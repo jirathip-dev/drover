@@ -220,7 +220,7 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
 
 #[test]
 fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness_login() {
-    let signed_out = "Invalid API key · Please run /login";
+    let signed_out = json!({"state": "error", "note": "auth: Invalid API key · Please run /login"});
     let page = |c: &drover::Ctx| {
         let r = Fake::default();
         let s = Server::new(c, &r, Some(ADDR.into()));
@@ -232,7 +232,7 @@ fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness
         now: T + 60,
         ..c.clone()
     };
-    b.screen("orchestrator-t1", signed_out);
+    b.set("orchestrator-t1", |t| t["reported"] = signed_out.clone());
     assert_eq!(run(&later, &Fake::default(), &["check"]).0, 0);
     assert!(b.called("kill", "orchestrator-t1"), "{:?}", b.methods());
     assert_eq!(kinds(&c, "orchestrator-start").len(), 1, "nothing to resume on");
@@ -251,7 +251,7 @@ fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness
         "{signed}"
     );
     b.add("orchestrator-t1", json!({"fleet": "sendmeter", "harness": "claude"}));
-    b.screen("orchestrator-t1", signed_out);
+    b.set("orchestrator-t1", |t| t["reported"] = signed_out.clone());
     run(&later, &Fake::default(), &["check"]);
     assert_eq!(
         kinds(&c, "thread-msg")

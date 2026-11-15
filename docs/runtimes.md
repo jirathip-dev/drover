@@ -48,7 +48,8 @@ A shed lane's terminal is labelled `fleet`, `issue`, `role` and `harness`, kept 
 restart, and runs the user's login shell (`$SHELL -l`, in shed's environment). drover then types the lane's
 exports and the harness command (`exec <harness> <args>`) into that shell. So no
 token is ever in the terminal's command line, in `ps` or in shed's state file. `exec` makes the harness the
-terminal's program, so the terminal ends when the harness exits, and the lane drops out of the agent list (lane-dead).
+terminal's program, so the terminal ends when the harness exits; shed then lists it `exited` with its code until
+drover removes it, and `drover check` alerts `lane-dead` with the cause (#1053).
 
 `drover spawn --dry-run` shows the shed requests it would send (`shed <method> <params>`).
 
@@ -66,12 +67,25 @@ then reports the turn's state with shed's `state` method:
 is printed on stderr and never blocks the tool call. The kick's confirmation (`wait --until working blocked`) and the
 board's agent status read these states.
 
+#1053: every lane fact drover shows comes from shed through one module, `crates/core/src/session/`
+(docs/architecture/shed-native/). shed's `reported.state` maps once to a status: `working`/`running` is working,
+`blocked`/`waiting-approval` blocked, `done` done, and every other word (`idle`, `rate-limited`, `error`,
+`hibernated`, `stuck`) shows as idle with shed's note beside it. shed's `rate-limited` is the usage limit; `error`
+with an `auth:` note is a sign-out. A lane is stalled when shed has said a quiet status for `stall_minutes` (since
+drover's `lane-state` stamp) and the lane logged no turn-end; dead when shed lists it exited, or no more on a host
+that answered, and drover did not close it; an orphan when no spawn names a session drover labelled. No screen is
+read for any of these. A lane's transcript is shed's own log (`read`: its events for ACP, its text for a
+terminal), copied to `transcripts/<agent>.jsonl` (or `.txt`) when drover removes the session; the next lane's
+handover reads that copy.
+
 ## drive and shed events
 
 Each drive pass (not the fast step) reads shed's `events` stream since the last `seq` it saw (kept in `shed.seq`
 beside the event log), stopping once the stream is quiet for 0.3 s. Every lane's `state`, `exited` and `killed`
-event is logged as a passive `lane-state` event (`agent`, `state`, `note` or `code`, `shed_seq`); #529: an exit or
-kill is `state: gone` (`why`: `exited` or `killed`). A running `drover service` follows the stream instead, as it
+event is logged as a passive `lane-state` event (`agent`, `state`, `note` or `code`, `shed_seq`, #1053 `since`: when
+shed began to say this status); #529: an exit or kill is `state: gone` (`why`: `exited` or `killed`, `cause`). drive's
+pass and `drover check` also stamp each lane session's changed status or exit from shed's `ls`, so a host whose
+events drover cannot stream, or an event shed no longer keeps, still gets its stamp. A running `drover service` follows the stream instead, as it
 comes (docs/service.md). Only this host's
 server is read. When it does not answer, drive prints `shed events: …` and carries on: the agent list it polls each
 pass still covers every lane, here and on other hosts. shed keeps only its last 1,000 events, so a long gap loses

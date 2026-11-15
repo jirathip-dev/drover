@@ -23,7 +23,7 @@ impl Service {
                             now: (self.clock)(),
                             ..ctx.clone()
                         };
-                        let _ = shed::log(&c, &cfg, &e);
+                        let _ = drover_core::session::stamp::on_event(&c, &cfg, &e);
                         let _ = std::fs::write(c.state.with_file_name("shed.seq"), e.seq.to_string());
                     }
                 })

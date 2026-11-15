@@ -106,6 +106,7 @@ macro_rules! each {
             Roles,
             ChatDefaults,
             Reply,
+            Job,
             ConductorAttach,
             AttachEnv,
             propose::ConfigView,

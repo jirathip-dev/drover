@@ -1,18 +1,9 @@
 use crate::config::Limits;
 use crate::runner::{ok, Runner};
-pub use crate::term::agents;
+use crate::session::Session;
 use anyhow::Result;
-use serde_json::Value;
-use std::path::Path;
-
-/// Live agents named `name` or running inside `dir`.
-pub fn live_in<'a>(agents: &'a [Value], name: &str, dir: &Path) -> Vec<&'a Value> {
-    let inside = |a: &Value, k: &str| a[k].as_str().is_some_and(|c| Path::new(c).starts_with(dir));
-    agents
-        .iter()
-        .filter(|a| a["name"] == name || inside(a, "cwd") || inside(a, "foreground_cwd"))
-        .collect()
-}
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 const SPARE: &[&str] = &["shed", "drover", "herdsman", "launchd"];
 
@@ -125,33 +116,26 @@ pub fn jam_line((readers, agent): &(Vec<Stuck>, Option<Stuck>)) -> String {
 }
 
 /// #248: the MB each agent's processes hold (those whose cwd is inside the agent's cwd).
-pub fn held(r: &dyn Runner, agents: &[&Value]) -> Vec<u64> {
+pub fn held(r: &dyn Runner, agents: &[&Session]) -> Vec<u64> {
     let (ps, rss) = (cwds(r), stdout(r, "ps", &["-axo", "pid=,rss="]).unwrap_or_default());
     let rss: std::collections::BTreeMap<&str, &str> = rss.lines().filter_map(|l| l.trim().split_once(' ')).collect();
     let kb = |pid: &str| rss.get(pid)?.trim().parse::<u64>().ok();
-    let mb = |a: &&Value| {
-        let dir = Path::new(a["cwd"].as_str().unwrap_or("\0"));
-        inside(&ps, dir).iter().filter_map(|p| kb(&p.0)).sum::<u64>() / 1024
-    };
+    let mb = |a: &&Session| inside(&ps, &a.cwd).iter().filter_map(|p| kb(&p.0)).sum::<u64>() / 1024;
     agents.iter().map(mb).collect()
 }
 
 /// #223: the top 3 memory users by footprint (`top`) as `mem command (owner)`: `lane <agent>` when inside a live agent's cwd, else `other`; a virtual machine is `mem VM (colima)` (#234: no nested brackets).
-pub fn top(r: &dyn Runner, agents: &[Value]) -> Vec<String> {
+pub fn top(r: &dyn Runner, agents: &[Session]) -> Vec<String> {
     let (ps, out) = (cwds(r), stdout(r, "top", &TOP).unwrap_or_default());
     let row = |l: &str| {
         let (pid, w) = l.trim().split_once(' ')?;
         let (cmd, mem) = w.trim().rsplit_once(' ')?;
         let cwd = Path::new(ps.iter().find(|p| p.0 == pid).map_or("\0", |p| &p.2));
-        let lane = agents
-            .iter()
-            .find(|a| a["cwd"].as_str().is_some_and(|d| cwd.starts_with(d)));
+        let lane = agents.iter().find(|a| cwd.starts_with(&a.cwd));
         if l.contains("Virtua") || l.contains("qemu") {
             return Some(format!("{mem} VM (colima)"));
         }
-        let owner = lane.map_or("other".into(), |a| {
-            format!("lane {}", a["name"].as_str().unwrap_or_default())
-        });
+        let owner = lane.map_or("other".into(), |a| format!("lane {}", a.name));
         Some(format!("{mem} {} ({owner})", cmd.trim()))
     };
     out.split_once("MEM")
@@ -186,7 +170,7 @@ pub struct Host {
     pub top: Vec<String>,
 }
 
-fn own_load(ps: &str) -> (f64, Vec<String>) {
+fn procs(ps: &str) -> Vec<(u64, u64, f64, String)> {
     let row = |l: &str| {
         let mut w = l.split_whitespace();
         let (pid, parent, cpu) = (
@@ -198,7 +182,48 @@ fn own_load(ps: &str) -> (f64, Vec<String>) {
         let name = comm.rsplit('/').next().unwrap_or_default().to_string();
         Some((pid, parent, cpu.parse::<f64>().ok()?, name))
     };
-    let procs: Vec<_> = ps.lines().filter_map(row).collect();
+    ps.lines().filter_map(row).collect()
+}
+const PS: [&str; 2] = ["-Ao", "pid=,ppid=,pcpu=,comm="];
+
+/// #966: per lane (`dirs` holds its process's or an ancestor's cwd): its % of the host's CPUs and `n × busiest`.
+pub fn lane_cpu(r: &dyn Runner, dirs: &BTreeMap<PathBuf, String>) -> Vec<(String, f64, String)> {
+    let cpus = stdout(r, "sysctl", &["-n", "hw.ncpu"]).or_else(|| stdout(r, "nproc", &[]));
+    let Some(cpus) = cpus.and_then(|s| s.trim().parse::<f64>().ok()).filter(|n| *n > 0.0) else {
+        return vec![];
+    };
+    let ps = procs(&stdout(r, "ps", &PS).unwrap_or_default());
+    let cwd: BTreeMap<u64, String> = cwds(r)
+        .into_iter()
+        .filter_map(|p| Some((p.0.parse().ok()?, p.2)))
+        .collect();
+    let parent: BTreeMap<u64, u64> = ps.iter().map(|p| (p.0, p.1)).collect();
+    let lane = |pid: u64| {
+        let up = std::iter::successors(Some(pid), |p| parent.get(p).copied().filter(|q| *q > 1)).take(64);
+        up.filter_map(|p| cwd.get(&p))
+            .find_map(|c| Path::new(c).ancestors().find_map(|d| dirs.get(d)))
+    };
+    let mut by = BTreeMap::<&String, BTreeMap<&str, (usize, f64)>>::new();
+    for (pid, _, cpu, name) in ps.iter().filter(|p| p.2 > 0.0) {
+        if let Some(l) = lane(*pid) {
+            let n = by.entry(l).or_default().entry(name).or_default();
+            *n = (n.0 + 1, n.1 + cpu);
+        }
+    }
+    let mut out: Vec<_> = (by.into_iter())
+        .map(|(l, names)| {
+            let top = names.iter().max_by(|a, b| a.1 .1.total_cmp(&b.1 .1));
+            let top = top.map_or(String::new(), |(n, (k, _))| format!("{k} × {n}"));
+            let sum: f64 = names.values().map(|v| v.1).sum();
+            (l.clone(), (sum / cpus).min(100.0), top)
+        })
+        .collect();
+    out.sort_by(|a, b| b.1.total_cmp(&a.1));
+    out
+}
+
+fn own_load(ps: &str) -> (f64, Vec<String>) {
+    let procs = procs(ps);
     let ours: Vec<u64> = (procs.iter().filter(|p| ["drover", "herdsman"].contains(&p.3.as_str())))
         .map(|p| p.0)
         .collect();
@@ -257,7 +282,7 @@ pub fn sample(r: &dyn Runner) -> Host {
     let load = load.or_else(|| word(linux("cat", &["/proc/loadavg"]), 0));
     let ncpu = ncpu.or_else(|| word(linux("nproc", &[]), 0));
     let avail = || Some(word(linux("grep", &["MemAvailable", "/proc/meminfo"]), 1)? / 1_048_576.0);
-    let (own, top) = own_load(&stdout(r, "ps", &["-Ao", "pid=,ppid=,pcpu=,comm="]).unwrap_or_default());
+    let (own, top) = own_load(&stdout(r, "ps", &PS).unwrap_or_default());
     let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| (l - own).max(0.0) / n);
     let size = stdout(r, "sysctl", &["-n", "hw.memsize"]).and_then(|s| s.trim().parse::<f64>().ok());
     let size = size.map(|b| b / 1_073_741_824.0);

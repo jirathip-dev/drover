@@ -1,13 +1,12 @@
-use super::{banner, hook_command, Dialect, Header, Provider, Proxy};
+use super::{hook_command, Dialect, Header, Provider, Proxy};
 use crate::term;
-use crate::lanes::{chat, mask, strip};
 use crate::runner::Runner;
 use crate::spawn::{role_prompt, Plan};
 use crate::Ctx;
 use anyhow::{bail, Result};
 use serde_json::json;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const SETTINGS: &str = include_str!("../../hooks/claude-settings.json");
 
@@ -37,20 +36,6 @@ fn headers(kept: &[Header]) -> Vec<Header> {
     let head = (BETA_HEADER.to_string(), beta.join(","));
     let rest = kept.iter().filter(|h| h.0 != BETA_HEADER).cloned();
     std::iter::once(head).chain(rest).collect()
-}
-
-const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
-
-const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in|api error: 401|\
-    authentication_error|token has been revoked";
-
-fn own_lines(screen: &str) -> String {
-    let body: Vec<String> = chat(screen).0.into_iter().map(strip).collect();
-    let head = body.iter().rposition(|l| l.starts_with(|c: char| !c.is_whitespace()));
-    let block = &body[head.unwrap_or(0)..];
-    let theirs = block.first().is_some_and(|l| l.starts_with(['⏺', '•']));
-    let own = block.iter().filter(|l| !theirs && !l.starts_with(['❯', '>']));
-    own.map(String::as_str).collect::<Vec<_>>().join("\n")
 }
 
 static DIALECT: Dialect = Dialect {
@@ -196,89 +181,11 @@ impl Provider for Claude {
     fn token_env(&self) -> Option<&'static str> {
         Some("CLAUDE_CODE_OAUTH_TOKEN")
     }
-    fn cap_banner(&self) -> &'static str {
-        CAP_PATTERN
-    }
-    fn usage_limited(&self, screen: &str) -> bool {
-        banner(CAP_PATTERN, &own_lines(screen))
-    }
-    fn signed_out(&self, screen: &str) -> bool {
-        banner(AUTH_PATTERN, &own_lines(screen))
-    }
-
-    fn status_word(&self, screen: &str) -> Option<(String, Option<String>)> {
-        let s = strip(chat(screen).1?);
-        let (w, rest) = s.split_once(" (")?;
-        let mins = |t: &&str| t.strip_suffix(['m', 'h']).is_some_and(|n| n.parse::<u32>().is_ok());
-        let t = rest.split([' ', ')']).find(mins).map(String::from);
-        w.trim().ends_with('…').then(|| (mask(w.trim()), t))
-    }
-    fn now_line(&self, line: &str) -> bool {
-        line.starts_with('⏺')
-    }
-    fn tool_line(&self, line: &str) -> Option<(String, String)> {
-        let (n, a) = line.strip_prefix(['⏺', '•'])?.trim_start().split_once('(')?;
-        let word = !n.is_empty() && n.chars().all(char::is_alphanumeric);
-        word.then(|| (n.into(), a.rsplit_once(')').map_or(a, |x| x.0).into()))
-    }
-    fn pending_menu(&self, screen: &str) -> Option<(String, Vec<String>)> {
-        pending(screen)
-    }
-    fn transcript(&self, home: &Path, wt: &str) -> Option<PathBuf> {
-        let d = home.join(".claude/projects");
-        let all = std::fs::read_dir(d.join(wt.replace(|c: char| !c.is_ascii_alphanumeric(), "-"))).ok()?;
-        let paths = all.flatten().map(|e| e.path());
-        let jsonl = paths.filter(|p| p.extension().is_some_and(|x| x == "jsonl"));
-        jsonl.max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
-    }
     fn health_check(&self) -> Option<(&'static str, &'static str, &'static str)> {
         Some(("claude", "claude auth status", "claude auth login in a pane there"))
     }
     fn process_names(&self) -> &'static [&'static str] {
         &["claude"]
-    }
-}
-
-fn pending(screen: &str) -> Option<(String, Vec<String>)> {
-    let lines: Vec<&str> = screen
-        .lines()
-        .map(|l| l.trim_matches(|c: char| c.is_whitespace() || c == '│'))
-        .filter(|l| !l.is_empty())
-        .collect();
-    let opt = |l: &str| {
-        let (n, t) = l.trim_start_matches(['❯', '›']).trim_start().split_once(". ")?;
-        Some((n.parse::<usize>().ok()?, t.trim().to_string()))
-    };
-    let question = |ls: &[&str]| {
-        ls.iter()
-            .rev()
-            .take(6)
-            .find(|l| l.contains('?'))
-            .map(std::string::ToString::to_string)
-    };
-    let (mut opts, mut i, mut gap) = (
-        vec![],
-        lines.iter().rposition(|l| opt(l).is_some()).map_or(0, |i| i + 1),
-        0,
-    );
-    while i > 0 && gap <= 2 && opts.last().is_none_or(|o: &(usize, String)| o.0 > 1) {
-        i -= 1;
-        match opt(lines[i]) {
-            Some(o) => (opts.push(o), gap = 0).1,
-            None => gap += 1,
-        }
-    }
-    opts.reverse();
-    let menu = opts.len() >= 2
-        && opts.iter().zip(1..).all(|(o, n)| o.0 == n)
-        && lines[i..].iter().any(|l| l.starts_with('❯') && opt(l).is_some());
-    if menu {
-        Some((
-            question(&lines[..i]).or(lines[..i].last().map(std::string::ToString::to_string))?,
-            opts.into_iter().map(|o| o.1).collect(),
-        ))
-    } else {
-        Some((question(&lines)?, vec![]))
     }
 }
 

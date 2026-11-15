@@ -2,6 +2,7 @@ use crate::config::{expand, Config, Role};
 use crate::events::{self, emit, working, Event};
 use crate::gate::refused;
 use crate::runner::Runner;
+use crate::session::Session;
 use crate::spawn::Plan;
 use crate::{providers, term, Ctx};
 use anyhow::{bail, Context, Result};
@@ -242,8 +243,11 @@ pub fn archive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, on: bool) -> R
     let t = t.map_or_else(|| find(&events, id), Ok)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     if let Some(s) = last.filter(|s| on && s.kind == "orchestrator-start") {
-        if term::agents(r)?.iter().any(|a| a["name"] == *s.val("agent")) {
-            close(r, s)?;
+        if crate::session::live_on(r)?
+            .iter()
+            .any(|a| Some(a.name.as_str()) == s.str("agent"))
+        {
+            close(ctx, r, s)?;
         }
         let d = json!({"thread": id, "agent": s.str("agent"), "why": "archived"});
         emit(
@@ -715,15 +719,16 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let id = t.str("thread").unwrap_or_default();
     let events = working(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let agents = term::agents(r)?;
-    let awake = last.filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| a["name"] == *s.val("agent")));
+    let agents = crate::session::live_on(r)?;
+    let awake = last
+        .filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| Some(a.name.as_str()) == s.str("agent")));
     let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
     let stuck = awake.and(hung(ctx, cfg, &events, &agents, id));
     let Some(s) = awake.filter(|_| !picked && stuck.is_none()) else {
         match (awake, stuck) {
             (Some(s), Some((_, quiet))) => end(ctx, cfg, r, (t, s), json!({"why": "hung", "quiet_secs": quiet}))?,
             (Some(s), None) => {
-                close(r, s)?;
+                close(ctx, r, s)?;
                 let d = json!({"thread": id, "agent": s.str("agent"), "why": "model"});
                 emit(
                     &ctx.state,
@@ -755,14 +760,20 @@ fn acp(s: &Event) -> bool {
 }
 
 /// #946: thread `id`'s awake ACP conductor reporting `working` with no CPU and no output for `stall_minutes`: its start and quiet seconds.
-pub fn hung<'a>(ctx: &Ctx, cfg: &Config, events: &'a [Event], agents: &[Value], id: &str) -> Option<(&'a Event, u64)> {
+pub fn hung<'a>(
+    ctx: &Ctx,
+    cfg: &Config,
+    events: &'a [Event],
+    agents: &[Session],
+    id: &str,
+) -> Option<(&'a Event, u64)> {
     let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     let s = last.filter(|e| e.kind == "orchestrator-start" && acp(e))?;
-    let a = agents.iter().find(|a| a["name"] == *s.val("agent"))?;
-    let out = crate::shed::session(ctx, s.str("agent")?)["at"].as_u64().unwrap_or(0);
+    let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"))?;
+    let out = crate::session::pulse::of(ctx, &a.name).map_or(0, |p| p.heard);
     let quiet = ctx.now.saturating_sub(out.max(s.ts));
-    let idle = a["cpu"].as_u64().is_some_and(|c| c < crate::stall::BUSY_CPU_PCT);
-    (a["agent_status"] == "working" && idle && quiet >= cfg.limits.stall_minutes * 60).then_some((s, quiet))
+    let idle = a.cpu_pct.is_some_and(|c| c < crate::stall::BUSY_CPU_PCT);
+    (a.busy() && idle && quiet >= cfg.limits.stall_minutes * 60).then_some((s, quiet))
 }
 
 fn end(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (t, s): (&Event, &Event), mut d: Value) -> Result<()> {
@@ -796,8 +807,8 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String>
     Ok(agent.into())
 }
 
-fn close(r: &dyn Runner, s: &Event) -> Result<()> {
-    term::close(r, s.str("agent").unwrap_or_default()).map(drop)
+fn close(ctx: &Ctx, r: &dyn Runner, s: &Event) -> Result<()> {
+    term::close(ctx, r, s.str("agent").unwrap_or_default()).map(drop)
 }
 
 /// The conductor role: the thread fleet's `[fleet.<n>.role.conductor]` (#401: else its impl role on profile `lane-conductor`, `Config::parse`); for `all`, the first fleet's that has one.
@@ -1104,6 +1115,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     .map(|(k, v)| (k, v.to_string()));
     let b = term::Shed(crate::shed::Shed { wire, ..shed });
     b.start(
+        ctx,
         r,
         &agent,
         &labels,
@@ -1307,7 +1319,7 @@ pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_
 }
 
 /// `check`: each awake conductor whose thread has been quiet `IDLE` and that is not working is closed (`conductor-sleep`); the next message resumes it.
-pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents: &[Value]) -> Result<()> {
+pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents: &[Session]) -> Result<()> {
     for t in events.iter().filter(|e| e.kind == "thread-new") {
         let id = t.str("thread").unwrap_or_default();
         let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
@@ -1316,16 +1328,17 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         };
         let quiet =
             of(events, id).map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
-        let a = agents.iter().find(|a| a["name"] == *s.val("agent"));
-        if a.is_some() && signed_out(ctx, cfg, r, t, s)? {
+        let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"));
+        if a.is_some_and(Session::signed_out) {
+            signed_out(ctx, cfg, r, t, s)?;
             continue;
         }
         let gone = a.is_none() && acp(s);
-        if !gone && (!quiet || a.is_some_and(|a| a["agent_status"] == "working")) {
+        if !gone && (!quiet || a.is_some_and(Session::busy)) {
             continue;
         }
         if a.is_some() {
-            close(r, s)?;
+            close(ctx, r, s)?;
         }
         let d = json!({"thread": id, "agent": s.str("agent"), "why": if a.is_some() { "idle" } else { "gone" }});
         emit(
@@ -1337,16 +1350,12 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
     Ok(())
 }
 
-fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<bool> {
+fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<()> {
     let (id, hn) = (
         t.str("thread").unwrap_or_default(),
         s.str("harness").unwrap_or_default(),
     );
-    let screen = term::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default();
-    if !providers::get(hn).signed_out(&screen) {
-        return Ok(false);
-    }
-    close(r, s)?;
+    close(ctx, r, s)?;
     let d = json!({"thread": id, "agent": s.str("agent"), "why": "signed out"});
     emit(
         &ctx.state,
@@ -1354,6 +1363,5 @@ fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> 
         Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
     )?;
     let d = json!({"thread": id, "from": "system", "text": format!("{hn} is signed out: sign in"), "signin": hn});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
-    Ok(true)
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
 }

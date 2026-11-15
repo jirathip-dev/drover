@@ -89,12 +89,6 @@ pub fn proxied() -> Option<&'static Proxy> {
     all().find_map(|p| p.proxy())
 }
 
-/// The screen holds one of `pat`'s `|`-separated, case-insensitive substrings (a banner).
-pub fn banner(pat: &str, screen: &str) -> bool {
-    let (screen, pat) = (screen.to_lowercase(), pat.to_lowercase());
-    pat.split('|').any(|p| !p.is_empty() && screen.contains(p))
-}
-
 /// Effort levels a role may set (`effort = "…"`).
 pub const EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
 
@@ -256,33 +250,6 @@ pub trait Provider: Sync {
         None
     }
     fn token_env(&self) -> Option<&'static str> {
-        None
-    }
-    fn cap_banner(&self) -> &'static str {
-        ""
-    }
-    fn usage_limited(&self, _screen: &str) -> bool {
-        false
-    }
-    fn signed_out(&self, _screen: &str) -> bool {
-        false
-    }
-    fn status_word(&self, _screen: &str) -> Option<(String, Option<String>)> {
-        None
-    }
-    fn now_line(&self, line: &str) -> bool {
-        !crate::lanes::chrome(line)
-    }
-    fn tool_line(&self, line: &str) -> Option<(String, String)> {
-        Some(("$".into(), line.strip_prefix("$ ")?.trim_start().into()))
-    }
-    fn pending_menu(&self, _screen: &str) -> Option<(String, Vec<String>)> {
-        None
-    }
-    fn answer_keys(&self, n: usize) -> String {
-        n.to_string()
-    }
-    fn transcript(&self, _home: &Path, _wt: &str) -> Option<PathBuf> {
         None
     }
     fn health_check(&self) -> Option<(&'static str, &'static str, &'static str)> {

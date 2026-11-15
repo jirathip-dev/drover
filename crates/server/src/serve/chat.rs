@@ -8,6 +8,7 @@ use crate::conductor::{self, of};
 use crate::config::Config;
 use crate::events::{ask_event, closed, Event};
 use crate::runner::Runner;
+use crate::session::{Session, Status};
 use crate::Ctx;
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
@@ -72,13 +73,13 @@ fn queued<'a>(events: &'a [Event], id: &'a str) -> BTreeMap<u64, &'a Event> {
 }
 
 /// `choose` (an open ask), `working` (mid-turn), `asleep`, `awake` or `new` (no conductor yet).
-fn state(events: &[Event], id: &str, agents: &[Value]) -> &'static str {
+fn state(events: &[Event], id: &str, agents: &[Session]) -> &'static str {
     let lane = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let a = lane.and_then(|l| agents.iter().find(|a| l.data.get("agent") == Some(&a["name"])));
+    let a = lane.and_then(|l| agents.iter().find(|a| l.str("agent") == Some(a.name.as_str())));
     match lane {
         _ if open_ask(events, id).is_some() => "choose",
         Some(l) if l.kind == "orchestrator-sleep" => "asleep",
-        Some(_) if a.is_some_and(|a| a["agent_status"] == "working") => "working",
+        Some(_) if a.is_some_and(Session::busy) => "working",
         Some(_) => "awake",
         None => "new",
     }
@@ -288,7 +289,7 @@ pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>
 
 /// One thread: the bar (fleet · harness · model · state), its last 30 messages and the live line's state; #407:
 /// working, the turn's start (`since`, serve.js times its pill), and the queued messages above the box.
-fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Value]) -> ThreadView {
+fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Session]) -> ThreadView {
     let id = t.str("thread").unwrap_or_default();
     let st = state(events, id, agents);
     let me = |e: &&Event| e.kind == "thread-msg" && e.str("from") == Some("owner");
@@ -351,7 +352,7 @@ fn waiting(ctx: &Ctx, events: &[Event], id: &str) -> Vec<String> {
 
 /// A thread's row: unread, title, age; its state and the last message; the threads it links to (not its flow-back
 /// lines), once each.
-fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, ThreadRow) {
+fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Session]) -> (u64, ThreadRow) {
     let id = t.str("thread").unwrap_or_default();
     let mut msgs = of(events, id).filter(|e| matches!(e.kind.as_str(), "thread-msg" | "needs-decision"));
     let last = msgs.rfind(|e| e.str("from") != Some("system"));
@@ -384,7 +385,7 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, Thread
 
 /// #269: API v1's `chat`, the tab (web/src/chat.ts draws it): "all repos", then each fleet by name, a card each with
 /// its threads newest first (the archived ones apart); then every thread's view (serve.js shows the open one).
-pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Value], rw: bool) -> ChatTab {
+pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Session], rw: bool) -> ChatTab {
     let mut tab = ChatTab {
         now: ctx.now,
         rw,
@@ -429,11 +430,11 @@ impl super::Server<'_> {
     /// #701: one per `rw` (a paired and an unpaired device no longer evict each other's every tick), keyed by each
     /// agent's name and status only (all a thread's state reads).
     pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> Value {
-        let agents = self.agents_json(ctx.now);
-        let agents = agents
-            .and_then(|j| j["result"]["agents"].as_array().cloned())
-            .unwrap_or_default();
-        let seen: Vec<_> = agents.iter().map(|a| [&a["name"], &a["agent_status"]]).collect();
+        let agents = self.sessions(ctx.now).map(|s| s.running()).unwrap_or_default();
+        let seen: Vec<_> = agents
+            .iter()
+            .map(|a| [a.name.as_str(), a.status().map_or("", Status::word)])
+            .collect();
         let key = json!([crate::db::last_seq(&ctx.state), super::mtime(ctx), seen, ctx.now / 60]);
         let mut all = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let c = &mut all[usize::from(rw)];
@@ -485,7 +486,7 @@ pub fn post(
     let cfg = Config::kept(ctx)?;
     let events = crate::events::working(&ctx.state)?;
     let g = |k: &str| f.get(k).map_or("", String::as_str);
-    let (id, mut out) = (g("t"), vec![]);
+    let id = g("t");
     match g("op") {
         // #405: `new` is a first message (in `repo`): the thread, titled with its first line, then the message.
         // #407: `queue` keeps it for the turn's end (`q`: an edit of queued message q, its files kept unless new
@@ -576,20 +577,6 @@ pub fn post(
             later.push((conductor::find(&events, id)?.clone(), line.into()));
             Ok("retrying".into())
         }
-        "answer" => {
-            let (choice, by) = (
-                or(g("choice").is_empty(), g("text"), g("choice")),
-                ("owner", Some("web")),
-            );
-            crate::answer(ctx, &cfg, r, &mut out, (g("fleet"), g("id")), choice, by)?;
-            Ok(format!("answered {}", g("id")))
-        }
-        // #669: a run card's [approve] (with the sha prefix the owner saw) / [deny].
-        "card" => {
-            let approve = g("act") == "approve";
-            crate::card::settle(ctx, &cfg, r, g("id"), approve, approve.then(|| g("sha")))
-        }
-        "config" => crate::propose::settle(ctx, &cfg, r, g("id"), g("act") == "apply"),
         "secret" => crate::secret::settle(ctx, &cfg, r, (id, g("name")), (g("act") == "save").then(|| g("value"))),
         "read" => {
             conductor::mark_read(ctx, &cfg, &events, conductor::find(&events, id)?)?;
@@ -618,7 +605,7 @@ fn stop(r: &dyn Runner, events: &[Event], id: &str) {
 
 /// #407: at a turn's end (the conductor no longer working) its queued messages go in, oldest first, each logged as
 /// the owner's and unqueued; the lines for `deliver`.
-pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
+pub fn flush(ctx: &Ctx, agents: &[Session]) -> Vec<(Event, String)> {
     let (Ok(cfg), Ok(events)) = (Config::kept(ctx), crate::events::working(&ctx.state)) else {
         return vec![];
     };
