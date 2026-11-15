@@ -1,0 +1,13 @@
+Decided: merge origin/staging; the screen router keeps staging's /screens/ask sheet and adds this branch's /screens/threads routes beside it
+Because: crates/server/src/screens.rs:785
+Decided: the Threads place is added by the page shell (page_places), never by cooee-plugin.toml; thread actions run only for a paired standalone device
+Because: "It is NOT added to `cooee-plugin.toml`: when Drover runs as the Cooee plugin there is no Threads tab"
+Decided: the screens reuse the old tab's folds and POST /thread ops in serve/chat.rs, no second thread model
+Because: "move its drawing onto the JSON screen model and reuse its behaviour, instead of keeping a second hand-drawn board"
+Decided: Threads is the last tab and a thread replaces the list in the same tab, per the design's recommended answers
+Because: q1722
+Decided: a paired live open marks a thread read only while unread, so stream rebuilds log one thread-read
+Because: crates/cli/tests/threads_tab.rs:229
+Rejected: deleting API v1's chat payload — other clients and tests still read it; out of scope
+Check: drive_now_on_the_board fails on load timing (0.1 s vs 0 s) only; a drive pass reaches no file this PR changes
+Owner: Brought up to date with staging; the standalone page's Threads tab works as before and Cooee is unchanged.
