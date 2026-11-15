@@ -1,0 +1,7 @@
+Decided: merge origin/staging; row takes staging's paused flag for the wait line but no repo, since rows tap the issue sheet rather than the PR
+Because: crates/server/src/screens.rs:130
+Decided: a row with an open ask keeps its options line; a queued row's wait line goes in front of it
+Because: "46: \"waiting: decision\" shows no options and no link to the asking thread."
+Rejected: staging's direct PR tap on the row — the issue sheet carries the issue, PR and checks links
+Check: a queued row on a paused fleet shows its wait line; a row with an open ask shows its options
+Owner: Brought this change up to date with staging again; queued rows now also say what they wait on.
