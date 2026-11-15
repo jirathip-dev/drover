@@ -1,0 +1,7 @@
+Decided: merge origin/staging (#1029, #895, #808) rather than rebase; the lane never rewrites history
+Because: crates/server/src/serve/v1.rs:678
+Decided: keep the 150k test's own issue read after #808's perf.rs changes
+Because: crates/cli/tests/perf.rs:699
+Rejected: rebase onto staging — would force-push the PR branch
+Check: perf.rs still reads /api/v1/issue/sendmeter/1000 in the 150k test
+Owner: Brought this change up to date with staging after three other changes merged.
