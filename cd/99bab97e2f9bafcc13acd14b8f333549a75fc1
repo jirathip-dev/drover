@@ -1,0 +1,6 @@
+Decided: merge origin/staging; actions are the union of both sides, a live Queue row taps staging's Lanes sheet, a non-live row keeps the issue sheet
+Because: crates/server/src/screens.rs:167
+Decided: gh_links tests follow the row's issue sheet and assert its issue, PR and checks links instead of a direct PR tap
+Because: "40/41: no issue or checks links"
+Rejected: none
+Owner: Brought this change up to date with staging; tapping a running lane in the Queue now opens the lane card.
