@@ -359,7 +359,7 @@ fn launch(
         let by = by.map_or(String::new(), |b| format!(": {b}"));
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
     }
-    crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
+    crate::spawn::lane_admit(ctx, (cfg, r), ev, (fleet, n, role), false)?;
     if let Some(why) = crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &live) {
         return crate::gate::refused("HOST_FULL", why);
     }
@@ -1932,7 +1932,7 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         };
         go &= !matches!(
             code,
-            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "LOGIN_NEEDED" | "CAP")
+            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "LOGIN_NEEDED" | "CAP" | "IN_FLIGHT_CAP")
         );
     }
     res.and(clean_merged(ctx, cfg, r, out, &events, fleet))

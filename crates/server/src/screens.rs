@@ -517,7 +517,8 @@ fn issue_sheet(repo: &str, f: &str, r: &QueueRow) -> Value {
     json!({"type": "sheet", "id": format!("issue-{f}-{n}"), "title": title.trim_end(), "cancel": "Done", "blocks": blocks})
 }
 
-fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&str>) -> Value {
+fn stats(ctx: &Ctx, ev: &[Event], states: &crate::events::States, only: Option<&str>) -> Value {
+    let now = ctx.now;
     let day = |e: &Event| usize::try_from(now.saturating_sub(e.ts) / 86_400).unwrap_or(usize::MAX);
     let merged: Vec<&Event> = ev
         .iter()
@@ -543,10 +544,26 @@ fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&s
     let lanes = lanes
         .filter(|s| s.lane.is_some() && !s.done() && s.state != "queued")
         .count();
-    json!({"type": "stat", "id": "stats", "items": [
-        {"label": "merged · 7d", "value": n.to_string(), "spark": per.map(|p| p.0)},
-        {"label": "lanes", "value": lanes.to_string()},
-        {"label": "rounds / issue", "value": format!("{:.1}", avg(n, r)), "spark": per.map(|p| avg(p.0, p.1))}]})
+    let mut items = vec![
+        json!({"label": "merged · 7d", "value": n.to_string(), "spark": per.map(|p| p.0)}),
+        json!({"label": "lanes", "value": lanes.to_string()}),
+        json!({"label": "rounds / issue", "value": format!("{:.1}", avg(n, r)), "spark": per.map(|p| avg(p.0, p.1))}),
+    ];
+    let cfg = Config::kept(ctx).ok();
+    for (f, fc) in cfg
+        .iter()
+        .flat_map(|c| &c.fleet)
+        .filter(|f| only.is_none_or(|o| o == f.0))
+    {
+        let label = if only.is_some() {
+            "in flight".into()
+        } else {
+            format!("{f} in flight")
+        };
+        let flight = crate::queue::flight(ctx, states, fc, f);
+        items.extend(flight.map(|(v, cap)| json!({"label": label, "value": format!("{}/{cap}", v.len())})));
+    }
+    json!({"type": "stat", "id": "stats", "items": items})
 }
 
 fn choice(id: &str, action: &str, options: &[Value]) -> Value {
@@ -1221,7 +1238,7 @@ impl Server<'_> {
         opts.extend(tab.fleets.iter().map(|f| json!({"value": f.name, "label": dot(f)})));
         let mut blocks = vec![
             json!({"type": "chips", "id": "repo", "name": "repo", "selected": [sel.unwrap_or("all")], "action": "filter", "options": opts}),
-            stats(ctx.now, &ev, &ev.states, sel),
+            stats(ctx, &ev, &ev.states, sel),
         ];
         if let Some(e) = &tab.error {
             blocks.push(json!({"type": "text", "id": "error", "markdown": e}));

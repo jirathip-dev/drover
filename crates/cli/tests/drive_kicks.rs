@@ -72,7 +72,7 @@ fn pass(c: &drover::Ctx, r: &Fake) -> serde_json::Value {
 
 #[test]
 fn a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness() {
-    let (c, sh) = fleet("kicks-ten", 11, 10);
+    let (c, sh) = fleet_with("kicks-ten", 11, "max_in_flight = 0", 10, &[]);
     let r = fake("1.0");
     let t0 = std::time::Instant::now();
     let d = pass(&c, &r);
