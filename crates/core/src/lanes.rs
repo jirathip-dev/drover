@@ -368,15 +368,17 @@ pub fn group(all: &[Lane], changed: impl Fn(&Lane) -> u64) -> Groups<'_> {
     let mut out: Groups = vec![];
     for l in v {
         let f = (l.fleet.as_deref()).map_or("Others", |f| if f == "all" { "all repos" } else { f });
-        let (s, f) = (SECTIONS[section(l)], f.to_string());
+        let (s, f) = (SECTIONS.get(section(l)).copied().unwrap_or("idle"), f.to_string());
         if out.last().is_none_or(|x| x.0 != s) {
             out.push((s, vec![]));
         }
-        let subs = &mut out.last_mut().unwrap().1;
+        let Some((_, subs)) = out.last_mut() else { continue };
         if subs.last().is_none_or(|x| x.0 != f) {
             subs.push((f, vec![]));
         }
-        subs.last_mut().unwrap().1.push(l);
+        if let Some((_, ls)) = subs.last_mut() {
+            ls.push(l);
+        }
     }
     out
 }
@@ -421,8 +423,9 @@ pub fn secret(l: &str) -> Option<&str> {
                 .split(['"', '\'', ' ', '\t'])
                 .next()?
                 .trim_end_matches([';', ',']);
-            let n = v.chars().count() as f64;
-            let bits: f64 = v.chars().map(|c| -(v.matches(c).count() as f64 / n).log2() / n).sum();
+            let f = |x: usize| f64::from(u32::try_from(x).unwrap_or(u32::MAX));
+            let n = f(v.chars().count());
+            let bits: f64 = v.chars().map(|c| -(f(v.matches(c).count()) / n).log2() / n).sum();
             let word = !has(v, u8::is_ascii_digit) || v.contains('_') && v == v.to_ascii_lowercase();
             let code = v.contains(['(', '{', ' ']) || v.contains("::") || v.starts_with(['/', '~', '.', '$']);
             ((named(&l[..i]) || named(first) || bearer) && n >= 20.0 && bits >= 3.5 && !word && !code).then_some(v)
@@ -477,8 +480,9 @@ fn word(w: &str) -> (String, bool) {
 /// The text's last `n` non-empty lines, masked.
 pub fn tail(screen: &str, n: usize) -> Vec<String> {
     let lines: Vec<&str> = screen.lines().filter(|l| !l.trim().is_empty()).collect();
-    lines[lines.len().saturating_sub(n)..]
+    lines
         .iter()
+        .skip(lines.len().saturating_sub(n))
         .map(|l| mask(l.trim_end()))
         .collect()
 }

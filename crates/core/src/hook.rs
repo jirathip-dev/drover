@@ -1,4 +1,5 @@
 use crate::config::{Config, Deny};
+use crate::events::Json;
 use crate::providers::dialects;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -100,7 +101,7 @@ const WRITERS: &[&str] = &[
 ];
 
 /// #668: the repo's line cap file and (#973) its folder of raises; one orchestrator-filed issue raises it for the queue.
-pub const CAP_PATHS: &[&str] = &["ci/cap.toml", "ci/cap.d/"];
+pub const CAP_PATHS: &[&str; 2] = &["ci/cap.toml", "ci/cap.d/"];
 pub const NO_CAP_EDIT: &str =
     "REFUSED CAP_FILE: a lane never edits ci/cap.toml or ci/cap.d/; when your PR would cross \
                                the cap, run `drover cap <fleet>` and ask with its view (#668)";
@@ -253,9 +254,10 @@ fn resolve(w: &str, cwd: &str) -> String {
 }
 
 fn notes(t: &[&str]) -> Option<String> {
-    let rest = &t[t.iter().position(|w| *w == "git")? + 1..];
+    let rest = t.get(t.iter().position(|w| *w == "git")? + 1..)?;
     let writes = ["add", "append", "edit", "copy", "merge", "remove", "prune"];
-    let write = (rest.iter().position(|w| *w == "notes")).is_some_and(|i| rest[i..].iter().any(|w| writes.contains(w)));
+    let write =
+        (rest.iter().position(|w| *w == "notes")).is_some_and(|i| rest.iter().skip(i).any(|w| writes.contains(w)));
     let push = rest.contains(&"push") && rest.iter().any(|w| w.contains("refs/notes"));
     (write || push).then(|| {
         "REFUSED NOTES_DROVER_ONLY: only drover writes or pushes why notes: write why.md, then \
@@ -443,11 +445,12 @@ fn unquote(cmd: &str, args: bool) -> String {
                     .iter()
                     .position(|w| matches!(word(w), "drover" | "herdsman" | "fleet" | "gh"));
                 let i = i.filter(|&i| {
-                    words[..i]
+                    words
                         .iter()
+                        .take(i)
                         .all(|w| w.contains('=') || matches!(word(w), "command" | "time"))
                 });
-                let rest: Vec<&str> = i.map_or(vec![], |i| words[i + 1..].iter().map(String::as_str).collect());
+                let rest: Vec<&str> = i.map_or(vec![], |i| words.iter().skip(i + 1).map(String::as_str).collect());
                 let text = matches!(rest[..], ["thread", "reply" | "say", ..] | ["ask", ..]);
                 let runs =
                     |w: &String| WRAPPERS.contains(&word(w)) || ["ssh", "watch", "parallel", "-c"].contains(&word(w));
@@ -570,7 +573,7 @@ fn word(w: &str) -> &str {
 
 fn gh(t: &[&str]) -> Option<String> {
     let i = t.iter().position(|w| *w == "gh")?;
-    let rest = &t[i + 1..];
+    let rest = t.get(i + 1..)?;
     let merge = rest.windows(2).any(|w| w == ["pr", "merge"])
         || (rest.first() == Some(&"api") && rest.iter().any(|w| w.contains("/merge")));
     if merge {
@@ -589,7 +592,7 @@ fn gh(t: &[&str]) -> Option<String> {
 fn group(r: &[&str]) -> Option<&'static str> {
     let has = |w: &str| r.iter().any(|x| x.split('=').next() == Some(w));
     Some(match (*r.first()?, r.get(1).copied()) {
-        ("spawn", _) if r[1..].iter().any(|w| crate::events::STAGES.contains(w)) => "design",
+        ("spawn", _) if r.iter().skip(1).any(|w| crate::events::STAGES.contains(w)) => "design",
         ("clean", _) if has("--yes") || has("--orphans") || has("--lane") => "clean",
         ("hosts" | "host", Some("on" | "off" | "refresh")) => "hosts",
         ("reclaim", _) => "reclaim",
@@ -607,7 +610,7 @@ pub fn group_of(cmd: &str) -> Option<&'static str> {
         let i = t
             .iter()
             .position(|w| matches!(word(w), "drover" | "herdsman" | "fleet"))?;
-        group(&t[i + 1..])
+        group(t.get(i + 1..)?)
     })
 }
 
@@ -616,7 +619,7 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     let i = t
         .iter()
         .position(|w| matches!(w.rsplit('/').next(), Some("drover" | "herdsman" | "fleet")))?;
-    let r = &t[i + 1..];
+    let r = t.get(i + 1..)?;
     if r.first() == Some(&"serve") && ["approve", "unpair", "--revoke"].iter().any(|w| r.contains(w)) {
         return Some("REFUSED OWNER_ONLY: only the owner pairs or unpairs devices, never a lane (#288)".into());
     }
@@ -633,10 +636,10 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
                 .into(),
         );
     }
-    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
+    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
     let own = lane.split(':').nth(1).filter(|n| n.parse::<u64>().is_ok());
     let block = r.first() == Some(&"queue") && matches!(r.get(2), Some(&("block" | "unblock"))) && own.is_some();
-    let other = |(i, w): (usize, &&str)| r[i - 1] != "--on" && w.parse::<u64>().is_ok() && Some(*w) != own;
+    let other = |(i, w): (usize, &&str)| r.get(i - 1) != Some(&"--on") && w.parse::<u64>().is_ok() && Some(*w) != own;
     if block && r.iter().enumerate().skip(3).any(other) {
         return Some("REFUSED OWN_ISSUE: a lane may `queue block`/`unblock` only its own issue (#425)".into());
     }
@@ -684,7 +687,7 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if !orchestrator {
         return Some(format!(
             "REFUSED OWNER_ONLY: `drover {}` ({g} group) is the owner's or an orchestrator's, never a lane's (#538)",
-            r[0]
+            r.first().unwrap_or(&"")
         ));
     }
     (!p.groups.iter().any(|x| x == g)).then(|| {
@@ -716,11 +719,11 @@ fn git_sub(t: &[&str], cwd: &str) -> Option<(usize, String)> {
     let g = t.iter().position(|w| *w == "git")?;
     let mut dir = cwd.to_string();
     let mut i = g + 1;
-    while i < t.len() && t[i].starts_with('-') {
-        if t[i] == "-C" && i + 1 < t.len() {
-            dir = t[i + 1].to_string();
+    while let Some(w) = t.get(i).filter(|w| w.starts_with('-')) {
+        if let (&"-C", Some(d)) = (w, t.get(i + 1)) {
+            dir = d.to_string();
         }
-        i += if (t[i] == "-C" || t[i] == "-c") && i + 1 < t.len() {
+        i += if (*w == "-C" || *w == "-c") && i + 1 < t.len() {
             2
         } else {
             1
@@ -731,17 +734,15 @@ fn git_sub(t: &[&str], cwd: &str) -> Option<(usize, String)> {
 
 fn reviewer_git(t: &[&str], p: &Policy) -> Option<String> {
     let (i, _) = git_sub(t, ".").filter(|_| p.reviewer)?;
-    GIT_WRITES.contains(&t[i]).then(|| {
-        format!(
-            "reviewers are read-only: no `git {}`; write verdict.md and report in your pane",
-            t[i]
-        )
-    })
+    let w = t.get(i)?;
+    GIT_WRITES
+        .contains(w)
+        .then(|| format!("reviewers are read-only: no `git {w}`; write verdict.md and report in your pane"))
 }
 
 fn git_push(t: &[&str], cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     let (i, dir) = git_sub(t, cwd)?;
-    if t[i] != "push" {
+    if t.get(i) != Some(&"push") {
         return None;
     }
     let deny = |b: &str| {
@@ -751,8 +752,7 @@ fn git_push(t: &[&str], cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Opti
     };
     let mut pos = vec![];
     let mut j = i + 1;
-    while j < t.len() {
-        let w = t[j];
+    while let Some(&w) = t.get(j) {
         if w == "--all" || w == "--mirror" {
             return deny(w);
         }
@@ -775,7 +775,7 @@ fn git_push(t: &[&str], cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Opti
         let head = cur_branch(&dir)?;
         return protected(&head).and_then(|b| deny(&b));
     }
-    for r in &pos[1..] {
+    for r in pos.iter().skip(1) {
         let name = if *r == "HEAD" {
             cur_branch(&dir).unwrap_or_default()
         } else {
@@ -797,7 +797,9 @@ pub fn push_dir(input: &Value) -> Option<String> {
         .split([';', '|', '&', '\n', '(', ')', '`'])
         .find_map(|seg| {
             let t: Vec<&str> = seg.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
-            git_sub(&t, cwd).filter(|(i, _)| t[*i] == "push").map(|(_, d)| d)
+            git_sub(&t, cwd)
+                .filter(|(i, _)| t.get(*i) == Some(&"push"))
+                .map(|(_, d)| d)
         })
 }
 
@@ -884,7 +886,7 @@ pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Op
     let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
     let d = dialects().find(|d| d.prompt == ev || d.stop == ev)?;
     if d.prompt == ev {
-        let _ = std::fs::write(mark, "prompt");
+        std::fs::write(mark, "prompt").ok();
         return None;
     }
     let seen = std::fs::read_to_string(mark).unwrap_or_default();
@@ -894,7 +896,7 @@ pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Op
     if !builds() {
         return None;
     }
-    let _ = std::fs::write(mark, "asked");
+    std::fs::write(mark, "asked").ok();
     Some(again(TURN_ASK))
 }
 
@@ -903,9 +905,9 @@ pub fn heavy(input: &Value, h: &crate::heavy::Heavy, exe: &str) -> Option<Value>
     let tool = input["tool_name"].as_str()?;
     let rewrite = dialects().find(|d| (d.sent)(input) && d.shell == tool)?.rewrite?;
     let mut ti = tool_input(input).clone();
-    let cmd = ti["command"].as_str()?;
+    let cmd = ti.at("command").as_str()?;
     let kind = h.kind(cmd)?;
-    ti["command"] = h.wrap(exe, kind, cmd).into();
+    ti.put("command", h.wrap(exe, kind, cmd).into());
     Some(rewrite(ti))
 }
 

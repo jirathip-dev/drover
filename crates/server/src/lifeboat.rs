@@ -32,7 +32,7 @@ fn shell(body: &str) -> String {
 fn button(label: &str, fields: &[(&str, &str)]) -> String {
     let mut s = String::from("<form method=post action=lifeboat>");
     for (k, v) in fields {
-        let _ = write!(s, "<input type=hidden name={k} value=\"{}\">", esc(v));
+        write!(s, "<input type=hidden name={k} value=\"{}\">", esc(v)).ok();
     }
     s + &format!("<button>{}</button></form>", esc(label))
 }
@@ -62,17 +62,19 @@ pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
     };
     let mut b = String::new();
     if !msg.is_empty() {
-        let _ = write!(b, "<p class=b>{}</p>", esc(msg));
+        write!(b, "<p class=b>{}</p>", esc(msg)).ok();
     }
     b += "<section><h2>Fleets</h2>";
     for (f, fc) in &cfg.fleet {
-        let (word, op) = [("running", "pause"), ("paused", "resume")][usize::from(fc.paused)];
-        let _ = write!(
+        let word = if fc.paused { "paused" } else { "running" };
+        let op = if fc.paused { "resume" } else { "pause" };
+        write!(
             b,
             "<p>{} · {word} {}</p>",
             esc(f),
             button(op, &[("op", op), ("fleet", f)])
-        );
+        )
+        .ok();
     }
     b += "</section><section><h2>Queue</h2>";
     for f in cfg.fleet.keys() {
@@ -85,11 +87,12 @@ pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
                 format!(" · {}", age(ctx.now.saturating_sub(s.last_ts)))
             });
             let (f, title, lane) = (esc(f), esc(&title), esc(lane));
-            let _ = write!(
+            write!(
                 b,
                 "<p>{f} #{} {title}<br><small>{state} · {lane}{ago}</small></p>",
                 i.issue
-            );
+            )
+            .ok();
         }
     }
     b += "</section><section><h2>Lanes</h2>";
@@ -101,14 +104,14 @@ pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
             format!(" · {}", esc(&l.shown))
         };
         let (name, host, state) = (esc(&l.name), esc(host), esc(&l.state));
-        let _ = write!(b, "<p>{name}<br><small>{host} · {state}{why}</small></p>");
+        write!(b, "<p>{name}<br><small>{host} · {state}{why}</small></p>").ok();
     }
     b += "</section><section><h2>Asks</h2>";
     for a in open_asks(&ev) {
         let (fleet, id) = (a.fleet.as_str(), a.str("id").unwrap_or_default());
         let at = a.issue.map_or(String::new(), |n| format!(" #{n}"));
         let q = esc(a.str("question").unwrap_or_default());
-        let _ = write!(b, "<p>{} {}{at}: {q}<br>", esc(fleet), esc(id));
+        write!(b, "<p>{} {}{at}: {q}<br>", esc(fleet), esc(id)).ok();
         let opts = a.val("options").as_array().cloned().unwrap_or_default();
         for (n, o) in opts.iter().enumerate() {
             let (n, o) = ((n + 1).to_string(), o.as_str().unwrap_or_default());
@@ -117,14 +120,15 @@ pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
                 &[("op", "answer"), ("fleet", fleet), ("id", id), ("choice", &n)],
             );
         }
-        let _ = write!(
+        write!(
             b,
             "</p><form method=post action=lifeboat><input type=hidden name=op value=answer>\
              <input type=hidden name=fleet value=\"{}\"><input type=hidden name=id value=\"{}\">\
              <input name=choice placeholder=\"answer in your words\" aria-label=answer><button>answer</button></form>",
             esc(fleet),
             esc(id)
-        );
+        )
+        .ok();
     }
     b += "</section><section><h2>Run cards</h2>";
     let open = |e: &&crate::events::Event| {
@@ -135,7 +139,7 @@ pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
         let s = |k: &str| c.str(k).unwrap_or_default();
         let (id, sha) = (s("id"), &s("sha")[..12.min(s("sha").len())]);
         let (why, blast) = (esc(s("why")), esc(s("blast")));
-        let _ = write!(
+        write!(
             b,
             "<p>{} {}<pre>{}</pre>why: {why}<br>touches: {blast}<br><small>sha {sha} · in {}</small><br>{}{}</p>",
             esc(&c.fleet),
@@ -144,7 +148,8 @@ pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
             esc(s("dir")),
             button("approve", &[("op", "approve"), ("id", id), ("sha", sha)]),
             button("deny", &[("op", "deny"), ("id", id)])
-        );
+        )
+        .ok();
     }
     shell(&(b + "</section>"))
 }

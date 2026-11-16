@@ -1,6 +1,6 @@
 use super::{pulse, Cause, Exit, Life, Session, Sessions, Status};
 use crate::config::Config;
-use crate::events::{append, last_spawn, Event};
+use crate::events::{append, last_spawn, Event, Json};
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -49,14 +49,14 @@ fn whose(cfg: &Config, labels: &std::collections::BTreeMap<String, String>) -> O
 
 fn stamp(ctx: &Ctx, events: &[Event], (fleet, issue): (&str, u64), agent: &str, mut d: Value) -> Result<bool> {
     let was = latest(events, agent);
-    let same = |k: &str| was.is_some_and(|e| e.val(k) == &d[k]);
+    let same = |k: &str| was.is_some_and(|e| e.val(k) == d.at(k));
     if same("state") && same("note") && same("cause") {
         return Ok(false);
     }
     let word = |v: &Value| v.as_str().filter(|s| *s != "gone").map(Status::word_of);
-    let kept = was.filter(|e| word(e.val("state")).is_some() && word(e.val("state")) == word(&d["state"]));
+    let kept = was.filter(|e| word(e.val("state")).is_some() && word(e.val("state")) == word(d.at("state")));
     let at = kept.map_or(ctx.now, |e| e.data.get("since").and_then(Value::as_u64).unwrap_or(e.ts));
-    (d["agent"], d["since"]) = (json!(agent), json!(at));
+    d.put("agent", json!(agent)).put("since", json!(at));
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-state", d))?;
     Ok(true)
 }
@@ -66,9 +66,11 @@ fn gone(ctx: &Ctx, cfg: &Config, (fleet, issue): (&str, u64), agent: &str, exit:
     if latest(&events, agent).is_some_and(|e| e.str("state") == Some("gone")) {
         return Ok(false);
     }
-    (d["state"], d["code"], d["cause"]) = (json!("gone"), json!(exit.code), json!(exit.cause.word()));
+    d.put("state", json!("gone"))
+        .put("code", json!(exit.code))
+        .put("cause", json!(exit.cause.word()));
     if let Some(n) = &exit.note {
-        d["note"] = json!(n);
+        d.put("note", json!(n));
     }
     stamp(ctx, &events, (fleet, issue), agent, d)?;
     if exit.cause == Cause::Limit {
@@ -77,7 +79,7 @@ fn gone(ctx: &Ctx, cfg: &Config, (fleet, issue): (&str, u64), agent: &str, exit:
             let d = crate::hosts::hold_alert(&events, sp, "hit the usage limit");
             if !events
                 .iter()
-                .any(|x| x.kind == "usage-limit" && x.val("key") == &d["key"])
+                .any(|x| x.kind == "usage-limit" && x.val("key") == d.at("key"))
             {
                 crate::events::emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "usage-limit", d))?;
             }
@@ -100,7 +102,7 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> 
     match &e.kind {
         EventKind::State(s) => {
             let mut d = json!({"state": s.state, "note": s.note});
-            d["shed_seq"] = seq["shed_seq"].clone();
+            d.put("shed_seq", seq.at("shed_seq").clone());
             stamp(ctx, &crate::events::working(&ctx.state)?, at, &e.name, d)
         }
         EventKind::Exited { code } => {

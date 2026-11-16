@@ -433,8 +433,9 @@ fn fns(lines: &[&str], rust: bool) -> Vec<(String, usize, usize)> {
             continue;
         }
         let ind = l.len() - t.len();
-        let end = lines[i + 1..]
+        let end = lines
             .iter()
+            .skip(i + 1)
             .position(|x| x.len() - x.trim_start().len() == ind && x.trim_start().starts_with('}'));
         if let Some(e) = end {
             v.push((name.to_string(), i + 1, e + 2));
@@ -476,13 +477,13 @@ fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
     let each = lines.iter().map(|l| {
         let s: Vec<char> = l.chars().collect();
         let (mut c, mut i) = (block, 0);
-        while i < s.len() {
-            let (ch, next) = (s[i], s.get(i + 1).copied());
+        while let Some(&ch) = s.get(i) {
+            let (next, p) = (s.get(i + 1).copied(), i.checked_sub(1).and_then(|j| s.get(j)));
             if block {
                 block = !(ch == '*' && next == Some('/'));
                 i += if block { 1 } else { 2 };
             } else if let Some(n) = raw {
-                let end = ch == '"' && s[i + 1..].iter().take(n).filter(|&&x| x == '#').count() == n;
+                let end = ch == '"' && s.iter().skip(i + 1).take(n).filter(|&&x| x == '#').count() == n;
                 raw = if end { None } else { raw };
                 i += if end { n + 1 } else { 1 };
             } else if let Some(q) = quote {
@@ -493,8 +494,8 @@ fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
                 break;
             } else if ch == '/' && next == Some('*') {
                 (c, block, i) = (true, true, i + 2);
-            } else if rust && ch == 'r' && matches!(next, Some('"' | '#')) && (i == 0 || !s[i - 1].is_alphanumeric()) {
-                let n = s[i + 1..].iter().take_while(|&&x| x == '#').count();
+            } else if rust && ch == 'r' && matches!(next, Some('"' | '#')) && p.is_none_or(|c| !c.is_alphanumeric()) {
+                let n = s.iter().skip(i + 1).take_while(|&&x| x == '#').count();
                 raw = (s.get(i + 1 + n) == Some(&'"')).then_some(n);
                 i += if raw.is_some() { n + 2 } else { 1 };
             } else if ch == '"' || (!rust && matches!(ch, '\'' | '`')) {
@@ -512,18 +513,19 @@ fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
 }
 
 fn allowed_comment(lines: &[&str], com: &[bool], i: usize) -> bool {
-    let t = lines[i].trim();
-    if t.starts_with("// TODO(#") && t[9..].split(')').next().is_some_and(|n| n.parse::<u32>().is_ok()) {
+    let t = lines.get(i).unwrap_or(&"").trim();
+    let todo = t.strip_prefix("// TODO(#").and_then(|r| r.split(')').next());
+    if todo.is_some_and(|n| n.parse::<u32>().is_ok()) {
         return true;
     }
     if t.starts_with("// SAFETY:") {
         return lines.get(i + 1).is_some_and(|n| n.contains("unsafe"));
     }
     let one_doc = (t.starts_with("///") && !t.starts_with("////")) || (t.starts_with("/**") && t.ends_with("*/"));
-    let mut item = lines[i + 1..].iter().map(|l| l.trim_start());
+    let mut item = lines.iter().skip(i + 1).map(|l| l.trim_start());
     let item = item.find(|l| !l.starts_with("#[") && !l.starts_with('@'));
     let public = item.is_some_and(|l| l.starts_with("pub ") || l.starts_with("export "));
-    one_doc && public && (i == 0 || !com[i - 1])
+    one_doc && public && (i == 0 || com.get(i - 1) == Some(&false))
 }
 
 fn commented(f: &str, except: &[String]) -> bool {

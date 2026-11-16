@@ -1,5 +1,5 @@
 use crate::config::Limits;
-use crate::events::{age, emit, Event, IssueState};
+use crate::events::{age, emit, Event, IssueState, Json};
 use crate::waiting::Waiting;
 use crate::Ctx;
 use anyhow::Result;
@@ -59,7 +59,7 @@ impl Say {
             Say::ReviewerSlot(why) => format!("waiting for a reviewer slot: {why}"),
             Say::ReviewsAhead(n) => format!(
                 "review waits behind {n} earlier review{}",
-                ["s", ""][usize::from(*n == 1)]
+                if *n == 1 { "" } else { "s" }
             ),
             Say::Pass(r) => format!("drive's next pass{r}"),
             Say::Starts(r) => format!("{r}; starts next pass"),
@@ -112,11 +112,12 @@ impl Limits {
 
 fn open(mine: &[&Event]) -> Option<(Promise, Option<String>)> {
     let at = mine.iter().rposition(|e| e.kind == "promise")?;
-    let p = Promise::of(mine[at])?;
-    if mine[at..].iter().any(|e| e.kind == "promise-void") {
+    let p = Promise::of(mine.get(at)?)?;
+    let since = mine.get(at..)?;
+    if since.iter().any(|e| e.kind == "promise-void") {
         return None;
     }
-    let missed = mine[at..].iter().rfind(|e| e.kind == "promise-missed");
+    let missed = since.iter().rfind(|e| e.kind == "promise-missed");
     Some((p, missed.map(|e| e.str("why").unwrap_or_default().into())))
 }
 
@@ -158,7 +159,8 @@ pub fn pass(
             .iter()
             .filter(|e| e.fleet == fleet && e.issue == Some(s.issue))
             .collect();
-        let head = crate::gh::cached_pr(ctx, fleet, s.issue)["headRefOid"]
+        let head = crate::gh::cached_pr(ctx, fleet, s.issue)
+            .at("headRefOid")
             .as_str()
             .unwrap_or_default()
             .to_string();
@@ -257,7 +259,7 @@ mod tests {
     }
 
     fn tmp(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("drover-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("drover-{name}-{}", crate::runner::pid()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
