@@ -111,7 +111,13 @@ dir = "src/features"
 glob = "*.rs"
 ```
 
-A frozen or generated file counts as converted: `drover hotspots` leaves it out.
+A frozen or generated file counts as converted: `drover hotspots` leaves it out. So does a `shared` one (#1147):
+
+```toml
+# Files many PRs touch by nature (code, not a list): off the hot list and out of the serial rule. Each must fall under
+# a `[[size]]` rule, or the check fails; its baseline keeps it from growing. Only an ADR adds a line.
+shared = ["src/engine.rs", "tests/**"]
+```
 
 The lesson lane turns a repeated layer crossing or banned call into a `[[layer]]` or `[[ban]]` entry.
 

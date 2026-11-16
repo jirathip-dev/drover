@@ -355,3 +355,21 @@ fn tick_stores_the_list_daily_and_files_the_issue_weekly() {
     assert_eq!(tick(NOW + 6 * 86400), (false, true));
     assert_eq!(tick(NOW + 7 * 86400), (true, true));
 }
+
+#[test]
+fn a_shared_file_is_decided_and_counted_in_the_header_not_listed() {
+    let c = fixture("hotspots-shared");
+    let local = c.state.parent().unwrap().parent().unwrap().join("local");
+    std::fs::create_dir_all(local.join(".drover")).unwrap();
+    std::fs::write(local.join(".drover/arch.toml"), "shared = [\"a.rs\"]\n").unwrap();
+    git(&local, NOW, &["add", "."]);
+    git(&local, NOW, &["commit", "-qm", "share a.rs"]);
+    git(&local, NOW, &["update-ref", "refs/remotes/origin/staging", "HEAD"]);
+    let (code, out) = run(&c, &RealGit(gh("[]")), &["hotspots", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("1 decided files (frozen, generated or shared) not listed"),
+        "{out}"
+    );
+    assert!(!out.contains("| `a.rs`") && out.contains("none"), "{out}");
+}

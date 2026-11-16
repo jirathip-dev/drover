@@ -254,17 +254,7 @@ pub fn check(
         }
     }
     bad.extend(frozen_adds(&a, &frozen, &diff));
-    bad.extend(
-        a.shared
-            .iter()
-            .filter(|g| !a.size.iter().any(|s| covers(&s.paths, g)))
-            .map(|g| {
-                format!(
-                    "{}: shared `{g}` falls under no `[[size]]` rule: a shared file must be kept from growing",
-                    config.display()
-                )
-            }),
-    );
+    bad.extend(unsized_shared(&a, config));
     bad.extend(stale_generated(&a, r)?);
     match &a.comments {
         Some(c) if c.policy == Policy::Off => bad.extend(new_comments(&diff, &c.except)),
@@ -314,10 +304,16 @@ pub fn decided(text: &str) -> Result<Vec<String>> {
     Ok(a.frozen.into_iter().chain(a.generated).chain(a.shared).collect())
 }
 
-fn covers(paths: &[String], g: &str) -> bool {
-    let probe = g.replace("**", "x/y").replace('*', "x");
-    let probe = if g.ends_with("/**") { probe + "/z.rs" } else { probe };
-    any(paths, &probe)
+fn unsized_shared(a: &Arch, config: &Path) -> Vec<String> {
+    let covered = |g: &String| {
+        let probe = g.replace("**", "x/y").replace('*', "x");
+        let probe = if g.ends_with("/**") { probe + "/z.rs" } else { probe };
+        a.size.iter().any(|s| any(&s.paths, &probe))
+    };
+    let why = "falls under no `[[size]]` rule: a shared file must be kept from growing";
+    (a.shared.iter().filter(|g| !covered(g)))
+        .map(|g| format!("{}: shared `{g}` {why}", config.display()))
+        .collect()
 }
 
 fn frozen_adds(a: &Arch, frozen: &[String], diff: &[Change]) -> Vec<String> {
