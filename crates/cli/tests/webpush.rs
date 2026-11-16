@@ -34,7 +34,7 @@ fn decrypt(body: &[u8], ua: &SecretKey, auth: &[u8]) -> Option<Vec<u8>> {
     let hk = |salt: &[u8], ikm: &[u8], info: &[u8], out: &mut [u8]| {
         hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm)
             .expand(info, out)
-            .unwrap()
+            .unwrap();
     };
     let (mut ikm, mut cek, mut nonce) = ([0u8; 32], [0u8; 16], [0u8; 12]);
     hk(auth, shared.raw_secret_bytes().as_slice(), &info, &mut ikm);
@@ -112,7 +112,7 @@ fn post(s: &Server, path: &str, body: &str, extra: &str) -> String {
 }
 
 #[test]
-fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
+fn parity_8_subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     let dir = tmpdir("wp-sub");
     let c = ctx(&dir, CONFIG);
     let r = OnShed::new(Fake::default());
@@ -161,12 +161,12 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
         "unpaired cannot remove"
     );
     assert!(post(&s, "/push/unsubscribe", &body, &cookie).starts_with("HTTP/1.1 303"));
-    assert!(webpush::load(&c.state).is_empty());
+    assert_eq!(webpush::load(&c.state), [] as [drover::webpush::Sub; 0]);
 }
 
 fn fake_curl(dir: &Path) -> std::sync::MutexGuard<'static, ()> {
     static PATH: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let held = PATH.lock().unwrap_or_else(|e| e.into_inner());
+    let held = PATH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let script = format!(
@@ -398,7 +398,7 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
         "one push each, to the new device only"
     );
     let json: serde_json::Value =
-        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap().to_vec(), &ua, &d(AUTH)).unwrap())
+        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap().clone(), &ua, &d(AUTH)).unwrap())
             .unwrap();
     assert!(json["body"].as_str().unwrap().ends_with("alerts are on"), "{json}");
     let sent: Vec<_> = read(&c.state)
@@ -595,18 +595,18 @@ fn a_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named() {
     assert_eq!(pushes(), 1);
     let j = last();
     assert_eq!(j["body"], "sendmeter · Grill #12: Scope and tests.");
-    assert_eq!(j["url"], "/?thread=t1#chat");
+    assert_eq!(j["url"], "/#threads/t1");
     let ask = serde_json::json!({"id": "q1", "question": "Which scope?", "options": ["small", "full"],
         "recommend": 2, "kind": "owner", "thread": "t1"});
     emit(&c.state, &cfg, Event::new(1, "sendmeter", None, "needs-decision", ask)).unwrap();
     assert_eq!(pushes(), 2);
     let j = last();
     assert_eq!(j["body"], "sendmeter · Grill #12 asks: Which scope?");
-    assert_eq!(j["url"], "/?thread=t1#chat");
+    assert_eq!(j["url"], "/#threads/t1");
 }
 
 #[test]
-fn no_push_for_the_thread_open_on_a_board() {
+fn parity_9_no_push_for_the_thread_open_on_a_board() {
     let dir = tmpdir("wp-watch");
     let _path = fake_curl(&dir);
     std::fs::write(dir.join("code"), "201").unwrap();

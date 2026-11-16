@@ -29,6 +29,11 @@ colours, and in the Home Screen app "enable alerts"). Each screen's last copy is
 painted first, offline too, with `last update hh:mm · Nm ago` on the strip until a fresh read or a live stream
 replaces it. A read over 300 ms shows `↻ loading` on the strip. `crates/cli/tests/page.rs` taps through it in Chrome.
 
+#895: every `[limits] serve_host_secs` serve hands its freed heap back to the OS and reads its own RSS; past
+`[limits] serve_mem_mb` (300) it logs `serve-mem-high` once and hands over to a fresh copy of itself (#894's handover,
+no client dropped), unless it was over that already at its first reading (a fresh copy would be no smaller).
+`scripts/serve-soak.sh` measures it on a copy of a real database.
+
 Snapshot (#337): the fast step (every minute) and every kick (a lane push, a verdict, an ask, a board tap) take one
 look at everything the board and `status` show and save it as the `board` row of `state.db`'s snapshots (#344): each read's output by
 command line. Every remote host's reads (verdict files, `git` facts, its shed's agent list and pane reads) go in one
@@ -74,6 +79,10 @@ a "no" shows the Pair UI; any later answer to a paired device (its `X-Paired: 1`
 database error reading the devices answers 503 `board busy, retrying` (API v1: `BUSY`), never 401: the page says why in its toast. Each 401 and 503 is one `serve.log` line, `auth <unix secs> <status>
 <method> <route>: <reason>` (`no cookie`, `unknown token`, `expired`, `db error: <kind>`; never the token), and
 `drover doctor` shows the last 24 h's counts.
+#896: up to 256 requests run at once (reads off the snapshot are cheap), of which at most 16 writes (any non-GET); past
+either bound the reply is 503 with `Retry-After: 1`. A tap's job (#977) runs on a worker per key: the fleet for a drive
+press, the fleet and issue for the rest, a card or config by its id. Different keys run at once, one key's jobs run in the
+order they came. Each ends in a toast.
 The panel reads `Waiting for approval on the Mac: drover serve approve <code>`. An unpaired page,
 while any device is paired, adds "Safari and the home-screen app pair separately" (iOS keeps their cookies apart). An optional `[serve] approve_hint`
 (a string, `{code}` replaced by the code) is appended after ` · `, e.g.
@@ -113,8 +122,11 @@ you` / `At the gate: …`; terminal sends none and keeps today's titles. A theme
 [[notify]]
 type = "webpush"
 sub = "mailto:you@example.com"   # the VAPID `sub` claim; required
-# on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, needs-human, ask-waiting, answer-undelivered, state-write-failed
+# on = [...]   # default: every alert emitted as a push (blocked, stall, lane-dead, merged, needs-human, ask-waiting, …)
 ```
+
+#1147: with no `on`, a phone gets each event logged with `"push": true` (set where the alert is born,
+`Event::push`) and the kinds pushed before the flag (`crates/core/src/events/push.rs`, frozen: it only shrinks).
 
 It works per fleet too (`[[fleet.<name>.notify]]`), next to any command notifier, which is
 unchanged. Each event is encrypted per device (RFC 8291 aes128gcm), signed with an ES256 VAPID
@@ -169,6 +181,33 @@ for the issue at once (200); anything else is ignored with 202. While a fleet ha
 becomes a catch-up poll every `[limits] webhook_poll_minutes` (default 10), for what a sleeping Mac or a down Funnel
 missed.
 
+## Serve health (#898)
+
+Each minute serve writes its own numbers to `serve-health.json` in the state dir, and `GET /api/v1/health` returns
+them as `serve`: `sha` (the build it runs, #1081), `rss_mb`, `groups` (the last minute's `/live` first bytes, `/api/v1 reads` and `writes`, each with
+`count`, `p50`, `p95` and `max` ms), `busy` (reads answered 503 in that minute), `clients` (live streams), `queued`
+(taps waiting for a worker), `started` and `slow` (set while `/api/v1` p95 has been over 200 ms for 5 min). Each start
+appends `<ts> cold|handover` to `serve-starts` (the last day kept); a start that fails appends `<ts> failed`.
+
+#1081: a `serve` whose port is held asks that port's health which build holds it: its own build, it exits 0 (launchd and
+systemd restart it only after a failed exit); an older one, it asks that serve over its control socket to hand over (its
+bridge runs the installed binary), then exits 0; nothing answers, it fails.
+
+`drover check` alerts once per state, then `<kind>-ok` when it clears:
+
+| Alert | When |
+|---|---|
+| `serve-restarts` | more than 3 starts in 24 h that were not handovers |
+| `serve-mem` | RSS over 300 MB |
+| `serve-stale` | the serve on the port runs another build than the installed `drover` |
+| `serve-loop` | more than 3 failed serve starts in 1 h (launchd's serve exiting non-zero) |
+| `serve-slow` | `/api/v1` p95 over 200 ms for 5 min |
+| `serve-503` | any read answered 503 in the last minute |
+| `drive-slow` | a fleet's last pass over `pass_max_secs` (120 s); names the fleet and its slowest step |
+
+CI's gates are `crates/cli/tests/serve_health.rs`: the request-path guard (every read answers with the db write-locked,
+and none calls git, gh or ssh) and the bench (each route group's p95 within 50 ms on the fixture state).
+
 ## JSON API v1 (#265)
 
 `drover serve` answers JSON under `/api/v1/`, for Drover's screens and cooee core (below). Every route checks Host/Origin like `/live`; the routes kept for a paired device (a
@@ -194,7 +233,7 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `GET repo/<fleet>/threads` | #681: the repo's orchestrator threads, newest-active first: `id`, `title`, `last` (`line`, `ts`), `unread`, `awake` (its orchestrator not asleep), `archived`, and `newest: true` on the ongoing one (the first not archived), so cooee shows it as the agent's chat and the rest as side threads; `all` for the all-repos threads; 404 `NOT_FOUND` for no such fleet |
 | `GET events?since=N` | #259's contract: the events after `N` (#266: `&until=M`, up to `M`) in `list`; over 500, `refresh: true` and none (read `state` again). Each as the Events tab says it: `glyph`, `tone`, `text`, `imp`, the row sprite's `act` and `coat`, `plain`, and its issue's `pr` or checks `run` |
 | `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) plus #749's `blocks`: an ACP lane's transcript from shed's events (`prompt`, `reply`, `tool`, `plan`, `approval`; `?before=<seq>&n=N` pages back), a PTY lane's one `screen` block (its `lines`) |
-| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `unpark`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}`. #977: a tap (`answer`, `drive`, `override`, `extend`, `park`, `unpark`, `card` `{id, act, sha}`, `config` `{id, act}`) is a job: 202 `ACCEPTED` with its `job` id at once, run on its own thread, never refused for another job or a running drive; the same button tapped again while its job runs or within 15 min of the first tap returns that job (a card or config by its id alone) (a refused one may be tapped again); each logs `job` events |
+| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `unpark`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}`. #977: a tap (`answer`, `drive`, `override`, `extend`, `park`, `unpark`, `card` `{id, act, sha}`, `config` `{id, act}`) is a job: 202 `ACCEPTED` with its `job` id at once, run after the jobs before it on its issue (#896), never refused for another job or a running drive; the same button tapped again while its job runs or within 15 min of the first tap returns that job (a card or config by its id alone) (a refused one may be tapped again); each logs `job` events |
 | `GET job/<id>` | #977 (paired): a tap's `Job` (`id`, `op`, `fleet`, `issue`, `ts`): `state` `running`, `waiting` (`HOST_WAIT`: its issue's start waits for host; re-checked every `serve_host_secs`), `done`, `refused` (`code`) or `error`, and `message` (its toast) |
 | `GET herd` | #555: Herd mode's data (the old board's `/herd.json`, gone with it in #927) |
 | `GET roles?fleet=F` | #555: the fleet's [config] sheet (`config`: its roles with the model/effort pickers, the orchestrator) and `chat`, `[chat]`'s new-thread defaults with the harnesses it may name |

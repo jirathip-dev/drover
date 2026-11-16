@@ -218,7 +218,7 @@ fn repo(wt: &str, fail: &'static str) -> RealGit {
                 .status
                 .success(),
             "{a:?}"
-        )
+        );
     };
     sh(&["init", "-q", "--bare", &origin]);
     sh(&["clone", "-q", &origin, wt]);
@@ -727,7 +727,13 @@ fn wip_prune_dry_run_lists_and_deletes_nothing() {
         std::fs::create_dir_all(local.join(file).parent().unwrap()).unwrap();
         let mut x = file.len() as u64;
         let bytes: Vec<u8> = (0..2 << 20)
-            .map(|_| (x = x.wrapping_mul(6364136223846793005).wrapping_add(1), (x >> 56) as u8).1)
+            .map(|_| {
+                (
+                    x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1),
+                    (x >> 56) as u8,
+                )
+                    .1
+            })
             .collect();
         std::fs::write(local.join(file), bytes).unwrap();
         git(&["-C", &l, "add", "-f", file]);
@@ -839,7 +845,7 @@ fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
 }
 
 #[test]
-fn the_lanes_sheets_stop_and_kill_run_the_verbs_and_log_via_the_screen() {
+fn parity_59_the_lanes_sheets_stop_and_kill_run_the_verbs_and_log_via_the_screen() {
     let (c, wt, sh) = lane("cooee-stop-kill");
     sh.lane(LANE, "working", &wt);
     let r = OnShed(git(&wt, "", "0\n", ""), sh);

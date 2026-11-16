@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS snapshot (n INTEGER PRIMARY KEY AUTOINCREMENT, key TE
 CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS states (fleet TEXT NOT NULL, issue INTEGER NOT NULL, done INTEGER NOT NULL, json TEXT NOT NULL,
     PRIMARY KEY (fleet, issue));
-CREATE TABLE IF NOT EXISTS lanes (agent TEXT PRIMARY KEY, seq INTEGER NOT NULL, json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS lanes (lane TEXT PRIMARY KEY, seq INTEGER NOT NULL, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS asks (seq INTEGER PRIMARY KEY, fleet TEXT NOT NULL, id TEXT, issue INTEGER, agent TEXT,
     twin TEXT, json TEXT NOT NULL, rank INTEGER, closed TEXT, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS asks_twin ON asks (twin);
@@ -44,7 +44,7 @@ impl Scratch {
     pub fn start() -> Scratch {
         static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!("drover-scratch-{}-{n}.db", std::process::id()));
+        let p = std::env::temp_dir().join(format!("drover-scratch-{}-{n}.db", crate::runner::pid()));
         SCRATCH.set(Some(p.clone()));
         Scratch(p)
     }
@@ -55,7 +55,7 @@ impl Drop for Scratch {
         SCRATCH.set(None);
         OPEN.with_borrow_mut(|v| v.retain(|x| x.0 != self.0));
         for x in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(format!("{}{x}", self.0.display()));
+            std::fs::remove_file(format!("{}{x}", self.0.display())).ok();
         }
     }
 }
@@ -104,17 +104,21 @@ fn open(state: &Path) -> Result<Connection> {
         if mode(&c)? == "wal" || c.pragma_update(None, "journal_mode", "WAL").is_ok() {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(l.db_retry_millis));
+        crate::clock::sleep(std::time::Duration::from_millis(l.db_retry_millis));
     }
     anyhow::ensure!(mode(&c)? == "wal", "{} is not in WAL mode", file(state).display());
     c.execute_batch(SCHEMA)?;
     let mut c = c;
-    if c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))? < 1 {
+    let version = |c: &Connection| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0));
+    if version(&c)? < 2 {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if tx.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))? < 1 {
+        if version(&tx)? < 1 {
             offload_all(&tx, state)?;
+        }
+        if version(&tx)? < 2 {
+            tx.execute_batch(&format!("DROP TABLE lanes; {SCHEMA}"))?;
             rebuild_in(&tx, state)?;
-            tx.pragma_update(None, "user_version", 1)?;
+            tx.pragma_update(None, "user_version", 2)?;
         }
         tx.commit()?;
     }
@@ -160,22 +164,28 @@ fn project(c: &Connection, ev: &Event) -> Result<()> {
     if let Some(n) = ev.issue {
         let q = "SELECT json FROM states WHERE fleet = ?1 AND issue = ?2";
         let old: Option<String> = c.query_row(q, params![ev.fleet, n], |r| r.get(0)).optional()?;
-        if old.is_none() || !events::PASSIVE.contains(&ev.kind.as_str()) {
+        if old.is_none() || !ev.is_passive() {
             let key = (ev.fleet.clone(), n);
             let mut m = events::States::new();
             if let Some(j) = old {
                 m.insert(key.clone(), serde_json::from_str(&j)?);
             }
-            let s = &events::fold_into(m, std::slice::from_ref(ev))[&key];
-            let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
-            c.execute(q, params![ev.fleet, n, s.done(), serde_json::to_string(s)?])?;
+            if let Some(s) = events::fold_into(m, std::slice::from_ref(ev)).get(&key) {
+                let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
+                c.execute(q, params![ev.fleet, n, s.done(), serde_json::to_string(s)?])?;
+            }
         }
     }
-    if let (true, Some(a)) = (ev.kind == "spawn", ev.str("agent")) {
-        let q = "INSERT OR REPLACE INTO lanes (agent, seq, json) VALUES (?1, ?2, ?3)";
-        c.execute(q, params![a, ev.seq, serde_json::to_string(ev)?])?;
-    }
+    lane(c, ev)?;
     project_ask(c, ev)
+}
+
+fn lane(c: &Connection, e: &Event) -> Result<()> {
+    if let Some(k) = events::lane_id(e) {
+        let q = "INSERT OR REPLACE INTO lanes (lane, seq, json) VALUES (?1, ?2, ?3)";
+        c.execute(q, params![k, e.seq, serde_json::to_string(e)?])?;
+    }
+    Ok(())
 }
 
 fn project_ask(c: &Connection, e: &Event) -> Result<()> {
@@ -230,11 +240,11 @@ fn project_ask(c: &Connection, e: &Event) -> Result<()> {
     for (seq, json, rank) in found {
         let a = numbered(seq, &json)?;
         let w = events::closes(&a, e, || first().ok().flatten().is_some_and(|f| f < seq));
-        let Some(r) = events::ORDER.iter().position(|o| Some(*o) == w) else {
+        let Some((r, o)) = events::ORDER.iter().enumerate().find(|o| Some(*o.1) == w) else {
             continue;
         };
         if r < rank.unwrap_or(events::ORDER.len()) {
-            let row = events::ending_row(events::ORDER[r], e);
+            let row = events::ending_row(o, e);
             let set = "UPDATE asks SET rank = ?2, closed = ?3, at = ?4 WHERE seq = ?1";
             c.execute(set, params![seq, r, row, e.seq])?;
         }
@@ -272,11 +282,8 @@ fn rebuild_in(c: &Connection, state: &Path) -> Result<()> {
     for s in events::fold_into(events::States::new(), &all).into_values() {
         c.execute(q, params![s.fleet, s.issue, s.done(), serde_json::to_string(&s)?])?;
     }
-    let q = "INSERT OR REPLACE INTO lanes (agent, seq, json) VALUES (?1, ?2, ?3)";
-    for e in all.iter().filter(|e| e.kind == "spawn") {
-        if let Some(a) = e.str("agent") {
-            c.execute(q, params![a, e.seq, serde_json::to_string(e)?])?;
-        }
+    for e in &all {
+        lane(c, e)?;
     }
     let m = projected(&all)?;
     let mut q = m.prepare("SELECT * FROM asks")?;
@@ -298,9 +305,22 @@ pub fn rebuild(state: &Path) -> Result<()> {
     })
 }
 
+/// #1023: the saved lane fold's events (each lane's newest lane event), kept after `compact` archives its issue.
+pub fn lanes(state: &Path) -> Result<Vec<Event>> {
+    with(state, false, vec![], |c| {
+        let mut q = c.prepare("SELECT seq, json FROM lanes")?;
+        let rows = q.query_map([], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
+        rows.map(|r| {
+            let (seq, json) = r?;
+            Ok(events::aliased(numbered(seq, &json)?))
+        })
+        .collect()
+    })
+}
+
 /// #978: the current per-issue state, the `states` rows.
 pub fn issues(state: &Path) -> Result<events::States> {
-    since(state, i64::MAX as u64, true, None).map(|t| t.1)
+    since(state, i64::MAX.unsigned_abs(), true, None).map(|t| t.1)
 }
 
 /// #978: an ask's ending as its `asks` row holds it: (`ORDER` rank, `drover asks`' text); `None` while open.
@@ -347,12 +367,12 @@ pub(crate) fn since(
     })
 }
 
-/// #978: `drover asks`' rows: every ask (`fleet`'s) with its ending, oldest first.
-pub fn asks(state: &Path, fleet: Option<&str>) -> Result<Vec<(Event, Ending)>> {
+/// #978: `drover asks`' rows: the open asks (`all`: every ask), `fleet`'s, with their endings, oldest first.
+pub fn asks(state: &Path, fleet: Option<&str>, all: bool) -> Result<Vec<(Event, Ending)>> {
     with(state, false, vec![], |c| {
-        let q = "SELECT seq, json, rank, closed FROM asks WHERE ?1 IS NULL OR fleet = ?1 ORDER BY seq";
+        let q = "SELECT seq, json, rank, closed FROM asks WHERE (?1 IS NULL OR fleet = ?1) AND (?2 OR rank IS NULL) ORDER BY seq";
         let mut q = c.prepare(q)?;
-        let rows = q.query_map([fleet], |r| {
+        let rows = q.query_map(params![fleet, all], |r| {
             let end = r.get::<_, Option<usize>>(2)?.zip(r.get::<_, Option<String>>(3)?);
             Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?, end))
         })?;
@@ -651,8 +671,7 @@ pub struct Lease {
 
 /// This machine's name, as leases record their holder.
 pub fn host() -> String {
-    std::env::var("HOSTNAME")
-        .ok()
+    crate::config::env("HOSTNAME")
         .filter(|h| !h.is_empty())
         .unwrap_or_else(|| {
             std::fs::read_to_string("/etc/hostname").map_or_else(|_| "localhost".into(), |h| h.trim().into())

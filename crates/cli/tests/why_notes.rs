@@ -3,6 +3,7 @@ use common::*;
 use drover::events::{append, read, Event};
 use drover::runner::{Out, Runner};
 use serde_json::{json, Value};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -40,7 +41,6 @@ impl Runner for Git<'_> {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
-        use std::io::Write;
         c.stdin.take().unwrap().write_all(input.as_bytes())?;
         let o = c.wait_with_output()?;
         Ok(Out {
@@ -389,7 +389,7 @@ fn why_reads_a_merged_line_back() {
         out.contains("issue   #12 Meter sends") && out.contains("PR #100 · merged"),
         "{out}"
     );
-    assert!(out.contains(&format!("note    round 1 · on {:.9}", head)), "{out}");
+    assert!(out.contains(&format!("note    round 1 · on {head:.9}")), "{out}");
     assert!(out.contains("  Owner: retries no longer double the meter"), "{out}");
     assert!(
         out.contains("q5 owner · Count retries?") && out.contains("→ owner (web): yes, each once"),
@@ -405,6 +405,81 @@ fn why_reads_a_merged_line_back() {
     assert_eq!(v["note"]["sha"], json!(head));
     assert_eq!(v["note"]["owner"], json!("retries no longer double the meter"));
     assert_eq!(v["asks"][0]["answer"]["choice"], json!("yes, each once"));
+}
+
+#[test]
+fn a_squash_merge_lands_one_commit_carrying_every_lane_note() {
+    let repo = repo("why-squash");
+    let (c, _sh) = lane(&repo, false);
+    let pr = |head: &str| {
+        let green =
+            json!([{"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
+        let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+            "body": body(head), "statusCheckRollup": green});
+        Fake::default()
+            .reply("gh pr view issue-12", &pr.to_string())
+            .reply(
+                "gh issue view 12",
+                &json!({"title": "Meter sends", "body": SPEC}).to_string(),
+            )
+            .reply("gh pr edit", "")
+    };
+    std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
+    assert_eq!(run(&c, &Git::new(&pr(&repo.head)), &["turn", "done"]).0, 0);
+    let seed = repo.dir.join("seed");
+    std::fs::write(seed.join("c.rs"), "c\n").unwrap();
+    g(&seed, &["add", "."]);
+    g(&seed, &["commit", "-qm", "meter: test it"]);
+    g(&seed, &["push", "-q", "origin", "issue-12"]);
+    let head = g(&seed, &["rev-parse", "HEAD"]);
+    g(&repo.wt, &["pull", "-q", "origin", "issue-12"]);
+    let second = "Decided: test the meter\nBecause: q5\nRejected: no test — the meter would drift\nCheck: c.rs holds the test\nOwner: the meter has a test\n";
+    std::fs::write(repo.wt.join("why.md"), second).unwrap();
+    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    let r = pr(&head);
+    let (code, out) = run(&c, &Git::new(&r), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(origin_note(&repo, &head).is_some(), "{out}");
+    let v = json!({"verdict": "PASS", "sha": head});
+    append(&c.state, &Event::new(40, "sendmeter", Some(12), "verdict", v)).unwrap();
+    g(&seed, &["checkout", "-q", "staging"]);
+    g(&seed, &["merge", "-q", "--squash", "issue-12"]);
+    g(&seed, &["commit", "-qm", "meter: count sends (#12) (#100)"]);
+    g(&seed, &["push", "-q", "origin", "staging"]);
+    let squash = g(&seed, &["rev-parse", "HEAD"]);
+    let r = pr(&head)
+        .reply("gh pr merge 100", "")
+        .reply("gh pr view 100", &json!({"mergeCommit": {"oid": squash}}).to_string())
+        .reply("gh issue", "");
+    let (code, out) = run(&c, &Git::new(&r), &["merge", "sendmeter", "12"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(r.called(&format!(
+        "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
+    )));
+    let note = origin_note(&repo, &squash).expect("a note on the squash commit");
+    assert_eq!(note.trim(), format!("{}\n\n{}", NOTE.trim(), second.trim()));
+    let look = repo.dir.join("look");
+    g(
+        &repo.dir,
+        &["clone", "-q", repo.origin.to_str().unwrap(), look.to_str().unwrap()],
+    );
+    assert_eq!(g(&look, &["rev-list", "--count", "origin/staging"]), "2");
+    let at = format!("{}:2", look.join("a.rs").display());
+    let (code, out) = run(&c, &Git::new(&r), &["why", &at]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("commit  {squash:.9}  meter: count sends (#12) (#100)")),
+        "{out}"
+    );
+    assert!(
+        out.contains("issue   #12 Meter sends") && out.contains("PR #100 · merged"),
+        "{out}"
+    );
+    assert!(out.contains(&format!("on {squash:.9}")), "{out}");
+    assert!(
+        out.contains("  Owner: retries no longer double the meter") && out.contains("  Owner: the meter has a test"),
+        "{out}"
+    );
 }
 
 #[test]

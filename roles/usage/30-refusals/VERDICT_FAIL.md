@@ -1,0 +1,1 @@
+- VERDICT_FAIL: latest verdict for the head sha is FAIL

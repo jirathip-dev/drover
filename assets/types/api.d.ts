@@ -527,7 +527,15 @@ export type Event = {
 /**
  * #259: the log's monotonic number, set on append (an old row's is its line number); 0 before.
  */
-seq?: number, ts: number, fleet: string, issue?: number | null, type: string, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+seq?: number, ts: number, fleet: string, issue?: number | null, type: string, 
+/**
+ * #973: not activity (an alert, a note, a prompt): the fold and the idle-pane reader skip it.
+ */
+passive?: boolean, 
+/**
+ * #1147: reaches a phone whose notifier sets no `on`; kinds pushed before the flag are in `push::LEGACY`.
+ */
+push?: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
 
 export type IssueState = { fleet: string, issue: number, state: string, lane?: string | null, branch?: string | null, 
 /**

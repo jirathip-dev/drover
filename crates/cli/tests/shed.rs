@@ -66,7 +66,10 @@ fn every_adapter_call_is_a_shed_request() {
     let c = ctx(&tmpdir("adapter-calls"), CONFIG);
     term::close(&c, &r, lane).unwrap();
     assert_eq!(b.methods().iter().rev().take(2).collect::<Vec<_>>(), ["rm", "kill"]);
-    assert!(drover::session::live_on(&r).unwrap().is_empty());
+    assert_eq!(
+        drover::session::live_on(&r).unwrap(),
+        [] as [drover::session::Session; 0]
+    );
     term::close(&c, &r, lane).unwrap();
     let o = term::exec(&r, &term::read_argv(lane)).unwrap();
     assert!(term::failed_with(&o, "pane_not_found"), "{o:?}");
@@ -127,7 +130,7 @@ fn another_host_is_reached_through_shed_connect_over_ssh() {
     assert!(
         calls
             .iter()
-            .any(|c| c.starts_with("ssh ") && c.contains("box -- 'shed' 'connect' '--autostart'")),
+            .any(|c| c.starts_with("ssh ") && c.ends_with("box -- 'shed' 'connect'")),
         "{calls:?}"
     );
     assert!(b.methods().is_empty(), "nothing went to this host's server");
@@ -1061,8 +1064,8 @@ fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
         "a running ACP lane's scratch is never trimmed, oldest or not: {out}"
     );
     assert!(!exited.exists(), "an exited lane's goes over budget: {out}");
-    let line = format!("builds: trimmed {} ", exited.display());
-    assert!(out.contains(&line) && out.contains("no live agent"), "{out}");
+    let want = format!("builds: trimmed {} ", exited.display());
+    assert!(out.contains(&want) && out.contains("no live agent"), "{out}");
 }
 
 fn git(dir: &std::path::Path, a: &[&str]) -> String {
@@ -1171,7 +1174,7 @@ fn an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_
     let (code, out) = run(&later(&c, 300), &cli, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(git(&origin, &["rev-parse", "issue-12"]), head, "{out}");
-    assert!(git(&origin, &["ls-tree", "--name-only", "issue-12"]).is_empty());
+    assert_eq!(git(&origin, &["ls-tree", "--name-only", "issue-12"]), "");
     assert_eq!(
         git(&wt, &["diff", "--cached", "--name-only"]),
         "more.rs",
@@ -1197,7 +1200,7 @@ fn an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_
         exits(&b, &[json!({"event": "exited", "code": 1})]);
         let (code, out) = run(&later(&c, 2400 + i * 1900), &cli, &["drive"]);
         assert_eq!(code, 0, "{out}");
-        assert_eq!(logged(&c, "spawn").len(), 2 + i as usize, "{out}");
+        assert_eq!(logged(&c, "spawn").len(), 2 + usize::try_from(i).unwrap(), "{out}");
     }
     assert!(logged(&c, "needs-human").is_empty());
     let (_, st) = run(&later(&c, 8100), &cli, &["status", "sendmeter"]);
@@ -1907,7 +1910,7 @@ fn recorded(b: &FakeShed, agent: &str) -> Value {
     let events: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     b.add("sendmeter-impl-12", lane_labels());
     b.set("sendmeter-impl-12", |t| {
-        (t["acp"], t["events"]) = (json!(format!("{agent}-acp")), events)
+        (t["acp"], t["events"]) = (json!(format!("{agent}-acp")), events);
     });
     lane_json(b, "sendmeter-impl-12", "")
 }
@@ -2249,7 +2252,7 @@ fn verify_round_one(name: &str) -> (drover::Ctx, FakeShed) {
     let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
     let c = ctx(&tmpdir(name), &format!("{}{verify}", shed_config(&b.sock, "")));
     let ev = |kind: &str, d: Value| {
-        drover::events::append(&c.state, &Event::new(c.now - 100, "sendmeter", Some(12), kind, d)).unwrap()
+        drover::events::append(&c.state, &Event::new(c.now - 100, "sendmeter", Some(12), kind, d)).unwrap();
     };
     let impl_ = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     ev("spawn", impl_.clone());
@@ -2489,4 +2492,50 @@ fn stop_ends_a_hung_acp_orchestrator_by_its_thread() {
     let (code, out) = run(&at(&c, c.now + 120), &b.cli(&hang_fake()), &["stop", "orchestrator-t1"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("NO_SUCH_AGENT") && out.contains("asleep"), "{out}");
+}
+
+#[test]
+fn a_host_with_the_shed_job_starts_it_and_never_autostarts_a_server_outside_it() {
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C \
+               -oControlPersist=10m box -- ";
+    let hello = json!(Response::ok(json!(0), json!(shed::proto::Hello::ours())));
+    let ls = json!(Response::ok(json!(1), json!([])));
+    let up = format!("{hello}\n{ls}\n");
+    let (connect, auto) = (
+        format!("{ssh}'shed' 'connect'"),
+        format!("{ssh}'shed' 'connect' '--autostart'"),
+    );
+    let unit = format!("{ssh}'systemctl' '--user' 'show'");
+    let start = format!("{ssh}'systemctl' '--user' 'start' 'shed.service'");
+    let ls_on = |f: &Fake| {
+        shed::call(
+            &On::new(f, Some("box")),
+            &Wire::Connect,
+            shed::proto::Method::Ls,
+            json!({}),
+        )
+    };
+
+    let f = Fake::default()
+        .once(&connect, 1, "")
+        .reply(&unit, "LoadState=loaded\nActiveState=failed\n")
+        .reply(&start, "")
+        .reply(&connect, &up);
+    ls_on(&f).unwrap();
+    let calls = f.calls.borrow();
+    assert!(calls.iter().all(|c| !c.starts_with(&auto)), "{calls:?}");
+    let (s, last) = (f.index(&start), calls.iter().rposition(|c| c.starts_with(&connect)));
+    assert!(s.is_some() && s < last, "started, then connected: {calls:?}");
+
+    let f = Fake::default().once(&connect, 1, "").reply(&auto, &up);
+    ls_on(&f).unwrap();
+    assert!(f.called(&auto), "no job: --autostart as before {:?}", f.calls.borrow());
+
+    let f = Fake::default()
+        .reply(&unit, "LoadState=loaded\nActiveState=failed\n")
+        .reply(&start, "")
+        .once_err(&connect, 1, "no shed server");
+    let line = shed::line(&On::new(&f, Some("box")), &Wire::Connect);
+    assert!(line.starts_with("✗ shed — "), "{line}");
+    assert!(!f.called(&auto), "{:?}", f.calls.borrow());
 }

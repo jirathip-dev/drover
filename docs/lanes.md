@@ -96,6 +96,10 @@ Every lane gets `DROVER_PORT` (#187): a stable hash of `<fleet>/<branch>` into t
 logs it and the Lanes tab shows it (`:41234`). Lanes start dev servers on it, never a fixed port; `env`
 values expand it: `[fleet.web.env] PORT = "$DROVER_PORT"`. `scripts/ui-audit.sh` serves on it when set.
 
+`sandbox = "srt"` in `[fleet.<n>]` (#782, a spike, off by default) starts the lane's agent as `srt --settings <worktree>.srt.json <harness …>`:
+spawn writes those rules (worktree, build and its own temp writable; `~` read-denied but toolchains, its repo and the agent's own
+folders; the secrets folder denied; network through srt's proxy to an allowlist). Profile, proofs and numbers: docs/spikes/lane-sandbox.md.
+
 `drover close <agent>` closes the terminal of a shed agent that is not a drover lane (by name or pane id),
 never touching files or worktrees, and logs a passive `closed-other`; a logged lane is refused `IS_LANE`
 (use stop, kill or clean). `drover stop <agent>` sends Esc (logs `stop`). `drover kill <agent>` prints what is lost
@@ -229,7 +233,8 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | a live lane shed has said quiet for `stall_minutes` with no turn-end (#666, #1053) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with shed's note |
 | a live lane whose pane or session shows no output 10 min after its spawn | an ACP session gets its brief again once; then `spawn <role> --supersede` once (respawn `failed start`); then `needs-human START_FAILED` |
 | an ACP lane (build, check or design stage) mid-turn with no session event `silent_minutes` (10) and no tool call still running (#792) | `shed cancel` and one `continue` prompt (`nudged`); still silent 10 min later: `spawn <role> --supersede` once (`respawned-silent`); silent again within the hour: `needs-human LANE_SILENT` |
-| a design or architect lane in `error` or gone with no commit of its own (past its spawn, not on integration) under its stage's folders (#915) | `needs-human LANE_FAILED` naming the error; no `design-review`, no ask; a respawn is the owner's `spawn`, under `RESPAWN_LOOP` |
+| a design or architect lane in `error`, idle, hibernated or gone with no commit of its own under its stage's folders (#915, #914) | no `design-review`, no ask; `spawn <role> --supersede` (respawn) like a gone impl lane: 30 min apart, `LANE_ENDS` after two, under `RESPAWN_LOOP` |
+| a respawn refused for good (`RESPAWN_LOOP`, `DESIGN_MAIN_ONLY`, `HOST_OFFLINE`…) (#914) | `needs-human RESPAWN_REFUSED` (`RESPAWN_LOOP`: its one owner ask instead); `check` alerts `respawn-refused` once per lane and code |
 | a dead, stalled, silent or released lane's respawn (#908) | admitted like any spawn: `HOST_BUSY`, `MEM_LOW` and `DISK_LOW` hold it to a later pass, and `waiting` names the hold (`held: <code> <why>`); at most `[limits] respawn_per_pass` (default 2; `respawn_per_pass` in `[fleet.<n>]` overrides it) start a pass, the rest wait `RESPAWN_PACED`, still ahead of new starts |
 | a prompt drive or check sends a lane shed has asleep (`hibernated`: nudge, DECISION, turn, release, heads-up) (#908) | waking it starts a whole agent, so the host is admitted first; busy, the prompt is held and sent on a later pass |
 | a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
@@ -244,7 +249,10 @@ Herd strip (the issue's horse, or a gate horse when it has no lane, wears a red 
   PASS, green CI and the serial gate still apply. The `merged` event records `by: owner, override: "ROUND_LIMIT"`
   and the closing comment says `Owner override: ROUND_LIMIT`.
 - **one more round** logs `round-extended` (this issue's limit is `review_rounds` + 1 per extension) and
-  spawns `impl --supersede`. #817: an orchestrator grants it in its repo's thread with
+  puts the issue back in its queue place as `queued` (#1058): the tap spawns nothing, drive starts it in turn
+  with `impl --supersede`, and its Queue row reads `extended · waiting: <gate>` (`PAUSED`, `HOST_BUSY`, …) until
+  then. The card never comes back for a wait; a hard refusal of the start (`MERGED`, `UPDATE_LIMIT`, an error)
+  is a new `needs-human` naming the code. #817: an orchestrator grants it in its repo's thread with
   `drover extend <fleet> <issue> --typed "<owner line>"` (`by: owner (typed)`) or `--basis "<spec quote>"`
   (`by: orchestrator-<thread>`, an FYI line whose [change] parks the issue for 30 min).
 - **park** logs `parked` (`by`, and `drover park <fleet> <issue> --why <text>`'s reason): the issue leaves
@@ -262,9 +270,13 @@ never passes `--force`, and never bypasses a refusal: `REFUSED` (e.g. `HOST_BUSY
 next pass. Starts fan out: a pass tries every startable item in queue order, each spawn sampling the host
 afresh. An item-specific refusal (`SERIAL_BUSY`, `MCP_FORBIDDEN`, …) skips that item for the pass; it keeps
 its queue place and status reads `skipped this pass: <CODE> (<why>)` (board lane `skip <CODE>`). `CAP` ends
-the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end starting for every later fleet in the pass too (same Mac). Every action logs a passive `driven` event (step, command, result). A pass holds
-the `drive.lock` lease (#344: taken over once its pid is gone, or after an hour), so cron and the button never overlap; the
-board shows `driver: drover · last pass <age> ago`.
+the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end that fleet's starts in the pass. Every action logs a passive `driven` event (step, command, result).
+#896: each fleet's pass runs on its own thread under its own `drive-<fleet>.lock` lease (`drive-fast-<fleet>.lock` for
+the fast step; #344: taken over once its pid is gone, or after an hour), so cron and the button never overlap on one
+fleet and a slow fleet never holds another. The steps every fleet shares (the look, orphans, repair, checkpoint) run
+under `drive.lock`; a pass that finds it held skips them. A spawn's admission (slot count, host room, its marker) runs
+under the short `admit.lock`, so two fleets' passes never both take the last slot. The board shows each fleet's
+`⟳ driving…` and its last pass's length.
 
 A fix lane may push back on a finding in its report with file:line proof; that is not a fix,
 and the next (fresh) reviewer decides.
@@ -323,7 +335,8 @@ once the issue moves or the SLO recovers, and the card clears.
 `drover check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
 checks `[limits] ci_start_minutes` (10) after its push: `CI broken: <workflow> did not start` when a failed run has
-no jobs, else `CI missing`; once per head, and drive sends the lane a fix round as for red CI) and
+no jobs, else `CI missing`; once per head, and drive sends the lane a fix round as for red CI), `respawn-refused`
+(#914: a lane respawn refused for good, once per lane and code) and
 `usage-limit` / `signed-out` (#923). A limit banner counts only on the harness's own lines (the pane's last block,
 unless a `⏺` reply or tool call heads it; prompt lines never); a sign-in prompt is `signed-out`. Either alerts once,
 naming the lane, its host and the login command, and holds new lanes on that host (`LOGIN_NEEDED`) until the owner

@@ -1,7 +1,7 @@
 // #63 gate 2 (docs/ui.md), shipped only in the `serve --export --demo` page: `?audit=<view>` opens one view for
 // scripts/ui-audit.sh; `&check=1` then measures it and writes {"view","controls","outliers","sprites"} into <pre id=audit>.
 // #927: the views are the screens the page draws: each tab by its place id, `fleets` (the [⚙] screen), `lane` (a lane's
-// sheet) and `card` (the first card opened). Controls are 28 px tall with a 44 px tap area; rows are 44 px tap rows.
+// sheet), `card` (the first card opened) and #1072's `thread` (the Threads tab's first thread). Controls are 28 px tall with a 44 px tap area; rows are 44 px tap rows.
 (() => {
   const q = new URLSearchParams(location.search), V = q.get('audit');
   if (!V) return;
@@ -13,6 +13,7 @@
   const SETUP = {
     fleets: async () => { $('#sysb').click(); await until(() => $('#sheet .row')); $('#sheet .row').click(); await until(() => $('#sheet .fd')); },
     lane: async () => { location.hash = '#lanes'; await until(() => $('.row[data-id^="l-"]')); $('.row[data-id^="l-"]').click(); await until(() => $('#sheet .sb .sec')); },
+    thread: async () => { location.hash = '#threads'; await until(() => $('.row[data-id^="t"]')); $('.row[data-id^="t"]').click(); await until(() => $('.cmp')); },
     card: async () => { await until(() => $('#cards .fold')); $('#cards .fold .fl').click(); await until(() => $('#cards .choice, #cards .run')); },
   };
   const seen = e => e.checkVisibility({ visibilityProperty: true });

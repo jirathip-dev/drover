@@ -1,7 +1,6 @@
-#![warn(clippy::pedantic)]
 fn main() {
-    let _ = drover::SERVE.set((drover::hooks::serve, drover::serve::export));
-    let _ = drover::SERVICE.set(drover_service::main);
+    drover::SERVE.set((drover::hooks::serve, drover::serve::export)).ok();
+    drover::SERVICE.set(drover_service::main).ok();
     let ctx = drover::Ctx::from_env();
     let code = drover::main_with(
         std::env::args().collect(),
@@ -10,5 +9,5 @@ fn main() {
         &mut std::io::stdout(),
         &mut std::io::stdin(),
     );
-    std::process::exit(code);
+    drover_core::runner::exit(code);
 }

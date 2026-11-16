@@ -33,13 +33,13 @@ nav a.on{box-shadow:inset 0 2px var(--l)}
 nav a.on>span{background:var(--l);color:var(--bg)}
 nav a.on .n{color:inherit}
 
-button{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;height:var(--ctl);min-width:28px;max-width:100%;margin:0;padding:0 1ch;border:0;border-radius:0;background:none;color:var(--l);font:inherit;font-size:var(--fs);line-height:1;white-space:nowrap;text-transform:lowercase}
-button>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
-button::before{content:"[";position:absolute;left:0}
-button::after{content:"]";position:absolute;inset:calc(-1 * var(--s2));display:flex;align-items:center;justify-content:flex-end;padding-right:var(--s2)}
-button:active{background:var(--l);color:var(--bg)}
+button,a.btn{text-decoration:none;position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;height:var(--ctl);min-width:28px;max-width:100%;margin:0;padding:0 1ch;border:0;border-radius:0;background:none;color:var(--l);font:inherit;font-size:var(--fs);line-height:1;white-space:nowrap;text-transform:lowercase}
+button>span,a.btn>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+button::before,a.btn::before{content:"[";position:absolute;left:0}
+button::after,a.btn::after{content:"]";position:absolute;inset:calc(-1 * var(--s2));display:flex;align-items:center;justify-content:flex-end;padding-right:var(--s2)}
+button:active,a.btn:active{background:var(--l);color:var(--bg)}
 button:disabled{color:var(--mute);opacity:.6}
-button.bad,button.destructive{color:var(--r)}
+button.bad,button.destructive,a.btn.bad{color:var(--r)}
 button[aria-busy=true]>span::after{content:" ↻";display:inline-block;animation:s 1s linear infinite}
 button.pick{display:flex;width:100%;height:auto;min-height:var(--ctl);padding:calc((var(--ctl) - 1.35em) / 2) 1ch;justify-content:flex-start;text-align:left;white-space:normal;line-height:1.35;text-transform:none}
 button.pick::after{inset:calc(-1 * var(--s1)) calc(-1 * var(--s2));align-items:flex-start;padding-top:calc(var(--s1) + (var(--ctl) - 1.35em) / 2)}
@@ -66,7 +66,7 @@ input[type=checkbox]{width:var(--s4);height:var(--s4);accent-color:var(--l)}
 .foot{font-size:var(--fs-meta)}
 .list{display:flex;flex-direction:column}
 .row{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);padding:var(--s1) 0;border-bottom:1px solid var(--line)}
-.row.tap{cursor:pointer}
+.row.tap{cursor:pointer}a.row{color:inherit;text-decoration:none}
 .row.link .rt{color:var(--link);text-decoration:underline}
 .row.in1{padding-left:var(--s4)}.row.in2{padding-left:calc(2 * var(--s4))}.row.in3{padding-left:calc(3 * var(--s4))}
 .rm{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--s2)}
@@ -124,4 +124,47 @@ body:not([data-pair]) .pairb{display:none}
 @keyframes s{to{transform:rotate(1turn)}}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
-.sb>button,.scr>button,.sec>button,.shb>button,.card>button{margin:var(--s2) var(--s4) var(--s2) 0}
+.sb>button,.scr>button,.msgs>button,.sec>button,.shb>button,.card>button{margin:var(--s2) var(--s4) var(--s2) 0}
+/* #1072 Threads: a `focus` screen hides the cards; message cards by kind; the composer docks at the foot. */
+html[data-focus] #cards{display:none}
+.scr .card.k-you,.scr .card.k-orch,.scr .card.k-ask{border-left-width:3px}
+.scr .card.k-you{border-left-color:var(--a)}
+.scr .card.k-orch,.scr .card.k-ask{border-left-color:var(--p)}
+.scr .card.k-you .ch>b{color:var(--a)}
+.scr .card.k-orch .ch>b,.scr .card.k-ask .ch>b{color:var(--p)}
+.scr .card.k-you .ch .m,.scr .card.k-orch .ch .m,.scr .card.k-ask .ch .m{margin-left:auto;font-size:var(--fs-meta)}
+.scr .card.k-you.bad .ch .m{color:var(--r)}
+.scr .card.k-tool,.scr .card.k-sys{background:none;border:0;padding:0 var(--s2);margin:0}
+.scr .card.k-tool .fold{color:var(--a);font-size:var(--fs-meta)}
+.scr .card.k-sys .txt{color:var(--mute);font-size:var(--fs-meta)}
+.form.say{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 0;background:var(--bg);border-top:1px solid var(--line)}
+.form.say .fd{flex:1;border:0;min-height:0}
+.form.say .fk:empty{display:none}
+.cmp{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));padding:var(--s2) 0;background:var(--bg);border-top:1px solid var(--line)}
+.cmp .cr{display:flex;align-items:flex-end;gap:var(--s3)}
+.cmp textarea{flex:1;min-width:0;min-height:var(--hit);max-height:calc(8.4em + var(--s2) * 2 + 2px);box-sizing:border-box;resize:none;overflow-y:auto;font:inherit;line-height:1.4;color:inherit;background:none;border:1px solid var(--line);border-radius:4px;padding:var(--s2)}
+.cmp .pill,.cmp .qd,.cmp .cs{display:flex;align-items:center;gap:var(--s2);margin:0 0 var(--s2);font-size:var(--fs-meta)}
+.cmp .pill .pt{flex:1;color:var(--g)}
+.cmp .qd .qt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmp .th{display:flex;gap:var(--s2);overflow-x:auto;margin:0 0 var(--s2)}
+.cmp .tb{position:relative;display:flex;align-items:center;gap:var(--s1)}
+.cmp .tb img{height:calc(var(--hit) * 1.5);border-radius:4px}
+.cmp .chips{margin:var(--s4) 0 0}
+/* #1086, #1120: a focus screen is a column between the header and the tab bar or keyboard (`fit()`): bar, messages (the one scroller), composer. */
+html[data-focus] body{overflow:hidden}
+html[data-focus] #strip{position:fixed;left:0;right:0}
+html[data-focus] main>.tab>.scr{position:fixed;top:var(--top,0);bottom:var(--bot,0);left:0;right:0;max-width:760px;margin-inline:auto;padding:0 var(--s3);display:flex;flex-direction:column}
+.scr>.msgs{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:var(--s2)}
+html[data-focus] .scr>.cmp{position:static}
+.row.sticky{position:sticky;top:0;z-index:1;background:var(--bg)}
+.msgs>button[data-id=older]{display:flex;margin:var(--s2) auto}
+.cb{position:relative}
+.cb>.cpy{position:absolute;top:0;right:0}
+.cb>pre{padding-right:calc(6ch + var(--s4))}
+.imgs a{flex:none}
+#iv{position:fixed;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--scrim);touch-action:none}
+#iv>img{width:100%;min-height:0;max-height:calc(100% - var(--hit) * 2);object-fit:contain;transition:transform .15s}
+#iv.z{overflow:auto}
+#iv>.bar{position:fixed;bottom:env(safe-area-inset-bottom);left:0;right:0;justify-content:center;background:var(--bg)}
+#iv .bar>a{display:inline-flex;align-items:center;height:var(--ctl);color:var(--l);text-decoration:none}
+.card .form.say{position:static;border:0;padding:0;background:none}

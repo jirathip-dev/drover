@@ -171,6 +171,7 @@ fn lanes(c: &drover::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<(drover
         &read(&c.state).unwrap(),
         &agents,
         true,
+        None,
     )
 }
 
@@ -581,7 +582,7 @@ fn a_green_pass_on_a_draft_or_unlabelled_pr_names_the_cause() {
 
 #[test]
 fn a_pass_left_unmerged_for_three_passes_shows_the_missed_promise_with_the_real_reason() {
-    let (mut c, mut r) = fixture("waiting-854-missed");
+    let (mut c, r) = fixture("waiting-854-missed");
     let cfg = Config::load(&c.config).unwrap();
     let drive = |c: &drover::Ctx, r: &Fake| {
         let rows = lanes(c, r, &[]);
@@ -590,13 +591,6 @@ fn a_pass_left_unmerged_for_three_passes_shows_the_missed_promise_with_the_real_
     let four = |c: &drover::Ctx, r: &Fake| waits(c, r, &[]).into_iter().find(|w| w.issue == 4).unwrap();
     assert_eq!(four(&c, &r).what, "PASS · CI green · merging within 1 min");
     drive(&c, &r);
-    let draft = pr(&sha("4"), "green").replace("\"number\"", "\"isDraft\":true,\"number\"");
-    let out = drover::runner::Out {
-        code: 0,
-        stdout: draft,
-        stderr: String::new(),
-    };
-    r.replies.insert(0, ("gh pr view issue-4 ".into(), out));
     for _ in 0..3 {
         c.now += 300;
         drive(&c, &r);
@@ -609,5 +603,79 @@ fn a_pass_left_unmerged_for_three_passes_shows_the_missed_promise_with_the_real_
         .collect();
     assert_eq!(missed.len(), 1, "{missed:?}");
     assert_eq!(missed[0].str("kind"), Some("merging"));
-    assert_eq!(four(&c, &r).what, "⚠ missed 15m: now: PASS · CI green · PR is a draft");
+    assert_eq!(four(&c, &r).what, "⚠ missed 15m: drive took no step");
+}
+
+#[test]
+fn a_pass_a_draft_pr_holds_voids_the_merge_promise_and_shows_the_hold() {
+    let (mut c, mut r) = fixture("waiting-1093-void");
+    let cfg = Config::load(&c.config).unwrap();
+    let drive = |c: &drover::Ctx, r: &Fake| {
+        let rows = lanes(c, r, &[]);
+        drover::promise::pass(c, &cfg, "sendmeter", &read(&c.state).unwrap(), &rows).unwrap();
+    };
+    let four = |c: &drover::Ctx, r: &Fake| waits(c, r, &[]).into_iter().find(|w| w.issue == 4).unwrap();
+    drive(&c, &r);
+    let draft = pr(&sha("4"), "green").replace("\"number\"", "\"isDraft\":true,\"number\"");
+    let out = drover::runner::Out {
+        code: 0,
+        stdout: draft,
+        stderr: String::new(),
+    };
+    r.replies.insert(0, ("gh pr view issue-4 ".into(), out));
+    for _ in 0..3 {
+        c.now += 300;
+        drive(&c, &r);
+    }
+    let ev = read(&c.state).unwrap().to_vec();
+    let of = |k: &str| ev.iter().filter(|e| e.kind == k && e.issue == Some(4)).count();
+    assert_eq!((of("promise-missed"), of("promise-void")), (0, 1));
+    assert_eq!(four(&c, &r).what, "PASS · CI green · PR is a draft");
+}
+
+#[test]
+fn a_promise_missed_after_the_disk_recovers_is_stuck_on_the_current_hold_not_disk_low() {
+    let (mut c, r) = fixture("waiting-1122-stuck");
+    let cfg = Config::load(&c.config).unwrap();
+    let drive = |c: &drover::Ctx, r: &Fake| {
+        let rows = lanes(c, r, &[]);
+        drover::promise::pass(c, &cfg, "sendmeter", &read(&c.state).unwrap(), &rows).unwrap();
+    };
+    for n in [9, 12, 31] {
+        ev(&c, c.now, Some(n), "merged", json!({"pr": "9"}));
+    }
+    let refused = |c: &drover::Ctx, code: &str, why: &str| {
+        let d = json!({"step": "review", "cmd": "drover spawn sendmeter 42 rev", "result": format!("REFUSED {code}: {why}"), "code": code});
+        ev(c, c.now, Some(42), "driven", d);
+    };
+    refused(&c, "DISK_LOW", "mini: 0.1 GB free < 10 GB; retry later");
+    drive(&c, &r);
+    let ev42 = read(&c.state).unwrap().to_vec();
+    let promised = ev42
+        .iter()
+        .rfind(|e| e.kind == "promise" && e.issue == Some(42))
+        .unwrap();
+    assert!(
+        promised.str("reason").unwrap().contains("disk nearly full"),
+        "{promised:?}"
+    );
+    c.now += 300;
+    refused(
+        &c,
+        "SERIAL_BUSY",
+        "hot crates/cli/tests/waiting.rs: #983 holds 1/1; retry after they merge",
+    );
+    for _ in 0..3 {
+        drive(&c, &r);
+        c.now += 300;
+    }
+    let sh = FakeShed::attached(&c);
+    let seen = sh.on(&r);
+    let mut out = vec![];
+    drover::slo::pass(&c, &cfg, (&seen, &seen), &mut out, &["sendmeter"]).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
+    let stuck = ev.iter().find(|e| e.kind == "stuck" && e.issue == Some(42));
+    let why = stuck.and_then(|e| e.str("reason")).unwrap_or_default();
+    assert!(why.contains("SERIAL_BUSY") && why.contains("#983"), "{why:?} {ev:?}");
+    assert!(!why.contains("DISK_LOW") && !why.contains("disk nearly full"), "{why}");
 }

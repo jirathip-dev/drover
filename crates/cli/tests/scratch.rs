@@ -163,7 +163,7 @@ fn a_finished_lanes_build_folder_goes_at_once_even_with_its_session_open() {
             )
         })
         .collect();
-    got.sort();
+    got.sort_unstable();
     assert_eq!(
         got,
         [
@@ -320,9 +320,10 @@ impl drover::runner::Runner for Air<'_> {
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
         let batch = drover::hosts::quote("sh", &["-c".into(), drover::hosts::EXISTS.into()]);
-        match args.last() == Some(&batch) || args.iter().any(|a| a.contains("'shed' 'connect'")) {
-            true => self.over.run_in(prog, args, input),
-            false => self.run(prog, args),
+        if args.last() == Some(&batch) || args.iter().any(|a| a.contains("'shed' 'connect'")) {
+            self.over.run_in(prog, args, input)
+        } else {
+            self.run(prog, args)
         }
     }
     fn sleep(&self, _: u64) {}
@@ -344,7 +345,9 @@ fn tick(c: &drover::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Ve
     let sh = FakeShed::new();
     sh.attach(c);
     let air_sh = FakeShed::new();
-    air.iter().for_each(|(n, st)| air_sh.lane(n, st, "/x"));
+    for (n, st) in air {
+        air_sh.lane(n, st, "/x");
+    }
     let f = Fake::default()
         .reply(
             "herdr status",

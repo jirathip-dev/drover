@@ -30,15 +30,16 @@ impl Air {
             _ => input.lines().collect(),
         };
         let yes = |p: &&str| self.present.contains(*p);
-        match line.contains("\"$1\"") {
-            true => Out {
+        if line.contains("\"$1\"") {
+            Out {
                 code: i32::from(!paths.iter().all(yes)),
                 ..Out::default()
-            },
-            false => Out {
+            }
+        } else {
+            Out {
                 stdout: paths.iter().map(|p| if yes(p) { "y\n" } else { "n\n" }).collect(),
                 ..Out::default()
-            },
+            }
         }
     }
 }

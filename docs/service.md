@@ -6,8 +6,8 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
 
 ## Shape
 
-- **One process**, `drover service --api <addr> [--board <addr>]`, kept alive by launchd (`KeepAlive`) or systemd
-  (`Restart=always`). A second one refuses to start. It logs `service-started`; a stall logs `service-stalled`, which
+- **One process**, `drover service --api <addr> [--board <addr>]`, kept alive by launchd (`KeepAlive` after a failed exit) or systemd
+  (`Restart=on-failure`). A second one refuses to start. It logs `service-started`; a stall logs `service-stalled`, which
   every notifier gets, and the process exits so the supervisor starts it again.
 - **Local socket** `service.sock` beside `state.db` (mode 0600). A kick (a lane's push, stop or ask, a verdict, an
   answer, a board tap) goes there and is driven in the service's process at once, not as a detached `kick --now`.

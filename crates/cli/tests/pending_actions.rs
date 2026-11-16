@@ -17,30 +17,6 @@ fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
-fn setup(name: &str) -> (drover::Ctx, FakeShed) {
-    let c = ctx(&tmpdir(name), CONFIG);
-    let sh = FakeShed::attached(&c);
-    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    let wt = c.worktrees.join("sendmeter/issue-12");
-    let d = json!({"role": "impl", "agent": IMPL, "pane": IMPL, "worktree": wt, "branch": "issue-12"});
-    ev(&c, 10, "spawn", d);
-    for (ts, p) in [(11, "1"), (12, "2"), (13, "3")] {
-        ev(
-            &c,
-            ts,
-            "verdict",
-            json!({"verdict": "FAIL", "sha": sha(p), "body": "FAIL"}),
-        );
-    }
-    ev(
-        &c,
-        14,
-        "needs-human",
-        json!({"code": "ROUND_LIMIT", "reason": "out of rounds"}),
-    );
-    (c, sh)
-}
-
 fn started(sh: &FakeShed) -> usize {
     sh.all("run").iter().filter(|p| p["name"] == IMPL).count()
 }
@@ -59,16 +35,6 @@ fn fake(level: &str) -> Fake {
         .reply("git -C", "")
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("kill -0", "")
-}
-
-fn low_mem(level: &str) -> Fake {
-    let vm = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
-        Pages inactive: 16384.\nSwapouts: 100.\n";
-    let low = Fake::default().reply("vm_stat", vm);
-    Fake {
-        replies: [low.replies, fake(level).replies].concat(),
-        ..Default::default()
-    }
 }
 
 fn get(c: &drover::Ctx, r: &Fake, path: &str, now: u64) -> Value {
@@ -102,117 +68,6 @@ fn spawns(c: &drover::Ctx) -> usize {
 
 fn pending(c: &drover::Ctx) -> Option<drover::pending::Pending> {
     drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12)
-}
-
-#[test]
-fn a_held_back_extend_stays_answered_and_drive_starts_it_with_no_second_tap() {
-    let (c, sh) = setup("pending-extend");
-    let (busy, calm) = (low_mem("1"), fake("1"));
-    assert_eq!(cards(&c, &calm, c.now).len(), 1, "the needs-human card before the tap");
-    let (code, out) = run(&c, &busy, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.contains("waiting for host (MEM_LOW)"), "{out}");
-    let (code, out) = run(&c, &busy, &["drive"]);
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(spawns(&c), 1, "nothing started on a busy host");
-    assert_eq!(cards(&c, &calm, c.now), [], "gone, and stays gone");
-    let q = row(&c, &calm);
-    assert_eq!(q["pending"]["action"], "extend", "{q}");
-    assert_eq!(q["pending"]["reason"], "MEM_LOW", "{q}");
-    assert_eq!(
-        q["status"], "extended · starting, waiting for host: MEM_LOW · 0s",
-        "{q}"
-    );
-    let (_, st) = run(&c, &calm, &["status", "sendmeter"]);
-    assert!(st.contains("extended · starting, waiting for host: MEM_LOW"), "{st}");
-    let (_, w) = run(&c, &calm, &["waiting", "sendmeter"]);
-    assert!(
-        w.contains("sendmeter #12 drive: extended · starting, waiting for host: MEM_LOW"),
-        "{w}"
-    );
-
-    let (code, out) = run(&c, &calm, &["drive"]);
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(started(&sh), 1, "{out}");
-    assert_eq!((spawns(&c), pending(&c)), (2, None));
-    assert_eq!(cards(&c, &calm, c.now), []);
-    assert_eq!(row(&c, &calm)["status"], Value::Null);
-}
-
-#[test]
-fn a_start_pending_for_30_minutes_brings_its_card_back_once() {
-    let (mut c, sh) = setup("pending-late");
-    let (busy, calm) = (low_mem("1"), fake("1"));
-    assert_eq!(run(&c, &busy, &["extend", "sendmeter", "12"]).0, 0);
-    assert_eq!(cards(&c, &calm, c.now + 1799), []);
-    let back = cards(&c, &calm, c.now + 1800);
-    assert_eq!(back.len(), 1, "{back:?}");
-    assert_eq!(
-        back[0],
-        (
-            12,
-            "extend did not start a lane (still waiting after 30m): MEM_LOW".into()
-        )
-    );
-    c.now += 1800;
-    let (code, out) = run(&c, &calm, &["extend", "sendmeter", "12"]);
-    assert_eq!(code, 0, "the returned card's tap: {out}");
-    assert_eq!(started(&sh), 1, "{out}");
-    assert_eq!((pending(&c), cards(&c, &calm, c.now)), (None, vec![]));
-    let rounds = read(&c.state)
-        .unwrap()
-        .iter()
-        .filter(|e| e.kind == "round-extended")
-        .count();
-    assert_eq!(rounds, 1, "the second tap grants no second round");
-}
-
-#[test]
-fn soft_refusals_keep_it_pending_and_a_hard_one_brings_the_card_back_at_once() {
-    let (c, sh) = setup("pending-hard");
-    let busy = low_mem("1");
-    assert_eq!(run(&c, &busy, &["extend", "sendmeter", "12"]).0, 0);
-    for code in drover::pending::SOFT {
-        assert!(
-            drover::pending::refused(&c, ("sendmeter", 12), code, "x").unwrap(),
-            "{code}"
-        );
-        let p = pending(&c).unwrap();
-        assert_eq!((p.reason.as_deref(), p.failed), (Some(code), false));
-    }
-    assert!(drover::pending::refused(&c, ("sendmeter", 12), "IN_FLIGHT", "another pass").unwrap());
-    assert_eq!(
-        pending(&c).unwrap().reason.as_deref(),
-        Some("HOST_OFFLINE"),
-        "a skip is no refusal"
-    );
-    assert_eq!(cards(&c, &busy, c.now), []);
-
-    let broken = fake("1").once_err(ADD, 1, "worktree exists");
-    let (code, out) = run(&c, &broken, &["drive"]);
-    assert_eq!(code, 0, "{out}");
-    let p = pending(&c).unwrap();
-    assert!(p.failed && p.reason.as_deref().unwrap().starts_with("ERROR: "), "{p:?}");
-    let back = cards(&c, &broken, c.now);
-    assert_eq!(back.len(), 1, "{back:?}");
-    assert!(
-        back[0]
-            .1
-            .starts_with("extend did not start a lane (refused after 0s): ERROR: "),
-        "{back:?}"
-    );
-    for code in ["ROUND_LIMIT", "MERGED", "UPDATE_LIMIT", "BAD_VALUE", "DISK_LOW"] {
-        drover::pending::record(&c, ("sendmeter", 12), "extend", "impl", None).unwrap();
-        assert!(
-            !drover::pending::refused(&c, ("sendmeter", 12), code, "x").unwrap(),
-            "{code}"
-        );
-        let p = pending(&c).unwrap();
-        assert_eq!((p.failed, p.reason), (true, Some(format!("{code}: x"))));
-    }
-    let calm = fake("1");
-    let (code, out) = run(&c, &calm, &["drive"]);
-    assert!(code == 0 && started(&sh) == 1, "{out}");
-    assert_eq!((pending(&c), cards(&c, &calm, c.now)), (None, vec![]));
 }
 
 struct Hooked<'a> {

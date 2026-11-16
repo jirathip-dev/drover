@@ -41,7 +41,7 @@ fn fast_green() -> Value {
     json!([check("unit", "COMPLETED", "SUCCESS"), check("e2e", "IN_PROGRESS", "")])
 }
 
-fn pr(head: &str, checks: Value, files: &str) -> Fake {
+fn pr(head: &str, checks: &Value, files: &str) -> Fake {
     let pr = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
         "statusCheckRollup": checks});
     Fake::default()
@@ -69,11 +69,13 @@ fn event(c: &drover::Ctx, kind: &str) -> Option<Event> {
 #[test]
 fn a_pass_lands_once_its_fast_checks_are_green() {
     let (_d, c) = setup("land-fast", true, HEAD);
-    let r = pr(HEAD, fast_green(), "src/a.rs\n").reply("git", "");
+    let r = pr(HEAD, &fast_green(), "src/a.rs\n").reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     assert!(r.called(&format!("git -C {DIR} merge-base --is-ancestor origin/staging {HEAD}")));
-    assert!(r.called(&format!("gh pr merge 34 -R {REPO} --merge --match-head-commit {HEAD}")));
+    assert!(r.called(&format!(
+        "gh pr merge 34 -R {REPO} --squash --delete-branch --match-head-commit {HEAD}"
+    )));
     let l = event(&c, "landed").expect("landed");
     assert_eq!((l.str("mode"), l.str("sha")), (Some("fast-first"), Some("m3rg3")));
     assert_eq!(l.val("checks_secs"), 180);
@@ -83,7 +85,7 @@ fn a_pass_lands_once_its_fast_checks_are_green() {
 #[test]
 fn a_pr_touching_full_first_paths_waits_for_the_full_suite() {
     let (_d, c) = setup("land-full-path", true, HEAD);
-    let r = pr(HEAD, fast_green(), "src/a.rs\ndb/migrations/1.sql\n").reply("git", "");
+    let r = pr(HEAD, &fast_green(), "src/a.rs\ndb/migrations/1.sql\n").reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains("REFUSED CI_NOT_GREEN") && out.contains("e2e"), "{out}");
@@ -94,7 +96,7 @@ fn a_pr_touching_full_first_paths_waits_for_the_full_suite() {
 #[test]
 fn the_pass_must_be_at_the_exact_head_and_fast_red_is_no_landing() {
     let (_d, c) = setup("land-stale", true, OLD);
-    let r = pr(HEAD, fast_green(), "src/a.rs\n").reply("git", "");
+    let r = pr(HEAD, &fast_green(), "src/a.rs\n").reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains("REFUSED STALE_VERDICT"), "{out}");
@@ -103,7 +105,7 @@ fn the_pass_must_be_at_the_exact_head_and_fast_red_is_no_landing() {
         check("unit", "COMPLETED", "FAILURE"),
         check("e2e", "COMPLETED", "SUCCESS")
     ]);
-    let r = pr(HEAD, red, "src/a.rs\n").reply("git", "");
+    let r = pr(HEAD, &red, "src/a.rs\n").reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains("REFUSED CI_NOT_GREEN") && out.contains("unit"), "{out}");
@@ -113,7 +115,7 @@ fn the_pass_must_be_at_the_exact_head_and_fast_red_is_no_landing() {
 #[test]
 fn default_config_still_needs_the_full_suite() {
     let (_d, c) = setup("land-default", false, HEAD);
-    let r = pr(HEAD, fast_green(), "src/a.rs\n").reply("git", "");
+    let r = pr(HEAD, &fast_green(), "src/a.rs\n").reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains("REFUSED CI_NOT_GREEN"), "{out}");
@@ -128,7 +130,7 @@ fn default_config_still_needs_the_full_suite() {
 #[test]
 fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
     let (d, c) = setup("land-swap", true, HEAD);
-    let r = pr(HEAD, fast_green(), "src/a.rs\n")
+    let r = pr(HEAD, &fast_green(), "src/a.rs\n")
         .once("git -C /tmp/does-not-matter/sendmeter merge-base --is-ancestor", 1, "")
         .reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
@@ -149,7 +151,7 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
     let u = event(&c, "auto-updated").expect("auto-updated");
     assert_eq!((u.str("from"), u.str("to")), (Some(HEAD), Some(NEW)));
     let c = drover::Ctx { now: c.now + 120, ..c };
-    let r = pr(NEW, fast_green(), "src/a.rs\n")
+    let r = pr(NEW, &fast_green(), "src/a.rs\n")
         .reply(
             &format!("git -C {DIR} rev-list --parents -n1 {NEW}"),
             &format!("{NEW} {HEAD} b4se"),
@@ -159,7 +161,9 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
         .reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
-    assert!(r.called(&format!("gh pr merge 34 -R {REPO} --merge --match-head-commit {NEW}")));
+    assert!(r.called(&format!(
+        "gh pr merge 34 -R {REPO} --squash --delete-branch --match-head-commit {NEW}"
+    )));
 }
 
 fn landed(c: &drover::Ctx, rows: &[(u64, &str, &str)]) {
@@ -172,7 +176,7 @@ fn landed(c: &drover::Ctx, rows: &[(u64, &str, &str)]) {
     }
 }
 
-fn runs(checks: Value) -> String {
+fn runs(checks: &Value) -> String {
     checks.to_string()
 }
 
@@ -188,7 +192,7 @@ fn integration(tip: &str, suites: &[(&str, Value)]) -> Fake {
     for (sha, checks) in suites {
         r = r.reply(
             &format!("gh api repos/{REPO}/commits/{sha}/check-runs"),
-            &runs(checks.clone()),
+            &runs(&checks.clone()),
         );
     }
     r
@@ -221,7 +225,7 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
     let out = watch(&c, &r);
     assert!(out.contains("revert PR #77"), "{out}");
     assert!(r.called(&format!(
-        "git -C {}/state/revert-sendmeter revert -m 1 --no-edit m1",
+        "git -C {}/state/revert-sendmeter revert --no-edit m1",
         d.display()
     )));
     let p = event(&c, "land-paused").expect("paused");
@@ -236,7 +240,9 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
         .reply("gh run view 99", "e2e\tboom: assertion failed\n")
         .reply("gh issue reopen", "");
     watch(&c, &r);
-    assert!(r.called(&format!("gh pr merge 77 -R {REPO} --merge --match-head-commit r3v")));
+    assert!(r.called(&format!(
+        "gh pr merge 77 -R {REPO} --squash --delete-branch --match-head-commit r3v"
+    )));
     assert!(r.called(&format!("gh issue reopen 12 -R {REPO}")));
     assert!(!r.called("gh pr create"), "one revert per culprit");
     let rv = event(&c, "reverted").expect("reverted");
@@ -332,7 +338,7 @@ fn red_pauses_fast_first_landings_and_green_resumes_them() {
     assert!(!r.called("gh run rerun"), "re-run once only");
     let ev = read(&c.state).unwrap();
     assert!(drover::land::paused(&ev, "sendmeter").is_some());
-    let r = pr(HEAD, fast_green(), "src/a.rs\n").reply("git", "");
+    let r = pr(HEAD, &fast_green(), "src/a.rs\n").reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains("REFUSED CI_NOT_GREEN"), "{out}");

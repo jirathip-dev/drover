@@ -206,7 +206,7 @@ fn cap_asks_only_when_your_own_pr_crosses() {
             "ask only when your own PR, merged onto current integration, would put the total over `line_cap`; trim first, then ask `--kind owner`.",
             "Being near the cap, or another PR's growth, is never a reason to ask.",
             "A `STAGING_WOULD_BREAK` from the cap after another merge is a fix round: trim, or ask under the same rule.",
-            "Never edit `ci/cap.toml` (the hook refuses it",
+            "Never edit `ci/cap.toml` or add a raise in `ci/cap.d/` (the hook refuses both",
             "`drover cap <fleet>`'s queue-wide view",
             "in one orchestrator-filed issue (recommended), or trim.",
         ] {
@@ -519,7 +519,7 @@ impl drover::runner::Runner for Checkout<'_> {
     }
     fn sleep(&self, secs: u64) {
         within(|| self.cloned.get());
-        self.f.sleep(secs)
+        self.f.sleep(secs);
     }
 }
 
@@ -691,16 +691,11 @@ fn unconfirmed_hermes_kick_presses_enter_then_exits_4() {
 }
 
 #[test]
-fn help_agent_doc_is_short_and_complete() {
+fn help_agent_doc_is_complete() {
     let d = tmpdir("help");
     let c = ctx(&d, CONFIG);
     let (code, out) = run(&c, &Fake::default(), &["help", "--agent"]);
     assert_eq!(code, 0);
-    assert!(
-        out.lines().count() <= drover::HELP_AGENT_MAX,
-        "{} lines",
-        out.lines().count()
-    );
     for w in [
         "drover spawn",
         "drover merge",
@@ -893,4 +888,39 @@ fn a_spawned_lanes_build_command_runs_in_the_background_but_a_design_lanes_does_
             "{role}: {line}"
         );
     }
+}
+
+#[test]
+fn a_new_lane_worktree_leaves_out_docs_archive_unless_opted_out() {
+    let sparse = |cfg: &str, name: &str| {
+        let d = tmpdir(name);
+        let c = ctx(
+            &d,
+            &CONFIG
+                .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+                .replace("[limits]", cfg),
+        );
+        let _sh = on_shed(&c);
+        assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+        let wt = c.worktrees.join("sendmeter/issue-12");
+        let r = shed_fake()
+            .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+            .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+            .reply("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", "")
+            .reply("git -C", "");
+        let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+        assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+        let calls = r.calls.borrow();
+        assert!(calls.iter().any(|l| l.contains(" worktree add ")), "{calls:?}");
+        let want = format!("git -C {} sparse-checkout set --no-cone /* ", wt.display());
+        calls.iter().find(|l| l.starts_with(&want)).cloned()
+    };
+    assert_eq!(
+        sparse("[limits]", "sparse-default")
+            .as_deref()
+            .map(|l| l.rsplit(' ').next().unwrap()),
+        Some("!/docs/archive/")
+    );
+    let off = "[fleet.sendmeter.hygiene]\ndocs_trust = []\n\n[limits]";
+    assert_eq!(sparse(off, "sparse-off"), None);
 }

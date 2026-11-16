@@ -23,8 +23,8 @@ impl Service {
                             now: (self.clock)(),
                             ..ctx.clone()
                         };
-                        let _ = drover_core::session::stamp::on_event(&c, &cfg, &e);
-                        let _ = std::fs::write(c.state.with_file_name("shed.seq"), e.seq.to_string());
+                        drover_core::session::stamp::on_event(&c, &cfg, &e).ok();
+                        std::fs::write(c.state.with_file_name("shed.seq"), e.seq.to_string()).ok();
                     }
                 })
             });
@@ -32,7 +32,7 @@ impl Service {
                 .err()
                 .map_or("shed: the event stream closed".into(), |e| format!("{e:#}"));
             self.stream_is("shed", Some(why));
-            std::thread::sleep(Duration::from_secs(RETRY_SECS));
+            drover_core::clock::sleep(Duration::from_secs(RETRY_SECS));
         }
     }
 
@@ -45,6 +45,6 @@ impl Service {
             None => json!({"runtime": runtime, "state": "live"}),
             Some(why) => json!({"runtime": runtime, "state": "down", "why": why}),
         };
-        let _ = append(&self.ctx.state, &self.event("lane-stream", d));
+        append(&self.ctx.state, &self.event("lane-stream", d)).ok();
     }
 }

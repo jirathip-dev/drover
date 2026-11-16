@@ -91,12 +91,9 @@ pub enum Health {
 
 /// Join the shed sessions with the log.
 pub fn join(cfg: &Config, r: &dyn Runner, events: &[Event], st: &States, sessions: &Sessions) -> Vec<Lane> {
-    let mut by_name = BTreeMap::new();
-    for e in events.iter().filter(|e| e.kind == "spawn") {
-        by_name.insert(e.str("agent"), e);
-    }
+    let by_name = |n: &str| crate::events::last_spawn(events, n);
     let (mut out, mut seen) = (vec![], BTreeSet::new());
-    let starts = events.iter().filter(|e| e.kind == "orchestrator-start");
+    let starts = crate::events::of_kind(events, &["orchestrator-start"]).into_iter();
     let mut cs: BTreeMap<&str, &Event> = starts.filter_map(|e| Some((e.str("agent")?, e))).collect();
     for a in sessions.live() {
         let mut l = Lane {
@@ -108,7 +105,7 @@ pub fn join(cfg: &Config, r: &dyn Runner, events: &[Event], st: &States, session
             session: Some(a.clone()),
             ..Lane::default()
         };
-        if let Some(e) = by_name.get(&Some(a.name.as_str())).copied() {
+        if let Some(e) = by_name(&a.name) {
             l = from_spawn(e, l);
             if !seen.insert(a.name.clone()) {
                 let rank = |s: &LaneState| SECTIONS.iter().position(|x| *x == s.word()).unwrap_or(2);
@@ -132,7 +129,7 @@ pub fn join(cfg: &Config, r: &dyn Runner, events: &[Event], st: &States, session
         let Some((_, agent)) = s.active_lane().filter(|(_, a)| !seen.contains(*a)) else {
             continue;
         };
-        if let Some(e) = by_name.get(&Some(agent)) {
+        if let Some(e) = by_name(agent) {
             let r = &crate::hosts::On::of(r, Some(e));
             let wt = e
                 .str("worktree")
@@ -158,7 +155,7 @@ pub fn join(cfg: &Config, r: &dyn Runner, events: &[Event], st: &States, session
     out.extend(cs.into_values().map(|e| orchestrator(events, e, Lane::default())));
     for l in &mut out {
         let mark = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "lane-closed" | "lane-kept-dirty");
-        let last = events.iter().rev().find(|e| mark(e) && e.str("agent") == Some(&l.name));
+        let last = crate::events::of_agent(events, &l.name).into_iter().rfind(mark);
         let why = last.filter(|e| e.kind == "lane-kept-dirty").and_then(|e| e.str("why"));
         l.kept = why.filter(|_| l.state.is(Status::Done)).map(String::from);
     }
@@ -192,7 +189,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
     };
     let shut = |e: &Event| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
     let killed = |e: &Event| e.kind == "lane-killed" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-    if events.iter().any(|e| shut(e) || killed(e)) {
+    if (crate::events::of_kind(events, &["lane-closed", "lane-killed"]).into_iter()).any(|e| shut(e) || killed(e)) {
         return Health::Closed;
     }
     let live = match sessions.seen(lane, sp.str("machine")) {
@@ -231,8 +228,10 @@ pub fn whose<'a>(cfg: &Config, s: &'a Session) -> Option<(&'a str, Option<u64>, 
 /// #1053: the running sessions labelled for a configured fleet that no `spawn`, adoption, conductor start or young `spawn-started` names.
 pub fn orphans<'a>(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &'a Sessions) -> Vec<&'a Session> {
     let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < crate::spawn::SPAWN_SECS;
-    let named = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-adopted" | "orchestrator-start") || young(e);
-    let ours: BTreeSet<&str> = events.iter().filter(named).filter_map(|e| e.str("agent")).collect();
+    let kinds = ["spawn", "spawn-adopted", "spawn-started", "orchestrator-start"];
+    let named = |e: &&Event| e.kind != "spawn-started" || young(e);
+    let ours = crate::events::of_kind(events, &kinds).into_iter().filter(named);
+    let ours: BTreeSet<&str> = ours.filter_map(|e| e.str("agent")).collect();
     let lone = |s: &&Session| !ours.contains(s.name.as_str()) && whose(cfg, s).is_some();
     sessions.live().filter(lone).collect()
 }
@@ -293,7 +292,9 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
 
 fn orchestrator(events: &[Event], e: &Event, l: Lane) -> Lane {
     let (id, mut l) = (e.str("thread").unwrap_or_default(), from_spawn(e, l));
-    let t = (events.iter()).find(|t| t.kind == "thread-new" && t.str("thread") == Some(id));
+    let t = crate::events::of_kind(events, &["thread-new"])
+        .into_iter()
+        .find(|t| t.str("thread") == Some(id));
     l.name = format!("{} · {id}", t.and_then(|t| t.str("title")).unwrap_or_default());
     (l.role, l.thread) = ("orchestrator".into(), Some(id.into()));
     if l.session.is_none() {
@@ -323,15 +324,17 @@ pub fn group(all: &[Lane], changed: impl Fn(&Lane) -> u64) -> Groups<'_> {
     let mut out: Groups = vec![];
     for l in v {
         let f = (l.fleet.as_deref()).map_or("Others", |f| if f == "all" { "all repos" } else { f });
-        let (s, f) = (SECTIONS[section(l)], f.to_string());
+        let (s, f) = (SECTIONS.get(section(l)).copied().unwrap_or("idle"), f.to_string());
         if out.last().is_none_or(|x| x.0 != s) {
             out.push((s, vec![]));
         }
-        let subs = &mut out.last_mut().unwrap().1;
+        let Some((_, subs)) = out.last_mut() else { continue };
         if subs.last().is_none_or(|x| x.0 != f) {
             subs.push((f, vec![]));
         }
-        subs.last_mut().unwrap().1.push(l);
+        if let Some((_, ls)) = subs.last_mut() {
+            ls.push(l);
+        }
     }
     out
 }
@@ -349,7 +352,6 @@ pub fn redact(l: &str) -> String {
 }
 
 /// The push guards' check (stricter than [`mask`]): the secret on line `l`, if any — a `PREFIXES`/AWS/Google token, a JWT, a PEM private key, or a high-entropy non-code value assigned to a `*KEY|TOKEN|SECRET|PASSWORD` name.
-#[allow(clippy::cast_precision_loss)]
 pub fn secret(l: &str) -> Option<&str> {
     let has = |s: &str, f: fn(&u8) -> bool| s.as_bytes().iter().any(f);
     let pre = |w: &str, p: &str| w.starts_with(p) && w.len() >= p.len() + 16 && has(&w[p.len()..], u8::is_ascii_digit);
@@ -377,8 +379,9 @@ pub fn secret(l: &str) -> Option<&str> {
                 .split(['"', '\'', ' ', '\t'])
                 .next()?
                 .trim_end_matches([';', ',']);
-            let n = v.chars().count() as f64;
-            let bits: f64 = v.chars().map(|c| -(v.matches(c).count() as f64 / n).log2() / n).sum();
+            let f = |x: usize| f64::from(u32::try_from(x).unwrap_or(u32::MAX));
+            let n = f(v.chars().count());
+            let bits: f64 = v.chars().map(|c| -(f(v.matches(c).count()) / n).log2() / n).sum();
             let word = !has(v, u8::is_ascii_digit) || v.contains('_') && v == v.to_ascii_lowercase();
             let code = v.contains(['(', '{', ' ']) || v.contains("::") || v.starts_with(['/', '~', '.', '$']);
             ((named(&l[..i]) || named(first) || bearer) && n >= 20.0 && bits >= 3.5 && !word && !code).then_some(v)
@@ -433,16 +436,17 @@ fn word(w: &str) -> (String, bool) {
 /// The text's last `n` non-empty lines, masked.
 pub fn tail(screen: &str, n: usize) -> Vec<String> {
     let lines: Vec<&str> = screen.lines().filter(|l| !l.trim().is_empty()).collect();
-    lines[lines.len().saturating_sub(n)..]
+    lines
         .iter()
+        .skip(lines.len().saturating_sub(n))
         .map(|l| mask(l.trim_end()))
         .collect()
 }
 
 /// #611: each enabled host's shed sessions that are no lane or conductor, or `{host, error}` for a host whose shed fails.
 pub fn others(cfg: &Config, r: &dyn Runner, events: &[Event]) -> Vec<Value> {
-    let ours = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "orchestrator-start");
-    let ours: BTreeSet<&str> = events.iter().filter(ours).filter_map(|e| e.str("agent")).collect();
+    let ours = crate::events::of_kind(events, &["spawn", "orchestrator-start"]).into_iter();
+    let ours: BTreeSet<&str> = ours.filter_map(|e| e.str("agent")).collect();
     let mut out = vec![];
     for (host, h) in crate::hosts::cards(cfg, r) {
         let on = crate::hosts::On::new(r, h.and_then(|h| h.machine.as_deref()));

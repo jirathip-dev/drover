@@ -44,11 +44,11 @@ once() {
 }
 fail=0
 # #927: the page draws the JSON screens: each tab (its place id), `fleets` (the [⚙] screen's sheet), `lane` (a lane's
-# sheet) and `card` (the first card opened), in each built-in theme (`~<theme>`), at 1440 (`@1440`) and in every colour
+# sheet) and `card` (the first card opened); #1072: `threads` (the standalone tab) and `thread` (its first thread opened), in each built-in theme (`~<theme>`), at 1440 (`@1440`) and in every colour
 # scheme (`^<scheme>`, the contact sheet). #725: `lifeboat/page`: the lifeboat's paired page (site/lifeboat/, written by
 # `cargo test --test lifeboat`), shot as lifeboat-page.png.
-for v in lifeboat/page queue lanes events fleets lane card queue@1440 lanes@1440 events@1440 \
-  $(for t in kitchen garden terminal; do echo "queue~$t lanes~$t events~$t"; done) lanes~garden^garden-dark \
+for v in lifeboat/page queue lanes events threads fleets lane card thread queue@1440 lanes@1440 events@1440 threads@1440 \
+  $(for t in kitchen garden terminal; do echo "queue~$t lanes~$t events~$t threads~$t"; done) lanes~garden^garden-dark \
   $(for s in github-dark solarized-dark gruvbox nord dracula paper farm kitchen garden-light garden-dark; do echo "queue^$s"; done); do
   [ -n "${UI_AUDIT_VIEWS:-}" ] && [[ " $UI_AUDIT_VIEWS " != *" $v "* ]] && continue # #266: only these views (space-separated)
   # #241: `<view>~<theme>` is the view in that theme (`?theme=`), shot as <view>-<theme>.png. #244: `<view>^<scheme>`

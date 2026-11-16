@@ -1,0 +1,126 @@
+{
+  "response": {
+    "config": "ok",
+    "error": null,
+    "ok": true,
+    "routes": [
+      {
+        "count": 1,
+        "max": 20,
+        "p50": 20,
+        "p95": 20,
+        "route": "/api/v1/host"
+      },
+      {
+        "count": 2,
+        "max": 8,
+        "p50": 1,
+        "p95": 8,
+        "route": "/pair"
+      },
+      {
+        "count": 1,
+        "max": 7,
+        "p50": 7,
+        "p95": 7,
+        "route": "/api/v1/lanes"
+      },
+      {
+        "count": 1,
+        "max": 5,
+        "p50": 5,
+        "p95": 5,
+        "route": "/api/v1/needs"
+      },
+      {
+        "count": 1,
+        "max": 5,
+        "p50": 5,
+        "p95": 5,
+        "route": "/api/v1/state"
+      },
+      {
+        "count": 1,
+        "max": 4,
+        "p50": 4,
+        "p95": 4,
+        "route": "/api/v1/chat-about"
+      },
+      {
+        "count": 1,
+        "max": 4,
+        "p50": 4,
+        "p95": 4,
+        "route": "/api/v1/queue"
+      },
+      {
+        "count": 1,
+        "max": 2,
+        "p50": 2,
+        "p95": 2,
+        "route": "/api/v1/events"
+      },
+      {
+        "count": 1,
+        "max": 2,
+        "p50": 2,
+        "p95": 2,
+        "route": "/api/v1/setup"
+      },
+      {
+        "count": 1,
+        "max": 1,
+        "p50": 1,
+        "p95": 1,
+        "route": "/api/v1/shed"
+      }
+    ],
+    "serve": {
+      "at": 1000000,
+      "busy": 0,
+      "clients": 0,
+      "groups": [
+        {
+          "count": 7,
+          "max": 20,
+          "p50": 5,
+          "p95": 20,
+          "route": "/api/v1 reads"
+        },
+        {
+          "count": 4,
+          "max": 8,
+          "p50": 2,
+          "p95": 8,
+          "route": "writes"
+        }
+      ],
+      "queued": 0,
+      "rss_mb": 0,
+      "sha": "6f6bdff63a14b07f643ff5d4edc909ac9f89426a",
+      "slow": null,
+      "started": 1000000
+    },
+    "sources": {}
+  },
+  "route": "GET /api/v1/health",
+  "schema": {
+    "config": "string",
+    "error": "null",
+    "ok": "boolean",
+    "routes": [],
+    "serve": {
+      "at": "number",
+      "busy": "number",
+      "clients": "number",
+      "groups": [],
+      "queued": "number",
+      "rss_mb": "number",
+      "sha": "string",
+      "slow": "null",
+      "started": "number"
+    },
+    "sources": {}
+  },
+  "type": "Health"
+}

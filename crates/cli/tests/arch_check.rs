@@ -532,7 +532,7 @@ fn a_baselined_layer_crossing_passes_and_a_new_one_fails() {
 
 #[test]
 fn a_commit_building_a_promise_phrase_outside_the_promise_module_fails_this_repos_arch_check() {
-    let conf = include_str!("../../../.drover/arch.toml");
+    let conf = &repo_conf();
     let d = committed("arch-promise", conf, &[("crates/core/src/drive.rs", "fn a() {}\n")]);
     let add = |p: &str| {
         std::fs::write(d.join(p), "fn a() -> String {\n    format!(\"merging next pass\")\n}\n").unwrap();
@@ -553,7 +553,7 @@ fn a_commit_building_a_promise_phrase_outside_the_promise_module_fails_this_repo
 
 #[test]
 fn the_repos_provider_ban_fails_a_web_file_naming_a_provider() {
-    let conf = include_str!("../../../.drover/arch.toml");
+    let conf = &repo_conf();
     let d = committed("arch-ban-web", conf, &[("web/src/main.ts", "export const v = 'x';\n")]);
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
@@ -569,6 +569,18 @@ fn the_repos_provider_ban_fails_a_web_file_naming_a_provider() {
         "{out}"
     );
     assert!(out.contains("1 violations"), "{out}");
+}
+
+fn repo_conf() -> String {
+    let conf = include_str!("../../../.drover/arch.toml");
+    let (head, rest) = conf.split_once("generated = [").unwrap();
+    let rest = rest.split_once("]\n").unwrap().1;
+    let rest = rest
+        .split_once('\n')
+        .filter(|r| r.0.starts_with("generate ="))
+        .unwrap()
+        .1;
+    format!("{head}{rest}")
 }
 
 const FROZEN: &str = "frozen = [\"src/registry.rs\"]\n\n[[collect]]\ndir = \"src/features\"\nglob = \"*.rs\"\n";
@@ -590,6 +602,36 @@ fn a_line_added_to_a_frozen_list_fails_but_removed_edited_or_collected_ones_pass
     assert!(out.contains("1 violations"), "{out}");
     std::fs::write(d.join("src/registry.rs"), "mod a;\nmod bee;\n").unwrap();
     std::fs::write(d.join("src/features/d.rs"), "fn d() {}\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+}
+
+#[test]
+fn only_a_freeze_the_base_arch_toml_lists_counts() {
+    let reg = "mod a;\n";
+    let d = committed("arch-frozen-base", "", &[("src/registry.rs", reg)]);
+    let both = "frozen = [\"src/registry.rs\", \"src/root.rs\"]\n";
+    std::fs::write(d.join(".drover/arch.toml"), both).unwrap();
+    std::fs::write(d.join("src/root.rs"), "mod a;\nmod b;\n").unwrap();
+    std::fs::write(d.join("src/registry.rs"), "mod a;\nmod b;\n").unwrap();
+    git(&d, &["add", "-N", "src/root.rs"]);
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    git(&d, &["add", "-A"]);
+    git(&d, &["commit", "-qm", "freeze"]);
+    std::fs::write(d.join(".drover/arch.toml"), "").unwrap();
+    std::fs::write(d.join("src/registry.rs"), "mod a;\nmod b;\nmod c;\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("src/registry.rs:3: `mod c;` added to a frozen list"),
+        "{out}"
+    );
+    git(&d, &["rm", "-q", "--cached", ".drover/arch.toml"]);
+    git(&d, &["commit", "-qm", "no arch"]);
+    std::fs::write(d.join(".drover/arch.toml"), both).unwrap();
     let (code, out) = arch(&d, &["--base", "HEAD"]);
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
 }
@@ -620,4 +662,52 @@ fn the_pre_rename_folder_is_read_only_while_the_new_one_has_no_such_file() {
     std::fs::write(d.join(".drover/arch.toml"), "[[layer").unwrap();
     let (code, out) = arch(&d, &[]);
     assert!(code != 0 && out.contains("parsing .drover/arch.toml"), "{out}");
+}
+
+#[test]
+fn the_repos_809_bans_fail_each_api_outside_its_one_module() {
+    let conf = repo_conf();
+    let bans = [
+        ("Command::new", "crates/core/src/runner.rs"),
+        ("std::process", "crates/core/src/runner.rs"),
+        ("thread::sleep", "crates/core/src/clock.rs"),
+        ("env::var", "crates/core/src/config.rs"),
+        ("SystemTime::now", "crates/core/src/clock.rs"),
+        ("Instant::now", "crates/core/src/clock.rs"),
+    ];
+    let body = |api: &str| format!("fn a() {{\n    let _ = {api}(\"x\");\n}}\n");
+    let own: Vec<(&str, String)> = bans.iter().map(|&(api, home)| (home, body(api))).collect();
+    let own: Vec<(&str, &str)> = own.iter().map(|(p, t)| (*p, t.as_str())).collect();
+    let d = committed("arch-809", &conf, &own);
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::create_dir_all(d.join("crates/server/src")).unwrap();
+    for (i, (api, _)) in bans.iter().enumerate() {
+        std::fs::write(d.join(format!("crates/server/src/f{i}.rs")), body(api)).unwrap();
+    }
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    for (i, (api, _)) in bans.iter().enumerate() {
+        let want = format!("crates/server/src/f{i}.rs:2: `{api}` is banned here: #809");
+        assert!(out.contains(&want), "{want}\n{out}");
+    }
+    assert!(out.contains(&format!("{} violations", bans.len())), "{out}");
+}
+
+#[test]
+fn a_shared_file_under_no_size_rule_fails_and_one_under_a_rule_passes() {
+    let shared = |name: &str, glob: &str| {
+        repo(
+            name,
+            &[(".drover/arch.toml", &format!("shared = [\"{glob}\"]\n{ARCH}"))],
+        )
+    };
+    let (code, out) = arch(&shared("arch-shared-ok", "crates/core/src/drive.rs"), &[]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out) = arch(&shared("arch-shared-tests", "crates/*/tests/**"), &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("shared `crates/*/tests/**` falls under no `[[size]]` rule"),
+        "{out}"
+    );
 }

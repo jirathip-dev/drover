@@ -54,7 +54,7 @@ fn standing(cfg: &Config) -> String {
     }
     s += "\n## Capability groups ([orchestrator] allow)\n\n";
     for (g, verbs) in crate::config::GROUPS {
-        let on = ["off", "on"][usize::from(c.groups().contains(g))];
+        let on = if c.groups().contains(g) { "on" } else { "off" };
         s += &format!("- `{g}` ({on}): {verbs}\n");
     }
     s += "\nA verb of an off group is refused `GROUP_OFF`: ask the owner for an `[orchestrator] allow` change.\n";
