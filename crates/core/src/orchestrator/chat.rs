@@ -49,7 +49,7 @@ pub fn seat<'a>(cfg: &'a Config, id: &str) -> Result<Seat<'a>> {
 }
 
 /// One entry of `GET /cooee/profiles`.
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub struct ChatProfile {
     name: String,
     label: String,
@@ -68,38 +68,15 @@ pub struct ChatProfile {
     why: String,
 }
 
-impl ChatProfile {
-    fn offered(seat: &Seat, agent: &str, instructions: PathBuf, settings: PathBuf, policy: Option<String>) -> Self {
-        let env = BTreeMap::from([
-            ("DROVER_LANE", format!("{}:-:orchestrator", seat.fleet)),
-            ("DROVER_ORCHESTRATOR", seat.id.into()),
-            ("DROVER_THREAD", "{thread}".into()),
-        ]);
-        Self {
-            name: seat.id.into(),
-            label: seat.name.into(),
-            agent: agent.into(),
-            instructions: Some(instructions),
-            settings: Some(settings),
-            env,
-            policy,
-            hidden: false,
-            why: String::new(),
-        }
-    }
-
-    fn hidden(id: &str, label: &str, agent: &str, why: String) -> Self {
-        Self {
-            name: id.into(),
-            label: label.into(),
-            agent: agent.into(),
-            instructions: None,
-            settings: None,
-            env: BTreeMap::new(),
-            policy: None,
-            hidden: true,
-            why,
-        }
+fn hidden(id: &str, label: &str, agent: &str, why: String) -> ChatProfile {
+    let (name, label, agent) = (id.into(), label.into(), agent.into());
+    ChatProfile {
+        name,
+        label,
+        agent,
+        hidden: true,
+        why,
+        ..ChatProfile::default()
     }
 }
 
@@ -111,17 +88,17 @@ pub fn profiles(ctx: &Ctx, cfg: &Config) -> Result<Vec<ChatProfile>> {
 fn profile(ctx: &Ctx, cfg: &Config, id: &str) -> Result<ChatProfile> {
     let seat = match seat(cfg, id) {
         Ok(s) => s,
-        Err(e) => return Ok(ChatProfile::hidden(id, name(cfg, id), "", e.to_string())),
+        Err(e) => return Ok(hidden(id, name(cfg, id), "", e.to_string())),
     };
     let h = providers::get(&seat.role.harness);
     let Some(agent) = h.acp() else {
         let why = format!("harness {} has no ACP agent", seat.role.harness);
-        return Ok(ChatProfile::hidden(id, seat.name, "", why));
+        return Ok(hidden(id, seat.name, "", why));
     };
     let p = seat.role.profile_or("orchestrator");
     let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &seat.role.harness), agent, false);
     if !why.is_empty() {
-        return Ok(ChatProfile::hidden(id, seat.name, agent, why));
+        return Ok(hidden(id, seat.name, agent, why));
     }
     let file = ctx
         .state
@@ -142,13 +119,24 @@ fn profile(ctx: &Ctx, cfg: &Config, id: &str) -> Result<ChatProfile> {
         .get(seat.fleet)
         .and_then(|f| f.runtime.as_ref())
         .or(cfg.runtime.as_ref());
-    Ok(ChatProfile::offered(
-        &seat,
+    let env = BTreeMap::from([
+        ("DROVER_LANE", format!("{}:-:orchestrator", seat.fleet)),
+        ("DROVER_ORCHESTRATOR", id.into()),
+        ("DROVER_THREAD", "{thread}".into()),
+    ]);
+    let (name, label, agent) = (id.into(), seat.name.into(), agent.into());
+    let policy = rt.and_then(|r| r.acp_policy.clone());
+    let (instructions, settings) = (Some(file), Some(settings));
+    Ok(ChatProfile {
+        name,
+        label,
         agent,
-        file,
+        instructions,
         settings,
-        rt.and_then(|r| r.acp_policy.clone()),
-    ))
+        env,
+        policy,
+        ..ChatProfile::default()
+    })
 }
 
 /// `POST /cooee/thread-started`: cooee `thread` is orchestrator `id`'s chat, linked once (`via: profile`).
