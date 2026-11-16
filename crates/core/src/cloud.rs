@@ -181,13 +181,15 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
     up
 }
 
-/// #1123: `status` printed nothing, so the VM was deleted outside drover: logs `cloud-stop {why: gone}`. A failing `status` is not gone.
-pub fn gone(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<bool> {
-    if !cmd(ctx, cfg, r, name, "status").is_ok_and(|s| s.trim().is_empty()) {
-        return Ok(false);
-    }
-    log(ctx, cfg, "cloud-stop", name, json!({"why": "gone"}))?;
-    Ok(true)
+/// #1123, #1145: `status` printed nothing (`gone`) or not `running` (`stopped outside drover`): logs that `cloud-stop` and returns its why. A failing `status` is neither.
+pub fn outside(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<Option<&'static str>> {
+    let why = match cmd(ctx, cfg, r, name, "status").as_deref().map(str::trim) {
+        Ok("") => "gone",
+        Ok("running") | Err(_) => return Ok(None),
+        Ok(_) => "stopped outside drover",
+    };
+    log(ctx, cfg, "cloud-stop", name, json!({"why": why}))?;
+    Ok(Some(why))
 }
 
 fn pin(ctx: &Ctx, name: &str) -> std::path::PathBuf {
@@ -292,8 +294,8 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Live, out: &mut dyn 
         if state(&events, name) != "running" {
             continue;
         }
-        if gone(ctx, cfg, r, name)? {
-            writeln!(out, "cloud {name}: gone (status prints nothing), logged stopped")?;
+        if let Some(why) = outside(ctx, cfg, r, name)? {
+            writeln!(out, "cloud {name}: {why}, logged stopped")?;
             continue;
         }
         let Some(Some(agents)) = live.get(name) else {
@@ -379,7 +381,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
     let acp = cfg.host_acp(name).is_some();
     let cloud = h.cloud.is_some();
-    if cloud && (state(&working(&ctx.state)?, name) != "running" || gone(ctx, cfg, r, name)?) {
+    if cloud && (state(&working(&ctx.state)?, name) != "running" || outside(ctx, cfg, r, name)?.is_some()) {
         start(ctx, cfg, r, name)?;
     } else if cloud {
         moved(ctx, cfg, r, name, true)?;
