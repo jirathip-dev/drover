@@ -1,0 +1,9 @@
+Decided: merged origin/staging again; ci.yml keeps #1086's threads_tab step and trigger paths, herd.rs added to the WebKit trigger, the herd step kept last
+Because: .github/workflows/ci.yml:201
+Decided: board.css takes #1086's focus-screen rules, which replace the old thread max-width line, and keeps the Herd's scene rules after them
+Because: web/src/board.css:160
+Decided: Herd still opens from [⚙] as a page-only menu row; nothing in the Herd changed in this merge
+Because: crates/server/src/screens.rs:42
+Rejected: taking staging's side alone — the ui-webkit job would stop running the Herd's WebKit test and the scene would lose its styles
+Check: web/dist rebuilt from the merged src; ui-webkit runs parity_webkit, page_drafts, threads_tab and herd
+Owner: The Herd branch is caught up with staging and the new thread view; nothing about the Herd changed.
