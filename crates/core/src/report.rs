@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{emit, Event};
+use crate::events::{emit, Event, Json};
 use crate::Ctx;
 use anyhow::{ensure, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -47,7 +47,7 @@ pub fn show(ctx: &Ctx, out: &mut dyn Write, id: Option<&str>) -> Result<()> {
     all.sort();
     for p in all.iter().rev().map(|p| p.join("bundle.json")) {
         let b: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap_or_default()).unwrap_or_default();
-        let s = |k: &str| b[k].as_str().unwrap_or_default().to_string();
+        let s = |k: &str| b.at(k).as_str().unwrap_or_default().to_string();
         writeln!(out, "{}  {}  {}", s("id"), s("note"), p.display())?;
     }
     Ok(())

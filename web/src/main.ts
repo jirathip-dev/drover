@@ -1,27 +1,28 @@
 // #927: the phone page draws the screens cooee draws (cooee-plugin.toml's places, `PL` from the page shell): each
 // header-strip place is a tab, the menu-row places open from [⚙], the chat-cards place is the cards above every tab.
 // A screen is fetched, drawn block by block, patched by its `stream`, and its blocks post `/action`. No per-tab code.
-import { type Act, type Ctx, el, kids, render, sent, values } from './blocks';
-import { apply, type Blk } from './ops';
-import { R, colours, esc, get, put, schemes, theme, themes } from './theme';
+import { type Act, type Ctx, el, kids, morph, render, sent, values } from './blocks';
+import { apply, type Blk, blks, isBlk, isList, obj } from './ops';
+import { R, colours, esc, get, nodes, put, schemes, theme, themes } from './theme';
 
 type Place = { type: string; id?: string; label?: string; subtitle?: string; screen?: string };
 declare const PL: Place[];
 const B = document.body, H = document.documentElement;
 const ro = 'ro' in B.dataset, demo = 'demo' in B.dataset;
-const $ = <T extends Element = HTMLElement>(s: string) => document.querySelector<T>(s)!;
+const $ = <T extends Element = HTMLElement>(s: string): T => { const e = document.querySelector<T>(s); if (!e) throw new Error(`no ${s}`); return e; };
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const exported = B.dataset.root === '';
 const url = (p: string) => new URL(p.replace(/^\//, '') + (exported && /^\/screens\/[^?]*$/.test(p) ? '/index.html' : ''), R).href;
 
 type View = { path: string; model: Blk | null; at: number; live: boolean; es?: EventSource; root: HTMLElement; open: Set<string>; back: string[] };
 const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, root, open: new Set(), back: [] });
-const tabs = PL.filter(p => p.type === 'header-strip' && p.screen).map(p => ({ ...p, v: view(p.screen!, el('section', 'tab')), a: el('a') }));
+const tabs = PL.flatMap(p => (p.type === 'header-strip' && p.screen ? [{ ...p, screen: p.screen, v: view(p.screen, el('section', 'tab')), a: el('a') }] : []));
 const cards = PL.some(p => p.type === 'chat-cards') ? view('/screens/cards', $('#cards')) : null;
 type Tab = (typeof tabs)[number];
-const hashOf = (t: Tab, p: string) => '#' + t.id + (p.startsWith(t.screen + '/') ? p.slice(t.screen!.length) : '');
+const hashOf = (t: Tab, p: string) => '#' + t.id + (p.startsWith(t.screen + '/') ? p.slice(t.screen.length) : '');
 const route = (h = location.hash.slice(1) || (get('tab') ?? '')): [Tab, string] | null => {
   const t = tabs.find(x => h === x.id || h.startsWith(x.id + '/'));
-  return t ? [t, t.screen + h.slice(t.id!.length)] : null;
+  return t ? [t, t.screen + h.slice((t.id ?? '').length)] : null;
 };
 const at = route();
 let cur = at?.[0] ?? tabs[0];
@@ -30,19 +31,21 @@ const dot = $('#dot'), stale = $('#stale');
 function sync() {
   const v = cur.v, live = !!v.live && navigator.onLine;
   dot.className = demo ? 'demo' : live ? 'g' : navigator.onLine ? 'a' : 'r';
-  H.toggleAttribute('data-focus', !!v.model && !Array.isArray(v.model) && !!v.model.focus);
+  H.toggleAttribute('data-focus', !!v.model && !isList(v.model) && !!v.model.focus);
   const t = v.at ? new Date(v.at) : null, hm = t && t.toTimeString().slice(0, 5), old = t ? Date.now() - t.getTime() : 0;
   stale.hidden = !t || (live && old < 120_000);
   if (t) stale.textContent = `last update ${hm}${old > 60_000 ? ` · ${Math.round(old / 60_000)}m ago` : ''}`;
 }
 
 // The last copy of each screen, painted at once (offline too), its age on the strip until a fresh one lands.
-const cached = (p: string): { t: number; v: Blk } | null => { try { return JSON.parse(get('scr:' + p) ?? 'null'); } catch { return null; } };
+const cached = (p: string): { t: number; v: Blk } | null => {
+  try { const c: unknown = JSON.parse(get('scr:' + p) ?? 'null'); return isBlk(c) && isBlk(c.v) ? { t: Number(c.t), v: c.v } : null; } catch { return null; }
+};
 async function fetchScreen(p: string): Promise<Blk> {
   const get = () => fetch(url(p), { cache: 'no-store' });
   const r = await get().catch(() => new Promise<Response>(ok => setTimeout(() => ok(get()), 300)));
-  const j = await r.json().catch(() => ({ line: `${r.status}` }));
-  if (!r.ok) throw Object.assign(new Error(j.line ?? String(r.status)), { status: r.status });
+  const j = obj(await r.json().catch(() => ({ line: `${r.status}` })));
+  if (!r.ok) throw Object.assign(new Error(String(j.line ?? r.status)), { status: r.status });
   return j;
 }
 
@@ -50,11 +53,10 @@ function ctx(v: View, screen: string): Ctx {
   return { screen, open: v.open, act: (a, b) => act(a, v, screen, b), tap };
 }
 function rows(m: unknown, out = new Map<string, string>()) {
-  if (Array.isArray(m)) m.forEach(x => rows(x, out));
-  else if (m && typeof m === 'object') {
-    const o = m as Blk;
-    if ((o.type === 'row' || o.type === 'card') && o.id) out.set(o.id, JSON.stringify(o));
-    Object.values(o).forEach(x => rows(x, out));
+  if (isList(m)) m.forEach(x => rows(x, out));
+  else if (isBlk(m)) {
+    if ((m.type === 'row' || m.type === 'card') && m.id) out.set(String(m.id), JSON.stringify(m));
+    Object.values(m).forEach(x => rows(x, out));
   }
   return out;
 }
@@ -69,43 +71,24 @@ function spot(sc: HTMLElement | null): Spot | null {
 function land(sc: HTMLElement | null, s: Spot | null) {
   if (!sc) return;
   const k = s && !s.end && s.id ? sc.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(s.id)}"]`) : null;
-  sc.scrollTop = k ? sc.scrollTop + k.getBoundingClientRect().top - sc.getBoundingClientRect().top - s!.dy : sc.scrollHeight;
+  sc.scrollTop = k && s ? sc.scrollTop + k.getBoundingClientRect().top - sc.getBoundingClientRect().top - s.dy : sc.scrollHeight;
 }
-const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr');
-const path = (e: Element, top: Element | null) => {
-  const p: Element[] = [];
-  for (let x: Element | null = e; x && x !== top; x = x.parentElement) p.unshift(x);
-  return p;
-};
-function graft(root: Element, body: Element[], mine: Element[], twin: Element[]) {
-  let [box, fresh] = [root, body];
-  mine.forEach((m, i) => {
-    const at = fresh.indexOf(twin[i]);
-    [...box.childNodes].forEach(n => { if (n !== m) n.remove(); });
-    m.before(...fresh.slice(0, at));
-    m.after(...fresh.slice(at + 1));
-    if (i < mine.length - 1) m.className = twin[i].className;
-    [box, fresh] = [m, [...twin[i].children]];
-  });
-}
+const seen = new WeakMap<HTMLElement, Spot | null>();
+const docked = new ResizeObserver(es => es.forEach(({ target: t }) => { if (t instanceof HTMLElement && t.isConnected) land(t, seen.get(t) ?? null); }));
+const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr > .msgs');
 function paint(v: View, before?: Blk | null) {
-  const m = v.model, y = scrollY, f = document.activeElement;
+  const m = v.model, y = scrollY;
   if (!m) return;
-  const focus = !Array.isArray(m) && !!m.focus, was = scroller(v), place = focus && was?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
-  const c = ctx(v, Array.isArray(m) ? 'cards' : m.id);
-  const body = Array.isArray(m) ? kids(m, c) : [render(m, c)].filter((e): e is HTMLElement => !!e);
+  const focus = !isList(m) && !!m.focus, was = scroller(v), place = focus && was?.parentElement?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
+  const c = ctx(v, isList(m) ? 'cards' : String(m.id));
+  const body = isList(m) ? kids(m, c) : [render(m, c)].filter((e): e is HTMLElement => !!e);
   if (v.back.length && body[0]) {
     const b = el('button', '', '<span>‹ back</span>');
     b.type = 'button';
-    b.onclick = () => (v === cur.v ? history.back() : go(v, v.back.pop()!, false));
-    body[0].prepend(b);
+    b.onclick = () => { if (v === cur.v) history.back(); else { const p = v.back.pop(); if (p != null) go(v, p, false); } };
+    (body[0].querySelector(':scope > .msgs') ?? body[0]).prepend(b);
   }
-  const keep = f && v.root.contains(f) && f.matches('input, select') ? f.closest('[data-id]') : null;
-  const sel = keep && `[data-id="${CSS.escape(keep.getAttribute('data-id') ?? '')}"]`;
-  const twin = sel ? body.map(e => (e.matches(sel) ? e : e.querySelector(sel))).find(e => !!e) : null;
-  const [mp, tp] = keep && twin ? [path(keep, v.root), path(twin, null)] : [[], []];
-  if (mp.length && mp.length === tp.length && (body as Element[]).includes(tp[0]) && mp[0].getAttribute('data-id') === tp[0].getAttribute('data-id')) graft(v.root, body, mp, tp);
-  else v.root.replaceChildren(...body);
+  morph(v.root, body);
   if (scrollY !== y) scrollTo(0, y);
   if (before) {
     const was = rows(before);
@@ -116,17 +99,23 @@ function paint(v: View, before?: Blk | null) {
     fit();
     const sc = scroller(v);
     land(sc, place);
-    if (sc) sc.onscroll = () => {
-      const o = sc.querySelector<HTMLElement>(':scope > [data-id=older]:not([aria-busy])');
-      if (o && sc.isConnected && sc.scrollTop < 8) { o.setAttribute('aria-busy', 'true'); o.click(); }
-    };
+    if (sc) {
+      seen.set(sc, spot(sc));
+      sc.onscroll = () => {
+        seen.set(sc, spot(sc));
+        const o = sc.querySelector<HTMLElement>(':scope > [data-id=older]:not([aria-busy])');
+        if (o && sc.isConnected && sc.scrollTop < 8) { o.setAttribute('aria-busy', 'true'); o.click(); }
+      };
+      docked.disconnect();
+      docked.observe(sc);
+    }
   }
   badges();
 }
 function badges() {
   tabs.forEach(t => {
-    const n = t.v.model && !Array.isArray(t.v.model) ? t.v.model.badge : null;
-    t.a.innerHTML = `<span>${esc(t.label?.toLowerCase())}${n ? `<b class=n>·${n}</b>` : ''}</span>`;
+    const n = t.v.model && !isList(t.v.model) ? t.v.model.badge : null;
+    t.a.replaceChildren(...nodes(`<span>${esc(t.label?.toLowerCase())}${n ? `<b class=n>·${n}</b>` : ''}</span>`));
   });
 }
 
@@ -136,15 +125,15 @@ async function load(v: View, quiet = false) {
   if (!v.model || !quiet) paint(v);
   const slow = setTimeout(() => ($('#ld').hidden = false), 300);
   try {
-    const p = v.path, m = await fetchScreen(p), before = v.model;
+    const p = v.path, m = await fetchScreen(p), before = v.model === c?.v ? null : v.model;
     if (v.path !== p) return;
     [v.model, v.at] = [m, Date.now()];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: m }));
     paint(v, before);
     if (!v.es) stream(v);
   } catch (e) {
-    if ((e as { status?: number }).status === 401) unpaired();
-    else if (!v.model) v.root.replaceChildren(el('p', 'msg r', esc((e as Error).message)));
+    if (isBlk(e) && e.status === 401) unpaired();
+    else if (!v.model) v.root.replaceChildren(el('p', 'msg r', esc(msg(e))));
     sync();
   } finally {
     clearTimeout(slow);
@@ -153,14 +142,14 @@ async function load(v: View, quiet = false) {
 }
 
 function stream(v: View) {
-  const s = v.model && !Array.isArray(v.model) ? v.model.stream : v === cards ? v.path + '/stream' : null;
+  const s = v.model && !isList(v.model) ? v.model.stream : v === cards ? v.path + '/stream' : null;
   if (!s || exported || !('EventSource' in window)) return;
-  const es = (v.es = new EventSource(url(s)));
+  const es = (v.es = new EventSource(url(String(s))));
   es.onopen = () => { v.live = true; sync(); };
   es.onerror = () => { v.live = false; sync(); };
   es.onmessage = e => {
-    const d = JSON.parse(e.data) as { ops: Blk[] }, before = v.model && JSON.parse(JSON.stringify(v.model));
-    v.model = apply(v.model ?? {}, d.ops as never);
+    const d = obj(JSON.parse(e.data)), before = v.model && obj(JSON.parse(JSON.stringify(v.model)));
+    v.model = apply(v.model ?? {}, blks(d.ops));
     [v.at, v.live] = [Date.now(), true];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
     paint(v, before);
@@ -184,7 +173,7 @@ function show(t: Tab, path = t.v.path) {
   if (cur !== t) close(cur.v);
   if (path !== t.v.path) {
     close(t.v);
-    [t.v.path, t.v.model, t.v.back] = [path, null, path === t.screen ? [] : [t.screen!]];
+    [t.v.path, t.v.model, t.v.back] = [path, null, path === t.screen ? [] : [t.screen]];
   }
   cur = t;
   put('tab', t.id ?? null);
@@ -218,36 +207,39 @@ async function sheet(path: string) {
   try {
     shv.model = await fetchScreen(path);
   } catch (e) {
-    if ((e as { status?: number }).status === 401) return unpaired();
-    return toast((e as Error).message, true);
+    if (isBlk(e) && e.status === 401) return unpaired();
+    return toast(msg(e), true);
   }
   drawSheet();
   sh.hidden = false;
   H.classList.add('sheet');
 }
 function drawSheet() {
-  const m = shv.model!, c = ctx(shv, m.id), head = $('#sheet .sh');
+  const m = shv.model;
+  if (!m) return;
+  const c = ctx(shv, String(m.id)), head = $('#sheet .sh'), done = m.done;
   head.replaceChildren(el('b', '', esc(m.title)));
   const x = el('button', '', `<span>${esc(m.cancel ?? 'close')}</span>`);
   x.type = 'button';
   x.onclick = closeSheet;
   head.append(x);
-  if (m.done) {
-    const d = el('button', 'primary', `<span>${esc(m.done.label)}</span>`);
+  if (isBlk(done)) {
+    const d = el('button', 'primary', `<span>${esc(done.label)}</span>`);
     d.type = 'button';
-    d.onclick = () => c.act({ action: m.done.action, block: m.id, values: { ...m.done.values, ...values(shv.root) } }, d).then(ok => ok && sent(shv.root));
+    d.onclick = () => c.act({ action: done.action, block: m.id, values: { ...obj(done.values), ...values(shv.root) } }, d).then(ok => ok && sent(shv.root));
     head.append(d);
   }
-  shv.root.replaceChildren(...(m.type === 'sheet' ? kids(m.blocks, c) : [render(m, c)!]));
+  shv.root.replaceChildren(...kids(m.type === 'sheet' ? m.blocks : [m], c));
 }
 sh.addEventListener('click', e => { if (e.target === sh) closeSheet(); });
 addEventListener('keydown', e => { if (e.key === 'Escape' && !sh.hidden) closeSheet(); });
 
-function tap(t: Blk) {
-  if (t.sheet) sheet(t.sheet);
-  else if (t.open) go(cur.v, t.open, !t.keep);
-  else if (t.copy != null) void copy(t.copy);
-  else if (t.thread) /^t\d+$/.test(t.thread) ? thread(t.thread) : sheet(`/screens/lanes/${t.thread}`);
+function tap(x: unknown) {
+  const t = obj(x);
+  if (t.sheet) sheet(String(t.sheet));
+  else if (t.open) go(cur.v, String(t.open), !t.keep);
+  else if (t.copy != null) void copy(String(t.copy));
+  else if (t.thread) /^t\d+$/.test(String(t.thread)) ? thread(String(t.thread)) : sheet(`/screens/lanes/${String(t.thread)}`);
 }
 function thread(id: string) {
   const t = tabs.find(x => x.id === 'threads');
@@ -279,19 +271,19 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<bo
     toast(demo ? 'Demo with fake data: install drover to act on your own fleets' : 'read-only page', ro);
     return false;
   }
-  if (a.confirm && !(await confirmed(a.confirm))) return false;
+  if (isBlk(a.confirm) && !(await confirmed(a.confirm))) return false;
   const retry = b && (() => b.click());
   b?.setAttribute('aria-busy', 'true');
   try {
     const r = await fetch(url('action'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...a, confirm: undefined, screen }) });
-    const j = await r.json().catch(() => ({ line: `${r.status}` }));
+    const j = obj(await r.json().catch(() => ({ line: `${r.status}` })));
     if (r.status === 401) return (unpaired(), false);
-    if (!r.ok) return (toast(j.line ?? `${r.status}`, true, retry), false);
-    const ops: Blk[] = j.ops ?? [];
+    if (!r.ok) return (toast(String(j.line ?? r.status), true, retry), false);
+    const ops = blks(j.ops);
     const whole = ops.find(o => o.op === 'screen');
     if (whole && v !== shv) {
       close(v);
-      v.model = apply(v.model ?? {}, ops as never);
+      v.model = apply(v.model ?? {}, ops);
       v.path = String(v.model.stream ?? v.path).replace(/\/stream/, '') || v.path;
       if (v === cur.v) history.replaceState(null, '', hashOf(cur, v.path));
       [v.at] = [Date.now()];
@@ -299,15 +291,15 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<bo
       paint(v);
       stream(v);
     } else if (ops.length && v.model) {
-      v.model = apply(v.model, ops as never);
+      v.model = apply(v.model, ops);
       v === shv ? drawSheet() : paint(v);
     }
     if (j.close && v === shv) closeSheet();
-    if (j.toast) toast(j.toast);
+    if (j.toast) toast(String(j.toast));
     if (!whole) setTimeout(() => { if (cards) load(cards, true); load(cur.v, true); }, 300);
     return true;
   } catch (e) {
-    toast(`${(e as Error).message}`, true, retry);
+    toast(msg(e), true, retry);
     return false;
   } finally {
     b?.removeAttribute('aria-busy');
@@ -318,8 +310,8 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<bo
 let pairing = false;
 async function unpaired() {
   const r = await fetch(url('pair/status'), { cache: 'no-store' }).catch(() => null);
-  const j = r && r.ok ? await r.json().catch(() => null) : null;
-  if (j && !j.paired) {
+  const j: unknown = r && r.ok ? await r.json().catch(() => null) : null;
+  if (isBlk(j) && !j.paired) {
     B.dataset.pair = '1';
     toast('pair this phone first', true);
   }
@@ -329,7 +321,7 @@ async function pair() {
   const s = r ? (await r.text()).trim() : 'error: no answer', [code, hint, line] = s.split('\n'), p = $('#pairp');
   p.hidden = false;
   p.className = `pairp msg ${r && r.ok ? 'a' : 'r'}`;
-  p.innerHTML = r && r.ok ? `<p class=code>${esc(code)}</p><p class=m>Waiting for approval on the Mac: drover serve approve ${esc(code)}${hint ? ` · ${esc(hint)}` : ''}</p>${line ? `<pre>${esc(line)}</pre>` : ''}` : esc(s);
+  p.replaceChildren(...nodes(r && r.ok ? `<p class=code>${esc(code)}</p><p class=m>Waiting for approval on the Mac: drover serve approve ${esc(code)}${hint ? ` · ${esc(hint)}` : ''}</p>${line ? `<pre>${esc(line)}</pre>` : ''}` : esc(s)));
   pairing = !!(r && r.ok);
 }
 setInterval(async () => {
@@ -361,8 +353,8 @@ function settings() {
     return r;
   };
   const sec = (h: string, rs: HTMLElement[]) => { const s = el('section', 'sec', `<h3 class=sh>${esc(h)}</h3>`); const l = el('div', 'list'); l.append(...rs); s.append(l); return s; };
-  const menu = PL.filter(p => p.type === 'menu-row' && p.screen);
-  if (menu.length) body.push(sec('screens', menu.map(p => row(p.label ?? p.screen!, false, () => sheet(p.screen!), p.subtitle))));
+  const menu = PL.flatMap(p => (p.type === 'menu-row' && p.screen ? [{ ...p, screen: p.screen }] : []));
+  if (menu.length) body.push(sec('screens', menu.map(p => row(p.label ?? p.screen, false, () => sheet(p.screen), p.subtitle))));
   body.push(sec('theme', themes().map(n => row(n, n === H.dataset.theme, () => { put('theme', n); H.dataset.theme = n; colours(); theme(n).then(redraw); settings(); }))));
   body.push(sec('colours', schemes().map(n => row(n, n === H.dataset.scheme, () => { put('scheme', n); colours(); settings(); }))));
   if (app && 'PushManager' in window && B.dataset.key) body.push(sec('alerts', [row('enable alerts on this phone', false, alerts)]));
@@ -374,13 +366,13 @@ function settings() {
 async function alerts() {
   try {
     if ((await Notification.requestPermission()) !== 'granted') throw new Error('notifications are off for this app');
-    const key = Uint8Array.from(atob(B.dataset.key!.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+    const key = Uint8Array.from(atob((B.dataset.key ?? '').replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
     const s = (await (await navigator.serviceWorker.ready).pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })).toJSON();
     const r = await fetch(url('push/subscribe'), { method: 'POST', body: new URLSearchParams({ endpoint: s.endpoint ?? '', p256dh: s.keys?.p256dh ?? '', auth: s.keys?.auth ?? '' }) });
     if (r.status === 401) return unpaired();
     toast((await r.text()).trim(), !r.ok);
   } catch (e) {
-    toast('alerts failed: ' + (e as Error).message, true);
+    toast('alerts failed: ' + msg(e), true);
   }
 }
 
@@ -408,7 +400,7 @@ function fit() {
   const vv = visualViewport, nav = $('nav').getBoundingClientRect().top, kb = vv ? vv.offsetTop + vv.height : innerHeight;
   H.style.setProperty('--top', `${$('main').getBoundingClientRect().top}px`);
   H.style.setProperty('--bot', `${Math.max(0, H.clientHeight - Math.min(nav, kb))}px`);
-  if (H.hasAttribute('data-focus') && document.scrollingElement!.scrollTop) scrollTo(0, 0);
+  if (H.hasAttribute('data-focus') && document.scrollingElement?.scrollTop) scrollTo(0, 0);
 }
 const refit = () => { const sc = scroller(cur.v), s = spot(sc); fit(); land(sc, s); };
 visualViewport?.addEventListener('resize', refit);
@@ -418,7 +410,8 @@ addEventListener('resize', refit);
 async function copy(text: string, b?: HTMLElement) {
   try {
     await navigator.clipboard.writeText(text);
-    if (b) { b.firstElementChild!.textContent = 'copied'; setTimeout(() => { b.firstElementChild!.textContent = 'copy'; }, 1500); } else toast('copied');
+    const w = b?.firstElementChild;
+    if (w) { w.textContent = 'copied'; setTimeout(() => { w.textContent = 'copy'; }, 1500); } else toast('copied');
   } catch {
     const s = getSelection(), g = document.createRange();
     g.selectNodeContents(b?.previousElementSibling ?? document.body);
@@ -427,18 +420,21 @@ async function copy(text: string, b?: HTMLElement) {
   }
 }
 main.addEventListener('click', e => {
-  const t = e.target as Element, c = t.closest<HTMLElement>('.cpy'), a = t.closest<HTMLElement>('a[data-thread]');
-  if (c) copy(c.previousElementSibling!.textContent ?? '', c);
-  if (a) { e.preventDefault(); thread(a.dataset.thread!); }
+  const t = e.target;
+  if (!(t instanceof Element)) return;
+  const c = t.closest<HTMLElement>('.cpy'), a = t.closest<HTMLElement>('a[data-thread]');
+  if (c) copy(c.previousElementSibling?.textContent ?? '', c);
+  if (a) { e.preventDefault(); thread(a.dataset.thread ?? ''); }
 });
 function press(k: HTMLElement) {
   const txt = [...k.querySelectorAll<HTMLElement>(':scope > .txt')], plain = txt.map(t => t.innerText).join('\n\n'), raw = txt.map(t => t.dataset.md).join('\n\n');
   const pick = (label: string, f: () => void) => { const b = el('button', '', `<span>${esc(label)}</span>`); b.type = 'button'; b.onclick = () => { closeSheet(); f(); }; return b; };
   $('#sheet .sh').replaceChildren(el('b', '', 'message'), pick('close', () => {}));
   const quote = () => {
-    const i = cur.v.root.querySelector<HTMLInputElement>('.form.say input');
+    const i = cur.v.root.querySelector<HTMLTextAreaElement>('.cmp textarea');
     if (!i) return;
     i.value = `> ${plain.replace(/\s+/g, ' ').trim()}\n${i.value}`;
+    i.dispatchEvent(new Event('input'));
     i.focus();
   };
   const bar = el('div', 'bar');
@@ -448,10 +444,10 @@ function press(k: HTMLElement) {
   sh.hidden = false;
   H.classList.add('sheet');
 }
-const msg = (t: EventTarget | null) => (t as Element | null)?.closest<HTMLElement>('.card.k-you, .card.k-orch');
+const card = (t: EventTarget | null) => (t instanceof Element ? t.closest<HTMLElement>('.card.k-you, .card.k-orch') : null);
 let hold = 0;
-main.addEventListener('contextmenu', e => { const k = msg(e.target); if (k) { e.preventDefault(); press(k); } });
-main.addEventListener('touchstart', e => { const k = msg(e.target); clearTimeout(hold); if (k) hold = setTimeout(() => press(k), 500); }, { passive: true });
+main.addEventListener('contextmenu', e => { const k = card(e.target); if (k) { e.preventDefault(); press(k); } });
+main.addEventListener('touchstart', e => { const k = card(e.target); clearTimeout(hold); if (k) hold = setTimeout(() => press(k), 500); }, { passive: true });
 for (const ev of ['touchend', 'touchmove', 'touchcancel']) main.addEventListener(ev, () => clearTimeout(hold), { passive: true });
 $('#rf').onclick = reload;
 $('#sysb').onclick = settings;
@@ -469,7 +465,7 @@ addEventListener('hashchange', () => {
   go(t.v, p, false);
 });
 let edge = -1;
-const app = matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
+const app = matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && navigator.standalone === true);
 if (app) addEventListener('touchstart', e => { edge = e.touches[0].clientX < 24 ? e.touches[0].clientX : -1; }, { passive: true });
 addEventListener('touchend', e => { if (edge >= 0 && e.changedTouches[0].clientX - edge > 80 && cur.v.back.length && sh.hidden) history.back(); edge = -1; }, { passive: true });
 setInterval(() => { if (!document.hidden) { paint(cur.v); sync(); } }, 30_000);

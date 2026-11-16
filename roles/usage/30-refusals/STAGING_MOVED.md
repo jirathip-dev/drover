@@ -1,0 +1,1 @@
+- STAGING_MOVED: merge: integration moved during the checks twice; retried next pass

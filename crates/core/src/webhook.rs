@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{fold, working};
+use crate::events::{fold, working, Json};
 use crate::runner::Runner;
 use crate::{gate, gh, Ctx};
 use anyhow::Result;
@@ -56,7 +56,7 @@ fn names(v: &Value) -> (Vec<&str>, Vec<u64>) {
     let mut branches: Vec<&str> = BRANCH.into_iter().filter_map(s).collect();
     branches.extend(s("/ref").and_then(|r| r.strip_prefix("refs/heads/")));
     branches.extend(all("/branches").filter_map(|b| b["name"].as_str()));
-    let mut nums: Vec<u64> = v["pull_request"]["number"].as_u64().into_iter().collect();
+    let mut nums: Vec<u64> = v.at("pull_request").at("number").as_u64().into_iter().collect();
     nums.extend(
         ["/check_suite/pull_requests", "/check_run/pull_requests"]
             .iter()
@@ -85,14 +85,14 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: 
         .map(|k| k.0.as_str())
         .collect();
     if ok.is_empty() {
-        let _ = std::fs::write(counter(ctx), (rejected(ctx) + 1).to_string());
+        std::fs::write(counter(ctx), (rejected(ctx) + 1).to_string()).ok();
         return (401, "bad signature".into());
     }
     if event == "ping" {
         return (200, "pong".into());
     }
     let v: Value = serde_json::from_slice(body).unwrap_or_default();
-    let repo = v["repository"]["full_name"].as_str().unwrap_or_default();
+    let repo = v.at("repository").at("full_name").as_str().unwrap_or_default();
     let (branches, nums) = names(&v);
     let states = fold(&working(&ctx.state).unwrap_or_default());
     let mut hit = vec![];
@@ -108,7 +108,7 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: 
             continue;
         };
         let branch = gate::branch_of(Some(s), s.issue);
-        let num = gh::cached_pr(ctx, &s.fleet, s.issue)["number"].as_u64();
+        let num = gh::cached_pr(ctx, &s.fleet, s.issue).at("number").as_u64();
         if branches.contains(&branch.as_str()) || num.is_some_and(|n| nums.contains(&n)) {
             hit.push((f, s, branch));
         }
@@ -119,11 +119,11 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: 
     for (f, s, branch) in &hit {
         gh::forget_pr(ctx, &s.fleet, s.issue);
         gh::stale(ctx, &s.fleet);
-        let _ = gh::pr(ctx, r, f, (&s.fleet, s.issue), branch, ctx.now);
+        gh::pr(ctx, r, f, (&s.fleet, s.issue), branch, ctx.now).ok();
         crate::drive::kick(ctx, r, &s.fleet, s.issue, "webhook");
     }
     if let Some((ts, snap)) = crate::db::get::<crate::snapshot::Snapshot>(&ctx.state, "board") {
-        let _ = crate::db::put(&ctx.state, "board", ts, &snap);
+        crate::db::put(&ctx.state, "board", ts, &snap).ok();
     }
     let done: Vec<String> = hit.iter().map(|h| format!("{} #{}", h.1.fleet, h.1.issue)).collect();
     (200, format!("refreshed {}", done.join(", ")))

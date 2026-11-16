@@ -1,0 +1,1 @@
+- BAD_SHA: verdict --sha is not 40 hex chars

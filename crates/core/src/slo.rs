@@ -1,6 +1,7 @@
 use crate::config::Config;
-use crate::events::{append, emit, fold, Event};
+use crate::events::{append, emit, fold, Event, IssueState, Json};
 use crate::runner::{ok, Runner};
+use crate::waiting::Waiting;
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -36,20 +37,22 @@ pub fn pass(
     let events = crate::events::working(&ctx.state)?;
     let agents = crate::session::all(cfg, seen).checked()?.running();
     let mut now: Vec<Breach> = tick(ctx, cfg, r).into_iter().collect();
+    let rows = crate::waiting::scan(ctx, cfg, seen, &events, &agents, false, None);
     for f in fleets {
         now.extend(idle(ctx, cfg, &events, &agents, f));
-        now.extend(missed(ctx, &events, f));
+        now.extend(missed(ctx, &events, &rows, f));
     }
     let eps = episodes(&events);
     let mut loud: BTreeSet<String> = eps
         .iter()
         .filter(|(k, ep)| now.iter().any(|b| &b.key == *k) && ep.iter().any(|e| e.kind == "stuck"))
-        .map(|(_, ep)| ep[0].fleet.clone())
+        .filter_map(|(_, ep)| Some(ep.first()?.fleet.clone()))
         .collect();
     for (key, ep) in eps.iter().filter(|(k, _)| !now.iter().any(|b| &b.key == *k)) {
+        let Some(e) = ep.first() else { continue };
         append(
             &ctx.state,
-            &Event::new(ctx.now, &ep[0].fleet, ep[0].issue, "slo-ok", json!({"key": key})),
+            &Event::new(ctx.now, &e.fleet, e.issue, "slo-ok", json!({"key": key})),
         )?;
     }
     for b in &now {
@@ -152,14 +155,14 @@ fn heal(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, h: &Heal) 
     match h {
         Heal::StopTick(pid) => {
             let gone = || ok(r, "kill", &["-0", pid]).is_err();
-            let _ = ok(r, "kill", &["-TERM", pid]);
+            ok(r, "kill", &["-TERM", pid]).ok();
             for _ in 0..10 {
                 if gone() {
                     return format!("stopped tick pid {pid} (SIGTERM)");
                 }
                 r.sleep(1);
             }
-            let _ = ok(r, "kill", &["-KILL", pid]);
+            ok(r, "kill", &["-KILL", pid]).ok();
             format!("stopped tick pid {pid} (SIGKILL after 10 s)")
         }
         Heal::Recount(fleet, n) => {
@@ -177,10 +180,12 @@ fn heal(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, h: &Heal) 
 fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
     let text = std::fs::read_to_string(ctx.state.with_file_name("tick.step")).ok()?;
     let m: Value = serde_json::from_str(&text).unwrap_or_default();
-    let since = m["since"]
+    let since = m
+        .at("since")
         .as_u64()
         .filter(|t| ctx.now >= t + cfg.limits.slo_tick_minutes * 60)?;
-    let pid = m["pid"]
+    let pid = m
+        .at("pid")
         .as_u64()
         .filter(|p| *p != u64::from(crate::sim::pid()))
         .map(|p| p.to_string());
@@ -190,8 +195,8 @@ fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
     let ours =
         |c: &str| (c.contains("drover") || c.contains("herdsman")) && [" tick", " drive"].iter().any(|w| c.contains(w));
     let named = pid.filter(|p| ok(r, "ps", &["-o", "command=", "-p", p]).is_ok_and(|c| ours(&c)));
-    let child = m["child"].as_str().filter(|c| !c.is_empty()).unwrap_or("none");
-    let step = m["step"].as_str().unwrap_or("?");
+    let child = m.at("child").as_str().filter(|c| !c.is_empty()).unwrap_or("none");
+    let step = m.at("step").as_str().unwrap_or("?");
     let mins = (ctx.now - since) / 60;
     Some(Breach {
         key: format!("slo-tick:{since}"),
@@ -217,7 +222,7 @@ fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[crate::session::Ses
         .first()
         .and_then(|n| n.parse::<u64>().ok());
     let Some(n) = next.filter(|_| !agents.iter().any(working)) else {
-        let _ = std::fs::remove_file(&at);
+        std::fs::remove_file(&at).ok();
         return None;
     };
     let since = std::fs::read_to_string(&at).ok().and_then(|s| s.trim().parse().ok());
@@ -253,20 +258,18 @@ fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[crate::session::Ses
     })
 }
 
-fn missed(ctx: &Ctx, events: &[Event], fleet: &str) -> Vec<Breach> {
-    let st = fold(events);
-    let open = st.values().filter(|s| s.fleet == fleet).filter_map(|s| {
-        let head = crate::gh::cached_pr(ctx, fleet, s.issue)["headRefOid"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-        let (p, why) = crate::promise::open_missed(events, s, &head, None)?;
+fn missed(ctx: &Ctx, events: &[Event], rows: &[(IssueState, Waiting)], fleet: &str) -> Vec<Breach> {
+    let mine = |(s, w): &&(IssueState, Waiting)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane);
+    let open = rows.iter().filter(mine).filter_map(|(s, w)| {
+        let pr = crate::gh::cached_pr(ctx, fleet, s.issue);
+        let head = pr.at("headRefOid").as_str().unwrap_or_default();
+        let p = crate::promise::open_missed(events, s, head, w.promise)?;
         Some(Breach {
             key: format!("promise:{fleet}#{}:{}", s.issue, p.made_at),
             fleet: fleet.into(),
             issue: Some(s.issue),
             slo: None,
-            reason: format!("promise `{}` missed: {why}", p.reason),
+            reason: w.what.clone(),
             heal: None,
             since: p.made_at,
         })

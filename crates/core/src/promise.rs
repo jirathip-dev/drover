@@ -1,5 +1,5 @@
 use crate::config::Limits;
-use crate::events::{age, emit, Event, IssueState};
+use crate::events::{age, emit, Event, IssueState, Json};
 use crate::waiting::Waiting;
 use crate::Ctx;
 use anyhow::Result;
@@ -59,7 +59,7 @@ impl Say {
             Say::ReviewerSlot(why) => format!("waiting for a reviewer slot: {why}"),
             Say::ReviewsAhead(n) => format!(
                 "review waits behind {n} earlier review{}",
-                ["s", ""][usize::from(*n == 1)]
+                if *n == 1 { "" } else { "s" }
             ),
             Say::Pass(r) => format!("drive's next pass{r}"),
             Say::Starts(r) => format!("{r}; starts next pass"),
@@ -112,11 +112,12 @@ impl Limits {
 
 fn open(mine: &[&Event]) -> Option<(Promise, Option<String>)> {
     let at = mine.iter().rposition(|e| e.kind == "promise")?;
-    let p = Promise::of(mine[at])?;
-    if mine[at..].iter().any(|e| e.kind == "promise-void") {
+    let p = Promise::of(mine.get(at)?)?;
+    let since = mine.get(at..)?;
+    if since.iter().any(|e| e.kind == "promise-void") {
         return None;
     }
-    let missed = mine[at..].iter().rfind(|e| e.kind == "promise-missed");
+    let missed = since.iter().rfind(|e| e.kind == "promise-missed");
     Some((p, missed.map(|e| e.str("why").unwrap_or_default().into())))
 }
 
@@ -158,7 +159,8 @@ pub fn pass(
             .iter()
             .filter(|e| e.fleet == fleet && e.issue == Some(s.issue))
             .collect();
-        let head = crate::gh::cached_pr(ctx, fleet, s.issue)["headRefOid"]
+        let head = crate::gh::cached_pr(ctx, fleet, s.issue)
+            .at("headRefOid")
             .as_str()
             .unwrap_or_default()
             .to_string();
@@ -193,20 +195,25 @@ pub fn pass(
     Ok(())
 }
 
-/// #855: the issue's open promise once missed, with drive's real reason.
-pub fn open_missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>) -> Option<(Promise, String)> {
+/// #855: the issue's open promise once missed.
+pub fn open_missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>) -> Option<Promise> {
     let mine: Vec<&Event> = events
         .iter()
         .filter(|e| e.fleet == s.fleet && e.issue == Some(s.issue))
         .collect();
     let (p, why) = open(&mine)?;
-    let why = why.filter(|_| !p.moved(s, head) && kind.is_none_or(|k| k == p.kind))?;
-    Some((p, why))
+    why.filter(|_| !p.moved(s, head) && kind.is_none_or(|k| k == p.kind))?;
+    Some(p)
 }
 
-/// The row's line once its open promise was missed: `⚠ missed <age>: <real reason>`.
-pub fn missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>, now: u64) -> Option<String> {
-    let (p, why) = open_missed(events, s, head, kind)?;
+/// The row's line once its open promise was missed: `⚠ missed <age>: <reason>`, read from the current wait `w`.
+pub fn missed(events: &[Event], s: &IssueState, head: &str, w: &Waiting, now: u64) -> Option<String> {
+    let p = open_missed(events, s, head, w.promise)?;
+    let mine: Vec<&Event> = events
+        .iter()
+        .filter(|e| e.fleet == s.fleet && e.issue == Some(s.issue))
+        .collect();
+    let why = why_now(&mine, &p, w);
     Some(format!("⚠ missed {}: {why}", age(now.saturating_sub(p.made_at))))
 }
 
@@ -257,7 +264,7 @@ mod tests {
     }
 
     fn tmp(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("drover-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("drover-{name}-{}", crate::runner::pid()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -283,7 +290,7 @@ mod tests {
         assert_eq!(m.str("why"), Some("drive took no step"));
         assert_eq!(m.val("age"), 600);
         assert_eq!(
-            missed(&ev2, &ready, "", None, 1900).as_deref(),
+            missed(&ev2, &ready, "", &same()[0].1, 1900).as_deref(),
             Some("⚠ missed 15m: drive took no step")
         );
         std::fs::remove_dir_all(&d).unwrap();
@@ -316,7 +323,10 @@ mod tests {
             );
             let v = ev.iter().find(|e| e.kind == "promise-void").unwrap();
             assert_eq!((v.str("hold"), v.str("promised")), (Some(hold), Some(line.as_str())));
-            assert_eq!(missed(&ev, &st("impl"), "", None, 1900), None);
+            assert_eq!(
+                missed(&ev, &st("impl"), "", &row(&st("impl"), None, hold).1, 1900),
+                None
+            );
             std::fs::remove_dir_all(&d).unwrap();
         }
     }
@@ -332,7 +342,8 @@ mod tests {
         run(&d, 1000, &[row(&st("impl"), Some(Kind::NextPass), &line)]);
         let ev = run(&d, 5000, &[row(&st("review(1)"), None, "waiting on f-rev-7 (working)")]);
         assert_eq!((count(&ev, "promise"), count(&ev, "promise-missed")), (1, 0));
-        assert_eq!(missed(&ev, &st("review(1)"), "", None, 5000), None);
+        let now = row(&st("review(1)"), None, "waiting on f-rev-7 (working)").1;
+        assert_eq!(missed(&ev, &st("review(1)"), "", &now, 5000), None);
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

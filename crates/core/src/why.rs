@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::{emit, fold, last_spawn, working, Event};
+use crate::events::{emit, fold, last_spawn, working, Event, Json};
 use crate::runner::{argv, json, ok, Runner};
 use crate::{gh, hosts::On, Ctx};
 use anyhow::{bail, Context, Result};
@@ -129,11 +129,11 @@ pub fn turn(
         "number,body,headRefOid,state",
     ];
     let pr = json(r, "gh", &fields).unwrap_or_default();
-    let head = pr["headRefOid"].as_str().unwrap_or_default();
+    let head = pr.at("headRefOid").as_str().unwrap_or_default();
     let noted = events
         .iter()
         .any(|e| e.is("why", fleet, n) && e.str("sha") == Some(head));
-    if head.is_empty() || pr["state"] != "OPEN" || s.reviewed(head) || noted {
+    if head.is_empty() || pr.at("state") != "OPEN" || s.reviewed(head) || noted {
         return Ok(None);
     }
     let (on, wt) = (On::of(r, Some(sp)), sp.str("worktree").unwrap_or_default());
@@ -145,7 +145,7 @@ pub fn turn(
     let subject = |c: &str| git(&["log", "-1", "--format=%s", c]).map(|o| o.stdout.trim().to_string());
     let parent = |c: &str| git(&["rev-parse", &format!("{c}^1")]).map(|o| o.stdout.trim().to_string());
     if let Err(e) = body(
-        pr["body"].as_str().unwrap_or_default(),
+        pr.at("body").as_str().unwrap_or_default(),
         head,
         &f.integration,
         &subject,
@@ -167,7 +167,13 @@ pub fn turn(
         (o.code == 0).then(|| o.stdout.lines().count())
     };
     let short = sp.data.get("update") == Some(&Value::Bool(true));
-    let owner = match check(&text, short, spec["body"].as_str().unwrap_or_default(), &answered, &len) {
+    let owner = match check(
+        &text,
+        short,
+        spec.at("body").as_str().unwrap_or_default(),
+        &answered,
+        &len,
+    ) {
         Ok(o) => o,
         Err(e) => return Ok(Some(("WHY_INVALID", e))),
     };
@@ -178,11 +184,19 @@ pub fn turn(
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "why-failed", d))?;
         return Ok(None);
     }
-    let body = section(pr["body"].as_str().unwrap_or_default(), round, &text, head);
+    let body = section(pr.at("body").as_str().unwrap_or_default(), round, &text, head);
     if let Err(e) = ok(
         r,
         "gh",
-        &["pr", "edit", &pr["number"].to_string(), "-R", &f.repo, "--body", &body],
+        &[
+            "pr",
+            "edit",
+            &pr.at("number").to_string(),
+            "-R",
+            &f.repo,
+            "--body",
+            &body,
+        ],
     ) {
         writeln!(out, "PR body: {e:#}")?;
     }
@@ -274,7 +288,7 @@ pub fn attach(
         let mut err = String::new();
         for _ in 0..3 {
             git(&["update-ref", "-d", &mine], "")?;
-            let _ = git(&["fetch", "-q", "origin", &format!("+refs/notes/why:{mine}")], "");
+            git(&["fetch", "-q", "origin", &format!("+refs/notes/why:{mine}")], "").ok();
             let id = ["-c", "user.name=drover", "-c", "user.email=drover@localhost"];
             let o = git(
                 &[&id[..], &["notes", "--ref", &mine, "add", "-f", "-F", "-", head]].concat(),
@@ -285,14 +299,14 @@ pub fn attach(
             }
             let o = git(&["push", "-q", "origin", &format!("{mine}:refs/notes/why")], "")?;
             if o.code == 0 {
-                let _ = git(&["fetch", "-q", "origin", NOTES], "");
+                git(&["fetch", "-q", "origin", NOTES], "").ok();
                 return Ok(());
             }
             err = o.stderr;
         }
         bail!("git push refs/notes/why: {}", err.trim())
     })();
-    let _ = git(&["update-ref", "-d", &mine], "");
+    git(&["update-ref", "-d", &mine], "").ok();
     if let Some(l) = lease {
         crate::db::release(&ctx.state, &key, Some(&l));
     }
@@ -393,10 +407,9 @@ pub fn brief(
             .filter(|p| named(p))
         {
             match files.iter().position(|x| x.0 == p) {
-                Some(x) if files[x].1.len() < 3 => files[x].1.push((sha, i)),
-                None if files.len() < 5 => files.push((p, vec![(sha, i)])),
-                _ => {}
-            }
+                Some(x) => files.get_mut(x).filter(|f| f.1.len() < 3).map(|f| f.1.push((sha, i))),
+                None => (files.len() < 5).then(|| files.push((p, vec![(sha, i)]))),
+            };
         }
     }
     let mut s = String::from("## Why notes for the files this issue names\n");
@@ -423,7 +436,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
         .unwrap_or(Path::new("."));
     let dir = dir.to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
-    let _ = git(&["fetch", "-q", "origin", NOTES]);
+    git(&["fetch", "-q", "origin", NOTES]).ok();
     let name = p
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -510,7 +523,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
     .collect();
     let st = issue.and_then(|n| fold(&events).remove(&(fleet.clone(), n)));
     let issue = issue.map(|n| {
-        let title = gh::spec(ctx, r, f, fleet, n, false).ok().map(|v| v["title"].clone());
+        let title = gh::spec(ctx, r, f, fleet, n, false).ok().map(|v| v.at("title").clone());
         let m = |k: &str| merged.map_or(Value::Null, |e| e.val(k).clone());
         let rounds = st.as_ref().map(|s| s.rounds);
         json!({"fleet": fleet, "number": n, "title": title, "pr": m("pr"), "merge_sha": m("merge_sha"), "into": m("into"), "rounds": rounds})
@@ -522,7 +535,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
     }
     let s = |v: &Value| v.as_str().map_or_else(|| v.to_string(), String::from);
     writeln!(out, "line    {at}  {}\ncommit  {sha:.9}  {subject}", text.trim())?;
-    match &v["issue"] {
+    match v.at("issue") {
         Value::Null => writeln!(out, "issue   none")?,
         i => {
             writeln!(out, "issue   #{} {}", i["number"], s(&i["title"]))?;
@@ -536,7 +549,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
             }
         }
     }
-    match &v["note"] {
+    match v.at("note") {
         Value::Null => writeln!(out, "note    none")?,
         n => {
             writeln!(out, "note    round {} · on {:.9}", n["round"], s(&n["sha"]))?;

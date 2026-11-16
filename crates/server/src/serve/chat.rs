@@ -6,7 +6,7 @@ use crate::api::{
 };
 use crate::conductor::{self, of};
 use crate::config::Config;
-use crate::events::{ask_event, closed, Event};
+use crate::events::{ask_event, closed, Event, Json};
 use crate::runner::Runner;
 use crate::session::{Session, Status};
 use crate::Ctx;
@@ -17,7 +17,11 @@ use std::collections::BTreeMap;
 
 /// `a` if `c`, else `b`.
 fn or<'a>(c: bool, a: &'a str, b: &'a str) -> &'a str {
-    [b, a][usize::from(c)]
+    if c {
+        a
+    } else {
+        b
+    }
 }
 
 /// The files a message carries.
@@ -275,7 +279,7 @@ fn page(
     ThreadPage {
         id: id.into(),
         archived: conductor::archived(events, id),
-        older: (k > 0).then(|| msgs[k].seq),
+        older: msgs.get(k).filter(|_| k > 0).map(|m| m.seq),
         started: t.ts,
         dir: dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}")),
         msgs: {
@@ -411,7 +415,7 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Se
         let (mut rows, mut arch) = (vec![], vec![]);
         for t in threads.iter().filter(|t| t.fleet == repo) {
             let on = conductor::archived(events, t.str("thread").unwrap_or_default());
-            [&mut rows, &mut arch][usize::from(on)].push(row(ctx, events, t, agents));
+            if on { &mut arch } else { &mut rows }.push(row(ctx, events, t, agents));
         }
         rows.sort_by_key(|r| std::cmp::Reverse(r.0));
         arch.sort_by_key(|r| std::cmp::Reverse(r.0));
@@ -447,7 +451,8 @@ impl super::Server<'_> {
             .collect();
         let key = json!([crate::db::last_seq(&ctx.state), super::mtime(ctx), seen, ctx.now / 60]);
         let mut all = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let c = &mut all[usize::from(rw)];
+        let [ro, wr] = &mut *all;
+        let c = if rw { wr } else { ro };
         if c.0 != key {
             // #483: a config or log read error shows its own text (as the Queue tab does).
             let (cfg, events) = match (Config::kept(ctx), crate::events::working(&ctx.state)) {
@@ -540,8 +545,8 @@ pub fn post(
                 conductor::text_ok(&text)?;
                 let mut d = json!({"thread": id, "text": text, "files": files});
                 if let Ok(o) = old {
-                    d["q"] = json!(q);
-                    (d["files"] == json!([])).then(|| d["files"] = json!(qfiles(o)));
+                    d.put("q", json!(q));
+                    (d.at("files") == &json!([])).then(|| d.put("files", json!(qfiles(o))));
                 }
                 let t = conductor::find(&events, &id)?;
                 crate::events::append(&ctx.state, &Event::new(ctx.now, &t.fleet, None, "thread-queue", d))?;
@@ -676,7 +681,7 @@ fn row_block(r: &ThreadRow, repo: Option<&str>) -> Value {
         "subtitle": {"text": sub, "tone": tone}, "value": r.age, "tap": {"open": format!("/screens/threads/{}", r.id)},
         "swipe": [{"label": act, "action": format!("thread-{act}"), "values": {"thread": r.id}}]});
     if r.unread {
-        v["badge"] = json!({"text": "new", "tone": "done"});
+        v.put("badge", json!({"text": "new", "tone": "done"}));
     }
     v
 }
@@ -730,10 +735,14 @@ pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]
         "stream": "/screens/threads/stream", "blocks": blocks})
 }
 
-/// #1072: the composer: one text field whose `[label]` posts `action` with `values`.
-fn composer(label: &str, action: &str, values: &Value) -> Value {
-    json!({"type": "form", "id": "say", "fields": [{"type": "text", "name": "text", "label": "", "value": "", "placeholder": "message the orchestrator"}],
-        "submit": {"label": label, "action": action, "values": values}})
+/// #1087: the composer, a page-only block: its `[label]` posts `action` with `values`, text and files.
+fn composer(label: &str, action: &str, values: &Value, more: Value) -> Value {
+    let mut c = json!({"type": "composer", "id": "say", "label": label, "action": action, "values": values,
+        "placeholder": "message the orchestrator"});
+    if let (Some(o), Value::Object(m)) = (c.as_object_mut(), more) {
+        o.extend(m.into_iter().filter(|(_, v)| !v.is_null()));
+    }
+    c
 }
 
 /// #1086: a message's card with its files (images inline, others as rows) and its link's chip, which opens that thread.
@@ -753,9 +762,11 @@ fn msg_card(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
         "value": format!("{} KB", f.size.div_ceil(1024)), "tap": {"url": src(f)}})
         })
         .collect();
-    let mut add = |k: &str, b: Value| match v[k].as_array_mut() {
+    let mut add = |k: &str, b: Value| match v.get_mut(k).and_then(Value::as_array_mut) {
         Some(a) => a.push(b),
-        None => v[k] = json!([b]),
+        None => {
+            v.put(k, json!([b]));
+        }
     };
     if !items.is_empty() {
         add(
@@ -851,7 +862,7 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
                     .recommend
                     .and_then(|n| a.options.get(usize::try_from(n).ok()?.checked_sub(1)?));
                 if let Some(r) = rec {
-                    ch["recommended"] = json!(r);
+                    ch.put("recommended", json!(r));
                 }
                 blocks.push(ch);
             }
@@ -955,7 +966,16 @@ pub fn thread_screen(
     }));
     blocks.extend(v.page.msgs.iter().map(|m| msg_card(ctx.now, id, m, paired)));
     if !arch {
-        blocks.push(composer("send", "thread-say", &json!({ "thread": id })));
+        let working = v.since.map(|t| json!({ "since": super::screens::iso(t) }));
+        blocks.push(composer(
+            "send",
+            "thread-say",
+            &json!({ "thread": id }),
+            json!({
+            "acts": {"queue": "thread-queue", "steer": "thread-steer", "unqueue": "thread-unqueue",
+                "stop": "thread-stop", "model": "thread-model"},
+            "queued": v.queued, "chips": v.chips, "working": working}),
+        ));
     }
     let q = if before == u64::MAX {
         String::new()
@@ -973,12 +993,19 @@ pub fn thread_screen(
 pub fn new_screen(cfg: &Config, repo: &str) -> Option<Value> {
     let role = conductor::defaults(cfg, repo).ok()?.1;
     let who = super::join(&[repo, role.harness.as_str(), role.model.as_deref().unwrap_or_default()]);
+    let chips = [chip("harness", Some(&role.harness), &crate::providers::lane_names())];
+    let c = composer(
+        "start",
+        "thread-new",
+        &json!({ "repo": repo }),
+        json!({ "chips": chips }),
+    );
     let hint = "Your first message starts the thread and its orchestrator, and titles it with its first line. Nothing is logged until you send.";
     Some(
         json!({"type": "screen", "id": format!("thread-new-{repo}"), "title": "New thread", "focus": true, "blocks": [
         {"type": "row", "id": "who", "figure": {"state": "idle"}, "title": who, "subtitle": "no orchestrator yet"},
         {"type": "text", "id": "hint", "markdown": hint},
-        composer("start", "thread-new", &json!({ "repo": repo }))]}),
+        c]}),
     )
 }
 

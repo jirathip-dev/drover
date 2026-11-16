@@ -93,7 +93,7 @@ fn placed(c: &drover::Ctx, r: &Fake, issue: u64, role: &str, force: Option<&str>
         &mini.on(&two(r, &bazzite)),
         &events,
         ("sendmeter", issue, role),
-        force,
+        (force, &|_| None),
     ) {
         Ok(p) => {
             let p = p.unwrap();
@@ -708,6 +708,7 @@ fn doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh() {
     let _sh = FakeShed::attached(&c);
     let r = healthy(fake(0.1, 0.1))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
+        .once_err(&format!("{SSH}'shed' 'connect'"), 1, "shed: no server on bazzite")
         .once_err(&format!("{SSH}'shed' 'connect'"), 1, "shed: no server on bazzite");
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(
@@ -1488,6 +1489,33 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     );
 }
 
+#[test]
+fn health_is_clean_only_when_drover_on_ssh_path_is_this_version() {
+    let c = setup("hosts-path-version", "", true, 0);
+    let cfg = Config::load(&c.config).unwrap();
+    let real = std::fs::canonicalize(&c.exe).map_or(c.exe.clone(), |p| p.display().to_string());
+    let mine = format!("drover {}\n", drover::VERSION);
+    let rows = |path: &str| {
+        let r = healthy(fake(0.1, 0.1))
+            .reply(&format!("{SSH}'{real}' '--version'"), &mine)
+            .reply(&format!("{SSH}'drover' '--version'"), path);
+        let (here, there) = (FakeShed::new(), FakeShed::new());
+        let over = two(&r, &there);
+        let base = here.on(&over);
+        let on = drover::hosts::On::new(&base, Some("bazzite"));
+        let home = drover::config::home();
+        let rows = drover::hosts::health(&c, &cfg, &on, &[], home.to_str().unwrap());
+        rows.into_iter().filter(|r| r.contains("drover —")).collect::<Vec<_>>()
+    };
+    assert_eq!(rows(&mine), Vec::<String>::new());
+    let stale = rows("drover 0.1.0 (d91e726)\n");
+    assert_eq!(stale.len(), 1, "{stale:?}");
+    assert!(
+        stale[0].starts_with("✗ drover") && stale[0].contains("drover 0.1.0 (d91e726)"),
+        "{stale:?}"
+    );
+}
+
 fn dirty_remote(f: Fake, push: Option<i32>) -> (Fake, String) {
     let g = format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' ");
     let f = match push {
@@ -1808,7 +1836,7 @@ fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_wor
     let (mini, bazzite) = (FakeShed::new(), FakeShed::new());
     let ssh = two(&kept, &bazzite);
     let on = mini.on(&ssh);
-    let p = place(&c, &cfg, &on, &events, ("sendmeter", 12, "impl"), None)
+    let p = place(&c, &cfg, &on, &events, ("sendmeter", 12, "impl"), (None, &|_| None))
         .unwrap()
         .unwrap();
     assert_eq!((p.name.as_str(), p.refusal), ("bazzite", None));

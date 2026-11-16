@@ -62,11 +62,12 @@ pub fn grafts(r: &dyn Runner, f: &Fleet, dir: &Path) -> Result<()> {
     if had.is_some() && had.as_deref() != want {
         let list = g(&["worktree", "list", "--porcelain"])?;
         for wt in list.lines().filter_map(|l| l.strip_prefix("worktree ")) {
-            let _ = git(
+            git(
                 r,
                 Path::new(wt),
                 &["config", "--worktree", "--unset", "core.useReplaceRefs"],
-            );
+            )
+            .ok();
         }
         let refs = g(&["replace", "-l"])?;
         let refs: Vec<&str> = refs.lines().filter(|l| !l.is_empty()).collect();
@@ -77,7 +78,7 @@ pub fn grafts(r: &dyn Runner, f: &Fleet, dir: &Path) -> Result<()> {
     let Some(t) = want else {
         if had.is_some() {
             g(&["config", "--unset", "drover.baseline"])?;
-            let _ = g(&["config", "--unset", "core.useReplaceRefs"]);
+            g(&["config", "--unset", "core.useReplaceRefs"]).ok();
         }
         return Ok(());
     };
@@ -111,7 +112,7 @@ pub fn view(r: &dyn Runner, f: &Fleet, wt: &Path, heads: &[&str]) -> View {
     };
     let on = ["config", "--worktree", "core.useReplaceRefs", "true"];
     if let View::Full(_) = v {
-        let _ = git(r, wt, &["config", "--worktree", "--unset", "core.useReplaceRefs"]);
+        git(r, wt, &["config", "--worktree", "--unset", "core.useReplaceRefs"]).ok();
         return v;
     }
     match git(r, wt, &on) {
