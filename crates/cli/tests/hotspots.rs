@@ -3,6 +3,7 @@ use common::*;
 use drover::events::{append, read, Event};
 use drover::runner::{Out, Real, Runner};
 use serde_json::{json, Value};
+use std::io::Write as _;
 use std::path::Path;
 
 const NOW: u64 = 1_700_000_000;
@@ -267,4 +268,90 @@ fn conflicts_count_distinct_pr_pairs_not_every_push() {
     let (code, out) = run(&c, &RealGit(gh("[]")), &["hotspots", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("| `a.rs` | 5 | 2 | 2 |"), "{out}");
+}
+
+#[test]
+fn a_sweep_over_forty_files_is_not_counted() {
+    let c = fixture("hotspots-sweep");
+    let local = c.state.parent().unwrap().parent().unwrap().join("local");
+    let files: Vec<String> = (0..40)
+        .map(|i| format!("sweep/{i}.rs"))
+        .chain(["b.rs".into()])
+        .collect();
+    pr(
+        &local,
+        NOW - 86400,
+        6,
+        &files.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    git(&local, NOW, &["update-ref", "refs/remotes/origin/staging", "HEAD"]);
+    let (code, out) = run(&c, &RealGit(gh("[]")), &["hotspots", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("5 or more of 5 merged PRs"), "{out}");
+    assert!(out.contains("1 sweeps (over 40 files) not counted"), "{out}");
+    assert!(out.contains("| `a.rs` | 5 |") && !out.contains("b.rs"), "{out}");
+}
+
+#[test]
+fn the_bar_rises_to_one_in_twenty_merges() {
+    let c = fixture("hotspots-rate");
+    let local = c.state.parent().unwrap().parent().unwrap().join("local");
+    let mut stream = String::new();
+    for k in 0..115u64 {
+        let file = if k < 6 { "c.rs" } else { "d.rs" };
+        let at = NOW - 3 * 86400 + k;
+        stream += &format!(
+            "commit refs/heads/staging\ncommitter t <t@example.com> {at} +0000\ndata 1\nx\nM 100644 inline {file}\ndata 4\n{k:03}\n\n"
+        );
+    }
+    let head = git(&local, NOW, &["rev-parse", "HEAD"]);
+    let mut p = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&local)
+        .args(["fast-import", "--quiet", "--force"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let first = format!("reset refs/heads/staging\nfrom {head}\n\n{stream}");
+    p.stdin.take().unwrap().write_all(first.as_bytes()).unwrap();
+    assert!(p.wait().unwrap().success());
+    git(&local, NOW, &["update-ref", "refs/remotes/origin/staging", "staging"]);
+    let (code, out) = run(&c, &RealGit(gh("[]")), &["hotspots", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("6 or more of 120 merged PRs"), "{out}");
+    assert!(
+        out.contains("| `c.rs` | 6 |") && out.contains("| `d.rs` | 109 |"),
+        "{out}"
+    );
+    assert!(!out.contains("a.rs"), "{out}");
+}
+
+#[test]
+fn tick_stores_the_list_daily_and_files_the_issue_weekly() {
+    let c = fixture("hotspots-daily");
+    let _sh = FakeShed::attached(&c);
+    let tick = |now: u64| {
+        let r = RealGit(
+            gh("[]")
+                .reply("herdr status", "server:\n  status: running\n")
+                .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n"),
+        );
+        let (code, out) = run(&drover::Ctx { now, ..c.clone() }, &r, &["tick"]);
+        assert_eq!(code, 0, "{out}");
+        (
+            r.0.called("gh issue list -R jirathip-dev/sendmeter --state open --search \"hotspots"),
+            drover::hotspots::path(&c, "sendmeter").exists(),
+        )
+    };
+    assert_eq!(tick(NOW), (true, true));
+    std::fs::remove_file(drover::hotspots::path(&c, "sendmeter")).unwrap();
+    assert_eq!(tick(NOW + HOUR), (false, false));
+    assert_eq!(tick(NOW + 86400), (false, true));
+    let local = c.state.parent().unwrap().parent().unwrap().join("local");
+    for k in 10..15 {
+        pr(&local, NOW + 6 * 86400, k, &["a.rs"]);
+    }
+    git(&local, NOW, &["update-ref", "refs/remotes/origin/staging", "HEAD"]);
+    assert_eq!(tick(NOW + 6 * 86400), (false, true));
+    assert_eq!(tick(NOW + 7 * 86400), (true, true));
 }

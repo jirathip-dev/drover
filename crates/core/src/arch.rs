@@ -25,6 +25,8 @@ struct Arch {
     #[serde(default)]
     generated: Vec<String>,
     generate: Option<String>,
+    #[serde(default)]
+    shared: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -252,6 +254,17 @@ pub fn check(
         }
     }
     bad.extend(frozen_adds(&a, &frozen, &diff));
+    bad.extend(
+        a.shared
+            .iter()
+            .filter(|g| !a.size.iter().any(|s| covers(&s.paths, g)))
+            .map(|g| {
+                format!(
+                    "{}: shared `{g}` falls under no `[[size]]` rule: a shared file must be kept from growing",
+                    config.display()
+                )
+            }),
+    );
     bad.extend(stale_generated(&a, r)?);
     match &a.comments {
         Some(c) if c.policy == Policy::Off => bad.extend(new_comments(&diff, &c.except)),
@@ -295,10 +308,16 @@ pub fn check(
     Ok(i32::from(!bad.is_empty()))
 }
 
-/// #890: the globs `text`, an arch.toml, lists as frozen or generated: converted, so never a hotspot.
-pub fn converted(text: &str) -> Result<Vec<String>> {
+/// #1147: the globs `text`, an arch.toml, lists as frozen, generated or shared: decided, so never a hotspot.
+pub fn decided(text: &str) -> Result<Vec<String>> {
     let a: Arch = toml::from_str(text).context("parsing .drover/arch.toml")?;
-    Ok(a.frozen.into_iter().chain(a.generated).collect())
+    Ok(a.frozen.into_iter().chain(a.generated).chain(a.shared).collect())
+}
+
+fn covers(paths: &[String], g: &str) -> bool {
+    let probe = g.replace("**", "x/y").replace('*', "x");
+    let probe = if g.ends_with("/**") { probe + "/z.rs" } else { probe };
+    any(paths, &probe)
 }
 
 fn frozen_adds(a: &Arch, frozen: &[String], diff: &[Change]) -> Vec<String> {
