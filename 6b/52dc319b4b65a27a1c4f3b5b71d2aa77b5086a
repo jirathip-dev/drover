@@ -1,0 +1,12 @@
+Decided: bootstrap runs `profiles sync --profile P --role F` there for each profile hosts::acp_profiles lists, the same list acp_health checks
+Because: "syncs, on the VM, each profile `acp_health` would check"
+Decided: acp_profiles is the one list of (profile, family, adapter) both acp_health and bootstrap use, so they cannot drift
+Because: crates/core/src/hosts.rs:976
+Decided: the per-profile syncs run only for a shed-acp host; the plain `profiles sync` step stays as it was
+Because: crates/core/src/cloud.rs:452
+Rejected: keeping the main config on the VM so the plain `profiles sync` runs — it needs the main host's fleet.toml there, which bootstrap removes on purpose
+Rejected: syncing in spawn only — spawn never places on the unhealthy host, the deadlock itself
+Decided: the test's fake `profiles sync` writes the hook for the `--role` it is given, so a lane-orchestrator profile gets its own family
+Because: crates/cli/tests/remote_acp.rs:513
+Check: with cloud.rs's loop removed the new test fails on `✗ acp guard cargo-impl`, `lane-orchestrator` and `fleet-impl` rows; at head it passes
+Owner: Bringing up a new cloud host now sets up the lane guard there, so the host passes its health check and gets lanes without a manual step.
