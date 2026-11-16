@@ -1,0 +1,14 @@
+Decided: paint grafts the new screen around the focused field's [data-id] block instead of replaceChildren, so the input node never leaves the page
+Because: "A paint never replaces a field that has focus or a non-empty value"
+Rejected: re-focusing a re-rendered input and restoring its caret — the node is still removed, which drops the iOS keyboard
+Decided: unfocused edited fields come back from their localStorage draft on the repaint, not by keeping their stale block
+Because: "Per-thread drafts (and per-form for other screens' text fields) kept on the device"
+Decided: act() returns success; drafts clear only then, every live copy reset to its server value (data-was)
+Because: "cleared only after a successful send"
+Decided: a failed action's red toast carries [retry] (re-clicks the same button) and stays until tapped
+Because: "A failed send keeps the text in the box with the red line and [retry]."
+Rejected: storing secret fields as drafts — passwords would sit in localStorage
+Decided: load() drops a fetch whose path is no longer the view's, so tapping a thread during the list's fetch keeps the thread
+Because: web/src/main.ts:109
+Check: ui-webkit runs cargo test --test page_drafts (Playwright WebKit, fake clock); it skips without Playwright
+Owner: typed text, cursor and scroll now survive live updates and reloads; a failed send keeps the text with a retry button
