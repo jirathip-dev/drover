@@ -1,0 +1,12 @@
+Decided: the Hosts screen is built from the existing host tab data (API v1's `host`), turned into the page's blocks; no new host logic
+Because: "A **Hosts** JSON screen (`/screens/hosts`), page-only, opened from [⚙] as a menu row"
+Decided: its actions (host, reap, orphans, sign-in) are page-only like the thread actions, not added to cooee-plugin.toml
+Rejected: adding them to the manifest's [permissions] — it is cooee's contract and its fixture (golden/cooee/permissions.json) would no longer match
+Decided: the page opens a sheet's stream while the sheet shows, so the Hosts screen (opened from [⚙] as a sheet) streams
+Because: "Its stream, while open, stamps `host-watch.at`, so watched sampling works again."
+Decided: the dead `/live?tab=host` stamp is deleted; its test now opens `/screens/hosts/stream`
+Because: crates/cli/tests/host_history.rs:220
+Decided: [sign in] starts the login in a pane and opens a paired-only sheet with its screen, links and a reply line, refreshed every 2 s
+Check: an unpaired device gets 401 for /screens/sign-in/<pane> and for every host action
+Check: the golden crates/cli/tests/golden/page/hosts.json: mini (main) first, cloud1 with spend/budget and a confirmed [off]
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
