@@ -130,7 +130,7 @@ fn another_host_is_reached_through_shed_connect_over_ssh() {
     assert!(
         calls
             .iter()
-            .any(|c| c.starts_with("ssh ") && c.contains("box -- 'shed' 'connect' '--autostart'")),
+            .any(|c| c.starts_with("ssh ") && c.ends_with("box -- 'shed' 'connect'")),
         "{calls:?}"
     );
     assert!(b.methods().is_empty(), "nothing went to this host's server");
@@ -2645,4 +2645,50 @@ fn wait_sends_continue_at_the_reset_only_on_the_owners_pick() {
     drive_at(&c, &cli, at - c.now + 60);
     assert_eq!(f.count("shed send sendmeter-impl-12 continue"), 1, "once at the reset");
     assert_eq!(logged(&c, "spawn").len(), 1);
+}
+
+#[test]
+fn a_host_with_the_shed_job_starts_it_and_never_autostarts_a_server_outside_it() {
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C \
+               -oControlPersist=10m box -- ";
+    let hello = json!(Response::ok(json!(0), json!(shed::proto::Hello::ours())));
+    let ls = json!(Response::ok(json!(1), json!([])));
+    let up = format!("{hello}\n{ls}\n");
+    let (connect, auto) = (
+        format!("{ssh}'shed' 'connect'"),
+        format!("{ssh}'shed' 'connect' '--autostart'"),
+    );
+    let unit = format!("{ssh}'systemctl' '--user' 'show'");
+    let start = format!("{ssh}'systemctl' '--user' 'start' 'shed.service'");
+    let ls_on = |f: &Fake| {
+        shed::call(
+            &On::new(f, Some("box")),
+            &Wire::Connect,
+            shed::proto::Method::Ls,
+            json!({}),
+        )
+    };
+
+    let f = Fake::default()
+        .once(&connect, 1, "")
+        .reply(&unit, "LoadState=loaded\nActiveState=failed\n")
+        .reply(&start, "")
+        .reply(&connect, &up);
+    ls_on(&f).unwrap();
+    let calls = f.calls.borrow();
+    assert!(calls.iter().all(|c| !c.starts_with(&auto)), "{calls:?}");
+    let (s, last) = (f.index(&start), calls.iter().rposition(|c| c.starts_with(&connect)));
+    assert!(s.is_some() && s < last, "started, then connected: {calls:?}");
+
+    let f = Fake::default().once(&connect, 1, "").reply(&auto, &up);
+    ls_on(&f).unwrap();
+    assert!(f.called(&auto), "no job: --autostart as before {:?}", f.calls.borrow());
+
+    let f = Fake::default()
+        .reply(&unit, "LoadState=loaded\nActiveState=failed\n")
+        .reply(&start, "")
+        .once_err(&connect, 1, "no shed server");
+    let line = shed::line(&On::new(&f, Some("box")), &Wire::Connect);
+    assert!(line.starts_with("✗ shed — "), "{line}");
+    assert!(!f.called(&auto), "{:?}", f.calls.borrow());
 }

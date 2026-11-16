@@ -43,10 +43,10 @@ review or ready).
 
 Board, status and the Host tab show each group's use: `serial: db 3/10 · ci 1/1`.
 
-Hot files (#891): each file the last `drover hotspots` run stored is its own one-slot group, `hot <file>`, joined
+Hot files (#891): each file the last stored hotspots list names is its own one-slot group, `hot <file>`, joined
 only by a PR's diff (never a `--serial` mark). Drive drops a file from it on its next pass once
-`.drover/arch.toml` on the integration branch lists it `frozen` or `generated` (`hot-files {files}` logs each
-change).
+`.drover/arch.toml` on the integration branch lists it `frozen`, `generated` or `shared` (#1147; `hot-files {files}`
+logs each change).
 
 ## Fast-first landing (#350)
 
@@ -94,13 +94,14 @@ New fleets set `merge_label = "merge-ready"` with the affected-only CI recipe in
 
 ## Hotspots (#889)
 
-`drover hotspots [FLEET]` (every fleet when none is named) lists the files 5 or more merged PRs touched in the
-last 14 days on the integration branch, any language, each with the distinct PR pairs it was predicted to conflict in
+`drover hotspots [FLEET]` (every fleet when none is named) lists the files 1 in 20 of the merged PRs (at least 5)
+touched in the last 14 days on the integration branch; a merge touching more than 40 files is a sweep and not counted
+(#1147), and the report's header says how many were skipped, any language, each with the distinct PR pairs it was predicted to conflict in
 (#973: pairs, not one per push) and the update rounds of the issues that touched it (drover's log, every fleet on the
-same repo). A file no longer at the integration tip, or one `.drover/arch.toml` lists frozen or generated, is left
-out. It keeps the list in the state folder as
+same repo). A file no longer at the integration tip, or one `.drover/arch.toml` lists frozen, generated or shared, is
+left out. It keeps the list in the state folder as
 `hotspots-<fleet>.json`. With any hot file it opens `hotspots: <fleet> week of <monday>`, or updates that issue while it
-is open, and queues it `--architect`. `drover tick` runs it weekly per fleet; `hotspots = "off"` in `[fleet.<n>]` opts
+is open, and queues it `--architect`. `drover tick` stores each fleet's list daily and files its issue weekly; `hotspots = "off"` in `[fleet.<n>]` opts
 out.
 
 ## Limits (#844)

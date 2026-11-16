@@ -45,18 +45,23 @@ pub fn page_places() -> Value {
     Value::Array(all)
 }
 
-const THREAD_ACTIONS: [&str; 8] = [
+const THREAD_ACTIONS: [&str; 13] = [
     "thread-new",
     "thread-say",
     "thread-retry",
     "thread-archive",
     "thread-restore",
+    "thread-queue",
+    "thread-steer",
+    "thread-unqueue",
+    "thread-stop",
+    "thread-model",
     "thread-secret",
     "thread-config",
     "thread-signin",
 ];
 
-fn iso(t: u64) -> String {
+pub(super) fn iso(t: u64) -> String {
     let (d, s) = (t / 86_400, t % 86_400);
     let (m, day) = civil_month_day(d);
     format!(
@@ -1473,16 +1478,13 @@ impl Server<'_> {
             "thread-config" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
             "thread-signin" => crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("name"), "web")?,
             n if THREAD_ACTIONS.contains(&n) => {
-                let kv = [
-                    ("t", s("thread")),
-                    ("text", s("text")),
-                    ("repo", s("repo")),
-                    ("n", s("msg")),
-                    ("name", s("name")),
-                    ("act", s("act")),
-                    ("value", s("text")),
-                ];
-                let mut f: Q = kv.into_iter().map(|(k, v)| (k.into(), v)).collect();
+                let keys = ["text", "repo", "name", "act", "data", "q", "harness", "model", "effort"];
+                let mut f: Q = keys.into_iter().map(|k| (k.into(), s(k))).collect();
+                f.extend([
+                    ("t".into(), s("thread")),
+                    ("n".into(), s("msg")),
+                    ("value".into(), s("text")),
+                ]);
                 f.insert("op".into(), n[7..].into());
                 let mut later = vec![];
                 let (res, more) = crate::conductor::deferred(|| super::chat::post(ctx, &self.r, &f, &mut later));

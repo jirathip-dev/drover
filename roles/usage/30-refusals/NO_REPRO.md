@@ -1,0 +1,1 @@
+- NO_REPRO: verdict PASS on a `--repro` issue: no `Repro:` block, a `Repro: run` without the fenced command and both fenced outputs (base plus commit 1 failing, then head), or a `Repro: verify` without a `>` quoted reason from the PR's `## Repro` section; merge: a `Repro: verify` PASS has no verify PASS at the head

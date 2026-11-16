@@ -1,0 +1,1 @@
+- LOGIN_NEEDED: spawn: a lane on the host showed a usage limit or sign-in prompt; new lanes wait until the owner signs in there and turns the host back on

@@ -1,0 +1,1 @@
+- IS_LANE: close: a logged lane (use stop/kill/clean)
