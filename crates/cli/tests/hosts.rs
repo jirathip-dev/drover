@@ -1722,3 +1722,38 @@ fn a_lane_of_the_same_name_on_another_host_keeps_no_worktree_live() {
     );
     assert!(!out.contains("live agent"), "{out}");
 }
+
+#[test]
+fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_work() {
+    let c = setup("hosts-sticky-needs", "", true, 0);
+    remote_spawn(&c, NOW - 60);
+    let r = fake(2.0, 0.1);
+    assert_eq!(
+        placed(&c, &r, 12, "impl", None).as_deref(),
+        Ok("bazzite"),
+        "fits, so sticky"
+    );
+    run(&c, &r, &["queue", "sendmeter", "add", "12", "--needs", "xcode"]);
+    assert_eq!(
+        placed(&c, &r, 12, "impl", None).as_deref(),
+        Ok("mini"),
+        "no xcode on bazzite"
+    );
+    let kept = fake(2.0, 0.1)
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "2\n");
+    let cfg = Config::load(&c.config).unwrap();
+    let events = read(&c.state).unwrap();
+    let (mini, bazzite) = (FakeShed::new(), FakeShed::new());
+    let ssh = two(&kept, &bazzite);
+    let on = mini.on(&ssh);
+    let p = place(&c, &cfg, &on, &events, ("sendmeter", 12, "impl"), None)
+        .unwrap()
+        .unwrap();
+    assert_eq!((p.name.as_str(), p.refusal), ("bazzite", None));
+    assert_eq!(
+        p.why.as_deref(),
+        Some("stays on bazzite: its worktree there has unpushed work")
+    );
+}
