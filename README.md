@@ -29,6 +29,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - verify: drives the real app from `.drover/verify.md` after rev's PASS (#469, #765).
 - design (UI mockups) and architect (ADR) run before impl, owner-approved (#448, #760).
 - lesson: a weekly lane turns repeated review findings into checks, shadow first (#449, #586, #756).
+- triage: a weekly lane per fleet where `triage = "weekly"`, or `drover triage <fleet>`, closes done, duplicate or superseded issues, folds amendments, flags `stale?` and files one `docs:` issue; its verbs (`cmd`): `drover triage close <fleet> <issue> --why done --evidence <sha>`, `drover triage fold <fleet> <issue> --spec <file>`, `drover triage label <fleet> <issue> <labels>…`, `drover triage docs <fleet> --findings <file> --root <checkout>` (#1100).
 
 **Lane runtime**
 - shed terminals or shed-acp ACP sessions, set in `[runtime]` (#390, #480, #590, #721); lane state from shed's events (#585); see [runtimes](docs/runtimes.md).
@@ -141,7 +142,7 @@ Self-update installs the green head of `[self_update] branch` (default `main`); 
 | `ask` / `answer` / `asks` / `thread` / `card` | decisions; orchestrator threads; run cards |
 | `check` / `clean` / `reclaim` / `kill` | alerts; reclaim done lanes and build folders; stop a lane, work saved |
 | `profiles` / `hosts` / `secret` | per-role folders and hooks; hosts; secret files |
-| `setup` / `doctor` / `why` / `lesson` | install the jobs; host check; a line's reasoning; lesson checks |
+| `setup` / `doctor` / `why` / `lesson` / `triage` | install the jobs; host check; a line's reasoning; lesson checks; issue triage |
 
 Detail: [setup](docs/setup.md), [config](docs/config.md), [pipeline](docs/pipeline.md), [lanes and hooks](docs/lanes.md), [hosts](docs/hosts.md), [accounts](docs/accounts.md), [orchestrator](docs/orchestrator.md), [serve and /api/v1](docs/serve.md), [architecture](docs/architecture.md). Agents read `drover help --agent`.
 
