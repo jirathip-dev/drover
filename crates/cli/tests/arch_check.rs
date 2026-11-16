@@ -573,10 +573,14 @@ fn the_repos_provider_ban_fails_a_web_file_naming_a_provider() {
 
 fn repo_conf() -> String {
     let conf = include_str!("../../../.drover/arch.toml");
-    conf.replace(
-        "generated = [\"assets/types/api.d.ts\"]\ngenerate = \"just types\"\n",
-        "",
-    )
+    let (head, rest) = conf.split_once("generated = [").unwrap();
+    let rest = rest.split_once("]\n").unwrap().1;
+    let rest = rest
+        .split_once('\n')
+        .filter(|r| r.0.starts_with("generate ="))
+        .unwrap()
+        .1;
+    format!("{head}{rest}")
 }
 
 const FROZEN: &str = "frozen = [\"src/registry.rs\"]\n\n[[collect]]\ndir = \"src/features\"\nglob = \"*.rs\"\n";
