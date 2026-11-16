@@ -146,7 +146,7 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
         .reply("gh api repos/jirathip-dev/sendmeter/pulls/34/files", "src/a.rs\n")
         .reply("git", "");
     let cfg = Config::load(&c.config).unwrap();
-    drover::drive::auto_update(&c, &cfg, &r, &mut Vec::new(), "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &r, &mut Vec::new(), "sendmeter").unwrap();
     assert!(r.called(&format!("git -C {} push -q origin HEAD:issue-12", wt.display())));
     assert!(!r.called("gh pr edit"), "{:?}", r.calls.borrow());
     let u = event(&c, "auto-updated").expect("auto-updated");
