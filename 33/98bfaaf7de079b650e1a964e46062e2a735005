@@ -1,0 +1,6 @@
+Decided: merged origin/staging twice; promise.rs keeps staging's promise-void check through `mine.get(at..)?`, cloud.rs and slo.rs's new indexing became `.get(..)` lookups
+Because: "Fix every existing hit in this issue; no baseline of old offenders."
+Decided: #957 moved clippy and tests into a new `test` job; #809's two clippy passes and the Rust fixtures moved there with it
+Rejected: keeping the steps in the rust job — staging dropped clippy from that job's toolchain
+Check: the shed ACP orchestrator test fails only under the full parallel run (3 times) and passes alone; CI's nextest job is the real check
+Owner: the branch is current with staging's CI split, and the bans still run in CI
