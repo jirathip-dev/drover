@@ -248,9 +248,9 @@ function composer(b: Blk, c: Ctx): HTMLElement {
   const ta = el('textarea');
   Object.assign(ta, { name: 'text', rows: 1, value: d.text, placeholder: b.placeholder ?? '' });
   const grow = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
-  ta.oninput = () => { d.text = ta.value; grow(); };
+  ta.oninput = () => { [d.text, d.st] = [ta.value, d.st === 'sent' ? '' : d.st]; grow(); };
   ta.onfocus = () => { typing = key; };
-  ta.onblur = () => { if (typing === key) setTimeout(() => { if (!ta.isConnected || document.activeElement !== ta) typing = ''; }); };
+  ta.onblur = () => setTimeout(() => { if (!(document.activeElement instanceof HTMLTextAreaElement)) typing = ''; });
   ta.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } };
   const pick = el('input');
   Object.assign(pick, { type: 'file', multiple: true, hidden: true });
