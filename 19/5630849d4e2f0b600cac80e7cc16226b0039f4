@@ -1,0 +1,12 @@
+Decided: docs/parity.md lists all 117 rows of #553 with a test and a status; scripts/parity-check.sh checks it in CI's rust job against HEAD^1
+Because: "CI fails on a PR that deletes `parity_38` without a `dropped` line; passes with one"
+Decided: statuses add `open [#N]` beside kept/page-only/cooee/dropped: a row the page lacks is neither kept nor owner-dropped
+Because: "A drop without an owner q-number is a FAIL"
+Decided: existing tests that already guard a row are renamed parity_<row>_…, with lowercase r for R rows so rustc's snake-case lint stays quiet
+Because: crates/cli/tests/cooee_screens.rs:717
+Decided: R25 and R5 are restored as running WebKit tests; the #65, #403, #443, #406 and #408 checks come back #[ignore]d, each naming its fix issue, and run as a soft CI step
+Because: "each may land red-then-green with its fix"
+Rejected: marking rows 86-90 dropped under q873 — q873 only took them off the retirement gate, it dropped nothing
+Rejected: comparing only the tree — deleting a test and flipping its row to `open` would pass, so the base's test names are diffed too
+Check: cargo test --test parity_check; the ui-webkit job's parity steps (no Playwright on this host)
+Owner: CI now fails when a parity test is deleted unless you recorded the drop; docs/parity.md shows each row's state.
