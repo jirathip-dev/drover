@@ -1,0 +1,14 @@
+Decided: drive picks the host at admission (placement passes over hosts whose start or working slots are full) and stores it in the spawn marker; the kick's spawn uses that host
+Because: "Starts on one host never wait on another host's starts"
+Decided: the main host's start cap is max_parallel_spawns (a smaller per-host start_max may lower it); [limits] start_max applies to remote hosts
+Because: "The global `max_parallel_spawns` stays and applies only to the main host"
+Decided: release on "started" marks the marker started instead of deleting it, so max_working and the duplicate-start guard still count the lane
+Because: crates/core/src/spawn.rs:1380
+Decided: the early start step runs only when spawns are detached kicks; with max_parallel_spawns = 0 the spawn is the slow part and stays at the pass's end
+Because: crates/core/src/drive.rs:903
+Decided: a full pass also tries again at its end, only for issues not tried yet, so issues its own steps release start the same pass
+Rejected: dropping the end-of-pass step — blocker releases and the sim's same-pass starts would wait one more pass
+Decided: four drive_kicks tests now expect starts before reviews and fix rounds; the main host still keeps one slot for them
+Because: "Full passes run it before the PR reads"
+Check: the sim's known fleet merges 78 s sooner per issue (1012/1337 s to 934/1259 s) since the fast pass now starts lanes
+Owner: Each machine now starts its own new lanes, and drive starts queued work every minute instead of after the slow PR reads.
