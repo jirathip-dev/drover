@@ -1,7 +1,7 @@
 // #927: the phone page draws the screens cooee draws (cooee-plugin.toml's places, `PL` from the page shell): each
 // header-strip place is a tab, the menu-row places open from [⚙], the chat-cards place is the cards above every tab.
 // A screen is fetched, drawn block by block, patched by its `stream`, and its blocks post `/action`. No per-tab code.
-import { type Act, type Ctx, el, kids, render, values } from './blocks';
+import { type Act, type Ctx, el, kids, render, sent, values } from './blocks';
 import { apply, type Blk } from './ops';
 import { R, colours, esc, get, put, schemes, theme, themes } from './theme';
 
@@ -65,10 +65,26 @@ function land(sc: HTMLElement | null, s: Spot | null) {
   sc.scrollTop = k ? sc.scrollTop + k.getBoundingClientRect().top - sc.getBoundingClientRect().top - s!.dy : sc.scrollHeight;
 }
 const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr');
+const path = (e: Element, top: Element | null) => {
+  const p: Element[] = [];
+  for (let x: Element | null = e; x && x !== top; x = x.parentElement) p.unshift(x);
+  return p;
+};
+function graft(root: Element, body: Element[], mine: Element[], twin: Element[]) {
+  let [box, fresh] = [root, body];
+  mine.forEach((m, i) => {
+    const at = fresh.indexOf(twin[i]);
+    [...box.childNodes].forEach(n => { if (n !== m) n.remove(); });
+    m.before(...fresh.slice(0, at));
+    m.after(...fresh.slice(at + 1));
+    if (i < mine.length - 1) m.className = twin[i].className;
+    [box, fresh] = [m, [...twin[i].children]];
+  });
+}
 function paint(v: View, before?: Blk | null) {
-  const m = v.model;
+  const m = v.model, y = scrollY, f = document.activeElement;
   if (!m) return;
-  const focus = !Array.isArray(m) && !!m.focus, was = scroller(v), keep = focus && was?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
+  const focus = !Array.isArray(m) && !!m.focus, was = scroller(v), place = focus && was?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
   const c = ctx(v, Array.isArray(m) ? 'cards' : m.id);
   const body = Array.isArray(m) ? kids(m, c) : [render(m, c)].filter((e): e is HTMLElement => !!e);
   if (v.back.length && body[0]) {
@@ -77,7 +93,13 @@ function paint(v: View, before?: Blk | null) {
     b.onclick = () => go(v, v.back.pop()!, false);
     body[0].prepend(b);
   }
-  v.root.replaceChildren(...body);
+  const keep = f && v.root.contains(f) && f.matches('input, select') ? f.closest('[data-id]') : null;
+  const sel = keep && `[data-id="${CSS.escape(keep.getAttribute('data-id') ?? '')}"]`;
+  const twin = sel ? body.map(e => (e.matches(sel) ? e : e.querySelector(sel))).find(e => !!e) : null;
+  const [mp, tp] = keep && twin ? [path(keep, v.root), path(twin, null)] : [[], []];
+  if (mp.length && mp.length === tp.length && (body as Element[]).includes(tp[0]) && mp[0].getAttribute('data-id') === tp[0].getAttribute('data-id')) graft(v.root, body, mp, tp);
+  else v.root.replaceChildren(...body);
+  if (scrollY !== y) scrollTo(0, y);
   if (before) {
     const was = rows(before);
     rows(m).forEach((j, id) => { if (was.has(id) && was.get(id) !== j) v.root.querySelector(`[data-id="${CSS.escape(id)}"]`)?.classList.add('fl'); });
@@ -85,7 +107,7 @@ function paint(v: View, before?: Blk | null) {
   if (v === cur.v) sync();
   if (focus && !v.root.hidden) {
     fit();
-    land(scroller(v), keep);
+    land(scroller(v), place);
   }
   badges();
 }
@@ -102,7 +124,8 @@ async function load(v: View, quiet = false) {
   if (!v.model || !quiet) paint(v);
   const slow = setTimeout(() => ($('#ld').hidden = false), 300);
   try {
-    const m = await fetchScreen(v.path), before = v.model;
+    const p = v.path, m = await fetchScreen(p), before = v.model;
+    if (v.path !== p) return;
     [v.model, v.at] = [m, Date.now()];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: m }));
     paint(v, before);
@@ -155,13 +178,18 @@ function show(t: (typeof tabs)[number]) {
   scrollTo(0, 0);
 }
 
-function toast(text: string, bad = false) {
+function toast(text: string, bad = false, retry?: () => void) {
   const p = $('#toast');
   p.className = `msg ${bad ? 'r' : 'g'}`;
   p.textContent = text;
   p.hidden = !text;
   clearTimeout(Number(p.dataset.t));
-  p.dataset.t = String(setTimeout(() => { p.hidden = true; }, bad ? 8000 : 3000));
+  if (retry) {
+    const b = el('button', '', '<span>retry</span>');
+    b.type = 'button';
+    b.onclick = () => { p.hidden = true; retry(); };
+    p.append(' ', b);
+  } else p.dataset.t = String(setTimeout(() => { p.hidden = true; }, bad ? 8000 : 3000));
 }
 
 // The sheet: a screen of type `sheet` (or any screen) over the page, its `done` posting the fields' values.
@@ -190,7 +218,7 @@ function drawSheet() {
   if (m.done) {
     const d = el('button', 'primary', `<span>${esc(m.done.label)}</span>`);
     d.type = 'button';
-    d.onclick = () => c.act({ action: m.done.action, block: m.id, values: { ...m.done.values, ...values(shv.root) } }, d);
+    d.onclick = () => c.act({ action: m.done.action, block: m.id, values: { ...m.done.values, ...values(shv.root) } }, d).then(ok => ok && sent(shv.root));
     head.append(d);
   }
   shv.root.replaceChildren(...(m.type === 'sheet' ? kids(m.blocks, c) : [render(m, c)!]));
@@ -221,16 +249,19 @@ function confirmed(c: Blk): Promise<boolean> {
   });
 }
 
-async function act(a: Act, v: View, screen: string, b?: HTMLElement) {
-  if (demo) return toast('Demo with fake data: install drover to act on your own fleets');
-  if (ro) return toast('read-only page', true);
-  if (a.confirm && !(await confirmed(a.confirm))) return;
+async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<boolean> {
+  if (demo || ro) {
+    toast(demo ? 'Demo with fake data: install drover to act on your own fleets' : 'read-only page', ro);
+    return false;
+  }
+  if (a.confirm && !(await confirmed(a.confirm))) return false;
+  const retry = b && (() => b.click());
   b?.setAttribute('aria-busy', 'true');
   try {
     const r = await fetch(url('action'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...a, confirm: undefined, screen }) });
     const j = await r.json().catch(() => ({ line: `${r.status}` }));
-    if (r.status === 401) return unpaired();
-    if (!r.ok) return toast(j.line ?? `${r.status}`, true);
+    if (r.status === 401) return (unpaired(), false);
+    if (!r.ok) return (toast(j.line ?? `${r.status}`, true, retry), false);
     const ops: Blk[] = j.ops ?? [];
     const whole = ops.find(o => o.op === 'screen');
     if (whole && v !== shv) {
@@ -248,8 +279,10 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement) {
     if (j.close && v === shv) closeSheet();
     if (j.toast) toast(j.toast);
     if (!whole) setTimeout(() => { if (cards) load(cards, true); load(cur.v, true); }, 300);
+    return true;
   } catch (e) {
-    toast(`${(e as Error).message}`, true);
+    toast(`${(e as Error).message}`, true, retry);
+    return false;
   } finally {
     b?.removeAttribute('aria-busy');
   }
