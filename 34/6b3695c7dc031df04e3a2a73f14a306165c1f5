@@ -1,0 +1,12 @@
+Decided: Swatinem/rust-cache@v2 after the toolchain in rust, test, ui and ui-webkit; it keys on Cargo.lock and the rustc version
+Because: "A cargo cache keyed on the lockfile and toolchain"
+Decided: only the rust job builds release; ui builds debug, the profile its own cargo tests compile, for its demo export
+Because: "Jobs that need the release binary share one build (an artifact, or one job)."
+Rejected: a release artifact from rust to ui — ui would wait for the whole rust job, and still compile debug for its tests
+Decided: clippy and the debug suite moved to a parallel test job run by cargo-nextest: the cache alone left ~11 min of serial test binaries
+Because: "a warm run is at least 30% shorter"
+Decided: [profile.release] thin LTO, codegen-units 1, strip adopted: perf gate medians 17-46% better, clean build +7%
+Because: "adopt it only if the gate's numbers improve and the build time is acceptable"
+Check: nextest ran 1497 tests (cargo test passed 1483); there are no doctests to lose
+Check: the stripped binary ad-hoc codesigns and runs; tests/self_update.rs passes with DROVER_LANE unset (the lane's own env sets its actor)
+Owner: CI finishes in about half the time: crates are cached, the release build happens once, and tests run in parallel.
