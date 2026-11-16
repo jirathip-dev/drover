@@ -64,3 +64,8 @@ drover-sys = { path = "crates/sys" }
 drover-core = { path = "crates/core" }
 drover-server = { path = "crates/server" }
 drover-service = { path = "crates/service" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
