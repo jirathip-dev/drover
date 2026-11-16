@@ -1,0 +1,6 @@
+Decided: merged origin/staging rather than rebasing, so the pushed branch history is never rewritten; the only conflict was the built web/dist/board.js, rebuilt from the merged web/src
+Decided: kept #1084's draft saving as is; the in-thread secret field is never drafted to storage
+Because: web/src/blocks.ts:276
+Rejected: a rebase on staging — it rewrites the pushed branch and needs a force-push, which lanes may not do
+Check: ci.yml carries both the #1088 thread WebKit step and #1084's page_drafts step; ui-webkit runs both
+Owner: brought up to date with the drafts change; nothing about the thread cards changed
