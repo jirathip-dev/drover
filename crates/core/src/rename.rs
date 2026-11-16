@@ -102,7 +102,8 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, (old, new): (&str, &s
     let after = Config::parse(&new_text)?;
     let (a, b): (toml::Table, toml::Table) = (text.parse()?, new_text.parse()?);
     ensure!(
-        a["fleet"].get(old) == b["fleet"].get(new) && after.fleet.contains_key(new),
+        a.get("fleet").and_then(|t| t.get(old)) == b.get("fleet").and_then(|t| t.get(new))
+            && after.fleet.contains_key(new),
         "fleet.toml: [fleet.{old}] did not move to [fleet.{new}] unchanged"
     );
     let mine: Vec<&Event> = events.iter().filter(|e| e.fleet == old).collect();

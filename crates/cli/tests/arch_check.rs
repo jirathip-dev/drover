@@ -659,3 +659,33 @@ fn the_pre_rename_folder_is_read_only_while_the_new_one_has_no_such_file() {
     let (code, out) = arch(&d, &[]);
     assert!(code != 0 && out.contains("parsing .drover/arch.toml"), "{out}");
 }
+
+#[test]
+fn the_repos_809_bans_fail_each_api_outside_its_one_module() {
+    let conf = repo_conf();
+    let bans = [
+        ("Command::new", "crates/core/src/runner.rs"),
+        ("std::process", "crates/core/src/runner.rs"),
+        ("thread::sleep", "crates/core/src/clock.rs"),
+        ("env::var", "crates/core/src/config.rs"),
+        ("SystemTime::now", "crates/core/src/clock.rs"),
+        ("Instant::now", "crates/core/src/clock.rs"),
+    ];
+    let body = |api: &str| format!("fn a() {{\n    let _ = {api}(\"x\");\n}}\n");
+    let own: Vec<(&str, String)> = bans.iter().map(|&(api, home)| (home, body(api))).collect();
+    let own: Vec<(&str, &str)> = own.iter().map(|(p, t)| (*p, t.as_str())).collect();
+    let d = committed("arch-809", &conf, &own);
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::create_dir_all(d.join("crates/server/src")).unwrap();
+    for (i, (api, _)) in bans.iter().enumerate() {
+        std::fs::write(d.join(format!("crates/server/src/f{i}.rs")), body(api)).unwrap();
+    }
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    for (i, (api, _)) in bans.iter().enumerate() {
+        let want = format!("crates/server/src/f{i}.rs:2: `{api}` is banned here: #809");
+        assert!(out.contains(&want), "{want}\n{out}");
+    }
+    assert!(out.contains(&format!("{} violations", bans.len())), "{out}");
+}
