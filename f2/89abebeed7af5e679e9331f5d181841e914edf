@@ -1,0 +1,7 @@
+Decided: merged origin/staging with #1086; its viewer, copy boxes, thread refs and attachments keep their behaviour, written to the bans
+Because: "no `any` (explicit or implicit), no non-null `!`, no `as` casts except `as const`"
+Decided: #1086's second `msg` helper became `card`, an instanceof check in place of its `as Element`; the existing `msg(e)` error helper stays
+Decided: chat.rs's attachment `add` writes through get_mut and Json::put, not `v[k]`
+Rejected: taking staging's blocks.ts and main.ts as written — the #809 lint refuses their `!` and `as`
+Check: the full cargo test run at this head exits 0 (215 suites); tsc, lint and build exit 0
+Owner: the branch now carries #1086's chat page features, written to the new rules
