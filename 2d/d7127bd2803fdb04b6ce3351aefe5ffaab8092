@@ -1,0 +1,10 @@
+Decided: the fleet card's done list is the fleet's `merged` events of the last 24 h, all of them, and the row's count is that list's length
+Because: "The count and the list come from the same `merged` events, so they always agree."
+Because: crates/server/src/serve.rs:2052
+Rejected: the old count from issue states that look done — it also counted closed issues, so it could disagree with a list of merges
+Decided: today stays the last 24 h the board already used, not a UTC calendar day
+Rejected: UTC midnight — for an owner at UTC+7 the list would empty at 7 am
+Decided: a merged issue's card is drawn from its done row, since merged issues are not queue rows
+Because: crates/server/src/screens.rs:1303
+Check: cooee_screens done_today_opens_todays_merged_events_and_a_row_opens_its_issue_card; parity_webkit done_today_opens_the_list_a_row_opens_its_issue_card_and_back_returns runs in ui-webkit only (no Playwright on the lane host)
+Owner: tap done today on a fleet card to see what merged today, then tap one to open its card
