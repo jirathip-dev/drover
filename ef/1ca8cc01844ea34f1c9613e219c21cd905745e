@@ -1,0 +1,9 @@
+Decided: bootstrap runs the bare profiles sync only when fleet.toml exists there, and prints its tick only then
+Because: "The ✓ prints only when that sync ran."
+Decided: acp_profiles keeps only roles place() can put on that host: no host pin elsewhere, no architect/design stage
+Because: "a role pinned to `host = \"main\"` is not checked on a remote host"
+Decided: hosts::sync appends the per-profile ACP syncs to its install job on shed-acp hosts
+Because: "bootstrap (and `hosts::sync`) runs `profiles sync --profile P --role R`"
+Rejected: changing the acp guard hint only — the profiles would still be missing there
+Check: remote_acp's new test fails at 711c2604 and passes at head; cloud.rs tests asserted the old shell string and the buggy tick
+Owner: a fresh cloud host now gets its lane profiles at bootstrap and is no longer marked unhealthy for roles that never run there
