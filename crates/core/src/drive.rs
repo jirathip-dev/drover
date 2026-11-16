@@ -900,7 +900,8 @@ fn one(
     ACTS.with_borrow_mut(BTreeMap::clear);
     ROOM.set((false, None));
     let t = crate::clock::instant();
-    let early = cfg.limits.max_parallel_spawns > 0 && KICK.get().is_none();
+    let one_slot = cfg.limits.max_parallel_spawns == 1 && crate::starts::fix_due(&working(&ctx.state)?, name);
+    let early = cfg.limits.max_parallel_spawns > 0 && KICK.get().is_none() && !one_slot;
     let res = if early {
         starts(ctx, cfg, r, out, name, fast)
     } else {
