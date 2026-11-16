@@ -19,7 +19,12 @@ pub fn name_ok(name: &str) -> bool {
 
 /// `<config dir>/secrets/<name>`, where a `secret:<name>` env is read from.
 pub fn path(ctx: &Ctx, name: &str) -> PathBuf {
-    ctx.config.with_file_name("secrets").join(name)
+    dir(ctx).join(name)
+}
+
+/// `<config dir>/secrets`, the folder every `secret:<name>` file is in.
+pub fn dir(ctx: &Ctx) -> PathBuf {
+    ctx.config.with_file_name("secrets")
 }
 
 /// The secret in file `p`, trimmed (None: no such file); refused `SECRET_FILE_OPEN` when group or others may read it.
@@ -90,8 +95,8 @@ pub fn settle(
         format!("secret {name} dismissed (by owner)"),
         format!("secret {name} set ✓ (by owner)"),
     ];
-    let line = &line[usize::from(value.is_some())];
-    let _ = orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false));
+    let line = if value.is_some() { &line[1] } else { &line[0] };
+    orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false)).ok();
     Ok(line.clone())
 }
 

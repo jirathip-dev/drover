@@ -5,7 +5,7 @@ use crate::api::{
     QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
 };
 use crate::config::{Config, Limits, Role};
-use crate::events::{age, append, working, Event, IssueState, States};
+use crate::events::{age, append, working, Event, IssueState, Json, States};
 use crate::gate::{gate, refused, Refusal};
 use crate::handover::Handover;
 use crate::host::{self, Host};
@@ -97,7 +97,11 @@ const FILES: &[(&str, &str, &[u8])] = &[
     ("apple-touch-icon-precomposed.png", "image/png", I180),
     ("favicon.ico", "image/png", I192),
 ];
-#[allow(long_running_const_eval)]
+#[expect(
+    long_running_const_eval,
+    clippy::indexing_slicing,
+    reason = "assets outgrow rustc's const-eval step budget"
+)]
 const VER: u32 = {
     let (mut h, mut k, mut i) = (0x811c_9dc5u32, 0, 0);
     while k < ASSETS.len() + FILES.len() {
@@ -110,7 +114,7 @@ const VER: u32 = {
             let w = if i + 4 <= b.len() {
                 u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
             } else {
-                b[i] as u32
+                u32::from_le_bytes([b[i], 0, 0, 0])
             };
             h = (h ^ w).wrapping_mul(0x0100_0193);
             i += if i + 4 <= b.len() { 4 } else { 1 };
@@ -124,49 +128,11 @@ type Auth = std::result::Result<devices::Device, String>;
 fn busy(a: &Auth) -> bool {
     a.as_ref().is_err_and(|w| w.starts_with("db error: "))
 }
-#[cfg(target_os = "macos")]
-fn queued(s: &TcpStream) -> i32 {
-    extern "C" {
-        fn getsockopt(fd: i32, level: i32, name: i32, value: *mut i32, len: *mut u32) -> i32;
-    }
-    let (mut n, mut len) = (0i32, 4u32);
-    // SAFETY: a live socket's fd and an int-sized out value with its length, as SO_NWRITE writes.
-    let rc = unsafe {
-        getsockopt(
-            std::os::fd::AsRawFd::as_raw_fd(s),
-            0xffff,
-            0x1024,
-            &raw mut n,
-            &raw mut len,
-        )
-    };
-    if rc == 0 {
-        n
-    } else {
-        0
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn queued(s: &TcpStream) -> i32 {
-    extern "C" {
-        fn ioctl(fd: i32, req: u64, ...) -> i32;
-    }
-    let mut n = 0i32;
-    // SAFETY: a live socket's fd and an int out value, as SIOCOUTQ writes.
-    let rc = unsafe { ioctl(std::os::fd::AsRawFd::as_raw_fd(s), 0x5411, &raw mut n) };
-    if rc == 0 {
-        n
-    } else {
-        0
-    }
-}
-
 fn sent(s: &mut TcpStream, mut b: &[u8], end: Instant) -> bool {
     while !b.is_empty() {
-        let left = end.saturating_duration_since(Instant::now());
+        let left = end.saturating_duration_since(drover_core::clock::instant());
         match s.set_write_timeout(Some(left)).and_then(|()| s.write(b)) {
-            Ok(n) if n > 0 => b = &b[n..],
+            Ok(n) if n > 0 => b = b.get(n..).unwrap_or_default(),
             _ => return false,
         }
     }
@@ -183,7 +149,10 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
     serve_with(ctx, r, l, read_only, None)
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "public API: the handed-over listener lives as long as the server"
+)]
 pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho: Option<&Handover>) -> Result<()> {
     devices::cooee_token(ctx)?;
     let addr = (!read_only)
@@ -200,7 +169,14 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         ..Server::new(ctx, r, addr).deferring()
     };
     STARTED.get_or_init(|| ctx.now);
-    started(ctx, ho.is_some_and(Handover::inherited));
+    started(
+        ctx,
+        if ho.is_some_and(Handover::inherited) {
+            "handover"
+        } else {
+            "cold"
+        },
+    );
     for _ in 0..2 {
         s.warm();
         s.refresh(crate::now());
@@ -224,22 +200,22 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             host::window(&ctx.state, &mut hs);
             *lock(&h) = hs;
             s.r.sampled(crate::now());
-            std::thread::sleep(Duration::from_secs(limits().serve_host_secs.max(1)));
+            drover_core::clock::sleep(Duration::from_secs(limits().serve_host_secs.max(1)));
         });
         for src in fresh::Source::ALL {
             sc.spawn(move || loop {
                 s.r.refresh(src, src.every(&limits()), crate::now());
-                std::thread::sleep(Duration::from_secs(1));
+                drover_core::clock::sleep(Duration::from_secs(1));
             });
         }
         sc.spawn(move || loop {
             s.slo(crate::now());
-            std::thread::sleep(Duration::from_secs(60));
+            drover_core::clock::sleep(Duration::from_secs(60));
         });
         w.tick();
         sc.spawn(move || loop {
             w.tick();
-            std::thread::sleep(Duration::from_secs(1));
+            drover_core::clock::sleep(Duration::from_secs(1));
         });
         sc.spawn(move || {
             for t in rx {
@@ -278,7 +254,8 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
     Ok(())
 }
 
-fn started(ctx: &Ctx, handover: bool) {
+/// This start (`cold`, `handover`; `failed`) in `serve-starts` (its last day kept) for `drover check`.
+pub fn started(ctx: &Ctx, how: &str) {
     let f = ctx.state.with_file_name("serve-starts");
     let was = std::fs::read_to_string(&f).unwrap_or_default();
     let day = |l: &&str| {
@@ -288,7 +265,7 @@ fn started(ctx: &Ctx, handover: bool) {
             .is_some_and(|t| t + 86_400 >= ctx.now)
     };
     let mut keep: Vec<&str> = was.lines().filter(day).collect();
-    let now = format!("{} {}", ctx.now, ["cold", "handover"][usize::from(handover)]);
+    let now = format!("{} {how}", ctx.now);
     keep.push(&now);
     drop(std::fs::write(f, keep.join("\n") + "\n"));
 }
@@ -389,7 +366,7 @@ fn window<T: std::fmt::Debug>(v: &[T], n: usize, kb: usize) -> &[T] {
         size += format!("{x:?}").len();
         k += usize::from(k == 0 || size <= kb << 10);
     }
-    &v[v.len() - k..]
+    v.get(v.len() - k..).unwrap_or_default()
 }
 
 pub struct Server<'a> {
@@ -449,8 +426,8 @@ fn client(head: &str) -> &str {
 fn form(s: &str) -> BTreeMap<String, String> {
     let dec = |v: &str| {
         let (b, mut out, mut i) = (v.as_bytes(), vec![], 0);
-        while i < b.len() {
-            match (b[i], v.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok())) {
+        while let Some(&c) = b.get(i) {
+            match (c, v.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok())) {
                 (b'%', Some(x)) => (out.push(x), i += 2).1,
                 (b'+', _) => out.push(b' '),
                 (c, _) => out.push(c),
@@ -469,7 +446,7 @@ fn enc(s: &str) -> String {
     s.bytes()
         .map(|b| {
             if b.is_ascii_alphanumeric() {
-                (b as char).to_string()
+                char::from(b).to_string()
             } else {
                 format!("%{b:02X}")
             }
@@ -662,7 +639,8 @@ const COATS: &[(&str, &str, &str, bool)] = &[
 
 /// The coat as CSS vars, stable per name.
 pub fn coat(name: &str) -> String {
-    let (c, d, m, blaze) = COATS[usize::from_str_radix(&devices::sha256(name.as_bytes())[..2], 16).unwrap_or(0) % 8];
+    let i = usize::from_str_radix(&devices::sha256(name.as_bytes())[..2], 16).unwrap_or(0) % 8;
+    let (c, d, m, blaze) = COATS.get(i).copied().unwrap_or_default();
     format!(
         "--c:#{c};--d:#{d};--m:#{m};--b:{}",
         if blaze { "#efe7dc" } else { "transparent" }
@@ -793,7 +771,7 @@ impl<'a> Server<'a> {
         loop {
             let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
             if let Some(i) = end.filter(|_| want.is_none()) {
-                let h = String::from_utf8_lossy(&buf[..i]);
+                let h = String::from_utf8_lossy(buf.get(..i).unwrap_or_default());
                 let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
                 let most = if h.starts_with("POST /thread ") {
                     140 << 20
@@ -809,7 +787,7 @@ impl<'a> Server<'a> {
             }
             match s.read(&mut chunk)? {
                 0 => break,
-                n => buf.extend_from_slice(&chunk[..n]),
+                n => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
             }
         }
         let req = String::from_utf8_lossy(&buf).replacen(
@@ -820,7 +798,10 @@ impl<'a> Server<'a> {
             ),
             1,
         );
-        let (t0, target) = (Instant::now(), req.split_whitespace().nth(1).unwrap_or_default());
+        let (t0, target) = (
+            drover_core::clock::instant(),
+            req.split_whitespace().nth(1).unwrap_or_default(),
+        );
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let mut clients = lock(&self.clients);
         clients.retain(|c| c.0.send(String::new()).is_ok());
@@ -874,9 +855,9 @@ impl<'a> Server<'a> {
             lock(&self.timing).add(crate::now(), "/live", false, ms);
             std::thread::spawn(move || {
                 let mut missed = 0;
-                while sent(&mut s, msg.as_bytes(), Instant::now() + 2 * beat) {
+                while sent(&mut s, msg.as_bytes(), drover_core::clock::instant() + 2 * beat) {
                     let _ = host.then(|| std::fs::write(st.with_file_name("host-watch.at"), crate::now().to_string()));
-                    let t = Instant::now();
+                    let t = drover_core::clock::instant();
                     msg = loop {
                         let _ = watch.as_ref().map(|f| std::fs::write(f, crate::now().to_string()));
                         match rx.recv_timeout(Duration::from_secs(1)) {
@@ -897,7 +878,7 @@ impl<'a> Server<'a> {
                                 return
                             }
                             _ if t.elapsed() >= beat => {
-                                missed = if queued(&s) > 0 { missed + 1 } else { 0 };
+                                missed = if drover_sys::unsent(&s) > 0 { missed + 1 } else { 0 };
                                 if missed >= 2 {
                                     return;
                                 }
@@ -1007,7 +988,7 @@ impl<'a> Server<'a> {
             let msg = format!("id: {}\nevent: queue\ndata: {}\n\n", w.seen.unwrap_or(0), json!(q));
             lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
         }
-        for paired in [false, true].into_iter().filter(|p| [anon, owner][usize::from(*p)]) {
+        for paired in [false, true].into_iter().filter(|p| if *p { owner } else { anon }) {
             for (id, j) in self.parts(at, paired) {
                 let h = hash(&j.replace(&format!("\"now\":{now},"), ""));
                 if w.frags.insert((paired, id), h).is_some_and(|o| o != h) {
@@ -1049,7 +1030,7 @@ impl<'a> Server<'a> {
     }
 
     fn reply(&self, req: &str, now: u64) -> Vec<u8> {
-        let t = Instant::now();
+        let t = drover_core::clock::instant();
         let res = if req.starts_with("GET ") {
             crate::runner::request(|| self.route(req, now))
         } else {
@@ -1137,7 +1118,7 @@ impl<'a> Server<'a> {
             ),
             ("GET", p) if p.starts_with("/themes/") => match p[8..].split_once('/').filter(|(n, f)| !n.is_empty() && THEME.contains(f)) {
                 Some((n, f)) => theme(ctx, n, f).0.map_or(("404 Not Found", "text/plain", text("not in this theme\n")), |b| {
-                    ("200 OK", [SVG, JSON, PNG][usize::from(f.ends_with("json")) + 2 * usize::from(f.ends_with("png"))], b)
+                    ("200 OK", match (f.ends_with("json"), f.ends_with("png")) { (_, true) => PNG, (true, _) => JSON, _ => SVG }, b)
                 }),
                 None => ("404 Not Found", "text/plain", text("not a theme file\n")),
             },
@@ -1155,8 +1136,8 @@ impl<'a> Server<'a> {
                 let ask = |e: &Event| crate::design::is_ask(e) && e.fleet == f && e.issue == Some(n) && q.is_none_or(|q| e.str("id") == Some(q));
                 let ev = crate::events::since(&ctx.state, &["needs-decision", "design-review"], 0).unwrap_or_default();
                 let k = ev.iter().rposition(ask);
-                let at = k.and_then(|k| chat::files_of(&ev[k]).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
-                let sha = k.filter(|_| q.is_some()).and_then(|k| ev[..k].iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
+                let at = k.and_then(|k| chat::files_of(ev.get(k)?).nth(i.parse().ok()?)?.at("path").as_str().map(String::from));
+                let sha = k.filter(|_| q.is_some()).and_then(|k| ev.get(..k)?.iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
                 self.round_file(sha, at, "no such design file\n")
             }
             ("GET", p) if p.starts_with("/shot/") => {
@@ -1260,7 +1241,7 @@ impl<'a> Server<'a> {
         }
     }
 
-    #[allow(clippy::unused_self)]
+    #[expect(clippy::unused_self, reason = "a method so every route reads `self.auth(..)` alike")]
     fn auth<'c>(&self, ctx: &Ctx, head: &str, a: &'c OnceCell<Auth>) -> &'c Auth {
         a.get_or_init(|| devices::check(ctx, header(head, "cookie").unwrap_or_default()))
     }
@@ -1419,7 +1400,7 @@ impl<'a> Server<'a> {
         };
         let all: Vec<String> = text.lines().map(lanes::mask).collect();
         let end = all.len().saturating_sub(before);
-        let page = window(&all[..end], lines, 32);
+        let page = window(all.get(..end).unwrap_or_default(), lines, 32);
         let Some(l) = l.filter(|l| l.session.is_some()) else {
             return serde_json::to_string(&Chat {
                 lines: page.to_vec(),
@@ -1556,7 +1537,7 @@ impl<'a> Server<'a> {
             "bqueue" => {
                 let ns: Vec<u64> = g("issues").split(',').filter_map(|n| n.trim().parse().ok()).collect();
                 let mut d = queue::op("add", &ns, false, None, None, None);
-                d["check"] = json!(true);
+                d.put("check", json!(true));
                 crate::queue_change(ctx, &Config::kept(ctx)?, fleet, d, Some("web"))? + " (needs-check)"
             }
             "unpair" => {
@@ -1614,14 +1595,15 @@ impl<'a> Server<'a> {
             .map(|(n, j)| {
                 (
                     n,
-                    serde_json::from_slice(&j).map_or(json!(null), |t: serde_json::Value| t["scheme"].clone()),
+                    serde_json::from_slice(&j).map_or(json!(null), |t: serde_json::Value| t.at("scheme").clone()),
                 )
             })
             .collect();
         let block = |want: &serde_json::Value| -> Result<String> {
             let b = SCHEMES.iter().find(|s| *want == s.0).unwrap_or(&SCHEMES[0]);
             let b: serde_json::Value = serde_json::from_slice(b.1)?;
-            let tokens = b["tokens"]
+            let tokens = b
+                .at("tokens")
                 .as_object()
                 .into_iter()
                 .flatten()
@@ -1629,10 +1611,10 @@ impl<'a> Server<'a> {
             Ok(format!(
                 ":root{{{}color-scheme:{}}}",
                 tokens.collect::<String>(),
-                b["color-scheme"].as_str().unwrap_or("dark")
+                b.at("color-scheme").as_str().unwrap_or("dark")
             ))
         };
-        let first = match &def[name.as_str()] {
+        let first = match def.get(name.as_str()).unwrap_or(&serde_json::Value::Null) {
             d @ serde_json::Value::Object(_) => {
                 format!(
                     "{}@media(prefers-color-scheme:dark){{{}}}",
@@ -1722,7 +1704,7 @@ impl<'a> Server<'a> {
                 .iter()
                 .rev()
                 .find(|e| ["needs-human", "extend-failed"].iter().any(|k| e.is(k, f, n)));
-            let m = pr["mergeable"].as_str().unwrap_or("?");
+            let m = pr.at("mergeable").as_str().unwrap_or("?");
             let pass = s.verdicts.last().filter(|v| v.1 == "PASS").map(|v| v.0.clone());
             NeedIssue {
                 fleet: f.clone(),
@@ -1733,7 +1715,7 @@ impl<'a> Server<'a> {
                 why: why.and_then(|e| e.str("reason")).unwrap_or("gate").into(),
                 stale: pass
                     .as_ref()
-                    .is_some_and(|sha| pr["headRefOid"].as_str() != Some(sha.as_str())),
+                    .is_some_and(|sha| pr.at("headRefOid").as_str() != Some(sha.as_str())),
                 pass,
                 fail: crate::events::finding(events, f, n).unwrap_or_default().to_string(),
                 pr: pr_data(ctx, fc, f, n, None),
@@ -1849,7 +1831,7 @@ impl<'a> Server<'a> {
                 let lane = s.and_then(|s| s.lane.as_deref()).unwrap_or_default();
                 let on = ls.iter().find(|l| !lane.is_empty() && l.name == lane);
                 let pr = gh::cached_pr(ctx, f, n);
-                let head = pr["headRefOid"].as_str().unwrap_or_default();
+                let head = pr.at("headRefOid").as_str().unwrap_or_default();
                 let mut seen = BTreeSet::new();
                 let of = crate::events::of_issue(events, f, n);
                 let spawns = of.iter().rev().filter(|e| e.kind == "spawn");
@@ -1901,15 +1883,15 @@ impl<'a> Server<'a> {
                         tone: tone(state).into(),
                         age: ago(now, s.map_or(0, |s| s.last_ts)),
                         t: s.map_or(now, |s| s.last_ts),
-                        act: act(["", "update"][usize::from(up)], state).into(),
-                        grow: stage(state, act(["", "update"][usize::from(up)], state)).into(),
+                        act: act(if up { "update" } else { "" }, state).into(),
+                        grow: stage(state, act(if up { "update" } else { "" }, state)).into(),
                         coat: if lane.is_empty() {
                             String::new()
                         } else {
                             coat(lane).replace("--", "--r")
                         },
                         queued: k.is_some(),
-                        check: k.is_some_and(|k| q[k].check),
+                        check: k.and_then(|k| q.get(k)).is_some_and(|x| x.check),
                         groups: queue::groups(&q, events, fc, f, n)
                             .iter()
                             .map(|g| g.name.clone())
@@ -1926,7 +1908,7 @@ impl<'a> Server<'a> {
                         ask: ask.map(v1::ask),
                         open,
                         mv,
-                        up: k.filter(|&k| mv && k > 0).map(|k| q[k - 1].issue),
+                        up: k.filter(|&k| mv && k > 0).and_then(|k| q.get(k - 1)).map(|x| x.issue),
                         down: k.filter(|_| mv).and_then(|k| q.get(k + 1)).map(|x| x.issue),
                         lanes: qls,
                         runtime: on.map(|l| l.runtime.clone()).unwrap_or_default(),
@@ -1954,11 +1936,11 @@ impl<'a> Server<'a> {
             };
             let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
             let mut open: BTreeMap<String, BacklogIssue> =
-                serde_json::from_value(bl["issues"].clone()).unwrap_or_default();
+                serde_json::from_value(bl.at("issues").clone()).unwrap_or_default();
             open.retain(|n, _| n.parse().is_ok_and(|n| !queued(n) && !st.contains_key(&(f.clone(), n))));
-            let backlog = bl["issues"].is_object().then(|| Backlog {
+            let backlog = bl.at("issues").is_object().then(|| Backlog {
                 issues: open,
-                ago: age(now.saturating_sub(bl["ts"].as_u64().unwrap_or(now))),
+                ago: age(now.saturating_sub(bl.at("ts").as_u64().unwrap_or(now))),
             });
             let lanes: Vec<&&IssueState> = mine.iter().filter(|s| s.active_lane().is_some()).collect();
             let plural = |n: usize| if n == 1 { "" } else { "s" };
@@ -2021,8 +2003,8 @@ impl<'a> Server<'a> {
                     .push(format!("landing paused: {} red since {at}", fc.integration));
             }
             let cap: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "cap", f, 0)).unwrap_or_default();
-            let left = cap["cap"].as_i64().zip(cap["lines"].as_i64()).map(|(c, n)| c - n);
-            if let Some(l) = left.filter(|l| *l < cap["warn"].as_i64().unwrap_or(500)) {
+            let left = cap.at("cap").as_i64().zip(cap.at("lines").as_i64()).map(|(c, n)| c - n);
+            if let Some(l) = left.filter(|l| *l < cap.at("warn").as_i64().unwrap_or(500)) {
                 card.notes
                     .push(format!("cap-near: {l} lines of headroom on {}", fc.integration));
             }
@@ -2324,7 +2306,7 @@ impl<'a> Server<'a> {
             let (k, v) = sl.split_once(' ').unwrap_or_default();
             d.spawns = Some(Row {
                 name: k.into(),
-                tone: ["g", "a"][usize::from(sl.contains(" · stale"))].into(),
+                tone: if sl.contains(" · stale") { "a" } else { "g" }.into(),
                 detail: v.into(),
                 ..Row::default()
             });
@@ -2341,7 +2323,7 @@ impl<'a> Server<'a> {
         let name = active(ctx);
         let err = theme(ctx, &name, "theme.json").1.err();
         d.theme = Row {
-            tone: ["g", "a"][usize::from(err.is_some())].into(),
+            tone: if err.is_some() { "a" } else { "g" }.into(),
             detail: err.unwrap_or_default(),
             name,
             ..Row::default()
@@ -2490,15 +2472,15 @@ impl<'a> Server<'a> {
             let inline = self.export.is_some();
             let row = |k: &str, key: &str, t: &str, v: Cell, l: Option<f64>| {
                 let sr = |k: &str| crate::hosts::series(&hist, &name, k, now, false);
-                let x = [String::new(), crate::hosts::chart(&hist, &name, key, now)];
+                let [none, chart] = [String::new(), crate::hosts::chart(&hist, &name, key, now)];
                 Cell {
                     k: k.into(),
                     t: t.into(),
                     key: key.into(),
                     s: sr(key),
-                    p: [String::new(), sr("pressure")][usize::from(key == "mem")].clone(),
+                    p: if key == "mem" { sr("pressure") } else { String::new() },
                     l,
-                    x: x[usize::from(inline)].clone(),
+                    x: if inline { chart } else { none },
                     ..v
                 }
             };
@@ -2526,7 +2508,7 @@ impl<'a> Server<'a> {
                     bar.n = gauge(u / n).n;
                 }
                 let (t, b) = (
-                    ["g", "a", "r"]["gar".find(bar.t.as_str()).unwrap_or(0)],
+                    "gar".find(bar.t.as_str()).and_then(|i| "gar".get(i..=i)).unwrap_or("g"),
                     format!("{pre}{x:.p$}{unit}"),
                 );
                 (
@@ -2564,11 +2546,12 @@ impl<'a> Server<'a> {
                 size(s.mem_total, 0).into_iter().chain(pr).collect(),
             );
             let (mt, mv) = val(s.mem, s.mem, lim.min_free_mem_gb, used(s.mem, s.mem_total), mm);
-            let mt = ["g", "a", "r"][[mt, tone(pw)]
+            let mt = [mt, tone(pw)]
                 .map(|t| "gar".find(t).unwrap_or(0))
                 .into_iter()
                 .max()
-                .unwrap_or(0)];
+                .and_then(|i| "gar".get(i..=i))
+                .unwrap_or("g");
             let dd = (
                 0,
                 "free ",
@@ -2606,14 +2589,18 @@ impl<'a> Server<'a> {
                 ));
             }
             rows.extend(cloud.map(|c| plain("cloud", &c[1], None, c[2].clone(), vec![])));
-            let ls = [lanes.join(" · "), "none".into()][usize::from(lanes.is_empty())].clone();
+            let ls = if lanes.is_empty() {
+                "none".into()
+            } else {
+                lanes.join(" · ")
+            };
             let ln = plain("", "", Some(lanes.len().to_string()), String::new(), vec![ls]);
             rows.push(row("lanes", "lanes", grey("g"), ln, None));
             let tags = h.map_or(s.tags.clone(), |h| crate::hosts::tags(h, Some(&s))).join(" ");
             rows.push(plain("tags", "m", None, String::new(), vec![tags]));
             let rank = |t: &str| "gar".find(t).unwrap_or(0);
             let worst = [lt, st, mt, dt].map(rank).into_iter().max().unwrap_or(0);
-            let dot = grey(["g", "a", "r"][worst]);
+            let dot = grey("gar".get(worst..=worst).unwrap_or("g"));
             let why: Vec<String> = [
                 (lt, "load", "limit"),
                 (st, "swap-out", "limit"),
@@ -2625,7 +2612,10 @@ impl<'a> Server<'a> {
             .map(|(_, k, l)| {
                 format!(
                     "{k} {} {l}",
-                    ["near", if l == "floor" { "under" } else { "over" }][worst - 1]
+                    ["near", if l == "floor" { "under" } else { "over" }]
+                        .get(worst - 1)
+                        .copied()
+                        .unwrap_or_default()
                 )
             })
             .collect();
@@ -2641,7 +2631,7 @@ impl<'a> Server<'a> {
                 rows,
                 to: h
                     .filter(|_| !(main && on))
-                    .map(|_| ["on", "off"][usize::from(on)].into()),
+                    .map(|_| if on { "off" } else { "on" }.into()),
                 lanes: lanes.len(),
                 setups: crate::setup::all(cfg).into_iter().map(|(s, _)| s).collect(),
                 name,
@@ -2652,7 +2642,8 @@ impl<'a> Server<'a> {
 }
 
 fn gauge(x: f64) -> Bar {
-    let t = ["g", "a", "r"][usize::from(x >= 0.8) + usize::from(x > 1.0)];
+    let i = usize::from(x >= 0.8) + usize::from(x > 1.0);
+    let t = "gar".get(i..=i).unwrap_or("g");
     let n = (1..=12).filter(|i| f64::from(*i) <= x * 12.0 + 0.5).count();
     let pct = Some(x).filter(|x| *x > 1.0).map(|x| format!("{:.0}", x * 100.0));
     Bar {
@@ -2689,7 +2680,7 @@ pub fn in_words(e: &Event, serial: &str) -> (&'static str, &'static str, String)
     let (why, then) = body.split_once("; ").unwrap_or((body, ""));
     let busy: Vec<_> = raw.split(' ').filter(|w| w.starts_with('#')).collect();
     let noun = format!("serial ({serial})").replace("serial (serial)", "serial");
-    let slots = format!("{} {noun} slot{}", busy.len(), ["s", ""][usize::from(busy.len() == 1)]);
+    let slots = format!("{} {noun} slot{}", busy.len(), if busy.len() == 1 { "" } else { "s" });
     let code = match e.str("code") {
         Some("EXIT") if raw.starts_with("exit 4:") => "EXIT4".into(),
         Some(c) => c.to_string(),
@@ -2699,9 +2690,12 @@ pub fn in_words(e: &Event, serial: &str) -> (&'static str, &'static str, String)
     let row = |l: &&str| l.split('|').next().unwrap_or_default().split(' ').any(|c| c == code) || ok(l);
     let w = WORDS.lines().find(row).unwrap_or("|r|failed|{raw}");
     let w: Vec<_> = w.split('|').collect();
-    let x = w[3].replace("{why}", why).replace("{then}", then).replace("{n}", &n);
+    let &[_, t, k, x, ..] = w.as_slice() else {
+        return ("r", "failed", raw.into());
+    };
+    let x = x.replace("{why}", why).replace("{then}", then).replace("{n}", &n);
     let x = x.replace("{busy}", &busy.join(", ")).replace("{slots}", &slots);
-    (w[1], w[2], x.replace("{raw}", raw))
+    (t, k, x.replace("{raw}", raw))
 }
 
 #[derive(Default)]
@@ -2729,7 +2723,7 @@ impl Runner for Canned {
         let mut stdout = String::new();
         for q in input.lines().filter_map(|l| serde_json::from_str::<Request>(l).ok()) {
             let id = q.id.clone().unwrap_or_default();
-            let key = format!("shed {} {}", q.method, q.params["name"].as_str().unwrap_or_default());
+            let key = format!("shed {} {}", q.method, q.params.at("name").as_str().unwrap_or_default());
             let got = match q.method.as_str() {
                 "hello" => serde_json::to_value(Hello::ours()).ok(),
                 _ => self.0.get(key.trim_end()).and_then(|v| serde_json::from_str(v).ok()),
@@ -2820,7 +2814,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
                 && t.lines().all(|l| {
                     l.chars().count() <= 8
                         && l.chars()
-                            .all(|c| matches!(c as u32, 0x20..=0x7e | 0xa0..=0x10ff | 0x1160..=0x2e7f))
+                            .all(|c| matches!(u32::from(c), 0x20..=0x7e | 0xa0..=0x10ff | 0x1160..=0x2e7f))
                 })
         })
     };
@@ -2953,25 +2947,34 @@ pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json:
     use serde_json::Value;
     let mut t = farm.clone();
     for (k, v) in own.as_object().into_iter().flatten() {
-        t[k] = match (&t[k], v) {
+        let x = match (t.at(k), v) {
             (Value::Object(f), Value::Object(o)) => Value::Object(f.clone().into_iter().chain(o.clone()).collect()),
             _ => v.clone(),
         };
+        t.put(k, x);
     }
-    let pick = |k: &str, x: &str| own[k][x].as_str().map(Value::from);
+    let pick = |k: &str, x: &str| own.at(k).at(x).as_str().map(Value::from);
+    let (mut acts, mut rows) = (t.at("actions").clone(), t.at("row_sprites").clone());
     for (a, pose) in ACTS {
-        t["actions"][a] = pick("actions", a)
+        let x = pick("actions", a)
             .or_else(|| pick("poses", pose))
-            .unwrap_or_else(|| farm["actions"][a].clone());
-        if t["row_sprites"] != false {
-            t["row_sprites"][a] = pick("row_sprites", a).unwrap_or_else(|| t["actions"][a].clone());
+            .unwrap_or_else(|| farm.at("actions").at(a).clone());
+        acts.put(a, x);
+        if rows != false {
+            rows.put(a, pick("row_sprites", a).unwrap_or_else(|| acts.at(a).clone()));
         }
     }
-    t["words"] = own.get("words").cloned().unwrap_or_else(|| json!({}));
-    t["scheme"] = own.get("scheme").cloned().unwrap_or_else(|| "github-dark".into());
-    t["loading"] = own.get("loading").cloned().unwrap_or_default();
-    t["rail"]["item"] = pick("rail", "item").unwrap_or_else(|| t["actions"]["idle"].clone());
-    t["rail"]["needs"] = pick("rail", "needs").unwrap_or_else(|| t["rail"]["item"].clone());
+    let (mut rail, item) = (
+        t.at("rail").clone(),
+        pick("rail", "item").unwrap_or_else(|| acts.at("idle").clone()),
+    );
+    let needs = pick("rail", "needs").unwrap_or_else(|| item.clone());
+    rail.put("item", item).put("needs", needs);
+    t.put("actions", acts).put("row_sprites", rows);
+    t.put("words", own.get("words").cloned().unwrap_or_else(|| json!({})));
+    t.put("scheme", own.get("scheme").cloned().unwrap_or("github-dark".into()));
+    t.put("loading", own.get("loading").cloned().unwrap_or_default());
+    t.put("rail", rail);
     t
 }
 
@@ -3084,7 +3087,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
 
 fn pr_data(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64, s: Option<&IssueState>) -> PrLine {
     let pr = gh::cached_pr(ctx, fleet, issue);
-    let n = pr["number"].as_u64();
+    let n = pr.at("number").as_u64();
     let v = s.and_then(|s| s.verdicts.last().map(|v| (s, v.1.as_str())));
     let req = fc.map(|c| c.required_checks.as_slice()).unwrap_or_default();
     PrLine {
@@ -3092,7 +3095,7 @@ fn pr_data(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
         run: (n.is_none() && fc.is_some())
             .then(|| gh::cached_run(ctx, fleet, issue))
             .flatten(),
-        ci: (!pr.is_null()).then(|| gh::ci(&gh::required(&pr["statusCheckRollup"], req)).into()),
+        ci: (!pr.is_null()).then(|| gh::ci(&gh::required(pr.at("statusCheckRollup"), req)).into()),
         verdict: v.map(|v| v.1.into()),
         vtone: v.map_or("", |v| tone(v.1)).into(),
         rounds: s.map_or(0, |s| s.rounds),
@@ -3105,9 +3108,10 @@ fn pr_data(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
 fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     let spec = gh::cached_title(ctx, fleet, issue);
     let pr = gh::cached_pr(ctx, fleet, issue);
-    let pr = pr["number"]
+    let pr = pr
+        .at("number")
         .as_u64()
-        .zip(pr["title"].as_str())
+        .zip(pr.at("title").as_str())
         .filter(|p| Some(p.1) != spec.as_deref())
         .map(|(n, p)| format!("PR #{n} · {p}"));
     let t = [spec, pr].into_iter().flatten().collect::<Vec<_>>().join(" · ");
@@ -3324,7 +3328,7 @@ fn stages(fc: &crate::config::Fleet, s: &IssueState, head: &str) -> Vec<Stage> {
             },
             k: k.into(),
             g: g.into(),
-            at: i.cmp(&pos) as i8,
+            at: i8::from(i > pos) - i8::from(i < pos),
             ok: ok && i != pos,
         }
     };

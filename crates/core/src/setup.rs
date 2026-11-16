@@ -65,7 +65,7 @@ pub fn open<'e>(events: &'e [Event], pane: &str) -> Option<&'e Event> {
     let i = events
         .iter()
         .rposition(|e| e.kind.starts_with("setup") && e.str("pane") == Some(pane))?;
-    Some(&events[i]).filter(|e| e.kind == "setup")
+    events.get(i).filter(|e| e.kind == "setup")
 }
 
 /// Close setup `e`'s terminal (its scrollback goes with it) and log `setup-closed`.
@@ -80,7 +80,7 @@ pub fn close(ctx: &Ctx, r: &dyn Runner, e: &Event, why: &str) -> Result<()> {
 pub fn reap(ctx: &Ctx, r: &dyn Runner, events: &[Event]) -> Result<()> {
     for e in events.iter().filter(|e| e.kind == "setup" && ctx.now >= e.ts + TIMEOUT) {
         if open(events, e.str("pane").unwrap_or_default()).is_some_and(|o| o.ts == e.ts) {
-            let _ = close(ctx, r, e, "timeout");
+            close(ctx, r, e, "timeout").ok();
         }
     }
     Ok(())
@@ -93,7 +93,7 @@ pub fn screen(ctx: &Ctx, r: &dyn Runner, pane: &str) -> Result<Value> {
     let live = ctx.now < e.ts + TIMEOUT;
     let o = term::exec(&On::of(r, Some(e)), &term::read_argv(pane))?;
     if !live || term::failed_with(&o, "pane_not_found") {
-        return close(ctx, r, e, ["timeout", "exited"][usize::from(live)]).map(|()| shut);
+        return close(ctx, r, e, if live { "exited" } else { "timeout" }).map(|()| shut);
     }
     anyhow::ensure!(o.code == 0, "could not read the sign-in pane; retrying");
     let s = o.stdout;
@@ -104,8 +104,9 @@ pub fn screen(ctx: &Ctx, r: &dyn Runner, pane: &str) -> Result<Value> {
             .split(' ')
             .next()
             .unwrap_or_default();
-        let more = ls[i + 1..]
+        let more = ls
             .iter()
+            .skip(i + 1)
             .take_while(|n| l.ends_with(u) && !n.is_empty() && !n.trim().contains(' '));
         urls.push(more.fold(u.to_string(), |u, n| u + n.trim()));
     }

@@ -133,9 +133,13 @@ pub fn skip(ctx: &Ctx, cfg: &Config, sp: &Event) -> Option<&'static str> {
         set
     });
     if hung != open.contains(wt) {
-        let (kind, how) = [("root-answers", "answers again"), ("root-hung", "not answering")][usize::from(hung)];
+        let (kind, how) = if hung {
+            ("root-hung", "not answering")
+        } else {
+            ("root-answers", "answers again")
+        };
         let d = json!({"worktree": wt, "under": root, "reason": format!("lane worktree {wt} {how}")});
-        let _ = emit(&ctx.state, cfg, Event::new(ctx.now, &sp.fleet, sp.issue, kind, d));
+        emit(&ctx.state, cfg, Event::new(ctx.now, &sp.fleet, sp.issue, kind, d)).ok();
         let _ = if hung { open.insert(wt.into()) } else { open.remove(wt) };
     }
     hung.then_some("root-hung")
@@ -187,7 +191,7 @@ pub fn eject(
         .as_deref()
         .map_or(ctx.worktrees.clone(), |h| under(DEFAULT, Some(h)));
     let all = listed(cfg, name, home.as_deref(), &def);
-    let root = root.map_or(all[0].clone(), |p| under(p, home.as_deref()));
+    let root = root.map_or(all.first().cloned().unwrap_or_default(), |p| under(p, home.as_deref()));
     if !all.contains(&root) || all.len() < 2 {
         return crate::gate::refused(
             "BAD_VALUE",
@@ -291,7 +295,7 @@ fn restart(
             );
             let git = |a: &[&str]| ok(&on, "git", &[&["-C", wt][..], a].concat());
             if hung {
-                let _ = crate::term::close(ctx, &on, e.str("pane").unwrap_or_default());
+                crate::term::close(ctx, &on, e.str("pane").unwrap_or_default()).ok();
                 forget(Path::new(&local), Path::new(wt), e.str("branch").unwrap_or_default())?;
                 writeln!(out, "not saved {wt}: root hung, unsaved work stays on the disk")?;
                 lost.push(format!("{agent}: not saved, root hung"));
@@ -309,7 +313,7 @@ fn restart(
                 lost.push(format!("{agent}: uncommitted work, {} commit(s) not pushed", n.trim()));
                 continue;
             }
-            let _ = crate::term::close(ctx, &on, e.str("pane").unwrap_or_default());
+            crate::term::close(ctx, &on, e.str("pane").unwrap_or_default()).ok();
             let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?;
             if crate::spawn::changes(&git(&["status", "--porcelain"])?) > 0 || ahead.trim() != "0" {
                 let w = crate::check::wip_branch(ctx, &on, agent);
@@ -326,7 +330,7 @@ fn restart(
             ok(&on, "git", &["-C", &local, "worktree", "remove", "--force", wt])?;
         }
         if !hung {
-            let _ = ok(&on, "git", &["-C", &local, "worktree", "prune"]);
+            ok(&on, "git", &["-C", &local, "worktree", "prune"]).ok();
         }
         let o = crate::spawn::Opts {
             supersede: true,

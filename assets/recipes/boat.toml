@@ -22,6 +22,9 @@ destroy = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exi
 # #255: `hosts snapshot` saves a bootstrapped host; `create_from` makes a new one from that snapshot, ready to use.
 snapshot = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exit 1; }; boat snapshot "$i" drover-{name} --no-update'''
 create_from = "boat new --type {size} --name {name} --from drover-{name} --no-auto-stop --no-update >/dev/null"
+# #1149: a new sandbox refuses `identity` over plain ssh until one `boat ssh` runs (a wait doesn't help), so drover
+# runs `ready` once after `create` / `create_from` says running, before bootstrap's probe.
+ready = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exit 1; }; boat ssh "$i" --no-update true'''
 
 # #537: `[ci_runners]` VMs (boat.dev's HTTP API, docs.boat.dev; check them there). `{vm}` is a VM id; `{size}`,
 # `{ttl}` (seconds, 0 = none), `{snapshots}` and `{service}` (the runner unit) come from `[ci_runners]`.

@@ -1,6 +1,6 @@
 use crate::config::{expand, Config};
 use crate::devices::save;
-
+use crate::events::Json;
 use crate::runner::{argv, Runner};
 use crate::Ctx;
 use serde::de::DeserializeOwned;
@@ -54,7 +54,7 @@ pub struct Balance {
 /// The first `balance_infos` entry of `DeepSeek`'s `/user/balance` reply.
 pub fn parse_balance(body: &str, ts: u64) -> Option<Balance> {
     let v: Value = serde_json::from_str(body).ok()?;
-    let b = &v["balance_infos"][0];
+    let b = v.at("balance_infos").at(0);
     Some(Balance {
         ts,
         currency: b["currency"].as_str()?.into(),
@@ -82,7 +82,7 @@ pub fn deepseek(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Result<(Balan
                 None => return Some(Err(format!("key not found in {f}"))),
             },
         },
-        None => std::env::var(&p.key_env).ok().filter(|k| !k.is_empty())?,
+        None => crate::config::env(&p.key_env).filter(|k| !k.is_empty())?,
     };
     let path = dir(ctx).join("deepseek.json");
     let cached: Option<Balance> = load(&path);
@@ -96,7 +96,7 @@ pub fn deepseek(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Result<(Balan
             );
             match got.filter(|g| g.0 == 200).and_then(|g| parse_balance(&g.2, ctx.now)) {
                 Some(b) => {
-                    let _ = save(&path, &b);
+                    save(&path, &b).ok();
                     b
                 }
                 None => cached?,
@@ -127,5 +127,5 @@ pub fn statusline(lane: &str, out: &mut dyn Write) {
         [f, i, _] if i != "-" => format!("{f} #{i}"),
         _ => String::new(),
     };
-    let _ = writeln!(out, "{label}");
+    writeln!(out, "{label}").ok();
 }

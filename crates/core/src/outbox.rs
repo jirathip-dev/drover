@@ -1,4 +1,4 @@
-use crate::events::{append, fold, last_spawn, working, Event};
+use crate::events::{append, fold, last_spawn, working, Event, Json};
 use crate::{hosts::On, runner::Runner, Ctx};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -8,8 +8,8 @@ pub const QUEUED: &str = "queued for the main host: drive delivers it within 1 m
 
 /// A lane on another host (spawn exports `DROVER_OUTBOX`): its `DROVER_LANE`.
 pub fn lane() -> Option<String> {
-    std::env::var_os("DROVER_OUTBOX")?;
-    std::env::var("DROVER_LANE").ok().filter(|l| !l.is_empty())
+    crate::config::env_os("DROVER_OUTBOX")?;
+    crate::config::env("DROVER_LANE").filter(|l| !l.is_empty())
 }
 
 /// The lane's side: `args` as one line (`args`, `lane`, `ts` in ms) in the worktree holding the cwd.
@@ -67,28 +67,28 @@ pub fn drain(ctx: &Ctx, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Wri
 
 fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str, raw: &str) -> Result<()> {
     let v: Value = serde_json::from_str(raw).unwrap_or_default();
-    let (ts, events) = (v["ts"].as_u64(), working(&ctx.state)?);
+    let (ts, events) = (v.at("ts").as_u64(), working(&ctx.state)?);
     let seen = |e: &Event| e.kind == "outbox" && e.str("lane") == Some(lane) && e.val("sent").as_u64() == ts;
     if ts.is_some() && events.iter().any(seen) {
         return Ok(());
     }
-    let args: Vec<String> = serde_json::from_value(v["args"].clone()).unwrap_or_default();
-    let why = match v["lane"].as_str() {
+    let args: Vec<String> = serde_json::from_value(v.at("args").clone()).unwrap_or_default();
+    let why = match v.at("lane").as_str() {
         _ if ts.is_none() || args.is_empty() => Some("unreadable line".into()),
         Some(l) if l == lane => crate::cli::foreign(&args, lane, &events),
-        _ => Some(format!("names lane {}, not {lane}", v["lane"])),
+        _ => Some(format!("names lane {}, not {lane}", v.at("lane"))),
     };
     let mut d = json!({"lane": lane, "sent": ts, "args": args});
     if let Some(w) = &why {
-        d["refused"] = json!(w);
+        d.put("refused", json!(w));
         writeln!(out, "outbox {lane}: refused: {w}")?;
     } else {
-        writeln!(out, "outbox {lane}: {}", args[0])?;
+        writeln!(out, "outbox {lane}: {}", args.first().map_or("", String::as_str))?;
         std::env::set_var("DROVER_LANE", lane);
         let res = crate::cli::run(&args.iter().map(String::as_str).collect::<Vec<_>>(), ctx, r, out);
         std::env::remove_var("DROVER_LANE");
-        d["code"] = json!(res.as_ref().ok());
-        d["error"] = json!(res.err().map(|e| format!("{e:#}")));
+        d.put("code", json!(res.as_ref().ok()))
+            .put("error", json!(res.err().map(|e| format!("{e:#}"))));
     }
     append(&ctx.state, &Event::new(ctx.now, &sp.fleet, sp.issue, "outbox", d))
 }
@@ -101,7 +101,7 @@ pub fn stale(r: &dyn Runner, events: &[Event], (now, after): (u64, u64)) -> Vec<
         let ts = text
             .unwrap_or_default()
             .lines()
-            .filter_map(|l| serde_json::from_str::<Value>(l).ok()?["ts"].as_u64())
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok()?.at("ts").as_u64())
             .min();
         ts.filter(|ts| now.saturating_mul(1000).saturating_sub(*ts) > after * 1000)
     };

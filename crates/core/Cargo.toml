@@ -17,6 +17,7 @@ name = "drover_core"
 aes-gcm.workspace = true
 anyhow.workspace = true
 base64.workspace = true
+drover-sys.workspace = true
 shed-proto.workspace = true
 clap.workspace = true
 hkdf.workspace = true

@@ -1,3 +1,4 @@
+use crate::events::Json;
 use crate::runner::{argv, Out, Runner};
 use crate::shed;
 use anyhow::{bail, Context, Result};
@@ -70,7 +71,7 @@ impl Shed {
     /// A throwaway terminal running the breaker's canary shows its output: shed starts sessions again.
     pub fn canary(&self, r: &dyn Runner) -> bool {
         let name = "drover-canary";
-        let _ = self.rm(r, name);
+        self.rm(r, name).ok();
         let mut p = Self::run_params(name, &[], "/");
         p.cmd = argv(&["sh", "-c", crate::breaker::CANARY]);
         let wait = WaitParams {
@@ -84,8 +85,8 @@ impl Shed {
         let ok = self.call(r, Method::Run, p).is_ok()
             && self
                 .call(r, Method::Wait, wait)
-                .is_ok_and(|v| v["outcome"] == "matched");
-        let _ = self.rm(r, name);
+                .is_ok_and(|v| v.at("outcome") == "matched");
+        self.rm(r, name).ok();
         ok
     }
     /// The `shed run --acp` words that start ACP lane `name`.
@@ -127,7 +128,7 @@ impl Shed {
             output: Some("ACP session ready".into()),
             timeout: Some(60.0),
         };
-        if self.call(r, Method::Wait, ready)?["outcome"] != "matched" {
+        if self.call(r, Method::Wait, ready)?.at("outcome") != "matched" {
             return Ok(false);
         }
         shed::cli(r, &["send", name, text])?;
@@ -139,13 +140,13 @@ impl Shed {
             output: None,
             timeout: Some(20.0),
         };
-        Ok(self.call(r, Method::Wait, up)?["outcome"] == "matched")
+        Ok(self.call(r, Method::Wait, up)?.at("outcome") == "matched")
     }
 }
 
 fn request(a: &[String]) -> Option<(Method, Value)> {
     let w: Vec<&str> = a.iter().map(String::as_str).collect();
-    let flag = |f: &str| w.windows(2).find(|p| p[0] == f).map(|p| p[1]);
+    let flag = |f: &str| w.iter().position(|x| *x == f).and_then(|i| w.get(i + 1)).copied();
     let secs = flag("--timeout")
         .and_then(|ms| ms.parse::<f64>().ok())
         .map(|ms| ms / 1000.0);
@@ -193,8 +194,10 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
         ["agent", "wait", t, ..] => {
             let until = w
                 .windows(2)
-                .filter(|p| p[0] == "--until")
-                .map(|p| p[1].to_string())
+                .filter_map(|p| match p {
+                    ["--until", v] => Some(v.to_string()),
+                    _ => None,
+                })
                 .collect();
             (
                 Method::Wait,
@@ -242,16 +245,18 @@ impl Shed {
         let Some((m, params)) = request(a) else {
             return Ok(failed("unsupported", &format!("shed runs no `{}`", a.join(" "))));
         };
-        let name = params["name"].as_str().unwrap_or_default().to_string();
+        let name = params.at("name").as_str().unwrap_or_default().to_string();
         let acp = matches!(m, Method::Send | Method::Keys)
             && crate::session::get(r, &name).is_ok_and(|s| s.is_some_and(|s| s.acp));
         let got = match m {
             Method::Send if acp => {
-                shed::cli(r, &["send", &name, params["text"].as_str().unwrap_or_default()]).map(|_| json!({}))
+                shed::cli(r, &["send", &name, params.at("text").as_str().unwrap_or_default()]).map(|_| json!({}))
             }
             Method::Keys
                 if acp
-                    && params["keys"][0]
+                    && params
+                        .at("keys")
+                        .at(0)
                         .as_str()
                         .is_some_and(|k| k.eq_ignore_ascii_case("enter")) =>
             {
@@ -268,14 +273,14 @@ impl Shed {
             Err(e) => return Ok(failed("shed", &format!("{e:#}"))),
         };
         let stdout = match m {
-            Method::Read => v["text"].as_str().unwrap_or_default().to_string(),
-            Method::Wait if v["outcome"] != "matched" => {
-                let code = if v["outcome"] == "timeout" {
+            Method::Read => v.at("text").as_str().unwrap_or_default().to_string(),
+            Method::Wait if v.at("outcome") != "matched" => {
+                let code = if v.at("outcome") == "timeout" {
                     "timeout"
                 } else {
                     "agent_exited"
                 };
-                return Ok(failed(code, &format!("shed wait {name}: {}", v["outcome"])));
+                return Ok(failed(code, &format!("shed wait {name}: {}", v.at("outcome"))));
             }
             _ => v.to_string(),
         };
@@ -353,7 +358,7 @@ pub fn reply(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> 
     for a in [first, keys_argv(pane, "Enter")] {
         let o = exec(r, &a)?;
         if o.code != 0 {
-            bail!("{} {}: {}", a[0], a[1], o.stderr.trim());
+            bail!("{}: {}", a.get(..2).unwrap_or_default().join(" "), o.stderr.trim());
         }
     }
     Ok(())
@@ -387,7 +392,7 @@ pub fn landed(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> bool {
 
 /// Close the session, its log archived first (`session::transcript::archive`); one already gone is closed.
 pub fn close(ctx: &crate::Ctx, r: &dyn Runner, pane: &str) -> Result<String> {
-    let _ = crate::session::transcript::archive(r, ctx, pane);
+    crate::session::transcript::archive(r, ctx, pane).ok();
     let o = exec(r, &argv(&["pane", "close", pane]))?;
     if o.code != 0 && ![&o.stderr, &o.stdout].iter().any(|s| s.contains("pane_not_found")) {
         bail!("pane close {pane} failed ({}): {}", o.code, o.stderr.trim());
@@ -399,14 +404,14 @@ pub fn close(ctx: &crate::Ctx, r: &dyn Runner, pane: &str) -> Result<String> {
 pub fn failed_with(o: &Out, code: &str) -> bool {
     [&o.stderr, &o.stdout]
         .iter()
-        .any(|s| serde_json::from_str::<Value>(s.trim()).is_ok_and(|v| v["error"]["code"] == code))
+        .any(|s| serde_json::from_str::<Value>(s.trim()).is_ok_and(|v| v.at("error").at("code") == code))
 }
 
 /// A failed call's `error.message` (the JSON envelope), else its stderr.
 pub fn message(o: &Out) -> String {
     let m = [&o.stderr, &o.stdout].iter().find_map(|s| {
         let v: Value = serde_json::from_str(s.trim()).ok()?;
-        Some(v["error"]["message"].as_str()?.to_string())
+        Some(v.at("error").at("message").as_str()?.to_string())
     });
     m.unwrap_or_else(|| o.stderr.trim().into())
 }

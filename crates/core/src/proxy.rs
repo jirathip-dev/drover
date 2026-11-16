@@ -170,11 +170,7 @@ const DROP: [&str; 9] = [
 pub fn serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<()> {
     let l =
         TcpListener::bind(("127.0.0.1", cfg.proxy.port)).with_context(|| format!("proxy port {}", cfg.proxy.port))?;
-    let clock = || {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(ctx.now, |d| d.as_secs())
-    };
+    let clock = crate::clock::wall;
     serve_on(ctx, cfg, r, &l, &clock)
 }
 
@@ -190,7 +186,7 @@ pub fn serve_on(
         for c in l.incoming().flatten() {
             s.spawn(move || {
                 if let Err(e) = handle(ctx, cfg, r, c, clock()) {
-                    eprintln!("proxy: {e:#}");
+                    crate::stderr!("proxy: {e:#}");
                 }
             });
         }
@@ -277,7 +273,7 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
     let res = r
         .stream("curl", &argv(&["-sS", "-N", "-g", "--http1.1", "-K", "-"]), &conf)
         .and_then(|up| relay(&mut BufReader::new(up), &mut c));
-    let _ = std::fs::remove_file(&tmp);
+    std::fs::remove_file(&tmp).ok();
     if res.is_err() {
         return reply(&mut c, 502, "upstream did not answer");
     }
@@ -312,7 +308,7 @@ fn relay(up: &mut impl BufRead, c: &mut TcpStream) -> Result<()> {
     loop {
         match up.read(&mut buf)? {
             0 => return Ok(()),
-            n => c.write_all(&buf[..n])?,
+            n => c.write_all(buf.get(..n).unwrap_or_default())?,
         }
     }
 }

@@ -36,7 +36,7 @@ pub(crate) fn write0600(p: &Path, b: &[u8]) -> Result<()> {
         f.write_all(b)?;
         f.sync_all()?;
         std::fs::rename(&tmp, p)?;
-        let _ = std::fs::File::open(p.parent().unwrap_or(p)).and_then(|d| d.sync_all());
+        drop(std::fs::File::open(p.parent().unwrap_or(p)).and_then(|d| d.sync_all()));
         Ok::<_, io::Error>(())
     })();
     Ok(r.inspect_err(|_| drop(std::fs::remove_file(&tmp)))?)
@@ -47,7 +47,7 @@ pub(crate) fn tmp_name(p: &Path) -> PathBuf {
     PathBuf::from(format!(
         "{}.tmp-{}-{}",
         p.display(),
-        std::process::id(),
+        crate::runner::pid(),
         N.fetch_add(1, Ordering::Relaxed)
     ))
 }
@@ -79,7 +79,7 @@ pub fn store(ctx: &Ctx, d: &[Device]) -> Result<()> {
         let kind = e.downcast_ref().map_or(io::ErrorKind::Other, io::Error::kind);
         let d = json!({"path": p, "error": kind.to_string(), "reason": format!("{}: {kind}", p.display())});
         let ev = Event::new(ctx.now, "drover", None, "state-write-failed", d);
-        let _ = emit(&ctx.state, &Config::load(&ctx.config).unwrap_or_default(), ev);
+        emit(&ctx.state, &Config::load(&ctx.config).unwrap_or_default(), ev).ok();
     }
     r
 }
@@ -97,13 +97,13 @@ pub fn request(ctx: &Ctx, label: &str, ip: &str) -> Result<Option<(String, Strin
     let _g = lock();
     let (mut all, b, token) = (
         load(ctx),
-        random(4)?,
+        <[u8; 4]>::try_from(random(4)?).unwrap_or_default(),
         random(32)?.iter().map(|b| format!("{b:02x}")).collect::<String>(),
     );
     all.retain(|d| d.code.is_none() || d.created + 3600 > ctx.now);
     let (open, code, hash) = (
         pending(ctx),
-        format!("{:06}", u32::from_be_bytes([b[0], b[1], b[2], b[3]]) % 1_000_000),
+        format!("{:06}", u32::from_be_bytes(b) % 1_000_000),
         sha256(token.as_bytes()),
     );
     if open.len() >= 4
@@ -194,14 +194,15 @@ pub fn check(ctx: &Ctx, cookie: &str) -> Result<Device, String> {
     let _g = lock();
     let mut all =
         crate::db::try_list::<Device>(&ctx.state, "devices").map_err(|e| format!("db error: {}", kind(&e)))?;
-    let i = all
-        .iter()
-        .position(|d| d.code.is_none() && same(&d.hash, &tok))
+    let (i, d) = all
+        .iter_mut()
+        .enumerate()
+        .find(|(_, d)| d.code.is_none() && same(&d.hash, &tok))
         .ok_or("unknown token")?;
-    if all[i].used + YEAR <= ctx.now {
+    if d.used + YEAR <= ctx.now {
         return Err("expired".into());
     }
-    let stale = std::mem::replace(&mut all[i].used, ctx.now) + 3600 <= ctx.now;
+    let stale = std::mem::replace(&mut d.used, ctx.now) + 3600 <= ctx.now;
     let _ = stale.then(|| crate::db::store_now(&ctx.state, "devices", &all));
     Ok(all.swap_remove(i))
 }
@@ -215,7 +216,7 @@ pub fn denied(ctx: &Ctx, status: &str, method: &str, route: &str, why: &str) {
         .append(true)
         .mode(0o600)
         .open(ctx.state.with_file_name("serve.log"));
-    let _ = f.and_then(|mut f| f.write_all(line.as_bytes()));
+    f.and_then(|mut f| f.write_all(line.as_bytes())).ok();
 }
 
 /// The board's (401, 503) answers in `serve.log` over the last 24 h.

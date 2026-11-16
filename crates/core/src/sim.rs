@@ -28,7 +28,7 @@ pub(crate) fn now() -> Option<u64> {
 pub(crate) fn pid() -> u32 {
     HOOKS
         .with_borrow(|h| h.as_ref().map(|h| h.pid))
-        .unwrap_or_else(std::process::id)
+        .unwrap_or_else(crate::runner::pid)
 }
 
 pub(crate) fn point(p: &Point) {

@@ -36,7 +36,7 @@ pub fn default_socket() -> PathBuf {
     if cfg!(target_os = "macos") {
         return crate::config::home().join("Library/Caches/shed/shed.sock");
     }
-    PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_default()).join("shed.sock")
+    PathBuf::from(crate::config::env("XDG_RUNTIME_DIR").unwrap_or_default()).join("shed.sock")
 }
 
 fn lines(m: Method, params: Value) -> String {

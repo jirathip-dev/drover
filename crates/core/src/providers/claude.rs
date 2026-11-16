@@ -71,6 +71,14 @@ impl Provider for Claude {
     fn proxy(&self) -> Option<&'static Proxy> {
         Some(&PROXY)
     }
+    fn sandbox(&self, ctx: &Ctx, profile: &str) -> super::Needs {
+        let h = crate::config::home();
+        super::Needs {
+            read: vec![root(ctx).join(profile), h.join(".local/share/claude")],
+            write: vec![h.join(".claude"), h.join(".claude.json")],
+            hosts: vec!["*.anthropic.com", "claude.ai", "*.claude.ai"],
+        }
+    }
     fn sync(&self, ctx: &Ctx, role: &str, prompt: &str, profile: &str, usage: &str, out: &mut dyn Write) -> Result<()> {
         let dir = root(ctx).join(profile);
         std::fs::create_dir_all(&dir)?;
@@ -144,7 +152,9 @@ impl Provider for Claude {
     }
 
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
-        Ok(term::exec(r, &self.kick_cmds(p, pane)[0])?.code == 0)
+        self.kick_cmds(p, pane)
+            .first()
+            .map_or(Ok(false), |c| Ok(term::exec(r, c)?.code == 0))
     }
 
     fn env(&self) -> &'static [&'static str] {
@@ -195,7 +205,7 @@ pub fn remove_tmp(roots: &[PathBuf], wt: &str) {
     for root in roots {
         let ls = std::fs::read_dir(root).into_iter().flatten().flatten();
         for d in ls.filter(|e| e.file_name().to_string_lossy().starts_with("claude-")) {
-            let _ = std::fs::remove_dir_all(d.path().join(&key));
+            std::fs::remove_dir_all(d.path().join(&key)).ok();
         }
     }
 }

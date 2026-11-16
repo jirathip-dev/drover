@@ -1,0 +1,1 @@
+- NO_PROOF: verdict FAIL: a `- blocking [<category>] file:line: what` finding lacks a `Proof:` block right under it: `Proof: run` (a fenced command, then its output; or a screenshot path) or `Proof: spec` (a `>` quoted AC, amendment or rule line, plus a `file:line`). Names each finding; notes and PASS are free-form

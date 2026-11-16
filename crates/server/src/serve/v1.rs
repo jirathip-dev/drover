@@ -9,7 +9,7 @@ use crate::api::{
     Lessons, Marks, NeedsTab, PendingStart, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict,
     WhyNote,
 };
-use crate::events::plain;
+use crate::events::{plain, Json};
 use crate::runner::Runner;
 use anyhow::{bail, Context};
 use serde::Serialize;
@@ -152,8 +152,8 @@ impl Server<'_> {
                     self.chat_tab(ctx, paired && self.addr.is_some()),
                     working(&ctx.state).unwrap_or_default(),
                 );
-                c["threads"]
-                    .as_array_mut()
+                c.get_mut("threads")
+                    .and_then(Value::as_array_mut)
                     .into_iter()
                     .flatten()
                     .for_each(|t| handoffs(&ev, &mut t["page"]));
@@ -227,7 +227,9 @@ impl Server<'_> {
                     f = about(ctx, &f);
                 }
                 let path = ["/send", "/answer", "/act", "/setup", "/thread"]
-                    [LANE_OPS.iter().position(|o| *o == op).unwrap_or(0)];
+                    .get(LANE_OPS.iter().position(|o| *o == op).unwrap_or(0))
+                    .copied()
+                    .unwrap_or("/send");
                 let (status, msg) = self.send(ctx, head, &f, path, &auth.clone().into());
                 let refusal = msg.strip_prefix("REFUSED ").and_then(|m| m.split_once(": "));
                 let code = match &status[..3] {
@@ -359,7 +361,7 @@ impl Server<'_> {
         }
         let d = serde_json::json!({"why": "backlog", "via": "web"});
         crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "closed", d))?;
-        let _ = gh::backlog(ctx, &self.r, fc, fleet);
+        gh::backlog(ctx, &self.r, fc, fleet).ok();
         Ok(format!("closed #{n}"))
     }
 
@@ -413,7 +415,8 @@ impl Server<'_> {
             lock(&self.cache).insert(key, (ctx.now, Some(json!(rows).to_string())));
         }
         let row = |r: Value| {
-            let age = r["since"]
+            let age = r
+                .at("since")
                 .as_u64()
                 .map(|t| crate::events::age(ctx.now.saturating_sub(t)));
             crate::api::ShedRow {
@@ -553,19 +556,20 @@ impl Server<'_> {
         };
         ServeHealth {
             at: now,
+            sha: crate::SHA.into(),
             started: super::STARTED.get().copied().unwrap_or_default(),
             rss_mb: self.rss.load(std::sync::atomic::Ordering::Relaxed),
             groups,
             busy,
-            clients: lock(&self.clients).len() as u64,
-            queued: lock(&self.running).values().map(|q| q.len() as u64).sum(),
+            clients: u64::try_from(lock(&self.clients).len()).unwrap_or(u64::MAX),
+            queued: lock(&self.running).values().flatten().map(|_| 1).sum(),
             slow: slow.map(|(r, p95)| format!("{r} p95 {p95} ms, over 200 ms for 5 min")),
         }
     }
 
     /// `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
     pub fn slo(&self, now: u64) {
-        let pid = std::process::id().to_string();
+        let pid = drover_core::runner::pid().to_string();
         let kb = crate::runner::ok(&self.r, "ps", &["-o", "rss=", "-p", &pid]).map(|s| s.trim().parse::<u64>());
         self.rss.store(
             kb.ok().and_then(Result::ok).unwrap_or_default() / 1024,
@@ -629,7 +633,7 @@ fn qset(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
     );
     anyhow::ensure!(["on", "off"].contains(&value), "{key} is `on` or `off`");
     let mut d = crate::queue::op("set", &[n], false, None, None, None);
-    d[key] = serde_json::json!([value]);
+    d.put(key, serde_json::json!([value]));
     crate::queue_change(ctx, &Config::kept(ctx)?, g("fleet"), d, Some("web"))?;
     Ok(format!("#{n}: {key} {value}"))
 }
@@ -846,7 +850,7 @@ pub(super) fn feed(ctx: &Ctx, after: &[Event], cap: usize) -> Events {
             let (pr, run) = e.issue.filter(|_| fc.is_some()).map_or((None, None), |n| {
                 let pr = pr.or_else(|| {
                     *prs.entry(n)
-                        .or_insert_with(|| gh::cached_pr(ctx, &e.fleet, n)["number"].as_u64())
+                        .or_insert_with(|| gh::cached_pr(ctx, &e.fleet, n).at("number").as_u64())
                 });
                 (pr, pr.is_none().then(|| gh::cached_run(ctx, &e.fleet, n)).flatten())
             });
@@ -884,7 +888,8 @@ fn roots(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
     let seen = crate::hosts::cached(ctx);
     for c in &mut tab.hosts {
         for r in seen.get(&c.name).map_or(&[][..], |s| &s.roots[..]) {
-            let t = ["g", "a", "m"][usize::from(r.state != "active") + usize::from(r.state == "gone")];
+            let i = usize::from(r.state != "active") + usize::from(r.state == "gone");
+            let t = "gam".get(i..=i).unwrap_or("g");
             let free = r.free_gb.map(|g| format!("{g:.0} GB free"));
             c.rows.push(crate::api::Cell {
                 k: "root".into(),
@@ -972,15 +977,15 @@ fn handoffs(events: &[Event], page: &mut Value) {
         })
     };
     let msgs = msgs.into_iter().map(|mut m| {
-        let e = m["seq"].as_u64().and_then(|s| at.get(&s).copied());
-        let h = e.and_then(|e| match (m["kind"].as_str().unwrap_or_default(), e.kind.as_str()) {
+        let e = m.at("seq").as_u64().and_then(|s| at.get(&s).copied());
+        let h = e.and_then(|e| match (m.at("kind").as_str().unwrap_or_default(), e.kind.as_str()) {
             ("handoff", "thread-handoff") if e.str("ask").is_none() => Some(handoff(events, e, true)),
             ("ask", "needs-decision") if e.data.get("handoff").is_some() => Some(handoff(events, e, true)),
             ("msg", "thread-msg") => got(e),
             _ => None,
         });
         if let Some(h) = h {
-            m["handoff"] = serde_json::json!(h);
+            m.put("handoff", serde_json::json!(h));
         }
         m
     });
@@ -1109,7 +1114,7 @@ fn acp_blocks(events: &[crate::shed::proto::Logged]) -> Vec<Block> {
                 Some(Block::Reply { markdown }) => markdown.push_str(text),
                 _ => out.push(Block::Reply { markdown: text.clone() }),
             },
-            E::Reply { text, .. } if !out[turn(&out)..].iter().any(|b| matches!(b, Block::Reply { .. })) => {
+            E::Reply { text, .. } if !out.iter().skip(turn(&out)).any(|b| matches!(b, Block::Reply { .. })) => {
                 out.push(Block::Reply { markdown: text.clone() });
             }
             E::ToolCall {
@@ -1143,7 +1148,7 @@ fn acp_blocks(events: &[crate::shed::proto::Logged]) -> Vec<Block> {
                 let p = Block::Plan {
                     entries: entries.clone(),
                 };
-                match out[at..].iter_mut().find(|b| matches!(b, Block::Plan { .. })) {
+                match out.iter_mut().skip(at).find(|b| matches!(b, Block::Plan { .. })) {
                     Some(b) => *b = p,
                     None => out.push(p),
                 }

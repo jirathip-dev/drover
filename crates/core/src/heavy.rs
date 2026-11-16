@@ -21,7 +21,7 @@ impl Heavy {
             .map(|s| {
                 let w: Vec<&str> = s.split_whitespace().collect();
                 let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
-                at.map_or(String::new(), |i| w[i..].join(" "))
+                at.and_then(|i| w.get(i..)).map_or(String::new(), |t| t.join(" "))
             })
             .collect();
         let hit = |p: &String| {
@@ -75,7 +75,7 @@ pub fn line(dir: &Path) -> Vec<(String, Ticket)> {
         .filter_map(|e| {
             let f = File::open(e.path()).ok()?;
             if f.try_lock().is_ok() {
-                let _ = std::fs::remove_file(e.path());
+                std::fs::remove_file(e.path()).ok();
                 return None;
             }
             let t = serde_json::from_reader(&f).ok()?;
@@ -118,10 +118,8 @@ pub fn run(
     std::fs::create_dir_all(dir)?;
     let guard = File::create(dir.join(".lock"))?;
     guard.lock()?;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos();
-    let name = format!("{nanos:020}-{}.json", std::process::id());
+    let nanos = crate::clock::nanos();
+    let name = format!("{nanos:020}-{}.json", crate::runner::pid());
     let path = dir.join(&name);
     let mut mine = File::create_new(&path)?;
     mine.lock()?;
@@ -144,12 +142,12 @@ pub fn run(
         if go || timed_out {
             break timed_out;
         }
-        std::thread::sleep(std::time::Duration::from_millis(crate::config::limits().poll_millis));
+        crate::clock::sleep(std::time::Duration::from_millis(crate::config::limits().poll_millis));
     };
     if timed_out {
         late(&me);
     }
     let code = r.attached("bash", &["-c".into(), me.cmd.clone()]);
-    let _ = std::fs::remove_file(&path);
+    std::fs::remove_file(&path).ok();
     code
 }

@@ -270,7 +270,7 @@ fn pass_and_green_ci_merges() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["merge"], "{out}");
     assert!(r.called(&format!(
-        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+        "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));
     assert_eq!(state(&c), "merged");
     idle(&c, &r);
@@ -1096,7 +1096,7 @@ fn a_serial_busy_item_is_skipped_and_keeps_its_place() {
     );
     let status = run(&c, &fake(&working(&c, &[2, 3, 9])), &["status", "sendmeter"]).1;
     assert!(
-        status.contains("skipped this pass: waiting for a db slot (#9 holds 1/1)"),
+        status.contains("skipped this pass: serial: db held by #9 (1/1)"),
         "{status}"
     );
     let board = run(&c, &Fake::default(), &["board", "sendmeter"]).1;
@@ -1126,7 +1126,7 @@ fn a_serial_busy_skip_shows_the_live_holders() {
     let status = || run(&c, &Fake::default(), &["status", "sendmeter"]).1;
     let board = || run(&c, &Fake::default(), &["board", "sendmeter"]).1;
     assert!(
-        status().contains("skipped this pass: waiting for a db slot (#9 holds 1/1)"),
+        status().contains("skipped this pass: serial: db held by #9 (1/1)"),
         "{}",
         status()
     );
@@ -1136,10 +1136,7 @@ fn a_serial_busy_skip_shows_the_live_holders() {
     assert!(board().contains(" #1     queued      db slot free "), "{}", board());
     spawn(c.now - 100, 4);
     let s = status();
-    assert!(
-        s.contains("skipped this pass: waiting for a db slot (#4 holds 1/1)"),
-        "{s}"
-    );
+    assert!(s.contains("skipped this pass: serial: db held by #4 (1/1)"), "{s}");
     assert!(!s.contains("#9 hold"), "{s}");
     assert!(board().contains(" #1     queued      skip SERIAL_BUSY "), "{}", board());
 }
@@ -1591,7 +1588,7 @@ fn a_pass_recorded_with_green_ci_merges_in_the_same_pass() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["verdict", "merge"], "{out}");
     assert!(r.called(&format!(
-        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+        "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));
     assert_eq!(state(&c), "merged");
 }

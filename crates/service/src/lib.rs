@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use drover_core::config::Config;
-use drover_core::events::{append, emit, Event};
+use drover_core::events::{append, emit, Event, Json};
 use drover_core::runner::{argv, Real, Runner};
 use drover_core::{devices, service, Ctx};
 use serde_json::{json, Value};
@@ -45,7 +45,7 @@ pub fn main(ctx: &Ctx, api: &str, board: Option<&str>) -> Result<()> {
         let c = ctx.clone();
         std::thread::spawn(move || {
             if let Err(e) = drover_server::hooks::board(&c, &Real, &b, false, false) {
-                eprintln!("drover service: board on {b}: {e:#}");
+                drover_core::stderr!("drover service: board on {b}: {e:#}");
             }
         });
     }
@@ -60,7 +60,7 @@ pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::
         api.set_nonblocking(true)?;
         let api = TcpListener::from_std(api)?;
         let path = service::sock(&ctx);
-        let _ = std::fs::remove_file(&path);
+        std::fs::remove_file(&path).ok();
         let local = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
         let s = Arc::new(Service {
@@ -74,7 +74,7 @@ pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::
             r,
             clock,
         });
-        let d = json!({"pid": std::process::id(), "api": api.local_addr()?.to_string()});
+        let d = json!({"pid": drover_core::runner::pid(), "api": api.local_addr()?.to_string()});
         append(&s.ctx.state, &s.event("service-started", d))?;
         s.watchdog();
         tokio::spawn(s.clone().watch_log());
@@ -110,7 +110,7 @@ impl Service {
             return code.ok();
         }
         let d = json!({"job": args.join(" "), "secs": secs});
-        let _ = append(&self.ctx.state, &self.event("service-timeout", d));
+        append(&self.ctx.state, &self.event("service-timeout", d)).ok();
         None
     }
 
@@ -125,12 +125,17 @@ impl Service {
         });
         let me = self.clone();
         std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(5));
+            drover_core::clock::sleep(Duration::from_secs(5));
             let late = drover_core::now().saturating_sub(me.beat.load(Relaxed));
             if late > STALL_SECS {
-                let ev = me.event("service-stalled", json!({"secs": late, "pid": std::process::id()}));
-                let _ = Config::load(&me.ctx.config).map(|cfg| emit(&me.ctx.state, &cfg, ev));
-                std::process::exit(70);
+                let ev = me.event(
+                    "service-stalled",
+                    json!({"secs": late, "pid": drover_core::runner::pid()}),
+                );
+                Config::load(&me.ctx.config)
+                    .map(|cfg| emit(&me.ctx.state, &cfg, ev))
+                    .ok();
+                drover_core::runner::exit(70);
             }
         });
     }
@@ -177,14 +182,14 @@ impl Service {
         if !matches!(timeout(Duration::from_secs(2), read).await, Ok(Ok(_))) {
             return;
         }
-        let _ = wr
-            .write_all(format!("{}\n", json!({"pid": std::process::id()})).as_bytes())
-            .await;
+        wr.write_all(format!("{}\n", json!({"pid": drover_core::runner::pid()})).as_bytes())
+            .await
+            .ok();
         let v: Value = serde_json::from_str(&line).unwrap_or_default();
-        let k = &v["kick"];
-        if let (Some(f), Some(n)) = (k["fleet"].as_str(), k["issue"].as_u64()) {
-            let why = k["why"].as_str().unwrap_or("kick");
-            let id = k["id"].as_str().map(|i| ["--id".to_string(), i.into()]);
+        let k = v.at("kick");
+        if let (Some(f), Some(n)) = (k.at("fleet").as_str(), k.at("issue").as_u64()) {
+            let why = k.at("why").as_str().unwrap_or("kick");
+            let id = k.at("id").as_str().map(|i| ["--id".to_string(), i.into()]);
             let mut k = argv(&["kick", f, &n.to_string(), "--why", why, "--now"]);
             k.extend(id.into_iter().flatten());
             if self.job(k, KICK_SECS).await.is_none() {
@@ -195,7 +200,7 @@ impl Service {
 
     async fn api(self: Arc<Self>, mut c: TcpStream, peer: SocketAddr) {
         let Ok(_slot) = self.conns.clone().try_acquire_owned() else {
-            let _ = c.write_all(&reply(503, &json!({"error": "busy"}))).await;
+            c.write_all(&reply(503, &json!({"error": "busy"}))).await.ok();
             return;
         };
         let Ok(Ok(Some((head, body)))) = timeout(Duration::from_secs(10), request(&mut c)).await else {
@@ -208,7 +213,7 @@ impl Service {
             ("GET", "/api/v1/health") => {
                 let late = drover_core::now().saturating_sub(self.beat.load(Relaxed));
                 let busy = JOBS - self.jobs.available_permits();
-                let d = json!({"ok": true, "pid": std::process::id(), "version": drover_core::VERSION, "jobs": busy, "beat_secs": late});
+                let d = json!({"ok": true, "pid": drover_core::runner::pid(), "version": drover_core::VERSION, "jobs": busy, "beat_secs": late});
                 reply(200, &d)
             }
             ("GET", "/api/v1/events") if peer.ip().is_loopback() || self.paired(&head) => {
@@ -219,7 +224,7 @@ impl Service {
             ("POST", "/api/v1/cmd") => self.cmd(&body).await,
             _ => reply(404, &json!({"error": "no such path"})),
         };
-        let _ = c.write_all(&out).await;
+        c.write_all(&out).await.ok();
     }
 
     fn paired(&self, head: &str) -> bool {
@@ -244,7 +249,7 @@ impl Service {
                 _ => vec![],
             };
             let mut out = String::new();
-            for e in &rows[rows.len().saturating_sub(REPLAY)..] {
+            for e in rows.get(rows.len().saturating_sub(REPLAY)..).unwrap_or_default() {
                 after = e.seq;
                 out += &format!(
                     "id: {}\ndata: {}\n\n",
@@ -265,14 +270,15 @@ impl Service {
 
     async fn cmd(self: &Arc<Self>, body: &[u8]) -> Vec<u8> {
         let v: Value = serde_json::from_slice(body).unwrap_or_default();
-        let token = v["token"].as_str().unwrap_or_default().to_string();
-        let mut args: Vec<String> = v["args"]
+        let token = v.at("token").as_str().unwrap_or_default().to_string();
+        let mut args: Vec<String> = v
+            .at("args")
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|a| a.as_str().map(String::from))
             .collect();
-        let (ctx, r, files) = (self.ctx.clone(), self.r, v["files"].clone());
+        let (ctx, r, files) = (self.ctx.clone(), self.r, v.at("files").clone());
         let run = move || -> Result<(u16, Value)> {
             let ctx = Ctx {
                 now: drover_core::now(),
@@ -285,15 +291,18 @@ impl Service {
             };
             let dir = ctx.state.with_file_name("service-files");
             for i in 1..args.len() {
-                if args[i - 1] == "--file" {
-                    let Some(text) = files[&args[i]].as_str() else {
-                        let e = format!("drover: --file {} came without its text\n", args[i]);
+                let Some([prev, arg]) = args.get_mut(i - 1..=i) else {
+                    continue;
+                };
+                if *prev == "--file" {
+                    let Some(text) = files.at(arg.as_str()).as_str() else {
+                        let e = format!("drover: --file {arg} came without its text\n");
                         return Ok((400, json!({"code": 2, "stdout": "", "stderr": e})));
                     };
                     std::fs::create_dir_all(&dir)?;
                     let p = dir.join(drover_core::devices::sha256(text.as_bytes()) + ".md");
                     std::fs::write(&p, text)?;
-                    args[i] = p.display().to_string();
+                    *arg = p.display().to_string();
                 }
             }
             let a = [argv(&[&format!("DROVER_LANE={lane}"), &ctx.exe]), args].concat();
@@ -321,7 +330,7 @@ async fn request(c: &mut TcpStream) -> std::io::Result<Option<(String, Vec<u8>)>
     let (mut buf, mut chunk) = (vec![], [0u8; 8192]);
     loop {
         if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-            let head = String::from_utf8_lossy(&buf[..i]).into_owned();
+            let head = String::from_utf8_lossy(buf.get(..i).unwrap_or_default()).into_owned();
             let len = head.lines().find_map(|l| {
                 let (k, v) = l.split_once(':')?;
                 k.eq_ignore_ascii_case("content-length")
@@ -337,7 +346,7 @@ async fn request(c: &mut TcpStream) -> std::io::Result<Option<(String, Vec<u8>)>
                 if n == 0 {
                     return Ok(None);
                 }
-                body.extend_from_slice(&chunk[..n]);
+                body.extend_from_slice(chunk.get(..n).unwrap_or_default());
             }
             body.truncate(len);
             return Ok(Some((head, body)));
@@ -346,7 +355,7 @@ async fn request(c: &mut TcpStream) -> std::io::Result<Option<(String, Vec<u8>)>
         if n == 0 || buf.len() > 64 << 10 {
             return Ok(None);
         }
-        buf.extend_from_slice(&chunk[..n]);
+        buf.extend_from_slice(chunk.get(..n).unwrap_or_default());
     }
 }
 

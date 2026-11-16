@@ -1,6 +1,6 @@
 use crate::access::{civil_month_day, civil_year};
 use crate::config::Config;
-use crate::events::{emit, plain, Event};
+use crate::events::{emit, plain, Event, Json};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -114,7 +114,7 @@ pub fn run(
     writeln!(out, "filed {fleet}#{n}: {title}")?;
     let mut op = crate::queue::op("add", &[n], true, None, None, None);
     if let Some(by) = by {
-        op["by"] = json!(by);
+        op.put("by", json!(by));
     }
     writeln!(out, "{}", crate::queue_change(ctx, cfg, fleet, op, by.map(|_| "web"))?)?;
     crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "lesson"), &crate::spawn::Opts::default())
@@ -186,7 +186,7 @@ pub fn done(
 ) -> Result<()> {
     let st = crate::gate::issue_state(ctx, fleet, n)?;
     let filed = || crate::gh::cached_title(ctx, fleet, n).is_some_and(|t| t.starts_with("lessons: "));
-    let no_pr = || crate::gh::cached_pr(ctx, fleet, n)["number"].is_null();
+    let no_pr = || crate::gh::cached_pr(ctx, fleet, n).at("number").is_null();
     if st.is_none_or(|s| s.build.as_deref() != Some("lesson") && !(filed() && no_pr()) || s.rounds > 0) {
         return Ok(());
     }
@@ -290,7 +290,7 @@ pub fn ci(r: &dyn Runner, rules: &std::path::Path, out: &mut dyn Write) -> Resul
         s += &format!("{what} {}: `{}`\n```\n{}\n```\n", c.name, c.cmd, o.trim_end());
     }
     write!(out, "{s}")?;
-    if let Some(p) = std::env::var_os("GITHUB_STEP_SUMMARY").filter(|_| !s.is_empty()) {
+    if let Some(p) = crate::config::env_os("GITHUB_STEP_SUMMARY").filter(|_| !s.is_empty()) {
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(p)?;
         write!(f, "## Lesson checks (#510)\n\n{s}")?;
     }
@@ -400,7 +400,7 @@ pub fn apply(
     for (c, stats, decision) in review(ctx, cfg, r, fleet, &text)? {
         writeln!(out, "{}: {stats} → {decision}", c.name)?;
         let to = format!("active since {}", ymd(ctx.now / 86400));
-        let l = &mut lines[c.line];
+        let Some(l) = lines.get_mut(c.line) else { continue };
         match decision {
             "promote" => *l = l.take().map(|s| s.replace(&format!("shadow since {}", c.since), &to)),
             "retire" => *l = None,

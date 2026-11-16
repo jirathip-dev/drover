@@ -436,6 +436,9 @@ pub struct Fleet {
     pub cap_script: Option<String>,
     /// `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
+    /// How `merge` lands a PR: `squash` (default) or `merge`.
+    #[serde(default)]
+    pub merge: MergeMode,
     /// `weekly` (unset) has `tick` run `drover lesson` every 7 days; `off` opts out.
     pub lessons: Option<String>,
     /// `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
@@ -452,6 +455,34 @@ pub struct Fleet {
     pub runtime: Option<Runtime>,
     /// Lets `rev` share `impl`'s provider; its line needs a `#` reason comment.
     pub rev_same_provider: Option<bool>,
+    /// `srt` starts every lane's agent inside sandbox-runtime with the rules `sandbox::settings` writes; unset = off.
+    pub sandbox: Option<Sandbox>,
+}
+
+/// The kernel sandbox a lane's agent runs in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sandbox {
+    Srt,
+}
+
+/// `squash` lands a PR as one commit carrying its why notes and deletes its branch; `merge` keeps every commit.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeMode {
+    #[default]
+    Squash,
+    Merge,
+}
+
+impl MergeMode {
+    /// `gh pr merge`'s flags for this mode.
+    pub fn flags(self) -> &'static [&'static str] {
+        match self {
+            Self::Squash => &["--squash", "--delete-branch"],
+            Self::Merge => &["--merge"],
+        }
+    }
 }
 
 /// `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits for the full set); integration's own CI then runs the full suite, and `land::watch` reverts a red landing.
@@ -1037,60 +1068,15 @@ pub struct Notify {
     pub sub: Option<String>,
 }
 
-/// A webpush notifier's events when `on` is unset: the alert set plus the asks and needs-human.
-pub const WEBPUSH_ON: &[&str] = &[
-    "slo-api",
-    "stuck",
-    "config-invalid",
-    "thread-msg",
-    "blocked",
-    "stall",
-    "lane-hog",
-    "lane-dead",
-    "usage-limit",
-    "signed-out",
-    "lane-failed-start",
-    "respawn-refused",
-    "rev-stale-replaced",
-    "ready-unmerged",
-    "ci-missing",
-    "outbox-stale",
-    "merged",
-    "needs-decision",
-    "needs-human",
-    "ask-waiting",
-    "answer-undelivered",
-    "state-write-failed",
-    "wip-blocked",
-    "spawn-held",
-    "spawn-failing",
-    "host-busy",
-    "cap-near",
-    "orphan-issue",
-    "config-warning",
-    "keychain-locked",
-    "keychain-jammed",
-    "self-update-failed",
-    "shed-version",
-    "shed-version-ok",
-    "auto-update-failed",
-    "host-sync-failed",
-    "clean-failed",
-    "runners-low",
-    "runners-ok",
-    "runtime-down",
-    "heavy-timeout",
-    "host-overloaded",
-];
-
 impl Notify {
     pub fn webpush(&self) -> bool {
         self.kind.as_deref() == Some("webpush")
     }
     /// Every landing pause and revert (or failed revert), and a stalled service, goes to each notifier, whatever its `on` says; so does a board report, to each notifier but the phones'.
-    pub fn wants(&self, kind: &str) -> bool {
+    pub fn wants(&self, e: &crate::events::Event) -> bool {
+        let kind = e.kind.as_str();
         self.on.iter().any(|k| k == kind)
-            || (self.on.is_empty() && self.webpush() && WEBPUSH_ON.contains(&kind))
+            || (self.on.is_empty() && self.webpush() && e.is_push())
             || matches!(kind, "land-paused" | "reverted" | "revert-failed" | "service-stalled")
             || kind == "report" && !self.webpush()
     }
@@ -1148,7 +1134,7 @@ impl Config {
             Ok((c, text)) => {
                 if std::fs::read_to_string(&good).ok().as_deref() != Some(&text) {
                     let _ = good.parent().map(std::fs::create_dir_all);
-                    let _ = std::fs::write(&good, text);
+                    std::fs::write(&good, text).ok();
                 }
                 Ok(c)
             }
@@ -1181,10 +1167,10 @@ impl Config {
             bail!("fleet.{n}.env: secret:{v} is not a secret name (A-Z, 0-9, _)");
         }
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
-            eprintln!("drover: [limits].max_agents is no longer used; ignoring it");
+            crate::stderr!("drover: [limits].max_agents is no longer used; ignoring it");
         }
         if c.runtime.as_ref().is_some_and(|r| r.kind == RuntimeKind::Berth) {
-            eprintln!("drover: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
+            crate::stderr!("drover: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
         }
         let levels = crate::providers::EFFORTS;
         if let Some(e) = c.limits.effort.as_deref().filter(|e| !levels.contains(e)) {
@@ -1280,7 +1266,7 @@ impl Config {
                 bail!("fleet.{name}.serial: a name (serial_label) must be 1 to 8 characters");
             }
             if f.deny_commands.as_ref().is_some_and(Vec::is_empty) {
-                eprintln!("drover: fleet.{name}.deny_commands is empty: the lane hook denies no commands");
+                crate::stderr!("drover: fleet.{name}.deny_commands is empty: the lane hook denies no commands");
             }
             if let Some(k) = f.color.as_deref().filter(|k| !COLORS.contains(k)) {
                 bail!("fleet.{name}.color: \"{k}\" must be one of {COLORS:?}");
@@ -1333,7 +1319,7 @@ impl Config {
     }
 
     fn same_provider(&self, name: &str, text: &str) -> Result<()> {
-        let f = &self.fleet[name];
+        let f = self.fleet.get(name).ok_or_else(|| anyhow!("unknown fleet '{name}'"))?;
         let (Some(i), Some(v)) = (f.role.get("impl"), f.role.get("rev")) else {
             return Ok(());
         };
@@ -1432,9 +1418,11 @@ impl Config {
 impl Fleet {
     /// The fleet's pipeline (the built-in one unless fleet.toml has its own).
     pub fn flow(&self) -> &crate::pipeline::Pipeline {
-        self.pipeline
-            .as_ref()
-            .expect("Config::parse resolves every fleet's pipeline")
+        static NONE: crate::pipeline::Pipeline = crate::pipeline::Pipeline {
+            stage: Vec::new(),
+            builtin: false,
+        };
+        self.pipeline.as_ref().unwrap_or(&NONE)
     }
     /// The prompt family a role's lane gets: `rev` for a check role, `design`, else `impl` (a build).
     pub fn family(&self, role: &str) -> &'static str {
@@ -1450,7 +1438,8 @@ impl Fleet {
     pub fn color(&self, name: &str) -> &str {
         self.color.as_deref().unwrap_or_else(|| {
             let h = crate::devices::sha256(name.as_bytes());
-            COLORS[usize::from_str_radix(&h[..2], 16).unwrap_or(0) % COLORS.len()]
+            let i = usize::from_str_radix(h.get(..2).unwrap_or_default(), 16).unwrap_or(0) % COLORS.len();
+            COLORS.get(i).copied().unwrap_or_default()
         })
     }
     /// The lane hook's deny list: `deny_commands`, else `[limits]`'s, plus `deny_commands_add`.
@@ -1561,12 +1550,12 @@ fn strings(key: &str, v: &toml::Value) -> Vec<(String, String)> {
 pub fn glob(g: &[u8], s: &[u8]) -> bool {
     match g {
         [] => s.is_empty(),
-        [b'*', b'*', rest @ ..] => (0..=s.len()).any(|i| glob(rest, &s[i..])),
+        [b'*', b'*', rest @ ..] => (0..=s.len()).any(|i| glob(rest, s.get(i..).unwrap_or_default())),
         [b'*', rest @ ..] => (0..=s.len())
-            .take_while(|&i| i == 0 || s[i - 1] != b'/')
-            .any(|i| glob(rest, &s[i..])),
-        [b'?', rest @ ..] => s.first().is_some_and(|&c| c != b'/') && glob(rest, &s[1..]),
-        [c, rest @ ..] => s.first() == Some(c) && glob(rest, &s[1..]),
+            .take_while(|&i| i == 0 || s.get(i - 1) != Some(&b'/'))
+            .any(|i| glob(rest, s.get(i..).unwrap_or_default())),
+        [b'?', rest @ ..] => s.split_first().is_some_and(|(&c, t)| c != b'/' && glob(rest, t)),
+        [c, rest @ ..] => s.split_first().is_some_and(|(h, t)| h == c && glob(rest, t)),
     }
 }
 
@@ -1575,6 +1564,21 @@ pub fn expand(p: &str) -> PathBuf {
         Some(rest) => home().join(rest),
         None => PathBuf::from(p),
     }
+}
+
+/// The environment variable `k`; `None` when unset or not UTF-8.
+pub fn env(k: &str) -> Option<String> {
+    std::env::var(k).ok()
+}
+
+/// The environment variable `k`, raw.
+pub fn env_os(k: &str) -> Option<std::ffi::OsString> {
+    std::env::var_os(k)
+}
+
+/// Every environment variable.
+pub fn envs() -> std::env::VarsOs {
+    std::env::vars_os()
 }
 
 pub fn home() -> PathBuf {
@@ -1593,30 +1597,38 @@ pub fn set_in(text: &str, header: &str, key: &str, lit: &str) -> Result<String> 
     let start = lines.iter().position(|l| {
         let (mut q, n) = (false, l.len());
         let n = l.find(|c| (q ^= c == '"', c == '#' && !q).1).unwrap_or(n);
-        l[..n].split_whitespace().collect::<String>() == header
+        l.get(..n).unwrap_or(l).split_whitespace().collect::<String>() == header
     });
     let start = start.ok_or_else(|| anyhow!("no {header} table in fleet.toml; add it first"))?;
     let end = (start + 1..lines.len())
-        .find(|&i| lines[i].trim_start().starts_with('['))
+        .find(|&i| lines.get(i).is_some_and(|l| l.trim_start().starts_with('[')))
         .unwrap_or(lines.len());
     let mut out: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
-    let hit = (start + 1..end).find(|&i| {
-        let t = lines[i].trim_start();
-        t.strip_prefix(key).is_some_and(|r| r.trim_start().starts_with('='))
+    let hit = (start + 1..end).find_map(|i| {
+        let l = *lines.get(i)?;
+        let t = l.trim_start();
+        t.strip_prefix(key)
+            .is_some_and(|r| r.trim_start().starts_with('='))
+            .then_some((i, l))
     });
-    if let Some(i) = hit {
-        let l = lines[i];
-        let eq = l.find('=').unwrap() + 1;
-        let v = eq + l[eq..].len() - l[eq..].trim_start().len();
-        let mut q = false;
-        let end = l[v..]
+    if let Some((i, l)) = hit {
+        let eq = l.find('=').context("no =")? + 1;
+        let v = l.get(eq..).map_or(eq, |r| eq + r.len() - r.trim_start().len());
+        let (mut q, (head, rest)) = (false, l.split_at_checked(v).unwrap_or((l, "")));
+        let end = rest
             .find(|c| (q ^= c == '"', c == '#' && !q).1)
             .map_or(l.trim_end().len().max(v), |c| v + c);
-        out[i] = format!("{}{lit}{}", &l[..v], &l[v + l[v..end].trim_end().len()..]);
+        let tail = rest
+            .get(rest.get(..end - v).unwrap_or_default().trim_end().len()..)
+            .unwrap_or_default();
+        *out.get_mut(i).context("no line")? = format!("{head}{lit}{tail}");
     } else {
-        let last = (start..end).rev().find(|&i| !lines[i].trim().is_empty()).unwrap();
-        if !out[last].ends_with('\n') {
-            out[last].push('\n');
+        let last = (start..end)
+            .rev()
+            .find(|&i| lines.get(i).is_some_and(|l| !l.trim().is_empty()))
+            .unwrap_or(start);
+        if let Some(o) = out.get_mut(last).filter(|o| !o.ends_with('\n')) {
+            o.push('\n');
         }
         out.insert(last + 1, format!("{key} = {lit}\n"));
     }
