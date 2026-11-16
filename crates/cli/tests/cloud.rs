@@ -892,6 +892,37 @@ fn bootstrap_installs_over_a_shed_of_another_build() {
     }
 }
 
+#[test]
+fn bootstrap_installs_and_checks_the_real_exe_the_guard_runs_not_its_symlink() {
+    let (mut c, cfg) = running("cloud-boot-link");
+    let home = std::fs::canonicalize(tmpdir("cloud-boot-link-home")).unwrap();
+    let (real, link) = (
+        home.join(".local/share/drover/bin/drover"),
+        home.join(".local/bin/drover"),
+    );
+    std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::fs::write(&real, "").unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    c.exe = link.display().to_string();
+    let exe = real.display().to_string();
+    let check = format!("[ \"$('{exe}' --version)\" = 'drover {}' ]", drover::VERSION);
+    let f = boot_again().once(&step(&check), 1, "").reply(&step(&check), "");
+    let mut out = vec![];
+    let res = drover::cloud::bootstrap(&c, &cfg, &f, "cloud1", &mut out);
+    let out = String::from_utf8(out).unwrap();
+    assert!(res.is_ok() && out.contains("✓ drover — installed"), "{res:?} {out}");
+    let root = home.join(".local/share/drover").display().to_string();
+    assert!(
+        f.called(&step(&drover::hosts::install_line(&root, env!("DROVER_SHA")))),
+        "{:?}",
+        f.calls.borrow()
+    );
+    let on = drover::hosts::On::new(&f, Some("cloud1"));
+    let _ = drover::hosts::acp_guard(&c, &on, "/home/me", ("fleet-impl", "claude", "x"));
+    assert!(f.called(&format!("{SSH}'{exe}' '--version'")), "{:?}", f.calls.borrow());
+}
+
 fn gone_stops(c: &drover::Ctx) -> Vec<Event> {
     let events = read(&c.state).unwrap();
     let gone = |e: &&Event| e.kind == "cloud-stop" && e.str("why") == Some("gone");
