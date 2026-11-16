@@ -1,0 +1,15 @@
+Decided: a shed counts as pinned when its build is a prefix of REV or its semver is proto::VERSION; serve must also run the same build as the shed on PATH
+Because: "are the build it pins, or speak its proto version"
+Decided: spawn gates on the main host only, after SHED_MISSING and before any worktree; remote hosts keep their bootstrap pin
+Because: crates/core/src/spawn.rs:1003
+Decided: an unreadable `shed --version` or a serve that does not answer is not a refusal; only a read mismatch refuses
+Because: crates/core/src/shed.rs:140
+Decided: the breaker counts distinct lanes with an unconfirmed spawn, reusing runtime_down_failures and runtime_down_minutes; a landed spawn or `shed-installed` clears it
+Because: crates/core/src/breaker.rs:119
+Rejected: new [limits] keys for N and M — the existing 5 lanes / 30 min covers the 5-in-15 case
+Decided: install is `drover shed install`, a dry run naming serve's live terminals unless --yes, then cargo install --rev REV and `shed install --force`, read back as doctor's line
+Because: crates/core/src/shed.rs:156
+Decided: the line cap is raised in one orchestrator-filed issue; this PR waits for it
+Because: q1812
+Check: cargo test -p drover --test shed_pin fails at 891888d (commit 1 on staging) and passes at the head
+Owner: drover now refuses to start lanes on a shed build that doesn't match its pin, stops respawning when prompts stop landing fleet-wide, and has one command that installs shed and restarts it.
