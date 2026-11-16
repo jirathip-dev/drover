@@ -1,0 +1,10 @@
+Decided: the composer is a new page-only `composer` block (crates/server/src/serve/chat.rs composer), and the generic `form` loses its unused `submit` path.
+Because: "A composer for the page's thread screen as a page-only block"
+Decided: the screen posts the existing ops through `/action` as thread-queue, thread-steer, thread-unqueue, thread-stop and thread-model, with files, q, harness, model and effort passed through.
+Because: crates/server/src/screens.rs:47
+Decided: drafts (text, files, picks) are kept in page memory per composer, so a stream repaint keeps them and a failed send keeps both text and files.
+Rejected: IndexedDB drafts — the kept-input issue owns drafts that survive a reload; this keeps them across repaints only.
+Rejected: reconnecting… on the pill — the pill shows working with timer, stopping… and offline · tap to retry; the stream's reconnect state is not the block's.
+Check: crates/cli/tests/threads_tab.rs each_composer_op_reaches_its_thread_op_and_the_screen_shows_it drives say with two files, queue, edit, steer, unqueue, stop, model, retry and new with harness.
+Check: the two WebKit tests skip without Playwright; they run in CI's ui-webkit job (new step and path trigger).
+Owner: Please try attaching a screenshot from Photos on your phone and sending it; that check can only be done by hand.
