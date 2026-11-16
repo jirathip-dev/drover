@@ -36,6 +36,7 @@ resume) id_ok "$2"; set_state "$2" running ;;
 stop) id_ok "$2"; set_state "$2" stopped ;;
 delete) id_ok "$2"; grep -v "^$2 " "$s" > "$s.new"; mv "$s.new" "$s" ;;
 snapshot) id_ok "$2" ;;
+ssh) id_ok "$2"; [ ! -f "$d/ssh-fails" ] || { echo "ssh: connect to $2: refused" >&2; exit 255; } ;;
 *) echo "error: unrecognized subcommand '$1'" >&2; exit 2 ;;
 esac
 "#;
@@ -126,6 +127,29 @@ fn bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start() {
     assert!(
         made.matches("new ").count() == 1 && made.contains("resume bx_0"),
         "{made}"
+    );
+}
+
+#[test]
+fn bootstrap_runs_one_boat_ssh_on_a_new_vm_before_probe_and_reports_a_failing_one() {
+    let (c, bin) = setup("boat-ready", "small");
+    let cfg = Config::load(&c.config).unwrap();
+    let r = Boat(Fake::default().reply("herdr machine list --json", "[]"), bin.clone());
+    let e = drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut vec![]).unwrap_err();
+    assert!(format!("{e:#}").contains("can't reach boat1"), "{e:#}");
+    let made = calls(&bin);
+    let (new, ssh) = (made.find("new --type").unwrap(), made.find("ssh bx_0 --no-update true"));
+    assert!(ssh.is_some_and(|s| s > new), "{made}");
+    drover::cloud::stop(&c, &cfg, &r, "boat1", "stop", "test").unwrap();
+    drover::cloud::start(&c, &cfg, &r, "boat1").unwrap();
+    assert_eq!(calls(&bin).matches("ssh bx_").count(), 1, "{}", calls(&bin));
+    drover::cloud::stop(&c, &cfg, &r, "boat1", "destroy", "test").unwrap();
+    std::fs::write(bin.join("ssh-fails"), "").unwrap();
+    let e = drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut vec![]).unwrap_err();
+    let e = format!("{e:#}");
+    assert!(
+        e.contains("boat1 ready failed (255): ssh: connect to bx_0: refused") && !e.contains("can't reach"),
+        "{e}"
     );
 }
 

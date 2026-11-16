@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::working;
+use crate::events::{working, Json};
 use crate::lesson::ymd;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
@@ -11,10 +11,21 @@ use std::io::Write;
 
 const DAYS: u64 = 14;
 const HOT: usize = 5;
+const HOT_IN: usize = 20;
+const SWEEP: usize = 40;
 /// #892: how a hotspots issue's title starts.
 pub const TITLE: &str = "hotspots: ";
 
-/// #889: a file `HOT` or more merged PRs touched in `DAYS` days, the distinct PR pairs it was predicted to conflict in (#973) and its PRs' update rounds.
+/// #1147: what the window held: merges counted, sweeps (over `SWEEP` files) skipped, the bar, and decided files over it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Window {
+    pub merges: usize,
+    pub sweeps: usize,
+    pub bar: usize,
+    pub decided: usize,
+}
+
+/// #889: a file the window's bar or more counted merges touched in `DAYS` days, the distinct PR pairs it was predicted to conflict in (#973) and its PRs' update rounds.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Hot {
     pub file: String,
@@ -24,7 +35,7 @@ pub struct Hot {
 }
 
 /// #889: `fleet`'s hot files from its integration branch's merges and every same-repo fleet's log, most-touched first.
-pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<Hot>> {
+pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<(Window, Vec<Hot>)> {
     let f = cfg.fleet(fleet)?;
     let since = ctx.now.saturating_sub(DAYS * 86400);
     let (local, range) = (
@@ -42,18 +53,35 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
     ];
     let since_at = format!("--since=@{since}");
     let log = ok(r, "git", &[&args[..], &[since_at.as_str(), "--format=%x00%H"]].concat())?;
-    let mut touched = BTreeMap::<String, Vec<String>>::new();
-    let mut sha = "";
+    let mut counted = Vec::<(String, Vec<String>)>::new();
     for l in log.lines().filter(|l| !l.is_empty()) {
-        match l.strip_prefix('\0') {
-            Some(h) => sha = h,
-            None => touched.entry(l.to_string()).or_default().push(sha.to_string()),
+        match (l.strip_prefix('\0'), counted.last_mut()) {
+            (Some(h), _) => counted.push((h.to_string(), vec![])),
+            (None, Some(m)) => m.1.push(l.to_string()),
+            (None, None) => {}
         }
     }
-    let converted = converted(r, f)?;
+    let all = counted.len();
+    counted.retain(|m| m.1.len() <= SWEEP);
+    let bar = HOT.max(counted.len() / HOT_IN);
+    let mut touched = BTreeMap::<String, Vec<String>>::new();
+    for (sha, files) in &counted {
+        for file in files {
+            touched.entry(file.clone()).or_default().push(sha.clone());
+        }
+    }
+    let decided = decided(r, f)?;
     let tip = ok(r, "git", &["-C", &local, "ls-tree", "-r", "--name-only", &range])?;
     let tip: BTreeSet<&str> = tip.lines().collect();
-    touched.retain(|f, _| tip.contains(f.as_str()) && !crate::arch::any(&converted, f));
+    touched.retain(|f, s| tip.contains(f.as_str()) && s.len() >= bar);
+    let before = touched.len();
+    touched.retain(|f, _| !crate::arch::any(&decided, f));
+    let window = Window {
+        merges: counted.len(),
+        sweeps: all - counted.len(),
+        bar,
+        decided: before - touched.len(),
+    };
     let (events, predicted) = (
         working(&ctx.state)?,
         crate::events::since(&ctx.state, &["conflict-predicted"], since)?,
@@ -84,7 +112,7 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
         let pairs: BTreeSet<_> = predicted.iter().filter(same).filter(on).map(pair).collect();
         pairs.len()
     };
-    let mut hot: Vec<Hot> = (touched.into_iter().filter(|(_, s)| s.len() >= HOT))
+    let mut hot: Vec<Hot> = (touched.into_iter())
         .map(|(file, shas)| Hot {
             prs: shas.len(),
             conflicts: conflicts(&file),
@@ -93,20 +121,20 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
         })
         .collect();
     hot.sort_by(|a, b| b.prs.cmp(&a.prs).then_with(|| a.file.cmp(&b.file)));
-    Ok(hot)
+    Ok((window, hot))
 }
 
-fn converted(r: &dyn Runner, f: &crate::config::Fleet) -> Result<Vec<String>> {
+fn decided(r: &dyn Runner, f: &crate::config::Fleet) -> Result<Vec<String>> {
     let local = f.local_path().to_string_lossy().into_owned();
     let show = |p: &str| {
         let at = format!("origin/{}:{p}", f.integration);
         let o = r.run("git", &argv(&["-C", &local, "show", &at])).ok()?;
         (o.code == 0).then_some(o.stdout)
     };
-    crate::repo_read("arch.toml", show).map_or(Ok(vec![]), |t| crate::arch::converted(&t))
+    crate::repo_read("arch.toml", show).map_or(Ok(vec![]), |t| crate::arch::decided(&t))
 }
 
-/// #891: log `hot-files` when the stored hot files less those arch.toml now marks converted differ from the last one.
+/// #891: log `hot-files` when the stored hot files less those arch.toml now marks decided differ from the last one.
 pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<()> {
     let Ok(text) = std::fs::read_to_string(path(ctx, fleet)) else {
         return Ok(());
@@ -116,9 +144,9 @@ pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<()> 
     if hot.is_empty() && last.is_empty() {
         return Ok(());
     }
-    let converted = converted(r, cfg.fleet(fleet)?)?;
+    let decided = decided(r, cfg.fleet(fleet)?)?;
     let files: Vec<String> = (hot.into_iter().map(|h| h.file))
-        .filter(|p| !crate::arch::any(&converted, p))
+        .filter(|p| !crate::arch::any(&decided, p))
         .collect();
     if files != last {
         let e = crate::events::Event::new(ctx.now, fleet, None, "hot-files", json!({"files": files}));
@@ -128,8 +156,16 @@ pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<()> 
 }
 
 /// #889: the report `drover hotspots` prints and its issue's body.
-pub fn report(fleet: &str, hot: &[Hot]) -> String {
-    let mut s = format!("Hot files in {fleet}: {HOT} or more merged PRs in the last {DAYS} days\n\n");
+pub fn report(fleet: &str, w: &Window, hot: &[Hot]) -> String {
+    let Window {
+        merges,
+        sweeps,
+        bar,
+        decided,
+    } = w;
+    let mut s = format!(
+        "Hot files in {fleet}: {bar} or more of {merges} merged PRs (1 in {HOT_IN}, at least {HOT}) in the last {DAYS} days\n{sweeps} sweeps (over {SWEEP} files) not counted · {decided} decided files (frozen, generated or shared) not listed\n\n"
+    );
     if hot.is_empty() {
         return s + "none\n";
     }
@@ -145,16 +181,25 @@ pub fn path(ctx: &Ctx, fleet: &str) -> std::path::PathBuf {
     ctx.state.with_file_name(format!("hotspots-{fleet}.json"))
 }
 
+fn store(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<(Window, Vec<Hot>)> {
+    let (w, hot) = find(ctx, cfg, r, fleet)?;
+    std::fs::write(path(ctx, fleet), serde_json::to_string_pretty(&hot)?)?;
+    Ok((w, hot))
+}
+
 /// #889: report and store the hot files; with any, open (or update) the week's issue and queue it `--architect`.
 pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let f = cfg.fleet(fleet)?;
-    let hot = find(ctx, cfg, r, fleet)?;
-    std::fs::write(path(ctx, fleet), serde_json::to_string_pretty(&hot)?)?;
-    let body = report(fleet, &hot);
+    let (w, hot) = store(ctx, cfg, r, fleet)?;
+    let body = report(fleet, &w, &hot);
     write!(out, "{body}")?;
     if hot.is_empty() {
         return Ok(());
     }
+    file(ctx, cfg, r, out, fleet, &body)
+}
+
+fn file(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, body: &str) -> Result<()> {
+    let f = cfg.fleet(fleet)?;
     let day = ctx.now / 86400;
     let title = format!("{TITLE}{fleet} week of {}", ymd(day - (day + 3) % 7));
     let search = format!("\"{title}\" in:title");
@@ -176,7 +221,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         ok(
             r,
             "gh",
-            &["issue", "edit", &n.to_string(), "-R", &f.repo, "--body", &body],
+            &["issue", "edit", &n.to_string(), "-R", &f.repo, "--body", body],
         )?;
         writeln!(out, "updated {fleet}#{n}: {title}")?;
         n
@@ -184,7 +229,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         let url = ok(
             r,
             "gh",
-            &["issue", "create", "-R", &f.repo, "--title", &title, "--body", &body],
+            &["issue", "create", "-R", &f.repo, "--title", &title, "--body", body],
         )?;
         let n = (url.trim().rsplit('/').next().and_then(|n| n.parse().ok())).context("gh issue create: no number")?;
         writeln!(out, "filed {fleet}#{n}: {title}")?;
@@ -195,25 +240,35 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         .all(|i| i.issue != n)
     {
         let mut op = crate::queue::op("add", &[n], false, None, None, None);
-        op["architect"] = json!(true);
+        op.put("architect", json!(true));
         writeln!(out, "{}", crate::queue_change(ctx, cfg, fleet, op, None)?)?;
     }
     Ok(())
 }
 
-/// #889: `tick`'s run, at most once per 7 days per fleet (`hotspots = "off"` opts out; a paused fleet waits).
-pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+/// #1147: `tick`'s run: store each fleet's list once a day, file its issue once in 7 days (`hotspots = "off"` opts out; a paused fleet waits).
+pub fn daily(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let on = |f: &crate::config::Fleet| f.hotspots.as_deref() != Some("off") && !f.paused;
-    for name in cfg.fleet.iter().filter(|(_, f)| on(f)).map(|x| x.0) {
-        let at = ctx.state.with_file_name(format!("hotspots-{name}.at"));
+    let due = |name: &str, ext: &str, every: u64| {
+        let at = ctx.state.with_file_name(format!("hotspots-{name}.{ext}"));
         let last = std::fs::read_to_string(&at)
             .ok()
             .and_then(|t| t.trim().parse::<u64>().ok());
-        if last.is_some_and(|t| ctx.now < t + 7 * 86400) {
-            continue;
-        }
-        std::fs::write(&at, ctx.now.to_string())?;
-        if let Err(e) = run(ctx, cfg, r, out, name) {
+        (last.is_none_or(|t| ctx.now >= t + every)).then_some(at)
+    };
+    for name in cfg.fleet.iter().filter(|(_, f)| on(f)).map(|x| x.0) {
+        let Some(day) = due(name, "day", 86400) else { continue };
+        std::fs::write(&day, ctx.now.to_string())?;
+        let filed = store(ctx, cfg, r, name).and_then(|(w, hot)| {
+            let Some(at) = due(name, "at", 7 * 86400).filter(|_| !hot.is_empty()) else {
+                return Ok(());
+            };
+            std::fs::write(&at, ctx.now.to_string())?;
+            let body = report(name, &w, &hot);
+            write!(out, "{body}")?;
+            file(ctx, cfg, r, out, name, &body)
+        });
+        if let Err(e) = filed {
             writeln!(out, "{name} hotspots: {e:#}")?;
         }
     }

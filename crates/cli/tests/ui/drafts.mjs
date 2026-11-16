@@ -30,41 +30,41 @@ try {
   const open = async () => {
     await until(() => !!document.querySelector('[data-id="t2"]'), 'the threads list');
     await page.evaluate(() => document.querySelector('[data-id="t2"]').click());
-    await until(() => !!document.querySelector('.form.say input'), 'the composer');
+    await until(() => !!document.querySelector('.cmp textarea'), 'the composer');
   };
   const box = () => page.evaluate(() => {
-    const i = document.querySelector('.form.say input');
+    const i = document.querySelector('.cmp textarea');
     return { value: i.value, focus: document.activeElement === i, caret: [i.selectionStart, i.selectionEnd], draft: localStorage.getItem('draft:thread-t2:say:text') };
   });
 
   await page.goto(url + '#threads');
   await open();
-  await page.evaluate(() => { const i = document.querySelector('.form.say input'); i.focus(); document.querySelector('.scr[data-id=thread-t2]').scrollTop = 400; });
+  await page.evaluate(() => { const i = document.querySelector('.cmp textarea'); i.focus(); document.querySelector('.scr[data-id=thread-t2] > .msgs').scrollTop = 400; });
   await page.keyboard.type('half a thought');
   await page.evaluate(() => {
-    const i = document.querySelector('.form.say input');
+    const i = document.querySelector('.cmp textarea');
     i.setSelectionRange(4, 6);
     const a = document.elementFromPoint(195, 422).closest('.card');
     window.kept = { i, gone: 0, anchor: a.dataset.id, top: a.getBoundingClientRect().top };
     kept.live = [];
-    new MutationObserver(rs => { if (document.getElementById('stale').hidden) kept.live.push([Math.round(document.querySelector('.scr[data-id=thread-t2]').scrollTop), document.querySelector(`[data-id="${kept.anchor}"]`)?.getBoundingClientRect().top]); for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
+    new MutationObserver(rs => { if (document.getElementById('stale').hidden) kept.live.push([Math.round(document.querySelector('.scr[data-id=thread-t2] > .msgs').scrollTop), document.querySelector(`[data-id="${kept.anchor}"]`)?.getBoundingClientRect().top]); for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
   });
   out.before = { ...(await box()), top: await page.evaluate(() => kept.top) };
   typed();
   await until(() => document.querySelectorAll('[data-id^="m-x"]').length === 5, 'the 5 stream updates');
-  const view = () => page.evaluate(() => [Math.round(document.querySelector('.scr[data-id=thread-t2]').scrollTop), document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top]);
+  const view = () => page.evaluate(() => [Math.round(document.querySelector('.scr[data-id=thread-t2] > .msgs').scrollTop), document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top]);
   const tick = [await view()];
   await page.clock.runFor(30_000);
   tick.push(await view());
-  out.after = { ...(await box()), tick, same: await page.evaluate(() => document.querySelector('.form.say input') === kept.i && kept.i.isConnected), gone: await page.evaluate(() => kept.gone), live: await page.evaluate(() => kept.live) };
+  out.after = { ...(await box()), tick, same: await page.evaluate(() => document.querySelector('.cmp textarea') === kept.i && kept.i.isConnected), gone: await page.evaluate(() => kept.gone), live: await page.evaluate(() => kept.live) };
 
   await page.reload();
-  await until(() => !!document.querySelector('.form.say input'), 'the reloaded thread');
+  await until(() => !!document.querySelector('.cmp textarea'), 'the reloaded thread');
   out.reloaded = { ...(await box()), hash: await page.evaluate(() => location.hash) };
 
   await page.route('**/action', r => { out.posts++; return r.fulfill({ status: 500, contentType: 'application/json', body: '{"line":"boom: not sent"}' }); });
-  await page.evaluate(() => document.querySelector('.form.say input').focus());
-  await page.keyboard.press('Enter');
+  await page.evaluate(() => document.querySelector('.cmp textarea').focus());
+  await page.keyboard.press('Control+Enter');
   await until(() => !document.getElementById('toast').hidden, 'the failed send toast');
   out.failed = { ...(await box()), toast: await page.evaluate(() => { const t = document.getElementById('toast'); return { red: t.classList.contains('r'), text: t.textContent, retry: [...t.querySelectorAll('button')].map(b => b.textContent) }; }) };
   await page.evaluate(() => [...document.querySelectorAll('#toast button')].find(b => b.textContent === 'retry').click());
@@ -72,9 +72,9 @@ try {
   out.retried = { posts: out.posts, ...(await box()) };
 
   await page.unroute('**/action');
-  await page.evaluate(() => document.querySelector('.form.say input').focus());
-  await page.keyboard.press('Enter');
-  await until(() => document.querySelector('.form.say input').value === '', 'the box to empty');
+  await page.evaluate(() => document.querySelector('.cmp textarea').focus());
+  await page.keyboard.press('Control+Enter');
+  await until(() => document.querySelector('.cmp textarea').value === '', 'the box to empty');
   await page.clock.runFor(1000);
   await until(() => [...document.querySelectorAll('.card')].some(c => c.textContent.includes('half a thought')), 'the sent message');
   out.sent = await box();

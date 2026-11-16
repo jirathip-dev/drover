@@ -3,6 +3,13 @@
 types:
     cargo test -p drover-server --features ts export_bindings
 
+# #1147: every generated file (.drover/arch.toml `generated`); arch-check runs it and fails on a difference.
+gen: types
+    npm --prefix web ci --no-audit --no-fund
+    npm --prefix web run build
+    cargo run -q --locked -p drover -- diagram > docs/workflow.md
+    BLESS=1 cargo test -q --locked -p drover --test brief_golden
+
 # #375: no board TS under assets/ (but assets/types/) declares its own copy of a generated type.
 types-lint:
     #!/usr/bin/env bash

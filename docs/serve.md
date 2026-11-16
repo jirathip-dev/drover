@@ -122,8 +122,11 @@ you` / `At the gate: …`; terminal sends none and keeps today's titles. A theme
 [[notify]]
 type = "webpush"
 sub = "mailto:you@example.com"   # the VAPID `sub` claim; required
-# on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, needs-human, ask-waiting, answer-undelivered, state-write-failed
+# on = [...]   # default: every alert emitted as a push (blocked, stall, lane-dead, merged, needs-human, ask-waiting, …)
 ```
+
+#1147: with no `on`, a phone gets each event logged with `"push": true` (set where the alert is born,
+`Event::push`) and the kinds pushed before the flag (`crates/core/src/events/push.rs`, frozen: it only shrinks).
 
 It works per fleet too (`[[fleet.<name>.notify]]`), next to any command notifier, which is
 unchanged. Each event is encrypted per device (RFC 8291 aes128gcm), signed with an ES256 VAPID

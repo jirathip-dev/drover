@@ -1,5 +1,5 @@
 use crate::config::{Config, Limits, LIMIT_DOCS};
-use crate::events::{working, IssueState, STATES};
+use crate::events::{working, IssueState, Json, STATES};
 use crate::{drive, timer, Ctx};
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -37,7 +37,7 @@ fn id(state: &str) -> String {
 /// #845: the issue statechart and the timers' pass chart, at `limits`, with `counts` per state when live.
 pub fn charts(limits: &Limits, counts: Option<&BTreeMap<&str, usize>>) -> [Chart; 2] {
     let l = serde_json::to_value(limits).unwrap_or_default();
-    let set = |k: &str| format!("{k} = {}", l[k]);
+    let set = |k: &str| format!("{k} = {}", l.at(k));
     let label = |text: &str| {
         let words = text.split(' ').map(|w| match LIMIT_DOCS.iter().find(|d| d.0 == w) {
             Some((k, _)) => set(k),
@@ -48,28 +48,32 @@ pub fn charts(limits: &Limits, counts: Option<&BTreeMap<&str, usize>>) -> [Chart
     let mut s = String::from("stateDiagram-v2\n    [*] --> queued\n");
     for (name, _) in STATES {
         let n = counts.map(|c| format!(" · {}", c.get(name).copied().unwrap_or_default()));
-        let _ = writeln!(s, "    state \"{name}{}\" as {}", n.unwrap_or_default(), id(name));
+        writeln!(s, "    state \"{name}{}\" as {}", n.unwrap_or_default(), id(name)).ok();
     }
     for (from, to) in STATES {
         for (next, why) in *to {
-            let _ = writeln!(s, "    {} --> {} : {}", id(from), id(next), label(why));
+            writeln!(s, "    {} --> {} : {}", id(from), id(next), label(why)).ok();
         }
         if to.is_empty() {
-            let _ = writeln!(s, "    {} --> [*]", id(from));
+            writeln!(s, "    {} --> [*]", id(from)).ok();
         }
     }
     let mut p = String::from("flowchart TD\n");
     let mut links: Vec<(String, &str)> = vec![];
     for (i, (job, args)) in timer::JOBS.iter().enumerate() {
-        let every = if args[0] == "drive" { "fast_secs" } else { "slow_secs" };
+        let every = if args.starts_with(&["drive"]) {
+            "fast_secs"
+        } else {
+            "slow_secs"
+        };
         let first = if i == 0 { "t0" } else { "d0" };
-        let _ = writeln!(p, "    j{i}[\"{job}: drover {}\"] --> {first}", args.join(" "));
+        writeln!(p, "    j{i}[\"{job}: drover {}\"] --> {first}", args.join(" ")).ok();
         links.push((format!("j{i}"), every));
     }
     for (pre, steps) in [("t", &timer::TICK_STEPS[..]), ("d", &drive::STEPS[..])] {
         for (i, (step, keys)) in steps.iter().enumerate() {
             let next = (i + 1 < steps.len()).then(|| format!(" --> {pre}{}", i + 1));
-            let _ = writeln!(p, "    {pre}{i}[\"{step}\"]{}", next.unwrap_or_default());
+            writeln!(p, "    {pre}{i}[\"{step}\"]{}", next.unwrap_or_default()).ok();
             links.extend(keys.iter().map(|k| (format!("{pre}{i}"), *k)));
         }
     }
@@ -77,17 +81,18 @@ pub fn charts(limits: &Limits, counts: Option<&BTreeMap<&str, usize>>) -> [Chart
         .iter()
         .position(|s| s.0 == "drive")
         .unwrap_or_default();
-    let _ = writeln!(
+    writeln!(
         p,
         "    t{drive} --> d0\n    other[\"other timers: serve, hosts, store\"]"
-    );
+    )
+    .ok();
     let rest = LIMIT_DOCS
         .iter()
         .filter(|(k, _)| timing(k) && !links.iter().any(|l| l.1 == *k));
     links.extend(rest.map(|(k, _)| ("other".to_string(), *k)).collect::<Vec<_>>());
     let mut nodes: Vec<(String, &str)> = vec![];
     for (at, k) in links {
-        let _ = writeln!(p, "    {at} -.- k_{k}([\"{}\"])", set(k));
+        writeln!(p, "    {at} -.- k_{k}([\"{}\"])", set(k)).ok();
         if !nodes.iter().any(|n| n.1 == k) {
             nodes.push((format!("k_{k}"), k));
         }
@@ -113,7 +118,7 @@ pub fn markdown(charts: &[Chart; 2], at: &str) -> String {
         `drover diagram --live [FLEET]` adds each state's issues (of FLEET, else every fleet) at the config's values.\n"
     );
     for (c, title) in charts.iter().zip(["Issue states", "Timers and the drive pass"]) {
-        let _ = write!(m, "\n## {title}\n\n```mermaid\n{}```\n", c.source);
+        write!(m, "\n## {title}\n\n```mermaid\n{}```\n", c.source).ok();
     }
     m
 }

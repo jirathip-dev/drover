@@ -316,6 +316,7 @@ dependencies = [
  "drover-core",
  "drover-server",
  "drover-service",
+ "drover-sys",
  "hkdf",
  "p256",
  "rusqlite",
@@ -333,6 +334,7 @@ dependencies = [
  "anyhow",
  "base64",
  "clap",
+ "drover-sys",
  "hkdf",
  "p256",
  "rusqlite",
@@ -351,6 +353,7 @@ dependencies = [
  "anyhow",
  "base64",
  "drover-core",
+ "drover-sys",
  "serde",
  "serde_json",
  "toml",
@@ -367,6 +370,10 @@ dependencies = [
  "serde_json",
  "tokio",
 ]
+
+[[package]]
+name = "drover-sys"
+version = "0.1.0"
 
 [[package]]
 name = "ecdsa"

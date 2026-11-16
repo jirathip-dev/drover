@@ -1,0 +1,1 @@
+- MERGED: spawn/adopt: the issue is merged; a merged issue never reopens
