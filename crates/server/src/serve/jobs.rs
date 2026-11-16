@@ -50,7 +50,6 @@ fn host_wait(reason: &str) -> bool {
 }
 
 impl Server<'_> {
-    /// Whether the job `kv` names (as its form) is still running or waiting.
     pub(super) fn flying(&self, kv: &[(&str, &str)]) -> bool {
         let k = key(&kv.iter().map(|(a, b)| ((*a).into(), (*b).into())).collect());
         lock(&self.tapped).0.values().any(|(x, j)| *x == k && !ended(j))
