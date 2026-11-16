@@ -1,0 +1,8 @@
+Decided: health, the ACP guard and sync also read `drover --version` through ssh's PATH and flag ✗ when it differs from the install root
+Because: "The health check reads the version through `drover` on ssh's PATH (what lanes run)"
+Decided: a separate bootstrap step and a sync line link ~/.local/bin/drover and a stale /usr/local/bin/drover to the root binary
+Because: "bootstrap and sync make `~/.local/bin/drover` and `/usr/local/bin/drover` symlinks"
+Rejected: folding the link into install_line — #1164/#1165 edit that line, and a bad link alone would force a cargo reinstall in bootstrap
+Rejected: ✗ when no drover is on ssh's PATH — non-ACP hosts run the hook by absolute path; it would flag every such host
+Check: crates/cli/tests/cloud.rs bootstrap_links_a_stale_real_local_bin_drover test runs the real link shell on a temp home
+Owner: a stale drover copy on a remote host's PATH now shows ✗ and bootstrap or the next check relinks it
