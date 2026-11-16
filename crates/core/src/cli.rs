@@ -2322,6 +2322,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     let mut it = lane.split(':');
     let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
     let cap = rules.builds
+        && !rules.cap_raise
         && !n
             .and_then(|n| crate::gh::cached_title(ctx, fleet, n))
             .is_some_and(|t| t.starts_with("cap:"));

@@ -1362,7 +1362,11 @@ pub fn spawn(
         on.write(&crate::sandbox::tmp(&p).join(".keep"), "")?;
     }
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
-    let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
+    let cap_raise = crate::gh::cached_title(ctx, fleet, issue).is_some_and(|t| t.starts_with("cap:"));
+    let rules = rules.map(|pl| crate::hook::Rules {
+        cap_raise,
+        ..crate::hook::Rules::resolve(cfg, fleet, role, &pl.name)
+    });
     if let Some(rl) = &rules {
         on.write(&p.rules_file(), &serde_json::to_string(rl)?)?;
     }
