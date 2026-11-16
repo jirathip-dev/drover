@@ -1,0 +1,7 @@
+Decided: merged origin/staging (#1084, #1085); the ui-webkit path filter keeps staging's page_drafts.rs and ui/drafts.mjs beside parity_webkit.rs
+Because: .github/workflows/ci.yml:201
+Decided: rows 2, 21 and 27 stay `open #1084` though #1084 merged; a row turns kept only with its passing parity test
+Because: "Each #553 row (and each R row) that the page claims gets a WebKit or golden test named `parity_<row>`"
+Rejected: flipping those rows to kept here — no parity test proves them yet, and parity_2's update never reached the Events tab in CI
+Check: ui-webkit's parity_r25 and parity_r5 still pass after #1084's repaint change
+Owner: The parity guard sits on the latest staging; nothing about it changed.
