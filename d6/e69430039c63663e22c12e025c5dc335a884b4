@@ -1,0 +1,12 @@
+Decided: cap-check --base <sha> refuses a commit since the base touching ci/cap.toml or ci/cap.d without a `Cap:` trailer; CI passes the PR's base sha, full history
+Because: "`drover cap-check` refuses a `ci/cap.toml` change without that trailer"
+Decided: `drover cap log` reads git log -p of ci/cap.toml, ci/cap.d and the pre-#129 ci.yml cap line: 44 rows here, each with its trailer or subject
+Because: "`drover cap log` prints the history from `git log -p ci/cap.toml` and those trailers"
+Decided: briefs carry `.drover/docs.md` as "Docs you may trust" when the repo has one; this repo lists README, docs/*.md, the kept mockups, roles and help --agent
+Because: "**Lane briefs** list the docs a lane may trust"
+Decided: deleted docs/cap-history, docs/runtime-hc.md, docs/snapshots and 5 mockup folders (conductor-chat, fleet-cards, pickers, sim-680, why-notes); 2 demo images moved to demo/files
+Because: "keep only those of screens that exist or are queued (#1086–#1092); delete the rest"
+Rejected: editing the ci/cap.toml header — the lane hook refuses it (REFUSED CAP_FILE); it still names docs/cap-history
+Check: rg -l 'Host tab|herd\.json|\[chat\] tab|/frag' docs roles README.md prints nothing
+Check: doc lines net -3468
+Owner: Stale docs about removed screens are gone, the README shows only what ships now and what is queued, and cap raises are recorded in git, with `drover cap log` printing them.
