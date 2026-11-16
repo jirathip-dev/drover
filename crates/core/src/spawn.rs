@@ -963,7 +963,8 @@ pub fn spawn(
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
     let ev = working(&ctx.state)?;
-    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), o.host.as_deref())?;
+    let host = o.host.clone().or_else(|| crate::starts::admitted(ctx, fleet, issue));
+    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
         return refused("RUNTIME_DOWN", why);
     }
@@ -1380,6 +1381,7 @@ pub fn spawn(
         term::ok(r, &home(p.lane_cmd(&pane)))?;
         term::ok(r, &term::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
     }
+    crate::starts::started(ctx, fleet, issue);
     let mut dirs: Vec<String> = f.clone_build.clone();
     dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
     dirs.sort();

@@ -268,6 +268,10 @@ pub struct HostCfg {
     pub runtime: Option<RuntimeKind>,
     /// #984: lanes running a turn at once on this host, all fleets (unset: no cap).
     pub max_working: Option<usize>,
+    /// #1186: lanes starting at once on this host (unset: `[limits] start_max`; the main host: `max_parallel_spawns`).
+    pub start_max: Option<usize>,
+    /// #1186: when a start here frees its slot (unset: `[limits] start_release`).
+    pub start_release: Option<StartRelease>,
     /// #984: live lanes that need `sim` on this host at once (unset: no cap).
     pub max_simulators: Option<usize>,
     /// #909: heavy checks its lanes run at once, of every fleet (unset: 3).
@@ -277,6 +281,14 @@ pub struct HostCfg {
     pub heavy_kind_max: BTreeMap<String, usize>,
     /// #909: minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
     pub heavy_wait_minutes: Option<u64>,
+}
+
+/// #1186: the point a starting lane frees its start slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartRelease {
+    Started,
+    Confirmed,
 }
 
 /// #256: a cloud host is a disposable machine: its lanes may start containers.
@@ -668,6 +680,8 @@ pub struct Limits {
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
     pub max_parallel_spawns: usize,
+    pub start_max: usize,
+    pub start_release: StartRelease,
     pub spawn_pending_max_secs: u64,
     pub acp_start_minutes: u64,
     pub webhook_poll_minutes: u64,
@@ -787,6 +801,8 @@ impl Default for Limits {
             import_max_age_hours: 24,
             max_pushes_per_pass: 3,
             max_parallel_spawns: 6,
+            start_max: 2,
+            start_release: StartRelease::Started,
             spawn_pending_max_secs: 300,
             acp_start_minutes: 3,
             webhook_poll_minutes: 10,
@@ -932,7 +948,15 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "max_parallel_spawns",
-        "concurrent detached spawn kicks (0: in the pass)",
+        "concurrent detached spawn kicks on the main host (0: in the pass)",
+    ),
+    (
+        "start_max",
+        "lanes starting at once on a remote host that sets no `start_max`",
+    ),
+    (
+        "start_release",
+        "a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`)",
     ),
     (
         "spawn_pending_max_secs",
@@ -1463,6 +1487,21 @@ impl Config {
         let first = || self.fleet.values().find_map(|f| f.runtime.as_ref());
         let host = || self.hosts.keys().find_map(|h| self.host_acp(h));
         self.runtime.as_ref().or_else(first).map(Runtime::shed).or_else(host)
+    }
+
+    /// #1186: lanes that may start at once on host `name` (a name no `[hosts]` entry has, or a machine-less one, is the main host).
+    pub fn start_max(&self, name: &str) -> usize {
+        let mps = self.limits.max_parallel_spawns;
+        match self.hosts.get(name) {
+            Some(h) if h.machine.is_some() => h.start_max.unwrap_or(self.limits.start_max),
+            h => h.and_then(|h| h.start_max).map_or(mps, |s| s.min(mps)),
+        }
+    }
+
+    /// #1186: when a start on host `name` frees its slot.
+    pub fn start_release(&self, name: &str) -> StartRelease {
+        let h = self.hosts.get(name).and_then(|h| h.start_release);
+        h.unwrap_or(self.limits.start_release)
     }
 
     /// #637: host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
