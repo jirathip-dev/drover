@@ -427,7 +427,7 @@ fn a_queued_issue_on_a_held_group_still_waits_and_names_its_holder() {
     );
     let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
     let row = w.lines().find(|l| l.starts_with("sendmeter #13 ")).unwrap_or_default();
-    assert!(row.contains("waiting for a ci slot (#9 holds 1/1)"), "{w}");
+    assert!(row.contains("serial: ci held by #9 (1/1)"), "{w}");
     assert!(!row.contains("(0/1)"), "{w}");
 }
 
