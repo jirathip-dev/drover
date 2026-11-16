@@ -1,0 +1,8 @@
+Decided: widened #1123's gone() into outside(): empty status logs `gone`, any other non-running status logs `stopped outside drover`; bootstrap and tick keep their one branch on it
+Because: "but `status` prints something else that is not `running`"
+Because: crates/core/src/cloud.rs:185
+Rejected: a second stopped() check beside gone() — two status calls and two ways to say the same thing
+Rejected: re-pinning in moved() — start() already resumes, refreshes the address and re-pins (#1125)
+Check: a failing status (Err) returns None: nothing logged, bootstrap goes on to moved() as before
+Check: self_update's pause test fails only with DROVER_LANE set (lane env); passes with it unset
+Owner: A cloud machine stopped by hand is now noticed: bootstrap starts it again, and the idle check stops counting its cost.
