@@ -559,7 +559,7 @@ fn boot_fake(gh_in: bool) -> Fake {
     );
     let f = Fake::default()
         .reply(&format!("{SSH}'sh' '-c' 'uname -s"), "Linux\nx86_64\n/home/me\n")
-        .reply(&step("[ \"$(shed --version)\""), "")
+        .reply(&step("v=$(shed --version)"), "")
         .reply(&step("shed doctor"), "")
         .once(&step("command -v gh"), 1, "")
         .once(&step(&mine), 1, "")
@@ -604,7 +604,7 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
         "apt_ gh",
         "command -v claude",
         "command -v cargo",
-        "[ \"$(shed --version)\"",
+        "v=$(shed --version)",
         "shed doctor",
     ];
     let at: Vec<_> = order.iter().map(|s| r.index(&step(s)).unwrap()).collect();
@@ -836,10 +836,7 @@ struct ShedThere<'a>(&'a Fake, std::path::PathBuf);
 impl Runner for ShedThere<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
-        let Some(script) = args
-            .last()
-            .filter(|_| line.starts_with(&step("[ \"$(shed --version)\"")))
-        else {
+        let Some(script) = args.last().filter(|_| line.starts_with(&step("v=$(shed --version)"))) else {
             return self.0.run(prog, args);
         };
         self.0.calls.borrow_mut().push(line);
