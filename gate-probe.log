@@ -1,0 +1,16 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.36s
+     Running tests/answer_delivery.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1146/debug/deps/answer_delivery-ab66a86ac5b31d64)
+
+running 9 tests
+test an_ask_without_an_agent_is_answered_into_the_issues_current_lane ... ok
+test a_remote_lane_is_answered_on_its_machines_shed ... ok
+test a_lane_ask_stores_its_agent_and_the_answer_is_typed_into_its_pane ... ok
+test a_closed_lane_whose_agent_still_runs_in_its_worktree_gets_the_answer ... ok
+test parity_71_an_answer_with_no_lane_alerts_once_from_check ... ok
+test a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane ... ok
+test parity_r9_a_supersede_close_logged_after_the_new_spawn_does_not_close_it ... ok
+test a_sleeping_lanes_answer_waits_for_room_then_lands ... ok
+test drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+

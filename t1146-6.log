@@ -1,0 +1,18 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1146/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s
+     Running tests/done_close.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1146/debug/deps/done_close-9bd82f3a2f8933f9)
+
+running 1 test
+test a_done_verify_lane_holding_only_its_own_outputs_closes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.05s
+
+     Running tests/verify_stage.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1146/debug/deps/verify_stage-329489421a863673)
+
+running 3 tests
+test a_same_name_verify_lane_without_a_verdict_is_still_lane_live ... ok
+test a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane ... ok
+test a_verify_lane_that_recorded_its_verdict_is_superseded_by_the_next_verify ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.41s
+

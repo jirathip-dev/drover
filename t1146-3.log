@@ -1,0 +1,31 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1146/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1146/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1146/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1146/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.94s
+     Running tests/verify_stage.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1146/debug/deps/verify_stage-329489421a863673)
+
+running 3 tests
+test a_same_name_verify_lane_without_a_verdict_is_still_lane_live ... ok
+test a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane ... ok
+test a_verify_lane_that_recorded_its_verdict_is_superseded_by_the_next_verify ... FAILED
+
+failures:
+
+---- a_verify_lane_that_recorded_its_verdict_is_superseded_by_the_next_verify stdout ----
+
+thread 'a_verify_lane_that_recorded_its_verdict_is_superseded_by_the_next_verify' (380280) panicked at crates/cli/tests/verify_stage.rs:715:5:
+sendmeter #12 review: REFUSED LANE_LIVE: finished (done) lane(s) ["sendmeter-verify-12-r1"] in /tmp/fleet-test-verify-1146-reuse-380277-0/worktrees/sendmeter/verify-12-r1; `--supersede` replaces it
+sendmeter #12 review: "sendmeter-verify-12-r1" ["hermes" "fleet-verify"] "verify-12-r1" @ "/tmp/fleet-test-verify-1146-reuse-380277-0/worktrees/sendmeter/verify-12-r1"
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_verify_lane_that_recorded_its_verdict_is_superseded_by_the_next_verify
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.58s
+
+error: test failed, to rerun pass `-p drover --test verify_stage`
+error: 1 target failed:
+    `-p drover --test verify_stage`

@@ -1,0 +1,26 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running tests/done_close.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1146/debug/deps/done_close-9bd82f3a2f8933f9)
+
+running 1 test
+test a_done_verify_lane_holding_only_its_own_outputs_closes ... FAILED
+
+failures:
+
+---- a_done_verify_lane_holding_only_its_own_outputs_closes stdout ----
+
+thread 'a_done_verify_lane_holding_only_its_own_outputs_closes' (375790) panicked at crates/cli/tests/done_close.rs:133:5:
+assertion `left == right` failed: ?? verdict.md
+?? .verify-browser.mjs
+?? shots/
+
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_done_verify_lane_holding_only_its_own_outputs_closes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p drover --test done_close`
