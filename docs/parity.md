@@ -60,8 +60,8 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 41 | Reorder rows ▲/▼ | parity_41 | kept |
 | 42 | Pause and resume a fleet | parity_42 | kept |
 | 43 | Drive now, plus per-fleet drive result line with details | — | open |
-| 44 | Pipeline stage chips on each row | — | open #1090 |
-| 45 | Issue card sections; its lanes newest first, tap opens sheet | — | open #1090 |
+| 44 | Pipeline stage chips on each row | parity_44 | kept |
+| 45 | Issue card sections; its lanes newest first, tap opens sheet | parity_45 | kept |
 | 46 | "waiting: decision" with options; link to the asking thread | — | open #1088 |
 | 47 | Backlog: search, filters, tick issues, [queue N] | parity_47 | kept |
 | 48 | Legend sheet [?] and serial-group 🔒 tags | parity_38 | kept |

@@ -197,11 +197,6 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     }
     let row = find(&q, "q-sendmeter-12");
     assert_eq!(row["title"], "#12");
-    assert_eq!(row["badge"], json!({"text": "[▲ impl · fix] ◆ ◫", "tone": "working"}));
-    assert_eq!(
-        row["figure"],
-        json!({"state": "working", "tool": "edit", "grow": "fix"})
-    );
     assert_eq!(row["subtitle"], "impl ✓ · review 1 ✗ · fix 1 ▸ sendmeter-impl-12");
     assert_eq!(row["tap"], json!({"sheet": "/screens/issue?repo=sendmeter&issue=12"}));
     for (id, n) in [("q-722", 722), ("q-456", 456), ("q-690", 690)] {
@@ -209,10 +204,6 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
         assert_eq!(find(&fx, id)["tap"], tap, "{id}");
     }
     assert_eq!(row["swipe"][0]["action"], "stop");
-    assert_eq!(
-        find(&q, "q-sendmeter-5")["figure"],
-        json!({"state": "needs", "grow": "blocked"})
-    );
     assert_eq!(
         find(&q, "q-sendmeter-17")["badge"],
         json!({"text": "#1", "tone": "mute"})
@@ -826,7 +817,31 @@ fn parity_38_the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_mo
 }
 
 #[test]
-fn a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thread() {
+fn parity_44_a_moving_row_shows_its_stage_strip_and_plant_a_stuck_one_its_state() {
+    let (c, r) = recorded("cooee-strip");
+    let (status, q) = req(
+        &Server::new(&c, &r, Some(ADDR.into())),
+        T,
+        "GET",
+        "/screens/queue",
+        "",
+        "",
+    );
+    assert_eq!(status, 200, "{q}");
+    let fix = find(&q, "q-sendmeter-12");
+    assert_eq!(fix["badge"], json!({"text": "[▲ impl · fix] ◆ ◫", "tone": "working"}));
+    assert_eq!(
+        fix["figure"],
+        json!({"state": "working", "tool": "edit", "grow": "fix"})
+    );
+    assert!(fix["value"]["since"].is_string(), "{fix}");
+    let stuck = find(&q, "q-sendmeter-5");
+    assert_eq!(stuck["figure"], json!({"state": "needs", "grow": "blocked"}));
+    assert!(!stuck["badge"]["text"].as_str().unwrap().contains('['), "{stuck}");
+}
+
+#[test]
+fn parity_45_a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thread() {
     let (c, r) = recorded("cooee-issue");
     let ask =
         json!({"id": "q8", "question": "Split the PR?", "options": ["split", "keep"], "recommend": 2, "thread": "t9"});
