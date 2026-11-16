@@ -1812,7 +1812,7 @@ impl<'a> Server<'a> {
         // #517: but one tied to an issue: its card is answerable here too.
         let asks = crate::events::open_asks(ev)
             .into_iter()
-            .filter(|a| a.str("thread").is_none() || a.issue.is_some() || crate::design::is_ask(a))
+            .filter(|a| asked_here(a))
             .map(|a| need_ask(ctx.now, mins, ev, a));
         NeedsTab {
             now: ctx.now,
@@ -1873,12 +1873,18 @@ impl<'a> Server<'a> {
             }
         };
         // #217: a failed extend's card is back; a recorded one with no lane yet is one muted line, no buttons.
-        let pend = |s: &IssueState| match s.last_event.as_str() {
-            "round-extended" if crate::waiting::unspawned(events, s) => Some(card(s, true)),
-            _ if s.state == "needs-human" || s.last_event == "extend-failed" => Some(card(s, false)),
-            _ => None,
-        };
-        st.values().filter_map(pend).collect()
+        st.values()
+            .filter_map(|s| pending(events, s).map(|p| card(s, p)))
+            .collect()
+    }
+
+    /// #1089: the needs-you cards' count (blocked lanes, asks, issues), as the old `[queue·N]` counted them.
+    pub(super) fn needs_count(&self, ctx: &Ctx, events: &crate::events::Log) -> usize {
+        let cfg = Config::kept(ctx).ok();
+        let all = cfg.and_then(|c| self.lanes(ctx.now, &c, events, &events.states));
+        let blocked = all.map_or(0, |l| l.iter().filter(|l| l.state.word() == "blocked").count());
+        let asks = crate::events::open_asks(events).into_iter().filter(|a| asked_here(a));
+        blocked + asks.count() + events.states.values().filter(|s| pending(events, s).is_some()).count()
     }
 
     /// A blocked lane's card: shed's note as its activity; paired, the last 6 masked lines of shed's text as they are.
@@ -3569,4 +3575,16 @@ fn pipe(fleet: &str, fc: &crate::config::Fleet, st: &States) -> serde_json::Valu
     json!({"fleet": fleet, "into": fc.integration, "builtin": p.builtin, "stages": stages, "bad": bad,
         "checks": checks, "required": fc.required_checks, "queued": count(&|s| s.state == "queued"),
         "parked": count(&|s| s.state == "needs-human")})
+}
+
+fn asked_here(a: &Event) -> bool {
+    a.str("thread").is_none() || a.issue.is_some() || crate::design::is_ask(a)
+}
+
+fn pending(events: &[Event], s: &IssueState) -> Option<bool> {
+    match s.last_event.as_str() {
+        "round-extended" if crate::waiting::unspawned(events, s) => Some(true),
+        _ if s.state == "needs-human" || s.last_event == "extend-failed" => Some(false),
+        _ => None,
+    }
 }

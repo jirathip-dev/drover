@@ -3,6 +3,7 @@
  "id": "queue",
  "title": "Queue",
  "stream": "/screens/queue/stream",
+ "badge": 2,
  "actions": [
   {
    "icon": "more",
@@ -39,19 +40,19 @@
    "options": [
     {
      "value": "all",
-     "label": "all"
+     "label": "all 26"
     },
     {
      "value": "cooee",
-     "label": "cooee"
+     "label": "cooee 3 ●"
     },
     {
      "value": "herdsman",
-     "label": "herdsman"
+     "label": "herdsman 19"
     },
     {
      "value": "drover",
-     "label": "drover"
+     "label": "drover 4"
     }
    ]
   },
@@ -90,6 +91,29 @@
       1.6,
       1.6
      ]
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "id": "counts",
+   "items": [
+    {
+     "label": "needs you",
+     "value": "0",
+     "tone": ""
+    },
+    {
+     "label": "in progress",
+     "value": "7"
+    },
+    {
+     "label": "queued",
+     "value": "12"
+    },
+    {
+     "label": "done today",
+     "value": "6"
     }
    ]
   },
