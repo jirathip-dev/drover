@@ -1,0 +1,12 @@
+Decided: a serve that finds its port held asks /api/v1/health for the holder's sha; same build exits 0, older build is asked to hand over over its control socket, then exits 0
+Because: "launchd's serve never loops on a held port"
+Decided: launchd KeepAlive SuccessfulExit=false and systemd Restart=on-failure, so the exit 0 is not respawned
+Because: "launchd's serve exits 0 once and does not respawn in a loop"
+Decided: drover check alerts serve-stale from serve-health.json's new sha and serve-loop from `failed` lines in serve-starts (over 3 in 1 h)
+Because: "`drover check` alerts once when the serve on the port is older than the installed binary"
+Decided: clean's reap also TERMs processes whose binary sits in the lane's .build folders
+Because: "Lane test builds' `drover serve` processes end with their lane"
+Rejected: killing a holder that will not hand over — unknown processes on the port are left alone; serve-loop alerts instead
+Rejected: changing the 300 MB watcher — 7171 predates #895 (merged after it started); a test proves a handed-over serve hands over again
+Check: crates/cli/tests/handover.rs older-build test drives a fake old holder through the real handover protocol
+Owner: After installing, run `drover timer install` once so the serve job picks up the no-respawn-on-success setting.
