@@ -105,7 +105,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 86 | Host and Events as tabs; [◐] look button (drop? in #553) | — | open |
 | 87 | Lanes mode button; fixed Corral horse art (drop? in #553) | — | open |
 | 88 | Queue as a table with per-row buttons (drop? in #553) | — | open |
-| 89 | Server-rendered HTML tabs and `/frag` fragments (drop? in #553) | — | open |
+| 89 | Server-rendered HTML tabs and their fragment route (drop? in #553) | — | open |
 | 90 | Public demo as a static export (drop? in #553) | — | open |
 | R1 | A keychain read waits forever on an invisible macOS prompt | parity_r1 | kept |
 | R2 | A retired or unknown config key stops the whole service | parity_r2 | kept |

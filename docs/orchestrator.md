@@ -126,8 +126,9 @@ drover thread ls [FLEET] [--json]           # per repo: title, last message, unr
 has no Threads place, so the Cooee plugin never shows it), N the threads where a choice waits. It is a JSON screen
 like the others (`docs/design/threads-tab/`): `/screens/threads` (the list), `/screens/threads/<id>` (a thread, opened
 in the same tab, its cards place hidden) and `/screens/threads/new/<repo>`. Its taps post `/action` `thread-new`,
-`thread-say`, `thread-retry`, `thread-archive`, `thread-restore` (the `POST /thread` ops) and `answer`. Files, queued
-messages, config and secret cards come with #1086–#1088.
+`thread-say`, `thread-retry`, `thread-archive`, `thread-restore` (the `POST /thread` ops) and `answer`. #1088: a
+thread tap or push opens `#threads/<id>` (back returns to the list), and its config, secret and run cards show in the
+thread. Files and queued messages come with #1086 and #1087.
 
 - **Archive (#405):** the thread's orchestrator stops (its pane closes; the folder, uploads and log stay) and the
   thread folds under "N archived"; `restore` brings it back and its next message resumes the same session. CLI:

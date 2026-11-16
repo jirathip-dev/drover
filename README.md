@@ -57,16 +57,19 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - The lifeboat page at `/api/v1/lifeboat` for when cooee is down (#757).
 - The phone page (`drover serve`) stays: it draws the same `/screens/` JSON cooee draws: Queue, Lanes, Events, the
   Fleets sheet and the cards (#927), plus a Threads tab of its own (#1072); its links open in a new tab (#1085).
+- Threads: a tap or push opens the thread, `#threads/<id>` with back, and config, secret and run cards in a thread
+  (#1088); typed text, focus and scroll survive repaints, with per-thread drafts (#1084).
+- Every #553 parity row names its test in `docs/parity.md`; CI fails a dropped one without the owner's q-number (#1094).
+- A held port hands over to the installed build; a stale or looping serve alerts (#1081).
 
 ## Next
 
 The open queue, by area.
 
 **The page and its screens**
-- Threads at parity with the old chat: reading, composer, taps and cards in a thread ([#1086](https://github.com/jirathip-dev/herdsman/issues/1086), [#1087](https://github.com/jirathip-dev/herdsman/issues/1087), [#1088](https://github.com/jirathip-dev/herdsman/issues/1088)).
+- Threads at parity with the old chat: reading and the composer ([#1086](https://github.com/jirathip-dev/herdsman/issues/1086), [#1087](https://github.com/jirathip-dev/herdsman/issues/1087)).
 - Queue counts and chips, and a row tap that always opens the issue sheet ([#1089](https://github.com/jirathip-dev/herdsman/issues/1089), [#1090](https://github.com/jirathip-dev/herdsman/issues/1090)).
 - A Hosts screen ([#1091](https://github.com/jirathip-dev/herdsman/issues/1091)) and the Herd scene ([#1092](https://github.com/jirathip-dev/herdsman/issues/1092)) back on the page.
-- Typed text, focus and scroll survive repaints ([#1084](https://github.com/jirathip-dev/herdsman/issues/1084)).
 
 **cooee plugin**
 - Shed's lane states on the board and in the plugin ([#983](https://github.com/jirathip-dev/herdsman/issues/983)); each orchestrator as a cooee profile ([#1057](https://github.com/jirathip-dev/herdsman/issues/1057)).
@@ -74,12 +77,12 @@ The open queue, by area.
 
 **Drive, merge and gates**
 - Closed issues and dropped holds leave the Queue at once ([#1025](https://github.com/jirathip-dev/herdsman/issues/1025)); one log read per pass ([#832](https://github.com/jirathip-dev/herdsman/issues/832)).
-- A handed-over serve runs the new binary ([#1081](https://github.com/jirathip-dev/herdsman/issues/1081)); SLO promises a known hold supersedes are not missed ([#1093](https://github.com/jirathip-dev/herdsman/issues/1093)).
+- SLO promises a known hold supersedes are not missed ([#1093](https://github.com/jirathip-dev/herdsman/issues/1093)).
 - Squash merges carrying their why notes ([#1097](https://github.com/jirathip-dev/herdsman/issues/1097)).
 
 **Orchestrators and asks**
 - Design reviews and one more round from the owner's typed words ([#828](https://github.com/jirathip-dev/herdsman/issues/828)); a typed `#N approve` approves ([#1080](https://github.com/jirathip-dev/herdsman/issues/1080)).
 
 **Rules and history**
-- Banned APIs enforced in CI ([#809](https://github.com/jirathip-dev/herdsman/issues/809)); legacy history comments stripped ([#1098](https://github.com/jirathip-dev/herdsman/issues/1098)); parity rows are tests ([#1094](https://github.com/jirathip-dev/herdsman/issues/1094)).
+- Banned APIs enforced in CI ([#809](https://github.com/jirathip-dev/herdsman/issues/809)); legacy history comments stripped ([#1098](https://github.com/jirathip-dev/herdsman/issues/1098)).
 - A per-fleet git baseline ([#1099](https://github.com/jirathip-dev/herdsman/issues/1099)), a triage lane ([#1100](https://github.com/jirathip-dev/herdsman/issues/1100)) and shared history conventions ([#1101](https://github.com/jirathip-dev/herdsman/issues/1101)).
