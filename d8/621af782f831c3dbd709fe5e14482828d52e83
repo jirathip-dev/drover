@@ -1,0 +1,7 @@
+Decided: a running cloud host that admits with max_working room takes the lane as soon as every local host refuses; overflow_after_minutes only gates starting a stopped one
+Because: "placement picks that host instead of holding the issue on the main host"
+Because: crates/core/src/hosts.rs:1183
+Rejected: shortening overflow_after_minutes — the held timer resets on every load dip, so a running VM still idles
+Rejected: max_working as a refusal in at() — would change spawn's HOST_BUSY semantics for every host; it only ranks instead
+Check: the stopped-cloud overflow test still holds HOST_BUSY on mini until the wait passes
+Owner: busy Mac plus a running cloud VM with room now sends new lanes to the VM at once
