@@ -1083,7 +1083,7 @@ pub fn sync(ctx: &Ctx, on: &On, name: &str, home: &str) -> String {
     theirs
 }
 
-/// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it is enabled, up and admitting (#676), else the least-busy enabled host whose tags cover the needs.
+/// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it is enabled, up, admitting (#676) and its tags cover the needs, or its worktree there has unpushed work (#1138), else the least-busy enabled host whose tags cover the needs.
 pub fn place(
     ctx: &Ctx,
     cfg: &Config,
@@ -1126,28 +1126,31 @@ pub fn place(
         }
         return Ok(Some(at(ctx, cfg, f, r, (h, machine), pre)));
     }
+    let needs = needs(f, role, events, (fleet, issue));
+    let seen = cached(ctx);
+    let fit = |n: &str, h: &HostCfg| needs.iter().all(|t| tags(h, seen.get(n)).contains(t));
     if let Some(e) = last {
         let was = (e.str("host").unwrap_or("local"), e.str("machine"));
         let mut p = at(ctx, cfg, f, r, was, pre);
         let code = p.refusal.as_ref().map(|x| x.0);
         let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "MEM_LOW"));
+        let fits = cfg.hosts.get(was.0).map_or(needs.is_empty(), |h| fit(was.0, h));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
         let wt = wt.and_then(|l| l.str("worktree")).map(Path::new);
-        let unpushed = busy && wt.is_some_and(|w| crate::check::unsaved(&On::new(r, was.1), w));
+        let unpushed = (busy || !fits) && wt.is_some_and(|w| crate::check::unsaved(&On::new(r, was.1), w));
         if unpushed {
-            p.refusal.as_mut().unwrap().1 += &format!("; stays on {}: its worktree there has unpushed work", was.0);
+            let note = format!("stays on {}: its worktree there has unpushed work", was.0);
+            match p.refusal.as_mut() {
+                Some(x) => x.1 += &format!("; {note}"),
+                None => p.why = Some(note),
+            }
         }
-        if cfg.hosts.get(was.0).is_none_or(|h| h.enabled) && (unpushed || !busy && code != Some("HOST_OFFLINE")) {
+        if cfg.hosts.get(was.0).is_none_or(|h| h.enabled) && (unpushed || fits && !busy && code != Some("HOST_OFFLINE"))
+        {
             return Ok(Some(p));
         }
     }
-    let needs = needs(f, role, events, (fleet, issue));
-    let seen = cached(ctx);
-    let fits: Vec<_> = cfg
-        .hosts
-        .iter()
-        .filter(|(n, h)| needs.iter().all(|t| tags(h, seen.get(*n)).contains(t)))
-        .collect();
+    let fits: Vec<_> = cfg.hosts.iter().filter(|(n, h)| fit(n, h)).collect();
     let mut on: Vec<Placed> = fits
         .iter()
         .filter(|h| h.1.enabled)
