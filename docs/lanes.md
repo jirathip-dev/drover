@@ -185,8 +185,10 @@ sheet shows the active list. Each refusal is logged `hook-denied` (`rule` = the 
 Per host (#256): spawn exports `DROVER_HOST=<[hosts] name>`, and the hook applies that host's rules on top:
 `[hosts.<n>] deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops
 entries. A cloud host (`cloud = …`) defaults to allowing `docker`, `docker compose` and `supabase start` (a disposable
-machine; `allow_commands = []` keeps the ban); a Mac keeps the ban. `hosts bootstrap` writes that host's rules, its
-cloud default spelled out, into the config it leaves there, since the lane's hook reads that host's fleet.toml.
+machine; `allow_commands = []` keeps the ban); a Mac keeps the ban. A remote lane's hook rules (deny, branches,
+heavy slots) are resolved on the main host at spawn and written to its `DROVER_RULES` file (#592); the remote host's
+own fleet.toml is never read. A config change reaches a live lane only when it respawns; `drover board` and
+`drover waiting` show `rules stale` until then.
 
 Heavy checks (#909): `[fleet.<n>.heavy]` maps a kind to command patterns (`*` matches any text), e.g.
 `swiftlint = ["swiftlint analyze*"]`, `vitest = ["*vitest*"]`, `cargo = ["cargo test*", "cargo check*"]`. A lane's
