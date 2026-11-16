@@ -59,6 +59,7 @@ merge_label = "merge-ready"   # the full CI runs only with this label; drover ad
 # update_ready = "always"   # catch every behind PASSed PR up with integration; default "needed": only on a conflict or a strict branch rule
 # line_cap = 10000   # `drover cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
 # hotspots = "off"   # #889: `drover tick` runs `drover hotspots` weekly per fleet (default "weekly"); "off" opts out
+# hygiene = { merge = "merge", docs_trust = [] }   # #1101: this fleet's keys over [hygiene]'s (docs/config.md#hygiene-1101); "off" opts a key out
 # lessons = "off"   # #419: `drover tick` runs `drover lesson` weekly per fleet (default "weekly"); "off" opts out
 # max_impl = 2   # optional caps (CAP); unset = no cap, the host check protects the Mac
 # max_rev = 2
