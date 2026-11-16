@@ -1114,7 +1114,7 @@ pub fn usage_doc() -> String {
             s += &format!("  --{}  {h}\n", a.get_long().unwrap_or_default());
         }
     }
-    s + include_str!("../roles/usage-tail.md")
+    s + include_str!(concat!(env!("OUT_DIR"), "/usage-tail.md"))
 }
 
 /// Entry point used by main and tests. Returns the process exit code.
