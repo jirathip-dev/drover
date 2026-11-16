@@ -1,5 +1,5 @@
 // #1084: the Threads composer in Playwright's WebKit on a real serve: node drafts.mjs <url> <cookie name=value>.
-// Types into thread t2 at 400 px down (a message card mid-screen is the anchor that must not move), pushes 5 stream ops and a 30 s tick (fake clock), reloads, fails one send (500)
+// Types into thread t2 at 400 px down (a message card mid-screen must not move on any change while the stream is live, nor on the tick; the route's stream then ends, and the page's offline strip showing is no repaint), pushes 5 stream ops and a 30 s tick (fake clock), reloads, fails one send (500)
 // and retries it, then sends. Prints one JSON object of what the page showed at each step.
 import { createRequire } from 'node:module';
 
@@ -45,16 +45,18 @@ try {
     const i = document.querySelector('.form.say input');
     i.setSelectionRange(4, 6);
     const a = document.elementFromPoint(195, 422).closest('.card');
-    window.kept = { i, y: scrollY, gone: 0, anchor: a.dataset.id, top: a.getBoundingClientRect().top };
-    kept.trace = [];
-    new MutationObserver(rs => { kept.trace.push([scrollY, document.documentElement.scrollHeight, document.getElementById('stale').hidden, document.querySelector(`[data-id="${kept.anchor}"]`)?.getBoundingClientRect().top]); for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
+    window.kept = { i, gone: 0, anchor: a.dataset.id, top: a.getBoundingClientRect().top };
+    kept.live = [];
+    new MutationObserver(rs => { if (document.getElementById('stale').hidden) kept.live.push([scrollY, document.querySelector(`[data-id="${kept.anchor}"]`)?.getBoundingClientRect().top]); for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
   });
-  out.before = { ...(await box()), top: await page.evaluate(() => kept.top), y: await page.evaluate(() => [kept.y, scrollY, document.documentElement.scrollHeight, innerHeight]) };
+  out.before = { ...(await box()), top: await page.evaluate(() => kept.top) };
   typed();
   await until(() => document.querySelectorAll('[data-id^="m-x"]').length === 5, 'the 5 stream updates');
-  const y = await page.evaluate(() => scrollY);
+  const view = () => page.evaluate(() => [scrollY, document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top]);
+  const tick = [await view()];
   await page.clock.runFor(30_000);
-  out.after = { ...(await box()), tick: [y, await page.evaluate(() => scrollY)], top: await page.evaluate(() => document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top), same: await page.evaluate(() => document.querySelector('.form.say input') === kept.i && kept.i.isConnected), gone: await page.evaluate(() => kept.gone), trace: await page.evaluate(() => kept.trace) };
+  tick.push(await view());
+  out.after = { ...(await box()), tick, same: await page.evaluate(() => document.querySelector('.form.say input') === kept.i && kept.i.isConnected), gone: await page.evaluate(() => kept.gone), live: await page.evaluate(() => kept.live) };
 
   await page.reload();
   await open();

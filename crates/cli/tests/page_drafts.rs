@@ -57,11 +57,18 @@ fn typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_rel
     for k in ["value", "focus", "caret", "draft"] {
         assert_eq!(after[k], typed[k], "5 stream ops and a 30 s tick kept {k}: {out}");
     }
-    let moved = (after["top"].as_f64().unwrap() - before["top"].as_f64().unwrap()).abs();
-    assert!(moved <= 1.0, "#65: a live update never moves what is on screen: {out}");
+    let top = before["top"].as_f64().unwrap();
+    let live = after["live"].as_array().unwrap();
+    assert!(live.len() >= 5, "{out}");
+    for v in live {
+        assert!(
+            v[0] == live[0][0] && (v[1].as_f64().unwrap() - top).abs() <= 1.0,
+            "#65: a live update never moves the scroll or what is on screen: {out}"
+        );
+    }
     assert_eq!(
         after["tick"][0], after["tick"][1],
-        "the 30 s repaint keeps the scroll: {out}"
+        "the 30 s repaint keeps the scroll and the view: {out}"
     );
     assert_eq!(
         (&after["same"], &after["gone"]),
