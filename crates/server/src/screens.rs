@@ -1415,15 +1415,7 @@ impl Server<'_> {
                 d.put("check", json!(true));
                 crate::queue_change(ctx, &cfg, f, d, Some("cooee"))? + " (needs-check)"
             }
-            "limit" => {
-                let mut buf = vec![];
-                crate::limit::wait(ctx, &self.r, &mut buf, (&fleet, n()?), "owner")?;
-                String::from_utf8_lossy(&buf)
-                    .lines()
-                    .next()
-                    .unwrap_or("waiting")
-                    .to_string()
-            }
+            "limit" => crate::limit::wait(ctx, &self.r, (&fleet, n()?), "owner")?,
             "stop" | "kill" | "clean" | "close" => {
                 let act = crate::api::Act {
                     agent: s("agent"),

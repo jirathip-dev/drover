@@ -10,8 +10,29 @@ use std::io::Write;
 /// The prompt a waited-out lane gets.
 pub const CONTINUE: &str = "continue";
 
-/// The owner's [wait] for `fleet` #`n`'s rate-limited lane: logged `limit-picked` by `by`; `due` sends `continue` at shed's reset time.
-pub fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, (fleet, n): (&str, u64), by: &str) -> Result<()> {
+/// `drover limit`'s arguments.
+#[derive(clap::Args)]
+pub struct Pick {
+    fleet: String,
+    issue: u64,
+    #[arg(long, default_value = "owner", help = "Who picked it, as the log shows it")]
+    by: String,
+    #[arg(long, help = "An orchestrator's: the owner's exact line in its thread")]
+    typed: Option<String>,
+}
+
+/// `drover limit`: the owner's pick, or an orchestrator's relay of the owner's typed line, then `wait`.
+pub fn pick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, p: &Pick) -> Result<()> {
+    let at = (p.fleet.as_str(), p.issue);
+    Ok(writeln!(
+        out,
+        "{}",
+        wait(ctx, r, at, by(ctx, p.typed.as_deref(), &p.by, at)?)?
+    )?)
+}
+
+/// The owner's [wait] for `fleet` #`n`'s rate-limited lane: logged `limit-picked` by `by`, its line back; `due` sends `continue` at shed's reset time.
+pub fn wait(ctx: &Ctx, r: &dyn Runner, (fleet, n): (&str, u64), by: &str) -> Result<String> {
     let events = read(&ctx.state)?;
     let lane = fold(&events).remove(&(fleet.to_string(), n));
     let lane = lane.as_ref().and_then(|s| s.active_lane()).map(|(_, l)| l.to_string());
@@ -33,7 +54,7 @@ pub fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, (fleet, n): (&str, u
         &Event::new(ctx.now, fleet, Some(n), "limit-picked", d).passive(),
     )?;
     let when = crate::usage::date(r, at, "+%H:%M");
-    Ok(writeln!(out, "{fleet} #{n}: {} gets `{CONTINUE}` at {when}", a.name)?)
+    Ok(format!("{fleet} #{n}: {} gets `{CONTINUE}` at {when}", a.name))
 }
 
 fn reset_at(r: &dyn Runner, note: &str, now: u64) -> Option<u64> {

@@ -1201,11 +1201,8 @@ fn pass(
         let mut episode = ev.iter().rev().take_while(|e| !e.is("held", fleet, s.issue));
         if outlived && !episode.any(|e| e.is("hold-stale", fleet, s.issue)) {
             let d = json!({"on": on, "merged_at": at});
-            emit(
-                &ctx.state,
-                cfg,
-                Event::new(ctx.now, fleet, Some(s.issue), "hold-stale", d),
-            )?;
+            let e = Event::new(ctx.now, fleet, Some(s.issue), "hold-stale", d);
+            emit(&ctx.state, cfg, e)?;
         }
         let Some((role, lane)) = s.active_lane() else {
             let e = Event::new(ctx.now, fleet, Some(s.issue), "released", json!({"on": on}));

@@ -628,9 +628,8 @@ fn names(name: &str, v: &str) -> bool {
 pub fn tone(state: &str) -> &'static str {
     match state.split('(').next().unwrap_or_default() {
         "merged" | "ready" | "PASS" | "working" | "running" | "done" | "ok" | "normal" => "g",
+        s if s.starts_with("waiting-") => "r",
         "blocked"
-        | "waiting-approval"
-        | "waiting-owner"
         | "needs-human"
         | "design-review"
         | "⏸ waiting: decision"
@@ -763,9 +762,8 @@ pub fn act(role: &str, state: &str) -> &'static str {
         _ => "impl",
     };
     match state.split('(').next().unwrap_or_default() {
-        "blocked" | "waiting-approval" | "waiting-owner" | "dead" | "needs-human" | "⏸ waiting: decision" => {
-            "blocked"
-        }
+        "blocked" | "dead" | "needs-human" | "⏸ waiting: decision" => "blocked",
+        s if s.starts_with("waiting-") => "blocked",
         "done" | "ready" | "merged" => "done",
         "working" | "running" => busy(role),
         "fix" if role == "update" => "update",
@@ -2351,15 +2349,12 @@ impl<'a> Server<'a> {
             o(&l.port),
             a,
         ];
-        let busy = l
-            .note()
-            .filter(|_| matches!(l.state, lanes::LaneState::Live(st) if st.busy()))
-            .map(|n| LaneNow {
-                title: n.clone(),
-                w: None,
-                n: Some(n),
-                t: None,
-            });
+        let busy = l.note().filter(|_| l.state.busy()).map(|n| LaneNow {
+            title: n.clone(),
+            w: None,
+            n: Some(n),
+            t: None,
+        });
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
@@ -2400,11 +2395,7 @@ impl<'a> Server<'a> {
             pr: l.issue.zip(l.fleet.as_ref()).map(|(n, f)| pr_data(ctx, fc, f, n, s)),
             repo: fc.map(|c| c.repo.clone()),
             dead: l.state.word() == "dead",
-            blocked: matches!(
-                l.state,
-                lanes::LaneState::Live(crate::session::Status::Blocked | crate::session::Status::Approval)
-            )
-            .then(|| self.blocked(ctx, l, paired)),
+            blocked: l.state.blocked().then(|| self.blocked(ctx, l, paired)),
             unpark: l.fleet.clone().filter(|_| s.is_some_and(|s| s.state == "parked")),
         }
     }

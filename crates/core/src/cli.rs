@@ -154,17 +154,8 @@ enum Cmd {
         #[arg(long, default_value = "owner")]
         by: String,
     },
-    #[command(
-        about = "Owner only: a rate-limited lane's [wait]: one `continue` at shed's reset time; logs `limit-picked`"
-    )]
-    Limit {
-        fleet: String,
-        issue: u64,
-        #[arg(long, default_value = "owner", help = "Who picked it, as the log shows it")]
-        by: String,
-        #[arg(long, help = "An orchestrator's: the owner's exact line in its thread")]
-        typed: Option<String>,
-    },
+    #[command(about = "Owner only: a rate-limited lane's [wait], one `continue` at shed's reset; logs `limit-picked`")]
+    Limit(crate::limit::Pick),
     #[command(
         about = "Owner only: a parked issue back to the state it had, in its queue place (else last); logs `unparked`"
     )]
@@ -1535,9 +1526,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             demo,
             ..
         } => (SERVE.get().context("no serve")?.1)(ctx, r, &dir, demo)?,
-        Cmd::Serve { addr, read_only, .. } => {
-            (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?;
-        }
+        Cmd::Serve { addr, read_only, .. } => (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?,
         Cmd::Push { cmd: PushCmd::Test } => {
             let cfg = Config::load(&ctx.config)?;
             let Some(sub) = cfg.webpush_sub() else {
@@ -1683,9 +1672,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     issue,
                     role,
                     pane,
-                } => {
-                    spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane, &serde_json::json!({}))?;
-                }
+                } => spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane, &serde_json::json!({}))?,
                 Cmd::Ask {
                     cmd: Some(AskCmd::Withdraw { fleet, id, by, new }),
                     ..
@@ -2113,15 +2100,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
-                Cmd::Limit {
-                    fleet,
-                    issue,
-                    by,
-                    typed,
-                } => {
-                    let by = crate::limit::by(ctx, typed.as_deref(), &by, (&fleet, issue))?;
-                    crate::limit::wait(ctx, r, out, (&fleet, issue), by)?;
-                }
+                Cmd::Limit(p) => crate::limit::pick(ctx, r, out, &p)?,
                 Cmd::Unpark { fleet, issue, by } => gate::unpark(ctx, &cfg, out, (&fleet, issue), &by)?,
                 Cmd::Brief { fleet, issue } => {
                     let v = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, issue, false)?;

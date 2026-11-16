@@ -78,6 +78,14 @@ impl LaneState {
     pub fn is(&self, s: Status) -> bool {
         *self == LaneState::Live(s)
     }
+    /// shed says it is busy: working or running.
+    pub fn busy(&self) -> bool {
+        matches!(self, LaneState::Live(s) if s.busy())
+    }
+    /// shed says it waits on someone: blocked or an approval.
+    pub fn blocked(&self) -> bool {
+        matches!(self, LaneState::Live(Status::Blocked | Status::Approval))
+    }
 }
 
 /// A lane's health for check (the alert) and drive (the act); built only by `health`.
