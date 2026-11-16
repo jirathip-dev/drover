@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::Event;
+use crate::events::{Event, Json};
 use crate::runner::{json, ok, Runner};
 use crate::usage::load;
 use crate::Ctx;
@@ -36,7 +36,7 @@ pub(crate) fn store(p: &Path, v: &Value) -> Result<()> {
 
 /// #212: when the cached PR read was taken (the fast step refreshes it each minute).
 pub fn cached_at(ctx: &Ctx, fleet: &str, issue: u64) -> Option<u64> {
-    load::<Value>(&cache_path(ctx, "pr", fleet, issue))?["ts"].as_u64()
+    load::<Value>(&cache_path(ctx, "pr", fleet, issue))?.at("ts").as_u64()
 }
 
 /// The cached spec, if any; never calls GitHub (dry runs).
@@ -51,8 +51,9 @@ pub fn is_pr(v: &Value) -> bool {
 
 /// The cached issue title, if any (#391: else the last backlog read's, for a row queued from it); never calls GitHub.
 pub fn cached_title(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
-    let b = || load::<Value>(&cache_path(ctx, "backlog", fleet, 0)).map(|b| b["issues"][issue.to_string()].clone());
-    Some(cached_spec(ctx, fleet, issue).or_else(b)?["title"].as_str()?.into())
+    let b =
+        || load::<Value>(&cache_path(ctx, "backlog", fleet, 0)).map(|b| b.at("issues").at(issue.to_string()).clone());
+    Some(cached_spec(ctx, fleet, issue).or_else(b)?.at("title").as_str()?.into())
 }
 
 fn amendment(c: &Value) -> Option<(String, String)> {
@@ -75,18 +76,18 @@ pub fn spec(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, issue: u64, refre
             return Ok(c);
         }
         let u = json(r, "gh", &["issue", "view", &n, "-R", &f.repo, "--json", "updatedAt"])?;
-        if !u["updatedAt"].is_null() && u["updatedAt"] == c["updatedAt"] {
+        if !u.at("updatedAt").is_null() && u.at("updatedAt") == c.at("updatedAt") {
             return Ok(c);
         }
     }
     let mut v = json(r, "gh", &["issue", "view", &n, "-R", &f.repo, "--json", SPEC_FIELDS])?;
-    let comments = v["comments"].as_array().cloned().unwrap_or_default();
+    let comments = v.at("comments").as_array().cloned().unwrap_or_default();
     let amends: Vec<(String, String)> = comments.iter().filter_map(amendment).collect();
     if let Some((url, _)) = amends.last() {
         let list: String = amends.iter().map(|a| a.1.as_str()).collect();
-        let body = format!("{}\n\n## Amendments{list}", v["body"].as_str().unwrap_or_default());
-        v["body"] = json!(body);
-        v["amended"] = json!(url);
+        let body = format!("{}\n\n## Amendments{list}", v.at("body").as_str().unwrap_or_default());
+        v.put("body", json!(body));
+        v.put("amended", json!(url));
     }
     store(&p, &v)?;
     Ok(v)
@@ -157,9 +158,10 @@ pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> 
     let c = if fresh(&old, now) {
         old
     } else {
-        let mut etags = old["etags"].as_array().cloned().unwrap_or_default();
-        let at = old["at"].as_u64().unwrap_or(0);
-        let settled = old["prs"]
+        let mut etags = old.at("etags").as_array().cloned().unwrap_or_default();
+        let at = old.at("at").as_u64().unwrap_or(0);
+        let settled = old
+            .at("prs")
             .as_object()
             .is_some_and(|m| m.values().all(|v| v["mergeable"] != "UNKNOWN"));
         let age = now.saturating_sub(at);
@@ -167,7 +169,7 @@ pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> 
         let hooked = || settled && age < CATCHUP.get() && on();
         let same = FORCE.get() && (hooked() || unchanged(r, f, &mut etags) && settled && age < PROBE_MAX);
         let c = if same {
-            json!({"ts": now, "at": at, "prs": old["prs"], "etags": etags})
+            json!({"ts": now, "at": at, "prs": old.at("prs"), "etags": etags})
         } else {
             let (owner, name) = f.repo.split_once('/').unwrap_or_default();
             let v = [
@@ -182,19 +184,19 @@ pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> 
             match ok(r, "gh", &a.concat()) {
                 Ok(out) => {
                     let prs = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
-                    let by = prs.map(|v| (v["headRefName"].as_str().unwrap_or_default().to_string(), v));
+                    let by = prs.map(|v| (v.at("headRefName").as_str().unwrap_or_default().to_string(), v));
                     let prs = by.collect::<serde_json::Map<_, _>>();
                     json!({"ts": now, "at": now, "prs": prs, "etags": etags})
                 }
                 Err(e) => json!({"ts": now, "error": format!("{e:#}")}),
             }
         };
-        let _ = store(&p, &c);
+        store(&p, &c).ok();
         c
     };
-    match c["error"].as_str() {
+    match c.at("error").as_str() {
         Some(e) => anyhow::bail!("open PRs of {}: {e}", f.repo),
-        None => Ok(c["prs"].clone()),
+        None => Ok(c.at("prs").clone()),
     }
 }
 
@@ -211,7 +213,7 @@ pr: any(.timelineItems.nodes[].source.state?; . == \"MERGED\" or . == \"CLOSED\"
 pub fn backlog(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<()> {
     let p = cache_path(ctx, "backlog", fleet, 0);
     let mut c = load::<Value>(&p).unwrap_or_else(|| json!({"issues": {}}));
-    let since = c["since"].as_str().map(|s| format!("since={s}"));
+    let since = c.at("since").as_str().map(|s| format!("since={s}"));
     let q = ISSUES_QUERY.replace("STATES", if since.is_some() { "[OPEN,CLOSED]" } else { "OPEN" });
     let (owner, name) = f.repo.split_once('/').unwrap_or_default();
     let v = [format!("owner={owner}"), format!("name={name}"), format!("query={q}")];
@@ -221,13 +223,14 @@ pub fn backlog(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<()> 
     a.extend(v.into_iter().chain(since).flat_map(|x| ["-f".into(), x]));
     let out = ok(r, "gh", &a)?;
     for i in out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
-        c["since"] = json!(c["since"].as_str().max(i["updated"].as_str()));
-        let (n, m) = (i["number"].to_string(), c["issues"].as_object_mut());
+        c.put("since", json!(c.at("since").as_str().max(i.at("updated").as_str())));
+        let n = i.at("number").to_string();
+        let m = c.get_mut("issues").and_then(Value::as_object_mut);
         let m = m.ok_or_else(|| anyhow::anyhow!("bad backlog cache"))?;
         m.remove(&n);
-        m.extend((i["state"] == "OPEN").then_some((n, i)));
+        m.extend((i.at("state") == "OPEN").then_some((n, i)));
     }
-    c["ts"] = json!(ctx.now);
+    c.put("ts", json!(ctx.now));
     store(&p, &c)
 }
 
@@ -238,11 +241,11 @@ pub fn pr(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), bra
     if let Some(c) = c.as_ref().filter(|c| fresh(c, now)) {
         return Ok(c["pr"].clone());
     }
-    let (old, forgot) = c.map_or((Value::Null, false), |c| (c["pr"].clone(), c["forgot"] == true));
+    let (old, forgot) = c.map_or((Value::Null, false), |c| (c.at("pr").clone(), c.at("forgot") == true));
     let open = (!forgot).then(|| snapshot(ctx, r, f, fleet, now)).transpose()?;
     let pr = match open.as_ref().and_then(|o| o.get(branch)) {
         Some(v) => v.clone(),
-        None if forgot || old["state"] == "OPEN" || old.is_null() && !FORCE.get() => {
+        None if forgot || old.at("state") == "OPEN" || old.is_null() && !FORCE.get() => {
             json(r, "gh", &["pr", "view", branch, "-R", &f.repo, "--json", PR_FIELDS]).unwrap_or_default()
         }
         None => old,
@@ -253,7 +256,7 @@ pub fn pr(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), bra
 
 /// The last cached PR read, however old; never calls `gh` (Null when none).
 pub fn cached_pr(ctx: &Ctx, fleet: &str, issue: u64) -> Value {
-    load::<Value>(&cache_path(ctx, "pr", fleet, issue)).map_or(Value::Null, |c| c["pr"].clone())
+    load::<Value>(&cache_path(ctx, "pr", fleet, issue)).map_or(Value::Null, |c| c.at("pr").clone())
 }
 
 /// #169: the latest Actions run url for an issue branch with no PR: one `gh run list` per 60 s, by the tick only.
@@ -265,20 +268,21 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), br
     let a = [
         "run", "list", "-R", &f.repo, "--branch", branch, "--limit", "1", "--json", "url",
     ];
-    let url = json(r, "gh", &a).ok().map(|v| v[0]["url"].clone());
-    let _ = store(&p, &json!({"ts": now, "url": url}));
+    let url = json(r, "gh", &a).ok().map(|v| v.at(0).at("url").clone());
+    store(&p, &json!({"ts": now, "url": url})).ok();
 }
 
 /// The cached latest run url for the issue, if any; never calls `gh`.
 pub fn cached_run(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
-    load::<Value>(&cache_path(ctx, "run", fleet, issue)).and_then(|c| c["url"].as_str().map(String::from))
+    load::<Value>(&cache_path(ctx, "run", fleet, issue)).and_then(|c| c.at("url").as_str().map(String::from))
 }
 
 /// Numbers of the fleet's closed issues: one `gh issue list` per fleet, fresh for 60 s.
 pub fn closed(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Vec<u64>> {
     let p = cache_path(ctx, "closed", fleet, 0);
     if let Some(c) = load(&p).filter(|c| fresh(c, now)) {
-        return Ok(c["closed"]
+        return Ok(c
+            .at("closed")
             .as_array()
             .into_iter()
             .flatten()
@@ -313,7 +317,7 @@ pub fn diff_names(
 ) -> Result<Vec<String>> {
     let p = cache_path(ctx, "diff", fleet, issue);
     let files = if let Some(c) = load::<Value>(&p).filter(|c| c["head"] == head) {
-        c["files"].clone()
+        c.at("files").clone()
     } else {
         let jq = r#".[] | [.filename, .previous_filename // empty] | join("\t")"#;
         let path = format!("repos/{}/pulls/{num}/files", f.repo);
@@ -341,8 +345,8 @@ pub fn diff_names(
 pub fn stale(ctx: &Ctx, fleet: &str) {
     let p = cache_path(ctx, "prs", fleet, 0);
     if let Some(mut c) = load::<Value>(&p) {
-        (c["ts"], c["at"]) = (json!(0), json!(0));
-        let _ = store(&p, &c);
+        c.put("ts", json!(0)).put("at", json!(0));
+        store(&p, &c).ok();
     }
 }
 
@@ -350,7 +354,7 @@ pub fn stale(ctx: &Ctx, fleet: &str) {
 pub fn forget_pr(ctx: &Ctx, fleet: &str, issue: u64) {
     let p = cache_path(ctx, "pr", fleet, issue);
     if let Some(c) = load::<Value>(&p) {
-        let _ = store(&p, &json!({"branch": c["branch"], "forgot": true}));
+        store(&p, &json!({"branch": c.at("branch"), "forgot": true})).ok();
     }
 }
 
@@ -369,7 +373,7 @@ pub fn update_ready(ctx: &Ctx, r: Option<&dyn Runner>, f: &Fleet, fleet: &str) -
         r.and_then(|_| store(&p, &json!({"ts": ctx.now, "strict": s})).ok());
         s
     };
-    f.update_ready.as_deref() == Some("always") || c.map_or_else(strict, |c| c["strict"] == true)
+    f.update_ready.as_deref() == Some("always") || c.map_or_else(strict, |c| c.at("strict") == true)
 }
 
 /// The PR view carries label `name`.
@@ -560,10 +564,10 @@ pub fn missing(x: &Ctx, r: Option<&dyn Runner>, c: &Config, k: (&str, u64), e: &
             let zero = |id: &str| ok(r, "gh", &["api", &format!("{api}/{id}/jobs"), "--jq", ".total_count"]);
             let mut b = runs.lines().filter_map(|l| l.split_once(' '));
             let b = b.find(|(id, _)| zero(id).is_ok_and(|n| n.trim() == "0"));
-            let _ = store(&p, &json!({"ts": x.now, "head": head, "broken": b.map(|b| b.1)}));
+            store(&p, &json!({"ts": x.now, "head": head, "broken": b.map(|b| b.1)})).ok();
             b.map(|b| b.1.to_string())
         }
-        None => c.and_then(|c| c["broken"].as_str().map(String::from)),
+        None => c.and_then(|c| c.at("broken").as_str().map(String::from)),
     };
     let missing = || format!("CI missing (no checks {} after push)", crate::events::age(g));
     Some(broken.map_or_else(missing, |w| format!("CI broken: {w} did not start")))

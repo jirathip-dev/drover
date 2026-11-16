@@ -53,8 +53,8 @@ pub fn page(r: &dyn Runner, ctx: &Ctx, agent: &str, before: Option<u64>, n: usiz
         Ok(Some(t)) => Some(t),
         _ => match archived(ctx, agent)? {
             Transcript::Events(ev) => {
-                let ev: Vec<Logged> = ev.into_iter().filter(|e| before.is_none_or(|b| e.seq < b)).collect();
-                Some(Transcript::Events(ev[ev.len().saturating_sub(n)..].to_vec()))
+                let mut ev: Vec<Logged> = ev.into_iter().filter(|e| before.is_none_or(|b| e.seq < b)).collect();
+                Some(Transcript::Events(ev.split_off(ev.len().saturating_sub(n))))
             }
             t @ Transcript::Screen(_) => Some(t),
         },

@@ -129,7 +129,7 @@ value. The rules are frozen at spawn: after a config change that alters them, th
 until a respawn. A fleet.toml left on a remote host is no longer read: `drover doctor` shows
 `! stale fleet.toml on <host>: no longer read`; remove it by hand. #647: bootstrap removes one an old bootstrap wrote
 (only `[fleet.*]` and `[hosts.<host>]`); doctor's host row names the failed check (`unreachable (ssh: …)`,
-`! shed: …`).
+`✗ shed — does not answer: …`).
 
 ## Asks, answers and verdicts from another host (#275, #389)
 
@@ -216,7 +216,8 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
   a red host problem. Fix: `ssh <host> gh auth login` for gh; for claude, log in from a terminal there.
 - **drover**: `drover --version` there prints the same version and git sha as on the main host. A mismatch is
   a warning (amber), not a failure.
-- **shed**: its lanes list answers there; a failure is a `! shed: …` warning.
+- **shed**: its lanes list answers there; one that does not answer (#1127: e.g. frozen by a snapshot) is
+  `✗ shed — does not answer: … → ssh <host> '<thaw and restart>'`, so it takes no lanes.
 
 ## Auto-update
 
@@ -328,7 +329,9 @@ or not logged in yet) the card says `github: unreadable` and the host turns red,
 above (and the token look) before placement uses it, so an unhealthy host never takes the lane.
 
 **Snapshot.** Once `drover doctor` is all ✓, `drover hosts snapshot <name>` runs a fresh health look and, with no
-✗, the recipe's `snapshot` command (logged `cloud-snapshot`). The recipe's `create_from` template makes a new
+✗, the recipe's `snapshot` command (logged `cloud-snapshot`). #1127: a snapshot can leave the shed service there
+frozen; when shed then does not answer, drover thaws and restarts it once and checks again, and a second failure is
+the snapshot's error, naming the host. The recipe's `create_from` template makes a new
 sandbox from it that starts ready. Check both against docs.boat.dev.
 
 ## ACP hosts: `runtime = "shed-acp"` (#637)

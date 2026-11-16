@@ -124,8 +124,8 @@ body:not([data-pair]) .pairb{display:none}
 @keyframes s{to{transform:rotate(1turn)}}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
-.sb>button,.scr>button,.sec>button,.shb>button,.card>button{margin:var(--s2) var(--s4) var(--s2) 0}
-/* #1072 Threads: a `focus` screen hides the cards; message cards by kind; the composer's `submit` sticks to the foot. */
+.sb>button,.scr>button,.msgs>button,.sec>button,.shb>button,.card>button{margin:var(--s2) var(--s4) var(--s2) 0}
+/* #1072 Threads: a `focus` screen hides the cards; message cards by kind; the composer docks at the foot. */
 html[data-focus] #cards{display:none}
 .scr .card.k-you,.scr .card.k-orch,.scr .card.k-ask{border-left-width:3px}
 .scr .card.k-you{border-left-color:var(--a)}
@@ -140,5 +140,31 @@ html[data-focus] #cards{display:none}
 .form.say{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 0;background:var(--bg);border-top:1px solid var(--line)}
 .form.say .fd{flex:1;border:0;min-height:0}
 .form.say .fk:empty{display:none}
+.cmp{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));padding:var(--s2) 0;background:var(--bg);border-top:1px solid var(--line)}
+.cmp .cr{display:flex;align-items:flex-end;gap:var(--s3)}
+.cmp textarea{flex:1;min-width:0;min-height:var(--hit);max-height:calc(8.4em + var(--s2) * 2 + 2px);box-sizing:border-box;resize:none;overflow-y:auto;font:inherit;line-height:1.4;color:inherit;background:none;border:1px solid var(--line);border-radius:4px;padding:var(--s2)}
+.cmp .pill,.cmp .qd,.cmp .cs{display:flex;align-items:center;gap:var(--s2);margin:0 0 var(--s2);font-size:var(--fs-meta)}
+.cmp .pill .pt{flex:1;color:var(--g)}
+.cmp .qd .qt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmp .th{display:flex;gap:var(--s2);overflow-x:auto;margin:0 0 var(--s2)}
+.cmp .tb{position:relative;display:flex;align-items:center;gap:var(--s1)}
+.cmp .tb img{height:calc(var(--hit) * 1.5);border-radius:4px}
+.cmp .chips{margin:var(--s4) 0 0}
+/* #1086, #1120: a focus screen is a column between the header and the tab bar or keyboard (`fit()`): bar, messages (the one scroller), composer. */
+html[data-focus] body{overflow:hidden}
+html[data-focus] #strip{position:fixed;left:0;right:0}
+html[data-focus] main>.tab>.scr{position:fixed;top:var(--top,0);bottom:var(--bot,0);left:0;right:0;max-width:760px;margin-inline:auto;padding:0 var(--s3);display:flex;flex-direction:column}
+.scr>.msgs{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:var(--s2)}
+html[data-focus] .scr>.cmp{position:static}
+.row.sticky{position:sticky;top:0;z-index:1;background:var(--bg)}
+.msgs>button[data-id=older]{display:flex;margin:var(--s2) auto}
+.cb{position:relative}
+.cb>.cpy{position:absolute;top:0;right:0}
+.cb>pre{padding-right:calc(6ch + var(--s4))}
+.imgs a{flex:none}
+#iv{position:fixed;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--scrim);touch-action:none}
+#iv>img{width:100%;min-height:0;max-height:calc(100% - var(--hit) * 2);object-fit:contain;transition:transform .15s}
+#iv.z{overflow:auto}
+#iv>.bar{position:fixed;bottom:env(safe-area-inset-bottom);left:0;right:0;justify-content:center;background:var(--bg)}
+#iv .bar>a{display:inline-flex;align-items:center;height:var(--ctl);color:var(--l);text-decoration:none}
 .card .form.say{position:static;border:0;padding:0;background:none}
-.scr[data-id^=thread-]{max-width:760px;margin-inline:auto}
