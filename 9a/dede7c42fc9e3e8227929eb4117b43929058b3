@@ -1,0 +1,4 @@
+Decided: merged origin/staging; kept this branch's remote-with-room placement and dry-run host/why, in staging's on.first() and pj.put forms
+Because: crates/core/src/hosts.rs:1236
+Rejected: none
+Owner: branch brought up to date with staging; behaviour unchanged
