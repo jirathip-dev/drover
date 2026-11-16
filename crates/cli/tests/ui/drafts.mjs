@@ -46,14 +46,15 @@ try {
     i.setSelectionRange(4, 6);
     const a = document.elementFromPoint(195, 422).closest('.card');
     window.kept = { i, y: scrollY, gone: 0, anchor: a.dataset.id, top: a.getBoundingClientRect().top };
-    new MutationObserver(rs => { for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
+    kept.trace = [];
+    new MutationObserver(rs => { kept.trace.push([scrollY, document.documentElement.scrollHeight, document.getElementById('stale').hidden, document.querySelector(`[data-id="${kept.anchor}"]`)?.getBoundingClientRect().top]); for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
   });
-  out.before = { ...(await box()), top: await page.evaluate(() => kept.top) };
+  out.before = { ...(await box()), top: await page.evaluate(() => kept.top), y: await page.evaluate(() => [kept.y, scrollY, document.documentElement.scrollHeight, innerHeight]) };
   typed();
   await until(() => document.querySelectorAll('[data-id^="m-x"]').length === 5, 'the 5 stream updates');
   const y = await page.evaluate(() => scrollY);
   await page.clock.runFor(30_000);
-  out.after = { ...(await box()), tick: [y, await page.evaluate(() => scrollY)], top: await page.evaluate(() => document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top), same: await page.evaluate(() => document.querySelector('.form.say input') === kept.i && kept.i.isConnected), gone: await page.evaluate(() => kept.gone) };
+  out.after = { ...(await box()), tick: [y, await page.evaluate(() => scrollY)], top: await page.evaluate(() => document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top), same: await page.evaluate(() => document.querySelector('.form.say input') === kept.i && kept.i.isConnected), gone: await page.evaluate(() => kept.gone), trace: await page.evaluate(() => kept.trace) };
 
   await page.reload();
   await open();
