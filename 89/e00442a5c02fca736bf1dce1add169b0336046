@@ -1,0 +1,12 @@
+Decided: merged origin/staging (#1088); handoff chips and t<n> text refs open the thread through #1088's thread() route, so back returns to where you were
+Because: web/src/blocks.ts:44
+Decided: the bar keeps repo · harness · model · state after #1088's waiting note instead of replacing them
+Because: "A sticky thread bar (title, id, repo · harness · model · state, waiting config)."
+Decided: #1088's copy taps reuse this PR's copy helper: one copy path
+Because: crates/server/src/serve/chat.rs:947
+Decided: the thread screen takes `?before=N`: the 30 before N plus every later one, and its stream keeps the query
+Because: "`older` marker loading the 30 before, place kept"
+Rejected: side-by-side at 1000 px and phone-clock times — in the problem table, not in Wanted
+Check: parity_32's message ids moved by one because the t2 fixture gained a message with files; goldens thread and thread-cards re-blessed
+Check: CI ui-webkit runs parity_webkit and threads_tab webkit (skipped locally: no Playwright on this host)
+Owner: Threads now read like the old chat tab, and refs and chips open the thread with back working, as #1088 added.
