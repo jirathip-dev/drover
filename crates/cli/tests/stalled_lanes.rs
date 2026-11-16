@@ -151,7 +151,7 @@ fn a_verify_lane_that_ends_without_a_verdict_is_respawned_once_then_needs_a_huma
 }
 
 #[test]
-fn a_lane_shed_never_heard_from_after_the_start_window_is_retried_once_then_escalated() {
+fn parity_r15_a_lane_shed_never_heard_from_after_the_start_window_is_retried_once_then_escalated() {
     let c = ctx(&tmpdir("stall-blank"), CONFIG);
     let t0 = 1_000_000 - 60;
     let wt = c.worktrees.join("sendmeter/issue-12");

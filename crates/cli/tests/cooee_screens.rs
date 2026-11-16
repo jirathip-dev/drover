@@ -330,7 +330,7 @@ fn a_queue_row_is_one_short_title_line_without_the_pr_title() {
 }
 
 #[test]
-fn the_lanes_screen_and_a_lanes_sheet_are_cooees_blocks() {
+fn parity_50_the_lanes_screen_and_a_lanes_sheet_are_cooees_blocks() {
     let (c, r) = recorded("cooee-lanes");
     r.1.lane("sendmeter-impl-20", "idle", "/x");
     r.1.lane("sendmeter-impl-5", "blocked", "/x");
@@ -494,7 +494,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
 }
 
 #[test]
-fn a_folded_cards_main_button_answers_its_ask() {
+fn parity_63_a_folded_cards_main_button_answers_its_ask() {
     let (c, r) = recorded("cooee-fold");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
@@ -723,7 +723,7 @@ fn rows_of<'a>(v: &'a Value, list: &str) -> Vec<&'a str> {
 }
 
 #[test]
-fn the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_moves() {
+fn parity_38_the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_moves() {
     let (c, r) = recorded("cooee-parity");
     let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
     ok(&["queue", "sendmeter", "add", "30", "31", "32", "33", "34"]);
@@ -908,7 +908,7 @@ fn a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thread() {
 }
 
 #[test]
-fn the_backlog_sheet_filters_searches_and_queues_the_ticked_issues() {
+fn parity_47_the_backlog_sheet_filters_searches_and_queues_the_ticked_issues() {
     let (c, r) = recorded("cooee-backlog");
     let issue = |t: &str, ac: bool, created: &str| json!({"title": t, "labels": ["ui"], "created": created, "updated": created, "ac": ac, "pr": false});
     let bl = json!({"ts": T, "issues": {"40": issue("Dark mode", true, "1970-01-01T00:00:00Z"), "41": issue("Fix push", false, "1970-01-12T00:00:00Z"), "42": issue("Old thing", false, "1970-01-01T00:00:00Z")}});

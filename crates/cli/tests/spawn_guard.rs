@@ -419,7 +419,7 @@ fn host_busy_creates_no_worktree_dir() {
 }
 
 #[test]
-fn kick_failure_after_start_still_logs_unconfirmed_spawn() {
+fn parity_r11_kick_failure_after_start_still_logs_unconfirmed_spawn() {
     let d = tmpdir("kick-fails");
     let c = ctx(&d, CONFIG);
     let (sh, r) = shed_happy(&c);
