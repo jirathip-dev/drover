@@ -616,5 +616,10 @@ fn hygiene_is_on_by_default_and_drift_is_flagged() {
         line(&out, "hygiene demo").starts_with("✓ hygiene demo — merge merge · comments off · "),
         "{out}"
     );
-    assert!(!out.contains("! hygiene"), "a fleet's own keys win: {out}");
+    let rows: Vec<_> = out.lines().filter(|l| l.starts_with("! hygiene")).collect();
+    assert_eq!(
+        rows,
+        ["! hygiene demo — merge is squash, hygiene says merge → set [fleet.demo] merge = \"merge\""],
+        "a fleet's own keys win; drover's own merge mode drifts: {out}"
+    );
 }

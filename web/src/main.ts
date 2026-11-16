@@ -1,7 +1,7 @@
 // #927: the phone page draws the screens cooee draws (cooee-plugin.toml's places, `PL` from the page shell): each
 // header-strip place is a tab, the menu-row places open from [⚙], the chat-cards place is the cards above every tab.
 // A screen is fetched, drawn block by block, patched by its `stream`, and its blocks post `/action`. No per-tab code.
-import { type Act, type Ctx, el, kids, render, values } from './blocks';
+import { type Act, type Ctx, el, kids, render, sent, values } from './blocks';
 import { apply, type Blk } from './ops';
 import { R, colours, esc, get, put, schemes, theme, themes } from './theme';
 
@@ -17,7 +17,14 @@ type View = { path: string; model: Blk | null; at: number; live: boolean; es?: E
 const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, root, open: new Set(), back: [] });
 const tabs = PL.filter(p => p.type === 'header-strip' && p.screen).map(p => ({ ...p, v: view(p.screen!, el('section', 'tab')), a: el('a') }));
 const cards = PL.some(p => p.type === 'chat-cards') ? view('/screens/cards', $('#cards')) : null;
-let cur = tabs.find(t => t.id === (location.hash.slice(1) || get('tab'))) ?? tabs[0];
+type Tab = (typeof tabs)[number];
+const hashOf = (t: Tab, p: string) => '#' + t.id + (p.startsWith(t.screen + '/') ? p.slice(t.screen!.length) : '');
+const route = (h = location.hash.slice(1) || (get('tab') ?? '')): [Tab, string] | null => {
+  const t = tabs.find(x => h === x.id || h.startsWith(x.id + '/'));
+  return t ? [t, t.screen + h.slice(t.id!.length)] : null;
+};
+const at = route();
+let cur = at?.[0] ?? tabs[0];
 
 const dot = $('#dot'), stale = $('#stale');
 function sync() {
@@ -51,23 +58,69 @@ function rows(m: unknown, out = new Map<string, string>()) {
   }
   return out;
 }
+// #1086: a focus screen scrolls inside: it opens at its end, follows it while there, else keeps the card in view in place.
+type Spot = { end: boolean; id?: string; dy: number };
+const spots = new Map<string, Spot>();
+function spot(sc: HTMLElement | null): Spot | null {
+  if (!sc) return null;
+  const top = sc.getBoundingClientRect().top, k = [...sc.querySelectorAll<HTMLElement>(':scope > .card[data-id]')].find(c => c.getBoundingClientRect().bottom > top + 1);
+  return { end: sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2, id: k?.dataset.id, dy: k ? k.getBoundingClientRect().top - top : 0 };
+}
+function land(sc: HTMLElement | null, s: Spot | null) {
+  if (!sc) return;
+  const k = s && !s.end && s.id ? sc.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(s.id)}"]`) : null;
+  sc.scrollTop = k ? sc.scrollTop + k.getBoundingClientRect().top - sc.getBoundingClientRect().top - s!.dy : sc.scrollHeight;
+}
+const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr');
+const path = (e: Element, top: Element | null) => {
+  const p: Element[] = [];
+  for (let x: Element | null = e; x && x !== top; x = x.parentElement) p.unshift(x);
+  return p;
+};
+function graft(root: Element, body: Element[], mine: Element[], twin: Element[]) {
+  let [box, fresh] = [root, body];
+  mine.forEach((m, i) => {
+    const at = fresh.indexOf(twin[i]);
+    [...box.childNodes].forEach(n => { if (n !== m) n.remove(); });
+    m.before(...fresh.slice(0, at));
+    m.after(...fresh.slice(at + 1));
+    if (i < mine.length - 1) m.className = twin[i].className;
+    [box, fresh] = [m, [...twin[i].children]];
+  });
+}
 function paint(v: View, before?: Blk | null) {
-  const m = v.model;
+  const m = v.model, y = scrollY, f = document.activeElement;
   if (!m) return;
+  const focus = !Array.isArray(m) && !!m.focus, was = scroller(v), place = focus && was?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
   const c = ctx(v, Array.isArray(m) ? 'cards' : m.id);
   const body = Array.isArray(m) ? kids(m, c) : [render(m, c)].filter((e): e is HTMLElement => !!e);
   if (v.back.length && body[0]) {
     const b = el('button', '', '<span>‹ back</span>');
     b.type = 'button';
-    b.onclick = () => go(v, v.back.pop()!, false);
+    b.onclick = () => (v === cur.v ? history.back() : go(v, v.back.pop()!, false));
     body[0].prepend(b);
   }
-  v.root.replaceChildren(...body);
+  const keep = f && v.root.contains(f) && f.matches('input, select') ? f.closest('[data-id]') : null;
+  const sel = keep && `[data-id="${CSS.escape(keep.getAttribute('data-id') ?? '')}"]`;
+  const twin = sel ? body.map(e => (e.matches(sel) ? e : e.querySelector(sel))).find(e => !!e) : null;
+  const [mp, tp] = keep && twin ? [path(keep, v.root), path(twin, null)] : [[], []];
+  if (mp.length && mp.length === tp.length && (body as Element[]).includes(tp[0]) && mp[0].getAttribute('data-id') === tp[0].getAttribute('data-id')) graft(v.root, body, mp, tp);
+  else v.root.replaceChildren(...body);
+  if (scrollY !== y) scrollTo(0, y);
   if (before) {
     const was = rows(before);
     rows(m).forEach((j, id) => { if (was.has(id) && was.get(id) !== j) v.root.querySelector(`[data-id="${CSS.escape(id)}"]`)?.classList.add('fl'); });
   }
   if (v === cur.v) sync();
+  if (focus && !v.root.hidden) {
+    fit();
+    const sc = scroller(v);
+    land(sc, place);
+    if (sc) sc.onscroll = () => {
+      const o = sc.querySelector<HTMLElement>(':scope > [data-id=older]:not([aria-busy])');
+      if (o && sc.isConnected && sc.scrollTop < 8) { o.setAttribute('aria-busy', 'true'); o.click(); }
+    };
+  }
   badges();
 }
 function badges() {
@@ -83,7 +136,8 @@ async function load(v: View, quiet = false) {
   if (!v.model || !quiet) paint(v);
   const slow = setTimeout(() => ($('#ld').hidden = false), 300);
   try {
-    const m = await fetchScreen(v.path), before = v.model;
+    const p = v.path, m = await fetchScreen(p), before = v.model;
+    if (v.path !== p) return;
     [v.model, v.at] = [m, Date.now()];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: m }));
     paint(v, before);
@@ -118,29 +172,41 @@ const close = (v: View) => { v.es?.close(); v.es = undefined; v.live = false; };
 
 function go(v: View, path: string, push = true) {
   if (push) v.back.push(v.path);
+  if (push && v === cur.v) history.pushState(null, '', hashOf(cur, path));
+  const s = spot(scroller(v));
+  if (s) spots.set(v.path, s);
   close(v);
   [v.path, v.model] = [path, null];
   load(v);
 }
 
-function show(t: (typeof tabs)[number]) {
+function show(t: Tab, path = t.v.path) {
   if (cur !== t) close(cur.v);
+  if (path !== t.v.path) {
+    close(t.v);
+    [t.v.path, t.v.model, t.v.back] = [path, null, path === t.screen ? [] : [t.screen!]];
+  }
   cur = t;
   put('tab', t.id ?? null);
-  if (location.hash.slice(1) !== t.id) history.replaceState(null, '', '#' + t.id);
+  if (location.hash !== hashOf(t, t.v.path)) history.replaceState(null, '', hashOf(t, t.v.path));
   tabs.forEach(x => { x.a.classList.toggle('on', x === t); x.v.root.hidden = x !== t; });
   H.dataset.tab = t.id;
   load(t.v, !!t.v.model);
   scrollTo(0, 0);
 }
 
-function toast(text: string, bad = false) {
+function toast(text: string, bad = false, retry?: () => void) {
   const p = $('#toast');
   p.className = `msg ${bad ? 'r' : 'g'}`;
   p.textContent = text;
   p.hidden = !text;
   clearTimeout(Number(p.dataset.t));
-  p.dataset.t = String(setTimeout(() => { p.hidden = true; }, bad ? 8000 : 3000));
+  if (retry) {
+    const b = el('button', '', '<span>retry</span>');
+    b.type = 'button';
+    b.onclick = () => { p.hidden = true; retry(); };
+    p.append(' ', b);
+  } else p.dataset.t = String(setTimeout(() => { p.hidden = true; }, bad ? 8000 : 3000));
 }
 
 // The sheet: a screen of type `sheet` (or any screen) over the page, its `done` posting the fields' values.
@@ -169,7 +235,7 @@ function drawSheet() {
   if (m.done) {
     const d = el('button', 'primary', `<span>${esc(m.done.label)}</span>`);
     d.type = 'button';
-    d.onclick = () => c.act({ action: m.done.action, block: m.id, values: { ...m.done.values, ...values(shv.root) } }, d);
+    d.onclick = () => c.act({ action: m.done.action, block: m.id, values: { ...m.done.values, ...values(shv.root) } }, d).then(ok => ok && sent(shv.root));
     head.append(d);
   }
   shv.root.replaceChildren(...(m.type === 'sheet' ? kids(m.blocks, c) : [render(m, c)!]));
@@ -179,8 +245,16 @@ addEventListener('keydown', e => { if (e.key === 'Escape' && !sh.hidden) closeSh
 
 function tap(t: Blk) {
   if (t.sheet) sheet(t.sheet);
-  else if (t.open) go(cur.v, t.open);
-  else if (t.thread) toast('threads open in cooee');
+  else if (t.open) go(cur.v, t.open, !t.keep);
+  else if (t.copy != null) void copy(t.copy);
+  else if (t.thread) /^t\d+$/.test(t.thread) ? thread(t.thread) : sheet(`/screens/lanes/${t.thread}`);
+}
+function thread(id: string) {
+  const t = tabs.find(x => x.id === 'threads');
+  if (!t) return toast('no Threads tab on this page', true);
+  closeSheet();
+  history.pushState(null, '', hashOf(t, `${t.screen}/${id}`));
+  show(t, `${t.screen}/${id}`);
 }
 
 // A confirm: the block's own words, [cancel] and its [ok] (a destructive one in red).
@@ -200,22 +274,26 @@ function confirmed(c: Blk): Promise<boolean> {
   });
 }
 
-async function act(a: Act, v: View, screen: string, b?: HTMLElement) {
-  if (demo) return toast('Demo with fake data: install drover to act on your own fleets');
-  if (ro) return toast('read-only page', true);
-  if (a.confirm && !(await confirmed(a.confirm))) return;
+async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<boolean> {
+  if (demo || ro) {
+    toast(demo ? 'Demo with fake data: install drover to act on your own fleets' : 'read-only page', ro);
+    return false;
+  }
+  if (a.confirm && !(await confirmed(a.confirm))) return false;
+  const retry = b && (() => b.click());
   b?.setAttribute('aria-busy', 'true');
   try {
     const r = await fetch(url('action'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...a, confirm: undefined, screen }) });
     const j = await r.json().catch(() => ({ line: `${r.status}` }));
-    if (r.status === 401) return unpaired();
-    if (!r.ok) return toast(j.line ?? `${r.status}`, true);
+    if (r.status === 401) return (unpaired(), false);
+    if (!r.ok) return (toast(j.line ?? `${r.status}`, true, retry), false);
     const ops: Blk[] = j.ops ?? [];
     const whole = ops.find(o => o.op === 'screen');
     if (whole && v !== shv) {
       close(v);
       v.model = apply(v.model ?? {}, ops as never);
       v.path = String(v.model.stream ?? v.path).replace(/\/stream/, '') || v.path;
+      if (v === cur.v) history.replaceState(null, '', hashOf(cur, v.path));
       [v.at] = [Date.now()];
       put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
       paint(v);
@@ -227,8 +305,10 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement) {
     if (j.close && v === shv) closeSheet();
     if (j.toast) toast(j.toast);
     if (!whole) setTimeout(() => { if (cards) load(cards, true); load(cur.v, true); }, 300);
+    return true;
   } catch (e) {
-    toast(`${(e as Error).message}`, true);
+    toast(`${(e as Error).message}`, true, retry);
+    return false;
   } finally {
     b?.removeAttribute('aria-busy');
   }
@@ -285,8 +365,7 @@ function settings() {
   if (menu.length) body.push(sec('screens', menu.map(p => row(p.label ?? p.screen!, false, () => sheet(p.screen!), p.subtitle))));
   body.push(sec('theme', themes().map(n => row(n, n === H.dataset.theme, () => { put('theme', n); H.dataset.theme = n; colours(); theme(n).then(redraw); settings(); }))));
   body.push(sec('colours', schemes().map(n => row(n, n === H.dataset.scheme, () => { put('scheme', n); colours(); settings(); }))));
-  const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
-  if (standalone && 'PushManager' in window && B.dataset.key) body.push(sec('alerts', [row('enable alerts on this phone', false, alerts)]));
+  if (app && 'PushManager' in window && B.dataset.key) body.push(sec('alerts', [row('enable alerts on this phone', false, alerts)]));
   body.push(el('p', 'm foot', 'this phone only · the home-screen icon keeps its install-time look'));
   shv.root.replaceChildren(...body);
   sh.hidden = false;
@@ -324,16 +403,83 @@ for (const t of tabs) {
 }
 cards?.root.addEventListener('redraw', () => cards && paint(cards));
 shv.root.addEventListener('redraw', drawSheet);
+// #1086: a thread's messages scroll between the bar and the composer, which sits on the keyboard (or the tab bar).
+function fit() {
+  const vv = visualViewport, nav = $('nav').getBoundingClientRect().top, kb = vv ? vv.offsetTop + vv.height : innerHeight;
+  H.style.setProperty('--top', `${$('main').getBoundingClientRect().top}px`);
+  H.style.setProperty('--bot', `${Math.max(0, H.clientHeight - Math.min(nav, kb))}px`);
+  if (H.hasAttribute('data-focus') && document.scrollingElement!.scrollTop) scrollTo(0, 0);
+}
+const refit = () => { const sc = scroller(cur.v), s = spot(sc); fit(); land(sc, s); };
+visualViewport?.addEventListener('resize', refit);
+visualViewport?.addEventListener('scroll', refit);
+addEventListener('resize', refit);
+// #1086: a code box's [copy], a `t<n>` ref, and a long press (or right click) on a message: copy, as markdown, quote.
+async function copy(text: string, b?: HTMLElement) {
+  try {
+    await navigator.clipboard.writeText(text);
+    if (b) { b.firstElementChild!.textContent = 'copied'; setTimeout(() => { b.firstElementChild!.textContent = 'copy'; }, 1500); } else toast('copied');
+  } catch {
+    const s = getSelection(), g = document.createRange();
+    g.selectNodeContents(b?.previousElementSibling ?? document.body);
+    s?.removeAllRanges();
+    s?.addRange(g);
+  }
+}
+main.addEventListener('click', e => {
+  const t = e.target as Element, c = t.closest<HTMLElement>('.cpy'), a = t.closest<HTMLElement>('a[data-thread]');
+  if (c) copy(c.previousElementSibling!.textContent ?? '', c);
+  if (a) { e.preventDefault(); thread(a.dataset.thread!); }
+});
+function press(k: HTMLElement) {
+  const txt = [...k.querySelectorAll<HTMLElement>(':scope > .txt')], plain = txt.map(t => t.innerText).join('\n\n'), raw = txt.map(t => t.dataset.md).join('\n\n');
+  const pick = (label: string, f: () => void) => { const b = el('button', '', `<span>${esc(label)}</span>`); b.type = 'button'; b.onclick = () => { closeSheet(); f(); }; return b; };
+  $('#sheet .sh').replaceChildren(el('b', '', 'message'), pick('close', () => {}));
+  const quote = () => {
+    const i = cur.v.root.querySelector<HTMLInputElement>('.form.say input');
+    if (!i) return;
+    i.value = `> ${plain.replace(/\s+/g, ' ').trim()}\n${i.value}`;
+    i.focus();
+  };
+  const bar = el('div', 'bar');
+  bar.append(pick('copy', () => copy(plain)), pick('copy as markdown', () => copy(raw)), pick('quote', quote));
+  shv.model = null;
+  shv.root.replaceChildren(bar);
+  sh.hidden = false;
+  H.classList.add('sheet');
+}
+const msg = (t: EventTarget | null) => (t as Element | null)?.closest<HTMLElement>('.card.k-you, .card.k-orch');
+let hold = 0;
+main.addEventListener('contextmenu', e => { const k = msg(e.target); if (k) { e.preventDefault(); press(k); } });
+main.addEventListener('touchstart', e => { const k = msg(e.target); clearTimeout(hold); if (k) hold = setTimeout(() => press(k), 500); }, { passive: true });
+for (const ev of ['touchend', 'touchmove', 'touchcancel']) main.addEventListener(ev, () => clearTimeout(hold), { passive: true });
 $('#rf').onclick = reload;
 $('#sysb').onclick = settings;
 document.querySelectorAll<HTMLElement>('.pairb').forEach(b => { b.onclick = pair; });
 addEventListener('online', sync);
 addEventListener('offline', sync);
-addEventListener('hashchange', () => { const t = tabs.find(x => x.id === location.hash.slice(1)); if (t && t !== cur) show(t); });
+addEventListener('hashchange', () => {
+  const r = route(location.hash.slice(1));
+  if (!r) return;
+  const [t, p] = r;
+  if (t !== cur) return show(t, p);
+  if (p === t.v.path) return;
+  if (t.v.back[t.v.back.length - 1] === p) t.v.back.pop();
+  else t.v.back.push(t.v.path);
+  go(t.v, p, false);
+});
+let edge = -1;
+const app = matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
+if (app) addEventListener('touchstart', e => { edge = e.touches[0].clientX < 24 ? e.touches[0].clientX : -1; }, { passive: true });
+addEventListener('touchend', e => { if (edge >= 0 && e.changedTouches[0].clientX - edge > 80 && cur.v.back.length && sh.hidden) history.back(); edge = -1; }, { passive: true });
 setInterval(() => { if (!document.hidden) { paint(cur.v); sync(); } }, 30_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && !cur.v.live) load(cur.v, true); });
 colours();
 theme(H.dataset.theme ?? 'farm').then(redraw);
 if (cards) load(cards);
-show(cur);
+if (at && at[1] !== cur.screen) {
+  history.replaceState(null, '', '#' + cur.id);
+  history.pushState(null, '', hashOf(cur, at[1]));
+}
+show(cur, at?.[1]);
 if ('serviceWorker' in navigator && !demo) navigator.serviceWorker.register(url('sw.js')).catch(() => {});

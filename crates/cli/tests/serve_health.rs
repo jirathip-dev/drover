@@ -246,3 +246,55 @@ fn a_fleets_pass_over_2_minutes_alerts_drive_slow_naming_its_slowest_step() {
         )
     );
 }
+
+#[test]
+fn a_serve_on_the_port_older_than_the_installed_binary_alerts_serve_stale_once() {
+    let c = ctx(&tmpdir("serve-stale"), CONFIG);
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let (f, health) = (Fake::default(), c.state.with_file_name("serve-health.json"));
+    let s = Server::new(&c, &f, Some(ADDR.into()));
+    s.slo(T);
+    assert_eq!(run(&at(&c, T), &f, &["check"]).0, 0);
+    let mut h: Value = serde_json::from_slice(&std::fs::read(&health).unwrap()).unwrap();
+    assert_eq!(
+        (h["sha"].as_str(), alerts(&c, "serve-stale")),
+        (Some(drover::SHA), vec![])
+    );
+    h["sha"] = json!("0ld0ld0ld");
+    std::fs::write(&health, h.to_string()).unwrap();
+    for t in [T + 60, T + 120] {
+        assert_eq!(run(&at(&c, t), &f, &["check"]).0, 0);
+        assert_eq!(alerts(&c, "serve-stale"), ["serve-stale"], "once at {t}");
+    }
+    let ev = read(&c.state).unwrap().to_vec();
+    let why = ev
+        .iter()
+        .find(|e| e.kind == "serve-stale")
+        .unwrap()
+        .str("reason")
+        .unwrap()
+        .to_string();
+    assert!(why.contains("runs 0ld0ld0, not the installed"), "{why}");
+    s.slo(T + 180);
+    assert_eq!(run(&at(&c, T + 180), &f, &["check"]).0, 0);
+    assert_eq!(alerts(&c, "serve-stale"), ["serve-stale", "serve-stale-ok"]);
+}
+
+#[test]
+fn a_serve_that_cannot_take_its_port_logs_each_failure_and_a_fourth_in_an_hour_alerts_serve_loop() {
+    let c = ctx(&tmpdir("serve-loop"), &format!("{CONFIG}serve_handover_secs = 1\n"));
+    append(&c.state, &Event::new(T, "sendmeter", None, "note", json!({}))).unwrap();
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap().to_string();
+    std::thread::spawn(move || l.incoming().for_each(drop));
+    let f = Fake::default();
+    for n in 1..=4 {
+        let e = drover::hooks::serve(&c, &f, &addr, false).unwrap_err();
+        assert!(format!("{e:#}").contains("in use"), "{e:#}");
+        assert_eq!(run(&c, &f, &["check"]).0, 0);
+        let want: &[&str] = if n < 4 { &[] } else { &["serve-loop"] };
+        assert_eq!(alerts(&c, "serve-loop"), want, "after failure {n}");
+    }
+    assert_eq!(run(&at(&c, T + 3_601), &f, &["check"]).0, 0);
+    assert_eq!(alerts(&c, "serve-loop"), ["serve-loop", "serve-loop-ok"], "an hour on");
+}

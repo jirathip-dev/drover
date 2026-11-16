@@ -57,6 +57,12 @@ fn hygiene(
     rows.push(format!("✓ hygiene {name} — {}", h.line()));
     let repo = &f.repo;
     let m = h.merge.as_deref().unwrap_or("off");
+    let did = format!("{:?}", f.merge).to_lowercase();
+    if m != "off" && m != did {
+        rows.push(format!(
+            "! hygiene {name} — merge is {did}, hygiene says {m} → set [fleet.{name}] merge = \"{m}\""
+        ));
+    }
     let flag = match m {
         "squash" => Some(("squashMergeAllowed", "squash-merge")),
         "merge" => Some(("mergeCommitAllowed", "merge-commit")),

@@ -142,7 +142,7 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "3"]);
     assert_eq!(code, 0, "{out}");
     assert!(r.0.called(&format!(
-        "gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {to}"
+        "gh pr merge 13 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {to}"
     )));
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
     assert_eq!((st.state.as_str(), st.rounds), ("merged", 1));
@@ -278,7 +278,7 @@ fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
     assert_eq!(st(&c), "ready");
     c.now += 120;
     let (r, out) = pass(&c, &green_pr(3, &to));
-    let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {to}");
+    let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {to}");
     assert!(r.0.called(&merge), "{out}");
     assert_eq!(st(&c), "merged");
 }
@@ -510,7 +510,7 @@ fn a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges() {
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "3"]);
     assert_eq!(code, 0, "{out}");
     assert!(r.0.called(&format!(
-        "gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {m}"
+        "gh pr merge 13 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {m}"
     )));
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
     assert_eq!((st.state.as_str(), st.rounds), ("merged", 1));
@@ -595,7 +595,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let r = Mixed(r.0.reply("gh pr ", "").reply("gh issue", ""));
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {from}");
+    let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {from}");
     assert!(r.0.called(&merge), "{out}");
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "auto-updated"));
 }

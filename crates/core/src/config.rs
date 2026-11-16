@@ -438,6 +438,9 @@ pub struct Fleet {
     pub cap_script: Option<String>,
     /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
+    /// #1097: how `merge` lands a PR: `squash` (default) or `merge`.
+    #[serde(default)]
+    pub merge: MergeMode,
     /// #419: `weekly` (unset) has `tick` run `drover lesson` every 7 days; `off` opts out.
     pub lessons: Option<String>,
     /// #889: `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
@@ -457,6 +460,8 @@ pub struct Fleet {
     /// #1101: `[fleet.<n>.hygiene]`, this fleet's keys over `[hygiene]`'s.
     #[serde(default)]
     pub hygiene: Hygiene,
+    /// #782: `srt` starts every lane's agent inside sandbox-runtime with the rules `sandbox::settings` writes; unset = off.
+    pub sandbox: Option<Sandbox>,
 }
 
 /// #1101: one key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
@@ -513,6 +518,32 @@ impl Hygiene {
             o(&self.triage),
             o(&self.issue_spec)
         )
+    }
+}
+
+/// #782: the kernel sandbox a lane's agent runs in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sandbox {
+    Srt,
+}
+
+/// #1097: `squash` lands a PR as one commit carrying its why notes and deletes its branch; `merge` keeps every commit.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeMode {
+    #[default]
+    Squash,
+    Merge,
+}
+
+impl MergeMode {
+    /// `gh pr merge`'s flags for this mode.
+    pub fn flags(self) -> &'static [&'static str] {
+        match self {
+            Self::Squash => &["--squash", "--delete-branch"],
+            Self::Merge => &["--merge"],
+        }
     }
 }
 

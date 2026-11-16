@@ -19,7 +19,12 @@ pub fn name_ok(name: &str) -> bool {
 
 /// `<config dir>/secrets/<name>`, where a `secret:<name>` env is read from.
 pub fn path(ctx: &Ctx, name: &str) -> PathBuf {
-    ctx.config.with_file_name("secrets").join(name)
+    dir(ctx).join(name)
+}
+
+/// `<config dir>/secrets`, the folder every `secret:<name>` file is in.
+pub fn dir(ctx: &Ctx) -> PathBuf {
+    ctx.config.with_file_name("secrets")
 }
 
 /// The secret in file `p`, trimmed (None: no such file); refused `SECRET_FILE_OPEN` when group or others may read it.

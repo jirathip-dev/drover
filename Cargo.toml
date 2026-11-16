@@ -48,3 +48,8 @@ shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "9b88eb5be5bc
 drover-core = { path = "crates/core" }
 drover-server = { path = "crates/server" }
 drover-service = { path = "crates/service" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
