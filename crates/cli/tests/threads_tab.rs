@@ -204,7 +204,7 @@ fn the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only() {
 }
 
 #[test]
-fn the_owner_reads_a_thread_sends_and_answers_from_the_tab() {
+fn parity_15_the_owner_reads_a_thread_sends_and_answers_from_the_tab() {
     let c = recorded("threads-act");
     let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));

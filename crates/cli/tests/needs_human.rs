@@ -94,7 +94,7 @@ fn needs_human_pushes_with_the_default_on() {
 }
 
 #[test]
-fn card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only() {
+fn parity_67_card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only() {
     let c = fixture("nh-pass", "PASS");
     let r = runner();
     let s = Server::new(&c, &r, Some(ADDR.into()));
