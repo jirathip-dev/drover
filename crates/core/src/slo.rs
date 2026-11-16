@@ -1,6 +1,7 @@
 use crate::config::Config;
-use crate::events::{append, emit, fold, Event, Json};
+use crate::events::{append, emit, fold, Event, IssueState, Json};
 use crate::runner::{ok, Runner};
+use crate::waiting::Waiting;
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -36,9 +37,10 @@ pub fn pass(
     let events = crate::events::working(&ctx.state)?;
     let agents = crate::session::all(cfg, seen).checked()?.running();
     let mut now: Vec<Breach> = tick(ctx, cfg, r).into_iter().collect();
+    let rows = crate::waiting::scan(ctx, cfg, seen, &events, &agents, false, None);
     for f in fleets {
         now.extend(idle(ctx, cfg, &events, &agents, f));
-        now.extend(missed(ctx, &events, f));
+        now.extend(missed(ctx, &events, &rows, f));
     }
     let eps = episodes(&events);
     let mut loud: BTreeSet<String> = eps
@@ -256,21 +258,18 @@ fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[crate::session::Ses
     })
 }
 
-fn missed(ctx: &Ctx, events: &[Event], fleet: &str) -> Vec<Breach> {
-    let st = fold(events);
-    let open = st.values().filter(|s| s.fleet == fleet).filter_map(|s| {
-        let head = crate::gh::cached_pr(ctx, fleet, s.issue)
-            .at("headRefOid")
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-        let (p, why) = crate::promise::open_missed(events, s, &head, None)?;
+fn missed(ctx: &Ctx, events: &[Event], rows: &[(IssueState, Waiting)], fleet: &str) -> Vec<Breach> {
+    let mine = |(s, w): &&(IssueState, Waiting)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane);
+    let open = rows.iter().filter(mine).filter_map(|(s, w)| {
+        let pr = crate::gh::cached_pr(ctx, fleet, s.issue);
+        let head = pr.at("headRefOid").as_str().unwrap_or_default();
+        let p = crate::promise::open_missed(events, s, head, w.promise)?;
         Some(Breach {
             key: format!("promise:{fleet}#{}:{}", s.issue, p.made_at),
             fleet: fleet.into(),
             issue: Some(s.issue),
             slo: None,
-            reason: format!("promise `{}` missed: {why}", p.reason),
+            reason: w.what.clone(),
             heal: None,
             since: p.made_at,
         })

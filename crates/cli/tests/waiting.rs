@@ -632,3 +632,50 @@ fn a_pass_a_draft_pr_holds_voids_the_merge_promise_and_shows_the_hold() {
     assert_eq!((of("promise-missed"), of("promise-void")), (0, 1));
     assert_eq!(four(&c, &r).what, "PASS · CI green · PR is a draft");
 }
+
+#[test]
+fn a_promise_missed_after_the_disk_recovers_is_stuck_on_the_current_hold_not_disk_low() {
+    let (mut c, r) = fixture("waiting-1122-stuck");
+    let cfg = Config::load(&c.config).unwrap();
+    let drive = |c: &drover::Ctx, r: &Fake| {
+        let rows = lanes(c, r, &[]);
+        drover::promise::pass(c, &cfg, "sendmeter", &read(&c.state).unwrap(), &rows).unwrap();
+    };
+    for n in [9, 12, 31] {
+        ev(&c, c.now, Some(n), "merged", json!({"pr": "9"}));
+    }
+    let refused = |c: &drover::Ctx, code: &str, why: &str| {
+        let d = json!({"step": "review", "cmd": "drover spawn sendmeter 42 rev", "result": format!("REFUSED {code}: {why}"), "code": code});
+        ev(c, c.now, Some(42), "driven", d);
+    };
+    refused(&c, "DISK_LOW", "mini: 0.1 GB free < 10 GB; retry later");
+    drive(&c, &r);
+    let ev42 = read(&c.state).unwrap().to_vec();
+    let promised = ev42
+        .iter()
+        .rfind(|e| e.kind == "promise" && e.issue == Some(42))
+        .unwrap();
+    assert!(
+        promised.str("reason").unwrap().contains("disk nearly full"),
+        "{promised:?}"
+    );
+    c.now += 300;
+    refused(
+        &c,
+        "SERIAL_BUSY",
+        "hot crates/cli/tests/waiting.rs: #983 holds 1/1; retry after they merge",
+    );
+    for _ in 0..3 {
+        drive(&c, &r);
+        c.now += 300;
+    }
+    let sh = FakeShed::attached(&c);
+    let seen = sh.on(&r);
+    let mut out = vec![];
+    drover::slo::pass(&c, &cfg, (&seen, &seen), &mut out, &["sendmeter"]).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
+    let stuck = ev.iter().find(|e| e.kind == "stuck" && e.issue == Some(42));
+    let why = stuck.and_then(|e| e.str("reason")).unwrap_or_default();
+    assert!(why.contains("SERIAL_BUSY") && why.contains("#983"), "{why:?} {ev:?}");
+    assert!(!why.contains("DISK_LOW") && !why.contains("disk nearly full"), "{why}");
+}
