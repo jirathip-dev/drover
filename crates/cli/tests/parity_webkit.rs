@@ -184,6 +184,7 @@ fn parity_24_an_edge_swipe_past_40_percent_goes_back_to_the_list_where_it_was_an
         }
     });
     let js = "location.hash = '#threads'; \
+        await until(() => $('.card[data-id^=\"older-\"] > .fold')); $('.card[data-id^=\"older-\"] > .fold').click(); \
         await until(() => $$('.row[data-id^=\"t\"]').length >= 30); \
         scrollTo(0, 400); await w(100); const y0 = scrollY; \
         const row = $$('.row[data-id^=\"t\"]').find(r => r.getBoundingClientRect().top > 100); row.click(); \

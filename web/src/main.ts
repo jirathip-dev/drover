@@ -182,7 +182,7 @@ const close = (v: View) => { v.es?.close(); v.es = undefined; v.live = false; };
 
 const ys = new Map<string, number>();
 function go(v: View, path: string, push = true) {
-  ys.set(v.path, scrollY);
+  if (v === cur.v) ys.set(v.path, scrollY);
   if (push) v.back.push(v.path);
   if (push && v === cur.v) history.pushState(null, '', hashOf(cur, path));
   const s = spot(scroller(v));
