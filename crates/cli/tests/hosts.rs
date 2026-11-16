@@ -690,6 +690,7 @@ fn doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh() {
     let _sh = FakeShed::attached(&c);
     let r = healthy(fake(0.1, 0.1))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
+        .once_err(&format!("{SSH}'shed' 'connect'"), 1, "shed: no server on bazzite")
         .once_err(&format!("{SSH}'shed' 'connect'"), 1, "shed: no server on bazzite");
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(

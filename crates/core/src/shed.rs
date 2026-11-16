@@ -74,7 +74,13 @@ fn answer(text: &str) -> Result<(Hello, Value)> {
 pub fn line(r: &dyn Runner, w: &Wire) -> String {
     let theirs = exchange(r, w, Method::Ls, json!(proto::LsParams::default())).and_then(|t| answer(&t));
     match theirs {
+        Ok(_) if unit(r).is_some_and(|a| a != "active") => {
+            "✗ shed — server outside its service (shed.service not active) \
+→ stop that shed serve, then systemctl --user reset-failed shed.service && systemctl --user start shed.service"
+                .into()
+        }
         Ok((h, _)) => format!("✓ shed — server {}, drover speaks {}", side(&h), side(&Hello::ours())),
+        Err(e) if format!("{e:#}").starts_with("SHED_JOB") => format!("✗ shed — {e:#}"),
         Err(e) if format!("{e:#}").starts_with("SHED_VERSION") => format!(
             "✗ shed — {e:#} → cargo install --git {} --rev {REV} --locked --force shed, then restart shed serve",
             git()
@@ -118,17 +124,63 @@ fn exchange(r: &dyn Runner, w: &Wire, m: Method, params: Value) -> Result<String
             }
             text
         }
-        Wire::Connect => {
-            let o = r.run_in("shed", &argv(&["connect", "--autostart"]), &lines(m, params))?;
-            ensure!(
-                !o.stdout.is_empty(),
-                "shed connect failed ({}): {}",
-                o.code,
-                o.stderr.trim()
-            );
-            o.stdout
-        }
+        Wire::Connect => connect(r, &lines(m, params))?,
     })
+}
+
+fn connect(r: &dyn Runner, q: &str) -> Result<String> {
+    let plain = || r.run_in("shed", &argv(&["connect"]), q);
+    let mut o = plain()?;
+    if o.stdout.is_empty() && !matches!(o.code, 124 | 255) {
+        match start_job(r) {
+            None => o = r.run_in("shed", &argv(&["connect", "--autostart"]), q)?,
+            Some(job) => {
+                for _ in 0..10 {
+                    if !o.stdout.is_empty() {
+                        break;
+                    }
+                    r.sleep(1);
+                    o = plain()?;
+                }
+                ensure!(
+                    !o.stdout.is_empty(),
+                    "SHED_JOB: the shed job is installed but its server is not up → {job}"
+                );
+            }
+        }
+    }
+    ensure!(
+        !o.stdout.is_empty(),
+        "shed connect failed ({}): {}",
+        o.code,
+        o.stderr.trim()
+    );
+    Ok(o.stdout)
+}
+
+/// #1140: the installed shed unit's `ActiveState`, if systemd has one.
+fn unit(r: &dyn Runner) -> Option<String> {
+    let o = r
+        .run(
+            "systemctl",
+            &argv(&["--user", "show", "-p", "LoadState,ActiveState", "shed.service"]),
+        )
+        .ok()
+        .filter(|o| o.code == 0)?;
+    let at = |k: &str| o.stdout.lines().find_map(|l| l.strip_prefix(k)).map(str::to_string);
+    at("LoadState=").filter(|l| l == "loaded")?;
+    at("ActiveState=")
+}
+
+fn start_job(r: &dyn Runner) -> Option<&'static str> {
+    if unit(r).is_some() {
+        let _ = r.run("systemctl", &argv(&["--user", "start", "shed.service"]));
+        return Some("journalctl --user -u shed.service");
+    }
+    let plist = "p=\"$HOME/Library/LaunchAgents/dev.shed.serve.plist\"; [ -f \"$p\" ] && \
+launchctl kickstart \"gui/$(id -u)/dev.shed.serve\"";
+    let o = r.run("sh", &argv(&["-c", plist])).ok()?;
+    (o.code == 0).then_some("launchctl print gui/$(id -u)/dev.shed.serve")
 }
 
 /// The `shed` CLI (ACP mode only: its bridge and prompt framing are shed's own); fails on a non-zero exit.

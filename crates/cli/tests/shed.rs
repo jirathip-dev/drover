@@ -130,7 +130,7 @@ fn another_host_is_reached_through_shed_connect_over_ssh() {
     assert!(
         calls
             .iter()
-            .any(|c| c.starts_with("ssh ") && c.contains("box -- 'shed' 'connect' '--autostart'")),
+            .any(|c| c.starts_with("ssh ") && c.ends_with("box -- 'shed' 'connect'")),
         "{calls:?}"
     );
     assert!(b.methods().is_empty(), "nothing went to this host's server");
