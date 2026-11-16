@@ -187,17 +187,17 @@ fn parity_24_an_edge_swipe_past_40_percent_goes_back_to_the_list_where_it_was_an
         await until(() => $('.card[data-id^=\"older-\"] > .fold')); $('.card[data-id^=\"older-\"] > .fold').click(); \
         await until(() => $$('.row[data-id^=\"t\"]').length >= 30); \
         scrollTo(0, 400); await w(100); const y0 = scrollY; \
-        const row = $$('.row[data-id^=\"t\"]').find(r => r.getBoundingClientRect().top > 100); row.click(); \
-        await until(() => $('.form.say')); await w(300); \
+        $('.row[data-id=\"t1\"]').click(); \
+        await until(() => $('.cmp')); await w(300); \
         const touch = (type, x) => { const at = document.elementFromPoint(5, 400) ?? document.body, p = { identifier: 1, target: at, clientX: x, clientY: 400 }; \
           const list = a => Object.assign(a, { item: i => a[i] ?? null }), e = new Event(type, { bubbles: true, cancelable: true }); \
           Object.defineProperties(e, { touches: { value: list(type === 'touchend' ? [] : [p]) }, changedTouches: { value: list([p]) } }); at.dispatchEvent(e); }; \
         const moved = () => $$('main > section:not([hidden]) > *').some(k => k.style.transform.includes('translateX')); \
         const drag = to => { touch('touchstart', 8); for (let x = 8; x <= to; x += 20) touch('touchmove', x); const f = +moved(); touch('touchend', to); return f; }; \
         const follows = drag(innerWidth * 0.3); await w(400); \
-        const stayed = +(!!$('.form.say') && !moved()); \
+        const stayed = +(!!$('.cmp') && !moved()); \
         drag(innerWidth * 0.6); \
-        const back = await until(() => $('.row[data-id^=\"t\"]') && !$('.form.say')); await w(200); \
+        const back = await until(() => $('.row[data-id^=\"t\"]') && !$('.cmp')); await w(200); \
         return [scrollY > 0 ? 1 : 0, follows, stayed, +back, +!moved(), Math.round(scrollY - y0)];";
     assert_eq!(
         late(&url, "parity-24-swipe-png", js),
