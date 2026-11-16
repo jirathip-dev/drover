@@ -990,6 +990,9 @@ pub fn spawn(
     let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
     if o.dry_run {
         pj["dry_run"] = json!(true);
+        if let Some(pl) = &placed {
+            (pj["host"], pj["why"]) = (json!(pl.name), json!(pl.why));
+        }
         print_plan(out, &pj, o.json)?;
         return Ok(true);
     }
@@ -1750,6 +1753,10 @@ fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool) -> Result<()> {
             "{} [{} {}] {} @ {}",
             pj["agent"], pj["harness"], pj["profile"], pj["branch"], pj["worktree"]
         )?;
+        if let Some(h) = pj["host"].as_str() {
+            let why = pj["why"].as_str().map_or(String::new(), |w| format!(": {w}"));
+            writeln!(out, "  on {h}{why}")?;
+        }
         for c in pj["commands"].as_array().into_iter().flatten() {
             let words: Vec<&str> = c.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             writeln!(out, "  $ {}", words.join(" "))?;

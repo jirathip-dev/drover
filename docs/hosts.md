@@ -273,10 +273,12 @@ overflow_after_minutes = 10  # the default
   `<config dir>/secrets/<key_env>`, and each command gets it on stdin and exports it (the `[ci_runners]` API calls use
   it as `$BOAT_API_KEY`). `drover doctor` names the one it found (`✓ cloud boat1 key — env`), or warns `!` with none.
   It never appears in argv, fleet.toml or the event log.
-- **Start on demand.** Placement uses a cloud host, stopped or running, in two cases only: every local host has been
-  refused (busy, low memory or disk) for `overflow_after_minutes`, or the lane needs a tag only the cloud host has (#256:
-  local Macs first, even when the cloud host is idle). The `spawn` event's `why` says which (`overflow: every local host
-  busy 12 min`, `needs docker: no local host has it`), and `drover status` shows it as `on <host>: <why>`. A respawn on a lane's
+- **Start on demand.** Local Macs come first, even when a cloud host is idle (#256). A running cloud host that admits
+  and has `max_working` room takes a lane as soon as every local host refuses or is full (#1152). A stopped one is
+  started only when every local host has been refused (busy, low memory or disk) for `overflow_after_minutes`, or the
+  lane needs a tag only the cloud host has. The `spawn` event's `why` says which (`HOST_BUSY mini: …; cloud1 is up with
+  room`, `overflow: every local host busy 12 min`, `needs docker: no local host has it`), `drover status` shows it as
+  `on <host>: <why>`, and `spawn --dry-run` prints it as `on <host>: <why>`. A respawn on a lane's
   own host, `--host`, or a role `host` pin starts it too. `spawn` runs `start`, then polls `status` for up to 5 min.
   It then rewrites the host's block in `~/.ssh/config.d/herdsman` and its own known_hosts file
   (`~/.ssh/herdsman/<name>.known`, outside `config.d`) from `address`, and then spawns. A dry run never starts a host.
