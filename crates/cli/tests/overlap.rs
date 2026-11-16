@@ -1078,3 +1078,39 @@ fn cap_reports_a_script_it_cannot_parse() {
     let want = "`sh scripts/line-cap.sh` at origin/staging printed no `N / cap M` line drover can parse: printed `total: 15 lines, limit 100`";
     assert_eq!(err.to_string(), want);
 }
+
+#[test]
+fn a_second_pass_with_nothing_moved_starts_no_worktree() {
+    let (d, seed, c, cfg) = repos("au-idle");
+    let sh = FakeShed::attached(&c);
+    for n in 1..=3 {
+        lane(&c, &seed, n, true);
+    }
+    commit(&seed, "c.txt", "c\n", "staging");
+    merge_staging(&d, None);
+    let heads: Vec<String> = (1..=3).map(|n| head(&seed, &format!("issue-{n}"))).collect();
+    let r = Mixed(Fake::default().reply(PROTECTION, "false\n"));
+    let t = std::time::Instant::now();
+    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    let first = r.0.calls.borrow().len();
+    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    let ms = t.elapsed().as_millis();
+    let second: Vec<String> = r.0.calls.borrow()[first..]
+        .iter()
+        .filter(|l| l.starts_with("git "))
+        .cloned()
+        .collect();
+    let tried = |w: &str| second.iter().filter(|l| l.contains(w)).count();
+    assert_eq!(
+        (tried(" worktree "), tried(" merge-tree "), tried(" merge ")),
+        (0, 0, 0),
+        "{} git calls in {ms} ms: {second:#?}",
+        second.len()
+    );
+    let now: Vec<String> = (1..=3).map(|n| head(&seed, &format!("issue-{n}"))).collect();
+    assert_eq!(now, heads, "nothing pushed");
+    assert!(read(&c.state)
+        .unwrap()
+        .iter()
+        .all(|e| e.kind != "auto-updated" && e.kind != "driven"));
+}
