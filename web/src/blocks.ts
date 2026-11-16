@@ -2,12 +2,12 @@
 // button, run, images, form and its fields and `submit`, sheet). A block that acts calls `ctx.act`; a tap that goes somewhere
 // calls `ctx.tap`. No block knows which screen it is on.
 import { type Blk, blks, isBlk, isList, obj } from './ops';
-import { esc, figure, nodes, word } from './theme';
+import { esc, figure, get, nodes, put, word } from './theme';
 
 export type Act = { action: unknown; block?: unknown; values?: unknown; confirm?: unknown };
 export type Ctx = {
   screen: string;
-  act: (a: Act, el?: HTMLElement) => void | Promise<void>;
+  act: (a: Act, el?: HTMLElement) => Promise<boolean>;
   tap: (t: unknown) => void;
   open: Set<string>;
 };
@@ -28,6 +28,17 @@ const btn = (label: unknown, cls = '', url?: string) => {
 const GROUP: Record<string, string> = { waiting: 'needs', blocked: 'needs', asleep: 'idle', in: 'working' };
 const tone = (v: unknown): Blk => (isBlk(v) ? v : { text: v });
 const SH: Record<string, string> = { needs: 'r', working: 'g' };
+const draft = (i: HTMLInputElement, key: string) => {
+  i.dataset.draft = key;
+  i.value = get(key) ?? i.value;
+  i.addEventListener('input', () => put(key, i.value || null));
+};
+/** Clears the drafts of the fields under `box`, here and in any copy on the page, once their action succeeded. */
+export const sent = (box: Element) => box.querySelectorAll<HTMLInputElement>('[data-draft]').forEach(i => {
+  const k = i.dataset.draft ?? '';
+  put(k, null);
+  document.querySelectorAll<HTMLInputElement>(`[data-draft="${CSS.escape(k)}"]`).forEach(x => { x.value = x.dataset.was ?? ''; });
+});
 
 /** Minimal markdown: code fences, `code`, **bold**, [links](url); everything else escaped. */
 export function md(s: unknown): string {
@@ -179,12 +190,13 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
       const f = el('form', 'other');
       const i = el('input');
       Object.assign(i, { name: 'other', placeholder: other.placeholder ?? 'other…', autocomplete: 'off' });
+      draft(i, `draft:${c.screen}:${String(b.id)}:other`);
       const go = btn('send');
       go.type = 'submit';
       f.append(i, go);
       f.onsubmit = e => {
         e.preventDefault();
-        if (i.value.trim()) c.act({ action: b.action, block: b.id, values: { ...obj(b.values), choice: other.for ?? '', other: i.value } }, go);
+        if (i.value.trim()) c.act({ action: b.action, block: b.id, values: { ...obj(b.values), choice: other.for ?? '', other: i.value } }, go).then(ok => ok && sent(f));
       };
       s.append(f);
     }
@@ -221,7 +233,7 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
   form(b, c) {
     const f = el('div', `form${b.submit ? ' say' : ''}`);
     f.dataset.id = String(b.id ?? '');
-    for (const x of blks(b.fields)) f.append(field(x));
+    for (const x of blks(b.fields)) f.append(field(x, `draft:${c.screen}:${String(b.id)}:`));
     const s = b.submit;
     if (!isBlk(s)) return f;
     const go = btn(s.label), word = go.firstElementChild ?? go;
@@ -229,7 +241,7 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
       const v = values(f);
       if (!String(v.text ?? '').trim()) return;
       word.textContent = 'sending…';
-      Promise.resolve(c.act({ action: s.action, block: b.id, values: { ...obj(s.values), ...v } }, go)).finally(() => { word.textContent = String(s.label ?? ''); });
+      c.act({ action: s.action, block: b.id, values: { ...obj(s.values), ...v } }, go).then(ok => ok && sent(f)).finally(() => { word.textContent = String(s.label ?? ''); });
     };
     go.onclick = send;
     f.querySelector('input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
@@ -251,7 +263,7 @@ function toggle(e: HTMLElement, id: unknown, c: Ctx, card = false) {
 }
 
 /** A form field (toggle, text, picker, secret) as a labelled control named by the field's `name`. */
-function field(x: Blk): HTMLElement {
+function field(x: Blk, key: string): HTMLElement {
   const l = el('label', 'fd');
   l.append(el('span', 'fk', esc(x.label ?? x.name)));
   if (x.type === 'toggle') {
@@ -268,6 +280,7 @@ function field(x: Blk): HTMLElement {
     const i = el('input');
     Object.assign(i, { type: x.type === 'secret' ? 'password' : 'text', name: x.name, value: x.value ?? '', placeholder: x.placeholder ?? '', autocomplete: 'off' });
     i.dataset.was = i.value;
+    if (x.type !== 'secret') draft(i, key + String(x.name));
     l.append(i);
   }
   return l;
