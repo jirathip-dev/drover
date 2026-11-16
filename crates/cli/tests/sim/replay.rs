@@ -18,7 +18,7 @@ pub struct Scenario {
     pub queue: Vec<(u64, Vec<String>)>,
     /// Each `<role>#<issue>`'s lanes in spawn order: what its agent did (the last one again for any later lane).
     pub lanes: BTreeMap<String, Vec<Script>>,
-    /// Windows the host refused spawns HOST_BUSY, and a host was offline (the sim has one host: both are busy).
+    /// Windows the host refused spawns `HOST_BUSY`, and a host was offline (the sim has one host: both are busy).
     pub busy: Vec<(u64, u64)>,
     pub offline: Vec<(u64, u64)>,
     /// What really happened that week.
@@ -177,14 +177,15 @@ pub fn build(evs: &[Event], fleet: &str, from: u64, to: u64) -> Scenario {
         }
         let rev = s.lanes.entry(format!("rev#{n}")).or_default();
         if rev.is_empty() {
-            rev.push(match merged.contains(&n) {
-                true => Script::Review {
+            rev.push(if merged.contains(&n) {
+                Script::Review {
                     secs: 600,
                     pass: true,
                     proof: true,
                     heeds: true,
-                },
-                false => Script::Hang,
+                }
+            } else {
+                Script::Hang
             });
         }
     }
@@ -242,7 +243,7 @@ pub fn real(evs: &[Event], from: u64) -> Run {
             produced.insert(*p);
         }
         if e.kind == "spawn" {
-            last.insert((n, r), e as *const Event);
+            last.insert((n, r), std::ptr::from_ref::<Event>(e));
         }
         if ["spawn", "pushed", "verdict", "merged"].contains(&e.kind.as_str()) && seen.insert(n) {
             adds.push(Event::new(
@@ -255,7 +256,9 @@ pub fn real(evs: &[Event], from: u64) -> Run {
         }
     }
     let log = adds.iter().map(|e| (from, e)).chain(evs.iter().map(|e| (e.ts, e)));
-    let mut m = crate::metrics::summary(&[crate::metrics::log(log, |e| produced.contains(&(e as *const Event)))]);
+    let mut m = crate::metrics::summary(&[crate::metrics::log(log, |e| {
+        produced.contains(&std::ptr::from_ref::<Event>(e))
+    })]);
     m.retain(|k, _| !["idle_lane_min", "ci_wait_min", "lock_wait_min"].contains(k));
     Run {
         merged: merged(evs),

@@ -71,7 +71,7 @@ Production code added only for tests counts against the change too.
   in the PR body with one line on why. The cap in `ci/cap.toml` is a total for the repo and the only
   hard limit: ask only when your own PR, merged onto current integration, would put the total over
   `line_cap`; trim first, then ask `--kind owner`.
-- Never edit `ci/cap.toml` (the hook refuses it): one orchestrator-filed issue raises it for the whole queue.
+- Never edit `ci/cap.toml` or add a raise in `ci/cap.d/` (the hook refuses both): one orchestrator-filed issue raises it for the whole queue.
   Your cap ask carries `drover cap <fleet>`'s queue-wide view, with its two options: raise to the
   projected total plus margin in one orchestrator-filed issue (recommended), or trim. A `DECISION` to wait
   for that issue: `drover queue <fleet> block --on N <issue>` and end the turn.
@@ -112,6 +112,7 @@ AC: it {works} \ `ok`
 - Guard the context window: read the files you need, not the repo; keep logs in files, not in the chat.
 - Smallest correct diff: no refactor, dependency or feature the issue did not ask for.
 - Every rule names its enforcer: a rule nothing checks is retired.
+- Keep code comment-free: only `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` line on a public item, whole files included; the why goes in the why note.
 - Leave the tree green: format, lint and test before you push.
 
 ## Review findings to fix (latest FAIL verdict)

@@ -45,9 +45,10 @@ fn job_files_match_their_goldens() {
 }
 
 fn job(c: &drover::Ctx, label: &str) -> std::path::PathBuf {
-    match MAC {
-        true => c.home.join(format!("Library/LaunchAgents/{label}.plist")),
-        false => c.home.join(format!(".config/systemd/user/{label}.service")),
+    if MAC {
+        c.home.join(format!("Library/LaunchAgents/{label}.plist"))
+    } else {
+        c.home.join(format!(".config/systemd/user/{label}.service"))
     }
 }
 
@@ -68,9 +69,10 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
         "= already dev.drover.tick\n= already dev.drover.fast\n= already dev.drover.update\n= already dev.drover.clean\n"
     );
     let fast = std::fs::read_to_string(job(&c, "dev.drover.fast")).unwrap();
-    let every = match MAC {
-        true => fast.clone(),
-        false => std::fs::read_to_string(c.home.join(".config/systemd/user/dev.drover.fast.timer")).unwrap(),
+    let every = if MAC {
+        fast.clone()
+    } else {
+        std::fs::read_to_string(c.home.join(".config/systemd/user/dev.drover.fast.timer")).unwrap()
     };
     assert!(fast.contains("--fast") && every.contains("60"), "{fast}\n{every}");
 
@@ -265,6 +267,41 @@ fn setup_makes_a_missing_merge_label_once_then_says_already() {
 }
 
 #[test]
+fn setup_writes_a_fleets_missing_hygiene_once() {
+    let d = tmpdir("timer-hygiene");
+    let local = d.join("sendmeter");
+    std::fs::create_dir_all(&local).unwrap();
+    let cfg = CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
+    let c = ctx(&d, &cfg);
+    let _sh = FakeShed::attached(&c);
+    let ls = format!("git -C {} ls-files", local.display());
+    let base = format!(
+        "sh -c cd '{}' && '{}' arch-check --write-baseline",
+        local.display(),
+        c.exe
+    );
+    let r = host(Fake::default())
+        .reply("launchctl print", "")
+        .reply("systemctl --user is-active", "")
+        .reply(&ls, "src/cli.rs\nsrc/main.rs\ncrates/x/src/config.rs\nREADME.md\n")
+        .reply(&base, "");
+    let (_, out) = run(&c, &r, &["setup", "--no-load"]);
+    let arch = local.join(".drover/arch.toml");
+    let wrote = format!("✓ hygiene sendmeter — wrote {} → commit it", arch.display());
+    assert!(out.lines().any(|l| l == wrote), "{out}");
+    let baseline = "✓ hygiene sendmeter — wrote the .drover/arch-baseline.txt baseline → commit it";
+    assert!(out.lines().any(|l| l == baseline), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(&arch).unwrap(),
+        "\n[comments]\npolicy = \"strict\"\n\n[docs]\npaths = [\"docs/**/*.md\", \"README.md\"]\nwatch = [\"src/cli.rs\", \"crates/x/src/config.rs\"]\n"
+    );
+    std::fs::write(local.join(".drover/arch-baseline.txt"), "").unwrap();
+    let (_, out) = run(&c, &r, &["setup", "--no-load"]);
+    assert!(!out.contains("hygiene sendmeter — wrote"), "{out}");
+    assert_eq!(r.count(&base), 1);
+}
+
+#[test]
 fn setup_adopts_a_serve_job_under_another_label() {
     let c = ctx(&tmpdir("timer-adopt"), CONFIG);
     let _sh = FakeShed::attached(&c);
@@ -313,7 +350,7 @@ fn services_rows_go_green_amber_and_red() {
             c.state.with_file_name("worktrees.du"),
             format!("{} {}", gb << 30, c.now - 240),
         )
-        .unwrap()
+        .unwrap();
     };
     fleet_disk(3);
     assert_eq!(run(&c, &host(Fake::default()), &["timer", "install", "--no-load"]).0, 0);
@@ -469,9 +506,10 @@ fn drift_is_missing_outdated_or_loaded() {
     assert_eq!(drift(&up), both("loaded", "loaded"));
     assert_eq!(drift(&host(Fake::default())), both("missing", "missing"), "not loaded");
     let edit = |label: &str, from: &str, to: &str| {
-        let p = match MAC || !from.starts_with("OnUnit") {
-            true => job(&c, label),
-            false => c.home.join(format!(".config/systemd/user/{label}.timer")),
+        let p = if MAC || !from.starts_with("OnUnit") {
+            job(&c, label)
+        } else {
+            c.home.join(format!(".config/systemd/user/{label}.timer"))
         };
         let text = std::fs::read_to_string(&p).unwrap();
         assert!(text.contains(from), "{text}");

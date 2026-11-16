@@ -18,8 +18,10 @@ pub fn host(sp: &Event) -> &str {
 
 /// Host `h`'s `runtime-down` while its breaker is open.
 pub fn down<'a>(ev: &'a [Event], h: &str) -> Option<&'a Event> {
-    let mine = |e: &&Event| matches!(e.kind.as_str(), "runtime-down" | "runtime-up") && e.str("host") == Some(h);
-    ev.iter().rfind(mine).filter(|e| e.kind == "runtime-down")
+    let on = crate::events::of_kind(ev, &["runtime-down", "runtime-up"]);
+    on.into_iter()
+        .rfind(|e| e.str("host") == Some(h))
+        .filter(|e| e.kind == "runtime-down")
 }
 
 /// `runtime down on <host> since <HH:MM> UTC` while host `h`'s breaker is open.
@@ -62,7 +64,7 @@ pub fn failed(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str, lane: &
         .map_or(0, |e| e.ts)
         .max(ctx.now.saturating_sub(l.runtime_down_minutes * 60));
     let count = 1 + ev.iter().filter(|e| e.ts >= since && failure_on(e, h)).count();
-    if (count as u64) < l.runtime_down_failures {
+    if u64::try_from(count).unwrap_or(u64::MAX) < l.runtime_down_failures {
         return Ok(false);
     }
     let reason = format!(

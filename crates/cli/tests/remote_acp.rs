@@ -25,6 +25,7 @@ struct Boat<'a> {
     machines: Shared<BTreeMap<String, Machine>>,
     runs: Shared<Vec<(Vec<String>, String)>>,
     profiles: PathBuf,
+    conf: String,
 }
 
 fn words(line: &str) -> Vec<String> {
@@ -74,6 +75,7 @@ impl Boat<'_> {
             machines: Shared::default(),
             runs: Shared::default(),
             profiles: c.config.with_file_name("claude"),
+            conf: c.config.display().to_string(),
         };
         *b.machines.borrow_mut() = m.collect();
         b
@@ -150,8 +152,8 @@ impl Boat<'_> {
                     .push((w.to_vec(), String::from_utf8(o.stdout).unwrap()));
                 Ok(out(0, ""))
             }
-            [exe, "profiles", "sync", "--profile", p, ..] if exe == EXE => {
-                let hook = format!("'{EXE}' hook --role impl");
+            [exe, "profiles", "sync", "--profile", p, "--role", role] if exe == EXE => {
+                let hook = format!("'{EXE}' hook --role {role}");
                 let hooks = [json!({"matcher": "*", "hooks": [{"type": "command", "command": hook}]})];
                 let hooks = if self.machines.borrow()[m].hook {
                     json!(hooks)
@@ -165,6 +167,7 @@ impl Boat<'_> {
                 std::fs::write(dir.join("role.md"), "role").unwrap();
                 Ok(out(0, ""))
             }
+            ["sh", "-c", "test -e \"$1\"", "sh", p] if p == self.conf => Ok(out(1, "")),
             ["sh", "-c", script, "sh", _] if script.contains("cat >") || script.starts_with("test -e") => {
                 real(w, input)
             }
@@ -212,13 +215,13 @@ impl Runner for Boat<'_> {
 }
 
 fn setup(name: &str, hosts: &[&str]) -> (drover::Ctx, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
     let base = CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"");
     let home = tmpdir(&format!("{name}-remote"));
     let d = tmpdir(name);
     let tf = d.join("config/tokens/proxy");
     std::fs::create_dir_all(tf.parent().unwrap()).unwrap();
     std::fs::write(&tf, TOKEN_C).unwrap();
-    use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&tf, std::fs::Permissions::from_mode(0o600)).unwrap();
     let mut toml = format!(
         "{base}\n[proxy]\nport = 9\ntoken-file = \"{}\"\n\n[hosts.mini]\nenabled = false\n",
@@ -386,9 +389,12 @@ fn shed_runner<'a>(b: &'a Boat, cfg: &drover::config::Config) -> drover::shed::W
 
 fn grep(dir: &Path, needle: &str) -> bool {
     let Ok(rd) = std::fs::read_dir(dir) else { return false };
-    rd.flatten().any(|e| match e.file_type().unwrap().is_dir() {
-        true => grep(&e.path(), needle),
-        false => std::fs::read_to_string(e.path()).is_ok_and(|s| s.contains(needle)),
+    rd.flatten().any(|e| {
+        if e.file_type().unwrap().is_dir() {
+            grep(&e.path(), needle)
+        } else {
+            std::fs::read_to_string(e.path()).is_ok_and(|s| s.contains(needle))
+        }
     })
 }
 
@@ -438,7 +444,7 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     let checks = [
         "command -v git",
         "command -v gh",
-        "[ \"$(shed --version)\"",
+        "v=$(shed --version)",
         "shed doctor",
         "command -v node",
         "shed agents --json",
@@ -504,6 +510,60 @@ fn bootstrap_puts_shed_and_drover_on_a_hosts_non_login_ssh_path_so_the_survey_fi
         "shed not on PATH /home/user/.ascii:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin",
         "{o}"
     );
+}
+
+#[test]
+fn bootstrap_syncs_each_fitting_fleets_acp_profile_there_so_the_next_survey_passes_the_guard() {
+    let (c, _) = setup("racp-profiles", &["boat1"]);
+    let second = "\n[fleet.cargo]\nrepo = \"jirathip-dev/cargo\"\nlocal = \"/tmp/does-not-matter/cargo\"\n\
+integration = \"staging\"\n\n[fleet.cargo.role.impl]\nharness = \"claude\"\nprofile = \"cargo-impl\"\n";
+    let toml = std::fs::read_to_string(&c.config).unwrap() + second;
+    std::fs::write(&c.config, toml).unwrap();
+    let f = Fake::default()
+        .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat1 sh -c", "")
+        .reply("sh -c nohup", "4242\n");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat1"]);
+    assert_eq!(code, 0, "{o}");
+    let health = drover::hosts::cached(&c).remove("boat1").unwrap().health;
+    assert!(!health.iter().any(|r| r.starts_with("✗ acp guard")), "{health:?}");
+    let calls = f.calls.borrow().clone();
+    for p in ["fleet-impl", "cargo-impl"] {
+        let sync = format!("'profiles' 'sync' '--profile' '{p}' '--role' 'impl'");
+        let n = calls
+            .iter()
+            .filter(|l| l.starts_with("ssh boat1 ") && l.ends_with(&sync))
+            .count();
+        assert_eq!(n, 1, "{p}: {calls:?}");
+    }
+}
+
+#[test]
+fn bootstrap_with_no_config_there_prints_no_bare_sync_and_skips_a_main_pinned_role() {
+    let (c, _) = setup("racp-pinned", &["boat1"]);
+    let pinned = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\nhost = \"main\"\n";
+    let toml = std::fs::read_to_string(&c.config).unwrap() + pinned;
+    std::fs::write(&c.config, toml).unwrap();
+    let f = Fake::default()
+        .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat1 sh -c", "")
+        .reply("sh -c nohup", "4242\n");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat1"]);
+    assert_eq!(code, 0, "{o}");
+    assert!(!o.contains("✓ profiles sync — there"), "{o}");
+    assert!(o.contains("✓ profiles sync fleet-impl — there"), "{o}");
+    assert!(!o.contains("fleet-verify"), "{o}");
+    let calls = f.calls.borrow().clone();
+    assert!(!calls.iter().any(|l| l.contains("'fleet-verify'")), "{calls:?}");
+    let job = calls.iter().find(|l| l.starts_with("@boat1 sh -c V=")).unwrap();
+    assert!(
+        job.contains("profiles sync --profile 'fleet-impl' --role impl"),
+        "{job}"
+    );
+    let health = drover::hosts::cached(&c).remove("boat1").unwrap().health;
+    assert!(!health.iter().any(|r| r.starts_with("✗ acp guard")), "{health:?}");
 }
 
 fn upstream() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
@@ -577,7 +637,7 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
     );
     let f = Fake::default();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let pport = l.local_addr().unwrap().port();
+    let proxy_port = l.local_addr().unwrap().port();
     let now: &'static Shared<u64> = Box::leak(Box::new(Shared::new(c.now)));
     let dir = c.config.parent().unwrap().parent().unwrap();
     let pc: &'static drover::Ctx = Box::leak(Box::new(ctx(dir, &std::fs::read_to_string(&c.config).unwrap())));
@@ -586,7 +646,7 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
     let f = pf;
     std::thread::spawn(move || drover::proxy::serve_on(pc, pcfg, pf, &l, &|| now.get()));
     {
-        let (status, body) = call(pport, &live);
+        let (status, body) = call(proxy_port, &live);
         assert!(status.contains("200"), "{status} {body}");
         assert!(body.contains("message_stop"), "{body}");
         let up = seen.lock().unwrap().clone();
@@ -611,7 +671,7 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
             "/v1#@x",
             "v1/messages",
         ] {
-            let (status, body) = call_at(pport, &live, p);
+            let (status, body) = call_at(proxy_port, &live, p);
             assert!(
                 status.contains("400") && body.contains("bad request path"),
                 "{p}: {status} {body}"
@@ -625,11 +685,11 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
             "{list}"
         );
         for (k, why) in [(gone.as_str(), "revoked"), ("hsk-nope", "unknown lane key")] {
-            let (status, body) = call(pport, k);
+            let (status, body) = call(proxy_port, k);
             assert!(status.contains("401") && body.contains(why), "{status} {body}");
         }
         now.set(c.now + 12 * 3600);
-        let (status, body) = call(pport, &late);
+        let (status, body) = call(proxy_port, &late);
         assert!(status.contains("401") && body.contains("expired"), "{status} {body}");
         assert_eq!(seen.lock().unwrap().len(), 1, "refused calls never reach upstream");
     }
@@ -648,4 +708,37 @@ fn a_remote_acp_lane_without_the_proxy_token_file_is_refused_with_the_setup_comm
     );
     assert!(spawned(&c).is_empty() && drover::proxy::keys(&c).is_empty());
     assert!(b.runs.borrow().is_empty(), "nothing started");
+}
+
+#[test]
+fn doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does() {
+    let (c, _) = setup("racp-doctor", &["boat1"]);
+    let f = spawn_fake()
+        .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat1 sh -lc gh auth status", "");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    for (p, role) in [("fleet-impl", "impl"), ("lane-orchestrator", "orchestrator")] {
+        let hook = json!([{"hooks": [{"command": format!("'{EXE}' hook --role {role}")}]}]);
+        let dir = b.profiles.join(p);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            json!({"hooks": {"PreToolUse": hook}}).to_string(),
+        )
+        .unwrap();
+    }
+    let (_, o) = run(&c, &b, &["doctor"]);
+    assert!(
+        o.contains("\n✓ host boat1 — git, gh, ") && o.contains(", shed\n"),
+        "{o}"
+    );
+    assert!(f.called("ssh boat1 'shed' 'connect'"), "{:?}", f.calls.borrow());
+    assert!(!o.contains("herdr"), "{o}");
+    b.machines.borrow_mut().get_mut("boat1").unwrap().bare = false;
+    let (_, o) = run(&c, &b, &["doctor"]);
+    assert!(
+        o.contains("\n✗ host boat1 shed — does not answer: ") && o.contains("shed: not found"),
+        "{o}"
+    );
+    assert!(!o.contains("✓ host boat1"), "{o}");
 }

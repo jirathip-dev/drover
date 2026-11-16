@@ -127,7 +127,7 @@ fn spawn_rev_with(name: &str, states: &[&str], screen: &str, f: impl FnOnce(&dro
     let lane = Lane {
         f: &r,
         b: &b,
-        states: Mutex::new(states.iter().map(|s| s.to_string()).collect()),
+        states: Mutex::new(states.iter().map(std::string::ToString::to_string).collect()),
         screen: screen.into(),
         seen: Mutex::default(),
     };

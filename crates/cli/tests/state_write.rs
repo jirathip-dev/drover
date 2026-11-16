@@ -49,7 +49,7 @@ fn a_failed_write_keeps_the_old_devices_and_logs_once_an_hour() {
     );
     assert!(drover::events::plain(&failed[0]).starts_with(&format!("drover state-write-failed: {}: ", file.display())));
     devices::store(&c, &[]).unwrap();
-    assert!(devices::load(&c).is_empty());
+    assert_eq!(devices::load(&c), [] as [drover::devices::Device; 0]);
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
 }
 
@@ -89,7 +89,7 @@ fn last_seen_is_written_at_most_hourly() {
 }
 
 #[test]
-fn concurrent_device_updates_all_land_without_a_write_failure() {
+fn parity_r18_concurrent_device_updates_all_land_without_a_write_failure() {
     let c = ctx(&tmpdir("state-write-race"), CONFIG);
     std::thread::scope(|s| {
         for _ in 0..16 {

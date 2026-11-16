@@ -175,6 +175,9 @@ fn each_orchestrator_is_served_with_the_owners_instructions_and_drovers_hook() {
 
 #[test]
 fn a_started_chat_is_linked_once_and_takes_no_lane_asks() {
+    for k in ["DROVER_OUTBOX", "DROVER_HOST", "DROVER_LANE"] {
+        std::env::remove_var(k);
+    }
     let (c, _) = setup("cooee-started");
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));

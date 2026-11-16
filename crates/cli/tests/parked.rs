@@ -154,7 +154,7 @@ fn unpaused_fleet_resumes_a_parked_impl_to_review() {
     let (c, r) = fixture("parked-resume", false);
     let events = read(&c.state).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    let waits = drover::waiting::scan(&c, &cfg, &r, &events, &[], false);
+    let waits = drover::waiting::scan(&c, &cfg, &r, &events, &[], false, None);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert_eq!(
         (w.who, w.what.as_str()),
@@ -206,8 +206,8 @@ fn a_fix_round_held_for_a_spawn_slot_is_not_parked() {
     );
     let s = Server::new(&c, &r, None);
     let shown = |s: &Server| {
-        let herd = v1(s, "herd");
-        let lanes = herd["fleets"][0]["lanes"].as_array().unwrap().clone();
+        let tab = v1(s, "herd");
+        let lanes = tab["fleets"][0]["lanes"].as_array().unwrap().clone();
         lanes.into_iter().find(|l| l["name"] == SAFE).unwrap()["shown"].clone()
     };
     assert_eq!(shown(&s), json!("parked · work on PR #42"), "not yet tried");

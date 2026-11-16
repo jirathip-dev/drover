@@ -122,13 +122,17 @@ fn shipped_files_name_no_install() {
 fn role_texts_name_no_harness() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../roles");
     let mut bad = vec![];
-    let mut files: Vec<_> = std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().path()).collect();
-    let dirs: Vec<_> = files.iter().filter(|f| f.is_dir()).cloned().collect();
-    files.retain(|f| f.is_file());
-    files.extend(
-        dirs.iter()
-            .flat_map(|d| std::fs::read_dir(d).unwrap().map(|e| e.unwrap().path())),
-    );
+    let (mut dirs, mut files) = (vec![root], vec![]);
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else {
+                files.push(p);
+            }
+        }
+    }
     assert!(files.iter().any(|f| f.ends_with("orchestrator/role.md")));
     for f in files {
         let text = std::fs::read_to_string(&f).unwrap();

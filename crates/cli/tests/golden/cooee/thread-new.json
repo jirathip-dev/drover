@@ -1,0 +1,43 @@
+{
+  "blocks": [
+    {
+      "figure": {
+        "state": "idle"
+      },
+      "id": "who",
+      "subtitle": "no orchestrator yet",
+      "title": "sendmeter · claude · opus",
+      "type": "row"
+    },
+    {
+      "id": "hint",
+      "markdown": "Your first message starts the thread and its orchestrator, and titles it with its first line. Nothing is logged until you send.",
+      "type": "text"
+    },
+    {
+      "action": "thread-new",
+      "chips": [
+        {
+          "all": [
+            "claude",
+            "hermes",
+            "dsh"
+          ],
+          "cur": "claude",
+          "name": "harness"
+        }
+      ],
+      "id": "say",
+      "label": "start",
+      "placeholder": "message the orchestrator",
+      "type": "composer",
+      "values": {
+        "repo": "sendmeter"
+      }
+    }
+  ],
+  "focus": true,
+  "id": "thread-new-sendmeter",
+  "title": "New thread",
+  "type": "screen"
+}

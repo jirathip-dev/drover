@@ -1,11 +1,10 @@
 use crate::config::{Fleet, Serial};
-use crate::events::{age, fold, last_spawn, Event, IssueState, States};
+use crate::events::{age, fold, last_spawn, Event, IssueState, Json, States};
 use crate::overlap::Conflicts;
 use anyhow::{anyhow, ensure, Result};
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct Item {
     pub issue: u64,
     /// #505: every issue it waits on (`queue block --on A --on B`); a merged one drops out in `view`.
@@ -37,11 +36,11 @@ pub fn op(op: &str, issues: &[u64], top: bool, before: Option<u64>, after: Optio
     let mut d = json!({"op": op, "issues": issues});
     for (k, v) in [("before", before), ("after", after), ("on", on)] {
         if let Some(v) = v {
-            d[k] = json!(v);
+            d.put(k, json!(v));
         }
     }
     if top {
-        d["top"] = json!(true);
+        d.put("top", json!(true));
     }
     d
 }
@@ -49,7 +48,7 @@ pub fn op(op: &str, issues: &[u64], top: bool, before: Option<u64>, after: Optio
 /// Apply one change; Err leaves `q` untouched.
 pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
     let issues = nums(&d["issues"]);
-    ensure!(!issues.is_empty(), "no issue given");
+    let first = *issues.first().ok_or_else(|| anyhow!("no issue given"))?;
     let pos = |q: &[Item], n: u64| {
         q.iter()
             .position(|i| i.issue == n)
@@ -58,7 +57,7 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
     match d["op"].as_str().unwrap_or_default() {
         op @ ("add" | "mv") => {
             if op == "mv" {
-                pos(q, issues[0])?;
+                pos(q, first)?;
             }
             let anchor = d["before"].as_u64().or(d["after"].as_u64());
             if let Some(a) = anchor {
@@ -108,16 +107,17 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
             q.splice(at..at, moved);
         }
         "rm" => {
-            q.remove(pos(q, issues[0])?);
+            q.remove(pos(q, first)?);
         }
         op @ ("block" | "unblock") => {
-            let n = issues[0];
+            let n = first;
             let (on, ext) = (nums(&d["on"]), refs(&d["on"]));
             let i = pos(q, n)?;
             if op == "unblock" {
                 let all = on.is_empty() && ext.is_empty();
-                q[i].blockers.retain(|b| !all && !on.contains(b));
-                q[i].ext.retain(|b| !all && !ext.contains(b));
+                let it = q.get_mut(i).ok_or_else(|| anyhow!("#{n} is not queued"))?;
+                it.blockers.retain(|b| !all && !on.contains(b));
+                it.ext.retain(|b| !all && !ext.contains(b));
                 return Ok(());
             }
             ensure!(!on.is_empty() || !ext.is_empty(), "block needs --on");
@@ -126,8 +126,8 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     .split_once('#')
                     .is_some_and(|(r, m)| !r.is_empty() && m.parse::<u64>().is_ok());
                 ensure!(ok, "`{b}` is no issue: `<n>`, `<fleet>#<n>` or `<owner/repo>#<n>`");
-                if !q[i].ext.contains(&b) {
-                    q[i].ext.push(b);
+                if let Some(it) = q.get_mut(i).filter(|it| !it.ext.contains(&b)) {
+                    it.ext.push(b);
                 }
             }
             for &b in &on {
@@ -137,25 +137,26 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     ensure!(x != n, "#{b} cannot block #{n}: #{b} already waits on #{n}");
                     path.extend(q.iter().filter(|i| i.issue == x).flat_map(|i| &i.blockers));
                 }
-                if !q[i].blockers.contains(&b) {
-                    q[i].blockers.push(b);
+                if let Some(it) = q.get_mut(i).filter(|it| !it.blockers.contains(&b)) {
+                    it.blockers.push(b);
                 }
             }
         }
         "set" => {
-            let i = pos(q, issues[0])?;
+            let i = pos(q, first)?;
+            let it = q.get_mut(i).ok_or_else(|| anyhow!("#{first} is not queued"))?;
             if d.get("serial").is_some() {
-                q[i].serial = strs(&d["serial"]);
+                it.serial = strs(d.at("serial"));
             } else if d.get("design").is_some() {
-                q[i].design = strs(&d["design"]) == ["on"];
+                it.design = strs(d.at("design")) == ["on"];
             } else if d.get("architect").is_some() {
-                q[i].architect = strs(&d["architect"]) == ["on"];
+                it.architect = strs(d.at("architect")) == ["on"];
             } else if d.get("verify").is_some() {
-                q[i].verify = onoff(&d["verify"]);
+                it.verify = onoff(d.at("verify"));
             } else if d.get("repro").is_some() {
-                q[i].repro = strs(&d["repro"]) == ["on"];
+                it.repro = strs(d.at("repro")) == ["on"];
             } else {
-                q[i].needs = strs(&d["needs"]);
+                it.needs = strs(d.at("needs"));
             }
         }
         o => anyhow::bail!("unknown queue op `{o}`"),
@@ -245,12 +246,25 @@ pub fn playbook(events: &[Event], fleet: &str, n: u64) -> Option<String> {
 
 /// Replay the fleet's `queue` events; invalid ones (never logged by fleet) are skipped.
 pub fn replay(events: &[Event], fleet: &str) -> Vec<Item> {
-    let mut q = vec![];
-    for e in events.iter().filter(|e| e.kind == "queue" && e.fleet == fleet) {
+    let all = crate::events::of_kind(events, &["queue"]);
+    let mine: Vec<&Event> = all.into_iter().filter(|e| e.fleet == fleet).collect();
+    let memo = crate::events::queues(events);
+    let mut memo = memo
+        .as_ref()
+        .map(|m| m.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    let kept = memo
+        .as_ref()
+        .and_then(|m| m.get(fleet))
+        .filter(|(n, _)| *n <= mine.len());
+    let (done, mut q) = kept.cloned().unwrap_or_default();
+    for e in mine.get(done..).unwrap_or_default() {
         let mut next = q.clone();
         if apply(&mut next, &Value::Object(e.data.clone())).is_ok() {
             q = next;
         }
+    }
+    if let Some(m) = memo.as_mut() {
+        m.insert(fleet.into(), (mine.len(), q.clone()));
     }
     q
 }
@@ -262,7 +276,7 @@ fn state<'a>(st: &'a States, fleet: &str, n: u64) -> &'a str {
 /// #294: the serial groups issue `n` is in, by name: marked in queue `q` (`""` = the first group) or joined by its diff (`serial-joined`; #149's `serial-auto` = the first group), merged ones included.
 pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> Vec<Serial> {
     let marks = q.iter().filter(|i| i.issue == n).flat_map(|i| &i.serial);
-    let joined = events.iter().filter(|e| e.fleet == fleet && e.issue == Some(n));
+    let joined = crate::events::of_issue(events, fleet, n).into_iter();
     let joined = joined.filter_map(|e| match e.kind.as_str() {
         "serial-joined" => e.str("group"),
         "serial-auto" => Some(""),
@@ -280,7 +294,8 @@ pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> V
 
 /// #891: the hot files of `fleet`'s last `hot-files` event (drive logs one when the list less converted files changes).
 pub fn hot_files(events: &[Event], fleet: &str) -> Vec<String> {
-    let last = events.iter().rfind(|e| e.kind == "hot-files" && e.fleet == fleet);
+    let hot = crate::events::of_kind(events, &["hot-files"]);
+    let last = hot.into_iter().rfind(|e| e.fleet == fleet);
     let files = last
         .and_then(|e| e.val("files").as_array().cloned())
         .unwrap_or_default();
@@ -326,14 +341,15 @@ pub fn held(events: &[Event], fleet: &str, n: u64, g: &str) -> bool {
 pub fn holders<'a>(events: &[Event], st: &'a States, f: &Fleet, fleet: &str, g: &str) -> Vec<&'a IssueState> {
     let q = replay(events, fleet);
     let isin = |s: &IssueState| groups(&q, events, f, fleet, s.issue).iter().any(|x| x.name == g);
-    let holds = |s: &&IssueState| in_flight(&s.state) && !held(events, fleet, s.issue, g) && isin(s);
+    let holds =
+        |s: &&IssueState| in_flight(&s.state) && !held(events, fleet, s.issue, g) && !stuck(events, st, s) && isin(s);
     st.values().filter(|s| s.fleet == fleet).filter(holds).collect()
 }
 
 /// #294: `ci: #2968 holds 1/1`, group `g`'s holders.
 pub fn holds(g: &Serial, h: &[&IssueState]) -> String {
     let who: Vec<_> = h.iter().map(|s| format!("#{}", s.issue)).collect();
-    let s = ["", "s"][usize::from(h.len() == 1)];
+    let s = if h.len() == 1 { "s" } else { "" };
     format!("{}: {} hold{s} {}/{}", g.name, who.join(" "), h.len(), g.max)
 }
 
@@ -410,8 +426,9 @@ pub fn skipped(
         for g in &gs {
             let h = holders(events, st, f, fleet, &g.name);
             if h.len() >= g.max {
-                let who = holds(g, &h).split_off(g.name.len() + 2);
-                return Some((format!("skip {code}"), format!("waiting for a {} slot ({who})", g.name)));
+                let who: Vec<u64> = h.iter().map(|s| s.issue).collect();
+                let held = format!("serial: {} held by {} ({}/{})", g.name, hashes(&who), h.len(), g.max);
+                return Some((format!("skip {code}"), held));
             }
         }
         let g = &gs.first()?.name;
@@ -436,8 +453,13 @@ pub fn skipped(
 
 /// #712: a parked issue's `park --why`.
 pub fn park_why<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64) -> Option<&'a str> {
-    let parked = |e: &&Event| e.is("parked", fleet, n);
-    (state(st, fleet, n) == "parked").then(|| events.iter().rfind(parked)?.str("why"))?
+    let parked = |e: &&Event| e.kind == "parked";
+    (state(st, fleet, n) == "parked").then(|| {
+        crate::events::of_issue(events, fleet, n)
+            .into_iter()
+            .rfind(parked)?
+            .str("why")
+    })?
 }
 
 pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
@@ -494,8 +516,8 @@ pub fn board(
         let hit = |e: &&Event| e.is("premerge-failed", fleet, n) || pass(e);
         let note = events.iter().rev().find(hit).and_then(|e| e.str("note"));
         let warn = note.map_or(String::new(), |t| format!("\n         ✗ {t}")) + &warn;
-        let away = s.and_then(|s| crate::hosts::offline(ctx, last_spawn(events, s.active_lane()?.1)));
-        let warn = away.map_or(String::new(), |h| format!("\n         host offline: {h}")) + &warn;
+        let away = s.and_then(|s| crate::hosts::offline(ctx, cfg, last_spawn(events, s.active_lane()?.1)));
+        let warn = away.map_or(String::new(), |h| format!("\n         {h}")) + &warn;
         let sp = s.and_then(|s| last_spawn(events, s.active_lane()?.1));
         let stale = sp.zip(cfg).is_some_and(|(e, c)| crate::hook::rules_stale(c, fleet, e));
         let place = s.and_then(|s| at.get(s.active_lane()?.1)).filter(|p| !p.is_empty());

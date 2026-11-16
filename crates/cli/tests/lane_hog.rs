@@ -60,7 +60,7 @@ fn a_busy_lane_on_a_host_under_its_load_limit_is_left_alone() {
         pass(&c, &r, p * 300);
     }
     assert!(kinds(&c, "lane-hog").is_empty());
-    assert!(escapes(&sh).is_empty());
+    assert_eq!(escapes(&sh), [] as [serde_json::Value; 0]);
 }
 
 #[test]

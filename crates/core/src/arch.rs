@@ -25,6 +25,14 @@ struct Arch {
     #[serde(default)]
     generated: Vec<String>,
     generate: Option<String>,
+    #[serde(default)]
+    shared: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct Frozen {
+    #[serde(default)]
+    frozen: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -234,13 +242,19 @@ pub fn check(
             }
         }
     }
-    let mut diff = vec![];
+    let (mut diff, mut frozen) = (vec![], vec![]);
     if let Some(b) = since {
         let o = r.run("git", &argv(&["diff", "-U0", "--no-color", "--no-ext-diff", b]))?;
         anyhow::ensure!(o.code == 0, "git diff {b}: {}", o.stderr.trim());
         diff = changes(&o.stdout);
+        let o = r.run("git", &argv(&["show", &format!("{b}:./{}", config.display())]))?;
+        if o.code == 0 {
+            let f: Frozen = toml::from_str(&o.stdout).with_context(|| format!("parsing {b}:{}", config.display()))?;
+            frozen = f.frozen;
+        }
     }
-    bad.extend(frozen_adds(&a, &diff));
+    bad.extend(frozen_adds(&a, &frozen, &diff));
+    bad.extend(unsized_shared(&a, config));
     bad.extend(stale_generated(&a, r)?);
     match &a.comments {
         Some(c) if c.policy == Policy::Off => bad.extend(new_comments(&diff, &c.except)),
@@ -284,13 +298,25 @@ pub fn check(
     Ok(i32::from(!bad.is_empty()))
 }
 
-/// #890: the globs `text`, an arch.toml, lists as frozen or generated: converted, so never a hotspot.
-pub fn converted(text: &str) -> Result<Vec<String>> {
+/// #1147: the globs `text`, an arch.toml, lists as frozen, generated or shared: decided, so never a hotspot.
+pub fn decided(text: &str) -> Result<Vec<String>> {
     let a: Arch = toml::from_str(text).context("parsing .drover/arch.toml")?;
-    Ok(a.frozen.into_iter().chain(a.generated).collect())
+    Ok(a.frozen.into_iter().chain(a.generated).chain(a.shared).collect())
 }
 
-fn frozen_adds(a: &Arch, diff: &[Change]) -> Vec<String> {
+fn unsized_shared(a: &Arch, config: &Path) -> Vec<String> {
+    let covered = |g: &String| {
+        let probe = g.replace("**", "x/y").replace('*', "x");
+        let probe = if g.ends_with("/**") { probe + "/z.rs" } else { probe };
+        a.size.iter().any(|s| any(&s.paths, &probe))
+    };
+    let why = "falls under no `[[size]]` rule: a shared file must be kept from growing";
+    (a.shared.iter().filter(|g| !covered(g)))
+        .map(|g| format!("{}: shared `{g}` {why}", config.display()))
+        .collect()
+}
+
+fn frozen_adds(a: &Arch, frozen: &[String], diff: &[Change]) -> Vec<String> {
     let folders: Vec<String> = a.collect.iter().map(|c| format!("`{}`", c.entries())).collect();
     let instead = if folders.is_empty() {
         "a `[[collect]]` folder".to_string()
@@ -299,7 +325,7 @@ fn frozen_adds(a: &Arch, diff: &[Change]) -> Vec<String> {
     };
     let collected = |f: &str| a.collect.iter().any(|c| any(&[c.entries()], f));
     let mut hunks = BTreeMap::<usize, (Vec<&Change>, usize)>::new();
-    for c in diff.iter().filter(|c| any(&a.frozen, &c.file) && !collected(&c.file)) {
+    for c in diff.iter().filter(|c| any(frozen, &c.file) && !collected(&c.file)) {
         let h = hunks.entry(c.hunk).or_default();
         if c.added {
             h.0.push(c);
@@ -422,8 +448,9 @@ fn fns(lines: &[&str], rust: bool) -> Vec<(String, usize, usize)> {
             continue;
         }
         let ind = l.len() - t.len();
-        let end = lines[i + 1..]
+        let end = lines
             .iter()
+            .skip(i + 1)
             .position(|x| x.len() - x.trim_start().len() == ind && x.trim_start().starts_with('}'));
         if let Some(e) = end {
             v.push((name.to_string(), i + 1, e + 2));
@@ -465,13 +492,13 @@ fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
     let each = lines.iter().map(|l| {
         let s: Vec<char> = l.chars().collect();
         let (mut c, mut i) = (block, 0);
-        while i < s.len() {
-            let (ch, next) = (s[i], s.get(i + 1).copied());
+        while let Some(&ch) = s.get(i) {
+            let (next, p) = (s.get(i + 1).copied(), i.checked_sub(1).and_then(|j| s.get(j)));
             if block {
                 block = !(ch == '*' && next == Some('/'));
                 i += if block { 1 } else { 2 };
             } else if let Some(n) = raw {
-                let end = ch == '"' && s[i + 1..].iter().take(n).filter(|&&x| x == '#').count() == n;
+                let end = ch == '"' && s.iter().skip(i + 1).take(n).filter(|&&x| x == '#').count() == n;
                 raw = if end { None } else { raw };
                 i += if end { n + 1 } else { 1 };
             } else if let Some(q) = quote {
@@ -482,8 +509,8 @@ fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
                 break;
             } else if ch == '/' && next == Some('*') {
                 (c, block, i) = (true, true, i + 2);
-            } else if rust && ch == 'r' && matches!(next, Some('"' | '#')) && (i == 0 || !s[i - 1].is_alphanumeric()) {
-                let n = s[i + 1..].iter().take_while(|&&x| x == '#').count();
+            } else if rust && ch == 'r' && matches!(next, Some('"' | '#')) && p.is_none_or(|c| !c.is_alphanumeric()) {
+                let n = s.iter().skip(i + 1).take_while(|&&x| x == '#').count();
                 raw = (s.get(i + 1 + n) == Some(&'"')).then_some(n);
                 i += if raw.is_some() { n + 2 } else { 1 };
             } else if ch == '"' || (!rust && matches!(ch, '\'' | '`')) {
@@ -501,18 +528,19 @@ fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
 }
 
 fn allowed_comment(lines: &[&str], com: &[bool], i: usize) -> bool {
-    let t = lines[i].trim();
-    if t.starts_with("// TODO(#") && t[9..].split(')').next().is_some_and(|n| n.parse::<u32>().is_ok()) {
+    let t = lines.get(i).unwrap_or(&"").trim();
+    let todo = t.strip_prefix("// TODO(#").and_then(|r| r.split(')').next());
+    if todo.is_some_and(|n| n.parse::<u32>().is_ok()) {
         return true;
     }
     if t.starts_with("// SAFETY:") {
         return lines.get(i + 1).is_some_and(|n| n.contains("unsafe"));
     }
     let one_doc = (t.starts_with("///") && !t.starts_with("////")) || (t.starts_with("/**") && t.ends_with("*/"));
-    let mut item = lines[i + 1..].iter().map(|l| l.trim_start());
+    let mut item = lines.iter().skip(i + 1).map(|l| l.trim_start());
     let item = item.find(|l| !l.starts_with("#[") && !l.starts_with('@'));
     let public = item.is_some_and(|l| l.starts_with("pub ") || l.starts_with("export "));
-    one_doc && public && (i == 0 || !com[i - 1])
+    one_doc && public && (i == 0 || com.get(i - 1) == Some(&false))
 }
 
 fn commented(f: &str, except: &[String]) -> bool {

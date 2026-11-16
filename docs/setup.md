@@ -151,7 +151,9 @@ drover needs no Hermes: `drover setup` (or `timer install`) also writes two jobs
   stream (the page reconnects with `?since=<seq>` and misses no event), drains its requests and execs the new binary
   in place, so launchd keeps its pid. A serve that does not answer on `<state dir>/serve-<port>.sock` (an older
   build) is restarted instead. Any failed step keeps the old binary and alerts `self-update-failed` once per head,
-  with the exact failure. `drover self-update --dry-run` prints what it would do; `--pause` / `--resume` toggle it
+  with the exact failure. #1031: that doctor also says `hello` to the local `shed serve`; a server on another shed
+  protocol fails it (`✗ shed — SHED_VERSION: …` naming the shed the new drover needs), so the old drover stays and
+  the alert goes out once per mismatch, not once per head; install that shed and restart `shed serve`. `drover self-update --dry-run` prints what it would do; `--pause` / `--resume` toggle it
   (logged). The job's PATH includes `cargo`'s directory.
 - `[self_update] staging_serve = true` (off by default) also installs the green staging head into
   `<state dir>/update-staging/bin/drover` and runs it as `dev.drover.serve-staging`: `serve --read-only` on
@@ -202,7 +204,7 @@ Check it worked: `echo hello | notify-telegram <chat>` arrives on your phone.
 ## 6. Board on the phone (Tailscale)
 
 `drover setup` writes and loads this job for you: label `[serve] launchd_label` (default
-`dev.drover.serve`), address `[serve] addr` (default `127.0.0.1:7777`), `KeepAlive`, `ProcessType Interactive` (#893), the tick's PATH,
+`dev.drover.serve`), address `[serve] addr` (default `127.0.0.1:7777`), `KeepAlive` only after a failed exit (#1081: a serve that finds its port held by its own build exits 0, by an older one asks it to hand over, then exits 0), `ProcessType Interactive` (#893), the tick's PATH,
 logs to `~/.local/state/drover/serve.log`. If a job under another label already runs
 `drover serve`, setup adopts it (`= adopted <plist>`) and never makes a second one. Re-labelling is
 manual: `launchctl bootout gui/$(id -u)/<old label>`, delete its plist, run `drover setup` again.
@@ -232,7 +234,7 @@ macOS, `~/Library/LaunchAgents/dev.drover.serve.plist`:
     <key>PATH</key><string><home>/.local/share/drover/bin:<shed-dir>:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ProcessType</key><string>Interactive</string>
 </dict>
 </plist>
@@ -251,7 +253,7 @@ Description=drover board
 [Service]
 Environment=PATH=%h/.local/share/drover/bin:<shed-dir>:/usr/bin:/bin
 ExecStart=%h/.local/share/drover/bin/drover serve --addr 127.0.0.1:7777
-Restart=always
+Restart=on-failure
 
 [Install]
 WantedBy=default.target

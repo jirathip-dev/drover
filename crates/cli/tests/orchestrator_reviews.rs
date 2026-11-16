@@ -12,7 +12,7 @@ const QUOTE: &str = "Keep the old sender behind a flag";
 
 fn env() -> MutexGuard<'static, ()> {
     static ENV: Mutex<()> = Mutex::new(());
-    ENV.lock().unwrap_or_else(|e| e.into_inner())
+    ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn log(c: &drover::Ctx, ts: u64, fleet: &str, issue: Option<u64>, kind: &str, d: Value) {
@@ -89,15 +89,12 @@ fn host() -> Fake {
 }
 
 fn by(c: &drover::Ctx, t: Option<&str>, now: u64, args: &[&str]) -> (i32, String) {
-    match t {
-        Some(t) => {
-            std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
-            std::env::set_var("DROVER_THREAD", t);
-        }
-        None => {
-            std::env::remove_var("DROVER_LANE");
-            std::env::remove_var("DROVER_THREAD");
-        }
+    if let Some(t) = t {
+        std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
+        std::env::set_var("DROVER_THREAD", t);
+    } else {
+        std::env::remove_var("DROVER_LANE");
+        std::env::remove_var("DROVER_THREAD");
     }
     let got = run(&at(c, now), &host(), args);
     std::env::remove_var("DROVER_LANE");

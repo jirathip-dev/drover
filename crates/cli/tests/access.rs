@@ -19,13 +19,13 @@ fn config(d: &Path, role_extra: &str) -> String {
 
 fn shell(sh: &FakeShed, lane: &str, var: &str) -> String {
     let typed = sh.sent(lane);
-    let line = typed.iter().find(|t| t.starts_with("export ")).expect("no export line");
-    let line = format!("{}; printf %s \"${var}\"", line.trim_end_matches('\r'));
+    let export = typed.iter().find(|t| t.starts_with("export ")).expect("no export line");
+    let export = format!("{}; printf %s \"${var}\"", export.trim_end_matches('\r'));
     let mut c = std::process::Command::new("sh");
     c.env_remove("CLAUDE_CODE_OAUTH_TOKEN")
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("DROVER_ACCOUNT");
-    String::from_utf8_lossy(&c.arg("-c").arg(line).output().unwrap().stdout).into()
+    String::from_utf8_lossy(&c.arg("-c").arg(export).output().unwrap().stdout).into()
 }
 
 fn spawn_run(c: &drover::Ctx, n: u64) -> (i32, String) {

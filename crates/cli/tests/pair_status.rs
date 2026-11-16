@@ -42,7 +42,7 @@ fn pair_status_says_whether_this_browser_is_paired() {
 }
 
 #[test]
-fn a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
+fn parity_r3_a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
     let c = ctx(&tmpdir("pair-busy"), CONFIG);
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
@@ -61,11 +61,11 @@ fn a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
     std::fs::create_dir(&db).unwrap();
     let why = devices::check(&c, cookie.trim().strip_prefix("Cookie: ").unwrap()).unwrap_err();
     assert_eq!(why, "db error: is a directory");
-    let sent = String::from_utf8_lossy(&s.respond(&format!("{send}{cookie}Content-Length: 9\r\n\r\nagent=x&t"), T))
+    let reply = String::from_utf8_lossy(&s.respond(&format!("{send}{cookie}Content-Length: 9\r\n\r\nagent=x&t"), T))
         .into_owned();
     assert!(
-        sent.starts_with("HTTP/1.1 503 ") && sent.contains("board busy"),
-        "{sent}"
+        reply.starts_with("HTTP/1.1 503 ") && reply.contains("board busy"),
+        "{reply}"
     );
     for p in ["/lane?agent=x", "/pair/status", "/api/v1/lane/x", "/api/v1/needs"] {
         let res = req(&s, "GET", p, &cookie, T);

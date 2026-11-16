@@ -121,8 +121,8 @@ fn an_ssh_that_never_returns_costs_one_deadline_and_drive_still_starts() {
             .collect();
         assert_eq!(
             sent.len(),
-            2,
-            "{name}: one shed connect and its retry off the shared socket, then the host is skipped: {sent:#?}"
+            1,
+            "{name}: one shed connect killed at its deadline, then the host is skipped: {sent:#?}"
         );
         assert!(sent.iter().all(|l| l.contains("'shed' 'connect'")), "{name}: {sent:#?}");
         assert!(!drover::hosts::cached(&c)["boat1"].up, "{name}: boat1 shows offline");

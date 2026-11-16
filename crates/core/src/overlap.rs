@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::{emit, fold, Event, IssueState};
+use crate::events::{emit, fold, Event, IssueState, Json};
 use crate::runner::{argv, ok, Runner};
 use crate::{gh, Ctx};
 use anyhow::Result;
@@ -18,7 +18,7 @@ pub fn git(r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<String> {
 /// The last preview's conflicts; never runs git.
 pub fn cached(ctx: &Ctx, fleet: &str) -> Conflicts {
     let v = crate::usage::load::<Value>(&gh::cache_path(ctx, "conflicts", fleet, 0)).unwrap_or_default();
-    serde_json::from_value(v["conflicts"].clone()).unwrap_or_default()
+    serde_json::from_value(v.at("conflicts").clone()).unwrap_or_default()
 }
 
 fn collide(r: &dyn Runner, dir: &Path, a: &str, b: &str) -> Vec<String> {
@@ -58,11 +58,11 @@ pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[E
     let old = crate::usage::load::<Value>(&p).unwrap_or_default();
     let (mut cache, mut out) = (BTreeMap::new(), Conflicts::new());
     for (i, (a, ha)) in heads.iter().enumerate() {
-        for (b, hb) in &heads[i + 1..] {
+        for (b, hb) in heads.get(i + 1..).unwrap_or_default() {
             let key = format!("{ha} {hb}");
             let files: Vec<String> =
-                serde_json::from_value(old["cache"][&key].clone()).unwrap_or_else(|_| collide(r, &dir, ha, hb));
-            if !files.is_empty() && old["cache"][&key].is_null() {
+                serde_json::from_value(old.at("cache").at(&key).clone()).unwrap_or_else(|_| collide(r, &dir, ha, hb));
+            if !files.is_empty() && old.at("cache").at(&key).is_null() {
                 ev(
                     *b,
                     "conflict-predicted",
@@ -144,11 +144,31 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
 
 /// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`; #429: under `warn_within` lines of headroom it warns and still passes. #270: `web/src/**/*.ts` lines are reported, never capped.
 pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
-    let (cap, warn) = limits(&std::fs::read_to_string(config)?)
-        .ok_or_else(|| anyhow::anyhow!("no [fleet.<name>] line_cap in {}", config.display()))?;
+    let dir = std::fs::read_dir(config.with_file_name("cap.d"));
+    let mut files: Vec<PathBuf> = (dir.into_iter().flatten().flatten())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+        .collect();
+    files.sort();
+    let raises = files
+        .iter()
+        .map(|p| Ok((p.display().to_string(), std::fs::read_to_string(p)?)));
+    let Cap {
+        lines: cap,
+        warn_within: warn,
+        from,
+    } = highest(
+        &config.display().to_string(),
+        &std::fs::read_to_string(config)?,
+        raises.collect::<Result<Vec<_>>>()?,
+    )
+    .ok_or_else(|| anyhow::anyhow!("no [fleet.<name>] line_cap in {}", config.display()))?;
     let crates = std::fs::read_dir("crates").into_iter().flatten().flatten();
     let n = lines(Path::new("src"), "rs") + crates.map(|c| lines(&c.path().join("src"), "rs")).sum::<usize>();
     writeln!(out, "src lines (formatted): {n} / cap {cap}")?;
+    if from != config.display().to_string() {
+        writeln!(out, "cap raised by {from}")?;
+    }
     writeln!(
         out,
         "web lines (TypeScript, soft budget, not capped): {}",
@@ -169,6 +189,44 @@ pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> R
     Ok(i32::from(left < 0 || over > 30))
 }
 
+/// #973: the effective line cap: the highest `line_cap` among `ci/cap.toml` and the raises in `ci/cap.d/*.toml`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cap {
+    pub lines: i64,
+    pub warn_within: i64,
+    pub from: String,
+}
+
+fn highest(name: &str, base: &str, raises: Vec<(String, String)>) -> Option<Cap> {
+    let (lines, warn_within) = limits(base)?;
+    let num = |t: &str| toml::from_str::<toml::Value>(t).ok()?.get("line_cap")?.as_integer();
+    let each = raises.into_iter().filter_map(|(from, t)| {
+        Some(Cap {
+            lines: num(&t)?,
+            warn_within,
+            from,
+        })
+    });
+    let first = Cap {
+        lines,
+        warn_within,
+        from: name.into(),
+    };
+    Some(each.fold(first, |a, b| if b.lines > a.lines { b } else { a }))
+}
+
+/// #973: the cap at `sha` of the repo in `dir`, by git alone: `ci/cap.toml` and `ci/cap.d/*.toml` at that commit.
+pub fn cap_at_sha(r: &dyn Runner, dir: &Path, sha: &str) -> Option<Cap> {
+    let show = |p: &str| git(r, dir, &["show", &format!("{sha}:{p}")]).ok();
+    let base = show("ci/cap.toml")?;
+    let names = git(r, dir, &["ls-tree", "--name-only", sha, "ci/cap.d/"]).unwrap_or_default();
+    let raises = names
+        .lines()
+        .filter(|n| Path::new(n).extension().is_some_and(|x| x == "toml"))
+        .filter_map(|n| Some((n.to_string(), show(n)?)));
+    highest("ci/cap.toml", &base, raises.collect())
+}
+
 fn limits(text: &str) -> Option<(i64, i64)> {
     let v: toml::Value = toml::from_str(text).ok()?;
     let t = v
@@ -186,18 +244,22 @@ pub fn cap_at(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Option<(S
     let dir = f.local_path();
     let sha = git(r, &dir, &["rev-parse", &format!("origin/{}", f.integration)]).ok()?;
     let old = crate::usage::load::<Value>(&p).unwrap_or_default();
-    let n = |k: &str| old[k].as_i64();
-    if old["sha"] == sha.as_str() {
+    let n = |k: &str| old.at(k).as_i64();
+    if old.at("sha") == sha.as_str() {
         return Some((sha, n("lines")?, n("cap")?, n("warn")?));
     }
-    let (cap, warn) = limits(&git(r, &dir, &["show", &format!("{sha}:ci/cap.toml")]).ok()?)?;
+    let Cap {
+        lines: cap,
+        warn_within: warn,
+        ..
+    } = cap_at_sha(r, &dir, &sha)?;
     let globs = [":(glob)src/**/*.rs", ":(glob)crates/*/src/**/*.rs"];
     let counts = git(r, &dir, &[&["grep", "-c", "", &sha, "--"][..], &globs].concat()).unwrap_or_default();
     let lines = counts
         .lines()
         .filter_map(|l| l.rsplit(':').next()?.parse::<i64>().ok())
         .sum();
-    let _ = gh::store(&p, &json!({"sha": sha, "lines": lines, "cap": cap, "warn": warn}));
+    gh::store(&p, &json!({"sha": sha, "lines": lines, "cap": cap, "warn": warn})).ok();
     Some((sha, lines, cap, warn))
 }
 
@@ -255,12 +317,12 @@ fn script_caps(
     );
     let wts = wt.to_string_lossy();
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
-    let _ = tree(&["remove", "--force", &wts]);
+    tree(&["remove", "--force", &wts]).ok();
     tree(&["add", "-f", "--detach", &wts, base]).map_err(|e| e.to_string())?;
     let merged = branch.is_none_or(|b| git(r, &wt, &["merge", "--no-ff", "--no-edit", b]).is_ok());
     let sh = argv(&["-c", &format!("cd \"$0\" && {script}"), &wts]);
     let o = merged.then(|| r.run("sh", &sh));
-    let _ = tree(&["remove", "--force", &wts]);
+    tree(&["remove", "--force", &wts]).ok();
     let o = o.ok_or("conflicts")?.map_err(|e| e.to_string())?;
     let num = |w: &str| w.replace(',', "").parse::<i64>().ok();
     let cap = |l: &str| {
@@ -287,13 +349,12 @@ fn script_caps(
 pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut dyn std::io::Write) -> Result<i32> {
     let f = cfg.fleet(fleet)?;
     let dir = f.local_path();
-    let _ = git(r, &dir, &["fetch", "-q", "origin"]);
+    git(r, &dir, &["fetch", "-q", "origin"]).ok();
     let head = git(r, &dir, &["rev-parse", &format!("origin/{}", f.integration)]);
     let script = head.as_ref().ok().and_then(|h| cap_script(r, f, h));
     let (sha, caps, warn) = if let Some(s) = &script {
         let sha = head?;
-        let toml = git(r, &dir, &["show", &format!("{sha}:ci/cap.toml")]).unwrap_or_default();
-        let warn = limits(&toml).map_or(500, |l| l.1);
+        let warn = cap_at_sha(r, &dir, &sha).map_or(500, |c| c.warn_within);
         let caps = script_caps(ctx, r, f, s, &sha, None).map_err(|got| {
             let at = &f.integration;
             anyhow::anyhow!("`{s}` at origin/{at} printed no `N / cap M` line drover can parse: {got}")

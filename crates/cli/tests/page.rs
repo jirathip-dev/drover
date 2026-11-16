@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 const LANE: &str = "sendmeter-impl-12";
 
 #[test]
-fn a_paired_phone_answers_settles_cards_pauses_stops_and_saves_fleets_through_the_page_and_paints_offline() {
+fn parity_1_a_paired_phone_answers_settles_cards_pauses_stops_and_saves_fleets_through_the_page_and_paints_offline() {
     let Some(chrome) = std::env::var_os("CHROME") else {
         eprintln!("skipping: no CHROME here");
         return;
@@ -20,7 +20,7 @@ fn a_paired_phone_answers_settles_cards_pauses_stops_and_saves_fleets_through_th
     std::fs::create_dir_all(&wt).unwrap();
     let now = drover::now();
     let ev = |ts: u64, n: Option<u64>, kind: &str, d: Value| {
-        append(&c.state, &Event::new(ts, "sendmeter", n, kind, d)).unwrap()
+        append(&c.state, &Event::new(ts, "sendmeter", n, kind, d)).unwrap();
     };
     let sp =
         json!({"role": "impl", "agent": LANE, "pane": LANE, "worktree": wt, "branch": "issue-12", "runtime": "shed"});

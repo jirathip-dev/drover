@@ -1,0 +1,1 @@
+- TESTS_CHANGED: verdict PASS on a `--refactor` issue whose PR edits test files beyond moves and renames

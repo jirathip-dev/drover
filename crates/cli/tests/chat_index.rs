@@ -48,7 +48,10 @@ fn a_quiet_tick_and_a_post_touch_only_new_events() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let tick = |now: u64| {
         let v: Value = serde_json::from_str(&api(&s, ADDR, "", now, "chat")).unwrap();
-        assert_eq!(v["threads"].as_array().unwrap().len(), THREADS as usize);
+        assert_eq!(
+            v["threads"].as_array().unwrap().len(),
+            usize::try_from(THREADS).unwrap()
+        );
         let n: Value = serde_json::from_str(&api(&s, ADDR, "", now, "needs")).unwrap();
         assert_eq!(n["choosing"], THREADS, "every thread waits on its ask");
     };

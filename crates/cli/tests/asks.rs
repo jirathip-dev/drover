@@ -274,7 +274,7 @@ fn answer_to_a_gone_agent_records_the_decision_and_exits_0() {
     assert!(kinds(&c, "answer-delivered").is_empty());
 }
 
-fn closed_by(then: Event) -> (usize, String) {
+fn closed_by(then: &Event) -> (usize, String) {
     let d = tmpdir(&format!("ask-closed-{}", then.kind));
     let c = ctx(&d, CONFIG);
     let impl36 = json!({"role": "impl", "agent": "sendmeter-impl-36", "pane": "w1:p2"});
@@ -285,7 +285,7 @@ fn closed_by(then: Event) -> (usize, String) {
         &Event::new(NOW - 60, "sendmeter", Some(36), "needs-decision", q),
     )
     .unwrap();
-    append(&c.state, &then).unwrap();
+    append(&c.state, then).unwrap();
     let events = read(&c.state).unwrap();
     (
         drover::events::open_asks(&events).len(),
@@ -308,12 +308,12 @@ fn an_ask_closes_when_its_issue_merges_or_its_lane_goes() {
         (ev("spawn", 36, respawn), "[closed: lane gone]"),
     ] {
         let kind = then.kind.clone();
-        let (open, all) = closed_by(then);
+        let (open, all) = closed_by(&then);
         assert_eq!(open, 0, "{kind} closes the ask");
         assert!(all.contains("q1 #36") && all.trim_end().ends_with(why), "{kind}: {all}");
     }
-    assert_eq!(closed_by(ev("merged", 37, json!({}))).0, 1);
-    assert_eq!(closed_by(ev("clean", 37, json!({}))).0, 1);
+    assert_eq!(closed_by(&ev("merged", 37, json!({}))).0, 1);
+    assert_eq!(closed_by(&ev("clean", 37, json!({}))).0, 1);
 }
 
 fn post(s: &Server, body: &str, extra: &str) -> String {
@@ -533,7 +533,7 @@ fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
         (u.len(), u[0].str("id"), u[0].str("agent"), u[0].str("text")),
         (1, Some("q1"), Some(LANE), Some("DECISION q1: no, trim"))
     );
-    assert!(drover::config::WEBPUSH_ON.contains(&"answer-undelivered"), "pushed");
+    assert!(u[0].is_push(), "pushed");
     assert!(kinds(&c, "answer-delivered").is_empty());
 }
 

@@ -101,7 +101,7 @@ fn schema<T: Serialize + Default>() -> Value {
     shape(&serde_json::to_value(T::default()).unwrap())
 }
 
-fn check(name: &str, route: &str, (ty, schema): (&str, Value), got: Value, fails: &mut Vec<String>) {
+fn check(name: &str, route: &str, (ty, schema): (&str, Value), got: &Value, fails: &mut Vec<String>) {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/golden/api_v1/{name}.json"));
     let fresh = json!({"route": route, "type": ty, "schema": schema, "response": got});
     if std::env::var_os("BLESS").is_some() {
@@ -120,7 +120,7 @@ fn check(name: &str, route: &str, (ty, schema): (&str, Value), got: Value, fails
             old["route"], old["type"]
         ));
     }
-    check_shapes(&schema, &old["response"], &got, &mut out);
+    check_shapes(&schema, &old["response"], got, &mut out);
     fails.extend(out.into_iter().map(|o| format!("{name} ({route}): {o}")));
 }
 
@@ -177,7 +177,7 @@ fn every_route_keeps_its_fixtures_shape() {
         ($(($name:literal, $path:expr, $ty:ty)),*) => {$(
             let route = format!("GET /api/v1/{}", $name);
             let file = $name.split('/').filter(|s| !s.starts_with('<')).collect::<Vec<_>>().join("-");
-            check(&file, &route, (stringify!($ty), schema::<$ty>()), get(&$path), &mut fails);
+            check(&file, &route, (stringify!($ty), schema::<$ty>()), &get(&$path), &mut fails);
         )*};
     }
     gets!(
@@ -187,7 +187,8 @@ fn every_route_keeps_its_fixtures_shape() {
         ("queue", "/api/v1/queue", QueueTab),
         ("needs", "/api/v1/needs", NeedsTab),
         ("lanes", "/api/v1/lanes", LanesTab),
-        ("shed", "/api/v1/shed", Vec<ShedRow>)
+        ("shed", "/api/v1/shed", Vec<ShedRow>),
+        ("health", "/api/v1/health", Health)
     );
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let h = [t.as_str(), "sendmeter", "Facets", "add facets\nthen reindex"];
@@ -219,7 +220,7 @@ fn every_route_keeps_its_fixtures_shape() {
             &format!("post-{op}"),
             &route,
             ("Reply", schema::<Reply>()),
-            got,
+            &got,
             &mut fails,
         );
     }
@@ -230,7 +231,7 @@ fn every_route_keeps_its_fixtures_shape() {
         "post-conductor-attach",
         "POST /api/v1/conductor-attach",
         ty,
-        post("conductor-attach", attach),
+        &post("conductor-attach", attach),
         &mut fails,
     );
     let ask = [
@@ -251,7 +252,7 @@ fn every_route_keeps_its_fixtures_shape() {
         "events-conductor-attach",
         "GET /api/v1/events",
         ("Events", schema::<Events>()),
-        got,
+        &got,
         &mut fails,
     );
     assert!(

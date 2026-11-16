@@ -23,7 +23,7 @@ fn fixtures() -> Vec<(String, String)> {
 }
 
 #[test]
-fn a_fleet_toml_from_before_each_retired_key_change_loads() {
+fn parity_r2_a_fleet_toml_from_before_each_retired_key_change_loads() {
     let all = fixtures();
     assert!(all.len() >= 5, "{all:?}");
     for (name, text) in all {

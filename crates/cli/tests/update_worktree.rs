@@ -16,7 +16,7 @@ impl Runner for Git<'_> {
         self.0.run(prog, args)
     }
     fn sleep(&self, secs: u64) {
-        self.0.sleep(secs)
+        self.0.sleep(secs);
     }
 }
 

@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, reason = "each test crate uses its own part of the shared helpers")]
 use drover::runner::{Out, Runner};
 use drover::Ctx;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// #771: the shared fake shed server lane tests run on.
 pub mod fake_shed;
-#[allow(unused_imports)]
+#[allow(unused_imports, reason = "not every test crate drives the fake shed")]
 pub use fake_shed::{FakeShed, OnShed, OverSsh};
 
 pub const CONFIG: &str = r#"# fleet config (test)
@@ -33,7 +33,7 @@ build_root = ""           # #630: retired (builds go under the worktree root); a
 stray_roots = []          # #536: never clean the real /tmp or $TMPDIR
 "#;
 
-/// RefCell's API over an RwLock: runners are `Sync` (serve's watcher has its own thread).
+/// `RefCell`'s API over an `RwLock`: runners are `Sync` (serve's watcher has its own thread).
 #[derive(Default)]
 pub struct Shared<T>(RwLock<T>);
 
@@ -252,6 +252,7 @@ impl Drop for Made {
 thread_local!(static MADE: Made = const { Made(std::cell::RefCell::new(Vec::new())) });
 
 static ALL: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+static AT_EXIT: std::sync::Once = std::sync::Once::new();
 
 extern "C" fn sweep() {
     if let Ok(all) = ALL.try_lock() {
@@ -259,10 +260,6 @@ extern "C" fn sweep() {
             let _ = std::fs::remove_dir_all(d);
         }
     }
-}
-
-extern "C" {
-    fn atexit(f: extern "C" fn()) -> std::ffi::c_int;
 }
 
 pub fn tmpdir(name: &str) -> PathBuf {
@@ -275,8 +272,7 @@ pub fn tmpdir(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     MADE.with(|m| m.0.borrow_mut().push(d.clone()));
-    static AT_EXIT: std::sync::Once = std::sync::Once::new();
-    AT_EXIT.call_once(|| assert_eq!(unsafe { atexit(sweep) }, 0));
+    AT_EXIT.call_once(|| assert!(drover_sys::at_exit(sweep)));
     ALL.lock().unwrap().push(d.clone());
     d
 }
@@ -309,13 +305,13 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
 
 pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
     let mut out = Vec::new();
-    let mut argv = vec!["drover".to_string()];
-    argv.extend(args.iter().map(|s| s.to_string()));
-    let code = drover::main_with(argv, ctx, r, &mut out, &mut std::io::empty());
+    let mut cmd = vec!["drover".to_string()];
+    cmd.extend(args.iter().map(std::string::ToString::to_string));
+    let code = drover::main_with(cmd, ctx, r, &mut out, &mut std::io::empty());
     (code, String::from_utf8(out).unwrap())
 }
 
-/// `node tests/support/webview.mjs` (Playwright's WebKit) under scripts/ui-lock.sh, its page based at serve's assets.
+/// `node tests/support/webview.mjs` (Playwright's `WebKit`) under scripts/ui-lock.sh, its page based at serve's assets.
 pub fn webview() -> std::process::Command {
     static BASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let base = BASE.get_or_init(|| {
@@ -344,7 +340,7 @@ pub fn webview() -> std::process::Command {
     c
 }
 
-/// #862: true (and a skip message) where node cannot load Playwright (`NODE_PATH`), so a WebKit test returns early.
+/// #862: true (and a skip message) where node cannot load Playwright (`NODE_PATH`), so a `WebKit` test returns early.
 pub fn no_webkit() -> bool {
     static NO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let no = *NO.get_or_init(|| {
@@ -367,7 +363,7 @@ fn user_home() -> PathBuf {
 
 static HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// #560: scripts/ui-lock.sh's host lock held for a whole WebKit test whose steps are timed (a `/live` update 2.5 s in), so its clock starts once WebKit is its own; `swift()` meanwhile runs without the wrapper. Every WebKit test of a binary that takes it must take it.
+/// #560: scripts/ui-lock.sh's host lock held for a whole `WebKit` test whose steps are timed (a `/live` update 2.5 s in), so its clock starts once `WebKit` is its own; `swift()` meanwhile runs without the wrapper. Every `WebKit` test of a binary that takes it must take it.
 pub struct UiLock(std::fs::File, std::sync::MutexGuard<'static, ()>);
 
 pub fn ui_lock() -> UiLock {
@@ -461,7 +457,7 @@ pub fn chat_fixture() -> serde_json::Value {
         "status": "✽ Gusting… (2m 47s · ↓ 1.8k tokens)", "before": l.len(), "more": true})
 }
 
-/// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the same) in the full view (#315: not the one WebKit's stored `chat:full` says), every block open with [show all] pressed, or all collapsed.
+/// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the same) in the full view (#315: not the one `WebKit`'s stored `chat:full` says), every block open with [show all] pressed, or all collapsed.
 pub fn chat_scene(open: bool) -> String {
     let fx = chat_fixture();
     format!(
@@ -580,7 +576,7 @@ pub fn session(v: &serde_json::Value) -> drover::session::Session {
 }
 
 /// `rows` (each as `session` reads it) as one answering host's sessions.
-pub fn sessions(rows: serde_json::Value) -> drover::session::Sessions {
+pub fn sessions(rows: &serde_json::Value) -> drover::session::Sessions {
     drover::session::Sessions::of(rows.as_array().unwrap().iter().map(session))
 }
 

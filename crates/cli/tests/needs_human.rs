@@ -90,11 +90,23 @@ fn action(s: &Server, cookie: &str, choice: &str) -> String {
 #[test]
 fn needs_human_pushes_with_the_default_on() {
     let cfg = Config::parse("[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n").unwrap();
-    assert!(cfg.notify[0].wants("needs-human"));
+    let e = |k: &str| Event::new(0, "app", Some(1), k, json!({}));
+    assert!(cfg.notify[0].wants(&e("needs-human")));
 }
 
 #[test]
-fn card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only() {
+fn a_new_kind_reaches_a_default_phone_only_when_emitted_with_push() {
+    let cfg = Config::parse("[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n").unwrap();
+    let e = Event::new(0, "app", Some(1), "brand-new-alert", json!({}));
+    assert!(!cfg.notify[0].wants(&e));
+    assert!(!serde_json::to_string(&e).unwrap().contains("push"));
+    let e = e.push();
+    assert!(cfg.notify[0].wants(&e));
+    assert!(serde_json::to_string(&e).unwrap().contains(r#""push":true"#));
+}
+
+#[test]
+fn parity_67_card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only() {
     let c = fixture("nh-pass", "PASS");
     let r = runner();
     let s = Server::new(&c, &r, Some(ADDR.into()));
@@ -211,20 +223,14 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     let res = post("extend");
     assert!(
         res.contains("msg=%2312%3A%20extend"),
-        "PAUSED only holds the spawn: {res}"
+        "PAUSED only holds the start: {res}"
     );
-    let p = drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
-    assert_eq!((p.reason.as_deref(), p.failed), (Some("PAUSED"), false));
-    assert!(
-        card(&s, &cookie).is_some_and(|k| choice(&k).is_none()),
-        "the card stays answered"
-    );
-    assert!(
-        post("extend").contains("msg=%2312%3A%20extend"),
-        "a second tap retries the start"
-    );
-    assert_eq!(extended(), 1, "the decision is logged once, before the spawn");
-    assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].extra, 1);
+    assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
+    assert_eq!(card(&s, &cookie), None, "the card leaves at the tap");
+    assert!(post("extend").contains("not%20needs"), "a second tap decides nothing");
+    assert_eq!(extended(), 1, "the decision is logged once");
+    let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
+    assert_eq!((st.extra, st.state.as_str()), (1, "queued"));
     let failed = read(&c.state)
         .unwrap()
         .iter()

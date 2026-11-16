@@ -1,13 +1,14 @@
 # #264: core (state, gates, commands) <- server (the phone page) <- service (#345) <- cli (the `drover` binary);
 # docs/architecture.md.
 [workspace]
-members = ["crates/core", "crates/server", "crates/service", "crates/cli"]
+members = ["crates/sys", "crates/core", "crates/server", "crates/service", "crates/cli"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+publish = false
 repository = "https://github.com/jirathip-dev/herdsman"
 
 # Lints for every crate root (moved from the old lib.rs, #264); the allows are style noise, docs/architecture.md (Code rules).
@@ -20,6 +21,24 @@ too_many_lines = "allow"
 format_push_string = "allow"
 format_collect = "allow"
 many_single_char_names = "allow"
+struct_excessive_bools = "allow"
+too_many_arguments = "allow"
+cast_precision_loss = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+indexing_slicing = "deny"
+as_conversions = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+allow_attributes_without_reason = "deny"
+let_underscore_must_use = "deny"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
 
 [workspace.dependencies]
 aes-gcm = "0.11.1"
@@ -41,6 +60,12 @@ toml = "0.8"
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 # #298, #455: shed's wire types only (serde, no I/O), pinned to shed main until it tags a release.
 shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "9b88eb5be5bc9ba8c5c75480483b9861ddc6e993" }
+drover-sys = { path = "crates/sys" }
 drover-core = { path = "crates/core" }
 drover-server = { path = "crates/server" }
 drover-service = { path = "crates/service" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
