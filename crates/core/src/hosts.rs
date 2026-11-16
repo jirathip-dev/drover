@@ -1,5 +1,5 @@
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
-use crate::events::{age, append, emit, fold, last_spawn, open_asks, working, Event, IssueState};
+use crate::events::{age, append, emit, fold, last_spawn, open_asks, working, Event, IssueState, Json};
 use crate::gate::refused;
 use crate::host::{self, Host};
 use crate::providers;
@@ -13,6 +13,10 @@ use std::cmp::Ordering::Equal;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// `prog args` as one shell line, each word single-quoted.
 pub fn quote(prog: &str, args: &[String]) -> String {
@@ -221,7 +225,7 @@ impl<'a> Pass<'a> {
             up,
             mark,
             step,
-            t0: std::time::Instant::now(),
+            t0: crate::clock::instant(),
             until: None,
             late: std::sync::Mutex::default(),
             off: std::collections::BTreeSet::new(),
@@ -234,11 +238,11 @@ impl<'a> Pass<'a> {
         Pass { off, log, ..self }
     }
     pub fn over(&self) -> bool {
-        self.until.is_some_and(|t| std::time::Instant::now() >= t)
+        self.until.is_some_and(|t| crate::clock::instant() >= t)
     }
     /// #880: the hosts over budget this pass: a call there killed at its limit, or held back past the pass's budget.
     pub fn late(&self) -> Vec<String> {
-        self.late.lock().unwrap().iter().cloned().collect()
+        lock(&self.late).iter().cloned().collect()
     }
     /// The fast step's: #337's one remote call per host, no probe; a call killed at 15 s marks its host down.
     pub fn fast(r: &'a dyn Runner) -> Self {
@@ -252,23 +256,24 @@ impl<'a> Pass<'a> {
             crate::timer::TICK_STEPS.iter().any(|t| t.0 == s),
             "{s} is not in TICK_STEPS"
         );
-        *self.step.lock().unwrap() = (s.into(), self.t0.elapsed().as_secs());
+        *lock(&self.step) = (s.into(), self.t0.elapsed().as_secs());
         self.note("");
     }
     fn note(&self, child: &str) {
         if let Some((p, since)) = &self.mark {
-            let (step, at) = self.step.lock().unwrap().clone();
+            let (step, at) = lock(&self.step).clone();
             let at = since + at;
             let m = json!({"since": since, "at": at, "step": step, "child": child, "pid": crate::sim::pid()});
-            let _ = std::fs::write(p, m.to_string());
+            std::fs::write(p, m.to_string()).ok();
         }
     }
     fn host<'b>(prog: &str, args: &'b [String]) -> Option<&'b str> {
         let end = args.iter().position(|a| a == "--").filter(|_| prog == "ssh")?;
-        args[..end].last().filter(|m| !m.starts_with('-')).map(String::as_str)
+        let last = args.get(end.checked_sub(1)?)?;
+        Some(last.as_str()).filter(|m| !m.starts_with('-'))
     }
     fn up(&self, m: &str) -> bool {
-        if let Some(&u) = self.up.lock().unwrap().get(m) {
+        if let Some(&u) = lock(&self.up).get(m) {
             return u;
         }
         if !self.probe {
@@ -282,10 +287,10 @@ impl<'a> Pass<'a> {
             self.key_changed(m, o);
         }
         if o.as_ref().is_ok_and(|o| o.code == 124) {
-            self.late.lock().unwrap().insert(m.into());
+            lock(&self.late).insert(m.into());
         }
         let u = o.is_ok_and(|o| !matches!(o.code, 124 | 255));
-        self.up.lock().unwrap().insert(m.into(), u);
+        lock(&self.up).insert(m.into(), u);
         u
     }
     fn call(&self, prog: &str, args: &[String], input: Option<&str>) -> Result<Out> {
@@ -309,7 +314,7 @@ impl<'a> Pass<'a> {
         self.note(&quote(prog, args));
         let over = self.over();
         if over {
-            self.late.lock().unwrap().insert(m.into());
+            lock(&self.late).insert(m.into());
         }
         if over || !self.up(m) {
             let stderr = format!("{m}: not sent (host offline this pass, or the tick past its budget)");
@@ -327,7 +332,7 @@ impl<'a> Pass<'a> {
         if matches!(o.code, 124 | 255) && !refused(&o) && args.iter().any(|a| a == CM[1]) {
             let g = ok(self.r, "ssh", &["-G", CM[1], m]).unwrap_or_default();
             if let Some(sock) = g.lines().find_map(|l| l.strip_prefix("controlpath ")) {
-                let _ = std::fs::remove_file(sock);
+                std::fs::remove_file(sock).ok();
             }
         }
         if o.code == 255 && !refused(&o) && args.iter().any(|a| a == CM[1]) {
@@ -337,10 +342,10 @@ impl<'a> Pass<'a> {
         }
         self.key_changed(m, &o);
         if matches!(o.code, 124 | 255) {
-            self.up.lock().unwrap().insert(m.into(), false);
+            lock(&self.up).insert(m.into(), false);
         }
         if o.code == 124 {
-            self.late.lock().unwrap().insert(m.into());
+            lock(&self.late).insert(m.into());
         }
         self.note("");
         Ok(o)
@@ -349,7 +354,7 @@ impl<'a> Pass<'a> {
         if !o.stderr.contains(KEY_CHANGED) {
             return;
         }
-        self.up.lock().unwrap().insert(m.into(), false);
+        lock(&self.up).insert(m.into(), false);
         let Some((ctx, cfg)) = self.log else {
             return;
         };
@@ -369,7 +374,7 @@ impl<'a> Pass<'a> {
         }
         let why = format!("host-key-changed {host}: ssh refuses its new host key; check it, then `ssh-keygen -R {m}`");
         let d = json!({"host": host, "reason": why});
-        let _ = emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kinds[0], d));
+        emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kinds[0], d)).ok();
     }
 }
 
@@ -474,7 +479,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         let s = all.entry(name.clone()).or_default();
         let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
         if let Some(Err(e)) = (h.cloud.is_some() && !stopped).then(|| crate::cloud::moved(ctx, cfg, r, name, false)) {
-            eprintln!("cloud {name}: {e:#}");
+            crate::stderr!("cloud {name}: {e:#}");
         }
         let a = (!stopped).then(|| crate::session::live_on(&on).ok()).flatten();
         s.up = a.is_some();
@@ -488,7 +493,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                 .filter(|_| cfg.host_acp(name).is_some())
                 .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)))
             {
-                eprintln!("proxy {name}: {e:#}");
+                crate::stderr!("proxy {name}: {e:#}");
             }
             if refresh || s.probed + 3600 <= ctx.now {
                 if let Some((tags, home)) = probe(&on) {
@@ -503,7 +508,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                 }
             }
             if h.machine.is_some() && h.enabled && !s.home.is_empty() {
-                s.drover = sync(ctx, &on, name, &s.home);
+                s.drover = sync(ctx, cfg, &on, (name, &s.home, &tags(h, Some(&*s))));
             }
             let hs = host::sample(&on);
             (s.load, s.mem, s.mem_total) = (hs.load_per_cpu, hs.free_mem_gb, hs.mem_total_gb);
@@ -518,9 +523,9 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         }
         agents.insert(name.clone(), a);
     }
-    let _ = std::fs::write(file(ctx), serde_json::to_string(&all).unwrap_or_default());
+    std::fs::write(file(ctx), serde_json::to_string(&all).unwrap_or_default()).ok();
     if let Err(e) = record(ctx, &rows, cfg.hosts.len()) {
-        eprintln!("host history: {e:#}");
+        crate::stderr!("host history: {e:#}");
     }
     agents
 }
@@ -547,21 +552,23 @@ fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
         }
         let lane = (events.iter().rev()).find(|s| s.kind == "spawn" && s.fleet == e.fleet && s.issue == e.issue);
         let mut d = Value::Object(e.data.clone());
-        d["from"] = json!(from);
-        if d["agent"].is_null() {
-            d["agent"] = json!(lane
+        d.put("from", json!(from));
+        if d.at("agent").is_null() {
+            let a = lane
                 .filter(|s| s.str("host") == Some(name))
-                .and_then(|s| s.str("agent")));
+                .and_then(|s| s.str("agent"));
+            d.put("agent", json!(a));
         }
-        let _ = crate::db::ask(
+        crate::db::ask(
             &ctx.state,
             vec![Event::new(e.ts, &e.fleet, e.issue, "needs-decision", d)],
             None,
-        );
+        )
+        .ok();
     }
     if let Some(t) = remote.iter().filter(new).map(|e| e.ts).max() {
         let d = json!({"host": name, "upto_ts": t});
-        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "asks-imported", d));
+        append(&ctx.state, &Event::new(ctx.now, "drover", None, "asks-imported", d)).ok();
     }
 }
 
@@ -636,8 +643,9 @@ pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: La
             Some((me.0, me.1)),
         );
         let used = [held[0] + start[0], held[1] + start[1]];
-        let (k, c) = (0..2).find_map(|k| caps[k].filter(|&c| used[k] >= c).map(|c| (k, c)))?;
-        full.get_or_insert(format!("waiting for a slot: {}/{c} {} on {name}", used[k], SLOTS[k]));
+        let (u, c, s) =
+            (caps.into_iter().zip(used).zip(SLOTS)).find_map(|((c, u), s)| c.filter(|&c| u >= c).map(|c| (u, c, s)))?;
+        full.get_or_insert(format!("waiting for a slot: {u}/{c} {s} on {name}"));
     }
     full
 }
@@ -650,8 +658,8 @@ pub fn slots_line(cfg: &Config, events: &[Event], agents: &[Session]) -> String 
         let mine: Vec<Session> = agents.iter().filter(on).cloned().collect();
         let held = held_slots(cfg, events, &mine, None);
         let caps = [h.max_working, h.max_simulators];
-        let v: Vec<String> = (0..2)
-            .filter_map(|k| Some(format!("{} {}/{}", SLOTS[k], held[k], caps[k]?)))
+        let v: Vec<String> = (SLOTS.into_iter().zip(held).zip(caps))
+            .filter_map(|((s, n), c)| Some(format!("{s} {n}/{}", c?)))
             .collect();
         if !v.is_empty() {
             out += &format!("{name}: {}\n", v.join(" · "));
@@ -666,7 +674,7 @@ pub fn sick(ctx: &Ctx, name: &str, row: &str) {
     let s = all.entry(name.into()).or_default();
     if !s.health.iter().any(|w| w == row) {
         s.health.push(row.into());
-        let _ = std::fs::write(file(ctx), serde_json::to_string(&all).unwrap_or_default());
+        std::fs::write(file(ctx), serde_json::to_string(&all).unwrap_or_default()).ok();
     }
 }
 
@@ -711,7 +719,8 @@ pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>) -> Option<&'a 
             .rposition(|e| kinds.contains(&e.kind.as_str()) && e.str("machine") == machine)
     };
     let i = at(&["usage-limit", "signed-out"])?;
-    (at(&["host-on"]) < Some(i)).then(|| events[i].str("reason")).flatten()
+    let e = events.get(i).filter(|_| at(&["host-on"]) < Some(i))?;
+    e.str("reason")
 }
 
 /// #923: the data of the alert that holds new lanes off spawn `sp`'s host because its lane `what` (keyed once per hold).
@@ -942,12 +951,23 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     bad
 }
 
-fn shed_row(on: &On) -> Option<String> {
+/// #1127: thaw a frozen shed service (its user manager, then the unit), then restart it.
+pub const SHED_RESTART: &str =
+    "{ sudo -n systemctl thaw \"user@$(id -u).service\"; systemctl --user thaw shed.service; } 2>/dev/null; \
+systemctl --user restart shed.service";
+
+/// A host's shed row unless it answers `✓`; one there that does not answer is `✗ shed` with the restart.
+pub fn shed_row(on: &On) -> Option<String> {
     let line = on.shed().map_or_else(
         || crate::session::live_on(on).err().map(|e| format!("! shed: {e:#}")),
         |b| Some(crate::shed::line(on, &b.wire)),
     );
-    line.filter(|l| !l.starts_with('✓'))
+    let m = on.machine.unwrap_or_default();
+    let dead = |l: String| match l.strip_prefix("! shed: ") {
+        Some(e) if on.shed().is_some() => format!("✗ shed — does not answer: {e} → ssh {m} '{SHED_RESTART}'"),
+        _ => l,
+    };
+    line.filter(|l| !l.starts_with('✓')).map(dead)
 }
 
 fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {
@@ -965,7 +985,7 @@ fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[Str
             ));
         }
     }
-    for (profile, family, id) in acp_profiles(cfg, tags) {
+    for (profile, family, id) in acp_profiles(cfg, name, tags) {
         if let Some(why) = acp_guard(ctx, on, home, (&profile, family, id)) {
             bad.push(format!("✗ acp guard {profile} — {why}"));
         }
@@ -979,12 +999,14 @@ fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[Str
     bad
 }
 
-/// #1126: each ACP profile, once, of the fleets a host with `tags` fits: (profile, role family, adapter id).
-pub fn acp_profiles(cfg: &Config, tags: &[String]) -> Vec<(String, &'static str, &'static str)> {
+/// #1126: each ACP profile, once, of the roles `place` can put on host `name` (#1148: none pinned elsewhere) of the fleets its `tags` fit: (profile, role family, adapter id).
+pub fn acp_profiles(cfg: &Config, name: &str, tags: &[String]) -> Vec<(String, &'static str, &'static str)> {
     let mut seen = std::collections::BTreeSet::new();
     let fits = cfg.fleet.values().filter(|f| f.needs.iter().all(|t| tags.contains(t)));
     let roles = fits.flat_map(|f| f.role.iter().map(move |(role, rc)| (f, role, rc)));
+    let main = |f: &crate::config::Fleet, role: &str| crate::events::STAGES.contains(&f.family(role)).then_some("main");
     roles
+        .filter(|(f, role, rc)| rc.host.as_deref().or_else(|| main(f, role)).is_none_or(|h| h == name))
         .filter_map(|(f, role, rc)| Some((rc.profile_or(role), f.family(role), providers::get(&rc.harness).acp()?)))
         .filter(|p| seen.insert(p.0.clone()))
         .collect()
@@ -1006,7 +1028,7 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
         .read(&Path::new(&dir).join("settings.json"))
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
-    let pre = s["hooks"]["PreToolUse"].as_array().into_iter().flatten();
+    let pre = s.at("hooks").at("PreToolUse").as_array().into_iter().flatten();
     let mut hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
     let hook = format!("drover' hook --role {family}");
     if !hooks.any(|h| {
@@ -1036,7 +1058,9 @@ pub(crate) fn real_exe(ctx: &Ctx, home: &str) -> String {
 /// #917: `cargo install` of drover at `sha` into `root`, with its `herdsman` link: `hosts bootstrap`'s and `sync`'s.
 pub fn install_line(root: &str, sha: &str) -> String {
     let repo = env!("CARGO_PKG_REPOSITORY");
-    format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force && ln -sf drover '{root}/bin/herdsman'")
+    format!(
+        "cargo install --git {repo} --rev {sha} --locked --root '{root}' --force && ln -sf drover '{root}/bin/herdsman'"
+    )
 }
 
 const SYNC_STATUS: &str = "\"$1\" --version 2>/dev/null || echo missing; d=\"$HOME/.drover-sync\"; \
@@ -1050,7 +1074,7 @@ fn sha_of(v: &str) -> &str {
 }
 
 /// #917: host `name`'s drover `--version`, its last install logged `host-sync`, a mismatch's install started there.
-pub fn sync(ctx: &Ctx, on: &On, name: &str, home: &str) -> String {
+pub fn sync(ctx: &Ctx, cfg: &Config, on: &On, (name, home, tags): (&str, &str, &[String])) -> String {
     let (exe, sha) = (real_exe(ctx, home), env!("DROVER_SHA"));
     let Ok(o) = ok(on, "sh", &["-c", SYNC_STATUS, "sh", &exe]) else {
         return String::new();
@@ -1063,7 +1087,7 @@ pub fn sync(ctx: &Ctx, on: &On, name: &str, home: &str) -> String {
         if let Some((code, rest)) = l.strip_prefix("done ").and_then(|l| l.split_once(' ')) {
             let (to, from) = rest.split_once(' ').unwrap_or((rest, ""));
             let d = json!({"host": name, "from": sha_of(from), "to": to, "ok": code == "0"});
-            let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d));
+            append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
         }
     }
     if busy || theirs == format!("drover {}", crate::VERSION) {
@@ -1072,13 +1096,21 @@ pub fn sync(ctx: &Ctx, on: &On, name: &str, home: &str) -> String {
     let conf = rehome(vec![ctx.config.display().to_string()], Some(home)).remove(0);
     let root = Path::new(&exe).parent().and_then(Path::parent).map(Path::display);
     let install = install_line(&root.map_or(exe.clone(), |r| r.to_string()), sha);
+    let acp = cfg
+        .host_acp(name)
+        .map(|_| acp_profiles(cfg, name, tags))
+        .unwrap_or_default();
+    let acp: String = acp
+        .iter()
+        .map(|(p, family, _)| format!(" && '{exe}' profiles sync --profile '{p}' --role {family}"))
+        .collect();
     let job = format!(
-        "{}{{ {install} && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}; }}; echo \"$? {sha} $V\" >\"$HOME/.drover-sync.done\"",
+        "{}{{ {install} && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}{acp}; }}; echo \"$? {sha} $V\" >\"$HOME/.drover-sync.done\"",
         crate::cloud::SH
     );
     if let Err(e) = ok(on, "sh", &["-c", SYNC_START, "sh", &job, &theirs]) {
         let d = json!({"host": name, "from": sha_of(&theirs), "to": sha, "ok": false, "error": format!("{e:#}")});
-        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d));
+        append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
     }
     theirs
 }
@@ -1165,15 +1197,16 @@ pub fn place(
         } else {
             format!("host with {}", needs.join(", "))
         };
-        let cloud =
-            ["", " (cloud host stopped or over budget)"][usize::from(cfg.hosts.values().any(|h| h.cloud.is_some()))];
+        let cloud = (cfg.hosts.values().any(|h| h.cloud.is_some())).then_some(" (cloud host stopped or over budget)");
+        let cloud = cloud.unwrap_or_default();
         return refused("NO_HOST", format!("no {has}{cloud}"));
     }
     on.sort_by(|a, b| a.rank.partial_cmp(&b.rank).unwrap_or(Equal));
     let local = |p: &Placed| cfg.hosts.get(&p.name).is_some_and(|h| h.cloud.is_none());
     let held = held_for(ctx, on.iter().filter(|p| local(p)).all(|p| p.refusal.is_some()));
     let wake = held >= cfg.limits.overflow_after_minutes * 60 || !on.iter().any(local);
-    let i = (!wake && !local(&on[0])).then(|| on.iter().position(local)).flatten();
+    let first = on.first().is_some_and(local);
+    let i = (!wake && !first).then(|| on.iter().position(local)).flatten();
     let mut p = on.remove(i.unwrap_or(0));
     let why = match on.iter().any(local) {
         true => format!("overflow: every local host busy {} min", held / 60),
@@ -1192,12 +1225,13 @@ fn held_for(ctx: &Ctx, held: bool) -> u64 {
         (Some(a), Some(b)) if ctx.now.saturating_sub(b) <= 900 => a,
         _ => ctx.now,
     };
-    let _ = if held {
+    if held {
         std::fs::write(&p, format!("{since} {}", ctx.now))
     } else {
         std::fs::remove_file(&p)
-    };
-    [0, ctx.now.saturating_sub(since)][usize::from(held)]
+    }
+    .ok();
+    ctx.now.saturating_sub(since) * u64::from(held)
 }
 
 /// #254: start the stopped cloud host `place` picked (not on a dry run), then place on it afresh.
@@ -1296,7 +1330,8 @@ pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) ->
 /// A host as the board and `hosts` say it: (tone, words). Offline and off are grey: neither pages.
 pub fn shown(enabled: bool, s: &Seen, lanes: usize, now: u64) -> (&'static str, String) {
     if !s.up {
-        let last = [age(now.saturating_sub(s.seen)), "never".into()][usize::from(s.seen == 0)].clone();
+        let last = (s.seen != 0).then(|| age(now.saturating_sub(s.seen)));
+        let last = last.unwrap_or_else(|| "never".into());
         return ("m", format!("offline · last seen {last}"));
     }
     let sick = |c: char| s.health.iter().find_map(|w| w.strip_prefix(c)).map(str::trim);
@@ -1506,8 +1541,8 @@ pub fn spark(rows: &[Row], h: &str, k: &str, (now, secs, n): (u64, u64, usize)) 
     let (mut out, from) = (vec![None; n], now.saturating_sub(secs));
     for r in rows.iter().filter(|r| r.host == h && r.ts > from && r.ts <= now) {
         let (Some(v), low) = r.get(k) else { continue };
-        let i = usize::try_from((r.ts - from - 1) * n as u64 / secs.max(1)).unwrap_or(0);
-        let o: &mut Option<(f64, u64)> = &mut out[i.min(n - 1)];
+        let i = usize::try_from((r.ts - from - 1) * u64::try_from(n).unwrap_or(u64::MAX) / secs.max(1)).unwrap_or(0);
+        let Some(o) = out.get_mut(i.min(n - 1)) else { continue };
         if o.is_none_or(|(w, _)| if low { v < w } else { v > w }) {
             *o = Some((v, r.ts));
         }
@@ -1524,8 +1559,8 @@ fn ranges(rows: &[Row], (h, k, now, all): (&str, &str, u64, bool), f: &dyn Fn((f
             .join(",")
     };
     let rs = [(DAY, 120), (21_600, 120), (3_600, 60)];
-    rs[..[1, 3][usize::from(all)]]
-        .iter()
+    rs.iter()
+        .take(if all { 3 } else { 1 })
         .map(one)
         .collect::<Vec<_>>()
         .join(";")

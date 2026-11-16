@@ -1,10 +1,10 @@
 use crate::config::Config;
-use crate::events::{append, emit, fold, Event};
+use crate::events::{append, emit, fold, Event, Json};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
 const KINDS: [&str; 5] = ["slo-idle", "slo-tick", "self-heal", "stuck", "slo-ok"];
@@ -41,10 +41,16 @@ pub fn pass(
         now.extend(missed(ctx, &events, f));
     }
     let eps = episodes(&events);
+    let mut loud: BTreeSet<String> = eps
+        .iter()
+        .filter(|(k, ep)| now.iter().any(|b| &b.key == *k) && ep.iter().any(|e| e.kind == "stuck"))
+        .filter_map(|(_, ep)| Some(ep.first()?.fleet.clone()))
+        .collect();
     for (key, ep) in eps.iter().filter(|(k, _)| !now.iter().any(|b| &b.key == *k)) {
+        let Some(e) = ep.first() else { continue };
         append(
             &ctx.state,
-            &Event::new(ctx.now, &ep[0].fleet, ep[0].issue, "slo-ok", json!({"key": key})),
+            &Event::new(ctx.now, &e.fleet, e.issue, "slo-ok", json!({"key": key})),
         )?;
     }
     for b in &now {
@@ -56,17 +62,22 @@ pub fn pass(
             &events,
             eps.get(&b.key).map_or(&[][..], Vec::as_slice),
             b,
+            &mut loud,
         )?;
     }
     Ok(())
 }
 
-/// #855: the `stuck` alerts whose breach still holds: the owner's cards.
-pub fn open_stuck(events: &[Event]) -> Vec<&Event> {
-    let eps = episodes(events);
-    eps.into_values()
+/// #855: the `stuck` alerts whose breach still holds, by fleet: one owner's card each (#1093).
+pub fn open_stuck(events: &[Event]) -> BTreeMap<&str, Vec<&Event>> {
+    let mut m: BTreeMap<&str, Vec<&Event>> = BTreeMap::new();
+    for e in episodes(events)
+        .into_values()
         .filter_map(|ep| ep.into_iter().find(|e| e.kind == "stuck"))
-        .collect()
+    {
+        m.entry(e.fleet.as_str()).or_default().push(e);
+    }
+    m
 }
 
 fn episodes(events: &[Event]) -> BTreeMap<String, Vec<&Event>> {
@@ -91,6 +102,7 @@ fn step(
     events: &[Event],
     ep: &[&Event],
     b: &Breach,
+    loud: &mut BTreeSet<String>,
 ) -> Result<()> {
     if ep.iter().any(|e| e.kind == "stuck") {
         return Ok(());
@@ -129,21 +141,26 @@ fn step(
         tried.join(", ")
     };
     let why = format!("{}; tried: {tried}", b.reason);
-    emit(&ctx.state, cfg, ev("stuck", json!({"key": b.key, "reason": why})))
+    let e = ev("stuck", json!({"key": b.key, "reason": why}));
+    if loud.insert(b.fleet.clone()) {
+        emit(&ctx.state, cfg, e)
+    } else {
+        append(&ctx.state, &e)
+    }
 }
 
 fn heal(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, h: &Heal) -> String {
     match h {
         Heal::StopTick(pid) => {
             let gone = || ok(r, "kill", &["-0", pid]).is_err();
-            let _ = ok(r, "kill", &["-TERM", pid]);
+            ok(r, "kill", &["-TERM", pid]).ok();
             for _ in 0..10 {
                 if gone() {
                     return format!("stopped tick pid {pid} (SIGTERM)");
                 }
                 r.sleep(1);
             }
-            let _ = ok(r, "kill", &["-KILL", pid]);
+            ok(r, "kill", &["-KILL", pid]).ok();
             format!("stopped tick pid {pid} (SIGKILL after 10 s)")
         }
         Heal::Recount(fleet, n) => {
@@ -161,10 +178,12 @@ fn heal(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, h: &Heal) 
 fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
     let text = std::fs::read_to_string(ctx.state.with_file_name("tick.step")).ok()?;
     let m: Value = serde_json::from_str(&text).unwrap_or_default();
-    let since = m["since"]
+    let since = m
+        .at("since")
         .as_u64()
         .filter(|t| ctx.now >= t + cfg.limits.slo_tick_minutes * 60)?;
-    let pid = m["pid"]
+    let pid = m
+        .at("pid")
         .as_u64()
         .filter(|p| *p != u64::from(crate::sim::pid()))
         .map(|p| p.to_string());
@@ -174,8 +193,8 @@ fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
     let ours =
         |c: &str| (c.contains("drover") || c.contains("herdsman")) && [" tick", " drive"].iter().any(|w| c.contains(w));
     let named = pid.filter(|p| ok(r, "ps", &["-o", "command=", "-p", p]).is_ok_and(|c| ours(&c)));
-    let child = m["child"].as_str().filter(|c| !c.is_empty()).unwrap_or("none");
-    let step = m["step"].as_str().unwrap_or("?");
+    let child = m.at("child").as_str().filter(|c| !c.is_empty()).unwrap_or("none");
+    let step = m.at("step").as_str().unwrap_or("?");
     let mins = (ctx.now - since) / 60;
     Some(Breach {
         key: format!("slo-tick:{since}"),
@@ -201,7 +220,7 @@ fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[crate::session::Ses
         .first()
         .and_then(|n| n.parse::<u64>().ok());
     let Some(n) = next.filter(|_| !agents.iter().any(working)) else {
-        let _ = std::fs::remove_file(&at);
+        std::fs::remove_file(&at).ok();
         return None;
     };
     let since = std::fs::read_to_string(&at).ok().and_then(|s| s.trim().parse().ok());
@@ -240,7 +259,8 @@ fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[crate::session::Ses
 fn missed(ctx: &Ctx, events: &[Event], fleet: &str) -> Vec<Breach> {
     let st = fold(events);
     let open = st.values().filter(|s| s.fleet == fleet).filter_map(|s| {
-        let head = crate::gh::cached_pr(ctx, fleet, s.issue)["headRefOid"]
+        let head = crate::gh::cached_pr(ctx, fleet, s.issue)
+            .at("headRefOid")
             .as_str()
             .unwrap_or_default()
             .to_string();

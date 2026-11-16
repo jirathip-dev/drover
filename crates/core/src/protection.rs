@@ -1,5 +1,5 @@
-use crate::config::Config;
 use crate::runner::{argv, Runner};
+use crate::{config::Config, events::Json};
 use anyhow::Result;
 use serde_json::Value;
 use std::io::Write;
@@ -15,19 +15,23 @@ fn branch(r: &dyn Runner, repo: &str, b: &str) -> (Option<bool>, Vec<String>) {
             ("required status checks", "required_status_checks"),
             ("required PR reviews", "required_pull_request_reviews"),
         ];
-        let missing: Vec<_> = parts.iter().filter(|p| !body[p.1].is_object()).map(|p| p.0).collect();
+        let missing: Vec<_> = parts
+            .iter()
+            .filter(|p| !body.at(p.1).is_object())
+            .map(|p| p.0)
+            .collect();
         let mut lines = vec![if missing.is_empty() {
             "✓ protected (required status checks, required PR reviews)".to_string()
         } else {
             format!("△ protected but incomplete: missing {}", missing.join(", "))
         }];
-        if body["enforce_admins"]["enabled"] != true {
+        if body.at("enforce_admins").at("enabled") != true {
             lines.push("⚠ enforce_admins off: admins can bypass protection".into());
         }
         return (Some(missing.is_empty()), lines);
     }
-    let msg = body["message"].as_str().unwrap_or("").to_string();
-    let status = body["status"].as_str().map(String::from).or_else(|| {
+    let msg = body.at("message").as_str().unwrap_or("").to_string();
+    let status = body.at("status").as_str().map(String::from).or_else(|| {
         let s = o.stderr.rsplit_once("(HTTP ")?.1;
         Some(s.split(')').next()?.to_string())
     });

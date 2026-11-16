@@ -574,7 +574,8 @@ fn boot_fake(gh_in: bool) -> Fake {
         .reply(&step("git config --global --get credential"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&step("git clone"), "")
-        .reply(&step("test ! -e "), "");
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&step("'"), "");
     if gh_in {
         f.reply(&step("gh auth status"), "")
     } else {
@@ -663,10 +664,7 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
     );
     let written = r.1.borrow().join("\n");
     assert!(!written.contains("[fleet") && !written.contains("SEKRIT"), "{written}");
-    let conf = c.config.display().to_string();
-    assert!(r.0.called(&step(&format!(
-        "test ! -e '{conf}' || '/opt/drover/bin/drover' profiles sync"
-    ))));
+    assert!(r.0.called(&step(SYNC)));
     assert!(out.contains("✓ profiles sync — there"), "{out}");
     let log = drover::events::jsonl(&c.state).unwrap();
     assert!(
@@ -722,6 +720,8 @@ profile = "fleet-impl"
 allow_commands = ["docker"]
 "#;
 
+const SYNC: &str = "'/opt/drover/bin/drover' profiles sync";
+
 fn boot_again() -> Fake {
     boot_fake(true)
         .reply(&step("git config --global --get credential"), "")
@@ -744,7 +744,7 @@ fn bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there()
     let res = drover::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();
     assert!(res.is_ok(), "{res:?} {out}");
-    assert!(out.contains("✓ profiles sync"), "{out}");
+    assert!(!out.contains("✓ profiles sync"), "{out}");
     let left = there.join("fleet.toml");
     assert!(
         !left.exists() || Config::load(&left).is_ok(),
@@ -760,17 +760,14 @@ fn a_failed_bootstrap_step_shows_its_command_exit_code_and_output_and_logs_them(
     let (c, cfg) = running("cloud-boot-fail");
     let err = "invalid config /home/me/.config/drover/fleet.toml: fleet.berth.role.orchestrator: account 'C' is not in [accounts]";
     let f = boot_again()
-        .once_err(&step("test ! -e "), 1, &format!("warming up\n{err}\n"))
-        .once_err(&step("test ! -e "), 1, &format!("warming up\n{err}\n"));
+        .once_err(&step(SYNC), 1, &format!("warming up\n{err}\n"))
+        .once_err(&step(SYNC), 1, &format!("warming up\n{err}\n"));
     let mut out = vec![];
     let res = drover::cloud::bootstrap(&c, &cfg, &f, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();
     let shown = format!("{out}\n{:#}", res.unwrap_err());
-    let cmd = format!(
-        "test ! -e '{}' || '/opt/drover/bin/drover' profiles sync",
-        c.config.display()
-    );
-    assert!(shown.contains(&cmd) && shown.contains("exit 1"), "{shown}");
+    let cmd = SYNC;
+    assert!(shown.contains(cmd) && shown.contains("exit 1"), "{shown}");
     assert!(shown.contains(err) && shown.contains("warming up"), "{shown}");
     let log = read(&c.state).unwrap();
     let e = log
@@ -828,6 +825,65 @@ fn a_snapshot_needs_a_green_health_check_first() {
     assert!(
         drover::hosts::cached(&c)["cloud1"].github.starts_with("github:"),
         "the look reads the token too"
+    );
+}
+
+struct Frozen<'a>(&'a dyn Runner, &'a Fake, std::sync::atomic::AtomicUsize);
+
+impl Runner for Frozen<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let connect = args.join(" ").contains("cloud1 -- 'shed' 'connect'");
+        if connect && self.1.called(&rc("snapshot")) && self.2.load(SeqCst) > 0 {
+            self.2.fetch_sub(1, SeqCst);
+            self.1.calls.borrow_mut().push("frozen shed connect".into());
+            return Ok(Out {
+                code: 255,
+                stderr: "timed out".into(),
+                ..Out::default()
+            });
+        }
+        self.0.run_in(prog, args, input)
+    }
+}
+
+fn snapshot_frozen(name: &str, fails: usize) -> (Fake, anyhow::Result<()>) {
+    let (c, cfg) = running(name);
+    let recipe = RECIPE.replace("[rate", "snapshot = \"fakecloud snapshot {name}\"\n[rate");
+    std::fs::write(c.config.with_file_name("recipes/fake.toml"), recipe).unwrap();
+    let restart = format!("{SSH}'sh' '-c' '{{ sudo -n systemctl thaw");
+    let r = healthy(Fake::default()).reply(&rc("snapshot"), "").reply(&restart, "");
+    let (sh, cloud) = (FakeShed::new(), FakeShed::new());
+    let over = on_cloud(&r, &cloud);
+    let frozen = Frozen(&over, &r, fails.into());
+    let res = drover::cloud::snapshot(&c, &cfg, &sh.on(&frozen), "cloud1");
+    (r, res)
+}
+
+#[test]
+fn a_shed_frozen_by_the_snapshot_is_restarted_once_then_fails_the_snapshot() {
+    let restart = format!("{SSH}'sh' '-c' '{{ sudo -n systemctl thaw");
+    let (r, res) = snapshot_frozen("cloud-snap-thaw", 1);
+    res.unwrap();
+    assert_eq!(r.count("frozen shed connect"), 1);
+    let at = |p: &str| r.index(p).unwrap();
+    assert!(at(&rc("snapshot")) < at("frozen shed connect") && at("frozen shed connect") < at(&restart));
+    assert!(r.calls.borrow()[at(&restart)].contains("systemctl --user restart shed.service"));
+    let (r, res) = snapshot_frozen("cloud-snap-dead", 2);
+    let e = format!("{:#}", res.unwrap_err());
+    assert!(
+        e.starts_with("cloud1: shed does not answer after the snapshot: ✗ shed"),
+        "{e}"
+    );
+    assert_eq!((r.count(&restart), r.count("frozen shed connect")), (1, 2));
+    let (r, res) = snapshot_frozen("cloud-snap-fine", 0);
+    res.unwrap();
+    assert!(
+        r.called(&rc("snapshot")) && !r.called(&restart),
+        "a shed that answers is left alone"
     );
 }
 
@@ -984,6 +1040,78 @@ fn tick_logs_a_vm_deleted_outside_drover_gone_once_and_stops_counting_its_spend(
     assert_eq!(spend(&c), spend(&later));
 }
 
+fn outside_stops(c: &drover::Ctx) -> usize {
+    let events = read(&c.state).unwrap();
+    let why = |e: &&Event| e.kind == "cloud-stop" && e.str("why") == Some("stopped outside drover");
+    events.iter().filter(why).count()
+}
+
+#[test]
+fn bootstrap_of_a_vm_stopped_outside_drover_logs_it_stopped_starts_it_and_repins() {
+    let (c, cfg) = running("cloud-stopped-boot");
+    let known = c.home.join(".ssh/herdsman/cloud1.known");
+    std::fs::create_dir_all(known.parent().unwrap()).unwrap();
+    std::fs::write(&known, "[10.0.0.7]:2222 ssh-ed25519 AAAAC3oldkey\n").unwrap();
+    let r = boot_fake(false)
+        .once(&rc("status"), 0, "stopped\n")
+        .once(&rc("status"), 0, "stopped\n")
+        .reply(&rc("status"), "running\n")
+        .reply(&rc("start"), "")
+        .reply(&rc("address"), "ubuntu@10.0.0.8 2222\nssh-ed25519 AAAAC3newkey\n");
+    let (here, cloud) = (FakeShed::new(), FakeShed::new());
+    let there = on_cloud(&r, &cloud);
+    let e = drover::cloud::bootstrap(&c, &cfg, &here.on(&there), "cloud1", &mut vec![]).unwrap_err();
+    assert!(format!("{e:#}").contains("log in in terminal"), "{e:#}");
+    assert_eq!(outside_stops(&c), 1, "{:?}", r.calls.borrow());
+    assert!(
+        r.called(&rc("start")) && !r.called(&rc("create")),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&known).unwrap(),
+        "[10.0.0.8]:2222 ssh-ed25519 AAAAC3newkey\n"
+    );
+    let events = read(&c.state).unwrap();
+    let kinds: Vec<_> = events
+        .iter()
+        .map(|e| e.kind.as_str())
+        .filter(|k| k.starts_with("cloud-"))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "cloud-start",
+            "cloud-up",
+            "cloud-stop",
+            "cloud-start",
+            "cloud-repin",
+            "cloud-up"
+        ]
+    );
+}
+
+#[test]
+fn tick_logs_a_vm_stopped_outside_drover_once_and_stops_counting_its_spend() {
+    let (c, cfg) = running("cloud-stopped-tick");
+    let r = lane_fake().once(&rc("status"), 0, "stopped\n");
+    let out = tick(&c, &cfg, &r, &idle());
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert!(!r.called(&rc("stop")), "{:?}", r.calls.borrow());
+    assert_eq!(outside_stops(&c), 1);
+    assert_eq!(drover::cloud::state(&read(&c.state).unwrap(), "cloud1"), "stopped");
+    let later = drover::Ctx {
+        now: NOW + 3600,
+        ..c.clone()
+    };
+    let r = Fake::default().reply(&rc("status"), "stopped\n");
+    assert_eq!(tick(&later, &cfg, &r, &idle()), [] as [String; 0]);
+    assert!(!r.called(&rc("stop")) && outside_stops(&c) == 1);
+    let events = read(&c.state).unwrap();
+    let spend = |c: &drover::Ctx| drover::cloud::spend(c, &cfg, &events, "cloud1").unwrap();
+    assert_eq!(spend(&c), spend(&later));
+}
+
 #[test]
 fn a_failing_status_is_not_gone() {
     let (c, cfg) = running("cloud-gone-err");
@@ -994,6 +1122,6 @@ fn a_failing_status_is_not_gone() {
     let there = on_cloud(&r, &cloud);
     let _ = drover::cloud::bootstrap(&c, &cfg, &here.on(&there), "cloud1", &mut vec![]);
     assert!(r.called(&rc("status")) && !r.called(&rc("create")) && !r.called(&rc("start")));
-    assert!(gone_stops(&c).is_empty());
+    assert!(gone_stops(&c).is_empty() && outside_stops(&c) == 0);
     assert_eq!(drover::cloud::state(&read(&c.state).unwrap(), "cloud1"), "running");
 }
