@@ -21,7 +21,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     let mut rows = vec![];
     if !config_only {
         let sample = crate::host::sample(r);
-        let host = sample.pressure.is_some() && sample.swapout.is_some() && sample.load_per_cpu.is_some();
+        let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.load_per_cpu.is_some();
         row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH");
         let gh = ok(r, "gh", &["auth", "status"]).is_ok();
         row(&mut rows, gh, '✗', "gh — auth status → gh auth login");

@@ -208,9 +208,9 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
     let (s, busy, open) = (&s, &AtomicUsize::new(0), &AtomicUsize::new(0));
     std::thread::scope(|sc| {
         let limits = || Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
-        // #57: the host every 10 s (its 2 s vm_stat delta included) here, never on a request.
         sc.spawn(move || loop {
             let mut hs = host::sample(r);
+            host::pace(&ctx.state, None, &mut hs, crate::now());
             host::window(&ctx.state, &mut hs);
             *lock(&h) = hs;
             s.r.sampled(crate::now());

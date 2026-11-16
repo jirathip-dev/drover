@@ -57,6 +57,23 @@ pub enum Miss {
     Local,
 }
 
+/// #337: run `lines` (quoted command lines) in one `sh -c` on `r`; each one's stdout, None when it failed.
+pub fn batch(r: &dyn Runner, lines: &[String]) -> Vec<Option<String>> {
+    let script: String = (lines.iter())
+        .map(|l| format!("{l} </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n"))
+        .collect();
+    let text = r
+        .run("sh", &argv(&["-c", &script]))
+        .map(|o| o.stdout)
+        .unwrap_or_default();
+    let mut parts = text.split('\x1e');
+    let mut each = || {
+        let (o, code) = (parts.next(), parts.next());
+        o.filter(|_| code == Some("0")).map(String::from)
+    };
+    lines.iter().map(|_| each()).collect()
+}
+
 pub struct Snap<'a> {
     r: &'a dyn Runner,
     miss: Miss,
@@ -99,15 +116,9 @@ impl<'a> Snap<'a> {
             by.entry(m).or_default().push((k, line));
         }
         for (m, cmds) in by {
-            let script: String = (cmds.iter())
-                .map(|(_, l)| format!("{l} </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n"))
-                .collect();
-            let text = On::new(self.r, Some(&m)).run("sh", &argv(&["-c", &script]));
-            let text = text.map(|o| o.stdout).unwrap_or_default();
-            let mut parts = text.split('\x1e');
-            for (k, _) in cmds {
-                let (o, code) = (parts.next(), parts.next());
-                let o = o.filter(|_| code == Some("0")).map(String::from);
+            let lines: Vec<String> = cmds.iter().map(|c| c.1.clone()).collect();
+            let outs = batch(&On::new(self.r, Some(&m)), &lines);
+            for ((k, _), o) in cmds.into_iter().zip(outs) {
                 lock(&self.reads).insert(k, o);
             }
         }
