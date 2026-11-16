@@ -1,0 +1,10 @@
+Decided: the list is a second view beside the Threads tab's thread view from 1000 px, painted and streamed on its own
+Because: "The list and thread screens stay as they are"
+Because: "Scrolling, repainting or live-updating one pane never moves the other"
+Rejected: one grid in normal flow with a sticky list (the old [chat]) — it shared the document's scroll, the bug this issue fixes
+Rejected: rendering the list inside the thread screen from the server — it would change the screens and Cooee
+Decided: two-pane mode also sets data-focus, so the document never scrolls and the cards stay hidden
+Because: web/src/main.ts:37
+Check: below 1000 px duo() is false and every path is #1110's, and the 390 px webkit tests pass unchanged
+Check: duo.mjs uses the wheel over each pane, not scrollTop writes, so scroll chaining to the document would show
+Owner: on a wide window the thread list sits beside the open thread and each side scrolls on its own
