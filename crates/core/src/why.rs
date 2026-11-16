@@ -314,6 +314,25 @@ fn section(body: &str, round: u32, text: &str, head: &str) -> String {
     }
 }
 
+/// #1097: put the issue's lane notes, joined in round order, on its squash commit `sha`.
+pub fn squash(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    f: &Fleet,
+    (fleet, n): (&str, u64),
+    events: &[Event],
+    sha: &str,
+) -> Result<()> {
+    let local = f.local_path();
+    let notes: Vec<String> = (events.iter().filter(|e| e.is("why", fleet, n)))
+        .filter_map(|e| note(r, &local, e.str("sha")?))
+        .collect();
+    if notes.is_empty() {
+        return Ok(());
+    }
+    attach(ctx, r, f, fleet, (&f.integration, sha), &notes.join("\n\n"))
+}
+
 fn note(r: &dyn Runner, local: &Path, sha: &str) -> Option<String> {
     let local = local.to_string_lossy();
     ok(r, "git", &["-C", &local, "notes", "--ref", "why", "show", sha])
@@ -435,7 +454,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
             .iter()
             .find(|e| e.kind == "merged" && e.fleet == *fleet && e.str("merge_sha") == Some(m))
     };
-    let merged = since.lines().rev().find_map(by_sha);
+    let merged = by_sha(&sha).or_else(|| since.lines().rev().find_map(by_sha));
     let head = |e: &&Event| e.kind == "why" && e.fleet == *fleet && e.str("sha").is_some_and(|h| under(&sha, h));
     let issue = (merged.and_then(|e| e.issue))
         .or_else(|| {
