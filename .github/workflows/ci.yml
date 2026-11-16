@@ -85,6 +85,8 @@ jobs:
   # #957: the debug half (clippy, the test suite) beside the rust job's release half, so CI's wall time is the longer of the two.
   test:
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -100,8 +102,11 @@ jobs:
           cargo clippy --all-targets --locked -- -D warnings
           n=$(grep -rE '#!?\[allow\(' crates | wc -l)
           test "$n" -le 10 || { echo "::error::$n #[allow] attributes in crates/, at most 10"; exit 1; }
-      - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)"
-        run: cargo test --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)"
+        run: cargo nextest run --locked --no-fail-fast
       - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
         run: test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*' -print -quit)"
 
