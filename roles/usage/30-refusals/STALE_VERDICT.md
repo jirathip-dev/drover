@@ -1,0 +1,1 @@
+- STALE_VERDICT: verdicts exist, but none for the PR's current head sha

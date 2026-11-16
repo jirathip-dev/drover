@@ -1,0 +1,1 @@
+- STALE_SHA: verdict --sha is not the branch head

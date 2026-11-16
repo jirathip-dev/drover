@@ -1,0 +1,1 @@
+- SECRET_FILE_OPEN: a secret file (`<config>/secrets/<NAME>`, a `token-file:`, the webhook or provider key file) is readable by group or others; `chmod 600` it
