@@ -339,7 +339,8 @@ pub fn held(events: &[Event], fleet: &str, n: u64, g: &str) -> bool {
 pub fn holders<'a>(events: &[Event], st: &'a States, f: &Fleet, fleet: &str, g: &str) -> Vec<&'a IssueState> {
     let q = replay(events, fleet);
     let isin = |s: &IssueState| groups(&q, events, f, fleet, s.issue).iter().any(|x| x.name == g);
-    let holds = |s: &&IssueState| in_flight(&s.state) && !held(events, fleet, s.issue, g) && isin(s);
+    let holds =
+        |s: &&IssueState| in_flight(&s.state) && !held(events, fleet, s.issue, g) && !stuck(events, st, s) && isin(s);
     st.values().filter(|s| s.fleet == fleet).filter(holds).collect()
 }
 
