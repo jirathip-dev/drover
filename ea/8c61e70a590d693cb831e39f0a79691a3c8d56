@@ -1,0 +1,14 @@
+Decided: the strict comment policy's except list keeps only generated files and web/lint-fixtures; serve.rs, serve/ and web/src are checked
+Because: "arch-check's strict policy then checks **whole files**, not only the diff"
+Decided: web/lint-fixtures stays excepted: its files must hold `// @ts-ignore` and `// @ts-expect-error` for the TS lint's own tests
+Because: web/lint-fixtures/ts-ignore.ts:1
+Decided: schemes.ts became schemes.js with allowJs; it was untyped JS kept alive by a banned `// @ts-nocheck`
+Because: crates/cli/tests/schemes.rs:31
+Rejected: allowing `// @ts-nocheck` in the policy — a fourth comment kind the issue does not list
+Decided: regex `/^\//` became `/^[/]/`; the comment scanner reads `//` there as a comment
+Decided: staging merges keep staging's code, drop its new comments and strip issue numbers from its new `///` docs
+Check: web/dist/board.js differs from staging only in those regex characters
+Decided: staging build fix: two clippy errors fixed and three size baselines raised to staging's own sizes
+Because: crates/core/src/shed.rs:176
+Check: hosts.rs, shed.rs and spawn() sizes match origin/staging; this PR adds no lines there
+Owner: Old history comments are gone and the comment rule now covers every Rust and TypeScript file.
