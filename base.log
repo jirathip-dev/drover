@@ -1,0 +1,31 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1149/crates/core)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1149/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1149/crates/service)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1149/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.83s
+     Running tests/boat.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1149/debug/deps/boat-04534400bb561f38)
+
+running 1 test
+test bootstrap_runs_one_boat_ssh_on_a_new_vm_before_probe_and_reports_a_failing_one ... FAILED
+
+failures:
+
+---- bootstrap_runs_one_boat_ssh_on_a_new_vm_before_probe_and_reports_a_failing_one stdout ----
+
+thread 'bootstrap_runs_one_boat_ssh_on_a_new_vm_before_probe_and_reports_a_failing_one' (42906) panicked at crates/cli/tests/boat.rs:142:5:
+list --all --json --no-update
+new --type small --name boat1 --no-auto-stop --no-update
+list --all --json --no-update
+list --all --json --no-update
+list --all --json --no-update
+list --all --json --no-update
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    bootstrap_runs_one_boat_ssh_on_a_new_vm_before_probe_and_reports_a_failing_one
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p drover --test boat`

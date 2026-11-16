@@ -1,0 +1,17 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1149/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.58s
+     Running tests/boat.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1149/debug/deps/boat-04534400bb561f38)
+
+running 9 tests
+test doctor_flags_a_recipe_subcommand_the_boat_cli_lacks_and_an_include_of_a_known_file ... ok
+test the_rates_are_boats_and_medium_is_default ... ok
+test bootstrap_that_cannot_reach_a_host_names_the_recipe_override_in_use ... ok
+test boat_runs_on_its_own_login_with_no_key_and_doctor_finds_a_key_file ... ok
+test a_sandbox_the_default_list_omits_or_that_is_gone_is_never_acted_on_by_an_empty_id ... ok
+test bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start ... ok
+test bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address ... ok
+test the_ssh_files_are_valid_a_resume_repins_the_host_key_and_a_moved_key_is_refused ... ok
+test bootstrap_runs_one_boat_ssh_on_a_new_vm_before_probe_and_reports_a_failing_one ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
