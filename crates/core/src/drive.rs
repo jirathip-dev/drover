@@ -1563,6 +1563,19 @@ fn no_proof(
     if fast {
         return Ok(Some(Some("NO_PROOF")));
     }
+    let head = args.get(5).copied();
+    let spawned = ev
+        .iter()
+        .rposition(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
+    let before = ev.iter().take(spawned.unwrap_or_default());
+    if before
+        .filter(|e| e.is("proof-refused", fleet, n))
+        .any(|e| e.str("sha") == head)
+    {
+        let why = format!("a re-review at the same head was refused NO_PROOF too: {why}");
+        escalate(ctx, cfg, out, (fleet, n), (lane, None), "NO_PROOF", &why)?;
+        return Ok(Some(Some("NO_PROOF")));
+    }
     let role = sp.and_then(|e| e.str("role")).unwrap_or("rev");
     let (num, why) = (n.to_string(), "verdict refused NO_PROOF: re-review");
     let c = ["spawn", fleet, &num, role, "--supersede"];
