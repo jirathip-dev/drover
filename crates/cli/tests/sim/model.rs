@@ -478,7 +478,6 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             m.heads.insert(dir.into(), n);
             ok("")
         }
-        ["config", "--get", "drover.baseline"] => ok(format!("{BASELINE}\n")),
         ["status", "--porcelain", ..]
         | ["fetch" | "rev-list" | "log" | "diff" | "branch" | "ls-files" | "add" | "ls-tree" | "commit" | "push"
         | "stash" | "remote" | "config" | "replace", ..]

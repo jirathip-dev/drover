@@ -37,6 +37,11 @@ lessons = "off"
     )
 }
 
+/// #1099: `cfg` with no history baseline (the schedule-pinned runs: exact metrics and the hunt, q1779).
+pub fn unbaselined(cfg: &str) -> String {
+    cfg.replace(&format!("baseline = \"{BASELINE}\"\n"), "")
+}
+
 /// The process's view of the world's files (one per process: its `Ctx.now` is its start).
 pub fn ctx(root: &Path, now: u64) -> Ctx {
     Ctx {

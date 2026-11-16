@@ -59,6 +59,11 @@ pub fn run(seed: u64, sabotage: Option<Sabotage>) -> Outcome {
 /// Run `plan` (#688: a seed's scenario, or a hunt's mutant of one).
 pub fn run_plan(plan: &hunt::Plan, sabotage: Option<Sabotage>) -> Outcome {
     let cfg = scenario::config(plan.cfg.0, plan.cfg.1);
+    let cfg = if sabotage.is_some() {
+        scenario::unbaselined(&cfg)
+    } else {
+        cfg
+    };
     run_world(plan.seed, (plan.model(), cfg), plan.steps, sabotage)
 }
 
@@ -359,7 +364,7 @@ fn the_known_fleet_gives_exact_metrics() {
         lanes: 4,
         idle: 992,
         ci_wait: 600,
-        lock_wait: 12,
+        lock_wait: 13,
         serial: 0,
         host_busy: 0,
         caps: 0,
@@ -376,7 +381,7 @@ fn the_known_fleet_gives_exact_metrics() {
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
             ("idle_lane_min", 16.53),
-            ("lock_wait_min", 0.2),
+            ("lock_wait_min", 0.22),
             ("queue_to_merge_p50_min", 16.87),
             ("queue_to_merge_p90_min", 22.28),
             ("review_rounds_per_merge", 1.0),
