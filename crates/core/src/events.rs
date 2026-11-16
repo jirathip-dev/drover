@@ -880,6 +880,12 @@ pub(crate) fn issue_events<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<
     }
 }
 
+pub(crate) fn last_at<'a>(events: &'a [Event], kind: &str, (fleet, n): (&str, u64), ts: u64) -> Option<&'a Event> {
+    issue_events(events, fleet, n)
+        .into_iter()
+        .rfind(|e| e.kind == kind && e.ts == ts)
+}
+
 /// #971: the events of any of `kinds`, in order: the index's when `events` is a cached log, else one pass.
 pub fn of_kind<'a>(events: &'a [Event], kinds: &[&str]) -> Vec<&'a Event> {
     let Some(l) = cached(events) else {

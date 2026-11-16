@@ -1295,13 +1295,7 @@ fn pass(
         if crate::gate::ready_draft(ctx, cfg, r, out, s, &pr)? && merge(w) {
             continue;
         }
-        let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
-        let log = crate::events::working(&ctx.state)?;
-        if let Some(e) = crate::events::of_issue(&log, fleet, s.issue)
-            .into_iter()
-            .rfind(|e| now(e))
-            .cloned()
-        {
+        if let Some(e) = crate::events::last_at(&working(&ctx.state)?, "auto-updated", (fleet, s.issue), ctx.now) {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
