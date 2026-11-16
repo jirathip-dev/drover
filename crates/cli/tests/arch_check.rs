@@ -532,7 +532,7 @@ fn a_baselined_layer_crossing_passes_and_a_new_one_fails() {
 
 #[test]
 fn a_commit_building_a_promise_phrase_outside_the_promise_module_fails_this_repos_arch_check() {
-    let conf = include_str!("../../../.drover/arch.toml");
+    let conf = &repo_conf();
     let d = committed("arch-promise", conf, &[("crates/core/src/drive.rs", "fn a() {}\n")]);
     let add = |p: &str| {
         std::fs::write(d.join(p), "fn a() -> String {\n    format!(\"merging next pass\")\n}\n").unwrap();
@@ -553,7 +553,7 @@ fn a_commit_building_a_promise_phrase_outside_the_promise_module_fails_this_repo
 
 #[test]
 fn the_repos_provider_ban_fails_a_web_file_naming_a_provider() {
-    let conf = include_str!("../../../.drover/arch.toml");
+    let conf = &repo_conf();
     let d = committed("arch-ban-web", conf, &[("web/src/main.ts", "export const v = 'x';\n")]);
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
@@ -569,6 +569,14 @@ fn the_repos_provider_ban_fails_a_web_file_naming_a_provider() {
         "{out}"
     );
     assert!(out.contains("1 violations"), "{out}");
+}
+
+fn repo_conf() -> String {
+    let conf = include_str!("../../../.drover/arch.toml");
+    conf.replace(
+        "generated = [\"assets/types/api.d.ts\"]\ngenerate = \"just types\"\n",
+        "",
+    )
 }
 
 const FROZEN: &str = "frozen = [\"src/registry.rs\"]\n\n[[collect]]\ndir = \"src/features\"\nglob = \"*.rs\"\n";

@@ -69,7 +69,7 @@ pub mod webpush;
 pub mod why;
 
 use anyhow::{bail, Context, Result};
-pub use cli::{main_with, usage_doc, write_stderr, HELP_AGENT_MAX, SERVE, SERVICE};
+pub use cli::{main_with, usage_doc, write_stderr, SERVE, SERVICE};
 use config::{home, set_in, set_value, write_atomic, Config};
 use events::{emit, working, Event, Json};
 use runner::Runner;
