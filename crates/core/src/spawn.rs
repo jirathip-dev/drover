@@ -134,6 +134,8 @@ pub struct Plan {
     pub session: Option<(String, bool)>,
     /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
     pub lane_key: Option<String>,
+    /// #782: the fleet's `sandbox`; `start_cmd` runs the harness inside it.
+    pub sandbox: Option<crate::config::Sandbox>,
 }
 
 /// #979: a build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
@@ -190,7 +192,7 @@ impl Plan {
     }
 
     pub fn start_cmd(&self, ctx: &Ctx, pane: &str) -> Vec<String> {
-        providers::get(&self.harness).start_cmd(ctx, self, pane)
+        crate::sandbox::wrap(self, providers::get(&self.harness).start_cmd(ctx, self, pane))
     }
 
     pub fn kick_cmds(&self, pane: &str) -> Vec<Vec<String>> {
@@ -376,6 +378,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         title,
         session: None,
         lane_key: None,
+        sandbox: f.sandbox,
     })
 }
 
@@ -1329,6 +1332,11 @@ pub fn spawn(
         crate::proxy::ensure(ctx, cfg, base, (&pl.name, pl.machine.as_deref().unwrap_or_default()))?;
     }
     let _secrets = deliver(ctx, &on, &p)?;
+    if p.sandbox.is_some() {
+        let rules = serde_json::to_string_pretty(&crate::sandbox::settings(ctx, f, &p, on.machine.is_none()))?;
+        on.write(&crate::sandbox::file(&p), &home(vec![rules]).remove(0))?;
+        on.write(&crate::sandbox::tmp(&p).join(".keep"), "")?;
+    }
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
     let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
     if let Some(rl) = &rules {
