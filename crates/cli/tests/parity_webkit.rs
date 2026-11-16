@@ -434,3 +434,35 @@ fn parity_35_handoff_chips_flow_back_lines_and_a_pick_a_thread_tap_that_delivers
         "two taps deliver once: one handoff, one new thread, one decision"
     );
 }
+
+#[test]
+fn done_today_opens_the_list_a_row_opens_its_issue_card_and_back_returns() {
+    if no_webkit() {
+        return;
+    }
+    let t = now();
+    let (_, url) = page("done-today", |c| {
+        ev(
+            c,
+            t - 600,
+            Some(9),
+            "merged",
+            json!({"pr": "41", "merge_sha": "e".repeat(40)}),
+        );
+    });
+    let js = "const done = '.row[data-id=\"done-today-sendmeter\"]', row = '.row[data-id^=\"done-9-\"]'; \
+        await until(() => $(done)); $(done).click(); \
+        const list = await until(() => $(row)); \
+        if (list) $(row).click(); \
+        const card = await until(() => !$('#sheet').hidden && $('#sheet .sh b')?.textContent.startsWith('#9')); \
+        if (card) $('#sheet .sh button').click(); \
+        const shut = await until(() => $('#sheet').hidden && $(row)); \
+        history.back(); \
+        const back = await until(() => $(done) && !$(row)); \
+        return [+list, +card, +shut, +back];";
+    assert_eq!(
+        late(&url, "done-today-png", js),
+        [1.0, 1.0, 1.0, 1.0],
+        "the list, #9's card, the card closed over the list, back on the queue"
+    );
+}

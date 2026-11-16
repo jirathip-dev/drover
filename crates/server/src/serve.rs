@@ -2049,20 +2049,19 @@ impl<'a> Server<'a> {
             }
             rows.sort_by_key(|r| r.0);
             let need = rows.iter().filter(|r| r.0 == 0).count();
-            let mut done: Vec<&&IssueState> = mine
-                .iter()
-                .filter(|s| s.done() && now.saturating_sub(s.last_ts) < 86_400)
+            let mut done: Vec<(u64, &Event)> = (events.iter())
+                .filter(|e| e.kind == "merged" && e.fleet == *f && now.saturating_sub(e.ts) < 86_400)
+                .filter_map(|e| Some((e.issue?, e)))
                 .collect();
-            done.sort_by_key(|s| std::cmp::Reverse(s.last_ts));
-            let done_row = |s: &&&IssueState| DoneRow {
-                issue: s.issue,
-                note: crate::land::note(events, f, s.issue).unwrap_or_else(|| s.state.clone()),
-                age: age(now.saturating_sub(s.last_ts)),
-                pr: crate::events::of_issue(events, f, s.issue)
-                    .into_iter()
-                    .rfind(|e| e.kind == "merged")
-                    .and_then(|e| e.str("pr"))
-                    .map(Into::into),
+            done.sort_by_key(|d| std::cmp::Reverse(d.1.ts));
+            let done_row = |&(n, e): &(u64, &Event)| DoneRow {
+                issue: n,
+                title: titles(ctx, f, n),
+                note: crate::land::note(events, f, n).unwrap_or_else(|| "merged".into()),
+                age: age(now.saturating_sub(e.ts)),
+                t: e.ts,
+                pr: e.str("pr").map(Into::into),
+                sha: e.str("merge_sha").map(Into::into),
             };
             // #365: open issues not queued, with no lane, from the last read; serve.js draws, filters, ticks (`bqueue`) them.
             let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
@@ -2083,7 +2082,7 @@ impl<'a> Server<'a> {
                 paths: fc.serial.iter().map(|g| g.paths.join(", ")).collect(),
                 need,
                 rows: rows.into_iter().map(|r| r.1).collect(),
-                done: done.iter().take(5).map(done_row).collect(),
+                done: done.iter().map(done_row).collect(),
                 done_n: done.len(),
                 backlog,
                 config: config_sheet(ctx, cfg, f, fc, st),
