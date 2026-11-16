@@ -1,0 +1,8 @@
+Decided: bootstrap takes its drover path from hosts::real_exe, the canonical exe rehomed, so install root, version check, profiles sync and the PATH link all use the path acp_guard, health and sync run
+Because: "`bootstrap` installs at, and checks, the same path the guard, health and sync use"
+Decided: real_exe became pub(crate); no second canonicalising helper
+Because: crates/core/src/hosts.rs:1021
+Rejected: canonicalising ctx.exe once at startup — it changes every other caller of ctx.exe, beyond the issue
+Rejected: changing import's ctx.exe use — the issue names bootstrap only
+Check: the new test makes the main-host exe a symlink into share/drover/bin and asserts --root <home>/.local/share/drover, the drover check on the real path, and acp_guard's --version on that same path
+Owner: Bringing up a remote host now installs drover where the health check and the lane guard look for it, so they stop reporting it missing.
