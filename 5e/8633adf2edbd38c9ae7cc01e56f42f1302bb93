@@ -1,0 +1,6 @@
+Decided: the hunt test's random comparison window starts at seed 2014, not 1000
+Because: q1805
+Because: q1779
+Rejected: seed 2000 — it trips the planted I1 by chance on the no-baseline fleet, like 1000
+Check: cargo test -p drover --test sim: 10 passed, the hunt included
+Owner: The simulator check is green again; only the random seeds it compares against moved.
