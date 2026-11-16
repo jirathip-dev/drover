@@ -3,7 +3,7 @@ use super::{
 };
 use super::{LaneRow, LanesTab, NeedAsk, NeedIssue, QueueCard, QueueRow, JSON};
 use crate::access::{civil_month_day, civil_year};
-use crate::api::{Block, Chat};
+use crate::api::{Block, Chat, Herd, HerdFleet, HerdLane};
 use anyhow::Context;
 use serde_json::{json, Map, Value};
 use std::io::Write;
@@ -39,8 +39,9 @@ pub fn places() -> Value {
 /// #1072: the standalone page's places: the manifest's, then the Threads tab (never the Cooee plugin's).
 pub fn page_places() -> Value {
     let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
+    let herd = json!({"type": "menu-row", "label": "Herd", "subtitle": "the ranch: lanes by state, weather from host load", "screen": "/screens/herd"});
     let mut all = places().as_array().cloned().unwrap_or_default();
-    all.push(threads);
+    all.extend([threads, herd]);
     Value::Array(all)
 }
 
@@ -844,6 +845,85 @@ fn lane_row(fleet: &str, l: &LaneRow) -> Value {
         "subtitle": sub.join(" · "), "value": l.ago, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
 }
 
+const BANDS: [(&str, &[&str]); 4] = [
+    ("working", &["working"]),
+    ("idle", &["idle", "unknown", "parked"]),
+    ("done", &["done"]),
+    ("blocked", &["blocked", "dead"]),
+];
+
+fn band(id: &str, name: &str, rows: &[Value]) -> Option<Value> {
+    (!rows.is_empty()).then(|| {
+        json!({"type": "section", "id": format!("h-{id}-{name}"), "header": format!("{name} ({})", rows.len()),
+            "blocks": [{"type": "list", "id": format!("h-{id}-{name}-list"), "rows": rows}]})
+    })
+}
+
+fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>) -> Option<Value> {
+    let needs = f.map(|f| f.needs.as_slice()).unwrap_or_default();
+    let lanes: Vec<&HerdLane> = lanes.iter().filter(|l| !l.gone).collect();
+    let mut sum = vec![];
+    let gate: Vec<Value> = (f.map(|f| f.queue.as_slice()).unwrap_or_default().iter())
+        .filter(|q| !lanes.iter().any(|l| l.issue == Some(q.issue)))
+        .map(|q| {
+            let need = needs.contains(&q.issue);
+            let blocked = q.blocked_by.map(|b| format!("blocked by #{b}"));
+            let sub = need.then(|| "needs you".to_string()).or(blocked).or_else(|| q.title.clone());
+            json!({"type": "row", "id": format!("h-{name}-q{}", q.issue), "figure": {"state": if need { "needs" } else { "idle" }},
+                "title": format!("#{}", q.issue), "subtitle": sub.unwrap_or_default()})
+        })
+        .collect();
+    sum.push((gate.len(), "queued"));
+    let mut blocks: Vec<Value> = band(name, "queued", &gate).into_iter().collect();
+    for (b, states) in BANDS {
+        let rows: Vec<Value> = (lanes.iter())
+            .filter(|l| {
+                let need = l.issue.is_some_and(|i| needs.contains(&i));
+                if need { b == "blocked" } else { states.contains(&l.state.as_str()) }
+            })
+            .map(|l| {
+                let need = l.issue.is_some_and(|i| needs.contains(&i));
+                let shown = if need { "needs you" } else { l.shown.as_str() };
+                let sub: Vec<&str> = [shown, l.host.as_deref().unwrap_or_default()].into_iter().filter(|s| !s.is_empty()).collect();
+                json!({"type": "row", "id": format!("h-{}", l.name), "figure": lane_figure(&l.name, if need { "blocked" } else { &l.state }),
+                    "title": l.name, "subtitle": sub.join(" · "), "value": l.age, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
+            })
+            .collect();
+        sum.push((rows.len(), b));
+        blocks.extend(band(name, b, &rows));
+    }
+    let sum: Vec<String> = sum
+        .iter()
+        .filter(|s| s.0 > 0)
+        .map(|(n, w)| format!("{n} {w}"))
+        .collect();
+    (f.is_some() || !lanes.is_empty())
+        .then(|| json!({"id": name, "title": name, "color": color, "subtitle": sum.join(" · "), "blocks": blocks}))
+}
+
+fn herd_screen(h: &Herd) -> Value {
+    let mut repos: Vec<Value> = (h.fleets.iter())
+        .filter_map(|f| herd_repo(&f.name, &f.color, &f.lanes, Some(f)))
+        .collect();
+    repos.extend(herd_repo("others", "", &h.others, None));
+    let host = &h.host;
+    let wind = (host.load.unwrap_or_default() / host.limit.max(0.01)).clamp(0.0, 1.0);
+    let sky = match host.pressure.as_deref() {
+        _ if host.gate.is_some() => "storm",
+        Some("warn" | "critical") => "fog",
+        _ if wind >= 0.5 => "windy",
+        _ => "clear",
+    };
+    let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
+    let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
+    let line = format!(
+        "load {load} · mem {} · swap {swap}",
+        host.pressure.as_deref().unwrap_or("?")
+    );
+    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene",
+        "weather": {"sky": sky, "wind": (wind * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
+}
+
 fn section_word(state: &str) -> &str {
     match state {
         "blocked" => "waiting",
@@ -1067,6 +1147,7 @@ impl Server<'_> {
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx),
             "/screens/workflow" => workflow(ctx),
+            "/screens/herd" => herd_screen(&self.herd(ctx, None).ok()?),
             "/screens/hot" => self.on_row(ctx, q, |_, f, r| {
                 let rows: Vec<Value> = (hot(r).iter().enumerate())
                     .map(|(i, p)| json!({"type": "row", "id": format!("hot-{i}"), "title": p}))

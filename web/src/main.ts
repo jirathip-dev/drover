@@ -2,6 +2,7 @@
 // header-strip place is a tab, the menu-row places open from [⚙], the chat-cards place is the cards above every tab.
 // A screen is fetched, drawn block by block, patched by its `stream`, and its blocks post `/action`. No per-tab code.
 import { type Act, type Ctx, el, kids, render, values } from './blocks';
+import './herd';
 import { apply, type Blk } from './ops';
 import { R, colours, esc, get, put, schemes, theme, themes } from './theme';
 
