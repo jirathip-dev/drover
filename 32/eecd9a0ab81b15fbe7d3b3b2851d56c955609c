@@ -1,0 +1,7 @@
+Decided: a new optional recipe verb `ready`, run by cloud::start once a freshly made VM says running, before refresh and bootstrap's probe.
+Because: "or as its own `ready` step that bootstrap runs before `probe`"
+Because: crates/core/src/cloud.rs:177
+Rejected: appending `boat ssh` to `create` — it would run before `status` says running, and its failure would read as a failed create.
+Rejected: running `ready` on every start — the issue is only a new VM; a resumed one already accepts the key.
+Check: crates/cli/tests/boat.rs bootstrap_runs_one_boat_ssh_on_a_new_vm_before_probe_and_reports_a_failing_one fails at base (no boat ssh call).
+Owner: a brand-new boat VM now gets one boat ssh first, so bootstrap reaches it on its first run.
