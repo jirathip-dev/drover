@@ -1,0 +1,7 @@
+Decided: a remote shed that does not answer is a `✗ shed` health row with the thaw-and-restart fix, so it takes no lanes
+Because: "flags a shed service that does not answer as `✗ shed` with that fix"
+Decided: snapshot logs cloud-snapshot first, then checks shed, restarts once, re-checks; a second failure is its error
+Because: "a second failure is the snapshot's error, naming the host"
+Rejected: changing shed::line's generic error arm — it also feeds the local doctor row, where a systemd restart may not apply (macOS)
+Check: SHED_RESTART thaws user@UID.service and shed.service then restarts; not yet run on a boat VM (spend, owner call)
+Owner: please try the restart line on a boat VM after a snapshot; I could not start one from a lane
