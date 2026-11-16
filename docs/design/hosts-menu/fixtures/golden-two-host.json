@@ -1,0 +1,38 @@
+{
+  "type": "sheet",
+  "id": "hosts",
+  "title": "Hosts",
+  "cancel": "close",
+  "stream": "/screens/hosts/stream",
+  "blocks": [
+    {
+      "type": "section",
+      "id": "hosts",
+      "footer": "Off: no new lanes go there; its live lanes finish and it is still watched. The main host stays on.",
+      "blocks": [
+        {
+          "type": "list",
+          "id": "hosts-list",
+          "rows": [
+            {
+              "type": "row", "id": "host-main", "title": "main",
+              "badge": {"text": "on", "tone": "ok"}, "subtitle": "main", "value": "1 lane",
+              "swipe": [
+                {"label": "reap", "tone": "bad", "action": "reap", "values": {"host": "main"},
+                 "confirm": {"title": "Reap leftovers on main?", "message": "Processes still running in closed lanes' worktrees get TERM, then KILL. Live lanes are not touched.", "ok": "reap"}}
+              ]
+            },
+            {
+              "type": "row", "id": "host-boat-1", "title": "boat-1",
+              "badge": {"text": "on", "tone": "ok"}, "subtitle": "cloud", "value": "0 lanes",
+              "swipe": [
+                {"label": "off", "tone": "bad", "action": "host", "values": {"host": "boat-1", "to": "off"},
+                 "confirm": {"title": "Turn boat-1 off?", "message": "No new lanes go to boat-1; it has no live lanes.", "ok": "turn off"}}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

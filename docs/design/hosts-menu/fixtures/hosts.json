@@ -1,0 +1,46 @@
+{
+  "type": "sheet",
+  "id": "hosts",
+  "title": "Hosts",
+  "cancel": "close",
+  "stream": "/screens/hosts/stream",
+  "blocks": [
+    {
+      "type": "section",
+      "id": "hosts",
+      "footer": "Off: no new lanes go there; its live lanes finish and it is still watched. The main host stays on.",
+      "blocks": [
+        {
+          "type": "list",
+          "id": "hosts-list",
+          "rows": [
+            {
+              "type": "row", "id": "host-mini", "title": "mini",
+              "badge": {"text": "on", "tone": "ok"}, "subtitle": "main", "value": "3 lanes",
+              "swipe": [
+                {"label": "reap", "tone": "bad", "action": "reap", "values": {"host": "mini"},
+                 "confirm": {"title": "Reap leftovers on mini?", "message": "Processes still running in closed lanes' worktrees get TERM, then KILL. Live lanes are not touched.", "ok": "reap"}}
+              ]
+            },
+            {
+              "type": "row", "id": "host-air", "title": "air",
+              "badge": {"text": "off"}, "subtitle": "no new lanes", "value": "0 lanes",
+              "swipe": [
+                {"label": "on", "action": "host", "values": {"host": "air", "to": "on"},
+                 "confirm": {"title": "Turn air on?", "message": "New lanes may go to air again.", "ok": "turn on"}}
+              ]
+            },
+            {
+              "type": "row", "id": "host-boat-1", "title": "boat-1",
+              "badge": {"text": "on", "tone": "ok"}, "subtitle": "cloud", "value": "2 lanes",
+              "swipe": [
+                {"label": "off", "tone": "bad", "action": "host", "values": {"host": "boat-1", "to": "off"},
+                 "confirm": {"title": "Turn boat-1 off?", "message": "No new lanes go to boat-1; its 2 live lanes finish there.", "ok": "turn off"}}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
