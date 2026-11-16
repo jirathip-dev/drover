@@ -183,6 +183,22 @@ fn reverdict_on_same_sha_is_one_round() {
 }
 
 #[test]
+fn a_fleet_set_to_merge_keeps_its_commits_and_branch() {
+    let cfg = CONFIG.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nmerge = \"merge\"",
+    );
+    let (_d, c) = setup("merge-mode", &cfg, &[("PASS", HEAD)]);
+    let r = pr("staging", &green());
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    assert!(r.called(&format!(
+        "gh pr merge 34 -R jirathip-dev/sendmeter --merge --match-head-commit {HEAD}"
+    )));
+    assert!(!r.called("git -C /tmp/does-not-matter/sendmeter notes"));
+}
+
+#[test]
 fn refuses_main_as_integration_target() {
     let cfg = CONFIG.replace("integration = \"staging\"", "integration = \"main\"");
     let (_d, c) = setup("main-cfg", &cfg, &[("PASS", HEAD)]);
@@ -208,7 +224,7 @@ fn merges_with_exact_head_pass_and_green_ci() {
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     assert!(r.called(&format!(
-        "gh pr merge 34 -R jirathip-dev/sendmeter --merge --match-head-commit {HEAD}"
+        "gh pr merge 34 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {HEAD}"
     )));
     assert!(r.called("gh issue comment 12 -R jirathip-dev/sendmeter --body Merged via `drover merge`"));
     assert!(
@@ -630,7 +646,7 @@ fn merge_message_copies_the_human_summary_and_the_facts_line() {
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     let want = format!(
-        "gh pr merge 34 -R jirathip-dev/sendmeter --merge --match-head-commit {HEAD} --subject Board shows the host (#34) --body The board's Host tab now shows memory.\nNothing else changes.\n\nCloses #12 · 2 review rounds · src +12 · PASS 1111111"
+        "gh pr merge 34 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {HEAD} --subject Board shows the host (#34) --body The board's Host tab now shows memory.\nNothing else changes.\n\nCloses #12 · 2 review rounds · src +12 · PASS 1111111"
     );
     assert!(r.calls.borrow().contains(&want), "{:#?}", r.calls.borrow());
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "no-human-summary"));
@@ -649,7 +665,7 @@ fn merge_without_a_human_summary_gives_the_facts_line_only() {
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     let want = format!(
-        "gh pr merge 34 -R jirathip-dev/sendmeter --merge --match-head-commit {HEAD} --subject Trim the cap (#34) --body Closes #12 · 1 review round · src -8 · PASS 1111111"
+        "gh pr merge 34 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {HEAD} --subject Trim the cap (#34) --body Closes #12 · 1 review round · src -8 · PASS 1111111"
     );
     assert!(r.calls.borrow().contains(&want), "{:#?}", r.calls.borrow());
     assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "no-human-summary"));

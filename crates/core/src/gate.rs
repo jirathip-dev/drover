@@ -828,21 +828,12 @@ pub fn merge(
     let res = match res {
         Ok(head) => match unjoined(ctx, r, f, (fleet, issue), (&num, &head))?
             .iter()
-            .find_map(|(g, p)| {
-                if f.serial.iter().any(|c| c.name == g.name) {
-                    return Some((
-                        "SERIAL_UNMARKED",
-                        format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
-                    ));
-                }
-                let st = fold(&events);
-                let h = crate::queue::holders(&events, &st, f, fleet, &g.name);
-                (h.len() >= g.max).then(|| {
-                    (
-                        "SERIAL_BUSY",
-                        format!("{}; retry after they merge", crate::queue::holds(g, &h)),
-                    )
-                })
+            .find(|(g, _)| f.serial.iter().any(|c| c.name == g.name))
+            .map(|(g, p)| {
+                (
+                    "SERIAL_UNMARKED",
+                    format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
+                )
             }) {
             Some((code, why)) => Err(refuse(code, why)),
             None if unverified(&events, (fleet, issue), &head) => Err(refuse(
@@ -902,14 +893,10 @@ pub fn merge(
         )?;
     }
     let m = [
-        "--merge",
-        "--match-head-commit",
-        &head,
-        "--subject",
-        &subject,
-        "--body",
-        &body,
-    ];
+        f.merge.flags(),
+        &["--match-head-commit", &head, "--subject", &subject, "--body", &body],
+    ]
+    .concat();
     let inputs = json!({"pr": num, "head": head, "over": over, "fast": fast});
     let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
     let at = (fleet, issue, "merge", head.as_str());
@@ -965,6 +952,11 @@ fn merged(
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
     let log = working(&ctx.state)?;
+    if f.merge == crate::config::MergeMode::Squash {
+        if let Err(e) = crate::why::squash(ctx, r, f, (fleet, issue), &log, &merge_sha) {
+            writeln!(out, "why note not on {merge_sha:.7}: {e:#}")?;
+        }
+    }
     let why = log.iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(

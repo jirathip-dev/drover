@@ -270,7 +270,7 @@ fn pass_and_green_ci_merges() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["merge"], "{out}");
     assert!(r.called(&format!(
-        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+        "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));
     assert_eq!(state(&c), "merged");
     idle(&c, &r);
@@ -1591,7 +1591,7 @@ fn a_pass_recorded_with_green_ci_merges_in_the_same_pass() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["verdict", "merge"], "{out}");
     assert!(r.called(&format!(
-        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+        "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));
     assert_eq!(state(&c), "merged");
 }
