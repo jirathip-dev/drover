@@ -457,8 +457,9 @@ fn done_today_opens_the_list_a_row_opens_its_issue_card_and_back_returns() {
         const card = await until(() => !$('#sheet').hidden && $('#sheet .sh b')?.textContent.startsWith('#9')); \
         if (card) $('#sheet .sh button').click(); \
         const shut = await until(() => $('#sheet').hidden && $(row)); \
-        history.back(); \
-        const back = await until(() => $(done) && !$(row)); \
+        const bk = $$('main button').find(b => b.textContent.includes('back')); \
+        if (bk) bk.click(); \
+        const back = await until(() => location.hash === '#queue' && $(done) && !$(row)); \
         return [+list, +card, +shut, +back];";
     assert_eq!(
         late(&url, "done-today-png", js),

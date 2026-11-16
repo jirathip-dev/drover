@@ -353,7 +353,7 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q) -> Value {
     ];
     let mut end = vec![
         json!({"type": "row", "id": format!("done-today-{f}"), "title": "done today", "value": c.done.len().to_string(),
-            "accessory": "chevron", "tap": {"open": format!("/screens/done?repo={f}")}}),
+            "accessory": "chevron", "tap": {"open": format!("/screens/queue/done?repo={f}")}}),
     ];
     if let Some(b) = &c.backlog {
         end.push(
@@ -1199,7 +1199,7 @@ impl Server<'_> {
                 let tab = self.queue_tab(ctx);
                 backlog(ctx.now, tab.fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?, q)?
             }
-            "/screens/done" => done_screen(self.queue_tab(ctx).fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?),
+            "/screens/queue/done" => done_screen(self.queue_tab(ctx).fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?),
             "/screens/ask" => ask_sheet(ctx, q)?,
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
                 return self.threads_screen(ctx, &p[16..], q.get("before"), paired)

@@ -296,7 +296,7 @@ fn done_today_opens_todays_merged_events_and_a_row_opens_its_issue_card() {
         v
     };
     let row = find(&get("/screens/queue"), "done-today-sendmeter").clone();
-    assert_eq!(row["tap"], json!({"open": "/screens/done?repo=sendmeter"}));
+    assert_eq!(row["tap"], json!({"open": "/screens/queue/done?repo=sendmeter"}));
     let d = get(row["tap"]["open"].as_str().unwrap());
     assert_eq!(d["type"], "screen");
     let rows = find(&d, "done-list")["rows"].as_array().unwrap().clone();
