@@ -105,7 +105,8 @@ async function load(v: View, quiet = false) {
   if (!v.model || !quiet) paint(v);
   const slow = setTimeout(() => ($('#ld').hidden = false), 300);
   try {
-    const m = await fetchScreen(v.path), before = v.model;
+    const p = v.path, m = await fetchScreen(p), before = v.model;
+    if (v.path !== p) return;
     [v.model, v.at] = [m, Date.now()];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: m }));
     paint(v, before);

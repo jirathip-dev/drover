@@ -1,5 +1,5 @@
 // #1084: the Threads composer in Playwright's WebKit on a real serve: node drafts.mjs <url> <cookie name=value>.
-// Types into thread t2 at 400 px down, pushes 5 stream ops and a 30 s tick (fake clock), reloads, fails one send (500)
+// Types into thread t2 at 400 px down (a message card mid-screen is the anchor that must not move), pushes 5 stream ops and a 30 s tick (fake clock), reloads, fails one send (500)
 // and retries it, then sends. Prints one JSON object of what the page showed at each step.
 import { createRequire } from 'node:module';
 
@@ -44,14 +44,16 @@ try {
   await page.evaluate(() => {
     const i = document.querySelector('.form.say input');
     i.setSelectionRange(4, 6);
-    window.kept = { i, y: scrollY, gone: 0 };
+    const a = document.elementFromPoint(195, 422).closest('.card');
+    window.kept = { i, y: scrollY, gone: 0, anchor: a.dataset.id, top: a.getBoundingClientRect().top };
     new MutationObserver(rs => { for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
   });
-  out.before = { ...(await box()), y: await page.evaluate(() => kept.y) };
+  out.before = { ...(await box()), top: await page.evaluate(() => kept.top) };
   typed();
   await until(() => document.querySelectorAll('[data-id^="m-x"]').length === 5, 'the 5 stream updates');
+  const y = await page.evaluate(() => scrollY);
   await page.clock.runFor(30_000);
-  out.after = { ...(await box()), y: await page.evaluate(() => scrollY), same: await page.evaluate(() => document.querySelector('.form.say input') === kept.i && kept.i.isConnected), gone: await page.evaluate(() => kept.gone) };
+  out.after = { ...(await box()), tick: [y, await page.evaluate(() => scrollY)], top: await page.evaluate(() => document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top), same: await page.evaluate(() => document.querySelector('.form.say input') === kept.i && kept.i.isConnected), gone: await page.evaluate(() => kept.gone) };
 
   await page.reload();
   await open();

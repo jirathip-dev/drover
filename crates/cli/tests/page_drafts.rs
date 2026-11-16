@@ -53,14 +53,15 @@ fn typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_rel
     assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
     let typed = json!({"value": "half a thought", "focus": true, "caret": [4, 6], "draft": "half a thought"});
     let before = &out["before"];
-    assert!(before["y"].as_f64().unwrap() >= 400.0, "{out}");
     let after = &out["after"];
     for k in ["value", "focus", "caret", "draft"] {
         assert_eq!(after[k], typed[k], "5 stream ops and a 30 s tick kept {k}: {out}");
     }
+    let moved = (after["top"].as_f64().unwrap() - before["top"].as_f64().unwrap()).abs();
+    assert!(moved <= 1.0, "#65: a live update never moves what is on screen: {out}");
     assert_eq!(
-        after["y"], before["y"],
-        "#65: a live update never moves the scroll: {out}"
+        after["tick"][0], after["tick"][1],
+        "the 30 s repaint keeps the scroll: {out}"
     );
     assert_eq!(
         (&after["same"], &after["gone"]),
