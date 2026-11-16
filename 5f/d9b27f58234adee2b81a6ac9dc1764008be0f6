@@ -1,0 +1,12 @@
+Decided: [hygiene] and [fleet.<n>.hygiene] with one fallback chain fleet, global, default; "off" or docs_trust = [] opts out
+Because: "A `[hygiene]` set that is **on by default** for every fleet (opt out per key under `[fleet.<f>.hygiene]`)"
+Decided: hygiene.merge is the convention; #1097's [fleet.<n>] merge is what drover does, and doctor flags them apart
+Because: crates/core/src/doctor.rs:50
+Rejected: one merge key — the fleet key drives gh pr merge, hygiene is the cross-fleet convention doctor audits
+Rejected: a ✗ row for drift — doctor's exit code feeds drover setup, a convention gap is no broken host
+Decided: lane worktrees get a per-worktree no-cone sparse checkout excluding each docs_trust path
+Because: crates/core/src/spawn.rs:1220
+Decided: the sim hunt's planted bug fires at a lane's third start; at the fourth the extra spawn call pushed it to round 371
+Because: crates/cli/tests/sim/model.rs:179
+Check: setup <repo>, labels, triage and the cooee/berth PRs are not here; the triage lane and label set do not exist yet
+Owner: Every fleet now follows one history convention by default; doctor shows it and flags drift, and lanes no longer see archived docs.
