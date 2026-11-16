@@ -1,0 +1,6 @@
+Decided: merged origin/staging (#1087, #1120, #809 and later) into the branch, keeping staging's `.put` style and the sheet's ask_choice split in screens.rs
+Because: "A row tap **always** opens the issue sheet."
+Decided: #809's lints fixed in this PR's own lines: the row's state read uses `get`, the sheet's back button pops without a non-null assertion
+Because: crates/server/src/screens.rs:161
+Rejected: none
+Owner: The branch is up to date with staging again; nothing changes for users beyond this PR.
