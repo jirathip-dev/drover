@@ -128,4 +128,5 @@ flowchart TD
     other -.- k_slo_api_minutes(["slo_api_minutes = 10"])
     other -.- k_slo_idle_minutes(["slo_idle_minutes = 20"])
     other -.- k_slo_tick_minutes(["slo_tick_minutes = 10"])
+    other -.- k_slo_pass_minutes(["slo_pass_minutes = 30"])
 ```

@@ -179,6 +179,7 @@ spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or
 # slo_api_minutes = 10
 # slo_idle_minutes = 20   # #855: no lane working this long with spawnable work queued: `slo-idle`, a heal, then `stuck`
 # slo_tick_minutes = 10   # #855: a tick running longer: `slo-tick`; the next fast step stops it, then `stuck` if it lives
+# slo_pass_minutes = 30  # #1183: no slow drive pass of a fleet this long: the `Drive is stuck` card and one push
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin

@@ -945,3 +945,15 @@ fn two_fleets_passes_at_once_never_admit_a_spawn_past_the_host_limit() {
     assert_eq!(held.len(), 1, "one start slot of two: {held:?} {out}");
     assert!(out.contains("REFUSED SPAWN_PENDING"), "{out}");
 }
+
+#[test]
+fn one_free_slot_goes_to_the_fix_round_and_over_the_load_limit_neither_spawns() {
+    let (c, _sh) = fleet("kicks-fix-first", 1, 1);
+    fix_due(&c, 21);
+    let busy = fake("40.0");
+    let d = pass(&c, &busy);
+    assert_eq!((launched(&busy, 21), launched(&busy, 1)), (0, 0), "{d}");
+    let r = fake("1.0");
+    let d = pass(&c, &r);
+    assert_eq!((launched(&r, 21), launched(&r, 1)), (1, 0), "{d}");
+}
