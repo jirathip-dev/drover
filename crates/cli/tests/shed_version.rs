@@ -167,3 +167,32 @@ fn a_shed_version_refusal_alerts_once_per_state_not_a_line_per_pass() {
     assert_eq!(kinds(&c, "shed-version-ok").len(), 1);
     assert_eq!(kinds(&c, "shed-version").len(), 1);
 }
+
+#[test]
+fn a_live_socket_beside_a_failed_shed_unit_shows_the_server_outside_its_service() {
+    let b = FakeShed::new();
+    let c = ctx(
+        &tmpdir("shedv-outside"),
+        &b.config(&format!("{FLEET}\n[hosts.far]\nmachine = \"far\"\n")),
+    );
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C \
+               -oControlPersist=10m far -- ";
+    let hello = serde_json::json!(Response::ok(
+        serde_json::json!(0),
+        serde_json::json!(drover::shed::proto::Hello::ours())
+    ));
+    let ls = serde_json::json!(Response::ok(serde_json::json!(1), serde_json::json!([])));
+    let f = Fake::default()
+        .reply(&format!("{ssh}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\n")
+        .reply(&format!("{ssh}'shed' 'connect'"), &format!("{hello}\n{ls}\n"))
+        .reply(
+            &format!("{ssh}'systemctl' '--user' 'show'"),
+            "LoadState=loaded\nActiveState=failed\n",
+        );
+    let (_, out) = run(&c, &f, &["doctor"]);
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("✗ host far shed — server outside its service") && l.contains(" → ")),
+        "{out}"
+    );
+}
