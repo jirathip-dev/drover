@@ -1,0 +1,6 @@
+Decided: merged origin/staging; #1084's drafts, focus graft and retry toast keep their behaviour, written through the typed block helpers
+Because: "no `any` (explicit or implicit), no non-null `!`, no `as` casts except `as const`"
+Decided: sent() reads `dataset.draft ?? ''` and paint tests `body.some(e => e === tp[0])` instead of a `!` and an `as Element[]`
+Rejected: taking staging's blocks.ts and main.ts as they are — the #809 lint refuses their `!` and `as`
+Check: npm run check, lint and build exit 0; url_links, serve_web and page_drafts pass (page_drafts runs for real in CI's ui-webkit job)
+Owner: the branch now has #1084's draft-keeping, written to the new TypeScript rules
