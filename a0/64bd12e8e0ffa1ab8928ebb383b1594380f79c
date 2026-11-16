@@ -1,0 +1,9 @@
+Decided: merged origin/staging; screens.rs and main.ts keep both sides' imports (Herd types and './herd' beside staging's Json, blks, isBlk, nodes)
+Because: crates/server/src/screens.rs:6
+Decided: herd.ts reads the scene block through staging's strict Blk helpers (blks, obj) and draws the swag svg with nodes() like el() now does
+Because: web/src/herd.ts:20
+Decided: the scene cache fetch returns its svg directly, so herd.ts has no non-null `!` for staging's ts-lint
+Because: web/src/herd.ts:7
+Rejected: hand-merging web/dist — it is rebuilt from the merged src with npm run build
+Check: npm run check, lint and build exit 0; --test herd passes 7/7; ui-webkit runs the herd test at a064bd12
+Owner: The Herd branch is caught up with staging again; the scene works the same, only its code follows the page's new stricter types.
