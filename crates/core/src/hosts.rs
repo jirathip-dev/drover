@@ -770,19 +770,26 @@ pub fn lane_dirs(events: &[Event], machine: Option<&str>) -> BTreeMap<PathBuf, S
         let (Some(agent), Some(wt)) = (sp.str("agent"), sp.str("worktree").map(PathBuf::from)) else {
             continue;
         };
-        let b = sp
-            .str("root")
-            .map(PathBuf::from)
-            .or_else(|| wt.ancestors().nth(2).map(Path::to_path_buf));
-        let b = b.map(|r| r.join(crate::roots::BUILD));
-        let build = b
-            .iter()
-            .flat_map(|b| [b.join(agent), b.join(crate::spawn::SCRATCH).join(agent)]);
-        for d in build.chain([wt]) {
+        for d in build_dirs(sp).into_iter().chain([wt]) {
             dirs.insert(d, agent.to_string());
         }
     }
     dirs
+}
+
+/// #536: lane `sp`'s build and scratch folders under its root's `.build`.
+pub fn build_dirs(sp: &Event) -> Vec<PathBuf> {
+    let (Some(agent), Some(wt)) = (sp.str("agent"), sp.str("worktree").map(Path::new)) else {
+        return vec![];
+    };
+    let root = sp
+        .str("root")
+        .map(PathBuf::from)
+        .or_else(|| wt.ancestors().nth(2).map(Path::to_path_buf));
+    let b = root.map(|r| r.join(crate::roots::BUILD));
+    b.iter()
+        .flat_map(|b| [b.join(agent), b.join(crate::spawn::SCRATCH).join(agent)])
+        .collect()
 }
 
 /// #416: the host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim`.
@@ -1021,7 +1028,7 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
     None
 }
 
-fn real_exe(ctx: &Ctx, home: &str) -> String {
+pub(crate) fn real_exe(ctx: &Ctx, home: &str) -> String {
     let exe = std::fs::canonicalize(&ctx.exe).map_or(ctx.exe.clone(), |p| p.to_string_lossy().into());
     rehome(vec![exe], Some(home)).remove(0)
 }
