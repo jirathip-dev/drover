@@ -941,7 +941,7 @@ const NO_BROAD_KILL: &str = "drover: REFUSED NO_BROAD_KILL: lanes stop only thei
                              echo $! > f', stop with kill \"$(cat f)\"";
 
 #[test]
-fn broad_kills_are_denied_and_pid_kills_allowed() {
+fn parity_r8_broad_kills_are_denied_and_pid_kills_allowed() {
     for cmd in [
         "pkill -f x -n",
         "/usr/bin/pkill x",
@@ -1178,7 +1178,7 @@ fn pre_bash(cmd: &str) -> Value {
 }
 
 #[test]
-fn a_lane_hook_fails_closed() {
+fn parity_r13_a_lane_hook_fails_closed() {
     let d = tmpdir("hook-closed");
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
     let lane = [("DROVER_LANE", Some("sendmeter:7:impl"))];
