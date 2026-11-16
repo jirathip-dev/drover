@@ -616,7 +616,7 @@ export type HostRoot = { path: string, state: string, free_gb?: number | null, }
  */
 export type HostRow = { ts: number, host: string, load_cpu?: number | null, pressure?: number | null, swap_out?: number | null, mem_free_gb?: number | null, disk_free_gb?: number | null, lanes: number, 
 /**
- * #352: MB per `host::groups` group, only while `/live?tab=host` was seen in the last 2 min (else no `ps` walk).
+ * #352: MB per `host::groups` group, only while `/screens/hosts/stream` was open in the last 2 min (else no `ps` walk).
  */
 procs?: [number, number, number, number, number] | null, };
 
