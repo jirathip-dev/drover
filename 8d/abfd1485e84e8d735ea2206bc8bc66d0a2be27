@@ -1,0 +1,9 @@
+Decided: in a thread the loading/last-update strip floats over the top of the messages, so it showing or hiding never moves the message box or the card on screen
+Because: "Opens at the end; follows new messages while at the end; no jump on repaint."
+Rejected: reserving the strip's height in a thread at all times — a blank band on a phone while nothing loads
+Decided: the older WebKit test scrolls 200 px up from the end and taps the marker; it used to scroll to the top first, which already loads the older 30 by itself (parity_29), so its tap loaded a second page (71 cards)
+Because: crates/cli/tests/threads_tab.rs:377
+Rejected: fixing parity_2 here — it is #[ignore] "red until #1084" on the events tab, a soft CI step, red on other branches; this PR does not touch the non-thread repaint
+Because: crates/cli/tests/parity_webkit.rs:122
+Check: CI ui-webkit at a7ddbaa: threads_tab webkit 4/4 and page_drafts pass; parity_webkit 9 pass, parity_2 red only in the soft --ignored step
+Owner: The thread view no longer shifts when the "loading" or "last update" note appears, and loading older messages loads one page per tap.
