@@ -1,0 +1,9 @@
+Decided: the docs pass files its one `docs:` issue through `drover triage docs <fleet> --findings <file>`; an empty findings file files nothing
+Because: "files **one** `docs:` issue listing each stale, contradicting or bloated passage"
+Decided: the lane judges the findings (one `file:line: what: proof` line each); drover only files them, refuses ALREADY_FILED for a second one from the same lane, and puts a missing README non-goals section first
+Because: "triage judges what is too long, duplicated or obsolete"
+Rejected: a mechanical removed-flag or contradiction detector in code — the owner made it the lane's judgment, with no new per-PR checks
+Decided: the prompts name the scope and forbid editing docs or proposing a change to the README's intent section
+Because: "it never proposes changes to that section in the `docs:` issue"
+Check: the docs fixture test drives the real CLI verb against a fake gh: removed flag and non-goal findings give one issue with both, a clean file gives none
+Owner: Each weekly triage run now also lists stale or contradicting docs in one issue for a normal lane to fix, and files nothing when the docs are clean.
