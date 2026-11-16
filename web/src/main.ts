@@ -1,7 +1,8 @@
 // #927: the phone page draws the screens cooee draws (cooee-plugin.toml's places, `PL` from the page shell): each
 // header-strip place is a tab, the menu-row places open from [⚙], the chat-cards place is the cards above every tab.
 // A screen is fetched, drawn block by block, patched by its `stream`, and its blocks post `/action`. No per-tab code.
-import { type Act, type Ctx, el, kids, render, sent, values } from './blocks';
+import { type Act, type Ctx, el, kids, morph, render, sent, values } from './blocks';
+import './herd';
 import { apply, type Blk, blks, isBlk, isList, obj } from './ops';
 import { R, colours, esc, get, nodes, put, schemes, theme, themes } from './theme';
 
@@ -26,12 +27,16 @@ const route = (h = location.hash.slice(1) || (get('tab') ?? '')): [Tab, string] 
 };
 const at = route();
 let cur = at?.[0] ?? tabs[0];
+const th = tabs.find(x => x.id === 'threads'), lst = th ? view(th.screen, el('section', 'lst')) : null, wide = matchMedia('(min-width:1000px)');
+const duo = () => !!lst && wide.matches && cur === th;
 
 const dot = $('#dot'), stale = $('#stale');
 function sync() {
   const v = cur.v, live = !!v.live && navigator.onLine;
   dot.className = demo ? 'demo' : live ? 'g' : navigator.onLine ? 'a' : 'r';
-  H.toggleAttribute('data-focus', !!v.model && !isList(v.model) && !!v.model.focus);
+  H.toggleAttribute('data-focus', duo() || (!!v.model && !isList(v.model) && !!v.model.focus));
+  H.toggleAttribute('data-duo', duo());
+  if (duo()) fit();
   const t = v.at ? new Date(v.at) : null, hm = t && t.toTimeString().slice(0, 5), old = t ? Date.now() - t.getTime() : 0;
   stale.hidden = !t || (live && old < 120_000);
   if (t) stale.textContent = `last update ${hm}${old > 60_000 ? ` · ${Math.round(old / 60_000)}m ago` : ''}`;
@@ -76,40 +81,19 @@ function land(sc: HTMLElement | null, s: Spot | null) {
 const seen = new WeakMap<HTMLElement, Spot | null>();
 const docked = new ResizeObserver(es => es.forEach(({ target: t }) => { if (t instanceof HTMLElement && t.isConnected) land(t, seen.get(t) ?? null); }));
 const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr > .msgs');
-const path = (e: Element, top: Element | null) => {
-  const p: Element[] = [];
-  for (let x: Element | null = e; x && x !== top; x = x.parentElement) p.unshift(x);
-  return p;
-};
-function graft(root: Element, body: Element[], mine: Element[], twin: Element[]) {
-  let [box, fresh] = [root, body];
-  mine.forEach((m, i) => {
-    const at = fresh.indexOf(twin[i]);
-    [...box.childNodes].forEach(n => { if (n !== m) n.remove(); });
-    m.before(...fresh.slice(0, at));
-    m.after(...fresh.slice(at + 1));
-    if (i < mine.length - 1) m.className = twin[i].className;
-    [box, fresh] = [m, [...twin[i].children]];
-  });
-}
 function paint(v: View, before?: Blk | null) {
-  const m = v.model, y = scrollY, f = document.activeElement;
+  const m = v.model, y = scrollY;
   if (!m) return;
   const focus = !isList(m) && !!m.focus, was = scroller(v), place = focus && was?.parentElement?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
   const c = ctx(v, isList(m) ? 'cards' : String(m.id));
   const body = isList(m) ? kids(m, c) : [render(m, c)].filter((e): e is HTMLElement => !!e);
-  if (v.back.length && body[0]) {
+  if (v.back.length && body[0] && !(duo() && v === th?.v)) {
     const b = el('button', '', '<span>‹ back</span>');
     b.type = 'button';
     b.onclick = () => { if (v === cur.v) history.back(); else { const p = v.back.pop(); if (p != null) go(v, p, false); } };
     (body[0].querySelector(':scope > .msgs') ?? body[0]).prepend(b);
   }
-  const keep = f && v.root.contains(f) && f.matches('input, select') ? f.closest('[data-id]') : null;
-  const sel = keep && `[data-id="${CSS.escape(keep.getAttribute('data-id') ?? '')}"]`;
-  const twin = sel ? body.map(e => (e.matches(sel) ? e : e.querySelector(sel))).find(e => !!e) : null;
-  const [mp, tp] = keep && twin ? [path(keep, v.root), path(twin, null)] : [[], []];
-  if (mp.length && mp.length === tp.length && body.some(e => e === tp[0]) && mp[0].getAttribute('data-id') === tp[0].getAttribute('data-id')) graft(v.root, body, mp, tp);
-  else v.root.replaceChildren(...body);
+  morph(v.root, body);
   if (scrollY !== y) scrollTo(0, y);
   if (before) {
     const was = rows(before);
@@ -132,21 +116,39 @@ function paint(v: View, before?: Blk | null) {
     }
   }
   badges();
+  mark();
+}
+function mark() {
+  const id = th ? /^\/([^/?]+)/.exec(th.v.path.slice(th.screen.length))?.[1] : '';
+  lst?.root.querySelectorAll<HTMLElement>('.row[data-id]').forEach(r => r.toggleAttribute('aria-current', r.dataset.id === id));
+}
+function blank(v: View) {
+  const b = el('button', '', '<span>new thread</span>'), s = el('div', 'scr', '<p class=m>no thread open</p>');
+  b.type = 'button';
+  b.onclick = () => go(v, `${v.path}/new/all`);
+  s.dataset.id = 'none';
+  s.append(b);
+  close(v);
+  v.model = null;
+  v.root.replaceChildren(s);
+  sync();
+  mark();
 }
 function badges() {
   tabs.forEach(t => {
-    const n = t.v.model && !isList(t.v.model) ? t.v.model.badge : null;
+    const m = t === th && duo() ? lst?.model : t.v.model, n = m && !isList(m) ? m.badge : null;
     t.a.replaceChildren(...nodes(`<span>${esc(t.label?.toLowerCase())}${n ? `<b class=n>·${n}</b>` : ''}</span>`));
   });
 }
 
 async function load(v: View, quiet = false) {
+  if (duo() && v === th?.v && v.path === th.screen) return blank(v);
   const c = cached(v.path);
   if (!v.model && c) [v.model, v.at, v.live] = [c.v, c.t, false];
   if (!v.model || !quiet) paint(v);
   const slow = setTimeout(() => ($('#ld').hidden = false), 300);
   try {
-    const p = v.path, m = await fetchScreen(p), before = v.model;
+    const p = v.path, m = await fetchScreen(p), before = v.model === c?.v ? null : v.model;
     if (v.path !== p) return;
     [v.model, v.at] = [m, Date.now()];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: m }));
@@ -195,6 +197,7 @@ function go(v: View, path: string, push = true) {
 
 function show(t: Tab, path = t.v.path) {
   if (cur !== t) close(cur.v);
+  if (lst) close(lst);
   if (path !== t.v.path) {
     close(t.v);
     [t.v.path, t.v.model, t.v.back] = [path, null, path === t.screen ? [] : [t.screen]];
@@ -204,6 +207,8 @@ function show(t: Tab, path = t.v.path) {
   if (location.hash !== hashOf(t, t.v.path)) history.replaceState(null, '', hashOf(t, t.v.path));
   tabs.forEach(x => { x.a.classList.toggle('on', x === t); x.v.root.hidden = x !== t; });
   H.dataset.tab = t.id;
+  if (lst) lst.root.hidden = !duo();
+  if (lst && duo()) load(lst, !!lst.model);
   load(t.v, !!t.v.model);
   scrollTo(0, 0);
 }
@@ -402,6 +407,7 @@ async function alerts() {
 
 function redraw() {
   tabs.forEach(t => paint(t.v));
+  if (lst) paint(lst);
   if (cards) paint(cards);
 }
 function reload() {
@@ -418,6 +424,11 @@ for (const t of tabs) {
   t.v.root.addEventListener('redraw', () => paint(t.v));
 }
 cards?.root.addEventListener('redraw', () => cards && paint(cards));
+if (lst && th) {
+  main.insertBefore(lst.root, th.v.root);
+  lst.root.addEventListener('redraw', () => paint(lst));
+  wide.addEventListener('change', () => show(cur));
+}
 shv.root.addEventListener('redraw', drawSheet);
 // #1086: a thread's messages scroll between the bar and the composer, which sits on the keyboard (or the tab bar).
 function fit() {
@@ -455,9 +466,10 @@ function press(k: HTMLElement) {
   const pick = (label: string, f: () => void) => { const b = el('button', '', `<span>${esc(label)}</span>`); b.type = 'button'; b.onclick = () => { closeSheet(); f(); }; return b; };
   $('#sheet .sh').replaceChildren(el('b', '', 'message'), pick('close', () => {}));
   const quote = () => {
-    const i = cur.v.root.querySelector<HTMLInputElement>('.form.say input');
+    const i = cur.v.root.querySelector<HTMLTextAreaElement>('.cmp textarea');
     if (!i) return;
     i.value = `> ${plain.replace(/\s+/g, ' ').trim()}\n${i.value}`;
+    i.dispatchEvent(new Event('input'));
     i.focus();
   };
   const bar = el('div', 'bar');
@@ -494,7 +506,7 @@ const slide = (dx: number, ease = false) => {
 };
 addEventListener('touchstart', e => {
   const t = e.touches.item(0), x = e.target instanceof Element ? e.target : null;
-  swipe = t && e.touches.length === 1 && t.clientX < 20 && cur.v.back.length && sh.hidden && !x?.closest('#iv, .imgs, pre') ? { x: t.clientX, y: t.clientY, dx: 0 } : null;
+  swipe = t && e.touches.length === 1 && t.clientX < 20 && cur.v.back.length && sh.hidden && !duo() && !x?.closest('#iv, .imgs, pre') ? { x: t.clientX, y: t.clientY, dx: 0 } : null;
 }, { passive: true });
 addEventListener('touchmove', e => {
   const t = e.touches.item(0);
@@ -513,8 +525,11 @@ const release = (e: TouchEvent) => {
 addEventListener('touchend', release, { passive: true });
 addEventListener('touchcancel', release, { passive: true });
 addEventListener('hashchange', () => slide(0));
-setInterval(() => { if (!document.hidden) { paint(cur.v); sync(); } }, 30_000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && !cur.v.live) load(cur.v, true); });
+setInterval(() => { if (!document.hidden) { paint(cur.v); if (lst && duo()) paint(lst); sync(); } }, 30_000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && !cur.v.live) load(cur.v, true);
+  if (!document.hidden && lst && duo() && !lst.live) load(lst, true);
+});
 colours();
 theme(H.dataset.theme ?? 'farm').then(redraw);
 if (cards) load(cards);

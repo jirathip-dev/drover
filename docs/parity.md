@@ -37,12 +37,12 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 18 | Message blocks: colours, markdown, system lines, folded tool runs | parity_18 | kept |
 | 19 | Fenced code blocks with a copy button | parity_19 | kept |
 | 20 | Several attachments per message, thumbnails, image viewer (#406) | parity_20 | kept |
-| 21 | Instant send: sending…/✓, red retry on failure | — | open #1087 |
-| 22 | Growing composer, pinned send, smart follow-scroll | — | open #1087 |
+| 21 | Instant send: sending…/✓, red retry on failure | parity_21 | page-only |
+| 22 | Growing composer, pinned send, smart follow-scroll | — | open |
 | 23 | iOS keyboard: composer sits on keyboard, page never jumps | parity_r4 | kept |
-| 24 | Back button and edge swipe (#1170); side-by-side layout ≥1000 px (#403): open #1118 | parity_24 | kept |
-| 25 | Working pill with timer and [stop]; reconnecting/offline states | — | open #1087 |
-| 26 | Queue or steer during a turn; edit or remove queued | — | open #1087 |
+| 24 | Back button and edge swipe (#1170); side-by-side layout ≥1000 px (#403, #1118) | parity_24 | kept |
+| 25 | Working pill with timer and [stop]; reconnecting/offline states | — | open |
+| 26 | Queue or steer during a turn; edit or remove queued | parity_26 | page-only |
 | 27 | Per-thread drafts, picked files included | — | open #1084 |
 | 28 | Long-press menu: copy, copy as markdown, quote | parity_28 | kept |
 | 29 | Sticky thread header; last 30 messages, older on scroll (#408) | parity_29 | kept |
@@ -50,7 +50,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 31 | Conductor-answered asks keep [change] for 30 min | parity_32 | kept |
 | 32 | Config-proposal card: diff, apply/discard, stale, waiting bar | parity_32 | kept |
 | 33 | Secret request card with masked input | parity_32 | kept |
-| 34 | Harness pick at thread start; model/effort chip in composer | — | open #1087 |
+| 34 | Harness pick at thread start; model/effort chip in composer | parity_34 | page-only |
 | 35 | Handoff chips, flow-back lines, pick-a-thread choice row | — | open |
 | 36 | One repo at a time: chips, swipe, needs dot, [all] | — | open #1089 |
 | 37 | Fleet cards in their colour; paused folds; needs-you first | parity_37 | kept |

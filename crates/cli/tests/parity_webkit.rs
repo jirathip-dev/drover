@@ -159,10 +159,10 @@ fn parity_24_opening_a_thread_pushes_history_and_back_returns_to_the_list() {
     let js = "location.hash = '#threads'; \
         await until(() => $('.row[data-id^=\"t\"]')); \
         const h0 = history.length; $('.row[data-id^=\"t\"]').click(); \
-        await until(() => $('.form.say')); \
+        await until(() => $('.cmp')); \
         const pushed = +(history.length > h0); \
         if (pushed) history.back(); \
-        const back = pushed && await until(() => $('.row[data-id^=\"t\"]') && !$('.form.say')); \
+        const back = pushed && await until(() => $('.row[data-id^=\"t\"]') && !$('.cmp')); \
         return [pushed, +back];";
     assert_eq!(
         late(&url, "parity-24-png", js),
@@ -214,11 +214,11 @@ fn parity_r4_in_a_thread_only_the_messages_scroll_and_the_composer_sits_at_the_b
     let (_, url) = page("parity-r4", |c| thread(c, 40, &json!([])));
     let js = "location.hash = '#threads'; \
         await until(() => $('.row[data-id^=\"t\"]')); $('.row[data-id^=\"t\"]').click(); \
-        await until(() => $('.form.say')); await w(300); \
+        await until(() => $('.cmp')); await w(300); \
         const se = document.scrollingElement, page = +(se.scrollHeight > se.clientHeight + 1); \
         const msg = $('[data-id^=\"m-\"]'); let box = msg && msg.parentElement; \
         while (box && !(box.scrollHeight > box.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement; \
-        const say = $('.form.say').getBoundingClientRect(); \
+        const say = $('.cmp').getBoundingClientRect(); \
         return [page, +!!box, +(say.bottom <= innerHeight + 1 && say.bottom >= innerHeight - 120)];";
     assert_eq!(
         late(&url, "parity-r4-png", js),
@@ -235,7 +235,7 @@ fn parity_29_a_long_thread_shows_its_last_30_and_older_ones_load_on_scroll() {
     let (_, url) = page("parity-29", |c| thread(c, 40, &json!([])));
     let js = "location.hash = '#threads'; \
         await until(() => $('.row[data-id^=\"t\"]')); $('.row[data-id^=\"t\"]').click(); \
-        await until(() => $('.form.say')); await w(300); \
+        await until(() => $('.cmp')); await w(300); \
         const msgs = () => $$('[data-id^=\"m-\"]:not([data-id$=\"-t\"])').length; \
         const n0 = msgs(); \
         let box = $('[data-id^=\"m-\"]').parentElement; \
@@ -265,7 +265,7 @@ fn parity_20_a_tapped_image_opens_fitted_in_the_viewer() {
     });
     let js = "location.hash = '#threads'; \
         await until(() => $('.row[data-id^=\"t\"]')); $('.row[data-id^=\"t\"]').click(); \
-        await until(() => $('.form.say')); \
+        await until(() => $('.cmp')); \
         const img = await until(() => $('main img')) && $('main img'); \
         if (img) img.click(); \
         const big = () => $$('img').some(i => i !== img && i.getBoundingClientRect().width >= innerWidth * 0.9 && i.naturalWidth > 0); \
@@ -290,7 +290,7 @@ fn coded(name: &str) -> String {
 
 const OPEN: &str = "location.hash = '#threads'; \
     await until(() => $('.row[data-id^=\"t\"]')); $('.row[data-id^=\"t\"]').click(); \
-    await until(() => $('.form.say')); await w(300); \
+    await until(() => $('.cmp')); await w(300); \
     const card = $$('.card.k-orch').pop(), copied = []; \
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: t => (copied.push(t), Promise.resolve()) } });";
 
@@ -338,7 +338,7 @@ fn parity_28_a_long_press_offers_copy_copy_as_markdown_and_quote() {
         const pick = l => [...$$('#sheet button')].find(b => b.textContent === l); \
         press(); const labels = ['copy', 'copy as markdown', 'quote'].map(l => +!!pick(l)); \
         pick('copy as markdown').click(); await w(100); press(); pick('quote').click(); \
-        return [...labels, +(copied[0] === {want}), +$('.form.say input').value.startsWith('> See t2'), +$('#sheet').hidden];"
+        return [...labels, +(copied[0] === {want}), +$('.cmp textarea').value.startsWith('> See t2'), +$('#sheet').hidden];"
     );
     assert_eq!(
         late(&coded("parity-28"), "parity-28-png", &js),

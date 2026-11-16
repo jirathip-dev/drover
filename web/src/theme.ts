@@ -8,7 +8,13 @@ const NS = 'http://www.w3.org/2000/svg';
 const H = document.documentElement;
 export const R = new URL('.', document.baseURI).href;
 export const get = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
-export const put = (k: string, v: string | null) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch {} };
+const set = (k: string, v: string | null) => (v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v));
+/** Stores `v` under `k` (null removes it); a full storage drops the cached screens first, so a draft is never lost. */
+export const put = (k: string, v: string | null) => {
+  try { set(k, v); } catch {
+    try { Object.keys(localStorage).forEach(x => { if (x.startsWith('scr:') && x !== k) localStorage.removeItem(x); }); set(k, v); } catch {}
+  }
+};
 
 export let T: Blk = {};
 const defs = document.createElementNS(NS, 'svg');

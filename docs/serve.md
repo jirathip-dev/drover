@@ -122,8 +122,11 @@ you` / `At the gate: …`; terminal sends none and keeps today's titles. A theme
 [[notify]]
 type = "webpush"
 sub = "mailto:you@example.com"   # the VAPID `sub` claim; required
-# on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, needs-human, ask-waiting, answer-undelivered, state-write-failed
+# on = [...]   # default: every alert emitted as a push (blocked, stall, lane-dead, merged, needs-human, ask-waiting, …)
 ```
+
+#1147: with no `on`, a phone gets each event logged with `"push": true` (set where the alert is born,
+`Event::push`) and the kinds pushed before the flag (`crates/core/src/events/push.rs`, frozen: it only shrinks).
 
 It works per fleet too (`[[fleet.<name>.notify]]`), next to any command notifier, which is
 unchanged. Each event is encrypted per device (RFC 8291 aes128gcm), signed with an ES256 VAPID
@@ -302,6 +305,12 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   for an Others agent), a Send line and the transcript (`/api/v1/lane/<agent>`'s blocks as text and row blocks). Each
   action runs the board's `act` (the CLI verb, `confirm`ed) or `send`, logged `act`/`prompt` with `device: cooee`. The
   Host tab is not ported (#926): `drover doctor` and `GET /api/v1/host` remain;
+- #1092: `GET /screens/herd`, the page's Herd (page-only, [⚙] → Herd; cooee draws its own scene): one `scene` block
+  with `weather` (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `line`)
+  and `repos`, each a fleet (then `others`) with its queued issues at the gate and its lanes in bands (working, idle,
+  done, blocked) as rows with figures. The page draws the theme's `scene.svg` (the pinned swag pack; a `<config
+  dir>/themes/<name>/scene.svg` overrides it; farm and terminal, with none, get a drawn ranch), [‹] [›] switch repo
+  and [☾] switches night;
 - `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
   `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;

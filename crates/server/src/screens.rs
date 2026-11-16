@@ -3,7 +3,7 @@ use super::{
 };
 use super::{LaneRow, LanesTab, NeedAsk, NeedIssue, QueueCard, QueueRow, JSON};
 use crate::access::{civil_month_day, civil_year};
-use crate::api::{Block, Chat};
+use crate::api::{Block, Chat, Herd, HerdFleet, HerdLane};
 use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Map, Value};
@@ -40,23 +40,29 @@ pub fn places() -> Value {
 /// #1072: the standalone page's places: the manifest's, then the Threads tab (never the Cooee plugin's).
 pub fn page_places() -> Value {
     let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
+    let herd = json!({"type": "menu-row", "label": "Herd", "subtitle": "the ranch: lanes by state, weather from host load", "screen": "/screens/herd"});
     let mut all = places().as_array().cloned().unwrap_or_default();
-    all.push(threads);
+    all.extend([threads, herd]);
     Value::Array(all)
 }
 
-const THREAD_ACTIONS: [&str; 8] = [
+const THREAD_ACTIONS: [&str; 13] = [
     "thread-new",
     "thread-say",
     "thread-retry",
     "thread-archive",
     "thread-restore",
+    "thread-queue",
+    "thread-steer",
+    "thread-unqueue",
+    "thread-stop",
+    "thread-model",
     "thread-secret",
     "thread-config",
     "thread-signin",
 ];
 
-fn iso(t: u64) -> String {
+pub(super) fn iso(t: u64) -> String {
     let (d, s) = (t / 86_400, t % 86_400);
     let (m, day) = civil_month_day(d);
     format!(
@@ -860,6 +866,85 @@ fn lane_row(fleet: &str, l: &LaneRow) -> Value {
         "subtitle": sub.join(" · "), "value": l.ago, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
 }
 
+const BANDS: [(&str, &[&str]); 4] = [
+    ("working", &["working"]),
+    ("idle", &["idle", "unknown", "parked"]),
+    ("done", &["done"]),
+    ("blocked", &["blocked", "dead"]),
+];
+
+fn band(id: &str, name: &str, rows: &[Value]) -> Option<Value> {
+    (!rows.is_empty()).then(|| {
+        json!({"type": "section", "id": format!("h-{id}-{name}"), "header": format!("{name} ({})", rows.len()),
+            "blocks": [{"type": "list", "id": format!("h-{id}-{name}-list"), "rows": rows}]})
+    })
+}
+
+fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>) -> Option<Value> {
+    let needs = f.map(|f| f.needs.as_slice()).unwrap_or_default();
+    let lanes: Vec<&HerdLane> = lanes.iter().filter(|l| !l.gone).collect();
+    let mut sum = vec![];
+    let gate: Vec<Value> = (f.map(|f| f.queue.as_slice()).unwrap_or_default().iter())
+        .filter(|q| !lanes.iter().any(|l| l.issue == Some(q.issue)))
+        .map(|q| {
+            let need = needs.contains(&q.issue);
+            let blocked = q.blocked_by.map(|b| format!("blocked by #{b}"));
+            let sub = need.then(|| "needs you".to_string()).or(blocked).or_else(|| q.title.clone());
+            json!({"type": "row", "id": format!("h-{name}-q{}", q.issue), "figure": {"state": if need { "needs" } else { "idle" }},
+                "title": format!("#{}", q.issue), "subtitle": sub.unwrap_or_default()})
+        })
+        .collect();
+    sum.push((gate.len(), "queued"));
+    let mut blocks: Vec<Value> = band(name, "queued", &gate).into_iter().collect();
+    for (b, states) in BANDS {
+        let rows: Vec<Value> = (lanes.iter())
+            .filter(|l| {
+                let need = l.issue.is_some_and(|i| needs.contains(&i));
+                if need { b == "blocked" } else { states.contains(&l.state.as_str()) }
+            })
+            .map(|l| {
+                let need = l.issue.is_some_and(|i| needs.contains(&i));
+                let shown = if need { "needs you" } else { l.shown.as_str() };
+                let sub: Vec<&str> = [shown, l.host.as_deref().unwrap_or_default()].into_iter().filter(|s| !s.is_empty()).collect();
+                json!({"type": "row", "id": format!("h-{}", l.name), "figure": lane_figure(&l.name, if need { "blocked" } else { &l.state }),
+                    "title": l.name, "subtitle": sub.join(" · "), "value": l.age, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
+            })
+            .collect();
+        sum.push((rows.len(), b));
+        blocks.extend(band(name, b, &rows));
+    }
+    let sum: Vec<String> = sum
+        .iter()
+        .filter(|s| s.0 > 0)
+        .map(|(n, w)| format!("{n} {w}"))
+        .collect();
+    (f.is_some() || !lanes.is_empty())
+        .then(|| json!({"id": name, "title": name, "color": color, "subtitle": sum.join(" · "), "blocks": blocks}))
+}
+
+fn herd_screen(h: &Herd) -> Value {
+    let mut repos: Vec<Value> = (h.fleets.iter())
+        .filter_map(|f| herd_repo(&f.name, &f.color, &f.lanes, Some(f)))
+        .collect();
+    repos.extend(herd_repo("others", "", &h.others, None));
+    let host = &h.host;
+    let wind = (host.load.unwrap_or_default() / host.limit.max(0.01)).clamp(0.0, 1.0);
+    let sky = match host.pressure.as_deref() {
+        _ if host.gate.is_some() => "storm",
+        Some("warn" | "critical") => "fog",
+        _ if wind >= 0.5 => "windy",
+        _ => "clear",
+    };
+    let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
+    let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
+    let line = format!(
+        "load {load} · mem {} · swap {swap}",
+        host.pressure.as_deref().unwrap_or("?")
+    );
+    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene",
+        "weather": {"sky": sky, "wind": (wind * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
+}
+
 fn section_word(state: &str) -> &str {
     match state {
         "blocked" => "waiting",
@@ -1083,6 +1168,7 @@ impl Server<'_> {
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx),
             "/screens/workflow" => workflow(ctx),
+            "/screens/herd" => herd_screen(&self.herd(ctx, None).ok()?),
             "/screens/hot" => self.on_row(ctx, q, |_, f, r| {
                 let rows: Vec<Value> = (hot(r).iter().enumerate())
                     .map(|(i, p)| json!({"type": "row", "id": format!("hot-{i}"), "title": p}))
@@ -1300,7 +1386,9 @@ impl Server<'_> {
             ("POST", "/action") if self.addr.is_none() => line("405 Method Not Allowed", "read-only: GET only"),
             ("POST", "/action") if !plugin && auth.is_err() => line("401 Unauthorized", "pair this device first"),
             ("POST", "/action") => {
-                let a: Value = serde_json::from_str(body).unwrap_or_default();
+                let Ok(a) = serde_json::from_str::<Value>(body) else {
+                    return line("400 Bad Request", "bad request body");
+                };
                 let name = a.at("action").as_str().unwrap_or_default();
                 if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name)) {
                     let why =
@@ -1448,16 +1536,13 @@ impl Server<'_> {
             "thread-config" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
             "thread-signin" => crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("name"), "web")?,
             n if THREAD_ACTIONS.contains(&n) => {
-                let kv = [
-                    ("t", s("thread")),
-                    ("text", s("text")),
-                    ("repo", s("repo")),
-                    ("n", s("msg")),
-                    ("name", s("name")),
-                    ("act", s("act")),
-                    ("value", s("text")),
-                ];
-                let mut f: Q = kv.into_iter().map(|(k, v)| (k.into(), v)).collect();
+                let keys = ["text", "repo", "name", "act", "data", "q", "harness", "model", "effort"];
+                let mut f: Q = keys.into_iter().map(|k| (k.into(), s(k))).collect();
+                f.extend([
+                    ("t".into(), s("thread")),
+                    ("n".into(), s("msg")),
+                    ("value".into(), s("text")),
+                ]);
                 f.insert("op".into(), n[7..].into());
                 let mut later = vec![];
                 let (res, more) = crate::conductor::deferred(|| super::chat::post(ctx, &self.r, &f, &mut later));

@@ -426,8 +426,9 @@ pub fn skipped(
         for g in &gs {
             let h = holders(events, st, f, fleet, &g.name);
             if h.len() >= g.max {
-                let who = holds(g, &h).split_off(g.name.len() + 2);
-                return Some((format!("skip {code}"), format!("waiting for a {} slot ({who})", g.name)));
+                let who: Vec<u64> = h.iter().map(|s| s.issue).collect();
+                let held = format!("serial: {} held by {} ({}/{})", g.name, hashes(&who), h.len(), g.max);
+                return Some((format!("skip {code}"), held));
             }
         }
         let g = &gs.first()?.name;

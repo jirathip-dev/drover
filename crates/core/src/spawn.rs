@@ -731,7 +731,7 @@ pub fn own_files() -> impl Iterator<Item = &'static str> {
 }
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
-pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
+pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/", "shots/"];
 
 /// #646: a drover-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
 pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
@@ -928,6 +928,20 @@ pub struct Opts {
     pub update: bool,
 }
 
+fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygiene) -> Result<()> {
+    let verify = argv(&["-C", local, "rev-parse", "--verify", "--quiet", &p.branch]);
+    let have = r.run("git", &verify)?.code == 0;
+    ok(r, "git", &worktree_add(local, p, have))?;
+    let deny = h.docs_trust.clone().unwrap_or_default();
+    if !deny.is_empty() {
+        let pats = deny.iter().map(|d| format!("!/{}", d.trim_start_matches('/')));
+        let wt = p.worktree.to_string_lossy();
+        let set = ["-C", &wt, "sparse-checkout", "set", "--no-cone", "/*"].map(String::from);
+        ok(r, "git", &[set.to_vec(), pats.collect()].concat())?;
+    }
+    Ok(())
+}
+
 pub fn spawn(
     ctx: &Ctx,
     cfg: &Config,
@@ -945,7 +959,8 @@ pub fn spawn(
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
     let ev = working(&ctx.state)?;
-    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), o.host.as_deref())?;
+    let host = o.host.clone().or_else(|| crate::starts::admitted(ctx, fleet, issue));
+    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
         return refused("RUNTIME_DOWN", why);
     }
@@ -998,7 +1013,7 @@ pub fn spawn(
     let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
     if o.dry_run {
         pj.put("dry_run", json!(true));
-        print_plan(out, &pj, o.json)?;
+        print_plan(out, &pj, o.json, placed.as_ref())?;
         return Ok(true);
     }
     if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
@@ -1047,7 +1062,12 @@ pub fn spawn(
         let after = |i: usize| {
             (events.iter().skip(i + 1)).any(|e| e.is("verdict", fleet, issue) || e.is("spawn", fleet, issue))
         };
-        matches!(a.status(), Some(Status::Done | Status::Idle)) && sp.is_some_and(after)
+        let judged = |i: usize| {
+            let at = events.get(i).and_then(|e| e.str("stage"));
+            (events.iter().skip(i + 1)).any(|e| e.is("verdict", fleet, issue) && e.str("stage") == at)
+        };
+        let ended = matches!(a.status(), Some(Status::Done | Status::Idle));
+        sp.is_some_and(|i| ended && after(i) || f.family(role) == "rev" && judged(i))
     };
     if !stale && !live.is_empty() {
         let st = live.first().and_then(|l| l.status()).map_or("unknown", Status::word);
@@ -1206,14 +1226,7 @@ pub fn spawn(
         }
         let make = || -> Result<()> {
             if !reopen {
-                let have = r
-                    .run(
-                        "git",
-                        &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
-                    )?
-                    .code
-                    == 0;
-                ok(r, "git", &worktree_add(&local, &p, have))?;
+                add_worktree(r, &local, &p, &cfg.hygiene(fleet))?;
             }
             Ok(())
         };
@@ -1364,6 +1377,7 @@ pub fn spawn(
         term::ok(r, &home(p.lane_cmd(&pane)))?;
         term::ok(r, &term::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
     }
+    crate::starts::started(ctx, fleet, issue);
     let mut dirs: Vec<String> = f.clone_build.clone();
     dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
     dirs.sort();
@@ -1418,7 +1432,7 @@ pub fn spawn(
             event("spawn", d)?;
             kicked?;
             pj.put("pane", json!(pane)).put("confirmed", json!(confirmed));
-            print_plan(out, &pj, o.json)?;
+            print_plan(out, &pj, o.json, placed.as_ref())?;
             Ok(confirmed)
         })();
         (res, c.join().ok())
@@ -1766,7 +1780,12 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
     Ok(any)
 }
 
-fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool) -> Result<()> {
+fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool, placed: Option<&crate::hosts::Placed>) -> Result<()> {
+    let mut v = pj.clone();
+    if let Some(pl) = placed {
+        v.put("host", json!(pl.name)).put("why", json!(pl.why));
+    }
+    let pj = &v;
     if as_json {
         writeln!(out, "{}", serde_json::to_string_pretty(pj)?)?;
     } else {
@@ -1775,6 +1794,10 @@ fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool) -> Result<()> {
             "{} [{} {}] {} @ {}",
             pj["agent"], pj["harness"], pj["profile"], pj["branch"], pj["worktree"]
         )?;
+        if let Some(h) = pj["host"].as_str() {
+            let why = pj["why"].as_str().map_or(String::new(), |w| format!(": {w}"));
+            writeln!(out, "  on {h}{why}")?;
+        }
         for c in pj["commands"].as_array().into_iter().flatten() {
             let words: Vec<&str> = c.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             writeln!(out, "  $ {}", words.join(" "))?;
