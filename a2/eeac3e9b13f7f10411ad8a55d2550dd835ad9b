@@ -1,0 +1,5 @@
+Decided: merged origin/staging again; ci.yml keeps staging's repaint.mjs trigger with herd.rs, main.ts keeps morph and './herd'
+Because: web/src/main.ts:5
+Rejected: none
+Check: npm check/lint/build and the herd test exit 0 at a2eeac3e
+Owner: The Herd branch is caught up with staging again; nothing about the scene changed.
