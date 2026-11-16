@@ -18,7 +18,13 @@ pub const PARKED: &[(u64, &str)] = &[
 ];
 
 /// #688: plans a hunt found (`Plan::text`, as its failure printed it), each joining with its fix like a seed.
-pub const PLANS: &[(&str, &str)] = &[];
+pub const PLANS: &[(&str, &str)] = &[(
+    "seed=84628020866114 cfg=2,2 steps=3817 | +13 T 300 check | +23 T 60 drive --fast | +200 T 300 drive | +956 R queue drover add 106 | +1231 R queue drover add 103 | +1421 R queue drover add 101 | +1622 R queue drover add 105 | +2018 R queue drover add 104 | +2864 R queue drover add 102 | +3601 R queue drover block --on 101 102",
+    "hunt: I9 churn: drover-rev-103-r1 spawned 4 times within an hour, nothing new in between (#1178)",
+), (
+    "seed=84628020866114 cfg=2,2 steps=3817 | +13 T 300 check | +23 T 60 drive --fast | +200 T 300 drive | +956 R queue drover add 106 | +1231 R queue drover add 103 | +1421 R queue drover add 101 | +1622 R queue drover add 105 | +2018 R queue drover add 104 | +2864 R queue drover add 102 | +3601 R queue drover block --on 101 102 | impl P 300 1 1 | rev V 600 0 0 0 | rev V 600 0 0 0 | rev V 600 0 0 0 | rev V 600 0 0 0 | rev V 600 0 0 0 | rev V 600 0 0 0",
+    "#1178: the same fleet, every reviewer writing a FAIL without Proof and ignoring the refusal: re-reviewed once, then needs-human",
+)];
 
 /// Seeds 2–24: random fleets (`scenario::random`).
 pub const FIXED: &[(u64, &str)] = &[
