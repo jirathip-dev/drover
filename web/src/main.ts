@@ -172,7 +172,9 @@ function stream(v: View) {
 }
 const close = (v: View) => { v.es?.close(); v.es = undefined; v.live = false; };
 
+const ys = new Map<string, number>();
 function go(v: View, path: string, push = true) {
+  ys.set(v.path, scrollY);
   if (push) v.back.push(v.path);
   if (push && v === cur.v) history.pushState(null, '', hashOf(cur, path));
   const s = spot(scroller(v));
@@ -180,6 +182,7 @@ function go(v: View, path: string, push = true) {
   close(v);
   [v.path, v.model] = [path, null];
   load(v);
+  if (!push && v === cur.v) scrollTo(0, ys.get(path) ?? 0);
 }
 
 function show(t: Tab, path = t.v.path) {
@@ -476,10 +479,32 @@ addEventListener('hashchange', () => {
   else t.v.back.push(t.v.path);
   go(t.v, p, false);
 });
-let edge = -1;
 const app = matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && navigator.standalone === true);
-if (app) addEventListener('touchstart', e => { edge = e.touches[0].clientX < 24 ? e.touches[0].clientX : -1; }, { passive: true });
-addEventListener('touchend', e => { if (edge >= 0 && e.changedTouches[0].clientX - edge > 80 && cur.v.back.length && sh.hidden) history.back(); edge = -1; }, { passive: true });
+let swipe: { x: number; y: number; dx: number } | null = null;
+const slide = (dx: number, ease = false) => {
+  for (const k of cur.v.root.children) if (k instanceof HTMLElement) Object.assign(k.style, { transition: ease ? 'transform .2s ease-out' : '', transform: dx ? `translateX(${dx}px)` : '' });
+};
+addEventListener('touchstart', e => {
+  const t = e.touches.item(0), x = e.target instanceof Element ? e.target : null;
+  swipe = t && e.touches.length === 1 && t.clientX < 20 && cur.v.back.length && sh.hidden && !x?.closest('#iv, .imgs, pre') ? { x: t.clientX, y: t.clientY, dx: 0 } : null;
+}, { passive: true });
+addEventListener('touchmove', e => {
+  const t = e.touches.item(0);
+  if (!swipe || !t) return;
+  const dx = t.clientX - swipe.x;
+  if (!swipe.dx && Math.abs(t.clientY - swipe.y) > Math.abs(dx)) return void (swipe = null);
+  swipe.dx = Math.max(0, dx);
+  slide(swipe.dx);
+}, { passive: true });
+const release = (e: TouchEvent) => {
+  const s = swipe;
+  swipe = null;
+  if (s && e.type === 'touchend' && s.dx > innerWidth * 0.4) history.back();
+  else if (s?.dx) slide(0, true);
+};
+addEventListener('touchend', release, { passive: true });
+addEventListener('touchcancel', release, { passive: true });
+addEventListener('hashchange', () => slide(0));
 setInterval(() => { if (!document.hidden) { paint(cur.v); sync(); } }, 30_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && !cur.v.live) load(cur.v, true); });
 colours();

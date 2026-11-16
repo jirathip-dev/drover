@@ -40,7 +40,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 21 | Instant send: sending…/✓, red retry on failure | — | open #1087 |
 | 22 | Growing composer, pinned send, smart follow-scroll | — | open #1087 |
 | 23 | iOS keyboard: composer sits on keyboard, page never jumps | parity_r4 | kept |
-| 24 | Back button and edge swipe; side-by-side layout ≥1000 px (#403) | parity_24 | open |
+| 24 | Back button and edge swipe (#1170); side-by-side layout ≥1000 px (#403): open #1118 | parity_24 | kept |
 | 25 | Working pill with timer and [stop]; reconnecting/offline states | — | open #1087 |
 | 26 | Queue or steer during a turn; edit or remove queued | — | open #1087 |
 | 27 | Per-thread drafts, picked files included | — | open #1084 |
