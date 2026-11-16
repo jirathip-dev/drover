@@ -154,28 +154,45 @@ fn install(
 }
 
 fn hand_over(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
-    let asked = || -> Result<String> {
-        let port = cfg
-            .serve
-            .addr()
-            .rsplit_once(':')
-            .and_then(|(_, p)| p.parse().ok())
-            .unwrap_or(7777);
-        let mut c = std::os::unix::net::UnixStream::connect(serve_sock(ctx, port))?;
-        c.set_read_timeout(Some(std::time::Duration::from_secs(cfg.limits.serve_handover_secs)))?;
-        writeln!(c, "handover")?;
-        let mut line = String::new();
-        std::io::BufRead::read_line(&mut std::io::BufReader::new(c), &mut line)?;
-        let pid = line
-            .trim()
-            .strip_prefix("ok ")
-            .with_context(|| format!("serve: {}", line.trim()))?;
-        Ok(format!("serve handed over (bridge pid {pid})"))
-    };
-    asked().or_else(|_| {
-        let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
-        crate::timer::restart(ctx, r, label).map(|_| "serve restarted".into())
-    })
+    let port = cfg
+        .serve
+        .addr()
+        .rsplit_once(':')
+        .and_then(|(_, p)| p.parse().ok())
+        .unwrap_or(7777);
+    let asked = ask_handover(&serve_sock(ctx, port), cfg.limits.serve_handover_secs);
+    asked
+        .map(|pid| format!("serve handed over (bridge pid {pid})"))
+        .or_else(|_| {
+            let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
+            crate::timer::restart(ctx, r, label).map(|_| "serve restarted".into())
+        })
+}
+
+/// #894: ask the serve on control socket `sock` to hand over; the bridge's pid once it serves.
+pub fn ask_handover(sock: &Path, secs: u64) -> Result<String> {
+    let mut c = std::os::unix::net::UnixStream::connect(sock)?;
+    c.set_read_timeout(Some(std::time::Duration::from_secs(secs.max(1))))?;
+    writeln!(c, "handover")?;
+    let mut line = String::new();
+    std::io::BufRead::read_line(&mut std::io::BufReader::new(c), &mut line)?;
+    let pid = line.trim().strip_prefix("ok ");
+    Ok(pid.with_context(|| format!("serve: {}", line.trim()))?.to_string())
+}
+
+/// #1081: the build sha `/api/v1/health` on `addr` reports (`?` from a build before it did); `None` if nothing answers.
+pub fn serving(addr: &str, secs: u64) -> Option<String> {
+    use std::io::Read;
+    let wait = Some(std::time::Duration::from_secs(secs.max(1)));
+    let mut s = std::net::TcpStream::connect(addr).ok()?;
+    s.set_read_timeout(wait).ok()?;
+    let req = format!("GET /api/v1/health HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    s.write_all(req.as_bytes()).ok()?;
+    let mut res = String::new();
+    s.read_to_string(&mut res).ok()?;
+    let body: serde_json::Value = serde_json::from_str(res.split_once("\r\n\r\n")?.1).ok()?;
+    let sha = body.get("serve")?.get("sha").and_then(serde_json::Value::as_str);
+    Some(sha.filter(|s| !s.is_empty()).unwrap_or("?").to_string())
 }
 
 fn staging_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Path) -> Result<String> {
