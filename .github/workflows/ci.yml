@@ -220,3 +220,5 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/pw/node_modules" node -e "require('playwright')"
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
+      - name: a thread tap and a thread push open the thread; back returns (#1088)
+        run: cargo test --locked --test cooee_screens a_queue_row_with_an_ask_opens_its_thread_in_webkit -- --nocapture
