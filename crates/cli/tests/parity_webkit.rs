@@ -173,7 +173,6 @@ fn parity_24_opening_a_thread_pushes_history_and_back_returns_to_the_list() {
 }
 
 #[test]
-#[ignore = "red until #1086: the page scrolls, not the messages"]
 fn parity_r4_in_a_thread_only_the_messages_scroll_and_the_composer_sits_at_the_bottom() {
     if no_webkit() {
         return;
@@ -195,7 +194,6 @@ fn parity_r4_in_a_thread_only_the_messages_scroll_and_the_composer_sits_at_the_b
 }
 
 #[test]
-#[ignore = "red until #1086: a thread shows every message at once"]
 fn parity_29_a_long_thread_shows_its_last_30_and_older_ones_load_on_scroll() {
     if no_webkit() {
         return;
@@ -219,7 +217,6 @@ fn parity_29_a_long_thread_shows_its_last_30_and_older_ones_load_on_scroll() {
 }
 
 #[test]
-#[ignore = "red until #1086: a thread draws no image viewer"]
 fn parity_20_a_tapped_image_opens_fitted_in_the_viewer() {
     if no_webkit() {
         return;
@@ -243,5 +240,75 @@ fn parity_20_a_tapped_image_opens_fitted_in_the_viewer() {
         late(&url, "parity-20-png", js),
         [1.0, 1.0],
         "the message's image is drawn, and a tap opens it fitted to the screen"
+    );
+}
+
+const CODE: &str = "See t2, https://example.com/a and **this**:\n```sh\nif [ 1 < 2 ]; then\n  echo \"b & c\"\nfi\n```";
+
+fn coded(name: &str) -> String {
+    page(name, |c| {
+        thread(c, 2, &json!([]));
+        let d = json!({"thread": "t1", "from": "orchestrator", "text": CODE});
+        ev(c, now() - 500, None, "thread-msg", d);
+    })
+    .1
+}
+
+const OPEN: &str = "location.hash = '#threads'; \
+    await until(() => $('.row[data-id^=\"t\"]')); $('.row[data-id^=\"t\"]').click(); \
+    await until(() => $('.form.say')); await w(300); \
+    const card = $$('.card.k-orch').pop(), copied = []; \
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: t => (copied.push(t), Promise.resolve()) } });";
+
+#[test]
+fn parity_18_a_message_links_its_urls_and_thread_refs_and_keeps_its_markdown() {
+    if no_webkit() {
+        return;
+    }
+    let js = format!(
+        "{OPEN} return [+!!card.querySelector('a[href=\"https://example.com/a\"]'), \
+        +!!card.querySelector('a[data-open=\"/screens/threads/t2\"]'), +(card.querySelector('.txt b')?.textContent === 'this')];"
+    );
+    assert_eq!(
+        late(&coded("parity-18"), "parity-18-png", &js),
+        [1.0, 1.0, 1.0],
+        "a plain URL and a t<n> ref are links, bold stays bold"
+    );
+}
+
+#[test]
+fn parity_19_a_fenced_block_copies_its_exact_text() {
+    if no_webkit() {
+        return;
+    }
+    let want = serde_json::to_string("if [ 1 < 2 ]; then\n  echo \"b & c\"\nfi").unwrap();
+    let js = format!(
+        "{OPEN} const b = card.querySelector('.cb .cpy'); b.click(); await w(100); \
+        return [+!!b, +(copied[0] === {want}), +(b.textContent === 'copied')];"
+    );
+    assert_eq!(
+        late(&coded("parity-19"), "parity-19-png", &js),
+        [1.0, 1.0, 1.0],
+        "the [copy] puts the block's exact text on the clipboard and says so"
+    );
+}
+
+#[test]
+fn parity_28_a_long_press_offers_copy_copy_as_markdown_and_quote() {
+    if no_webkit() {
+        return;
+    }
+    let want = serde_json::to_string(CODE).unwrap();
+    let js = format!(
+        "{OPEN} const press = () => card.querySelector('.txt').dispatchEvent(new MouseEvent('contextmenu', {{ bubbles: true, cancelable: true }})); \
+        const pick = l => [...$$('#sheet button')].find(b => b.textContent === l); \
+        press(); const labels = ['copy', 'copy as markdown', 'quote'].map(l => +!!pick(l)); \
+        pick('copy as markdown').click(); await w(100); press(); pick('quote').click(); \
+        return [...labels, +(copied[0] === {want}), +$('.form.say input').value.startsWith('> See t2'), +$('#sheet').hidden];"
+    );
+    assert_eq!(
+        late(&coded("parity-28"), "parity-28-png", &js),
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        "the menu's three items; copy as markdown copies the raw text; quote fills the composer"
     );
 }

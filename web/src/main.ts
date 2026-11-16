@@ -107,7 +107,12 @@ function paint(v: View, before?: Blk | null) {
   if (v === cur.v) sync();
   if (focus && !v.root.hidden) {
     fit();
-    land(scroller(v), place);
+    const sc = scroller(v);
+    land(sc, place);
+    if (sc) sc.onscroll = () => {
+      const o = sc.querySelector<HTMLElement>(':scope > [data-id=older]:not([aria-busy])');
+      if (o && sc.scrollTop < 8) { o.setAttribute('aria-busy', 'true'); o.click(); }
+    };
   }
   badges();
 }
