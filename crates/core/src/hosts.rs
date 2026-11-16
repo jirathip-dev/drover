@@ -317,7 +317,12 @@ impl<'a> Pass<'a> {
             lock(&self.late).insert(m.into());
         }
         if over || !self.up(m) {
-            let stderr = format!("{m}: not sent (host offline this pass, or the tick past its budget)");
+            let why = if over {
+                "the tick past its budget"
+            } else {
+                "host offline this pass"
+            };
+            let stderr = format!("{m}: not sent ({why})");
             return Ok(Out {
                 code: 255,
                 stderr,
@@ -487,6 +492,26 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         s.busy = if live { ctx.now } else { s.busy };
         if s.up {
             s.seen = ctx.now;
+            let due = refresh || s.probed + 3600 <= ctx.now;
+            if let Some((tags, home)) = due.then(|| probe(&on)).flatten() {
+                (s.tags, s.home, s.probed) = (tags, home, ctx.now);
+            }
+            let mut landed = false;
+            if h.machine.is_some() && h.enabled && !s.home.is_empty() {
+                match sync(ctx, cfg, &on, (name, &s.home, &tags(h, Some(&*s)))) {
+                    Ok((v, done)) => (s.drover, landed) = (v, done),
+                    Err(why) => {
+                        let first = !events
+                            .iter()
+                            .any(|e| e.kind == "host-sync-skipped" && e.str("host") == Some(name));
+                        if first || !s.drover.is_empty() {
+                            let d = json!({"host": name, "reason": why});
+                            append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync-skipped", d)).ok();
+                        }
+                        s.drover = String::new();
+                    }
+                }
+            }
             if let Some(Err(e)) = h
                 .machine
                 .as_deref()
@@ -495,20 +520,12 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             {
                 crate::stderr!("proxy {name}: {e:#}");
             }
-            if refresh || s.probed + 3600 <= ctx.now {
-                if let Some((tags, home)) = probe(&on) {
-                    (s.tags, s.home, s.probed) = (tags, home, ctx.now);
+            if (due || landed) && h.machine.is_some() && h.enabled {
+                s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
+                if h.cloud.is_some() {
+                    let (card, warn) = crate::cloud::github(&on, ctx.now);
+                    (s.github, ()) = (card, s.health.extend(warn));
                 }
-                if h.machine.is_some() && h.enabled {
-                    s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
-                    if h.cloud.is_some() {
-                        let (card, warn) = crate::cloud::github(&on, ctx.now);
-                        (s.github, ()) = (card, s.health.extend(warn));
-                    }
-                }
-            }
-            if h.machine.is_some() && h.enabled && !s.home.is_empty() {
-                s.drover = sync(ctx, cfg, &on, (name, &s.home, &tags(h, Some(&*s))));
             }
             let hs = host::sample(&on);
             (s.load, s.mem, s.mem_total) = (hs.load_per_cpu, hs.free_mem_gb, hs.mem_total_gb);
@@ -1158,26 +1175,35 @@ fn sha_of(v: &str) -> &str {
     v.rsplit_once('(').and_then(|p| p.1.strip_suffix(')')).unwrap_or(v)
 }
 
-/// #917: host `name`'s drover `--version`, its last install logged `host-sync`, a mismatch's install started there.
-pub fn sync(ctx: &Ctx, cfg: &Config, on: &On, (name, home, tags): (&str, &str, &[String])) -> String {
+/// #917: host `name`'s drover `--version` and whether an install landed (#1164), its last install logged `host-sync`, a mismatch's install started there; Err: why its status went unread.
+pub fn sync(
+    ctx: &Ctx,
+    cfg: &Config,
+    on: &On,
+    (name, home, tags): (&str, &str, &[String]),
+) -> std::result::Result<(String, bool), String> {
     let (exe, sha) = (real_exe(ctx, home), env!("DROVER_SHA"));
-    let Ok(o) = ok(on, "sh", &["-c", SYNC_STATUS, "sh", &exe]) else {
-        return String::new();
-    };
-    let mut lines = o.lines().map(str::trim);
+    let o = on
+        .run("sh", &argv(&["-c", SYNC_STATUS, "sh", &exe]))
+        .map_err(|e| format!("{e:#}"))?;
+    if o.code != 0 {
+        return Err(format!("status exit {}: {}", o.code, o.stderr.trim()));
+    }
+    let (mut lines, mut done) = (o.stdout.lines().map(str::trim), false);
     let root = lines.next().unwrap_or_default().to_string();
     let theirs = with_path(on, &exe, root).0;
     let mut busy = false;
     for l in lines {
         busy |= l == "busy";
         if let Some((code, rest)) = l.strip_prefix("done ").and_then(|l| l.split_once(' ')) {
+            done = true;
             let (to, from) = rest.split_once(' ').unwrap_or((rest, ""));
             let d = json!({"host": name, "from": sha_of(from), "to": to, "ok": code == "0"});
             append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
         }
     }
     if busy || theirs == format!("drover {}", crate::VERSION) {
-        return theirs;
+        return Ok((theirs, done));
     }
     let conf = rehome(vec![ctx.config.display().to_string()], Some(home)).remove(0);
     let root = Path::new(&exe).parent().and_then(Path::parent).map(Path::display);
@@ -1199,7 +1225,7 @@ pub fn sync(ctx: &Ctx, cfg: &Config, on: &On, (name, home, tags): (&str, &str, &
         let d = json!({"host": name, "from": sha_of(&theirs), "to": sha, "ok": false, "error": format!("{e:#}")});
         append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
     }
-    theirs
+    Ok((theirs, done))
 }
 
 /// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it is enabled, up, admitting (#676) and its tags cover the needs, or its worktree there has unpushed work (#1138), else the least-busy enabled host whose tags cover the needs.

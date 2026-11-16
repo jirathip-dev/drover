@@ -63,6 +63,7 @@
 4 host_offline
 2 host_slots
 2 host_spared
+3 host_sync
 1 host_tab
 1 host_words
 3 hosts
