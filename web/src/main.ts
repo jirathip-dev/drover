@@ -73,7 +73,9 @@ function land(sc: HTMLElement | null, s: Spot | null) {
   const k = s && !s.end && s.id ? sc.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(s.id)}"]`) : null;
   sc.scrollTop = k && s ? sc.scrollTop + k.getBoundingClientRect().top - sc.getBoundingClientRect().top - s.dy : sc.scrollHeight;
 }
-const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr');
+const seen = new WeakMap<HTMLElement, Spot | null>();
+const docked = new ResizeObserver(es => es.forEach(({ target: t }) => { if (t instanceof HTMLElement && t.isConnected) land(t, seen.get(t) ?? null); }));
+const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr > .msgs');
 const path = (e: Element, top: Element | null) => {
   const p: Element[] = [];
   for (let x: Element | null = e; x && x !== top; x = x.parentElement) p.unshift(x);
@@ -93,14 +95,14 @@ function graft(root: Element, body: Element[], mine: Element[], twin: Element[])
 function paint(v: View, before?: Blk | null) {
   const m = v.model, y = scrollY, f = document.activeElement;
   if (!m) return;
-  const focus = !isList(m) && !!m.focus, was = scroller(v), place = focus && was?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
+  const focus = !isList(m) && !!m.focus, was = scroller(v), place = focus && was?.parentElement?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
   const c = ctx(v, isList(m) ? 'cards' : String(m.id));
   const body = isList(m) ? kids(m, c) : [render(m, c)].filter((e): e is HTMLElement => !!e);
   if (v.back.length && body[0]) {
     const b = el('button', '', '<span>‹ back</span>');
     b.type = 'button';
     b.onclick = () => { if (v === cur.v) history.back(); else { const p = v.back.pop(); if (p != null) go(v, p, false); } };
-    body[0].prepend(b);
+    (body[0].querySelector(':scope > .msgs') ?? body[0]).prepend(b);
   }
   const keep = f && v.root.contains(f) && f.matches('input, select, textarea') ? f.closest('[data-id]') : null;
   const sel = keep && `[data-id="${CSS.escape(keep.getAttribute('data-id') ?? '')}"]`;
@@ -118,10 +120,16 @@ function paint(v: View, before?: Blk | null) {
     fit();
     const sc = scroller(v);
     land(sc, place);
-    if (sc) sc.onscroll = () => {
-      const o = sc.querySelector<HTMLElement>(':scope > [data-id=older]:not([aria-busy])');
-      if (o && sc.isConnected && sc.scrollTop < 8) { o.setAttribute('aria-busy', 'true'); o.click(); }
-    };
+    if (sc) {
+      seen.set(sc, spot(sc));
+      sc.onscroll = () => {
+        seen.set(sc, spot(sc));
+        const o = sc.querySelector<HTMLElement>(':scope > [data-id=older]:not([aria-busy])');
+        if (o && sc.isConnected && sc.scrollTop < 8) { o.setAttribute('aria-busy', 'true'); o.click(); }
+      };
+      docked.disconnect();
+      docked.observe(sc);
+    }
   }
   badges();
 }

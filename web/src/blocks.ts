@@ -70,6 +70,11 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
       head.append(x);
     }
     s.append(head, ...kids(b.blocks, c));
+    if (b.focus) {
+      const m = el('div', 'msgs');
+      m.append(...[...s.children].filter(e => !e.matches('.row.sticky, .cmp')));
+      s.insertBefore(m, s.querySelector(':scope > .cmp'));
+    }
     return s;
   },
   section(b, c) {

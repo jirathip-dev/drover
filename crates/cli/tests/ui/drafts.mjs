@@ -39,7 +39,7 @@ try {
 
   await page.goto(url + '#threads');
   await open();
-  await page.evaluate(() => { const i = document.querySelector('.cmp textarea'); i.focus(); document.querySelector('.scr[data-id=thread-t2]').scrollTop = 400; });
+  await page.evaluate(() => { const i = document.querySelector('.cmp textarea'); i.focus(); document.querySelector('.scr[data-id=thread-t2] > .msgs').scrollTop = 400; });
   await page.keyboard.type('half a thought');
   await page.evaluate(() => {
     const i = document.querySelector('.cmp textarea');
@@ -47,12 +47,12 @@ try {
     const a = document.elementFromPoint(195, 422).closest('.card');
     window.kept = { i, gone: 0, anchor: a.dataset.id, top: a.getBoundingClientRect().top };
     kept.live = [];
-    new MutationObserver(rs => { if (document.getElementById('stale').hidden) kept.live.push([Math.round(document.querySelector('.scr[data-id=thread-t2]').scrollTop), document.querySelector(`[data-id="${kept.anchor}"]`)?.getBoundingClientRect().top]); for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
+    new MutationObserver(rs => { if (document.getElementById('stale').hidden) kept.live.push([Math.round(document.querySelector('.scr[data-id=thread-t2] > .msgs').scrollTop), document.querySelector(`[data-id="${kept.anchor}"]`)?.getBoundingClientRect().top]); for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
   });
   out.before = { ...(await box()), top: await page.evaluate(() => kept.top) };
   typed();
   await until(() => document.querySelectorAll('[data-id^="m-x"]').length === 5, 'the 5 stream updates');
-  const view = () => page.evaluate(() => [Math.round(document.querySelector('.scr[data-id=thread-t2]').scrollTop), document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top]);
+  const view = () => page.evaluate(() => [Math.round(document.querySelector('.scr[data-id=thread-t2] > .msgs').scrollTop), document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top]);
   const tick = [await view()];
   await page.clock.runFor(30_000);
   tick.push(await view());

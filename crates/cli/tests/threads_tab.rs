@@ -489,10 +489,10 @@ const WAIT: &str = "const st = window.setTimeout, $ = s => document.querySelecto
     const until = async f => { for (let i = 0; i < 100 && !f(); i++) await new Promise(r => st(r, 50)); return !!f(); }; \
     const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); \
     const open = async t => { location.hash = '#threads'; await until(() => $(`.row[data-id=\"${t}\"]`)); $(`.row[data-id=\"${t}\"]`).click(); \
-      await until(() => $(`.scr[data-id=\"thread-${t}\"] .cmp textarea`)); await frame(); return $(`.scr[data-id=\"thread-${t}\"]`); }; \
+      await until(() => $(`.scr[data-id=\"thread-${t}\"] .cmp textarea`)); await frame(); return $(`.scr[data-id=\"thread-${t}\"] > .msgs`); }; \
     const end = sc => +(sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2 && sc.scrollTop > 0);";
 
-fn webkit(name: &str, js: &str) -> Vec<f64> {
+fn webkit(name: &str, width: &str, js: &str) -> Vec<f64> {
     let c = long(name);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
@@ -503,7 +503,7 @@ fn webkit(name: &str, js: &str) -> Vec<f64> {
     let js = format!("window.late = (async () => {{ try {{ {WAIT} {js} }} catch (e) {{ return [-1]; }} }})()");
     let o = webview()
         .env("DROVER_WAIT", "1")
-        .args([&format!("http://{addr}/"), "390", "-", "-", png.to_str().unwrap(), &js])
+        .args([&format!("http://{addr}/"), width, "-", "-", png.to_str().unwrap(), &js])
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&o.stdout);
@@ -559,9 +559,9 @@ fn a_thread_opens_at_its_end_in_webkit_with_its_bar_on_top_and_the_page_still() 
     if no_webkit() {
         return;
     }
-    let js = "const sc = await open('t3'), bar = sc.querySelector('.row.sticky'); \
-        return [end(sc), document.scrollingElement.scrollTop, Math.round(bar.getBoundingClientRect().top - sc.getBoundingClientRect().top), errs.length];";
-    assert_eq!(webkit("thread-end-webkit", js), [1., 0., 0., 0.]);
+    let js = "const sc = await open('t3'), col = sc.parentElement, bar = col.querySelector('.row.sticky'); \
+        return [end(sc), document.scrollingElement.scrollTop, Math.round(bar.getBoundingClientRect().top - col.getBoundingClientRect().top), errs.length];";
+    assert_eq!(webkit("thread-end-webkit", "390", js), [1., 0., 0., 0.]);
 }
 
 #[test]
@@ -571,11 +571,11 @@ fn older_messages_load_above_in_webkit_and_the_card_in_view_stays_in_place() {
     }
     let js = "const sc = await open('t3'), cards = () => $$('.scr[data-id^=thread-] .card.k-orch').length; \
         const at = [cards()], r = sc.getBoundingClientRect(); sc.scrollTop -= 200; await frame(); \
-        const k = $$('.scr[data-id^=thread-] > .card[data-id]').find(c => c.getBoundingClientRect().bottom > r.top + r.height / 2), id = k.dataset.id, y = k.getBoundingClientRect().top; \
+        const k = $$('.scr[data-id^=thread-] > .msgs > .card[data-id]').find(c => c.getBoundingClientRect().bottom > r.top + r.height / 2), id = k.dataset.id, y = k.getBoundingClientRect().top; \
         $('.scr button[data-id=older]').click(); await until(() => cards() > 30); await frame(); \
         const k2 = $(`.scr[data-id^=thread-] .card[data-id=\"${id}\"]`); \
-        at.push(cards(), Math.round(Math.abs(k2.getBoundingClientRect().top - y)), +($('.scr[data-id^=thread-]').scrollTop > 0), errs.length); return at;";
-    assert_eq!(webkit("thread-older-webkit", js), [30., 60., 0., 1., 0.]);
+        at.push(cards(), Math.round(Math.abs(k2.getBoundingClientRect().top - y)), +($('.scr[data-id^=thread-] > .msgs').scrollTop > 0), errs.length); return at;";
+    assert_eq!(webkit("thread-older-webkit", "390", js), [30., 60., 0., 1., 0.]);
 }
 
 #[test]
@@ -587,7 +587,7 @@ fn an_image_opens_in_the_viewer_in_webkit_and_close_and_escape_shut_it() {
         const at = [+!!$('#iv'), +$('#iv img').src.endsWith('/thread/t2/shot.png'), +($('#iv a').download === 'shot.png')]; \
         [...$$('#iv button')].find(b => b.textContent === 'close').click(); at.push(+!!$('#iv')); \
         $('.scr[data-id^=thread-] .imgs a').click(); dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); at.push(+!!$('#iv'), errs.length); return at;";
-    assert_eq!(webkit("thread-viewer-webkit", js), [1., 1., 1., 0., 0., 0.]);
+    assert_eq!(webkit("thread-viewer-webkit", "390", js), [1., 1., 1., 0., 0., 0.]);
 }
 
 #[test]
@@ -600,7 +600,27 @@ fn the_keyboard_keeps_the_composer_flush_on_it_in_webkit_and_the_page_still() {
         const look = async y => { await frame(); return [Math.round(Math.abs(f.getBoundingClientRect().bottom - y)), document.scrollingElement.scrollTop, end(sc)]; }; \
         box.focus(); kb(336); const at = await look(vv.offsetTop + vv.height); \
         box.blur(); kb(0); at.push(...await look($('nav').getBoundingClientRect().top), errs.length); return at;";
-    assert_eq!(webkit("thread-kb-webkit", js), [0., 0., 1., 0., 0., 1., 0.]);
+    assert_eq!(webkit("thread-kb-webkit", "390", js), [0., 0., 1., 0., 0., 1., 0.]);
+}
+
+#[test]
+fn the_composer_docks_below_the_messages_in_webkit_empty_and_with_4_lines_at_390_and_1440() {
+    if no_webkit() {
+        return;
+    }
+    let js = "const sc = await open('t3'), f = sc.parentElement.querySelector(':scope > .cmp'), box = f.querySelector('textarea'); \
+        const look = async () => { await frame(); const t = f.getBoundingClientRect().top, k = [...sc.querySelectorAll(':scope > .card')].pop(); \
+          const hit = document.elementFromPoint(innerWidth / 2, t - 2); \
+          return [+(k.getBoundingClientRect().bottom <= t), +(hit === sc || !!hit?.closest('.msgs > .card')), end(sc)]; }; \
+        const at = await look(); box.value = 'one\\ntwo\\nthree\\nfour'; box.dispatchEvent(new Event('input', { bubbles: true })); \
+        at.push(...await look(), errs.length); return at;";
+    for w in ["390", "1440"] {
+        assert_eq!(
+            webkit(&format!("thread-dock-webkit-{w}"), w, js),
+            [1., 1., 1., 1., 1., 1., 0.],
+            "at {w} px: the last card ends above the composer, which hides nothing, and the end stays in view"
+        );
+    }
 }
 
 fn cards(name: &str) -> drover::Ctx {
