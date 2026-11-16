@@ -113,7 +113,7 @@ pub struct Home {
 impl Home {
     /// The folder: its env var when set and not empty, else the default under `home`.
     pub fn resolve(&self, home: &Path) -> PathBuf {
-        std::env::var_os(self.env)
+        crate::config::env_os(self.env)
             .filter(|v| !v.is_empty())
             .map_or_else(|| home.join(self.default), PathBuf::from)
     }

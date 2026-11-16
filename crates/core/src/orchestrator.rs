@@ -1,5 +1,5 @@
 use crate::config::{expand, Config, Role};
-use crate::events::{self, emit, working, Event};
+use crate::events::{self, emit, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::Runner;
 use crate::session::Session;
@@ -27,7 +27,7 @@ pub fn of<'a>(events: &'a [Event], id: &str) -> impl DoubleEndedIterator<Item = 
         let id = id.to_string();
         events.iter().filter(move |e| e.str("thread") == Some(id.as_str()))
     });
-    let at = at.into_iter().flatten().map(move |i| &events[i]);
+    let at = at.into_iter().flatten().filter_map(move |i| events.get(i));
     at.chain(all.into_iter().flatten())
         .filter(move |e| !events::repeat(events, e))
 }
@@ -35,7 +35,7 @@ pub fn of<'a>(events: &'a [Event], id: &str) -> impl DoubleEndedIterator<Item = 
 /// #701: every thread's `thread-new`, oldest first.
 pub fn threads(events: &[Event]) -> Vec<&Event> {
     match events::cached(events) {
-        Some(l) => l.threads.new.iter().map(|i| &events[*i]).collect(),
+        Some(l) => l.threads.new.iter().filter_map(|i| events.get(*i)).collect(),
         None => events.iter().filter(|e| e.kind == "thread-new").collect(),
     }
 }
@@ -121,8 +121,8 @@ pub fn by(b: &str) -> String {
 
 /// #780: in an orchestrator lane, its `DROVER_ORCHESTRATOR` id; every event it logs names it (`db::insert`).
 pub fn acting() -> Option<String> {
-    let lane = std::env::var("DROVER_LANE").ok()?;
-    is_role(lane.split(':').nth(2)?).then(|| std::env::var("DROVER_ORCHESTRATOR").ok())?
+    let lane = crate::config::env("DROVER_LANE")?;
+    is_role(lane.split(':').nth(2)?).then(|| crate::config::env("DROVER_ORCHESTRATOR"))?
 }
 
 /// #780: the orchestrator a thread from before #780 (none named) belongs to, the one `[orchestrator]` itself names.
@@ -193,7 +193,7 @@ pub fn new_with(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch
     let id = format!("t{}", events.iter().filter(|e| e.kind == "thread-new").count() + 1);
     let mut d = json!({"thread": id, "title": title, "harness": h});
     if orch != DEFAULT {
-        d["orchestrator"] = json!(orch);
+        d.put("orchestrator", json!(orch));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-new", d))?;
     Ok(id)
@@ -248,7 +248,7 @@ pub fn archive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, on: bool) -> R
             Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
         )?;
     }
-    let kind = ["thread-restore", "thread-archive"][usize::from(on)];
+    let kind = if on { "thread-archive" } else { "thread-restore" };
     emit(
         &ctx.state,
         cfg,
@@ -313,7 +313,11 @@ pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]:
     rows.sort_by_key(|r| std::cmp::Reverse(r.0));
     let row = |(ts, id): &(u64, &str)| {
         let last = items(&events, id).pop().unwrap_or_default();
-        let last = last["text"].as_str().or(last["question"].as_str()).unwrap_or_default();
+        let last = last
+            .at("text")
+            .as_str()
+            .or(last.at("question").as_str())
+            .unwrap_or_default();
         let topic: String = last
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -565,7 +569,7 @@ pub fn text_ok(text: &str) -> Result<()> {
 fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, (text, files): (&str, &[Value])) -> Result<()> {
     let mut d = json!({"thread": t.str("thread"), "from": from, "text": text});
     if !files.is_empty() {
-        d["files"] = json!(files);
+        d.put("files", json!(files));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
 }
@@ -607,7 +611,7 @@ fn copy_in(ctx: &Ctx, cfg: &Config, t: &Event, p: &std::path::Path) -> Result<st
     let to = dir(ctx, cfg, id).join("files");
     std::fs::create_dir_all(&to)?;
     let to = to.join(name);
-    let _ = std::fs::remove_file(&to);
+    std::fs::remove_file(&to).ok();
     std::fs::copy(&from, &to).with_context(|| from.display().to_string())?;
     to.canonicalize().map_err(Into::into)
 }
@@ -767,9 +771,9 @@ pub fn hung<'a>(
 
 fn end(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (t, s): (&Event, &Event), mut d: Value) -> Result<()> {
     let agent = s.str("agent").unwrap_or_default();
-    let _ = crate::shed::cli(r, &["cancel", agent]);
+    crate::shed::cli(r, &["cancel", agent]).ok();
     crate::shed::cli(r, &["kill", agent])?;
-    (d["thread"], d["agent"]) = (json!(t.str("thread")), json!(agent));
+    d.put("thread", json!(t.str("thread"))).put("agent", json!(agent));
     emit(
         &ctx.state,
         cfg,
@@ -890,7 +894,7 @@ pub fn pick(ctx: &Ctx, cfg: &Config, id: &str, model: &str, effort: &str) -> Res
         .into_iter()
         .filter(|p| !p.1.is_empty())
     {
-        d[k] = json!(v);
+        d.put(k, json!(v));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-model", d))
 }
@@ -998,7 +1002,9 @@ fn save(ctx: &Ctx, r: &dyn Runner, new: &str) -> Result<Config> {
 
 fn uuid() -> Result<String> {
     let mut b = crate::devices::random(16)?;
-    (b[6], b[8]) = (b[6] & 0x0f | 0x40, b[8] & 0x3f | 0x80);
+    if let [_, _, _, _, _, _, x6, _, x8, ..] = b.as_mut_slice() {
+        (*x6, *x8) = (*x6 & 0x0f | 0x40, *x8 & 0x3f | 0x80);
+    }
     let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
     Ok(format!(
         "{}-{}-{}-{}-{}",
@@ -1130,7 +1136,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
 }
 
 fn started(ctx: &Ctx, cfg: &Config, t: &Event, d: Value) -> Result<String> {
-    let agent = d["agent"].as_str().unwrap_or_default().to_string();
+    let agent = d.at("agent").as_str().unwrap_or_default().to_string();
     emit(
         &ctx.state,
         cfg,
@@ -1168,7 +1174,7 @@ fn profile(cfg: &Config, t: &Event, fleet: &str) -> String {
     }
     s += "\n## Capability groups ([orchestrator] allow)\n\n";
     for (g, verbs) in crate::config::GROUPS {
-        let on = ["off", "on"][usize::from(c.groups().contains(g))];
+        let on = if c.groups().contains(g) { "on" } else { "off" };
         s += &format!("- `{g}` ({on}): {verbs}\n");
     }
     s += "\nA verb of an off group is refused `GROUP_OFF`: propose `[orchestrator] allow` with `drover config propose`.\n";
@@ -1190,13 +1196,16 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
         "thread-msg" => {
             let mut m = json!({"ts": e.ts, "from": e.str("from"), "text": e.str("text")});
             if let Some(f) = e.data.get("files") {
-                m["files"] = f.clone();
+                m.put("files", f.clone());
             }
             if let Some((w, t)) = link(e) {
-                m["link"] = json!(format!("{w} {t}"));
+                m.put("link", json!(format!("{w} {t}")));
             }
             if sent.contains(&e.seq) {
-                m["text"] = json!(format!("{} (forwarded)", e.str("text").unwrap_or_default()));
+                m.put(
+                    "text",
+                    json!(format!("{} (forwarded)", e.str("text").unwrap_or_default())),
+                );
             }
             Some(m)
         }

@@ -1,3 +1,8 @@
+#[macro_export]
+macro_rules! stderr {
+    ($($t:tt)*) => { $crate::write_stderr(format_args!("{}\n", format_args!($($t)*))) };
+}
+
 pub mod access;
 pub mod action;
 pub mod amend;
@@ -5,8 +10,8 @@ pub mod arch;
 pub mod breaker;
 pub mod card;
 pub mod check;
-#[allow(clippy::doc_markdown)]
 mod cli;
+pub mod clock;
 pub mod cloud;
 pub mod config;
 pub mod db;
@@ -65,9 +70,9 @@ pub mod webpush;
 pub mod why;
 
 use anyhow::{bail, Context, Result};
-pub use cli::{main_with, usage_doc, SERVE, SERVICE};
+pub use cli::{main_with, usage_doc, write_stderr, SERVE, SERVICE};
 use config::{home, set_in, set_value, write_atomic, Config};
-use events::{emit, working, Event};
+use events::{emit, working, Event, Json};
 use runner::Runner;
 use serde_json::{json, Value};
 use std::io::Write;
@@ -94,12 +99,12 @@ pub struct Ctx {
 
 impl Ctx {
     pub fn from_env() -> Ctx {
-        for (k, v) in std::env::vars_os() {
+        for (k, v) in crate::config::envs() {
             let new = k
                 .to_str()
                 .and_then(|k| k.strip_prefix("HERDSMAN_"))
                 .map(|k| format!("DROVER_{k}"));
-            if let Some(new) = new.filter(|n| std::env::var_os(n).is_none()) {
+            if let Some(new) = new.filter(|n| crate::config::env_os(n).is_none()) {
                 std::env::set_var(new, v);
             }
         }
@@ -139,7 +144,7 @@ impl Ctx {
 }
 
 fn var(k: &str) -> Option<std::ffi::OsString> {
-    std::env::var_os(k).filter(|v| !v.is_empty())
+    crate::config::env_os(k).filter(|v| !v.is_empty())
 }
 
 /// `drover migrate` (docs/architecture.md): both moves or neither.
@@ -209,15 +214,7 @@ pub fn repo_read<T>(name: &str, read: impl Fn(&str) -> Option<T>) -> Option<T> {
         .find_map(|d| read(&format!("{d}/{name}")))
 }
 
-/// Seconds since the epoch.
-pub fn now() -> u64 {
-    if let Some(t) = sim::now() {
-        return t;
-    }
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
-}
+pub use clock::now;
 
 /// Apply one queue change and log it (`drover queue`, and the page's ▲/▼ with `via`); the new order as shown.
 pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<&str>) -> Result<String> {
@@ -225,15 +222,13 @@ pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<
     let events = working(&ctx.state)?;
     let mut q = queue::replay(&events, fleet);
     queue::apply(&mut q, &d)?;
-    for b in queue::refs(&d["on"])
+    for b in queue::refs(d.at("on"))
         .iter()
-        .filter(|b| d["op"] == "block" && !b.contains('/'))
+        .filter(|b| d.at("op") == "block" && !b.contains('/'))
     {
         cfg.fleet(b.split('#').next().unwrap_or_default())?;
     }
-    let n = d["issues"][0]
-        .as_u64()
-        .filter(|_| d["op"] == "block" || d["op"] == "unblock");
+    let n = (d.at("issues").at(0).as_u64()).filter(|_| d.at("op") == "block" || d.at("op") == "unblock");
     let s = n.and_then(|n| events::fold(&events).remove(&(fleet.into(), n)));
     let on = q.iter().find(|i| Some(i.issue) == n).map(|i| i.blockers.clone());
     let held = s.and_then(|s| s.active_lane().map(|l| json!({"agent": l.1, "on": on})));
@@ -309,7 +304,7 @@ pub fn set(
 
 fn with_via(mut d: Value, via: Option<&str>) -> Value {
     if let Some(v) = via {
-        d["via"] = json!(v);
+        d.put("via", json!(v));
     }
     d
 }
@@ -377,7 +372,7 @@ pub fn ask(
     if let Some(t) = thread {
         orchestrator::fleet_of(&events, t)?;
     }
-    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
+    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
     let at = |e: &Event| {
         format!(
             "{}:{}:{}",
@@ -391,7 +386,7 @@ pub fn ask(
     let (a, h) = spawned.map_or((None, None), |e| (e.str("agent"), e.str("host")));
     let mut d = json!({"question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
     if let Some(t) = thread {
-        d["thread"] = json!(t);
+        d.put("thread", json!(t));
     }
     let from_lane = lane
         .rsplit(':')
@@ -399,7 +394,7 @@ pub fn ask(
         .is_some_and(|r| !r.is_empty() && !orchestrator::is_role(r));
     let routed = orchestrator::route(cfg, &events, fleet).filter(|_| from_lane && thread.is_none());
     if let Some(t) = routed {
-        d["routed"] = json!(t);
+        d.put("routed", json!(t));
     }
     let ev = Event::new(ctx.now, fleet, issue, "needs-decision", d);
     let ev = events::ask(&ctx.state, cfg, vec![ev], None)?
@@ -451,7 +446,7 @@ pub fn orchestrator_answer(
             return Ok(false);
         };
         let v = gh::spec(ctx, r, cfg.fleet(fleet)?, fleet, n, false)?;
-        Ok(flat(v["body"].as_str().unwrap_or_default()).contains(&quote))
+        Ok(flat(v.at("body").as_str().unwrap_or_default()).contains(&quote))
     };
     let why = if owner_topic(&format!("{} {text}", ask.str("question").unwrap_or_default())) {
         "it names an owner topic"
@@ -852,7 +847,7 @@ pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, 
         let mut rows = Vec::new();
         for (e, why) in &open {
             let mut v = serde_json::to_value(e)?;
-            v["closed"] = json!(why.as_ref().map(|w| events::ORDER[w.0]));
+            v.put("closed", json!(why.as_ref().and_then(|w| events::ORDER.get(w.0))));
             rows.push(v);
         }
         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
