@@ -1,0 +1,6 @@
+Decided: merged origin/staging; #1085's url taps keep their <a target=_blank> links, read through a typed urlOf(tap) so web/src stays free of `as`, `!` and `any`
+Because: "no `any` (explicit or implicit), no non-null `!`, no `as` casts except `as const`"
+Decided: web/dist rebuilt from the merged web/src
+Rejected: taking staging's blocks.ts and main.ts as they are — they read tap.url off an untyped Blk, which #809's lint refuses
+Check: url_links and serve_web pass at this head; npm run check, lint and build exit 0
+Owner: the branch now has #1085's link taps, written to the new TypeScript rules
