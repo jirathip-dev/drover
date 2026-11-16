@@ -184,7 +184,7 @@ fn a_missed_promise_drive_healed_alerts_with_the_issue_reason_and_heal_one_pass_
     let pushes = std::fs::read_to_string(&sink).unwrap();
     assert_eq!(
         pushes,
-        format!("sendmeter #7 stuck: promise `{line}` missed: now: PASS · CI pending; tried: marked-ready\n")
+        "sendmeter #7 stuck: ⚠ missed 16m: now: lane gone, no push: respawning impl; tried: marked-ready\n"
     );
     assert_eq!(kinds(&c), ["stuck"]);
 }
