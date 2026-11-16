@@ -735,9 +735,11 @@ fn msg_card(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
     let mut c = msg_body(now, id, m, paired);
     if let Some(l) = &m.link {
         let chip = json!({"type": "button", "id": format!("m-{}-link", m.seq), "label": format!("{} {}", l.w, l.t), "tap": {"thread": l.t}});
-        match c["buttons"].as_array_mut() {
+        match c.get_mut("buttons").and_then(Value::as_array_mut) {
             Some(b) => b.push(chip),
-            None => c["buttons"] = json!([chip]),
+            None => {
+                c.put("buttons", json!([chip]));
+            }
         }
     }
     c
