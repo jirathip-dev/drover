@@ -1,0 +1,9 @@
+Decided: slot_before skips a host whose last look in hosts.json is not up, as offline() does
+Because: "`slot_before` skips a host whose last look is not up, the same way `offline()` and `held()` do"
+Decided: a pending start is bound by its spawn-started event (same issue, ts at or after the start) and counts only on that host
+Because: "A pending start counts only against the host it is bound to (its spawn's `host`)"
+Decided: unbound starts fill the free room of the fitting up hosts in order, so a single host still holds kicked starts
+Because: crates/cli/tests/host_slots.rs:89
+Rejected: unbound starts count against no host — kicked starts before any lane is up would no longer hold on a one-host setup
+Check: the three new host_slots tests fail on base with "4/4 working on a" and pass at head
+Owner: A host that is offline, or busy only with starts meant for another host, no longer holds every new lane as full.
