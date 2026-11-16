@@ -673,6 +673,39 @@ pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: La
     full
 }
 
+/// #1186: host `name`'s working or simulator slots are all held, counting the spawns `start` still starting there.
+pub fn working_full(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    ev: &[Event],
+    me: Lane,
+    start: &[&Event],
+    (name, h): (&str, &HostCfg),
+) -> Option<String> {
+    let sims = needs(cfg.fleet(me.0).ok()?, me.2, ev, (me.0, me.1))
+        .iter()
+        .any(|t| t == "sim");
+    let others: Vec<&&Event> = start
+        .iter()
+        .filter(|e| e.fleet != me.0 || e.issue != Some(me.1))
+        .collect();
+    let start = [others.len(), others.iter().filter(|e| sim(cfg, ev, e)).count()];
+    let caps = [h.max_working, h.max_simulators.filter(|_| sims)];
+    (caps != [None; 2]).then_some(())?;
+    let agents = crate::session::live_on(&On::new(r, h.machine.as_deref())).unwrap_or_default();
+    let held = held_slots(
+        cfg,
+        &crate::events::working(&ctx.state).unwrap_or_default(),
+        &agents,
+        Some((me.0, me.1)),
+    );
+    let used = [held[0] + start[0], held[1] + start[1]];
+    let (u, c, s) =
+        (caps.into_iter().zip(used).zip(SLOTS)).find_map(|((c, u), s)| c.filter(|&c| u >= c).map(|c| (u, c, s)))?;
+    Some(format!("waiting for a slot: {u}/{c} {s} on {name}"))
+}
+
 /// #984: each capped host's `name: working N/cap · simulators N/cap` line, from its live `agents` (`host`-tagged remote).
 pub fn slots_line(cfg: &Config, events: &[Event], agents: &[Session]) -> String {
     let mut out = String::new();
@@ -878,6 +911,9 @@ pub struct Placed {
 }
 
 type Pre<'a> = (&'a [Event], Option<&'a str>);
+
+/// #1186: a host placement passes over, with the refusal it names (its start or working slots are full).
+pub type Skip<'a> = &'a dyn Fn(&str) -> Option<(&'static str, String)>;
 
 /// #984: a lane by fleet, issue and role.
 pub type Lane<'a> = (&'a str, u64, &'a str);
@@ -1173,7 +1209,7 @@ pub fn place(
     r: &dyn Runner,
     events: &[Event],
     (fleet, issue, role): (&str, u64, &str),
-    force: Option<&str>,
+    (force, skip): (Option<&str>, Skip),
 ) -> Result<Option<Placed>> {
     if cfg.hosts.is_empty() {
         return match force {
@@ -1207,6 +1243,9 @@ pub fn place(
                 format!("host {h}: {role} lanes run on the main host only"),
             );
         }
+        if let Some((code, why)) = skip(h) {
+            return refused(code, why);
+        }
         return Ok(Some(at(ctx, cfg, f, r, (h, machine), pre)));
     }
     let needs = needs(f, role, events, (fleet, issue));
@@ -1230,13 +1269,27 @@ pub fn place(
         }
         if cfg.hosts.get(was.0).is_none_or(|h| h.enabled) && (unpushed || fits && !busy && code != Some("HOST_OFFLINE"))
         {
-            return Ok(Some(p));
+            return match skip(was.0) {
+                Some((code, why)) => refused(code, why),
+                None => Ok(Some(p)),
+            };
         }
     }
     let fits: Vec<_> = cfg.hosts.iter().filter(|(n, h)| fit(n, h)).collect();
-    let mut on: Vec<Placed> = fits
-        .iter()
-        .filter(|h| h.1.enabled)
+    let (mut full, mut open) = (vec![], vec![]);
+    for h in fits.iter().filter(|h| h.1.enabled) {
+        match skip(h.0) {
+            Some(why) => full.push(why),
+            None => open.push(h),
+        }
+    }
+    if open.is_empty() && !full.is_empty() {
+        let starting = full.iter().any(|w| w.0 == "SPAWN_PENDING");
+        let code = if starting { "SPAWN_PENDING" } else { "HOST_FULL" };
+        let whys: Vec<String> = full.into_iter().map(|w| w.1).collect();
+        return refused(code, whys.join(", "));
+    }
+    let mut on: Vec<Placed> = (open.into_iter())
         .map(|(n, h)| at(ctx, cfg, f, r, (n, h.machine.as_deref()), pre))
         .collect();
     if on
