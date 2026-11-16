@@ -1059,7 +1059,6 @@ pub(crate) fn real_exe(ctx: &Ctx, home: &str) -> String {
     rehome(vec![exe], Some(home)).remove(0)
 }
 
-/// #1168: `root`, the install root's `--version` there, with ssh's PATH's (what lanes run) when that differs; true then.
 fn with_path(on: &On, exe: &str, root: String) -> (String, bool) {
     match ok(on, "drover", &["--version"]).map(|v| v.trim().to_string()) {
         Ok(p) if p != root => (format!("{root} at {exe}, on ssh's PATH {p}"), true),
