@@ -232,24 +232,35 @@
       "type": "card"
     },
     {
-      "fields": [
+      "action": "thread-say",
+      "acts": {
+        "model": "thread-model",
+        "queue": "thread-queue",
+        "steer": "thread-steer",
+        "stop": "thread-stop",
+        "unqueue": "thread-unqueue"
+      },
+      "chips": [
         {
-          "label": "",
-          "name": "text",
-          "placeholder": "message the orchestrator",
-          "type": "text",
-          "value": ""
+          "all": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "cur": null,
+          "name": "effort"
         }
       ],
       "id": "say",
-      "submit": {
-        "action": "thread-say",
-        "label": "send",
-        "values": {
-          "thread": "t4"
-        }
-      },
-      "type": "form"
+      "label": "send",
+      "placeholder": "message the orchestrator",
+      "queued": [],
+      "type": "composer",
+      "values": {
+        "thread": "t4"
+      }
     }
   ],
   "focus": true,

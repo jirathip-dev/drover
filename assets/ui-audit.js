@@ -13,7 +13,7 @@
   const SETUP = {
     fleets: async () => { $('#sysb').click(); await until(() => $('#sheet .row')); $('#sheet .row').click(); await until(() => $('#sheet .fd')); },
     lane: async () => { location.hash = '#lanes'; await until(() => $('.row[data-id^="l-"]')); $('.row[data-id^="l-"]').click(); await until(() => $('#sheet .sb .sec')); },
-    thread: async () => { location.hash = '#threads'; await until(() => $('.row[data-id^="t"]')); $('.row[data-id^="t"]').click(); await until(() => $('.form.say')); },
+    thread: async () => { location.hash = '#threads'; await until(() => $('.row[data-id^="t"]')); $('.row[data-id^="t"]').click(); await until(() => $('.cmp')); },
     card: async () => { await until(() => $('#cards .fold')); $('#cards .fold .fl').click(); await until(() => $('#cards .choice, #cards .run')); },
   };
   const seen = e => e.checkVisibility({ visibilityProperty: true });
