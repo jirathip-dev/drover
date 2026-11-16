@@ -1,0 +1,4 @@
+Decided: merged origin/staging and rebuilt web/dist/board.js from the merged web/src instead of hand-resolving the bundle
+Because: .drover/rules.md:21
+Rejected: none
+Owner: The branch is updated with the latest staging. The swipe-back change is the same as before.
