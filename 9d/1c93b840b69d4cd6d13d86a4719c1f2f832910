@@ -1,0 +1,10 @@
+Decided: one `gone` check logs `cloud-stop {why: gone}` when the recipe's `status` prints nothing; bootstrap then runs start(), tick stops there
+Because: "When the log says `running` or `starting` but the recipe's `status` prints nothing"
+Decided: a failing status (recipe error, network) returns not-gone and logs nothing, so behaviour is as today
+Because: "A status that fails (recipe error, network) is not \"gone\": nothing logged, behaviour as today."
+Decided: tick checks gone before the live-agent filter, so an unreachable deleted VM is still caught; one status call per running cloud host per check
+Rejected: checking gone for `starting` hosts in tick — a check during an in-flight start() could see '' before create finishes and mark it stopped; bootstrap already sends `starting` to start()
+Rejected: changing moved() to detect gone — hosts survey calls it too, outside this issue's scope
+Decided: spend needs no change: the logged cloud-stop closes the open cloud-start span
+Check: cargo test --locked -p drover --test cloud gone fails at aaea0bbf5 and passes at head
+Owner: A cloud machine deleted outside drover is now noticed: bootstrap recreates it, and the 5-minute check stops counting its cost instead of erroring every run.
