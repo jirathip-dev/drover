@@ -118,7 +118,7 @@ function paint(v: View, before?: Blk | null) {
     land(sc, place);
     if (sc) sc.onscroll = () => {
       const o = sc.querySelector<HTMLElement>(':scope > [data-id=older]:not([aria-busy])');
-      if (o && sc.scrollTop < 8) { o.setAttribute('aria-busy', 'true'); o.click(); }
+      if (o && sc.isConnected && sc.scrollTop < 8) { o.setAttribute('aria-busy', 'true'); o.click(); }
     };
   }
   badges();
