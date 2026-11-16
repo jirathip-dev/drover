@@ -1,0 +1,1023 @@
+unsafe_code crates/core/src/check.rs:1889:14 let rc = unsafe { getattrlist(path.as_ptr(), &raw mut list, &raw mut buf, size_of::<Buf>(), 0x21) };
+allow_attributes_without_reason crates/core/src/lib.rs:8:1 #[allow(clippy::doc_markdown)]
+allow_attributes_without_reason crates/core/src/events.rs:74:1 #[allow(clippy::trivially_copy_pass_by_ref)]
+allow_attributes_without_reason crates/core/src/events.rs:217:1 #[allow(clippy::needless_pass_by_value)]
+unsafe_code crates/core/src/events.rs:693:1 unsafe impl Sync for Buf {}
+unsafe_code crates/core/src/events.rs:700:13 unsafe { c.get_mut().assume_init_drop() };
+unsafe_code crates/core/src/events.rs:709:9 unsafe { std::slice::from_raw_parts(self.buf.cells.as_ptr().cast(), self.len) }
+unsafe_code crates/core/src/events.rs:719:17 unsafe { (*self.buf.cells[self.len].get()).write(e) };
+unsafe_code crates/core/src/runner.rs:81:5 unsafe {
+unsafe_code crates/core/src/runner.rs:113:5 unsafe {
+unsafe_code crates/core/src/runner.rs:147:9 unsafe {
+unsafe_code crates/core/src/runner.rs:436:9 unsafe { kill(group, 9) };
+indexing_slicing crates/core/src/access.rs:25:64 [b'*', rest @ ..] => (0..=s.len()).any(|i| glob(rest, &s[i..])),
+indexing_slicing crates/core/src/access.rs:26:63 [c, rest @ ..] => s.first() == Some(c) && glob(rest, &s[1..]),
+indexing_slicing crates/core/src/access.rs:50:28 let get = |n: &String| all["mcpServers"].get(n).cloned().map(|v| (n.clone(), v));
+let_underscore_must_use crates/core/src/action.rs:52:13 let _ = finish(&self.state, self.ev.ts, &self.ev, "failed", json!({}));
+indexing_slicing crates/core/src/action.rs:59:6 (d["action_id"], d["step"]) = (json!(id_of(intent)), json!(intent.str("step")));
+indexing_slicing crates/core/src/action.rs:59:22 (d["action_id"], d["step"]) = (json!(id_of(intent)), json!(intent.str("step")));
+indexing_slicing crates/core/src/action.rs:75:6 (inputs["action_id"], inputs["step"]) = (json!(id), json!(step));
+indexing_slicing crates/core/src/action.rs:75:27 (inputs["action_id"], inputs["step"]) = (json!(id), json!(step));
+indexing_slicing crates/core/src/action.rs:76:6 (inputs["pid"], inputs["host"]) = (json!(crate::sim::pid()), json!(crate::db::host()));
+indexing_slicing crates/core/src/action.rs:76:21 (inputs["pid"], inputs["host"]) = (json!(crate::sim::pid()), json!(crate::db::host()));
+indexing_slicing crates/core/src/action.rs:96:9 d["recovered"] = json!(true);
+indexing_slicing crates/core/src/amend.rs:38:16 let body = body["body"].as_str().unwrap_or_default().trim_end();
+indexing_slicing crates/core/src/amend.rs:60:18 let checks = pr["statusCheckRollup"].as_array().filter(|_| pr["state"] == "OPEN");
+indexing_slicing crates/core/src/amend.rs:60:64 let checks = pr["statusCheckRollup"].as_array().filter(|_| pr["state"] == "OPEN");
+indexing_slicing crates/core/src/arch.rs:436:19 let end = lines[i + 1..]
+indexing_slicing crates/core/src/arch.rs:480:31 let (ch, next) = (s[i], s.get(i + 1).copied());
+indexing_slicing crates/core/src/arch.rs:485:40 let end = ch == '"' && s[i + 1..].iter().take(n).filter(|&&x| x == '#').count() == n;
+indexing_slicing crates/core/src/arch.rs:496:91 } else if rust && ch == 'r' && matches!(next, Some('"' | '#')) && (i == 0 || !s[i - 1].is_alphanumeric()) {
+indexing_slicing crates/core/src/arch.rs:497:25 let n = s[i + 1..].iter().take_while(|&&x| x == '#').count();
+indexing_slicing crates/core/src/arch.rs:515:13 let t = lines[i].trim();
+indexing_slicing crates/core/src/arch.rs:523:20 let mut item = lines[i + 1..].iter().map(|l| l.trim_start());
+indexing_slicing crates/core/src/arch.rs:526:38 one_doc && public && (i == 0 || !com[i - 1])
+as_conversions crates/core/src/breaker.rs:67:8 if (count as u64) < l.runtime_down_failures {
+indexing_slicing crates/core/src/card.rs:119:19 let how = ["was denied", "ran already"][usize::from(s.val("approved") == true)];
+indexing_slicing crates/core/src/card.rs:140:9 d["via"] = json!(v);
+let_underscore_must_use crates/core/src/card.rs:150:5 let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
+let_underscore_must_use crates/core/src/card.rs:189:5 let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
+let_underscore_must_use crates/core/src/card.rs:191:9 let _ = r.run("kill", &argv(&["-KILL", "--", &format!("-{pid}")]));
+indexing_slicing crates/core/src/check.rs:25:6 (pr["state"] == "OPEN").then_some((f, pr))
+indexing_slicing crates/core/src/check.rs:32:15 let url = spec["amended"].as_str().filter(|u| !brief.contains(*u))?;
+let_underscore_must_use crates/core/src/check.rs:67:5 let _ = std::fs::write(ctx.state.with_file_name("check.at"), ctx.now.to_string());
+print_stderr crates/core/src/check.rs:70:9 eprintln!("drover check: the agent list failed ({e}); skipping lane checks");
+indexing_slicing crates/core/src/check.rs:104:24 let kind = ["host-online", "host-offline"][usize::from(a.is_none())];
+indexing_slicing crates/core/src/check.rs:130:31 let (kind, how) = [("root-answers", "answers again"), ("root-hung", "not answering")][usize::from(hung)];
+indexing_slicing crates/core/src/check.rs:141:28 let kind = ["runners-ok", "runners-low"][usize::from(on < want)];
+print_stderr crates/core/src/check.rs:146:25 Some(Err(e)) => eprintln!("drover check: CI runners: {e:#}"),
+let_underscore_must_use crates/core/src/check.rs:154:9 let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
+let_underscore_must_use crates/core/src/check.rs:183:13 let _ = gh::spec(ctx, r, f, name, i.issue, false);
+indexing_slicing crates/core/src/check.rs:314:40 if held.insert(d["key"].to_string()) {
+indexing_slicing crates/core/src/check.rs:349:58 let same = s.state.starts_with("fix") && pr["headRefOid"].as_str().is_some_and(|h| s.reviewed(h));
+indexing_slicing crates/core/src/check.rs:352:52 .map(|f| gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)));
+indexing_slicing crates/core/src/check.rs:375:42 hits.push(("ci-missing", pr["headRefOid"].as_str().unwrap_or_default().into(), why));
+indexing_slicing crates/core/src/check.rs:385:23 let refused = mine[from..].iter().rev().find(|e| {
+indexing_slicing crates/core/src/check.rs:399:17 d["cause"] = json!(c);
+indexing_slicing crates/core/src/check.rs:408:29 let (f, pr) = (&cfg.fleet[&s.fleet], gh::cached_pr(ctx, &s.fleet, s.issue));
+indexing_slicing crates/core/src/check.rs:416:25 .map_or(["none", "gone"][usize::from(s.lane.is_some())], |a| {
+let_underscore_must_use crates/core/src/check.rs:464:13 let _ = r.run("kill", &pids);
+let_underscore_must_use crates/core/src/check.rs:467:17 let _ = r.run("kill", std::slice::from_ref(a));
+indexing_slicing crates/core/src/check.rs:503:20 let next = ["spawn", "verdict"][usize::from(checks(e))];
+indexing_slicing crates/core/src/check.rs:510:20 let wait = [cfg.limits.done_close_minutes * 60, 0][usize::from(acted)];
+indexing_slicing crates/core/src/check.rs:547:23 .map(|id| [id.to_string(), format!("{id}@{day}d")][usize::from(day > 0)].clone());
+let_underscore_must_use crates/core/src/check.rs:593:5 let _ = stamp(ctx, &measure(ctx, cfg));
+indexing_slicing crates/core/src/check.rs:609:8 if h["at"].as_u64().is_some_and(|t| t + 600 >= ctx.now) {
+indexing_slicing crates/core/src/check.rs:610:28 let (rss, busy) = (h["rss_mb"].as_u64().unwrap_or(0), h["busy"].as_u64().unwrap_or(0));
+indexing_slicing crates/core/src/check.rs:610:63 let (rss, busy) = (h["rss_mb"].as_u64().unwrap_or(0), h["busy"].as_u64().unwrap_or(0));
+indexing_slicing crates/core/src/check.rs:616:43 now.push(("drover", "serve-slow", h["slow"].as_str().map(|s| format!("serve {s}"))));
+indexing_slicing crates/core/src/check.rs:782:10 (d["key"], d["id"], d["ask_seq"]) = (json!(id), json!(id), json!(q.seq));
+indexing_slicing crates/core/src/check.rs:782:20 (d["key"], d["id"], d["ask_seq"]) = (json!(id), json!(id), json!(q.seq));
+indexing_slicing crates/core/src/check.rs:782:29 (d["key"], d["id"], d["ask_seq"]) = (json!(id), json!(id), json!(q.seq));
+indexing_slicing crates/core/src/check.rs:928:26 .map(|p| p["number"].clone());
+let_underscore_must_use crates/core/src/check.rs:1044:13 let _ = term::close(ctx, &on, pane);
+indexing_slicing crates/core/src/check.rs:1073:25 let (fl, n) = (&t.labels["fleet"], t.labels.get("issue").and_then(|i| i.parse().ok()));
+let_underscore_must_use crates/core/src/check.rs:1121:9 let _ = std::fs::remove_file(&mark);
+indexing_slicing crates/core/src/check.rs:1505:84 writeln!(out, "{what}: {host}: removed {b}/{n} {:.2} GB ({})", gb(*bytes), why[n])?;
+indexing_slicing crates/core/src/check.rs:1507:63 let d = json!({"agent": n, "bytes": bytes, "why": why[n], "host": host, "path": format!("{b}/{n}")});
+as_conversions crates/core/src/check.rs:1771:5 bytes as f64 / 1_073_741_824.0
+indexing_slicing crates/core/src/check.rs:1794:38 .is_some_and(|n| n.as_encoded_bytes()[0] == b'.' || ours.iter().any(|o| n == *o))
+indexing_slicing crates/core/src/check.rs:1908:25 open.retain(|n| gh::cached_pr(ctx, name, *n)["state"] != "MERGED");
+let_underscore_must_use crates/core/src/check.rs:1939:13 let _ = writeln!(
+indexing_slicing crates/core/src/check.rs:1986:25 match i.filter(|i| !events[*i..].iter().any(|e| killed(e, events[*i]))) {
+indexing_slicing crates/core/src/check.rs:1986:63 match i.filter(|i| !events[*i..].iter().any(|e| killed(e, events[*i]))) {
+indexing_slicing crates/core/src/check.rs:1987:23 Some(i) => Ok(events[i]),
+indexing_slicing crates/core/src/check.rs:2023:43 let on = On::new(r, host.and_then(|h| cfg.hosts[h].machine.as_deref()));
+indexing_slicing crates/core/src/check.rs:2077:62 .map_or(String::new(), |p| format!(" · PR #{} open", p["number"]));
+indexing_slicing crates/core/src/check.rs:2101:27 let kind = why.map_or(["lane-killed", "stale-pane-killed"][usize::from(stale)], |_| {
+indexing_slicing crates/core/src/check.rs:2406:30 .find(|p| digits(p[0], 8) && digits(p[1], 6))
+indexing_slicing crates/core/src/check.rs:2406:49 .find(|p| digits(p[0], 8) && digits(p[1], 6))
+indexing_slicing crates/core/src/check.rs:2440:16 let gone = ["would delete", "deleted"][usize::from(!dry)];
+indexing_slicing crates/core/src/check.rs:2451:19 let has = ["", " · build output"][usize::from(has)];
+let_underscore_must_use crates/core/src/check.rs:2460:9 let _ = git(&["reset", "-q"]);
+let_underscore_must_use crates/core/src/check.rs:2518:9 let _ = git(&["reset", "-q"]);
+indexing_slicing crates/core/src/check.rs:2528:19 let msg = [msg, &format!("skipped: {}", skip.join(", "))][..=usize::from(!skip.is_empty())].join("\n\n");
+unwrap_used crates/core/src/cli.rs:1117:44 s += &format!("  --{}  {h}\n", a.get_long().unwrap());
+let_underscore_must_use crates/core/src/cli.rs:1128:13 let _ = e.print();
+print_stderr crates/core/src/cli.rs:1145:9 eprintln!("herdsman is now drover: the old name works for one more release");
+print_stderr crates/core/src/cli.rs:1148:9 eprintln!("{}", ctx.hints.join("\n"));
+let_underscore_must_use crates/core/src/cli.rs:1156:9 let _ = std::fs::write(hook::turn_mark(&ctx.state, &lane), "turn");
+indexing_slicing crates/core/src/cli.rs:1160:12 if sent[i - 1] == "--file" {
+indexing_slicing crates/core/src/cli.rs:1161:44 sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
+indexing_slicing crates/core/src/cli.rs:1161:60 sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
+indexing_slicing crates/core/src/cli.rs:1161:13 sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
+let_underscore_must_use crates/core/src/cli.rs:1171:13 let _ = write!(out, "{}", o.stdout);
+print_stderr crates/core/src/cli.rs:1172:13 eprint!("{}", o.stderr);
+let_underscore_must_use crates/core/src/cli.rs:1181:17 let _ = writeln!(out, "{rf}");
+print_stderr crates/core/src/cli.rs:1184:17 eprintln!("drover: {e:#}");
+indexing_slicing crates/core/src/cli.rs:1219:64 _ => return Some(format!("`{}` is no lane's own verb", args[0])),
+indexing_slicing crates/core/src/cli.rs:1315:25 v["conflicts"] = json!(c);
+indexing_slicing crates/core/src/cli.rs:1351:27 let pad = [5, 63][usize::from(hosts)];
+indexing_slicing crates/core/src/cli.rs:1874:41 let (f, pr) = (&cfg.fleet[&s.fleet], crate::gh::cached_pr(ctx, &s.fleet, s.issue));
+indexing_slicing crates/core/src/cli.rs:2068:25 d["note"] = json!(format!("{code}: {w}"));
+indexing_slicing crates/core/src/cli.rs:2101:39 let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
+indexing_slicing crates/core/src/cli.rs:2180:33 d["serial"] = if g.is_empty() { json!(true) } else { json!(g) };
+indexing_slicing crates/core/src/cli.rs:2183:33 d["needs"] = json!(needs);
+indexing_slicing crates/core/src/cli.rs:2186:33 d["design"] = json!(true);
+indexing_slicing crates/core/src/cli.rs:2189:33 d["architect"] = json!(true);
+indexing_slicing crates/core/src/cli.rs:2192:33 d["verify"] = json!(v);
+indexing_slicing crates/core/src/cli.rs:2195:33 d["repro"] = json!(true);
+indexing_slicing crates/core/src/cli.rs:2198:33 d["playbook"] = json!(if perf { "perf" } else { "refactor" });
+indexing_slicing crates/core/src/cli.rs:2213:29 d[key.as_str()] = json!(tags);
+indexing_slicing crates/core/src/cli.rs:2234:25 d["design_thread"] = json!(t);
+print_stderr crates/core/src/cli.rs:2281:13 eprintln!("drover hook: shed state: {e:#}");
+indexing_slicing crates/core/src/cli.rs:2288:22 let id = input["tool_use_id"].as_str().filter(|_| why == "push");
+print_stderr crates/core/src/cli.rs:2300:13 eprintln!("drover hook: {e:#}");
+indexing_slicing crates/core/src/cli.rs:2306:8 if input["tool_name"].as_str().is_none_or(str::is_empty) {
+indexing_slicing crates/core/src/cli.rs:2381:13 d["group"] = json!(g);
+print_stderr crates/core/src/cli.rs:2396:9 eprintln!("drover hook: {e:#}");
+print_stderr crates/core/src/cli.rs:2420:5 eprintln!("drover: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
+indexing_slicing crates/core/src/cli.rs:2436:5 d["lane"] = json!(lane);
+let_underscore_must_use crates/core/src/cli.rs:2440:5 let _ = match Config::load(&ctx.config) {
+indexing_slicing crates/core/src/cloud.rs:12:23 let (c, size) = (&cfg.hosts[name].cloud, cfg.hosts[name].size.clone().unwrap_or_default());
+indexing_slicing crates/core/src/cloud.rs:12:46 let (c, size) = (&cfg.hosts[name].cloud, cfg.hosts[name].size.clone().unwrap_or_default());
+indexing_slicing crates/core/src/cloud.rs:93:5 d["host"] = json!(name);
+indexing_slicing crates/core/src/cloud.rs:137:14 let h = &cfg.hosts[name];
+let_underscore_must_use crates/core/src/cloud.rs:157:9 let _ = std::fs::remove_file(pin(ctx, name));
+indexing_slicing crates/core/src/cloud.rs:224:40 let pinned = format!("{} {key}\n", at[usize::from(port == "22")]);
+indexing_slicing crates/core/src/cloud.rs:228:13 let m = cfg.hosts[name].machine.as_deref().unwrap_or(name);
+let_underscore_must_use crates/core/src/cloud.rs:239:5 let _ = std::fs::remove_file(dir.join(format!("herdsman-{name}.known")));
+indexing_slicing crates/core/src/cloud.rs:304:16 let head = [st.replace("running", ""), paused][usize::from(st == "stopped")].clone();
+indexing_slicing crates/core/src/cloud.rs:313:16 let tone = ["g", "a", "r"][at.min(2)].to_string();
+indexing_slicing crates/core/src/cloud.rs:334:16 return [
+let_underscore_must_use crates/core/src/cloud.rs:390:9 let _ = log(ctx, cfg, "host-bootstrap", name, d);
+indexing_slicing crates/core/src/cloud.rs:477:13 let c = cfg.hosts[name].cloud.clone().unwrap_or_default();
+indexing_slicing crates/core/src/cloud.rs:478:8 if cfg.hosts[name].size.as_deref() != Some(&size) {
+indexing_slicing crates/core/src/cloud.rs:479:19 let old = cfg.hosts[name].size.clone().unwrap_or_default();
+indexing_slicing crates/core/src/cloud.rs:498:13 [
+indexing_slicing crates/core/src/cloud.rs:523:29 .filter(|p| p[0] == c && !p[1].starts_with('-'))
+indexing_slicing crates/core/src/cloud.rs:523:43 .filter(|p| p[0] == c && !p[1].starts_with('-'))
+indexing_slicing crates/core/src/cloud.rs:524:27 .map(|p| (p[1], verb, line)),
+let_underscore_must_use crates/core/src/config.rs:1149:21 let _ = std::fs::write(&good, text);
+print_stderr crates/core/src/config.rs:1182:13 eprintln!("drover: [limits].max_agents is no longer used; ignoring it");
+print_stderr crates/core/src/config.rs:1185:13 eprintln!("drover: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
+print_stderr crates/core/src/config.rs:1281:17 eprintln!("drover: fleet.{name}.deny_commands is empty: the lane hook denies no commands");
+indexing_slicing crates/core/src/config.rs:1334:18 let f = &self.fleet[name];
+expect_used crates/core/src/config.rs:1433:9 self.pipeline
+indexing_slicing crates/core/src/config.rs:1451:13 COLORS[usize::from_str_radix(&h[..2], 16).unwrap_or(0) % COLORS.len()]
+indexing_slicing crates/core/src/config.rs:1562:70 [b'*', b'*', rest @ ..] => (0..=s.len()).any(|i| glob(rest, &s[i..])),
+indexing_slicing crates/core/src/config.rs:1564:40 .take_while(|&i| i == 0 || s[i - 1] != b'/')
+indexing_slicing crates/core/src/config.rs:1565:34 .any(|i| glob(rest, &s[i..])),
+indexing_slicing crates/core/src/config.rs:1566:83 [b'?', rest @ ..] => s.first().is_some_and(|&c| c != b'/') && glob(rest, &s[1..]),
+indexing_slicing crates/core/src/config.rs:1567:63 [c, rest @ ..] => s.first() == Some(c) && glob(rest, &s[1..]),
+indexing_slicing crates/core/src/config.rs:1598:20 .find(|&i| lines[i].trim_start().starts_with('['))
+indexing_slicing crates/core/src/config.rs:1602:17 let t = lines[i].trim_start();
+indexing_slicing crates/core/src/config.rs:1606:17 let l = lines[i];
+unwrap_used crates/core/src/config.rs:1607:18 let eq = l.find('=').unwrap() + 1;
+indexing_slicing crates/core/src/config.rs:1613:9 out[i] = format!("{}{lit}{}", &l[..v], &l[v + l[v..end].trim_end().len()..]);
+unwrap_used crates/core/src/config.rs:1615:20 let last = (start..end).rev().find(|&i| !lines[i].trim().is_empty()).unwrap();
+indexing_slicing crates/core/src/config.rs:1615:50 let last = (start..end).rev().find(|&i| !lines[i].trim().is_empty()).unwrap();
+indexing_slicing crates/core/src/config.rs:1616:13 if !out[last].ends_with('\n') {
+indexing_slicing crates/core/src/config.rs:1617:13 out[last].push('\n');
+let_underscore_must_use crates/core/src/db.rs:58:13 let _ = std::fs::remove_file(format!("{}{x}", self.0.display()));
+indexing_slicing crates/core/src/db.rs:173:22 let s = &events::fold_into(m, std::slice::from_ref(ev))[&key];
+indexing_slicing crates/core/src/db.rs:246:42 let row = events::ending_row(events::ORDER[r], e);
+as_conversions crates/core/src/db.rs:322:18 since(state, i64::MAX as u64, true, None).map(|t| t.1)
+indexing_slicing crates/core/src/design.rs:26:35 let allow = Recipe::of(&text, spec["body"].as_str().unwrap_or_default()).folders;
+indexing_slicing crates/core/src/design.rs:132:5 ev[from..]
+indexing_slicing crates/core/src/design.rs:180:33 Recipe::at(r, wt, head, spec["body"].as_str().unwrap_or_default()).folders
+indexing_slicing crates/core/src/design.rs:198:22 let dir = folder(names[0], &dirs);
+indexing_slicing crates/core/src/design.rs:262:27 let body: Vec<&str> = lines[at + 1..]
+indexing_slicing crates/core/src/design.rs:264:37 .take_while(|l| !(1..=level(lines[at])).contains(&level(l)))
+let_underscore_must_use crates/core/src/design.rs:310:9 let _ = crate::term::close(ctx, r, pane);
+indexing_slicing crates/core/src/design.rs:324:10 (d["pre"], d["sha"]) = (json!(pre), json!(c));
+indexing_slicing crates/core/src/design.rs:324:20 (d["pre"], d["sha"]) = (json!(pre), json!(c));
+indexing_slicing crates/core/src/design.rs:326:6 (d["id"], d["by"]) = (ask.val("id").clone(), json!(by));
+indexing_slicing crates/core/src/design.rs:326:15 (d["id"], d["by"]) = (ask.val("id").clone(), json!(by));
+indexing_slicing crates/core/src/design.rs:327:6 (d["role"], d["adr"]) = (
+indexing_slicing crates/core/src/design.rs:327:17 (d["role"], d["adr"]) = (
+let_underscore_must_use crates/core/src/devices.rs:39:9 let _ = std::fs::File::open(p.parent().unwrap_or(p)).and_then(|d| d.sync_all());
+let_underscore_must_use crates/core/src/devices.rs:82:9 let _ = emit(&ctx.state, &Config::load(&ctx.config).unwrap_or_default(), ev);
+indexing_slicing crates/core/src/devices.rs:106:46 format!("{:06}", u32::from_be_bytes([b[0], b[1], b[2], b[3]]) % 1_000_000),
+indexing_slicing crates/core/src/devices.rs:106:52 format!("{:06}", u32::from_be_bytes([b[0], b[1], b[2], b[3]]) % 1_000_000),
+indexing_slicing crates/core/src/devices.rs:106:58 format!("{:06}", u32::from_be_bytes([b[0], b[1], b[2], b[3]]) % 1_000_000),
+indexing_slicing crates/core/src/devices.rs:106:64 format!("{:06}", u32::from_be_bytes([b[0], b[1], b[2], b[3]]) % 1_000_000),
+indexing_slicing crates/core/src/devices.rs:201:8 if all[i].used + YEAR <= ctx.now {
+indexing_slicing crates/core/src/devices.rs:204:40 let stale = std::mem::replace(&mut all[i].used, ctx.now) + 3600 <= ctx.now;
+let_underscore_must_use crates/core/src/devices.rs:218:5 let _ = f.and_then(|mut f| f.write_all(line.as_bytes()));
+indexing_slicing crates/core/src/diagram.rs:40:45 let set = |k: &str| format!("{k} = {}", l[k]);
+let_underscore_must_use crates/core/src/diagram.rs:51:9 let _ = writeln!(s, "    state \"{name}{}\" as {}", n.unwrap_or_default(), id(name));
+let_underscore_must_use crates/core/src/diagram.rs:55:13 let _ = writeln!(s, "    {} --> {} : {}", id(from), id(next), label(why));
+let_underscore_must_use crates/core/src/diagram.rs:58:13 let _ = writeln!(s, "    {} --> [*]", id(from));
+indexing_slicing crates/core/src/diagram.rs:64:24 let every = if args[0] == "drive" { "fast_secs" } else { "slow_secs" };
+let_underscore_must_use crates/core/src/diagram.rs:66:9 let _ = writeln!(p, "    j{i}[\"{job}: drover {}\"] --> {first}", args.join(" "));
+let_underscore_must_use crates/core/src/diagram.rs:72:13 let _ = writeln!(p, "    {pre}{i}[\"{step}\"]{}", next.unwrap_or_default());
+let_underscore_must_use crates/core/src/diagram.rs:80:5 let _ = writeln!(
+let_underscore_must_use crates/core/src/diagram.rs:90:9 let _ = writeln!(p, "    {at} -.- k_{k}([\"{}\"])", set(k));
+let_underscore_must_use crates/core/src/diagram.rs:116:9 let _ = write!(m, "\n## {title}\n\n```mermaid\n{}```\n", c.source);
+indexing_slicing crates/core/src/doctor.rs:80:33 if view.is_some_and(|v| v["isArchived"] == true) {
+as_conversions crates/core/src/doctor.rs:288:39 let why = ok(&on, "true", &[] as &[&str]).map_or_else(ssh, |_| "probe: unreadable answer".into());
+indexing_slicing crates/core/src/doctor.rs:383:40 let Some(cmd) = a.and_then(|a| a["cmd"][0].as_str()) else {
+let_underscore_must_use crates/core/src/drive.rs:122:13 let _ = append(&ctx.state, &e);
+indexing_slicing crates/core/src/drive.rs:332:16 let role = c[3];
+indexing_slicing crates/core/src/drive.rs:375:5 d["pid"] = pid.into();
+indexing_slicing crates/core/src/drive.rs:391:89 queue::startable(ev, g).iter().any(start) || held.into_iter().flatten().any(|a| a["code"] == "SPAWN_PENDING")
+indexing_slicing crates/core/src/drive.rs:450:18 let pushed = gh::cached_pr(ctx, fleet, n)["headRefOid"].as_str() != last.str("head");
+indexing_slicing crates/core/src/drive.rs:561:16 let acts = d["actions"].as_array_mut();
+indexing_slicing crates/core/src/drive.rs:567:37 d["spawns_launched"] = launched(d["actions"].as_array().map_or(&[], Vec::as_slice)).into();
+indexing_slicing crates/core/src/drive.rs:567:5 d["spawns_launched"] = launched(d["actions"].as_array().map_or(&[], Vec::as_slice)).into();
+indexing_slicing crates/core/src/drive.rs:568:5 d["updated"] = ctx.now.into();
+indexing_slicing crates/core/src/drive.rs:708:16 let lock = ["drive.lock", "drive-fast.lock"][i];
+let_underscore_must_use crates/core/src/drive.rs:713:13 let _ = std::fs::write(&mark, step);
+indexing_slicing crates/core/src/drive.rs:725:42 let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
+let_underscore_must_use crates/core/src/drive.rs:726:5 let _ = std::fs::write(&stamp, ctx.now.to_string());
+indexing_slicing crates/core/src/drive.rs:771:62 let fleets: Vec<&str> = live.iter().copied().filter(|n| !cfg.fleet[*n].paused).collect();
+let_underscore_must_use crates/core/src/drive.rs:848:9 let _ = std::fs::write(&stamp, format!("{} {secs}", ctx.now));
+print_stderr crates/core/src/drive.rs:855:66 crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: stale panes: {e:#}"));
+print_stderr crates/core/src/drive.rs:856:66 crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-dup: {e:#}"));
+print_stderr crates/core/src/drive.rs:858:69 crate::check::hogs(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-hog: {e:#}"));
+let_underscore_must_use crates/core/src/drive.rs:866:9 let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-slow", d));
+indexing_slicing crates/core/src/drive.rs:881:76 writeln!(out, "! a pass held {lock} past {max} s, {}: taken over", d["step"])?;
+let_underscore_must_use crates/core/src/drive.rs:882:9 let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-stuck", d));
+let_underscore_must_use crates/core/src/drive.rs:884:5 let _ = std::fs::write(&mark, "start");
+indexing_slicing crates/core/src/drive.rs:897:47 let lock = format!("drive{}-{name}.lock", ["", "-fast"][usize::from(fast)]);
+let_underscore_must_use crates/core/src/drive.rs:928:9 let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
+indexing_slicing crates/core/src/drive.rs:933:13 ["auto", "manual", "fast"][usize::from(manual) + 2 * usize::from(fast)],
+let_underscore_must_use crates/core/src/drive.rs:940:9 let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
+print_stderr crates/core/src/drive.rs:944:33 .unwrap_or_else(|e| eprintln!("drover: {name} backlog: {e:#}"));
+indexing_slicing crates/core/src/drive.rs:955:30 if on.is_empty() || !gh::cached_pr(ctx, &s.fleet, s.issue)["number"].is_null() {
+indexing_slicing crates/core/src/drive.rs:996:52 if s.build.as_deref() == Some("lesson") && mine[at].1.str("code") == Some("LANE_ENDS") {
+indexing_slicing crates/core/src/drive.rs:1000:20 let from = mine[..at].iter().rposition(|(_, e)| reset.contains(&e.kind.as_str()));
+indexing_slicing crates/core/src/drive.rs:1001:22 let round = &mine[from.map_or(0, |i| i + 1)..at];
+indexing_slicing crates/core/src/drive.rs:1005:22 .any(|w| w[0].1.kind == "lane-trimmed" && exited(w[1].1));
+indexing_slicing crates/core/src/drive.rs:1005:62 .any(|w| w[0].1.kind == "lane-trimmed" && exited(w[1].1));
+indexing_slicing crates/core/src/drive.rs:1009:12 if mine[at].1.str("code") == Some("LANE_ENDS") && trimmed && !again {
+indexing_slicing crates/core/src/drive.rs:1010:35 let Some(was) = fold(&events[..mine[at].0])
+indexing_slicing crates/core/src/drive.rs:1010:44 let Some(was) = fold(&events[..mine[at].0])
+indexing_slicing crates/core/src/drive.rs:1036:12 if mine[at].1.str("code") != Some("LANE_ENDS") || !gone || !round[..first].iter().any(|(_, e)| adopted(e)) {
+indexing_slicing crates/core/src/drive.rs:1036:69 if mine[at].1.str("code") != Some("LANE_ENDS") || !gone || !round[..first].iter().any(|(_, e)| adopted(e)) {
+indexing_slicing crates/core/src/drive.rs:1040:31 let Some(was) = fold(&events[..mine[at].0]).remove(&key).map(|b| b.state) else {
+indexing_slicing crates/core/src/drive.rs:1040:40 let Some(was) = fold(&events[..mine[at].0]).remove(&key).map(|b| b.state) else {
+indexing_slicing crates/core/src/drive.rs:1284:40 let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr)));
+indexing_slicing crates/core/src/drive.rs:1287:12 if pr["state"] == "OPEN"
+indexing_slicing crates/core/src/drive.rs:1378:31 let step = match (args[0], args.get(3).copied()) {
+indexing_slicing crates/core/src/drive.rs:1389:36 if step == "review" && args[3] == "verify" && !crate::verify::due(ctx, cfg, r, out, s, &pr)? {
+indexing_slicing crates/core/src/drive.rs:1392:37 if step == "verdict" && args[3] == "FAIL" {
+indexing_slicing crates/core/src/drive.rs:1408:39 (step == "verdict" && args[3] == "PASS").then(|| repro_seen(r, &events, (fleet, s.issue), &args));
+indexing_slicing crates/core/src/drive.rs:1420:49 if let Some(why) = cause.filter(|_| args[0] == "spawn") {
+indexing_slicing crates/core/src/drive.rs:1425:38 .then(|| s.lanes.get(args[3]))
+indexing_slicing crates/core/src/drive.rs:1428:45 if code == Some("LANE_LIVE") && args[0] == "spawn" && (last_words(fleet).contains(OLD) || stale.is_some()) {
+indexing_slicing crates/core/src/drive.rs:1433:65 stale_replaced(ctx, cfg, out, (fleet, s.issue), args[3], old, mins)?;
+indexing_slicing crates/core/src/drive.rs:1447:21 args[3],
+indexing_slicing crates/core/src/drive.rs:1460:51 let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
+indexing_slicing crates/core/src/drive.rs:1462:34 ci == "green" && pr["isDraft"] != true && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
+indexing_slicing crates/core/src/drive.rs:1462:59 ci == "green" && pr["isDraft"] != true && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
+indexing_slicing crates/core/src/drive.rs:1465:58 Ok(crate::gate::verified(f, st.as_ref(), args[5], false).is_ok())
+indexing_slicing crates/core/src/drive.rs:1467:55 if step == "verdict" && code.is_none() && args[3] == "PASS" && green && verified()? {
+indexing_slicing crates/core/src/drive.rs:1469:27 code = if pr["mergeable"] == "CONFLICTING" {
+indexing_slicing crates/core/src/drive.rs:1522:24 let head = pr["headRefOid"].as_str().unwrap_or_default();
+indexing_slicing crates/core/src/drive.rs:1549:34 let body = on.read(Path::new(args[7])).unwrap_or_default();
+indexing_slicing crates/core/src/drive.rs:1559:39 .any(|e| e.str("sha") == Some(args[5]) && e.str("hash") == Some(hash));
+indexing_slicing crates/core/src/drive.rs:1569:31 let d = json!({"sha": args[5], "hash": hash, "agent": lane, "prompted": prompted});
+indexing_slicing crates/core/src/drive.rs:1591:59 let body = crate::hosts::On::of(r, sp).read(Path::new(args[7])).unwrap_or_default();
+indexing_slicing crates/core/src/drive.rs:1596:37 && e.str("sha") == Some(args[5])
+indexing_slicing crates/core/src/drive.rs:1624:27 let d = json!({"sha": args[5], "hash": hash, "agent": lane, "why": why, "prompted": prompted});
+indexing_slicing crates/core/src/drive.rs:1718:105 let last = (now.iter().rev()).find(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(&gs[at].name));
+indexing_slicing crates/core/src/drive.rs:1828:48 holds.push((n, g.name.clone(), h[0]));
+indexing_slicing crates/core/src/drive.rs:1884:20 let head = pr["headRefOid"].as_str().unwrap_or_default();
+indexing_slicing crates/core/src/drive.rs:1889:40 let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
+indexing_slicing crates/core/src/drive.rs:1896:77 if !(idle && building && (done || unlabelled || ci != "pending") && pr["state"] == "OPEN") || head.is_empty() {
+indexing_slicing crates/core/src/drive.rs:1944:24 let (v, since) = (&ev[i], &ev[i + 1..]);
+indexing_slicing crates/core/src/drive.rs:1944:32 let (v, since) = (&ev[i], &ev[i + 1..]);
+indexing_slicing crates/core/src/drive.rs:1981:19 let num = pr["number"].to_string();
+indexing_slicing crates/core/src/drive.rs:1985:35 let (kind, mut d) = match pr["state"].as_str() {
+indexing_slicing crates/core/src/drive.rs:1988:40 let m = json!({"into": pr["baseRefName"], "merge_sha": pr["mergeCommit"]["oid"], "merged_at": pr["mergedAt"]});
+indexing_slicing crates/core/src/drive.rs:1988:72 let m = json!({"into": pr["baseRefName"], "merge_sha": pr["mergeCommit"]["oid"], "merged_at": pr["mergedAt"]});
+indexing_slicing crates/core/src/drive.rs:1988:111 let m = json!({"into": pr["baseRefName"], "merge_sha": pr["mergeCommit"]["oid"], "merged_at": pr["mergedAt"]});
+indexing_slicing crates/core/src/drive.rs:1998:10 (d["pr"], d["by"]) = (json!(num), json!("external"));
+indexing_slicing crates/core/src/drive.rs:1998:19 (d["pr"], d["by"]) = (json!(num), json!("external"));
+indexing_slicing crates/core/src/drive.rs:2018:63 let ts = crate::usage::load::<Value>(&p).and_then(|c| c["ts"].as_u64());
+indexing_slicing crates/core/src/drive.rs:2024:28 if v.is_ok_and(|v| v["state"] == "CLOSED") {
+indexing_slicing crates/core/src/drive.rs:2059:18 let f = &cfg.fleet[fleet];
+indexing_slicing crates/core/src/drive.rs:2068:14 &c[..4 + usize::from(design.is_some() || again)],
+indexing_slicing crates/core/src/drive.rs:2142:9 pr["number"].as_u64().filter(|_| pr["state"] == "OPEN")
+indexing_slicing crates/core/src/drive.rs:2142:42 pr["number"].as_u64().filter(|_| pr["state"] == "OPEN")
+let_underscore_must_use crates/core/src/drive.rs:2161:9 let _ = tree(&["remove", "--force", "--force", &wts]);
+indexing_slicing crates/core/src/drive.rs:2167:35 let push = to != from && (pr["landing"] == "fast-first" || gh::update_ready(ctx, Some(r), f, fleet));
+indexing_slicing crates/core/src/drive.rs:2185:17 pr["headRefOid"] = json!(to);
+let_underscore_must_use crates/core/src/drive.rs:2191:9 let _ = tree(&["remove", "--force", &wts]);
+indexing_slicing crates/core/src/drive.rs:2244:17 let kicks = c[0] == "spawn" && KICK.get().is_none() && cfg.limits.max_parallel_spawns > 0;
+indexing_slicing crates/core/src/drive.rs:2246:34 let spawn = issue.filter(|_| c[0] == "spawn");
+indexing_slicing crates/core/src/drive.rs:2250:18 let paced = (c[0] == "spawn" && step == "respawn" && KICK.get().is_none())
+indexing_slicing crates/core/src/drive.rs:2275:57 if let Some(n) = issue.filter(|_| code.is_some() && c[0] == "spawn" && SLOT.get()) {
+indexing_slicing crates/core/src/drive.rs:2286:20 let head = gh::cached_pr(ctx, fleet, n)["headRefOid"].clone();
+indexing_slicing crates/core/src/drive.rs:2307:71 .filter(|_| !cfg.fleet(fleet).is_ok_and(|f| f.flow().is_check(c[3])))
+as_conversions crates/core/src/events.rs:111:22 seq: i as u64 + 1,
+print_stderr crates/core/src/events.rs:116:23 Err(e) => eprintln!(
+print_stderr crates/core/src/events.rs:260:13 eprintln!("drover: notifier `{cmd}` failed: {e:#}");
+let_underscore_must_use crates/core/src/events.rs:262:13 let _ = append(state, &Event::new(ev.ts, &ev.fleet, ev.issue, "notify-failed", d));
+indexing_slicing crates/core/src/events.rs:381:52 Some(l) => l.lane_at.iter().rev().map(|i| &events[*i]).find(spawn),
+indexing_slicing crates/core/src/events.rs:423:42 return l.lane_at.iter().map(|i| &events[*i]).collect();
+indexing_slicing crates/core/src/events.rs:431:29 at.into_iter().map(|i| &events[i]).collect()
+indexing_slicing crates/core/src/events.rs:621:50 map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
+indexing_slicing crates/core/src/events.rs:647:32 return f(&l.asks, &|i| events[i].seq);
+as_conversions crates/core/src/events.rs:651:16 f(&x, &|i| i as u64 + 1)
+indexing_slicing crates/core/src/events.rs:698:23 for c in &mut self.cells[..n] {
+indexing_slicing crates/core/src/events.rs:719:28 unsafe { (*self.buf.cells[self.len].get()).write(e) };
+expect_used crates/core/src/events.rs:822:22 let l = &mut m.get_mut(&file).expect("added above").1;
+expect_used crates/core/src/events.rs:829:5 logs().get_mut(&file).expect("added above").1 = l.clone();
+as_conversions crates/core/src/events.rs:877:14 let at = (std::ptr::from_ref(a) as usize).wrapping_sub(events.as_ptr() as usize) / size_of::<Event>();
+as_conversions crates/core/src/events.rs:877:60 let at = (std::ptr::from_ref(a) as usize).wrapping_sub(events.as_ptr() as usize) / size_of::<Event>();
+indexing_slicing crates/core/src/events.rs:880:11 Some((ORDER[r], row))
+indexing_slicing crates/core/src/events.rs:939:32 let open = |i: &usize| events[*i].kind == "needs-decision" && x.get(&key(*i)).is_some_and(Option::is_none);
+indexing_slicing crates/core/src/events.rs:940:49 (0..events.len()).filter(open).map(|i| &events[i]).collect()
+indexing_slicing crates/core/src/events.rs:954:52 at.map_or_else(Vec::new, |v| v.iter().map(|i| &events[*i]).collect())
+indexing_slicing crates/core/src/events.rs:969:29 at.into_iter().map(|i| &events[i]).collect()
+indexing_slicing crates/core/src/events.rs:982:47 at.iter().skip(c.len).for_each(|i| c.push(events[*i].clone()));
+indexing_slicing crates/core/src/events.rs:995:52 at.map_or_else(Vec::new, |v| v.iter().map(|i| &events[*i]).collect())
+indexing_slicing crates/core/src/gate.rs:49:76 let proofless = |(b, ls): (bool, Vec<&str>)| Some(format!("`{}` ({})", ls[0].trim(), unproven(&ls).filter(|_| b)?));
+indexing_slicing crates/core/src/gate.rs:346:18 .map(|f| f.1[0].to_lowercase())
+indexing_slicing crates/core/src/gate.rs:383:16 let kind = lc[at]
+indexing_slicing crates/core/src/gate.rs:386:16 let text = ls[at + 1..].join("\n");
+indexing_slicing crates/core/src/gate.rs:397:38 k if k.starts_with("run") => p[2..].iter().all(|o| o.is_empty()).then_some("run proof has no output"),
+indexing_slicing crates/core/src/gate.rs:492:18 let block = (ls[at + 1..].iter().copied())
+indexing_slicing crates/core/src/gate.rs:500:15 Some((key(ls[at]).split_off(6), block))
+let_underscore_must_use crates/core/src/gate.rs:645:9 let _ = tree(&["remove", "--force", &wts]);
+let_underscore_must_use crates/core/src/gate.rs:654:9 let _ = tree(&["remove", "--force", &wts]);
+indexing_slicing crates/core/src/gate.rs:714:45 let block = format!("\n```\n{}\n```\n", lines[lines.len().saturating_sub(20)..].join("\n"));
+indexing_slicing crates/core/src/gate.rs:777:12 Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?["state"] == "MERGED")
+indexing_slicing crates/core/src/gate.rs:787:59 crate::action::finish(&ctx.state, ctx.now, a, ["failed", "done"][usize::from(done)], d)?;
+indexing_slicing crates/core/src/gate.rs:808:18 v if v["state"] == "OPEN" => v,
+indexing_slicing crates/core/src/gate.rs:813:16 let fast = pr["landing"] == "fast-first";
+indexing_slicing crates/core/src/gate.rs:814:13 let h = pr["headRefOid"].as_str().unwrap_or_default();
+indexing_slicing crates/core/src/gate.rs:822:15 let num = pr["number"].as_u64().unwrap_or_default().to_string();
+indexing_slicing crates/core/src/gate.rs:877:46 && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "pending" =>
+indexing_slicing crates/core/src/gate.rs:941:21 let merge_sha = mc["mergeCommit"]["oid"].as_str().unwrap_or("?").to_string();
+indexing_slicing crates/core/src/gate.rs:944:9 d["premerge_secs"] = json!(s);
+indexing_slicing crates/core/src/gate.rs:947:10 (d["by"], d["override"]) = (json!("owner"), json!("ROUND_LIMIT"));
+indexing_slicing crates/core/src/gate.rs:947:19 (d["by"], d["override"]) = (json!("owner"), json!("ROUND_LIMIT"));
+let_underscore_must_use crates/core/src/gate.rs:991:5 let _ = r.run(
+indexing_slicing crates/core/src/gate.rs:1113:32 let was = |i: usize| fold(&events[..i]).remove(&(fleet.to_string(), n)).map(|s| s.state);
+indexing_slicing crates/core/src/gate.rs:1116:18 let nh = events[..at]
+indexing_slicing crates/core/src/gh.rs:39:5 load::<Value>(&cache_path(ctx, "pr", fleet, issue))?["ts"].as_u64()
+indexing_slicing crates/core/src/gh.rs:54:77 let b = || load::<Value>(&cache_path(ctx, "backlog", fleet, 0)).map(|b| b["issues"][issue.to_string()].clone());
+indexing_slicing crates/core/src/gh.rs:55:10 Some(cached_spec(ctx, fleet, issue).or_else(b)?["title"].as_str()?.into())
+indexing_slicing crates/core/src/gh.rs:78:13 if !u["updatedAt"].is_null() && u["updatedAt"] == c["updatedAt"] {
+indexing_slicing crates/core/src/gh.rs:78:41 if !u["updatedAt"].is_null() && u["updatedAt"] == c["updatedAt"] {
+indexing_slicing crates/core/src/gh.rs:78:59 if !u["updatedAt"].is_null() && u["updatedAt"] == c["updatedAt"] {
+indexing_slicing crates/core/src/gh.rs:83:20 let comments = v["comments"].as_array().cloned().unwrap_or_default();
+indexing_slicing crates/core/src/gh.rs:87:57 let body = format!("{}\n\n## Amendments{list}", v["body"].as_str().unwrap_or_default());
+indexing_slicing crates/core/src/gh.rs:88:9 v["body"] = json!(body);
+indexing_slicing crates/core/src/gh.rs:89:9 v["amended"] = json!(url);
+indexing_slicing crates/core/src/gh.rs:160:25 let mut etags = old["etags"].as_array().cloned().unwrap_or_default();
+indexing_slicing crates/core/src/gh.rs:161:18 let at = old["at"].as_u64().unwrap_or(0);
+indexing_slicing crates/core/src/gh.rs:162:23 let settled = old["prs"]
+indexing_slicing crates/core/src/gh.rs:170:48 json!({"ts": now, "at": at, "prs": old["prs"], "etags": etags})
+indexing_slicing crates/core/src/gh.rs:185:43 let by = prs.map(|v| (v["headRefName"].as_str().unwrap_or_default().to_string(), v));
+let_underscore_must_use crates/core/src/gh.rs:192:9 let _ = store(&p, &c);
+indexing_slicing crates/core/src/gh.rs:195:11 match c["error"].as_str() {
+indexing_slicing crates/core/src/gh.rs:197:20 None => Ok(c["prs"].clone()),
+indexing_slicing crates/core/src/gh.rs:214:17 let since = c["since"].as_str().map(|s| format!("since={s}"));
+indexing_slicing crates/core/src/gh.rs:224:28 c["since"] = json!(c["since"].as_str().max(i["updated"].as_str()));
+indexing_slicing crates/core/src/gh.rs:224:52 c["since"] = json!(c["since"].as_str().max(i["updated"].as_str()));
+indexing_slicing crates/core/src/gh.rs:224:9 c["since"] = json!(c["since"].as_str().max(i["updated"].as_str()));
+indexing_slicing crates/core/src/gh.rs:225:23 let (n, m) = (i["number"].to_string(), c["issues"].as_object_mut());
+indexing_slicing crates/core/src/gh.rs:225:48 let (n, m) = (i["number"].to_string(), c["issues"].as_object_mut());
+indexing_slicing crates/core/src/gh.rs:228:19 m.extend((i["state"] == "OPEN").then_some((n, i)));
+indexing_slicing crates/core/src/gh.rs:230:5 c["ts"] = json!(ctx.now);
+indexing_slicing crates/core/src/gh.rs:241:61 let (old, forgot) = c.map_or((Value::Null, false), |c| (c["pr"].clone(), c["forgot"] == true));
+indexing_slicing crates/core/src/gh.rs:241:78 let (old, forgot) = c.map_or((Value::Null, false), |c| (c["pr"].clone(), c["forgot"] == true));
+indexing_slicing crates/core/src/gh.rs:245:27 None if forgot || old["state"] == "OPEN" || old.is_null() && !FORCE.get() => {
+indexing_slicing crates/core/src/gh.rs:256:81 load::<Value>(&cache_path(ctx, "pr", fleet, issue)).map_or(Value::Null, |c| c["pr"].clone())
+indexing_slicing crates/core/src/gh.rs:268:46 let url = json(r, "gh", &a).ok().map(|v| v[0]["url"].clone());
+let_underscore_must_use crates/core/src/gh.rs:269:5 let _ = store(&p, &json!({"ts": now, "url": url}));
+indexing_slicing crates/core/src/gh.rs:274:71 load::<Value>(&cache_path(ctx, "run", fleet, issue)).and_then(|c| c["url"].as_str().map(String::from))
+indexing_slicing crates/core/src/gh.rs:281:19 return Ok(c["closed"]
+indexing_slicing crates/core/src/gh.rs:316:9 c["files"].clone()
+indexing_slicing crates/core/src/gh.rs:344:10 (c["ts"], c["at"]) = (json!(0), json!(0));
+indexing_slicing crates/core/src/gh.rs:344:19 (c["ts"], c["at"]) = (json!(0), json!(0));
+let_underscore_must_use crates/core/src/gh.rs:345:9 let _ = store(&p, &c);
+let_underscore_must_use crates/core/src/gh.rs:353:9 let _ = store(&p, &json!({"branch": c["branch"], "forgot": true}));
+indexing_slicing crates/core/src/gh.rs:353:45 let _ = store(&p, &json!({"branch": c["branch"], "forgot": true}));
+indexing_slicing crates/core/src/gh.rs:372:78 f.update_ready.as_deref() == Some("always") || c.map_or_else(strict, |c| c["strict"] == true)
+let_underscore_must_use crates/core/src/gh.rs:563:13 let _ = store(&p, &json!({"ts": x.now, "head": head, "broken": b.map(|b| b.1)}));
+indexing_slicing crates/core/src/gh.rs:566:32 None => c.and_then(|c| c["broken"].as_str().map(String::from)),
+indexing_slicing crates/core/src/heavy.rs:24:46 at.map_or(String::new(), |i| w[i..].join(" "))
+let_underscore_must_use crates/core/src/heavy.rs:78:17 let _ = std::fs::remove_file(e.path());
+let_underscore_must_use crates/core/src/heavy.rs:153:5 let _ = std::fs::remove_file(&path);
+indexing_slicing crates/core/src/hook.rs:251:17 let rest = &t[t.iter().position(|w| *w == "git")? + 1..];
+indexing_slicing crates/core/src/hook.rs:253:75 let write = (rest.iter().position(|w| *w == "notes")).is_some_and(|i| rest[i..].iter().any(|w| writes.contains(w)));
+indexing_slicing crates/core/src/hook.rs:441:21 words[..i]
+indexing_slicing crates/core/src/hook.rs:445:60 let rest: Vec<&str> = i.map_or(vec![], |i| words[i + 1..].iter().map(String::as_str).collect());
+indexing_slicing crates/core/src/hook.rs:568:17 let rest = &t[i + 1..];
+indexing_slicing crates/core/src/hook.rs:587:25 ("spawn", _) if r[1..].iter().any(|w| crate::events::STAGES.contains(w)) => "design",
+indexing_slicing crates/core/src/hook.rs:605:16 group(&t[i + 1..])
+indexing_slicing crates/core/src/hook.rs:614:14 let r = &t[i + 1..];
+indexing_slicing crates/core/src/hook.rs:634:42 let other = |(i, w): (usize, &&str)| r[i - 1] != "--on" && w.parse::<u64>().is_ok() && Some(*w) != own;
+indexing_slicing crates/core/src/hook.rs:679:13 r[0]
+indexing_slicing crates/core/src/hook.rs:711:26 while i < t.len() && t[i].starts_with('-') {
+indexing_slicing crates/core/src/hook.rs:712:12 if t[i] == "-C" && i + 1 < t.len() {
+indexing_slicing crates/core/src/hook.rs:713:19 dir = t[i + 1].to_string();
+indexing_slicing crates/core/src/hook.rs:715:18 i += if (t[i] == "-C" || t[i] == "-c") && i + 1 < t.len() {
+indexing_slicing crates/core/src/hook.rs:715:34 i += if (t[i] == "-C" || t[i] == "-c") && i + 1 < t.len() {
+indexing_slicing crates/core/src/hook.rs:726:26 GIT_WRITES.contains(&t[i]).then(|| {
+indexing_slicing crates/core/src/hook.rs:729:13 t[i]
+indexing_slicing crates/core/src/hook.rs:736:8 if t[i] != "push" {
+indexing_slicing crates/core/src/hook.rs:747:17 let w = t[j];
+indexing_slicing crates/core/src/hook.rs:770:15 for r in &pos[1..] {
+indexing_slicing crates/core/src/hook.rs:792:46 git_sub(&t, cwd).filter(|(i, _)| t[*i] == "push").map(|(_, d)| d)
+let_underscore_must_use crates/core/src/hook.rs:879:9 let _ = std::fs::write(mark, "prompt");
+let_underscore_must_use crates/core/src/hook.rs:889:5 let _ = std::fs::write(mark, "asked");
+indexing_slicing crates/core/src/hook.rs:898:15 let cmd = ti["command"].as_str()?;
+indexing_slicing crates/core/src/hook.rs:900:5 ti["command"] = h.wrap(exe, kind, cmd).into();
+let_underscore_must_use crates/core/src/host.rs:58:9 let _ = r.run("kill", &args);
+indexing_slicing crates/core/src/host.rs:84:29 let up = etime_secs(w[2]);
+indexing_slicing crates/core/src/host.rs:85:22 let stuck = (w[0].to_string(), up, parent(w[1]));
+indexing_slicing crates/core/src/host.rs:85:51 let stuck = (w[0].to_string(), up, parent(w[1]));
+indexing_slicing crates/core/src/host.rs:151:9 kb[if lane { 0 } else { i.map_or(4, |i| i + 1) }] += k.parse::<u64>().unwrap_or(0);
+indexing_slicing crates/core/src/host.rs:309:14 let w = &w[w.len().saturating_sub(WINDOW)..];
+let_underscore_must_use crates/core/src/host.rs:310:5 let _ = std::fs::write(&file, w.iter().map(f64::to_string).collect::<Vec<_>>().join(" "));
+unwrap_used crates/core/src/hosts.rs:241:9 self.late.lock().unwrap().iter().cloned().collect()
+unwrap_used crates/core/src/hosts.rs:255:10 *self.step.lock().unwrap() = (s.into(), self.t0.elapsed().as_secs());
+unwrap_used crates/core/src/hosts.rs:260:30 let (step, at) = self.step.lock().unwrap().clone();
+let_underscore_must_use crates/core/src/hosts.rs:263:13 let _ = std::fs::write(p, m.to_string());
+indexing_slicing crates/core/src/hosts.rs:268:9 args[..end].last().filter(|m| !m.starts_with('-')).map(String::as_str)
+unwrap_used crates/core/src/hosts.rs:271:27 if let Some(&u) = self.up.lock().unwrap().get(m) {
+unwrap_used crates/core/src/hosts.rs:285:13 self.late.lock().unwrap().insert(m.into());
+unwrap_used crates/core/src/hosts.rs:288:9 self.up.lock().unwrap().insert(m.into(), u);
+unwrap_used crates/core/src/hosts.rs:312:13 self.late.lock().unwrap().insert(m.into());
+let_underscore_must_use crates/core/src/hosts.rs:330:17 let _ = std::fs::remove_file(sock);
+unwrap_used crates/core/src/hosts.rs:340:13 self.up.lock().unwrap().insert(m.into(), false);
+unwrap_used crates/core/src/hosts.rs:343:13 self.late.lock().unwrap().insert(m.into());
+unwrap_used crates/core/src/hosts.rs:352:9 self.up.lock().unwrap().insert(m.into(), false);
+let_underscore_must_use crates/core/src/hosts.rs:372:9 let _ = emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kinds[0], d));
+print_stderr crates/core/src/hosts.rs:477:13 eprintln!("cloud {name}: {e:#}");
+print_stderr crates/core/src/hosts.rs:491:17 eprintln!("proxy {name}: {e:#}");
+let_underscore_must_use crates/core/src/hosts.rs:521:5 let _ = std::fs::write(file(ctx), serde_json::to_string(&all).unwrap_or_default());
+print_stderr crates/core/src/hosts.rs:523:9 eprintln!("host history: {e:#}");
+indexing_slicing crates/core/src/hosts.rs:550:9 d["from"] = json!(from);
+indexing_slicing crates/core/src/hosts.rs:551:12 if d["agent"].is_null() {
+indexing_slicing crates/core/src/hosts.rs:552:13 d["agent"] = json!(lane
+let_underscore_must_use crates/core/src/hosts.rs:556:9 let _ = crate::db::ask(
+let_underscore_must_use crates/core/src/hosts.rs:564:9 let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "asks-imported", d));
+indexing_slicing crates/core/src/hosts.rs:639:42 let (k, c) = (0..2).find_map(|k| caps[k].filter(|&c| used[k] >= c).map(|c| (k, c)))?;
+indexing_slicing crates/core/src/hosts.rs:639:62 let (k, c) = (0..2).find_map(|k| caps[k].filter(|&c| used[k] >= c).map(|c| (k, c)))?;
+indexing_slicing crates/core/src/hosts.rs:640:79 full.get_or_insert(format!("waiting for a slot: {}/{c} {} on {name}", used[k], SLOTS[k]));
+indexing_slicing crates/core/src/hosts.rs:640:88 full.get_or_insert(format!("waiting for a slot: {}/{c} {} on {name}", used[k], SLOTS[k]));
+indexing_slicing crates/core/src/hosts.rs:654:54 .filter_map(|k| Some(format!("{} {}/{}", SLOTS[k], held[k], caps[k]?)))
+indexing_slicing crates/core/src/hosts.rs:654:64 .filter_map(|k| Some(format!("{} {}/{}", SLOTS[k], held[k], caps[k]?)))
+indexing_slicing crates/core/src/hosts.rs:654:73 .filter_map(|k| Some(format!("{} {}/{}", SLOTS[k], held[k], caps[k]?)))
+let_underscore_must_use crates/core/src/hosts.rs:669:9 let _ = std::fs::write(file(ctx), serde_json::to_string(&all).unwrap_or_default());
+indexing_slicing crates/core/src/hosts.rs:714:42 (at(&["host-on"]) < Some(i)).then(|| events[i].str("reason")).flatten()
+indexing_slicing crates/core/src/hosts.rs:995:15 let pre = s["hooks"]["PreToolUse"].as_array().into_iter().flatten();
+let_underscore_must_use crates/core/src/hosts.rs:1052:13 let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d));
+let_underscore_must_use crates/core/src/hosts.rs:1067:9 let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d));
+unwrap_used crates/core/src/hosts.rs:1124:13 p.refusal.as_mut().unwrap().1 += &format!("; stays on {}: its worktree there has unpushed work", was.0);
+indexing_slicing crates/core/src/hosts.rs:1152:13 ["", " (cloud host stopped or over budget)"][usize::from(cfg.hosts.values().any(|h| h.cloud.is_some()))];
+indexing_slicing crates/core/src/hosts.rs:1159:31 let i = (!wake && !local(&on[0])).then(|| on.iter().position(local)).flatten();
+let_underscore_must_use crates/core/src/hosts.rs:1178:5 let _ = if held {
+indexing_slicing crates/core/src/hosts.rs:1183:5 [0, ctx.now.saturating_sub(since)][usize::from(held)]
+indexing_slicing crates/core/src/hosts.rs:1282:20 let last = [age(now.saturating_sub(s.seen)), "never".into()][usize::from(s.seen == 0)].clone();
+as_conversions crates/core/src/hosts.rs:1492:53 let i = usize::try_from((r.ts - from - 1) * n as u64 / secs.max(1)).unwrap_or(0);
+indexing_slicing crates/core/src/hosts.rs:1493:47 let o: &mut Option<(f64, u64)> = &mut out[i.min(n - 1)];
+indexing_slicing crates/core/src/hosts.rs:1510:5 rs[..[1, 3][usize::from(all)]]
+indexing_slicing crates/core/src/hosts.rs:1510:10 rs[..[1, 3][usize::from(all)]]
+indexing_slicing crates/core/src/hotspots.rs:194:9 op["architect"] = json!(true);
+indexing_slicing crates/core/src/land.rs:29:65 .and_then(|c| serde_json::from_value::<Vec<String>>(c["files"].clone()).ok()),
+indexing_slicing crates/core/src/land.rs:66:6 ([gh::ci(&c), "none"][usize::from(none)], c)
+indexing_slicing crates/core/src/land.rs:96:20 let head = pr["headRefOid"].as_str().unwrap_or_default();
+indexing_slicing crates/core/src/land.rs:97:40 let st = gh::ci(&gh::required(&pr["statusCheckRollup"], &l.fast));
+indexing_slicing crates/core/src/land.rs:98:12 if pr["state"] != "OPEN" || st != "green" {
+indexing_slicing crates/core/src/land.rs:100:16 if pr["state"] == "OPEN" && st == "failed" && !ev.iter().any(told) {
+indexing_slicing crates/core/src/land.rs:103:17 d["reason"] = json!(format!("revert PR #{num}: fast checks red"));
+indexing_slicing crates/core/src/land.rs:115:30 let since: Vec<&Event> = ev[green..].iter().filter(mine("landed")).collect();
+let_underscore_must_use crates/core/src/land.rs:137:13 let _ = ok(r, "gh", &["run", "rerun", &run, "-R", &f.repo, "--failed"]);
+let_underscore_must_use crates/core/src/land.rs:173:5 let _ = tree(&["remove", "--force", &wts]);
+let_underscore_must_use crates/core/src/land.rs:182:5 let _ = tree(&["remove", "--force", &wts]);
+indexing_slicing crates/core/src/land.rs:185:10 (d["reason"], d["error"]) = (json!(format!("revert of {sha:.7} failed")), json!(format!("{e:#}")));
+indexing_slicing crates/core/src/land.rs:185:23 (d["reason"], d["error"]) = (json!(format!("revert of {sha:.7} failed")), json!(format!("{e:#}")));
+indexing_slicing crates/core/src/land.rs:205:6 (d["pr"], d["reason"]) = (json!(num), json!(format!("revert PR #{num} for {job} red")));
+indexing_slicing crates/core/src/land.rs:205:15 (d["pr"], d["reason"]) = (json!(num), json!(format!("revert PR #{num} for {job} red")));
+indexing_slicing crates/core/src/land.rs:249:18 let wf = wf["workflowName"].as_str().unwrap_or_default();
+indexing_slicing crates/core/src/land.rs:288:5 d["reason"] = json!(format!("{} red after #{n} landed: {}", f.integration, s("red_job")));
+indexing_slicing crates/core/src/land.rs:289:46 writeln!(out, "{fleet} #{n} {kind}: {}", d["reason"].as_str().unwrap_or_default())?;
+let_underscore_must_use crates/core/src/land.rs:303:5 let _ = ok(r, "gh", &["issue", "reopen", &n.to_string(), "-R", &f.repo]);
+as_conversions crates/core/src/land.rs:330:19 let day = lands.len() as u64 * 864_000 / span;
+indexing_slicing crates/core/src/land.rs:347:19 let end = ev[i..]
+indexing_slicing crates/core/src/lanes.rs:327:23 let (s, f) = (SECTIONS[section(l)], f.to_string());
+unwrap_used crates/core/src/lanes.rs:331:25 let subs = &mut out.last_mut().unwrap().1;
+unwrap_used crates/core/src/lanes.rs:335:9 subs.last_mut().unwrap().1.push(l);
+as_conversions crates/core/src/lanes.rs:380:21 let n = v.chars().count() as f64;
+as_conversions crates/core/src/lanes.rs:381:49 let bits: f64 = v.chars().map(|c| -(v.matches(c).count() as f64 / n).log2() / n).sum();
+indexing_slicing crates/core/src/lanes.rs:436:5 lines[lines.len().saturating_sub(n)..]
+indexing_slicing crates/core/src/lesson.rs:117:9 op["by"] = json!(by);
+indexing_slicing crates/core/src/lesson.rs:189:20 let no_pr = || crate::gh::cached_pr(ctx, fleet, n)["number"].is_null();
+indexing_slicing crates/core/src/lesson.rs:403:22 let l = &mut lines[c.line];
+indexing_slicing crates/core/src/orchestrator.rs:30:53 let at = at.into_iter().flatten().map(move |i| &events[i]);
+indexing_slicing crates/core/src/orchestrator.rs:38:50 Some(l) => l.threads.new.iter().map(|i| &events[*i]).collect(),
+indexing_slicing crates/core/src/orchestrator.rs:196:9 d["orchestrator"] = json!(orch);
+indexing_slicing crates/core/src/orchestrator.rs:251:16 let kind = ["thread-restore", "thread-archive"][usize::from(on)];
+indexing_slicing crates/core/src/orchestrator.rs:316:20 let last = last["text"].as_str().or(last["question"].as_str()).unwrap_or_default();
+indexing_slicing crates/core/src/orchestrator.rs:316:45 let last = last["text"].as_str().or(last["question"].as_str()).unwrap_or_default();
+indexing_slicing crates/core/src/orchestrator.rs:568:9 d["files"] = json!(files);
+let_underscore_must_use crates/core/src/orchestrator.rs:610:5 let _ = std::fs::remove_file(&to);
+let_underscore_must_use crates/core/src/orchestrator.rs:770:5 let _ = crate::shed::cli(r, &["cancel", agent]);
+indexing_slicing crates/core/src/orchestrator.rs:772:6 (d["thread"], d["agent"]) = (json!(t.str("thread")), json!(agent));
+indexing_slicing crates/core/src/orchestrator.rs:772:19 (d["thread"], d["agent"]) = (json!(t.str("thread")), json!(agent));
+indexing_slicing crates/core/src/orchestrator.rs:893:9 d[k] = json!(v);
+indexing_slicing crates/core/src/orchestrator.rs:1001:21 (b[6], b[8]) = (b[6] & 0x0f | 0x40, b[8] & 0x3f | 0x80);
+indexing_slicing crates/core/src/orchestrator.rs:1001:41 (b[6], b[8]) = (b[6] & 0x0f | 0x40, b[8] & 0x3f | 0x80);
+indexing_slicing crates/core/src/orchestrator.rs:1001:6 (b[6], b[8]) = (b[6] & 0x0f | 0x40, b[8] & 0x3f | 0x80);
+indexing_slicing crates/core/src/orchestrator.rs:1001:12 (b[6], b[8]) = (b[6] & 0x0f | 0x40, b[8] & 0x3f | 0x80);
+indexing_slicing crates/core/src/orchestrator.rs:1132:17 let agent = d["agent"].as_str().unwrap_or_default().to_string();
+indexing_slicing crates/core/src/orchestrator.rs:1170:18 let on = ["off", "on"][usize::from(c.groups().contains(g))];
+indexing_slicing crates/core/src/orchestrator.rs:1192:17 m["files"] = f.clone();
+indexing_slicing crates/core/src/orchestrator.rs:1195:17 m["link"] = json!(format!("{w} {t}"));
+indexing_slicing crates/core/src/orchestrator.rs:1198:17 m["text"] = json!(format!("{} (forwarded)", e.str("text").unwrap_or_default()));
+indexing_slicing crates/core/src/outbox.rs:70:25 let (ts, events) = (v["ts"].as_u64(), working(&ctx.state)?);
+indexing_slicing crates/core/src/outbox.rs:75:52 let args: Vec<String> = serde_json::from_value(v["args"].clone()).unwrap_or_default();
+indexing_slicing crates/core/src/outbox.rs:76:21 let why = match v["lane"].as_str() {
+indexing_slicing crates/core/src/outbox.rs:79:56 _ => Some(format!("names lane {}, not {lane}", v["lane"])),
+indexing_slicing crates/core/src/outbox.rs:83:9 d["refused"] = json!(w);
+indexing_slicing crates/core/src/outbox.rs:86:44 writeln!(out, "outbox {lane}: {}", args[0])?;
+indexing_slicing crates/core/src/outbox.rs:90:9 d["code"] = json!(res.as_ref().ok());
+indexing_slicing crates/core/src/outbox.rs:91:9 d["error"] = json!(res.err().map(|e| format!("{e:#}")));
+indexing_slicing crates/core/src/outbox.rs:104:29 .filter_map(|l| serde_json::from_str::<Value>(l).ok()?["ts"].as_u64())
+indexing_slicing crates/core/src/overlap.rs:21:28 serde_json::from_value(v["conflicts"].clone()).unwrap_or_default()
+indexing_slicing crates/core/src/overlap.rs:61:25 for (b, hb) in &heads[i + 1..] {
+indexing_slicing crates/core/src/overlap.rs:64:40 serde_json::from_value(old["cache"][&key].clone()).unwrap_or_else(|_| collide(r, &dir, ha, hb));
+indexing_slicing crates/core/src/overlap.rs:65:37 if !files.is_empty() && old["cache"][&key].is_null() {
+indexing_slicing crates/core/src/overlap.rs:189:23 let n = |k: &str| old[k].as_i64();
+indexing_slicing crates/core/src/overlap.rs:190:8 if old["sha"] == sha.as_str() {
+let_underscore_must_use crates/core/src/overlap.rs:200:5 let _ = gh::store(&p, &json!({"sha": sha, "lines": lines, "cap": cap, "warn": warn}));
+let_underscore_must_use crates/core/src/overlap.rs:258:5 let _ = tree(&["remove", "--force", &wts]);
+let_underscore_must_use crates/core/src/overlap.rs:263:5 let _ = tree(&["remove", "--force", &wts]);
+let_underscore_must_use crates/core/src/overlap.rs:290:5 let _ = git(r, &dir, &["fetch", "-q", "origin"]);
+indexing_slicing crates/core/src/pipeline.rs:210:29 return Some(path[i..].iter().chain([&n]).map(|s| (*s).to_string()).collect());
+indexing_slicing crates/core/src/pipeline.rs:289:35 let rest: Vec<&str> = stuck[1..].iter().map(|s| s.name.as_str()).collect();
+indexing_slicing crates/core/src/pipeline.rs:306:29 .unwrap_or(&c[0]);
+indexing_slicing crates/core/src/promise.rs:62:17 ["s", ""][usize::from(*n == 1)]
+indexing_slicing crates/core/src/promise.rs:115:25 let p = Promise::of(mine[at])?;
+indexing_slicing crates/core/src/promise.rs:116:18 let missed = mine[at..].iter().rfind(|e| e.kind == "promise-missed");
+indexing_slicing crates/core/src/promise.rs:158:20 let head = crate::gh::cached_pr(ctx, fleet, s.issue)["headRefOid"]
+let_underscore_must_use crates/core/src/promise.rs:252:9 let _ = std::fs::remove_dir_all(&d);
+indexing_slicing crates/core/src/propose.rs:59:26 l[i][j] = if a[i] == b[j] {
+indexing_slicing crates/core/src/propose.rs:59:34 l[i][j] = if a[i] == b[j] {
+indexing_slicing crates/core/src/propose.rs:60:17 l[i + 1][j + 1] + 1
+indexing_slicing crates/core/src/propose.rs:62:17 l[i + 1][j].max(l[i][j + 1])
+indexing_slicing crates/core/src/propose.rs:62:33 l[i + 1][j].max(l[i][j + 1])
+indexing_slicing crates/core/src/propose.rs:59:13 l[i][j] = if a[i] == b[j] {
+indexing_slicing crates/core/src/propose.rs:68:53 let line = if i < a.len() && j < b.len() && a[i] == b[j] {
+indexing_slicing crates/core/src/propose.rs:68:61 let line = if i < a.len() && j < b.len() && a[i] == b[j] {
+indexing_slicing crates/core/src/propose.rs:70:22 sec = if a[i - 1].starts_with('[') { a[i - 1] } else { sec };
+indexing_slicing crates/core/src/propose.rs:70:50 sec = if a[i - 1].starts_with('[') { a[i - 1] } else { sec };
+indexing_slicing crates/core/src/propose.rs:72:51 } else if i < a.len() && (j == b.len() || l[i + 1][j] >= l[i][j + 1]) {
+indexing_slicing crates/core/src/propose.rs:72:66 } else if i < a.len() && (j == b.len() || l[i + 1][j] >= l[i][j + 1]) {
+indexing_slicing crates/core/src/propose.rs:74:31 format!("- {}\n", a[i - 1])
+indexing_slicing crates/core/src/propose.rs:77:31 format!("+ {}\n", b[j - 1])
+unwrap_used crates/core/src/propose.rs:147:9 d.as_object_mut()
+indexing_slicing crates/core/src/propose.rs:163:13 ["✗ (run drover doctor)", "✓"][usize::from(ok)]
+indexing_slicing crates/core/src/propose.rs:168:5 d["applied"] = json!(apply);
+let_underscore_must_use crates/core/src/propose.rs:174:5 let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
+indexing_slicing crates/core/src/propose.rs:402:9 ["✗ (run drover doctor)", "✓"][usize::from(ok)]
+indexing_slicing crates/core/src/protection.rs:18:56 let missing: Vec<_> = parts.iter().filter(|p| !body[p.1].is_object()).map(|p| p.0).collect();
+indexing_slicing crates/core/src/protection.rs:24:12 if body["enforce_admins"]["enabled"] != true {
+indexing_slicing crates/core/src/protection.rs:29:15 let msg = body["message"].as_str().unwrap_or("").to_string();
+indexing_slicing crates/core/src/protection.rs:30:18 let status = body["status"].as_str().map(String::from).or_else(|| {
+indexing_slicing crates/core/src/providers/claude.rs:147:27 Ok(term::exec(r, &self.kick_cmds(p, pane)[0])?.code == 0)
+let_underscore_must_use crates/core/src/providers/claude.rs:198:13 let _ = std::fs::remove_dir_all(d.path().join(&key));
+indexing_slicing crates/core/src/providers/hermes.rs:145:24 term::exec(r, &c[0])?;
+indexing_slicing crates/core/src/providers/hermes.rs:147:28 term::exec(r, &c[1])?;
+indexing_slicing crates/core/src/providers/hermes.rs:148:28 term::exec(r, &c[2])?;
+indexing_slicing crates/core/src/providers/hermes.rs:149:31 if term::exec(r, &c[3])?.code == 0 {
+indexing_slicing crates/core/src/providers/hermes.rs:152:41 let screen = term::exec(r, &c[4])?;
+indexing_slicing crates/core/src/providers/hermes.rs:171:9 if !data["approvals"].is_array() {
+indexing_slicing crates/core/src/providers/hermes.rs:172:9 data["approvals"] = json!([]);
+indexing_slicing crates/core/src/providers/hermes.rs:174:16 let list = data["approvals"].as_array_mut().context("approvals")?;
+unwrap_used crates/core/src/providers/hermes.rs:195:46 .map(|(k, v)| format!("  {}: {v}\n", serde_json::to_string(k).unwrap()))
+indexing_slicing crates/core/src/providers/dsh.rs:101:37 let screen = term::exec(r, &c[0])?.stdout;
+indexing_slicing crates/core/src/providers/dsh.rs:103:28 term::exec(r, &c[1])?;
+indexing_slicing crates/core/src/providers/dsh.rs:111:48 if attempt == 0 || !term::exec(r, &c[0])?.stdout.contains(&typed) {
+indexing_slicing crates/core/src/providers/dsh.rs:112:32 term::exec(r, &c[2])?;
+indexing_slicing crates/core/src/providers/dsh.rs:114:28 term::exec(r, &c[3])?;
+print_stderr crates/core/src/proxy.rs:193:21 eprintln!("proxy: {e:#}");
+let_underscore_must_use crates/core/src/proxy.rs:280:5 let _ = std::fs::remove_file(&tmp);
+indexing_slicing crates/core/src/proxy.rs:315:31 n => c.write_all(&buf[..n])?,
+indexing_slicing crates/core/src/queue.rs:39:13 d[k] = json!(v);
+indexing_slicing crates/core/src/queue.rs:43:9 d["top"] = json!(true);
+indexing_slicing crates/core/src/queue.rs:60:24 pos(q, issues[0])?;
+indexing_slicing crates/core/src/queue.rs:110:29 q.remove(pos(q, issues[0])?);
+indexing_slicing crates/core/src/queue.rs:113:21 let n = issues[0];
+indexing_slicing crates/core/src/queue.rs:118:17 q[i].blockers.retain(|b| !all && !on.contains(b));
+indexing_slicing crates/core/src/queue.rs:119:17 q[i].ext.retain(|b| !all && !ext.contains(b));
+indexing_slicing crates/core/src/queue.rs:128:21 if !q[i].ext.contains(&b) {
+indexing_slicing crates/core/src/queue.rs:129:21 q[i].ext.push(b);
+indexing_slicing crates/core/src/queue.rs:139:21 if !q[i].blockers.contains(&b) {
+indexing_slicing crates/core/src/queue.rs:140:21 q[i].blockers.push(b);
+indexing_slicing crates/core/src/queue.rs:145:28 let i = pos(q, issues[0])?;
+indexing_slicing crates/core/src/queue.rs:147:17 q[i].serial = strs(&d["serial"]);
+indexing_slicing crates/core/src/queue.rs:149:17 q[i].design = strs(&d["design"]) == ["on"];
+indexing_slicing crates/core/src/queue.rs:151:17 q[i].architect = strs(&d["architect"]) == ["on"];
+indexing_slicing crates/core/src/queue.rs:153:17 q[i].verify = onoff(&d["verify"]);
+indexing_slicing crates/core/src/queue.rs:155:17 q[i].repro = strs(&d["repro"]) == ["on"];
+indexing_slicing crates/core/src/queue.rs:157:17 q[i].needs = strs(&d["needs"]);
+indexing_slicing crates/core/src/queue.rs:258:15 for e in &mine[done..] {
+indexing_slicing crates/core/src/queue.rs:349:13 let s = ["", "s"][usize::from(h.len() == 1)];
+indexing_slicing crates/core/src/rename.rs:105:9 a["fleet"].get(old) == b["fleet"].get(new) && after.fleet.contains_key(new),
+indexing_slicing crates/core/src/rename.rs:105:32 a["fleet"].get(old) == b["fleet"].get(new) && after.fleet.contains_key(new),
+indexing_slicing crates/core/src/report.rs:50:27 let s = |k: &str| b[k].as_str().unwrap_or_default().to_string();
+indexing_slicing crates/core/src/roots.rs:136:27 let (kind, how) = [("root-answers", "answers again"), ("root-hung", "not answering")][usize::from(hung)];
+let_underscore_must_use crates/core/src/roots.rs:138:9 let _ = emit(&ctx.state, cfg, Event::new(ctx.now, &sp.fleet, sp.issue, kind, d));
+indexing_slicing crates/core/src/roots.rs:190:28 let root = root.map_or(all[0].clone(), |p| under(p, home.as_deref()));
+let_underscore_must_use crates/core/src/roots.rs:294:17 let _ = crate::term::close(ctx, &on, e.str("pane").unwrap_or_default());
+let_underscore_must_use crates/core/src/roots.rs:312:13 let _ = crate::term::close(ctx, &on, e.str("pane").unwrap_or_default());
+let_underscore_must_use crates/core/src/roots.rs:329:13 let _ = ok(&on, "git", &["-C", &local, "worktree", "prune"]);
+indexing_slicing crates/core/src/runner.rs:71:65 let mut c = Command::new(if bridge { "sh".as_ref() } else { argv[0].as_os_str() });
+indexing_slicing crates/core/src/runner.rs:75:17 c.args(&argv[1..]);
+let_underscore_must_use crates/core/src/runner.rs:170:9 let _ = self.0.wait();
+let_underscore_must_use crates/core/src/runner.rs:217:13 let _ = c.stdin.take().unwrap().write_all(input);
+unwrap_used crates/core/src/runner.rs:217:21 let _ = c.stdin.take().unwrap().write_all(input);
+let_underscore_must_use crates/core/src/runner.rs:336:13 let _ = std::fs::write(p, b"");
+let_underscore_must_use crates/core/src/runner.rs:521:5 let _ = c.kill();
+let_underscore_must_use crates/core/src/runner.rs:535:9 let _ = tx.send(v);
+indexing_slicing crates/core/src/runners.rs:58:8 Ok(v["runners"]
+as_conversions crates/core/src/runners.rs:158:9 Ok((on as u64, c.slots * vms(c, events).len() as u64))
+as_conversions crates/core/src/runners.rs:158:30 Ok((on as u64, c.slots * vms(c, events).len() as u64))
+print_stderr crates/core/src/runners.rs:186:13 eprintln!("drover check: runner tokens: {e:#}");
+as_conversions crates/core/src/runners.rs:210:27 c.slots * all.len() as u64
+indexing_slicing crates/core/src/runners.rs:230:59 writeln!(out, "runner {}: {}{busy}", g.1, ["offline", "online"][usize::from(g.2)])?;
+as_conversions crates/core/src/runners.rs:247:33 let (total, per) = (all.len() as u64 + n, per_day(ctx, c)?);
+indexing_slicing crates/core/src/secret.rs:93:17 let line = &line[usize::from(value.is_some())];
+let_underscore_must_use crates/core/src/secret.rs:94:5 let _ = orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false));
+indexing_slicing crates/core/src/service.rs:33:5 call(ctx, &json!({"ping": true}))?["pid"].as_u64()
+indexing_slicing crates/core/src/service.rs:42:5 v["pid"].as_u64().and_then(|p| u32::try_from(p).ok())
+indexing_slicing crates/core/src/service.rs:48:41 for w in args.windows(2).filter(|w| w[0] == "--file") {
+indexing_slicing crates/core/src/service.rs:49:45 let text = std::fs::read_to_string(&w[1]).with_context(|| format!("cannot read {}", w[1]))?;
+indexing_slicing crates/core/src/service.rs:49:93 let text = std::fs::read_to_string(&w[1]).with_context(|| format!("cannot read {}", w[1]))?;
+indexing_slicing crates/core/src/service.rs:50:22 files.insert(w[1].clone(), text.into());
+indexing_slicing crates/core/src/service.rs:60:26 let text = |k: &str| v[k].as_str().unwrap_or_default().to_string();
+indexing_slicing crates/core/src/service.rs:61:16 let code = v["code"].as_i64().and_then(|c| i32::try_from(c).ok()).unwrap_or(1);
+indexing_slicing crates/core/src/service.rs:103:8 if args[0] == "verdict" && !cfg.fleet(&g.fleet)?.flow().is_check(&g.role) {
+indexing_slicing crates/core/src/session/stamp.rs:52:59 let same = |k: &str| was.is_some_and(|e| e.val(k) == &d[k]);
+indexing_slicing crates/core/src/session/stamp.rs:57:95 let kept = was.filter(|e| word(e.val("state")).is_some() && word(e.val("state")) == word(&d["state"]));
+indexing_slicing crates/core/src/session/stamp.rs:59:6 (d["agent"], d["since"]) = (json!(agent), json!(at));
+indexing_slicing crates/core/src/session/stamp.rs:59:18 (d["agent"], d["since"]) = (json!(agent), json!(at));
+indexing_slicing crates/core/src/session/stamp.rs:69:6 (d["state"], d["code"], d["cause"]) = (json!("gone"), json!(exit.code), json!(exit.cause.word()));
+indexing_slicing crates/core/src/session/stamp.rs:69:18 (d["state"], d["code"], d["cause"]) = (json!("gone"), json!(exit.code), json!(exit.cause.word()));
+indexing_slicing crates/core/src/session/stamp.rs:69:29 (d["state"], d["code"], d["cause"]) = (json!("gone"), json!(exit.code), json!(exit.cause.word()));
+indexing_slicing crates/core/src/session/stamp.rs:71:9 d["note"] = json!(n);
+indexing_slicing crates/core/src/session/stamp.rs:80:70 .any(|x| x.kind == "usage-limit" && x.val("key") == &d["key"])
+indexing_slicing crates/core/src/session/stamp.rs:103:29 d["shed_seq"] = seq["shed_seq"].clone();
+indexing_slicing crates/core/src/session/stamp.rs:103:13 d["shed_seq"] = seq["shed_seq"].clone();
+indexing_slicing crates/core/src/session/transcript.rs:57:41 Some(Transcript::Events(ev[ev.len().saturating_sub(n)..].to_vec()))
+indexing_slicing crates/core/src/setup.rs:68:11 Some(&events[i]).filter(|e| e.kind == "setup")
+let_underscore_must_use crates/core/src/setup.rs:83:13 let _ = close(ctx, r, e, "timeout");
+indexing_slicing crates/core/src/setup.rs:96:33 return close(ctx, r, e, ["timeout", "exited"][usize::from(live)]).map(|()| shut);
+indexing_slicing crates/core/src/setup.rs:107:20 let more = ls[i + 1..]
+indexing_slicing crates/core/src/slo.rs:47:35 &Event::new(ctx.now, &ep[0].fleet, ep[0].issue, "slo-ok", json!({"key": key})),
+indexing_slicing crates/core/src/slo.rs:47:48 &Event::new(ctx.now, &ep[0].fleet, ep[0].issue, "slo-ok", json!({"key": key})),
+let_underscore_must_use crates/core/src/slo.rs:139:13 let _ = ok(r, "kill", &["-TERM", pid]);
+let_underscore_must_use crates/core/src/slo.rs:146:13 let _ = ok(r, "kill", &["-KILL", pid]);
+indexing_slicing crates/core/src/slo.rs:164:17 let since = m["since"]
+indexing_slicing crates/core/src/slo.rs:167:15 let pid = m["pid"]
+indexing_slicing crates/core/src/slo.rs:177:17 let child = m["child"].as_str().filter(|c| !c.is_empty()).unwrap_or("none");
+indexing_slicing crates/core/src/slo.rs:178:16 let step = m["step"].as_str().unwrap_or("?");
+let_underscore_must_use crates/core/src/slo.rs:204:9 let _ = std::fs::remove_file(&at);
+indexing_slicing crates/core/src/slo.rs:243:20 let head = crate::gh::cached_pr(ctx, fleet, s.issue)["headRefOid"]
+print_stderr crates/core/src/snapshot.rs:226:13 eprintln!("drover: lane states: {e:#}");
+let_underscore_must_use crates/core/src/snapshot.rs:239:5 let _ = crate::db::put(&ctx.state, "board", ctx.now, &snap);
+indexing_slicing crates/core/src/spawn.rs:97:19 let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
+let_underscore_must_use crates/core/src/spawn.rs:240:13 let _ = self.0.remove(f);
+indexing_slicing crates/core/src/spawn.rs:428:20 clip = [
+indexing_slicing crates/core/src/spawn.rs:443:19 + hot[usize::from(title.starts_with(crate::hotspots::TITLE))]
+indexing_slicing crates/core/src/spawn.rs:534:15 let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
+indexing_slicing crates/core/src/spawn.rs:561:26 let mut words = home(p.lane_cmd("")[3..].to_vec());
+indexing_slicing crates/core/src/spawn.rs:681:38 let shown = |a: Vec<String>| term::shed_line(&a)[1..].to_vec();
+let_underscore_must_use crates/core/src/spawn.rs:781:17 let _ = std::fs::remove_dir_all(&tmp);
+let_underscore_must_use crates/core/src/spawn.rs:836:5 let _ = std::fs::remove_dir_all(&tmp);
+as_conversions crates/core/src/spawn.rs:869:11 Some((changes(&st) as u64, n.trim().parse().ok()?))
+indexing_slicing crates/core/src/spawn.rs:992:9 pj["dry_run"] = json!(true);
+indexing_slicing crates/core/src/spawn.rs:1040:13 events[i + 1..]
+indexing_slicing crates/core/src/spawn.rs:1047:18 let st = live[0].status().map_or("unknown", Status::word);
+indexing_slicing crates/core/src/spawn.rs:1115:16 let step = ["spawn", "supersede"][usize::from(o.supersede && !dup.is_empty())];
+indexing_slicing crates/core/src/spawn.rs:1160:14 (d["stale_host"], d["stale_pane"]) = (json!(e.str("host")), json!(e.str("pane")));
+indexing_slicing crates/core/src/spawn.rs:1160:31 (d["stale_host"], d["stale_pane"]) = (json!(e.str("host")), json!(e.str("pane")));
+indexing_slicing crates/core/src/spawn.rs:1186:20 let body = iss["body"].as_str().unwrap_or("");
+let_underscore_must_use crates/core/src/spawn.rs:1239:13 let _ = on.remove(&p.worktree.join("verdict.md"));
+indexing_slicing crates/core/src/spawn.rs:1246:30 let (title, body) = (iss["title"].as_str().unwrap_or(""), iss["body"].as_str().unwrap_or(""));
+indexing_slicing crates/core/src/spawn.rs:1246:67 let (title, body) = (iss["title"].as_str().unwrap_or(""), iss["body"].as_str().unwrap_or(""));
+indexing_slicing crates/core/src/spawn.rs:1372:34 d["runtime"] = json!(["shed", "shed-acp"][usize::from(bt.0.acp.is_some())]);
+indexing_slicing crates/core/src/spawn.rs:1372:13 d["runtime"] = json!(["shed", "shed-acp"][usize::from(bt.0.acp.is_some())]);
+indexing_slicing crates/core/src/spawn.rs:1374:13 d["confirmed"] = json!(confirmed);
+indexing_slicing crates/core/src/spawn.rs:1375:13 d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
+indexing_slicing crates/core/src/spawn.rs:1376:13 d["update"] = json!(o.update);
+indexing_slicing crates/core/src/spawn.rs:1377:13 d["handover"] = json!(note);
+indexing_slicing crates/core/src/spawn.rs:1379:18 (d["host"], d["machine"], d["root"]) = (json!(pl.name), json!(pl.machine), json!(pl.root));
+indexing_slicing crates/core/src/spawn.rs:1379:29 (d["host"], d["machine"], d["root"]) = (json!(pl.name), json!(pl.machine), json!(pl.root));
+indexing_slicing crates/core/src/spawn.rs:1379:43 (d["host"], d["machine"], d["root"]) = (json!(pl.name), json!(pl.machine), json!(pl.root));
+indexing_slicing crates/core/src/spawn.rs:1381:21 d["why"] = json!(w);
+indexing_slicing crates/core/src/spawn.rs:1385:17 d["sha"] = json!(h);
+indexing_slicing crates/core/src/spawn.rs:1388:17 d["rules"] = json!(rl);
+let_underscore_must_use crates/core/src/spawn.rs:1392:21 let _ = term::close(ctx, r, old);
+indexing_slicing crates/core/src/spawn.rs:1400:13 pj["pane"] = json!(pane);
+indexing_slicing crates/core/src/spawn.rs:1401:13 pj["confirmed"] = json!(confirmed);
+as_conversions crates/core/src/spawn.rs:1513:23 if failed.len() < l.respawn_max as usize {
+indexing_slicing crates/core/src/spawn.rs:1599:19 for i in &items[items.len().saturating_sub(20)..] {
+indexing_slicing crates/core/src/spawn.rs:1645:5 d["adopted"] = json!(true);
+indexing_slicing crates/core/src/spawn.rs:1650:28 .for_each(|(k, v)| d[k] = v.clone());
+indexing_slicing crates/core/src/spawn.rs:1651:72 writeln!(out, "adopted {pane} as {} ({} @ {})", p.agent, p.branch, d["worktree"])?;
+indexing_slicing crates/core/src/spawn.rs:1688:17 crate::gh::pr(ctx, r, f, (fleet, n), &branch, ctx.now).ok()?["headRefOid"]
+let_underscore_must_use crates/core/src/stall.rs:32:13 let _ = term::close(ctx, &On::of(r, Some(sp)), p);
+let_underscore_must_use crates/core/src/stall.rs:81:17 let _ = append(
+indexing_slicing crates/core/src/stall.rs:129:15 let sp = &ev[i];
+indexing_slicing crates/core/src/stall.rs:130:50 if !agents.iter().any(|a| a.name == lane) || ev[i + 1..].iter().any(|e| e.is("verdict", fleet, n)) {
+indexing_slicing crates/core/src/stall.rs:192:17 ["nudge", "respawn"][usize::from(e.kind == "respawned-silent")]
+let_underscore_must_use crates/core/src/term.rs:73:9 let _ = self.rm(r, name);
+indexing_slicing crates/core/src/term.rs:87:32 .is_ok_and(|v| v["outcome"] == "matched");
+let_underscore_must_use crates/core/src/term.rs:88:9 let _ = self.rm(r, name);
+indexing_slicing crates/core/src/term.rs:130:12 if self.call(r, Method::Wait, ready)?["outcome"] != "matched" {
+indexing_slicing crates/core/src/term.rs:142:12 Ok(self.call(r, Method::Wait, up)?["outcome"] == "matched")
+indexing_slicing crates/core/src/term.rs:148:48 let flag = |f: &str| w.windows(2).find(|p| p[0] == f).map(|p| p[1]);
+indexing_slicing crates/core/src/term.rs:148:67 let flag = |f: &str| w.windows(2).find(|p| p[0] == f).map(|p| p[1]);
+indexing_slicing crates/core/src/term.rs:196:29 .filter(|p| p[0] == "--until")
+indexing_slicing crates/core/src/term.rs:197:26 .map(|p| p[1].to_string())
+indexing_slicing crates/core/src/term.rs:245:20 let name = params["name"].as_str().unwrap_or_default().to_string();
+indexing_slicing crates/core/src/term.rs:250:47 shed::cli(r, &["send", &name, params["text"].as_str().unwrap_or_default()]).map(|_| json!({}))
+indexing_slicing crates/core/src/term.rs:254:24 && params["keys"][0]
+indexing_slicing crates/core/src/term.rs:271:29 Method::Read => v["text"].as_str().unwrap_or_default().to_string(),
+indexing_slicing crates/core/src/term.rs:272:29 Method::Wait if v["outcome"] != "matched" => {
+indexing_slicing crates/core/src/term.rs:273:31 let code = if v["outcome"] == "timeout" {
+indexing_slicing crates/core/src/term.rs:278:73 return Ok(failed(code, &format!("shed wait {name}: {}", v["outcome"])));
+indexing_slicing crates/core/src/term.rs:356:32 bail!("{} {}: {}", a[0], a[1], o.stderr.trim());
+indexing_slicing crates/core/src/term.rs:356:38 bail!("{} {}: {}", a[0], a[1], o.stderr.trim());
+let_underscore_must_use crates/core/src/term.rs:390:5 let _ = crate::session::transcript::archive(r, ctx, pane);
+indexing_slicing crates/core/src/term.rs:402:72 .any(|s| serde_json::from_str::<Value>(s.trim()).is_ok_and(|v| v["error"]["code"] == code))
+indexing_slicing crates/core/src/term.rs:409:14 Some(v["error"]["message"].as_str()?.to_string())
+indexing_slicing crates/core/src/timer.rs:57:40 let log = ctx.state.with_file_name(["serve.log", "tick.log"][i]);
+indexing_slicing crates/core/src/timer.rs:62:20 let when = [serve, "StartInterval</key><integer>{secs}</integer>"][i];
+indexing_slicing crates/core/src/timer.rs:68:20 let when = ["Restart=always\n\n[Install]\nWantedBy=default.target", "Type=oneshot"][i];
+indexing_slicing crates/core/src/timer.rs:91:64 let load = format!("launchctl bootstrap gui/{uid} {}", plist[0].0.display());
+indexing_slicing crates/core/src/timer.rs:110:49 let every = !["serve", "service"].contains(&args[0]);
+indexing_slicing crates/core/src/timer.rs:111:22 let secs = match args[0] {
+indexing_slicing crates/core/src/timer.rs:137:17 (label, ["missing", "outdated (args or interval differ)", "loaded"][i])
+indexing_slicing crates/core/src/timer.rs:144:17 let file = &expect(ctx, cfg, JOBS[0].0, JOBS[0].1, "")[0].0;
+indexing_slicing crates/core/src/timer.rs:174:41 !["serve", "service"].contains(&args[0]),
+let_underscore_must_use crates/core/src/timer.rs:202:9 let _ = exec(r, &down);
+let_underscore_must_use crates/core/src/timer.rs:205:9 let _ = exec(r, "systemctl --user daemon-reload");
+let_underscore_must_use crates/core/src/timer.rs:222:17 let _ = exec(r, &ctl(ctx, label, true)[2]);
+indexing_slicing crates/core/src/timer.rs:233:22 let on = ["not loaded", "loaded"][usize::from(exec(r, &ctl(ctx, label, true)[0]).is_ok())];
+indexing_slicing crates/core/src/timer.rs:250:9 d["thread"] = t.into();
+let_underscore_must_use crates/core/src/timer.rs:285:9 let _ = f.and_then(|f| f.set_len(0));
+let_underscore_must_use crates/core/src/timer.rs:295:9 let _ = std::fs::write(&at, format!("{since} {}", since + t0.elapsed().as_secs()));
+let_underscore_must_use crates/core/src/timer.rs:333:13 let _ = std::fs::write(&at, ctx.now.to_string());
+let_underscore_must_use crates/core/src/timer.rs:351:5 let _ = std::fs::remove_file(&mark);
+let_underscore_must_use crates/core/src/timer.rs:353:5 let _ = beating.join();
+let_underscore_must_use crates/core/src/timer.rs:354:5 let _ = std::fs::remove_file(&beat);
+indexing_slicing crates/core/src/timer.rs:385:14 let at = m["at"].as_u64().or_else(|| m["since"].as_u64())?;
+indexing_slicing crates/core/src/timer.rs:385:42 let at = m["at"].as_u64().or_else(|| m["since"].as_u64())?;
+indexing_slicing crates/core/src/timer.rs:387:48 (secs > 3 * cfg.limits.slow_secs).then(|| (m["step"].as_str().unwrap_or("?").to_string(), secs))
+indexing_slicing crates/core/src/timer.rs:509:13 ["a", "g"][usize::from(subs > 0)],
+indexing_slicing crates/core/src/timer.rs:517:5 ["g", "a", "r"][usize::from(since > 600) + usize::from(since > 900)]
+indexing_slicing crates/core/src/timer.rs:549:46 let job = |i: usize, t, d: String| match drift[i].1 {
+indexing_slicing crates/core/src/timer.rs:596:17 let t = ["g", "a", "r"][n(gb <= min * 1.25) + n(gb < min)];
+indexing_slicing crates/core/src/timer.rs:604:17 let t = ["g", "a", "r"][usize::from(gb > budget * 0.8) + usize::from(gb > budget)];
+indexing_slicing crates/core/src/top.rs:66:18 pid: w[0].into(),
+indexing_slicing crates/core/src/top.rs:67:19 ppid: w[1].into(),
+indexing_slicing crates/core/src/top.rs:70:18 cpu: w[2].parse().ok()?,
+indexing_slicing crates/core/src/top.rs:71:36 secs: host::etime_secs(w[3]),
+indexing_slicing crates/core/src/update.rs:21:28 let (kind, word) = [("self-update-resumed", "resumed"), ("self-update-paused", "paused")][usize::from(pause)];
+let_underscore_must_use crates/core/src/update.rs:132:5 let _ = std::fs::remove_file(&new);
+indexing_slicing crates/core/src/usage.rs:57:14 let b = &v["balance_infos"][0];
+let_underscore_must_use crates/core/src/usage.rs:99:21 let _ = save(&path, &b);
+let_underscore_must_use crates/core/src/usage.rs:130:5 let _ = writeln!(out, "{label}");
+indexing_slicing crates/core/src/waiting.rs:108:6 !events[at..].iter().any(|e| e.is("turn-end", &s.fleet, s.issue))
+indexing_slicing crates/core/src/waiting.rs:337:17 ["s", ""][usize::from(on.len() > 1)]
+indexing_slicing crates/core/src/waiting.rs:615:29 let (f, branch) = (&cfg.fleet[&s.fleet], crate::gate::branch_of(Some(&s), s.issue));
+indexing_slicing crates/core/src/waiting.rs:666:22 let pushed = pr["headRefOid"].as_str().unwrap_or_default();
+indexing_slicing crates/core/src/waiting.rs:728:47 let green = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "green";
+indexing_slicing crates/core/src/waiting.rs:799:22 _ => ["prompt never landed", "lane gone"][usize::from(gone)].into(),
+indexing_slicing crates/core/src/waiting.rs:844:12 if pr["isDraft"] == true && w.what.starts_with("PASS") && !w.what.ends_with(DRAFT) {
+indexing_slicing crates/core/src/waiting.rs:875:22 let pr = pr["number"]
+indexing_slicing crates/core/src/waiting.rs:880:20 let head = pr["headRefOid"].as_str().unwrap_or_default();
+indexing_slicing crates/core/src/waiting.rs:900:30 role.is_some_and(|r| cfg.fleet[&w.fleet].flow().is_check(r))
+indexing_slicing crates/core/src/waiting.rs:971:19 let how = ["nudged", "respawned"][usize::from(e.kind == "respawned-silent")];
+indexing_slicing crates/core/src/webhook.rs:59:30 let mut nums: Vec<u64> = v["pull_request"]["number"].as_u64().into_iter().collect();
+let_underscore_must_use crates/core/src/webhook.rs:88:9 let _ = std::fs::write(counter(ctx), (rejected(ctx) + 1).to_string());
+indexing_slicing crates/core/src/webhook.rs:95:16 let repo = v["repository"]["full_name"].as_str().unwrap_or_default();
+indexing_slicing crates/core/src/webhook.rs:111:19 let num = gh::cached_pr(ctx, &s.fleet, s.issue)["number"].as_u64();
+let_underscore_must_use crates/core/src/webhook.rs:122:9 let _ = gh::pr(ctx, r, f, (&s.fleet, s.issue), branch, ctx.now);
+let_underscore_must_use crates/core/src/webhook.rs:126:9 let _ = crate::db::put(&ctx.state, "board", ts, &snap);
+indexing_slicing crates/core/src/why.rs:132:16 let head = pr["headRefOid"].as_str().unwrap_or_default();
+indexing_slicing crates/core/src/why.rs:136:27 if head.is_empty() || pr["state"] != "OPEN" || s.reviewed(head) || noted {
+indexing_slicing crates/core/src/why.rs:148:9 pr["body"].as_str().unwrap_or_default(),
+indexing_slicing crates/core/src/why.rs:170:43 let owner = match check(&text, short, spec["body"].as_str().unwrap_or_default(), &answered, &len) {
+indexing_slicing crates/core/src/why.rs:181:24 let body = section(pr["body"].as_str().unwrap_or_default(), round, &text, head);
+indexing_slicing crates/core/src/why.rs:185:26 &["pr", "edit", &pr["number"].to_string(), "-R", &f.repo, "--body", &body],
+let_underscore_must_use crates/core/src/why.rs:277:13 let _ = git(&["fetch", "-q", "origin", &format!("+refs/notes/why:{mine}")], "");
+let_underscore_must_use crates/core/src/why.rs:288:17 let _ = git(&["fetch", "-q", "origin", NOTES], "");
+let_underscore_must_use crates/core/src/why.rs:295:5 let _ = git(&["update-ref", "-d", &mine], "");
+indexing_slicing crates/core/src/why.rs:377:28 Some(x) if files[x].1.len() < 3 => files[x].1.push((sha, i)),
+indexing_slicing crates/core/src/why.rs:377:52 Some(x) if files[x].1.len() < 3 => files[x].1.push((sha, i)),
+let_underscore_must_use crates/core/src/why.rs:407:5 let _ = git(&["fetch", "-q", "origin", NOTES]);
+indexing_slicing crates/core/src/why.rs:494:71 let title = gh::spec(ctx, r, f, fleet, n, false).ok().map(|v| v["title"].clone());
+indexing_slicing crates/core/src/why.rs:506:12 match &v["issue"] {
+indexing_slicing crates/core/src/why.rs:520:12 match &v["note"] {
+indexing_slicing crates/core/src/lib.rs:225:27 for b in queue::refs(&d["on"])
+indexing_slicing crates/core/src/lib.rs:227:21 .filter(|b| d["op"] == "block" && !b.contains('/'))
+indexing_slicing crates/core/src/lib.rs:231:13 let n = d["issues"][0]
+indexing_slicing crates/core/src/lib.rs:233:21 .filter(|_| d["op"] == "block" || d["op"] == "unblock");
+indexing_slicing crates/core/src/lib.rs:233:43 .filter(|_| d["op"] == "block" || d["op"] == "unblock");
+indexing_slicing crates/core/src/lib.rs:309:9 d["via"] = json!(v);
+indexing_slicing crates/core/src/lib.rs:391:9 d["thread"] = json!(t);
+indexing_slicing crates/core/src/lib.rs:399:9 d["routed"] = json!(t);
+indexing_slicing crates/core/src/lib.rs:449:17 Ok(flat(v["body"].as_str().unwrap_or_default()).contains(&quote))
+indexing_slicing crates/core/src/lib.rs:850:54 v["closed"] = json!(why.as_ref().map(|w| events::ORDER[w.0]));
+indexing_slicing crates/core/src/lib.rs:850:13 v["closed"] = json!(why.as_ref().map(|w| events::ORDER[w.0]));
+unsafe_code crates/server/src/handover.rs:178:5 unsafe extern "C" {
+unsafe_code crates/server/src/handover.rs:182:5 unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
+allow_attributes_without_reason crates/server/src/serve.rs:108:1 #[allow(long_running_const_eval)] // ~300 KB of assets outgrow rustc's const-eval step budget
+unsafe_code crates/server/src/serve.rs:145:14 let rc = unsafe {
+allow_attributes_without_reason crates/server/src/serve.rs:198:1 #[allow(clippy::needless_pass_by_value)] // public API: the listener is handed over and lives as long as the server
+allow_attributes_without_reason crates/server/src/serve.rs:1357:5 #[allow(clippy::unused_self)] // a method so every route reads `self.auth(..)` alike
+indexing_slicing crates/server/src/handover.rs:31:50 sock: crate::update::serve_sock(ctx, listeners[0].1.port()),
+let_underscore_must_use crates/server/src/handover.rs:58:13 let _ = c.set_read_timeout(Some(Duration::from_secs(10)));
+let_underscore_must_use crates/server/src/handover.rs:59:13 let _ = writeln!(c, "ready {}", std::process::id());
+let_underscore_must_use crates/server/src/handover.rs:60:13 let _ = BufReader::new(c).read_line(&mut String::new());
+let_underscore_must_use crates/server/src/handover.rs:62:9 let _ = std::fs::remove_file(&self.sock);
+print_stderr crates/server/src/handover.rs:68:26 .map_err(|e| eprintln!("drover serve: no handover: {}: {e}", self.sock.display()))
+let_underscore_must_use crates/server/src/handover.rs:77:13 let _ = c.set_read_timeout(Some(Duration::from_secs(5)));
+let_underscore_must_use crates/server/src/handover.rs:78:13 let _ = BufReader::new(&c).read_line(&mut line);
+let_underscore_must_use crates/server/src/handover.rs:86:21 let _ = writeln!(c, "ok");
+let_underscore_must_use crates/server/src/handover.rs:88:25 let _ = writeln!(a, "ok {pid}");
+let_underscore_must_use crates/server/src/handover.rs:116:17 let _ = append(
+print_stderr crates/server/src/handover.rs:126:27 Err(e) => eprintln!("drover serve: no handover past {mb} MB: {e}"),
+print_stderr crates/server/src/handover.rs:169:17 eprintln!("drover serve: after the handover: {e:#}");
+print_stderr crates/server/src/hooks.rs:22:5 eprintln!("drover serve: {mode} on http://{}/", l.local_addr()?);
+print_stderr crates/server/src/hooks.rs:38:17 eprintln!("drover serve: webhooks on http://{}/hooks/github", h.local_addr()?);
+print_stderr crates/server/src/hooks.rs:41:34 Some(Err((a, e))) => eprintln!("drover serve: no webhooks: {a}: {e}"),
+let_underscore_must_use crates/server/src/hooks.rs:61:21 let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
+indexing_slicing crates/server/src/hooks.rs:83:76 Ok(n) if n > 0 && buf.len() < 16_384 => buf.extend_from_slice(&chunk[..n]),
+indexing_slicing crates/server/src/hooks.rs:87:41 let head = String::from_utf8_lossy(&buf[..end]).into_owned();
+as_conversions crates/server/src/hooks.rs:104:16 let left = (n - body.len()) as u64;
+let_underscore_must_use crates/server/src/lifeboat.rs:35:9 let _ = write!(s, "<input type=hidden name={k} value=\"{}\">", esc(v));
+let_underscore_must_use crates/server/src/lifeboat.rs:65:9 let _ = write!(b, "<p class=b>{}</p>", esc(msg));
+indexing_slicing crates/server/src/lifeboat.rs:69:26 let (word, op) = [("running", "pause"), ("paused", "resume")][usize::from(fc.paused)];
+let_underscore_must_use crates/server/src/lifeboat.rs:70:9 let _ = write!(
+let_underscore_must_use crates/server/src/lifeboat.rs:88:13 let _ = write!(
+let_underscore_must_use crates/server/src/lifeboat.rs:104:9 let _ = write!(b, "<p>{name}<br><small>{host} · {state}{why}</small></p>");
+let_underscore_must_use crates/server/src/lifeboat.rs:111:9 let _ = write!(b, "<p>{} {}{at}: {q}<br>", esc(fleet), esc(id));
+let_underscore_must_use crates/server/src/lifeboat.rs:120:9 let _ = write!(
+let_underscore_must_use crates/server/src/lifeboat.rs:138:9 let _ = write!(
+indexing_slicing crates/server/src/serve/chat.rs:20:5 [b, a][usize::from(c)]
+indexing_slicing crates/server/src/serve/chat.rs:271:32 older: (k > 0).then(|| msgs[k].seq),
+indexing_slicing crates/server/src/serve/chat.rs:407:13 [&mut rows, &mut arch][usize::from(on)].push(row(ctx, events, t, agents));
+indexing_slicing crates/server/src/serve/chat.rs:440:22 let c = &mut all[usize::from(rw)];
+indexing_slicing crates/server/src/serve/chat.rs:533:21 d["q"] = json!(q);
+indexing_slicing crates/server/src/serve/chat.rs:534:22 (d["files"] == json!([])).then(|| d["files"] = json!(qfiles(o)));
+indexing_slicing crates/server/src/serve/chat.rs:534:55 (d["files"] == json!([])).then(|| d["files"] = json!(qfiles(o)));
+indexing_slicing crates/server/src/serve/chat.rs:669:9 v["badge"] = json!({"text": "new", "tone": "done"});
+indexing_slicing crates/server/src/serve/chat.rs:768:21 ch["recommended"] = json!(r);
+indexing_slicing crates/server/src/screens.rs:166:9 v["indent"] = json!(1);
+indexing_slicing crates/server/src/screens.rs:167:9 v["subtitle"] = json!({"text": format!("held until #{b}"), "tone": "bad"});
+indexing_slicing crates/server/src/screens.rs:169:9 v["subtitle"] = json!(cut(&sub, LINE));
+indexing_slicing crates/server/src/screens.rs:172:9 v["value"] = json!({ "since": iso(r.t) });
+indexing_slicing crates/server/src/screens.rs:175:9 v["tap"] = json!({ "sheet": format!("/screens/lanes/{}", r.lane) });
+indexing_slicing crates/server/src/screens.rs:177:9 v["swipe"] = json!([{"label": "Stop", "tone": "bad", "action": "stop", "values": vals, "confirm": confirm}]);
+indexing_slicing crates/server/src/screens.rs:179:9 v["tap"] = json!({ "url": format!("https://github.com/{repo}/pull/{pr}") });
+indexing_slicing crates/server/src/screens.rs:183:9 v["swipe"] = json!([{"label": "Top", "action": "top", "values": vals},
+indexing_slicing crates/server/src/screens.rs:224:88 "subtitle": c.paused.clone().unwrap_or_else(|| c.drive.line.clone()), "badge": badge[usize::from(paused)],
+as_conversions crates/server/src/screens.rs:233:27 let day = |e: &Event| (now.saturating_sub(e.ts) / 86_400) as usize;
+indexing_slicing crates/server/src/screens.rs:243:22 let p = &mut per[6 - day(e)];
+indexing_slicing crates/server/src/screens.rs:285:9 c["recommended"] = json!(r);
+indexing_slicing crates/server/src/screens.rs:288:5 c["other"] = match q.options.iter().find(|o| *o == "revise") {
+indexing_slicing crates/server/src/screens.rs:294:9 c["default"] = json!({"value": r, "until": until, "label": "takes the recommendation in {rel}"});
+indexing_slicing crates/server/src/screens.rs:302:92 .map(|i| json!({"src": format!("/design/{}/{n}/{i}/{}", q.fleet, q.id), "alt": a.pngs[i]}));
+indexing_slicing crates/server/src/screens.rs:358:9 ask_card(ctx.now, ask_minutes(ctx), &need)["blocks"].clone()
+indexing_slicing crates/server/src/screens.rs:498:13 r["subtitle"] = json!(t);
+indexing_slicing crates/server/src/screens.rs:502:9 r["tap"] = match (s("agent").filter(|_| k == "lane").or(s("thread")), e.pr.zip(repo)) {
+indexing_slicing crates/server/src/screens.rs:510:37 match ask_outcome(log, &log[i]) {
+indexing_slicing crates/server/src/screens.rs:511:28 Some(o) => r["subtitle"] = json!(o),
+indexing_slicing crates/server/src/screens.rs:512:25 None => r["tap"] = json!({ "sheet": format!("/screens/ask?seq={}", e.seq) }),
+indexing_slicing crates/server/src/screens.rs:515:12 if r["tap"].is_null() {
+indexing_slicing crates/server/src/screens.rs:544:9 s["stream"] = json!(stream.trim_end_matches(['?', '&']));
+indexing_slicing crates/server/src/screens.rs:560:20 json!({"coat": COATS[i], "state": state})
+indexing_slicing crates/server/src/screens.rs:707:19 walk(&ka[p], c, out);
+indexing_slicing crates/server/src/screens.rs:711:29 if let Some(next) = ib[k + 1..].iter().find(|x| ia.contains(x)) {
+indexing_slicing crates/server/src/screens.rs:712:13 op["before"] = json!(next);
+indexing_slicing crates/server/src/screens.rs:735:28 .map(|s| kids(&kids(s)[0]).len())
+indexing_slicing crates/server/src/screens.rs:799:20 let page = v["type"] == "screen";
+indexing_slicing crates/server/src/screens.rs:880:13 v["done"] = json!({"label": "Send", "action": "send", "values": values});
+indexing_slicing crates/server/src/screens.rs:883:9 v["blocks"] = json!(blocks);
+indexing_slicing crates/server/src/screens.rs:997:28 let name = a["action"].as_str().unwrap_or_default();
+indexing_slicing crates/server/src/screens.rs:1047:17 ["resume", "pause"][usize::from(v["on"] != false)],
+indexing_slicing crates/server/src/screens.rs:1052:21 ["mv", "rm"][usize::from(name == "drop")],
+indexing_slicing crates/server/src/screens.rs:1162:45 done.push(self.form_op(ctx, ["pause", "resume"][usize::from(on)], &[("fleet", f.clone())])?);
+indexing_slicing crates/server/src/screens.rs:1226:17 ["404 Not Found", "503 Service Unavailable"][usize::from(!open)],
+indexing_slicing crates/server/src/serve/slo.rs:24:5 ms[i - 1]
+as_conversions crates/server/src/serve/slo.rs:30:16 count: ms.len() as u64,
+as_conversions crates/server/src/serve/slo.rs:67:18 (groups, self.1.iter().filter(|t| **t >= from).count() as u64)
+indexing_slicing crates/server/src/serve/v1.rs:155:17 c["threads"]
+indexing_slicing crates/server/src/serve/v1.rs:229:28 let path = ["/send", "/answer", "/act", "/setup", "/thread"]
+let_underscore_must_use crates/server/src/serve/v1.rs:362:9 let _ = gh::backlog(ctx, &self.r, fc, fleet);
+indexing_slicing crates/server/src/serve/v1.rs:416:23 let age = r["since"]
+as_conversions crates/server/src/serve/v1.rs:560:22 clients: lock(&self.clients).len() as u64,
+as_conversions crates/server/src/serve/v1.rs:561:58 queued: lock(&self.running).values().map(|q| q.len() as u64).sum(),
+indexing_slicing crates/server/src/serve/v1.rs:632:5 d[key] = serde_json::json!([value]);
+indexing_slicing crates/server/src/serve/v1.rs:847:44 .or_insert_with(|| gh::cached_pr(ctx, &e.fleet, n)["number"].as_u64())
+indexing_slicing crates/server/src/serve/v1.rs:885:21 let t = ["g", "a", "m"][usize::from(r.state != "active") + usize::from(r.state == "gone")];
+indexing_slicing crates/server/src/serve/v1.rs:973:17 let e = m["seq"].as_u64().and_then(|s| at.get(&s).copied());
+indexing_slicing crates/server/src/serve/v1.rs:974:39 let h = e.and_then(|e| match (m["kind"].as_str().unwrap_or_default(), e.kind.as_str()) {
+indexing_slicing crates/server/src/serve/v1.rs:981:13 m["handoff"] = serde_json::json!(h);
+indexing_slicing crates/server/src/serve/v1.rs:1110:39 E::Reply { text, .. } if !out[turn(&out)..].iter().any(|b| matches!(b, Block::Reply { .. })) => {
+indexing_slicing crates/server/src/serve/v1.rs:1144:23 match out[at..].iter_mut().find(|b| matches!(b, Block::Plan { .. })) {
+indexing_slicing crates/server/src/serve.rs:113:13 ASSETS[k].2
+indexing_slicing crates/server/src/serve.rs:115:13 FILES[k - ASSETS.len()].2
+indexing_slicing crates/server/src/serve.rs:120:37 u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
+indexing_slicing crates/server/src/serve.rs:120:43 u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
+indexing_slicing crates/server/src/serve.rs:120:53 u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
+indexing_slicing crates/server/src/serve.rs:120:63 u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
+as_conversions crates/server/src/serve.rs:122:17 b[i] as u32
+indexing_slicing crates/server/src/serve.rs:122:17 b[i] as u32
+indexing_slicing crates/server/src/serve.rs:180:36 Ok(n) if n > 0 => b = &b[n..],
+indexing_slicing crates/server/src/serve.rs:307:41 let now = format!("{} {}", ctx.now, ["cold", "handover"][usize::from(handover)]);
+indexing_slicing crates/server/src/serve.rs:420:6 &v[v.len() - k..]
+indexing_slicing crates/server/src/serve.rs:495:20 match (b[i], v.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok())) {
+as_conversions crates/server/src/serve.rs:514:17 (b as char).to_string()
+indexing_slicing crates/server/src/serve.rs:720:28 let (c, d, m, blaze) = COATS[usize::from_str_radix(&devices::sha256(name.as_bytes())[..2], 16).unwrap_or(0) % 8];
+indexing_slicing crates/server/src/serve.rs:857:50 let h = String::from_utf8_lossy(&buf[..i]);
+indexing_slicing crates/server/src/serve.rs:873:45 n => buf.extend_from_slice(&chunk[..n]),
+indexing_slicing crates/server/src/serve.rs:1086:60 for paired in [false, true].into_iter().filter(|p| [anon, owner][usize::from(*p)]) {
+indexing_slicing crates/server/src/serve.rs:1224:32 ("200 OK", [SVG, JSON, PNG][usize::from(f.ends_with("json")) + 2 * usize::from(f.ends_with("png"))], b)
+indexing_slicing crates/server/src/serve.rs:1244:57 let at = k.and_then(|k| chat::files_of(&ev[k]).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
+indexing_slicing crates/server/src/serve.rs:1245:66 let sha = k.filter(|_| q.is_some()).and_then(|k| ev[..k].iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
+indexing_slicing crates/server/src/serve.rs:1523:28 let page = window(&all[..end], lines, 32);
+indexing_slicing crates/server/src/serve.rs:1664:17 d["check"] = json!(true);
+indexing_slicing crates/server/src/serve.rs:1727:91 serde_json::from_slice(&j).map_or(json!(null), |t: serde_json::Value| t["scheme"].clone()),
+indexing_slicing crates/server/src/serve.rs:1735:26 let tokens = b["tokens"]
+indexing_slicing crates/server/src/serve.rs:1743:17 b["color-scheme"].as_str().unwrap_or("dark")
+indexing_slicing crates/server/src/serve.rs:1746:28 let first = match &def[name.as_str()] {
+indexing_slicing crates/server/src/serve.rs:1845:21 let m = pr["mergeable"].as_str().unwrap_or("?");
+indexing_slicing crates/server/src/serve.rs:1856:40 .is_some_and(|sha| pr["headRefOid"].as_str() != Some(sha.as_str())),
+indexing_slicing crates/server/src/serve.rs:1979:28 let head = pr["headRefOid"].as_str().unwrap_or_default();
+indexing_slicing crates/server/src/serve.rs:2036:34 act: act(["", "update"][usize::from(up)], state).into(),
+indexing_slicing crates/server/src/serve.rs:2037:48 grow: stage(state, act(["", "update"][usize::from(up)], state)).into(),
+indexing_slicing crates/server/src/serve.rs:2044:50 check: k.is_some_and(|k| q[k].check),
+indexing_slicing crates/server/src/serve.rs:2061:64 up: k.filter(|&k| mv && k > 0).map(|k| q[k - 1].issue),
+indexing_slicing crates/server/src/serve.rs:2090:40 serde_json::from_value(bl["issues"].clone()).unwrap_or_default();
+indexing_slicing crates/server/src/serve.rs:2092:27 let backlog = bl["issues"].is_object().then(|| Backlog {
+indexing_slicing crates/server/src/serve.rs:2094:45 ago: age(now.saturating_sub(bl["ts"].as_u64().unwrap_or(now))),
+indexing_slicing crates/server/src/serve.rs:2161:24 let left = cap["cap"].as_i64().zip(cap["lines"].as_i64()).map(|(c, n)| c - n);
+indexing_slicing crates/server/src/serve.rs:2161:48 let left = cap["cap"].as_i64().zip(cap["lines"].as_i64()).map(|(c, n)| c - n);
+indexing_slicing crates/server/src/serve.rs:2162:51 if let Some(l) = left.filter(|l| *l < cap["warn"].as_i64().unwrap_or(500)) {
+indexing_slicing crates/server/src/serve.rs:2479:23 tone: ["g", "a"][usize::from(sl.contains(" · stale"))].into(),
+indexing_slicing crates/server/src/serve.rs:2498:19 tone: ["g", "a"][usize::from(err.is_some())].into(),
+indexing_slicing crates/server/src/serve.rs:2662:24 p: [String::new(), sr("pressure")][usize::from(key == "mem")].clone(),
+indexing_slicing crates/server/src/serve.rs:2664:24 x: x[usize::from(inline)].clone(),
+indexing_slicing crates/server/src/serve.rs:2694:21 ["g", "a", "r"]["gar".find(bar.t.as_str()).unwrap_or(0)],
+indexing_slicing crates/server/src/serve.rs:2734:22 let mt = ["g", "a", "r"][[mt, tone(pw)]
+indexing_slicing crates/server/src/serve.rs:2777:22 let ls = [lanes.join(" · "), "none".into()][usize::from(lanes.is_empty())].clone();
+indexing_slicing crates/server/src/serve.rs:2785:28 let dot = grey(["g", "a", "r"][worst]);
+indexing_slicing crates/server/src/serve.rs:2797:21 ["near", if l == "floor" { "under" } else { "over" }][worst - 1]
+indexing_slicing crates/server/src/serve.rs:2813:30 .map(|_| ["on", "off"][usize::from(on)].into()),
+indexing_slicing crates/server/src/serve.rs:2827:13 let t = ["g", "a", "r"][usize::from(x >= 0.8) + usize::from(x > 1.0)];
+indexing_slicing crates/server/src/serve.rs:2866:57 let slots = format!("{} {noun} slot{}", busy.len(), ["s", ""][usize::from(busy.len() == 1)]);
+indexing_slicing crates/server/src/serve.rs:2876:13 let x = w[3].replace("{why}", why).replace("{then}", then).replace("{n}", &n);
+indexing_slicing crates/server/src/serve.rs:2878:6 (w[1], w[2], x.replace("{raw}", raw))
+indexing_slicing crates/server/src/serve.rs:2878:12 (w[1], w[2], x.replace("{raw}", raw))
+indexing_slicing crates/server/src/serve.rs:2907:55 let key = format!("shed {} {}", q.method, q.params["name"].as_str().unwrap_or_default());
+as_conversions crates/server/src/serve.rs:3007:47 .all(|c| matches!(c as u32, 0x20..=0x7e | 0xa0..=0x10ff | 0x1160..=0x2e7f))
+indexing_slicing crates/server/src/serve.rs:3145:24 t[k] = match (&t[k], v) {
+indexing_slicing crates/server/src/serve.rs:3145:9 t[k] = match (&t[k], v) {
+indexing_slicing crates/server/src/serve.rs:3150:35 let pick = |k: &str, x: &str| own[k][x].as_str().map(Value::from);
+indexing_slicing crates/server/src/serve.rs:3154:32 .unwrap_or_else(|| farm["actions"][a].clone());
+indexing_slicing crates/server/src/serve.rs:3152:9 t["actions"][a] = pick("actions", a)
+indexing_slicing crates/server/src/serve.rs:3155:12 if t["row_sprites"] != false {
+indexing_slicing crates/server/src/serve.rs:3156:76 t["row_sprites"][a] = pick("row_sprites", a).unwrap_or_else(|| t["actions"][a].clone());
+indexing_slicing crates/server/src/serve.rs:3156:13 t["row_sprites"][a] = pick("row_sprites", a).unwrap_or_else(|| t["actions"][a].clone());
+indexing_slicing crates/server/src/serve.rs:3159:5 t["words"] = own.get("words").cloned().unwrap_or_else(|| json!({})); // #370: a word it lacks is the plain one
+indexing_slicing crates/server/src/serve.rs:3160:5 t["scheme"] = own.get("scheme").cloned().unwrap_or_else(|| "github-dark".into());
+indexing_slicing crates/server/src/serve.rs:3161:5 t["loading"] = own.get("loading").cloned().unwrap_or_default(); // #305: none is the spinning ↻, never farm's
+indexing_slicing crates/server/src/serve.rs:3162:64 t["rail"]["item"] = pick("rail", "item").unwrap_or_else(|| t["actions"]["idle"].clone());
+indexing_slicing crates/server/src/serve.rs:3162:5 t["rail"]["item"] = pick("rail", "item").unwrap_or_else(|| t["actions"]["idle"].clone());
+indexing_slicing crates/server/src/serve.rs:3163:66 t["rail"]["needs"] = pick("rail", "needs").unwrap_or_else(|| t["rail"]["item"].clone());
+indexing_slicing crates/server/src/serve.rs:3163:5 t["rail"]["needs"] = pick("rail", "needs").unwrap_or_else(|| t["rail"]["item"].clone());
+indexing_slicing crates/server/src/serve.rs:3286:13 let n = pr["number"].as_u64();
+indexing_slicing crates/server/src/serve.rs:3294:59 ci: (!pr.is_null()).then(|| gh::ci(&gh::required(&pr["statusCheckRollup"], req)).into()),
+indexing_slicing crates/server/src/serve.rs:3308:14 let pr = pr["number"]
+indexing_slicing crates/server/src/serve.rs:3310:14 .zip(pr["title"].as_str())
+as_conversions crates/server/src/serve.rs:3541:17 at: i.cmp(&pos) as i8,
+let_underscore_must_use crates/service/src/lanes.rs:26:25 let _ = drover_core::session::stamp::on_event(&c, &cfg, &e);
+let_underscore_must_use crates/service/src/lanes.rs:27:25 let _ = std::fs::write(c.state.with_file_name("shed.seq"), e.seq.to_string());
+let_underscore_must_use crates/service/src/lanes.rs:48:9 let _ = append(&self.ctx.state, &self.event("lane-stream", d));
+print_stderr crates/service/src/lib.rs:48:17 eprintln!("drover service: board on {b}: {e:#}");
+let_underscore_must_use crates/service/src/lib.rs:63:9 let _ = std::fs::remove_file(&path);
+let_underscore_must_use crates/service/src/lib.rs:113:9 let _ = append(&self.ctx.state, &self.event("service-timeout", d));
+let_underscore_must_use crates/service/src/lib.rs:132:17 let _ = Config::load(&me.ctx.config).map(|cfg| emit(&me.ctx.state, &cfg, ev));
+let_underscore_must_use crates/service/src/lib.rs:180:9 let _ = wr
+indexing_slicing crates/service/src/lib.rs:184:18 let k = &v["kick"];
+let_underscore_must_use crates/service/src/lib.rs:198:13 let _ = c.write_all(&reply(503, &json!({"error": "busy"}))).await;
+let_underscore_must_use crates/service/src/lib.rs:222:9 let _ = c.write_all(&out).await;
+indexing_slicing crates/service/src/lib.rs:247:23 for e in &rows[rows.len().saturating_sub(REPLAY)..] {
+indexing_slicing crates/service/src/lib.rs:268:21 let token = v["token"].as_str().unwrap_or_default().to_string();
+indexing_slicing crates/service/src/lib.rs:269:37 let mut args: Vec<String> = v["args"]
+indexing_slicing crates/service/src/lib.rs:275:58 let (ctx, r, files) = (self.ctx.clone(), self.r, v["files"].clone());
+indexing_slicing crates/service/src/lib.rs:288:20 if args[i - 1] == "--file" {
+indexing_slicing crates/service/src/lib.rs:289:38 let Some(text) = files[&args[i]].as_str() else {
+indexing_slicing crates/service/src/lib.rs:289:45 let Some(text) = files[&args[i]].as_str() else {
+indexing_slicing crates/service/src/lib.rs:290:86 let e = format!("drover: --file {} came without its text\n", args[i]);
+indexing_slicing crates/service/src/lib.rs:296:21 args[i] = p.display().to_string();
+indexing_slicing crates/service/src/lib.rs:324:49 let head = String::from_utf8_lossy(&buf[..i]).into_owned();
+indexing_slicing crates/service/src/lib.rs:340:41 body.extend_from_slice(&chunk[..n]);
+indexing_slicing crates/service/src/lib.rs:349:32 buf.extend_from_slice(&chunk[..n]);
+let_underscore_must_use crates/cli/src/main.rs:2:5 let _ = drover::SERVE.set((drover::hooks::serve, drover::serve::export));
+let_underscore_must_use crates/cli/src/main.rs:3:5 let _ = drover::SERVICE.set(drover_service::main);
