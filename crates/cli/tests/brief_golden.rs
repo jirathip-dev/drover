@@ -100,6 +100,10 @@ fn briefs_carry_the_test_antipatterns() {
         "{imp}"
     );
     assert!(rev.contains("`Tests checked against anti-patterns: yes`"), "{rev}");
+    assert!(
+        rev.contains("has a `## Parity` section in its body") && rev.contains("without an owner q-number"),
+        "{rev}"
+    );
 }
 
 #[test]

@@ -101,7 +101,7 @@ fn colour_is_a_stable_name_hash_and_color_overrides_it() {
 }
 
 #[test]
-fn fleets_that_need_you_go_first_then_by_name_and_a_paused_one_is_empty() {
+fn parity_37_fleets_that_need_you_go_first_then_by_name_and_a_paused_one_is_empty() {
     let c = fixture("fc-order");
     let r = Fake::default();
     let f = fleets(&Server::new(&c, &r, Some(ADDR.into())));
@@ -148,7 +148,7 @@ fn fleets_that_need_you_go_first_then_by_name_and_a_paused_one_is_empty() {
 }
 
 #[test]
-fn the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
+fn parity_80_the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
     let c = fixture("fc-config");
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
