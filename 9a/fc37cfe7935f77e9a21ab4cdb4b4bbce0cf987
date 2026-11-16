@@ -1,0 +1,7 @@
+Decided: merge origin/staging 89cb67c; screens.rs keeps staging's issue-sheet tap and figure grow plus this branch's lane arg and [wait] swipe
+Because: crates/server/src/screens.rs:151
+Decided: cooee_screens takes staging's tap and fixture asserts with this branch's state-first subtitle
+Because: crates/cli/tests/cooee_screens.rs:200
+Rejected: keeping the lane-sheet tap on live rows — staging moved every queue row's tap to its issue sheet
+Check: cooee_screens and shed lane_states pass at the merged head
+Owner: no behaviour change this round; the branch is brought up to date with staging
