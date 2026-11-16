@@ -1,0 +1,7 @@
+Decided: merged origin/staging after #1084 and #1088 (merges, no rebase); README moves #1081, #1084, #1088, #1094 from Next to Today
+Because: "**README**: Today = what is on staging now; Next = the open queue. Nothing else."
+Decided: docs/parity.md row 89 keeps its number, test and status; only its feature text drops the removed route's name
+Because: scripts/parity-check.sh:19
+Rejected: deleting row 89 — parity-check fails a gone row unless it reads `dropped q<N>`, and the owner has not decided it
+Check: rg -l 'Host tab|herd\.json|\[chat\] tab|/frag' docs roles README.md prints nothing; parity-check passes against origin/staging
+Owner: The docs sweep is up to date with the latest merges: the front page lists what just shipped, and the queue list no longer shows it.
