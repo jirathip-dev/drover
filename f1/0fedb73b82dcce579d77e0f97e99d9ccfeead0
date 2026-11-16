@@ -1,0 +1,11 @@
+Decided: the composer is a new page-only `composer` block, and the generic `form` keeps its #1084 field drafts but loses its unused `submit` path.
+Because: "A composer for the page's thread screen as a page-only block"
+Decided: the screen posts the existing ops through `/action` as thread-queue, thread-steer, thread-unqueue, thread-stop and thread-model, with files, q, harness, model and effort passed through.
+Because: crates/server/src/screens.rs:47
+Decided: the composer's text uses #1084's stored draft key draft:<screen>:say:text; files and chip picks stay in page memory, so a failed send keeps both.
+Because: "Builds on the kept-input issue (drafts)."
+Decided: #1084's repaint keeps a focused textarea block in place as it does an input, and its drafts test now sends with Ctrl+Enter since Enter makes a new line.
+Because: "Enter makes a new line, [send] sends (Cmd/Ctrl-Enter on a keyboard)."
+Rejected: files in IndexedDB — #1084 keeps typed text only; storing photos is beyond this issue.
+Check: each_composer_op_reaches_its_thread_op_and_the_screen_shows_it drives every op; the WebKit tests and page_drafts run in CI's ui-webkit job.
+Owner: Please attach a screenshot from Photos on your phone and send it; that check can only be done by hand.
