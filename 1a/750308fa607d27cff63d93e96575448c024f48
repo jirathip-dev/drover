@@ -1,0 +1,7 @@
+Decided: map an approval line to `approve` in `chosen`, so every answer path (plain, typed, orchestrator) reads it the same way
+Because: "is read as approve, not as a free-text revise note"
+Because: crates/core/src/design.rs:293
+Rejected: matching only in design::decide — the decision event and the typed path's amendment would still see "#213 approve"
+Check: "#214 approve" on #213's ask still logs design-revise; any other free text still revises
+Check: the round-1 CI red (drive_kicks failing_retries_never_starve_another_fleets_start) is untouched by this diff and passes 4/4 locally after merging staging
+Owner: Typing "#213 approve" or "ok" on a design ask now approves it and starts the build.
