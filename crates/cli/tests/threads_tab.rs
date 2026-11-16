@@ -525,7 +525,7 @@ fn parity_21_two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webk
 await wait(() => q('.cmp textarea'));
 const px = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
 const dt = new DataTransfer();
-for (const n of ['one.png', 'two.png']) dt.items.add(new File([px], n, {{ type: 'image/png' }}));
+for (const n of ['one.png', 'two.png']) dt.items.add(new File([px, new Uint8Array(40000)], n, {{ type: 'image/png' }}));
 const pick = q('.cmp input[type=file]');
 pick.files = dt.files;
 pick.dispatchEvent(new Event('change'));
@@ -811,4 +811,40 @@ fn parity_32_the_owner_settles_each_card_from_inside_its_thread() {
         "settled cards leave: {t}"
     );
     assert!(!t.to_string().contains(r#""type":"choice""#), "{t}");
+}
+
+#[test]
+fn a_composer_send_with_a_photo_over_32_kb_reaches_the_say_op_over_the_socket_and_an_over_limit_body_is_413() {
+    let c = recorded("threads-big-photo");
+    let b = Board::start(&c, OnShed::new(Fake::default()));
+    let (addr, ck) = (&b.addr, &b.cookie);
+    let photo = "QUJD".repeat(20_000);
+    let say = json!({"screen": "thread-t2", "block": "say", "action": "thread-say",
+        "values": {"thread": "t2", "text": "a photo", "name": "shot.png", "data": photo}})
+    .to_string();
+    assert!(say.len() > 32_768);
+    let res = http(
+        addr,
+        &format!(
+            "POST /action HTTP/1.1\r\nHost: {addr}\r\n{ck}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{say}",
+            say.len()
+        ),
+    );
+    assert!(res.starts_with("HTTP/1.1 200"), "{res}");
+    let got = http(
+        addr,
+        &format!("GET /thread/t2/shot.png HTTP/1.1\r\nHost: {addr}\r\n{ck}Connection: close\r\n\r\n"),
+    );
+    assert_eq!(got.split_once("\r\n\r\n").unwrap().1.len(), 60_000, "{}", &got[..200]);
+
+    let mut s = std::net::TcpStream::connect(addr.as_str()).unwrap();
+    let head = format!(
+        "POST /action HTTP/1.1\r\nHost: {addr}\r\n{ck}Content-Length: 200000000\r\nConnection: close\r\n\r\n{{\"action\":"
+    );
+    std::io::Write::write_all(&mut s, head.as_bytes()).unwrap();
+    s.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut over = String::new();
+    std::io::Read::read_to_string(&mut s, &mut over).unwrap();
+    assert!(over.starts_with("HTTP/1.1 413"), "{over}");
+    assert!(!over.contains("NOT_PERMITTED"), "{over}");
 }
