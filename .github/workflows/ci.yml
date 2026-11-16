@@ -13,7 +13,8 @@ jobs:
           fetch-depth: 2
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
-          components: clippy, rustfmt
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
       # #266: the tests run web/src/events.ts under node (type stripping: node 24).
       - uses: actions/setup-node@v4
         with:
@@ -22,15 +23,6 @@ jobs:
         run: cargo build --release --locked
       - name: fmt
         run: cargo fmt --check
-      - name: "clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/)"
-        run: |
-          cargo clippy --all-targets --locked -- -D warnings
-          n=$(grep -rE '#!?\[allow\(' crates | wc -l)
-          test "$n" -le 10 || { echo "::error::$n #[allow] attributes in crates/, at most 10"; exit 1; }
-      - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)"
-        run: cargo test --locked
-      - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
-        run: test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*' -print -quit)"
       - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)"
         run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests the_state_read_stays_under_300ms --nocapture --test-threads=1
       - name: "soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it)"
@@ -90,6 +82,34 @@ jobs:
           echo "assets JS/CSS lines: $n"
           test "$n" -le 1500 || echo "::warning::assets JS/CSS is $n lines, over the 1500 soft budget"
 
+  # #957: the debug half (clippy, the test suite) beside the rust job's release half, so CI's wall time is the longer of the two.
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # #266: the tests run web/src/events.ts under node (type stripping: node 24).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: "clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/)"
+        run: |
+          cargo clippy --all-targets --locked -- -D warnings
+          n=$(grep -rE '#!?\[allow\(' crates | wc -l)
+          test "$n" -le 10 || { echo "::error::$n #[allow] attributes in crates/, at most 10"; exit 1; }
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)"
+        run: cargo nextest run --locked --no-fail-fast
+      - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
+        run: test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*' -print -quit)"
+
   # #808: a workflow file GitHub can't parse fails here, on the PR.
   actionlint:
     runs-on: ubuntu-latest
@@ -134,10 +154,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
-      - name: build
-        run: cargo build --release --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: build (debug, the profile its tests build; the release build is the rust job's only)
+        run: cargo build --locked
       - name: demo export
-        run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
+        run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/debug/drover serve --export site --demo
       # #68: Chrome's new headless never makes a window under 500 px wide; the headless shell honours 390.
       # Pinned build (Google's Chrome-for-Testing), so layout never moves without a commit.
       - name: chrome-headless-shell
@@ -210,6 +231,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 24
