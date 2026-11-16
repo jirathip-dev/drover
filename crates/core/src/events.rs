@@ -1090,7 +1090,7 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
                 "fix(n)",
                 "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
             ),
-            ("merged", "merge with PASS at head and CI green, no STAGING_WOULD_BREAK"),
+            ("merged", "squash-merge into one commit carrying its why notes, with PASS at head and CI green, no STAGING_WOULD_BREAK"),
             ("blocked", "merge refused, or PR closed outside drover"),
         ],
     ),

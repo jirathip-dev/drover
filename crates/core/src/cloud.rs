@@ -478,6 +478,16 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     ensure!(o.code == 0, "{}", fail("profiles sync", &sync, &o));
     writeln!(out, "✓ profiles sync — there")?;
     if acp {
+        for (p, family, _) in crate::hosts::acp_profiles(cfg, &tags) {
+            let args = ["profiles", "sync", "--profile", &p, "--role", family];
+            let o = on.run(&exe, &argv(&args))?;
+            ensure!(
+                o.code == 0,
+                "{}",
+                fail("profiles sync", &format!("{exe} {}", args.join(" ")), &o)
+            );
+            writeln!(out, "✓ profiles sync {p} — there")?;
+        }
         let check = "command -v shed >/dev/null || { echo \"shed not on PATH $PATH\"; exit 1; }; \
 command -v drover >/dev/null || { echo \"drover not on PATH $PATH\"; exit 1; }";
         let bare = || on.run_in("sh", &argv(&["-c", check]), "");
