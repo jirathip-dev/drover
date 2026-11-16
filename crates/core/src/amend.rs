@@ -36,7 +36,7 @@ pub fn amend(
     let n = issue.to_string();
     let body = json(r, "gh", &["issue", "view", &n, "-R", &f.repo, "--json", "body"])?;
     let body = body["body"].as_str().unwrap_or_default().trim_end();
-    let head = if body.lines().any(|l| l.trim() == "## Amendments") {
+    let head = if crate::triage::live(body).lines().any(|l| l.trim() == "## Amendments") {
         "\n"
     } else {
         "\n\n## Amendments\n"

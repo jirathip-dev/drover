@@ -55,6 +55,7 @@ pub mod stall;
 pub mod term;
 pub mod timer;
 pub mod top;
+pub mod triage;
 pub mod update;
 pub mod usage;
 pub mod verify;

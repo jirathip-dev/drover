@@ -354,6 +354,15 @@ enum Cmd {
         cmd: Option<LessonCmd>,
         fleet: Option<String>,
     },
+    #[command(
+        about = "#1100: file this week's triage issue, queue it on top and spawn its `triage` lane (orchestrators and the owner only)"
+    )]
+    #[command(args_conflicts_with_subcommands = true)]
+    Triage {
+        #[command(subcommand)]
+        cmd: Option<TriageCmd>,
+        fleet: Option<String>,
+    },
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
     #[command(alias = "host")]
     Hosts {
@@ -1040,6 +1049,39 @@ enum LessonCmd {
         fleet: String,
         #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum TriageCmd {
+    #[command(
+        about = "Close an issue that is done, a duplicate or superseded, with one comment linking the evidence (a triage lane; never a queued, laned, asked or `keep` one)"
+    )]
+    Close {
+        fleet: String,
+        issue: u64,
+        #[arg(long, value_parser = ["done", "duplicate", "superseded"])]
+        why: String,
+        #[arg(help = "`#N` (the PR or the issue that replaced it), a URL, or a commit sha on the integration branch")]
+        #[arg(long)]
+        evidence: String,
+    },
+    #[command(
+        about = "Fold an issue's amendments: its body becomes `## Spec (current)` over the old text in a <details> block"
+    )]
+    Fold {
+        fleet: String,
+        issue: u64,
+        #[arg(help = "A file with the current spec")]
+        #[arg(long)]
+        spec: std::path::PathBuf,
+    },
+    #[command(about = "Add labels to an issue: `stale?` for one triage can't decide, or the fleet's own")]
+    Label {
+        fleet: String,
+        issue: u64,
+        #[arg(required = true)]
+        labels: Vec<String>,
     },
 }
 
@@ -2086,6 +2128,26 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Lesson { fleet, .. } => {
                     let fleet = fleet.context("usage: drover lesson <FLEET> | drover lesson digest <FLEET>")?;
                     if !crate::lesson::run(ctx, &cfg, r, out, &fleet, None)? {
+                        return Ok(4);
+                    }
+                }
+                Cmd::Triage { cmd: Some(t), .. } => match t {
+                    TriageCmd::Close {
+                        fleet,
+                        issue,
+                        why,
+                        evidence,
+                    } => crate::triage::close(ctx, &cfg, r, out, (&fleet, issue), (&why, &evidence))?,
+                    TriageCmd::Fold { fleet, issue, spec } => {
+                        crate::triage::fold_spec(ctx, &cfg, r, out, (&fleet, issue), &spec)?;
+                    }
+                    TriageCmd::Label { fleet, issue, labels } => {
+                        crate::triage::label(ctx, &cfg, r, out, (&fleet, issue), &labels)?;
+                    }
+                },
+                Cmd::Triage { fleet, .. } => {
+                    let fleet = fleet.context("usage: drover triage <FLEET> | drover triage close|fold|label …")?;
+                    if !crate::triage::run(ctx, &cfg, r, out, &fleet)? {
                         return Ok(4);
                     }
                 }

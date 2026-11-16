@@ -205,14 +205,9 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
 pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let on = |f: &crate::config::Fleet| f.hotspots.as_deref() != Some("off") && !f.paused;
     for name in cfg.fleet.iter().filter(|(_, f)| on(f)).map(|x| x.0) {
-        let at = ctx.state.with_file_name(format!("hotspots-{name}.at"));
-        let last = std::fs::read_to_string(&at)
-            .ok()
-            .and_then(|t| t.trim().parse::<u64>().ok());
-        if last.is_some_and(|t| ctx.now < t + 7 * 86400) {
+        if !crate::timer::weekly_due(ctx, &format!("hotspots-{name}"))? {
             continue;
         }
-        std::fs::write(&at, ctx.now.to_string())?;
         if let Err(e) = run(ctx, cfg, r, out, name) {
             writeln!(out, "{name} hotspots: {e:#}")?;
         }

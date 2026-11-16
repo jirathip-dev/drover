@@ -994,8 +994,15 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         let Some(at) = mine.iter().rposition(|(_, e)| e.kind == "needs-human") else {
             continue;
         };
-        if s.build.as_deref() == Some("lesson") && mine[at].1.str("code") == Some("LANE_ENDS") {
-            crate::lesson::done(ctx, cfg, r, out, (&s.fleet, s.issue), "no repeated class")?;
+        if crate::lesson::no_pr(s.build.as_deref()) && mine[at].1.str("code") == Some("LANE_ENDS") {
+            crate::lesson::done(
+                ctx,
+                cfg,
+                r,
+                out,
+                (&s.fleet, s.issue),
+                crate::lesson::idle_note(s.build.as_deref()),
+            )?;
             continue;
         }
         let from = mine[..at].iter().rposition(|(_, e)| reset.contains(&e.kind.as_str()));
@@ -1303,7 +1310,12 @@ fn pass(
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
-            let Some(sent) = tell(r, &events, &w.lane, &crate::lesson::prompt(fleet, s.issue)) else {
+            let Some(sent) = tell(
+                r,
+                &events,
+                &w.lane,
+                &crate::lesson::prompt(fleet, s.issue, s.build.as_deref()),
+            ) else {
                 continue;
             };
             writeln!(
@@ -1350,7 +1362,14 @@ fn pass(
                 Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
             )?;
         } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE && !fast {
-            crate::lesson::done(ctx, cfg, r, out, (fleet, s.issue), "no repeated class")?;
+            crate::lesson::done(
+                ctx,
+                cfg,
+                r,
+                out,
+                (fleet, s.issue),
+                crate::lesson::idle_note(s.build.as_deref()),
+            )?;
         } else if w.who == "drive" {
             let gone = w.what.split_once(waiting::NO_PUSH);
             let ends =
