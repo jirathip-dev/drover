@@ -46,7 +46,6 @@
   ],
   "lanes": [
     {
-      "account": null,
       "fleet": "sendmeter",
       "harness": "claude",
       "host": "local",
@@ -55,7 +54,7 @@
       "name": "sendmeter-impl-12",
       "note": null,
       "role": "impl",
-      "runtime": "herdr",
+      "runtime": "shed",
       "shown": "working",
       "since": 900100,
       "state": "working",
@@ -115,12 +114,6 @@
       "fix": "drover push test",
       "name": "phone alerts",
       "tone": "a"
-    },
-    {
-      "detail": "not on PATH, or no server",
-      "fix": "herdr",
-      "name": "herdr",
-      "tone": "r"
     },
     {
       "detail": "not measured yet",

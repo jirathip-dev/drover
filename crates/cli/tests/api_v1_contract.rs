@@ -101,7 +101,7 @@ fn schema<T: Serialize + Default>() -> Value {
     shape(&serde_json::to_value(T::default()).unwrap())
 }
 
-fn check(name: &str, route: &str, (ty, schema): (&str, Value), got: Value, fails: &mut Vec<String>) {
+fn check(name: &str, route: &str, (ty, schema): (&str, Value), got: &Value, fails: &mut Vec<String>) {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/golden/api_v1/{name}.json"));
     let fresh = json!({"route": route, "type": ty, "schema": schema, "response": got});
     if std::env::var_os("BLESS").is_some() {
@@ -120,7 +120,7 @@ fn check(name: &str, route: &str, (ty, schema): (&str, Value), got: Value, fails
             old["route"], old["type"]
         ));
     }
-    check_shapes(&schema, &old["response"], &got, &mut out);
+    check_shapes(&schema, &old["response"], got, &mut out);
     fails.extend(out.into_iter().map(|o| format!("{name} ({route}): {o}")));
 }
 
@@ -135,9 +135,34 @@ fn call(s: &Server, c: &drover::Ctx, (method, path): (&str, &str), body: &str, c
     serde_json::from_str(&body).unwrap_or_else(|e| panic!("{method} {path}: {e}: {res}"))
 }
 
+struct Bazzite(OnShed, FakeShed);
+
+impl drover::runner::Runner for Bazzite {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        if prog == "ssh" && args.join(" ").contains("bazzite -- 'shed' 'connect'") {
+            let stdout = self.1.connect(input);
+            return Ok(drover::runner::Out {
+                stdout,
+                ..Default::default()
+            });
+        }
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+    fn shed(&self) -> Option<drover::shed::Shed> {
+        self.0.shed()
+    }
+}
+
 #[test]
 fn every_route_keeps_its_fixtures_shape() {
-    let (c, r) = v1_board_on("v1-contract", herdr_setup(Fake::default().reply("gh", "")));
+    let (c, r) = v1_board_on("v1-contract", Fake::default().reply("gh", ""));
+    let r = Bazzite(r, FakeShed::new());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let post = |op: &str, v: Value| call(&s, &c, ("POST", &format!("/api/v1/{op}")), &v.to_string(), &ck);
@@ -145,13 +170,14 @@ fn every_route_keeps_its_fixtures_shape() {
     let ev = drover::events::read(&c.state).unwrap();
     let t = ev.iter().rev().find_map(|e| e.str("thread")).unwrap().to_string();
     post("setup", json!({"host": "bazzite", "name": "claude B"}));
+    r.1.screen("drover-setup-claude-B", "Paste code here >\n");
     let mut fails = vec![];
     let get = |p: &str| call(&s, &c, ("GET", p), "", &ck);
     macro_rules! gets {
         ($(($name:literal, $path:expr, $ty:ty)),*) => {$(
             let route = format!("GET /api/v1/{}", $name);
             let file = $name.split('/').filter(|s| !s.starts_with('<')).collect::<Vec<_>>().join("-");
-            check(&file, &route, (stringify!($ty), schema::<$ty>()), get(&$path), &mut fails);
+            check(&file, &route, (stringify!($ty), schema::<$ty>()), &get(&$path), &mut fails);
         )*};
     }
     gets!(
@@ -161,7 +187,8 @@ fn every_route_keeps_its_fixtures_shape() {
         ("queue", "/api/v1/queue", QueueTab),
         ("needs", "/api/v1/needs", NeedsTab),
         ("lanes", "/api/v1/lanes", LanesTab),
-        ("shed", "/api/v1/shed", Vec<ShedRow>)
+        ("shed", "/api/v1/shed", Vec<ShedRow>),
+        ("health", "/api/v1/health", Health)
     );
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let h = [t.as_str(), "sendmeter", "Facets", "add facets\nthen reindex"];
@@ -173,7 +200,7 @@ fn every_route_keeps_its_fixtures_shape() {
         ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), LaneChat),
         ("herd", "/api/v1/herd", Herd),
         ("roles", "/api/v1/roles?fleet=sendmeter", Roles),
-        ("setup/<pane>", "/api/v1/setup/w9:p1", SetupScreen),
+        ("setup/<pane>", "/api/v1/setup/drover-setup-claude-B", SetupScreen),
         ("issue/<fleet>/<n>", "/api/v1/issue/sendmeter/12", IssueView),
         ("lessons", "/api/v1/lessons", Lessons),
         (
@@ -193,7 +220,7 @@ fn every_route_keeps_its_fixtures_shape() {
             &format!("post-{op}"),
             &route,
             ("Reply", schema::<Reply>()),
-            got,
+            &got,
             &mut fails,
         );
     }
@@ -204,7 +231,7 @@ fn every_route_keeps_its_fixtures_shape() {
         "post-conductor-attach",
         "POST /api/v1/conductor-attach",
         ty,
-        post("conductor-attach", attach),
+        &post("conductor-attach", attach),
         &mut fails,
     );
     let ask = [
@@ -225,7 +252,7 @@ fn every_route_keeps_its_fixtures_shape() {
         "events-conductor-attach",
         "GET /api/v1/events",
         ("Events", schema::<Events>()),
-        got,
+        &got,
         &mut fails,
     );
     assert!(

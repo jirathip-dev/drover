@@ -22,14 +22,19 @@ jobs:
         run: cargo build --release --locked
       - name: fmt
         run: cargo fmt --check
-      - name: clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: "clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/)"
+        run: |
+          cargo clippy --all-targets --locked -- -D warnings
+          n=$(grep -rE '#!?\[allow\(' crates | wc -l)
+          test "$n" -le 10 || { echo "::error::$n #[allow] attributes in crates/, at most 10"; exit 1; }
       - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)"
         run: cargo test --locked
       - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
-        run: "! ls -a \"${TMPDIR:-/tmp}\" | grep '^fleet-test-'"
+        run: test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*' -print -quit)"
       - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)"
         run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests the_state_read_stays_under_300ms --nocapture --test-threads=1
+      - name: "soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it)"
+        run: cargo test --release --locked --test soak -- --ignored --nocapture --test-threads=1
       - name: demo export (#39, synthetic data in demo/)
         run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
       - name: leak gate (no ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the exported demo)
@@ -49,13 +54,12 @@ jobs:
         run: "! cargo tree --locked -p drover -e normal --prefix none | grep -E '^ts-rs(-macros)? v'"
       - uses: taiki-e/install-action@v2
         with:
-          tool: just
-      - name: "TS types (#375): regenerate, no drift from assets/types/, serde's JSON type-checks with tsc, no hand-written copies"
+          tool: just,cargo-deny
+      - name: "deny (#808: licences, advisories, duplicate versions, sources; deny.toml)"
+        run: cargo deny --locked check
+      - name: "TS types (#375): serde's JSON type-checks with tsc, no hand-written copies (#973: arch-check's `generated` catches drift)"
         run: |
           npm install -g typescript@7.0.2
-          just types
-          git diff --exit-code assets/types/ || { echo "::error::assets/types/ is stale: run \`just types\` and commit it"; exit 1; }
-          test -z "$(git status --porcelain assets/types/)" || { echo "::error::untracked file in assets/types/: run \`just types\`"; exit 1; }
           cargo test --locked -p drover-server --features ts serde_json_fits_the_types
           just types-lint
       - name: "no Rust HTML (#269): crates/server builds the page shell only; the TypeScript board draws every tab"
@@ -83,6 +87,16 @@ jobs:
           n=$(cat assets/*.js assets/*.css | wc -l)
           echo "assets JS/CSS lines: $n"
           test "$n" -le 1500 || echo "::warning::assets JS/CSS is $n lines, over the 1500 soft budget"
+
+  # #808: a workflow file GitHub can't parse fails here, on the PR.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint (.github/workflows/**)
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
 
   # #265: the TypeScript board (web/): strict typecheck, the esbuild bundle, and the committed dist must match it.
   # Node is CI's and developers' only: the binary embeds the committed web/dist, so `cargo install` needs no Node.
@@ -120,10 +134,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.1
       - name: build
         run: cargo build --release --locked
-      - name: demo export, and the Host tab's busy and healthy fixtures (#141)
-        run: |
-          DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
-          scripts/host-fixtures.sh site
+      - name: demo export
+        run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
       # #68: Chrome's new headless never makes a window under 500 px wide; the headless shell honours 390.
       # Pinned build (Google's Chrome-for-Testing), so layout never moves without a commit.
       - name: chrome-headless-shell
@@ -133,7 +145,7 @@ jobs:
           echo "CHROME=$c" >> "$GITHUB_ENV"
       - name: the lifeboat page for the audit (#725)
         run: LIFEBOAT_SITE="$PWD/site" cargo test --locked --test lifeboat the_page_for_the_ui_audit
-      - name: ui audit at 390 px (and the loading views at 1440, #337) and the sheet close screencast (#166)
+      - name: ui audit at 390 px (and 1440, #337) of the screens the page draws (#927)
         run: scripts/ui-audit.sh site ui-390
       # #566: every hung Chrome run in the job summary; views still hung after 2 retries go to the soft `ui-flaky` check.
       - name: Chrome hangs
@@ -142,8 +154,8 @@ jobs:
         run: |
           if [ -s ui-390/hangs.txt ]; then { echo "### Chrome hangs (#566)"; sed 's/^/- /' ui-390/hangs.txt; } >> "$GITHUB_STEP_SUMMARY"; fi
           echo "flaky=$(cut -d' ' -f1 ui-390/flaky.txt 2>/dev/null | sort -u | xargs)" >> "$GITHUB_OUTPUT"
-      - name: the backlog on a fresh load and after a /live patch, in Chrome on the real server (#391)
-        run: cargo test --locked --test backlog the_backlog_draws_on_a_fresh_load_and_after_a_live_patch
+      - name: "the page in Chrome on the real server (#927: answer, run cards, pause/resume, stop, Fleets, offline)"
+        run: cargo test --locked --test page
       - name: the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
         run: cargo test --locked --test verify_browser
       - uses: actions/upload-artifact@v4
@@ -165,7 +177,7 @@ jobs:
         env:
           FLAKY: ${{ needs.ui.outputs.flaky }}
 
-  # #862: ui-webkit runs only when the diff touches the board UI (scripts/board-freeze.sh's list) or its own tests.
+  # #862: ui-webkit runs only when the diff touches the page (#927: web/, assets/, serve.rs, screens.rs) or its own tests.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -184,12 +196,10 @@ jobs:
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
           webkit=false
-          scripts/board-freeze.sh /dev/null < changed.txt > /dev/null || webkit=true
-          grep -qxE 'crates/cli/tests/(support/webview\.mjs|perf\.rs|ui_audit\.rs|chat_tab\.rs)' changed.txt && webkit=true
+          grep -qE '^(web/|assets/|crates/server/src/(serve\.rs|screens\.rs)|crates/cli/tests/(support/webview\.mjs|perf\.rs))' changed.txt && webkit=true
           echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
 
-  # #200: the sheet close in WebKit (iOS Safari's engine; Chrome never showed the flash): the page above a closing
-  # sheet keeps its colour. The PNG is each sheet's worst frame. #862: Playwright's WebKit on Linux.
+  # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.
   ui-webkit:
     needs: changes
     if: needs.changes.outputs.webkit == 'true'
@@ -210,25 +220,3 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/pw/node_modules" node -e "require('playwright')"
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
-      - name: sheet close in WebKit (chat, config, legend)
-        if: ${{ !cancelled() }}
-        run: |
-          mkdir -p ui-webkit
-          DROVER_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
-          test -f ui-webkit/close-chat.png && test -f ui-webkit/close-config.png && test -f ui-webkit/close-legend.png
-      - name: the chat keyboard in WebKit (#443, a 336 px visualViewport shrink at 390)
-        if: ${{ !cancelled() }}
-        run: |
-          DROVER_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test chat_tab the_keyboard_keeps_the_composer_on_it -- --nocapture
-          test -f ui-webkit/chat-kb.png
-      - name: the Lanes tab's folded Other in shed section in WebKit (#611, folded and opened at 390)
-        if: ${{ !cancelled() }}
-        run: |
-          DROVER_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test shed_others the_lanes_tab_ends_with_the_folded_section_and_fits_390px -- --nocapture
-          test -f ui-webkit/shed-folded.png && test -f ui-webkit/shed-open.png
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ui-webkit
-          path: ui-webkit/*.png
-          retention-days: 14

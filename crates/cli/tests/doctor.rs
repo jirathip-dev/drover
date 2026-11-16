@@ -4,7 +4,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 const TOKEN: &str = concat!("sk", "-ant-oat01-FAKEtokenFAKEtokenFAKEtoken0123456789");
-const HERDR: &str = "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n";
 const PLIST: &str = "<plist><dict><key>ProgramArguments</key><array><string>/x/drover</string>\
 <string>serve</string><string>--addr</string><string>127.0.0.1:7777</string></array></dict></plist>";
 const SUB: &str = r#"[{"endpoint":"https://push.example/x","p256dh":"k","auth":"a","label":"phone","created":1}]"#;
@@ -20,12 +19,6 @@ integration = "staging"
 harness = "{harness}"
 profile = "fleet-impl"
 
-[accounts]
-main = "TOKEN_MAIN"
-
-[accounts.usage]
-main = "{accounts}/main"
-
 [serve]
 allowed_hosts = ["mac.tail.ts.net"]
 webhook_secret_file = "{hook}"
@@ -35,7 +28,6 @@ type = "webpush"
 sub = "mailto:a@b.c"
 "#,
         local = d.join("local").display(),
-        accounts = d.join("accounts").display(),
         hook = d.join("config/secrets/GITHUB_WEBHOOK_SECRET").display(),
     )
 }
@@ -51,7 +43,6 @@ fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
     let c = ctx(&d, &config(&d, harness));
     std::fs::create_dir_all(d.join("local")).unwrap();
     std::fs::create_dir_all(&c.worktrees).unwrap();
-    write(&d.join("accounts/main/.claude.json"), r#"{"oauthAccount": {}}"#, 0o600);
     write(&d.join("config/secrets/GITHUB_WEBHOOK_SECRET"), "hook", 0o600);
     write(
         &c.home.join("Library/LaunchAgents/dev.drover.serve.plist"),
@@ -79,7 +70,6 @@ fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
 
 fn good() -> Fake {
     Fake::default()
-        .reply("herdr status", HERDR)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1")
         .reply("vm_stat", "Swapouts: 5.\n")
         .reply("sysctl -n vm.loadavg", "{ 1.00 1.00 1.00 }")
@@ -109,11 +99,10 @@ fn all_good_exits_zero_and_never_writes() {
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains('✗') && !out.contains('!'), "{out}");
-    for check in ["herdr", "host", "gh", "config", "worktrees", "gh demo", "local demo"] {
+    for check in ["host", "gh", "config", "worktrees", "gh demo", "local demo"] {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
     for check in [
-        "accounts",
         "harness",
         "serve hosts",
         "serve",
@@ -133,10 +122,9 @@ fn all_good_exits_zero_and_never_writes() {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
     assert!(
-        line(&out, "accounts").contains("sign in from each account's own folder") && !out.contains("TOKEN_MAIN"),
-        "{out}"
+        !out.contains(" accounts — ") && !out.contains(" account main — "),
+        "#923: no account rows: {out}"
     );
-    assert!(!out.contains(" account main — "), "{out}");
     assert!(
         !r.calls.borrow().iter().any(|c| c.starts_with("security ")),
         "{:?}",
@@ -234,7 +222,6 @@ fn secrets_never_echo() {
 fn each_check_fails_with_its_fix_and_exit_one() {
     type Break = fn(&drover::Ctx, &Path, Fake) -> Fake;
     let cases: Vec<(Break, &str, &str)> = vec![
-        (|_, _, r| r.once("herdr status", 1, ""), "herdr", "→ herdr"),
         (|_, _, r| r.once("vm_stat", 1, ""), "host", "→ put /usr/sbin"),
         (|_, _, r| r.once("gh auth status", 1, ""), "gh", "→ gh auth login"),
         (|_, _, r| r.once("gh repo view", 1, ""), "gh demo", "→ gh auth refresh"),
@@ -318,9 +305,12 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "→ drover timer install",
         ),
         (
-            |_, _, r| match cfg!(target_os = "macos") {
-                true => r.once("launchctl print", 0, "").once("launchctl print", 1, ""),
-                false => r.once("systemctl --user is-active", 3, ""),
+            |_, _, r| {
+                if cfg!(target_os = "macos") {
+                    r.once("launchctl print", 0, "").once("launchctl print", 1, "")
+                } else {
+                    r.once("systemctl --user is-active", 3, "")
+                }
             },
             "timer",
             "dev.drover.tick missing → drover timer install",
@@ -346,14 +336,8 @@ fn warnings_do_not_fail() {
     for t in ["devices", "push"] {
         drover::db::store::<serde_json::Value>(&c.state, t, &[]).unwrap();
     }
-    let old = HERDR.replacen("version: 0.9.5\n\n", "version: 0.9.6\n\n", 1);
-    let r = good().once("herdr status", 0, &old);
-    let (code, out) = run(&c, &r, &["doctor"]);
+    let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        line(&out, "herdr").starts_with("! herdr — client 0.9.6, server 0.9.5 → herdr update --handoff"),
-        "{out}"
-    );
     for check in ["phone", "push"] {
         assert!(line(&out, check).starts_with('!'), "{out}");
     }
@@ -385,7 +369,7 @@ fn bad_config_and_hermes_profiles() {
     let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 1, "{out}");
     assert!(line(&out, "config").starts_with('✗'), "{out}");
-    assert!(line(&out, "herdr").starts_with('✓'), "{out}");
+    assert!(line(&out, "gh").starts_with('✓'), "{out}");
 
     let (c, _) = setup("doc-hermes", "hermes");
     let (code, out) = run(&c, &good(), &["doctor"]);
@@ -420,22 +404,21 @@ fn bad_config_and_hermes_profiles() {
 }
 
 #[test]
-fn retired_accounts_env_warns_until_the_line_is_dropped() {
-    let (c, d) = setup("doc-retired", "claude");
-    let env = d.join("tokens.env");
-    write(&env, &format!("TOKEN_MAIN={TOKEN}\n"), 0o600);
+fn retired_account_keys_warn_until_they_are_dropped() {
+    let (c, _) = setup("doc-retired", "claude");
     let text = std::fs::read_to_string(&c.config).unwrap();
-    let line_ = format!("accounts_env = \"{}\"\n", env.display());
-    let old = text.replace("[accounts]\n", &format!("[accounts]\n{line_}"));
+    let old = text.replace(
+        "profile = \"fleet-impl\"\n",
+        "profile = \"fleet-impl\"\naccount = \"main\"\n",
+    ) + "\n[accounts]\nmain = \"TOKEN_MAIN\"\naccounts_env = \"/x/tokens.env\"\n";
     std::fs::write(&c.config, &old).unwrap();
-    let warn = "! config — [accounts].accounts_env is retired (#441): drop the line (#683: accounts sign in with their own login)";
+    let warn = "! config — [accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.demo.role.impl.account";
 
     let r = good();
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.lines().any(|l| l == warn), "{out}");
-    assert!(line(&out, "accounts").starts_with('✓'), "{out}");
-    assert!(!out.contains(TOKEN), "{out}");
+    assert!(!out.contains("TOKEN_MAIN") && !out.contains(" accounts — "), "{out}");
 
     std::fs::write(&c.config, &text).unwrap();
     let (code, out) = run(&c, &good(), &["doctor"]);
@@ -545,7 +528,7 @@ fn a_paused_self_update_shows_in_doctor_and_the_board() {
 #[test]
 fn a_login_shell_exporting_the_token_warns() {
     let (c, _) = setup("doc-login", "claude");
-    let warn = "! a login shell exports CLAUDE_CODE_OAUTH_TOKEN (it overrides each lane's account) → remove it from";
+    let warn = "! a login shell exports CLAUDE_CODE_OAUTH_TOKEN (it overrides the host's own login in every lane) → remove it from";
     let (_, out) = run(&c, &good(), &["doctor"]);
     assert!(!out.contains("login shell"), "{out}");
     let shell = format!("Welcome {TOKEN}\ntoken:set\nfile:.zshrc\nfile:{TOKEN}\n");

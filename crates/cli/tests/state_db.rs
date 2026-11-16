@@ -63,7 +63,8 @@ fn migration_imports_once_with_an_equal_fold_and_the_export_is_the_old_format() 
     assert_eq!(rows(&back), rows(&all), "every event once, seq kept");
     assert_eq!(
         read(&c.state).unwrap().iter().map(|e| e.seq).collect::<Vec<_>>(),
-        [4, 5, 6, 7]
+        [1, 4, 5, 6, 7],
+        "the live events and the archived lane's newest spawn (the lane fold)"
     );
     for f in [
         "events.jsonl",
@@ -130,4 +131,30 @@ fn the_database_is_owner_only() {
     drover::events::append(&d.join("events.jsonl"), &Event::new(1, "app", None, "x", json!({}))).unwrap();
     let mode = std::fs::metadata(d.join("state.db")).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn a_kind_flagged_passive_where_it_is_emitted_is_not_activity() {
+    let d = tmpdir("passive-flag");
+    let c = ctx(&d, CONFIG);
+    let spawn = Event::new(
+        10,
+        "app",
+        Some(1),
+        "spawn",
+        json!({"role": "impl", "agent": "app-impl-1"}),
+    );
+    drover::events::append(&c.state, &spawn).unwrap();
+    let note = Event::new(20, "app", Some(1), "brand-new-note", json!({})).passive();
+    drover::events::append(&c.state, &note).unwrap();
+    let ev = read(&c.state).unwrap();
+    assert!(ev[1].passive, "{:?}", ev[1]);
+    assert!(jsonl(&c.state).unwrap().contains(r#""passive":true"#));
+    let s = &fold(&ev)[&("app".to_string(), 1)];
+    assert_eq!((s.last_event.as_str(), s.last_ts), ("spawn", 10));
+    let loud = Event::new(30, "app", Some(1), "brand-new-note", json!({}));
+    assert!(!serde_json::to_string(&loud).unwrap().contains("passive"));
+    drover::events::append(&c.state, &loud).unwrap();
+    let s = &fold(&read(&c.state).unwrap())[&("app".to_string(), 1)];
+    assert_eq!((s.last_event.as_str(), s.last_ts), ("brand-new-note", 30));
 }

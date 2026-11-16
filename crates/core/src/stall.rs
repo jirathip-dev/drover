@@ -1,11 +1,13 @@
 use crate::config::Config;
 use crate::events::{append, emit, fold, last_spawn, Event};
 use crate::hosts::On;
+use crate::lanes::Health;
 use crate::runner::Runner;
+use crate::session::{Session, Sessions};
 use crate::waiting::Waiting;
-use crate::{herdr, Ctx};
+use crate::{term, Ctx};
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::io::Write;
 
 /// A lane that shows no output this long after its spawn (or its first prompt sent again) never started.
@@ -27,7 +29,7 @@ pub fn refused(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev:
             continue;
         };
         if let Some(p) = sp.str("pane") {
-            let _ = herdr::close(&On::of(r, Some(sp)), p);
+            let _ = term::close(ctx, &On::of(r, Some(sp)), p);
             let d = json!({"agent": lane, "pane": p, "reason": "hook-refused"});
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-closed", d))?;
         }
@@ -55,123 +57,90 @@ fn refusals<'a>(ev: &'a [Event], sp: &Event, role: &str) -> Vec<&'a Event> {
     ev.iter().filter(mine).collect()
 }
 
-/// #666: what to do about row `w`'s live lane, idle with no push or verdict (and no turn reported), if anything yet.
-pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], agents: &[Value], w: &Waiting) -> Option<Act> {
-    let idle = ["idle without pushing", "rev idle without"];
-    if w.who != "none" || w.next_cmd.is_some() || !idle.iter().any(|p| w.what.starts_with(p)) {
+/// #666: what to do about row `w`'s live lane that nothing else waits on, when `lanes::health` says it never started or stalled.
+pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], sessions: &Sessions, w: &Waiting) -> Option<Act> {
+    if w.who != "none" || w.next_cmd.is_some() {
         return None;
     }
+    let s = fold(ev).remove(&(w.fleet.clone(), w.issue))?;
     let (lane, sp) = (&w.lane, last_spawn(ev, &w.lane)?);
-    let a = agents.iter().find(|a| a["name"] == lane.as_str())?;
-    if held(ev, a) {
-        return None;
-    }
-    let (role, pane, on) = (sp.str("role")?, sp.str("pane")?, On::of(r, Some(sp)));
+    let (role, on) = (sp.str("role")?, On::of(r, Some(sp)));
     let resent = |e: &&Event| e.kind == "start-resent" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
     let resent = ev.iter().rfind(resent);
-    let since = resent.map_or(sp.ts, |e| e.ts);
-    let (start, stall) = (since + START_SECS, w.since + cfg.limits.stall_minutes * 60);
-    if ctx.now < start.min(stall) {
-        return None;
-    }
-    let screen = herdr::read(&on, pane).ok();
     let (n, _) = crate::waiting::respawns(ev, &w.fleet, w.issue);
     let ago = |t: u64| crate::events::age(ctx.now.saturating_sub(t));
-    if screen.as_deref().is_some_and(|t| t.trim().is_empty()) {
-        if ctx.now < start {
-            return None;
+    match crate::lanes::health(ctx, cfg, ev, sessions, &s) {
+        Health::NeverStarted { since } => {
+            let acp = sp.str("runtime") == Some("shed") && cfg.shed_for(&w.fleet).is_some_and(|b| b.acp.is_some());
+            let brief = sp
+                .str("worktree")
+                .and_then(|wt| on.read(&std::path::Path::new(wt).join(".brief.md")));
+            if let Some(text) = brief.filter(|_| acp && resent.is_none()) {
+                let sent = term::prompt(&on, lane, &text).is_ok();
+                let d = json!({"agent": lane, "sent": sent});
+                let _ = append(
+                    &ctx.state,
+                    &Event::new(ctx.now, &w.fleet, Some(w.issue), "start-resent", d),
+                );
+                return None;
+            }
+            Some(if n == 0 {
+                Act::Respawn(role.into(), "failed start")
+            } else {
+                Act::Escalate(
+                    "START_FAILED",
+                    format!(
+                        "lane {lane} never started: no report {} after its spawn, retried once",
+                        ago(since)
+                    ),
+                )
+            })
         }
-        let acp = sp.str("runtime") == Some("shed") && cfg.shed_for(&w.fleet).is_some_and(|b| b.acp.is_some());
-        let brief = sp
-            .str("worktree")
-            .and_then(|wt| on.read(&std::path::Path::new(wt).join(".brief.md")));
-        if let Some(text) = brief.filter(|_| acp && resent.is_none()) {
-            let sent = herdr::prompt(&on, lane, &text).is_ok();
-            let d = json!({"agent": lane, "sent": sent});
-            let _ = append(
-                &ctx.state,
-                &Event::new(ctx.now, &w.fleet, Some(w.issue), "start-resent", d),
+        Health::Stalled { .. } if n == 0 => Some(Act::Respawn(role.into(), "lane stalled")),
+        Health::Stalled { since } => {
+            let note = sessions
+                .get(lane)
+                .and_then(|x| x.note.as_deref())
+                .map(crate::lanes::mask);
+            let hook = refusals(ev, sp, role)
+                .last()
+                .and_then(|e| e.str("cause"))
+                .map(|c| format!("; hook: {c}"));
+            let why = format!(
+                "lane {lane} stalled again after its respawn: shed quiet for {}, no turn-end; shed says: {}{}",
+                ago(since),
+                note.unwrap_or_else(|| "nothing".into()),
+                hook.unwrap_or_default()
             );
-            return None;
+            Some(Act::Escalate("LANE_STALLED", why))
         }
-        return Some(if n == 0 {
-            Act::Respawn(role.into(), "failed start")
-        } else {
-            Act::Escalate(
-                "START_FAILED",
-                format!(
-                    "lane {lane} never started: no output {} after its spawn, retried once",
-                    ago(since)
-                ),
-            )
-        });
+        _ => None,
     }
-    if ctx.now < stall {
-        return None;
-    }
-    if n == 0 {
-        return Some(Act::Respawn(role.into(), "lane stalled"));
-    }
-    let tail = crate::lanes::tail(screen.as_deref().unwrap_or_default(), 5).join(" ⏎ ");
-    let hook = refusals(ev, sp, role)
-        .last()
-        .and_then(|e| e.str("cause"))
-        .map(|c| format!("; hook: {c}"));
-    let why = format!(
-        "lane {lane} stalled again after its respawn: no push, verdict or turn for {}; last screen: {tail}{}",
-        ago(w.since),
-        hook.unwrap_or_default()
-    );
-    Some(Act::Escalate("LANE_STALLED", why))
 }
 
-/// #983: agent `a` waits or works by design (`lanes::HELD`).
-pub fn held(ev: &[Event], a: &Value) -> bool {
-    crate::lanes::HELD.contains(&crate::lanes::state(ev, a).as_str())
-}
-
-/// #819: a check lane with no verdict since its spawn and no new pane output this long is replaced.
+/// #819: a check lane with no verdict since its spawn and nothing new from shed this long is replaced.
 pub const STALE_CHECK_SECS: u64 = 2 * 3600;
 
-/// #819: the minutes check lane `lane` of `fleet` #`n` has been quiet, once that is [`STALE_CHECK_SECS`].
-pub fn stale_check(
-    ctx: &Ctx,
-    r: &dyn Runner,
-    ev: &[Event],
-    agents: &[Value],
-    (fleet, n): (&str, u64),
-    lane: &str,
-) -> Option<u64> {
+/// #819: the minutes check lane `lane` of `fleet` #`n` has been quiet (no shed event, no status change), once that is [`STALE_CHECK_SECS`].
+pub fn stale_check(ctx: &Ctx, ev: &[Event], agents: &[Session], (fleet, n): (&str, u64), lane: &str) -> Option<u64> {
     let i = ev
         .iter()
         .rposition(|e| e.kind == "spawn" && e.str("agent") == Some(lane))?;
     let sp = &ev[i];
-    if !agents.iter().any(|a| a["name"] == lane) || ev[i + 1..].iter().any(|e| e.is("verdict", fleet, n)) {
+    if !agents.iter().any(|a| a.name == lane) || ev[i + 1..].iter().any(|e| e.is("verdict", fleet, n)) {
         return None;
     }
-    let screen = herdr::read(&On::of(r, Some(sp)), sp.str("pane")?).ok()?;
-    let tools = crate::shed::session(ctx, lane)["tools"]
-        .as_object()
-        .is_some_and(|m| !m.is_empty());
-    let quiet = ctx.now.saturating_sub(changed(ctx, lane, &screen, tools).max(sp.ts));
-    (quiet >= STALE_CHECK_SECS).then_some(quiet / 60)
-}
-
-fn changed(ctx: &Ctx, lane: &str, screen: &str, busy: bool) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let path = ctx.state.with_file_name("pane-seen.json");
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut seen: serde_json::Map<String, Value> = serde_json::from_str(&text).unwrap_or_default();
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    screen.hash(&mut h);
-    let hash = format!("{:016x}", h.finish());
-    let at = seen.get(lane).filter(|s| !busy && s["hash"] == hash.as_str());
-    if let Some(t) = at.and_then(|s| s["at"].as_u64()) {
-        return t;
+    let p = crate::session::pulse::of(ctx, lane);
+    if p.as_ref().is_some_and(|p| !p.open_tools.is_empty()) {
+        return None;
     }
-    seen.insert(lane.into(), json!({"hash": hash, "at": ctx.now}));
-    let _ = std::fs::write(&path, Value::Object(seen).to_string());
-    ctx.now
+    let heard = [
+        p.map_or(0, |p| p.heard),
+        crate::session::stamp::since(ev, lane).unwrap_or(0),
+        sp.ts,
+    ];
+    let quiet = ctx.now.saturating_sub(heard.into_iter().max().unwrap_or_default());
+    (quiet >= STALE_CHECK_SECS).then_some(quiet / 60)
 }
 
 /// #792: the prompt a silent ACP lane gets once its turn is cancelled.
@@ -187,7 +156,7 @@ pub enum Silent {
     Escalate(String),
 }
 
-pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Value], fleet: &str) -> Vec<(u64, String, Silent)> {
+pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Session], fleet: &str) -> Vec<(u64, String, Silent)> {
     let mut out = vec![];
     for s in fold(ev).values().filter(|s| s.fleet == fleet) {
         let staged = s.lanes.iter().find_map(|(r, a)| {
@@ -197,19 +166,19 @@ pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Value], fleet: &s
         let Some((role, lane)) = s.active_lane().or(staged) else {
             continue;
         };
-        let (Some(sp), o) = (last_spawn(ev, lane), crate::shed::session(ctx, lane)) else {
+        let (Some(sp), Some(o)) = (last_spawn(ev, lane), crate::session::pulse::of(ctx, lane)) else {
             continue;
         };
-        let open = o["tools"].as_object().is_some_and(|m| !m.is_empty()) && o["cpu"].as_u64() >= Some(BUSY_CPU_PCT);
-        let Some(a) = agents.iter().find(|a| a["name"] == lane) else {
+        let open = !o.open_tools.is_empty() && o.cpu_pct >= Some(BUSY_CPU_PCT);
+        let Some(a) = agents.iter().find(|a| a.name == lane) else {
             continue;
         };
-        if o["turn"] != true || open || held(ev, a) {
+        if !o.turn_open || open || crate::lanes::held(ev, a) {
             continue;
         }
         let mine = |k: &'static str| move |e: &&Event| e.kind == k && e.str("agent") == Some(lane);
         let nudged = ev.iter().rfind(mine("nudged")).filter(|e| e.ts >= sp.ts);
-        let since = [o["at"].as_u64().unwrap_or(0), sp.ts, nudged.map_or(0, |e| e.ts)];
+        let since = [o.heard, sp.ts, nudged.map_or(0, |e| e.ts)];
         let since = since.into_iter().max().unwrap_or_default();
         if ctx.now < since + cfg.limits.silent_minutes * 60 {
             continue;
@@ -218,7 +187,7 @@ pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Value], fleet: &s
         let respawned = ev.iter().rfind(mine("respawned-silent")).filter(hour);
         let recent = respawned.or(ev.iter().rfind(mine("nudged")).filter(hour));
         let quiet = crate::events::age(ctx.now - since);
-        let unanswered = nudged.filter(|n| o["said"].as_u64().is_none_or(|t| t <= n.ts));
+        let unanswered = nudged.filter(|n| o.said.is_none_or(|t| t <= n.ts));
         let act = match (unanswered, respawned, recent) {
             (Some(_), None, _) => Silent::Respawn(role.into(), format!("silent {quiet} after its nudge")),
             (_, _, Some(e)) => Silent::Escalate(format!(
@@ -243,11 +212,11 @@ pub fn nudge(
     why: &str,
 ) -> Result<()> {
     let on = On::of(r, last_spawn(ev, lane));
-    if let Err(e) = herdr::awake(&on, lane) {
+    if let Err(e) = term::awake(&on, lane) {
         return Ok(writeln!(out, "{fleet} #{n} nudge of {lane} waits: {e:#}")?);
     }
     let cancelled = crate::shed::cli(&on, &["cancel", lane]).is_ok();
-    let sent = herdr::prompt(&on, lane, NUDGE).is_ok();
+    let sent = term::prompt(&on, lane, NUDGE).is_ok();
     writeln!(out, "{fleet} #{n} nudged {lane}: {why}")?;
     let d = json!({"agent": lane, "why": why, "cancelled": cancelled, "sent": sent});
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "nudged", d))

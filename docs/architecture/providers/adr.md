@@ -87,7 +87,7 @@ crates/core/src/harness/ (now providers/) already held a 40-method `Harness` tra
 
 1. **Comments in the ban.** Decided `comments = true` (core never names one, even in `///`): ~33 lines reworded. The
    alternative is to leave comments to the q1191 strip. Recommend: keep `true`.
-2. **`web/`.** `web/src/system.ts` hard-codes an Anthropic accounts card and `host.ts` filters the `claude` setup.
+2. **`web/`.** web/src/system.ts (removed in #927) hard-codes an Anthropic accounts card and `host.ts` filters the `claude` setup.
    Not in this issue's paths (scope item 4 says the providers folder, i.e. Rust). Recommend: a follow-up issue that
    sends the card's vendor label from the server and adds `web/src/**` to the ban.
 3. **gemini.rs** exists only to carry `gemini-acp → google` for #732. Recommend: keep it (`Listed`); dropping the row

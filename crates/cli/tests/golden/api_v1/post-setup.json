@@ -1,12 +1,14 @@
 {
   "response": {
     "code": "NO_SUCH_SETUP",
+    "job": null,
     "message": "no setup ``",
     "ok": false
   },
   "route": "POST /api/v1/setup",
   "schema": {
     "code": "string",
+    "job": "null",
     "message": "string",
     "ok": "boolean"
   },

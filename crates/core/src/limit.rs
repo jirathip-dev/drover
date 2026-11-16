@@ -1,65 +1,67 @@
-use crate::config::Config;
-use crate::events::{append, emit, fold, last_spawn, read, Event};
+use crate::events::{append, fold, last_spawn, read, Event};
 use crate::hosts::On;
 use crate::runner::Runner;
-use crate::{gate, herdr, host, Ctx};
+use crate::session::{Session, Status};
+use crate::{gate, term, Ctx};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::Write;
 
-/// The prompt a resumed or waited-out lane gets.
+/// The prompt a waited-out lane gets.
 pub const CONTINUE: &str = "continue";
 
-/// The owner's `pick` (`switch` | `wait`) for `fleet` #`n`'s rate-limited lane, logged `limit-picked` by `by`.
-pub fn pick(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    (fleet, n): (&str, u64),
-    pick: &str,
-    by: &str,
-) -> Result<()> {
+/// The owner's [wait] for `fleet` #`n`'s rate-limited lane: logged `limit-picked` by `by`; `due` sends `continue` at shed's reset time.
+pub fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, (fleet, n): (&str, u64), by: &str) -> Result<()> {
     let events = read(&ctx.state)?;
     let lane = fold(&events).remove(&(fleet.to_string(), n));
-    let lane = lane.as_ref().and_then(|s| s.active_lane());
-    let sp = lane.and_then(|(_, l)| last_spawn(&events, l));
-    let on = On::of(r, sp);
-    let agents = host::agents(&on).unwrap_or_default();
-    let limited = |a: &&Value| lane.is_some_and(|l| a["name"] == l.1) && a["agent_status"] == "rate-limited";
-    let (Some((role, lane)), Some(sp), Some(a)) = (lane, sp, agents.iter().find(limited)) else {
+    let lane = lane.as_ref().and_then(|s| s.active_lane()).map(|(_, l)| l.to_string());
+    let on = On::of(r, lane.as_deref().and_then(|l| last_spawn(&events, l)));
+    let a = lane.as_deref().and_then(|l| crate::session::get(&on, l).ok().flatten());
+    let Some(a) = a.filter(|a| a.status() == Some(Status::Limited)) else {
         return gate::refused("NOT_RATE_LIMITED", format!("{fleet} #{n} has no rate-limited lane"));
     };
-    let account = sp.str("account");
-    if pick == "switch" && account.is_none() {
+    let reset = a.note.as_deref().unwrap_or_default();
+    let Some(at) = reset_at(r, reset, ctx.now) else {
         return gate::refused(
-            "NO_ACCOUNT",
-            format!("{lane} runs on no [accounts] account: none to switch from"),
+            "NO_RESET",
+            format!("{} is rate-limited with no reset time from shed", a.name),
         );
-    }
-    let reset = a["agent_note"].as_str().unwrap_or_default();
-    let words = format!("resets {}", reset.replace(" AM", "am").replace(" PM", "pm"));
-    let at = crate::access::cap_until(cfg, r, &words, ctx.now);
-    let d = json!({"agent": lane, "pick": pick, "by": by, "account": account, "reset": reset, "at": at});
-    append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "limit-picked", d))?;
-    let Some(acct) = account.filter(|_| pick == "switch") else {
-        let when = crate::usage::date(r, at, "+%H:%M");
-        return Ok(writeln!(out, "{fleet} #{n}: {lane} gets `{CONTINUE}` at {when}")?);
     };
-    let why = format!("{acct}: lane {lane} is rate-limited; the owner switched it to the next account");
-    let d = json!({"key": format!("{lane}:{acct}"), "reason": why, "agent": lane, "account": acct, "until": at,
-        "harness": sp.str("harness"), "host": sp.str("host")});
-    emit(
+    let d = json!({"agent": a.name, "pick": "wait", "by": by, "reset": reset, "at": at});
+    append(
         &ctx.state,
-        cfg,
-        Event::new(ctx.now, fleet, Some(n), "account-capped", d),
+        &Event::new(ctx.now, fleet, Some(n), "limit-picked", d).passive(),
     )?;
-    let o = crate::spawn::Opts {
-        supersede: true,
-        resume: herdr::session_id(&on, lane),
-        ..Default::default()
-    };
-    crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, role), &o).map(drop)
+    let when = crate::usage::date(r, at, "+%H:%M");
+    Ok(writeln!(out, "{fleet} #{n}: {} gets `{CONTINUE}` at {when}", a.name)?)
+}
+
+/// shed's reset note (`5pm`, `9:30 AM`, `Nov 4, 8am`) as the next such host-local time after `now`.
+fn reset_at(r: &dyn Runner, note: &str, now: u64) -> Option<u64> {
+    let s = note
+        .to_lowercase()
+        .replace([',', '(', ')', '.'], " ")
+        .replace(" am", "am")
+        .replace(" pm", "pm");
+    let words: Vec<&str> = s.split_whitespace().collect();
+    let secs = words.iter().find_map(|w| {
+        let hm = w.strip_suffix("am").or(w.strip_suffix("pm"))?;
+        let (h, m) = hm.split_once(':').unwrap_or((hm, "0"));
+        let pm = if w.ends_with("pm") { 12 } else { 0 };
+        Some((h.parse::<u64>().ok()? % 12 + pm) * 3600 + m.parse::<u64>().ok()? * 60)
+    })?;
+    let months = "jan feb mar apr may jun jul aug sep oct nov dec";
+    let date = words.windows(2).find_map(|w| {
+        let m = months.split(' ').position(|x| w[0].starts_with(x))? as u64 + 1;
+        Some((m, w[1].parse::<u64>().ok()?))
+    });
+    let z = crate::usage::date(r, now, "+%z").parse::<i64>().unwrap_or(0);
+    let off = z / 100 * 3600 + z % 100 * 60;
+    let today = now.saturating_add_signed(off) / 86400;
+    (today..today + 400)
+        .filter(|&d| date.is_none_or(|md| md == crate::access::civil_month_day(d)))
+        .map(|d| (d * 86400 + secs).saturating_add_signed(-off))
+        .find(|&t| t > now)
 }
 
 /// Who picked: `by`, or in an orchestrator's thread the owner's `line` there since the lane went rate-limited.
@@ -84,7 +86,14 @@ pub fn by<'a>(ctx: &Ctx, line: Option<&str>, by: &'a str, (fleet, n): (&str, u64
 }
 
 /// Each [wait] picked since its lane's latest limit, its reset time come and the lane still rate-limited: `continue`, once.
-pub fn due(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, ev: &[Event], agents: &[Value], fleet: &str) -> Result<()> {
+pub fn due(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    ev: &[Event],
+    agents: &[Session],
+    fleet: &str,
+) -> Result<()> {
     let waits = ev
         .iter()
         .filter(|e| e.kind == "limit-picked" && e.fleet == fleet && e.str("pick") == Some("wait"));
@@ -98,15 +107,18 @@ pub fn due(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, ev: &[Event], agents:
         let sent = ev.iter().filter(mine("limit-continued")).any(|e| e.seq > p.seq);
         let limited = agents
             .iter()
-            .any(|a| a["name"] == lane && a["agent_status"] == "rate-limited");
+            .any(|a| a.name == lane && a.status() == Some(Status::Limited));
         let at = p.data.get("at").and_then(Value::as_u64).unwrap_or(u64::MAX);
         if ctx.now < at || sent || !limited || hit.is_some_and(|h| h.seq > p.seq) {
             continue;
         }
-        let sent = herdr::prompt(&On::of(r, last_spawn(ev, lane)), lane, CONTINUE).is_ok();
+        let sent = term::prompt(&On::of(r, last_spawn(ev, lane)), lane, CONTINUE).is_ok();
         writeln!(out, "{fleet} {lane}: its reset time came; sent `{CONTINUE}`")?;
         let d = json!({"agent": lane, "sent": sent});
-        append(&ctx.state, &Event::new(ctx.now, fleet, p.issue, "limit-continued", d))?;
+        append(
+            &ctx.state,
+            &Event::new(ctx.now, fleet, p.issue, "limit-continued", d).passive(),
+        )?;
     }
     Ok(())
 }

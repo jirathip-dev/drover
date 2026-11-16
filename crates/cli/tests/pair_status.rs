@@ -49,7 +49,7 @@ fn a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
     let cookie = pair(&s, &c, IPHONE, T);
     let token = cookie.trim().strip_prefix("Cookie: hd=").unwrap().to_string();
     let hash = devices::load(&c)[0].hash.clone();
-    let send = "POST /send HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n";
+    let send = "POST /answer HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n";
     assert!(req(&s, "GET", "/lane?agent=x", "", T).starts_with("HTTP/1.1 401 "));
     assert!(req(&s, "GET", "/lane?agent=x", "Cookie: hd=feed\r\n", T).starts_with("HTTP/1.1 401 "));
     let late = T + devices::YEAR + 1;
@@ -61,11 +61,11 @@ fn a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
     std::fs::create_dir(&db).unwrap();
     let why = devices::check(&c, cookie.trim().strip_prefix("Cookie: ").unwrap()).unwrap_err();
     assert_eq!(why, "db error: is a directory");
-    let sent = String::from_utf8_lossy(&s.respond(&format!("{send}{cookie}Content-Length: 9\r\n\r\nagent=x&t"), T))
+    let reply = String::from_utf8_lossy(&s.respond(&format!("{send}{cookie}Content-Length: 9\r\n\r\nagent=x&t"), T))
         .into_owned();
     assert!(
-        sent.starts_with("HTTP/1.1 503 ") && sent.contains("board busy"),
-        "{sent}"
+        reply.starts_with("HTTP/1.1 503 ") && reply.contains("board busy"),
+        "{reply}"
     );
     for p in ["/lane?agent=x", "/pair/status", "/api/v1/lane/x", "/api/v1/needs"] {
         let res = req(&s, "GET", p, &cookie, T);
@@ -76,7 +76,7 @@ fn a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
         "401 GET /lane: no cookie",
         "401 GET /lane: unknown token",
         "401 GET /lane: expired",
-        "503 POST /send: db error: is a directory",
+        "503 POST /answer: db error: is a directory",
         "503 GET /lane: db error: is a directory",
         "503 GET /pair/status: db error: is a directory",
         "503 GET /api/v1/lane/x: db error: is a directory",

@@ -137,11 +137,13 @@ fn install(
         "kept"
     };
     writeln!(out, "✗ self-update {why}; {kept} {}", live.display())?;
+    let shed = why.lines().find(|l| l.starts_with("✗ shed"));
+    let key = shed.unwrap_or(sha);
     if !events
         .iter()
-        .any(|e| e.kind == "self-update-failed" && e.str("key") == Some(sha))
+        .any(|e| e.kind == "self-update-failed" && e.str("key") == Some(key))
     {
-        let d = json!({"key": sha, "reason": format!("self-update {why}")});
+        let d = json!({"key": key, "reason": format!("self-update {why}")});
         emit(
             &ctx.state,
             cfg,

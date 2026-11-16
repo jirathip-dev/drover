@@ -31,9 +31,10 @@ impl Runner for Air<'_> {
         })
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
-        match args.join(" ").contains("air -- 'shed' 'connect'") {
-            true => self.0.run_in(prog, args, input),
-            false => self.run(prog, args),
+        if args.join(" ").contains("air -- 'shed' 'connect'") {
+            self.0.run_in(prog, args, input)
+        } else {
+            self.run(prog, args)
         }
     }
     fn sleep(&self, secs: u64) {
@@ -44,7 +45,8 @@ impl Runner for Air<'_> {
 #[test]
 fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answers() {
     let (md, ld) = (tmpdir("paused-main"), tmpdir("paused-lane"));
-    let (main, lane) = (ctx(&md, CONFIG), ctx(&ld, CONFIG));
+    let hosts = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n");
+    let (main, lane) = (ctx(&md, &hosts), ctx(&ld, CONFIG));
     let (here, air) = (FakeShed::new(), FakeShed::new());
     here.attach(&main);
     air.lane("sendmeter-impl-12", "idle", "/x");

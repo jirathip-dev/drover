@@ -2,7 +2,7 @@ use crate::model::{Ev, Model, Script, FLEET};
 use crate::scenario::{args, config, timers, T0};
 use crate::sched::Rng;
 
-/// Seed 1 (#370, 2026-11-04 22:11:25): a reviewer's FAIL without Proof blocks, refused NO_PROOF while one kick runs pass after pass on its start's `Ctx.now`. The reviewer ignores the prompt; every reviewer after it writes the same FAIL within seconds (and adds the Proof once told). Before #680's fix the kick superseded each new reviewer at once: 25 supersedes stamped with one second.
+/// Seed 1 (#370, 2026-11-04 22:11:25): a reviewer's FAIL without Proof blocks, refused `NO_PROOF` while one kick runs pass after pass on its start's `Ctx.now`. The reviewer ignores the prompt; every reviewer after it writes the same FAIL within seconds (and adds the Proof once told). Before #680's fix the kick superseded each new reviewer at once: 25 supersedes stamped with one second.
 pub const INCIDENT: u64 = 1;
 
 /// Seeds that found a cause of their own, parked `#[ignore]` (`parked_seeds`) until its issue's fix unparks them.
@@ -75,7 +75,11 @@ pub fn incident() -> (Model, (u64, u64)) {
     let mut rev = vec![first];
     rev.extend(std::iter::repeat_n(again, 40));
     m.scripts.insert("rev".into(), rev);
-    let push = Script::Push { secs: 200, green: true };
+    let push = Script::Push {
+        secs: 200,
+        green: true,
+        ci: None,
+    };
     m.scripts.insert("impl".into(), vec![push; 6]);
     (m, (4, 3))
 }
@@ -90,7 +94,11 @@ pub fn known() -> (Model, String) {
     m.ci_secs = Some(300);
     timers(&mut m, &mut rng, T0 + 1);
     m.at(T0, Ev::Run(args(&["queue", FLEET, "add", "201", "202"])));
-    let push = Script::Push { secs: 600, green: true };
+    let push = Script::Push {
+        secs: 600,
+        green: true,
+        ci: None,
+    };
     m.scripts.insert("impl".into(), vec![push; 6]);
     let bad = Script::Review {
         secs: 300,

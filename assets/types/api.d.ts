@@ -1,7 +1,7 @@
 // Generated from the Rust payload types by `just types` (#375); never edit by hand.
 
 /**
- * `/herd.json` (Herd mode, docs/serve.md).
+ * API v1's `GET herd` (docs/serve.md).
  */
 export type Herd = { fleets: Array<HerdFleet>, others: Array<HerdLane>, host: HerdHost, };
 
@@ -76,9 +76,6 @@ export type NeedIssue = { fleet: string, issue: number, pending: boolean, who: s
  */
 shots_at?: string | null, };
 
-/**
- * #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
- */
 export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, error?: string | null, failed: boolean, sections: Array<LaneSection>, 
 /**
  * #630: each lane's workspace root and unsaved work.
@@ -100,9 +97,6 @@ export type LaneSection = { name: string, tone: string, repos: Array<LaneRepo>, 
 
 export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
 
-/**
- * A Lanes row: its avatar (`avatar`, herdr's `state` with `act`, #423 `grow`, `atone` and `coat`), name, `state` in `tone` for `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its fleet is not configured), `dead` and the blocked card.
- */
 export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, 
 /**
  * #712: its issue is parked: the fleet its [unpark] posts to.
@@ -239,7 +233,7 @@ export type State = { seq: number, now: number, tz: number, age?: number | null,
  */
 counts: LaneCounts, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, 
 /**
- * #859: when the background last read each source the lanes come from (herdr, shed, remote, host).
+ * #859: when the background last read each source the lanes come from (shed, remote, host).
  */
 sources: { [key in string]: number }, };
 
@@ -263,9 +257,9 @@ pending?: PendingStart | null, status?: string | null, };
 export type PendingStart = { action: string, since: number, reason?: string | null, };
 
 /**
- * `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
+ * `state` is the runtime's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
  */
-export type Lane = { name: string, fleet?: string | null, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, account?: string | null, state: string, 
+export type Lane = { name: string, fleet?: string | null, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, state: string, 
 /**
  * #983: shed's note on `state` as shed gave it (a `rate-limited` lane's reset time).
  */
@@ -279,9 +273,9 @@ export type Ask = { id: string, fleet: string, issue?: number | null, question: 
 export type Row = { name: string, tone: string, detail: string, fix: string, };
 
 /**
- * #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`), SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` the forms send back.
+ * SERVICES (`services`, `theme`: `detail` its error, `deepseek`), FLEETS and ALERTS (`push`, and on a live
  */
-export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, vendors: Vendors, };
+export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, vendors: Vendors, };
 
 /**
  * #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on] its head offers (with the `lanes` running on it), and the logins its [sign in ▾] lists.
@@ -307,13 +301,6 @@ export type Disk = { bar: Bar, gb: string, budget: number, ago?: string | null, 
  * #186: processes still running in closed lanes' worktrees, and the memory they hold.
  */
 export type Leftovers = { n: number, mb: string, };
-
-/**
- * An account: `capped`, its cap line in `tone`, its usage `meters` and `pace` (or the `hint` why none), its lane hours.
- */
-export type Account = { name: string, capped: boolean, tone: string, cap: string, meters: Array<Meter>, pace?: string | null, hint?: string | null, hours: string, };
-
-export type Meter = { label: string, pct: number, };
 
 /**
  * The `DeepSeek` balance (currency and amount) and whether it is `low`, else the `hint` why none was read.
@@ -375,9 +362,6 @@ export type Drive = { tone: string, line: string, meta: Array<string>, pass: boo
  */
 export type DriveAct = { who: string, words: string, code: string, };
 
-/**
- * A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act`, #423 `grow` (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an answer not delivered), the decision taken by default (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
- */
 export type QueueRow = { issue: number, state: string, tone: string, age: string, t: number, act: string, grow: string, coat: string, queued: boolean, check: boolean, groups: Array<string>, blocked_by?: number | null, title?: string | null, stage: Array<Stage>, lane: string, live: boolean, pr: PrLine, dead: boolean, notes: Array<string>, decided?: string | null, ask?: Ask | null, open?: NeedAsk | null, mv: boolean, up?: number | null, down?: number | null, lanes: Array<QueueLane>, runtime: string, host: string, where: string, };
 
 /**
@@ -390,9 +374,6 @@ export type Stage = { name: string, k: string, g: string, at: number, ok: boolea
  */
 export type PrLine = { pr?: number | null, run?: string | null, ci?: string | null, verdict?: string | null, vtone: string, rounds: number, form?: string | null, };
 
-/**
- * #205: a lane the issue had, newest first: herdr's `state` (`gone`) in `tone`, its spawn's age; `link`: `live` opens its Lanes sheet, `gone` its stored transcript, empty none.
- */
 export type QueueLane = { name: string, state: string, tone: string, ago: string, link: string, };
 
 /**
@@ -487,7 +468,16 @@ export type ChatDefaults = { harness?: string | null, model?: string | null, eff
 /**
  * A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
  */
-export type Reply = { ok: boolean, code: string, message: string, };
+export type Reply = { ok: boolean, code: string, message: string, 
+/**
+ * #977: a tap's job id (`code` ACCEPTED): `GET /api/v1/job/<id>` gives how it ended.
+ */
+job?: string | null, };
+
+/**
+ * #977: a tap run as a job: `state` running, waiting (for host), done, refused (`code`) or error; `message` its toast.
+ */
+export type Job = { id: string, op: string, fleet: string, issue?: number | null, state: string, code: string, message: string, ts: number, };
 
 /**
  * #633: `POST /api/v1/conductor-attach`'s answer (a refusal is a `Reply`): what a cooee conductor profile needs.
@@ -506,7 +496,7 @@ settings: string, env: AttachEnv,
  */
 guarded: boolean, why: string, };
 
-export type AttachEnv = { DROVER_LANE: string, DROVER_THREAD: string, DROVER_PORT: string, } & ({ [key in string]: string });
+export type AttachEnv = { DROVER_LANE: string, DROVER_THREAD: string, DROVER_PORT: string, };
 
 /**
  * #786: `GET /api/v1/config`: fleet.toml as cooee's config screens read it.
@@ -547,7 +537,11 @@ export type Event = {
 /**
  * #259: the log's monotonic number, set on append (an old row's is its line number); 0 before.
  */
-seq?: number, ts: number, fleet: string, issue?: number | null, type: string, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+seq?: number, ts: number, fleet: string, issue?: number | null, type: string, 
+/**
+ * #973: not activity (an alert, a note, a prompt): the fold and the idle-pane reader skip it.
+ */
+passive?: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
 
 export type IssueState = { fleet: string, issue: number, state: string, lane?: string | null, branch?: string | null, 
 /**

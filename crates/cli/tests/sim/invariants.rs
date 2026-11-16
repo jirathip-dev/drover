@@ -34,7 +34,7 @@ pub fn on_append(w: &mut World, me: usize) {
     let (at, ev) = (w.wrote[i].at, w.wrote[i].ev.clone());
     let who = w.procs[me].name.clone();
     if ev.ts > at || at - ev.ts > LAG {
-        let lag = at as i64 - ev.ts as i64;
+        let lag = at.cast_signed() - ev.ts.cast_signed();
         return w.fail(format!(
             "I7 clock: {who} wrote {} #{} ts=t+{} at true t+{} (lag {lag} s > {LAG} s)",
             ev.kind,
@@ -140,41 +140,45 @@ pub fn after_step(w: &mut World) {
         }
     }
     if let Some((k, v)) = by.iter().find(|(_, v)| v.len() > 1) {
-        return w.fail(format!(
+        w.fail(format!(
             "I1 one-lane: #{} {} has {} live lanes: {v:?}",
             k.0,
             k.1,
             v.len()
         ));
     }
-    for x in w.wrote.iter().filter(|x| x.ev.kind == "merged") {
-        let n = x.ev.issue.unwrap_or(0);
-        let merged = w.model.merges.iter().rfind(|m| m.issue == n).map(|m| m.head.clone());
-        if merged.as_deref() != x.ev.str("verdict_sha") {
-            let why = format!(
-                "I4 merged-sha: #{n} merged event names {:?}, the model merged {merged:?}",
-                x.ev.str("verdict_sha")
-            );
-            return w.fail(why);
-        }
+    let now = (w.wrote.len(), w.model.merges.len());
+    let fresh = std::mem::replace(&mut w.checked, now) != now;
+    let bad: Vec<String> = (w.wrote.iter())
+        .filter(|x| fresh && x.ev.kind == "merged")
+        .filter_map(|x| {
+            let n = x.ev.issue.unwrap_or(0);
+            let merged = w.model.merges.iter().rfind(|m| m.issue == n).map(|m| m.head.clone());
+            let named = x.ev.str("verdict_sha");
+            (merged.as_deref() != named)
+                .then(|| format!("I4 merged-sha: #{n} merged event names {named:?}, the model merged {merged:?}"))
+        })
+        .collect();
+    for why in bad {
+        w.fail(why);
     }
     if w.procs.iter().all(|p| !p.live() || p.starting.is_none()) {
-        let orphan = w.model.live().find(|p| {
-            let a = p.agent.as_deref();
-            !(w.wrote.iter()).any(|x| x.ev.kind == "spawn" && agent(&x.ev) == a && x.ev.str("pane") == Some(&p.id))
-        });
+        let orphan =
+            (w.model.live()).find(|p| !w.spawned.contains(&(p.agent.clone().unwrap_or_default(), p.id.clone())));
         if let Some(p) = orphan {
             let why = format!("I5 orphan: pane {} runs {:?}, no spawn logged it", p.id, p.agent);
-            return w.fail(why);
+            w.fail(why);
         }
     }
     if !w.procs.iter().any(|p| p.killed) {
         if let Some(x) = w.wrote.iter().find(|x| x.ev.kind == "spawn-adopted") {
             let why = format!("I5 adopt: {:?} adopted with no process crashed", agent(&x.ev));
-            return w.fail(why);
+            w.fail(why);
         }
     }
-    liveness(w);
+    if fresh {
+        liveness(w);
+    }
 }
 
 fn liveness(w: &mut World) {
@@ -234,7 +238,7 @@ fn liveness(w: &mut World) {
 pub fn on_exit(w: &mut World, me: usize, pid: u32) {
     let state = crate::scenario::ctx(&w.root, 0).state;
     let held: Vec<String> = (drover::db::leases(&state, "").into_iter())
-        .filter(|l| l.pid == pid && l.expires_at > w.now && !l.key.ends_with(".again"))
+        .filter(|l| l.pid == pid && l.expires_at > w.now && l.key.strip_suffix(".again").is_none())
         .map(|l| l.key)
         .collect();
     if !held.is_empty() {
@@ -245,7 +249,7 @@ pub fn on_exit(w: &mut World, me: usize, pid: u32) {
 
 /// `Sabotage::DoubleLane`: a copy of the pane whose agent just started comes up beside it.
 pub fn double(w: &mut World, pane: &str) {
-    if let Some(p) = w.model.panes.iter().find(|p| p.id == pane).cloned() {
+    if let Some(p) = w.model.panes.iter().rfind(|p| p.id == pane && !p.closed).cloned() {
         w.model.panes.push(crate::model::Pane {
             id: format!("{}x", p.id),
             ..p

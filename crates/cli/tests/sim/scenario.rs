@@ -22,6 +22,9 @@ profile = "fleet-impl"
 harness = "claude"
 profile = "fleet-rev"
 
+[runtime]
+kind = "shed"
+
 [limits]
 review_rounds = {rounds}
 stall_minutes = 30
@@ -86,7 +89,7 @@ pub fn due(sim: &Arc<Sim>, w: &mut World) {
             break;
         }
         let e = w.model.agenda.remove(&(t, s)).unwrap();
-        w.log(format!("event {e:?}").chars().take(200).collect());
+        w.log(&format!("event {e:?}").chars().take(200).collect::<String>());
         match e {
             Ev::Timer { args, every } => {
                 let a: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -111,10 +114,10 @@ pub fn due(sim: &Arc<Sim>, w: &mut World) {
                     .filter(|&i| w.procs[i].live() && w.procs[i].started.is_some() && w.procs[i].args[0] == kind)
                     .collect();
                 if !live.is_empty() {
-                    let i = live[w.rng.below(live.len() as u64) as usize];
+                    let i = live[usize::try_from(w.rng.below(live.len() as u64)).unwrap()];
                     w.procs[i].killed = true;
                     let name = w.procs[i].name.clone();
-                    w.log(format!("crash {name}"));
+                    w.log(&format!("crash {name}"));
                 }
             }
         }
@@ -159,7 +162,7 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
             let a = w.model.panes[i].agent.clone().unwrap_or_default();
             w.model.died.push(a);
         }
-        (Some(Script::Push { green, .. }), 1) => {
+        (Some(Script::Push { green, ci, .. }), 1) => {
             let sha = w.model.sha();
             let branch = cwd.rsplit('/').next().unwrap_or_default().to_string();
             w.model.heads.insert(cwd.clone(), sha.clone());
@@ -173,10 +176,11 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
                 state: "OPEN".into(),
                 merged: None,
             });
-            pr.head = sha.clone();
+            pr.head.clone_from(&sha);
             w.model.version += 1;
-            let ci = w.model.ci_start(&sha, now, &mut w.rng);
-            w.model.produced.push(id.into());
+            let ci = w.model.ci_start(&sha, now, ci, &mut w.rng);
+            let made = w.model.incarnation(i);
+            w.model.produced.push(made);
             w.model.at(ci, Ev::Ci { sha, green });
             stop(sim, w, i, n);
         }
@@ -192,7 +196,8 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
                 ),
             };
             if pass || fixed {
-                w.model.produced.push(id.into());
+                let made = w.model.incarnation(i);
+                w.model.produced.push(made);
             }
             let f = Path::new(&cwd).join("verdict.md");
             std::fs::write(&f, body).unwrap();
@@ -248,11 +253,12 @@ pub fn default_script(rng: &mut Rng, role: &str) -> Script {
         _ => Script::Push {
             secs: rng.range(120, 2400),
             green: rng.chance(80),
+            ci: None,
         },
     }
 }
 
-/// A seed's own fleet: 2–6 issues queued over the first hour (some blocked on another for a while), lanes drawn from `default_script`, CI green or red, load spikes, crashed passes, and the owner's `drive` and `merge` by hand. `Model` and `config`'s (max_spawns, rounds).
+/// A seed's own fleet: 2–6 issues queued over the first hour (some blocked on another for a while), lanes drawn from `default_script`, CI green or red, load spikes, crashed passes, and the owner's `drive` and `merge` by hand. `Model` and `config`'s (`max_spawns`, rounds).
 pub fn random(seed: u64) -> (Model, (u64, u64)) {
     let mut rng = Rng::new(seed ^ 0x5eed);
     let mut m = Model::default();
@@ -280,11 +286,11 @@ pub fn random(seed: u64) -> (Model, (u64, u64)) {
     for _ in 0..rng.below(4) {
         let t = T0 + rng.below(6 * 3600);
         m.at(t, Ev::Run(args(&["drive"])));
-        let n = issues[rng.below(issues.len() as u64) as usize].to_string();
+        let n = issues[usize::try_from(rng.below(issues.len() as u64)).unwrap()].to_string();
         m.at(T0 + 3600 + rng.below(5 * 3600), Ev::Run(args(&["merge", FLEET, &n])));
     }
     for _ in 0..rng.below(3) {
-        let kind = ["drive", "kick"][rng.below(2) as usize];
+        let kind = ["drive", "kick"][usize::try_from(rng.below(2)).unwrap()];
         m.at(T0 + rng.below(5 * 3600), Ev::Crash(kind.into()));
     }
     (m, (rng.range(2, 5), rng.range(2, 4)))

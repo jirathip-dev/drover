@@ -1,3 +1,11 @@
+frozen = ["ci/cap.toml", "crates/core/src/events/passive.rs"]
+generated = ["assets/types/api.d.ts"]
+generate = "just types"
+
+[[collect]]
+dir = "ci/cap.d"
+glob = "*.toml"
+
 [comments]
 policy = "strict"
 except = [
@@ -19,48 +27,48 @@ skip = [".drover/**"]
 [[ban]]
 pattern = "claude"
 paths = ["crates/*/src/**", "web/src/**"]
-except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src"
 comments = true
 ignore_case = true
 
 [[ban]]
 pattern = "anthropic"
 paths = ["crates/*/src/**", "web/src/**"]
-except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src"
 comments = true
 ignore_case = true
 
 [[ban]]
 pattern = "codex"
 paths = ["crates/*/src/**", "web/src/**"]
-except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src"
 comments = true
 ignore_case = true
 
 [[ban]]
 pattern = "openai"
 paths = ["crates/*/src/**", "web/src/**"]
-except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src"
 comments = true
 ignore_case = true
 
 [[ban]]
 pattern = "gemini"
 paths = ["crates/*/src/**", "web/src/**"]
-except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src"
 comments = true
 ignore_case = true
 
 [[ban]]
 pattern = "hermes"
 paths = ["crates/*/src/**", "web/src/**"]
-except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src"
 comments = true
 ignore_case = true
 
@@ -111,3 +119,25 @@ pattern = "earlier review"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/promise.rs"]
 reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
+
+[[ban]]
+pattern = "agent_status"
+paths = ["crates/*/src/**"]
+reason = "#1053: a lane's status is session::Status, mapped from shed once in crates/core/src/session/"
+
+[[ban]]
+pattern = "pane_id"
+paths = ["crates/*/src/**"]
+reason = "#1053: a session is addressed by its shed name; no herdr-shaped row"
+
+[[ban]]
+pattern = ".reported"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/session/**"]
+reason = "#1053: shed's reported state is read in crates/core/src/session/ only (Status::of)"
+
+[[ban]]
+pattern = "read_argv"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/term.rs", "crates/core/src/setup.rs", "crates/core/src/providers/**"]
+reason = "#1053: no lane fact is read off a screen; a transcript is session::transcript"

@@ -17,6 +17,12 @@
     {
      "label": "Drive all now",
      "action": "drive-all"
+    },
+    {
+     "label": "Legend [?]",
+     "tap": {
+      "sheet": "/screens/legend"
+     }
     }
    ]
   }
@@ -168,7 +174,7 @@
           "since": "2026-11-09T09:35:00Z"
          },
          "tap": {
-          "thread": "herdsman-impl-641"
+          "sheet": "/screens/lanes/herdsman-impl-641"
          },
          "subtitle": "impl ✓ · review 1 ✗ · fix 1 ▸ herdsman-impl-641 · mini"
         },

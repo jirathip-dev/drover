@@ -2,8 +2,9 @@ use crate::config::{expand, Config, Role};
 use crate::events::{self, emit, working, Event};
 use crate::gate::refused;
 use crate::runner::Runner;
+use crate::session::Session;
 use crate::spawn::Plan;
-use crate::{herdr, providers, Ctx};
+use crate::{providers, term, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
@@ -66,8 +67,7 @@ pub fn fleet_of<'a>(events: &'a [Event], id: &str) -> Result<&'a str> {
     Ok(&attached(events, id).map_or_else(|| find(events, id), Ok)?.fleet)
 }
 
-/// #633: `POST /api/v1/conductor-attach`: cooee thread `id` becomes `fleet`'s conductor thread (`conductor-attached`); what its profile needs: the brief, the synced settings, the env, and whether #565's ACP guard holds (`why` not).
-pub fn attach(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, id: &str) -> Result<Value> {
+pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
     let f = cfg.fleet(fleet)?;
     let (_, role) = defaults(cfg, fleet)?;
     let ok = |c: char| c.is_ascii_alphanumeric() || "-_.:".contains(c);
@@ -82,19 +82,11 @@ pub fn attach(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, id: &str) ->
     emit(&ctx.state, cfg, t.clone())?;
     let p = role.profile_or("orchestrator");
     let acp = providers::get(&role.harness).acp().unwrap_or(&role.harness);
-    let acct = crate::access::pick(ctx, cfg, &events, &role).ok().flatten();
-    let acct = acct
-        .map(|a| crate::access::account_env(cfg, r, &role.harness, &a.0))
-        .transpose()?;
-    let acct = acct.unwrap_or_default();
-    let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, (!acct.is_empty(), false));
+    let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, false);
     let port = crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/orchestrator-{id}"), &[]);
     let settings = providers::profiles_root(ctx).join(&p).join("settings.json");
-    let mut env = json!({"DROVER_LANE": format!("{fleet}:-:orchestrator"), "DROVER_THREAD": id,
+    let env = json!({"DROVER_LANE": format!("{fleet}:-:orchestrator"), "DROVER_THREAD": id,
         "DROVER_PORT": port.to_string()});
-    for (k, v) in acct {
-        env[k] = json!(v);
-    }
     let message = format!("{id} is {fleet}'s orchestrator thread");
     Ok(
         json!({"ok": true, "code": "OK", "message": message, "brief": profile(cfg, &t, fleet),
@@ -243,8 +235,11 @@ pub fn archive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, on: bool) -> R
     let t = t.map_or_else(|| find(&events, id), Ok)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     if let Some(s) = last.filter(|s| on && s.kind == "orchestrator-start") {
-        if herdr::agents(r)?.iter().any(|a| a["name"] == *s.val("agent")) {
-            close(r, s)?;
+        if crate::session::live_on(r)?
+            .iter()
+            .any(|a| Some(a.name.as_str()) == s.str("agent"))
+        {
+            close(ctx, r, s)?;
         }
         let d = json!({"thread": id, "agent": s.str("agent"), "why": "archived"});
         emit(
@@ -713,15 +708,16 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let id = t.str("thread").unwrap_or_default();
     let events = working(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let agents = herdr::agents(r)?;
-    let awake = last.filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| a["name"] == *s.val("agent")));
+    let agents = crate::session::live_on(r)?;
+    let awake = last
+        .filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| Some(a.name.as_str()) == s.str("agent")));
     let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
     let stuck = awake.and(hung(ctx, cfg, &events, &agents, id));
     let Some(s) = awake.filter(|_| !picked && stuck.is_none()) else {
         match (awake, stuck) {
             (Some(s), Some((_, quiet))) => end(ctx, cfg, r, (t, s), json!({"why": "hung", "quiet_secs": quiet}))?,
             (Some(s), None) => {
-                close(r, s)?;
+                close(ctx, r, s)?;
                 let d = json!({"thread": id, "agent": s.str("agent"), "why": "model"});
                 emit(
                     &ctx.state,
@@ -738,7 +734,7 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
         crate::shed::cli(r, &["send", agent, line])?;
         return Ok(agent.into());
     }
-    herdr::reply(
+    term::reply(
         r,
         s.str("harness") == Some("dsh"),
         agent,
@@ -753,14 +749,20 @@ fn acp(s: &Event) -> bool {
 }
 
 /// #946: thread `id`'s awake ACP conductor reporting `working` with no CPU and no output for `stall_minutes`: its start and quiet seconds.
-pub fn hung<'a>(ctx: &Ctx, cfg: &Config, events: &'a [Event], agents: &[Value], id: &str) -> Option<(&'a Event, u64)> {
+pub fn hung<'a>(
+    ctx: &Ctx,
+    cfg: &Config,
+    events: &'a [Event],
+    agents: &[Session],
+    id: &str,
+) -> Option<(&'a Event, u64)> {
     let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     let s = last.filter(|e| e.kind == "orchestrator-start" && acp(e))?;
-    let a = agents.iter().find(|a| a["name"] == *s.val("agent"))?;
-    let out = crate::shed::session(ctx, s.str("agent")?)["at"].as_u64().unwrap_or(0);
+    let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"))?;
+    let out = crate::session::pulse::of(ctx, &a.name).map_or(0, |p| p.heard);
     let quiet = ctx.now.saturating_sub(out.max(s.ts));
-    let idle = a["cpu"].as_u64().is_some_and(|c| c < crate::stall::BUSY_CPU_PCT);
-    (a["agent_status"] == "working" && idle && quiet >= cfg.limits.stall_minutes * 60).then_some((s, quiet))
+    let idle = a.cpu_pct.is_some_and(|c| c < crate::stall::BUSY_CPU_PCT);
+    (a.busy() && idle && quiet >= cfg.limits.stall_minutes * 60).then_some((s, quiet))
 }
 
 fn end(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (t, s): (&Event, &Event), mut d: Value) -> Result<()> {
@@ -787,18 +789,15 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String>
     if acp(s) {
         end(ctx, cfg, r, (t, s), json!({"why": "stopped"}))?;
     } else {
-        herdr::keys(r, s.str("pane").unwrap_or_default(), "Escape")?;
+        term::keys(r, s.str("pane").unwrap_or_default(), "Escape")?;
     }
     let d = json!({"agent": agent, "thread": id});
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "stop", d))?;
     Ok(agent.into())
 }
 
-fn close(r: &dyn Runner, s: &Event) -> Result<()> {
-    if acp(s) {
-        return herdr::close(r, s.str("agent").unwrap_or_default()).map(drop);
-    }
-    herdr::workspace_close(r, s.str("workspace").unwrap_or_default()).map(drop)
+fn close(ctx: &Ctx, r: &dyn Runner, s: &Event) -> Result<()> {
+    term::close(ctx, r, s.str("agent").unwrap_or_default()).map(drop)
 }
 
 /// The conductor role: the thread fleet's `[fleet.<n>.role.conductor]` (#401: else its impl role on profile `lane-conductor`, `Config::parse`); for `all`, the first fleet's that has one.
@@ -817,16 +816,13 @@ pub fn role<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, &'a Role)> {
     }
 }
 
-/// #404: a new thread's conductor: the role, with `[chat]`'s harness (another harness drops the role's model and accounts), model, effort and account(s) over it.
+/// #404: a new thread's conductor: the role, with `[chat]`'s harness (another harness drops the role's model), model and effort over it.
 pub fn defaults<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, Role)> {
     let (fleet, base) = role(cfg, repo)?;
     let c = &cfg.chat;
     let mut r = on(base, c.harness.as_deref());
     r.model = c.model.clone().or(r.model);
     r.effort = c.effort.clone().or(r.effort);
-    if c.account.is_some() || !c.accounts.is_empty() {
-        (r.account, r.accounts) = (c.account.clone(), c.accounts.clone());
-    }
     Ok((fleet, r))
 }
 
@@ -835,8 +831,6 @@ fn on(r: &Role, h: Option<&str>) -> Role {
         Some(h) => Role {
             harness: h.into(),
             model: None,
-            account: None,
-            accounts: vec![],
             ..r.clone()
         },
         None => r.clone(),
@@ -1020,7 +1014,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let id = t.str("thread").unwrap_or_default();
     let (fleet, base) = thread_role(cfg, events, t)?;
     let f = cfg.fleet(fleet)?;
-    let (role, resting) = crate::access::fallback(cfg, events, &base, ctx.now)?;
+    let role = base;
     let h = providers::get(&role.harness);
     let first =
         of(events, id).find(|e| e.kind == "orchestrator-start" && e.str("harness") == Some(&role.harness) && !acp(e));
@@ -1059,25 +1053,22 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         brief: brief.clone(),
         kick,
         lane: format!("{fleet}:-:orchestrator"),
-        account: crate::access::pick(ctx, cfg, events, &role)?,
         env: f.env.clone(),
         port: crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/{agent}"), &[]),
         mcp: crate::access::mcp_servers(cfg, f, &role)?,
         mcp_file: dir.join(".mcp.lane.json"),
         title: crate::spawn::lane_title(&head, t.str("title").unwrap_or_default()),
         head,
-        resting,
         session: Some((session.clone(), resume)),
         lane_key: None,
-        token: None,
     };
     p.env.insert("DROVER_THREAD".into(), id.into());
     p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());
-    crate::access::signed(ctx, cfg, r, (fleet, &role, false), &mut p)?;
-    let shed = cfg.shed_for(fleet).filter(|b| b.acp.is_some());
-    let acp = match shed.map(|b| (b.acp.clone().unwrap_or_default(), herdr::Shed(b))) {
-        Some((aid, b)) => match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
-            Ok(cmd) => Some((b, cmd)),
+    let shed = cfg.shed_for(fleet).context(crate::config::NO_RUNTIME)?;
+    let wire = r.shed().map_or(shed.wire.clone(), |w| w.wire);
+    let acp = match shed.acp.clone() {
+        Some(aid) => match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
+            Ok(cmd) => Some(cmd),
             Err(e) => {
                 if e.downcast_ref::<crate::gate::Refusal>().is_some() {
                     log(
@@ -1097,125 +1088,53 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let text = profile(cfg, t, fleet);
     on.write(&brief, &text)?;
     h.prepare(ctx, &on, &p)?;
-    let _secrets = crate::spawn::deliver(ctx, &on, cfg, &p)?;
-    if let Some((b, cmd)) = acp {
-        let labels = [
-            ("fleet", fleet),
-            ("issue", "-"),
-            ("role", "orchestrator"),
-            ("harness", &p.harness),
-            ("source", "drover"),
-            ("group", f.repo_name()),
-            ("thread", id),
-        ]
-        .map(|(k, v)| (k, v.to_string()));
-        b.start(r, &agent, &labels, &dir.to_string_lossy(), &cmd, None)?;
+    if let Some(acp) = &acp {
+        crate::spawn::write_acp_mcp(&on, &p, acp)?;
+    }
+    let _secrets = crate::spawn::deliver(ctx, &on, &p)?;
+    let labels = [
+        ("fleet", fleet),
+        ("issue", "-"),
+        ("role", "orchestrator"),
+        ("harness", &p.harness),
+        ("source", "drover"),
+        ("group", f.repo_name()),
+        ("thread", id),
+    ]
+    .map(|(k, v)| (k, v.to_string()));
+    let b = term::Shed(crate::shed::Shed { wire, ..shed });
+    b.start(
+        ctx,
+        r,
+        &agent,
+        &labels,
+        &dir.to_string_lossy(),
+        &acp.clone().unwrap_or_default(),
+    )?;
+    if acp.is_some() {
         let kick = format!("The thread so far is in {}, the last message new.", thread.display());
         let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
         let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
-            "model": p.model, "effort": p.effort, "account": p.account.as_ref().map(|a| &a.0), "resumed": false,
+            "model": p.model, "effort": p.effort, "resumed": false,
             "confirmed": kicked});
-        return started(ctx, cfg, r, t, &p, d);
+        return started(ctx, cfg, t, d);
     }
-    let ws = |p: &str| p.split(':').next().unwrap_or(p).to_string();
-    let mine =
-        |a: &&Value| a["name"] == agent.as_str() && a["cwd"].as_str().map(std::path::Path::new) == Some(dir.as_path());
-    let find = |list: &[Value]| {
-        list.iter()
-            .find(mine)
-            .and_then(|a| a["pane_id"].as_str())
-            .map(String::from)
-    };
-    let (mut retried, mut answered, mut screen) = (false, false, String::new());
-    let (new, o, up) = loop {
-        let new = herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
-        herdr::ok(r, &p.lane_cmd(&new))?;
-        let o = herdr::exec(r, &p.start_cmd(ctx, &new))?;
-        if o.code == 0 {
-            break (new, o, None);
-        }
-        let has = |c: &str| herdr::failed_with(&o, c);
-        if has("agent_not_ready") {
-            let d = |prompt: &str| json!({"thread": id, "agent": agent, "pane": new, "prompt": prompt});
-            let ev = |prompt: &str| Event::new(ctx.now, &t.fleet, None, "startup-prompt", d(prompt));
-            (answered, screen) = crate::spawn::unblock(r, h, &new, |p| emit(&ctx.state, cfg, ev(p)))?;
-            if answered {
-                break (new.clone(), o, Some(new));
-            }
-        }
-        let lost = has("agent_name_not_found") || herdr::message(&o).contains("no longer owns the target terminal");
-        let seen = if has("timeout") || has("agent_name_taken") || lost {
-            herdr::agents(r)?
-        } else {
-            vec![]
-        };
-        let mut up = find(&seen);
-        if up.is_none() && has("timeout") {
-            let busy = crate::host::admit(&crate::host::sample(r), &cfg.limits).is_err();
-            let (bound, mut waited, mut step) = (START_SECS << u8::from(busy), 0, 1);
-            while up.is_none() && waited < bound {
-                r.sleep(step);
-                (waited, step) = (waited + step, (step * 2).min(10));
-                up = find(&herdr::agents(r).unwrap_or_default());
-            }
-        }
-        if up.as_deref().is_none_or(|p| ws(p) != ws(&new)) {
-            let _ = herdr::workspace_close(r, &ws(&new));
-        }
-        let taken = has("agent_name_taken") && !seen.iter().any(|a| a["name"] == agent.as_str());
-        if up.is_none() && (lost || taken) && !retried {
-            let prev = of(events, id).rfind(|e| e.kind == "orchestrator-start");
-            if let Some(w) = prev.and_then(|e| e.str("workspace")).filter(|w| *w != ws(&new)) {
-                let _ = herdr::workspace_close(r, w);
-            }
-            retried = true;
-            continue;
-        }
-        break (new, o, up);
-    };
-    let why = format!("{} {screen}", herdr::message(&o));
-    let named = |m: &&str| o.code != 0 && up.is_none() && (why.contains("unrecognized_model") || why.contains(*m));
-    if let Some(m) = p.model.as_deref().filter(named) {
-        let text = format!("the orchestrator does not start on model {m}: {}", why.trim_end());
-        return log(ctx, cfg, t, "system", (&text, &[])).and_then(|()| refused("BAD_VALUE", text));
-    }
-    let pane = match (o.code, up) {
-        (0, _) => new.clone(),
-        (_, Some(p)) => p,
-        _ if screen.is_empty() => bail!("herdr agent start failed: {}", herdr::message(&o)),
-        _ => bail!("herdr agent start failed: {}\nscreen:\n{screen}", herdr::message(&o)),
-    };
-    let kicked = pane == new && h.kick(r, &p, &pane).unwrap_or(false);
-    if o.code != 0 && !kicked {
-        herdr::reply(r, p.harness == "dsh", &agent, &pane, &line.replace('\n', " "))?;
-    }
-    let mut d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": ws(&pane), "harness": p.harness, "model": p.model, "effort": p.effort,
-        "account": p.account.as_ref().map(|a| &a.0), "session": session, "resumed": resume, "confirmed": kicked});
-    if o.code != 0 && !answered {
-        d["adopted"] = json!(true);
-    }
-    started(ctx, cfg, r, t, &p, d)
+    term::ok(r, &p.lane_cmd(&agent))?;
+    term::ok(r, &term::typed(&agent, &p.start_cmd(ctx, &agent)))?;
+    let kicked = h.kick(r, &p, &agent).unwrap_or(false);
+    let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed", "harness": p.harness,
+        "model": p.model, "effort": p.effort, "session": session,
+        "resumed": resume, "confirmed": kicked});
+    started(ctx, cfg, t, d)
 }
 
-fn started(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, p: &Plan, d: Value) -> Result<String> {
+fn started(ctx: &Ctx, cfg: &Config, t: &Event, d: Value) -> Result<String> {
     let agent = d["agent"].as_str().unwrap_or_default().to_string();
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, &t.fleet, None, "orchestrator-start", d),
     )?;
-    if let Some((on, until)) = &p.resting {
-        log(
-            ctx,
-            cfg,
-            t,
-            "system",
-            (
-                &format!("switched to {} {})", &on[3..], crate::usage::date(r, *until, "+%H:%M")),
-                &[],
-            ),
-        )?;
-    }
     Ok(agent)
 }
 
@@ -1433,7 +1352,7 @@ pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_
 }
 
 /// `check`: each awake conductor whose thread has been quiet `IDLE` and that is not working is closed (`conductor-sleep`); the next message resumes it.
-pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents: &[Value]) -> Result<()> {
+pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents: &[Session]) -> Result<()> {
     for t in events.iter().filter(|e| e.kind == "thread-new") {
         let id = t.str("thread").unwrap_or_default();
         let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
@@ -1442,16 +1361,17 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         };
         let quiet =
             of(events, id).map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
-        let a = agents.iter().find(|a| a["name"] == *s.val("agent"));
-        if a.is_some() && switch(ctx, cfg, r, t, s)? {
+        let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"));
+        if a.is_some_and(Session::signed_out) {
+            signed_out(ctx, cfg, r, t, s)?;
             continue;
         }
         let gone = a.is_none() && acp(s);
-        if !gone && (!quiet || a.is_some_and(|a| a["agent_status"] == "working")) {
+        if !gone && (!quiet || a.is_some_and(Session::busy)) {
             continue;
         }
         if a.is_some() {
-            close(r, s)?;
+            close(ctx, r, s)?;
         }
         let d = json!({"thread": id, "agent": s.str("agent"), "why": if a.is_some() { "idle" } else { "gone" }});
         emit(
@@ -1463,62 +1383,18 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
     Ok(())
 }
 
-fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<bool> {
-    let (id, account, hn) = (
+fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<()> {
+    let (id, hn) = (
         t.str("thread").unwrap_or_default(),
-        s.str("account"),
         s.str("harness").unwrap_or_default(),
     );
-    let chain = account.is_some() || role(cfg, &t.fleet).is_ok_and(|r| !r.1.fallback.is_empty());
-    let (screen, h) = (
-        herdr::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default(),
-        providers::get(hn),
-    );
-    let limit = chain.then(|| h.usage_limited(cfg, r, &screen, ctx.now)).flatten();
-    let seen = limit.map(|u| crate::access::confirm(ctx, account, u));
-    let (seen, limit) = seen.map_or((None, None), |s| (Some(s.0), s.1));
-    let out = seen.map_or(h.signed_out(&screen), |k| k == "account-signed-out");
-    let rest = out.then(|| ctx.now + cfg.limits.fallback_rest_minutes * 60);
-    let Some(until) = limit.or(rest) else {
-        return Ok(false);
-    };
-    if chain {
-        let kind = ["account-capped", "account-signed-out"][usize::from(out)];
-        let kind = account.map_or("agent-unavailable", |_| kind);
-        let until = (!out || account.is_none()).then_some(until);
-        let d = json!({"agent": s.str("agent"), "harness": hn, "account": account, "until": until});
-        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, kind, d))?;
-    }
-    close(r, s)?;
-    let why = if out { "signed out" } else { "usage limit" };
-    let d = json!({"thread": id, "agent": s.str("agent"), "why": why});
+    close(ctx, r, s)?;
+    let d = json!({"thread": id, "agent": s.str("agent"), "why": "signed out"});
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
     )?;
-    if out {
-        let text = format!(
-            "{hn} is signed out{}: sign in",
-            account.map_or(String::new(), |a| format!(" (account {a})"))
-        );
-        let named = account.map(|a| format!("{hn} {a}"));
-        let su = named.filter(|n| crate::setup::all(cfg).iter().any(|s| &s.0 == n));
-        let d = json!({"thread": id, "from": "system", "text": text, "signin": su.as_deref().unwrap_or(hn)});
-        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
-    }
-    if !chain {
-        return Ok(true);
-    }
-    let line = format!("[{id}] system: {why}; you resumed on the next account. Carry on where you left off.");
-    if let Err(e) = start(ctx, cfg, r, t, &working(&ctx.state)?, &line) {
-        log(
-            ctx,
-            cfg,
-            t,
-            "system",
-            (&format!("the orchestrator stays asleep: {e:#}"), &[]),
-        )?;
-    }
-    Ok(true)
+    let d = json!({"thread": id, "from": "system", "text": format!("{hn} is signed out: sign in"), "signin": hn});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
 }

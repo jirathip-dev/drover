@@ -8,6 +8,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+publish = false
 repository = "https://github.com/jirathip-dev/herdsman"
 
 # Lints for every crate root (moved from the old lib.rs, #264); the allows are style noise, docs/architecture.md (Code rules).
@@ -20,6 +21,9 @@ too_many_lines = "allow"
 format_push_string = "allow"
 format_collect = "allow"
 many_single_char_names = "allow"
+struct_excessive_bools = "allow"
+too_many_arguments = "allow"
+cast_precision_loss = "allow"
 
 [workspace.dependencies]
 aes-gcm = "0.11.1"

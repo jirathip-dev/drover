@@ -34,7 +34,7 @@ fn recorded(name: &str) -> (drover::Ctx, OnShed) {
         assert_eq!(run(&c, &Fake::default(), args).0, 0);
     }
     let ev = |ts: u64, n: Option<u64>, kind: &str, d: Value| {
-        append(&c.state, &Event::new(ts, "sendmeter", n, kind, d)).unwrap()
+        append(&c.state, &Event::new(ts, "sendmeter", n, kind, d)).unwrap();
     };
     let spawn = |ts, n, role: &str, agent: &str| {
         ev(
@@ -42,7 +42,7 @@ fn recorded(name: &str) -> (drover::Ctx, OnShed) {
             Some(n),
             "spawn",
             json!({"role": role, "agent": agent, "harness": "claude"}),
-        )
+        );
     };
     spawn(T - 9_000, 9, "impl", "sendmeter-impl-9");
     ev(T - 600, Some(9), "merged", json!({"pr": 41, "into": "staging"}));
@@ -124,7 +124,6 @@ fn vocabulary() -> BTreeMap<String, BTreeSet<String>> {
 }
 
 fn like(v: &Value, fixture: &str, exact: bool) {
-    let vocab = vocabulary();
     fn keys(v: &Value, parent: &str, vocab: &BTreeMap<String, BTreeSet<String>>) {
         match v {
             Value::Object(m) => {
@@ -135,10 +134,11 @@ fn like(v: &Value, fixture: &str, exact: bool) {
                 let known = vocab
                     .get(&kind)
                     .unwrap_or_else(|| panic!("{kind} is in no fixture: {v}"));
-                let spec = ["under swipe", "under options"].contains(&kind.as_str());
-                let odd = m
-                    .keys()
-                    .find(|k| !known.contains(*k) && *k != "id" && !(spec && *k == "values"));
+                let spec = ["under swipe", "under options", "under done"].contains(&kind.as_str());
+                let coat = kind == "under figure";
+                let odd = m.keys().find(|k| {
+                    !known.contains(*k) && *k != "id" && (!spec || *k != "values") && (!coat || *k != "coat")
+                });
                 assert!(
                     odd.is_none(),
                     "{kind}.{} is in no fixture: {v}",
@@ -152,10 +152,13 @@ fn like(v: &Value, fixture: &str, exact: bool) {
             _ => {}
         }
     }
+    let vocab = vocabulary();
     keys(v, "", &vocab);
     let (mut got, mut want) = (BTreeSet::new(), BTreeSet::new());
     skeleton(v, "", &mut got);
-    skeleton(&fixture_json(fixture), "", &mut want);
+    for f in fixture.split('+') {
+        skeleton(&fixture_json(f), "", &mut want);
+    }
     let extra: Vec<_> = got.difference(&want).collect();
     assert!(extra.is_empty(), "{fixture}: not in the fixture: {extra:?}");
     if exact {
@@ -196,11 +199,8 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     assert_eq!(row["title"], "#12");
     assert_eq!(row["badge"], json!({"text": "fix 1", "tone": "working"}));
     assert_eq!(row["figure"], json!({"state": "working", "tool": "edit"}));
-    assert_eq!(
-        row["subtitle"],
-        "impl ✓ · review 1 ✗ · fix 1 ▸ sendmeter-impl-12 · working"
-    );
-    assert_eq!(row["tap"], json!({"thread": "sendmeter-impl-12"}));
+    assert_eq!(row["subtitle"], "impl ✓ · review 1 ✗ · fix 1 ▸ working · sendmete…");
+    assert_eq!(row["tap"], json!({"sheet": "/screens/lanes/sendmeter-impl-12"}));
     assert_eq!(row["swipe"][0]["action"], "stop");
     assert_eq!(find(&q, "q-sendmeter-5")["figure"], json!({"state": "needs"}));
     assert_eq!(
@@ -281,6 +281,94 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     assert_eq!(req(&s, T, "GET", "/screens/nope", "", "").0, 404);
     let foreign = req(&s, T, "GET", "/screens/queue", "", "Origin: https://evil.example\r\n");
     assert_eq!(foreign.0, 403);
+}
+
+#[test]
+fn a_queue_row_is_one_short_title_line_without_the_pr_title() {
+    let (c, r) = recorded("cooee-short-row");
+    let (issue, pr) = ("Long issue title ".repeat(7), "Long PR title ".repeat(8));
+    assert!(issue.len() > 100 && pr.len() > 100);
+    let cache = c.state.parent().unwrap().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(
+        cache.join("issue-sendmeter-12.json"),
+        json!({"title": issue}).to_string(),
+    )
+    .unwrap();
+    let cached = json!({"ts": T, "pr": {"number": 281, "title": pr}});
+    std::fs::write(cache.join("pr-sendmeter-12.json"), cached.to_string()).unwrap();
+    let (status, q) = req(
+        &Server::new(&c, &r, Some(ADDR.into())),
+        T,
+        "GET",
+        "/screens/queue",
+        "",
+        "",
+    );
+    assert_eq!(status, 200, "{q}");
+    let row = find(&q, "q-sendmeter-12");
+    let (title, sub) = (row["title"].as_str().unwrap(), row["subtitle"].as_str().unwrap());
+    assert!(
+        title.starts_with("#12 Long issue title") && title.ends_with('…'),
+        "{title}"
+    );
+    assert!(!title.contains("PR"), "{title}");
+    assert!(sub.contains("PR #281") && !sub.contains("Long PR title"), "{sub}");
+    for line in [title, sub] {
+        assert!(line.chars().count() <= 49 && !line.contains('\n'), "{line}");
+    }
+    assert_eq!(row["tap"], json!({"sheet": "/screens/lanes/sendmeter-impl-12"}));
+}
+
+#[test]
+fn the_lanes_screen_and_a_lanes_sheet_are_cooees_blocks() {
+    let (c, r) = recorded("cooee-lanes");
+    r.1.lane("sendmeter-impl-20", "idle", "/x");
+    r.1.lane("sendmeter-impl-5", "blocked", "/x");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let (status, v) = req(&s, T, "GET", "/screens/lanes", "", "");
+    assert_eq!(status, 200, "{v}");
+    like(&v, "lanes", true);
+    assert_eq!(
+        (&v["id"], &v["stream"]),
+        (&json!("lanes"), &json!("/screens/lanes/stream"))
+    );
+    let row = find(&v, "l-sendmeter-impl-12");
+    assert_eq!(row["title"], "sendmeter #12");
+    assert_eq!(row["figure"]["state"], "working");
+    assert!(row["figure"]["coat"].is_string(), "{row}");
+    assert_eq!(row["tap"], json!({"sheet": "/screens/lanes/sendmeter-impl-12"}));
+    assert_eq!(find(&v, "lanes-working")["header"], "working (1)");
+    assert_eq!(find(&v, "lanes-blocked")["header"], "waiting (1)");
+    assert_eq!(find(&v, "lanes-idle")["header"], "asleep (1)");
+
+    let sheet = "/screens/lanes/sendmeter-impl-12";
+    assert_eq!(
+        req(&s, T, "GET", sheet, "", "").0,
+        401,
+        "a transcript needs a paired device"
+    );
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let (status, v) = req(&s, T, "GET", sheet, "", &ck);
+    assert_eq!(status, 200, "{v}");
+    like(&v, "lane-sheet", true);
+    assert_eq!(
+        (&v["type"], &v["title"]),
+        (&json!("sheet"), &json!("sendmeter-impl-12"))
+    );
+    assert_eq!(find(&v, "f-issue")["value"], "sendmeter #12");
+    assert_eq!(find(&v, "f-role")["value"], "fix");
+    let acts: Vec<&Value> = ["act-stop", "act-kill", "act-clean"]
+        .iter()
+        .map(|a| &find(&v, a)["action"])
+        .collect();
+    assert_eq!(acts, [&json!("stop"), &json!("kill"), &json!("clean")]);
+    assert_eq!(
+        v["done"],
+        json!({"label": "Send", "action": "send", "values": {"agent": "sendmeter-impl-12"}})
+    );
+    assert_eq!(find(&v, "transcript")["blocks"][0]["type"], "text");
+    assert_eq!(req(&s, T, "GET", "/screens/lanes/nobody", "", &ck).0, 404);
 }
 
 #[test]
@@ -431,7 +519,9 @@ fn apply(screen: &mut Value, ops: &[Value]) {
             Value::Object(m) => m.values_mut().for_each(|x| drop_id(x, id)),
             Value::Array(a) => {
                 a.retain(|x| x.get("id").and_then(Value::as_str) != Some(id));
-                a.iter_mut().for_each(|x| drop_id(x, id));
+                for x in a.iter_mut() {
+                    drop_id(x, id);
+                }
             }
             _ => {}
         }
@@ -579,21 +669,21 @@ fn the_workflow_screen_is_two_diagram_blocks_with_live_counts_and_limit_nodes() 
     let (status, v) = req(&s, T, "GET", "/screens/workflow", "", "");
     assert_eq!(status, 200, "{v}");
     assert_eq!((&v["type"], &v["id"]), (&json!("screen"), &json!("workflow")));
-    let states = find(&v, "states");
-    assert_eq!(states["type"], "diagram");
+    let chart = find(&v, "states");
+    assert_eq!(chart["type"], "diagram");
     assert!(
-        states["source"].as_str().unwrap().starts_with("stateDiagram-v2\n"),
-        "{states}"
+        chart["source"].as_str().unwrap().starts_with("stateDiagram-v2\n"),
+        "{chart}"
     );
     assert!(
-        states["source"]
+        chart["source"]
             .as_str()
             .unwrap()
             .contains("state \"fix(n) · 1\" as fix"),
-        "{states}"
+        "{chart}"
     );
     for (state, n) in [("merged", 1), ("fix(n)", 1), ("needs-human", 1)] {
-        assert_eq!(states["counts"][state], n, "{state}: {states}");
+        assert_eq!(chart["counts"][state], n, "{state}: {chart}");
     }
     let pass = find(&v, "pass");
     assert_eq!(pass["type"], "diagram");
@@ -616,4 +706,206 @@ fn the_workflow_screen_is_two_diagram_blocks_with_live_counts_and_limit_nodes() 
             "{n}"
         );
     }
+}
+
+fn rows_of<'a>(v: &'a Value, list: &str) -> Vec<&'a str> {
+    let rows = find(v, list)["rows"].as_array().unwrap();
+    rows.iter().map(|r| r["id"].as_str().unwrap()).collect()
+}
+
+#[test]
+fn the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_moves() {
+    let (c, r) = recorded("cooee-parity");
+    let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
+    ok(&["queue", "sendmeter", "add", "30", "31", "32", "33", "34"]);
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let get = |p: &str| {
+        let (status, v) = req(&s, T, "GET", p, "", "");
+        assert_eq!(status, 200, "{p}: {v}");
+        v
+    };
+    let q = get("/screens/queue");
+    like(&q, "queue", false);
+    assert_eq!(find(&q, "repo")["options"][1]["label"], "sendmeter ●", "a needs dot");
+    assert_eq!(find(&q, "fleet-sendmeter")["tone"], "warn", "needs you");
+    assert_eq!(
+        rows_of(&q, "queued-list-sendmeter"),
+        [
+            "q-sendmeter-17",
+            "chain-sendmeter-17",
+            "q-sendmeter-20",
+            "q-sendmeter-30",
+            "q-sendmeter-31",
+            "q-sendmeter-32",
+            "more-queued-sendmeter"
+        ]
+    );
+    assert_eq!(find(&q, "queued-sendmeter")["header"], "queued (7)");
+    assert_eq!(find(&q, "q-sendmeter-20")["indent"], 1);
+    let more = find(&q, "more-queued-sendmeter");
+    assert_eq!(
+        (&more["title"], &more["tap"]),
+        (&json!("+2 more"), &json!({"open": "/screens/queue?more=sendmeter"}))
+    );
+    let all = get("/screens/queue?more=sendmeter");
+    let ids = rows_of(&all, "queued-list-sendmeter");
+    assert_eq!(&ids[6..], ["q-sendmeter-33", "q-sendmeter-34", "more-queued-sendmeter"]);
+    assert_eq!(all["stream"], "/screens/queue/stream?more=sendmeter");
+    let fold = find(&q, "chain-sendmeter-17")["tap"]["open"].as_str().unwrap();
+    let folded = get(fold);
+    assert!(!rows_of(&folded, "queued-list-sendmeter").contains(&"q-sendmeter-20"));
+    assert_eq!(find(&folded, "chain-sendmeter-17")["title"], "▸ 1 held behind #17");
+    assert_eq!(find(&folded, "chain-sendmeter-17")["tap"]["open"], "/screens/queue");
+
+    let swipe = |v: &Value, id: &str| -> Vec<Value> {
+        find(v, id)["swipe"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["label"].clone())
+            .collect()
+    };
+    assert_eq!(swipe(&q, "q-sendmeter-17"), ["▼", "Top", "Drop"]);
+    assert_eq!(swipe(&q, "q-sendmeter-30"), ["▲", "▼", "Top", "Drop"]);
+    let up = find(&q, "q-sendmeter-30")["swipe"][0].clone();
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let tap = json!({"screen": "queue", "block": "q-sendmeter-30", "action": up["action"], "values": up["values"]});
+    let (status, v) = req(&s, T, "POST", "/action", &tap.to_string(), &ck);
+    assert_eq!(status, 200, "{v}");
+    let again = get("/screens/queue");
+    assert_eq!(
+        find(&again, "q-sendmeter-30")["badge"]["text"],
+        "#2",
+        "moved above #20, kept on a reload"
+    );
+
+    ok(&["pause", "sendmeter"]);
+    let paused = find(&get("/screens/queue"), "fleet-sendmeter").clone();
+    assert!(
+        paused["fold"]["line"]
+            .as_str()
+            .unwrap()
+            .starts_with("sendmeter · paused"),
+        "{paused}"
+    );
+    assert_eq!(
+        paused["fold"]["main"],
+        json!({"action": "pause", "label": "Resume", "values": {"fleet": "sendmeter", "on": false}})
+    );
+    let legend = get(q["actions"][0]["menu"][2]["tap"]["sheet"].as_str().unwrap());
+    like(&legend, "fleets", false);
+    let words: Vec<&str> = find(&legend, "legend-list")["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["title"].as_str().unwrap())
+        .collect();
+    for w in [
+        "queued",
+        "impl",
+        "review n",
+        "fix n",
+        "ready",
+        "merged",
+        "needs-human",
+        "parked",
+        "dead",
+        "🔒 hot ×N",
+    ] {
+        assert!(words.contains(&w), "{w}: {words:?}");
+    }
+}
+
+#[test]
+fn a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thread() {
+    let (c, r) = recorded("cooee-issue");
+    let ask =
+        json!({"id": "q8", "question": "Split the PR?", "options": ["split", "keep"], "recommend": 2, "thread": "t9"});
+    append(
+        &c.state,
+        &Event::new(T - 60, "sendmeter", Some(17), "needs-decision", ask),
+    )
+    .unwrap();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let get = |p: &str| {
+        let (status, v) = req(&s, T, "GET", p, "", "");
+        assert_eq!(status, 200, "{p}: {v}");
+        v
+    };
+    let q = get("/screens/queue");
+    let waiting = find(&q, "q-sendmeter-17");
+    assert_eq!(waiting["subtitle"], "asks: Split the PR? · split / keep (recommended)");
+    assert_eq!(waiting["tap"], json!({"thread": "t9"}));
+    let sheet = get(find(&q, "q-sendmeter-20")["tap"]["sheet"].as_str().unwrap());
+    assert_eq!((&sheet["type"], &sheet["title"]), (&json!("sheet"), &json!("#20")));
+    let issue = find(&sheet, "issue");
+    assert_eq!(
+        issue["tap"]["url"],
+        "https://github.com/jirathip-dev/sendmeter/issues/20"
+    );
+    let fix = get("/screens/issue?repo=sendmeter&issue=12");
+    let stage = find(&fix, "stage");
+    let lit = stage["selected"].as_array().unwrap();
+    assert_eq!(lit, &[json!("impl · fix")], "the stage #12 is on, lit: {stage}");
+    assert_eq!(find(&fix, "lane")["tap"], json!({"thread": "sendmeter-impl-12"}));
+    let asked = get("/screens/issue?repo=sendmeter&issue=17");
+    assert_eq!(find(&asked, "asked")["tap"], json!({"thread": "t9"}));
+    like(&asked, "fleets+queue", false);
+    assert_eq!(find(&asked, "asks")["header"], "asks: Split the PR?");
+    assert_eq!(find(&asked, "opt-1")["title"], "2. keep");
+    assert_eq!(find(&asked, "▼")["action"], "move");
+    assert_eq!(
+        req(&s, T, "GET", "/screens/issue?repo=sendmeter&issue=99", "", "").0,
+        404
+    );
+}
+
+#[test]
+fn the_backlog_sheet_filters_searches_and_queues_the_ticked_issues() {
+    let (c, r) = recorded("cooee-backlog");
+    let issue = |t: &str, ac: bool, created: &str| json!({"title": t, "labels": ["ui"], "created": created, "updated": created, "ac": ac, "pr": false});
+    let bl = json!({"ts": T, "issues": {"40": issue("Dark mode", true, "1970-01-01T00:00:00Z"), "41": issue("Fix push", false, "1970-01-12T00:00:00Z"), "42": issue("Old thing", false, "1970-01-01T00:00:00Z")}});
+    let p = c.state.with_file_name("cache");
+    std::fs::create_dir_all(&p).unwrap();
+    std::fs::write(p.join("backlog-sendmeter-0.json"), bl.to_string()).unwrap();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let get = |p: &str| {
+        let (status, v) = req(&s, T, "GET", p, "", "");
+        assert_eq!(status, 200, "{p}: {v}");
+        v
+    };
+    let row = find(&get("/screens/queue"), "backlog-sendmeter").clone();
+    assert_eq!(row["title"], "backlog (3)");
+    let sheet = get(row["tap"]["sheet"].as_str().unwrap());
+    like(&sheet, "fleets+queue", false);
+    let names = |v: &Value| -> Vec<String> {
+        find(v, "bl-sendmeter")["fields"].as_array().unwrap()[1..]
+            .iter()
+            .map(|f| f["name"].as_str().unwrap().into())
+            .collect()
+    };
+    assert_eq!(
+        names(&sheet),
+        ["sendmeter.pick.42", "sendmeter.pick.41", "sendmeter.pick.40"]
+    );
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let post = |v: Value| req(&s, T, "POST", "/action", &v.to_string(), &ck);
+    let (status, v) = post(
+        json!({"screen": "backlog-sendmeter", "block": "on", "action": "filter", "values": {"sendmeter.on": ["ac"]}}),
+    );
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(names(&v["ops"][0]["screen"]), ["sendmeter.pick.40"]);
+    let (_, v) = post(json!({"screen": "backlog-sendmeter", "action": "queue", "values": {"sendmeter.q": "push"}}));
+    assert_eq!(names(&v["ops"][0]["screen"]), ["sendmeter.pick.41"], "{v}");
+    let ticks =
+        json!({"sendmeter.q": "", "sendmeter.pick.40": true, "sendmeter.pick.41": false, "sendmeter.pick.42": true});
+    let (status, v) = post(json!({"screen": "backlog-sendmeter", "action": "queue", "values": ticks}));
+    assert_eq!((status, &v["close"]), (200, &json!(true)), "{v}");
+    let q = get("/screens/queue?more=sendmeter");
+    let ids = rows_of(&q, "queued-list-sendmeter");
+    assert!(
+        ids.contains(&"q-sendmeter-40") && ids.contains(&"q-sendmeter-42") && !ids.contains(&"q-sendmeter-41"),
+        "{ids:?}"
+    );
+    assert_eq!(find(&q, "backlog-sendmeter")["title"], "backlog (1)");
 }
