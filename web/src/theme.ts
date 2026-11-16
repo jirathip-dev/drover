@@ -33,7 +33,7 @@ export function act(f: Blk, lane: boolean): string {
 const GLYPH: Blk = { working: '●', needs: '!', fail: '✗', done: '✓', merged: '✓', idle: '○' };
 const WORD: Blk = { working: 'working', needs: 'needs you', fail: 'failed', done: 'done', merged: 'merged', idle: 'idle' };
 
-/** A figure as HTML: the theme's sprite (24 px row, or a lane's avatar in its coat), else its state glyph. */
+/** A figure as HTML: the theme's sprite (24 px row, its stage's plant where the theme has `stages`, or a lane's avatar in its coat), else its state glyph. */
 export function figure(f: Blk): string {
   const lane = 'coat' in f, a = act(f, lane), word = WORD[f.state] ?? f.state, has = (id: string) => !!document.getElementById(id);
   const tone = ({ working: 'g', needs: 'r', fail: 'r', done: 'mute', idle: 'mute', merged: 'g' } as Blk)[f.state] ?? 'mute';
@@ -44,7 +44,7 @@ export function figure(f: Blk): string {
     const art = has('ha-' + a) ? `<svg class=px viewBox="0 0 132 100" style="${style}"><use href="#ha-${a}"/></svg>` : g;
     return `<span class="av ${f.state}" role=img aria-label="${word}" title="${word}">${art}</span>`;
   }
-  const id = has('hr-' + a) ? 'hr-' + a : '';
+  const id = has('hg-' + f.grow) ? 'hg-' + f.grow : has('hr-' + a) ? 'hr-' + a : '';
   const box = id && document.getElementById(id)!.getAttribute('viewBox');
   return `<span class="rsg ${f.state}" role=img aria-label="${word}" title="${word}">${id ? `<svg class=rsp viewBox="${box}" aria-hidden=true><use href="#${id}"/></svg>` : g}</span>`;
 }
@@ -83,6 +83,7 @@ export async function theme(name: string): Promise<void> {
     if (T.row_sprites) sym('hr-' + a, T.row_sprites[a], fa[a]);
   });
   if (T.row_sprites) ['queued', 'needs', 'merged', 'fail'].forEach(k => sym('hr-' + k, T.row_sprites[k]));
+  Object.entries((T.stages ?? {}) as Record<string, string>).forEach(([k, id]) => sym('hg-' + k, id));
 }
 
 const DARK = matchMedia('(prefers-color-scheme: dark)');
