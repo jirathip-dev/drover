@@ -1,0 +1,12 @@
+Decided: [fleet.<f>] merge is a MergeMode enum, squash by default; squash adds --delete-branch, merge keeps --merge; an unknown value fails config parse
+Because: "`\"merge\"` stays available for a fleet that wants it"
+Decided: after a squash merge drover joins the issue's lane notes in round order and pushes them onto the squash commit with why::attach
+Because: "drover writes one note on the squash commit that joins the PR's lane notes in order"
+Decided: drover why first matches the blamed sha itself to a merged event, since a squash commit is its own merge_sha
+Because: "`drover why` on a line from a squashed PR prints its note."
+Decided: land.rs reverts with -m 1 only when the culprit has two parents, so squash and older merge landings both revert
+Rejected: picking -m from the fleet's mode — a landing merged before the switch to squash would fail to revert
+Rejected: hand-editing docs/workflow.md — it is drover diagram's output, so the merged transition's label states the squash rule
+Check: why_notes a_squash_merge_lands_one_commit_carrying_every_lane_note drives drover merge then drover why on real git
+Check: merge.rs refuses_verdict_for_older_sha still refuses STALE_VERDICT; --match-head-commit is unchanged
+Owner: Each merged PR now lands as one commit on the integration branch, still carrying its why notes; set merge = "merge" to keep the old way.
