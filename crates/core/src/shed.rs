@@ -158,7 +158,6 @@ fn connect(r: &dyn Runner, q: &str) -> Result<String> {
     Ok(o.stdout)
 }
 
-/// #1140: the installed shed unit's `ActiveState`, if systemd has one.
 fn unit(r: &dyn Runner) -> Option<String> {
     let o = r
         .run(
