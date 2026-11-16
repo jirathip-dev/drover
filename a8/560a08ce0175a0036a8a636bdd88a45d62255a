@@ -1,0 +1,8 @@
+Decided: page_drafts expects a reload to land on the open thread #threads/t2 and waits for its composer, not the threads list
+Because: "reload and resume keep it; open pushes a history entry"
+Decided: page_drafts asserts the reloaded hash, so a regression to the list fails it
+Because: crates/cli/tests/page_drafts.rs:85
+Decided: merged origin/staging again rather than rebasing; no conflicts
+Rejected: dropping the reload step from page_drafts — it is #1084's proof that a draft survives a reload
+Check: CI ui-webkit is green at the head (the WebKit steps skip locally without Playwright)
+Owner: the drafts test now matches the page keeping the open thread across a reload
