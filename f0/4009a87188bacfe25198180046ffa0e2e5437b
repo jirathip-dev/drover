@@ -1,0 +1,13 @@
+Decided: the full Hosts screen of round 1 (gauges, charts, sign-in, providers, sheet streams) is dropped; the page gets the approved bare list from docs/design/hosts-menu
+Because: "No gauges, sparklines, charts, health/services, spend or provider meters."
+Decided: the sheet reads fleet.toml's hosts, lanes_on and the reap leftovers count only, not the heavy host tab (df, ps, services)
+Because: "Each row: name, on/off state, live lane count."
+Decided: [Reap N] sits on the main host's row, only while leftovers exist; the main host has no [Off] (the host op refuses it)
+Because: q1784
+Decided: host and reap are page-only actions like the thread actions, not added to cooee-plugin.toml
+Rejected: listing them in the manifest's [permissions] — that is cooee's contract and its golden permissions fixture would change
+Decided: no sheet stream and no host-watch.at stamp; an action's answer redraws the sheet with a screen op
+Because: "Watched `procs` sampling (`host-watch.at`) is not restored by this issue"
+Check: golden crates/cli/tests/golden/page/hosts.json: mini (main, 2 leftovers, [Reap 2]) first, then cloud1 (cloud host, 1 lane, confirmed [Off])
+Check: hosts_screen.rs posts off, then on, then reap through POST /action: host-off/host-on logged, kill -TERM sent
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
