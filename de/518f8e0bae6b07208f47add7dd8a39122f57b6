@@ -1,0 +1,14 @@
+Decided: compact copies trees, never replays patches; open PRs are carried commit by commit, not `git rebase --onto`
+Because: docs/architecture/compact/adr.md:77
+Decided: the log is never edited; `compacted` records per issue bridge old and new ids through compact::Shas, read by why and hotspots only
+Because: docs/architecture/compact/adr.md:94
+Decided: open questions answered as the ADR recommends: main moves in the same push, fully merged branches are deleted (the archive keeps them)
+Because: q1793
+Decided: no GitHub-style "Merge pull request" rewrite: neither repo's line has one after the cut
+Rejected: the hidden event-archiving `compact` kept under the same verb — renamed `archive-events` as the ADR says
+Decided: the scratch mirror drops its fetch refspec so pushing from it never moves its own refs (why's archive blame needs the old ones)
+Because: crates/core/src/compact/write.rs:23
+Decided: hot files take only call sites, at net zero against .drover/arch-baseline.txt; drive's pause filter moved into compact::drives
+Check: crates/cli/tests/compact.rs drives dry run, card guard, push, why on both sides of the cut, gate STALE_VERDICT then PASS, OLD_ROOT, undo
+Check: the cooee dry run (staging 1082 → 133) passes the tree check on all 361 refs; nothing was pushed
+Owner: drover can now give a repo a short fresh history once, behind your approval card, with an archive and an undo
