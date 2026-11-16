@@ -1,0 +1,7 @@
+Decided: merged origin/staging again; ci.yml keeps staging's parity_webkit trigger and steps, with herd.rs added to the WebKit trigger and the herd step kept last
+Because: .github/workflows/ci.yml:201
+Decided: Herd still opens from [⚙] as a page-only menu row; nothing in the Herd changed in this merge
+Because: crates/server/src/screens.rs:42
+Rejected: taking staging's ci.yml alone — the ui-webkit job would stop running the Herd's WebKit test
+Check: web/dist rebuilt from the merged src is byte-identical to the committed one; ui-webkit runs parity_webkit, page_drafts and herd
+Owner: The Herd branch is caught up with staging again; nothing about the Herd changed.
