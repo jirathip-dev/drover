@@ -1,0 +1,8 @@
+Decided: merged origin/staging after #1084 (a merge, no rebase); the README quick start and command table moved to docs/setup.md's Quick start, and readme.rs reads them there
+Because: "**README**: Today = what is on staging now; Next = the open queue. Nothing else."
+Decided: README issue links keep the jirathip-dev/herdsman/issues/ form, the one setup_neutral.rs allows; GitHub redirects them
+Because: crates/cli/tests/setup_neutral.rs:114
+Rejected: keeping the table in README — the issue allows nothing but Today and Next there
+Check: readme.rs's quick_start_runs_as_written and table_commands_exist run against docs/setup.md's Quick start section only
+Check: the earlier evidence at d6e6943 ran 0 tests (zsh arg bug); the PR body says so, and this head's run is 24 binaries, 257 passed
+Owner: The setup steps and command list now live in the setup guide, so the front page shows only what ships and what is next.
