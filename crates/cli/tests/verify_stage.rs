@@ -704,7 +704,9 @@ fn verify_r1_live(name: &str, failed: bool) -> (drover::Ctx, Fake, FakeShed, Str
     }
     std::fs::create_dir_all(wt("verify-12-r1")).unwrap();
     sh.lane("sendmeter-verify-12-r1", "working", &wt("verify-12-r1"));
-    let r = fake(&b, "web/src/queue.ts\n").reply(RECIPE, "");
+    let mut r = Fake::default().reply(&format!("git -C {} rev-parse HEAD", wt("verify-12-r1")), &b);
+    r.replies
+        .extend(fake(&b, "web/src/queue.ts\n").reply(RECIPE, "").replies);
     (c, r, sh, b)
 }
 

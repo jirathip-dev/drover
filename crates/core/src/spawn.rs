@@ -723,7 +723,7 @@ pub fn own_files() -> impl Iterator<Item = &'static str> {
 }
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
-pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
+pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/", "shots/"];
 
 /// #646: a drover-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
 pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
@@ -1041,7 +1041,12 @@ pub fn spawn(
                 .iter()
                 .any(|e| e.is("verdict", fleet, issue) || e.is("spawn", fleet, issue))
         };
-        matches!(a.status(), Some(Status::Done | Status::Idle)) && sp.is_some_and(after)
+        let judged = |i: usize| {
+            let at = events[i].str("stage");
+            (events[i + 1..].iter()).any(|e| e.is("verdict", fleet, issue) && e.str("stage") == at)
+        };
+        let ended = matches!(a.status(), Some(Status::Done | Status::Idle));
+        sp.is_some_and(|i| ended && after(i) || f.family(role) == "rev" && judged(i))
     };
     if !stale && !live.is_empty() {
         let st = live[0].status().map_or("unknown", Status::word);
