@@ -1048,8 +1048,8 @@ pub fn spawn(
             (events.iter().skip(i + 1)).any(|e| e.is("verdict", fleet, issue) || e.is("spawn", fleet, issue))
         };
         let judged = |i: usize| {
-            let at = events[i].str("stage");
-            (events[i + 1..].iter()).any(|e| e.is("verdict", fleet, issue) && e.str("stage") == at)
+            let at = events.get(i).and_then(|e| e.str("stage"));
+            (events.iter().skip(i + 1)).any(|e| e.is("verdict", fleet, issue) && e.str("stage") == at)
         };
         let ended = matches!(a.status(), Some(Status::Done | Status::Idle));
         sp.is_some_and(|i| ended && after(i) || f.family(role) == "rev" && judged(i))
