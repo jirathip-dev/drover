@@ -36,7 +36,6 @@ pub fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, (fleet, n): (&str, u
     Ok(writeln!(out, "{fleet} #{n}: {} gets `{CONTINUE}` at {when}", a.name)?)
 }
 
-/// shed's reset note (`5pm`, `9:30 AM`, `Nov 4, 8am`) as the next such host-local time after `now`.
 fn reset_at(r: &dyn Runner, note: &str, now: u64) -> Option<u64> {
     let s = note
         .to_lowercase()
