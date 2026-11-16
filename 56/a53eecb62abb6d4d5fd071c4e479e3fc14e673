@@ -1,0 +1,7 @@
+Decided: each pick is one native select in one flex row under the box; a change posts the same model op
+Because: "Model and effort are each one dropdown (a native `<select>`), side by side in one compact row"
+Decided: a pick with no current value gets a placeholder option named after it, so the first choice is not shown as picked
+Because: crates/server/src/serve/chat.rs:354
+Rejected: option text "model opus" — the name is in aria-label; the bare value keeps the row compact at 390
+Check: the ui-webkit job runs the_model_and_effort_picks_are_one_row_of_dropdowns_and_a_model_pick_reaches_the_bar_in_webkit (skipped locally, no Playwright)
+Owner: the model and effort picks are two small dropdowns under the box; please check on the phone
