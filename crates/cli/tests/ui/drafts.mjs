@@ -59,8 +59,8 @@ try {
   out.after = { ...(await box()), tick, same: await page.evaluate(() => document.querySelector('.form.say input') === kept.i && kept.i.isConnected), gone: await page.evaluate(() => kept.gone), live: await page.evaluate(() => kept.live) };
 
   await page.reload();
-  await open();
-  out.reloaded = await box();
+  await until(() => !!document.querySelector('.form.say input'), 'the reloaded thread');
+  out.reloaded = { ...(await box()), hash: await page.evaluate(() => location.hash) };
 
   await page.route('**/action', r => { out.posts++; return r.fulfill({ status: 500, contentType: 'application/json', body: '{"line":"boom: not sent"}' }); });
   await page.evaluate(() => document.querySelector('.form.say input').focus());

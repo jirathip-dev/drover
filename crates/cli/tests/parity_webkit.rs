@@ -151,7 +151,6 @@ fn parity_2_a_live_update_never_moves_the_scroll_or_replaces_a_kept_node() {
 }
 
 #[test]
-#[ignore = "red until #1088: opening a thread pushes no history entry"]
 fn parity_24_opening_a_thread_pushes_history_and_back_returns_to_the_list() {
     if no_webkit() {
         return;
