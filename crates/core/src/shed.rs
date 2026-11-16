@@ -173,7 +173,7 @@ fn unit(r: &dyn Runner) -> Option<String> {
 
 fn start_job(r: &dyn Runner) -> Option<&'static str> {
     if unit(r).is_some() {
-        let _ = r.run("systemctl", &argv(&["--user", "start", "shed.service"]));
+        drop(r.run("systemctl", &argv(&["--user", "start", "shed.service"])));
         return Some("journalctl --user -u shed.service");
     }
     let plist = "p=\"$HOME/Library/LaunchAgents/dev.shed.serve.plist\"; [ -f \"$p\" ] && \
