@@ -1,0 +1,4 @@
+Decided: merge origin/staging; keep staging's sheet drawer signature and this PR's merged-issue fallback in on_row
+Because: crates/server/src/screens.rs:1359
+Rejected: none
+Owner: the branch is caught up with staging; done today still opens today's merges
