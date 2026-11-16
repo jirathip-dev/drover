@@ -2,7 +2,7 @@
 // button, run, images, form and its fields and `submit`, sheet). A block that acts calls `ctx.act`; a tap that goes somewhere
 // calls `ctx.tap`. No block knows which screen it is on.
 import type { Blk } from './ops';
-import { esc, figure, word } from './theme';
+import { esc, figure, get, put, word } from './theme';
 
 export type Act = { action: string; block?: string; values?: Blk; confirm?: Blk };
 export type Ctx = {
@@ -26,6 +26,16 @@ const btn = (label: string, cls = '', url?: string) => {
 };
 const GROUP: Record<string, string> = { waiting: 'needs', blocked: 'needs', asleep: 'idle', in: 'working' };
 const tone = (v: unknown) => (typeof v === 'object' && v ? (v as Blk) : { text: v });
+const draft = (i: HTMLInputElement, key: string) => {
+  i.dataset.draft = key;
+  i.value = get(key) ?? i.value;
+  i.addEventListener('input', () => put(key, i.value || null));
+};
+/** Clears the drafts of the fields under `box`, here and in any copy on the page, once their action succeeded. */
+export const sent = (box: Element) => box.querySelectorAll<HTMLInputElement>('[data-draft]').forEach(i => {
+  put(i.dataset.draft!, null);
+  document.querySelectorAll<HTMLInputElement>(`[data-draft="${CSS.escape(i.dataset.draft!)}"]`).forEach(x => { x.value = x.dataset.was ?? ''; });
+});
 
 /** Minimal markdown: code fences, `code`, **bold**, [links](url); everything else escaped. */
 export function md(s: string): string {
@@ -174,12 +184,13 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
       const f = el('form', 'other');
       const i = el('input');
       Object.assign(i, { name: 'other', placeholder: b.other.placeholder ?? 'other…', autocomplete: 'off' });
+      draft(i, `draft:${c.screen}:${b.id}:other`);
       const go = btn('send');
       go.type = 'submit';
       f.append(i, go);
       f.onsubmit = e => {
         e.preventDefault();
-        if (i.value.trim()) c.act({ action: b.action, block: b.id, values: { ...b.values, choice: b.other.for ?? '', other: i.value } }, go);
+        if (i.value.trim()) c.act({ action: b.action, block: b.id, values: { ...b.values, choice: b.other.for ?? '', other: i.value } }, go).then(ok => ok && sent(f));
       };
       s.append(f);
     }
@@ -213,10 +224,10 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     }
     return s;
   },
-  form(b) {
+  form(b, c) {
     const f = el('div', 'form');
     f.dataset.id = b.id ?? '';
-    for (const x of b.fields ?? []) f.append(field(x));
+    for (const x of b.fields ?? []) f.append(field(x, `draft:${c.screen}:${b.id}:`));
     return f;
   },
   composer,
@@ -228,9 +239,8 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
 };
 
 type Att = { name: string; type: string; data: string };
-type Draft = { text: string; files: Att[]; picks: Blk; q?: number; st?: string; steer?: boolean; stopping?: boolean };
+type Draft = { files: Att[]; picks: Blk; q?: number; st?: string; steer?: boolean; stopping?: boolean };
 const drafts = new Map<string, Draft>();
-let typing = '';
 
 const read = (f: File) => new Promise<Att>(ok => {
   const r = new FileReader();
@@ -239,18 +249,16 @@ const read = (f: File) => new Promise<Att>(ok => {
 });
 
 function composer(b: Blk, c: Ctx): HTMLElement {
-  const key = JSON.stringify([b.action, b.values]), acts: Blk = b.acts ?? {}, base: Blk = b.values ?? {};
-  const d: Draft = drafts.get(key) ?? { text: '', files: [], picks: {} };
+  const key = `draft:${c.screen}:${b.id}:text`, acts: Blk = b.acts ?? {}, base: Blk = b.values ?? {};
+  const d: Draft = drafts.get(key) ?? { files: [], picks: {} };
   drafts.set(key, d);
   if (!b.working) d.stopping = d.steer = false;
   const f = el('div', 'cmp');
   f.dataset.id = b.id ?? '';
   const ta = el('textarea');
-  Object.assign(ta, { name: 'text', rows: 1, value: d.text, placeholder: b.placeholder ?? '' });
+  Object.assign(ta, { name: 'text', rows: 1, value: get(key) ?? '', placeholder: b.placeholder ?? '' });
   const grow = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
-  ta.oninput = () => { [d.text, d.st] = [ta.value, d.st === 'sent' ? '' : d.st]; grow(); };
-  ta.onfocus = () => { typing = key; };
-  ta.onblur = () => setTimeout(() => { if (!(document.activeElement instanceof HTMLTextAreaElement)) typing = ''; });
+  ta.oninput = () => { put(key, ta.value || null); d.st = d.st === 'sent' ? '' : d.st; grow(); };
   ta.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } };
   const pick = el('input');
   Object.assign(pick, { type: 'file', multiple: true, hidden: true });
@@ -268,9 +276,10 @@ function composer(b: Blk, c: Ctx): HTMLElement {
     if (queue && d.q != null) v.q = d.q;
     [d.st, d.steer] = ['sending', false];
     draw();
-    if (await post(action, v)) {
-      Object.assign(d, { text: '', files: [], q: undefined, st: 'sent' });
+    if (await post(action, v, steer ? undefined : f.querySelector<HTMLElement>('.cr button.primary') ?? undefined)) {
+      Object.assign(d, { files: [], q: undefined, st: 'sent' });
       ta.value = '';
+      put(key, null);
       grow();
     } else d.st = 'failed';
     draw();
@@ -297,7 +306,7 @@ function composer(b: Blk, c: Ctx): HTMLElement {
       r.dataset.q = String(m.q);
       const now = btn('send now', 'primary'), edit = btn('edit'), rm = btn('remove', 'bad');
       now.onclick = () => post(acts.steer, { q: m.q }, now);
-      edit.onclick = () => { [d.q, d.text, ta.value] = [m.q, m.text, m.text]; grow(); ta.focus(); draw(); };
+      edit.onclick = () => { [d.q, ta.value] = [m.q, m.text]; put(key, m.text); grow(); ta.focus(); draw(); };
       rm.onclick = () => post(acts.unqueue, { q: m.q }, rm);
       r.append(now, edit, rm);
       top.push(r);
@@ -352,10 +361,7 @@ function composer(b: Blk, c: Ctx): HTMLElement {
     f.replaceChildren(...top, row, ...chips);
   }
   draw();
-  setTimeout(() => {
-    grow();
-    if (typing === key && ta.isConnected && document.activeElement !== ta) ta.focus();
-  });
+  setTimeout(grow);
   return f;
 }
 
@@ -367,7 +373,7 @@ function toggle(e: HTMLElement, id: string, c: Ctx, card = false) {
 }
 
 /** A form field (toggle, text, picker, secret) as a labelled control named by the field's `name`. */
-function field(x: Blk): HTMLElement {
+function field(x: Blk, key: string): HTMLElement {
   const l = el('label', 'fd');
   l.append(el('span', 'fk', esc(x.label ?? x.name)));
   if (x.type === 'toggle') {
@@ -384,6 +390,7 @@ function field(x: Blk): HTMLElement {
     const i = el('input');
     Object.assign(i, { type: x.type === 'secret' ? 'password' : 'text', name: x.name, value: x.value ?? '', placeholder: x.placeholder ?? '', autocomplete: 'off' });
     i.dataset.was = i.value;
+    if (x.type !== 'secret') draft(i, key + x.name);
     l.append(i);
   }
   return l;
