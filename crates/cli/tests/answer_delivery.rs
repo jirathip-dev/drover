@@ -228,7 +228,7 @@ fn a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane() {
 }
 
 #[test]
-fn a_supersede_close_logged_after_the_new_spawn_does_not_close_it() {
+fn parity_r9_a_supersede_close_logged_after_the_new_spawn_does_not_close_it() {
     let c = ctx(&tmpdir("deliver-410"), CONFIG);
     let sh = shed(&c);
     sh.lane("old-36", "idle", "/x");
@@ -266,7 +266,7 @@ fn a_closed_lane_whose_agent_still_runs_in_its_worktree_gets_the_answer() {
 }
 
 #[test]
-fn an_answer_with_no_lane_alerts_once_from_check() {
+fn parity_71_an_answer_with_no_lane_alerts_once_from_check() {
     let c = ctx(&tmpdir("deliver-alert"), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);
