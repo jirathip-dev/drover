@@ -164,7 +164,7 @@ fn project(c: &Connection, ev: &Event) -> Result<()> {
     if let Some(n) = ev.issue {
         let q = "SELECT json FROM states WHERE fleet = ?1 AND issue = ?2";
         let old: Option<String> = c.query_row(q, params![ev.fleet, n], |r| r.get(0)).optional()?;
-        if old.is_none() || !events::PASSIVE.contains(&ev.kind.as_str()) {
+        if old.is_none() || !ev.is_passive() {
             let key = (ev.fleet.clone(), n);
             let mut m = events::States::new();
             if let Some(j) = old {
