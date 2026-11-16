@@ -185,7 +185,6 @@ function tap(x: unknown) {
   const t = obj(x);
   if (t.sheet) sheet(String(t.sheet));
   else if (t.open) go(cur.v, String(t.open));
-  else if (t.url) window.open(String(t.url), '_blank', 'noopener');
   else if (t.thread) toast('threads open in cooee');
 }
 

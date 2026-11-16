@@ -18,9 +18,10 @@ export const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html
   if (html) e.replaceChildren(...nodes(html));
   return e;
 };
-const btn = (label: unknown, cls = '') => {
-  const b = el('button', cls);
-  b.type = 'button';
+const href = (a: HTMLAnchorElement, url: string) => Object.assign(a, { href: url, target: '_blank', rel: 'noopener' });
+const urlOf = (t: unknown): string | undefined => (isBlk(t) && typeof t.url === 'string' ? t.url : undefined);
+const btn = (label: unknown, cls = '', url?: string) => {
+  const b = url ? href(el('a', `btn ${cls}`), url) : Object.assign(el('button', cls), { type: 'button' });
   b.append(el('span', '', esc(label)));
   return b;
 };
@@ -50,7 +51,7 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     s.dataset.id = String(b.id);
     const head = el('p', 'tabh', `<span class=tw>${word(`tab-${b.id}`, String(b.title ?? '').toLowerCase())}</span>`);
     for (const a of blks(b.actions)) for (const m of blks(a.menu ?? [a])) {
-      const x = btn(m.label);
+      const x = btn(m.label, '', urlOf(m.tap));
       x.onclick = () => (m.tap ? c.tap(m.tap) : c.act({ action: m.action, values: m.values, confirm: m.confirm }, x));
       head.append(x);
     }
@@ -71,7 +72,9 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     return l;
   },
   row(b, c) {
-    const r = el('div', `row${b.style === 'link' ? ' link' : ''}${b.indent ? ' in' + Math.min(Number(b.indent), 3) : ''}`);
+    const cls = `row${b.style === 'link' ? ' link' : ''}${b.indent ? ' in' + Math.min(Number(b.indent), 3) : ''}`;
+    const url = urlOf(b.tap);
+    const r: HTMLElement = url ? href(el('a', cls), url) : el('div', cls);
     r.dataset.id = String(b.id ?? '');
     const sub = b.subtitle == null ? null : tone(b.subtitle), badge = b.badge == null ? null : tone(b.badge);
     r.replaceChildren(...nodes((isBlk(b.figure) ? figure(b.figure) : '') + `<span class=rm><span class=rt>${esc(b.title)}</span>` +
@@ -79,7 +82,8 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
       (sub ? `<span class="rs ${esc(sub.tone ?? '')}">${esc(sub.text)}</span>` : '') + '</span>' +
       (b.value != null ? `<span class=rv>${esc(value(b.value))}</span>` : '')));
     const swipe = blks(b.swipe);
-    if (b.tap || swipe.length) {
+    if (url) r.classList.add('tap');
+    else if (b.tap || swipe.length) {
       r.classList.add('tap');
       r.tabIndex = 0;
       r.setAttribute('role', 'button');
@@ -187,7 +191,7 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     return s;
   },
   button(b, c) {
-    const x = btn(b.label, String(b.style ?? ''));
+    const x = btn(b.label, String(b.style ?? ''), urlOf(b.tap));
     x.dataset.id = String(b.id ?? '');
     x.onclick = () => (b.tap ? c.tap(b.tap) : c.act({ action: b.action, block: b.id, values: b.values ?? {}, confirm: b.confirm }, x));
     return x;
@@ -206,9 +210,7 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
   images(b) {
     const s = el('div', 'imgs');
     for (const i of blks(b.items)) {
-      const a = el('a');
-      a.href = new URL(String(i.src).replace(/^\//, ''), document.baseURI).href;
-      a.target = '_blank';
+      const a = href(el('a'), new URL(String(i.src).replace(/^\//, ''), document.baseURI).href);
       const im = el('img');
       Object.assign(im, { src: a.href, alt: i.alt ?? '', loading: 'lazy' });
       a.append(im);
