@@ -47,7 +47,6 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     Ok(i32::from(rows.iter().any(|line| line.starts_with('✗'))))
 }
 
-/// #1101: fleet `name`'s hygiene line, then a `! hygiene` row for each key its repo has drifted from.
 fn hygiene(
     r: &dyn Runner,
     (name, f): (&str, &crate::config::Fleet),
