@@ -885,7 +885,7 @@ fn tick_logs_a_vm_deleted_outside_drover_gone_once_and_stops_counting_its_spend(
         ..c.clone()
     };
     let r = Fake::default().reply(&rc("status"), "");
-    assert!(tick(&later, &cfg, &r, &idle()).is_empty());
+    assert_eq!(tick(&later, &cfg, &r, &idle()), [] as [String; 0]);
     assert!(!r.called(&rc("stop")) && gone_stops(&c).len() == 1);
     let events = read(&c.state).unwrap();
     let spend = |c: &drover::Ctx| drover::cloud::spend(c, &cfg, &events, "cloud1").unwrap();
@@ -896,7 +896,7 @@ fn tick_logs_a_vm_deleted_outside_drover_gone_once_and_stops_counting_its_spend(
 fn a_failing_status_is_not_gone() {
     let (c, cfg) = running("cloud-gone-err");
     let r = lane_fake().once_err(&rc("status"), 1, "network unreachable");
-    assert!(tick(&c, &cfg, &r, &BTreeMap::new()).is_empty());
+    assert_eq!(tick(&c, &cfg, &r, &BTreeMap::new()), [] as [String; 0]);
     let (here, cloud) = (FakeShed::new(), FakeShed::new());
     let r = boot_fake(false);
     let there = on_cloud(&r, &cloud);
