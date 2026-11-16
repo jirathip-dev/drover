@@ -1474,9 +1474,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             }
             write!(out, "{}", boards.join("\n"))?;
         }
-        Cmd::ArchiveEvents { rebuild } => {
-            writeln!(out, "{}", crate::db::archive_events(&ctx.state, ctx.now, rebuild)?)?
-        }
+        Cmd::ArchiveEvents { rebuild } => crate::db::archive_events(&ctx.state, ctx.now, rebuild, out)?,
         Cmd::Compact(o) => crate::compact::cli(ctx, r, out, o)?,
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
