@@ -13,7 +13,7 @@ jobs:
           fetch-depth: 2
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
-          components: rustfmt
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       # #266: the tests run web/src/events.ts under node (type stripping: node 24).
       - uses: actions/setup-node@v4
@@ -23,9 +23,17 @@ jobs:
         run: cargo build --release --locked
       - name: fmt
         run: cargo fmt --check
+      - name: "clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/)"
+        run: |
+          cargo clippy --all-targets --locked -- -D warnings
+          n=$(grep -rE '#!?\[allow\(' crates | wc -l)
+          test "$n" -le 10 || { echo "::error::$n #[allow] attributes in crates/, at most 10"; exit 1; }
+      - name: "test shards (#1162: every test target is in exactly one shard of scripts/test-shards.txt)"
+        run: scripts/test-shards.sh check
       - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)"
         run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests the_state_read_stays_under_300ms --nocapture --test-threads=1
-      - name: "soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it)"
+      - name: "soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)"
+        if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
         run: cargo test --release --locked --test soak -- --ignored --nocapture --test-threads=1
       - name: demo export (#39, synthetic data in demo/)
         run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
@@ -82,33 +90,42 @@ jobs:
           echo "assets JS/CSS lines: $n"
           test "$n" -le 1500 || echo "::warning::assets JS/CSS is $n lines, over the 1500 soft budget"
 
-  # #957: the debug half (clippy, the test suite) beside the rust job's release half, so CI's wall time is the longer of the two.
-  test:
+  # #957: the debug suite beside the rust job's release half; #1162: in 4 shards side by side (scripts/test-shards.txt).
+  test-shard:
+    name: test (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
-        with:
-          components: clippy
       - uses: Swatinem/rust-cache@v2
       # #266: the tests run web/src/events.ts under node (type stripping: node 24).
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: "clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/)"
-        run: |
-          cargo clippy --all-targets --locked -- -D warnings
-          n=$(grep -rE '#!?\[allow\(' crates | wc -l)
-          test "$n" -le 10 || { echo "::error::$n #[allow] attributes in crates/, at most 10"; exit 1; }
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
       - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)"
-        run: cargo nextest run --locked --no-fail-fast
+        run: |
+          flags=$(scripts/test-shards.sh ${{ matrix.shard }})
+          read -ra targets <<<"$flags"
+          cargo nextest run --locked --no-fail-fast --workspace "${targets[@]}"
       - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
         run: test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*' -print -quit)"
+
+  # #1162: the one `test` check that branch protection and required_checks name, green only when every shard is.
+  test:
+    needs: test-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.test-shard.result }}" = success
 
   # #808: a workflow file GitHub can't parse fails here, on the PR.
   actionlint:
