@@ -902,14 +902,10 @@ pub fn merge(
         )?;
     }
     let m = [
-        "--merge",
-        "--match-head-commit",
-        &head,
-        "--subject",
-        &subject,
-        "--body",
-        &body,
-    ];
+        f.merge.flags(),
+        &["--match-head-commit", &head, "--subject", &subject, "--body", &body],
+    ]
+    .concat();
     let inputs = json!({"pr": num, "head": head, "over": over, "fast": fast});
     let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
     let at = (fleet, issue, "merge", head.as_str());
@@ -965,6 +961,11 @@ fn merged(
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
     let log = working(&ctx.state)?;
+    if f.merge == crate::config::MergeMode::Squash {
+        if let Err(e) = crate::why::squash(ctx, r, f, (fleet, issue), &log, &merge_sha) {
+            writeln!(out, "why note not on {merge_sha:.7}: {e:#}")?;
+        }
+    }
     let why = log.iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
