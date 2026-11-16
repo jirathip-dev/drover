@@ -150,8 +150,8 @@ impl Boat<'_> {
                     .push((w.to_vec(), String::from_utf8(o.stdout).unwrap()));
                 Ok(out(0, ""))
             }
-            [exe, "profiles", "sync", "--profile", p, ..] if exe == EXE => {
-                let hook = format!("'{EXE}' hook --role impl");
+            [exe, "profiles", "sync", "--profile", p, "--role", role] if exe == EXE => {
+                let hook = format!("'{EXE}' hook --role {role}");
                 let hooks = [json!({"matcher": "*", "hooks": [{"type": "command", "command": hook}]})];
                 let hooks = if self.machines.borrow()[m].hook {
                     json!(hooks)
@@ -441,7 +441,7 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     let checks = [
         "command -v git",
         "command -v gh",
-        "[ \"$(shed --version)\"",
+        "v=$(shed --version)",
         "shed doctor",
         "command -v node",
         "shed agents --json",
@@ -507,6 +507,33 @@ fn bootstrap_puts_shed_and_drover_on_a_hosts_non_login_ssh_path_so_the_survey_fi
         "shed not on PATH /home/user/.ascii:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin",
         "{o}"
     );
+}
+
+#[test]
+fn bootstrap_syncs_each_fitting_fleets_acp_profile_there_so_the_next_survey_passes_the_guard() {
+    let (c, _) = setup("racp-profiles", &["boat1"]);
+    let second = "\n[fleet.cargo]\nrepo = \"jirathip-dev/cargo\"\nlocal = \"/tmp/does-not-matter/cargo\"\n\
+integration = \"staging\"\n\n[fleet.cargo.role.impl]\nharness = \"claude\"\nprofile = \"cargo-impl\"\n";
+    let toml = std::fs::read_to_string(&c.config).unwrap() + second;
+    std::fs::write(&c.config, toml).unwrap();
+    let f = Fake::default()
+        .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat1 sh -c", "")
+        .reply("sh -c nohup", "4242\n");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat1"]);
+    assert_eq!(code, 0, "{o}");
+    let health = drover::hosts::cached(&c).remove("boat1").unwrap().health;
+    assert!(!health.iter().any(|r| r.starts_with("✗ acp guard")), "{health:?}");
+    let calls = f.calls.borrow().clone();
+    for p in ["fleet-impl", "cargo-impl"] {
+        let sync = format!("'profiles' 'sync' '--profile' '{p}' '--role' 'impl'");
+        let n = calls
+            .iter()
+            .filter(|l| l.starts_with("ssh boat1 ") && l.ends_with(&sync))
+            .count();
+        assert_eq!(n, 1, "{p}: {calls:?}");
+    }
 }
 
 fn upstream() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {

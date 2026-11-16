@@ -1,0 +1,271 @@
+{
+  "actions": [
+    {
+      "action": "thread-archive",
+      "label": "archive",
+      "values": {
+        "thread": "t4"
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "figure": {
+        "state": "idle"
+      },
+      "id": "who",
+      "sticky": true,
+      "subtitle": {
+        "text": "waiting: config c1 · no orchestrator yet · sendmeter · claude · opus",
+        "tone": "warn"
+      },
+      "title": "Ops · t4",
+      "type": "row"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-16-d",
+          "markdown": "```diff\n  [fleet.sendmeter.role.impl]\n- model = \"opus\"\n+ model = \"sonnet\"\n```",
+          "type": "text"
+        }
+      ],
+      "buttons": [
+        {
+          "action": "thread-config",
+          "id": "m-16-apply",
+          "label": "apply",
+          "style": "primary",
+          "type": "button",
+          "values": {
+            "act": "apply",
+            "id": "c1",
+            "thread": "t4"
+          }
+        },
+        {
+          "action": "thread-config",
+          "id": "m-16-discard",
+          "label": "discard",
+          "style": "",
+          "type": "button",
+          "values": {
+            "act": "discard",
+            "id": "c1",
+            "thread": "t4"
+          }
+        }
+      ],
+      "id": "m-16",
+      "kind": "config",
+      "meta": "0s",
+      "subtitle": "a fleet.toml change for you to apply",
+      "title": "config proposal c1",
+      "tone": "warn",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-17-t",
+          "markdown": "the search API",
+          "type": "text"
+        },
+        {
+          "id": "m-17-p",
+          "markdown": "pair this device to enter it",
+          "type": "text"
+        }
+      ],
+      "buttons": [],
+      "id": "m-17",
+      "kind": "secret",
+      "meta": "0s",
+      "title": "secret API_KEY",
+      "tone": "warn",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "action": "run-card",
+          "command": "git log -1",
+          "dir": "/srv/app",
+          "id": "r1",
+          "sha": "9ba072bced43",
+          "touches": "read-only",
+          "type": "run"
+        },
+        {
+          "id": "m-18-exp",
+          "markdown": "on main · expires in 15m",
+          "type": "text"
+        }
+      ],
+      "buttons": [],
+      "id": "m-18",
+      "kind": "run",
+      "meta": "0s",
+      "title": "owner asked",
+      "tone": "warn",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-19-cmd",
+          "markdown": "```\ngit status\n```",
+          "type": "text"
+        },
+        {
+          "id": "m-19-s",
+          "markdown": "on main · /srv/app · touches read-only  \n**approved** by owner · exit 1",
+          "type": "text"
+        },
+        {
+          "id": "m-19-tail",
+          "markdown": "```\nfatal: not a git repository\n```",
+          "type": "text"
+        }
+      ],
+      "buttons": [
+        {
+          "id": "m-19-copy",
+          "label": "copy",
+          "tap": {
+            "copy": "fatal: not a git repository"
+          },
+          "type": "button"
+        }
+      ],
+      "id": "m-19",
+      "kind": "run",
+      "meta": "0s",
+      "title": "owner asked",
+      "tone": "bad",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-24-t",
+          "markdown": "answered q9 for you: yes",
+          "type": "text"
+        },
+        {
+          "id": "m-24-c",
+          "markdown": "change it within 30 min of the answer:",
+          "type": "text"
+        },
+        {
+          "action": "answer",
+          "id": "q9",
+          "options": [
+            {
+              "label": "yes",
+              "value": "yes"
+            },
+            {
+              "label": "no",
+              "value": "no"
+            }
+          ],
+          "type": "choice",
+          "values": {
+            "fleet": "sendmeter",
+            "thread": "t4"
+          }
+        }
+      ],
+      "id": "m-24",
+      "kind": "ask",
+      "meta": "30s",
+      "title": "q9 · answered by the orchestrator",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-25-t",
+          "markdown": "claude is signed out: sign in",
+          "type": "text"
+        }
+      ],
+      "buttons": [
+        {
+          "action": "thread-signin",
+          "id": "m-25-sign-in",
+          "label": "sign in",
+          "style": "primary",
+          "type": "button",
+          "values": {
+            "host": "local",
+            "name": "claude",
+            "thread": "t4"
+          }
+        }
+      ],
+      "id": "m-25",
+      "kind": "sys",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-26-t",
+          "markdown": "Rate limits",
+          "type": "text"
+        }
+      ],
+      "buttons": [
+        {
+          "id": "m-26-link",
+          "label": "continued in t2",
+          "tap": {
+            "thread": "t2"
+          },
+          "type": "button"
+        }
+      ],
+      "id": "m-26",
+      "kind": "sys",
+      "type": "card"
+    },
+    {
+      "action": "thread-say",
+      "acts": {
+        "model": "thread-model",
+        "queue": "thread-queue",
+        "steer": "thread-steer",
+        "stop": "thread-stop",
+        "unqueue": "thread-unqueue"
+      },
+      "chips": [
+        {
+          "all": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "cur": null,
+          "name": "effort"
+        }
+      ],
+      "id": "say",
+      "label": "send",
+      "placeholder": "message the orchestrator",
+      "queued": [],
+      "type": "composer",
+      "values": {
+        "thread": "t4"
+      }
+    }
+  ],
+  "focus": true,
+  "id": "thread-t4",
+  "stream": "/screens/threads/t4/stream",
+  "title": "Ops",
+  "type": "screen"
+}

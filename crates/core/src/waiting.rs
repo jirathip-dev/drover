@@ -225,27 +225,6 @@ impl<'a> Log<'a> {
     }
 }
 
-fn serial_wait(all: &[Event], fc: &Fleet, f: &str, n: u64) -> Option<String> {
-    let g = crate::queue::serials(all, fc, f)
-        .into_iter()
-        .filter(|g| crate::queue::held(all, f, n, &g.name))
-        .min_by(|a, b| a.name.cmp(&b.name))?;
-    let serial_holders = |st: &crate::events::States| {
-        crate::queue::holders(all, st, fc, f, &g.name)
-            .iter()
-            .map(|s| s.issue)
-            .collect()
-    };
-    let h: Vec<u64> = crate::events::with_states(all, serial_holders);
-    let who: Vec<_> = h.iter().map(|n| format!("#{n}")).collect();
-    let by = if who.is_empty() {
-        "for a slot".into()
-    } else {
-        format!("held by {}", who.join(" "))
-    };
-    Some(format!("serial: {} {by} ({}/{})", g.name, h.len(), g.max))
-}
-
 /// Pure: the issue's wait reason. `log` = the whole log, `events` = the issue's part of it (or all of it). `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view; `rev` = the rev worktree's verdict.md (absolute path, first line) when written since the rev spawn. #173: each next step is the one `fc`'s pipeline maps the outcome to. #630: `waits`, plus what a pulled root lost (a `root-moved` since the issue's last push); #790: the lane moved on.
 pub fn waiting_on(
     log: &Log,
@@ -343,9 +322,6 @@ fn waits(
     let on = log.blockers(f, n);
     if !on.is_empty() {
         let what = format!("blocked by {on}");
-        return w("drive", &what, s.last_ts, None);
-    }
-    if let Some(what) = serial_wait(log.all, fc, f, n) {
         return w("drive", &what, s.last_ts, None);
     }
     let pushed = pr["headRefOid"].as_str().unwrap_or_default();
@@ -878,8 +854,7 @@ pub fn scan_where(
             (w.who, w.what, w.next_cmd, w.promise) = ("none", format!("parked: fleet paused{pr}"), None, None);
         }
         let head = pr["headRefOid"].as_str().unwrap_or_default();
-        let serial = || serial_wait(events, f, &s.fleet, s.issue).is_some();
-        if let Some(m) = crate::promise::missed(mine, &s, head, w.promise, ctx.now).filter(|_| !serial()) {
+        if let Some(m) = crate::promise::missed(mine, &s, head, w.promise, ctx.now) {
             w.what = m;
         }
         let s = IssueState {
@@ -990,7 +965,6 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Sess
     let ci = s.state == "ready" && label && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(pr))) == "pending";
     let held = !crate::events::held_on(log.all, s).is_empty() || !log.blockers(&s.fleet, s.issue).is_empty();
     let held = held || self::held(log.all, (&s.fleet, s.issue), None).is_some();
-    let held = held || serial_wait(log.all, f, &s.fleet, s.issue).is_some();
     if f.paused || ci || held || s.lanes.values().any(working) || log.asks.iter().any(asked) {
         return None;
     }

@@ -222,6 +222,8 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/pw/node_modules" node -e "require('playwright')"
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
+      - name: a thread tap and a thread push open the thread; back returns (#1088)
+        run: cargo test --locked --test cooee_screens parity_46_a_queue_row_with_an_ask_opens_its_thread_in_webkit -- --nocapture
       - name: "parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)"
         run: cargo test --locked --test parity_webkit -- --nocapture
       - name: "parity rows red until their fix (#1094: each #[ignore] names its issue; soft)"
@@ -231,5 +233,6 @@ jobs:
         run: cargo test --locked --test url_links
       - name: "typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65)"
         run: cargo test --locked --test page_drafts
-      - name: the Threads composer in WebKit (#1087, attachments and a failed send; queue and steer)
-        run: cargo test --locked --test threads_tab in_webkit -- --nocapture
+      - name: the thread view in WebKit (#1086, #1087: opens at the end, older above in place, image viewer, keyboard; attachments, a failed send, queue and steer)
+        if: ${{ !cancelled() }}
+        run: cargo test --locked --test threads_tab webkit -- --test-threads=1
