@@ -4,7 +4,7 @@ use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
 const KINDS: [&str; 5] = ["slo-idle", "slo-tick", "self-heal", "stuck", "slo-ok"];
@@ -41,6 +41,11 @@ pub fn pass(
         now.extend(missed(ctx, &events, f));
     }
     let eps = episodes(&events);
+    let mut loud: BTreeSet<String> = eps
+        .iter()
+        .filter(|(k, ep)| now.iter().any(|b| &b.key == *k) && ep.iter().any(|e| e.kind == "stuck"))
+        .filter_map(|(_, ep)| Some(ep.first()?.fleet.clone()))
+        .collect();
     for (key, ep) in eps.iter().filter(|(k, _)| !now.iter().any(|b| &b.key == *k)) {
         let Some(e) = ep.first() else { continue };
         append(
@@ -57,17 +62,22 @@ pub fn pass(
             &events,
             eps.get(&b.key).map_or(&[][..], Vec::as_slice),
             b,
+            &mut loud,
         )?;
     }
     Ok(())
 }
 
-/// #855: the `stuck` alerts whose breach still holds: the owner's cards.
-pub fn open_stuck(events: &[Event]) -> Vec<&Event> {
-    let eps = episodes(events);
-    eps.into_values()
+/// #855: the `stuck` alerts whose breach still holds, by fleet: one owner's card each (#1093).
+pub fn open_stuck(events: &[Event]) -> BTreeMap<&str, Vec<&Event>> {
+    let mut m: BTreeMap<&str, Vec<&Event>> = BTreeMap::new();
+    for e in episodes(events)
+        .into_values()
         .filter_map(|ep| ep.into_iter().find(|e| e.kind == "stuck"))
-        .collect()
+    {
+        m.entry(e.fleet.as_str()).or_default().push(e);
+    }
+    m
 }
 
 fn episodes(events: &[Event]) -> BTreeMap<String, Vec<&Event>> {
@@ -92,6 +102,7 @@ fn step(
     events: &[Event],
     ep: &[&Event],
     b: &Breach,
+    loud: &mut BTreeSet<String>,
 ) -> Result<()> {
     if ep.iter().any(|e| e.kind == "stuck") {
         return Ok(());
@@ -130,7 +141,12 @@ fn step(
         tried.join(", ")
     };
     let why = format!("{}; tried: {tried}", b.reason);
-    emit(&ctx.state, cfg, ev("stuck", json!({"key": b.key, "reason": why})))
+    let e = ev("stuck", json!({"key": b.key, "reason": why}));
+    if loud.insert(b.fleet.clone()) {
+        emit(&ctx.state, cfg, e)
+    } else {
+        append(&ctx.state, &e)
+    }
 }
 
 fn heal(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, h: &Heal) -> String {
