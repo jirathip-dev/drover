@@ -1,0 +1,10 @@
+Decided: the done-today count is the length of the list built from the fleet's `merged` events of the last 24 h
+Because: "The count and the list come from the same `merged` events, so they always agree."
+Because: crates/server/src/serve.rs:2053
+Decided: the list screen lives at /screens/queue/done so it gets its own queue hash and back returns to the queue
+Because: crates/server/src/screens.rs:356
+Rejected: /screens/done — round 1's ui-webkit run showed back did not return to the queue
+Decided: today stays the last 24 h the board already used, not a UTC calendar day
+Rejected: UTC midnight — for an owner at UTC+7 the list would empty at 7 am
+Check: ui-webkit done_today_opens_the_list_a_row_opens_its_issue_card_and_back_returns and m3 serve_is_read_only_html are green at the head
+Owner: tap done today on a fleet card to see what merged today, then tap one to open its card
