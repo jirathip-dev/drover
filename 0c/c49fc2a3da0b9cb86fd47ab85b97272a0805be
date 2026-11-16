@@ -1,0 +1,8 @@
+Decided: merge origin/staging; health.json's conflict takes staging's timings, since the contract test compares shapes only
+Because: crates/cli/tests/api_v1_contract.rs:123
+Decided: screens.rs keeps staging's Json::put style and this branch's [wait] swipe on a rate-limited row
+Because: crates/server/src/screens.rs:211
+Decided: limit.rs follows staging's new lints and env ban: slice pattern, try_from, config::env
+Because: crates/core/src/limit.rs:69
+Rejected: none
+Owner: no behaviour change this round; the branch is brought up to date with staging
