@@ -29,7 +29,7 @@ pub fn refused(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev:
             continue;
         };
         if let Some(p) = sp.str("pane") {
-            let _ = term::close(ctx, &On::of(r, Some(sp)), p);
+            term::close(ctx, &On::of(r, Some(sp)), p).ok();
             let d = json!({"agent": lane, "pane": p, "reason": "hook-refused"});
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-closed", d))?;
         }
@@ -78,10 +78,11 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], sessions: 
             if let Some(text) = brief.filter(|_| acp && resent.is_none()) {
                 let sent = term::prompt(&on, lane, &text).is_ok();
                 let d = json!({"agent": lane, "sent": sent});
-                let _ = append(
+                append(
                     &ctx.state,
                     &Event::new(ctx.now, &w.fleet, Some(w.issue), "start-resent", d),
-                );
+                )
+                .ok();
                 return None;
             }
             Some(if n == 0 {
@@ -126,8 +127,8 @@ pub fn stale_check(ctx: &Ctx, ev: &[Event], agents: &[Session], (fleet, n): (&st
     let i = ev
         .iter()
         .rposition(|e| e.kind == "spawn" && e.str("agent") == Some(lane))?;
-    let sp = &ev[i];
-    if !agents.iter().any(|a| a.name == lane) || ev[i + 1..].iter().any(|e| e.is("verdict", fleet, n)) {
+    let sp = ev.get(i)?;
+    if !agents.iter().any(|a| a.name == lane) || ev.iter().skip(i + 1).any(|e| e.is("verdict", fleet, n)) {
         return None;
     }
     let p = crate::session::pulse::of(ctx, lane);
@@ -189,7 +190,11 @@ pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Session], fleet: 
             (Some(_), None, _) => Silent::Respawn(role.into(), format!("silent {quiet} after its nudge")),
             (_, _, Some(e)) => Silent::Escalate(format!(
                 "lane {lane} went silent mid-turn again ({quiet}) within the hour after its {}",
-                ["nudge", "respawn"][usize::from(e.kind == "respawned-silent")]
+                if e.kind == "respawned-silent" {
+                    "respawn"
+                } else {
+                    "nudge"
+                }
             )),
             _ => Silent::Nudge(format!("silent {quiet} mid-turn")),
         };

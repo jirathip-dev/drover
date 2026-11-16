@@ -1,0 +1,1 @@
+- NO_BASELINE: verdict PASS on a `--perf` issue: the PR's first commit names no `baseline`, or verdict.md has no `Perf:` block

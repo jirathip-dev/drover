@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet, Role};
-use crate::gate::refused;
+use crate::{events::Json, gate::refused};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{Map, Value};
 
@@ -22,8 +22,8 @@ pub fn civil_year(days: u64) -> u64 {
 fn glob(g: &[u8], s: &[u8]) -> bool {
     match g {
         [] => s.is_empty(),
-        [b'*', rest @ ..] => (0..=s.len()).any(|i| glob(rest, &s[i..])),
-        [c, rest @ ..] => s.first() == Some(c) && glob(rest, &s[1..]),
+        [b'*', rest @ ..] => (0..=s.len()).any(|i| s.get(i..).is_some_and(|t| glob(rest, t))),
+        [c, rest @ ..] => s.split_first().is_some_and(|(h, t)| h == c && glob(rest, t)),
     }
 }
 
@@ -47,7 +47,7 @@ pub fn mcp_servers(cfg: &Config, f: &Fleet, role: &Role) -> Result<Map<String, V
     let src = f.local_path().join(".mcp.json");
     let text = std::fs::read_to_string(&src).with_context(|| format!("cannot read {}", src.display()))?;
     let all: Value = serde_json::from_str(&text).with_context(|| format!("{}: not JSON", src.display()))?;
-    let get = |n: &String| all["mcpServers"].get(n).cloned().map(|v| (n.clone(), v));
+    let get = |n: &String| all.at("mcpServers").get(n).cloned().map(|v| (n.clone(), v));
     role.mcp
         .iter()
         .map(|n| get(n).ok_or_else(|| anyhow!("MCP server `{n}` is not in {}", src.display())))

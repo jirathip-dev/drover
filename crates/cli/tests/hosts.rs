@@ -649,9 +649,10 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
     let r = here.on(&f);
     let rows = drover::hosts::health(&c, &cfg, &drover::hosts::On::new(&r, Some("bazzite")), &[], "/h");
     assert_eq!(rows.len(), 1, "{rows:?}");
+    let fix = format!("→ ssh bazzite '{}'", drover::hosts::SHED_RESTART);
     assert!(
-        rows[0].starts_with("! shed: "),
-        "a shed that does not answer only warns: {rows:?}"
+        rows[0].starts_with("✗ shed — does not answer: ") && rows[0].ends_with(&fix),
+        "a shed that does not answer keeps lanes off with its restart: {rows:?}"
     );
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     let r = healthy(fake(0.1, 0.1))
@@ -690,10 +691,11 @@ fn doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh() {
     let _sh = FakeShed::attached(&c);
     let r = healthy(fake(0.1, 0.1))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
+        .once_err(&format!("{SSH}'shed' 'connect'"), 1, "shed: no server on bazzite")
         .once_err(&format!("{SSH}'shed' 'connect'"), 1, "shed: no server on bazzite");
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(
-        out.contains("\n! host bazzite shed: ") && out.contains("no server on bazzite"),
+        out.contains("\n✗ host bazzite shed — does not answer: ") && out.contains("no server on bazzite"),
         "{out}"
     );
     assert!(!out.contains("unreachable"), "{out}");
@@ -1438,7 +1440,10 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     let rows = drover::hosts::health(&c, &cfg, &on, &[], home);
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert!(rows[0].starts_with("! drover — drover 0.1.0 (0ld) there"), "{rows:?}");
-    assert_eq!(drover::hosts::sync(&c, &on, "bazzite", home), "drover 0.1.0 (0ld)");
+    assert_eq!(
+        drover::hosts::sync(&c, &cfg, &on, ("bazzite", home, &[])),
+        "drover 0.1.0 (0ld)"
+    );
     let root = format!("--root '\\''{}'\\'' --force", root.display());
     let sync = format!("|| '\\''{real}'\\'' profiles sync");
     let calls = r.calls.borrow();
@@ -1450,6 +1455,33 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     assert!(
         calls.iter().any(|c| c.contains(STATUS) && c.ends_with(&asked)),
         "{calls:#?}"
+    );
+}
+
+#[test]
+fn health_is_clean_only_when_drover_on_ssh_path_is_this_version() {
+    let c = setup("hosts-path-version", "", true, 0);
+    let cfg = Config::load(&c.config).unwrap();
+    let real = std::fs::canonicalize(&c.exe).map_or(c.exe.clone(), |p| p.display().to_string());
+    let mine = format!("drover {}\n", drover::VERSION);
+    let rows = |path: &str| {
+        let r = healthy(fake(0.1, 0.1))
+            .reply(&format!("{SSH}'{real}' '--version'"), &mine)
+            .reply(&format!("{SSH}'drover' '--version'"), path);
+        let (here, there) = (FakeShed::new(), FakeShed::new());
+        let over = two(&r, &there);
+        let base = here.on(&over);
+        let on = drover::hosts::On::new(&base, Some("bazzite"));
+        let home = drover::config::home();
+        let rows = drover::hosts::health(&c, &cfg, &on, &[], home.to_str().unwrap());
+        rows.into_iter().filter(|r| r.contains("drover —")).collect::<Vec<_>>()
+    };
+    assert_eq!(rows(&mine), Vec::<String>::new());
+    let stale = rows("drover 0.1.0 (d91e726)\n");
+    assert_eq!(stale.len(), 1, "{stale:?}");
+    assert!(
+        stale[0].starts_with("✗ drover") && stale[0].contains("drover 0.1.0 (d91e726)"),
+        "{stale:?}"
     );
 }
 

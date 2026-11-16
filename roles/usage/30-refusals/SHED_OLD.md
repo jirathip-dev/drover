@@ -1,0 +1,1 @@
+- SHED_OLD: spawn: an ACP lane on a host whose shed has no `run --meta` (shed#94) does not start: it would load the owner's own setup

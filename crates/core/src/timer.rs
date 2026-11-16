@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{age, emit, working, Event};
+use crate::events::{age, emit, working, Event, Json};
 use crate::runner::{ok, Runner};
 use crate::{drive, host, Ctx};
 use anyhow::Result;
@@ -53,22 +53,27 @@ pub type Row = (String, &'static str, String, String);
 
 /// The job's files (path, content) for launchd (`mac`) or systemd: `argv` every `every` seconds or kept alive (0), with an explicit PATH, both streams to `<state>/tick.log` (or `serve.log`).
 pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac: bool) -> Vec<(PathBuf, String)> {
-    let (i, secs) = (usize::from(every > 0), every.to_string());
-    let log = ctx.state.with_file_name(["serve.log", "tick.log"][i]);
+    let (i, secs) = (every > 0, every.to_string());
+    let log = ctx.state.with_file_name(if i { "tick.log" } else { "serve.log" });
     let log = log.to_string_lossy();
     let (cmd, when, template, dest) = if mac {
         let strings = argv.iter().map(|a| format!("<string>{a}</string>")).collect();
         let serve = "KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n<key>ProcessType</key><string>Interactive</string>";
-        let when = [serve, "StartInterval</key><integer>{secs}</integer>"][i];
+        let when = if i {
+            "StartInterval</key><integer>{secs}</integer>"
+        } else {
+            serve
+        };
         let at = "StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>";
         let when = if every == DAILY { at } else { when };
         let dest = format!("Library/LaunchAgents/{label}.plist");
         (strings, when, include_str!("../assets/job.plist"), dest)
     } else {
-        let when = [
-            "Restart=on-failure\n\n[Install]\nWantedBy=default.target",
-            "Type=oneshot",
-        ][i];
+        let when = if i {
+            "Type=oneshot"
+        } else {
+            "Restart=on-failure\n\n[Install]\nWantedBy=default.target"
+        };
         let dest = format!(".config/systemd/user/{label}.service");
         (argv.join(" "), when, include_str!("../assets/job.service"), dest)
     };
@@ -91,7 +96,8 @@ fn ctl(ctx: &Ctx, label: &str, every: bool) -> [String; 3] {
     if MAC {
         let uid = std::fs::metadata(&ctx.home).map_or(0, |m| m.uid());
         let (t, plist) = (format!("gui/{uid}/{label}"), files(ctx, label, &[], "", 0, true));
-        let load = format!("launchctl bootstrap gui/{uid} {}", plist[0].0.display());
+        let p = plist.into_iter().next().unwrap_or_default().0;
+        let load = format!("launchctl bootstrap gui/{uid} {}", p.display());
         return [format!("launchctl print {t}"), load, format!("launchctl bootout {t}")];
     }
     let unit = format!("{label}.{}", if every { "timer" } else { "service" });
@@ -110,8 +116,8 @@ fn exec(r: &dyn Runner, cmd: &str) -> Result<String> {
 }
 
 fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Vec<(PathBuf, String)> {
-    let every = !["serve", "service"].contains(&args[0]);
-    let secs = match args[0] {
+    let every = !args.first().is_some_and(|a| ["serve", "service"].contains(a));
+    let secs = match args.first().copied().unwrap_or_default() {
         _ if !every => 0,
         "drive" => cfg.limits.fast_secs,
         "self-update" => 300,
@@ -121,6 +127,8 @@ fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Ve
     let cmd: Vec<&str> = std::iter::once(ctx.exe.as_str()).chain(args.iter().copied()).collect();
     files(ctx, label, &cmd, path, secs, MAC)
 }
+
+const STATES: [&str; 3] = ["missing", "outdated (args or interval differ)", "loaded"];
 
 /// #237: each own job against this build: `loaded`, `missing` (no file, or not loaded) or `outdated (args or interval differ)`; PATH is the host's, never compared.
 pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'static str)> {
@@ -137,14 +145,15 @@ pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'st
         if i == 1 && MAC && !files.iter().all(abandons) {
             return (label, "outdated (no AbandonProcessGroup)");
         }
-        (label, ["missing", "outdated (args or interval differ)", "loaded"][i])
+        (label, *STATES.get(i).unwrap_or(&"loaded"))
     };
     JOBS.map(state).to_vec()
 }
 
 /// #600: the PATH the tick job runs with: its installed file's, else the one `install` would write.
 pub fn job_path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
-    let file = &expect(ctx, cfg, JOBS[0].0, JOBS[0].1, "")[0].0;
+    let jobs = expect(ctx, cfg, JOBS[0].0, JOBS[0].1, "");
+    let file = jobs.first().map_or(Path::new(""), |f| f.0.as_path());
     let key = if MAC {
         "<key>PATH</key><string>"
     } else {
@@ -174,7 +183,7 @@ fn path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
 /// Write the job and load it (unless `!load`): `= already` when written (and loaded) as is, else `✓` or `✗ … → fix`.
 pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&str], load: bool) -> String {
     let (every, files) = (
-        !["serve", "service"].contains(&args[0]),
+        !args.first().is_some_and(|a| ["serve", "service"].contains(a)),
         expect(ctx, cfg, label, args, &path(ctx, cfg, r)),
     );
     let [probe, up, down] = ctl(ctx, label, every);
@@ -202,10 +211,10 @@ pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&st
         return format!("✓ wrote {label}; load it: {up}");
     }
     if live || MAC {
-        let _ = exec(r, &down);
+        exec(r, &down).ok();
     }
     if !MAC {
-        let _ = exec(r, "systemctl --user daemon-reload");
+        exec(r, "systemctl --user daemon-reload").ok();
     }
     exec(r, &up).map_or_else(|e| format!("✗ {label}: {e:#} → {up}"), |_| format!("✓ {up}"))
 }
@@ -222,7 +231,7 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
         }
         "remove" => both
             .map(|(label, _)| {
-                let _ = exec(r, &ctl(ctx, label, true)[2]);
+                exec(r, &ctl(ctx, label, true)[2]).ok();
                 let files = files(ctx, label, &[], "", 1, MAC);
                 let gone = files.iter().filter(|f| std::fs::remove_file(&f.0).is_ok()).count();
                 if gone > 0 {
@@ -233,7 +242,8 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
             })
             .join("\n"),
         _ => {
-            let on = ["not loaded", "loaded"][usize::from(exec(r, &ctl(ctx, label, true)[0]).is_ok())];
+            let up = exec(r, &ctl(ctx, label, true)[0]).is_ok();
+            let on = if up { "loaded" } else { "not loaded" };
             let (_, detail) = tick_row(ctx, &working(&ctx.state)?);
             format!("{label}: {on} · tick {detail}")
         }
@@ -243,14 +253,14 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
 }
 
 fn installed(ctx: &Ctx, cfg: &Config, lines: &[(&str, String)]) -> Result<()> {
-    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
+    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
     let pick = |f: fn(&str) -> bool| lines.iter().filter(|l| f(&l.1)).map(|l| l.0).collect::<Vec<_>>();
     let written = pick(|s| !s.starts_with("= ") && !s.contains("→ check"));
     let reloaded = pick(|s| s.starts_with("✓ ") && !s.starts_with("✓ wrote"));
     let by = if lane.is_empty() { "owner" } else { &lane };
     let mut d = serde_json::json!({"by": by, "written": written, "reloaded": reloaded});
-    if let Some(t) = std::env::var("DROVER_THREAD").ok().filter(|t| !t.is_empty()) {
-        d["thread"] = t.into();
+    if let Some(t) = crate::config::env("DROVER_THREAD").filter(|t| !t.is_empty()) {
+        d.put("thread", t.into());
     }
     let ev = Event::new(ctx.now, "drover", None, "timer-install", d);
     emit(&ctx.state, cfg, ev)
@@ -285,17 +295,13 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
     if log.metadata().is_ok_and(|m| m.len() > 1 << 20) {
         let f = std::fs::OpenOptions::new().write(true).open(&log);
-        let _ = f.and_then(|f| f.set_len(0));
+        f.and_then(|f| f.set_len(0)).ok();
     }
     let mark = ctx.state.with_file_name("tick.step");
-    let (beat, since, t0) = (
-        ctx.state.with_file_name("tick.beat"),
-        ctx.now,
-        std::time::Instant::now(),
-    );
+    let (beat, since, t0) = (ctx.state.with_file_name("tick.beat"), ctx.now, crate::clock::instant());
     let at = beat.clone();
     let write = move || {
-        let _ = std::fs::write(&at, format!("{since} {}", since + t0.elapsed().as_secs()));
+        std::fs::write(&at, format!("{since} {}", since + t0.elapsed().as_secs())).ok();
     };
     write();
     let loaded = crate::check::config(ctx);
@@ -314,7 +320,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         .map(|c| (crate::hosts::idle_off(c, &events), (ctx, c)));
     let (off, log) = spared.map_or_else(Default::default, |(o, l)| (o, Some(l)));
     let mut pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now))).sparing(off, log);
-    pass.until = std::time::Instant::now().checked_add(std::time::Duration::from_secs(budget));
+    pass.until = crate::clock::instant().checked_add(std::time::Duration::from_secs(budget));
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
         pass.step("check");
         crate::check::check(ctx, cfg, &pass, out)?;
@@ -333,7 +339,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
             .and_then(|s| s.trim().parse::<u64>().ok());
         if last.is_none_or(|t| ctx.now >= t + 3600) {
             pass.step("clean");
-            let _ = std::fs::write(&at, ctx.now.to_string());
+            std::fs::write(&at, ctx.now.to_string()).ok();
             if let Err(e) = crate::check::clean(ctx, cfg, &pass, out, None, (None, None, false), true) {
                 writeln!(out, "clean: {e:#}")?;
             }
@@ -343,7 +349,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         pass.step("lesson");
         crate::lesson::weekly(ctx, cfg, &pass, out)?;
         pass.step("hotspots");
-        crate::hotspots::weekly(ctx, cfg, &pass, out)?;
+        crate::hotspots::daily(ctx, cfg, &pass, out)?;
         pass.step("compact");
         compact_daily(ctx, out)?;
         driven
@@ -351,10 +357,10 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     for m in pass.late() {
         writeln!(out, "tick: {m}: over budget; skipped for the rest of this pass")?;
     }
-    let _ = std::fs::remove_file(&mark);
+    std::fs::remove_file(&mark).ok();
     drop(stop);
-    let _ = beating.join();
-    let _ = std::fs::remove_file(&beat);
+    beating.join().ok();
+    std::fs::remove_file(&beat).ok();
     let (cfg, events) = (loaded.unwrap_or_default(), working(&ctx.state).unwrap_or_default());
     match res {
         Err(e) if e.downcast_ref::<crate::gate::Refusal>().is_some() => writeln!(out, "tick: {e}")?,
@@ -385,9 +391,9 @@ pub fn running(ctx: &Ctx, cfg: &Config) -> Option<u64> {
 pub fn stuck_step(ctx: &Ctx, cfg: &Config) -> Option<(String, u64)> {
     let m: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(ctx.state.with_file_name("tick.step")).ok()?).ok()?;
-    let at = m["at"].as_u64().or_else(|| m["since"].as_u64())?;
+    let at = m.at("at").as_u64().or_else(|| m.at("since").as_u64())?;
     let secs = ctx.now.saturating_sub(at);
-    (secs > 3 * cfg.limits.slow_secs).then(|| (m["step"].as_str().unwrap_or("?").to_string(), secs))
+    (secs > 3 * cfg.limits.slow_secs).then(|| (m.at("step").as_str().unwrap_or("?").to_string(), secs))
 }
 
 /// #791: 2 tick intervals: no pass started and no heartbeat for longer reads stuck.
@@ -509,7 +515,7 @@ pub fn phone(ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> (&'static str
         (None, _) => ("a", "off: no webpush notifier".into()),
         (_, Some(f)) => ("r", format!("on · last failure: {}", f.str("error").unwrap_or("?"))),
         _ => (
-            ["a", "g"][usize::from(subs > 0)],
+            if subs > 0 { "g" } else { "a" },
             format!("on · {subs} device{s} · {when}"),
         ),
     }
@@ -517,7 +523,8 @@ pub fn phone(ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> (&'static str
 
 fn tone(now: u64, t: Option<u64>) -> &'static str {
     let since = t.map_or(u64::MAX, |t| now.saturating_sub(t));
-    ["g", "a", "r"][usize::from(since > 600) + usize::from(since > 900)]
+    let i = usize::from(since > 600) + usize::from(since > 900);
+    ["g", "a", "r"].get(i).unwrap_or(&"r")
 }
 
 fn ago(now: u64, t: Option<u64>) -> String {
@@ -549,7 +556,7 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let mut rows = vec![row("board", t, d, "drover setup")];
     let drift = drift(ctx, cfg, r);
     let service = crate::service::up(ctx);
-    let job = |i: usize, t, d: String| match drift[i].1 {
+    let job = |i: usize, t, d: String| match drift.get(i).map_or("", |d| d.1) {
         "loaded" => (t, d),
         _ if i == 1 && service.is_some() => (t, d + " · by the service"),
         state => ("r", format!("{d} · job {state}")),
@@ -596,7 +603,7 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     rows.push(row("phone alerts", t, d, "drover push test"));
     if let Some(gb) = host::free_gb(r) {
         let (min, n) = (cfg.limits.min_free_gb, usize::from);
-        let t = ["g", "a", "r"][n(gb <= min * 1.25) + n(gb < min)];
+        let t = *["g", "a", "r"].get(n(gb <= min * 1.25) + n(gb < min)).unwrap_or(&"r");
         rows.push(row("disk", t, format!("{gb:.0} GB free"), "drover clean --yes"));
     }
     let budget = cfg.limits.worktree_budget_gb;
@@ -604,7 +611,8 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let (t, d) = du.map_or(("a", "not measured yet".into()), |(gb, at)| {
         let full = |i: &u8| f64::from(*i) < (gb / budget * 10.0).round();
         let bar: String = (0..10).map(|i| if full(&i) { '█' } else { '░' }).collect();
-        let t = ["g", "a", "r"][usize::from(gb > budget * 0.8) + usize::from(gb > budget)];
+        let i = usize::from(gb > budget * 0.8) + usize::from(gb > budget);
+        let t = *["g", "a", "r"].get(i).unwrap_or(&"r");
         (t, format!("▕{bar}▏ {gb:.1} / {budget} GB · {}", ago(ctx.now, at)))
     });
     rows.push(row("fleet disk", t, d, "drover clean --yes"));

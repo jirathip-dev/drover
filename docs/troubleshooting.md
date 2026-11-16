@@ -58,7 +58,9 @@ prints, naming the login keychain over ssh as in §1.
 hook behaves like an old build.
 
 **Cause.** The updater installs into `~/.local/share/drover/bin`, but the lanes' hook called a separate, older copy
-in `~/.local/bin` that is not a symlink, so the update never reached it. #573 is the real fix.
+in `~/.local/bin` that is not a symlink, so the update never reached it. #573 is the real fix. Since #1168 the host's
+health shows `✗ drover` with both versions when ssh's PATH runs another drover than the install root, and
+`hosts bootstrap` and the next `check` relink `~/.local/bin/drover` and a stale `/usr/local/bin/drover`.
 
 **Check.**
 
