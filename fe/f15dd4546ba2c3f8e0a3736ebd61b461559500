@@ -1,0 +1,14 @@
+Decided: every Queue row taps to /screens/issue; the ask's thread and the lane transcript moved into the sheet's LINKS
+Because: "A row tap **always** opens the issue sheet."
+Decided: the row's badge is the stage strip as glyphs, the current stage in brackets with its name (`[▲ impl · fix] ◆ ◫`); stuck rows (dead, needs you) and stage-less ones keep the state word
+Because: crates/server/src/screens.rs:153
+Decided: the theme's plant is the row figure's `grow` key; the page draws the theme's `stages` sprite for it, else the old row sprite
+Because: "the theme's plant for its stage where the theme has `stages`, #423"
+Decided: the ask in the sheet reuses the Cards tab's choice block (ask_choice), so answering in place posts the same `answer` action
+Because: crates/server/src/screens.rs:592
+Decided: a sheet opened from a sheet keeps a back stack; [‹ back] returns, Done and the backdrop close them all
+Because: "[lane] in it → the transcript; back → the sheet"
+Decided: merged origin/staging (#1085, #1084) instead of rebasing; ci.yml keeps both sides' WebKit steps, web/dist rebuilt
+Rejected: a new block type for the strip — cooee's vocabulary has none; a text badge renders on both cooee and the page
+Check: CI ui-webkit runs issue_sheet_webkit (it skips locally without Playwright)
+Owner: Tapping any Queue row now opens the issue's sheet, and the row shows which pipeline step the issue is in.
