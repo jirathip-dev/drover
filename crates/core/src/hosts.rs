@@ -624,11 +624,13 @@ pub fn held_slots(cfg: &Config, events: &[Event], agents: &[Session], skip: Opti
     n
 }
 
-/// #984: drive's check before a start: `waiting for a slot` while every enabled host the lane fits is full.
+/// #984: drive's check before a start: `waiting for a slot` while every enabled, up host the lane fits is full.
 pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: Lane, start: &[Event]) -> Option<String> {
     let need = needs(cfg.fleet(me.0).ok()?, me.2, ev, (me.0, me.1));
     let seen = cached(ctx);
-    let fit = |(n, h): &(&String, &HostCfg)| h.enabled && need.iter().all(|t| tags(h, seen.get(*n)).contains(t));
+    let up = |n: &str| seen.get(n).is_none_or(|s| s.up);
+    let fit =
+        |(n, h): &(&String, &HostCfg)| h.enabled && up(n) && need.iter().all(|t| tags(h, seen.get(*n)).contains(t));
     let mut full = None;
     for (name, h) in cfg.hosts.iter().filter(fit) {
         let why = working_full(ctx, cfg, r, ev, me, &start.iter().collect::<Vec<_>>(), (name, h))?;
@@ -871,7 +873,7 @@ pub struct Placed {
     pub home: Option<String>,
     pub refusal: Option<(&'static str, String)>,
     pub why: Option<String>,
-    rank: (bool, f64, f64),
+    rank: (bool, bool, f64, f64),
 }
 
 type Pre<'a> = (&'a [Event], Option<&'a str>);
@@ -903,11 +905,16 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     };
     let reach = format!("can't reach {}:", f.repo);
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
+    let mut full = false;
     let (hs, refusal) = match cloud.map_or_else(|| crate::session::live_on(&on).map_err(|_| None), |c| Err(Some(c))) {
         Err(Some(c)) => (Host::default(), Some(c)),
         Err(None) => (Host::default(), Some(("HOST_OFFLINE", "unreachable".to_string()))),
         Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
-        Ok(_) => gate(ctx, cfg, &on),
+        Ok(agents) => {
+            let cap = cfg.hosts.get(name).and_then(|h| h.max_working);
+            full = cap.is_some_and(|c| held_slots(cfg, pre.0, &agents, None)[0] >= c);
+            gate(ctx, cfg, &on)
+        }
     };
     Placed {
         name: name.into(),
@@ -916,6 +923,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
         local: ex(&f.local),
         rank: (
             refusal.is_some(),
+            full,
             hs.load_per_cpu.unwrap_or(0.0),
             -hs.free_mem_gb.unwrap_or(0.0),
         ),
@@ -1267,13 +1275,23 @@ pub fn place(
     let local = |p: &Placed| cfg.hosts.get(&p.name).is_some_and(|h| h.cloud.is_none());
     let held = held_for(ctx, on.iter().filter(|p| local(p)).all(|p| p.refusal.is_some()));
     let wake = held >= cfg.limits.overflow_after_minutes * 60 || !on.iter().any(local);
-    let first = on.first().is_some_and(local);
-    let i = (!wake && !first).then(|| on.iter().position(local)).flatten();
+    let free = |p: &Placed| p.refusal.is_none() && !p.rank.1;
+    let up = (!on.iter().any(|p| local(p) && free(p)))
+        .then(|| on.iter().position(free))
+        .flatten();
+    let i = up.or_else(|| {
+        (!wake && !on.first().is_some_and(local))
+            .then(|| on.iter().position(local))
+            .flatten()
+    });
     let mut p = on.remove(i.unwrap_or(0));
-    let why = match on.iter().any(local) {
-        true => format!("overflow: every local host busy {} min", held / 60),
-        false if needs.is_empty() => "no local host fits".into(),
-        false => format!("needs {}: no local host has it", needs.join(", ")),
+    let busy = on.iter().filter(|p| local(p)).find_map(|p| p.refusal.as_ref());
+    let busy = busy.map_or_else(|| "every local host at max_working".into(), |(c, w)| format!("{c} {w}"));
+    let why = match (on.iter().any(local), up) {
+        (true, Some(_)) => format!("{busy}; {} is up with room", p.name),
+        (true, None) => format!("overflow: every local host busy {} min", held / 60),
+        (false, ..) if needs.is_empty() => "no local host fits".into(),
+        (false, ..) => format!("needs {}: no local host has it", needs.join(", ")),
     };
     p.why = (!local(&p)).then_some(why);
     Ok(Some(p))

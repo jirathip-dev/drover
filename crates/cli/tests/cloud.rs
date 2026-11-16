@@ -103,8 +103,8 @@ fn placed(c: &drover::Ctx, r: &Fake, force: Option<&str>) -> Result<String, Stri
     }
 }
 
-fn spawn_fake() -> Fake {
-    fake(0.1)
+fn spawn_fake_at(mini: f64) -> Fake {
+    fake(mini)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(
             &format!("{SSH}'sh' '-c' 'git clone --single-branch --branch '\\''staging'\\'' https://github.com/jirathip-dev/sendmeter.git"),
@@ -114,6 +114,10 @@ fn spawn_fake() -> Fake {
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
         .reply(&format!("{SSH}'rm' '-f'"), "")
+}
+
+fn spawn_fake() -> Fake {
+    spawn_fake_at(0.1)
 }
 
 fn on_cloud<'a>(f: &'a Fake, sh: &'a FakeShed) -> OverSsh<'a> {
@@ -228,33 +232,39 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
     assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
 }
 
-#[test]
-fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
-    let c = setup("cloud-running-overflow");
+fn pick(c: &drover::Ctx, r: &Fake) -> (String, Option<&'static str>, Option<String>) {
+    let (sh, cloud) = (FakeShed::new(), FakeShed::new());
+    let cfg = Config::load(&c.config).unwrap();
+    let p = place(
+        c,
+        &cfg,
+        &sh.on(&on_cloud(r, &cloud)),
+        &read(&c.state).unwrap(),
+        ("sendmeter", 12, "impl"),
+        (None, &|_| None),
+    );
+    let p = p.unwrap().unwrap();
+    (p.name, p.refusal.map(|r| r.0), p.why)
+}
+
+fn cloud_up(name: &str) -> drover::Ctx {
+    let c = setup(name);
     ev(&c, NOW - 100, "cloud-start");
     ev(&c, NOW - 90, "cloud-up");
-    let (sh, cloud) = (FakeShed::new(), FakeShed::new());
-    let pick = |c: &drover::Ctx, r: &Fake| {
-        let cfg = Config::load(&c.config).unwrap();
-        let p = place(
-            c,
-            &cfg,
-            &sh.on(&on_cloud(r, &cloud)),
-            &read(&c.state).unwrap(),
-            ("sendmeter", 12, "impl"),
-            (None, &|_| None),
-        );
-        let p = p.unwrap().unwrap();
-        (p.name, p.refusal.map(|r| r.0), p.why)
-    };
+    c
+}
+
+#[test]
+fn a_running_cloud_host_takes_a_lane_at_once_while_every_mac_is_busy_and_says_why() {
+    let c = cloud_up("cloud-running-overflow");
     assert_eq!(pick(&c, &fake(2.0)), ("mini".into(), None, None));
-    assert_eq!(pick(&c, &fake(3.0)).1, Some("HOST_BUSY"));
-    let later = drover::Ctx {
-        now: NOW + 601,
-        ..c.clone()
-    };
-    let why = Some("overflow: every local host busy 10 min".to_string());
-    assert_eq!(pick(&later, &fake(3.0)), ("cloud1".into(), None, why));
+    let (name, refusal, why) = pick(&c, &fake(3.0));
+    assert_eq!((name.as_str(), refusal), ("cloud1", None));
+    let why = why.unwrap();
+    assert!(
+        why.starts_with("HOST_BUSY mini: load/cpu 3.00 > ") && why.ends_with("; cloud1 is up with room"),
+        "{why}"
+    );
     run(
         &c,
         &Fake::default(),
@@ -262,6 +272,51 @@ fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
     );
     let why = Some("needs docker: no local host has it".to_string());
     assert_eq!(pick(&c, &fake(0.1)), ("cloud1".into(), None, why));
+}
+
+#[test]
+fn a_running_cloud_host_at_max_working_leaves_the_lane_held_on_the_busy_mac() {
+    let c = cloud_up("cloud-running-full");
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        cfg.replace("size = \"small\"\n", "size = \"small\"\nmax_working = 0\n"),
+    )
+    .unwrap();
+    assert_eq!(pick(&c, &fake(3.0)).1, Some("HOST_BUSY"));
+}
+
+#[test]
+fn an_issue_whose_last_lane_ran_on_the_busy_mac_goes_to_the_running_cloud_host() {
+    let c = cloud_up("cloud-sticky-busy");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "host": "mini", "pane": "p1"});
+    append(&c.state, &Event::new(NOW - 50, "sendmeter", Some(12), "spawn", d)).unwrap();
+    assert_eq!(pick(&c, &fake(0.1)), ("mini".into(), None, None));
+    let (name, refusal, why) = pick(&c, &fake(3.0));
+    assert_eq!((name.as_str(), refusal), ("cloud1", None), "{why:?}");
+    assert!(why.is_some_and(|w| w.ends_with("cloud1 is up with room")));
+}
+
+#[test]
+fn the_dry_run_names_the_host_it_picked_and_why() {
+    let c = cloud_up("cloud-dry-run-host");
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]);
+    let r = spawn_fake_at(3.0);
+    let cloud = FakeShed::new();
+    let (code, out) = run(
+        &c,
+        &on_cloud(&r, &cloud),
+        &["spawn", "sendmeter", "12", "impl", "--dry-run"],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("  on cloud1: HOST_BUSY mini: ") && l.ends_with("; cloud1 is up with room")),
+        "{out}"
+    );
 }
 
 fn running(name: &str) -> (drover::Ctx, Config) {
