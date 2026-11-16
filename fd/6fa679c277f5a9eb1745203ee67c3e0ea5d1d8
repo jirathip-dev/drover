@@ -1,0 +1,9 @@
+Decided: a live rev-family lane counts as finished once a verdict of its own stage follows its spawn, whatever its pane status
+Because: "that lane has already recorded its verdict, drive supersedes it"
+Because: crates/core/src/spawn.rs:1049
+Decided: shots/ joins SHOT_DIRS, so dirty, changes and clean all treat it as lane output
+Because: "`shots/` counts as a lane's own output, like `SHOT_DIRS`"
+Rejected: a separate supersede pre-check in drive — spawn's finished message already drives the --supersede retry
+Rejected: verdict rule for impl lanes — an impl pane gets fix prompts after a verdict and must not be replaced
+Check: a working verify lane with no verdict of its stage still gets LANE_LIVE live agent(s)
+Owner: Verify lanes stop holding the queue once they have given their verdict.
