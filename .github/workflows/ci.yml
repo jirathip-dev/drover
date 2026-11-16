@@ -237,7 +237,7 @@ jobs:
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
           webkit=false
-          grep -qE '^(web/|assets/|crates/server/src/(serve\.rs|screens\.rs|serve/chat\.rs)|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|ui/drafts\.mjs|threads_tab\.rs))' changed.txt && webkit=true
+          grep -qE '^(web/|assets/|crates/server/src/(serve\.rs|screens\.rs|serve/chat\.rs)|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|ui/(drafts|repaint)\.mjs|threads_tab\.rs))' changed.txt && webkit=true
           echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
 
   # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.

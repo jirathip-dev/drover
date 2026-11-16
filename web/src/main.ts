@@ -1,7 +1,7 @@
 // #927: the phone page draws the screens cooee draws (cooee-plugin.toml's places, `PL` from the page shell): each
 // header-strip place is a tab, the menu-row places open from [⚙], the chat-cards place is the cards above every tab.
 // A screen is fetched, drawn block by block, patched by its `stream`, and its blocks post `/action`. No per-tab code.
-import { type Act, type Ctx, el, kids, render, sent, values } from './blocks';
+import { type Act, type Ctx, el, kids, morph, render, sent, values } from './blocks';
 import { apply, type Blk, blks, isBlk, isList, obj } from './ops';
 import { R, colours, esc, get, nodes, put, schemes, theme, themes } from './theme';
 
@@ -76,24 +76,8 @@ function land(sc: HTMLElement | null, s: Spot | null) {
 const seen = new WeakMap<HTMLElement, Spot | null>();
 const docked = new ResizeObserver(es => es.forEach(({ target: t }) => { if (t instanceof HTMLElement && t.isConnected) land(t, seen.get(t) ?? null); }));
 const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr > .msgs');
-const path = (e: Element, top: Element | null) => {
-  const p: Element[] = [];
-  for (let x: Element | null = e; x && x !== top; x = x.parentElement) p.unshift(x);
-  return p;
-};
-function graft(root: Element, body: Element[], mine: Element[], twin: Element[]) {
-  let [box, fresh] = [root, body];
-  mine.forEach((m, i) => {
-    const at = fresh.indexOf(twin[i]);
-    [...box.childNodes].forEach(n => { if (n !== m) n.remove(); });
-    m.before(...fresh.slice(0, at));
-    m.after(...fresh.slice(at + 1));
-    if (i < mine.length - 1) m.className = twin[i].className;
-    [box, fresh] = [m, [...twin[i].children]];
-  });
-}
 function paint(v: View, before?: Blk | null) {
-  const m = v.model, y = scrollY, f = document.activeElement;
+  const m = v.model, y = scrollY;
   if (!m) return;
   const focus = !isList(m) && !!m.focus, was = scroller(v), place = focus && was?.parentElement?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
   const c = ctx(v, isList(m) ? 'cards' : String(m.id));
@@ -104,12 +88,7 @@ function paint(v: View, before?: Blk | null) {
     b.onclick = () => { if (v === cur.v) history.back(); else { const p = v.back.pop(); if (p != null) go(v, p, false); } };
     (body[0].querySelector(':scope > .msgs') ?? body[0]).prepend(b);
   }
-  const keep = f && v.root.contains(f) && f.matches('input, select, textarea') ? f.closest('[data-id]') : null;
-  const sel = keep && `[data-id="${CSS.escape(keep.getAttribute('data-id') ?? '')}"]`;
-  const twin = sel ? body.map(e => (e.matches(sel) ? e : e.querySelector(sel))).find(e => !!e) : null;
-  const [mp, tp] = keep && twin ? [path(keep, v.root), path(twin, null)] : [[], []];
-  if (mp.length && mp.length === tp.length && body.some(e => e === tp[0]) && mp[0].getAttribute('data-id') === tp[0].getAttribute('data-id')) graft(v.root, body, mp, tp);
-  else v.root.replaceChildren(...body);
+  morph(v.root, body);
   if (scrollY !== y) scrollTo(0, y);
   if (before) {
     const was = rows(before);
@@ -146,7 +125,7 @@ async function load(v: View, quiet = false) {
   if (!v.model || !quiet) paint(v);
   const slow = setTimeout(() => ($('#ld').hidden = false), 300);
   try {
-    const p = v.path, m = await fetchScreen(p), before = v.model;
+    const p = v.path, m = await fetchScreen(p), before = v.model === c?.v ? null : v.model;
     if (v.path !== p) return;
     [v.model, v.at] = [m, Date.now()];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: m }));
