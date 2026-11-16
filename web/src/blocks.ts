@@ -72,6 +72,7 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     s.append(head, ...kids(b.blocks, c));
     if (b.focus) {
       const m = el('div', 'msgs');
+      drawn.set(m, { key: JSON.stringify(b), box: true });
       m.append(...[...s.children].filter(e => !e.matches('.row.sticky, .cmp')));
       s.insertBefore(m, s.querySelector(':scope > .cmp'));
     }
@@ -491,12 +492,50 @@ export function kids(bs: unknown, c: Ctx): HTMLElement[] {
   return blks(bs).map(b => render(b, c)).filter((e): e is HTMLElement => !!e);
 }
 
+const drawn = new WeakMap<Element, { key: string; box: boolean }>();
+const BOX = new Set(['screen', 'section', 'list', 'sheet']);
+
 /** A block as DOM; a type this page has no renderer for draws its children, else nothing. */
 export function render(b: Blk, c: Ctx): HTMLElement | null {
   const f = R[String(b.type)];
-  if (f) return f(b, c);
-  if (!b.blocks) return null;
-  const d = el('div');
-  d.append(...kids(b.blocks, c));
-  return d;
+  const e = f ? f(b, c) : b.blocks ? el('div') : null;
+  if (!e) return null;
+  if (!f) e.append(...kids(b.blocks, c));
+  drawn.set(e, { key: `${c.open.has(String(b.id))}${c.open.has(`sw:${b.id}`)}${JSON.stringify(b)}`, box: !f || BOX.has(String(b.type)) });
+  return e;
+}
+
+const idOf = (n: Node) => (n instanceof HTMLElement ? n.dataset.id ?? '' : '');
+function same(a: Node, b: Node, trust: boolean): Node {
+  if (a.nodeName !== b.nodeName) return b;
+  if (!(a instanceof Element && b instanceof Element)) {
+    if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
+    return a;
+  }
+  const da = drawn.get(a), db = drawn.get(b);
+  if (da || db) {
+    if (!da || !db || (!db.box && da.key !== db.key)) return b;
+    trust = da.key === db.key;
+  } else if (!trust) return a.isEqualNode(b) ? a : b;
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name)) a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  morph(a, [...b.childNodes], trust);
+  return a;
+}
+/** #1169: `box`'s children become `want` in place: a node whose block is unchanged stays (its field, focus, scroll, image). */
+export function morph(box: Element, want: Node[], trust = false) {
+  const old = [...box.childNodes], byId = new Map<string, Node>(), plain: Node[] = [];
+  old.forEach(n => (idOf(n) ? byId.set(idOf(n), n) : plain.push(n)));
+  const next = want.map(n => {
+    const k = idOf(n), o = k ? byId.get(k) : plain.shift();
+    byId.delete(k);
+    return o ? same(o, n, trust) : n;
+  });
+  const keep = new Set(next);
+  old.forEach(n => { if (!keep.has(n)) n.remove(); });
+  let at = box.firstChild;
+  for (const n of next) {
+    if (n === at) at = n.nextSibling;
+    else box.insertBefore(n, at);
+  }
 }
