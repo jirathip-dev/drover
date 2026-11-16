@@ -1326,6 +1326,12 @@ impl Server<'_> {
         let tab = self.needs_tab(ctx, true);
         let ev = working(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
+        cards.retain(|c| {
+            !self.flying(&[
+                ("op", "card"),
+                ("id", c["id"].as_str().unwrap_or_default().trim_start_matches("run-")),
+            ])
+        });
         cards.extend(tab.config.as_ref().map(|e| {
             json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
                 "title": "fleet.toml is invalid", "blocks": [{"type": "text", "id": "config-why", "markdown": e}]})
@@ -1344,8 +1350,16 @@ impl Server<'_> {
                 "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": md.join("\n")}],
                 "buttons": [{"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"}]})
         }));
-        cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
-        cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
+        let asks =
+            (tab.asks.iter()).filter(|a| !self.flying(&[("op", "answer"), ("fleet", &a.ask.fleet), ("id", &a.ask.id)]));
+        cards.extend(asks.map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
+        let issues = tab.issues.iter().filter(|i| {
+            let n = i.issue.to_string();
+            !["extend", "override", "park"]
+                .iter()
+                .any(|op| self.flying(&[("op", op), ("fleet", &i.fleet), ("issue", &n)]))
+        });
+        cards.extend(issues.map(|i| needs_card(i, &ev)));
         Value::Array(cards)
     }
 
@@ -1572,10 +1586,13 @@ impl Server<'_> {
         };
         let close = ["save-fleets", "remove-fleet", "kill", "clean", "close", "queue"].contains(&name)
             || name == "answer" && a["screen"] != "cards";
-        let ops: Vec<Value> = (name == "answer")
-            .then(|| json!({"op": "remove", "id": format!("ask-{block}")}))
-            .into_iter()
-            .collect();
+        let gone = match name {
+            "answer" => Some(format!("ask-{block}")),
+            "needs-human" => Some(format!("nhc-{}-{}", s("fleet"), s("issue"))),
+            "run-card" => Some(format!("run-{block}")),
+            _ => None,
+        };
+        let ops: Vec<Value> = gone.map(|id| json!({"op": "remove", "id": id})).into_iter().collect();
         Ok(json!({"ops": ops, "toast": toast, "close": close}))
     }
 
