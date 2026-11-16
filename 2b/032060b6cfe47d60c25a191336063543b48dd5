@@ -1,0 +1,9 @@
+Decided: settle's wait sleeps poll_millis/32 first and doubles each step up to poll_millis, never past the deadline
+Because: "a poll that starts at 1 ms and backs off to `poll_millis`"
+Rejected: a waiter thread with recv_timeout — Proc has no blocking wait by design; a child stuck in disk I/O would pin a thread for good
+Because: crates/core/src/runner.rs:392
+Decided: the first step derives from poll_millis instead of a new [limits] key, so one knob still tunes the wait
+Rejected: a literal 1 ms Duration — the timing check bans hard-coded Durations in core
+Decided: drain's two threads per call stay; the scope names only the wait
+Check: runner_limits' two new tests; 100 true calls median 2.75 s before, 0.67 s after on a host at load 29-60
+Owner: Short commands no longer wait 20 ms each before drover sees them finish; time limits behave as before.
