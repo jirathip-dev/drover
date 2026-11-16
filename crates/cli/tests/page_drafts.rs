@@ -80,6 +80,10 @@ fn typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_rel
         (&typed["value"], &typed["draft"]),
         "the draft is back after a reload: {out}"
     );
+    assert_eq!(
+        out["reloaded"]["hash"], "#threads/t2",
+        "#1088: a reload keeps the open thread: {out}"
+    );
     let failed = &out["failed"];
     assert_eq!(
         (&failed["value"], &failed["draft"]),

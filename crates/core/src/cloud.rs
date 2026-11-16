@@ -167,7 +167,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
     let up = up.and_then(|_| {
         for _ in 0..30 {
             if cmd(ctx, cfg, r, name, "status")?.trim() == "running" {
-                return refresh(ctx, cfg, r, name, (true, false))
+                return refresh(ctx, cfg, r, name, (true, true))
                     .map(|()| drop(crate::hosts::survey(ctx, cfg, r, true)));
             }
             r.sleep(10);
@@ -180,6 +180,15 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
         log(ctx, cfg, "cloud-stop", name, d)?;
     }
     up
+}
+
+/// #1123: `status` printed nothing, so the VM was deleted outside drover: logs `cloud-stop {why: gone}`. A failing `status` is not gone.
+pub fn gone(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<bool> {
+    if !cmd(ctx, cfg, r, name, "status").is_ok_and(|s| s.trim().is_empty()) {
+        return Ok(false);
+    }
+    log(ctx, cfg, "cloud-stop", name, json!({"why": "gone"}))?;
+    Ok(true)
 }
 
 fn pin(ctx: &Ctx, name: &str) -> std::path::PathBuf {
@@ -284,7 +293,14 @@ pub type Live = BTreeMap<String, Option<Vec<crate::session::Session>>>;
 pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Live, out: &mut dyn std::io::Write) -> Result<()> {
     let (events, seen) = (working(&ctx.state).unwrap_or_default(), crate::hosts::cached(ctx));
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.cloud.is_some()) {
-        let Some(Some(agents)) = live.get(name).filter(|_| state(&events, name) == "running") else {
+        if state(&events, name) != "running" {
+            continue;
+        }
+        if gone(ctx, cfg, r, name)? {
+            writeln!(out, "cloud {name}: gone (status prints nothing), logged stopped")?;
+            continue;
+        }
+        let Some(Some(agents)) = live.get(name) else {
             continue;
         };
         let idle = h.idle_stop_minutes.unwrap_or(cfg.limits.cloud_idle_stop_minutes) * 60;
@@ -370,9 +386,10 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let h = cfg.hosts.get(name).context("no such host")?;
     let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
     let acp = cfg.host_acp(name).is_some();
-    if h.cloud.is_some() && state(&working(&ctx.state)?, name) != "running" {
+    let cloud = h.cloud.is_some();
+    if cloud && (state(&working(&ctx.state)?, name) != "running" || gone(ctx, cfg, r, name)?) {
         start(ctx, cfg, r, name)?;
-    } else if h.cloud.is_some() {
+    } else if cloud {
         moved(ctx, cfg, r, name, true)?;
     }
     let on = crate::hosts::On::new(r, Some(m));
@@ -380,7 +397,10 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let why = over.map_or(String::new(), |p| format!(" (recipe override {} in use)", p.display()));
     let (tags, home) = crate::hosts::probe(&on).with_context(|| format!("can't reach {name}{why}"))?;
     let mine = crate::config::home().to_string_lossy().into_owned();
-    let [exe, conf] = [&ctx.exe, &ctx.config.display().to_string()].map(|p| p.replace(&mine, &home));
+    let (exe, conf) = (
+        crate::hosts::real_exe(ctx, &home),
+        ctx.config.display().to_string().replace(&mine, &home),
+    );
     let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("DROVER_SHA"));
     let run = |s: &str, l: u64| {
         on.run_for(

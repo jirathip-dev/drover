@@ -45,12 +45,15 @@ pub fn page_places() -> Value {
     Value::Array(all)
 }
 
-const THREAD_ACTIONS: [&str; 5] = [
+const THREAD_ACTIONS: [&str; 8] = [
     "thread-new",
     "thread-say",
     "thread-retry",
     "thread-archive",
     "thread-restore",
+    "thread-secret",
+    "thread-config",
+    "thread-signin",
 ];
 
 fn iso(t: u64) -> String {
@@ -1406,17 +1409,16 @@ impl Server<'_> {
                     .into_iter()
                     .find(|e| e.str("id") == Some(block))
                     .cloned();
-                let ask = open.with_context(|| format!("no open ask {block}"))?;
+                let at = open
+                    .map(|a| a.fleet)
+                    .or_else(|| (!fleet.is_empty()).then(|| fleet.clone()));
+                let at = at.with_context(|| format!("no open ask {block}"))?;
                 let pick = if s("other").trim().is_empty() {
                     s("choice")
                 } else {
                     s("other")
                 };
-                self.form_op(
-                    ctx,
-                    "answer",
-                    &[("fleet", ask.fleet), ("id", block.into()), ("choice", pick)],
-                )?
+                self.form_op(ctx, "answer", &[("fleet", at), ("id", block.into()), ("choice", pick)])?
             }
             "needs-human" => {
                 let pick = s("choice");
@@ -1437,12 +1439,17 @@ impl Server<'_> {
                 ];
                 self.form_op(ctx, "card", &kv)?
             }
+            "thread-config" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
+            "thread-signin" => crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("name"), "web")?,
             n if THREAD_ACTIONS.contains(&n) => {
                 let kv = [
                     ("t", s("thread")),
                     ("text", s("text")),
                     ("repo", s("repo")),
                     ("n", s("msg")),
+                    ("name", s("name")),
+                    ("act", s("act")),
+                    ("value", s("text")),
                 ];
                 let mut f: Q = kv.into_iter().map(|(k, v)| (k.into(), v)).collect();
                 f.insert("op".into(), n[7..].into());
