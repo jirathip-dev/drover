@@ -104,7 +104,7 @@ function paint(v: View, before?: Blk | null) {
     b.onclick = () => { if (v === cur.v) history.back(); else { const p = v.back.pop(); if (p != null) go(v, p, false); } };
     (body[0].querySelector(':scope > .msgs') ?? body[0]).prepend(b);
   }
-  const keep = f && v.root.contains(f) && f.matches('input, select') ? f.closest('[data-id]') : null;
+  const keep = f && v.root.contains(f) && f.matches('input, select, textarea') ? f.closest('[data-id]') : null;
   const sel = keep && `[data-id="${CSS.escape(keep.getAttribute('data-id') ?? '')}"]`;
   const twin = sel ? body.map(e => (e.matches(sel) ? e : e.querySelector(sel))).find(e => !!e) : null;
   const [mp, tp] = keep && twin ? [path(keep, v.root), path(twin, null)] : [[], []];
@@ -452,9 +452,10 @@ function press(k: HTMLElement) {
   const pick = (label: string, f: () => void) => { const b = el('button', '', `<span>${esc(label)}</span>`); b.type = 'button'; b.onclick = () => { closeSheet(); f(); }; return b; };
   $('#sheet .sh').replaceChildren(el('b', '', 'message'), pick('close', () => {}));
   const quote = () => {
-    const i = cur.v.root.querySelector<HTMLInputElement>('.form.say input');
+    const i = cur.v.root.querySelector<HTMLTextAreaElement>('.cmp textarea');
     if (!i) return;
     i.value = `> ${plain.replace(/\s+/g, ' ').trim()}\n${i.value}`;
+    i.dispatchEvent(new Event('input'));
     i.focus();
   };
   const bar = el('div', 'bar');
