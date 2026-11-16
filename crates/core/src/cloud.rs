@@ -459,7 +459,9 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         steps += &ACP.replace("{acp}", crate::providers::default_acp().unwrap_or_default());
         steps += "\n";
     }
-    steps += &format!("drover\t[ \"$('{exe}' --version)\" = 'drover {version}' ]\t{build}");
+    steps += &format!("drover\t[ \"$('{exe}' --version)\" = 'drover {version}' ]\t{build}\n");
+    let link = crate::hosts::link_line(&exe);
+    steps += &format!("drover on PATH\t[ \"$HOME/.local/bin/drover\" -ef '{exe}' ] && {{ [ ! -e /usr/local/bin/drover ] || [ /usr/local/bin/drover -ef '{exe}' ]; }}\t{link}");
     steps.lines().try_for_each(&mut step)?;
     if acp && !pass("gh auth status") {
         bail!("{name}: log in with `ssh {m} gh auth login` there, then bootstrap again");

@@ -570,6 +570,7 @@ fn boot_fake(gh_in: bool) -> Fake {
             "",
         )
         .reply(&step(&mine), "")
+        .reply(&step("[ \"$HOME/.local/bin/drover\" -ef"), "")
         .reply(&step("claude auth status"), "")
         .reply(&step("git config --global --get credential"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")

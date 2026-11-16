@@ -943,9 +943,11 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
         );
     }
     let exe = real_exe(ctx, home);
-    let theirs = ok(on, &exe, &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
+    let root = ok(on, &exe, &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
+    let (theirs, split) = with_path(on, &exe, root);
     let mine = format!("drover {}", crate::VERSION);
-    let line = format!("! drover — {theirs} there, {mine} here → the next `check` updates it (docs/hosts.md)");
+    let (glyph, fix) = if split { ('✗', "relinks") } else { ('!', "updates") };
+    let line = format!("{glyph} drover — {theirs} there, {mine} here → the next `check` {fix} it (docs/hosts.md)");
     fail(theirs == mine, line);
     bad.extend(shed_row(on));
     bad
@@ -1014,7 +1016,9 @@ pub fn acp_profiles(cfg: &Config, name: &str, tags: &[String]) -> Vec<(String, &
 
 /// #637: why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: its drover is this one's version (#573), `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, and its shed lists the hooked adapter `id`. None: guarded.
 pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &str, &str)) -> Option<String> {
-    let theirs = ok(on, &real_exe(ctx, home), &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
+    let exe = real_exe(ctx, home);
+    let root = ok(on, &exe, &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
+    let theirs = with_path(on, &exe, root).0;
     let mine = format!("drover {}", crate::VERSION);
     if theirs != mine {
         return Some(format!("drover there is {theirs}, not {mine}"));
@@ -1055,6 +1059,23 @@ pub(crate) fn real_exe(ctx: &Ctx, home: &str) -> String {
     rehome(vec![exe], Some(home)).remove(0)
 }
 
+/// #1168: `root`, the install root's `--version` there, with ssh's PATH's (what lanes run) when that differs; true then.
+fn with_path(on: &On, exe: &str, root: String) -> (String, bool) {
+    match ok(on, "drover", &["--version"]).map(|v| v.trim().to_string()) {
+        Ok(p) if p != root => (format!("{root} at {exe}, on ssh's PATH {p}"), true),
+        _ => (root, false),
+    }
+}
+
+/// #1168: `~/.local/bin/drover` and a `/usr/local/bin/drover` there links to `exe`, the install root's binary.
+pub fn link_line(exe: &str) -> String {
+    let (l, u) = ("\"$HOME/.local/bin/drover\"", "/usr/local/bin/drover");
+    format!(
+        "mkdir -p \"$HOME/.local/bin\" && {{ [ {l} -ef '{exe}' ] || ln -sf '{exe}' {l}; }} && \
+{{ [ ! -e {u} ] || [ {u} -ef '{exe}' ] || sudo -n ln -sf '{exe}' {u}; }}"
+    )
+}
+
 /// #917: `cargo install` of drover at `sha` into `root`, with its `herdsman` link: `hosts bootstrap`'s and `sync`'s.
 pub fn install_line(root: &str, sha: &str) -> String {
     let repo = env!("CARGO_PKG_REPOSITORY");
@@ -1080,7 +1101,8 @@ pub fn sync(ctx: &Ctx, cfg: &Config, on: &On, (name, home, tags): (&str, &str, &
         return String::new();
     };
     let mut lines = o.lines().map(str::trim);
-    let theirs = lines.next().unwrap_or_default().to_string();
+    let root = lines.next().unwrap_or_default().to_string();
+    let theirs = with_path(on, &exe, root).0;
     let mut busy = false;
     for l in lines {
         busy |= l == "busy";
@@ -1096,6 +1118,7 @@ pub fn sync(ctx: &Ctx, cfg: &Config, on: &On, (name, home, tags): (&str, &str, &
     let conf = rehome(vec![ctx.config.display().to_string()], Some(home)).remove(0);
     let root = Path::new(&exe).parent().and_then(Path::parent).map(Path::display);
     let install = install_line(&root.map_or(exe.clone(), |r| r.to_string()), sha);
+    let link = link_line(&exe);
     let acp = cfg
         .host_acp(name)
         .map(|_| acp_profiles(cfg, name, tags))
@@ -1105,7 +1128,7 @@ pub fn sync(ctx: &Ctx, cfg: &Config, on: &On, (name, home, tags): (&str, &str, &
         .map(|(p, family, _)| format!(" && '{exe}' profiles sync --profile '{p}' --role {family}"))
         .collect();
     let job = format!(
-        "{}{{ {install} && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}{acp}; }}; echo \"$? {sha} $V\" >\"$HOME/.drover-sync.done\"",
+        "{}{{ {install} && {link} && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}{acp}; }}; echo \"$? {sha} $V\" >\"$HOME/.drover-sync.done\"",
         crate::cloud::SH
     );
     if let Err(e) = ok(on, "sh", &["-c", SYNC_START, "sh", &job, &theirs]) {
