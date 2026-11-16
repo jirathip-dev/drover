@@ -14,7 +14,10 @@
         "state": "idle"
       },
       "id": "who",
-      "subtitle": "no orchestrator yet",
+      "subtitle": {
+        "text": "waiting: config c1",
+        "tone": "warn"
+      },
       "title": "sendmeter · claude · opus",
       "type": "row",
       "value": ""

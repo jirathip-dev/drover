@@ -907,6 +907,9 @@ pub fn thread_screen(
         .collect::<Vec<_>>()
         .join(" · ");
     let sub = match v.state.as_str() {
+        _ if !v.waiting.is_empty() => {
+            json!({"text": format!("waiting: config {}", v.waiting.join(", ")), "tone": "warn"})
+        }
         "choose" => json!({"text": "! choose", "tone": "warn"}),
         "working" => json!("✻ working"),
         "new" => json!("no orchestrator yet"),

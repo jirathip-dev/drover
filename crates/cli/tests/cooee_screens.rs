@@ -926,7 +926,7 @@ fn walk(url: &str, tab: Option<&str>, js: &str) -> String {
 }
 
 #[test]
-fn a_queue_row_with_an_ask_opens_its_thread_in_webkit_and_back_returns() {
+fn parity_46_a_queue_row_with_an_ask_opens_its_thread_in_webkit_and_back_returns() {
     if no_webkit() {
         return;
     }

@@ -349,6 +349,11 @@ fn every_card_kind_in_a_thread_is_its_golden_json() {
     let blocks = t["blocks"].as_array().unwrap();
     let kinds: Vec<&str> = blocks.iter().filter_map(|b| b["kind"].as_str()).collect();
     assert_eq!(kinds, ["config", "secret", "run", "run", "ask", "sys", "sys"], "{t}");
+    assert_eq!(
+        blocks[0]["subtitle"],
+        json!({"text": "waiting: config c1", "tone": "warn"}),
+        "the bar names the waiting proposal"
+    );
     let config = &blocks[1];
     let acts: Vec<&Value> = config["buttons"]
         .as_array()
@@ -366,7 +371,7 @@ fn every_card_kind_in_a_thread_is_its_golden_json() {
 }
 
 #[test]
-fn the_owner_settles_each_card_from_inside_its_thread() {
+fn parity_32_the_owner_settles_each_card_from_inside_its_thread() {
     let c = cards("thread-cards-act");
     let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
