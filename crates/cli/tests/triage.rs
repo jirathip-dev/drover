@@ -236,3 +236,55 @@ fn the_docs_pass_files_one_docs_issue_with_each_finding_and_none_when_clean() {
     let first = body.split("\n\n").nth(1).unwrap().lines().next().unwrap();
     assert!(first.starts_with("- README.md:1: no intent section"), "{body}");
 }
+
+fn hook(lane: &str, cmd: &str) -> String {
+    let d = tmpdir("hook");
+    let fleet = "\n[fleet.synergy]\nrepo = \"o/synergy\"\nlocal = \"/tmp/synergy\"\nintegration = \"staging\"\n";
+    std::fs::write(d.join("fleet.toml"), CONFIG.to_string() + fleet).unwrap();
+    let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["hook", "--role", "impl"])
+        .current_dir(&d)
+        .env_remove("FLEET_LANE")
+        .env_remove("DROVER_SCRATCH_TARGET")
+        .env("DROVER_LANE", lane)
+        .env("FLEET_CONFIG", d.join("fleet.toml"))
+        .env("FLEET_STATE", d.join("state/events.jsonl"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(&mut child.stdin.take().unwrap(), input.to_string().as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    String::from_utf8(out.stdout).unwrap()
+}
+
+#[test]
+fn a_triage_lane_changes_issues_only_through_its_verbs_and_never_code() {
+    let acts = [
+        "drover triage close synergy 5 --why done --evidence abc1234",
+        "drover triage fold synergy 7 --spec spec.md",
+        "drover triage label synergy 9 stale?",
+        "drover triage docs synergy --findings f.md",
+    ];
+    for cmd in acts {
+        assert_eq!(hook("synergy:90:triage", cmd), "", "{cmd}");
+        for lane in ["synergy:12:impl", "synergy:12:rev"] {
+            assert!(hook(lane, cmd).contains("REFUSED ORCHESTRATOR_ONLY"), "{lane}: {cmd}");
+        }
+    }
+    assert_eq!(hook("synergy:-:orchestrator", "drover triage synergy"), "");
+    for (cmd, why) in [
+        ("drover triage synergy", "REFUSED ORCHESTRATOR_ONLY"),
+        ("gh issue close 5 -R o/synergy", "REFUSED TRIAGE_VERBS"),
+        ("gh issue edit 7 -R o/synergy --body x", "REFUSED TRIAGE_VERBS"),
+        ("gh issue comment 5 -b x", "never comment"),
+        ("git commit -am x", "read-only"),
+        ("git push origin issue-90", "read-only"),
+        ("gh pr merge 3", "merging is gated"),
+    ] {
+        assert!(hook("synergy:90:triage", cmd).contains(why), "{cmd}");
+    }
+    assert_eq!(hook("synergy:12:impl", "gh issue edit 7 -R o/synergy --body x"), "");
+}

@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{append, fold, open_asks, working, Event};
+use crate::events::{append, fold, open_asks, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::{argv, json, ok, Runner};
 use crate::Ctx;
@@ -9,6 +9,84 @@ use std::io::Write;
 
 /// #1100: the head of a folded issue's `<details>` block, which holds its text before the fold.
 pub const FOLDED: &str = "<details><summary>Earlier text";
+
+/// #1100: `drover triage [<fleet> | close|fold|label|docs …]`.
+#[derive(clap::Args)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct Args {
+    #[command(subcommand)]
+    cmd: Option<Verb>,
+    fleet: Option<String>,
+}
+
+#[derive(clap::Subcommand)]
+enum Verb {
+    #[command(
+        about = "Close an issue that is done, a duplicate or superseded, with one comment linking the evidence (a triage lane; never a queued, laned, asked or `keep` one)"
+    )]
+    Close {
+        fleet: String,
+        issue: u64,
+        #[arg(long, value_parser = ["done", "duplicate", "superseded"])]
+        why: String,
+        #[arg(help = "`#N` (the PR or the issue that replaced it), a URL, or a commit sha on the integration branch")]
+        #[arg(long)]
+        evidence: String,
+    },
+    #[command(
+        about = "Fold an issue's amendments: its body becomes `## Spec (current)` over the old text in a <details> block"
+    )]
+    Fold {
+        fleet: String,
+        issue: u64,
+        #[arg(help = "A file with the current spec")]
+        #[arg(long)]
+        spec: std::path::PathBuf,
+    },
+    #[command(about = "Add labels to an issue: `stale?` for one triage can't decide, or the fleet's own")]
+    Label {
+        fleet: String,
+        issue: u64,
+        #[arg(required = true)]
+        labels: Vec<String>,
+    },
+    #[command(
+        about = "File the run's one `docs:` issue: each stale, contradicting or bloated agent-read passage, one per line; none, no issue"
+    )]
+    Docs {
+        fleet: String,
+        #[arg(
+            help = "A file of findings, one per line: `file:line: what is wrong: the code or decision that proves it`"
+        )]
+        #[arg(long)]
+        findings: std::path::PathBuf,
+        #[arg(help = "The checkout whose README.md intent section is checked")]
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+    },
+}
+
+/// #1100: run `drover triage`: exit 4 when the lane's prompt was not confirmed.
+pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, a: Args) -> Result<i32> {
+    match a.cmd {
+        Some(Verb::Close {
+            fleet,
+            issue,
+            why,
+            evidence,
+        }) => close(ctx, cfg, r, out, (&fleet, issue), (&why, &evidence))?,
+        Some(Verb::Fold { fleet, issue, spec }) => fold_spec(ctx, cfg, r, out, (&fleet, issue), &spec)?,
+        Some(Verb::Label { fleet, issue, labels }) => label(ctx, cfg, r, out, (&fleet, issue), &labels)?,
+        Some(Verb::Docs { fleet, findings, root }) => docs(ctx, cfg, r, out, &fleet, (&findings, &root))?,
+        None => {
+            let fleet = a
+                .fleet
+                .context("usage: drover triage <FLEET> | drover triage close|fold|label|docs …")?;
+            return Ok(if run(ctx, cfg, r, out, &fleet)? { 0 } else { 4 });
+        }
+    }
+    Ok(0)
+}
 
 /// #1100: `drover triage <fleet>`: file this week's triage issue, queue it on top and spawn its `triage` lane; false when the lane's prompt was not confirmed (exit 4).
 pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<bool> {
@@ -53,7 +131,7 @@ fn unprotected(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64))
         "gh",
         &["issue", "view", &n.to_string(), "-R", repo, "--json", "body,labels"],
     )?;
-    let keep = (issue["labels"].as_array().into_iter().flatten()).any(|l| l["name"] == "keep");
+    let keep = (issue.at("labels").as_array().into_iter().flatten()).any(|l| l.at("name") == "keep");
     let why = [
         (queued, "is queued"),
         (laned, "has a lane"),
@@ -67,10 +145,10 @@ fn unprotected(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64))
 }
 
 fn log(ctx: &Ctx, fleet: &str, kind: &str, mut d: Value) -> Result<()> {
-    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
+    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
     let mut it = lane.split(':');
     let own = (it.next() == Some(fleet)).then(|| it.next()?.parse().ok()).flatten();
-    d["lane"] = json!(lane);
+    d.put("lane", json!(lane));
     append(&ctx.state, &Event::new(ctx.now, fleet, own, kind, d))
 }
 
@@ -150,7 +228,7 @@ pub fn fold_spec(
         return refused("BAD_VALUE", "--spec is an empty file");
     }
     let issue = unprotected(ctx, cfg, r, (fleet, n))?;
-    let old = issue["body"].as_str().unwrap_or_default().trim_end();
+    let old = issue.at("body").as_str().unwrap_or_default().trim_end();
     let cur = live(old);
     let amendments = cur.lines().filter(|l| l.starts_with("- **Amendment")).count();
     if !cur.lines().any(|l| l.trim() == "## Amendments") {
@@ -258,7 +336,7 @@ pub fn docs(
     if items.is_empty() {
         return Ok(writeln!(out, "{fleet}: no docs finding, no docs issue")?);
     }
-    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
+    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
     let filed = working(&ctx.state)?
         .iter()
         .any(|e| e.kind == "triage-docs" && e.str("lane") == Some(&lane));

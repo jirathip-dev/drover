@@ -28,8 +28,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - impl and rev, on different providers if you like (#751).
 - verify: drives the real app from `.drover/verify.md` after rev's PASS (#469, #765).
 - design (UI mockups) and architect (ADR) run before impl, owner-approved (#448, #760).
-- lesson: a weekly lane turns repeated review findings into checks, shadow first (#449, #586, #756).
-- triage: a weekly lane per fleet where `triage = "weekly"`, or `drover triage <fleet>`, closes done, duplicate or superseded issues, folds amendments, flags `stale?` and files one `docs:` issue; its verbs (`cmd`): `drover triage close <fleet> <issue> --why done --evidence <sha>`, `drover triage fold <fleet> <issue> --spec <file>`, `drover triage label <fleet> <issue> <labels>…`, `drover triage docs <fleet> --findings <file> --root <checkout>` (#1100).
+- lesson: a weekly lane turns repeated review findings into checks, shadow first (#449, #586, #756). triage: a weekly lane per fleet (`triage = "weekly"` or `drover triage <fleet>`) closes done, duplicate or superseded issues, folds amendments, flags `stale?` and files one `docs:` issue, each change with its undo in the orchestrator thread (#1100).
 
 **Lane runtime**
 - shed terminals or shed-acp ACP sessions, set in `[runtime]` (#390, #480, #590, #721); lane state from shed's events (#585); see [runtimes](docs/runtimes.md).

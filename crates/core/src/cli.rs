@@ -354,15 +354,8 @@ enum Cmd {
         cmd: Option<LessonCmd>,
         fleet: Option<String>,
     },
-    #[command(
-        about = "#1100: file this week's triage issue, queue it on top and spawn its `triage` lane (orchestrators and the owner only)"
-    )]
-    #[command(args_conflicts_with_subcommands = true)]
-    Triage {
-        #[command(subcommand)]
-        cmd: Option<TriageCmd>,
-        fleet: Option<String>,
-    },
+    #[command(about = "#1100: file this week's triage issue and spawn its lane, or a triage lane's verb")]
+    Triage(crate::triage::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
     #[command(alias = "host")]
     Hosts {
@@ -1049,53 +1042,6 @@ enum LessonCmd {
         fleet: String,
         #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
-    },
-}
-
-#[derive(Subcommand)]
-enum TriageCmd {
-    #[command(
-        about = "Close an issue that is done, a duplicate or superseded, with one comment linking the evidence (a triage lane; never a queued, laned, asked or `keep` one)"
-    )]
-    Close {
-        fleet: String,
-        issue: u64,
-        #[arg(long, value_parser = ["done", "duplicate", "superseded"])]
-        why: String,
-        #[arg(help = "`#N` (the PR or the issue that replaced it), a URL, or a commit sha on the integration branch")]
-        #[arg(long)]
-        evidence: String,
-    },
-    #[command(
-        about = "Fold an issue's amendments: its body becomes `## Spec (current)` over the old text in a <details> block"
-    )]
-    Fold {
-        fleet: String,
-        issue: u64,
-        #[arg(help = "A file with the current spec")]
-        #[arg(long)]
-        spec: std::path::PathBuf,
-    },
-    #[command(about = "Add labels to an issue: `stale?` for one triage can't decide, or the fleet's own")]
-    Label {
-        fleet: String,
-        issue: u64,
-        #[arg(required = true)]
-        labels: Vec<String>,
-    },
-    #[command(
-        about = "File the run's one `docs:` issue: each stale, contradicting or bloated agent-read passage, one per line; none, no issue"
-    )]
-    Docs {
-        fleet: String,
-        #[arg(
-            help = "A file of findings, one per line: `file:line: what is wrong: the code or decision that proves it`"
-        )]
-        #[arg(long)]
-        findings: std::path::PathBuf,
-        #[arg(help = "The checkout whose README.md intent section is checked")]
-        #[arg(long, default_value = ".")]
-        root: std::path::PathBuf,
     },
 }
 
@@ -2155,30 +2101,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         return Ok(4);
                     }
                 }
-                Cmd::Triage { cmd: Some(t), .. } => match t {
-                    TriageCmd::Close {
-                        fleet,
-                        issue,
-                        why,
-                        evidence,
-                    } => crate::triage::close(ctx, &cfg, r, out, (&fleet, issue), (&why, &evidence))?,
-                    TriageCmd::Fold { fleet, issue, spec } => {
-                        crate::triage::fold_spec(ctx, &cfg, r, out, (&fleet, issue), &spec)?;
-                    }
-                    TriageCmd::Label { fleet, issue, labels } => {
-                        crate::triage::label(ctx, &cfg, r, out, (&fleet, issue), &labels)?;
-                    }
-                    TriageCmd::Docs { fleet, findings, root } => {
-                        crate::triage::docs(ctx, &cfg, r, out, &fleet, (&findings, &root))?;
-                    }
-                },
-                Cmd::Triage { fleet, .. } => {
-                    let fleet =
-                        fleet.context("usage: drover triage <FLEET> | drover triage close|fold|label|docs …")?;
-                    if !crate::triage::run(ctx, &cfg, r, out, &fleet)? {
-                        return Ok(4);
-                    }
-                }
+                Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
@@ -2236,7 +2159,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     };
                     let groups = &cfg.fleet(&fleet)?.serial;
                     let known = |g: &String| g.is_empty() || groups.iter().any(|x| x.name == *g);
-                    let d = match cmd {
+                    let mut d = match cmd {
                         QueueCmd::Add {
                             mut issues,
                             top,
@@ -2313,7 +2236,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
-                    let mut d = d;
                     if let Some(t) = crate::config::env("DROVER_THREAD")
                         .filter(|_| d.get("design").is_some() || d.get("architect").is_some())
                     {
@@ -2329,14 +2251,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
 }
 
 fn lane(issue: &str) -> Result<Option<u64>> {
-    match issue {
-        "-" => Ok(None),
-        n => {
-            Ok(Some(n.parse().map_err(|_| {
-                anyhow::anyhow!("issue must be a number or `-`, not `{n}`")
-            })?))
-        }
-    }
+    let bad = |_| anyhow::anyhow!("issue must be a number or `-`, not `{issue}`");
+    (issue != "-").then(|| issue.parse().map_err(bad)).transpose()
 }
 
 fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<()> {

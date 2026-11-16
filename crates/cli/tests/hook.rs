@@ -405,39 +405,6 @@ fn only_a_orchestrator_runs_lesson() {
 }
 
 #[test]
-fn a_triage_lane_changes_issues_only_through_its_verbs_and_never_code() {
-    let run = |lane: &str, cmd: &str| {
-        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        hook_in(Some(lane), "impl", &input)
-    };
-    let acts = [
-        "drover triage close synergy 5 --why done --evidence abc1234",
-        "drover triage fold synergy 7 --spec spec.md",
-        "drover triage label synergy 9 stale?",
-        "drover triage docs synergy --findings f.md",
-    ];
-    for cmd in acts {
-        assert_eq!(run("synergy:90:triage", cmd), "", "{cmd}");
-        for lane in ["synergy:12:impl", "synergy:12:rev"] {
-            assert!(run(lane, cmd).contains("REFUSED ORCHESTRATOR_ONLY"), "{lane}: {cmd}");
-        }
-    }
-    assert_eq!(run("synergy:-:orchestrator", "drover triage synergy"), "");
-    for (cmd, why) in [
-        ("drover triage synergy", "REFUSED ORCHESTRATOR_ONLY"),
-        ("gh issue close 5 -R o/synergy", "REFUSED TRIAGE_VERBS"),
-        ("gh issue edit 7 -R o/synergy --body x", "REFUSED TRIAGE_VERBS"),
-        ("gh issue comment 5 -b x", "never comment"),
-        ("git commit -am x", "read-only"),
-        ("git push origin issue-90", "read-only"),
-        ("gh pr merge 3", "merging is gated"),
-    ] {
-        assert!(run("synergy:90:triage", cmd).contains(why), "{cmd}");
-    }
-    assert_eq!(run("synergy:12:impl", "gh issue edit 7 -R o/synergy --body x"), "");
-}
-
-#[test]
 fn only_a_orchestrator_runs_amend() {
     let run = |lane: &str| {
         let cmd = "drover amend synergy 12 --basis q3 \"board-fix: x\"";

@@ -579,7 +579,7 @@ fn gh(t: &[&str]) -> Option<String> {
     if merge {
         return Some("merging is gated: run `drover merge <fleet> <issue>` (needs exact-head PASS + green CI)".into());
     }
-    let triage = std::env::var("DROVER_LANE").is_ok_and(|l| l.split(':').nth(2) == Some("triage"));
+    let triage = crate::config::env("DROVER_LANE").is_some_and(|l| l.split(':').nth(2) == Some("triage"));
     if triage && matches!(rest, ["issue", "close" | "edit" | "reopen", ..]) {
         return Some(
             "REFUSED TRIAGE_VERBS: a triage lane changes issues only through `drover triage close|fold|label`, \

@@ -271,8 +271,19 @@ pub fn prompt(fleet: &str, n: u64, build: Option<&str>) -> String {
     format!("{why}? end with `drover done --no-change \"{why}\" {fleet} {n}`")
 }
 
-/// #1100: the line a lesson or triage lane's issue closes with when it ended without its own `done`.
-pub fn idle_note(build: Option<&str>) -> &'static str {
+/// #1100: close a lesson or triage lane's issue that ended without its own `done`.
+pub fn idle_done(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    at: (&str, u64),
+    build: Option<&str>,
+) -> Result<()> {
+    done(ctx, cfg, r, out, at, idle_note(build))
+}
+
+fn idle_note(build: Option<&str>) -> &'static str {
     if build == Some("triage") {
         "nothing to triage"
     } else {
