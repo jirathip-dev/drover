@@ -1020,7 +1020,7 @@ pub fn spawn(
     if stale {
         let last = events
             .iter()
-            .rfind(|e| e.fleet == fleet && e.issue == Some(issue) && !crate::events::PASSIVE.contains(&e.kind.as_str()))
+            .rfind(|e| e.fleet == fleet && e.issue == Some(issue) && !e.is_passive())
             .map_or(0, |e| e.ts);
         let idle = crate::events::age(ctx.now.saturating_sub(last));
         dup.push((
@@ -1152,7 +1152,7 @@ pub fn spawn(
             term::close(ctx, &old, &a.name)?;
         }
         if stale.is_none() && !hung {
-            crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?;
+            crate::check::reap(ctx, cfg, &old, was, (fleet, Some(issue)), owt)?;
         }
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
         let mut d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; "), "wip": wip});

@@ -553,6 +553,7 @@ impl Server<'_> {
         };
         ServeHealth {
             at: now,
+            sha: crate::SHA.into(),
             started: super::STARTED.get().copied().unwrap_or_default(),
             rss_mb: self.rss.load(std::sync::atomic::Ordering::Relaxed),
             groups,

@@ -1,3 +1,11 @@
+frozen = ["ci/cap.toml", "crates/core/src/events/passive.rs"]
+generated = ["assets/types/api.d.ts"]
+generate = "just types"
+
+[[collect]]
+dir = "ci/cap.d"
+glob = "*.toml"
+
 [comments]
 policy = "strict"
 except = [
