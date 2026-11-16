@@ -1098,7 +1098,7 @@ impl Server<'_> {
             }
             "/screens/ask" => ask_sheet(ctx, q)?,
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
-                return self.threads_screen(ctx, &p[16..], paired)
+                return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
             }
             _ => return None,
         };
@@ -1461,7 +1461,7 @@ impl Server<'_> {
                 if n == "thread-new" {
                     let id = line.split(' ').next().unwrap_or_default();
                     let s = self
-                        .threads_screen(ctx, &format!("/{id}"), true)
+                        .threads_screen(ctx, &format!("/{id}"), None, true)
                         .context("no such thread")?;
                     return Ok(json!({"ops": [{"op": "screen", "screen": s}], "toast": line}));
                 }

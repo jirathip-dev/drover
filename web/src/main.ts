@@ -60,6 +60,20 @@ function rows(m: unknown, out = new Map<string, string>()) {
   }
   return out;
 }
+// #1086: a focus screen scrolls inside: it opens at its end, follows it while there, else keeps the card in view in place.
+type Spot = { end: boolean; id?: string; dy: number };
+const spots = new Map<string, Spot>();
+function spot(sc: HTMLElement | null): Spot | null {
+  if (!sc) return null;
+  const top = sc.getBoundingClientRect().top, k = [...sc.querySelectorAll<HTMLElement>(':scope > .card[data-id]')].find(c => c.getBoundingClientRect().bottom > top + 1);
+  return { end: sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2, id: k?.dataset.id, dy: k ? k.getBoundingClientRect().top - top : 0 };
+}
+function land(sc: HTMLElement | null, s: Spot | null) {
+  if (!sc) return;
+  const k = s && !s.end && s.id ? sc.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(s.id)}"]`) : null;
+  sc.scrollTop = k && s ? sc.scrollTop + k.getBoundingClientRect().top - sc.getBoundingClientRect().top - s.dy : sc.scrollHeight;
+}
+const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr');
 const path = (e: Element, top: Element | null) => {
   const p: Element[] = [];
   for (let x: Element | null = e; x && x !== top; x = x.parentElement) p.unshift(x);
@@ -79,6 +93,7 @@ function graft(root: Element, body: Element[], mine: Element[], twin: Element[])
 function paint(v: View, before?: Blk | null) {
   const m = v.model, y = scrollY, f = document.activeElement;
   if (!m) return;
+  const focus = !isList(m) && !!m.focus, was = scroller(v), place = focus && was?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
   const c = ctx(v, isList(m) ? 'cards' : String(m.id));
   const body = isList(m) ? kids(m, c) : [render(m, c)].filter((e): e is HTMLElement => !!e);
   if (v.back.length && body[0]) {
@@ -99,6 +114,15 @@ function paint(v: View, before?: Blk | null) {
     rows(m).forEach((j, id) => { if (was.has(id) && was.get(id) !== j) v.root.querySelector(`[data-id="${CSS.escape(id)}"]`)?.classList.add('fl'); });
   }
   if (v === cur.v) sync();
+  if (focus && !v.root.hidden) {
+    fit();
+    const sc = scroller(v);
+    land(sc, place);
+    if (sc) sc.onscroll = () => {
+      const o = sc.querySelector<HTMLElement>(':scope > [data-id=older]:not([aria-busy])');
+      if (o && sc.isConnected && sc.scrollTop < 8) { o.setAttribute('aria-busy', 'true'); o.click(); }
+    };
+  }
   badges();
 }
 function badges() {
@@ -151,6 +175,8 @@ const close = (v: View) => { v.es?.close(); v.es = undefined; v.live = false; };
 function go(v: View, path: string, push = true) {
   if (push) v.back.push(v.path);
   if (push && v === cur.v) history.pushState(null, '', hashOf(cur, path));
+  const s = spot(scroller(v));
+  if (s) spots.set(v.path, s);
   close(v);
   [v.path, v.model] = [path, null];
   load(v);
@@ -224,8 +250,8 @@ addEventListener('keydown', e => { if (e.key === 'Escape' && !sh.hidden) closeSh
 function tap(x: unknown) {
   const t = obj(x);
   if (t.sheet) sheet(String(t.sheet));
-  else if (t.open) go(cur.v, String(t.open));
-  else if (t.copy != null) navigator.clipboard.writeText(String(t.copy)).then(() => toast('copied'), () => toast('copy failed', true));
+  else if (t.open) go(cur.v, String(t.open), !t.keep);
+  else if (t.copy != null) void copy(String(t.copy));
   else if (t.thread) /^t\d+$/.test(String(t.thread)) ? thread(String(t.thread)) : sheet(`/screens/lanes/${String(t.thread)}`);
 }
 function thread(id: string) {
@@ -382,6 +408,59 @@ for (const t of tabs) {
 }
 cards?.root.addEventListener('redraw', () => cards && paint(cards));
 shv.root.addEventListener('redraw', drawSheet);
+// #1086: a thread's messages scroll between the bar and the composer, which sits on the keyboard (or the tab bar).
+function fit() {
+  const vv = visualViewport, nav = $('nav').getBoundingClientRect().top, kb = vv ? vv.offsetTop + vv.height : innerHeight;
+  H.style.setProperty('--top', `${$('main').getBoundingClientRect().top}px`);
+  H.style.setProperty('--bot', `${Math.max(0, H.clientHeight - Math.min(nav, kb))}px`);
+  if (H.hasAttribute('data-focus') && document.scrollingElement?.scrollTop) scrollTo(0, 0);
+}
+const refit = () => { const sc = scroller(cur.v), s = spot(sc); fit(); land(sc, s); };
+visualViewport?.addEventListener('resize', refit);
+visualViewport?.addEventListener('scroll', refit);
+addEventListener('resize', refit);
+// #1086: a code box's [copy], a `t<n>` ref, and a long press (or right click) on a message: copy, as markdown, quote.
+async function copy(text: string, b?: HTMLElement) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const w = b?.firstElementChild;
+    if (w) { w.textContent = 'copied'; setTimeout(() => { w.textContent = 'copy'; }, 1500); } else toast('copied');
+  } catch {
+    const s = getSelection(), g = document.createRange();
+    g.selectNodeContents(b?.previousElementSibling ?? document.body);
+    s?.removeAllRanges();
+    s?.addRange(g);
+  }
+}
+main.addEventListener('click', e => {
+  const t = e.target;
+  if (!(t instanceof Element)) return;
+  const c = t.closest<HTMLElement>('.cpy'), a = t.closest<HTMLElement>('a[data-thread]');
+  if (c) copy(c.previousElementSibling?.textContent ?? '', c);
+  if (a) { e.preventDefault(); thread(a.dataset.thread ?? ''); }
+});
+function press(k: HTMLElement) {
+  const txt = [...k.querySelectorAll<HTMLElement>(':scope > .txt')], plain = txt.map(t => t.innerText).join('\n\n'), raw = txt.map(t => t.dataset.md).join('\n\n');
+  const pick = (label: string, f: () => void) => { const b = el('button', '', `<span>${esc(label)}</span>`); b.type = 'button'; b.onclick = () => { closeSheet(); f(); }; return b; };
+  $('#sheet .sh').replaceChildren(el('b', '', 'message'), pick('close', () => {}));
+  const quote = () => {
+    const i = cur.v.root.querySelector<HTMLInputElement>('.form.say input');
+    if (!i) return;
+    i.value = `> ${plain.replace(/\s+/g, ' ').trim()}\n${i.value}`;
+    i.focus();
+  };
+  const bar = el('div', 'bar');
+  bar.append(pick('copy', () => copy(plain)), pick('copy as markdown', () => copy(raw)), pick('quote', quote));
+  shv.model = null;
+  shv.root.replaceChildren(bar);
+  sh.hidden = false;
+  H.classList.add('sheet');
+}
+const card = (t: EventTarget | null) => (t instanceof Element ? t.closest<HTMLElement>('.card.k-you, .card.k-orch') : null);
+let hold = 0;
+main.addEventListener('contextmenu', e => { const k = card(e.target); if (k) { e.preventDefault(); press(k); } });
+main.addEventListener('touchstart', e => { const k = card(e.target); clearTimeout(hold); if (k) hold = setTimeout(() => press(k), 500); }, { passive: true });
+for (const ev of ['touchend', 'touchmove', 'touchcancel']) main.addEventListener(ev, () => clearTimeout(hold), { passive: true });
 $('#rf').onclick = reload;
 $('#sysb').onclick = settings;
 document.querySelectorAll<HTMLElement>('.pairb').forEach(b => { b.onclick = pair; });

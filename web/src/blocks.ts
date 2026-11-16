@@ -40,11 +40,14 @@ export const sent = (box: Element) => box.querySelectorAll<HTMLInputElement>('[d
   document.querySelectorAll<HTMLInputElement>(`[data-draft="${CSS.escape(k)}"]`).forEach(x => { x.value = x.dataset.was ?? ''; });
 });
 
-/** Minimal markdown: code fences, `code`, **bold**, [links](url); everything else escaped. */
-export function md(s: unknown): string {
-  return String(s ?? '').split(/```(?:[a-z]*)\n?/).map((part, i) => i % 2 ? `<pre>${esc(part.replace(/\n$/, ''))}</pre>` :
-    esc(part).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-      .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target=_blank rel=noopener>$1</a>').replace(/\n/g, '<br>')).join('');
+/** Minimal markdown: code fences with [copy], `code`, **bold**, [links](url) and plain URLs; with `refs`, `t<n>` opens
+ * that thread; everything else escaped. */
+export function md(s: unknown, refs = false): string {
+  const link = new RegExp(String.raw`\[([^\]]+)\]\((https?:[^)\s]+)\)|(https?:\/\/[^\s<]*[^\s<.,;:!?)])|\b(${refs ? 't\\d+' : '(?!)'})\b`, 'g');
+  const a = (_: string, t: string, u: string, bare: string, ref: string) => ref ? `<a href="#" data-thread="${ref}">${ref}</a>` :
+    `<a href="${u ?? bare}" target=_blank rel=noopener>${t ?? bare}</a>`;
+  return String(s ?? '').split(/```(?:[a-z]*)\n?/).map((part, i) => i % 2 ? `<div class=cb><pre>${esc(part.replace(/\n$/, ''))}</pre><button type=button class=cpy><span>copy</span></button></div>` :
+    esc(part).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(link, a).replace(/\n/g, '<br>')).join('');
 }
 
 /** `{since: iso}` as an age (`4m`, `1h 9m`), else the value as written. */
@@ -83,7 +86,7 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     return l;
   },
   row(b, c) {
-    const cls = `row${b.style === 'link' ? ' link' : ''}${b.indent ? ' in' + Math.min(Number(b.indent), 3) : ''}`;
+    const cls = `row${b.style === 'link' ? ' link' : ''}${b.sticky ? ' sticky' : ''}${b.indent ? ' in' + Math.min(Number(b.indent), 3) : ''}`;
     const url = urlOf(b.tap);
     const r: HTMLElement = url ? href(el('a', cls), url) : el('div', cls);
     r.dataset.id = String(b.id ?? '');
@@ -148,7 +151,11 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     }
     return k;
   },
-  text: b => el('div', 'txt', md(b.markdown)),
+  text(b, c) {
+    const t = el('div', 'txt', md(b.markdown, c.screen.startsWith('thread-')));
+    t.dataset.md = String(b.markdown ?? '');
+    return t;
+  },
   stat(b) {
     const s = el('div', 'stats');
     for (const i of blks(b.items)) {
@@ -223,6 +230,11 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     const s = el('div', 'imgs');
     for (const i of blks(b.items)) {
       const a = href(el('a'), new URL(String(i.src).replace(/^\//, ''), document.baseURI).href);
+      a.onclick = e => {
+        e.preventDefault();
+        const all = [...document.querySelectorAll<HTMLAnchorElement>('main .imgs a')];
+        viewer(all.map(x => [x.href, x.querySelector('img')?.alt ?? '']), Math.max(0, all.indexOf(a)));
+      };
       const im = el('img');
       Object.assign(im, { src: a.href, alt: i.alt ?? '', loading: 'lazy' });
       a.append(im);
@@ -254,6 +266,52 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     return s;
   },
 };
+
+/** #1086: the image viewer over the page: fitted; a double tap or a pinch zooms, a swipe goes to the next, [save]. */
+export function viewer(list: [string, string][], at: number) {
+  const v = el('div', 'iv'), im = el('img'), bar = el('div', 'bar'), save = el('a', '', '<span>save</span>');
+  v.id = 'iv';
+  let z = 1, x0 = 0, d0 = 0, t0 = 0;
+  const zoom = (k: number) => { z = Math.min(4, Math.max(1, k)); im.style.transform = `scale(${z})`; v.classList.toggle('z', z > 1); };
+  const to = (i: number) => {
+    at = (i + list.length) % list.length;
+    [im.src, im.alt] = list[at];
+    save.href = list[at][0];
+    save.download = list[at][1] || 'image';
+    const n = bar.querySelector('.m');
+    if (n) n.textContent = `${at + 1} / ${list.length}`;
+    zoom(1);
+  };
+  const shut = () => { v.remove(); removeEventListener('keydown', key); };
+  const key = (e: KeyboardEvent) => { if (e.key === 'Escape') shut(); else if (e.key === 'ArrowRight') to(at + 1); else if (e.key === 'ArrowLeft') to(at - 1); };
+  const close = btn('close'), prev = btn('‹'), next = btn('›');
+  close.onclick = shut;
+  prev.onclick = () => to(at - 1);
+  next.onclick = () => to(at + 1);
+  bar.append(prev, el('span', 'm'), next, save, close);
+  im.addEventListener('dblclick', () => zoom(z > 1 ? 1 : 2.5));
+  v.addEventListener('click', e => { if (e.target === v) shut(); });
+  v.addEventListener('touchstart', e => {
+    const [a, b] = [e.touches[0], e.touches[1]];
+    if (b) d0 = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / z;
+    else if (Date.now() - t0 < 300) zoom(z > 1 ? 1 : 2.5);
+    [x0, t0] = [a.clientX, Date.now()];
+  }, { passive: true });
+  v.addEventListener('touchmove', e => {
+    const [a, b] = [e.touches[0], e.touches[1]];
+    if (b && d0) zoom(Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / d0);
+  }, { passive: true });
+  v.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - x0;
+    if (!e.touches.length) d0 = 0;
+    if (z === 1 && Math.abs(dx) > 50 && list.length > 1) to(at + (dx < 0 ? 1 : -1));
+  }, { passive: true });
+  v.append(im, bar);
+  to(at);
+  document.body.append(v);
+  addEventListener('keydown', key);
+  close.focus();
+}
 
 function toggle(e: HTMLElement, id: unknown, c: Ctx, card = false) {
   const k = `${card ? '' : 'sw:'}${id}`;
