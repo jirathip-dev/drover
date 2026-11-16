@@ -834,21 +834,12 @@ pub fn merge(
     let res = match res {
         Ok(head) => match unjoined(ctx, r, f, (fleet, issue), (&num, &head))?
             .iter()
-            .find_map(|(g, p)| {
-                if f.serial.iter().any(|c| c.name == g.name) {
-                    return Some((
-                        "SERIAL_UNMARKED",
-                        format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
-                    ));
-                }
-                let st = fold(&events);
-                let h = crate::queue::holders(&events, &st, f, fleet, &g.name);
-                (h.len() >= g.max).then(|| {
-                    (
-                        "SERIAL_BUSY",
-                        format!("{}; retry after they merge", crate::queue::holds(g, &h)),
-                    )
-                })
+            .find(|(g, _)| f.serial.iter().any(|c| c.name == g.name))
+            .map(|(g, p)| {
+                (
+                    "SERIAL_UNMARKED",
+                    format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
+                )
             }) {
             Some((code, why)) => Err(refuse(code, why)),
             None if unverified(&events, (fleet, issue), &head) => Err(refuse(
