@@ -9,11 +9,16 @@ const WORDS: [&str; 6] = [
     "hermes-brain",
 ];
 
-const EXCEPTIONS: [(&str, &str, &str); 9] = [
+const EXCEPTIONS: [(&str, &str, &str); 10] = [
     (
         "assets/swag/farm/sprites.svg",
         "(c) 2026 jirathip-dev, MIT",
         "MIT notice of the ported Corral horses",
+    ),
+    (
+        "docs/design/hosts-menu/themes/farm/sprites.svg",
+        "(c) 2026 jirathip-dev, MIT",
+        "#1091: the design's copy of the farm sprites, same MIT notice",
     ),
     (
         "assets/swag/SOURCE",
