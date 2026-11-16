@@ -1,0 +1,18 @@
+Decided: a running cloud host that admits with max_working room takes the lane as soon as every local host refuses; overflow_after_minutes only gates starting a stopped one
+Because: "placement picks that host instead of holding the issue on the main host"
+Because: crates/core/src/hosts.rs:1183
+Rejected: shortening overflow_after_minutes — the held timer resets on every load dip, so a running VM still idles
+Rejected: max_working as a refusal in at() — would change spawn's HOST_BUSY semantics for every host; it only ranks instead
+Check: the stopped-cloud overflow test still holds HOST_BUSY on mini until the wait passes
+Owner: busy Mac plus a running cloud VM with room now sends new lanes to the VM at once
+
+Decided: merged origin/staging; kept this branch's remote-with-room placement and dry-run host/why, in staging's on.first() and pj.put forms
+Because: crates/core/src/hosts.rs:1236
+Rejected: none
+Owner: branch brought up to date with staging; behaviour unchanged
+
+Decided: no code change for the shard-2 red; diagnosed with a temporary CI print commit, reverted it, reran the failed jobs
+Because: .github/workflows/ci.yml:120
+Rejected: keeping the CI print step — out of this issue's scope
+Check: shard 2 green on run 43882301887 at 6b95a05; the PR diff is still only hosts.rs, spawn.rs, tests/cloud.rs, docs/hosts.md
+Owner: CI red was an intermittent temp-dir check; the branch is unchanged and green
