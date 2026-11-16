@@ -855,14 +855,8 @@ impl<'a> Server<'a> {
         if over {
             return s.write_all(TOO_LARGE);
         }
-        let req = String::from_utf8_lossy(&buf).replacen(
-            "\r\n",
-            &format!(
-                "\r\nX-Peer: {}\r\n",
-                s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default()
-            ),
-            1,
-        );
+        let peer = s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
+        let req = String::from_utf8_lossy(&buf).replacen("\r\n", &format!("\r\nX-Peer: {peer}\r\n"), 1);
         let (t0, target) = (
             drover_core::clock::instant(),
             req.split_whitespace().nth(1).unwrap_or_default(),
