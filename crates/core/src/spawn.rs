@@ -1159,7 +1159,7 @@ pub fn spawn(
             term::close(ctx, &old, &a.name)?;
         }
         if stale.is_none() && !hung {
-            crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?;
+            crate::check::reap(ctx, cfg, &old, was, (fleet, Some(issue)), owt)?;
         }
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
         let mut d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; "), "wip": wip});

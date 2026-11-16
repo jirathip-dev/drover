@@ -610,11 +610,20 @@ fn health(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Res
     let day = |t: &u64| t + 86_400 >= ctx.now;
     let cold = (starts.lines()).filter_map(|l| l.strip_suffix(" cold")?.parse::<u64>().ok());
     let cold = cold.filter(day).count();
-    let mut now = vec![(
-        "drover",
-        "serve-restarts",
-        (cold > 3).then(|| format!("serve started {cold} times in 24 h, none a handover")),
-    )];
+    let hour = (starts.lines()).filter_map(|l| l.strip_suffix(" failed")?.parse::<u64>().ok());
+    let failed = hour.filter(|t| t + 3600 >= ctx.now).count();
+    let mut now = vec![
+        (
+            "drover",
+            "serve-restarts",
+            (cold > 3).then(|| format!("serve started {cold} times in 24 h, none a handover")),
+        ),
+        (
+            "drover",
+            "serve-loop",
+            (failed > 3).then(|| format!("serve exited non-zero {failed} times in 1 h → tail serve.log")),
+        ),
+    ];
     let h = std::fs::read(ctx.state.with_file_name("serve-health.json")).unwrap_or_default();
     let h: serde_json::Value = serde_json::from_slice(&h).unwrap_or_default();
     if h.at("at").as_u64().is_some_and(|t| t + 600 >= ctx.now) {
@@ -626,6 +635,12 @@ fn health(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Res
         ));
         let slow = h.at("slow").as_str().map(|s| format!("serve {s}"));
         now.push(("drover", "serve-slow", slow));
+        let sha = h.at("sha").as_str().unwrap_or("?");
+        let why = format!(
+            "the serve on the port runs {sha:.7}, not the installed {:.7} → drover self-update",
+            crate::SHA
+        );
+        now.push(("drover", "serve-stale", (sha != crate::SHA).then_some(why)));
         let why = format!("serve answered {busy} reads 503 in the last minute");
         now.push(("drover", "serve-503", (busy > 0).then_some(why)));
     }
@@ -1022,7 +1037,7 @@ pub fn clean_all(
             Some(why_live)
         } else {
             if yes {
-                reap(ctx, cfg, &on, (&e.fleet, Some(n)), wt)?;
+                reap(ctx, cfg, &on, Some(e), (&e.fleet, Some(n)), wt)?;
                 if on.machine.is_none() {
                     freed += purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
                 }
@@ -1147,9 +1162,20 @@ pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -
     Err(e)
 }
 
-/// #186: TERM, then KILL, the processes inside `wt`; logs `lane-reaped` when any were signalled.
-pub fn reap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, issue): (&str, Option<u64>), wt: &str) -> Result<usize> {
-    let names = host::reap(r, Path::new(wt), false, None).0;
+/// #186: TERM, then KILL, the processes inside `wt` (#1081: TERM those run from its build folders); logs `lane-reaped` when any were signalled.
+pub fn reap(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    sp: Option<&Event>,
+    (fleet, issue): (&str, Option<u64>),
+    wt: &str,
+) -> Result<usize> {
+    let mut names = host::reap(r, Path::new(wt), false, None).0;
+    names.extend(host::reap_built(
+        r,
+        &sp.map(crate::hosts::build_dirs).unwrap_or_default(),
+    ));
     if !names.is_empty() {
         let d = json!({"worktree": wt, "killed": names.len(), "names": names});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "lane-reaped", d))?;
@@ -1188,7 +1214,7 @@ pub fn leftovers(
             continue;
         }
         if yes {
-            reap(ctx, cfg, r, (&e.fleet, Some(n)), wt)?;
+            reap(ctx, cfg, r, Some(e), (&e.fleet, Some(n)), wt)?;
         }
         found.extend(here);
     }

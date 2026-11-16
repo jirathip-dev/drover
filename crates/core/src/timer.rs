@@ -58,18 +58,22 @@ pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac:
     let log = log.to_string_lossy();
     let (cmd, when, template, dest) = if mac {
         let strings = argv.iter().map(|a| format!("<string>{a}</string>")).collect();
-        let serve = "KeepAlive</key><true/>\n<key>ProcessType</key><string>Interactive</string>";
-        let when = *[serve, "StartInterval</key><integer>{secs}</integer>"]
-            .get(usize::from(i))
-            .unwrap_or(&serve);
+        let serve = "KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n<key>ProcessType</key><string>Interactive</string>";
+        let when = if i {
+            "StartInterval</key><integer>{secs}</integer>"
+        } else {
+            serve
+        };
         let at = "StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>";
         let when = if every == DAILY { at } else { when };
         let dest = format!("Library/LaunchAgents/{label}.plist");
         (strings, when, include_str!("../assets/job.plist"), dest)
     } else {
-        let when = *["Restart=always\n\n[Install]\nWantedBy=default.target", "Type=oneshot"]
-            .get(usize::from(i))
-            .unwrap_or(&"Type=oneshot");
+        let when = if i {
+            "Type=oneshot"
+        } else {
+            "Restart=on-failure\n\n[Install]\nWantedBy=default.target"
+        };
         let dest = format!(".config/systemd/user/{label}.service");
         (argv.join(" "), when, include_str!("../assets/job.service"), dest)
     };

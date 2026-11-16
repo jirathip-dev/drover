@@ -182,7 +182,14 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         ..Server::new(ctx, r, addr).deferring()
     };
     STARTED.get_or_init(|| ctx.now);
-    started(ctx, ho.is_some_and(Handover::inherited));
+    started(
+        ctx,
+        if ho.is_some_and(Handover::inherited) {
+            "handover"
+        } else {
+            "cold"
+        },
+    );
     for _ in 0..2 {
         s.warm();
         s.refresh(crate::now());
@@ -262,8 +269,8 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
     Ok(())
 }
 
-/// #898: this start in `serve-starts` (its last day kept): `drover check` alerts `serve-restarts` on cold ones.
-fn started(ctx: &Ctx, handover: bool) {
+/// #898: this start (`cold`, `handover`; #1081: `failed`) in `serve-starts` (its last day kept) for `drover check`.
+pub fn started(ctx: &Ctx, how: &str) {
     let f = ctx.state.with_file_name("serve-starts");
     let was = std::fs::read_to_string(&f).unwrap_or_default();
     let day = |l: &&str| {
@@ -273,7 +280,7 @@ fn started(ctx: &Ctx, handover: bool) {
             .is_some_and(|t| t + 86_400 >= ctx.now)
     };
     let mut keep: Vec<&str> = was.lines().filter(day).collect();
-    let now = format!("{} {}", ctx.now, if handover { "handover" } else { "cold" });
+    let now = format!("{} {how}", ctx.now);
     keep.push(&now);
     drop(std::fs::write(f, keep.join("\n") + "\n"));
 }

@@ -18,7 +18,7 @@ fn error(s: &Server, tab: &str) -> String {
 }
 
 #[test]
-fn a_tab_names_the_real_read_error() {
+fn parity_85_a_tab_names_the_real_read_error() {
     let h = tmpdir("board-errors");
     std::env::set_var("HOME", &h);
     let mut c = ctx(&h, CFG);

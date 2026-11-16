@@ -10,14 +10,41 @@ use std::time::Duration;
 
 /// `drover serve`: the board on `addr` plus, unless read-only, the Funnel listener on `[serve] hooks_addr` (#626).
 pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<()> {
-    board(ctx, r, addr, read_only, !read_only)
+    let res = board(ctx, r, addr, read_only, !read_only);
+    if res.is_err() {
+        crate::serve::started(ctx, "failed");
+    }
+    res
+}
+
+fn held(ctx: &Ctx, addr: &str, e: std::io::Error) -> Result<()> {
+    let secs = Config::kept(ctx)
+        .map(|c| c.limits)
+        .unwrap_or_default()
+        .serve_handover_secs;
+    let Some(sha) = crate::update::serving(addr, secs) else {
+        return Err(e.into());
+    };
+    if sha == crate::SHA {
+        drover_core::stderr!("drover serve: {addr} already serves {sha:.7}");
+        return Ok(());
+    }
+    let port = addr.rsplit_once(':').and_then(|(_, p)| p.parse().ok()).unwrap_or(0);
+    let pid = crate::update::ask_handover(&crate::update::serve_sock(ctx, port), secs)
+        .map_err(|h| anyhow::anyhow!("{e}; the serve there ({sha:.7}) did not hand over: {h:#}"))?;
+    drover_core::stderr!("drover serve: {addr} ran {sha:.7}; handed over (bridge pid {pid})");
+    Ok(())
 }
 
 /// #894: `serve`; `handover`: take over a predecessor's listeners and hand them to a successor (`crate::handover`).
 pub fn board(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool, handover: bool) -> Result<()> {
     let mut got = if handover { crate::runner::inherited() } else { vec![] }.into_iter();
     let inherited = got.len() > 0;
-    let l = got.next().map_or_else(|| TcpListener::bind(addr), Ok)?;
+    let l = match got.next().map_or_else(|| TcpListener::bind(addr), Ok) {
+        Ok(l) => l,
+        Err(e) if handover && e.kind() == std::io::ErrorKind::AddrInUse => return held(ctx, addr, e),
+        Err(e) => return Err(e.into()),
+    };
     let mode = if read_only { "read-only view" } else { "phone page" };
     drover_core::stderr!("drover serve: {mode} on http://{}/", l.local_addr()?);
     let hooks = Config::kept(ctx).map(|c| c.serve.hooks_addr()).unwrap_or_default();

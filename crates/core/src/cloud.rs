@@ -417,7 +417,11 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     steps += &format!("{RUST}\n");
     let (git, rev, sv) = (crate::shed::git(), crate::shed::REV, crate::shed::proto::VERSION);
     let shed = format!("cargo install --git {git} --rev {rev} --locked --force shed");
-    steps += &format!("shed\t[ \"$(shed --version)\" = 'shed {sv}' ]\t{shed}\n{SHED}\n");
+    let pin = format!(
+        "v=$(shed --version) && s=${{v#'shed {sv} ('}} && s=${{s%')'}} && [ -n \"$s\" ] && \
+[ \"$v\" = \"shed {sv} ($s)\" ] && case '{rev}' in \"$s\"*) ;; *) false ;; esac"
+    );
+    steps += &format!("shed\t{pin}\t{shed}\n{SHED}\n");
     if acp {
         steps += &ACP.replace("{acp}", crate::providers::default_acp().unwrap_or_default());
         steps += "\n";
