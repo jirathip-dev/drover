@@ -1,0 +1,14 @@
+Decided: a reviewer refused NO_PROOF at a head where an earlier reviewer was already refused NO_PROOF goes to needs-human instead of another supersede.
+Because: "Drive never spawns the same rev lane again and again with nothing new in between"
+Because: crates/core/src/drive.rs:1570
+Rejected: loosening I9 or a ts-window count — the issue forbids loosening I9, and a frozen kick clock (#370) makes ts ordering unreliable, so log position is used.
+Rejected: only the issue's plan as the repro — it passes on base 80a3be3c because the rng now gives rev-103 a Hang script; a second plan pins the reviewer scripts.
+Check: commit 1 fails I9 on base (rev-106-r1), head passes with one supersede then needs-human per issue.
+Check: drive.rs test failures on merge labels are identical with the fix reverted.
+Owner: a reviewer that keeps skipping its proof now gets one fresh retry, then lands on your card instead of looping.
+
+Decided: a second reviewer refused NO_PROOF at the same head escalates needs-human instead of another supersede
+Because: "Drive never spawns the same rev lane again and again with nothing new in between"
+Rejected: loosening I9 — the issue says "Don't loosen I9"
+Check: drive.rs is 2185 lines, at its arch.toml baseline (CI arch-check was red at 2189)
+Owner: A reviewer that keeps skipping its proof now gets one retry, then the issue comes to you.
