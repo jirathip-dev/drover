@@ -1,0 +1,11 @@
+Decided: the 140 MB read cap applies to `POST /action`, the composer's real route; `/screens/action` is no route the page posts to
+Because: web/src/theme.ts:9
+Decided: a declared body over the route's cap is answered 413 `request body too large` before routing, never cut and parsed
+Because: "A body over the limit gets a clear 413/400 line, not NOT_PERMITTED."
+Decided: a body that is no JSON is 400 `bad request body` before the permission check
+Because: crates/server/src/screens.rs:1309
+Decided: handle's X-Peer splice went from 8 lines to 2 so serve.rs and handle stay under their size baselines
+Because: crates/server/src/serve.rs:828
+Rejected: raising serve.rs's size baseline in .drover — a two-line splice does the same job
+Check: the WebKit two-photo test now pads each photo to 40 KB, so ui-webkit drives a send over the old 32 KB cut
+Owner: on the phone, attach a screenshot from Photos in a thread and send it
