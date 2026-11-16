@@ -1,0 +1,14 @@
+Decided: [hygiene] and [fleet.<n>.hygiene] with one fallback chain fleet, global, default; "off" or docs_trust = [] opts out
+Because: "A `[hygiene]` set that is **on by default** for every fleet (opt out per key under `[fleet.<f>.hygiene]`)"
+Decided: a docs key, default on: setup writes a missing [docs] into the fleet clone's arch.toml, doctor flags integration without one
+Because: q1757
+Decided: setup applies hygiene to every fleet's existing local clone, writing only what is missing, then the first baseline
+Because: crates/core/src/setup.rs:36
+Rejected: a setup <repo> form — setup's positionals are <host> <name>; every configured fleet is the repo set
+Rejected: a ✗ row for drift — doctor's exit code feeds setup, a convention gap is no broken host
+Decided: lane worktrees get a per-worktree no-cone sparse checkout excluding each docs_trust path
+Because: "Lane worktrees use sparse checkout to **exclude `docs/archive/`**"
+Decided: staging build fix: hosts.rs and shed.rs test baselines raised to their merged sizes; #1177's snapshot predates #1158 and #1176
+Because: .drover/arch-baseline.txt:3
+Check: the label set and triage lane do not exist yet; cooee/berth PRs are per-repo work outside this lane
+Owner: Every fleet follows one history convention by default; setup writes the missing parts, doctor flags drift, lanes no longer see archived docs.
