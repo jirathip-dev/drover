@@ -917,7 +917,7 @@ impl<'a> Server<'a> {
             );
             // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
             let q = form(query);
-            let (host, st) = (q.get("tab").is_some_and(|t| t == "host"), self.ctx.state.clone());
+            let st = self.ctx.state.clone();
             // #407: a stream with a thread open stamps `watch-<thread>.at` each second: no push for it (`events::emit`).
             let t = q
                 .get("thread")
@@ -937,11 +937,10 @@ impl<'a> Server<'a> {
             let ms = t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
             lock(&self.timing).add(crate::now(), "/live", false, ms);
             // Each second: a message (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
-            // the slot), else a ping every 15 s; #352: a `?tab=host` stream stamps `host-watch.at` (`hosts::sample`).
+            // the slot), else a ping every 15 s.
             std::thread::spawn(move || {
                 let mut missed = 0;
                 while sent(&mut s, msg.as_bytes(), Instant::now() + 2 * beat) {
-                    let _ = host.then(|| std::fs::write(st.with_file_name("host-watch.at"), crate::now().to_string()));
                     let t = Instant::now();
                     msg = loop {
                         let _ = watch.as_ref().map(|f| std::fs::write(f, crate::now().to_string()));

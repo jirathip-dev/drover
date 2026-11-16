@@ -880,7 +880,7 @@ pub(super) fn feed(ctx: &Ctx, after: &[Event], cap: usize) -> Events {
     Events { seq, refresh, list }
 }
 
-fn roots(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
+pub(super) fn roots(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
     let seen = crate::hosts::cached(ctx);
     for c in &mut tab.hosts {
         for r in seen.get(&c.name).map_or(&[][..], |s| &s.roots[..]) {

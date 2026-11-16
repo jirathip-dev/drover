@@ -109,7 +109,7 @@ function stream(v: View) {
     v.model = apply(v.model ?? {}, d.ops as never);
     [v.at, v.live] = [Date.now(), true];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
-    paint(v, before);
+    if (v === shv) drawSheet(); else paint(v, before);
     dot.classList.add('p');
     setTimeout(() => dot.classList.remove('p'), 600);
   };
@@ -145,8 +145,9 @@ function toast(text: string, bad = false) {
 
 // The sheet: a screen of type `sheet` (or any screen) over the page, its `done` posting the fields' values.
 const sh = $('#sheet'), shv = view('', $('#sheet .sb'));
-function closeSheet() { sh.hidden = true; H.classList.remove('sheet'); shv.model = null; }
+function closeSheet() { sh.hidden = true; H.classList.remove('sheet'); shv.model = null; close(shv); }
 async function sheet(path: string) {
+  close(shv);
   shv.path = path;
   shv.open.clear();
   try {
@@ -156,6 +157,7 @@ async function sheet(path: string) {
     return toast((e as Error).message, true);
   }
   drawSheet();
+  stream(shv);
   sh.hidden = false;
   H.classList.add('sheet');
 }
@@ -213,13 +215,13 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement) {
     if (!r.ok) return toast(j.line ?? `${r.status}`, true);
     const ops: Blk[] = j.ops ?? [];
     const whole = ops.find(o => o.op === 'screen');
-    if (whole && v !== shv) {
+    if (whole) {
       close(v);
       v.model = apply(v.model ?? {}, ops as never);
       v.path = String(v.model.stream ?? v.path).replace(/\/stream/, '') || v.path;
       [v.at] = [Date.now()];
       put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
-      paint(v);
+      if (v === shv) drawSheet(); else paint(v);
       stream(v);
     } else if (ops.length && v.model) {
       v.model = apply(v.model, ops as never);

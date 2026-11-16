@@ -1390,7 +1390,7 @@ pub struct Row {
     pub mem_free_gb: Option<f64>,
     pub disk_free_gb: Option<f64>,
     pub lanes: usize,
-    /// #352: MB per `host::groups` group, only while `/live?tab=host` was seen in the last 2 min (else no `ps` walk).
+    /// #352: MB per `host::groups` group, only while `/screens/hosts/stream` was open in the last 2 min (else no `ps` walk).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub procs: Option<[u64; 5]>,
 }

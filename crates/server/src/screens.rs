@@ -36,11 +36,12 @@ pub fn places() -> Value {
     serde_json::to_value(m.get("places")).unwrap_or_default()
 }
 
-/// #1072: the standalone page's places: the manifest's, then the Threads tab (never the Cooee plugin's).
+/// #1072: the standalone page's places: the manifest's, then the Threads tab and #1091's Hosts row (never the Cooee plugin's).
 pub fn page_places() -> Value {
     let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
+    let hosts = json!({"type": "menu-row", "label": "Hosts", "subtitle": "gauges, on/off, sign in", "screen": "/screens/hosts"});
     let mut all = places().as_array().cloned().unwrap_or_default();
-    all.push(threads);
+    all.extend([threads, hosts]);
     Value::Array(all)
 }
 
@@ -1034,6 +1035,192 @@ fn sheets(v: &Value, out: &mut Vec<String>) {
     }
 }
 
+const HOST_ACTIONS: [&str; 4] = ["host", "reap", "orphans", "sign-in"];
+
+fn tone_word(t: &str) -> &'static str {
+    match t {
+        "g" => "ok",
+        "a" => "warn",
+        "r" => "bad",
+        _ => "mute",
+    }
+}
+
+fn spark(s: &str) -> Vec<f64> {
+    s.split(',').filter_map(|v| v.parse().ok()).collect()
+}
+
+fn host_card(c: &crate::api::HostCard) -> Value {
+    let n = &c.name;
+    let (gauges, rest): (Vec<_>, Vec<_>) = c.rows.iter().partition(|r| r.bar.is_some());
+    let items: Vec<Value> = gauges
+        .iter()
+        .map(|r| json!({"label": r.k, "value": r.b, "unit": r.of, "tone": tone_word(&r.t), "spark": spark(&r.s)}))
+        .collect();
+    let mut rows: Vec<Value> = rest
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let sub: Vec<&str> = [&r.text]
+                .into_iter()
+                .chain(&r.notes)
+                .map(String::as_str)
+                .filter(|t| !t.is_empty())
+                .collect();
+            json!({"type": "row", "id": format!("host-{n}-{i}"), "title": r.k, "value": r.b,
+            "subtitle": {"text": sub.join(" "), "tone": tone_word(&r.t)}})
+        })
+        .collect();
+    rows.push(
+        json!({"type": "row", "id": format!("host-{n}-chart"), "title": "chart", "value": "24h · 6h · 1h",
+        "tap": {"sheet": format!("/screens/hosts/{n}")}}),
+    );
+    let opts: Vec<Value> = c.setups.iter().map(|s| json!({"value": s, "label": s})).collect();
+    let buttons: Vec<Value> = c.to.iter().map(|to| {
+        let why = format!("{} lane(s) run there; they finish, no new one starts", c.lanes);
+        let confirm = json!({"title": format!("Turn {n} {to}?"), "message": ([why.as_str(), ""][usize::from(to == "on")]), "ok": to});
+        json!({"type": "button", "id": format!("host-{n}-{to}"), "label": to, "style": (["destructive", "primary"][usize::from(to == "on")]),
+            "action": "host", "values": {"host": n, "to": to}, "confirm": confirm})
+    }).collect();
+    json!({"type": "card", "id": format!("host-{n}"), "title": n, "meta": (["", "main"][usize::from(c.main)]),
+        "badge": {"text": c.words, "tone": tone_word(&c.tone)}, "blocks": [
+            {"type": "stat", "id": format!("host-{n}-gauges"), "items": items},
+            {"type": "list", "id": format!("host-{n}-rows"), "rows": rows},
+            {"type": "section", "id": format!("host-{n}-sign-in"), "header": "sign in",
+                "blocks": [{"type": "choice", "id": format!("sign-in-{n}"), "action": "sign-in", "values": {"host": n}, "options": opts}]},
+        ], "buttons": buttons})
+}
+
+fn hosts_screen(t: &crate::api::HostTab) -> Value {
+    let row = |id: &str, title: &str, value: String, sub: String, tone: &str| json!({"type": "row", "id": id, "title": title, "value": value, "subtitle": {"text": sub, "tone": tone}});
+    let mut disk = vec![];
+    if let Some(d) = &t.disk {
+        let ago = d
+            .ago
+            .as_ref()
+            .map_or("not walked yet".into(), |a| format!("walked {a} ago"));
+        disk.push(row(
+            "worktrees",
+            "worktrees",
+            format!("{} / {} GB", d.gb, d.budget),
+            ago,
+            tone_word(&d.bar.t),
+        ));
+    }
+    let left = t.leftovers.as_ref().map_or(("0".into(), String::new()), |l| {
+        (l.n.to_string(), format!("{} MB held", l.mb))
+    });
+    disk.push(row("leftovers", "leftover processes", left.0, left.1, "mute"));
+    disk.push(row(
+        "orphans",
+        "orphan folders",
+        t.orphans.to_string(),
+        "under the worktree root, no fleet's".into(),
+        "mute",
+    ));
+    let mut fix = vec![];
+    if t.leftovers.is_some() {
+        fix.push(
+            json!({"type": "button", "id": "reap", "label": "reap", "style": "destructive", "action": "reap",
+            "confirm": {"title": "Reap the leftover processes?", "message": "TERM, then KILL", "ok": "reap"}}),
+        );
+    }
+    if t.orphans > 0 {
+        fix.push(json!({"type": "button", "id": "orphans", "label": "remove orphans", "style": "destructive", "action": "orphans",
+            "confirm": {"title": format!("Remove {} orphan folder(s)?", t.orphans), "ok": "remove"}}));
+    }
+    let svc: Vec<Value> = t
+        .spawns
+        .iter()
+        .chain(&t.services)
+        .map(|r| {
+            let sub = [r.detail.as_str(), r.fix.as_str()]
+                .into_iter()
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
+            row(
+                &format!("svc-{}", r.name.replace(' ', "-")),
+                &r.name,
+                String::new(),
+                sub,
+                tone_word(&r.tone),
+            )
+        })
+        .collect();
+    let meters: Vec<Value> = t
+        .deepseek
+        .iter()
+        .map(|b| {
+            let v = b.balance.clone().unwrap_or_default();
+            row(
+                "meter-deepseek",
+                "DeepSeek",
+                v,
+                [b.hint.as_str(), "low"][usize::from(b.low)].into(),
+                ["mute", "warn"][usize::from(b.low)],
+            )
+        })
+        .collect();
+    let sec = |id: &str, header: &str, rows: Vec<Value>| json!({"type": "section", "id": id, "header": header, "blocks": [{"type": "list", "id": format!("{id}-list"), "rows": rows}]});
+    let mut blocks: Vec<Value> = t.hosts.iter().map(host_card).collect();
+    let mut fleet = sec("disk", "fleet disk", disk);
+    fleet["blocks"]
+        .as_array_mut()
+        .into_iter()
+        .for_each(|b| b.extend(fix.clone()));
+    let mut providers = sec("providers", "providers", meters);
+    providers["footer"] = json!("lanes sign in with each host's own login: a card's [sign in]");
+    blocks.extend([fleet, sec("services", "services", svc), providers]);
+    json!({"type": "screen", "id": "hosts", "title": "Hosts", "stream": "/screens/hosts/stream", "blocks": blocks})
+}
+
+fn host_chart(ctx: &Ctx, name: &str) -> Value {
+    let hist = crate::hosts::history(ctx);
+    let keys = [
+        ("load", "load/cpu"),
+        ("swap", "swap-out"),
+        ("mem", "free memory GB"),
+        ("disk", "free disk GB"),
+        ("lanes", "lanes"),
+    ];
+    let blocks: Vec<Value> = keys.iter().map(|(k, label)| {
+        let all = crate::hosts::series(&hist, name, k, ctx.now, true);
+        let items: Vec<Value> = all.split(';').zip(["24h", "6h", "1h"]).map(|(s, at)| {
+            let sp = spark(s);
+            let worst = sp.iter().copied().reduce(if ["mem", "disk"].contains(k) { f64::min } else { f64::max });
+            json!({"label": at, "value": worst.map_or("–".into(), |w| w.to_string()), "spark": sp})
+        }).collect();
+        json!({"type": "section", "id": format!("chart-{k}"), "header": label, "blocks": [{"type": "stat", "id": format!("chart-{k}-stat"), "items": items}]})
+    }).collect();
+    json!({"type": "sheet", "id": format!("chart-{name}"), "title": format!("{name} · worst per bucket"), "cancel": "Close", "blocks": blocks})
+}
+
+fn sign_in_sheet(pane: &str, v: &Value) -> Value {
+    let lines: Vec<&str> = v["lines"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let said = if v["closed"] == true {
+        "closed".to_string()
+    } else {
+        format!("```\n{}\n```", lines.join("\n"))
+    };
+    let urls: Vec<Value> = v["urls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .map(|(i, u)| json!({"type": "row", "id": format!("url-{i}"), "title": u, "tap": {"url": u}}))
+        .collect();
+    let field = json!({"type": "text", "name": "text", "label": "Reply", "value": "", "placeholder": "a code, or empty for Enter"});
+    json!({"type": "sheet", "id": format!("sign-in-{pane}"), "title": "sign in", "cancel": "Close", "stream": format!("/screens/sign-in/{pane}/stream"),
+        "done": {"label": "Send", "action": "sign-in", "values": {"pane": pane}},
+        "blocks": [{"type": "text", "id": "screen", "markdown": said}, {"type": "list", "id": "urls", "rows": urls}, {"type": "form", "id": "reply", "fields": [field]}]})
+}
+
 impl Server<'_> {
     pub(super) fn screen_files(&self, ctx: &Ctx, paired: bool) -> Vec<(String, Vec<u8>)> {
         let mut paths: Vec<String> = page_places()
@@ -1081,6 +1268,11 @@ impl Server<'_> {
                 backlog(ctx.now, tab.fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?, q)?
             }
             "/screens/ask" => ask_sheet(ctx, q)?,
+            "/screens/hosts" => hosts_screen(&super::v1::roots(ctx, self.host_tab(ctx))),
+            p if p.starts_with("/screens/hosts/") => host_chart(ctx, &p[15..]),
+            p if paired && p.starts_with("/screens/sign-in/") => {
+                sign_in_sheet(&p[17..], &crate::setup::screen(ctx, &self.r, &p[17..]).ok()?)
+            }
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
                 return self.threads_screen(ctx, &p[16..], paired)
             }
@@ -1268,7 +1460,11 @@ impl Server<'_> {
             return line("403 Forbidden", "foreign Host or Origin");
         }
         match (method, p) {
-            ("GET", p) if p.starts_with("/screens/lanes/") && !plugin && auth.is_err() => {
+            ("GET", p)
+                if (p.starts_with("/screens/lanes/") || p.starts_with("/screens/sign-in/"))
+                    && !plugin
+                    && auth.is_err() =>
+            {
                 line("401 Unauthorized", "pair this device first")
             }
             ("GET", p) => match self.screen(ctx, p, &form(query), plugin || auth.is_ok()) {
@@ -1280,7 +1476,7 @@ impl Server<'_> {
             ("POST", "/action") => {
                 let a: Value = serde_json::from_str(body).unwrap_or_default();
                 let name = a["action"].as_str().unwrap_or_default();
-                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name)) {
+                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name) && !HOST_ACTIONS.contains(&name)) {
                     let why =
                         format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
                     return line("403 Forbidden", &why);
@@ -1447,6 +1643,18 @@ impl Server<'_> {
                 }
                 line
             }
+            "host" => self.form_op(ctx, "host", &[("host", s("host")), ("to", s("to"))])?,
+            "reap" | "orphans" => self.form_op(ctx, name, &[])?,
+            "sign-in" if v["pane"].is_string() => crate::setup::send(ctx, &self.r, &s("pane"), &s("text"))?,
+            "sign-in" => {
+                let pane = crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("choice"), "web")?;
+                let sh = self
+                    .screen(ctx, &format!("/screens/sign-in/{pane}"), &Q::new(), true)
+                    .context("no sign-in")?;
+                return Ok(
+                    json!({"ops": [{"op": "screen", "screen": sh}], "toast": format!("{} started", s("choice"))}),
+                );
+            }
             "save-fleets" => self.save_fleets(ctx, &cfg, v)?,
             "remove-fleet" => {
                 let hash = crate::propose::view(ctx)?.hash;
@@ -1556,7 +1764,11 @@ impl Server<'_> {
         let mut msg = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\nid: {seq}\ndata: {}\n\n", json!({"seq": seq, "ops": start}));
         let (mut log, mut ping) = (crate::db::last_seq(&self.ctx.state), Instant::now());
         let mut built = Instant::now();
+        let every = Duration::from_secs([30, 2][usize::from(base.starts_with("/screens/sign-in/"))]);
         let res = loop {
+            if base == "/screens/hosts" {
+                let _ = std::fs::write(self.ctx.state.with_file_name("host-watch.at"), crate::now().to_string());
+            }
             if let Err(e) = s.write_all(msg.as_bytes()) {
                 break Err(e);
             }
@@ -1564,7 +1776,7 @@ impl Server<'_> {
             while msg.is_empty() {
                 std::thread::sleep(Duration::from_millis(500));
                 let now = crate::db::last_seq(&self.ctx.state);
-                if now != log || built.elapsed() >= Duration::from_secs(30) {
+                if now != log || built.elapsed() >= every {
                     (log, built) = (now, Instant::now());
                     let new = screen(&ctx()).unwrap_or_else(|| cur.clone());
                     let mut change = ops(&cur, &new);
