@@ -237,7 +237,7 @@ jobs:
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
           webkit=false
-          grep -qE '^(web/|assets/|crates/server/src/(serve\.rs|screens\.rs|serve/chat\.rs)|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|ui/(drafts|repaint)\.mjs|threads_tab\.rs|herd\.rs))' changed.txt && webkit=true
+          grep -qE '^(web/|assets/|crates/server/src/(serve\.rs|screens\.rs|serve/chat\.rs)|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|ui/(drafts|repaint)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs))' changed.txt && webkit=true
           echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
 
   # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.
@@ -263,7 +263,7 @@ jobs:
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
       - name: a thread tap and a thread push open the thread; back returns (#1088)
-        run: cargo test --locked --test cooee_screens parity_46_a_queue_row_with_an_ask_opens_its_thread_in_webkit -- --nocapture
+        run: cargo test --locked --test cooee_screens parity_46 -- --nocapture
       - name: "parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)"
         run: cargo test --locked --test parity_webkit -- --nocapture
       - name: "parity rows red until their fix (#1094: each #[ignore] names its issue; soft)"
@@ -276,5 +276,7 @@ jobs:
       - name: the thread view in WebKit (#1086, #1087: opens at the end, older above in place, image viewer, keyboard; attachments, a failed send, queue and steer)
         if: ${{ !cancelled() }}
         run: cargo test --locked --test threads_tab webkit -- --test-threads=1
+      - name: a Queue row opens its issue sheet, [lane] the transcript, back the sheet (#1090)
+        run: cargo test --locked --test issue_sheet_webkit
       - name: "the Herd in WebKit (#1092: a figure per lane, night, the next repo, the pinned swag scene)"
         run: cargo test --locked --test herd
