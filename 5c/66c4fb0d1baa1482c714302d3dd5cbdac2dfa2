@@ -1,0 +1,4 @@
+Decided: merged origin/staging (#1125) into the branch, no conflicts; bootstrap's per-profile sync loop is unchanged
+Because: crates/core/src/cloud.rs:473
+Rejected: none
+Owner: The fix is brought up to date with the latest shared branch; nothing about it changed.
