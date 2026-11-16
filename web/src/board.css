@@ -33,13 +33,13 @@ nav a.on{box-shadow:inset 0 2px var(--l)}
 nav a.on>span{background:var(--l);color:var(--bg)}
 nav a.on .n{color:inherit}
 
-button{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;height:var(--ctl);min-width:28px;max-width:100%;margin:0;padding:0 1ch;border:0;border-radius:0;background:none;color:var(--l);font:inherit;font-size:var(--fs);line-height:1;white-space:nowrap;text-transform:lowercase}
-button>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
-button::before{content:"[";position:absolute;left:0}
-button::after{content:"]";position:absolute;inset:calc(-1 * var(--s2));display:flex;align-items:center;justify-content:flex-end;padding-right:var(--s2)}
-button:active{background:var(--l);color:var(--bg)}
+button,a.btn{text-decoration:none;position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;height:var(--ctl);min-width:28px;max-width:100%;margin:0;padding:0 1ch;border:0;border-radius:0;background:none;color:var(--l);font:inherit;font-size:var(--fs);line-height:1;white-space:nowrap;text-transform:lowercase}
+button>span,a.btn>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+button::before,a.btn::before{content:"[";position:absolute;left:0}
+button::after,a.btn::after{content:"]";position:absolute;inset:calc(-1 * var(--s2));display:flex;align-items:center;justify-content:flex-end;padding-right:var(--s2)}
+button:active,a.btn:active{background:var(--l);color:var(--bg)}
 button:disabled{color:var(--mute);opacity:.6}
-button.bad,button.destructive{color:var(--r)}
+button.bad,button.destructive,a.btn.bad{color:var(--r)}
 button[aria-busy=true]>span::after{content:" ↻";display:inline-block;animation:s 1s linear infinite}
 button.pick{display:flex;width:100%;height:auto;min-height:var(--ctl);padding:calc((var(--ctl) - 1.35em) / 2) 1ch;justify-content:flex-start;text-align:left;white-space:normal;line-height:1.35;text-transform:none}
 button.pick::after{inset:calc(-1 * var(--s1)) calc(-1 * var(--s2));align-items:flex-start;padding-top:calc(var(--s1) + (var(--ctl) - 1.35em) / 2)}
@@ -66,7 +66,7 @@ input[type=checkbox]{width:var(--s4);height:var(--s4);accent-color:var(--l)}
 .foot{font-size:var(--fs-meta)}
 .list{display:flex;flex-direction:column}
 .row{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);padding:var(--s1) 0;border-bottom:1px solid var(--line)}
-.row.tap{cursor:pointer}
+.row.tap{cursor:pointer}a.row{color:inherit;text-decoration:none}
 .row.link .rt{color:var(--link);text-decoration:underline}
 .row.in1{padding-left:var(--s4)}.row.in2{padding-left:calc(2 * var(--s4))}.row.in3{padding-left:calc(3 * var(--s4))}
 .rm{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--s2)}
