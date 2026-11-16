@@ -845,7 +845,7 @@ fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
 }
 
 #[test]
-fn the_lanes_sheets_stop_and_kill_run_the_verbs_and_log_via_the_screen() {
+fn parity_59_the_lanes_sheets_stop_and_kill_run_the_verbs_and_log_via_the_screen() {
     let (c, wt, sh) = lane("cooee-stop-kill");
     sh.lane(LANE, "working", &wt);
     let r = OnShed(git(&wt, "", "0\n", ""), sh);

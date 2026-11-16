@@ -52,7 +52,7 @@ fn kills(r: &Fake) -> Vec<String> {
 }
 
 #[test]
-fn closing_a_lane_terms_then_kills_only_its_worktree_pids() {
+fn parity_r26_closing_a_lane_terms_then_kills_only_its_worktree_pids() {
     let (_d, c, mine, sibling, _sh) = setup("reap-kill");
     let rows = lsof(&mine, &sibling);
     let r = fake(&rows, &mine).reply("lsof", &rows);

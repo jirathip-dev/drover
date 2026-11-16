@@ -559,7 +559,7 @@ fn boot_fake(gh_in: bool) -> Fake {
     );
     let f = Fake::default()
         .reply(&format!("{SSH}'sh' '-c' 'uname -s"), "Linux\nx86_64\n/home/me\n")
-        .reply(&step("[ \"$(shed --version)\""), "")
+        .reply(&step("v=$(shed --version)"), "")
         .reply(&step("shed doctor"), "")
         .once(&step("command -v gh"), 1, "")
         .once(&step(&mine), 1, "")
@@ -604,7 +604,7 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
         "apt_ gh",
         "command -v claude",
         "command -v cargo",
-        "[ \"$(shed --version)\"",
+        "v=$(shed --version)",
         "shed doctor",
     ];
     let at: Vec<_> = order.iter().map(|s| r.index(&step(s)).unwrap()).collect();
@@ -829,6 +829,67 @@ fn a_snapshot_needs_a_green_health_check_first() {
         drover::hosts::cached(&c)["cloud1"].github.starts_with("github:"),
         "the look reads the token too"
     );
+}
+
+struct ShedThere<'a>(&'a Fake, std::path::PathBuf);
+
+impl Runner for ShedThere<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        let line = format!("{prog} {}", args.join(" "));
+        let Some(script) = args.last().filter(|_| line.starts_with(&step("v=$(shed --version)"))) else {
+            return self.0.run(prog, args);
+        };
+        self.0.calls.borrow_mut().push(line);
+        let o = std::process::Command::new("sh")
+            .args(["-c", script])
+            .env("HOME", &self.1)
+            .output()?;
+        Ok(Out {
+            code: o.status.code().unwrap_or(1),
+            stdout: String::from_utf8_lossy(&o.stdout).into(),
+            stderr: String::from_utf8_lossy(&o.stderr).into(),
+        })
+    }
+}
+
+fn boot_with_shed(name: &str, version: &str) -> (Fake, String) {
+    use std::os::unix::fs::PermissionsExt;
+    let (c, cfg) = running(name);
+    let home = tmpdir(name);
+    let bin = home.join(".local/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("shed"), format!("#!/bin/sh\necho '{version}'\n")).unwrap();
+    std::fs::set_permissions(bin.join("shed"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let f = boot_fake(true);
+    let mut out = vec![];
+    let _ = drover::cloud::bootstrap(&c, &cfg, &ShedThere(&f, home), "cloud1", &mut out);
+    (f, String::from_utf8(out).unwrap())
+}
+
+fn shed_install() -> String {
+    step(&format!(
+        "cargo install --git {} --rev {}",
+        drover::shed::git(),
+        drover::shed::REV
+    ))
+}
+
+#[test]
+fn bootstrap_keeps_a_shed_whose_version_names_the_pinned_rev() {
+    let sv = drover::shed::proto::VERSION;
+    let (f, out) = boot_with_shed("cloud-shed-pin", &format!("shed {sv} ({})", &drover::shed::REV[..7]));
+    assert!(out.contains("✓ shed — there"), "{out}");
+    assert!(!f.called(&shed_install()), "{:?}", f.calls.borrow());
+}
+
+#[test]
+fn bootstrap_installs_over_a_shed_of_another_build() {
+    let sv = drover::shed::proto::VERSION;
+    for v in [format!("shed {sv} (abc1234)"), format!("shed {sv}")] {
+        let (f, out) = boot_with_shed("cloud-shed-other", &v);
+        assert!(!out.contains("✓ shed — there"), "{v}: {out}");
+        assert!(f.called(&shed_install()), "{v}: {:?}", f.calls.borrow());
+    }
 }
 
 fn gone_stops(c: &drover::Ctx) -> Vec<Event> {
