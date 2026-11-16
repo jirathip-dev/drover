@@ -1,0 +1,9 @@
+Decided: on merging staging, a sent message's files render only through #1086's msg_card; this branch's own files() renderer is deleted.
+Because: crates/server/src/serve/chat.rs:740
+Decided: the generic form keeps its submit path, since #1086's secret card posts its masked value through it.
+Because: crates/server/src/serve/chat.rs:899
+Decided: #1086's tests, quote and focus-screen CSS target the composer's .cmp textarea, the thread's only box now.
+Because: "A `textarea` that grows to 6 lines; Enter makes a new line, [send] sends"
+Rejected: keeping both renderers — every attachment showed twice in the thread golden.
+Check: thread.json and thread-cards.json differ from staging only by the composer block; the ui-webkit job runs the threads_tab webkit filter, which matches the _in_webkit tests.
+Owner: Please attach a screenshot from Photos on your phone and send it; that check can only be done by hand.
