@@ -2,7 +2,8 @@
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
 use crate::api::{
-    Answered, ChatRepo, ChatTab, Chip, FileRef, Link, Msg, QueuedMsg, RunCard, ThreadPage, ThreadRow, ThreadView,
+    Answered, ChatRepo, ChatTab, Chip, FileRef, Handoff, Link, Msg, QueuedMsg, RunCard, ThreadPage, ThreadRow,
+    ThreadView,
 };
 use crate::conductor::{self, of};
 use crate::config::Config;
@@ -746,8 +747,8 @@ fn composer(label: &str, action: &str, values: &Value, more: Value) -> Value {
 }
 
 /// #1086: a message's card with its files (images inline, others as rows) and its link's chip, which opens that thread.
-fn msg_card(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
-    let (mut v, key) = (msg_body(now, id, m, paired), format!("m-{}", m.seq));
+fn msg_card(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> Value {
+    let (mut v, key) = (msg_body(now, id, m, paired, h), format!("m-{}", m.seq));
     let src = |f: &FileRef| format!("/thread/{id}/{}", f.name);
     let (imgs, docs): (Vec<&FileRef>, Vec<&FileRef>) = m
         .files
@@ -823,7 +824,7 @@ fn run_body(now: u64, key: &str, r: &RunCard) -> (Vec<Value>, Vec<Value>, &'stat
 }
 
 /// #1072: a message as a card: `kind` you, orch, tool, sys or ask (choice rows while open, else its answer).
-fn msg_body(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
+fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> Value {
     let (key, age) = (format!("m-{}", m.seq), crate::events::age(now.saturating_sub(m.ts)));
     let text = |k: &str, t: &str| json!({"type": "text", "id": format!("{key}-{k}"), "markdown": t});
     let sys = |t: &str| json!({"type": "card", "id": key, "kind": "sys", "blocks": [text("t", t)]});
@@ -833,7 +834,11 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
             json!({"type": "card", "id": key, "kind": "you", "title": "you", "meta": format!("✓ {age}"), "blocks": [text("t", &m.text)]})
         }
         "msg" => {
-            json!({"type": "card", "id": key, "kind": "orch", "title": "orchestrator", "meta": age, "blocks": [text("t", &m.text)]})
+            let who = m
+                .link
+                .as_ref()
+                .map_or("orchestrator".into(), |l| format!("{} {}", l.w, l.t));
+            json!({"type": "card", "id": key, "kind": "orch", "title": who, "meta": age, "blocks": [text("t", &m.text)]})
         }
         "note" if m.retry => {
             json!({"type": "card", "id": key, "kind": "you", "tone": "bad", "title": "you", "meta": age,
@@ -864,10 +869,28 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
                 if let Some(r) = rec {
                     ch.put("recommended", json!(r));
                 }
+                if h.is_some() {
+                    ch.put("values", json!({"thread": id, "fleet": a.fleet}));
+                }
                 blocks.push(ch);
             }
-            json!({"type": "card", "id": key, "kind": "ask", "tone": or(m.open && m.answer.is_none(), "warn", ""),
-                "title": format!("{}{}", a.id, or(m.routine, " · routine", "")), "meta": age, "blocks": blocks})
+            let mut tone = or(m.open && m.answer.is_none(), "warn", "");
+            let mut buttons = vec![];
+            match h.map(|h| (h.state.as_str(), h.to.as_str(), h.error.as_deref())) {
+                Some(("delivered", Some(to), _)) => buttons.push(json!({"type": "button", "id": format!("{key}-to"),
+                    "label": format!("continued in {to}"), "tap": {"thread": to}})),
+                Some(("failed", _, e)) => {
+                    tone = "bad";
+                    blocks.push(text("e", &format!("✗ not delivered: {}", e.unwrap_or_default())));
+                }
+                _ => {}
+            }
+            let mut c = json!({"type": "card", "id": key, "kind": "ask", "tone": tone,
+                "title": format!("{}{}", a.id, or(m.routine, " · routine", "")), "meta": age, "blocks": blocks});
+            if !buttons.is_empty() {
+                c.put("buttons", json!(buttons));
+            }
+            c
         }
         "note" if m.open && m.ask.is_some() => {
             let Some(a) = &m.ask else { return sys(&m.text) };
@@ -964,7 +987,17 @@ pub fn thread_screen(
         json!({"type": "button", "id": "older", "label": "↑ older messages",
         "tap": {"open": format!("/screens/threads/{id}?before={n}"), "keep": true}})
     }));
-    blocks.extend(v.page.msgs.iter().map(|m| msg_card(ctx.now, id, m, paired)));
+    let at = |m: &Msg| events.get(events.binary_search_by_key(&m.seq, |e| e.seq).ok()?);
+    let handoff = |m: &Msg| {
+        let e = at(m).filter(|e| m.kind == "ask" && e.data.get("handoff").is_some())?;
+        Some(super::v1::handoff(events, e, true))
+    };
+    blocks.extend(
+        v.page
+            .msgs
+            .iter()
+            .map(|m| msg_card(ctx.now, id, m, paired, handoff(m).as_ref())),
+    );
     if !arch {
         let working = v.since.map(|t| json!({ "since": super::screens::iso(t) }));
         blocks.push(composer(
