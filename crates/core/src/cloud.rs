@@ -467,12 +467,14 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     if on.read(p).and_then(|t| mine(&t.parse().ok()?)) == Some(true) {
         on.remove(p)?;
     }
-    let sync = format!("test ! -e '{conf}' || '{exe}' profiles sync");
-    let o = sh(&sync)?;
-    ensure!(o.code == 0, "{}", fail("profiles sync", &sync, &o));
-    writeln!(out, "✓ profiles sync — there")?;
+    if on.exists(p) {
+        let sync = format!("'{exe}' profiles sync");
+        let o = sh(&sync)?;
+        ensure!(o.code == 0, "{}", fail("profiles sync", &sync, &o));
+        writeln!(out, "✓ profiles sync — there")?;
+    }
     if acp {
-        for (p, family, _) in crate::hosts::acp_profiles(cfg, &tags) {
+        for (p, family, _) in crate::hosts::acp_profiles(cfg, name, &tags) {
             let args = ["profiles", "sync", "--profile", &p, "--role", family];
             let o = on.run(&exe, &argv(&args))?;
             ensure!(
