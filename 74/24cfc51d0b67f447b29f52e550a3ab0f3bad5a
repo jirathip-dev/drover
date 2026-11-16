@@ -1,0 +1,15 @@
+Decided: session::Status keeps every shed word (running and waiting-approval are their own) and word() gives shed's word back
+Because: "No state is renamed or folded."
+Rejected: staging's #1053 fold of running into working and of error, rate-limited, hibernated into idle — AC1 forbids it
+Decided: waiting-owner is LaneState::Owner, laid over shed's done while the issue has an open ask or an unanswered blocked turn-end
+Because: crates/core/src/lanes.rs:228
+Decided: one lanes::held test gates the silent nudge and lanes::health, which drives both the stall and the lane-dead checks
+Because: "never fire on a lane that is `running`, `waiting-approval`, `waiting-owner` or `rate-limited`"
+Decided: [switch account] dropped with its resume plumbing; drover limit is the owner's [wait] only
+Because: q1728
+Decided: the reset time is read from shed's note; NO_RESET when it names none, never a guessed time
+Because: crates/core/src/limit.rs:39
+Decided: the queue row shows state and note before the lane name, so a 48-char subtitle keeps the reset time
+Because: crates/core/src/session/mod.rs:94
+Check: a rate-limited lane gets no continue until the owner's limit-picked, and that continue arrives once at the reset
+Owner: a rate-limited lane shows when it resets and offers only Wait; drover never continues it unasked
