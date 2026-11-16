@@ -308,6 +308,12 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   A→Z, with its kind, on/off and live lane count; a remote host's [Off]/[On] runs `host` (`host-off`/`host-on`) and
   the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token
   proxy section under it holds doctor's proxy facts and [How to set], `GET /screens/proxy-token`, the token's steps;
+- #1092: `GET /screens/herd`, the page's Herd (page-only, [⚙] → Herd; cooee draws its own scene): one `scene` block
+  with `weather` (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `line`)
+  and `repos`, each a fleet (then `others`) with its queued issues at the gate and its lanes in bands (working, idle,
+  done, blocked) as rows with figures. The page draws the theme's `scene.svg` (the pinned swag pack; a `<config
+  dir>/themes/<name>/scene.svg` overrides it; farm and terminal, with none, get a drawn ranch), [‹] [›] switch repo
+  and [☾] switches night;
 - `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
   `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
