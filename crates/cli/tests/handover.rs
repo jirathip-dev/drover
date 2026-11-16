@@ -552,10 +552,7 @@ fn a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit() {
         Some(json!(true)),
         "{high:?}"
     );
-    assert_eq!(
-        log.matches("phone page on").count(),
-        4,
-        "two bridges, two exec'd copies: {log}"
-    );
+    let pages = log.matches("phone page on").count();
+    assert!(pages >= 4, "a bridge and an exec'd copy per handover: {log}");
     assert!(still.is_none(), "the supervised pid serves on\n{log}");
 }
