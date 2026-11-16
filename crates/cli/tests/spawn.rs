@@ -889,3 +889,38 @@ fn a_spawned_lanes_build_command_runs_in_the_background_but_a_design_lanes_does_
         );
     }
 }
+
+#[test]
+fn a_new_lane_worktree_leaves_out_docs_archive_unless_opted_out() {
+    let sparse = |cfg: &str, name: &str| {
+        let d = tmpdir(name);
+        let c = ctx(
+            &d,
+            &CONFIG
+                .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+                .replace("[limits]", cfg),
+        );
+        let _sh = on_shed(&c);
+        assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+        let wt = c.worktrees.join("sendmeter/issue-12");
+        let r = shed_fake()
+            .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+            .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+            .reply("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", "")
+            .reply("git -C", "");
+        let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+        assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+        let calls = r.calls.borrow();
+        assert!(calls.iter().any(|l| l.contains(" worktree add ")), "{calls:?}");
+        let want = format!("git -C {} sparse-checkout set --no-cone /* ", wt.display());
+        calls.iter().find(|l| l.starts_with(&want)).cloned()
+    };
+    assert_eq!(
+        sparse("[limits]", "sparse-default")
+            .as_deref()
+            .map(|l| l.rsplit(' ').next().unwrap()),
+        Some("!/docs/archive/")
+    );
+    let off = "[fleet.sendmeter.hygiene]\ndocs_trust = []\n\n[limits]";
+    assert_eq!(sparse(off, "sparse-off"), None);
+}

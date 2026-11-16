@@ -928,6 +928,20 @@ pub struct Opts {
     pub update: bool,
 }
 
+fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygiene) -> Result<()> {
+    let verify = argv(&["-C", local, "rev-parse", "--verify", "--quiet", &p.branch]);
+    let have = r.run("git", &verify)?.code == 0;
+    ok(r, "git", &worktree_add(local, p, have))?;
+    let deny = h.docs_trust.clone().unwrap_or_default();
+    if !deny.is_empty() {
+        let pats = deny.iter().map(|d| format!("!/{}", d.trim_start_matches('/')));
+        let wt = p.worktree.to_string_lossy();
+        let set = ["-C", &wt, "sparse-checkout", "set", "--no-cone", "/*"].map(String::from);
+        ok(r, "git", &[set.to_vec(), pats.collect()].concat())?;
+    }
+    Ok(())
+}
+
 pub fn spawn(
     ctx: &Ctx,
     cfg: &Config,
@@ -1055,8 +1069,8 @@ pub fn spawn(
             (events.iter().skip(i + 1)).any(|e| e.is("verdict", fleet, issue) || e.is("spawn", fleet, issue))
         };
         let judged = |i: usize| {
-            let at = events[i].str("stage");
-            (events[i + 1..].iter()).any(|e| e.is("verdict", fleet, issue) && e.str("stage") == at)
+            let at = events.get(i).and_then(|e| e.str("stage"));
+            (events.iter().skip(i + 1)).any(|e| e.is("verdict", fleet, issue) && e.str("stage") == at)
         };
         let ended = matches!(a.status(), Some(Status::Done | Status::Idle));
         sp.is_some_and(|i| ended && after(i) || f.family(role) == "rev" && judged(i))
@@ -1218,14 +1232,7 @@ pub fn spawn(
         }
         let make = || -> Result<()> {
             if !reopen {
-                let have = r
-                    .run(
-                        "git",
-                        &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
-                    )?
-                    .code
-                    == 0;
-                ok(r, "git", &worktree_add(&local, &p, have))?;
+                add_worktree(r, &local, &p, &cfg.hygiene(fleet))?;
             }
             Ok(())
         };
