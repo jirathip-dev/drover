@@ -1,0 +1,6 @@
+Decided: merged origin/staging; took its serial-queue rework in drive.rs and waiting.rs as written, with its Value reads moved to Json::at
+Because: "Fix every existing hit in this issue; no baseline of old offenders."
+Decided: spawn.rs's new `cached_pr(..)["state"]` read became `.at("state")`
+Rejected: keeping this branch's copy of the old serial-held and reconcile code — staging removed it
+Check: serve_health measured 8.8 ms /screens p95 here vs 8.0 ms on staging by the same command; the one 101 ms miss was host load
+Owner: the branch is current with staging's serial-queue change and is no slower
