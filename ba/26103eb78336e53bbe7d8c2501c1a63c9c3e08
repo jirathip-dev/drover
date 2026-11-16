@@ -1,0 +1,9 @@
+Decided: the shed check strips 'shed <proto::VERSION> (' and ')' from shed --version and passes only if the rest is a non-empty prefix of shed::REV
+Because: "`<sha>` is a prefix of `REV`"
+Decided: a bare 'shed 0.0.0' with no sha now fails the check, so the pinned build is installed over it
+Because: "A shed of another build (a different sha, or no suffix) still fails the check"
+Decided: the regression test runs the real check script under sh against a fake shed in $HOME/.local/bin, like the Remote runner already in cloud.rs
+Because: crates/cli/tests/cloud.rs:695
+Rejected: comparing only against REV's first 7 chars — the spec asks for any prefix
+Check: the existing tests' match prefixes changed only from '[ "$(shed --version)"' to 'v=$(shed --version)'
+Owner: Bringing up a remote host now accepts the pinned shed build instead of failing at the shed step.
