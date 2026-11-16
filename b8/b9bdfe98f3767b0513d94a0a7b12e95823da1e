@@ -1,0 +1,9 @@
+Decided: a url tap draws the row (or button) itself as <a href target=_blank rel=noopener>; tap() lost its window.open branch
+Because: "the row itself is the anchor), not a `window.open` from a click handler"
+Decided: a url button is <a class=btn> sharing the button CSS, so no url tap path is left without a link
+Because: "A row, button or link whose tap is a `url` is drawn as a real"
+Decided: the WebKit test is its own file run by a new ui-webkit CI step, on a real serve with a merged PR event
+Because: "WebKit test: an Events row with a PR `url` is an `<a>` with that `href` and `target=_blank`."
+Rejected: putting it in perf.rs — it is no perf gate
+Check: CI ui-webkit runs url_links and it passes; locally it skips (no Playwright here)
+Owner: Tapping a PR or issue link in the Home Screen app now opens the browser with no white page left behind.
