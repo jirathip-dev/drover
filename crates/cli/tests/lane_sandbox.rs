@@ -60,7 +60,7 @@ fn a_sandboxed_fleet_starts_its_agent_under_srt_with_rules_walling_off_home_secr
         "{deny:?}"
     );
     let write = strings(&fs["allowWrite"]);
-    assert!(write.iter().any(|w| PathBuf::from(w) == wt), "{write:?}");
+    assert!(write.iter().any(|w| std::path::Path::new(w) == wt), "{write:?}");
     assert!(
         !write.contains(&home) && !strings(&fs["allowRead"]).contains(&home),
         "{fs}"
