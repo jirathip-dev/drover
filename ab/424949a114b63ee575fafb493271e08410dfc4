@@ -1,0 +1,11 @@
+Decided: [hygiene] and [fleet.<n>.hygiene] with one fallback chain fleet, global, default; "off" or docs_trust = [] opts out
+Because: "A `[hygiene]` set that is **on by default** for every fleet (opt out per key under `[fleet.<f>.hygiene]`)"
+Decided: doctor drift is the GitHub repo's allowed merge method and integration's arch.toml comments policy, as `!` rows red on a TTY
+Because: crates/core/src/doctor.rs:51
+Rejected: a ✗ row for drift — doctor's exit code feeds drover setup, a convention gap is no broken host
+Decided: drover keeps merging with --merge for now
+Rejected: squash in gate.rs now — why notes sit on the PR head and would drop out of drover why; the squash issue carries them
+Decided: lane worktrees get a per-worktree no-cone sparse checkout excluding each docs_trust path
+Because: "Lane worktrees use sparse checkout to **exclude `docs/archive/`**"
+Check: setup <repo>, labels, triage and the cooee/berth PRs are not here; the triage lane and label set do not exist yet
+Owner: Every fleet now follows one history convention by default; doctor shows it and flags drift, and lanes no longer see archived docs.
