@@ -1,0 +1,10 @@
+Decided: merged origin/staging again; kept #1084's focus-keeping repaint and runs this PR's scroll-place step after it, its variable renamed `place`
+Because: "Opens at the end; follows new messages while at the end; no jump on repaint."
+Decided: the thread screen takes `?before=N`: the 30 messages before N plus every later one, and its stream keeps the query, so live updates never slide loaded messages away
+Because: crates/server/src/serve/chat.rs:272
+Rejected: prepending API v1 `thread/<t>?before=` pages on the page — the page would redraw messages from Msg rows, a second renderer beside msg_card
+Decided: a focus screen scrolls inside a fixed box between the header and the tab bar or keyboard
+Because: "iOS: only the messages scroll; the composer sits on the keyboard."
+Rejected: side-by-side list and thread at 1000 px and phone-clock times — in the problem table, not in Wanted
+Check: CI ui-webkit runs `cargo test --locked --test threads_tab webkit` and #1084's page_drafts beside it
+Owner: A thread now opens at its newest message under a sticky bar, loads older messages in place, shows images with a viewer, and keeps the composer on the keyboard.
