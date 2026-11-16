@@ -505,6 +505,13 @@ enum Cmd {
     )]
     Protection,
     #[command(
+        about = "#937: shed's one install path: the pinned rev onto PATH, shed serve restarted onto it, read back"
+    )]
+    Shed {
+        #[command(subcommand)]
+        cmd: ShedCmd,
+    },
+    #[command(
         about = "Remove worktree + pane of merged or closed-issue lanes (never live ones; unsaved work goes to `wip/` first, kept on a secret) and list orphan folders; dry run unless --yes"
     )]
     Clean {
@@ -1040,6 +1047,15 @@ enum LessonCmd {
         fleet: String,
         #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum ShedCmd {
+    #[command(about = "Install the pinned shed and restart shed serve onto it; dry run unless --yes")]
+    Install {
+        #[arg(long, help = "Actually install and restart serve")]
+        yes: bool,
     },
 }
 
@@ -1970,6 +1986,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                 }
                 Cmd::Protection => return protection::protection(&cfg, r, out),
+                Cmd::Shed {
+                    cmd: ShedCmd::Install { yes },
+                } => return crate::shed::install(ctx, r, out, yes),
                 Cmd::Stats {
                     cmd: StatsCmd::Land { fleet },
                 } => crate::land::stats(ctx, &cfg, out, &fleet)?,

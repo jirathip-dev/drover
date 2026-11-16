@@ -110,8 +110,8 @@ fn five_lanes_whose_prompt_never_landed_stop_every_respawn_with_one_needs_human_
     let reason = nh[0].str("reason").unwrap();
     assert!(reason.contains("5 lanes"), "{reason}");
     assert!(reason.contains(&format!("{VERSION} ({BUILD})")), "{reason}");
-    let pushed = std::fs::read_to_string(&pushes).unwrap();
-    assert_eq!(pushed.lines().count(), 1, "{pushed}");
+    let sent = std::fs::read_to_string(&pushes).unwrap();
+    assert_eq!(sent.lines().count(), 1, "{sent}");
 }
 
 #[test]
