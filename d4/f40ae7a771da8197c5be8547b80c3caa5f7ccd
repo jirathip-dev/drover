@@ -1,0 +1,10 @@
+Decided: /screens/herd is built from the existing Herd read (serve.rs herd()), one `scene` block with weather and per-repo band sections of plain rows, so the page reuses its row, section and figure renderers
+Because: "Its data from a JSON screen (`/screens/herd`: per repo, lanes by state band, queued at the gate, host load for weather), not from a revived `/herd.json`."
+Decided: Herd opens from [⚙] as a page-only menu row added in page_places, so cooee's manifest and its places golden stay unchanged and the 390 px tab bar keeps four tabs
+Because: crates/server/src/screens.rs:42
+Decided: the page fetches themes/<theme>/scene.svg, which serve already resolves own theme dir → vendored swag pack → farm; farm and terminal have none (404) and get a small drawn ranch
+Because: "The theme's `scene` falls back to farm/terminal as the old one did."
+Rejected: reviving herd.js's 539-line animated ranch (wind, rain, trotting legs) — the AC asks for the scene, figures, night and repo switching; the weather is a tint per sky
+Rejected: a new header-strip tab — a fifth tab at 390 px risks the ui gate for no AC gain
+Check: the ui-webkit CI job now runs tests/herd.rs; locally Playwright 1.65 has no matching WebKit build, so the same test was run on Chromium (passes) and must be read green in CI
+Owner: The Herd scene is back: [⚙] → Herd shows each repo's ranch with its lanes by state, the queue at the gate, night and the next repo.
