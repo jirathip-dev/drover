@@ -1,0 +1,12 @@
+Decided: a pushed head is never held: drive only logs its group joins and releases any old hold, then reviews, verifies and merges it as any issue
+Because: "Locks gate only new impl work (an impl lane starting on a queued issue)"
+Decided: lane_admit refuses SERIAL_BUSY only for an impl lane on an issue with no open PR, so a fix or update round on a held file runs
+Because: crates/core/src/spawn.rs:1440
+Decided: merge drops its SERIAL_BUSY check and keeps SERIAL_UNMARKED; conflicts still go through the update round
+Because: crates/core/src/gate.rs:831
+Decided: reconcile, the stop text and the freed-slot update round are deleted; a blocked issue now holds no slot via holders
+Because: crates/core/src/queue.rs:343
+Rejected: keeping serial-held as bookkeeping for pushed heads — a held head would then never count as a holder, undercounting the group
+Decided: the waiting card's `serial: ... (0/1)` line is gone; a queued issue's wait reads `waiting for a ci slot (#9 holds 1/1)` from the real holders
+Check: the 11 deleted serial_groups tests asserted holds on pushed heads, which the owner decision removes
+Owner: Pushed PRs on a locked file now get reviewed and merged; only new work on a locked file waits.
