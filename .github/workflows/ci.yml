@@ -14,6 +14,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
       # #266: the tests run web/src/events.ts under node (type stripping: node 24).
       - uses: actions/setup-node@v4
         with:
@@ -134,10 +135,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
-      - name: build
-        run: cargo build --release --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: build (debug, the profile its tests build; the release build is the rust job's only)
+        run: cargo build --locked
       - name: demo export
-        run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
+        run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/debug/drover serve --export site --demo
       # #68: Chrome's new headless never makes a window under 500 px wide; the headless shell honours 390.
       # Pinned build (Google's Chrome-for-Testing), so layout never moves without a commit.
       - name: chrome-headless-shell
@@ -210,6 +212,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 24
