@@ -60,6 +60,7 @@ mod tests {
             title: s(),
             session: None,
             lane_key: None,
+            sandbox: None,
         }
     }
 
