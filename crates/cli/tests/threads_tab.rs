@@ -277,7 +277,7 @@ fn parity_15_the_owner_reads_a_thread_sends_and_answers_from_the_tab() {
 }
 
 #[test]
-fn each_composer_op_reaches_its_thread_op_and_the_screen_shows_it() {
+fn parity_34_each_composer_op_reaches_its_thread_op_and_the_screen_shows_it() {
     let c = recorded("threads-ops");
     let sh = FakeShed::attached(&c);
     let start = json!({"thread": "t3", "agent": "orchestrator-t3", "pane": "orchestrator-t3"});
@@ -434,7 +434,7 @@ const wait = async f => { for (const t = Date.now(); Date.now() - t < 8000; awai
 const type = t => { const b = q('.cmp textarea'); b.value = t; b.dispatchEvent(new Event('input')); };";
 
 #[test]
-fn two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webkit() {
+fn parity_21_two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webkit() {
     if no_webkit() {
         return;
     }
@@ -473,7 +473,7 @@ return [thumbs, kept, text, shown, all('.cmp .tb').length];
 }
 
 #[test]
-fn a_message_sent_while_working_queues_and_send_now_steers_it_in_webkit() {
+fn parity_26_a_message_sent_while_working_queues_and_send_now_steers_it_in_webkit() {
     if no_webkit() {
         return;
     }
