@@ -1,0 +1,10 @@
+Decided: a focus screen renders as a fixed flex column, thread bar then a `.msgs` scroller then the composer, outside the scroller
+Because: "the messages (the only part that scrolls, `flex:1; min-height:0; overflow-y:auto`), and the composer, outside the scroller"
+Decided: one ResizeObserver re-lands the scroller from its last spot when the composer grows
+Because: "When the box grows (multi-line, attachments, #1087), the messages area shrinks. If you were at the end you stay at the end."
+Decided: the `--s2` gap is the scroller's padding-bottom, so 2 px above the composer hits the scroller, not the column
+Because: "`elementFromPoint` at the composer's top edge, 2 px above it, is a message card or the scroller, never the composer."
+Rejected: a fixed composer with a measured height variable — needs measuring JS the flex column does for free
+Rejected: column-reverse scroller — breaks the spot/land and older-on-top logic from #1086
+Check: the WebKit test grows the input box by min-height, since the composer is a one-line input until #1087
+Owner: In a thread the message box now sits under the messages, so nothing hides behind it.
