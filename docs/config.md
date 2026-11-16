@@ -104,6 +104,28 @@ left out. It keeps the list in the state folder as
 is open, and queues it `--architect`. `drover tick` stores each fleet's list daily and files its issue weekly; `hotspots = "off"` in `[fleet.<n>]` opts
 out.
 
+## Hygiene (#1101)
+
+One history and issue convention is on for every fleet with no config. `[hygiene]` sets it for all fleets,
+`[fleet.<n>.hygiene]` per fleet (its keys win); `"off"` opts a key out.
+
+| key | default | what |
+|---|---|---|
+| `merge` | `"squash"` | the merge method `[fleet.<n>] merge` and the repo should use; also `"merge"` |
+| `comments` | `"strict"` | `.drover/arch.toml`'s `[comments] policy`; the rule ships in `rules/shared.md` |
+| `baseline` | `"setup"` | the arch-check baseline, set at fleet setup, redone on the owner's ask |
+| `triage` | `"weekly"` | a weekly triage lane |
+| `docs_trust` | `["docs/archive/"]` | paths a new lane worktree leaves out (sparse checkout); `[]` = off |
+| `issue_spec` | `"triage"` | triage folds amendments into `## Spec (current)` |
+| `docs` | `"on"` | `.drover/arch.toml` has the #735 `[docs]` stale-doc check |
+
+`drover setup` applies the set to each fleet's local clone, writing only what is missing: `[comments] policy = "strict"`
+and a `[docs]` section (paths `docs/**/*.md` and `README.md`, the repo's `cli`, `config` and `api` files as `watch`) in
+`.drover/arch.toml`, then the first arch-check baseline when `baseline = "setup"` and none exists. Commit what it wrote.
+
+`drover doctor` prints each fleet's `hygiene` line and a red `! hygiene` row for each drift: the fleet's own
+`merge` mode (#1097) differing from it, the repo on GitHub not allowing that method, or `comments = "strict"` with integration's `.drover/arch.toml` saying otherwise, or `docs = "on"` with no `[docs]` there.
+
 ## Limits (#844)
 
 Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without one keeps the default below.
@@ -141,7 +163,9 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `overflow_after_minutes` | `10` | every local host refused this long lets placement start a stopped cloud host |
 | `import_max_age_hours` | `24` | a remote host's asks older than this are never imported |
 | `max_pushes_per_pass` | `3` | push alerts `check` sends a pass before a summary |
-| `max_parallel_spawns` | `6` | concurrent detached spawn kicks (0: in the pass) |
+| `max_parallel_spawns` | `6` | concurrent detached spawn kicks on the main host (0: in the pass) |
+| `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
+| `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
 | `spawn_pending_max_secs` | `300` | a spawn marker or kick lock older than this is stale |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |
