@@ -1,0 +1,6 @@
+Decided: merged origin/staging; its new serve-stale check, restart policy, handover ask and reap_built go through Json::at, if/else, stderr! and runner::pid
+Because: "`Command::new` / `std::process`: only the runner"
+Decided: kept staging's launchd SuccessfulExit and systemd Restart=on-failure text exactly, only the array-by-bool pick became if/else
+Rejected: an #[expect] on staging's new eprintln!/let _ lines — the ban has one allowed writer, stderr!
+Check: serve_health's p95 budget missed once (56 ms vs 50) in the full debug run and passed alone
+Owner: the branch is current with staging, and staging's newest code follows the same bans
