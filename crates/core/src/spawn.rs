@@ -1445,7 +1445,8 @@ pub(crate) fn lane_admit(
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
     let gs = crate::queue::groups(&crate::queue::replay(events, fleet), events, f, fleet, issue);
-    for g in gs.into_iter().filter(|_| role == "impl") {
+    let pushed = crate::gh::cached_pr(ctx, fleet, issue)["state"] == "OPEN";
+    for g in gs.into_iter().filter(|_| role == "impl" && !pushed) {
         let h = crate::queue::holders(events, &st, f, fleet, &g.name);
         if !h.iter().any(|s| s.issue == issue) && h.len() >= g.max {
             let why = format!("{}; retry after they merge", crate::queue::holds(&g, &h));
