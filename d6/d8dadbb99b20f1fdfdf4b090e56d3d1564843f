@@ -1,0 +1,14 @@
+Decided: graft, never shallow, per the ADR: the baseline and older fork points merged since go parentless; only a lane worktree whose heads contain the baseline turns the view on
+Because: q1730
+Decided: the runner adds --no-replace-objects to every git it starts, locally and in the ssh line, so gate, preview, update, land and why keep full history
+Because: crates/core/src/runner.rs:250
+Decided: grafts always graft the baseline itself, not only rev-list --boundary's lines: with the branch at the baseline, boundary prints nothing and the cut was missed
+Because: crates/core/src/baseline.rs:88
+Decided: the SECRET_IN_CONFIG scan skips a `baseline` key whose value is a valid 40-hex sha; it flagged every sha as a secret and the sim refused its config
+Because: crates/core/src/config.rs:1196
+Decided: a branch cut before the baseline gets full history and a `history: full (...)` spawn line, not a refused lane (the ADR's open question 1)
+Because: "a branch cut before it is refused with a clear message"
+Rejected: a `drover baseline <fleet> none` verb to remove it — the issue says removing the key undoes it; one way to do it
+Rejected: printing the history line on every spawn — no line while the fleet has no baseline, so existing spawn output is unchanged
+Check: cargo test -p drover --test baseline drives the verb and four real-git spawns (since, cut before, re-baseline, key removed); --test sim runs every seed with a baseline set
+Owner: Set `drover baseline <fleet>` and new lanes see git history only since that commit; nothing on GitHub changes, and removing the line from fleet.toml undoes it.
