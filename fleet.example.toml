@@ -55,6 +55,7 @@ integration = "staging"
 # premerge = ["drover cap-check --config ci/cap.toml", "cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = the cap check if ci/cap.toml
 # cap_script = "scripts/line-cap.sh"   # #754: `drover cap` runs it and reads its `N / cap M` lines; unset = the first premerge check naming a cap, else the built-in Rust count
 merge_label = "merge-ready"   # the full CI runs only with this label; drover adds it on a PASS at the head (docs/ci.md)
+# merge = "merge"   # #1097: default "squash": one commit per PR carrying its why notes, lane branch deleted; "merge" keeps every commit
 # update_ready = "always"   # catch every behind PASSed PR up with integration; default "needed": only on a conflict or a strict branch rule
 # line_cap = 10000   # `drover cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
 # hotspots = "off"   # #889: `drover tick` runs `drover hotspots` weekly per fleet (default "weekly"); "off" opts out

@@ -105,8 +105,12 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
             }
             continue;
         }
-        let a = format!("pr merge {num} -R {} --merge --match-head-commit {head}", f.repo);
-        ok(r, "gh", &a.split(' ').collect::<Vec<_>>())?;
+        let pin = ["--match-head-commit", head];
+        ok(
+            r,
+            "gh",
+            &[&["pr", "merge", num, "-R", &f.repo][..], f.merge.flags(), &pin].concat(),
+        )?;
         let how =
             format!("Its landing was reverted by PR #{num}: bring the change back (revert that revert) with the fix.");
         reopen(ctx, cfg, r, out, (f, fleet), o, ("reverted", &how))?;
@@ -172,7 +176,13 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     git(r, &dir, &["fetch", "-q", "origin"])?;
     let _ = tree(&["remove", "--force", &wts]);
     tree(&["add", "-f", "--detach", &wts, &format!("origin/{}", f.integration)])?;
-    let pushed = git(r, &wt, &["revert", "-m", "1", "--no-edit", sha]).and_then(|_| {
+    let parents = git(r, &wt, &["log", "-1", "--format=%P", sha]).unwrap_or_default();
+    let mainline: &[&str] = if parents.split_whitespace().count() > 1 {
+        &["-m", "1"]
+    } else {
+        &[]
+    };
+    let pushed = git(r, &wt, &[&["revert", "--no-edit", sha][..], mainline].concat()).and_then(|_| {
         git(
             r,
             &wt,
