@@ -742,7 +742,7 @@ pub fn drive(
         }
     }
     if only.is_none() && first {
-        if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
+        if let Err(e) = (!fast).then(|| crate::check::budget(ctx, cfg, r, out)).transpose() {
             writeln!(out, "budget: {e:#}")?;
         }
         if let Err(e) = crate::pending::requeue_waiting(ctx, cfg) {

@@ -1875,7 +1875,7 @@ type Seen = std::collections::HashSet<(u64, u64)>;
 
 fn walk(p: &Path, seen: &mut Seen) -> u64 {
     use std::os::unix::fs::MetadataExt;
-    match std::fs::symlink_metadata(p) {
+    match crate::sim::lstat(p) {
         Ok(m) if m.is_dir() => std::fs::read_dir(p).map_or(0, |d| d.flatten().map(|e| walk(&e.path(), seen)).sum()),
         Ok(m) => {
             let id = m.is_file().then(|| drover_sys::clone_id(p)).flatten();

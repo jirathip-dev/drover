@@ -946,3 +946,85 @@ fn idle_serve_on_the_live_log_with_its_trickle_replayed() {
         cpu / (secs as f64 * 10.0)
     ));
 }
+
+fn walked(c: &drover::Ctx, r: &Fake, args: &[&str]) -> (usize, u128, String) {
+    let n = std::rc::Rc::new(std::cell::Cell::new(0));
+    let k = n.clone();
+    let now = c.now;
+    drover::sim::set(Some(drover::sim::Hooks {
+        now: Box::new(move || now),
+        pid: std::process::id(),
+        point: Box::new(move |p| k.set(k.get() + usize::from(matches!(p, drover::sim::Point::Walk(_))))),
+    }));
+    let t = Instant::now();
+    let (code, out) = run(c, r, args);
+    let ms = ms(t);
+    drover::sim::set(None);
+    assert_eq!(code, 0, "{out}");
+    (n.get(), ms, out)
+}
+
+fn disk_fixture(name: &str, budget: &str) -> (drover::Ctx, Fake, FakeShed) {
+    let cfg = CONFIG.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\ndriver = \"drover\"",
+    );
+    let c = ctx(&tmpdir(name), &format!("{cfg}worktree_budget_gb = {budget}\n"));
+    let sh = FakeShed::attached(&c);
+    let r = Fake::default()
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply("git -C", "")
+        .reply("gh issue view", r#"{"title":"t","body":"b"}"#);
+    (c, r, sh)
+}
+
+#[test]
+fn a_fast_step_over_50k_worktree_files_walks_none_of_them() {
+    let (c, r, _sh) = disk_fixture("perf-walk", "1000.0");
+    for w in 0..50 {
+        let d = c.worktrees.join(format!("sendmeter/issue-{w}/src"));
+        std::fs::create_dir_all(&d).unwrap();
+        for f in 0..1000 {
+            std::fs::write(d.join(format!("f{f}.rs")), "x").unwrap();
+        }
+    }
+    let (fast, fast_ms, out) = walked(&c, &r, &["drive", "--fast"]);
+    assert_eq!(fast, 0, "drive --fast walked {fast} entries: {out}");
+    let (slow, slow_ms, out) = walked(&c, &r, &["drive"]);
+    assert!(slow >= 50_000, "the slow pass walked only {slow} entries: {out}");
+    report(&format!(
+        "#949 perf (50,000 worktree files): drive --fast {fast_ms} ms, {fast} entries walked · drive {slow_ms} ms, {slow} walked"
+    ));
+}
+
+#[test]
+fn over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane() {
+    let (c, r, _sh) = disk_fixture("perf-held", "0.000001");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1"]).0, 0);
+    let wt = c.worktrees.join("old");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join("blob"), vec![0u8; 5000]).unwrap();
+    let (_, _, out) = walked(&c, &r, &["drive"]);
+    assert!(
+        out.contains("sendmeter #1 start: REFUSED DISK_BUDGET: worktrees"),
+        "{out}"
+    );
+    std::fs::remove_dir_all(&wt).unwrap();
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        toml.replace("max_parallel_spawns = 0", "max_parallel_spawns = 2"),
+    )
+    .unwrap();
+    let (walks, _, out) = walked(&c, &r, &["drive", "--fast"]);
+    assert_eq!(walks, 0, "{out}");
+    let kick = "sh -c nohup '/opt/drover/bin/drover' kick sendmeter 1 --why drive --now";
+    assert_eq!(r.count(kick), 1, "the fast pass starts #1 by its kick: {out}");
+    let (_, _, out) = walked(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
+    assert!(
+        out.contains("sendmeter #1 start: REFUSED DISK_BUDGET: worktrees"),
+        "{out}"
+    );
+    let spawns = drover::events::read(&c.state).unwrap();
+    assert!(!spawns.iter().any(|e| e.kind == "spawn"), "{out}");
+}
