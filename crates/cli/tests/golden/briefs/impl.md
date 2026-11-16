@@ -112,6 +112,7 @@ AC: it {works} \ `ok`
 - Guard the context window: read the files you need, not the repo; keep logs in files, not in the chat.
 - Smallest correct diff: no refactor, dependency or feature the issue did not ask for.
 - Every rule names its enforcer: a rule nothing checks is retired.
+- Keep code comment-free: only `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` line on a public item, whole files included; the why goes in the why note.
 - Leave the tree green: format, lint and test before you push.
 
 ## Output contract
