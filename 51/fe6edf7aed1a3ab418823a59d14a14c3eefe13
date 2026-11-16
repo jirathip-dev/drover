@@ -1,0 +1,6 @@
+Decided: CI's arch-check doc check flagged lane, scratch, stage and builtin; the PR body now carries a `no doc:` note for them
+Because: crates/core/src/arch.rs:264
+Decided: an empty commit re-runs CI, since a body edit alone keeps the old pull_request payload
+Rejected: renaming the local bindings to dodge the doc check — they are no flags or config keys, so no doc can name them
+Check: `drover arch-check --base HEAD^1 --pr-body <body>` leaves only the local `just types` line (just is not installed in this lane)
+Owner: CI's architecture check was failing on internal names; the PR now says why no user doc changes
