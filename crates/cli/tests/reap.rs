@@ -423,3 +423,60 @@ fn check_alerts_no_stall_for_a_lane_that_reported_its_turn_end() {
         assert_eq!(stalled, stalls, "{turn}: {out}");
     }
 }
+
+struct Host(Fake);
+
+impl drover::runner::Runner for Host {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        if ["ps", "kill"].contains(&prog) {
+            return drover::runner::Real.run(prog, args);
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+}
+
+#[test]
+fn clean_stops_a_serve_run_from_the_lanes_build_folder_and_spares_another_lanes() {
+    let (d, c, mine, _sibling, _sh) = setup("reap-built");
+    let serve = |agent: &str| {
+        let bin = c.worktrees.join(".build").join(agent).join("debug");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_drover"), bin.join("drover")).unwrap();
+        let state = d.join(agent);
+        std::process::Command::new(bin.join("drover"))
+            .args(["serve", "--addr", "127.0.0.1:0"])
+            .env("FLEET_CONFIG", &c.config)
+            .env("FLEET_STATE", state.join("events.jsonl"))
+            .env("FLEET_WORKTREES", &c.worktrees)
+            .env("DROVER_HOME", &c.home)
+            .env_remove("DROVER_LANE")
+            .env_remove("DROVER_SERVE_FDS")
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap()
+    };
+    let (mut ours, mut other) = (serve("impl-12"), serve("impl-99"));
+    let r = Host(fake("", &mine).reply("lsof", ""));
+    let (code, out) = run(&c, &r, &["clean", "sendmeter", "--yes"]);
+    let t = std::time::Instant::now();
+    while ours.try_wait().unwrap().is_none() && t.elapsed() < std::time::Duration::from_secs(10) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let (gone, kept) = (ours.try_wait().unwrap(), other.try_wait().unwrap());
+    let _ = (ours.kill(), other.kill(), ours.wait(), other.wait());
+    assert_eq!(code, 0, "{out}");
+    assert!(gone.is_some(), "the lane's stray serve ends with its lane: {out}");
+    assert!(kept.is_none(), "another lane's build keeps running");
+    let reaped: Vec<_> = read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == "lane-reaped")
+        .collect();
+    assert_eq!(reaped.len(), 1, "{out}");
+    let names = reaped[0].val("names").to_string();
+    assert!(names.contains(".build/impl-12/debug/drover serve"), "{names}");
+}

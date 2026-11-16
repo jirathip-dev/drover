@@ -345,3 +345,217 @@ fn a_serve_that_starts_over_its_memory_limit_logs_once_and_keeps_serving() {
     );
     assert!(still.is_none() && !log.contains("phone page on"), "no handover: {log}");
 }
+
+fn serve(c: &drover::Ctx, addr: &str) -> std::process::Child {
+    std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["serve", "--addr", addr])
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .env("FLEET_WORKTREES", &c.worktrees)
+        .env("DROVER_HOME", &c.home)
+        .env("PATH", "/usr/bin:/bin")
+        .env_remove("DROVER_LANE")
+        .env_remove("DROVER_SERVE_FDS")
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap()
+}
+
+fn lines(p: &mut std::process::Child) -> Arc<Mutex<String>> {
+    let (log, err) = (Arc::new(Mutex::new(String::new())), p.stderr.take().unwrap());
+    let l2 = log.clone();
+    std::thread::spawn(move || {
+        for l in BufReader::new(err).lines().map_while(Result::ok) {
+            l2.lock().unwrap().push_str(&(l + "\n"));
+        }
+    });
+    log
+}
+
+fn exited(p: &mut std::process::Child, secs: u64) -> Option<std::process::ExitStatus> {
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(secs) {
+        if let Some(s) = p.try_wait().unwrap() {
+            return Some(s);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = p.kill();
+    None
+}
+
+fn addr_of(log: &Mutex<String>) -> String {
+    let t = Instant::now();
+    loop {
+        let l = log.lock().unwrap().clone();
+        if let Some(a) = l
+            .lines()
+            .find_map(|l| l.strip_prefix("drover serve: phone page on http://"))
+        {
+            return a.trim_end_matches('/').to_string();
+        }
+        assert!(t.elapsed() < Duration::from_secs(30), "{l}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_second_serve_on_a_port_its_own_build_holds_exits_0_once() {
+    let c = ctx(&tmpdir("ho-held"), CONFIG);
+    let mut first = serve(&c, "127.0.0.1:0");
+    let addr = addr_of(&lines(&mut first));
+    get(&addr).unwrap();
+    let mut second = serve(&c, &addr);
+    let log = lines(&mut second);
+    let code = exited(&mut second, 30);
+    let still = first.try_wait().unwrap();
+    let _ = (first.kill(), first.wait());
+    let log = log.lock().unwrap().clone();
+    assert_eq!(code.and_then(|s| s.code()), Some(0), "{log}");
+    assert!(
+        log.contains(&format!("{addr} already serves {:.7}", drover::SHA)),
+        "{log}"
+    );
+    assert!(still.is_none(), "the serve holding the port is left alone");
+    let starts = std::fs::read_to_string(c.state.with_file_name("serve-starts")).unwrap();
+    assert_eq!(starts.lines().count(), 1, "no failed start: {starts}");
+}
+
+#[test]
+fn a_serve_on_a_port_an_older_build_holds_has_it_hand_over_to_this_binary() {
+    let c = ctx(&tmpdir("ho-old"), CONFIG);
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap().to_string();
+    let sock = drover::update::serve_sock(&c, l.local_addr().unwrap().port());
+    let ctl = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    let env = |k: &str, v: &std::path::Path| format!("{k}={}", v.display()).into();
+    let argv: Vec<std::ffi::OsString> = vec![
+        "/usr/bin/env".into(),
+        "-u".into(),
+        "DROVER_LANE".into(),
+        env("FLEET_CONFIG", &c.config),
+        env("FLEET_STATE", &c.state),
+        env("FLEET_WORKTREES", &c.worktrees),
+        env("DROVER_HOME", &c.home),
+        "PATH=/usr/bin:/bin".into(),
+        env!("CARGO_BIN_EXE_drover").into(),
+        "serve".into(),
+        "--addr".into(),
+        addr.clone().into(),
+    ];
+    let old = std::thread::spawn(move || {
+        let (mut probe, _) = l.accept().unwrap();
+        let mut req = String::new();
+        let mut r = BufReader::new(&probe);
+        while !req.ends_with("\r\n\r\n") && r.read_line(&mut req).unwrap() > 0 {}
+        assert!(req.starts_with("GET /api/v1/health "), "{req}");
+        let body = json!({"ok": true, "serve": {"sha": "0ld0ld0ld"}}).to_string();
+        let res = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+        probe.write_all(res.as_bytes()).unwrap();
+        drop(probe);
+        let (mut asker, _) = ctl.accept().unwrap();
+        let mut line = String::new();
+        BufReader::new(&asker).read_line(&mut line).unwrap();
+        assert_eq!(line, "handover\n");
+        drover::runner::hand_fds(&argv, &[std::os::fd::AsRawFd::as_raw_fd(&l)], true).unwrap();
+        let (mut bridge, _) = ctl.accept().unwrap();
+        let mut ready = String::new();
+        BufReader::new(&bridge).read_line(&mut ready).unwrap();
+        let pid = ready.trim().strip_prefix("ready ").unwrap().to_string();
+        writeln!(bridge, "ok").unwrap();
+        writeln!(asker, "ok {pid}").unwrap();
+        pid
+    });
+    let mut new = serve(&c, &addr);
+    let log = lines(&mut new);
+    let code = exited(&mut new, 60);
+    let bridge = old.join().unwrap();
+    let health = drover::update::serving(&addr, 20);
+    let mut again = serve(&c, &addr);
+    let again_log = lines(&mut again);
+    let again_code = exited(&mut again, 30);
+    std::process::Command::new("kill").arg(&bridge).status().unwrap();
+    let log = log.lock().unwrap().clone();
+    assert_eq!(code.and_then(|s| s.code()), Some(0), "{log}");
+    assert!(
+        log.contains(&format!("{addr} ran 0ld0ld0; handed over (bridge pid {bridge})")),
+        "{log}"
+    );
+    assert_eq!(health.as_deref(), Some(drover::SHA), "the port serves this build now");
+    let again_log = again_log.lock().unwrap().clone();
+    assert_eq!(
+        again_code.and_then(|s| s.code()),
+        Some(0),
+        "no respawn loop: {again_log}"
+    );
+    assert!(again_log.contains("already serves"), "{again_log}");
+}
+
+#[test]
+fn a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit() {
+    let cfg = |mb: u64| format!("{CONFIG}[limits]\nserve_host_secs = 1\nserve_mem_mb = {mb}\n");
+    let c = ctx(&tmpdir("ho-mem-again"), &cfg(100_000));
+    append(&c.state, &Event::new(c.now, "drover", None, "note", json!({}))).unwrap();
+    let mut p = serve(&c, "127.0.0.1:0");
+    let log = lines(&mut p);
+    let addr = addr_of(&log);
+    let port = addr.rsplit_once(':').unwrap().1.parse().unwrap();
+    let sock = drover::update::serve_sock(&c, port);
+    let t = Instant::now();
+    while !sock.exists() && t.elapsed() < Duration::from_secs(30) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let Ok(pid) = drover::update::ask_handover(&sock, 60) else {
+        let _ = (p.kill(), p.wait());
+        panic!("no handover: {}", log.lock().unwrap());
+    };
+    let t = Instant::now();
+    while alive(&pid) && t.elapsed() < Duration::from_secs(60) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let starts = || std::fs::read_to_string(c.state.with_file_name("serve-starts")).unwrap_or_default();
+    let t = Instant::now();
+    while starts().lines().count() < 3 && t.elapsed() < Duration::from_secs(60) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(3_000));
+    std::fs::write(&c.config, cfg(1)).unwrap();
+    let high = || {
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "serve-mem-high")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let t = Instant::now();
+    while high().is_empty() && t.elapsed() < Duration::from_secs(30) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::fs::write(&c.config, cfg(100_000)).unwrap();
+    let t = Instant::now();
+    while log.lock().unwrap().matches("phone page on").count() < 4 && t.elapsed() < Duration::from_secs(60) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(1_000));
+    let still = p.try_wait().unwrap();
+    let _ = (p.kill(), p.wait());
+    let (log, high, starts) = (log.lock().unwrap().clone(), high(), starts());
+    assert!(!alive(&pid), "the first handover finished: {log}");
+    assert!(
+        starts.ends_with("handover\n"),
+        "the serve on the port came from a handover: {starts}"
+    );
+    assert_eq!(
+        high.first().map(|e| e.data["handover"].clone()),
+        Some(json!(true)),
+        "{high:?}"
+    );
+    assert_eq!(
+        log.matches("phone page on").count(),
+        4,
+        "two bridges, two exec'd copies: {log}"
+    );
+    assert!(still.is_none(), "the supervised pid serves on\n{log}");
+}

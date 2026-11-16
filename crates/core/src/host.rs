@@ -70,6 +70,25 @@ pub fn reap(r: &dyn Runner, dir: &Path, trim: bool, spare: Option<&str>) -> (Vec
     (first.into_iter().map(|p| p.1).collect(), kb / 1024)
 }
 
+/// #1081: TERM the processes run from a binary inside `dirs` (a lane's test builds, a stray `drover serve`); their commands.
+pub fn reap_built(r: &dyn Runner, dirs: &[std::path::PathBuf]) -> Vec<String> {
+    let me = std::process::id().to_string();
+    let ps = stdout(r, "ps", &["-axo", "pid=,command="]).unwrap_or_default();
+    let deep = |d: &&std::path::PathBuf| d.is_absolute() && d.components().count() > 2;
+    let built: Vec<(&str, &str)> = (ps.lines())
+        .filter_map(|l| l.trim_start().split_once(' '))
+        .filter(|(pid, cmd)| {
+            let exe = Path::new(cmd.trim_start().split(' ').next().unwrap_or_default());
+            *pid != me && dirs.iter().filter(deep).any(|d| exe.starts_with(d))
+        })
+        .collect();
+    if !built.is_empty() {
+        let pids = built.iter().map(|b| b.0.to_string());
+        let _ = r.run("kill", &std::iter::once("-TERM".into()).chain(pids).collect::<Vec<_>>());
+    }
+    built.into_iter().map(|b| b.1.trim().to_string()).collect()
+}
+
 /// #710: a process stuck on the Keychain: pid, seconds up, its parent's name (never an argument).
 pub type Stuck = (String, u64, String);
 
