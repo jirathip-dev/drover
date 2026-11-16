@@ -998,10 +998,7 @@ pub fn spawn(
     let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
     if o.dry_run {
         pj.put("dry_run", json!(true));
-        if let Some(pl) = &placed {
-            pj.put("host", json!(pl.name)).put("why", json!(pl.why));
-        }
-        print_plan(out, &pj, o.json)?;
+        print_plan(out, &pj, o.json, placed.as_ref())?;
         return Ok(true);
     }
     if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
@@ -1426,7 +1423,7 @@ pub fn spawn(
             event("spawn", d)?;
             kicked?;
             pj.put("pane", json!(pane)).put("confirmed", json!(confirmed));
-            print_plan(out, &pj, o.json)?;
+            print_plan(out, &pj, o.json, placed.as_ref())?;
             Ok(confirmed)
         })();
         (res, c.join().ok())
@@ -1774,7 +1771,12 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
     Ok(any)
 }
 
-fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool) -> Result<()> {
+fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool, placed: Option<&crate::hosts::Placed>) -> Result<()> {
+    let mut v = pj.clone();
+    if let Some(pl) = placed {
+        v.put("host", json!(pl.name)).put("why", json!(pl.why));
+    }
+    let pj = &v;
     if as_json {
         writeln!(out, "{}", serde_json::to_string_pretty(pj)?)?;
     } else {
