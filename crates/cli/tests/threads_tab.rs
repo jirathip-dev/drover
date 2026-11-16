@@ -94,6 +94,12 @@ fn recorded(name: &str) -> drover::Ctx {
         json!({"thread": "t2", "cmd": "drover brief sendmeter 19"}),
     );
     msg2(T - 6_900, "orchestrator", "Two questions, one at a time.");
+    ev(
+        T - 6_850,
+        "sendmeter",
+        "thread-msg",
+        json!({"thread": "t2", "from": "t3", "text": "See t3 and https://example.com/a.", "files": [{"name": "shot.png", "size": 2048}, {"name": "run.log", "size": 10}]}),
+    );
     let ask = |ts, id: &str, q: &str, opts: Value| {
         ev(
             ts,
@@ -176,7 +182,17 @@ fn the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only() {
     );
     let blocks = t["blocks"].as_array().unwrap();
     let kinds: Vec<&str> = blocks.iter().filter_map(|b| b["kind"].as_str()).collect();
-    assert_eq!(kinds, ["you", "tool", "orch", "ask", "you", "ask"]);
+    assert_eq!(kinds, ["you", "tool", "orch", "orch", "ask", "you", "ask"]);
+    assert_eq!(
+        (&t["blocks"][0]["sticky"], &t["blocks"][0]["title"]),
+        (&json!(true), &json!("Rate limits for /v1/search · t2"))
+    );
+    assert_eq!(find(&t, "m-8-i")["items"][0]["src"], "/thread/t2/shot.png");
+    assert_eq!(find(&t, "m-8-f0")["tap"], json!({"url": "/thread/t2/run.log"}));
+    assert_eq!(
+        (&find(&t, "m-8-l")["label"], &find(&t, "m-8-l")["tap"]),
+        (&json!("from t3"), &json!({"open": "/screens/threads/t3"}))
+    );
     let bad = blocks.iter().find(|b| b["tone"] == "bad").unwrap();
     assert_eq!(bad["buttons"][0]["action"], "thread-retry", "{t}");
     assert!(t.to_string().contains("✓ **per key** · owner"), "{t}");
@@ -274,4 +290,119 @@ fn the_owner_reads_a_thread_sends_and_answers_from_the_tab() {
     let list = get(&s, "/screens/threads", &ck);
     assert_eq!(find(&list, "t3")["swipe"][0]["action"], "thread-restore");
     assert!(find(&list, "archived").to_string().contains("\"t3\""), "{list}");
+}
+
+fn long(name: &str) -> drover::Ctx {
+    let c = recorded(name);
+    for i in 1..=70 {
+        let d = json!({"thread": "t3", "from": "orchestrator", "text": format!("m{i}")});
+        append(&c.state, &Event::new(T - 2_000 + i, "all", None, "thread-msg", d)).unwrap();
+    }
+    c
+}
+
+#[test]
+fn a_long_thread_opens_on_its_last_30_and_its_marker_loads_the_30_before_with_the_later_ones() {
+    let c = long("threads-older");
+    let r = OnShed::new(Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let texts = |v: &Value| -> Vec<String> {
+        let b = v["blocks"].as_array().unwrap().iter().filter(|b| b["kind"] == "orch");
+        b.map(|b| b["blocks"][0]["markdown"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let m = |a: u32, b: u32| (a..=b).map(|i| format!("m{i}")).collect::<Vec<_>>();
+    let t = get(&s, "/screens/threads/t3", "");
+    assert_eq!(texts(&t), m(41, 70));
+    let more = t["blocks"][1]["tap"]["open"].as_str().unwrap().to_string();
+    assert_eq!(t["blocks"][1]["tap"]["keep"], true, "{t}");
+    let t = get(&s, &more, "");
+    assert_eq!(texts(&t), m(11, 70), "the 30 before, and every later one");
+    assert_eq!(
+        t["stream"],
+        format!("/screens/threads/t3/stream{}", &more[more.find('?').unwrap()..])
+    );
+    let t = get(&s, t["blocks"][1]["tap"]["open"].as_str().unwrap(), "");
+    let mut all = vec!["Filed lessons.".to_string()];
+    all.extend(m(1, 70));
+    assert_eq!(texts(&t), all);
+    assert_eq!(
+        t["blocks"][1]["type"], "card",
+        "no marker once the thread's start is in: {t}"
+    );
+}
+
+const WAIT: &str = "const st = window.setTimeout, $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)]; \
+    const until = async f => { for (let i = 0; i < 100 && !f(); i++) await new Promise(r => st(r, 50)); return !!f(); }; \
+    const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); \
+    const open = async t => { location.hash = '#threads'; await until(() => $(`.row[data-id=\"${t}\"]`)); $(`.row[data-id=\"${t}\"]`).click(); \
+      await until(() => $(`.scr[data-id=\"thread-${t}\"] .form.say`)); await frame(); return $(`.scr[data-id=\"thread-${t}\"]`); }; \
+    const end = sc => +(sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2 && sc.scrollTop > 0);";
+
+fn webkit(name: &str, js: &str) -> Vec<f64> {
+    let c = long(name);
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    std::thread::spawn(move || drover::serve::serve_on(&c, &Fake::default(), l, false));
+    let png = std::env::var("DROVER_SNAPSHOTS").map_or(tmpdir(&format!("{name}-png")).join("t.png"), |p| {
+        std::path::Path::new(&p).join(format!("{name}.png"))
+    });
+    let js = format!("window.late = (async () => {{ try {{ {WAIT} {js} }} catch (e) {{ return [-1]; }} }})()");
+    let o = webview()
+        .env("DROVER_WAIT", "1")
+        .args([&format!("http://{addr}/"), "390", "-", "-", png.to_str().unwrap(), &js])
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
+    out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect()
+}
+
+#[test]
+fn a_thread_opens_at_its_end_in_webkit_with_its_bar_on_top_and_the_page_still() {
+    if no_webkit() {
+        return;
+    }
+    let js = "const sc = await open('t3'), bar = sc.querySelector('.row.sticky'); \
+        return [end(sc), document.scrollingElement.scrollTop, Math.round(bar.getBoundingClientRect().top - sc.getBoundingClientRect().top), errs.length];";
+    assert_eq!(webkit("thread-end-webkit", js), [1., 0., 0., 0.]);
+}
+
+#[test]
+fn older_messages_load_above_in_webkit_and_the_card_in_view_stays_in_place() {
+    if no_webkit() {
+        return;
+    }
+    let js = "const sc = await open('t3'), cards = () => $$('.scr[data-id^=thread-] .card.k-orch').length; \
+        const at = [cards()]; sc.scrollTop = 0; await frame(); \
+        const k = $('.scr[data-id^=thread-] .card[data-id]'), id = k.dataset.id, y = k.getBoundingClientRect().top; \
+        $('.scr button[data-id=older]').click(); await until(() => cards() > 30); await frame(); \
+        const k2 = $(`.scr[data-id^=thread-] .card[data-id=\"${id}\"]`); \
+        at.push(cards(), Math.round(Math.abs(k2.getBoundingClientRect().top - y)), +($('.scr[data-id^=thread-]').scrollTop > 0), errs.length); return at;";
+    assert_eq!(webkit("thread-older-webkit", js), [30., 60., 0., 1., 0.]);
+}
+
+#[test]
+fn an_image_opens_in_the_viewer_in_webkit_and_close_and_escape_shut_it() {
+    if no_webkit() {
+        return;
+    }
+    let js = "await open('t2'); $('.scr[data-id^=thread-] .imgs a').click(); await frame(); \
+        const at = [+!!$('#iv'), +$('#iv img').src.endsWith('/thread/t2/shot.png'), +($('#iv a').download === 'shot.png')]; \
+        [...$$('#iv button')].find(b => b.textContent === 'close').click(); at.push(+!!$('#iv')); \
+        $('.scr[data-id^=thread-] .imgs a').click(); dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); at.push(+!!$('#iv'), errs.length); return at;";
+    assert_eq!(webkit("thread-viewer-webkit", js), [1., 1., 1., 0., 0., 0.]);
+}
+
+#[test]
+fn the_keyboard_keeps_the_composer_flush_on_it_in_webkit_and_the_page_still() {
+    if no_webkit() {
+        return;
+    }
+    let js = "const sc = await open('t3'), f = $('.form.say'), box = f.querySelector('input'), vv = visualViewport, H = innerHeight; \
+        const kb = h => { for (const [o, k] of [[vv, 'height'], [window, 'innerHeight']]) Object.defineProperty(o, k, { configurable: true, get: () => H - h }); vv.dispatchEvent(new Event('resize')); }; \
+        const look = async y => { await frame(); return [Math.round(Math.abs(f.getBoundingClientRect().bottom - y)), document.scrollingElement.scrollTop, end(sc)]; }; \
+        box.focus(); kb(336); const at = await look(vv.offsetTop + vv.height); \
+        box.blur(); kb(0); at.push(...await look($('nav').getBoundingClientRect().top), errs.length); return at;";
+    assert_eq!(webkit("thread-kb-webkit", js), [0., 0., 1., 0., 0., 1., 0.]);
 }

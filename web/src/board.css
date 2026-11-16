@@ -140,4 +140,18 @@ html[data-focus] #cards{display:none}
 .form.say{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 0;background:var(--bg);border-top:1px solid var(--line)}
 .form.say .fd{flex:1;border:0;min-height:0}
 .form.say .fk:empty{display:none}
-.scr[data-id^=thread-]{max-width:760px;margin-inline:auto}
+/* #1086: a focus screen scrolls inside, between the header and the tab bar or keyboard (`fit()`); its bar sticks on top. */
+html[data-focus] body{overflow:hidden}
+html[data-focus] main>.tab>.scr{position:fixed;top:var(--top,0);bottom:var(--bot,0);left:0;right:0;max-width:760px;margin-inline:auto;padding:0 var(--s3);overflow-y:auto;overscroll-behavior:contain}
+html[data-focus] .form.say{bottom:0}
+.row.sticky{position:sticky;top:0;z-index:1;background:var(--bg)}
+.scr>button[data-id=older]{display:flex;margin:var(--s2) auto}
+.cb{position:relative}
+.cb>.cpy{position:absolute;top:0;right:0}
+.cb>pre{padding-right:calc(6ch + var(--s4))}
+.imgs a{flex:none}
+#iv{position:fixed;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--scrim);touch-action:none}
+#iv>img{max-width:100%;max-height:calc(100% - var(--hit) * 2);object-fit:contain;transition:transform .15s}
+#iv.z{overflow:auto}
+#iv>.bar{position:fixed;bottom:env(safe-area-inset-bottom);left:0;right:0;justify-content:center;background:var(--bg)}
+#iv .bar>a{display:inline-flex;align-items:center;height:var(--ctl);color:var(--l);text-decoration:none}

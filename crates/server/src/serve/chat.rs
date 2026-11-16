@@ -153,11 +153,18 @@ fn run_card(ctx: &Ctx, events: &[Event], e: &Event) -> RunCard {
     }
 }
 
-/// #408: the thread's last `n` messages before seq `before` (web/src/chat.ts draws each block, tagged `data-n`), under
+/// #408: the thread's `n` messages before seq `at` (and every later one) of those before seq `before` (web/src/chat.ts draws each block, tagged `data-n`), under
 /// `thread started …` or, older ones left, the marker serve.js loads them from (API v1 `thread/<t>?before=`). #407: a
 /// finished turn's commands fold, each run of them one `fold` (tagged as its first command); a run after `open` (the
 /// live turn's start) stays rows.
-fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64, usize), open: u64) -> ThreadPage {
+fn page(
+    ctx: &Ctx,
+    cfg: &Config,
+    events: &[Event],
+    t: &Event,
+    (before, at, n): (u64, u64, usize),
+    open: u64,
+) -> ThreadPage {
     let id = t.str("thread").unwrap_or_default();
     let (mut msgs, mut run, sent) = (vec![], vec![], conductor::forwarded(events));
     let fold = |msgs: &mut Vec<Msg>, run: &mut Vec<Msg>| {
@@ -262,7 +269,7 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
     if before != u64::MAX {
         msgs.retain(|m| !pins.contains(&m.seq));
     }
-    let k = msgs.len().saturating_sub(n);
+    let k = msgs.partition_point(|m| m.seq < at).saturating_sub(n);
     let dir = conductor::dir(ctx, cfg, id).display().to_string();
     let home = crate::config::home().display().to_string();
     ThreadPage {
@@ -284,12 +291,12 @@ pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>
     let (cfg, t) = (Config::kept(ctx).ok()?, conductor::find(events, id).ok()?);
     let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
-    Some(page(ctx, &cfg, events, t, (before, n), u64::MAX))
+    Some(page(ctx, &cfg, events, t, (before, u64::MAX, n), u64::MAX))
 }
 
 /// One thread: the bar (fleet · harness · model · state), its last 30 messages and the live line's state; #407:
 /// working, the turn's start (`since`, serve.js times its pill), and the queued messages above the box.
-fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Session]) -> ThreadView {
+fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, at): (&[Session], u64)) -> ThreadView {
     let id = t.str("thread").unwrap_or_default();
     let st = state(events, id, agents);
     let me = |e: &&Event| e.kind == "thread-msg" && e.str("from") == Some("owner");
@@ -315,7 +322,7 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Sessio
         since: (st == "working").then_some(turn.1),
         queued: queued(events, id).iter().map(q).collect(),
         chips: role.map(|r| chips(cfg, r)).unwrap_or_default(),
-        page: page(ctx, cfg, events, t, (u64::MAX, 30), open),
+        page: page(ctx, cfg, events, t, (u64::MAX, at, 30), open),
     }
 }
 
@@ -420,7 +427,10 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Se
             ),
         });
     }
-    tab.threads = threads.iter().map(|t| thread(ctx, cfg, events, t, agents)).collect();
+    tab.threads = threads
+        .iter()
+        .map(|t| thread(ctx, cfg, events, t, (agents, u64::MAX)))
+        .collect();
     tab
 }
 
@@ -726,8 +736,51 @@ fn composer(label: &str, action: &str, values: &Value) -> Value {
         "submit": {"label": label, "action": action, "values": values}})
 }
 
-/// #1072: a message as a card: `kind` you, orch, tool, sys or ask (choice rows while open, else its answer).
+/// #1086: a message's card with its files (images inline, others as rows) and its link's chip, which opens that thread.
 fn msg_card(now: u64, id: &str, m: &Msg) -> Value {
+    let (mut v, key) = (card(now, id, m), format!("m-{}", m.seq));
+    let src = |f: &FileRef| format!("/thread/{id}/{}", f.name);
+    let (imgs, docs): (Vec<&FileRef>, Vec<&FileRef>) = m
+        .files
+        .iter()
+        .partition(|f| ["png", "jpg", "jpeg", "gif", "webp"].contains(&ext(&f.name).as_str()));
+    let items: Vec<Value> = imgs.iter().map(|f| json!({"src": src(f), "alt": f.name})).collect();
+    let rows: Vec<Value> = docs
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            json!({"type": "row", "id": format!("{key}-f{i}"), "title": f.name,
+        "value": format!("{} KB", f.size.div_ceil(1024)), "tap": {"url": src(f)}})
+        })
+        .collect();
+    let mut add = |k: &str, b: Value| match v[k].as_array_mut() {
+        Some(a) => a.push(b),
+        None => v[k] = json!([b]),
+    };
+    if !items.is_empty() {
+        add(
+            "blocks",
+            json!({"type": "images", "id": format!("{key}-i"), "items": items}),
+        );
+    }
+    if !rows.is_empty() {
+        add(
+            "blocks",
+            json!({"type": "list", "id": format!("{key}-f"), "rows": rows}),
+        );
+    }
+    if let Some(l) = &m.link {
+        let tap = json!({"open": format!("/screens/threads/{}", l.t)});
+        add(
+            "buttons",
+            json!({"type": "button", "id": format!("{key}-l"), "label": format!("{} {}", l.w, l.t), "tap": tap}),
+        );
+    }
+    v
+}
+
+/// #1072: a message as a card: `kind` you, orch, tool, sys or ask (choice rows while open, else its answer).
+fn card(now: u64, id: &str, m: &Msg) -> Value {
     let (key, age) = (format!("m-{}", m.seq), crate::events::age(now.saturating_sub(m.ts)));
     let text = |k: &str, t: &str| json!({"type": "text", "id": format!("{key}-{k}"), "markdown": t});
     let sys = |t: &str| json!({"type": "card", "id": key, "kind": "sys", "blocks": [text("t", t)]});
@@ -778,41 +831,49 @@ fn msg_card(now: u64, id: &str, m: &Msg) -> Value {
     }
 }
 
-/// #1072: one thread (`/screens/threads/<id>`): its bar row, its last 30 messages and the composer; `[archive]` or,
-/// archived, `[restore]` and no composer.
-pub fn thread_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session], id: &str) -> Option<Value> {
+/// #1072: one thread (`/screens/threads/<id>`): its sticky bar (title · id, repo · harness · model · state, the waiting
+/// config), #1086: the 30 messages before `before` and every later one, under the marker that loads 30 more; the
+/// composer; `[archive]` or, archived, `[restore]` and no composer.
+pub fn thread_screen(
+    ctx: &Ctx,
+    cfg: &Config,
+    events: &[Event],
+    agents: &[Session],
+    id: &str,
+    before: u64,
+) -> Option<Value> {
     let t = conductor::find(events, id).ok()?;
-    let v = thread(ctx, cfg, events, t, agents);
+    let v = thread(ctx, cfg, events, t, (agents, before));
     let arch = v.page.archived;
     let act = or(arch, "restore", "archive");
-    let bar: Vec<&str> = v.ds.split(" · ").collect();
-    let awake = bar
-        .last()
-        .filter(|w| ["awake", "asleep", "working"].contains(w))
-        .copied()
-        .unwrap_or_default();
-    let title = bar
-        .iter()
-        .filter(|w| **w != awake)
-        .copied()
-        .collect::<Vec<_>>()
-        .join(" · ");
-    let sub = match v.state.as_str() {
-        "choose" => json!({"text": "! choose", "tone": "warn"}),
-        "working" => json!("✻ working"),
-        "new" => json!("no orchestrator yet"),
-        s => json!(s),
+    let (word, tone) = match v.state.as_str() {
+        "choose" => ("! choose · ", "warn"),
+        "working" => ("✻ working · ", ""),
+        "new" => ("no orchestrator yet · ", ""),
+        _ => ("", ""),
     };
-    let mut blocks = vec![
-        json!({"type": "row", "id": "who", "figure": figure(&v.state), "title": title, "subtitle": sub, "value": awake}),
-    ];
+    let mut bar = json!({"type": "row", "id": "who", "sticky": true, "figure": figure(&v.state), "title": format!("{} · {id}", v.title),
+        "subtitle": {"text": format!("{word}{}", v.ds), "tone": tone}});
+    if !v.waiting.is_empty() {
+        bar["badge"] = json!({"text": format!("config {} waiting", v.waiting.join(" ")), "tone": "warn"});
+    }
+    let mut blocks = vec![bar];
+    blocks.extend(v.page.older.map(|n| {
+        json!({"type": "button", "id": "older", "label": "↑ older messages",
+        "tap": {"open": format!("/screens/threads/{id}?before={n}"), "keep": true}})
+    }));
     blocks.extend(v.page.msgs.iter().map(|m| msg_card(ctx.now, id, m)));
     if !arch {
         blocks.push(composer("send", "thread-say", &json!({ "thread": id })));
     }
+    let q = if before == u64::MAX {
+        String::new()
+    } else {
+        format!("?before={before}")
+    };
     Some(
         json!({"type": "screen", "id": format!("thread-{id}"), "title": v.title, "focus": true,
-        "stream": format!("/screens/threads/{id}/stream"),
+        "stream": format!("/screens/threads/{id}/stream{q}"),
         "actions": [{"label": act, "action": format!("thread-{act}"), "values": {"thread": id}}], "blocks": blocks}),
     )
 }
@@ -833,7 +894,7 @@ pub fn new_screen(cfg: &Config, repo: &str) -> Option<Value> {
 impl super::Server<'_> {
     /// #1072: the Threads tab's screens by `sub` path: empty the list, `/<id>` a thread (a paired live open marks it read),
     /// `/new/<repo>` a new one.
-    pub(super) fn threads_screen(&self, ctx: &Ctx, sub: &str, paired: bool) -> Option<Value> {
+    pub(super) fn threads_screen(&self, ctx: &Ctx, sub: &str, before: Option<&String>, paired: bool) -> Option<Value> {
         let (cfg, events) = (Config::kept(ctx).ok()?, crate::events::working(&ctx.state).ok()?);
         let agents = self.sessions(ctx.now).map(|s| s.running()).unwrap_or_default();
         match sub {
@@ -849,7 +910,8 @@ impl super::Server<'_> {
                         conductor::find(&events, id).ok()?,
                     ));
                 }
-                thread_screen(ctx, &cfg, &events, &agents, id)
+                let before = before.and_then(|b| b.parse().ok()).unwrap_or(u64::MAX);
+                thread_screen(ctx, &cfg, &events, &agents, id, before)
             }
         }
     }
