@@ -1,0 +1,7 @@
+Decided: db::compact stamps the archived snapshot only when it deleted or archived rows, so db::version and a held events::shared stay as they were.
+Because: "with no seqs writes nothing and leaves the version as it was"
+Because: crates/core/src/db.rs:390
+Rejected: a live-bytes counter row (scope 2, AC3) — #978 removed events::rotate and db::live_bytes; no SUM scan is left to replace, so the counter would be new code with no reader.
+Rejected: stamping only when events were archived — deleted heartbeats must still make readers drop them, which the_shared_read_follows_appends_and_compaction checks.
+Check: a_compaction_that_moves_nothing_keeps_the_shared_log fails on the base (commit 1) and passes at the head.
+Owner: A daily cleanup that finds nothing to clean no longer makes the board and service reread the whole event log.
