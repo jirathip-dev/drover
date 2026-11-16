@@ -66,7 +66,7 @@ fn reset_at(r: &dyn Runner, note: &str, now: u64) -> Option<u64> {
 
 /// Who picked: `by`, or in an orchestrator's thread the owner's `line` there since the lane went rate-limited.
 pub fn by<'a>(ctx: &Ctx, line: Option<&str>, by: &'a str, (fleet, n): (&str, u64)) -> Result<&'a str> {
-    let Some(t) = std::env::var("DROVER_THREAD").ok().filter(|t| !t.is_empty()) else {
+    let Some(t) = crate::config::env("DROVER_THREAD").filter(|t| !t.is_empty()) else {
         return Ok(by);
     };
     let events = read(&ctx.state)?;
