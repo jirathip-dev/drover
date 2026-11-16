@@ -1,0 +1,12 @@
+Decided: held_on, the auto-updated lookup, promise::pass and gh::missing read the per-issue index through events::issue_events
+Because: "use the per-issue index the log already has; done issues are filtered out first"
+Decided: a fast pass skips done issues in the waits loop; a full pass keeps them
+Because: crates/core/src/drive.rs:1278
+Rejected: skipping done issues in every pass — stall::stalled acts on a merged issue's lane and the sim hunt test changed outcome
+Decided: gh::snapshot keeps the parsed snapshot per thread by cache file, now and mtime, returned as Rc
+Because: "The parsed PR snapshot is kept for the pass (per fleet and `now`), shared by reference"
+Rejected: one shared waiting::scan for every fleet — drive runs each fleet's pass on its own thread; #971 already removed the clone
+Decided: the perf gate measures CPU ms (median of 5 passes, budget 120) instead of wall time
+Because: crates/cli/tests/perf.rs:443
+Check: the perf gate fails on base src (148-204 ms CPU) and passes at head (55-78 ms)
+Owner: Drive's per-minute pass does about half the work on a long history; what it decides is unchanged.
