@@ -1,0 +1,14 @@
+Decided: wrap in Plan::start_cmd so every harness and both spawn and dry-run show the srt line
+Because: "herdsman starts the lane's agent as `srt <harness command>` with the lane's generated srt settings"
+Decided: deny all of ~ and re-allow toolchains, the repo and the agent's folders, rather than deny a list
+Because: "deny ~/.config (except the lane's own agent config folder), ~/.ssh, the secrets dir, other worktrees and repos"
+Decided: use srt's own proxy, not the per-lane token proxy
+Because: "Seatbelt on macOS and bubblewrap on Linux, its network allowlist proxy"
+Rejected: reusing the #637 token proxy — it fronts one provider API, not GitHub and the registries
+Decided: resolve symlinks and symlinked parents of allowed paths on the lane's host
+Because: crates/core/src/sandbox.rs:95
+Decided: allow /private/tmp writes and sockets so herdsman's tests (fake_shed /tmp/hsb-*.sock) pass; flagged as the first go condition
+Because: crates/cli/tests/common/fake_shed.rs:48
+Check: the srt line in `spawn --dry-run` and the rules file of a sandboxed fleet; off when `sandbox` is unset
+Check: real impl/rev/verify/sim lanes under srt were not run from this lane (needs the owner to install srt and flip one fleet)
+Owner: A spike that runs lanes in a kernel sandbox behind a per-fleet switch; it is a conditional go, pending real-lane runs.
