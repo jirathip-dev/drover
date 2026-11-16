@@ -157,7 +157,7 @@ So do `drover ask`, `verdict` and `answer`, and the board's answer, override, ex
 moves. A kick returns at once: a detached `kick --now` (output in `<state>/kick.log`) drives that issue's
 due steps alone under the drive lock, logs `kick`, and coalesces kicks within 10 s (or while the lock is
 busy) into one follow-up. A lane on another host kicks the main host. The tick and fast timers stay the
-safety net for CI, outside merges and stalls; the Host tab shows the last kick.
+safety net for CI, outside merges and stalls.
 
 ### Denied commands (#216)
 

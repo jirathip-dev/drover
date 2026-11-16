@@ -82,7 +82,7 @@ events (one long-lived PR re-pushed against `justfile` 442 times; it is one pair
    `generated` with `generate = "just types"` and delete CI's own stale-types step (one way to check).
 2. **Cap raises as a folder** (`crates/core/src/overlap.rs`, `crates/core/src/hook.rs`, `.drover/arch.toml`,
    `roles/orchestrator.md`, `roles/impl.md`, `roles/usage-tail.md`, `docs/architecture.md`): the folder, the one
-   reader, the hook's refusal widened to the folder, `ci/cap.toml` frozen. Old notes in `docs/cap-history/` stay.
+   reader, the hook's refusal widened to the folder, `ci/cap.toml` frozen.
 3. **Retire the help budget** (`crates/core/src/cli.rs`, `crates/cli/tests/spawn.rs`): delete `HELP_AGENT_MAX` and
    the `<=` assertion; the completeness half of the test stays.
 4. **Passive by flag** (`crates/core/src/events.rs`, `check.rs`, `spawn.rs`): the `passive` field, `.passive()`,

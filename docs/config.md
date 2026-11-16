@@ -45,7 +45,7 @@ review or ready).
   issues never wait on each other.
 - Issues already in flight over a limit when a group is added keep going (grandfathered); new joins wait.
 
-Board, status and the Host tab show each group's use: `serial: db 3/10 · ci 1/1`.
+`status` and `board` show each group's use: `serial: db 3/10 · ci 1/1`.
 
 Hot files (#891): each file the last `drover hotspots` run stored is its own one-slot group, `hot <file>`, joined
 only by a PR's diff (never a `--serial` mark). Drive drops a file from it on its next pass once

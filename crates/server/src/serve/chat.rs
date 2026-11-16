@@ -1,4 +1,4 @@
-//! #386: the `[chat]` tab (docs/design/conductor-chat/): per repo its conductor threads, and each thread as #138's chat
+//! #386: the `[chat]` tab (docs/design/threads-tab/): per repo its conductor threads, and each thread as #138's chat
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
 use crate::api::{
