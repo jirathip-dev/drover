@@ -12,11 +12,14 @@ use crate::spawn::{changes, dirty, own_files, SHOT_DIRS};
 use crate::Ctx;
 use crate::{gh, term};
 use anyhow::{Context, Result};
+use fire::{fire, PUSHES};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
+
+mod fire;
 
 fn ready<'a>(ctx: &Ctx, r: &dyn Runner, cfg: &'a Config, s: &IssueState) -> Option<(&'a Fleet, Value)> {
     let f = cfg.fleet(&s.fleet).ok().filter(|_| s.state == "ready")?;
@@ -724,34 +727,6 @@ fn overload(
     );
     let d = json!({"key": since, "host": main, "reason": why, "top": top});
     fire(ctx, cfg, out, events, ("drover", None), "host-overloaded", d)
-}
-
-thread_local!(static PUSHES: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) });
-
-fn fire(
-    ctx: &Ctx,
-    cfg: &Config,
-    out: &mut dyn Write,
-    events: &[Event],
-    (fleet, issue): (&str, Option<u64>),
-    kind: &str,
-    d: serde_json::Value,
-) -> Result<()> {
-    if events
-        .iter()
-        .any(|e| e.kind == kind && e.fleet == fleet && e.issue == issue && e.data.get("key") == d.get("key"))
-    {
-        return Ok(());
-    }
-    let ev = Event::new(ctx.now, fleet, issue, kind, d);
-    writeln!(out, "{}", plain(&ev))?;
-    let ((sent, held), push) = (PUSHES.get(), crate::config::WEBPUSH_ON.contains(&kind));
-    if push && sent >= cfg.limits.max_pushes_per_pass {
-        PUSHES.set((sent, held + 1));
-        return crate::events::append(&ctx.state, &ev);
-    }
-    PUSHES.set((sent + usize::from(push), held));
-    emit(&ctx.state, cfg, ev)
 }
 
 type Gate<'a> = (&'a str, &'a str, &'a str);

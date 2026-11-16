@@ -349,7 +349,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         pass.step("lesson");
         crate::lesson::weekly(ctx, cfg, &pass, out)?;
         pass.step("hotspots");
-        crate::hotspots::weekly(ctx, cfg, &pass, out)?;
+        crate::hotspots::daily(ctx, cfg, &pass, out)?;
         pass.step("compact");
         compact_daily(ctx, out)?;
         driven
