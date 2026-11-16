@@ -285,6 +285,42 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
 }
 
 #[test]
+fn done_today_opens_todays_merged_events_and_a_row_opens_its_issue_card() {
+    let (c, r) = recorded("cooee-done");
+    let ev = |ts: u64, n: u64, d: Value| append(&c.state, &Event::new(ts, "sendmeter", Some(n), "merged", d)).unwrap();
+    ev(T - 90_000, 3, json!({"pr": "40", "merge_sha": "c".repeat(40)}));
+    ev(T - 200, 11, json!({"pr": "43", "merge_sha": "d".repeat(40)}));
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let get = |p: &str| {
+        let (status, v) = req(&s, T, "GET", p, "", "");
+        assert_eq!(status, 200, "{p}: {v}");
+        v
+    };
+    let row = find(&get("/screens/queue"), "done-today-sendmeter").clone();
+    assert_eq!(row["tap"], json!({"open": "/screens/queue/done?repo=sendmeter"}));
+    let d = get(row["tap"]["open"].as_str().unwrap());
+    assert_eq!(d["type"], "screen");
+    let rows = find(&d, "done-list")["rows"].as_array().unwrap().clone();
+    let shown: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|r| (r["title"].as_str().unwrap(), r["subtitle"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        shown,
+        [("#11", "merged 13:43 UTC · ddddddd"), ("#9", "merged 13:36 UTC · ?")],
+        "today's merged events, newest first; #3 merged 25 h ago is left out"
+    );
+    assert_eq!(row["value"], rows.len().to_string());
+    assert_eq!(
+        rows[0]["tap"],
+        json!({"sheet": "/screens/issue?repo=sendmeter&issue=11"})
+    );
+    let card = get(rows[0]["tap"]["sheet"].as_str().unwrap());
+    assert_eq!((&card["type"], &card["title"]), (&json!("sheet"), &json!("#11")));
+    assert_eq!(rows_of(&card, "links-list"), ["issue", "pr", "checks"]);
+}
+
+#[test]
 fn a_queue_row_is_one_short_title_line_without_the_pr_title() {
     let (c, r) = recorded("cooee-short-row");
     let (issue, pr) = ("Long issue title ".repeat(7), "Long PR title ".repeat(8));

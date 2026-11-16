@@ -367,7 +367,8 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q) -> Value {
         json!({"text": "paused", "tone": "mute"}),
     ];
     let mut end = vec![
-        json!({"type": "row", "id": format!("done-today-{f}"), "title": "done today", "value": c.done_n.to_string()}),
+        json!({"type": "row", "id": format!("done-today-{f}"), "title": "done today", "value": c.done.len().to_string(),
+            "accessory": "chevron", "tap": {"open": format!("/screens/queue/done?repo={f}")}}),
     ];
     if let Some(b) = &c.backlog {
         end.push(
@@ -392,6 +393,22 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q) -> Value {
         );
     }
     v
+}
+
+fn done_screen(c: &QueueCard) -> Value {
+    let f = &c.name;
+    let rows: Vec<Value> = (c.done.iter())
+        .map(|d| {
+            let sha: String = d.sha.as_deref().unwrap_or("?").chars().take(7).collect();
+            let at = format!("{:02}:{:02} UTC", d.t % 86_400 / 3600, d.t % 3600 / 60);
+            let title = format!("#{} {}", d.issue, d.title.as_deref().unwrap_or_default());
+            json!({"type": "row", "id": format!("done-{}-{}", d.issue, d.t), "title": title.trim_end(),
+                "subtitle": format!("merged {at} · {sha}"), "value": d.age, "accessory": "chevron",
+                "tap": {"sheet": format!("/screens/issue?repo={f}&issue={}", d.issue)}})
+        })
+        .collect();
+    json!({"type": "screen", "id": format!("done-{f}"), "title": format!("{f} · done today"),
+        "blocks": [{"type": "list", "id": "done-list", "rows": rows}]})
 }
 
 const LEGEND: [(&str, &str); 17] = [
@@ -1242,6 +1259,7 @@ impl Server<'_> {
                 let tab = self.queue_tab(ctx);
                 backlog(ctx.now, tab.fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?, q)?
             }
+            "/screens/queue/done" => done_screen(self.queue_tab(ctx).fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?),
             "/screens/ask" => ask_sheet(ctx, q)?,
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
                 return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
@@ -1342,7 +1360,19 @@ impl Server<'_> {
         let (f, n) = (q.get("repo")?, q.get("issue")?.parse::<u64>().ok()?);
         let tab = self.queue_tab(ctx);
         let c = tab.fleets.iter().find(|c| &c.name == f)?;
-        Some(draw(c, c.rows.iter().find(|r| r.issue == n)?))
+        let merged = |d: &super::DoneRow| QueueRow {
+            issue: n,
+            state: "merged".into(),
+            title: d.title.clone(),
+            pr: super::PrLine {
+                pr: d.pr.as_deref().and_then(|p| p.parse().ok()),
+                ..super::PrLine::default()
+            },
+            notes: vec![d.note.clone()],
+            ..QueueRow::default()
+        };
+        let done = c.done.iter().find(|d| d.issue == n).map(merged);
+        Some(draw(c, c.rows.iter().find(|r| r.issue == n).or(done.as_ref())?))
     }
 
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
