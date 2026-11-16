@@ -531,7 +531,11 @@ seq?: number, ts: number, fleet: string, issue?: number | null, type: string,
 /**
  * #973: not activity (an alert, a note, a prompt): the fold and the idle-pane reader skip it.
  */
-passive?: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+passive?: boolean, 
+/**
+ * #1147: reaches a phone whose notifier sets no `on`; kinds pushed before the flag are in `push::LEGACY`.
+ */
+push?: boolean, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
 
 export type IssueState = { fleet: string, issue: number, state: string, lane?: string | null, branch?: string | null, 
 /**
@@ -616,7 +620,7 @@ export type HostRoot = { path: string, state: string, free_gb?: number | null, }
  */
 export type HostRow = { ts: number, host: string, load_cpu?: number | null, pressure?: number | null, swap_out?: number | null, mem_free_gb?: number | null, disk_free_gb?: number | null, lanes: number, 
 /**
- * #352: MB per `host::groups` group, only while `/screens/hosts/stream` was open in the last 2 min (else no `ps` walk).
+ * #352: MB per `host::groups` group, only while `/live?tab=host` was seen in the last 2 min (else no `ps` walk).
  */
 procs?: [number, number, number, number, number] | null, };
 

@@ -21,13 +21,13 @@ pub fn route(path: &str) -> String {
 fn p(ms: &mut [u64], pct: usize) -> u64 {
     ms.sort_unstable();
     let i = (ms.len() * pct).div_ceil(100).clamp(1, ms.len());
-    ms[i - 1]
+    ms.get(i - 1).copied().unwrap_or_default()
 }
 
 fn time(route: &str, mut ms: Vec<u64>) -> RouteTime {
     RouteTime {
         route: route.into(),
-        count: ms.len() as u64,
+        count: u64::try_from(ms.len()).unwrap_or(u64::MAX),
         p50: p(&mut ms, 50),
         p95: p(&mut ms, 95),
         max: ms.last().copied().unwrap_or_default(),
@@ -64,7 +64,7 @@ impl Timing {
             m.entry(g).or_default().push(*ms);
         }
         let groups = m.into_iter().map(|(g, ms)| time(g, ms)).collect();
-        (groups, self.1.iter().filter(|t| **t >= from).count() as u64)
+        (groups, self.1.iter().filter(|t| **t >= from).map(|_| 1).sum())
     }
 
     fn by_route(&self, from: u64, to: u64) -> BTreeMap<&str, Vec<u64>> {

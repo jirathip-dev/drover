@@ -217,29 +217,23 @@ fn no_process_table_walk_while_nobody_watches() {
 }
 
 #[test]
-fn sampling_resumes_once_the_hosts_screen_streams() {
+fn sampling_resumes_once_the_host_tab_is_open() {
     let (mut c, _sh) = two_hosts("history-watch");
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
     std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, false));
-    let open = |path: &str| {
-        use std::io::{BufRead, Write};
+    let live = |q: &str| {
+        use std::io::Write;
         let mut s = std::net::TcpStream::connect(addr).unwrap();
-        s.set_read_timeout(Some(std::time::Duration::from_secs(20))).unwrap();
-        write!(s, "GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
-        let mut r = std::io::BufReader::new(s);
-        let mut line = String::new();
-        while !line.starts_with("data: ") {
-            line.clear();
-            assert!(r.read_line(&mut line).unwrap() > 0, "{path}: closed");
-        }
-        r
+        write!(s, "GET /live{q} HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        s
     };
     let watch = c.state.with_file_name("host-watch.at");
-    let _queue = open("/screens/queue/stream");
-    assert!(!watch.exists(), "another screen is not watching the host");
-    let _hosts = open("/screens/hosts/stream");
+    let _queue = live("?tab=queue");
+    assert!(!watch.exists(), "another tab is not watching the host");
+    let _host = live("?tab=host");
     let at: u64 = std::fs::read_to_string(&watch).unwrap().parse().unwrap();
     c.now = at + 60;
     let r = watched_fake(10);

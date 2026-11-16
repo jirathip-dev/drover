@@ -1,5 +1,5 @@
 use crate::config::{CiRunners, Config};
-use crate::events::{age, emit, working, Event};
+use crate::events::{age, emit, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
@@ -55,7 +55,7 @@ fn github(r: &dyn Runner, c: &CiRunners, label: &str) -> Result<Vec<Gh>> {
             x["busy"] == true,
         )
     };
-    Ok(v["runners"]
+    Ok(v.at("runners")
         .as_array()
         .into_iter()
         .flatten()
@@ -154,8 +154,8 @@ fn ask_owner<T>(code: &'static str, why: &str, verb: &str) -> Result<T> {
 
 /// The VM runners online and how many there should be (`slots × VMs`).
 pub fn health(r: &dyn Runner, c: &CiRunners, events: &[Event]) -> Result<(u64, u64)> {
-    let on = github(r, c, &c.label)?.iter().filter(|g| g.2).count();
-    Ok((on as u64, c.slots * vms(c, events).len() as u64))
+    let on = u64::try_from(github(r, c, &c.label)?.iter().filter(|g| g.2).count())?;
+    Ok((on, c.slots * u64::try_from(vms(c, events).len())?))
 }
 
 fn push_tokens(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &CiRunners) -> Result<usize> {
@@ -183,7 +183,7 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Option
         .map_or(0, |e| e.ts);
     if last + cfg.limits.token_refresh_minutes * 60 <= ctx.now {
         if let Err(e) = push_tokens(ctx, cfg, r, c) {
-            eprintln!("drover check: runner tokens: {e:#}");
+            crate::stderr!("drover check: runner tokens: {e:#}");
         }
     }
     Some(health(r, c, events))
@@ -207,7 +207,7 @@ pub fn run(
             let line = format!(
                 "{}/{} online",
                 gh.iter().filter(|g| g.2).count(),
-                c.slots * all.len() as u64
+                c.slots * u64::try_from(all.len())?
             );
             writeln!(
                 out,
@@ -227,7 +227,7 @@ pub fn run(
             let local = c.local_label.as_deref().map(|l| github(r, c, l)).transpose()?;
             for g in gh.iter().chain(local.iter().flatten()) {
                 let busy = if g.3 { " busy" } else { "" };
-                writeln!(out, "runner {}: {}{busy}", g.1, ["offline", "online"][usize::from(g.2)])?;
+                writeln!(out, "runner {}: {}{busy}", g.1, if g.2 { "online" } else { "offline" })?;
             }
             log(ctx, cfg, "runners-status", json!({"health": line}))
         }
@@ -244,7 +244,7 @@ pub fn run(
             )?)
         }
         Verb::Add(n) => {
-            let (total, per) = (all.len() as u64 + n, per_day(ctx, c)?);
+            let (total, per) = (u64::try_from(all.len())? + n, per_day(ctx, c)?);
             let usd = f64::from(u32::try_from(total).unwrap_or(u32::MAX)) * per;
             if (total > c.max_vms || usd > c.usd_day) && !approved(&events, ok_id, "add") {
                 let why = format!(

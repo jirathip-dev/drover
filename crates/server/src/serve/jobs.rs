@@ -181,7 +181,7 @@ impl Server<'_> {
             let line = p.line(crate::now()).unwrap_or_default();
             self.set(&id, "waiting", "HOST_WAIT", format!("{msg} · {line}"));
             self.kick.store(true, Relaxed);
-            std::thread::sleep(std::time::Duration::from_secs(every));
+            drover_core::clock::sleep(std::time::Duration::from_secs(every));
         }
         if let Some(j) = self.set(&id, state, &code, msg.clone()) {
             self.logged(&j);

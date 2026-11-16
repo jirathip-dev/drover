@@ -226,7 +226,7 @@ fn the_page_carries_no_tab_and_each_part_is_its_own_read() {
 }
 
 #[test]
-fn the_loader_and_the_age_are_one_strip_under_the_header() {
+fn parity_3_the_loader_and_the_age_are_one_strip_under_the_header() {
     let (c, r) = fixture();
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let s = drover::serve::Server::new(&c, &r, Some(ADDR.into()));
@@ -394,7 +394,7 @@ fn big_with(lanes: u64) -> (drover::Ctx, Fake, &'static FakeShed) {
 }
 
 #[test]
-fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
+fn parity_r6_waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     let (c, r, sh) = big();
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let events = drover::events::read(&c.state).unwrap();
@@ -440,13 +440,8 @@ fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     assert!(lanes < 300, "the lanes reads took {lanes} ms (target < 300)");
 }
 
-extern "C" {
-    fn getrusage(who: i32, usage: *mut [i64; 18]) -> i32;
-}
-
 fn cpu_ms() -> f64 {
-    let mut u = [0i64; 18];
-    assert_eq!(unsafe { getrusage(0, &raw mut u) }, 0);
+    let u = drover_sys::rusage().unwrap();
     let tv = |s: i64, us: i64| s as f64 * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
     tv(u[0], u[1]) + tv(u[2], u[3])
 }
@@ -763,7 +758,7 @@ impl Runner for NoSpawn {
 }
 
 #[test]
-fn no_board_request_starts_a_process() {
+fn parity_r7_no_board_request_starts_a_process() {
     let (c, r) = fixture();
     let (c, r, addr) = serve(c, NoSpawn(r, Mutex::default()));
     let cookie = pair_on(addr, c);

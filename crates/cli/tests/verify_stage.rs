@@ -161,7 +161,7 @@ fn a_pr_outside_ui_paths_skips_verify_and_goes_to_the_gates() {
     assert!(!started(&sh, "sendmeter-verify"));
     drive(&c, &r);
     assert!(r.called(&format!(
-        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+        "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));
     assert_eq!(state(&c), "merged");
 }
@@ -403,7 +403,7 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
 }
 
 #[test]
-fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
+fn parity_70_shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
     let d = tmpdir("verify-shots");
     let c = ctx(&d, &config());
     let lane = d.join("lane");
@@ -573,7 +573,7 @@ fn skipped_after_a_refusal_merges_in_one_pass(name: &str, kind: &str, word: &str
     let r = fake(&head, "src/a.rs\n");
     drive(&c, &r);
     assert!(r.called(&format!(
-        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+        "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));
     assert_eq!(state(&c), "merged");
     assert!(kinds(&c, "spawn")

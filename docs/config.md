@@ -35,22 +35,18 @@ joined (belt and braces).
 An issue holds a slot in a group from joining until it is merged, closed or parked (in flight: an impl/fix lane, at
 review or ready).
 
-- A marked issue starts only with a free slot: `SERIAL_BUSY ci: #2968 holds 1/1`.
-- An issue whose diff joins a full group **holds** (`serial-held {group, holder}`): its lane is told
-  `stop: ci is held by #2968; you'll get an update round when it merges`, its worktree stays and no review is spawned.
-  Its card reads `serial: ci held by #2968 (1/1)`.
-- When a slot frees, the first held issue in queue order takes it (`serial-slot {group}`) and gets an update round
-  (merge `origin/<integration>`), then carries on.
-- An issue in two or more groups takes their slots in name order and needs all of them before it continues, so two
-  issues never wait on each other.
-- Issues already in flight over a limit when a group is added keep going (grandfathered); new joins wait.
+- A slot gates only new impl work: a marked issue with no open PR starts only with a free slot:
+  `SERIAL_BUSY ci: #2968 holds 1/1`. A blocked issue holds no slot.
+- A pushed head is never held (#1136): an open PR whose diff joins a full group is reviewed, verified, fixed and merged
+  like any other, and counts toward the group's use. A conflict at merge gets an update round as usual.
+- Issues already in flight over a limit when a group is added keep going (grandfathered).
 
 Board, status and the Host tab show each group's use: `serial: db 3/10 · ci 1/1`.
 
-Hot files (#891): each file the last `drover hotspots` run stored is its own one-slot group, `hot <file>`, joined
+Hot files (#891): each file the last stored hotspots list names is its own one-slot group, `hot <file>`, joined
 only by a PR's diff (never a `--serial` mark). Drive drops a file from it on its next pass once
-`.drover/arch.toml` on the integration branch lists it `frozen` or `generated` (`hot-files {files}` logs each
-change). A held issue's board row and card read `serial: hot <file>`.
+`.drover/arch.toml` on the integration branch lists it `frozen`, `generated` or `shared` (#1147; `hot-files {files}`
+logs each change).
 
 ## Fast-first landing (#350)
 
@@ -98,13 +94,14 @@ New fleets set `merge_label = "merge-ready"` with the affected-only CI recipe in
 
 ## Hotspots (#889)
 
-`drover hotspots [FLEET]` (every fleet when none is named) lists the files 5 or more merged PRs touched in the
-last 14 days on the integration branch, any language, each with the distinct PR pairs it was predicted to conflict in
+`drover hotspots [FLEET]` (every fleet when none is named) lists the files 1 in 20 of the merged PRs (at least 5)
+touched in the last 14 days on the integration branch; a merge touching more than 40 files is a sweep and not counted
+(#1147), and the report's header says how many were skipped, any language, each with the distinct PR pairs it was predicted to conflict in
 (#973: pairs, not one per push) and the update rounds of the issues that touched it (drover's log, every fleet on the
-same repo). A file no longer at the integration tip, or one `.drover/arch.toml` lists frozen or generated, is left
-out. It keeps the list in the state folder as
+same repo). A file no longer at the integration tip, or one `.drover/arch.toml` lists frozen, generated or shared, is
+left out. It keeps the list in the state folder as
 `hotspots-<fleet>.json`. With any hot file it opens `hotspots: <fleet> week of <monday>`, or updates that issue while it
-is open, and queues it `--architect`. `drover tick` runs it weekly per fleet; `hotspots = "off"` in `[fleet.<n>]` opts
+is open, and queues it `--architect`. `drover tick` stores each fleet's list daily and files its issue weekly; `hotspots = "off"` in `[fleet.<n>]` opts
 out.
 
 ## Limits (#844)

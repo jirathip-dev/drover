@@ -112,7 +112,7 @@ fn post(s: &Server, path: &str, body: &str, extra: &str) -> String {
 }
 
 #[test]
-fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
+fn parity_8_subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     let dir = tmpdir("wp-sub");
     let c = ctx(&dir, CONFIG);
     let r = OnShed::new(Fake::default());
@@ -595,18 +595,18 @@ fn a_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named() {
     assert_eq!(pushes(), 1);
     let j = last();
     assert_eq!(j["body"], "sendmeter · Grill #12: Scope and tests.");
-    assert_eq!(j["url"], "/?thread=t1#chat");
+    assert_eq!(j["url"], "/#threads/t1");
     let ask = serde_json::json!({"id": "q1", "question": "Which scope?", "options": ["small", "full"],
         "recommend": 2, "kind": "owner", "thread": "t1"});
     emit(&c.state, &cfg, Event::new(1, "sendmeter", None, "needs-decision", ask)).unwrap();
     assert_eq!(pushes(), 2);
     let j = last();
     assert_eq!(j["body"], "sendmeter · Grill #12 asks: Which scope?");
-    assert_eq!(j["url"], "/?thread=t1#chat");
+    assert_eq!(j["url"], "/#threads/t1");
 }
 
 #[test]
-fn no_push_for_the_thread_open_on_a_board() {
+fn parity_9_no_push_for_the_thread_open_on_a_board() {
     let dir = tmpdir("wp-watch");
     let _path = fake_curl(&dir);
     std::fs::write(dir.join("code"), "201").unwrap();

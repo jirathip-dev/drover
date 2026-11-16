@@ -95,7 +95,7 @@ fn a_builder_with_a_pass_frees_its_build_folders() {
 }
 
 #[test]
-fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
+fn parity_r24_over_budget_frees_the_idlest_lane_first_then_disk_budget() {
     let cfg = |gb: f64| format!("{CONFIG}worktree_budget_gb = {gb}\n");
     let d = tmpdir("disk-budget");
     let c = ctx(&d, &cfg(10240.0 / 1_073_741_824.0));
@@ -398,10 +398,7 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
     assert_eq!(events(&c, "wip-blocked").len(), 1);
     run(&c, &r(), &["clean", "--yes"]);
     assert_eq!(events(&c, "wip-blocked").len(), 1, "once, not every sweep");
-    assert!(
-        drover::config::WEBPUSH_ON.contains(&"wip-blocked"),
-        "pushed to the phone"
-    );
+    assert!(events(&c, "wip-blocked")[0].is_push(), "pushed to the phone");
 }
 
 #[test]

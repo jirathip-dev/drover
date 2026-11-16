@@ -1,0 +1,1 @@
+- MAIN_TARGET: integration or PR base is main/master; fleet never merges to main
