@@ -1000,7 +1000,7 @@ pub fn spawn(
         let fix = "`drover timer install` from a shell where `which shed` finds it";
         return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
     }
-    if let Some(Err(e)) = on.machine.is_none().then(|| crate::shed::gate(&on, &bt.0.wire)) {
+    if let Some(Err(e)) = (on.machine.is_none() && !o.dry_run).then(|| crate::shed::gate(&on, &bt.0.wire)) {
         return refused("SHED_VERSION", format!("{e:#}").replacen("SHED_VERSION: ", "", 1));
     }
     let acp_id = bt.0.acp.clone();
