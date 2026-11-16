@@ -1,0 +1,7 @@
+/Users/jkmacmini/.local/share/herdsman/work/.build/herdsman-impl-1152/debug/deps/disk-1b65e24ee39e5c9d
+/Users/jkmacmini/.local/share/herdsman/work/.build/herdsman-impl-1152/debug/deps/drive_sim-f16d90cb067d70d4
+/Users/jkmacmini/.local/share/herdsman/work/.build/herdsman-impl-1152/debug/deps/host_slots-730217c6041ef282
+/Users/jkmacmini/.local/share/herdsman/work/.build/herdsman-impl-1152/debug/deps/host_spared-aa89b9e6336b88b0
+/Users/jkmacmini/.local/share/herdsman/work/.build/herdsman-impl-1152/debug/deps/setup_terminal-ed33bdd3d1b5398f
+/Users/jkmacmini/.local/share/herdsman/work/.build/herdsman-impl-1152/debug/deps/spawn-8d93f09437746f57
+/Users/jkmacmini/.local/share/herdsman/work/.build/herdsman-impl-1152/debug/deps/tick_dead_host-793c606e022fe45c
