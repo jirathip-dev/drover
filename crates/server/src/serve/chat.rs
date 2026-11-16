@@ -726,11 +726,57 @@ fn composer(label: &str, action: &str, values: &Value) -> Value {
         "submit": {"label": label, "action": action, "values": values}})
 }
 
+fn msg_card(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
+    let mut c = msg_body(now, id, m, paired);
+    if let Some(l) = &m.link {
+        let chip = json!({"type": "button", "id": format!("m-{}-link", m.seq), "label": format!("{} {}", l.w, l.t), "tap": {"thread": l.t}});
+        match c["buttons"].as_array_mut() {
+            Some(b) => b.push(chip),
+            None => c["buttons"] = json!([chip]),
+        }
+    }
+    c
+}
+
+fn run_body(now: u64, key: &str, r: &RunCard) -> (Vec<Value>, Vec<Value>, &'static str) {
+    let text = |k: &str, t: &str| json!({"type": "text", "id": format!("{key}-{k}"), "markdown": t});
+    let host = or(r.host.is_empty(), "local", &r.host);
+    if r.state == "open" {
+        let sha = r.sha.get(..12).unwrap_or(&r.sha);
+        let left = r.exp.saturating_sub(now).div_ceil(60);
+        let run = json!({"type": "run", "id": r.id, "action": "run-card", "command": r.cmd, "sha": sha, "dir": r.dir, "touches": r.blast});
+        return (
+            vec![run, text("exp", &format!("on {host} · expires in {left}m"))],
+            vec![],
+            "warn",
+        );
+    }
+    let by = r.by.as_deref().map_or(String::new(), |b| format!(" by {b}"));
+    let code = r.code.map_or(String::new(), |c| format!(" · exit {c}"));
+    let mut blocks = vec![
+        text("cmd", &format!("```\n{}\n```", r.cmd)),
+        text(
+            "s",
+            &format!(
+                "on {host} · {} · touches {}  \n**{}**{by}{code}",
+                r.dir, r.blast, r.state
+            ),
+        ),
+    ];
+    let mut buttons = vec![];
+    if !r.tail.is_empty() {
+        blocks.push(text("tail", &format!("```\n{}\n```", r.tail)));
+        buttons.push(json!({"type": "button", "id": format!("{key}-copy"), "label": "copy", "tap": {"copy": r.tail}}));
+    }
+    (blocks, buttons, or(r.code.is_some_and(|c| c != 0), "bad", ""))
+}
+
 /// #1072: a message as a card: `kind` you, orch, tool, sys or ask (choice rows while open, else its answer).
-fn msg_card(now: u64, id: &str, m: &Msg) -> Value {
+fn msg_body(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
     let (key, age) = (format!("m-{}", m.seq), crate::events::age(now.saturating_sub(m.ts)));
     let text = |k: &str, t: &str| json!({"type": "text", "id": format!("{key}-{k}"), "markdown": t});
     let sys = |t: &str| json!({"type": "card", "id": key, "kind": "sys", "blocks": [text("t", t)]});
+    let button = |label: &str, style: &str, action: &str, values: Value| json!({"type": "button", "id": format!("{key}-{}", label.replace(' ', "-")), "label": label, "style": style, "action": action, "values": values});
     match m.kind.as_str() {
         "msg" if m.from == "owner" => {
             json!({"type": "card", "id": key, "kind": "you", "title": "you", "meta": format!("✓ {age}"), "blocks": [text("t", &m.text)]})
@@ -772,6 +818,62 @@ fn msg_card(now: u64, id: &str, m: &Msg) -> Value {
             json!({"type": "card", "id": key, "kind": "ask", "tone": or(m.open && m.answer.is_none(), "warn", ""),
                 "title": format!("{}{}", a.id, or(m.routine, " · routine", "")), "meta": age, "blocks": blocks})
         }
+        "note" if m.open && m.ask.is_some() => {
+            let Some(a) = &m.ask else { return sys(&m.text) };
+            let opts: Vec<Value> = a.options.iter().map(|o| json!({"label": o, "value": o})).collect();
+            let mins = crate::CHANGE / 60;
+            json!({"type": "card", "id": key, "kind": "ask", "title": format!("{} · answered by the orchestrator", a.id), "meta": age,
+                "blocks": [text("t", &m.text), text("c", &format!("change it within {mins} min of the answer:")),
+                    {"type": "choice", "id": a.id, "action": "answer", "values": {"thread": id, "fleet": a.fleet}, "options": opts}]})
+        }
+        "note" if m.signin.is_some() => {
+            let name = m.signin.as_deref().unwrap_or_default();
+            let b = button(
+                "sign in",
+                "primary",
+                "thread-signin",
+                json!({"thread": id, "host": m.host, "name": name}),
+            );
+            json!({"type": "card", "id": key, "kind": "sys", "blocks": [text("t", &m.text)], "buttons": [b]})
+        }
+        "config" => {
+            let v = |act: &str| json!({"thread": id, "id": m.from, "act": act});
+            let mut buttons = vec![button("discard", "", "thread-config", v("discard"))];
+            if m.open {
+                buttons.insert(0, button("apply", "primary", "thread-config", v("apply")));
+            }
+            let sub = or(
+                m.open,
+                "a fleet.toml change for you to apply",
+                "stale: fleet.toml changed since, it can no longer apply",
+            );
+            json!({"type": "card", "id": key, "kind": "config", "tone": or(m.open, "warn", "bad"), "title": format!("config proposal {}", m.from),
+                "subtitle": sub, "meta": age, "blocks": [text("d", &format!("```diff\n{}\n```", m.text.trim_end()))], "buttons": buttons})
+        }
+        "secret" => {
+            let mut blocks = vec![text("t", &m.text)];
+            let mut buttons = vec![];
+            if paired {
+                let field = json!({"type": "secret", "name": "text", "label": "", "value": "", "placeholder": format!("value of {}", m.from)});
+                blocks.push(json!({"type": "form", "id": format!("{key}-f"), "fields": [field],
+                    "submit": {"label": "save", "action": "thread-secret", "values": {"thread": id, "name": m.from, "act": "save"}}}));
+                buttons.push(button(
+                    "dismiss",
+                    "",
+                    "thread-secret",
+                    json!({"thread": id, "name": m.from, "act": "dismiss"}),
+                ));
+            } else {
+                blocks.push(text("p", "pair this device to enter it"));
+            }
+            json!({"type": "card", "id": key, "kind": "secret", "tone": "warn", "title": format!("secret {}", m.from), "meta": age,
+                "blocks": blocks, "buttons": buttons})
+        }
+        "run" => {
+            let Some(r) = &m.run else { return sys(&m.text) };
+            let (blocks, buttons, tone) = run_body(now, &key, r);
+            json!({"type": "card", "id": key, "kind": "run", "tone": tone, "title": r.why, "meta": age, "blocks": blocks, "buttons": buttons})
+        }
         "resumed" => sys(&format!("resumed session {}", m.text)),
         "sleep" => sys("the orchestrator went to sleep"),
         _ => sys(&m.text),
@@ -780,7 +882,14 @@ fn msg_card(now: u64, id: &str, m: &Msg) -> Value {
 
 /// #1072: one thread (`/screens/threads/<id>`): its bar row, its last 30 messages and the composer; `[archive]` or,
 /// archived, `[restore]` and no composer.
-pub fn thread_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session], id: &str) -> Option<Value> {
+pub fn thread_screen(
+    ctx: &Ctx,
+    cfg: &Config,
+    events: &[Event],
+    agents: &[Session],
+    id: &str,
+    paired: bool,
+) -> Option<Value> {
     let t = conductor::find(events, id).ok()?;
     let v = thread(ctx, cfg, events, t, agents);
     let arch = v.page.archived;
@@ -798,6 +907,9 @@ pub fn thread_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Sessio
         .collect::<Vec<_>>()
         .join(" · ");
     let sub = match v.state.as_str() {
+        _ if !v.waiting.is_empty() => {
+            json!({"text": format!("waiting: config {}", v.waiting.join(", ")), "tone": "warn"})
+        }
         "choose" => json!({"text": "! choose", "tone": "warn"}),
         "working" => json!("✻ working"),
         "new" => json!("no orchestrator yet"),
@@ -806,7 +918,7 @@ pub fn thread_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Sessio
     let mut blocks = vec![
         json!({"type": "row", "id": "who", "figure": figure(&v.state), "title": title, "subtitle": sub, "value": awake}),
     ];
-    blocks.extend(v.page.msgs.iter().map(|m| msg_card(ctx.now, id, m)));
+    blocks.extend(v.page.msgs.iter().map(|m| msg_card(ctx.now, id, m, paired)));
     if !arch {
         blocks.push(composer("send", "thread-say", &json!({ "thread": id })));
     }
@@ -849,7 +961,7 @@ impl super::Server<'_> {
                         conductor::find(&events, id).ok()?,
                     ));
                 }
-                thread_screen(ctx, &cfg, &events, &agents, id)
+                thread_screen(ctx, &cfg, &events, &agents, id, paired)
             }
         }
     }

@@ -11,7 +11,7 @@ fn ev(kind: &str, d: Value) -> Event {
 }
 
 #[test]
-fn each_kind_has_its_glyph_colour_and_weight() {
+fn parity_83_each_kind_has_its_glyph_colour_and_weight() {
     let busy = "REFUSED HOST_BUSY: load/cpu 3.09 over 2.5; retry when it drops";
     let golden: &[(Event, &str, &str, &str, bool)] = &[
         (
