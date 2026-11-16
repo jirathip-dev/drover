@@ -1,0 +1,5 @@
+Decided: no code change for the shard 2/4 FAIL; merged origin/staging and pushed so CI re-runs on a fresh head
+Because: scripts/test-shards.txt:200
+Rejected: editing a shard-2 test's cleanup — all 346 shard-2 tests passed in CI and none of them is in this diff (waiting/slo run in shard 1, serial_groups/drive in shard 3)
+Check: test (shard 2/4) at the new head is green; it failed only the leftover fleet-test-* dir step, not a test
+Owner: Nothing new in the change itself; this round only reruns a CI check that failed on a leftover temp folder from tests this PR doesn't touch.
