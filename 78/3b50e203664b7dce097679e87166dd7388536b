@@ -1,0 +1,11 @@
+Decided: the cap is checked in lane_admit, the one gate drive's launch and drover spawn share, only for an impl-family start of a queued issue with no open PR
+Because: "With the cap reached, drive starts no new impl lane (first start of a queued issue)"
+Decided: in flight is the fold's in_flight states plus queued, blocked or needs-human issues whose cached PR is open; the cache is a file read, safe on serve's request path
+Because: crates/core/src/queue.rs:389
+Decided: --force logs an `override` with code IN_FLIGHT_CAP and `by`, the same shape HOST_BUSY's override has
+Because: "`--force` overrides, logged `override` with `by`"
+Decided: the Queue screen gets an `in flight` item in its stat block (one per fleet on "all", plain `in flight` with one repo picked); no new QueueCard field, so no type regen
+Because: "a block like the other counts, on the page and in cooee"
+Rejected: a QueueCard field read by the card header — cli.rs, drive.rs and serve.rs sit at their arch-baseline sizes, and the stat block already reaches both page and cooee
+Check: the board header can pass 60 cols with serial groups too; in flight is put first so the cut drops serial, not it
+Owner: Drive now stops starting new issues once a fleet has 8 PRs in flight (set max_in_flight to change it, 0 for off) and spends its passes landing them.
