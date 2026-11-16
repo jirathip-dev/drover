@@ -1,0 +1,8 @@
+Decided: the unsaved-work check runs when the last host is busy or lacks the needed tags, never on a fitting idle host
+Because: "whatever the host's tags or load. Then it stays"
+Decided: with no refusal the stays-on note goes in the placement's why, which the spawn event records
+Because: crates/core/src/spawn.rs:1380
+Decided: a last host with no [hosts] entry fits only when nothing is needed
+Rejected: dropping the enabled check for unpushed work — hosts off must still drain the issue to another host
+Check: cargo test -p drover --test hosts passes; commit 1 alone fails a_last_host with Ok("bazzite")
+Owner: Issues stuck on a host without the needed tag now move to one that has it, unless unpushed work keeps them there.
