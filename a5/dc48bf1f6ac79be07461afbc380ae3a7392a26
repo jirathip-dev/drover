@@ -1,0 +1,10 @@
+Decided: plain `shed connect` first; only when it fails (not ssh 255 or deadline 124) does drover start an installed job and retry, else `--autostart`.
+Because: "On a host where the shed job is installed (systemd unit or launchd plist), drover never runs `shed connect --autostart`"
+Rejected: probing for the job before every connect — an extra ssh round trip on every call while the socket is up.
+Decided: the bootstrap check also requires the drop-in, so a host already bootstrapped (like boat-dev-2) gets it on its next bootstrap.
+Because: crates/core/src/cloud.rs:368
+Decided: a unit not `active` while the socket answers is flagged, so the auto-restart loop (`activating`) shows up too, not only `failed`/`inactive`.
+Because: "flags a shed server that isn't the job's own (unit failed or inactive while the socket answers)"
+Check: cloud.rs test runs the real check and install scripts with fake systemctl/shed on PATH and asserts the drop-in exists at daemon-reload and enable --now.
+Check: crates/cli/tests/shed.rs:133 and hosts.rs doctor test changed only because a no-job host now tries plain connect before --autostart.
+Owner: an OOM kill on a cloud host now ends only that lane, and drover restarts the shed service instead of running a stray server beside it.
