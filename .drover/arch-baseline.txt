@@ -8,7 +8,7 @@ crates/core/src/check.rs:check 543
 crates/core/src/check.rs:clean_all 267
 crates/core/src/cli.rs 2506
 crates/core/src/cli.rs:dispatch 1017
-crates/core/src/config.rs:parse 170
+crates/core/src/config.rs:parse 173
 crates/core/src/doctor.rs:checks 264
 crates/core/src/drive.rs 2185
 crates/core/src/drive.rs:drive 176
@@ -21,10 +21,10 @@ crates/core/src/waiting.rs:scan_where 339
 crates/core/src/waiting.rs:waits 295
 crates/core/src/why.rs:show 152
 crates/server/src/screens.rs:action 170
-crates/server/src/serve.rs 3575
+crates/server/src/serve.rs 3578
 crates/server/src/serve.rs:cards 241
 crates/server/src/serve.rs:host_tab 156
 crates/server/src/serve.rs:queue_tab 260
-crates/server/src/serve.rs:route 183
+crates/server/src/serve.rs:route 184
 crates/server/src/serve.rs:validate 154
 crates/server/src/serve/v1.rs:api 243
