@@ -720,3 +720,41 @@ fn two_waiters_on_a_released_hot_file_only_the_first_takes_it() {
     let row = w.lines().find(|l| l.starts_with("sendmeter #13 ")).unwrap_or_default();
     assert!(row.contains(&format!("serial: hot {X} held by #{b} (1/1)")), "{w}");
 }
+
+#[test]
+fn a_pushed_head_on_a_held_hot_file_is_reviewed_and_its_fix_round_may_start() {
+    let (c, sh) = hot_ctx("sg-hot-review");
+    lane(&c, 9);
+    drive(&c, &fake(&[(9, &format!("{HOT}\n"))]));
+    lane(&c, 12);
+    sh.lane("sendmeter-impl-12", "done", "/x");
+    sh.exit("sendmeter-impl-12");
+    let both = [(9, format!("{HOT}\n")), (12, format!("{HOT}\n"))];
+    let both: Vec<_> = both.iter().map(|(n, f)| (*n, f.as_str())).collect();
+    let (out, steps) = drive(&c, &fake(&both));
+    assert!(logged(&c, 12, "serial-held").is_empty(), "{out}");
+    assert_eq!(steps, ["review"], "{out}");
+    assert!(sh.called("run", "sendmeter-rev-12-r1"), "{out}");
+    let (_, w) = run(&c, &fake(&both), &["waiting", "sendmeter"]);
+    assert!(!w.contains("serial:") && !w.contains("(0/1)"), "{w}");
+    let (_, out) = run(&c, &fake(&both), &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    assert!(!out.contains("SERIAL_BUSY"), "{out}");
+}
+
+#[test]
+fn a_queued_issue_on_a_held_group_still_waits_and_names_its_holder() {
+    let (c, _sh) = sctx("sg-queued", &config("", DB_CI));
+    lane(&c, 9);
+    let r = fake(&[(9, "scripts/check-x.mjs\n")]);
+    drive(&c, &r);
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "13", "--serial", "ci"]).0, 0);
+    let (out, _) = drive(&c, &r);
+    assert!(
+        out.contains("sendmeter #13 start: REFUSED SERIAL_BUSY: ci: #9 holds 1/1"),
+        "{out}"
+    );
+    let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
+    let row = w.lines().find(|l| l.starts_with("sendmeter #13 ")).unwrap_or_default();
+    assert!(row.contains("waiting for a ci slot (#9 holds 1/1)"), "{w}");
+    assert!(!row.contains("(0/1)"), "{w}");
+}
