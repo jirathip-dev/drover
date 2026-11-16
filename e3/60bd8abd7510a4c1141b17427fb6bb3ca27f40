@@ -1,0 +1,8 @@
+Decided: parity row 75 is page-only, guarded by parity_75 (the off/on/reap test in hosts_screen.rs, renamed)
+Because: crates/cli/tests/hosts_screen.rs:94
+Decided: rows 72, 73, 74, 76 and 78 read dropped q1784; the owner approved the bare list
+Because: "No gauges, sparklines, charts, health/services, spend or provider meters."
+Decided: rows 77 and 79 go from open #1091 to plain open; this issue does not bring them back
+Rejected: marking them dropped — no owner decision names them
+Check: scripts/parity-check.sh origin/staging exits 0 and the PR body has a ## Parity section
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
