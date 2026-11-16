@@ -953,7 +953,6 @@ fn shed_row(on: &On) -> Option<String> {
 fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {
     let mut bad = vec![];
     let fits = cfg.fleet.iter().filter(|f| f.1.needs.iter().all(|t| tags.contains(t)));
-    let mut seen = std::collections::BTreeSet::new();
     for (fleet, f) in fits {
         let url = format!("https://github.com/{}.git", f.repo);
         if !on
@@ -965,17 +964,10 @@ fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[Str
                 f.repo
             ));
         }
-        for (role, rc) in &f.role {
-            let profile = rc.profile_or(role);
-            let Some(id) = providers::get(&rc.harness)
-                .acp()
-                .filter(|_| seen.insert(profile.clone()))
-            else {
-                continue;
-            };
-            if let Some(why) = acp_guard(ctx, on, home, (&profile, f.family(role), id)) {
-                bad.push(format!("✗ acp guard {profile} — {why}"));
-            }
+    }
+    for (profile, family, id) in acp_profiles(cfg, tags) {
+        if let Some(why) = acp_guard(ctx, on, home, (&profile, family, id)) {
+            bad.push(format!("✗ acp guard {profile} — {why}"));
         }
     }
     if ok(on, "sh", &["-lc", "gh auth status"]).is_err() {
@@ -985,6 +977,17 @@ fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[Str
         ));
     }
     bad
+}
+
+/// #1126: each ACP profile, once, of the fleets a host with `tags` fits: (profile, role family, adapter id).
+pub fn acp_profiles(cfg: &Config, tags: &[String]) -> Vec<(String, &'static str, &'static str)> {
+    let mut seen = std::collections::BTreeSet::new();
+    let fits = cfg.fleet.values().filter(|f| f.needs.iter().all(|t| tags.contains(t)));
+    let roles = fits.flat_map(|f| f.role.iter().map(move |(role, rc)| (f, role, rc)));
+    roles
+        .filter_map(|(f, role, rc)| Some((rc.profile_or(role), f.family(role), providers::get(&rc.harness).acp()?)))
+        .filter(|p| seen.insert(p.0.clone()))
+        .collect()
 }
 
 /// #637: why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: its drover is this one's version (#573), `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, and its shed lists the hooked adapter `id`. None: guarded.
