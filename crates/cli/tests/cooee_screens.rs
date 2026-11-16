@@ -988,7 +988,7 @@ fn walk(url: &str, tab: Option<&str>, js: &str) -> String {
 }
 
 #[test]
-fn parity_46_a_queue_row_with_an_ask_opens_its_thread_in_webkit_and_back_returns() {
+fn parity_46_a_queue_rows_sheet_links_its_asking_thread_in_webkit_and_back_returns() {
     if no_webkit() {
         return;
     }
@@ -1005,14 +1005,15 @@ fn parity_46_a_queue_row_with_an_ask_opens_its_thread_in_webkit_and_back_returns
     let base = format!("http://{}/", l.local_addr().unwrap());
     let c2 = c.clone();
     std::thread::spawn(move || drover::serve::serve_on(&c2, &working(), l, false));
-    let tap = "const row = await wait(() => document.querySelector('[data-id=\"q-sendmeter-17\"]')); if (!row) return [0, 0, 0]; row.click();
+    let tap = "const row = await wait(() => document.querySelector('[data-id=\"q-sendmeter-17\"]')); if (!row) return [0, 0, 0, 0]; row.click();
+        const asked = await wait(() => document.querySelector('#sheet:not([hidden]) [data-id=\"asked\"]')); if (!asked) return [1, 0, 0, 0]; asked.click();
         const open = await wait(() => location.hash === '#threads/t9' && on('.scr[data-id=\"thread-t9\"]')); history.back();
         const back = await wait(() => location.hash === '#queue' && on('[data-id=\"q-sendmeter-17\"]'));
-        return [1, open ? 1 : 0, back ? 1 : 0];";
+        return [1, 1, open ? 1 : 0, back ? 1 : 0];";
     assert_eq!(
         walk(&base, Some("queue"), tap),
-        "1 1 1",
-        "row found, its thread opened, back on the Queue"
+        "1 1 1 1",
+        "row found, its issue sheet links the asking thread, the thread opened, back on the Queue"
     );
     let push = "const open = await wait(() => on('.scr[data-id=\"thread-t9\"]')); history.back();
         const list = await wait(() => location.hash === '#threads' && on('.scr[data-id=\"threads\"]'));

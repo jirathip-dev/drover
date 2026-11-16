@@ -223,7 +223,7 @@ jobs:
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
       - name: a thread tap and a thread push open the thread; back returns (#1088)
-        run: cargo test --locked --test cooee_screens parity_46_a_queue_row_with_an_ask_opens_its_thread_in_webkit -- --nocapture
+        run: cargo test --locked --test cooee_screens parity_46 -- --nocapture
       - name: "parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)"
         run: cargo test --locked --test parity_webkit -- --nocapture
       - name: "parity rows red until their fix (#1094: each #[ignore] names its issue; soft)"
