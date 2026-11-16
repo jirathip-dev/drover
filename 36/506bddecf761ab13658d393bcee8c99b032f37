@@ -1,0 +1,13 @@
+Decided: merge origin/staging 40fcb58; no conflict but shed.rs, resolved by keeping both sides' tests
+Because: crates/cli/tests/shed.rs:2493
+Decided: the red shard 2 was its temp-dir step after 347/347 passed, the same step that fails on other PRs; no change for it
+Because: crates/cli/tests/common/mod.rs:265
+Decided: get back under staging's #1177 size baselines instead of raising them
+Because: crates/core/src/arch.rs:238
+Decided: drover limit's arguments are limit::Pick, and wait returns its line, so cli.rs and the screen's action shrink
+Because: crates/core/src/limit.rs:13
+Decided: the new tests and one related silent-lane test move unchanged to the shed target's lane_states module
+Because: crates/cli/tests/lane_states/mod.rs:1
+Rejected: raising .drover/arch-baseline.txt — the baseline only lets oversized files shrink
+Check: arch-check reports nothing but the missing just; shed still runs 60 tests
+Owner: no behaviour change this round; the branch is up to date with staging and back under the file size limits
