@@ -1,0 +1,5 @@
+Decided: no code change for the shard-2 red; diagnosed with a temporary CI print commit, reverted it, reran the failed jobs
+Because: .github/workflows/ci.yml:120
+Rejected: keeping the CI print step — out of this issue's scope
+Check: shard 2 green on run 43882301887 at 6b95a05; the PR diff is still only hosts.rs, spawn.rs, tests/cloud.rs, docs/hosts.md
+Owner: CI red was an intermittent temp-dir check; the branch is unchanged and green
