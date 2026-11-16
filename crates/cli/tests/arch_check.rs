@@ -662,7 +662,7 @@ fn the_pre_rename_folder_is_read_only_while_the_new_one_has_no_such_file() {
 
 #[test]
 fn the_repos_809_bans_fail_each_api_outside_its_one_module() {
-    let conf = include_str!("../../../.drover/arch.toml");
+    let conf = repo_conf();
     let bans = [
         ("Command::new", "crates/core/src/runner.rs"),
         ("std::process", "crates/core/src/runner.rs"),
@@ -674,7 +674,7 @@ fn the_repos_809_bans_fail_each_api_outside_its_one_module() {
     let body = |api: &str| format!("fn a() {{\n    let _ = {api}(\"x\");\n}}\n");
     let own: Vec<(&str, String)> = bans.iter().map(|&(api, home)| (home, body(api))).collect();
     let own: Vec<(&str, &str)> = own.iter().map(|(p, t)| (*p, t.as_str())).collect();
-    let d = committed("arch-809", conf, &own);
+    let d = committed("arch-809", &conf, &own);
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
     std::fs::create_dir_all(d.join("crates/server/src")).unwrap();
