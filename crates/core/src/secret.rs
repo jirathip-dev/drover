@@ -95,8 +95,8 @@ pub fn settle(
         format!("secret {name} dismissed (by owner)"),
         format!("secret {name} set ✓ (by owner)"),
     ];
-    let line = &line[usize::from(value.is_some())];
-    let _ = orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false));
+    let line = if value.is_some() { &line[1] } else { &line[0] };
+    orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false)).ok();
     Ok(line.clone())
 }
 

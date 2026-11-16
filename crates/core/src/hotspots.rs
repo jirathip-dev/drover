@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::working;
+use crate::events::{working, Json};
 use crate::lesson::ymd;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
@@ -195,7 +195,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         .all(|i| i.issue != n)
     {
         let mut op = crate::queue::op("add", &[n], false, None, None, None);
-        op["architect"] = json!(true);
+        op.put("architect", json!(true));
         writeln!(out, "{}", crate::queue_change(ctx, cfg, fleet, op, None)?)?;
     }
     Ok(())
