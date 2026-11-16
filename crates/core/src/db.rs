@@ -458,6 +458,15 @@ pub fn append(state: &Path, ev: &Event) -> Result<()> {
     })
 }
 
+/// #1121: `evs`, each numbered next, in one transaction.
+pub fn append_all(state: &Path, evs: &[Event]) -> Result<()> {
+    with(state, true, (), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        evs.iter().try_for_each(|ev| log(&tx, ev))?;
+        Ok(tx.commit()?)
+    })
+}
+
 /// #900, #906: `evs` in one transaction, each `needs-decision` under the highest `q<n>` logged plus 1; none if an ask keyed `once` is logged.
 pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Option<Vec<Event>>> {
     for ev in &evs {

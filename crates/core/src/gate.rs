@@ -850,6 +850,7 @@ pub fn merge(
         },
         res => res,
     };
+    let res = res.and_then(|h| crate::compact::rooted(r, &events, (fleet, f), &f.local_path(), &h).map(|()| h));
     let res = match res {
         Ok(h) if fast && !crate::land::based(r, f, &h) => Err(refuse(
             "BEHIND",

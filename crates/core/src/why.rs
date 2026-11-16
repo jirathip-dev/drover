@@ -338,8 +338,9 @@ pub fn squash(
     sha: &str,
 ) -> Result<()> {
     let local = f.local_path();
+    let shas = crate::compact::Shas::of(events);
     let notes: Vec<String> = (events.iter().filter(|e| e.is("why", fleet, n)))
-        .filter_map(|e| note(r, &local, e.str("sha")?))
+        .filter_map(|e| note(r, &local, shas.now(e.str("sha")?)))
         .collect();
     if notes.is_empty() {
         return Ok(());
@@ -363,7 +364,7 @@ pub fn brief(
     rev: Option<&str>,
     spec: &str,
 ) -> Option<String> {
-    let local = f.local_path();
+    let (local, ids) = (f.local_path(), crate::compact::Shas::of(events));
     let mine: Vec<&Event> = events.iter().filter(|e| e.is("why", fleet, n)).collect();
     if let Some(head) = rev {
         let text = mine
@@ -387,7 +388,7 @@ pub fn brief(
             Some(format!(
                 "round {} · {sha:.7}\n{}\n\n",
                 e.data.get("round").unwrap_or(&Value::Null),
-                note(r, &local, sha)?
+                note(r, &local, ids.now(sha))?
             ))
         };
         let all: String = mine.iter().filter_map(each).collect();
@@ -416,7 +417,7 @@ pub fn brief(
     for (p, shas) in &files {
         s += &format!("\n### {p}\n");
         for (sha, i) in shas {
-            if let Some(t) = note(r, &local, sha) {
+            if let Some(t) = note(r, &local, ids.now(sha)) {
                 s += &format!("\n#{i} · {sha:.7}\n{t}\n");
             }
         }
@@ -435,20 +436,40 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
         .filter(|d| !d.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     let dir = dir.to_string_lossy().into_owned();
-    let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
-    git(&["fetch", "-q", "origin", NOTES]).ok();
+    let g0 = |d: &str, a: &[&str]| ok(r, "git", &[&["-C", d][..], a].concat());
+    g0(&dir, &["fetch", "-q", "origin", NOTES]).ok();
     let name = p
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let blame = git(&["blame", "--porcelain", "-L", &format!("{line},{line}"), "--", &name])?;
+    let lines = format!("{line},{line}");
+    let mut blame = g0(&dir, &["blame", "--porcelain", "-L", &lines, "--", &name])?;
+    let events = crate::events::history(&ctx.state)?;
+    let shas = crate::compact::Shas::of(&events);
+    let first = blame.split_whitespace().next().unwrap_or_default().to_string();
+    let (mut dir, mut tip) = (dir, None);
+    if let Some(run) = shas.root(&first) {
+        let copy = crate::compact::dir(ctx, &run.repo).join("old.git");
+        if !copy.join("HEAD").exists() {
+            let a = &run.archive;
+            return Ok(writeln!(
+                out,
+                "line    {at}\ncommit  {first:.9}  older than the compact's cut: see {a}"
+            )?);
+        }
+        let path = g0(&dir, &["rev-parse", "--show-prefix"])?.trim().to_string() + &name;
+        let copy = copy.to_string_lossy().into_owned();
+        blame = g0(&copy, &["blame", "--porcelain", "-L", &lines, &run.cut, "--", &path])?;
+        (dir, tip) = (copy, Some(run.line.clone()));
+    }
+    let now = |s: &str| if tip.is_some() { s } else { shas.now(s) }.to_string();
+    let git = |a: &[&str]| g0(&dir, a);
     let sha = blame.split_whitespace().next().unwrap_or_default().to_string();
     let text = blame.lines().find_map(|l| l.strip_prefix('\t')).unwrap_or_default();
     let subject = blame
         .lines()
         .find_map(|l| l.strip_prefix("summary "))
         .unwrap_or_default();
-    let events = crate::events::history(&ctx.state)?;
     let url = git(&["remote", "get-url", "origin"]).unwrap_or_default();
     let (fleet, f) = (cfg.fleet.iter().find(|(_, f)| url.contains(&f.repo)))
         .or_else(|| cfg.fleet.iter().next())
@@ -459,16 +480,16 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
         "--merges",
         "--ancestry-path",
         "--format=%H",
-        &format!("{sha}..origin/{}", f.integration),
+        &format!("{sha}..{}", tip.clone().unwrap_or(format!("origin/{}", f.integration))),
     ]);
     let since = since.unwrap_or_default();
     let by_sha = |m: &str| {
         events
             .iter()
-            .find(|e| e.kind == "merged" && e.fleet == *fleet && e.str("merge_sha") == Some(m))
+            .find(|e| e.kind == "merged" && e.fleet == *fleet && e.str("merge_sha").map(now).as_deref() == Some(m))
     };
     let merged = by_sha(&sha).or_else(|| since.lines().rev().find_map(by_sha));
-    let head = |e: &&Event| e.kind == "why" && e.fleet == *fleet && e.str("sha").is_some_and(|h| under(&sha, h));
+    let head = |e: &&Event| e.kind == "why" && e.fleet == *fleet && e.str("sha").is_some_and(|h| under(&sha, &now(h)));
     let issue = (merged.and_then(|e| e.issue))
         .or_else(|| {
             subject
@@ -488,10 +509,15 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
     };
     let round = |h: &str| {
         whys.iter()
-            .find(|e| e.str("sha") == Some(h))
+            .find(|e| e.str("sha").map(now).as_deref() == Some(h))
             .and_then(|e| e.data.get("round").cloned())
     };
-    let note = on(&sha).or_else(|| whys.iter().copied().find(|e| head(e)).and_then(|e| on(e.str("sha")?)));
+    let note = on(&sha).or_else(|| {
+        whys.iter()
+            .copied()
+            .find(|e| head(e))
+            .and_then(|e| on(&now(e.str("sha")?)))
+    });
     let note = note.map(|(h, t)| {
         let owner = t
             .lines()

@@ -945,6 +945,13 @@ pub fn spawn(
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
     let ev = working(&ctx.state)?;
+    crate::compact::rooted(
+        r,
+        &ev,
+        (fleet, f),
+        &f.local_path(),
+        &format!("origin/{}", f.integration),
+    )?;
     let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), o.host.as_deref())?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
         return refused("RUNTIME_DOWN", why);

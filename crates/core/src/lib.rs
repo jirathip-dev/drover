@@ -13,6 +13,7 @@ pub mod check;
 mod cli;
 pub mod clock;
 pub mod cloud;
+pub mod compact;
 pub mod config;
 pub mod db;
 pub mod design;
