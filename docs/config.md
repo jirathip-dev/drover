@@ -43,10 +43,10 @@ review or ready).
 
 Board, status and the Host tab show each group's use: `serial: db 3/10 · ci 1/1`.
 
-Hot files (#891): each file the last `drover hotspots` run stored is its own one-slot group, `hot <file>`, joined
+Hot files (#891): each file the last stored hotspots list names is its own one-slot group, `hot <file>`, joined
 only by a PR's diff (never a `--serial` mark). Drive drops a file from it on its next pass once
-`.drover/arch.toml` on the integration branch lists it `frozen` or `generated` (`hot-files {files}` logs each
-change).
+`.drover/arch.toml` on the integration branch lists it `frozen`, `generated` or `shared` (#1147; `hot-files {files}`
+logs each change).
 
 ## Fast-first landing (#350)
 
@@ -94,14 +94,37 @@ New fleets set `merge_label = "merge-ready"` with the affected-only CI recipe in
 
 ## Hotspots (#889)
 
-`drover hotspots [FLEET]` (every fleet when none is named) lists the files 5 or more merged PRs touched in the
-last 14 days on the integration branch, any language, each with the distinct PR pairs it was predicted to conflict in
+`drover hotspots [FLEET]` (every fleet when none is named) lists the files 1 in 20 of the merged PRs (at least 5)
+touched in the last 14 days on the integration branch; a merge touching more than 40 files is a sweep and not counted
+(#1147), and the report's header says how many were skipped, any language, each with the distinct PR pairs it was predicted to conflict in
 (#973: pairs, not one per push) and the update rounds of the issues that touched it (drover's log, every fleet on the
-same repo). A file no longer at the integration tip, or one `.drover/arch.toml` lists frozen or generated, is left
-out. It keeps the list in the state folder as
+same repo). A file no longer at the integration tip, or one `.drover/arch.toml` lists frozen, generated or shared, is
+left out. It keeps the list in the state folder as
 `hotspots-<fleet>.json`. With any hot file it opens `hotspots: <fleet> week of <monday>`, or updates that issue while it
-is open, and queues it `--architect`. `drover tick` runs it weekly per fleet; `hotspots = "off"` in `[fleet.<n>]` opts
+is open, and queues it `--architect`. `drover tick` stores each fleet's list daily and files its issue weekly; `hotspots = "off"` in `[fleet.<n>]` opts
 out.
+
+## Hygiene (#1101)
+
+One history and issue convention is on for every fleet with no config. `[hygiene]` sets it for all fleets,
+`[fleet.<n>.hygiene]` per fleet (its keys win); `"off"` opts a key out.
+
+| key | default | what |
+|---|---|---|
+| `merge` | `"squash"` | the merge method `[fleet.<n>] merge` and the repo should use; also `"merge"` |
+| `comments` | `"strict"` | `.drover/arch.toml`'s `[comments] policy`; the rule ships in `rules/shared.md` |
+| `baseline` | `"setup"` | the arch-check baseline, set at fleet setup, redone on the owner's ask |
+| `triage` | `"weekly"` | a weekly triage lane |
+| `docs_trust` | `["docs/archive/"]` | paths a new lane worktree leaves out (sparse checkout); `[]` = off |
+| `issue_spec` | `"triage"` | triage folds amendments into `## Spec (current)` |
+| `docs` | `"on"` | `.drover/arch.toml` has the #735 `[docs]` stale-doc check |
+
+`drover setup` applies the set to each fleet's local clone, writing only what is missing: `[comments] policy = "strict"`
+and a `[docs]` section (paths `docs/**/*.md` and `README.md`, the repo's `cli`, `config` and `api` files as `watch`) in
+`.drover/arch.toml`, then the first arch-check baseline when `baseline = "setup"` and none exists. Commit what it wrote.
+
+`drover doctor` prints each fleet's `hygiene` line and a red `! hygiene` row for each drift: the fleet's own
+`merge` mode (#1097) differing from it, the repo on GitHub not allowing that method, or `comments = "strict"` with integration's `.drover/arch.toml` saying otherwise, or `docs = "on"` with no `[docs]` there.
 
 ## Limits (#844)
 
@@ -140,7 +163,9 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `overflow_after_minutes` | `10` | every local host refused this long lets placement start a stopped cloud host |
 | `import_max_age_hours` | `24` | a remote host's asks older than this are never imported |
 | `max_pushes_per_pass` | `3` | push alerts `check` sends a pass before a summary |
-| `max_parallel_spawns` | `6` | concurrent detached spawn kicks (0: in the pass) |
+| `max_parallel_spawns` | `6` | concurrent detached spawn kicks on the main host (0: in the pass) |
+| `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
+| `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
 | `spawn_pending_max_secs` | `300` | a spawn marker or kick lock older than this is stale |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |

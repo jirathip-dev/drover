@@ -126,40 +126,32 @@ fn a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every
     if no_webkit() {
         return;
     }
-    for mode in ["input", "textarea"] {
-        let (_c, o) = thread_t2("page-repaint", "repaint.mjs", &[mode]);
-        let out: Value =
-            serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
-        assert!(
-            out.get("error").is_none() && out["errors"] == json!([]),
-            "{mode}: {out}"
-        );
-        assert_eq!(out["full"], true, "{mode}: the cached screens fill localStorage: {out}");
-        assert_eq!(out["before"]["tag"], mode.to_uppercase(), "{out}");
-        let top = &out["before"]["top"];
-        assert!(
-            top.as_i64().unwrap() > 0,
-            "{mode}: the messages are scrolled off their end: {out}"
-        );
-        for step in ["stream", "tick", "resumed"] {
-            let s = &out[step];
-            assert_eq!(
-                (&s["value"], &s["same"]),
-                (&json!("half a thought"), &json!(true)),
-                "{mode}: the blurred composer keeps its node and text after the {step}: {out}"
-            );
-        }
-        for step in ["stream", "tick"] {
-            let s = &out[step];
-            assert_eq!(
-                (&s["removed"], &s["fl"], &s["nodes"], &s["top"]),
-                (&json!(0), &json!(0), &json!(true), top),
-                "{mode}: 5 messages, a no-op replace, a badge and the tick replace no node, flash none and keep the scroll: {out}"
-            );
-        }
+    let (_c, o) = thread_t2("page-repaint", "repaint.mjs", &[]);
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    assert_eq!(out["full"], true, "the cached screens fill localStorage: {out}");
+    assert_eq!(out["before"]["tag"], "TEXTAREA", "{out}");
+    let top = &out["before"]["top"];
+    assert!(
+        top.as_i64().unwrap() > 0,
+        "the messages are scrolled off their end: {out}"
+    );
+    for step in ["stream", "tick", "resumed"] {
+        let s = &out[step];
         assert_eq!(
-            out["reloaded"], "half a thought",
-            "{mode}: the draft survives a reload: {out}"
+            (&s["value"], &s["same"]),
+            (&json!("half a thought"), &json!(true)),
+            "the blurred composer keeps its node and text after the {step}: {out}"
         );
     }
+    for step in ["stream", "tick"] {
+        let s = &out[step];
+        assert_eq!(
+            (&s["removed"], &s["fl"], &s["nodes"], &s["top"]),
+            (&json!(0), &json!(0), &json!(true), top),
+            "5 messages, a no-op replace, a badge and the tick replace no node, flash none and keep the scroll: {out}"
+        );
+    }
+    assert_eq!(out["reloaded"], "half a thought", "the draft survives a reload: {out}");
 }

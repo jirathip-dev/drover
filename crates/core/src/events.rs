@@ -12,6 +12,7 @@ use std::time::Duration;
 use crate::db::Endings;
 
 mod passive;
+mod push;
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +31,10 @@ pub struct Event {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub passive: bool,
+    /// #1147: reaches a phone whose notifier sets no `on`; kinds pushed before the flag are in `push::LEGACY`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    pub push: bool,
     #[serde(flatten)]
     pub data: Map<String, Value>,
 }
@@ -47,6 +52,7 @@ impl Event {
             issue,
             kind: kind.into(),
             passive: false,
+            push: false,
             data,
         }
     }
@@ -59,6 +65,16 @@ impl Event {
     /// #973: flagged passive, or a kind logged passive before the flag.
     pub fn is_passive(&self) -> bool {
         self.passive || passive::LEGACY.contains(&self.kind.as_str())
+    }
+    /// #1147: this event reaches a phone whose notifier sets no `on`.
+    #[must_use]
+    pub fn push(mut self) -> Event {
+        self.push = true;
+        self
+    }
+    /// #1147: flagged push, or a kind pushed before the flag.
+    pub fn is_push(&self) -> bool {
+        self.push || push::LEGACY.contains(&self.kind.as_str())
     }
     pub fn str(&self, k: &str) -> Option<&str> {
         self.data.get(k).and_then(Value::as_str)
@@ -282,7 +298,14 @@ fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
         "thread-msg" if ev.str("from") != Some("orchestrator") => "",
         k => k,
     };
-    let wanted = |n: &&crate::config::Notify| n.wants(if n.webpush() { push } else { &ev.kind });
+    let phone = (!push.is_empty()).then(|| Event {
+        kind: push.into(),
+        ..ev.clone()
+    });
+    let wanted = |n: &&crate::config::Notify| match (n.webpush(), &phone) {
+        (false, _) => n.wants(ev),
+        (true, p) => p.as_ref().is_some_and(|p| n.wants(p)),
+    };
     for n in cfg.notifiers(&ev.fleet).into_iter().filter(wanted) {
         let payload = if n.format.as_deref() == Some("json") {
             serde_json::to_string(ev)?
@@ -891,7 +914,7 @@ pub fn of_agent<'a>(events: &'a [Event], agent: &str) -> Vec<&'a Event> {
     at.map_or_else(Vec::new, |v| v.iter().filter_map(|i| events.get(*i)).collect())
 }
 
-/// Current per-issue state (the states in `roles/usage-tail.md`); #859: the cached log's fold when `events` is it.
+/// Current per-issue state (the states in `roles/usage/20-states.md`); #859: the cached log's fold when `events` is it.
 pub fn fold(events: &[Event]) -> States {
     if let Some(l) = cached(events) {
         return l.states.clone();

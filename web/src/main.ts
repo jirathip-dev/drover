@@ -431,9 +431,10 @@ function press(k: HTMLElement) {
   const pick = (label: string, f: () => void) => { const b = el('button', '', `<span>${esc(label)}</span>`); b.type = 'button'; b.onclick = () => { closeSheet(); f(); }; return b; };
   $('#sheet .sh').replaceChildren(el('b', '', 'message'), pick('close', () => {}));
   const quote = () => {
-    const i = cur.v.root.querySelector<HTMLInputElement>('.form.say input');
+    const i = cur.v.root.querySelector<HTMLTextAreaElement>('.cmp textarea');
     if (!i) return;
     i.value = `> ${plain.replace(/\s+/g, ' ').trim()}\n${i.value}`;
+    i.dispatchEvent(new Event('input'));
     i.focus();
   };
   const bar = el('div', 'bar');

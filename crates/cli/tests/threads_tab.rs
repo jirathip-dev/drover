@@ -196,12 +196,12 @@ fn the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only() {
     let bad = blocks.iter().find(|b| b["tone"] == "bad").unwrap();
     assert_eq!(bad["buttons"][0]["action"], "thread-retry", "{t}");
     assert!(t.to_string().contains("✓ **per key** · owner"), "{t}");
-    assert_eq!(blocks.last().unwrap()["submit"]["action"], "thread-say");
+    assert_eq!(blocks.last().unwrap()["action"], "thread-say");
     assert!(get(&s, "/screens/threads/t1", "")["blocks"]
         .as_array()
         .unwrap()
         .iter()
-        .all(|b| b["type"] != "form"));
+        .all(|b| b["type"] != "composer"));
 
     golden("thread-new", &get(&s, "/screens/threads/new/sendmeter", ""));
     let (status, _) = req(&s, "GET", "/screens/threads/new/nope", "", "");
@@ -292,6 +292,159 @@ fn parity_15_the_owner_reads_a_thread_sends_and_answers_from_the_tab() {
     assert!(find(&list, "archived").to_string().contains("\"t3\""), "{list}");
 }
 
+#[test]
+fn parity_34_each_composer_op_reaches_its_thread_op_and_the_screen_shows_it() {
+    let c = recorded("threads-ops");
+    let sh = FakeShed::attached(&c);
+    let start = json!({"thread": "t3", "agent": "orchestrator-t3", "pane": "orchestrator-t3"});
+    append(&c.state, &Event::new(T - 60, "all", None, "orchestrator-start", start)).unwrap();
+    sh.add(
+        "orchestrator-t3",
+        json!({"fleet": "all", "issue": "-", "role": "orchestrator", "thread": "t3", "source": "drover"}),
+    );
+    let r = OnShed(Fake::default(), sh);
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let post = |action: &str, values: Value| {
+        let a = json!({"screen": "thread-t3", "block": "say", "action": action, "values": values});
+        let (status, body) = req(&s, "POST", "/action", &a.to_string(), &ck);
+        assert_eq!(status, 200, "{action}: {body}");
+        serde_json::from_str::<Value>(&body).unwrap()["toast"].clone()
+    };
+    let say = || find(&get(&s, "/screens/threads/t3", &ck), "say").clone();
+    let esc = || {
+        r.1.all("keys")
+            .iter()
+            .filter(|k| k["name"] == "orchestrator-t3")
+            .count()
+    };
+    let log = || read(&c.state).unwrap().to_vec();
+
+    let box0 = say();
+    assert!(
+        box0["working"]["since"].as_str().is_some_and(|t| t.ends_with('Z')),
+        "{box0}"
+    );
+    assert_eq!(box0["acts"]["queue"], "thread-queue");
+
+    let two = json!({"thread": "t3", "text": "two shots", "name": "a.png/b.png", "data": "cG5nMQ==,cG5nMg=="});
+    assert_eq!(post("thread-say", two), "sent");
+    let t = get(&s, "/screens/threads/t3", &ck);
+    let mine = t["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rfind(|b| b["kind"] == "you")
+        .unwrap()
+        .clone();
+    let imgs: Vec<&str> = mine["blocks"][1]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["src"].as_str().unwrap())
+        .collect();
+    assert_eq!(imgs, ["/thread/t3/a.png", "/thread/t3/b.png"], "{mine}");
+    let (status, png) = req(&s, "GET", imgs[1], "", "");
+    assert_eq!((status, png.as_str()), (200, "png2"));
+
+    assert_eq!(
+        post("thread-queue", json!({"thread": "t3", "text": "after this"})),
+        "queued"
+    );
+    let q = say()["queued"][0]["q"].as_u64().unwrap();
+    post(
+        "thread-queue",
+        json!({"thread": "t3", "text": "after this, edited", "q": q}),
+    );
+    assert_eq!(say()["queued"], json!([{"q": q, "text": "after this, edited"}]));
+    let before = esc();
+    assert_eq!(post("thread-steer", json!({"thread": "t3", "q": q})), "sent");
+    assert!(
+        say()["queued"] == json!([]) && esc() > before,
+        "steered: the queue empties, the turn gets Esc"
+    );
+    let sent = log()
+        .into_iter()
+        .rfind(|e| e.kind == "thread-msg" && e.str("from") == Some("owner"));
+    assert_eq!(
+        sent.and_then(|e| e.str("text").map(String::from)).as_deref(),
+        Some("after this, edited")
+    );
+
+    post("thread-queue", json!({"thread": "t3", "text": "never mind"}));
+    let q2 = say()["queued"][0]["q"].clone();
+    assert_eq!(post("thread-unqueue", json!({"thread": "t3", "q": q2})), "removed");
+    assert_eq!(say()["queued"], json!([]));
+    let gone = log().into_iter().rfind(|e| e.kind == "thread-unqueue").unwrap();
+    assert_eq!(gone.str("why"), Some("removed"));
+
+    let before = esc();
+    assert_eq!(post("thread-stop", json!({"thread": "t3"})), "stopping");
+    assert_eq!(esc(), before + 1);
+
+    assert_eq!(
+        post("thread-model", json!({"thread": "t3", "effort": "high"})),
+        "picked"
+    );
+    let chips = say()["chips"].clone();
+    let effort = chips
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "effort")
+        .unwrap();
+    assert_eq!(effort["cur"], "high", "{chips}");
+
+    let failed = log().into_iter().find(|e| e.str("line").is_some()).unwrap();
+    let retry = json!({"thread": "t2", "msg": failed.seq});
+    assert_eq!(post("thread-retry", retry), "retrying");
+
+    let new = json!({"repo": "sendmeter", "text": "Pick hermes", "harness": "hermes"});
+    post("thread-new", new);
+    let made = log().into_iter().rfind(|e| e.kind == "thread-new").unwrap();
+    assert_eq!(
+        (made.str("title"), made.str("harness")),
+        (Some("Pick hermes"), Some("hermes"))
+    );
+}
+
+fn composer_in_webkit(name: &str, js: &str) -> Vec<f64> {
+    let c = recorded(name);
+    let sh = FakeShed::attached(&c);
+    let now = drover::now();
+    let start = json!({"thread": "t3", "agent": "orchestrator-t3", "pane": "orchestrator-t3"});
+    append(
+        &c.state,
+        &Event::new(now - 60, "all", None, "orchestrator-start", start),
+    )
+    .unwrap();
+    sh.add(
+        "orchestrator-t3",
+        json!({"fleet": "all", "issue": "-", "role": "orchestrator", "thread": "t3", "source": "drover"}),
+    );
+    let ck = pair(
+        &Server::new(&c, &Fake::default(), Some(ADDR.into())),
+        &c,
+        "Mozilla/5.0 (iPhone)",
+        now,
+    );
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let c2 = c.clone();
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &OnShed(Fake::default(), sh), l, false));
+    let png = tmpdir(&format!("{name}-png")).join("page.png");
+    let o = webview()
+        .env("DROVER_COOKIE", ck.trim().trim_start_matches("Cookie: "))
+        .args([&format!("http://{addr}/#threads"), "390", "-", "-"])
+        .arg(&png)
+        .arg(js)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
+    out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect()
+}
+
 fn long(name: &str) -> drover::Ctx {
     let c = recorded(name);
     for i in 1..=70 {
@@ -336,7 +489,7 @@ const WAIT: &str = "const st = window.setTimeout, $ = s => document.querySelecto
     const until = async f => { for (let i = 0; i < 100 && !f(); i++) await new Promise(r => st(r, 50)); return !!f(); }; \
     const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); \
     const open = async t => { location.hash = '#threads'; await until(() => $(`.row[data-id=\"${t}\"]`)); $(`.row[data-id=\"${t}\"]`).click(); \
-      await until(() => $(`.scr[data-id=\"thread-${t}\"] .form.say`)); await frame(); return $(`.scr[data-id=\"thread-${t}\"] > .msgs`); }; \
+      await until(() => $(`.scr[data-id=\"thread-${t}\"] .cmp textarea`)); await frame(); return $(`.scr[data-id=\"thread-${t}\"] > .msgs`); }; \
     const end = sc => +(sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2 && sc.scrollTop > 0);";
 
 fn webkit(name: &str, width: &str, js: &str) -> Vec<f64> {
@@ -356,6 +509,49 @@ fn webkit(name: &str, width: &str, js: &str) -> Vec<f64> {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
     out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect()
+}
+
+const CMP: &str = "const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
+const wait = async f => { for (const t = Date.now(); Date.now() - t < 8000; await new Promise(r => setTimeout(r, 50))) { const v = f(); if (v) return v; } return 0; };
+const type = t => { const b = q('.cmp textarea'); b.value = t; b.dispatchEvent(new Event('input')); };";
+
+#[test]
+fn parity_21_two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webkit() {
+    if no_webkit() {
+        return;
+    }
+    let js = format!("window.late = (async () => {{ {CMP}
+(await wait(() => q('.row[data-id=\"t2\"]'))).click();
+await wait(() => q('.cmp textarea'));
+const px = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+const dt = new DataTransfer();
+for (const n of ['one.png', 'two.png']) dt.items.add(new File([px, new Uint8Array(40000)], n, {{ type: 'image/png' }}));
+const pick = q('.cmp input[type=file]');
+pick.files = dt.files;
+pick.dispatchEvent(new Event('change'));
+const thumbs = await wait(() => all('.cmp .tb img').length);
+type('two photos');
+const real = window.fetch;
+window.fetch = (u, o) => (String(u).endsWith('/action') ? Promise.reject(new TypeError('offline')) : real(u, o));
+q('.cmp .cr button.primary').click();
+const kept = await wait(() => q('.cmp .cs.r button') && all('.cmp .tb img').length);
+const text = Number(q('.cmp textarea').value === 'two photos');
+window.fetch = real;
+q('.cmp .cs.r button').click();
+const shown = await wait(() => {{
+  const c = all('.card.k-you').filter(c => c.textContent.includes('two photos')).pop();
+  c?.scrollIntoView();
+  const im = c ? [...c.querySelectorAll('.imgs img')] : [];
+  return im.length && im.every(i => i.complete && i.naturalWidth > 0) && im.length;
+}});
+return [thumbs, kept, text, shown, all('.cmp .tb').length];
+}})()");
+    let v = composer_in_webkit("threads-webkit-files", &js);
+    assert_eq!(
+        v,
+        [2.0, 2.0, 1.0, 2.0, 0.0],
+        "thumbs, kept on failure, text kept, shown sent, box emptied"
+    );
 }
 
 #[test]
@@ -399,7 +595,7 @@ fn the_keyboard_keeps_the_composer_flush_on_it_in_webkit_and_the_page_still() {
     if no_webkit() {
         return;
     }
-    let js = "const sc = await open('t3'), f = $('.form.say'), box = f.querySelector('input'), vv = visualViewport, H = innerHeight; \
+    let js = "const sc = await open('t3'), f = $('.cmp'), box = f.querySelector('textarea'), vv = visualViewport, H = innerHeight; \
         const kb = h => { for (const [o, k] of [[vv, 'height'], [window, 'innerHeight']]) Object.defineProperty(o, k, { configurable: true, get: () => H - h }); vv.dispatchEvent(new Event('resize')); }; \
         const look = async y => { await frame(); return [Math.round(Math.abs(f.getBoundingClientRect().bottom - y)), document.scrollingElement.scrollTop, end(sc)]; }; \
         box.focus(); kb(336); const at = await look(vv.offsetTop + vv.height); \
@@ -412,12 +608,12 @@ fn the_composer_docks_below_the_messages_in_webkit_empty_and_with_4_lines_at_390
     if no_webkit() {
         return;
     }
-    let js = "const sc = await open('t3'), f = sc.parentElement.querySelector(':scope > .form.say'), box = f.querySelector('input'); \
+    let js = "const sc = await open('t3'), f = sc.parentElement.querySelector(':scope > .cmp'), box = f.querySelector('textarea'); \
         const look = async () => { await frame(); const t = f.getBoundingClientRect().top, k = [...sc.querySelectorAll(':scope > .card')].pop(); \
           const hit = document.elementFromPoint(innerWidth / 2, t - 2); \
           return [+(k.getBoundingClientRect().bottom <= t), +(hit === sc || !!hit?.closest('.msgs > .card')), end(sc)]; }; \
         const at = await look(); box.value = 'one\\ntwo\\nthree\\nfour'; box.dispatchEvent(new Event('input', { bubbles: true })); \
-        f.style.minHeight = `${f.offsetHeight + 4 * 24}px`; at.push(...await look(), errs.length); return at;";
+        at.push(...await look(), errs.length); return at;";
     for w in ["390", "1440"] {
         assert_eq!(
             webkit(&format!("thread-dock-webkit-{w}"), w, js),
@@ -522,6 +718,26 @@ fn every_card_kind_in_a_thread_is_its_golden_json() {
 }
 
 #[test]
+fn parity_26_a_message_sent_while_working_queues_and_send_now_steers_it_in_webkit() {
+    if no_webkit() {
+        return;
+    }
+    let js = format!("window.late = (async () => {{ {CMP}
+(await wait(() => q('.row[data-id=\"t3\"]'))).click();
+const pill = Number(!!(await wait(() => q('.cmp .pill .pt')))?.textContent.startsWith('working'));
+type('after this');
+const go = q('.cmp .cr button.primary'), label = Number(go.textContent === 'queue');
+go.click();
+const queued = await wait(() => all('.cmp .qd').filter(r => r.textContent.includes('after this')).length);
+q('.cmp .qd button.primary').click();
+const steered = await wait(() => Number(!q('.cmp .qd') && all('.card.k-you').some(c => c.textContent.includes('after this'))));
+return [pill, label, queued, steered];
+}})()");
+    let v = composer_in_webkit("threads-webkit-queue", &js);
+    assert_eq!(v, [1.0, 1.0, 1.0, 1.0], "pill, [queue], the queued chip, steered in");
+}
+
+#[test]
 fn parity_32_the_owner_settles_each_card_from_inside_its_thread() {
     let c = cards("thread-cards-act");
     let r = OnShed::new(Fake::default());
@@ -595,4 +811,40 @@ fn parity_32_the_owner_settles_each_card_from_inside_its_thread() {
         "settled cards leave: {t}"
     );
     assert!(!t.to_string().contains(r#""type":"choice""#), "{t}");
+}
+
+#[test]
+fn a_composer_send_with_a_photo_over_32_kb_reaches_the_say_op_over_the_socket_and_an_over_limit_body_is_413() {
+    let c = recorded("threads-big-photo");
+    let b = Board::start(&c, OnShed::new(Fake::default()));
+    let (addr, ck) = (&b.addr, &b.cookie);
+    let photo = "QUJD".repeat(20_000);
+    let say = json!({"screen": "thread-t2", "block": "say", "action": "thread-say",
+        "values": {"thread": "t2", "text": "a photo", "name": "shot.png", "data": photo}})
+    .to_string();
+    assert!(say.len() > 32_768);
+    let res = http(
+        addr,
+        &format!(
+            "POST /action HTTP/1.1\r\nHost: {addr}\r\n{ck}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{say}",
+            say.len()
+        ),
+    );
+    assert!(res.starts_with("HTTP/1.1 200"), "{res}");
+    let got = http(
+        addr,
+        &format!("GET /thread/t2/shot.png HTTP/1.1\r\nHost: {addr}\r\n{ck}Connection: close\r\n\r\n"),
+    );
+    assert_eq!(got.split_once("\r\n\r\n").unwrap().1.len(), 60_000, "{}", &got[..200]);
+
+    let mut s = std::net::TcpStream::connect(addr.as_str()).unwrap();
+    let head = format!(
+        "POST /action HTTP/1.1\r\nHost: {addr}\r\n{ck}Content-Length: 200000000\r\nConnection: close\r\n\r\n{{\"action\":"
+    );
+    std::io::Write::write_all(&mut s, head.as_bytes()).unwrap();
+    s.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut over = String::new();
+    std::io::Read::read_to_string(&mut s, &mut over).unwrap();
+    assert!(over.starts_with("HTTP/1.1 413"), "{over}");
+    assert!(!over.contains("NOT_PERMITTED"), "{over}");
 }

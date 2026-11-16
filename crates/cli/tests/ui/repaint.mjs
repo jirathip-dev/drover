@@ -1,11 +1,11 @@
-// #1169: thread t2 in Playwright's WebKit at 390 px on a real serve: node repaint.mjs <url> <cookie name=value> [textarea].
+// #1169: thread t2 in Playwright's WebKit at 390 px on a real serve: node repaint.mjs <url> <cookie name=value>.
 // localStorage is full of cached screens (a phone's), the composer is typed into and blurred, its messages scrolled mid-way;
 // the stream sends 5 messages, a replace that changes nothing and a badge; then the 30 s tick, a resume and a reload.
-// `textarea` draws every text field as a textarea (#1087's composer). Prints one JSON object of what the page showed.
+// Prints one JSON object of what the page showed.
 import { createRequire } from 'node:module';
 
 const { webkit } = createRequire(import.meta.url)('playwright');
-const [url, cookie, mode] = process.argv.slice(2);
+const [url, cookie] = process.argv.slice(2);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const out = { errors: [] };
 const browser = await webkit.launch();
@@ -13,15 +13,6 @@ try {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
   const [name, value] = cookie.split(/=(.*)/);
   await ctx.addCookies([{ name, value, url }]);
-  if (mode === 'textarea') await ctx.addInitScript(() => {
-    const mk = Document.prototype.createElement;
-    Document.prototype.createElement = function (t, o) {
-      if (t !== 'input') return mk.call(this, t, o);
-      const e = mk.call(this, 'textarea');
-      Object.defineProperty(e, 'type', { value: 'text', writable: true });
-      return e;
-    };
-  });
   const page = await ctx.newPage();
   page.on('pageerror', e => out.errors.push(e.message));
   await page.clock.install();
@@ -39,7 +30,7 @@ try {
     const body = ops.map((o, i) => `id: ${i + 1}\ndata: ${JSON.stringify({ seq: i + 1, ops: o })}\n\n`).join('');
     await r.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: 'retry: 3600000\n' + body });
   });
-  const F = '.form.say .fd :is(input, textarea)';
+  const F = '.cmp textarea';
   const box = () => page.evaluate(F => {
     const i = document.querySelector(F);
     return { tag: i.tagName, value: i.value, same: i === kept.i && i.isConnected, removed: kept.removed, fl: kept.fl, top: Math.round(document.querySelector('.scr[data-id=thread-t2] > .msgs').scrollTop), nodes: kept.nodes.every(n => n.isConnected && document.querySelector(`[data-id="${n.dataset.id}"]`) === n) };

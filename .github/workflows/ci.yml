@@ -71,9 +71,6 @@ jobs:
         run: scripts/timing-check.sh
       - name: "parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`"
         run: scripts/parity-check.sh HEAD^1
-      - name: "workflow diagram (#845): docs/workflow.md is `drover diagram`'s output"
-        run: |
-          ./target/release/drover diagram | diff docs/workflow.md - || { echo "::error::docs/workflow.md is stale: run \`drover diagram > docs/workflow.md\`"; exit 1; }
       - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
         run: ./target/release/drover cap-check --config ci/cap.toml
       - name: "arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)"
@@ -140,7 +137,7 @@ jobs:
           bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
           ./actionlint -color
 
-  # #265: the TypeScript board (web/): strict typecheck, the esbuild bundle, and the committed dist must match it.
+  # #265: the TypeScript board (web/): strict typecheck and the esbuild bundle; #1147: arch-check's `just gen` diffs dist.
   # Node is CI's and developers' only: the binary embeds the committed web/dist, so `cargo install` needs no Node.
   web:
     runs-on: ubuntu-latest
@@ -160,11 +157,8 @@ jobs:
         run: |
           npm run lint
           ../scripts/lint-fixtures.sh ts
-      - name: build, and the committed dist is that build
-        run: |
-          npm run build
-          git diff --exit-code -- dist || { echo "::error::web/dist is stale: run \`npm run build\` in web/ and commit"; exit 1; }
-          test -z "$(git status --porcelain -- dist)" || { echo "::error::web/dist has uncommitted files"; exit 1; }
+      - name: "build (#1147: arch-check's `just gen` holds the committed dist to it)"
+        run: npm run build
       - name: web TypeScript lines (soft budget, reported only; #265 Q5)
         run: |
           echo "web/src TypeScript lines: $(cat src/*.ts | wc -l)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -279,6 +273,6 @@ jobs:
         run: cargo test --locked --test url_links
       - name: "typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65)"
         run: cargo test --locked --test page_drafts
-      - name: the thread view in WebKit (#1086, opens at the end, older above in place, image viewer, keyboard)
+      - name: the thread view in WebKit (#1086, #1087: opens at the end, older above in place, image viewer, keyboard; attachments, a failed send, queue and steer)
         if: ${{ !cancelled() }}
         run: cargo test --locked --test threads_tab webkit -- --test-threads=1
