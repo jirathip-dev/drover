@@ -1,0 +1,11 @@
+Decided: a SERIAL_BUSY queued wait reads `serial: <group> held by #N (n/max)`, built from holders() in queue::skipped
+Because: "A hot-file wait held by an issue names it, like other holds: `serial: hot <path> held by #983 (1/1)`."
+Rejected: naming a legacy serial-held holder when holders() is empty — since #1136 nothing logs serial-held and lane_admit would then admit the start, so `slot free` is the true line
+Decided: the stuck reason for a missed promise is the issue's current waiting row, scanned in slo::pass, not the promised text
+Because: "A stuck/promise-missed card states the current hold, re-evaluated at check time, not the text promised earlier."
+Decided: the row's `⚠ missed` line computes why_now from the live wait each render instead of the why frozen in promise-missed
+Because: crates/core/src/promise.rs:210
+Rejected: keeping open_missed's why — no caller reads the frozen text once both lines are live
+Check: crates/cli/tests/slo.rs's expected push changed with the spec: it now names the lane-gone wait, not the promise text
+Check: arch-check fails here only on `just types` exit 127 (no just on this host); CI runs it
+Owner: Waiting lines name the issue holding a one-at-a-time file, and stuck cards say what the issue is waiting on now, not an old disk-full reason.
