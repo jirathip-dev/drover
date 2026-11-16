@@ -1,0 +1,25 @@
+Decided: a ready PR whose branch already has the integration head is skipped after one merge-base --is-ancestor, before any merge test or checkout.
+Because: crates/core/src/drive.rs:2021
+Decided: whether the pair merges cleanly comes from the conflict preview's own merge-tree helper, kept per (branch head, integration head) in cache/update-<fleet>-0.json.
+Because: "the same pair is not tried again"
+Decided: the scratch worktree is made only for a clean catch-up that must be pushed (strict rule or fast-first), where premerge checks also run.
+Because: crates/core/src/drive.rs:2032
+Decided: a conflicting pair still asks for the --update lane on every pass, as today; only the merge test is remembered.
+Because: "a conflicting one still gets today's outcome"
+Rejected: remembering the whole outcome per pair — a busy host that refused the update lane would never get it retried.
+Rejected: reading the conflict preview's cache file — it is rewritten for the preview's pairs only and may not have run this pass.
+Check: three fake-git tests now fail is-ancestor once, because a fake that succeeds on every git call reads as "already caught up".
+Owner: Drover no longer rebuilds a scratch checkout for ready pull requests on every pass when nothing has changed.
+
+Decided: a ready PR whose branch already has the integration head is skipped after one merge-base --is-ancestor, before any merge test or checkout.
+Because: crates/core/src/land.rs:403
+Decided: whether the pair merges cleanly comes from the conflict preview's own merge-tree helper, kept per (branch head, integration head) in cache/update-<fleet>-0.json.
+Because: "the same pair is not tried again"
+Decided: the scratch worktree is made only for a clean catch-up that must be pushed (strict rule or fast-first), where premerge checks also run.
+Because: crates/core/src/land.rs:413
+Decided: auto_update moves from drive.rs to land.rs unchanged, so drive.rs is back under its size baseline; the kicked-pass guard stays in drive's catch_up.
+Because: crates/core/src/drive.rs:1
+Rejected: compacting lines inside drive.rs to fit the baseline — packing lines to fit a size limit is banned; the move is behaviour-neutral.
+Rejected: remembering the whole outcome per pair — a busy host that refused the update lane would never get it retried.
+Check: three fake-git tests now fail is-ancestor once, because a fake that succeeds on every git call reads as "already caught up".
+Owner: Drover no longer rebuilds a scratch checkout for ready pull requests on every pass when nothing has changed.
