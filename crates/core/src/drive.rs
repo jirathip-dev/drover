@@ -1275,7 +1275,7 @@ fn pass(
     let mut updated = false;
     for (s, w) in waits
         .iter()
-        .filter(|(s, w)| s.fleet == fleet && !s.done() && s.lane.as_ref() == Some(&w.lane))
+        .filter(|(s, w)| s.fleet == fleet && !(fast && s.done()) && s.lane.as_ref() == Some(&w.lane))
     {
         let lock = format!("drive-{fleet}-{}.lock", s.issue);
         let Some(_mine) = take(ctx, r, &lock, STALE_LOCK_SECS, fleet) else {

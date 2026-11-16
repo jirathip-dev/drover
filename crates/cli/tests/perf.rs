@@ -993,25 +993,28 @@ fn a_pass_over_30k_events_and_150_done_issues_stays_fast() {
     let (c, r) = pass_log(200, 150, 50);
     assert_eq!(drover::events::read(&c.state).unwrap().len(), 30_000);
     let mut t = vec![];
-    for k in 0..3 {
+    for k in 0..5 {
         let c = drover::Ctx {
             now: NOW + k * 120,
             ..c.clone()
         };
         prs_at(&c, c.now, 151..=200);
-        let t0 = Instant::now();
+        let t0 = cpu_ms();
         assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
-        t.push(ms(t0));
+        t.push((cpu_ms() - t0).round());
     }
-    t.sort_unstable();
-    let pass = t[1];
+    t.sort_by(f64::total_cmp);
+    let pass = t[2];
     report(&format!(
-        "#954 perf (30,000 events, 200 issues, 150 done): drive --fast {pass} ms (median of {t:?})"
+        "#954 perf (30,000 events, 200 issues, 150 done): drive --fast {pass:.0} ms of CPU (median of {t:?})"
     ));
     if cfg!(debug_assertions) {
         return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
     }
-    assert!(pass < 180, "a drive --fast pass took {pass} ms (target < 180)");
+    assert!(
+        pass < 120.0,
+        "a drive --fast pass took {pass:.0} ms of CPU (target < 120)"
+    );
 }
 
 #[test]
