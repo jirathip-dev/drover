@@ -47,6 +47,8 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     Ok(i32::from(rows.iter().any(|line| line.starts_with('✗'))))
 }
 
+const VIEW: &str = "name,isArchived,squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed";
+
 fn hygiene(
     r: &dyn Runner,
     (name, f): (&str, &crate::config::Fleet),
@@ -132,22 +134,10 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     );
     for (name, fleet) in &cfg.fleet {
         let repo = &fleet.repo;
-        let view = ok(
-            r,
-            "gh",
-            &[
-                "repo",
-                "view",
-                repo,
-                "--json",
-                "name,isArchived,squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed",
-            ],
-        );
+        let view = ok(r, "gh", &["repo", "view", repo, "--json", VIEW]);
         let read = format!("gh {name} — read {repo} → gh auth refresh");
         row(rows, view.is_ok(), '✗', &read);
-        let view = view
-            .ok()
-            .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
+        let view: Option<serde_json::Value> = view.ok().and_then(|v| serde_json::from_str(&v).ok());
         if view.as_ref().is_some_and(|v| v.at("isArchived") == true) {
             rows.push(format!(
                 "! gh {name} — {repo} is archived → remove [fleet.{name}] from fleet.toml"
