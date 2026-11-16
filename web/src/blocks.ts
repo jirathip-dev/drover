@@ -319,9 +319,9 @@ function composer(b: Blk, c: Ctx): HTMLElement {
     if (b.working) {
       const p = el('div', 'pill');
       const tick = () => {
-        if (!navigator.onLine) return (p.innerHTML = `<span class=r>offline · tap to retry</span>`);
+        if (!navigator.onLine) return p.replaceChildren(el('span', 'r', 'offline · tap to retry'));
         const s = Math.max(0, Math.floor((Date.now() - Date.parse(String(obj(b.working).since))) / 1000));
-        p.innerHTML = `${figure({ state: 'working' })}<span class=pt>${d.stopping ? 'stopping…' : `working ${s >= 60 ? `${Math.floor(s / 60)}m ` : ''}${s % 60}s`}</span>`;
+        p.replaceChildren(...nodes(`${figure({ state: 'working' })}<span class=pt>${d.stopping ? 'stopping…' : `working ${s >= 60 ? `${Math.floor(s / 60)}m ` : ''}${s % 60}s`}</span>`));
         const x = btn('stop', 'bad');
         x.onclick = async e => { e.stopPropagation(); if (await post(act('stop'), {}, x)) { d.stopping = true; tick(); } };
         if (act('stop') && !d.stopping) p.append(x);
