@@ -289,7 +289,7 @@ fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
         .iter()
         .find(|x| tripped(&x.failure))
         .expect("the hunt finds it within 40 rounds");
-    let random: Vec<u64> = (1000..1000 + f.round as u64).collect();
+    let random: Vec<u64> = (2014..2014 + f.round as u64).collect();
     let hs: Vec<_> = random.iter().map(|&n| std::thread::spawn(move || run(n, s))).collect();
     for o in hs.into_iter().map(|h| h.join().expect("a run")) {
         let why = o.failure.unwrap_or_default();
