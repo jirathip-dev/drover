@@ -1,10 +1,13 @@
-use crate::config::Fleet;
-use crate::events::Event;
+use crate::config::{Config, Fleet};
+use crate::events::{Event, Log};
 use crate::gate::{refuse, Refusal};
 use crate::runner::{ok, Runner};
+use crate::Ctx;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
 
 /// A compact run as its `compacted` record names it.
 #[derive(Debug, Clone)]
@@ -78,6 +81,28 @@ impl Shas {
     pub fn last(&self, repo: &str) -> Option<&Run> {
         self.runs.iter().rfind(|r| r.repo == repo && !r.undone)
     }
+}
+
+/// `events`, once the fleet's clone stands on its newest compact root (its `origin/<line>`).
+pub fn on_root(r: &dyn Runner, events: Arc<Log>, (fleet, f): (&str, &Fleet)) -> Result<Arc<Log>, Refusal> {
+    let line = format!("origin/{}", f.integration);
+    rooted(r, &events, (fleet, f), &f.local_path(), &line).map(|()| events)
+}
+
+/// Drive takes fleet `fleet`: not paused, and its clone on the newest compact root (else it says why in `out`).
+pub fn drives(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut dyn Write) -> bool {
+    let Some(f) = cfg.fleet.get(fleet).filter(|f| !f.paused) else {
+        return false;
+    };
+    let Ok(events) = crate::events::working(&ctx.state) else {
+        return true;
+    };
+    on_root(r, events, (fleet, f)).map_err(|e| writeln!(out, "{e}")).is_ok()
+}
+
+/// PR head `head` stands on the root (fetched first): merge's door.
+pub fn head(r: &dyn Runner, events: &[Event], (fleet, f): (&str, &Fleet), head: String) -> Result<String, Refusal> {
+    rooted(r, events, (fleet, f), &f.local_path(), &head).map(|()| head)
 }
 
 /// `rev` in `dir` (a sha is fetched first) stands on the newest compact root of `f`'s repo; else `OLD_ROOT`, naming `--reset`.

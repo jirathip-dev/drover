@@ -458,6 +458,16 @@ pub fn append(state: &Path, ev: &Event) -> Result<()> {
     })
 }
 
+/// The hidden `archive-events`: rebuild the tables (`rebuild`), else archive old events and heartbeats; its line.
+pub fn archive_events(state: &Path, now: u64, rebuild: bool) -> Result<String> {
+    if rebuild {
+        self::rebuild(state)?;
+        return Ok("rebuilt the issue, lane and ask tables".into());
+    }
+    let (gone, moved) = compact(state, now)?;
+    Ok(format!("{gone} heartbeats deleted, {moved} events archived"))
+}
+
 /// #1121: `evs`, each numbered next, in one transaction.
 pub fn append_all(state: &Path, evs: &[Event]) -> Result<()> {
     with(state, true, (), |c| {

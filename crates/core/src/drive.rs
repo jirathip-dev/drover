@@ -769,20 +769,8 @@ pub fn drive(
     let live: Vec<&str> = (cfg.fleet.keys().map(String::as_str))
         .filter(|n| only.is_none_or(|o| o == *n))
         .collect();
-    let on = |n: &&str| cfg.fleet.get(*n).is_some_and(|f| !f.paused);
-    let ev = crate::events::working(&ctx.state)?;
-    let rooted = |n: &&str| {
-        let Some(f) = cfg.fleet.get(*n) else { return Ok(()) };
-        let tip = format!("origin/{}", f.integration);
-        crate::compact::rooted(r, &ev, (n, f), &f.local_path(), &tip).map_err(|e| e.to_string())
-    };
-    let mut fleets: Vec<&str> = live.iter().copied().filter(on).collect();
-    for n in fleets.clone() {
-        if let Err(e) = rooted(&n) {
-            fleets.retain(|x| *x != n);
-            writeln!(out, "{e}")?;
-        }
-    }
+    let on = |n: &&str| crate::compact::drives(ctx, cfg, r, n, out);
+    let fleets: Vec<&str> = live.iter().copied().filter(on).collect();
     let events = (fast && first)
         .then(|| crate::events::working(&ctx.state).ok())
         .flatten()

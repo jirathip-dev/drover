@@ -595,27 +595,8 @@ enum Cmd {
         #[arg(long, help = "Rebuild the issue, lane and ask tables from every event instead")]
         rebuild: bool,
     },
-    #[command(
-        about = "#1121: a repo's one-time fresh start: one root before the cut, one commit per landed PR after it; archive, owner card, undo"
-    )]
-    Compact {
-        fleet: String,
-        #[arg(long, help = "The cut: a date (the last line commit before that midnight) or a sha")]
-        cut: Option<String>,
-        #[arg(long, help = "Print the plan; push nothing")]
-        dry_run: bool,
-        #[arg(long, help = "Post the owner's run card in this thread")]
-        thread: Option<String>,
-        #[arg(long, help = "Put the old history back (with --dry-run, --thread or --push)")]
-        undo: bool,
-        #[arg(
-            long,
-            help = "The approved card's run: the plan's new tip (with --undo, its old tip)"
-        )]
-        push: Option<String>,
-        #[arg(long, help = "Reset the fleet's clone and lane folders onto origin's new branches")]
-        reset: bool,
-    },
+    #[command(about = "A repo's fresh start: one root before a cut, one commit per landed PR after it; archive, undo")]
+    Compact(crate::compact::Opts),
     #[command(about = "The event log in its JSONL format (one event a line, with its seq), for external readers")]
     #[command(hide = true)]
     Events {
@@ -1493,34 +1474,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             }
             write!(out, "{}", boards.join("\n"))?;
         }
-        Cmd::ArchiveEvents { rebuild: true } => {
-            crate::db::rebuild(&ctx.state)?;
-            writeln!(out, "rebuilt the issue, lane and ask tables")?;
+        Cmd::ArchiveEvents { rebuild } => {
+            writeln!(out, "{}", crate::db::archive_events(&ctx.state, ctx.now, rebuild)?)?
         }
-        Cmd::ArchiveEvents { rebuild: false } => {
-            let (gone, moved) = crate::db::compact(&ctx.state, ctx.now)?;
-            writeln!(out, "{gone} heartbeats deleted, {moved} events archived")?;
-        }
-        Cmd::Compact {
-            fleet,
-            cut,
-            dry_run,
-            thread,
-            undo,
-            push,
-            reset,
-        } => {
-            use crate::compact::Act;
-            let act = match (cut, push) {
-                _ if reset => Act::Reset,
-                (_, Some(tip)) => Act::Push { tip, undo },
-                _ if undo => Act::Undo { thread },
-                (Some(cut), None) => Act::Cut { cut, thread },
-                (None, None) => bail!("usage: drover compact <fleet> --cut <date|sha> | --undo | --reset"),
-            };
-            let cfg = Config::load(&ctx.config)?;
-            crate::compact::run(ctx, &cfg, r, out, &fleet, &act, dry_run)?;
-        }
+        Cmd::Compact(o) => crate::compact::cli(ctx, r, out, o)?,
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
             scope: Scope { fleet, json },

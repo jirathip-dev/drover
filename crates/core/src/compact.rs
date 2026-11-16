@@ -4,7 +4,7 @@ pub mod reset;
 pub mod shas;
 pub mod write;
 
-pub use shas::{rooted, Run, Shas};
+pub use shas::{drives, head, on_root, rooted, Run, Shas};
 
 use crate::config::{Config, Fleet};
 use crate::events::{fold, history, Event, Json};
@@ -25,6 +25,39 @@ pub enum Act {
     Undo { thread: Option<String> },
     Push { tip: String, undo: bool },
     Reset,
+}
+
+/// `drover compact`'s arguments.
+#[derive(clap::Args, Debug)]
+pub struct Opts {
+    pub fleet: String,
+    #[arg(long, help = "The cut: a date (the last line commit before that midnight) or a sha")]
+    pub cut: Option<String>,
+    #[arg(long, help = "Print the plan; push nothing")]
+    pub dry_run: bool,
+    #[arg(long, help = "Post the owner's run card in this thread")]
+    pub thread: Option<String>,
+    #[arg(long, help = "Put the old history back (with --dry-run, --thread or --push)")]
+    pub undo: bool,
+    #[arg(
+        long,
+        help = "The approved card's run: the plan's new tip (with --undo, its old tip)"
+    )]
+    pub push: Option<String>,
+    #[arg(long, help = "Reset the fleet's clone and lane folders onto origin's new branches")]
+    pub reset: bool,
+}
+
+/// `drover compact` from its arguments.
+pub fn cli(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, o: Opts) -> Result<()> {
+    let act = match (o.cut, o.push) {
+        _ if o.reset => Act::Reset,
+        (_, Some(tip)) => Act::Push { tip, undo: o.undo },
+        _ if o.undo => Act::Undo { thread: o.thread },
+        (Some(cut), None) => Act::Cut { cut, thread: o.thread },
+        (None, None) => anyhow::bail!("usage: drover compact <fleet> --cut <date|sha> | --undo | --reset"),
+    };
+    run(ctx, &Config::load(&ctx.config)?, r, out, &o.fleet, &act, o.dry_run)
 }
 
 /// A ref's move as the plan file keeps it.
@@ -59,6 +92,7 @@ pub struct Plan {
     pub commits: [usize; 2],
     pub refs: Vec<RefMove>,
     pub chain: Vec<Step>,
+    pub forks: Vec<u64>,
 }
 
 /// The repo's scratch folder: the bare copy, the plan and the map.
@@ -101,21 +135,11 @@ fn build(ctx: &Ctx, r: &dyn Runner, f: &Fleet, cut: &str) -> Result<Plan> {
     std::fs::create_dir_all(&d)?;
     let copy = d.join("old.git");
     write::mirror(r, &origin(r, f)?, &copy)?;
+    let words = "pr list --state open --limit 500 --json number,headRefName,isCrossRepository -R";
     let prs = json(
         r,
         "gh",
-        &[
-            "pr",
-            "list",
-            "-R",
-            &f.repo,
-            "--state",
-            "open",
-            "--limit",
-            "500",
-            "--json",
-            "number,headRefName,isCrossRepository",
-        ],
+        &[&words.split(' ').collect::<Vec<_>>()[..], &[f.repo.as_str()]].concat(),
     )?;
     let prs = prs.as_array().cloned().unwrap_or_default();
     let open = (prs.iter())
@@ -209,6 +233,10 @@ fn build(ctx: &Ctx, r: &dyn Runner, f: &Fleet, cut: &str) -> Result<Plan> {
         commits: [count, shape.line.len() + 1],
         refs,
         chain,
+        forks: (prs.iter())
+            .filter(|p| p.at("isCrossRepository") == true)
+            .filter_map(|p| p.at("number").as_u64())
+            .collect(),
     };
     let mut rows: Vec<String> = (shape.place.iter())
         .map(|(o, (n, k))| format!("{o}\t{}\t{}\n", id(*n), k.word()))
@@ -224,7 +252,7 @@ fn fleets<'a>(cfg: &'a Config, repo: &str) -> Vec<(&'a String, &'a Fleet)> {
 }
 
 /// Every reason the repo is not ready to compact (none: ready).
-pub fn ready(cfg: &Config, r: &dyn Runner, events: &[Event], p: &Plan, prs: &[Value]) -> Vec<String> {
+pub fn ready(cfg: &Config, r: &dyn Runner, events: &[Event], p: &Plan) -> Vec<String> {
     let mut why = vec![];
     let st = fold(events);
     for (name, f) in fleets(cfg, &p.repo) {
@@ -244,8 +272,8 @@ pub fn ready(cfg: &Config, r: &dyn Runner, events: &[Event], p: &Plan, prs: &[Va
             why.push(format!("{}: {d}", wt.display()));
         }
     }
-    for pr in prs.iter().filter(|p| p["isCrossRepository"] == true) {
-        why.push(format!("PR #{} comes from a fork", pr["number"]));
+    for n in &p.forks {
+        why.push(format!("PR #{n} comes from a fork"));
     }
     for m in p.refs.iter().filter(|m| m.class == "Detached" && m.pr.is_some()) {
         why.push(format!(
@@ -401,23 +429,7 @@ pub fn run(
                 return Ok(writeln!(out, "{done}")?);
             }
             let p = build(ctx, r, f, cut)?;
-            let prs = json(
-                r,
-                "gh",
-                &[
-                    "pr",
-                    "list",
-                    "-R",
-                    &f.repo,
-                    "--state",
-                    "open",
-                    "--limit",
-                    "500",
-                    "--json",
-                    "number,isCrossRepository",
-                ],
-            )?;
-            let why = ready(cfg, r, &events, &p, prs.as_array().map_or(&[][..], Vec::as_slice));
+            let why = ready(cfg, r, &events, &p);
             report(out, &p, &moves(&events, &names, &map(&d)?, &p.root), &why)?;
             match thread.as_deref().filter(|_| !dry) {
                 None => Ok(()),
@@ -476,23 +488,7 @@ pub fn run(
             if *undo {
                 push::undo(ctx, r, f, &d, &p, &names)?;
             } else {
-                let prs = json(
-                    r,
-                    "gh",
-                    &[
-                        "pr",
-                        "list",
-                        "-R",
-                        &f.repo,
-                        "--state",
-                        "open",
-                        "--limit",
-                        "500",
-                        "--json",
-                        "number,isCrossRepository",
-                    ],
-                )?;
-                let why = ready(cfg, r, &events, &p, prs.as_array().map_or(&[][..], Vec::as_slice));
+                let why = ready(cfg, r, &events, &p);
                 if !why.is_empty() {
                     return refused("COMPACT_NOT_READY", why.join("; "));
                 }
