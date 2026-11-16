@@ -99,8 +99,8 @@ Appended in one transaction by the approved run, all flagged passive (not lane a
 new tip.
 
 ```json
-{"type": "compacted", "fleet": "cooee", "run": "3d4e…", "repo": "jirathip-dev/cooee", "line": "staging",
- "cut": "8957…", "root": "77aa…", "old_tip": "b758…", "archive": "jirathip-dev/cooee-history",
+{"type": "compacted", "fleet": "cooee", "run": "3d4e…", "repo": "<owner>/cooee", "line": "staging",
+ "cut": "8957…", "root": "77aa…", "old_tip": "b758…", "archive": "<owner>/cooee-history",
  "commits": [1081, 132], "refs": 361, "map_sha256": "…"}
 
 {"type": "compacted", "fleet": "cooee", "issue": 310, "run": "3d4e…",

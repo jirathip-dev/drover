@@ -4,6 +4,8 @@ use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
 
+const CHUNK: usize = 1000;
+
 fn git(r: &dyn Runner, dir: &Path, a: &[&str]) -> Result<String> {
     ok(r, "git", &[&["-C", &dir.to_string_lossy()][..], a].concat())
 }
@@ -27,12 +29,10 @@ pub fn mirror(r: &dyn Runner, url: &str, dir: &Path) -> Result<()> {
 }
 
 fn objects(r: &dyn Runner, dir: &Path, ids: &[String]) -> Result<Vec<(String, String)>> {
-    if ids.is_empty() {
-        return Ok(vec![]);
+    let mut out = String::new();
+    for chunk in ids.chunks(CHUNK) {
+        out += &git_in(r, dir, &["cat-file", "--batch"], &(chunk.join("\n") + "\n"))?;
     }
-    let mut input = ids.join("\n");
-    input.push('\n');
-    let out = git_in(r, dir, &["cat-file", "--batch"], &input)?;
     let (mut rest, mut all) = (out.as_str(), vec![]);
     while let Some((head, body)) = rest.split_once('\n') {
         let mut w = head.split(' ');
@@ -153,7 +153,10 @@ pub fn write(r: &dyn Runner, dir: &Path, s: &Shape) -> Result<Written> {
 
 /// The trees of `ids` as git reads them, in order.
 pub fn trees(r: &dyn Runner, dir: &Path, ids: &[&str]) -> Result<Vec<String>> {
-    let input: String = ids.iter().map(|i| format!("{i}^{{tree}}\n")).collect();
-    let out = git_in(r, dir, &["cat-file", "--batch-check=%(objectname)"], &input)?;
+    let mut out = String::new();
+    for chunk in ids.chunks(CHUNK) {
+        let input: String = chunk.iter().map(|i| format!("{i}^{{tree}}\n")).collect();
+        out += &git_in(r, dir, &["cat-file", "--batch-check=%(objectname)"], &input)?;
+    }
     Ok(out.lines().map(String::from).collect())
 }

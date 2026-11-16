@@ -33,9 +33,9 @@ The owner (or an orchestrator in a thread) runs three commands. Nothing leaves t
 ```text
 $ drover pause cooee
 $ drover compact cooee --cut 2026-11-09 --dry-run
-compact jirathip-dev/cooee · line staging · cut 89570c966 2026-11-08 23:46 "<subject>"
+compact <owner>/cooee · line staging · cut 89570c966 2026-11-08 23:46 "<subject>"
 commits   staging 1081 → 132 (1 root + 131) · main 736 → 82
-root      tree 5c1d0e7a… "cooee: initial (history before 2026-11-09 in jirathip-dev/cooee-history)"
+root      tree 5c1d0e7a… "cooee: initial (history before 2026-11-09 in <owner>/cooee-history)"
 chain     131: 127 PRs, 4 direct pushes
   0a1b2c3 ← 9f8e7d6  board: one sheet for every card (#310) (#322)      holds 14 old commits
   …
