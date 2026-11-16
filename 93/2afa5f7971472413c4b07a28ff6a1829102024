@@ -1,0 +1,12 @@
+Decided: paint() patches the screen in place through blocks.ts morph(): children keyed by data-id; an unchanged block keeps its node, a changed leaf is replaced, a container (screen, section, list, sheet) is patched.
+Because: "A repaint that changes nothing visible draws nothing. A repaint that adds a message appends or patches in place."
+Decided: the focus-only graft (path, graft, the 'input, select' match) is deleted; any field (input or textarea) survives because its node is never removed.
+Because: "It also holds for a `textarea` composer, so #1087 doesn't regress it."
+Decided: put() drops the cached `scr:` screens and retries when localStorage is full, so a draft is always saved.
+Because: "nothing you typed is ever lost: focused or not, during stream updates, the 30 s tick, a resume and a reload"
+Decided: the repro fills localStorage with cached screens (a phone's) before typing; on the base the blurred field is rebuilt from a draft that failed to save, so the text is gone.
+Rejected: copying event handlers from the fresh tree onto kept nodes — the closures capture the fresh, detached elements (the composer's send would read an empty form).
+Decided: the first fetch after painting the cached copy passes no `before`, so a reload flashes no row.
+Because: "The `.fl` highlight marks only a row that really changed for the reader (a new message, or a card's state), never a reload."
+Check: ui-webkit runs page_drafts; commit 1 (03020dc) fails there, 4417167 passes. WebKit crashes on this host, so it was only run in CI.
+Owner: Text you type in a thread now stays put, and new messages no longer redraw the whole thread; please check on your phone.
