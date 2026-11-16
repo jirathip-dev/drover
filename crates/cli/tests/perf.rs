@@ -1008,4 +1008,23 @@ fn a_pass_over_30k_events_and_150_done_issues_stays_fast() {
     report(&format!(
         "#954 perf (30,000 events, 200 issues, 150 done): drive --fast {pass} ms (median of {t:?})"
     ));
+    if cfg!(debug_assertions) {
+        return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
+    }
+    assert!(pass < 180, "a drive --fast pass took {pass} ms (target < 180)");
+}
+
+#[test]
+fn a_pass_over_20_open_prs_reads_the_pr_cache_file_once() {
+    let (c, r) = pass_log(20, 0, 20);
+    let before = drover::gh::READS.get();
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(drover::gh::READS.get() - before, 1);
+    for n in 1..=20 {
+        assert_eq!(
+            drover::gh::cached_pr(&c, "sendmeter", n)["number"],
+            n,
+            "#{n}'s PR came from the snapshot"
+        );
+    }
 }

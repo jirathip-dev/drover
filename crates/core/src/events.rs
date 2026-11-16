@@ -500,10 +500,8 @@ pub fn lanes(events: &[Event]) -> Vec<&Event> {
 /// #425: the issue `s`'s lane is held on (`held`, no `released` or `spawn` since). #505: the issues it waits on (`on`: one number before #505, a list since); empty when not held.
 pub fn held_on(events: &[Event], s: &IssueState) -> Vec<u64> {
     let kinds = ["held", "released", "spawn"];
-    let e = events
-        .iter()
-        .rev()
-        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind) && !design(e));
+    let pick = |e: &&Event| kinds.contains(&&*e.kind) && !design(e);
+    let e = issue_events(events, &s.fleet, s.issue).into_iter().rfind(pick);
     e.filter(|e| e.kind == "held")
         .map_or(vec![], |e| crate::queue::nums(e.val("on")))
 }
@@ -871,6 +869,15 @@ pub fn of_issue<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> 
     };
     let at = l.issues.get(&(fleet.to_string(), n));
     at.map_or_else(Vec::new, |v| v.iter().filter_map(|i| events.get(*i)).collect())
+}
+
+pub(crate) fn issue_events<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> {
+    match cached(events) {
+        Some(_) => of_issue(events, fleet, n),
+        None => (events.iter())
+            .filter(|e| e.fleet == fleet && e.issue == Some(n))
+            .collect(),
+    }
 }
 
 /// #971: the events of any of `kinds`, in order: the index's when `events` is a cached log, else one pass.
