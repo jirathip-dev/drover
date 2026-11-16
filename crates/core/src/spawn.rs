@@ -1203,6 +1203,12 @@ pub fn spawn(
                     .code
                     == 0;
                 ok(r, "git", &worktree_add(&local, &p, have))?;
+                let deny = cfg.hygiene(fleet).docs_trust.unwrap_or_default();
+                if !deny.is_empty() {
+                    let pats = deny.iter().map(|d| format!("!/{}", d.trim_start_matches('/')));
+                    let set = ["-C", wt.as_str(), "sparse-checkout", "set", "--no-cone", "/*"].map(String::from);
+                    ok(r, "git", &[set.to_vec(), pats.collect()].concat())?;
+                }
             }
             Ok(())
         };

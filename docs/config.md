@@ -107,6 +107,23 @@ out. It keeps the list in the state folder as
 is open, and queues it `--architect`. `drover tick` runs it weekly per fleet; `hotspots = "off"` in `[fleet.<n>]` opts
 out.
 
+## Hygiene (#1101)
+
+One history and issue convention is on for every fleet with no config. `[hygiene]` sets it for all fleets,
+`[fleet.<n>.hygiene]` per fleet (its keys win); `"off"` opts a key out.
+
+| key | default | what |
+|---|---|---|
+| `merge` | `"squash"` | the merge method the repo allows; also `"merge"`, `"rebase"` |
+| `comments` | `"strict"` | `.drover/arch.toml`'s `[comments] policy`; the rule ships in `rules/shared.md` |
+| `baseline` | `"setup"` | the arch-check baseline, set at fleet setup, redone on the owner's ask |
+| `triage` | `"weekly"` | a weekly triage lane |
+| `docs_trust` | `["docs/archive/"]` | paths a new lane worktree leaves out (sparse checkout); `[]` = off |
+| `issue_spec` | `"triage"` | triage folds amendments into `## Spec (current)` |
+
+`drover doctor` prints each fleet's `hygiene` line and a red `! hygiene` row for each drift: the repo on GitHub
+not allowing the `merge` method, or `comments = "strict"` with integration's `.drover/arch.toml` saying otherwise.
+
 ## Limits (#844)
 
 Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without one keeps the default below.

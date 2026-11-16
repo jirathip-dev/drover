@@ -45,6 +45,8 @@ pub struct Config {
     pub proxy: ProxyCfg,
     /// #894: `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,
+    /// #1101: `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
+    pub hygiene: Hygiene,
 }
 
 /// #894: `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
@@ -452,6 +454,66 @@ pub struct Fleet {
     pub runtime: Option<Runtime>,
     /// #732: lets `rev` share `impl`'s provider; its line needs a `#` reason comment.
     pub rev_same_provider: Option<bool>,
+    /// #1101: `[fleet.<n>.hygiene]`, this fleet's keys over `[hygiene]`'s.
+    #[serde(default)]
+    pub hygiene: Hygiene,
+}
+
+/// #1101: one key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
+#[derive(Debug, Default, Deserialize, Clone, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Hygiene {
+    pub merge: Option<String>,
+    pub comments: Option<String>,
+    pub baseline: Option<String>,
+    pub triage: Option<String>,
+    pub docs_trust: Option<Vec<String>>,
+    pub issue_spec: Option<String>,
+}
+
+/// #1101: the defaults: squash merges, strict comments, a setup baseline, weekly triage, `docs/archive/` unread, specs folded by triage.
+pub fn hygiene_default() -> Hygiene {
+    let s = |v: &str| Some(v.to_string());
+    Hygiene {
+        merge: s("squash"),
+        comments: s("strict"),
+        baseline: s("setup"),
+        triage: s("weekly"),
+        docs_trust: Some(vec!["docs/archive/".into()]),
+        issue_spec: s("triage"),
+    }
+}
+
+impl Hygiene {
+    fn or(&self, b: &Hygiene) -> Hygiene {
+        Hygiene {
+            merge: self.merge.clone().or_else(|| b.merge.clone()),
+            comments: self.comments.clone().or_else(|| b.comments.clone()),
+            baseline: self.baseline.clone().or_else(|| b.baseline.clone()),
+            triage: self.triage.clone().or_else(|| b.triage.clone()),
+            docs_trust: self.docs_trust.clone().or_else(|| b.docs_trust.clone()),
+            issue_spec: self.issue_spec.clone().or_else(|| b.issue_spec.clone()),
+        }
+    }
+
+    /// Doctor's line: `merge squash · comments strict · …`, `docs_trust` as its deny list.
+    pub fn line(&self) -> String {
+        let deny = self.docs_trust.clone().unwrap_or_default();
+        let deny = if deny.is_empty() {
+            "off".into()
+        } else {
+            format!("deny {}", deny.join(","))
+        };
+        let o = |v: &Option<String>| v.clone().unwrap_or_default();
+        format!(
+            "merge {} · comments {} · baseline {} · triage {} · docs_trust {deny} · issue_spec {}",
+            o(&self.merge),
+            o(&self.comments),
+            o(&self.baseline),
+            o(&self.triage),
+            o(&self.issue_spec)
+        )
+    }
 }
 
 /// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits for the full set); integration's own CI then runs the full suite, and `land::watch` reverts a red landing.
@@ -1097,6 +1159,12 @@ impl Notify {
 }
 
 impl Config {
+    /// #1101: fleet `name`'s hygiene, every key set: its own, else `[hygiene]`'s, else the default.
+    pub fn hygiene(&self, name: &str) -> Hygiene {
+        let own = self.fleet.get(name).map(|f| f.hygiene.clone()).unwrap_or_default();
+        own.or(&self.hygiene).or(&hygiene_default())
+    }
+
     /// #539: each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
         let gone = "removed (#923): lanes run on the host's own CLI login; delete";

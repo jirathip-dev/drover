@@ -34,9 +34,59 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     if json {
         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
     } else {
-        writeln!(out, "{}", rows.join("\n"))?;
+        let red = std::io::IsTerminal::is_terminal(&std::io::stdout());
+        let paint = |l: &String| {
+            if red && l.starts_with("! hygiene") {
+                format!("\x1b[31m{l}\x1b[0m")
+            } else {
+                l.clone()
+            }
+        };
+        writeln!(out, "{}", rows.iter().map(paint).collect::<Vec<_>>().join("\n"))?;
     }
     Ok(i32::from(rows.iter().any(|line| line.starts_with('✗'))))
+}
+
+/// #1101: fleet `name`'s hygiene line, then a `! hygiene` row for each key its repo has drifted from.
+fn hygiene(
+    r: &dyn Runner,
+    (name, f): (&str, &crate::config::Fleet),
+    h: &crate::config::Hygiene,
+    view: Option<&serde_json::Value>,
+    rows: &mut Vec<String>,
+) {
+    rows.push(format!("✓ hygiene {name} — {}", h.line()));
+    let repo = &f.repo;
+    let m = h.merge.as_deref().unwrap_or("off");
+    let flag = match m {
+        "squash" => Some(("squashMergeAllowed", "squash-merge")),
+        "merge" => Some(("mergeCommitAllowed", "merge-commit")),
+        "rebase" => Some(("rebaseMergeAllowed", "rebase-merge")),
+        _ => None,
+    };
+    if let Some((_, opt)) = flag.filter(|(k, _)| view.is_some_and(|v| v[k] == false)) {
+        rows.push(format!(
+            "! hygiene {name} — merge: {repo} does not allow {m}, hygiene says {m} → gh repo edit {repo} --enable-{opt}"
+        ));
+    }
+    if h.comments.as_deref() == Some("strict") {
+        let at = format!("origin/{}:.drover/arch.toml", f.integration);
+        let dir = f.local_path().display().to_string();
+        let o = r.run("git", &argv(&["-C", &dir, "show", &at]));
+        let policy = match o {
+            Ok(o) if o.code == 0 => toml::from_str::<toml::Value>(&o.stdout).ok().map(|v| {
+                let p = v.get("comments").and_then(|c| c.get("policy")).and_then(|p| p.as_str());
+                p.unwrap_or("unset").to_string()
+            }),
+            Ok(o) if o.stderr.contains("does not exist") => Some("unset".into()),
+            _ => None,
+        };
+        if let Some(p) = policy.filter(|p| p != "strict") {
+            rows.push(format!(
+                "! hygiene {name} — comments is {p}, hygiene says strict → set [comments] policy = \"strict\" in .drover/arch.toml"
+            ));
+        }
+    }
 }
 
 fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
@@ -72,13 +122,23 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     );
     for (name, fleet) in &cfg.fleet {
         let repo = &fleet.repo;
-        let view = ok(r, "gh", &["repo", "view", repo, "--json", "name,isArchived"]);
+        let view = ok(
+            r,
+            "gh",
+            &[
+                "repo",
+                "view",
+                repo,
+                "--json",
+                "name,isArchived,squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed",
+            ],
+        );
         let read = format!("gh {name} — read {repo} → gh auth refresh");
         row(rows, view.is_ok(), '✗', &read);
         let view = view
             .ok()
             .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
-        if view.is_some_and(|v| v["isArchived"] == true) {
+        if view.as_ref().is_some_and(|v| v["isArchived"] == true) {
             rows.push(format!(
                 "! gh {name} — {repo} is archived → remove [fleet.{name}] from fleet.toml"
             ));
@@ -94,6 +154,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || git clone https://github.com/{repo}.git {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
+        hygiene(r, (name, fleet), &cfg.hygiene(name), view.as_ref(), rows);
         if let Some(m) = fleet
             .land
             .as_ref()
