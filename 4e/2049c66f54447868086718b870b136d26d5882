@@ -1,0 +1,11 @@
+Decided: the thread screen takes `?before=N`: the 30 messages before N plus every later one, and its stream keeps the query, so live updates never slide loaded messages away
+Because: crates/server/src/serve/chat.rs:272
+Rejected: prepending API v1 `thread/<t>?before=` pages on the page — the page would redraw messages from Msg rows, a second renderer beside msg_card
+Decided: the older marker is a plain button block whose tap opens that path with `keep`, so the page swaps the path without a back entry
+Because: "`older` marker loading the 30 before, place kept"
+Decided: a focus screen scrolls inside a fixed box between the header and the tab bar or keyboard; the page keeps the card in view across repaints and opens at the end
+Because: "iOS: only the messages scroll; the composer sits on the keyboard."
+Decided: `t<n>` refs link only in thread screens (the text renderer checks the screen id); plain URLs and the code [copy] work everywhere
+Rejected: side-by-side list and thread at 1000 px and phone-clock times — in the problem table, not in Wanted
+Check: cargo test -p drover --test threads_tab with NODE_PATH holding Playwright (the ui-webkit CI job runs the four WebKit tests)
+Owner: A thread now opens at its newest message under a sticky bar, loads older messages in place, shows images with a viewer, and keeps the composer on the keyboard.
