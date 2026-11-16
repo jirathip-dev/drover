@@ -279,14 +279,14 @@ const read = (f: File) => new Promise<Att>(ok => {
 });
 
 function composer(b: Blk, c: Ctx): HTMLElement {
-  const key = `draft:${c.screen}:${b.id}:text`, acts: Blk = b.acts ?? {}, base: Blk = b.values ?? {};
+  const key = `draft:${c.screen}:${String(b.id)}:text`, acts = obj(b.acts), base = obj(b.values), act = (k: string) => String(acts[k] ?? '');
   const d: Draft = drafts.get(key) ?? { files: [], picks: {} };
   drafts.set(key, d);
   if (!b.working) d.stopping = d.steer = false;
   const f = el('div', 'cmp');
-  f.dataset.id = b.id ?? '';
+  f.dataset.id = String(b.id ?? '');
   const ta = el('textarea');
-  Object.assign(ta, { name: 'text', rows: 1, value: get(key) ?? '', placeholder: b.placeholder ?? '' });
+  Object.assign(ta, { name: 'text', rows: 1, value: get(key) ?? '', placeholder: String(b.placeholder ?? '') });
   const grow = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
   ta.oninput = () => { put(key, ta.value || null); d.st = d.st === 'sent' ? '' : d.st; grow(); };
   ta.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } };
@@ -301,7 +301,7 @@ function composer(b: Blk, c: Ctx): HTMLElement {
   const post = async (action: string, values: Blk, x?: HTMLElement) => c.act({ action, block: b.id, values: { ...base, ...values } }, x);
   const send = async (steer = false) => {
     if (!ta.value.trim() && !d.files.length) return;
-    const queue = !steer && (b.working || d.q != null) && acts.queue, action = steer ? acts.steer : queue || b.action;
+    const queue = !steer && (b.working || d.q != null) ? act('queue') : '', action = steer ? act('steer') : queue || String(b.action);
     const v: Blk = { ...d.picks, text: ta.value, name: d.files.map(x => x.name).join('/'), data: d.files.map(x => x.data).join(',') };
     if (queue && d.q != null) v.q = d.q;
     [d.st, d.steer] = ['sending', false];
@@ -320,24 +320,25 @@ function composer(b: Blk, c: Ctx): HTMLElement {
       const p = el('div', 'pill');
       const tick = () => {
         if (!navigator.onLine) return (p.innerHTML = `<span class=r>offline · tap to retry</span>`);
-        const s = Math.max(0, Math.floor((Date.now() - Date.parse(b.working.since)) / 1000));
+        const s = Math.max(0, Math.floor((Date.now() - Date.parse(String(obj(b.working).since))) / 1000));
         p.innerHTML = `${figure({ state: 'working' })}<span class=pt>${d.stopping ? 'stopping…' : `working ${s >= 60 ? `${Math.floor(s / 60)}m ` : ''}${s % 60}s`}</span>`;
         const x = btn('stop', 'bad');
-        x.onclick = async e => { e.stopPropagation(); if (await post(acts.stop, {}, x)) { d.stopping = true; tick(); } };
-        if (acts.stop && !d.stopping) p.append(x);
+        x.onclick = async e => { e.stopPropagation(); if (await post(act('stop'), {}, x)) { d.stopping = true; tick(); } };
+        if (act('stop') && !d.stopping) p.append(x);
       };
       p.onclick = () => { if (!navigator.onLine) f.dispatchEvent(new CustomEvent('redraw', { bubbles: true })); };
       tick();
       const t = setInterval(() => (p.isConnected ? tick() : clearInterval(t)), 1000);
       top.push(p);
     }
-    for (const m of b.queued ?? []) {
-      const r = el('div', 'qd', `<span class=qt>${esc(m.text)}</span>`);
+    for (const m of blks(b.queued)) {
+      const text = String(m.text ?? '');
+      const r = el('div', 'qd', `<span class=qt>${esc(text)}</span>`);
       r.dataset.q = String(m.q);
       const now = btn('send now', 'primary'), edit = btn('edit'), rm = btn('remove', 'bad');
-      now.onclick = () => post(acts.steer, { q: m.q }, now);
-      edit.onclick = () => { [d.q, ta.value] = [m.q, m.text]; put(key, m.text); grow(); ta.focus(); draw(); };
-      rm.onclick = () => post(acts.unqueue, { q: m.q }, rm);
+      now.onclick = () => post(act('steer'), { q: m.q }, now);
+      edit.onclick = () => { [d.q, ta.value] = [Number(m.q), text]; put(key, text); grow(); ta.focus(); draw(); };
+      rm.onclick = () => post(act('unqueue'), { q: m.q }, rm);
       r.append(now, edit, rm);
       top.push(r);
     }
@@ -362,11 +363,11 @@ function composer(b: Blk, c: Ctx): HTMLElement {
       }
       top.push(s);
     }
-    const row = el('div', 'cr'), add = btn('+'), go = btn(d.q != null ? 'save' : b.working ? 'queue' : b.label, 'primary');
+    const row = el('div', 'cr'), add = btn('+'), go = btn(d.q != null ? 'save' : b.working ? 'queue' : String(b.label ?? ''), 'primary');
     add.setAttribute('aria-label', 'attach');
     add.onclick = () => pick.click();
     let held = false, hold = 0;
-    go.onpointerdown = () => { held = false; hold = window.setTimeout(() => { held = true; if (b.working && acts.steer) { d.steer = true; draw(); } }, 500); };
+    go.onpointerdown = () => { held = false; hold = window.setTimeout(() => { held = true; if (b.working && act('steer')) { d.steer = true; draw(); } }, 500); };
     go.onpointerup = go.onpointerleave = () => clearTimeout(hold);
     go.oncontextmenu = e => e.preventDefault();
     go.onclick = () => { if (!held) send(); held = false; };
@@ -377,13 +378,13 @@ function composer(b: Blk, c: Ctx): HTMLElement {
       st.onclick = () => send(true);
       row.append(st);
     }
-    const chips = (b.chips ?? []).map((ch: Blk) => {
-      const s = el('div', 'chips');
-      const cur = d.picks[ch.name] ?? ch.cur ?? '';
-      for (const o of ch.all ?? []) {
-        const x = btn(`${ch.name} ${o}`, o === cur ? 'on' : '');
+    const chips = blks(b.chips).map(ch => {
+      const s = el('div', 'chips'), n = String(ch.name);
+      const cur = String(d.picks[n] ?? ch.cur ?? '');
+      for (const o of isList(ch.all) ? ch.all.map(String) : []) {
+        const x = btn(`${n} ${o}`, o === cur ? 'on' : '');
         x.setAttribute('aria-pressed', String(o === cur));
-        x.onclick = () => (acts.model ? post(acts.model, { [ch.name]: o }, x) : ((d.picks[ch.name] = o), draw()));
+        x.onclick = () => (act('model') ? post(act('model'), { [n]: o }, x) : ((d.picks[n] = o), draw()));
         s.append(x);
       }
       return s;
