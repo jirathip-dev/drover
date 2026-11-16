@@ -720,10 +720,27 @@ pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]
         "stream": "/screens/threads/stream", "blocks": blocks})
 }
 
-/// #1072: the composer: one text field whose `[label]` posts `action` with `values`.
+/// #1087: the composer, a page-only block: its `[label]` posts `action` with `values`, text and files.
 fn composer(label: &str, action: &str, values: &Value) -> Value {
-    json!({"type": "form", "id": "say", "fields": [{"type": "text", "name": "text", "label": "", "value": "", "placeholder": "message the orchestrator"}],
-        "submit": {"label": label, "action": action, "values": values}})
+    json!({"type": "composer", "id": "say", "label": label, "action": action, "values": values,
+        "placeholder": "message the orchestrator"})
+}
+
+/// #1087: a message's files: its images as an `images` block, every other file a link.
+fn files(id: &str, key: &str, files: &[FileRef]) -> Vec<Value> {
+    let src = |f: &FileRef| format!("/thread/{}/{}", super::enc(id), super::enc(&f.name));
+    let img = |f: &&FileRef| ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains(&ext(&f.name).as_str());
+    let (imgs, rest): (Vec<&FileRef>, Vec<&FileRef>) = files.iter().partition(img);
+    let items: Vec<Value> = imgs.iter().map(|f| json!({"src": src(f), "alt": f.name})).collect();
+    let links: Vec<String> = rest.iter().map(|f| format!("[{}]({})", f.name, src(f))).collect();
+    let mut out = vec![];
+    if !items.is_empty() {
+        out.push(json!({"type": "images", "id": format!("{key}-img"), "items": items}));
+    }
+    if !links.is_empty() {
+        out.push(json!({"type": "text", "id": format!("{key}-f"), "markdown": links.join(" · ")}));
+    }
+    out
 }
 
 /// #1072: a message as a card: `kind` you, orch, tool, sys or ask (choice rows while open, else its answer).
@@ -732,11 +749,15 @@ fn msg_card(now: u64, id: &str, m: &Msg) -> Value {
     let text = |k: &str, t: &str| json!({"type": "text", "id": format!("{key}-{k}"), "markdown": t});
     let sys = |t: &str| json!({"type": "card", "id": key, "kind": "sys", "blocks": [text("t", t)]});
     match m.kind.as_str() {
-        "msg" if m.from == "owner" => {
-            json!({"type": "card", "id": key, "kind": "you", "title": "you", "meta": format!("✓ {age}"), "blocks": [text("t", &m.text)]})
-        }
         "msg" => {
-            json!({"type": "card", "id": key, "kind": "orch", "title": "orchestrator", "meta": age, "blocks": [text("t", &m.text)]})
+            let mut blocks = vec![text("t", &m.text)];
+            blocks.extend(files(id, &key, &m.files));
+            let (kind, title, meta) = if m.from == "owner" {
+                ("you", "you", format!("✓ {age}"))
+            } else {
+                ("orch", "orchestrator", age)
+            };
+            json!({"type": "card", "id": key, "kind": kind, "title": title, "meta": meta, "blocks": blocks})
         }
         "note" if m.retry => {
             json!({"type": "card", "id": key, "kind": "you", "tone": "bad", "title": "you", "meta": age,
@@ -808,7 +829,15 @@ pub fn thread_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Sessio
     ];
     blocks.extend(v.page.msgs.iter().map(|m| msg_card(ctx.now, id, m)));
     if !arch {
-        blocks.push(composer("send", "thread-say", &json!({ "thread": id })));
+        let mut c = composer("send", "thread-say", &json!({ "thread": id }));
+        c["acts"] = json!({"queue": "thread-queue", "steer": "thread-steer", "unqueue": "thread-unqueue",
+            "stop": "thread-stop", "model": "thread-model"});
+        c["queued"] = json!(v.queued);
+        c["chips"] = json!(v.chips);
+        if let Some(t) = v.since {
+            c["working"] = json!({ "since": super::screens::iso(t) });
+        }
+        blocks.push(c);
     }
     Some(
         json!({"type": "screen", "id": format!("thread-{id}"), "title": v.title, "focus": true,
@@ -821,12 +850,14 @@ pub fn thread_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Sessio
 pub fn new_screen(cfg: &Config, repo: &str) -> Option<Value> {
     let role = conductor::defaults(cfg, repo).ok()?.1;
     let who = super::join(&[repo, role.harness.as_str(), role.model.as_deref().unwrap_or_default()]);
+    let mut c = composer("start", "thread-new", &json!({ "repo": repo }));
+    c["chips"] = json!([chip("harness", Some(&role.harness), &crate::providers::lane_names())]);
     let hint = "Your first message starts the thread and its orchestrator, and titles it with its first line. Nothing is logged until you send.";
     Some(
         json!({"type": "screen", "id": format!("thread-new-{repo}"), "title": "New thread", "focus": true, "blocks": [
         {"type": "row", "id": "who", "figure": {"state": "idle"}, "title": who, "subtitle": "no orchestrator yet"},
         {"type": "text", "id": "hint", "markdown": hint},
-        composer("start", "thread-new", &json!({ "repo": repo }))]}),
+        c]}),
     )
 }
 

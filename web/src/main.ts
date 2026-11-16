@@ -201,16 +201,16 @@ function confirmed(c: Blk): Promise<boolean> {
   });
 }
 
-async function act(a: Act, v: View, screen: string, b?: HTMLElement) {
-  if (demo) return toast('Demo with fake data: install drover to act on your own fleets');
-  if (ro) return toast('read-only page', true);
-  if (a.confirm && !(await confirmed(a.confirm))) return;
+async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<boolean> {
+  if (demo) return (toast('Demo with fake data: install drover to act on your own fleets'), false);
+  if (ro) return (toast('read-only page', true), false);
+  if (a.confirm && !(await confirmed(a.confirm))) return false;
   b?.setAttribute('aria-busy', 'true');
   try {
     const r = await fetch(url('action'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...a, confirm: undefined, screen }) });
     const j = await r.json().catch(() => ({ line: `${r.status}` }));
-    if (r.status === 401) return unpaired();
-    if (!r.ok) return toast(j.line ?? `${r.status}`, true);
+    if (r.status === 401) return (unpaired(), false);
+    if (!r.ok) return (toast(j.line ?? `${r.status}`, true), false);
     const ops: Blk[] = j.ops ?? [];
     const whole = ops.find(o => o.op === 'screen');
     if (whole && v !== shv) {
@@ -228,8 +228,10 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement) {
     if (j.close && v === shv) closeSheet();
     if (j.toast) toast(j.toast);
     if (!whole) setTimeout(() => { if (cards) load(cards, true); load(cur.v, true); }, 300);
+    return true;
   } catch (e) {
     toast(`${(e as Error).message}`, true);
+    return false;
   } finally {
     b?.removeAttribute('aria-busy');
   }

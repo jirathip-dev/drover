@@ -7,7 +7,7 @@ import { esc, figure, word } from './theme';
 export type Act = { action: string; block?: string; values?: Blk; confirm?: Blk };
 export type Ctx = {
   screen: string;
-  act: (a: Act, el?: HTMLElement) => void | Promise<void>;
+  act: (a: Act, el?: HTMLElement) => Promise<boolean>;
   tap: (t: Blk) => void;
   open: Set<string>;
 };
@@ -213,29 +213,151 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     }
     return s;
   },
-  form(b, c) {
-    const f = el('div', `form${b.submit ? ' say' : ''}`);
+  form(b) {
+    const f = el('div', 'form');
     f.dataset.id = b.id ?? '';
     for (const x of b.fields ?? []) f.append(field(x));
-    if (!b.submit) return f;
-    const s = b.submit, go = btn(s.label), word = go.firstElementChild!;
-    const send = () => {
-      const v = values(f);
-      if (!String(v.text ?? '').trim()) return;
-      word.textContent = 'sending…';
-      Promise.resolve(c.act({ action: s.action, block: b.id, values: { ...s.values, ...v } }, go)).finally(() => { word.textContent = s.label; });
-    };
-    go.onclick = send;
-    f.querySelector('input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
-    f.append(go);
     return f;
   },
+  composer,
   sheet(b, c) {
     const s = el('div', 'shb');
     s.append(...kids(b.blocks, c));
     return s;
   },
 };
+
+type Att = { name: string; type: string; data: string };
+type Draft = { text: string; files: Att[]; picks: Blk; q?: number; st?: string; steer?: boolean; stopping?: boolean };
+const drafts = new Map<string, Draft>();
+let typing = '';
+
+const read = (f: File) => new Promise<Att>(ok => {
+  const r = new FileReader();
+  r.onload = () => ok({ name: f.name, type: f.type, data: String(r.result).split(',')[1] ?? '' });
+  r.readAsDataURL(f);
+});
+
+function composer(b: Blk, c: Ctx): HTMLElement {
+  const key = JSON.stringify([b.action, b.values]), acts: Blk = b.acts ?? {}, base: Blk = b.values ?? {};
+  const d: Draft = drafts.get(key) ?? { text: '', files: [], picks: {} };
+  drafts.set(key, d);
+  if (!b.working) d.stopping = d.steer = false;
+  const f = el('div', 'cmp');
+  f.dataset.id = b.id ?? '';
+  const ta = el('textarea');
+  Object.assign(ta, { name: 'text', rows: 1, value: d.text, placeholder: b.placeholder ?? '' });
+  const grow = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
+  ta.oninput = () => { d.text = ta.value; grow(); };
+  ta.onfocus = () => { typing = key; };
+  ta.onblur = () => { if (typing === key) setTimeout(() => { if (!ta.isConnected || document.activeElement !== ta) typing = ''; }); };
+  ta.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } };
+  const pick = el('input');
+  Object.assign(pick, { type: 'file', multiple: true, hidden: true });
+  pick.onchange = async () => {
+    d.files = [...d.files, ...(await Promise.all([...(pick.files ?? [])].map(read)))].slice(0, 10);
+    pick.value = '';
+    d.st = '';
+    draw();
+  };
+  const post = async (action: string, values: Blk, x?: HTMLElement) => c.act({ action, block: b.id, values: { ...base, ...values } }, x);
+  const send = async (steer = false) => {
+    if (!ta.value.trim() && !d.files.length) return;
+    const queue = !steer && (b.working || d.q != null) && acts.queue, action = steer ? acts.steer : queue || b.action;
+    const v: Blk = { ...d.picks, text: ta.value, name: d.files.map(x => x.name).join('/'), data: d.files.map(x => x.data).join(',') };
+    if (queue && d.q != null) v.q = d.q;
+    [d.st, d.steer] = ['sending', false];
+    draw();
+    if (await post(action, v)) {
+      Object.assign(d, { text: '', files: [], q: undefined, st: 'sent' });
+      ta.value = '';
+      grow();
+    } else d.st = 'failed';
+    draw();
+  };
+  function draw() {
+    const top: HTMLElement[] = [];
+    if (b.working) {
+      const p = el('div', 'pill');
+      const tick = () => {
+        if (!navigator.onLine) return (p.innerHTML = `<span class=r>offline · tap to retry</span>`);
+        const s = Math.max(0, Math.floor((Date.now() - Date.parse(b.working.since)) / 1000));
+        p.innerHTML = `${figure({ state: 'working' })}<span class=pt>${d.stopping ? 'stopping…' : `working ${s >= 60 ? `${Math.floor(s / 60)}m ` : ''}${s % 60}s`}</span>`;
+        const x = btn('stop', 'bad');
+        x.onclick = async e => { e.stopPropagation(); if (await post(acts.stop, {}, x)) { d.stopping = true; tick(); } };
+        if (acts.stop && !d.stopping) p.append(x);
+      };
+      p.onclick = () => { if (!navigator.onLine) f.dispatchEvent(new CustomEvent('redraw', { bubbles: true })); };
+      tick();
+      const t = setInterval(() => (p.isConnected ? tick() : clearInterval(t)), 1000);
+      top.push(p);
+    }
+    for (const m of b.queued ?? []) {
+      const r = el('div', 'qd', `<span class=qt>${esc(m.text)}</span>`);
+      r.dataset.q = String(m.q);
+      const now = btn('send now', 'primary'), edit = btn('edit'), rm = btn('remove', 'bad');
+      now.onclick = () => post(acts.steer, { q: m.q }, now);
+      edit.onclick = () => { [d.q, d.text, ta.value] = [m.q, m.text, m.text]; grow(); ta.focus(); draw(); };
+      rm.onclick = () => post(acts.unqueue, { q: m.q }, rm);
+      r.append(now, edit, rm);
+      top.push(r);
+    }
+    if (d.files.length) {
+      const th = el('div', 'th');
+      d.files.forEach((a, i) => {
+        const t = el('span', 'tb', a.type.startsWith('image/') ? `<img alt="${esc(a.name)}" src="data:${esc(a.type)};base64,${a.data}">` : `<span>${esc(a.name)}</span>`);
+        const x = btn('×');
+        x.setAttribute('aria-label', `remove ${a.name}`);
+        x.onclick = () => { d.files.splice(i, 1); draw(); };
+        t.append(x);
+        th.append(t);
+      });
+      top.push(th);
+    }
+    if (d.st) {
+      const s = el('p', `cs ${d.st === 'failed' ? 'r' : 'm'}`, esc({ sending: 'sending…', sent: '✓ sent', failed: 'not sent' }[d.st] ?? ''));
+      if (d.st === 'failed') {
+        const x = btn('retry', 'bad');
+        x.onclick = () => send();
+        s.append(' ', x);
+      }
+      top.push(s);
+    }
+    const row = el('div', 'cr'), add = btn('+'), go = btn(d.q != null ? 'save' : b.working ? 'queue' : b.label, 'primary');
+    add.setAttribute('aria-label', 'attach');
+    add.onclick = () => pick.click();
+    let held = false, hold = 0;
+    go.onpointerdown = () => { held = false; hold = window.setTimeout(() => { held = true; if (b.working && acts.steer) { d.steer = true; draw(); } }, 500); };
+    go.onpointerup = go.onpointerleave = () => clearTimeout(hold);
+    go.oncontextmenu = e => e.preventDefault();
+    go.onclick = () => { if (!held) send(); held = false; };
+    if (d.st === 'sending') go.setAttribute('aria-busy', 'true');
+    row.append(add, pick, ta, go);
+    if (d.steer) {
+      const st = btn('steer');
+      st.onclick = () => send(true);
+      row.append(st);
+    }
+    const chips = (b.chips ?? []).map((ch: Blk) => {
+      const s = el('div', 'chips');
+      const cur = d.picks[ch.name] ?? ch.cur ?? '';
+      for (const o of ch.all ?? []) {
+        const x = btn(`${ch.name} ${o}`, o === cur ? 'on' : '');
+        x.setAttribute('aria-pressed', String(o === cur));
+        x.onclick = () => (acts.model ? post(acts.model, { [ch.name]: o }, x) : ((d.picks[ch.name] = o), draw()));
+        s.append(x);
+      }
+      return s;
+    });
+    f.replaceChildren(...top, row, ...chips);
+  }
+  draw();
+  setTimeout(() => {
+    grow();
+    if (typing === key && ta.isConnected && document.activeElement !== ta) ta.focus();
+  });
+  return f;
+}
 
 function toggle(e: HTMLElement, id: string, c: Ctx, card = false) {
   const k = (card ? '' : 'sw:') + id;

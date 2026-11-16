@@ -137,7 +137,14 @@ html[data-focus] #cards{display:none}
 .scr .card.k-tool,.scr .card.k-sys{background:none;border:0;padding:0 var(--s2);margin:0}
 .scr .card.k-tool .fold{color:var(--a);font-size:var(--fs-meta)}
 .scr .card.k-sys .txt{color:var(--mute);font-size:var(--fs-meta)}
-.form.say{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 0;background:var(--bg);border-top:1px solid var(--line)}
-.form.say .fd{flex:1;border:0;min-height:0}
-.form.say .fk:empty{display:none}
+.cmp{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));padding:var(--s2) 0;background:var(--bg);border-top:1px solid var(--line)}
+.cmp .cr{display:flex;align-items:flex-end;gap:var(--s3)}
+.cmp textarea{flex:1;min-width:0;min-height:var(--hit);max-height:calc(8.4em + var(--s2) * 2 + 2px);box-sizing:border-box;resize:none;overflow-y:auto;font:inherit;line-height:1.4;color:inherit;background:none;border:1px solid var(--line);border-radius:4px;padding:var(--s2)}
+.cmp .pill,.cmp .qd,.cmp .cs{display:flex;align-items:center;gap:var(--s2);margin:0 0 var(--s2);font-size:var(--fs-meta)}
+.cmp .pill .pt{flex:1;color:var(--g)}
+.cmp .qd .qt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmp .th{display:flex;gap:var(--s2);overflow-x:auto;margin:0 0 var(--s2)}
+.cmp .tb{position:relative;display:flex;align-items:center;gap:var(--s1)}
+.cmp .tb img{height:calc(var(--hit) * 1.5);border-radius:4px}
+.cmp .chips{margin:var(--s2) 0 0}
 .scr[data-id^=thread-]{max-width:760px;margin-inline:auto}
