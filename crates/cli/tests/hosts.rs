@@ -1438,7 +1438,10 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     let rows = drover::hosts::health(&c, &cfg, &on, &[], home);
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert!(rows[0].starts_with("! drover — drover 0.1.0 (0ld) there"), "{rows:?}");
-    assert_eq!(drover::hosts::sync(&c, &on, "bazzite", home), "drover 0.1.0 (0ld)");
+    assert_eq!(
+        drover::hosts::sync(&c, &cfg, &on, ("bazzite", home, &[])),
+        "drover 0.1.0 (0ld)"
+    );
     let root = format!("--root '\\''{}'\\'' --force", root.display());
     let sync = format!("|| '\\''{real}'\\'' profiles sync");
     let calls = r.calls.borrow();

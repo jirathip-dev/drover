@@ -503,7 +503,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                 }
             }
             if h.machine.is_some() && h.enabled && !s.home.is_empty() {
-                s.drover = sync(ctx, &on, name, &s.home);
+                s.drover = sync(ctx, cfg, &on, (name, &s.home, &tags(h, Some(&*s))));
             }
             let hs = host::sample(&on);
             (s.load, s.mem, s.mem_total) = (hs.load_per_cpu, hs.free_mem_gb, hs.mem_total_gb);
@@ -965,7 +965,7 @@ fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[Str
             ));
         }
     }
-    for (profile, family, id) in acp_profiles(cfg, tags) {
+    for (profile, family, id) in acp_profiles(cfg, name, tags) {
         if let Some(why) = acp_guard(ctx, on, home, (&profile, family, id)) {
             bad.push(format!("✗ acp guard {profile} — {why}"));
         }
@@ -979,12 +979,14 @@ fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[Str
     bad
 }
 
-/// #1126: each ACP profile, once, of the fleets a host with `tags` fits: (profile, role family, adapter id).
-pub fn acp_profiles(cfg: &Config, tags: &[String]) -> Vec<(String, &'static str, &'static str)> {
+/// #1126: each ACP profile, once, of the roles `place` can put on host `name` (#1148: none pinned elsewhere) of the fleets its `tags` fit: (profile, role family, adapter id).
+pub fn acp_profiles(cfg: &Config, name: &str, tags: &[String]) -> Vec<(String, &'static str, &'static str)> {
     let mut seen = std::collections::BTreeSet::new();
     let fits = cfg.fleet.values().filter(|f| f.needs.iter().all(|t| tags.contains(t)));
     let roles = fits.flat_map(|f| f.role.iter().map(move |(role, rc)| (f, role, rc)));
+    let main = |f: &crate::config::Fleet, role: &str| crate::events::STAGES.contains(&f.family(role)).then_some("main");
     roles
+        .filter(|(f, role, rc)| rc.host.as_deref().or_else(|| main(f, role)).is_none_or(|h| h == name))
         .filter_map(|(f, role, rc)| Some((rc.profile_or(role), f.family(role), providers::get(&rc.harness).acp()?)))
         .filter(|p| seen.insert(p.0.clone()))
         .collect()
@@ -1050,7 +1052,7 @@ fn sha_of(v: &str) -> &str {
 }
 
 /// #917: host `name`'s drover `--version`, its last install logged `host-sync`, a mismatch's install started there.
-pub fn sync(ctx: &Ctx, on: &On, name: &str, home: &str) -> String {
+pub fn sync(ctx: &Ctx, cfg: &Config, on: &On, (name, home, tags): (&str, &str, &[String])) -> String {
     let (exe, sha) = (real_exe(ctx, home), env!("DROVER_SHA"));
     let Ok(o) = ok(on, "sh", &["-c", SYNC_STATUS, "sh", &exe]) else {
         return String::new();
@@ -1072,8 +1074,16 @@ pub fn sync(ctx: &Ctx, on: &On, name: &str, home: &str) -> String {
     let conf = rehome(vec![ctx.config.display().to_string()], Some(home)).remove(0);
     let root = Path::new(&exe).parent().and_then(Path::parent).map(Path::display);
     let install = install_line(&root.map_or(exe.clone(), |r| r.to_string()), sha);
+    let acp = cfg
+        .host_acp(name)
+        .map(|_| acp_profiles(cfg, name, tags))
+        .unwrap_or_default();
+    let acp: String = acp
+        .iter()
+        .map(|(p, family, _)| format!(" && '{exe}' profiles sync --profile '{p}' --role {family}"))
+        .collect();
     let job = format!(
-        "{}{{ {install} && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}; }}; echo \"$? {sha} $V\" >\"$HOME/.drover-sync.done\"",
+        "{}{{ {install} && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}{acp}; }}; echo \"$? {sha} $V\" >\"$HOME/.drover-sync.done\"",
         crate::cloud::SH
     );
     if let Err(e) = ok(on, "sh", &["-c", SYNC_START, "sh", &job, &theirs]) {

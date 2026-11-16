@@ -25,6 +25,7 @@ struct Boat<'a> {
     machines: Shared<BTreeMap<String, Machine>>,
     runs: Shared<Vec<(Vec<String>, String)>>,
     profiles: PathBuf,
+    conf: String,
 }
 
 fn words(line: &str) -> Vec<String> {
@@ -74,6 +75,7 @@ impl Boat<'_> {
             machines: Shared::default(),
             runs: Shared::default(),
             profiles: c.config.with_file_name("claude"),
+            conf: c.config.display().to_string(),
         };
         *b.machines.borrow_mut() = m.collect();
         b
@@ -165,6 +167,7 @@ impl Boat<'_> {
                 std::fs::write(dir.join("role.md"), "role").unwrap();
                 Ok(out(0, ""))
             }
+            ["sh", "-c", "test -e \"$1\"", "sh", p] if p == self.conf => Ok(out(1, "")),
             ["sh", "-c", script, "sh", _] if script.contains("cat >") || script.starts_with("test -e") => {
                 real(w, input)
             }
@@ -554,6 +557,11 @@ fn bootstrap_with_no_config_there_prints_no_bare_sync_and_skips_a_main_pinned_ro
     assert!(!o.contains("fleet-verify"), "{o}");
     let calls = f.calls.borrow().clone();
     assert!(!calls.iter().any(|l| l.contains("'fleet-verify'")), "{calls:?}");
+    let job = calls.iter().find(|l| l.starts_with("@boat1 sh -c V=")).unwrap();
+    assert!(
+        job.contains("profiles sync --profile 'fleet-impl' --role impl"),
+        "{job}"
+    );
     let health = drover::hosts::cached(&c).remove("boat1").unwrap().health;
     assert!(!health.iter().any(|r| r.starts_with("✗ acp guard")), "{health:?}");
 }

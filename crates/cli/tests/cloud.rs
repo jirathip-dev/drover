@@ -574,7 +574,8 @@ fn boot_fake(gh_in: bool) -> Fake {
         .reply(&step("git config --global --get credential"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&step("git clone"), "")
-        .reply(&step("test ! -e "), "");
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&step("'"), "");
     if gh_in {
         f.reply(&step("gh auth status"), "")
     } else {
@@ -663,10 +664,7 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
     );
     let written = r.1.borrow().join("\n");
     assert!(!written.contains("[fleet") && !written.contains("SEKRIT"), "{written}");
-    let conf = c.config.display().to_string();
-    assert!(r.0.called(&step(&format!(
-        "test ! -e '{conf}' || '/opt/drover/bin/drover' profiles sync"
-    ))));
+    assert!(r.0.called(&step(SYNC)));
     assert!(out.contains("✓ profiles sync — there"), "{out}");
     let log = drover::events::jsonl(&c.state).unwrap();
     assert!(
@@ -722,6 +720,8 @@ profile = "fleet-impl"
 allow_commands = ["docker"]
 "#;
 
+const SYNC: &str = "'/opt/drover/bin/drover' profiles sync";
+
 fn boot_again() -> Fake {
     boot_fake(true)
         .reply(&step("git config --global --get credential"), "")
@@ -744,7 +744,7 @@ fn bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there()
     let res = drover::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();
     assert!(res.is_ok(), "{res:?} {out}");
-    assert!(out.contains("✓ profiles sync"), "{out}");
+    assert!(!out.contains("✓ profiles sync"), "{out}");
     let left = there.join("fleet.toml");
     assert!(
         !left.exists() || Config::load(&left).is_ok(),
@@ -760,17 +760,14 @@ fn a_failed_bootstrap_step_shows_its_command_exit_code_and_output_and_logs_them(
     let (c, cfg) = running("cloud-boot-fail");
     let err = "invalid config /home/me/.config/drover/fleet.toml: fleet.berth.role.orchestrator: account 'C' is not in [accounts]";
     let f = boot_again()
-        .once_err(&step("test ! -e "), 1, &format!("warming up\n{err}\n"))
-        .once_err(&step("test ! -e "), 1, &format!("warming up\n{err}\n"));
+        .once_err(&step(SYNC), 1, &format!("warming up\n{err}\n"))
+        .once_err(&step(SYNC), 1, &format!("warming up\n{err}\n"));
     let mut out = vec![];
     let res = drover::cloud::bootstrap(&c, &cfg, &f, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();
     let shown = format!("{out}\n{:#}", res.unwrap_err());
-    let cmd = format!(
-        "test ! -e '{}' || '/opt/drover/bin/drover' profiles sync",
-        c.config.display()
-    );
-    assert!(shown.contains(&cmd) && shown.contains("exit 1"), "{shown}");
+    let cmd = SYNC;
+    assert!(shown.contains(cmd) && shown.contains("exit 1"), "{shown}");
     assert!(shown.contains(err) && shown.contains("warming up"), "{shown}");
     let log = read(&c.state).unwrap();
     let e = log
