@@ -1244,7 +1244,6 @@ fn pass(
             writeln!(out, "{fleet} hotspots: {e:#}")?;
         }
     }
-    reconcile(ctx, cfg, fleet)?;
     let events = working(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
@@ -1286,12 +1285,8 @@ fn pass(
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr)));
         let gone = gh::missing(ctx, None, cfg, (fleet, s.issue), &events, &pr).filter(|m| w.what.contains(m));
         let n = s.issue.to_string();
-        if pr["state"] == "OPEN"
-            && !s.done()
-            && !queue::serials(&events, f, fleet).is_empty()
-            && serial(ctx, cfg, r, out, (fleet, s), &pr, fast)?
-        {
-            continue;
+        if pr["state"] == "OPEN" && !s.done() && !queue::serials(&events, f, fleet).is_empty() {
+            serial(ctx, cfg, r, out, (fleet, s), &pr)?;
         }
         if let Err(e) = crate::gate::sync_label(ctx, cfg, r, out, s, &pr) {
             writeln!(out, "{fleet} #{n} label: {e:#}")?;
@@ -1667,12 +1662,9 @@ fn serial(
     out: &mut dyn Write,
     (fleet, s): (&str, &IssueState),
     pr: &Value,
-    fast: bool,
-) -> Result<bool> {
+) -> Result<()> {
     let (f, n, ev) = (cfg.fleet(fleet)?, s.issue, working(&ctx.state)?);
-    let (st, q) = (fold(&ev), queue::replay(&ev, fleet));
-    let mine = queue::groups(&q, &ev, f, fleet, n);
-    let (mut wait, mut text) = (mine.iter().any(|g| queue::held(&ev, fleet, n, &g.name)), None);
+    let q = queue::replay(&ev, fleet);
     let (num, head) = (pr["number"].to_string(), pr["headRefOid"].as_str().unwrap_or_default());
     for g in queue::groups(&q, &[], f, fleet, n) {
         let has = |e: &Event| e.is("serial-joined", fleet, n) && e.str("group") == Some(&g.name);
@@ -1681,162 +1673,17 @@ fn serial(
             emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-joined", d))?;
         }
     }
-    let new = crate::gate::unjoined(ctx, r, f, (fleet, n), (&num, head)).unwrap_or_default();
-    let old = s.state.starts_with("review") || s.state == "ready";
-    let mut by = ev
-        .iter()
-        .rev()
-        .find(|e| e.is("serial-held", fleet, n))
-        .and_then(|e| e.val("holder").as_u64());
-    let pos = |i: u64| (q.iter().position(|x| x.issue == i).unwrap_or(usize::MAX), i);
-    for (g, p) in &new {
+    for (g, p) in crate::gate::unjoined(ctx, r, f, (fleet, n), (&num, head)).unwrap_or_default() {
         writeln!(out, "{fleet} #{n} serial-joined {}: {p}", g.name)?;
         let d = json!({"group": g.name, "by": "diff", "path": p});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-joined", d))?;
-        let h = queue::holders(&ev, &st, f, fleet, &g.name);
-        let hot = queue::hot(g);
-        let ahead = st.values().find(|x| {
-            hot && x.fleet == fleet
-                && queue::in_flight(&x.state)
-                && queue::held(&ev, fleet, x.issue, &g.name)
-                && pos(x.issue) < pos(n)
-        });
-        if (!old || hot) && (wait || h.len() >= g.max || ahead.is_some()) {
-            let h = h.first().or(ahead.as_ref()).map(|h| h.issue).or(by).unwrap_or(0);
-            by = Some(h);
-            let d = json!({"group": g.name, "holder": h});
-            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
-            let stop = format!(
-                "stop: {} is held by #{h}; you'll get an update round when it merges",
-                g.name
-            );
-            (wait, text) = (true, text.or(Some(stop)));
-        }
     }
     let now = working(&ctx.state)?;
-    let gs = queue::groups(&q, &now, f, fleet, n);
-    let atomic = |i: u64| queue::groups(&q, &now, f, fleet, i).iter().any(queue::hot);
-    if let Some(at) = gs.iter().position(|g| queue::held(&now, fleet, n, &g.name)) {
-        let last = (now.iter().rev()).find(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(&gs[at].name));
-        let b = last.and_then(|e| e.val("holder").as_u64()).unwrap_or(0);
-        let all = atomic(n);
-        for (_, g) in (gs.iter().enumerate()).filter(|(i, g)| (all || *i > at) && !queue::held(&now, fleet, n, &g.name))
-        {
-            let d = json!({"group": g.name, "holder": b, "by": "order"});
-            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
-        }
-    }
-    if let (Some(text), Some(lane)) = (text, s.lane.as_deref()) {
-        writeln!(out, "{fleet} #{n} serial-held: {text}")?;
-        let sp = crate::events::last_spawn(&ev, lane);
-        let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
-        let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
-        crate::term::tell(&crate::hosts::On::of(r, sp), dsh, lane, pane, &text).ok();
-    }
-    if !wait || fast || !new.is_empty() {
-        return Ok(wait);
-    }
-    let ev = working(&ctx.state)?;
-    let atomic = |i: u64| queue::groups(&q, &ev, f, fleet, i).iter().any(queue::hot);
-    let mut slots = vec![];
-    for g in queue::groups(&q, &ev, f, fleet, n)
-        .into_iter()
-        .filter(|g| queue::held(&ev, fleet, n, &g.name))
-    {
-        let first_held = |i: u64| {
-            queue::groups(&q, &ev, f, fleet, i)
-                .into_iter()
-                .find(|y| queue::held(&ev, fleet, i, &y.name))
-        };
-        let free = |i: u64| {
-            queue::groups(&q, &ev, f, fleet, i)
-                .iter()
-                .filter(|y| queue::held(&ev, fleet, i, &y.name))
-                .all(|y| queue::holders(&ev, &st, f, fleet, &y.name).len() < y.max)
-        };
-        let waits = |x: &&IssueState| {
-            x.fleet == fleet
-                && queue::in_flight(&x.state)
-                && queue::held(&ev, fleet, x.issue, &g.name)
-                && (x.issue == n
-                    || if atomic(x.issue) {
-                        free(x.issue)
-                    } else {
-                        first_held(x.issue).is_some_and(|y| y.name == g.name)
-                    })
-                && !queue::stuck(&ev, &st, x)
-        };
-        let first = st.values().filter(waits).min_by_key(|x| pos(x.issue));
-        if queue::holders(&ev, &st, f, fleet, &g.name).len() >= g.max || first.map(|x| x.issue) != Some(n) {
-            return Ok(true);
-        }
-        let e = Event::new(ctx.now, fleet, Some(n), "serial-slot", json!({"group": g.name}));
-        if atomic(n) {
-            slots.push(e);
-        } else {
+    for g in queue::groups(&q, &now, f, fleet, n) {
+        if queue::held(&now, fleet, n, &g.name) {
+            let e = Event::new(ctx.now, fleet, Some(n), "serial-slot", json!({"group": g.name}));
             emit(&ctx.state, cfg, e)?;
         }
-    }
-    for e in slots {
-        emit(&ctx.state, cfg, e)?;
-    }
-    update_lane(ctx, cfg, r, out, &ev, fleet, n)?;
-    Ok(true)
-}
-
-fn reconcile(ctx: &Ctx, cfg: &Config, fleet: &str) -> Result<()> {
-    let (f, ev) = (cfg.fleet(fleet)?, working(&ctx.state)?);
-    let (st, q) = (fold(&ev), queue::replay(&ev, fleet));
-    let pos = |i: u64| (q.iter().position(|x| x.issue == i).unwrap_or(usize::MAX), i);
-    let live = st.values().filter(|s| s.fleet == fleet && queue::in_flight(&s.state));
-    let gs: BTreeMap<u64, (bool, Vec<crate::config::Serial>)> = live
-        .map(|s| {
-            (
-                s.issue,
-                (queue::stuck(&ev, &st, s), queue::groups(&q, &ev, f, fleet, s.issue)),
-            )
-        })
-        .filter(|(_, (_, g))| g.iter().any(queue::hot))
-        .collect();
-    let mut holds: Vec<(u64, String, u64)> = vec![];
-    let held = |holds: &[(u64, String, u64)], n: u64, g: &str| {
-        queue::held(&ev, fleet, n, g) || holds.iter().any(|h| h.0 == n && h.1 == g)
-    };
-    let holder = |holds: &[(u64, String, u64)], n: u64, g: &str| {
-        let new = holds.iter().find(|h| h.0 == n && h.1 == g).map(|h| h.2);
-        let last = || {
-            ev.iter()
-                .rfind(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(g))
-        };
-        new.or_else(|| last()?.val("holder").as_u64()).unwrap_or(0)
-    };
-    loop {
-        let before = holds.len();
-        for (&n, (stuck, mine)) in &gs {
-            let by = mine.iter().find(|g| held(&holds, n, &g.name));
-            let Some(by) = by.map(|g| holder(&holds, n, &g.name)).or(stuck.then_some(0)) else {
-                continue;
-            };
-            let free: Vec<_> = mine.iter().filter(|g| !held(&holds, n, &g.name)).collect();
-            holds.extend(free.into_iter().map(|g| (n, g.name.clone(), by)));
-        }
-        for g in queue::serials(&ev, f, fleet).iter().filter(|g| queue::hot(g)) {
-            let mut h: Vec<u64> = (gs.iter())
-                .filter(|(&n, (_, m))| m.iter().any(|x| x.name == g.name) && !held(&holds, n, &g.name))
-                .map(|(&n, _)| n)
-                .collect();
-            h.sort_by_key(|&i| pos(i));
-            for &n in h.iter().skip(g.max) {
-                holds.push((n, g.name.clone(), h[0]));
-            }
-        }
-        if holds.len() == before {
-            break;
-        }
-    }
-    for (n, g, h) in holds {
-        let d = json!({"group": g, "holder": h, "by": "reconcile"});
-        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
     }
     Ok(())
 }

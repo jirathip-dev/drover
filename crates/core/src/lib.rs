@@ -75,6 +75,8 @@ use std::path::PathBuf;
 
 /// #235: `drover --version`: the crate version and the git sha it is built from (build.rs).
 pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("DROVER_SHA"), ")");
+/// #1081: the git sha this binary is built from; a serve reports it in `/api/v1/health`.
+pub const SHA: &str = env!("DROVER_SHA");
 
 #[derive(Clone)]
 pub struct Ctx {
@@ -417,7 +419,9 @@ pub const CHANGE: u64 = config::ORCHESTRATOR_CHANGE_MINUTES * 60;
 
 fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
     let n = choice.parse::<usize>().ok();
+    let approve = crate::design::is_approval(ask, choice).then_some("approve");
     n.and_then(|n| ask.val("options").get(n.checked_sub(1)?)?.as_str())
+        .or(approve)
         .unwrap_or(choice)
 }
 

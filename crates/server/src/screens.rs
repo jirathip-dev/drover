@@ -44,12 +44,15 @@ pub fn page_places() -> Value {
     Value::Array(all)
 }
 
-const THREAD_ACTIONS: [&str; 5] = [
+const THREAD_ACTIONS: [&str; 8] = [
     "thread-new",
     "thread-say",
     "thread-retry",
     "thread-archive",
     "thread-restore",
+    "thread-secret",
+    "thread-config",
+    "thread-signin",
 ];
 
 fn iso(t: u64) -> String {
@@ -1098,7 +1101,7 @@ impl Server<'_> {
             }
             "/screens/ask" => ask_sheet(ctx, q)?,
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
-                return self.threads_screen(ctx, &p[16..], paired)
+                return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
             }
             _ => return None,
         };
@@ -1249,9 +1252,15 @@ impl Server<'_> {
             json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
         }));
-        cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|e| {
-            json!({"type": "card", "id": format!("stuck-{}", e.seq), "kind": "alert", "tone": "warn",
-                "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": crate::events::plain(e)}]})
+        cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|(f, es)| {
+            let line = |e: &Event| match e.issue {
+                Some(n) => format!("- {} · `drover why {f}#{n}`", crate::events::plain(e)),
+                None => format!("- {}", crate::events::plain(e)),
+            };
+            let md: Vec<String> = es.iter().map(|e| line(e)).collect();
+            json!({"type": "card", "id": format!("stuck-{f}"), "kind": "alert", "tone": "warn",
+                "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": md.join("\n")}],
+                "buttons": [{"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"}]})
         }));
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
         cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
@@ -1419,17 +1428,16 @@ impl Server<'_> {
                     .into_iter()
                     .find(|e| e.str("id") == Some(block))
                     .cloned();
-                let ask = open.with_context(|| format!("no open ask {block}"))?;
+                let at = open
+                    .map(|a| a.fleet)
+                    .or_else(|| (!fleet.is_empty()).then(|| fleet.clone()));
+                let at = at.with_context(|| format!("no open ask {block}"))?;
                 let pick = if s("other").trim().is_empty() {
                     s("choice")
                 } else {
                     s("other")
                 };
-                self.form_op(
-                    ctx,
-                    "answer",
-                    &[("fleet", ask.fleet), ("id", block.into()), ("choice", pick)],
-                )?
+                self.form_op(ctx, "answer", &[("fleet", at), ("id", block.into()), ("choice", pick)])?
             }
             "needs-human" => {
                 let pick = s("choice");
@@ -1450,12 +1458,17 @@ impl Server<'_> {
                 ];
                 self.form_op(ctx, "card", &kv)?
             }
+            "thread-config" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
+            "thread-signin" => crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("name"), "web")?,
             n if THREAD_ACTIONS.contains(&n) => {
                 let kv = [
                     ("t", s("thread")),
                     ("text", s("text")),
                     ("repo", s("repo")),
                     ("n", s("msg")),
+                    ("name", s("name")),
+                    ("act", s("act")),
+                    ("value", s("text")),
                 ];
                 let mut f: Q = kv.into_iter().map(|(k, v)| (k.into(), v)).collect();
                 f.insert("op".into(), n[7..].into());
@@ -1467,7 +1480,7 @@ impl Server<'_> {
                 if n == "thread-new" {
                     let id = line.split(' ').next().unwrap_or_default();
                     let s = self
-                        .threads_screen(ctx, &format!("/{id}"), true)
+                        .threads_screen(ctx, &format!("/{id}"), None, true)
                         .context("no such thread")?;
                     return Ok(json!({"ops": [{"op": "screen", "screen": s}], "toast": line}));
                 }

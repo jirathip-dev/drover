@@ -130,7 +130,7 @@ fn bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start() {
 }
 
 #[test]
-fn the_ssh_files_are_all_valid_config_and_the_host_key_stays_pinned() {
+fn the_ssh_files_are_valid_a_resume_repins_the_host_key_and_a_moved_key_is_refused() {
     let (c, bin) = setup("boat-ssh", "small");
     let cfg = Config::load(&c.config).unwrap();
     let r = Boat(Fake::default(), bin.clone());
@@ -175,9 +175,29 @@ fn the_ssh_files_are_all_valid_config_and_the_host_key_stays_pinned() {
     )
     .unwrap();
     drover::cloud::stop(&c, &cfg, &r, "boat1", "stop", "test").unwrap();
-    let e = drover::cloud::start(&c, &cfg, &r, "boat1").unwrap_err();
+    drover::cloud::start(&c, &cfg, &r, "boat1").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&pin).unwrap(),
+        "[10.0.0.7]:2222 ssh-ed25519 EVIL\n"
+    );
+    let repin = read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .find(|e| e.kind == "cloud-repin");
+    let d = repin.expect("cloud-repin logged").data;
+    assert_eq!(
+        (d["was"].as_str(), d["key"].as_str()),
+        (Some("ssh-ed25519 AAAAboatkey"), Some("ssh-ed25519 EVIL"))
+    );
+    std::fs::write(
+        bin.join("ssh-keyscan"),
+        "#!/bin/sh\necho '[10.0.0.7]:2222 ssh-ed25519 WORSE'\n",
+    )
+    .unwrap();
+    let e = drover::cloud::moved(&c, &cfg, &r, "boat1", false).unwrap_err();
     assert!(format!("{e:#}").contains("host key changed"), "{e:#}");
-    assert!(std::fs::read_to_string(&pin).unwrap().contains("AAAAboatkey"));
+    assert!(std::fs::read_to_string(&pin).unwrap().contains("EVIL"));
 }
 
 #[test]
