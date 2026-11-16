@@ -1,0 +1,6 @@
+Decided: raise via one new file in ci/cap.d/, leaving ci/cap.toml untouched
+Because: "One new file `ci/cap.d/2026-11-17-53500.toml` with `line_cap = 53500`"
+Because: crates/core/src/overlap.rs:147
+Rejected: editing ci/cap.toml — the AC requires it unchanged and the hook refuses it
+Check: drover cap-check --config ci/cap.toml prints cap 53500 and cap raised by ci/cap.d/2026-11-17-53500.toml
+Owner: The code-size limit rises to 53,500 lines so the whole queue fits.
