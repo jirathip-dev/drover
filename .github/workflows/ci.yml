@@ -117,7 +117,9 @@ jobs:
           read -ra targets <<<"$flags"
           cargo nextest run --locked --no-fail-fast --workspace "${targets[@]}"
       - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
-        run: test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*' -print -quit)"
+        run: |
+          left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*' -print)
+          test -z "$left" || { echo "$left"; find $left | head -50; exit 1; }
 
   # #1162: the one `test` check that branch protection and required_checks name, green only when every shard is.
   test:
