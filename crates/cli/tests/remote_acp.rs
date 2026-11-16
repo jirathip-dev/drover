@@ -707,7 +707,7 @@ fn doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does() {
     b.machines.borrow_mut().get_mut("boat1").unwrap().bare = false;
     let (_, o) = run(&c, &b, &["doctor"]);
     assert!(
-        o.contains("\n! host boat1 shed: ") && o.contains("shed: not found"),
+        o.contains("\n✗ host boat1 shed — does not answer: ") && o.contains("shed: not found"),
         "{o}"
     );
     assert!(!o.contains("✓ host boat1"), "{o}");

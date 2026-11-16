@@ -649,9 +649,10 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
     let r = here.on(&f);
     let rows = drover::hosts::health(&c, &cfg, &drover::hosts::On::new(&r, Some("bazzite")), &[], "/h");
     assert_eq!(rows.len(), 1, "{rows:?}");
+    let fix = format!("→ ssh bazzite '{}'", drover::hosts::SHED_RESTART);
     assert!(
-        rows[0].starts_with("! shed: "),
-        "a shed that does not answer only warns: {rows:?}"
+        rows[0].starts_with("✗ shed — does not answer: ") && rows[0].ends_with(&fix),
+        "a shed that does not answer keeps lanes off with its restart: {rows:?}"
     );
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     let r = healthy(fake(0.1, 0.1))
@@ -693,7 +694,7 @@ fn doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh() {
         .once_err(&format!("{SSH}'shed' 'connect'"), 1, "shed: no server on bazzite");
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(
-        out.contains("\n! host bazzite shed: ") && out.contains("no server on bazzite"),
+        out.contains("\n✗ host bazzite shed — does not answer: ") && out.contains("no server on bazzite"),
         "{out}"
     );
     assert!(!out.contains("unreachable"), "{out}");

@@ -831,6 +831,65 @@ fn a_snapshot_needs_a_green_health_check_first() {
     );
 }
 
+struct Frozen<'a>(&'a dyn Runner, &'a Fake, std::sync::atomic::AtomicUsize);
+
+impl Runner for Frozen<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let connect = args.join(" ").contains("cloud1 -- 'shed' 'connect'");
+        if connect && self.1.called(&rc("snapshot")) && self.2.load(SeqCst) > 0 {
+            self.2.fetch_sub(1, SeqCst);
+            self.1.calls.borrow_mut().push("frozen shed connect".into());
+            return Ok(Out {
+                code: 255,
+                stderr: "timed out".into(),
+                ..Out::default()
+            });
+        }
+        self.0.run_in(prog, args, input)
+    }
+}
+
+fn snapshot_frozen(name: &str, fails: usize) -> (Fake, anyhow::Result<()>) {
+    let (c, cfg) = running(name);
+    let recipe = RECIPE.replace("[rate", "snapshot = \"fakecloud snapshot {name}\"\n[rate");
+    std::fs::write(c.config.with_file_name("recipes/fake.toml"), recipe).unwrap();
+    let restart = format!("{SSH}'sh' '-c' '{{ sudo -n systemctl thaw");
+    let r = healthy(Fake::default()).reply(&rc("snapshot"), "").reply(&restart, "");
+    let (sh, cloud) = (FakeShed::new(), FakeShed::new());
+    let over = on_cloud(&r, &cloud);
+    let frozen = Frozen(&over, &r, fails.into());
+    let res = drover::cloud::snapshot(&c, &cfg, &sh.on(&frozen), "cloud1");
+    (r, res)
+}
+
+#[test]
+fn a_shed_frozen_by_the_snapshot_is_restarted_once_then_fails_the_snapshot() {
+    let restart = format!("{SSH}'sh' '-c' '{{ sudo -n systemctl thaw");
+    let (r, res) = snapshot_frozen("cloud-snap-thaw", 1);
+    res.unwrap();
+    assert_eq!(r.count("frozen shed connect"), 1);
+    let at = |p: &str| r.index(p).unwrap();
+    assert!(at(&rc("snapshot")) < at("frozen shed connect") && at("frozen shed connect") < at(&restart));
+    assert!(r.calls.borrow()[at(&restart)].contains("systemctl --user restart shed.service"));
+    let (r, res) = snapshot_frozen("cloud-snap-dead", 2);
+    let e = format!("{:#}", res.unwrap_err());
+    assert!(
+        e.starts_with("cloud1: shed does not answer after the snapshot: ✗ shed"),
+        "{e}"
+    );
+    assert_eq!((r.count(&restart), r.count("frozen shed connect")), (1, 2));
+    let (r, res) = snapshot_frozen("cloud-snap-fine", 0);
+    res.unwrap();
+    assert!(
+        r.called(&rc("snapshot")) && !r.called(&restart),
+        "a shed that answers is left alone"
+    );
+}
+
 struct ShedThere<'a>(&'a Fake, std::path::PathBuf);
 
 impl Runner for ShedThere<'_> {

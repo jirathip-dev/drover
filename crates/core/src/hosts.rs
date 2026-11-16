@@ -942,12 +942,23 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     bad
 }
 
-fn shed_row(on: &On) -> Option<String> {
+/// #1127: thaw a frozen shed service (its user manager, then the unit), then restart it.
+pub const SHED_RESTART: &str =
+    "{ sudo -n systemctl thaw \"user@$(id -u).service\"; systemctl --user thaw shed.service; } 2>/dev/null; \
+systemctl --user restart shed.service";
+
+/// A host's shed row unless it answers `✓`; one there that does not answer is `✗ shed` with the restart.
+pub fn shed_row(on: &On) -> Option<String> {
     let line = on.shed().map_or_else(
         || crate::session::live_on(on).err().map(|e| format!("! shed: {e:#}")),
         |b| Some(crate::shed::line(on, &b.wire)),
     );
-    line.filter(|l| !l.starts_with('✓'))
+    let m = on.machine.unwrap_or_default();
+    let dead = |l: String| match l.strip_prefix("! shed: ") {
+        Some(e) if on.shed().is_some() => format!("✗ shed — does not answer: {e} → ssh {m} '{SHED_RESTART}'"),
+        _ => l,
+    };
+    line.filter(|l| !l.starts_with('✓')).map(dead)
 }
 
 fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {
