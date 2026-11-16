@@ -1,0 +1,7 @@
+Decided: merged origin/staging with #1088; its back, copy and thread taps keep their behaviour through obj() and String()
+Because: "no `any` (explicit or implicit), no non-null `!`, no `as` casts except `as const`"
+Decided: the tab list carries `screen` as a string and `'standalone' in navigator` replaces the cast, removing #1088's three `!` and one `as`
+Decided: #1088's thread-link chip in serve/chat.rs goes through Json::put instead of `c["buttons"]`
+Rejected: taking staging's main.ts as is — the #809 lint refuses its `!` and `as`
+Check: chat_tab and shed failed only under the full parallel run (orchestrator-spawn sleep polls) and passed alone
+Owner: the branch now carries #1088's page changes, written to the new rules
