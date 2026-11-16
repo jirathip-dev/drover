@@ -166,7 +166,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
     let up = up.and_then(|_| {
         for _ in 0..30 {
             if cmd(ctx, cfg, r, name, "status")?.trim() == "running" {
-                return refresh(ctx, cfg, r, name, (true, false))
+                return refresh(ctx, cfg, r, name, (true, true))
                     .map(|()| drop(crate::hosts::survey(ctx, cfg, r, true)));
             }
             r.sleep(10);
@@ -389,7 +389,10 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let why = over.map_or(String::new(), |p| format!(" (recipe override {} in use)", p.display()));
     let (tags, home) = crate::hosts::probe(&on).with_context(|| format!("can't reach {name}{why}"))?;
     let mine = crate::config::home().to_string_lossy().into_owned();
-    let [exe, conf] = [&ctx.exe, &ctx.config.display().to_string()].map(|p| p.replace(&mine, &home));
+    let (exe, conf) = (
+        crate::hosts::real_exe(ctx, &home),
+        ctx.config.display().to_string().replace(&mine, &home),
+    );
     let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("DROVER_SHA"));
     let run = |s: &str, l: u64| {
         on.run_for(
