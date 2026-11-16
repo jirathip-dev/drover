@@ -1,0 +1,9 @@
+Decided: start() refreshes with repin on, so a resume of a host drover stopped trusts the key address prints and logs cloud-repin
+Because: "re-pins the key it reads from `address`, logging `cloud-repin` as today"
+Decided: moved() keeps its caller's repin flag; check passes false, so a key change without a start still refuses
+Because: "A key change on a host drover did not just start (`moved()` in check) still refuses."
+Decided: the old boat test that expected stop then start to fail on a new key now expects the re-pin; its refusal half moved to moved(repin=false)
+Because: crates/cli/tests/boat.rs:178
+Rejected: repin only on the resume branch — create and create_from already delete the pin, so one flag covers all three
+Check: cargo test --test boat the_ssh_files fails at 2668b78d9 and passes at the head
+Owner: Starting a stopped cloud host no longer fails because its host key changed; a key change at any other time is still refused.
