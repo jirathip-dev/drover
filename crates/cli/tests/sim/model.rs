@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 pub const FLEET: &str = "drover";
 pub const REPO: &str = "jirathip-dev/herdsman";
+pub const BASELINE: &str = "6e618cd22a43225e18a773b2dc5bd9ab24a9088b";
 
 /// What a lane's agent does once its prompt lands.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -483,6 +484,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
         | ["reset", "-q", ..]
         | ["worktree", "prune"] => ok(""),
         ["merge-tree", ..] => ok(format!("{:040x}\n", 7)),
+        ["merge-base", "--is-ancestor", BASELINE, _] | ["replace", ..] => ok(""),
         ["show", _] => err(128, "fatal: path does not exist"),
         ["worktree", "add", .., path, rev] => {
             let _ = std::fs::create_dir_all(std::path::Path::new(path).join(".git"));

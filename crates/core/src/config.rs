@@ -452,6 +452,33 @@ pub struct Fleet {
     pub runtime: Option<Runtime>,
     /// #732: lets `rev` share `impl`'s provider; its line needs a `#` reason comment.
     pub rev_same_provider: Option<bool>,
+    /// #1099: lanes see history since this commit only (`drover baseline`); unset = all of it.
+    pub baseline: Option<Baseline>,
+}
+
+/// #1099: a full commit id; only 40 lowercase hex chars build one, so a bad key fails at load.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Baseline(String);
+
+impl TryFrom<String> for Baseline {
+    type Error = String;
+    fn try_from(s: String) -> std::result::Result<Self, String> {
+        let hex = s.len() == 40 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        hex.then_some(Baseline(s))
+            .ok_or_else(|| "baseline must be a full 40-hex commit sha".into())
+    }
+}
+
+impl Baseline {
+    /// The full sha.
+    pub fn sha(&self) -> &str {
+        &self.0
+    }
+    /// The first 12 chars, for lines people read.
+    pub fn short(&self) -> &str {
+        &self.0[..12]
+    }
 }
 
 /// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits for the full set); integration's own CI then runs the full suite, and `land::watch` reverts a red landing.
@@ -1166,7 +1193,7 @@ impl Config {
         let raw: toml::Table = toml::from_str(text)?;
         if let Some((k, _)) = strings("", &toml::Value::Table(raw.clone()))
             .into_iter()
-            .find(|(_, v)| secret_like(v))
+            .find(|(k, v)| secret_like(v) && !(k.ends_with(".baseline") && Baseline::try_from(v.clone()).is_ok()))
         {
             return crate::gate::refused(
                 "SECRET_IN_CONFIG",

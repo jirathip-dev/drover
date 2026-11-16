@@ -115,7 +115,7 @@ pub fn markdown(charts: &[Chart; 2], at: &str) -> String {
     for (c, title) in charts.iter().zip(["Issue states", "Timers and the drive pass"]) {
         let _ = write!(m, "\n## {title}\n\n```mermaid\n{}```\n", c.source);
     }
-    m
+    m + &crate::baseline::doc()
 }
 
 /// #845: `drover diagram [--live] [fleet]`: default `[limits]`, or the config's and per-state counts with `--live`.

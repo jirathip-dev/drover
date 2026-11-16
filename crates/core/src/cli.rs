@@ -55,6 +55,10 @@ enum Cmd {
     #[command(about = "Resume a paused fleet")]
     Resume { fleet: String },
     #[command(
+        about = "#1099: Owner only: lanes see history since <sha> (default the integration tip) by a local graft; writes `baseline` in fleet.toml"
+    )]
+    Baseline { fleet: String, sha: Option<String> },
+    #[command(
         about = "Create worktree + shed terminal, write .brief.md, launch the role's harness, verify the prompt landed"
     )]
     Spawn {
@@ -1070,6 +1074,7 @@ pub fn usage_doc() -> String {
     cmd.build();
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     let owner = [
+        "baseline",
         "doctor",
         "drive",
         "fleet",
@@ -1429,6 +1434,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Pause { fleet } => pause(ctx, out, &fleet, true, None)?,
         Cmd::Resume { fleet } => pause(ctx, out, &fleet, false, None)?,
+        Cmd::Baseline { fleet, sha } => crate::baseline::set(ctx, r, out, &fleet, sha.as_deref())?,
         Cmd::Next { fleet } => {
             if Config::load(&ctx.config).is_ok_and(|c| c.fleet.get(&fleet).is_some_and(|f| f.paused)) {
                 writeln!(out, "{fleet}: paused")?;

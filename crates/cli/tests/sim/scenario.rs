@@ -1,4 +1,4 @@
-use crate::model::{Ev, Model, Pr, Script, FLEET, REPO};
+use crate::model::{Ev, Model, Pr, Script, BASELINE, FLEET, REPO};
 use crate::sched::{Rng, Sim, World};
 use drover::Ctx;
 use std::path::Path;
@@ -13,6 +13,7 @@ pub fn config(max_spawns: u64, rounds: u64) -> String {
 repo = "{REPO}"
 local = "LOCAL"
 integration = "staging"
+baseline = "{BASELINE}"
 
 [fleet.{FLEET}.role.impl]
 harness = "claude"

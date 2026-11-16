@@ -1173,6 +1173,7 @@ pub fn spawn(
 
     let mut sha = None;
     let note;
+    let history;
     let brief_text = {
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
@@ -1238,6 +1239,17 @@ pub fn spawn(
             ok(r, "git", &["-C", &wt, "reset", "--hard", &p.base])?;
             let _ = on.remove(&p.worktree.join("verdict.md"));
         }
+        let saved = wip.as_ref().map(|w| format!("origin/{w}"));
+        let heads: Vec<&str> = std::iter::once("HEAD").chain(saved.as_deref()).collect();
+        history = crate::baseline::view(r, f, &p.worktree, &heads);
+        if let crate::baseline::View::Full(crate::baseline::Why::Failed(why)) = &history {
+            let d = json!({"agent": p.agent, "worktree": wt, "why": why});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, fleet, Some(issue), "baseline-failed", d).passive(),
+            )?;
+        }
         if p.family == "rev" || crate::events::STAGES.contains(&p.family) {
             sha = ok(r, "git", &["-C", &wt, "rev-parse", "HEAD"])
                 .ok()
@@ -1286,6 +1298,7 @@ pub fn spawn(
                 crate::why::brief(r, f, &events, (fleet, issue), rev, body)
             }).flatten())
             .chain(note.clone())
+            .chain(history.brief())
             .chain(resume)
             .chain(wip.as_ref().map(|w| {
                 format!("Saved work: the last lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
@@ -1340,6 +1353,9 @@ pub fn spawn(
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
+    if let Some(l) = history.line(&p.branch) {
+        pj["history"] = json!(l);
+    }
     bt.start(ctx, r, &pane, &labels, &wt, &acp)?;
     if bt.0.acp.is_none() {
         term::ok(r, &home(p.lane_cmd(&pane)))?;
@@ -1752,6 +1768,9 @@ fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool) -> Result<()> {
         for c in pj["commands"].as_array().into_iter().flatten() {
             let words: Vec<&str> = c.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             writeln!(out, "  $ {}", words.join(" "))?;
+        }
+        if let Some(h) = pj["history"].as_str() {
+            writeln!(out, "{h}")?;
         }
         if pj.get("confirmed") == Some(&json!(false)) {
             writeln!(out, "WARNING: prompt not confirmed landed; check the pane")?;

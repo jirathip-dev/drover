@@ -83,7 +83,7 @@ impl<'a> On<'a> {
         let Some(m) = self.machine else {
             return (prog.into(), args.to_vec());
         };
-        let line = quote(prog, args);
+        let line = quote(prog, &crate::runner::plain(prog, args));
         let connect = format!("-oConnectTimeout={}", self.connect);
         let ssh = argv(&["-oBatchMode=yes", &connect, CM[0], CM[1], CM[2], m, "--", &line]);
         ("ssh".into(), ssh)
