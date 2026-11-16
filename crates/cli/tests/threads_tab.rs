@@ -374,8 +374,8 @@ fn older_messages_load_above_in_webkit_and_the_card_in_view_stays_in_place() {
         return;
     }
     let js = "const sc = await open('t3'), cards = () => $$('.scr[data-id^=thread-] .card.k-orch').length; \
-        const at = [cards()]; sc.scrollTop = 0; await frame(); \
-        const k = $('.scr[data-id^=thread-] .card[data-id]'), id = k.dataset.id, y = k.getBoundingClientRect().top; \
+        const at = [cards()], r = sc.getBoundingClientRect(); sc.scrollTop -= 200; await frame(); \
+        const k = $$('.scr[data-id^=thread-] > .card[data-id]').find(c => c.getBoundingClientRect().bottom > r.top + r.height / 2), id = k.dataset.id, y = k.getBoundingClientRect().top; \
         $('.scr button[data-id=older]').click(); await until(() => cards() > 30); await frame(); \
         const k2 = $(`.scr[data-id^=thread-] .card[data-id=\"${id}\"]`); \
         at.push(cards(), Math.round(Math.abs(k2.getBoundingClientRect().top - y)), +($('.scr[data-id^=thread-]').scrollTop > 0), errs.length); return at;";
