@@ -1,0 +1,7 @@
+Decided: merge origin/staging; profile() stays in orchestrator/brief.rs with staging's #809 no-indexing change, and staging's #973 cap line goes into roles/orchestrator/role.md
+Because: roles/orchestrator/role.md:34
+Decided: raise the serve.rs baselines by the amendment's router lines; the id check moves out of Config::parse
+Because: q1714
+Rejected: restoring roles/orchestrator.md from staging — the split files replace it; two copies would drift
+Check: shed.rs missing-shed test fails only on hosts with shed installed; just gen ran by hand with no diff
+Owner: Staging's latest changes are merged in; cooee chat profiles work as before.
