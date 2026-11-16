@@ -43,7 +43,7 @@ fn three_readers_say_nothing() {
 }
 
 #[test]
-fn a_jam_alerts_once_per_episode_with_pids_ages_parents_and_the_fix_but_no_secret() {
+fn parity_r1_a_jam_alerts_once_per_episode_with_pids_ages_parents_and_the_fix_but_no_secret() {
     let c = ctx(&tmpdir("kc-jam-once"), CONFIG);
     run(&c, &fake(true), &["check"]);
     let sh = FakeShed::new();

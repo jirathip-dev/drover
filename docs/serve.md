@@ -122,8 +122,11 @@ you` / `At the gate: …`; terminal sends none and keeps today's titles. A theme
 [[notify]]
 type = "webpush"
 sub = "mailto:you@example.com"   # the VAPID `sub` claim; required
-# on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, needs-human, ask-waiting, answer-undelivered, state-write-failed
+# on = [...]   # default: every alert emitted as a push (blocked, stall, lane-dead, merged, needs-human, ask-waiting, …)
 ```
+
+#1147: with no `on`, a phone gets each event logged with `"push": true` (set where the alert is born,
+`Event::push`) and the kinds pushed before the flag (`crates/core/src/events/push.rs`, frozen: it only shrinks).
 
 It works per fleet too (`[[fleet.<name>.notify]]`), next to any command notifier, which is
 unchanged. Each event is encrypted per device (RFC 8291 aes128gcm), signed with an ES256 VAPID
@@ -181,10 +184,14 @@ missed.
 ## Serve health (#898)
 
 Each minute serve writes its own numbers to `serve-health.json` in the state dir, and `GET /api/v1/health` returns
-them as `serve`: `rss_mb`, `groups` (the last minute's `/live` first bytes, `/api/v1 reads` and `writes`, each with
+them as `serve`: `sha` (the build it runs, #1081), `rss_mb`, `groups` (the last minute's `/live` first bytes, `/api/v1 reads` and `writes`, each with
 `count`, `p50`, `p95` and `max` ms), `busy` (reads answered 503 in that minute), `clients` (live streams), `queued`
 (taps waiting for a worker), `started` and `slow` (set while `/api/v1` p95 has been over 200 ms for 5 min). Each start
-appends `<ts> cold|handover` to `serve-starts` (the last day kept).
+appends `<ts> cold|handover` to `serve-starts` (the last day kept); a start that fails appends `<ts> failed`.
+
+#1081: a `serve` whose port is held asks that port's health which build holds it: its own build, it exits 0 (launchd and
+systemd restart it only after a failed exit); an older one, it asks that serve over its control socket to hand over (its
+bridge runs the installed binary), then exits 0; nothing answers, it fails.
 
 `drover check` alerts once per state, then `<kind>-ok` when it clears:
 
@@ -192,6 +199,8 @@ appends `<ts> cold|handover` to `serve-starts` (the last day kept).
 |---|---|
 | `serve-restarts` | more than 3 starts in 24 h that were not handovers |
 | `serve-mem` | RSS over 300 MB |
+| `serve-stale` | the serve on the port runs another build than the installed `drover` |
+| `serve-loop` | more than 3 failed serve starts in 1 h (launchd's serve exiting non-zero) |
 | `serve-slow` | `/api/v1` p95 over 200 ms for 5 min |
 | `serve-503` | any read answered 503 in the last minute |
 | `drive-slow` | a fleet's last pass over `pass_max_secs` (120 s); names the fleet and its slowest step |

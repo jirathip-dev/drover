@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{emit, working, Event};
+use crate::events::{emit, working, Event, Json};
 use crate::runner::{json, ok, Runner};
 use crate::Ctx;
 use crate::{gate, gh};
@@ -35,7 +35,7 @@ pub fn amend(
     }
     let n = issue.to_string();
     let body = json(r, "gh", &["issue", "view", &n, "-R", &f.repo, "--json", "body"])?;
-    let body = body["body"].as_str().unwrap_or_default().trim_end();
+    let body = body.at("body").as_str().unwrap_or_default().trim_end();
     let head = if crate::triage::live(body).lines().any(|l| l.trim() == "## Amendments") {
         "\n"
     } else {
@@ -57,7 +57,8 @@ pub fn amend(
         "state,statusCheckRollup",
     ];
     let pr = json(r, "gh", &a).unwrap_or_default();
-    let checks = pr["statusCheckRollup"].as_array().filter(|_| pr["state"] == "OPEN");
+    let open = pr.at("state") == "OPEN";
+    let checks = pr.at("statusCheckRollup").as_array().filter(|_| open);
     for c in checks.into_iter().flatten() {
         let (name, url) = (gh::check_name(c), c["detailsUrl"].as_str().unwrap_or_default());
         let run = url.split("/runs/").nth(1).and_then(|t| t.split('/').next());

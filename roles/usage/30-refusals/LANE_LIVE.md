@@ -1,0 +1,1 @@
+- LANE_LIVE: spawn: a live agent is in the worktree, or the log has an unfinished lane for it; --supersede

@@ -100,6 +100,20 @@ all (or only a cloud host over its budget fits), it is refused with `REFUSED NO_
 ` (cloud host stopped or over budget)` when fleet.toml has a cloud host; the Host tab reads it as `waiting`. drive
 retries on its next pass.
 
+### Start slots (#1186)
+
+Each host starts its own lanes: `[hosts.<name>] start_max = 2` caps the lanes starting at once there (unset: `[limits]
+start_max`, 2), so a clone and install burst on one host never waits on another host's starts. The main host is also
+bounded by `[limits] max_parallel_spawns` (6), and keeps one of those slots for a fix round or review. Drive picks the
+host at admission, passing over hosts whose start or working slots are full, and the spawn runs there; when every
+fitting host is full it is skipped with `SPAWN_PENDING: boat-dev-2 2/2 starting`. A host's start slots are split
+between the fleets with something to start, by fleet weight. `start_release = "started"` (the default, also in
+`[limits]`) frees a start's slot once its harness is up on the host; `"confirmed"` holds it until its first prompt is
+confirmed. `spawn_pending_max_secs` stays the stale backstop. Every pass, the fast step too, runs the start step
+before its PR reads, while some host has a free start slot; a full pass tries once more at its end for the issues its
+own steps just released. With `max_parallel_spawns = 0` (spawns in the pass) only that end-of-pass step runs.
+`max_working` and the heavy-slot gate still bound the running load.
+
 ### Working-lane and simulator slots (#984)
 
 `[hosts.<name>] max_working = 12` caps the lanes running a turn on that host, across all fleets; `max_simulators = 1`
@@ -129,7 +143,7 @@ value. The rules are frozen at spawn: after a config change that alters them, th
 until a respawn. A fleet.toml left on a remote host is no longer read: `drover doctor` shows
 `! stale fleet.toml on <host>: no longer read`; remove it by hand. #647: bootstrap removes one an old bootstrap wrote
 (only `[fleet.*]` and `[hosts.<host>]`); doctor's host row names the failed check (`unreachable (ssh: …)`,
-`! shed: …`).
+`✗ shed — does not answer: …`).
 
 ## Asks, answers and verdicts from another host (#275, #389)
 
@@ -216,7 +230,8 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
   a red host problem. Fix: `ssh <host> gh auth login` for gh; for claude, log in from a terminal there.
 - **drover**: `drover --version` there prints the same version and git sha as on the main host. A mismatch is
   a warning (amber), not a failure.
-- **shed**: its lanes list answers there; a failure is a `! shed: …` warning.
+- **shed**: its lanes list answers there; one that does not answer (#1127: e.g. frozen by a snapshot) is
+  `✗ shed — does not answer: … → ssh <host> '<thaw and restart>'`, so it takes no lanes.
 
 ## Auto-update
 
@@ -273,10 +288,12 @@ overflow_after_minutes = 10  # the default
   `<config dir>/secrets/<key_env>`, and each command gets it on stdin and exports it (the `[ci_runners]` API calls use
   it as `$BOAT_API_KEY`). `drover doctor` names the one it found (`✓ cloud boat1 key — env`), or warns `!` with none.
   It never appears in argv, fleet.toml or the event log.
-- **Start on demand.** Placement uses a cloud host, stopped or running, in two cases only: every local host has been
-  refused (busy, low memory or disk) for `overflow_after_minutes`, or the lane needs a tag only the cloud host has (#256:
-  local Macs first, even when the cloud host is idle). The `spawn` event's `why` says which (`overflow: every local host
-  busy 12 min`, `needs docker: no local host has it`), and `drover status` shows it as `on <host>: <why>`. A respawn on a lane's
+- **Start on demand.** Local Macs come first, even when a cloud host is idle (#256). A running cloud host that admits
+  and has `max_working` room takes a lane as soon as every local host refuses or is full (#1152). A stopped one is
+  started only when every local host has been refused (busy, low memory or disk) for `overflow_after_minutes`, or the
+  lane needs a tag only the cloud host has. The `spawn` event's `why` says which (`HOST_BUSY mini: …; cloud1 is up with
+  room`, `overflow: every local host busy 12 min`, `needs docker: no local host has it`), `drover status` shows it as
+  `on <host>: <why>`, and `spawn --dry-run` prints it as `on <host>: <why>`. A respawn on a lane's
   own host, `--host`, or a role `host` pin starts it too. `spawn` runs `start`, then polls `status` for up to 5 min.
   It then rewrites the host's block in `~/.ssh/config.d/herdsman` and its own known_hosts file
   (`~/.ssh/herdsman/<name>.known`, outside `config.d`) from `address`, and then spawns. A dry run never starts a host.
@@ -326,7 +343,9 @@ or not logged in yet) the card says `github: unreadable` and the host turns red,
 above (and the token look) before placement uses it, so an unhealthy host never takes the lane.
 
 **Snapshot.** Once `drover doctor` is all ✓, `drover hosts snapshot <name>` runs a fresh health look and, with no
-✗, the recipe's `snapshot` command (logged `cloud-snapshot`). The recipe's `create_from` template makes a new
+✗, the recipe's `snapshot` command (logged `cloud-snapshot`). #1127: a snapshot can leave the shed service there
+frozen; when shed then does not answer, drover thaws and restarts it once and checks again, and a second failure is
+the snapshot's error, naming the host. The recipe's `create_from` template makes a new
 sandbox from it that starts ready. Check both against docs.boat.dev.
 
 ## ACP hosts: `runtime = "shed-acp"` (#637)

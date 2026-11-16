@@ -15,24 +15,25 @@
       "type": "text"
     },
     {
-      "fields": [
+      "action": "thread-new",
+      "chips": [
         {
-          "label": "",
-          "name": "text",
-          "placeholder": "message the orchestrator",
-          "type": "text",
-          "value": ""
+          "all": [
+            "claude",
+            "hermes",
+            "dsh"
+          ],
+          "cur": "claude",
+          "name": "harness"
         }
       ],
       "id": "say",
-      "submit": {
-        "action": "thread-new",
-        "label": "start",
-        "values": {
-          "repo": "sendmeter"
-        }
-      },
-      "type": "form"
+      "label": "start",
+      "placeholder": "message the orchestrator",
+      "type": "composer",
+      "values": {
+        "repo": "sendmeter"
+      }
     }
   ],
   "focus": true,

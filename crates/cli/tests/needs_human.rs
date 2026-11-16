@@ -90,11 +90,23 @@ fn action(s: &Server, cookie: &str, choice: &str) -> String {
 #[test]
 fn needs_human_pushes_with_the_default_on() {
     let cfg = Config::parse("[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n").unwrap();
-    assert!(cfg.notify[0].wants("needs-human"));
+    let e = |k: &str| Event::new(0, "app", Some(1), k, json!({}));
+    assert!(cfg.notify[0].wants(&e("needs-human")));
 }
 
 #[test]
-fn card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only() {
+fn a_new_kind_reaches_a_default_phone_only_when_emitted_with_push() {
+    let cfg = Config::parse("[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n").unwrap();
+    let e = Event::new(0, "app", Some(1), "brand-new-alert", json!({}));
+    assert!(!cfg.notify[0].wants(&e));
+    assert!(!serde_json::to_string(&e).unwrap().contains("push"));
+    let e = e.push();
+    assert!(cfg.notify[0].wants(&e));
+    assert!(serde_json::to_string(&e).unwrap().contains(r#""push":true"#));
+}
+
+#[test]
+fn parity_67_card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only() {
     let c = fixture("nh-pass", "PASS");
     let r = runner();
     let s = Server::new(&c, &r, Some(ADDR.into()));

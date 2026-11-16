@@ -209,7 +209,7 @@ impl Pipeline {
             free: &dyn Fn(&str) -> bool,
         ) -> Option<Vec<String>> {
             if let Some(i) = path.iter().position(|x| *x == n) {
-                return Some(path[i..].iter().chain([&n]).map(|s| (*s).to_string()).collect());
+                return Some(path.iter().skip(i).chain([&n]).map(|s| (*s).to_string()).collect());
             }
             path.push(n);
             for (_, _, t) in p.edges().filter(|e| e.0 == n && free(e.2)) {
@@ -287,8 +287,8 @@ impl Pipeline {
             ends.insert(e.0);
         }
         let stuck: Vec<&Stage> = self.stage.iter().filter(|s| !ends.contains(s.name.as_str())).collect();
-        if let Some(s) = stuck.first() {
-            let rest: Vec<&str> = stuck[1..].iter().map(|s| s.name.as_str()).collect();
+        if let Some((s, others)) = stuck.split_first() {
+            let rest: Vec<&str> = others.iter().map(|s| s.name.as_str()).collect();
             let nor = if rest.is_empty() {
                 String::new()
             } else {
@@ -305,7 +305,8 @@ impl Pipeline {
             let on = c
                 .iter()
                 .find(|n| self.get(n).is_some_and(|s| s.kind == "check"))
-                .unwrap_or(&c[0]);
+                .or(c.first())
+                .unwrap_or(&first.name);
             let s = self.get(on).unwrap_or(first);
             bad(
                 "no limit",

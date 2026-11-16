@@ -42,7 +42,7 @@ fn pair_status_says_whether_this_browser_is_paired() {
 }
 
 #[test]
-fn a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
+fn parity_r3_a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
     let c = ctx(&tmpdir("pair-busy"), CONFIG);
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));

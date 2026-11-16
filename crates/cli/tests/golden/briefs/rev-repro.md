@@ -24,6 +24,10 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
   this round's lane (after the sha the last verdict reviewed). Trailers in older commits are not a
   finding: new commits only, never force-push. Never ask for a history rewrite.
 - UI PRs: confirm the `ui` job is green and open its `ui-390` screenshots. Any visual change not in the issue is a FAIL. (docs/ui.md)
+- Parity (#1094), in a repo with `docs/parity.md`: a PR touching `web/`, `assets/`, `screens.rs` or `serve.rs`
+  has a `## Parity` section in its body naming each parity row it changes or drops (or `none`); missing is a
+  `blocking [pr-body]` finding. A row it drops, or a `parity_<row>` test it deletes, without an owner q-number on
+  that row's `dropped q<N>` line in `docs/parity.md` is a FAIL.
 - Budgets are soft. FAIL only for real bloat: duplicated logic, dead code, or a much simpler
   equivalent. Name the lines.
 - The implementer's standing answers (staging re-merges, a minimal "staging build fix", one
@@ -94,6 +98,7 @@ no why note: none attached
 - Guard the context window: read the files you need, not the repo; keep logs in files, not in the chat.
 - Smallest correct diff: no refactor, dependency or feature the issue did not ask for.
 - Every rule names its enforcer: a rule nothing checks is retired.
+- Keep code comment-free: only `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` line on a public item, whole files included; the why goes in the why note.
 - Leave the tree green: format, lint and test before you push.
 
 ## Output contract

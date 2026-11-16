@@ -94,10 +94,10 @@ impl Provider for Dsh {
     }
 
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
-        let c = self.kick_cmds(p, pane);
-        if !poll(r, pane, &[Status::Idle], 90) {
+        let c: Option<[_; 4]> = self.kick_cmds(p, pane).try_into().ok();
+        let Some(c) = c.filter(|_| poll(r, pane, &[Status::Idle], 90)) else {
             return Ok(false);
-        }
+        };
         let screen = term::exec(r, &c[0])?.stdout;
         if WIZARD.iter().any(|w| screen.contains(w)) {
             term::exec(r, &c[1])?;

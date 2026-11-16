@@ -36,6 +36,7 @@ resume) id_ok "$2"; set_state "$2" running ;;
 stop) id_ok "$2"; set_state "$2" stopped ;;
 delete) id_ok "$2"; grep -v "^$2 " "$s" > "$s.new"; mv "$s.new" "$s" ;;
 snapshot) id_ok "$2" ;;
+ssh) id_ok "$2"; [ ! -f "$d/ssh-fails" ] || { echo "ssh: connect to $2: refused" >&2; exit 255; } ;;
 *) echo "error: unrecognized subcommand '$1'" >&2; exit 2 ;;
 esac
 "#;
@@ -130,7 +131,30 @@ fn bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start() {
 }
 
 #[test]
-fn the_ssh_files_are_all_valid_config_and_the_host_key_stays_pinned() {
+fn bootstrap_runs_one_boat_ssh_on_a_new_vm_before_probe_and_reports_a_failing_one() {
+    let (c, bin) = setup("boat-ready", "small");
+    let cfg = Config::load(&c.config).unwrap();
+    let r = Boat(Fake::default().reply("herdr machine list --json", "[]"), bin.clone());
+    let e = drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut vec![]).unwrap_err();
+    assert!(format!("{e:#}").contains("can't reach boat1"), "{e:#}");
+    let made = calls(&bin);
+    let (new, ssh) = (made.find("new --type").unwrap(), made.find("ssh bx_0 --no-update true"));
+    assert!(ssh.is_some_and(|s| s > new), "{made}");
+    drover::cloud::stop(&c, &cfg, &r, "boat1", "stop", "test").unwrap();
+    drover::cloud::start(&c, &cfg, &r, "boat1").unwrap();
+    assert_eq!(calls(&bin).matches("ssh bx_").count(), 1, "{}", calls(&bin));
+    drover::cloud::stop(&c, &cfg, &r, "boat1", "destroy", "test").unwrap();
+    std::fs::write(bin.join("ssh-fails"), "").unwrap();
+    let e = drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut vec![]).unwrap_err();
+    let e = format!("{e:#}");
+    assert!(
+        e.contains("boat1 ready failed (255): ssh: connect to bx_0: refused") && !e.contains("can't reach"),
+        "{e}"
+    );
+}
+
+#[test]
+fn the_ssh_files_are_valid_a_resume_repins_the_host_key_and_a_moved_key_is_refused() {
     let (c, bin) = setup("boat-ssh", "small");
     let cfg = Config::load(&c.config).unwrap();
     let r = Boat(Fake::default(), bin.clone());
@@ -175,9 +199,29 @@ fn the_ssh_files_are_all_valid_config_and_the_host_key_stays_pinned() {
     )
     .unwrap();
     drover::cloud::stop(&c, &cfg, &r, "boat1", "stop", "test").unwrap();
-    let e = drover::cloud::start(&c, &cfg, &r, "boat1").unwrap_err();
+    drover::cloud::start(&c, &cfg, &r, "boat1").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&pin).unwrap(),
+        "[10.0.0.7]:2222 ssh-ed25519 EVIL\n"
+    );
+    let repin = read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .find(|e| e.kind == "cloud-repin");
+    let d = repin.expect("cloud-repin logged").data;
+    assert_eq!(
+        (d["was"].as_str(), d["key"].as_str()),
+        (Some("ssh-ed25519 AAAAboatkey"), Some("ssh-ed25519 EVIL"))
+    );
+    std::fs::write(
+        bin.join("ssh-keyscan"),
+        "#!/bin/sh\necho '[10.0.0.7]:2222 ssh-ed25519 WORSE'\n",
+    )
+    .unwrap();
+    let e = drover::cloud::moved(&c, &cfg, &r, "boat1", false).unwrap_err();
     assert!(format!("{e:#}").contains("host key changed"), "{e:#}");
-    assert!(std::fs::read_to_string(&pin).unwrap().contains("AAAAboatkey"));
+    assert!(std::fs::read_to_string(&pin).unwrap().contains("EVIL"));
 }
 
 #[test]
