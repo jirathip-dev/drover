@@ -336,3 +336,29 @@ fn calls_on_one_path_run_one_at_a_time_and_a_dead_child_frees_its_path() {
         Ended::Exited(_)
     ));
 }
+
+#[test]
+fn a_short_call_returns_as_soon_as_it_exits() {
+    let t = Instant::now();
+    for _ in 0..100 {
+        assert_eq!(Real.run("true", &[]).unwrap().code, 0);
+    }
+    let took = t.elapsed();
+    eprintln!("100 runs of true: {took:?}");
+    assert!(took < Duration::from_millis(500), "{took:?}");
+}
+
+#[test]
+fn a_call_past_its_limit_is_killed_within_50_ms_of_it() {
+    let t = Instant::now();
+    let o = Real
+        .run_for("sleep", &argv(&["30"]), "", Duration::from_millis(300))
+        .unwrap();
+    let took = t.elapsed();
+    eprintln!("a 300 ms limit cut sleep 30 at {took:?}");
+    assert_eq!(o.code, 124, "{o:?}");
+    assert!(
+        took >= Duration::from_millis(300) && took < Duration::from_millis(350),
+        "{took:?}"
+    );
+}

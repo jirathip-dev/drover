@@ -352,13 +352,22 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
 
 fn hangs_past(done: &std::sync::atomic::AtomicBool, dev: &std::sync::atomic::AtomicU64, end: Instant) -> bool {
     use std::sync::atomic::Ordering::Relaxed;
-    while crate::clock::instant() < end {
-        if done.load(Relaxed) {
-            return is_sick(dev.load(Relaxed));
+    watch(end, || done.load(Relaxed).then(|| is_sick(dev.load(Relaxed)))).unwrap_or_else(|| !done.load(Relaxed))
+}
+
+fn watch<T>(end: Instant, mut check: impl FnMut() -> Option<T>) -> Option<T> {
+    let mut nap = poll() / 16;
+    loop {
+        if let Some(t) = check() {
+            return Some(t);
         }
-        crate::clock::sleep(poll());
+        let left = end.saturating_duration_since(crate::clock::instant());
+        if left.is_zero() {
+            return None;
+        }
+        crate::clock::sleep(nap.min(left));
+        nap = nap.saturating_mul(2).min(poll());
     }
-    !done.load(Relaxed)
 }
 
 /// #775: `path`'s bytes for a request thread (serve's screenshots, designs, thread files), within `PROBE`: a `TimedOut` error when its folder is hung (#776), an earlier read of it has not ended, or this one takes too long, which marks the folder's disk. The stuck read keeps its own thread, and holds the path until it ends.
@@ -481,11 +490,8 @@ pub fn settle<P: Proc>(key: Option<&str>, limit: Duration, start: impl FnOnce() 
         c => c.flatten(),
     };
     let mut c = start()?;
-    while crate::clock::instant() < end {
-        if let Some(st) = c.try_wait()? {
-            return Ok(Ended::Exited(st));
-        }
-        crate::clock::sleep(poll());
+    if let Some(st) = watch(end, || c.try_wait().transpose()) {
+        return Ok(Ended::Exited(st?));
     }
     c.kill().ok();
     if let Some(cl) = &claim {
