@@ -119,7 +119,7 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(Fake::default());
     let mut out = vec![];
-    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
     let to = head(&seed, "issue-3");
     let ev = read(&c.state).unwrap().to_vec();
     let up = ev.iter().find(|e| e.kind == "auto-updated").expect("auto-updated");
@@ -291,7 +291,7 @@ fn conflicting_auto_update_spawns_an_update_lane() {
     git(&seed, &["merge", "-q", "--ff-only", "origin/issue-2"]);
     git(&seed, &["push", "-q", "origin", "HEAD:staging"]);
     let r = Mixed(Fake::default());
-    drover::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-1"), before, "nothing pushed");
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().all(|e| e.kind != "auto-updated"));
@@ -474,7 +474,7 @@ fn a_branch_in_review_is_not_updated() {
             sh.remove("sendmeter-rev-3-r1");
         }
         let r = Mixed(Fake::default());
-        drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+        drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
         assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     }
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "auto-updated"));
@@ -568,7 +568,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let from = head(&seed, "issue-3");
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(merger(3, &from).0.reply(PROTECTION, "false\n"));
-    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     let ev = read(&c.state).unwrap().to_vec();
     assert!(
@@ -609,7 +609,7 @@ fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(Fake::default().reply(RULES, "true\n").reply("gh pr edit", ""));
     let mut out = vec![];
-    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
     let out = String::from_utf8_lossy(&out);
     let to = head(&seed, "issue-3");
     assert!(out.contains("auto-updated"), "{out}");
@@ -1077,4 +1077,40 @@ fn cap_reports_a_script_it_cannot_parse() {
     let err = drover::overlap::cap_view(&c, &cfg, &r, "sendmeter", &mut Vec::new()).unwrap_err();
     let want = "`sh scripts/line-cap.sh` at origin/staging printed no `N / cap M` line drover can parse: printed `total: 15 lines, limit 100`";
     assert_eq!(err.to_string(), want);
+}
+
+#[test]
+fn a_second_pass_with_nothing_moved_starts_no_worktree() {
+    let (d, seed, c, cfg) = repos("au-idle");
+    let sh = FakeShed::attached(&c);
+    for n in 1..=3 {
+        lane(&c, &seed, n, true);
+    }
+    commit(&seed, "c.txt", "c\n", "staging");
+    merge_staging(&d, None);
+    let heads: Vec<String> = (1..=3).map(|n| head(&seed, &format!("issue-{n}"))).collect();
+    let r = Mixed(Fake::default().reply(PROTECTION, "false\n"));
+    let t = std::time::Instant::now();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    let first = r.0.calls.borrow().len();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    let ms = t.elapsed().as_millis();
+    let second: Vec<String> = r.0.calls.borrow()[first..]
+        .iter()
+        .filter(|l| l.starts_with("git "))
+        .cloned()
+        .collect();
+    let tried = |w: &str| second.iter().filter(|l| l.contains(w)).count();
+    assert_eq!(
+        (tried(" worktree "), tried(" merge-tree "), tried(" merge ")),
+        (0, 0, 0),
+        "{} git calls in {ms} ms: {second:#?}",
+        second.len()
+    );
+    let now: Vec<String> = (1..=3).map(|n| head(&seed, &format!("issue-{n}"))).collect();
+    assert_eq!(now, heads, "nothing pushed");
+    assert!(read(&c.state)
+        .unwrap()
+        .iter()
+        .all(|e| e.kind != "auto-updated" && e.kind != "driven"));
 }
