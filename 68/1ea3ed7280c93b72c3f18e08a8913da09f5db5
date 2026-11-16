@@ -1,0 +1,9 @@
+Decided: a scroller a repaint replaced ignores its late scroll event; it read scrollTop 0 while detached and clicked the next older marker (71 cards, not 60)
+Because: web/src/main.ts:120
+Decided: #1084's drafts WebKit test scrolls the thread's message box 400 px instead of the page, which no longer scrolls in a thread; its scroll readings are that box's scrollTop
+Because: "iOS: only the messages scroll; the composer sits on the keyboard."
+Rejected: keeping the drafts test's page scroll — scrollTo is a no-op now, so the composer sat at the thread's end and new messages were followed, as the issue asks while at the end
+Decided: merged origin/staging (#1142) again; clean merge
+Because: crates/server/src/serve/chat.rs:272
+Check: CI ui-webkit: threads_tab older test expects [30, 60, 0, 1, 0] and page_drafts' live readings stay put (no Playwright on this host)
+Owner: Loading older messages now loads exactly one page, and the typing test reads the scroll where the thread now scrolls.
