@@ -1,0 +1,14 @@
+Decided: one proxy::status feeds both the doctor row and the Hosts card, so the two always show the same facts
+Because: "Hosts screen (#1091):** a \"Token proxy\" card with the same facts"
+Decided: refuse NO_PROXY_TOKEN at the top of cloud::start, which covers bootstrap and drive starts
+Because: "refuses or warns `NO_PROXY_TOKEN` **before** making a VM"
+Decided: the expiry alert lives in proxy::ensure (survey and spawn), deduped by saved-mtime and stage
+Because: crates/core/src/proxy.rs:409
+Rejected: putting the alert in check() — check.rs and check() are at arch-check size baselines that may only shrink
+Decided: days left estimated from the token file's mtime plus 365 d
+Because: "The age comes from the file's mtime; the token has no readable expiry"
+Rejected: phone secret card — optional owner choice; the line cap has 1 line of headroom
+Decided: merged origin/issue-1091 for the Hosts screen
+Because: "Rebase on #1109 (#1091) for the Hosts screen."
+Check: screens.rs:action size (172 > 170) is #1109's diff, not this PR's
+Owner: Doctor and the Hosts screen now show the remote token's state; a cloud host won't start without it, and you get alerts at 30 and 7 days.
