@@ -78,9 +78,7 @@ fn hold(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str, mut extra: Value) -> Res
     if find(&working(&ctx.state)?, id).is_ok() {
         return refused("BAD_VALUE", format!("{id} is drover's own thread"));
     }
-    if let Some(o) = extra.as_object_mut() {
-        o.insert("thread".into(), json!(id));
-    }
+    extra.put("thread", json!(id));
     let t = Event::new(ctx.now, fleet, None, "orchestrator-attached", extra);
     emit(&ctx.state, cfg, t.clone())?;
     Ok(t)
