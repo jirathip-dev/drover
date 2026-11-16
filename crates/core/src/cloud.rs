@@ -151,7 +151,7 @@ pub fn held(ctx: &Ctx, cfg: &Config, name: &str) -> Option<(&'static str, String
     budget.or_else(stopped)
 }
 
-/// Start host `name`, wait (5 min at most) for `status` to print `running`, then refresh its address; a failure stops it.
+/// Start host `name`, wait (5 min at most) for `status` to print `running`, run `ready` on a new one, then refresh its address; a failure stops it.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     log(ctx, cfg, "cloud-start", name, json!({}))?;
     let made = |v: &str| {
@@ -159,14 +159,25 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
         cmd(ctx, cfg, r, name, v)
     };
     let snap = last(&working(&ctx.state)?, name, &["cloud-snapshot"]).is_some();
+    let rc = recipe(ctx, cfg, name)?.0;
+    let mut new = false;
     let up = cmd(ctx, cfg, r, name, "status").and_then(|s| match s.trim() {
-        "" if snap && recipe(ctx, cfg, name)?.0.contains_key("create_from") => made("create_from"),
-        "" => made("create"),
+        "" if snap && rc.contains_key("create_from") => {
+            new = true;
+            made("create_from")
+        }
+        "" => {
+            new = true;
+            made("create")
+        }
         _ => cmd(ctx, cfg, r, name, "start"),
     });
     let up = up.and_then(|_| {
         for _ in 0..30 {
             if cmd(ctx, cfg, r, name, "status")?.trim() == "running" {
+                if new && rc.contains_key("ready") {
+                    cmd(ctx, cfg, r, name, "ready")?;
+                }
                 return refresh(ctx, cfg, r, name, (true, true))
                     .map(|()| drop(crate::hosts::survey(ctx, cfg, r, true)));
             }
