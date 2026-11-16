@@ -112,7 +112,7 @@ fn post(s: &Server, path: &str, body: &str, extra: &str) -> String {
 }
 
 #[test]
-fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
+fn parity_8_subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     let dir = tmpdir("wp-sub");
     let c = ctx(&dir, CONFIG);
     let r = OnShed::new(Fake::default());
@@ -606,7 +606,7 @@ fn a_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named() {
 }
 
 #[test]
-fn no_push_for_the_thread_open_on_a_board() {
+fn parity_9_no_push_for_the_thread_open_on_a_board() {
     let dir = tmpdir("wp-watch");
     let _path = fake_curl(&dir);
     std::fs::write(dir.join("code"), "201").unwrap();

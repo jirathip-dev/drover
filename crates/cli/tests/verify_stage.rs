@@ -403,7 +403,7 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
 }
 
 #[test]
-fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
+fn parity_70_shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
     let d = tmpdir("verify-shots");
     let c = ctx(&d, &config());
     let lane = d.join("lane");
