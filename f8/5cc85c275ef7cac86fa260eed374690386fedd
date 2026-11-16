@@ -1,0 +1,4 @@
+Decided: merged origin/staging (#1126) again; it merged cleanly and touches no file of this PR
+Because: crates/server/src/serve/chat.rs:272
+Rejected: none
+Owner: The thread reading changes are brought up to date with staging; nothing in them changed.
