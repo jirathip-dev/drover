@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::events::{append, emit, fold, working, Event, IssueState, Json};
-use crate::overlap::git;
 use crate::runner::{ok, Runner};
 use crate::session::Session;
 use crate::waiting::Waiting;
@@ -1690,7 +1689,7 @@ fn serial(
     Ok(())
 }
 
-fn update_lane(
+pub(crate) fn update_lane(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
@@ -1963,7 +1962,10 @@ fn clean_merged(
 }
 
 fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let Err(e) = auto_update(ctx, cfg, r, out, fleet) else {
+    if KICK.get().is_some() {
+        return Ok(());
+    }
+    let Err(e) = crate::land::auto_update(ctx, cfg, r, out, fleet) else {
         return Ok(());
     };
     writeln!(out, "{fleet} auto-update: {e:#}")?;
@@ -1981,74 +1983,6 @@ fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         cfg,
         Event::new(ctx.now, fleet, None, kinds[0], json!({"reason": reason})),
     )
-}
-
-/// #129: after a merge, merge integration into every other open ready PR whose lane isn't working, oldest PR first, in a scratch worktree (#207: never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`) only when needed (#285: `update_ready`), else the PR merges as it is; a ready PR's conflict gets an `--update` lane.
-pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    if KICK.get().is_some() {
-        return Ok(());
-    }
-    let (f, events, ag) = (
-        cfg.fleet(fleet)?,
-        working(&ctx.state)?,
-        crate::session::all(cfg, r).checked().unwrap_or_default(),
-    );
-    let busy = |l: &str| ag.busy(l);
-    let open = |s: &IssueState| {
-        let pr = gh::cached_pr(ctx, fleet, s.issue);
-        pr.at("number").as_u64().filter(|_| pr.at("state") == "OPEN")
-    };
-    let mut prs: Vec<(u64, IssueState)> = (fold(&events).into_values())
-        .filter(|s| s.fleet == fleet && s.state == "ready")
-        .filter(|s| !s.lane.as_deref().is_some_and(busy))
-        .filter_map(|s| Some((open(&s)?, s)))
-        .collect();
-    if prs.is_empty() {
-        return Ok(());
-    }
-    prs.sort_by_key(|p| p.0);
-    let (dir, wt) = (f.local_path(), ctx.state.with_file_name(format!("update-{fleet}")));
-    let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
-    git(r, &dir, &["fetch", "-q", "origin"])?;
-    let checks = crate::gate::premerge_checks(ctx, f);
-    let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
-    for (_, s) in prs {
-        let (n, branch) = (s.issue.to_string(), crate::gate::branch_of(Some(&s), s.issue));
-        let from = git(r, &dir, &["rev-parse", &format!("origin/{branch}")])?;
-        tree(&["remove", "--force", "--force", &wts]).ok();
-        tree(&["add", "-f", "--detach", &wts, &from])?;
-        let clean = git(r, &wt, &["merge", "--no-edit", &into]).is_ok();
-        let to = git(r, &wt, &["rev-parse", "HEAD"])?;
-        let mut pr = gh::cached_pr(ctx, fleet, s.issue);
-        crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
-        let push = to != from && (pr.at("landing") == "fast-first" || gh::update_ready(ctx, Some(r), f, fleet));
-        let fail = crate::gate::run_checks(r, &wt, &into, if clean && push { &checks[..] } else { &[] });
-        let res = if !clean {
-            update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
-        } else if let Some((c, o)) = fail {
-            let at = format!("{from:.7} updated onto {into}");
-            let rf = crate::gate::premerge_failed(ctx, cfg, r, out, (fleet, s.issue), (&from, &at), (c, &o));
-            rf.and_then(|rf| Ok(writeln!(out, "{fleet} #{n} {rf}")?))
-        } else if push {
-            git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")]).and_then(|_| {
-                gh::forget_pr(ctx, fleet, s.issue);
-                writeln!(out, "{fleet} #{n} auto-updated: {from:.7} → {to:.7}")?;
-                let d = json!({"from": from, "to": to});
-                emit(
-                    &ctx.state,
-                    cfg,
-                    Event::new(ctx.now, fleet, Some(s.issue), "auto-updated", d),
-                )?;
-                pr.put("headRefOid", json!(to));
-                crate::gate::sync_label(ctx, cfg, r, out, &s, &pr)
-            })
-        } else {
-            Ok(())
-        };
-        tree(&["remove", "--force", &wts]).ok();
-        res?;
-    }
-    Ok(())
 }
 
 fn ci_findings(r: &dyn Runner, f: &crate::config::Fleet, pr: &serde_json::Value, head: &str) -> String {
