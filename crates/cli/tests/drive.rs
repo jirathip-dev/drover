@@ -1096,7 +1096,7 @@ fn a_serial_busy_item_is_skipped_and_keeps_its_place() {
     );
     let status = run(&c, &fake(&working(&c, &[2, 3, 9])), &["status", "sendmeter"]).1;
     assert!(
-        status.contains("skipped this pass: waiting for a db slot (#9 holds 1/1)"),
+        status.contains("skipped this pass: serial: db held by #9 (1/1)"),
         "{status}"
     );
     let board = run(&c, &Fake::default(), &["board", "sendmeter"]).1;
@@ -1126,7 +1126,7 @@ fn a_serial_busy_skip_shows_the_live_holders() {
     let status = || run(&c, &Fake::default(), &["status", "sendmeter"]).1;
     let board = || run(&c, &Fake::default(), &["board", "sendmeter"]).1;
     assert!(
-        status().contains("skipped this pass: waiting for a db slot (#9 holds 1/1)"),
+        status().contains("skipped this pass: serial: db held by #9 (1/1)"),
         "{}",
         status()
     );
@@ -1136,10 +1136,7 @@ fn a_serial_busy_skip_shows_the_live_holders() {
     assert!(board().contains(" #1     queued      db slot free "), "{}", board());
     spawn(c.now - 100, 4);
     let s = status();
-    assert!(
-        s.contains("skipped this pass: waiting for a db slot (#4 holds 1/1)"),
-        "{s}"
-    );
+    assert!(s.contains("skipped this pass: serial: db held by #4 (1/1)"), "{s}");
     assert!(!s.contains("#9 hold"), "{s}");
     assert!(board().contains(" #1     queued      skip SERIAL_BUSY "), "{}", board());
 }
@@ -1792,6 +1789,7 @@ fn auto_update_runs_in_a_pass_with_no_merge() {
     );
     let wt = c.state.with_file_name("update-sendmeter");
     let r = fake(NONE)
+        .once("git -C /tmp/does-not-matter/sendmeter merge-base --is-ancestor", 1, "")
         .reply("gh pr view issue-12", &pr(&head, "pending"))
         .reply("git -C /tmp/does-not-matter/sendmeter rev-parse", &format!("{head}\n"))
         .reply(
@@ -1833,6 +1831,7 @@ fn auto_update_rechecks_premerge_before_its_push() {
         let push = format!("git -C {} push -q origin HEAD:issue-12", wt.display());
         let r = fake(NONE)
             .once(&check, i32::from(fails), "lint: error: unused import\n")
+            .once("git -C /tmp/does-not-matter/sendmeter merge-base --is-ancestor", 1, "")
             .reply("gh pr view issue-12", &pr(&head, "pending"))
             .reply(
                 "gh api repos/jirathip-dev/sendmeter/branches/issue-12",

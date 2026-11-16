@@ -45,6 +45,8 @@ pub struct Config {
     pub proxy: ProxyCfg,
     /// #894: `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,
+    /// #1101: `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
+    pub hygiene: Hygiene,
 }
 
 /// #894: `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
@@ -266,6 +268,10 @@ pub struct HostCfg {
     pub runtime: Option<RuntimeKind>,
     /// #984: lanes running a turn at once on this host, all fleets (unset: no cap).
     pub max_working: Option<usize>,
+    /// #1186: lanes starting at once on this host (unset: `[limits] start_max`; the main host: `max_parallel_spawns`).
+    pub start_max: Option<usize>,
+    /// #1186: when a start here frees its slot (unset: `[limits] start_release`).
+    pub start_release: Option<StartRelease>,
     /// #984: live lanes that need `sim` on this host at once (unset: no cap).
     pub max_simulators: Option<usize>,
     /// #909: heavy checks its lanes run at once, of every fleet (unset: 3).
@@ -275,6 +281,14 @@ pub struct HostCfg {
     pub heavy_kind_max: BTreeMap<String, usize>,
     /// #909: minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
     pub heavy_wait_minutes: Option<u64>,
+}
+
+/// #1186: the point a starting lane frees its start slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartRelease {
+    Started,
+    Confirmed,
 }
 
 /// #256: a cloud host is a disposable machine: its lanes may start containers.
@@ -455,8 +469,72 @@ pub struct Fleet {
     pub runtime: Option<Runtime>,
     /// #732: lets `rev` share `impl`'s provider; its line needs a `#` reason comment.
     pub rev_same_provider: Option<bool>,
+    /// #1101: `[fleet.<n>.hygiene]`, this fleet's keys over `[hygiene]`'s.
+    #[serde(default)]
+    pub hygiene: Hygiene,
     /// #782: `srt` starts every lane's agent inside sandbox-runtime with the rules `sandbox::settings` writes; unset = off.
     pub sandbox: Option<Sandbox>,
+}
+
+/// #1101: one key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
+#[derive(Debug, Default, Deserialize, Clone, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Hygiene {
+    pub merge: Option<String>,
+    pub comments: Option<String>,
+    pub baseline: Option<String>,
+    pub triage: Option<String>,
+    pub docs_trust: Option<Vec<String>>,
+    pub issue_spec: Option<String>,
+    pub docs: Option<String>,
+}
+
+/// #1101: the defaults: squash merges, strict comments, a setup baseline, weekly triage, `docs/archive/` unread, specs folded by triage, a `[docs]` check.
+pub fn hygiene_default() -> Hygiene {
+    let s = |v: &str| Some(v.to_string());
+    Hygiene {
+        merge: s("squash"),
+        comments: s("strict"),
+        baseline: s("setup"),
+        triage: s("weekly"),
+        docs_trust: Some(vec!["docs/archive/".into()]),
+        issue_spec: s("triage"),
+        docs: s("on"),
+    }
+}
+
+impl Hygiene {
+    fn or(&self, b: &Hygiene) -> Hygiene {
+        Hygiene {
+            merge: self.merge.clone().or_else(|| b.merge.clone()),
+            comments: self.comments.clone().or_else(|| b.comments.clone()),
+            baseline: self.baseline.clone().or_else(|| b.baseline.clone()),
+            triage: self.triage.clone().or_else(|| b.triage.clone()),
+            docs_trust: self.docs_trust.clone().or_else(|| b.docs_trust.clone()),
+            issue_spec: self.issue_spec.clone().or_else(|| b.issue_spec.clone()),
+            docs: self.docs.clone().or_else(|| b.docs.clone()),
+        }
+    }
+
+    /// Doctor's line: `merge squash · comments strict · …`, `docs_trust` as its deny list.
+    pub fn line(&self) -> String {
+        let deny = self.docs_trust.clone().unwrap_or_default();
+        let deny = if deny.is_empty() {
+            "off".into()
+        } else {
+            format!("deny {}", deny.join(","))
+        };
+        let o = |v: &Option<String>| v.clone().unwrap_or_default();
+        format!(
+            "merge {} · comments {} · baseline {} · triage {} · docs_trust {deny} · issue_spec {} · docs {}",
+            o(&self.merge),
+            o(&self.comments),
+            o(&self.baseline),
+            o(&self.triage),
+            o(&self.issue_spec),
+            o(&self.docs)
+        )
+    }
 }
 
 /// #782: the kernel sandbox a lane's agent runs in.
@@ -602,6 +680,8 @@ pub struct Limits {
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
     pub max_parallel_spawns: usize,
+    pub start_max: usize,
+    pub start_release: StartRelease,
     pub spawn_pending_max_secs: u64,
     pub acp_start_minutes: u64,
     pub webhook_poll_minutes: u64,
@@ -721,6 +801,8 @@ impl Default for Limits {
             import_max_age_hours: 24,
             max_pushes_per_pass: 3,
             max_parallel_spawns: 6,
+            start_max: 2,
+            start_release: StartRelease::Started,
             spawn_pending_max_secs: 300,
             acp_start_minutes: 3,
             webhook_poll_minutes: 10,
@@ -866,7 +948,15 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "max_parallel_spawns",
-        "concurrent detached spawn kicks (0: in the pass)",
+        "concurrent detached spawn kicks on the main host (0: in the pass)",
+    ),
+    (
+        "start_max",
+        "lanes starting at once on a remote host that sets no `start_max`",
+    ),
+    (
+        "start_release",
+        "a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`)",
     ),
     (
         "spawn_pending_max_secs",
@@ -1068,66 +1158,27 @@ pub struct Notify {
     pub sub: Option<String>,
 }
 
-/// A webpush notifier's events when `on` is unset: the alert set plus the asks (#40) and needs-human (#130).
-pub const WEBPUSH_ON: &[&str] = &[
-    "slo-api",
-    "stuck",
-    "config-invalid",
-    "thread-msg",
-    "blocked",
-    "stall",
-    "lane-hog",
-    "lane-dead",
-    "usage-limit",
-    "signed-out",
-    "lane-failed-start",
-    "respawn-refused",
-    "rev-stale-replaced",
-    "ready-unmerged",
-    "ci-missing",
-    "outbox-stale",
-    "merged",
-    "needs-decision",
-    "needs-human",
-    "ask-waiting",
-    "answer-undelivered",
-    "state-write-failed",
-    "wip-blocked",
-    "spawn-held",
-    "spawn-failing",
-    "host-busy",
-    "cap-near",
-    "orphan-issue",
-    "config-warning",
-    "keychain-locked",
-    "keychain-jammed",
-    "self-update-failed",
-    "shed-version",
-    "shed-version-ok",
-    "auto-update-failed",
-    "host-sync-failed",
-    "clean-failed",
-    "runners-low",
-    "runners-ok",
-    "runtime-down",
-    "heavy-timeout",
-    "host-overloaded",
-];
-
 impl Notify {
     pub fn webpush(&self) -> bool {
         self.kind.as_deref() == Some("webpush")
     }
     /// #350: every landing pause and revert (or failed revert), and #345's stalled service, goes to each notifier, whatever its `on` says; #363: so does a board report, to each notifier but the phones'.
-    pub fn wants(&self, kind: &str) -> bool {
+    pub fn wants(&self, e: &crate::events::Event) -> bool {
+        let kind = e.kind.as_str();
         self.on.iter().any(|k| k == kind)
-            || (self.on.is_empty() && self.webpush() && WEBPUSH_ON.contains(&kind))
+            || (self.on.is_empty() && self.webpush() && e.is_push())
             || matches!(kind, "land-paused" | "reverted" | "revert-failed" | "service-stalled")
             || kind == "report" && !self.webpush()
     }
 }
 
 impl Config {
+    /// #1101: fleet `name`'s hygiene, every key set: its own, else `[hygiene]`'s, else the default.
+    pub fn hygiene(&self, name: &str) -> Hygiene {
+        let own = self.fleet.get(name).map(|f| f.hygiene.clone()).unwrap_or_default();
+        own.or(&self.hygiene).or(&hygiene_default())
+    }
+
     /// #539: each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
         let gone = "removed (#923): lanes run on the host's own CLI login; delete";
@@ -1421,6 +1472,21 @@ impl Config {
         let first = || self.fleet.values().find_map(|f| f.runtime.as_ref());
         let host = || self.hosts.keys().find_map(|h| self.host_acp(h));
         self.runtime.as_ref().or_else(first).map(Runtime::shed).or_else(host)
+    }
+
+    /// #1186: lanes that may start at once on host `name` (a name no `[hosts]` entry has, or a machine-less one, is the main host).
+    pub fn start_max(&self, name: &str) -> usize {
+        let mps = self.limits.max_parallel_spawns;
+        match self.hosts.get(name) {
+            Some(h) if h.machine.is_some() => h.start_max.unwrap_or(self.limits.start_max),
+            h => h.and_then(|h| h.start_max).map_or(mps, |s| s.min(mps)),
+        }
+    }
+
+    /// #1186: when a start on host `name` frees its slot.
+    pub fn start_release(&self, name: &str) -> StartRelease {
+        let h = self.hosts.get(name).and_then(|h| h.start_release);
+        h.unwrap_or(self.limits.start_release)
     }
 
     /// #637: host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.

@@ -349,7 +349,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         pass.step("lesson");
         crate::lesson::weekly(ctx, cfg, &pass, out)?;
         pass.step("hotspots");
-        crate::hotspots::weekly(ctx, cfg, &pass, out)?;
+        crate::hotspots::daily(ctx, cfg, &pass, out)?;
         pass.step("compact");
         compact_daily(ctx, out)?;
         driven
@@ -478,6 +478,7 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     let rows: Vec<_> = [tick, fast, board, tailscale, sync, update, clean]
         .into_iter()
         .chain(labels)
+        .chain(cfg.fleet.keys().flat_map(|n| crate::setup::hygiene(ctx, &cfg, r, n)))
         .collect();
     writeln!(out, "{}", rows.join("\n"))?;
     crate::doctor::doctor(ctx, r, out, false, false)
