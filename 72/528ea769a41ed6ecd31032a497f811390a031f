@@ -1,0 +1,15 @@
+Decided: clippy denies the banned lints in [workspace.lints]; CI's second clippy pass allows unwrap, indexing, as and print in test targets only
+Because: "tests may unwrap/expect/index via clippy.toml `allow-*-in-tests`"
+Decided: unsafe lives only in crates/sys (drover-sys) behind safe fns, the event log's buffer moved there as Append<T>; every other crate forbids unsafe
+Because: q1725
+Because: q1727
+Decided: processes stay in runner.rs, env reads in config.rs, clock reads and sleeps in a new clock.rs, each an arch.toml ban
+Because: "`Command::new` / `std::process`: only the runner"
+Decided: TypeScript bans are web/lint.mjs on Node's type stripper (no new dependency); innerHTML became DOMParser + replaceChildren on our own escaped markup
+Rejected: biome — a new dependency the owner did not approve
+Decided: every banned item has a fixture CI must see refused (scripts/lint-fixtures.sh rust|ts) plus an arch_check.rs test for the six bans
+Because: "CI fails on a fixture (or test) for each banned item and passes on staging"
+Decided: the line cap waited on #1079 (raised to 47200); src/ net +436
+Because: q1726
+Check: a former panic path (missing map key, short slice, overflow) now skips or falls back; runners.rs overflow is now an error, not a truncation
+Owner: risky Rust and TypeScript APIs are now refused by CI everywhere but their one allowed module, with every old use fixed
