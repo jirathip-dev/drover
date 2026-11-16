@@ -128,7 +128,7 @@ fn merge_fake(state: &str) -> Fake {
 }
 
 #[test]
-fn a_crash_between_merge_and_its_log_is_recovered_from_the_merged_pr_without_merging_again() {
+fn parity_r14_a_crash_between_merge_and_its_log_is_recovered_from_the_merged_pr_without_merging_again() {
     let mut c = ready("crash-merge");
     let r = merge_fake("MERGED");
     let crash = || panic!("crash injected after gh pr merge");

@@ -66,7 +66,7 @@ fn spawned(name: &str) -> drover::Ctx {
 }
 
 #[test]
-fn queue_row_links_the_issue_and_its_card_shows_three_links() {
+fn parity_40_queue_row_links_the_issue_and_its_card_shows_three_links() {
     let c = spawned("links-queue");
     let sh = FakeShed::new();
     sh.attach(&c);
