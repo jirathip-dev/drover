@@ -1,0 +1,14 @@
+Decided: a thread tap with a thread id (t<N>) pushes #threads/<id> and opens it; a lane name (sendmeter-impl-12) opens that lane's sheet, since a lane has no conductor thread to open
+Because: crates/core/src/orchestrator.rs:544
+Decided: the in-thread back button and the left-edge swipe call history.back(), so the page back and iOS back share one stack; a reload of #threads/<id> seeds #threads under it
+Because: "open pushes a history entry; back and a left-edge swipe return to the list"
+Decided: the edge swipe listens only in the Home Screen app; Safari already has its own back swipe and would go back twice
+Decided: a thread push now links /#threads/<t>; the page no longer needs to read ?thread=
+Because: crates/core/src/webpush.rs:237
+Decided: config, secret and sign-in cards post new thread-config, thread-secret and thread-signin actions (standalone page only, like the other thread actions) onto the existing settle paths; run cards reuse run-card
+Because: crates/server/src/screens.rs:47
+Decided: [change] on an orchestrator-answered ask posts the existing answer action with the ask's fleet; answer falls back to that fleet when the ask is no longer open, and the core answer still enforces the change window
+Because: crates/server/src/serve/chat.rs:45
+Rejected: a new block type for secrets or copy — the form's secret field and a button tap {copy} cover them
+Check: the ui-webkit job runs the new WebKit test (no Playwright on the lane host, so it only skips locally)
+Owner: tapping an ask or a push now opens its thread on the phone page, and its cards can be applied, saved, approved or changed right there
