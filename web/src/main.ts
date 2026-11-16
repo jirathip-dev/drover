@@ -175,7 +175,6 @@ addEventListener('keydown', e => { if (e.key === 'Escape' && !sh.hidden) closeSh
 function tap(t: Blk) {
   if (t.sheet) sheet(t.sheet);
   else if (t.open) go(cur.v, t.open);
-  else if (t.url) window.open(t.url, '_blank', 'noopener');
   else if (t.thread) toast('threads open in cooee');
 }
 
