@@ -1,0 +1,7 @@
+Decided: replace the stale bootstrap sentence with the frozen DROVER_RULES rule and the respawn rule
+Because: "rules are frozen at spawn in its rules file (`DROVER_RULES`), and its host's own fleet.toml is never read"
+Decided: fix round only merges origin/staging and reruns CI; the drive_kicks red is outside this docs-only diff
+Because: crates/cli/tests/drive_kicks.rs:1
+Rejected: changing drive_kicks or drive code — out of scope for a docs issue, and it passes locally at the merged head
+Check: cargo test -p drover --test drive_kicks passes at the merged head; CI reruns green
+Owner: no doc change this round, only a staging merge to rerun CI
