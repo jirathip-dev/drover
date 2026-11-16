@@ -698,7 +698,7 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     assert!(dead.get("swipe").is_none(), "no action on a dead lane: {dead}");
     assert_eq!(
         find(&q, "q-sendmeter-17").unwrap()["badge"]["text"],
-        "impl",
+        "[▲ impl] ◆ ◫",
         "live lane stays impl"
     );
 }

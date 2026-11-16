@@ -154,6 +154,7 @@ type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>, String)>>>;
 const PER_DEVICE: usize = 4;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
+const TOO_LARGE: &[u8] = b"HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"line\":\"request body too large\"}";
 /// When this board started (the Services board row's uptime).
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
@@ -829,19 +830,20 @@ impl<'a> Server<'a> {
     fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
         s.set_read_timeout(Some(Duration::from_secs(5)))?;
         // #386: a thread's message carries attached files (base64, at most 10 MB each): its POST may be that long.
-        let (mut buf, mut chunk, mut want) = (vec![], vec![0u8; 1 << 16], None);
+        let (mut buf, mut chunk, mut want, mut over) = (vec![], vec![0u8; 1 << 16], None, false);
         loop {
             let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
             if let Some(i) = end.filter(|_| want.is_none()) {
                 let h = String::from_utf8_lossy(buf.get(..i).unwrap_or_default());
                 let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
-                let most = if h.starts_with("POST /thread ") {
+                let most = if h.starts_with("POST /thread ") || h.starts_with("POST /action ") {
                     140 << 20 // #405: up to 10 files a message
                 } else if h.starts_with("POST /report ") {
                     3 << 20 // #363: a report carries its screenshot
                 } else {
                     32_768
                 };
+                over = i + 4 + n > most;
                 want = Some((i + 4 + n).min(most));
             }
             if want.map_or(buf.len() >= 32_768, |w| buf.len() >= w) {
@@ -852,14 +854,11 @@ impl<'a> Server<'a> {
                 n => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
             }
         }
-        let req = String::from_utf8_lossy(&buf).replacen(
-            "\r\n",
-            &format!(
-                "\r\nX-Peer: {}\r\n",
-                s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default()
-            ),
-            1,
-        );
+        if over {
+            return s.write_all(TOO_LARGE);
+        }
+        let peer = s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
+        let req = String::from_utf8_lossy(&buf).replacen("\r\n", &format!("\r\nX-Peer: {peer}\r\n"), 1);
         let (t0, target) = (
             drover_core::clock::instant(),
             req.split_whitespace().nth(1).unwrap_or_default(),
@@ -2052,20 +2051,19 @@ impl<'a> Server<'a> {
             }
             rows.sort_by_key(|r| r.0);
             let need = rows.iter().filter(|r| r.0 == 0).count();
-            let mut done: Vec<&&IssueState> = mine
-                .iter()
-                .filter(|s| s.done() && now.saturating_sub(s.last_ts) < 86_400)
+            let mut done: Vec<(u64, &Event)> = (events.iter())
+                .filter(|e| e.kind == "merged" && e.fleet == *f && now.saturating_sub(e.ts) < 86_400)
+                .filter_map(|e| Some((e.issue?, e)))
                 .collect();
-            done.sort_by_key(|s| std::cmp::Reverse(s.last_ts));
-            let done_row = |s: &&&IssueState| DoneRow {
-                issue: s.issue,
-                note: crate::land::note(events, f, s.issue).unwrap_or_else(|| s.state.clone()),
-                age: age(now.saturating_sub(s.last_ts)),
-                pr: crate::events::of_issue(events, f, s.issue)
-                    .into_iter()
-                    .rfind(|e| e.kind == "merged")
-                    .and_then(|e| e.str("pr"))
-                    .map(Into::into),
+            done.sort_by_key(|d| std::cmp::Reverse(d.1.ts));
+            let done_row = |&(n, e): &(u64, &Event)| DoneRow {
+                issue: n,
+                title: titles(ctx, f, n),
+                note: crate::land::note(events, f, n).unwrap_or_else(|| "merged".into()),
+                age: age(now.saturating_sub(e.ts)),
+                t: e.ts,
+                pr: e.str("pr").map(Into::into),
+                sha: e.str("merge_sha").map(Into::into),
             };
             // #365: open issues not queued, with no lane, from the last read; serve.js draws, filters, ticks (`bqueue`) them.
             let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
@@ -2086,7 +2084,7 @@ impl<'a> Server<'a> {
                 paths: fc.serial.iter().map(|g| g.paths.join(", ")).collect(),
                 need,
                 rows: rows.into_iter().map(|r| r.1).collect(),
-                done: done.iter().take(5).map(done_row).collect(),
+                done: done.iter().map(done_row).collect(),
                 done_n: done.len(),
                 backlog,
                 config: config_sheet(ctx, cfg, f, fc, st),

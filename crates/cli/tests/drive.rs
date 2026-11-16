@@ -1789,6 +1789,7 @@ fn auto_update_runs_in_a_pass_with_no_merge() {
     );
     let wt = c.state.with_file_name("update-sendmeter");
     let r = fake(NONE)
+        .once("git -C /tmp/does-not-matter/sendmeter merge-base --is-ancestor", 1, "")
         .reply("gh pr view issue-12", &pr(&head, "pending"))
         .reply("git -C /tmp/does-not-matter/sendmeter rev-parse", &format!("{head}\n"))
         .reply(
@@ -1830,6 +1831,7 @@ fn auto_update_rechecks_premerge_before_its_push() {
         let push = format!("git -C {} push -q origin HEAD:issue-12", wt.display());
         let r = fake(NONE)
             .once(&check, i32::from(fails), "lint: error: unused import\n")
+            .once("git -C /tmp/does-not-matter/sendmeter merge-base --is-ancestor", 1, "")
             .reply("gh pr view issue-12", &pr(&head, "pending"))
             .reply(
                 "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
