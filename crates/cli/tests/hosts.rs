@@ -93,7 +93,7 @@ fn placed(c: &drover::Ctx, r: &Fake, issue: u64, role: &str, force: Option<&str>
         &mini.on(&two(r, &bazzite)),
         &events,
         ("sendmeter", issue, role),
-        force,
+        (force, &|_| None),
     ) {
         Ok(p) => {
             let p = p.unwrap();
@@ -1780,7 +1780,7 @@ fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_wor
     let (mini, bazzite) = (FakeShed::new(), FakeShed::new());
     let ssh = two(&kept, &bazzite);
     let on = mini.on(&ssh);
-    let p = place(&c, &cfg, &on, &events, ("sendmeter", 12, "impl"), None)
+    let p = place(&c, &cfg, &on, &events, ("sendmeter", 12, "impl"), (None, &|_| None))
         .unwrap()
         .unwrap();
     assert_eq!((p.name.as_str(), p.refusal), ("bazzite", None));
