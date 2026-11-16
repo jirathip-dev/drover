@@ -1235,9 +1235,15 @@ impl Server<'_> {
             json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
         }));
-        cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|e| {
-            json!({"type": "card", "id": format!("stuck-{}", e.seq), "kind": "alert", "tone": "warn",
-                "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": crate::events::plain(e)}]})
+        cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|(f, es)| {
+            let line = |e: &Event| match e.issue {
+                Some(n) => format!("- {} · `drover why {f}#{n}`", crate::events::plain(e)),
+                None => format!("- {}", crate::events::plain(e)),
+            };
+            let md: Vec<String> = es.iter().map(|e| line(e)).collect();
+            json!({"type": "card", "id": format!("stuck-{f}"), "kind": "alert", "tone": "warn",
+                "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": md.join("\n")}],
+                "buttons": [{"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"}]})
         }));
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
         cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
