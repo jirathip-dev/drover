@@ -1,0 +1,46 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1160/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.69s
+     Running tests/tmp_1160.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1160/debug/deps/tmp_1160-4aa6230885ec2c9f)
+
+running 1 test
+BEFORE HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Content-Length: 1775
+Allow: GET, POST
+X-Paired: 1
+Cache-Control: no-store
+Connection: close
+
+{"actions":[{"action":"thread-archive","label":"archive","values":{"thread":"t1"}}],"blocks":[{"figure":{"state":"needs"},"id":"who","sticky":true,"subtitle":{"text":"! choose · sendmeter · claude · opus · awake","tone":"warn"},"title":"Search worker split · t1","type":"row"},{"blocks":[{"id":"m-3-t","markdown":"Burst size → Rate limits · t2","type":"text"}],"buttons":[{"id":"m-3-link","label":"continued in t2","tap":{"thread":"t2"},"type":"button"}],"id":"m-3","kind":"sys","type":"card"},{"blocks":[{"id":"m-4-t","markdown":"filed #52: cap","type":"text"}],"buttons":[{"id":"m-4-link","label":"from t2","tap":{"thread":"t2"},"type":"button"}],"id":"m-4","kind":"sys","type":"card"},{"blocks":[{"id":"m-5-t","markdown":"Hand off?","type":"text"},{"id":"m-5-e","markdown":"✗ not delivered: boom","type":"text"}],"id":"m-5","kind":"ask","meta":"0s","title":"q2","tone":"bad","type":"card"},{"blocks":[{"id":"m-7-t","markdown":"Hand off?","type":"text"},{"action":"answer","id":"q1","options":[{"label":"Rate limits · t2","value":"Rate limits · t2"},{"label":"new thread: X","value":"new thread: X"}],"other":{"placeholder":"other: type an answer"},"type":"choice","values":{"fleet":"sendmeter","thread":"t1"}}],"id":"m-7","kind":"ask","meta":"0s","title":"q1","tone":"warn","type":"card"},{"action":"thread-say","acts":{"model":"thread-model","queue":"thread-queue","steer":"thread-steer","stop":"thread-stop","unqueue":"thread-unqueue"},"chips":[{"all":["none","low","medium","high","xhigh"],"cur":null,"name":"effort"}],"id":"say","label":"send","placeholder":"message the orchestrator","queued":[],"type":"composer","values":{"thread":"t1"}}],"focus":true,"id":"thread-t1","stream":"/screens/threads/t1/stream","title":"Search worker split","type":"screen"}
+TAP1 HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Content-Length: 74
+Allow: GET, POST
+X-Paired: 1
+Cache-Control: no-store
+Connection: close
+
+{"close":true,"ops":[{"id":"ask-q1","op":"remove"}],"toast":"answered q1"}
+TAP2 HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Content-Length: 74
+Allow: GET, POST
+X-Paired: 1
+Cache-Control: no-store
+Connection: close
+
+{"close":true,"ops":[{"id":"ask-q1","op":"remove"}],"toast":"answered q1"}
+AFTER HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Content-Length: 1884
+Allow: GET, POST
+X-Paired: 1
+Cache-Control: no-store
+Connection: close
+
+{"actions":[{"action":"thread-archive","label":"archive","values":{"thread":"t1"}}],"blocks":[{"figure":{"state":"idle"},"id":"who","sticky":true,"subtitle":{"text":"no orchestrator yet · sendmeter · claude · opus","tone":""},"title":"Search worker split · t1","type":"row"},{"blocks":[{"id":"m-3-t","markdown":"Burst size → Rate limits · t2","type":"text"}],"buttons":[{"id":"m-3-link","label":"continued in t2","tap":{"thread":"t2"},"type":"button"}],"id":"m-3","kind":"sys","type":"card"},{"blocks":[{"id":"m-4-t","markdown":"filed #52: cap","type":"text"}],"buttons":[{"id":"m-4-link","label":"from t2","tap":{"thread":"t2"},"type":"button"}],"id":"m-4","kind":"sys","type":"card"},{"blocks":[{"id":"m-5-t","markdown":"Hand off?","type":"text"},{"id":"m-5-e","markdown":"✗ not delivered: boom","type":"text"}],"id":"m-5","kind":"ask","meta":"0s","title":"q2","tone":"bad","type":"card"},{"blocks":[{"id":"m-7-t","markdown":"Hand off?","type":"text"},{"id":"m-7-a","markdown":"✓ **new thread: X** · owner · 0s","type":"text"}],"buttons":[{"id":"m-7-to","label":"continued in t3","tap":{"thread":"t3"},"type":"button"}],"id":"m-7","kind":"ask","meta":"0s","title":"q1","tone":"","type":"card"},{"blocks":[{"id":"m-12-t","markdown":"X → X · t3","type":"text"}],"buttons":[{"id":"m-12-link","label":"continued in t3","tap":{"thread":"t3"},"type":"button"}],"id":"m-12","kind":"sys","type":"card"},{"action":"thread-say","acts":{"model":"thread-model","queue":"thread-queue","steer":"thread-steer","stop":"thread-stop","unqueue":"thread-unqueue"},"chips":[{"all":["none","low","medium","high","xhigh"],"cur":null,"name":"effort"}],"id":"say","label":"send","placeholder":"message the orchestrator","queued":[],"type":"composer","values":{"thread":"t1"}}],"focus":true,"id":"thread-t1","stream":"/screens/threads/t1/stream","title":"Search worker split","type":"screen"}
+KINDS ["thread-new", "thread-new", "thread-handoff", "thread-msg", "needs-decision", "ask-failed", "needs-decision", "pair-request", "pair-approve", "thread-read", "thread-new", "thread-handoff", "thread-msg", "decision", "thread-msg"]
+test dump ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
