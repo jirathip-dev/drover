@@ -1,5 +1,5 @@
 // #1084: the Threads composer in Playwright's WebKit on a real serve: node drafts.mjs <url> <cookie name=value>.
-// Types into thread t2 at 400 px down (a message card mid-screen must not move on any change while the stream is live, nor on the tick; the route's stream then ends, and the page's offline strip showing is no repaint), pushes 5 stream ops and a 30 s tick (fake clock), reloads, fails one send (500)
+// Types into thread t2 with its messages scrolled 400 px down (a message card mid-screen must not move on any change while the stream is live, nor on the tick; the route's stream then ends, and the page's offline strip showing is no repaint), pushes 5 stream ops and a 30 s tick (fake clock), reloads, fails one send (500)
 // and retries it, then sends. Prints one JSON object of what the page showed at each step.
 import { createRequire } from 'node:module';
 
@@ -39,7 +39,7 @@ try {
 
   await page.goto(url + '#threads');
   await open();
-  await page.evaluate(() => { const i = document.querySelector('.form.say input'); i.focus(); scrollTo(0, 400); });
+  await page.evaluate(() => { const i = document.querySelector('.form.say input'); i.focus(); document.querySelector('.scr[data-id=thread-t2]').scrollTop = 400; });
   await page.keyboard.type('half a thought');
   await page.evaluate(() => {
     const i = document.querySelector('.form.say input');
@@ -47,12 +47,12 @@ try {
     const a = document.elementFromPoint(195, 422).closest('.card');
     window.kept = { i, gone: 0, anchor: a.dataset.id, top: a.getBoundingClientRect().top };
     kept.live = [];
-    new MutationObserver(rs => { if (document.getElementById('stale').hidden) kept.live.push([scrollY, document.querySelector(`[data-id="${kept.anchor}"]`)?.getBoundingClientRect().top]); for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
+    new MutationObserver(rs => { if (document.getElementById('stale').hidden) kept.live.push([Math.round(document.querySelector('.scr[data-id=thread-t2]').scrollTop), document.querySelector(`[data-id="${kept.anchor}"]`)?.getBoundingClientRect().top]); for (const r of rs) for (const n of r.removedNodes) if (n === i || n.contains?.(i)) kept.gone++; }).observe(document.body, { childList: true, subtree: true });
   });
   out.before = { ...(await box()), top: await page.evaluate(() => kept.top) };
   typed();
   await until(() => document.querySelectorAll('[data-id^="m-x"]').length === 5, 'the 5 stream updates');
-  const view = () => page.evaluate(() => [scrollY, document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top]);
+  const view = () => page.evaluate(() => [Math.round(document.querySelector('.scr[data-id=thread-t2]').scrollTop), document.querySelector(`[data-id="${kept.anchor}"]`).getBoundingClientRect().top]);
   const tick = [await view()];
   await page.clock.runFor(30_000);
   tick.push(await view());
