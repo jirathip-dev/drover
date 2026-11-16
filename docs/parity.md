@@ -51,7 +51,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 32 | Config-proposal card: diff, apply/discard, stale, waiting bar | parity_32 | kept |
 | 33 | Secret request card with masked input | parity_32 | kept |
 | 34 | Harness pick at thread start; model/effort chip in composer | parity_34 | page-only |
-| 35 | Handoff chips, flow-back lines, pick-a-thread choice row | — | open |
+| 35 | Handoff chips, flow-back lines, pick-a-thread choice row | parity_35 | kept |
 | 36 | One repo at a time: chips, swipe, needs dot, [all] | — | open #1089 |
 | 37 | Fleet cards in their colour; paused folds; needs-you first | parity_37 | kept |
 | 38 | Blocked chains as a tree; chain collapsed to one row | parity_38 | kept |
