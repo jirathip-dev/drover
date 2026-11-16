@@ -430,3 +430,32 @@ fn a_queued_issue_on_a_held_group_still_waits_and_names_its_holder() {
     assert!(row.contains("waiting for a ci slot (#9 holds 1/1)"), "{w}");
     assert!(!row.contains("(0/1)"), "{w}");
 }
+
+#[test]
+fn a_queued_issue_on_a_held_hot_file_names_its_holder_in_status_and_waiting() {
+    let (c, _sh) = hot_ctx("sg-hot-held-by");
+    hot_files(&c, &[HOT]);
+    lane(&c, 9);
+    joined(&c, 9, &[HOT]);
+    let r = fake(&[(9, &format!("{HOT}\n"))]);
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "13"]).0, 0);
+    joined(&c, 13, &[HOT]);
+    ev(
+        &c,
+        13,
+        "serial-held",
+        json!({"group": format!("hot {HOT}"), "holder": 9}),
+    );
+    let (out, _) = drive(&c, &r);
+    assert!(out.contains("sendmeter #13 start: REFUSED SERIAL_BUSY"), "{out}");
+    let want = format!("serial: hot {HOT} held by #9 (1/1)");
+    let (_, s) = run(&c, &r, &["status", "sendmeter"]);
+    let row = s
+        .lines()
+        .find(|l| l.contains("#13") || l.contains(" 13 "))
+        .unwrap_or_default();
+    assert!(row.contains(&want) && !row.contains("(0/1)"), "{s}");
+    let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
+    let row = w.lines().find(|l| l.starts_with("sendmeter #13 ")).unwrap_or_default();
+    assert!(row.contains(&want) && !row.contains("(0/1)"), "{w}");
+}
