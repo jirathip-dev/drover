@@ -242,3 +242,30 @@ fn three_stuck_issues_in_one_fleet_push_once_and_show_one_card() {
     }
     assert!(shown.contains("\"action\":\"drive-all\""), "{shown}");
 }
+
+#[test]
+fn a_missed_promise_a_hold_took_over_shows_no_stuck_card() {
+    let (c, sink, sh) = setup("slo-missed-held");
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/issue-9")).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "rm", "12"]).0, 0);
+    let ev = |ts, kind: &str, d: Value| append(&c.state, &Event::new(NOW + ts, "sendmeter", Some(7), kind, d)).unwrap();
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-7", "pane": "sendmeter-impl-7", "runtime": "shed", "worktree": "/x", "branch": "issue-7"});
+    ev(0, "spawn", d);
+    let line = "pushed abc1234, waiting for drive (next pass ≤ 5 min) to spawn review";
+    ev(
+        20,
+        "promise",
+        json!({"kind": "next-pass", "reason": line, "deadline": NOW + 620, "state": "impl", "head": ""}),
+    );
+    ev(
+        700,
+        "promise-missed",
+        json!({"kind": "next-pass", "promised": line, "age": 680, "why": "drive took no step"}),
+    );
+    ev(710, "held", json!({"on": [8]}));
+    fast(&at(&c, 720), &sh);
+    fast(&at(&c, 1020), &sh);
+    assert!(!kinds(&c).contains(&"stuck".to_string()), "{:?}", kinds(&c));
+    assert_eq!(card(&c, &sh, NOW + 1020), None);
+    assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
+}
