@@ -1,0 +1,53 @@
+Decided: /screens/herd is built from the existing Herd read (serve.rs herd()), one `scene` block with weather and per-repo band sections of plain rows, so the page reuses its row, section and figure renderers
+Because: "Its data from a JSON screen (`/screens/herd`: per repo, lanes by state band, queued at the gate, host load for weather), not from a revived `/herd.json`."
+Decided: Herd opens from [⚙] as a page-only menu row added in page_places, so cooee's manifest and its places golden stay unchanged and the 390 px tab bar keeps four tabs
+Because: crates/server/src/screens.rs:42
+Decided: the page fetches themes/<theme>/scene.svg, which serve already resolves own theme dir → vendored swag pack → farm; farm and terminal have none (404) and get a small drawn ranch
+Because: "The theme's `scene` falls back to farm/terminal as the old one did."
+Rejected: reviving herd.js's 539-line animated ranch (wind, rain, trotting legs) — the AC asks for the scene, figures, night and repo switching; the weather is a tint per sky
+Rejected: a new header-strip tab — a fifth tab at 390 px risks the ui gate for no AC gain
+Check: the ui-webkit CI job now runs tests/herd.rs; locally Playwright 1.65 has no matching WebKit build, so the same test was run on Chromium (passes) and must be read green in CI
+Owner: The Herd scene is back: [⚙] → Herd shows each repo's ranch with its lanes by state, the queue at the gate, night and the next repo.
+
+Decided: merged origin/staging; ci.yml keeps #1084's page_drafts step and trigger beside this PR's herd ones, main.ts keeps #1084's `sent` import and adds `import './herd'`, web/dist rebuilt from the merged src
+Because: .github/workflows/ci.yml:199
+Because: web/src/main.ts:5
+Decided: Herd opens from [⚙] as a page-only menu row, so cooee's manifest stays unchanged and the 390 px tab bar keeps its tabs
+Because: crates/server/src/screens.rs:42
+Rejected: taking either side alone in the conflicts — both edits are additive and each PR's tests need its own lines
+Check: the ui-webkit job runs both `--test page_drafts` and `--test herd`; npm run build output equals the committed web/dist
+Owner: The Herd branch is caught up with staging and the drafts work from #1084; nothing about the Herd changed.
+
+Decided: merged origin/staging again; ci.yml keeps staging's parity_webkit trigger and steps, with herd.rs added to the WebKit trigger and the herd step kept last
+Because: .github/workflows/ci.yml:201
+Decided: Herd still opens from [⚙] as a page-only menu row; nothing in the Herd changed in this merge
+Because: crates/server/src/screens.rs:42
+Rejected: taking staging's ci.yml alone — the ui-webkit job would stop running the Herd's WebKit test
+Check: web/dist rebuilt from the merged src is byte-identical to the committed one; ui-webkit runs parity_webkit, page_drafts and herd
+Owner: The Herd branch is caught up with staging again; nothing about the Herd changed.
+
+Decided: merged origin/staging again; ci.yml keeps #1086's threads_tab step and trigger paths, herd.rs added to the WebKit trigger, the herd step kept last
+Because: .github/workflows/ci.yml:201
+Decided: board.css takes #1086's focus-screen rules, which replace the old thread max-width line, and keeps the Herd's scene rules after them
+Because: web/src/board.css:160
+Decided: Herd still opens from [⚙] as a page-only menu row; nothing in the Herd changed in this merge
+Because: crates/server/src/screens.rs:42
+Rejected: taking staging's side alone — the ui-webkit job would stop running the Herd's WebKit test and the scene would lose its styles
+Check: web/dist rebuilt from the merged src; ui-webkit runs parity_webkit, page_drafts, threads_tab and herd
+Owner: The Herd branch is caught up with staging and the new thread view; nothing about the Herd changed.
+
+Decided: merged origin/staging; screens.rs and main.ts keep both sides' imports (Herd types and './herd' beside staging's Json, blks, isBlk, nodes)
+Because: crates/server/src/screens.rs:6
+Decided: herd.ts reads the scene block through staging's strict Blk helpers (blks, obj) and draws the swag svg with nodes() like el() now does
+Because: web/src/herd.ts:20
+Decided: the scene cache fetch returns its svg directly, so herd.ts has no non-null `!` for staging's ts-lint
+Because: web/src/herd.ts:7
+Rejected: hand-merging web/dist — it is rebuilt from the merged src with npm run build
+Check: npm run check, lint and build exit 0; --test herd passes 7/7; ui-webkit runs the herd test at a064bd12
+Owner: The Herd branch is caught up with staging again; the scene works the same, only its code follows the page's new stricter types.
+
+Decided: merged origin/staging again; ci.yml keeps staging's repaint.mjs trigger with herd.rs, main.ts keeps morph and './herd'
+Because: web/src/main.ts:5
+Rejected: none
+Check: npm check/lint/build and the herd test exit 0 at a2eeac3e
+Owner: The Herd branch is caught up with staging again; nothing about the scene changed.
