@@ -124,8 +124,8 @@ body:not([data-pair]) .pairb{display:none}
 @keyframes s{to{transform:rotate(1turn)}}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
-.sb>button,.scr>button,.sec>button,.shb>button,.card>button{margin:var(--s2) var(--s4) var(--s2) 0}
-/* #1072 Threads: a `focus` screen hides the cards; message cards by kind; the composer's `submit` sticks to the foot. */
+.sb>button,.scr>button,.msgs>button,.sec>button,.shb>button,.card>button{margin:var(--s2) var(--s4) var(--s2) 0}
+/* #1072 Threads: a `focus` screen hides the cards; message cards by kind; the composer docks at the foot. */
 html[data-focus] #cards{display:none}
 .scr .card.k-you,.scr .card.k-orch,.scr .card.k-ask{border-left-width:3px}
 .scr .card.k-you{border-left-color:var(--a)}
@@ -140,13 +140,14 @@ html[data-focus] #cards{display:none}
 .form.say{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 0;background:var(--bg);border-top:1px solid var(--line)}
 .form.say .fd{flex:1;border:0;min-height:0}
 .form.say .fk:empty{display:none}
-/* #1086: a focus screen scrolls inside, between the header and the tab bar or keyboard (`fit()`); its bar sticks on top. */
+/* #1086, #1120: a focus screen is a column between the header and the tab bar or keyboard (`fit()`): bar, messages (the one scroller), composer. */
 html[data-focus] body{overflow:hidden}
 html[data-focus] #strip{position:fixed;left:0;right:0}
-html[data-focus] main>.tab>.scr{position:fixed;top:var(--top,0);bottom:var(--bot,0);left:0;right:0;max-width:760px;margin-inline:auto;padding:0 var(--s3);overflow-y:auto;overscroll-behavior:contain}
-html[data-focus] .form.say{bottom:0}
+html[data-focus] main>.tab>.scr{position:fixed;top:var(--top,0);bottom:var(--bot,0);left:0;right:0;max-width:760px;margin-inline:auto;padding:0 var(--s3);display:flex;flex-direction:column}
+.scr>.msgs{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:var(--s2)}
+html[data-focus] .scr>.form.say{position:static}
 .row.sticky{position:sticky;top:0;z-index:1;background:var(--bg)}
-.scr>button[data-id=older]{display:flex;margin:var(--s2) auto}
+.msgs>button[data-id=older]{display:flex;margin:var(--s2) auto}
 .cb{position:relative}
 .cb>.cpy{position:absolute;top:0;right:0}
 .cb>pre{padding-right:calc(6ch + var(--s4))}
