@@ -1,0 +1,5 @@
+Decided: merged origin/staging with #1138; took its hosts.rs hunk as written, it already matches on the refusal instead of unwrapping it
+Because: "Fix every existing hit in this issue; no baseline of old offenders."
+Rejected: keeping this branch's `filter(|_| unpushed)` form — staging's match also covers the new no-refusal note
+Check: the full cargo test run at this head exits 0 (215 suites)
+Owner: the branch is current with staging and every test passes at its head
