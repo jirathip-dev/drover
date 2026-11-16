@@ -1,0 +1,10 @@
+Decided: the tab badge is the Queue screen's own `badge` field; the stream's badge op reads that field
+Because: "The tab badge is the screen's own `badge` field (on first paint and in the cached copy)"
+Decided: the badge counts blocked lanes, open asks and needs-human issues, the old needs-you cards
+Because: "counting what the old `[queue·N]` counted"
+Decided: a chip's N is every open row on its fleet card: needs you, in progress and queued
+Because: "Each repo chip: `name N` (N = needs you + in progress + queued)"
+Rejected: building the needs tab to count it — /screens p95 went over serve_health's 50 ms budget
+Rejected: adding the four counts to the existing stats row — 8 tiles do not fit at 390 px
+Check: the counts row and chip labels in GET /screens/queue match each fleet card's sections and done today
+Owner: The Queue shows counts on every repo chip and a needs/in progress/queued/done today row; the tab badge shows on first load.
