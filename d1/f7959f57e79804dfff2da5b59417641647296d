@@ -1,0 +1,10 @@
+Decided: merged origin/staging (#1094); its seven `open #1086` parity rows are now kept, with three red WebKit tests un-ignored and parity_18, parity_19 and parity_28 added
+Because: docs/parity.md:15
+Decided: reaching the top of a thread loads the older 30 by itself, as the parity_29 row asks ("older on scroll"); the button stays for a tap
+Because: docs/parity.md:48
+Decided: the thread screen takes `?before=N`: the 30 before N plus every later one, and its stream keeps the query, so live updates never slide loaded messages away
+Because: crates/server/src/serve/chat.rs:272
+Rejected: prepending API v1 `thread/<t>?before=` pages on the page — a second message renderer beside msg_card
+Rejected: side-by-side at 1000 px and phone-clock times — in the problem table, not in Wanted (row 24 is #1088's)
+Check: CI ui-webkit runs parity_webkit (r4, 18, 19, 20, 28, 29) and threads_tab webkit; scripts/parity-check.sh passes
+Owner: Threads now read like the old chat tab, and the parity list shows seven of its rows done with a test each.
