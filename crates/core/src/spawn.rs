@@ -1072,7 +1072,7 @@ pub fn spawn(
     let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
     if o.dry_run {
         pj.put("dry_run", json!(true));
-        print_plan(out, &pj, o.json)?;
+        print_plan(out, &pj, o.json, placed.as_ref())?;
         return Ok(true);
     }
     if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
@@ -1492,7 +1492,7 @@ pub fn spawn(
             event("spawn", d)?;
             kicked?;
             pj.put("pane", json!(pane)).put("confirmed", json!(confirmed));
-            print_plan(out, &pj, o.json)?;
+            print_plan(out, &pj, o.json, placed.as_ref())?;
             Ok(confirmed)
         })();
         (res, c.join().ok())
@@ -1840,7 +1840,12 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
     Ok(any)
 }
 
-fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool) -> Result<()> {
+fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool, placed: Option<&crate::hosts::Placed>) -> Result<()> {
+    let mut v = pj.clone();
+    if let Some(pl) = placed {
+        v.put("host", json!(pl.name)).put("why", json!(pl.why));
+    }
+    let pj = &v;
     if as_json {
         writeln!(out, "{}", serde_json::to_string_pretty(pj)?)?;
     } else {
@@ -1849,6 +1854,10 @@ fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool) -> Result<()> {
             "{} [{} {}] {} @ {}",
             pj["agent"], pj["harness"], pj["profile"], pj["branch"], pj["worktree"]
         )?;
+        if let Some(h) = pj["host"].as_str() {
+            let why = pj["why"].as_str().map_or(String::new(), |w| format!(": {w}"));
+            writeln!(out, "  on {h}{why}")?;
+        }
         for c in pj["commands"].as_array().into_iter().flatten() {
             let words: Vec<&str> = c.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             writeln!(out, "  $ {}", words.join(" "))?;
