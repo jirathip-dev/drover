@@ -1,0 +1,11 @@
+Decided: a rev or verify lane's rules come from `git show origin/<integration>:.drover/rules.md` in the fleet's checkout, not the worktree
+Because: "as they are on the integration branch, not as the PR has them"
+Decided: a PR that touches rules.md, verify.md, design.md or arch.toml gets one brief line naming them with the `origin/<integration>...HEAD` diff of those files
+Because: "naming the files and saying the change itself is under review, with the diff"
+Decided: the verify lane reads the integration recipe drover writes to `.verify.md` in its folder (an own file, like .verify-browser.mjs), and drive's recipe probe asks the API at the integration ref
+Because: crates/core/src/verify.rs:54
+Rejected: checking the integration copies out over the PR's in the rev worktree — the lane's folder would look dirty to kill, clean and wip saves
+Decided: a lessons issue keeps today's path: its rev brief reads the worktree's rules and gets no changed-files line
+Because: "Lesson PRs keep their own path"
+Check: design.md and arch.toml are not read into a rev brief today; they are covered by the changed-files line only
+Owner: Reviewers and verifiers now follow the rules and app recipe already on the integration branch, so a PR can no longer soften the checks on itself; lesson PRs are reviewed as before.
