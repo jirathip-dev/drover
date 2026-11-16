@@ -715,6 +715,18 @@ pub const OWN_FILES: &[&str] = &[
     ".review-brief.md",
     "why.md",
     ".verify-browser.mjs",
+    ".verify.md",
+];
+
+const OWN_REPO: [&str; 8] = [
+    ".drover/rules.md",
+    ".drover/verify.md",
+    ".drover/design.md",
+    ".drover/arch.toml",
+    ".herdsman/rules.md",
+    ".herdsman/verify.md",
+    ".herdsman/design.md",
+    ".herdsman/arch.toml",
 ];
 
 /// #770: `OWN_FILES` and the harness files spawn copies in (`providers::LOCAL_FILES`).
@@ -1173,6 +1185,8 @@ pub fn spawn(
 
     let mut sha = None;
     let note;
+    let int = format!("origin/{}", f.integration);
+    let at_int = |p: &str| ok(r, "git", &["-C", &local, "show", &format!("{int}:{p}")]).ok();
     let brief_text = {
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
@@ -1183,6 +1197,10 @@ pub fn spawn(
             "git",
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
+        let own = p.family == "rev" && !crate::lesson::is_lesson(ctx, None, (fleet, issue));
+        if p.family == "rev" {
+            ok(r, "git", &["-C", &local, "fetch", "origin", &f.integration])?;
+        }
         let body = iss["body"].as_str().unwrap_or("");
         let recipe = match p.family {
             "design" => crate::design::Recipe::at(r, &local, &p.base, body),
@@ -1275,10 +1293,25 @@ pub fn spawn(
                 "rev" => format!("Architecture: the owner approved the ADR in `{a}/`; check the diff against it."),
                 _ => format!("Architecture: the owner approved the ADR in `{a}/` on this branch; build to it, and add any `.drover/arch.toml` lines it ends with in this PR."),
             });
+        let changed = own
+            .then(|| ok(r, "git", &[&["-C", &wt, "diff", &format!("{int}...HEAD"), "--"][..], &OWN_REPO].concat()).ok())
+            .flatten()
+            .and_then(|d| {
+                let names: Vec<String> = (d.lines())
+                    .filter_map(|l| Some(format!("`{}`", l.strip_prefix("diff --git a/")?.split(" b/").next()?)))
+                    .collect();
+                (!names.is_empty()).then(|| {
+                    format!(
+                        "This PR changes {}: you are briefed with the integration branch's copy; the change itself is under review.\n\n~~~diff\n{d}~~~",
+                        names.join(", ")
+                    )
+                })
+            });
         let decided = events
             .iter()
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
+            .chain(changed)
             .chain(update)
             .chain(adr)
             .chain((!crate::events::STAGES.contains(&p.family)).then(|| {
@@ -1299,7 +1332,12 @@ pub fn spawn(
             &decided.fold(body.to_string(), |b, d| b + &d),
             (
                 fix,
-                crate::repo_read("rules.md", |f| on.read(&p.worktree.join(f))).as_deref(),
+                if own {
+                    crate::repo_read("rules.md", at_int)
+                } else {
+                    crate::repo_read("rules.md", |f| on.read(&p.worktree.join(f)))
+                }
+                .as_deref(),
                 crate::queue::repro(&events, fleet, issue),
                 crate::queue::playbook(&events, fleet, issue),
             ),
@@ -1310,6 +1348,9 @@ pub fn spawn(
     if p.role == "verify" {
         let vb = include_str!("../../../scripts/verify-browser.mjs");
         on.write(&p.worktree.join(".verify-browser.mjs"), vb)?;
+        if let Some(v) = crate::repo_read("verify.md", at_int) {
+            on.write(&p.worktree.join(".verify.md"), &v)?;
+        }
     }
     if on.machine.is_none() {
         copy_included(&f.local_path(), &p.worktree)?;

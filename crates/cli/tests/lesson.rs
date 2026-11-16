@@ -262,7 +262,13 @@ fn rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine() {
         let wt = c.worktrees.join("sendmeter").join(dir);
         std::fs::create_dir_all(wt.join(".drover")).unwrap();
         std::fs::write(wt.join(".drover/rules.md"), rules).unwrap();
-        let r = spawner(12).once(&format!("git -C {} status --porcelain", wt.display()), 0, "");
+        let r = spawner(12)
+            .once(&format!("git -C {} status --porcelain", wt.display()), 0, "")
+            .once(
+                "git -C /tmp/does-not-matter/sendmeter show origin/staging:.drover/rules.md",
+                0,
+                rules,
+            );
         let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", role]);
         assert!(code == 0 || code == 4, "{role}: {code} {out}");
         let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
@@ -633,5 +639,33 @@ fn a_pr_that_deletes_every_rule_is_reviewed_by_the_integration_rules() {
     assert!(
         brief.contains("This PR changes `.drover/rules.md`") && brief.contains(diff),
         "{brief}"
+    );
+}
+
+#[test]
+fn a_lesson_pr_is_reviewed_by_its_own_rules_as_before() {
+    let c = ctx(&tmpdir("lesson-pr-rules"), CONFIG);
+    let _sh = FakeShed::attached(&c);
+    let wt = c.worktrees.join("sendmeter").join("rev-12-r1");
+    std::fs::create_dir_all(wt.join(".drover")).unwrap();
+    let rules = "- don't X (enforced by: lesson x `true`, shadow since 1970-01-12)\n";
+    std::fs::write(wt.join(".drover/rules.md"), rules).unwrap();
+    let r = Fake::default()
+        .reply(
+            "gh issue view 12",
+            r#"{"title":"lessons: sendmeter week of 1970-01-12","body":"b"}"#,
+        )
+        .reply("git -C", "0\n")
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .once(&format!("git -C {} status --porcelain", wt.display()), 0, "");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
+    assert!(code == 0 || code == 4, "{code} {out}");
+    let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    let want = format!("## Repo rules (.drover/rules.md)\n\n{rules}\n## ");
+    assert!(brief.contains(&want) && !brief.contains("This PR changes"), "{brief}");
+    assert!(
+        !r.called("git -C /tmp/does-not-matter/sendmeter show"),
+        "{:?}",
+        r.calls.borrow()
     );
 }
