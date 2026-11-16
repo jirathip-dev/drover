@@ -1,0 +1,5 @@
+Decided: line_cap 45400 -> 47200 in ci/cap.toml, the history note in docs/cap-history/2026-11-16-1079.md
+Because: q1726
+Rejected: none
+Check: cap-check at the head prints 45344 / cap 47200 and exits 0
+Owner: the code-size limit is now 47,200 lines, as you decided.
