@@ -1,0 +1,15 @@
+Decided: a merge touching more than 40 files is a sweep and not counted; hot is max(5, counted merges / 20); tick stores daily, files weekly
+Because: docs/architecture/hotspots-2026-11-16/adr.md:45
+Decided: the report header counts decided files (frozen, generated or shared) over the bar, not shared alone: all three leave the list the same way
+Rejected: a shared-only count — a second arch.rs API just for one header number
+Decided: `shared` in .drover/arch.toml; arch-check fails a shared glob no [[size]] rule covers; two size rules and their baseline written once
+Because: docs/architecture/hotspots-2026-11-16/adr.md:48
+Decided: `just gen` writes types, web/dist, docs/workflow.md and the brief goldens, all listed generated; CI's diagram step and dist diff deleted
+Because: docs/architecture/hotspots-2026-11-16/adr.md:53
+Decided: Event gains `push`; WEBPUSH_ON moved verbatim to the frozen events::push::LEGACY (42 kinds, the ADR said 44); Notify::wants takes the event
+Because: docs/architecture/hotspots-2026-11-16/adr.md:56
+Decided: fire and its push budget moved to check/fire.rs, so check.rs shrinks (2556 to 2531) instead of growing past its baseline
+Because: docs/architecture/hotspots-2026-11-16/adr.md:51
+Decided: roles/usage/ joined by core's build script; slash-grouped refusal bullets split one code a file, each keeping its clause of the old sentence
+Check: `drover help --agent` matches the old tail except the refusal block (sorted, one code a line); old ADRs naming usage-tail.md are in docs skip
+Owner: The hot-files list now ignores sweeps and scales with the merge rate, the engine's big files stop queueing one PR at a time but cannot grow, and built files come from one command.
