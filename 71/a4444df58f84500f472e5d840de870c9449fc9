@@ -1,0 +1,9 @@
+Decided: the ui audit's thread step waits for the composer's .cmp box; the old one-line .form.say no longer renders on the thread screen.
+Because: assets/ui-audit.js:16
+Decided: the composer's chip rows sit var(--s4) apart, so their 44 px tap areas no longer overlap [+] or each other.
+Because: web/src/board.css:149
+Decided: composer() takes its extra fields as one JSON object and merges the non-null ones, instead of indexing the value, which #809's lint bans.
+Because: crates/server/src/serve/chat.rs:739
+Rejected: an #[allow] for indexing — rules.md caps allows and the merge removes the need.
+Check: the ui job's thread view has no outliers; thread.json goldens are unchanged by the chat.rs rewrite (threads_tab and cooee tests pass).
+Owner: Please attach a screenshot from Photos on your phone and send it; that check can only be done by hand.
