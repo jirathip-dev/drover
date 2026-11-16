@@ -1,0 +1,13 @@
+Decided: a triage lane changes issues only through `drover triage close|fold|label`; its raw `gh issue close|edit|reopen` is refused, so the protected-issue rule cannot be skipped
+Because: "the hook allows them for this role alone"
+Decided: each verb refuses PROTECTED an issue that is queued, has a lane, waits on an open ask or is labeled keep, before any write
+Because: "an issue that is queued, has a live lane, waits on an open owner ask"
+Decided: the lane is read-only on code by reusing the reviewer rules (no commit, push or merge), and reports nothing via `drover turn`
+Because: crates/core/src/hook.rs:75
+Decided: weekly runs are opt-in with `triage = "weekly"` in [fleet.<n>]; `drover triage <fleet>` runs it on demand; role defaults to impl's like lesson
+Because: "First live run on `herdsman` and `cooee`; the owner reviews the summary"
+Decided: `done --no-change` builds the summary from the verbs' own events, each with its undo, posts it to the fleet's orchestrator thread and closes the triage issue
+Rejected: a free-text summary written by the lane — its undo lines could be wrong or missing
+Rejected: the concurrency sim in tests/sim — it models drive races; the fixture test drives the real CLI verbs against a fake gh
+Check: a `done` close needs a commit on origin/<integration> (NOT_ON_INTEGRATION otherwise); a later `drover amend` ignores the folded block
+Owner: Triage closes, folds and flags stale issues weekly where turned on, and tells you in the thread how to undo each change.
