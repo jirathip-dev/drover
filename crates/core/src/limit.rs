@@ -51,8 +51,9 @@ fn reset_at(r: &dyn Runner, note: &str, now: u64) -> Option<u64> {
     })?;
     let months = "jan feb mar apr may jun jul aug sep oct nov dec";
     let date = words.windows(2).find_map(|w| {
-        let m = months.split(' ').position(|x| w[0].starts_with(x))? as u64 + 1;
-        Some((m, w[1].parse::<u64>().ok()?))
+        let [mon, day] = w else { return None };
+        let m = u64::try_from(months.split(' ').position(|x| mon.starts_with(x))?).ok()? + 1;
+        Some((m, day.parse::<u64>().ok()?))
     });
     let z = crate::usage::date(r, now, "+%z").parse::<i64>().unwrap_or(0);
     let off = z / 100 * 3600 + z % 100 * 60;
