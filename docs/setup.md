@@ -4,6 +4,49 @@ From zero to the board as an app on your phone's Home Screen. Every step ends wi
 Placeholders: `<owner>`, `<repo>`, `<home>` (your home directory), `<machine>`, `<tailnet>`,
 `<chat>`. Swap in your own values; keep them out of anything you commit.
 
+## Quick start
+
+```sh
+cargo install --path crates/cli
+mkdir -p ~/.config/drover
+cat > ~/.config/drover/fleet.toml <<'EOF'
+[fleet.app]
+repo = "you/app"
+local = "~/src/app"
+integration = "staging"
+
+[fleet.app.role.impl]
+harness = "claude"
+profile = "lane-impl"
+
+[fleet.app.role.rev]
+harness = "claude"
+profile = "lane-rev"
+
+[runtime]
+kind = "shed"
+EOF
+drover profiles sync                # per-role profiles and the lane hook
+drover spawn app 12 impl --dry-run  # print the plan; drop --dry-run to launch it
+drover status
+drover timer install                # the drive loop, every 5 minutes
+drover serve --addr 127.0.0.1:7777  # /api/v1, cooee's screens and the phone page
+```
+
+Self-update installs the green head of `[self_update] branch` (default `main`); serve hands its sockets to the new binary without dropping a request; `staging_serve = true` adds a read-only staging serve on `staging_addr` (default `127.0.0.1:7787`) ([below](#self-update-and-the-daily-clean-557)).
+
+| Command | What it does |
+|---|---|
+| `drive` / `timer` / `tick` | one pass; the job that runs it; check, then drive |
+| `queue` / `next` / `pause` / `resume` | the ordered queue; the first ready issue; hold a fleet |
+| `spawn` / `adopt` / `turn` | start a lane; record a running one; a lane's end of turn |
+| `verdict` / `merge` / `cap` | a verdict pinned to the head sha; merge if every gate passes; the line cap |
+| `status` / `board` / `waiting` / `serve` | per-issue state; compact board; who waits on whom; the server |
+| `ask` / `answer` / `asks` / `thread` / `card` | decisions; orchestrator threads; run cards |
+| `check` / `clean` / `reclaim` / `kill` | alerts; reclaim done lanes and build folders; stop a lane, work saved |
+| `profiles` / `hosts` / `secret` | per-role folders and hooks; hosts; secret files |
+| `setup` / `doctor` / `why` / `lesson` | install the jobs; host check; a line's reasoning; lesson checks |
+
 ## 1. Install
 
 You need `git`, `gh` (logged in), shed (its server job running, [runtimes](runtimes.md)), a Rust toolchain, and
