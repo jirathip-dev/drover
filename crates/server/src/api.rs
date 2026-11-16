@@ -1013,6 +1013,7 @@ pub struct Health {
 /// #898: serve's own numbers (each minute also `serve-health.json`): RSS, the last minute's route groups and read 503s.
 pub struct ServeHealth {
     pub at: u64,
+    pub sha: String,
     pub started: u64,
     pub rss_mb: u64,
     pub groups: Vec<RouteTime>,

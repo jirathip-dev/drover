@@ -54,7 +54,7 @@ pub fn grafts(r: &dyn Runner, f: &Fleet, dir: &Path) -> Result<()> {
         .filter(|s| !s.is_empty());
     let want = f.baseline.as_ref().map(Baseline::sha);
     let int = format!("origin/{}", f.integration);
-    if let Some(t) = want {
+    if let Some(t) = want.filter(|t| had.as_deref() != Some(*t)) {
         g(&["merge-base", "--is-ancestor", t, &int]).with_context(|| format!("{t:.12} is not on {int}"))?;
         g(&["config", "extensions.worktreeConfig", "true"])?;
         g(&["config", "core.useReplaceRefs", "false"])?;
@@ -81,7 +81,9 @@ pub fn grafts(r: &dyn Runner, f: &Fleet, dir: &Path) -> Result<()> {
         }
         return Ok(());
     };
-    g(&["config", "drover.baseline", t])?;
+    if had.as_deref() != Some(t) {
+        g(&["config", "drover.baseline", t])?;
+    }
     let have = g(&["replace", "-l"])?;
     let cut = g(&["rev-list", "--boundary", "HEAD", &int, &format!("^{t}")])?;
     let boundary = cut.lines().filter_map(|l| l.strip_prefix('-'));

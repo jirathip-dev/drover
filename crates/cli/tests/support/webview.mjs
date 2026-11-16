@@ -3,7 +3,7 @@
 // the tab/mode switch and save one 844 px tall screen, e.g. an open sheet).
 // Numbers the js leaves in `window.measure` are printed after the two widths (with a png, `window.late` instead if set).
 // #200, with `close`: the page under a sheet as it closes. A baseline before `js` opens the sheet, then `close` and
-// screenshots back to back for 400 ms; prints the frame count, the worst frame's share of pixels above the open sheet
+// screenshots back to back for 400 ms (tab `-`: no tab()/mode()); prints the frame count, the worst frame's share of pixels above the open sheet
 // that are not the baseline dimmed evenly, no darker than under the open sheet (the backdrop fading), and how dimmed
 // the last frame is (0: the page as it was); the worst frame goes to out.png.
 // #206: `DROVER_TAB` is the stored tab before the page loads; tab `-`: no tab()/mode() and no <details> opened.
@@ -105,13 +105,13 @@ at = "js";
 const themed = url ? "" : "typeof themed === 'object' && await themed;";
 if (close) {
   await body(`${themed} return 1`);
-  await run(`tab('${tab}'); mode('${mode}'); 1`);
+  if (tab !== "-") await run(`tab('${tab}'); mode('${mode}'); 1`);
   await sleep(0.5);
   const b = rgba(await shot());
   await run(`${extra}; 1`).catch((e) => done(2, `js error: ${e.message}`));
   await sleep(0.7);
   // Above the open sheet: it only slides down from there.
-  const top = await run("document.querySelector('.sh').getBoundingClientRect().top").catch(() => 0);
+  const top = await run("(document.querySelector('#sheet .sh') ?? document.querySelector('.sh')).getBoundingClientRect().top").catch(() => 0);
   const lo = judge(b, rgba(await shot()), top).k;
   await run(`${close}; 1`);
   at = "close";

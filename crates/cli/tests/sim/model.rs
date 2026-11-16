@@ -478,13 +478,14 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             m.heads.insert(dir.into(), n);
             ok("")
         }
+        ["config", "--get", "drover.baseline"] => ok(format!("{BASELINE}\n")),
         ["status", "--porcelain", ..]
         | ["fetch" | "rev-list" | "log" | "diff" | "branch" | "ls-files" | "add" | "ls-tree" | "commit" | "push"
-        | "stash" | "remote" | "config", ..]
+        | "stash" | "remote" | "config" | "replace", ..]
         | ["reset", "-q", ..]
-        | ["worktree", "prune"] => ok(""),
+        | ["worktree", "prune"]
+        | ["merge-base", "--is-ancestor", BASELINE, _] => ok(""),
         ["merge-tree", ..] => ok(format!("{:040x}\n", 7)),
-        ["merge-base", "--is-ancestor", BASELINE, _] | ["replace", ..] => ok(""),
         ["show", _] => err(128, "fatal: path does not exist"),
         ["worktree", "add", .., path, rev] => {
             let _ = std::fs::create_dir_all(std::path::Path::new(path).join(".git"));

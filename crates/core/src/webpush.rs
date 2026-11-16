@@ -234,7 +234,7 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
             Some(q) => format!("{head} asks: {q}"),
             None => format!("{head}: {}", text.unwrap_or_default()),
         };
-        url = format!("?thread={}#chat", t.str("thread").unwrap_or_default());
+        url = format!("#threads/{}", t.str("thread").unwrap_or_default());
     }
     let (wk, said) = match (ev.kind.as_str(), ev.issue) {
         ("merged", Some(n)) => ("merged", format!("#{n} merged")),

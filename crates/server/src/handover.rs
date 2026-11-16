@@ -121,22 +121,11 @@ impl Handover {
             if fresh {
                 continue;
             }
-            match self.ask(limits.serve_handover_secs) {
-                Ok(()) => return,
+            match crate::update::ask_handover(&self.sock, limits.serve_handover_secs) {
+                Ok(_) => return,
                 Err(e) => eprintln!("drover serve: no handover past {mb} MB: {e}"),
             }
         }
-    }
-
-    fn ask(&self, secs: u64) -> std::io::Result<()> {
-        let mut c = UnixStream::connect(&self.sock)?;
-        c.set_read_timeout(Some(Duration::from_secs(secs.max(1))))?;
-        writeln!(c, "handover")?;
-        let mut line = String::new();
-        BufReader::new(c).read_line(&mut line)?;
-        line.starts_with("ok ")
-            .then_some(())
-            .ok_or_else(|| std::io::Error::other(line.trim().to_string()))
     }
 
     fn fds(&self) -> Vec<RawFd> {

@@ -36,7 +36,7 @@ stateDiagram-v2
     fix --> needs_human : turn blocked, or stalled past stall_minutes = 30
     ready --> review : verify stage at head for ui_paths, a verify or repro mark
     ready --> fix : update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds = 3
-    ready --> merged : merge with PASS at head and CI green, no STAGING_WOULD_BREAK
+    ready --> merged : squash-merge into one commit carrying its why notes, with PASS at head and CI green, no STAGING_WOULD_BREAK
     ready --> blocked : merge refused, or PR closed outside drover
     blocked --> fix : fix round spawned
     blocked --> review : review spawned at a new head

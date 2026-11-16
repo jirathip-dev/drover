@@ -289,6 +289,16 @@ fn summary(r: &dyn Runner, wt: &str, head: &str, dir: &str) -> Option<String> {
     Some(out.trim_end().to_string())
 }
 
+/// #1080: `choice` on design or architect ask `ask` is an approval: `approve`, `approved` or `ok`, with at most one `#N` naming the ask's issue.
+pub fn is_approval(ask: &Event, choice: &str) -> bool {
+    let words: Vec<String> = (choice.split_whitespace())
+        .map(|w| w.trim_end_matches(['.', '!']).to_lowercase())
+        .collect();
+    let (tags, rest): (Vec<_>, Vec<_>) = words.iter().partition(|w| w.starts_with('#'));
+    let own = tags.iter().all(|t| t[1..].parse().ok() == ask.issue) && tags.len() <= 1;
+    is_ask(ask) && own && matches!(rest[..], [w] if ["approve", "approved", "ok"].contains(&w.as_str()))
+}
+
 /// The owner's answer `text` to design ask `ask`: approve, reject, or (anything else) revise with it as the note. Approve and reject end the design lane (its pane closes); reject pushes one commit back to the pre-design tree.
 pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, by: &str) -> Result<()> {
     let (f, n) = (ask.fleet.as_str(), ask.issue.context("a design ask names its issue")?);

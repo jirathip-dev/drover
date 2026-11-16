@@ -436,6 +436,9 @@ pub struct Fleet {
     pub cap_script: Option<String>,
     /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
+    /// #1097: how `merge` lands a PR: `squash` (default) or `merge`.
+    #[serde(default)]
+    pub merge: MergeMode,
     /// #419: `weekly` (unset) has `tick` run `drover lesson` every 7 days; `off` opts out.
     pub lessons: Option<String>,
     /// #889: `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
@@ -452,8 +455,36 @@ pub struct Fleet {
     pub runtime: Option<Runtime>,
     /// #732: lets `rev` share `impl`'s provider; its line needs a `#` reason comment.
     pub rev_same_provider: Option<bool>,
+    /// #782: `srt` starts every lane's agent inside sandbox-runtime with the rules `sandbox::settings` writes; unset = off.
+    pub sandbox: Option<Sandbox>,
     /// #1099: lanes see history since this commit only (`drover baseline`); unset = all of it.
     pub baseline: Option<Baseline>,
+}
+
+/// #782: the kernel sandbox a lane's agent runs in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sandbox {
+    Srt,
+}
+
+/// #1097: `squash` lands a PR as one commit carrying its why notes and deletes its branch; `merge` keeps every commit.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeMode {
+    #[default]
+    Squash,
+    Merge,
+}
+
+impl MergeMode {
+    /// `gh pr merge`'s flags for this mode.
+    pub fn flags(self) -> &'static [&'static str] {
+        match self {
+            Self::Squash => &["--squash", "--delete-branch"],
+            Self::Merge => &["--merge"],
+        }
+    }
 }
 
 /// #1099: a full commit id; only 40 lowercase hex chars build one, so a bad key fails at load.
