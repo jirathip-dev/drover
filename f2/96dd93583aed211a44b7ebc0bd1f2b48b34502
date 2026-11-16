@@ -1,0 +1,8 @@
+Decided: merged origin/staging; ci.yml keeps #1084's page_drafts step and trigger beside this PR's herd ones, main.ts keeps #1084's `sent` import and adds `import './herd'`, web/dist rebuilt from the merged src
+Because: .github/workflows/ci.yml:199
+Because: web/src/main.ts:5
+Decided: Herd opens from [⚙] as a page-only menu row, so cooee's manifest stays unchanged and the 390 px tab bar keeps its tabs
+Because: crates/server/src/screens.rs:42
+Rejected: taking either side alone in the conflicts — both edits are additive and each PR's tests need its own lines
+Check: the ui-webkit job runs both `--test page_drafts` and `--test herd`; npm run build output equals the committed web/dist
+Owner: The Herd branch is caught up with staging and the drafts work from #1084; nothing about the Herd changed.
