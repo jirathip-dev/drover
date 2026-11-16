@@ -71,8 +71,8 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     }
     s.append(head, ...kids(b.blocks, c));
     if (b.focus) {
-      const m = el('div', 'msgs'), dock = ':scope > .row.sticky, :scope > .form.say';
-      m.append(...[...s.children].filter(e => !e.matches(dock)));
+      const m = el('div', 'msgs');
+      m.append(...[...s.children].filter(e => !e.matches('.row.sticky, .form.say')));
       s.insertBefore(m, s.querySelector(':scope > .form.say'));
     }
     return s;
