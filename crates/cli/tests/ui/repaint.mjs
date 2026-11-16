@@ -42,7 +42,7 @@ try {
   const F = '.form.say .fd :is(input, textarea)';
   const box = () => page.evaluate(F => {
     const i = document.querySelector(F);
-    return { tag: i.tagName, value: i.value, same: i === kept.i && i.isConnected, removed: kept.removed, fl: kept.fl, top: Math.round(document.querySelector('.scr[data-id=thread-t2]').scrollTop), nodes: kept.nodes.every(n => n.isConnected && document.querySelector(`[data-id="${n.dataset.id}"]`) === n) };
+    return { tag: i.tagName, value: i.value, same: i === kept.i && i.isConnected, removed: kept.removed, fl: kept.fl, top: Math.round(document.querySelector('.scr[data-id=thread-t2] > .msgs').scrollTop), nodes: kept.nodes.every(n => n.isConnected && document.querySelector(`[data-id="${n.dataset.id}"]`) === n) };
   }, F);
 
   await page.goto(url + '#threads');
@@ -60,12 +60,12 @@ try {
     }
     return true;
   });
-  await page.evaluate(F => { document.querySelector(F).focus(); document.querySelector('.scr[data-id=thread-t2]').scrollTop = 400; }, F);
+  await page.evaluate(F => { document.querySelector(F).focus(); document.querySelector('.scr[data-id=thread-t2] > .msgs').scrollTop = 400; }, F);
   await page.keyboard.type('half a thought');
   await page.evaluate(F => {
     const i = document.querySelector(F), sc = document.querySelector('.scr[data-id=thread-t2]');
     i.blur();
-    window.kept = { i, removed: 0, fl: 0, nodes: [...sc.querySelectorAll(':scope > [data-id]')] };
+    window.kept = { i, removed: 0, fl: 0, nodes: [...sc.querySelectorAll(':scope > [data-id], :scope > .msgs > [data-id]')] };
     new MutationObserver(rs => {
       for (const r of rs) {
         if (r.type === 'childList') kept.removed += [...r.removedNodes].filter(n => n instanceof Element).length;
