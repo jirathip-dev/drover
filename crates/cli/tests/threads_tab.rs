@@ -525,7 +525,7 @@ fn parity_21_two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webk
 await wait(() => q('.cmp textarea'));
 const px = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
 const dt = new DataTransfer();
-for (const n of ['one.png', 'two.png']) dt.items.add(new File([px], n, {{ type: 'image/png' }}));
+for (const n of ['one.png', 'two.png']) dt.items.add(new File([px, new Uint8Array(40000)], n, {{ type: 'image/png' }}));
 const pick = q('.cmp input[type=file]');
 pick.files = dt.files;
 pick.dispatchEvent(new Event('change'));

@@ -1305,7 +1305,9 @@ impl Server<'_> {
             ("POST", "/action") if self.addr.is_none() => line("405 Method Not Allowed", "read-only: GET only"),
             ("POST", "/action") if !plugin && auth.is_err() => line("401 Unauthorized", "pair this device first"),
             ("POST", "/action") => {
-                let a: Value = serde_json::from_str(body).unwrap_or_default();
+                let Ok(a) = serde_json::from_str::<Value>(body) else {
+                    return line("400 Bad Request", "bad request body");
+                };
                 let name = a.at("action").as_str().unwrap_or_default();
                 if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name)) {
                     let why =

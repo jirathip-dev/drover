@@ -154,6 +154,7 @@ type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>, String)>>>;
 const PER_DEVICE: usize = 4;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
+const TOO_LARGE: &[u8] = b"HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"line\":\"request body too large\"}";
 /// When this board started (the Services board row's uptime).
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
@@ -827,19 +828,20 @@ impl<'a> Server<'a> {
     fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
         s.set_read_timeout(Some(Duration::from_secs(5)))?;
         // #386: a thread's message carries attached files (base64, at most 10 MB each): its POST may be that long.
-        let (mut buf, mut chunk, mut want) = (vec![], vec![0u8; 1 << 16], None);
+        let (mut buf, mut chunk, mut want, mut over) = (vec![], vec![0u8; 1 << 16], None, false);
         loop {
             let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
             if let Some(i) = end.filter(|_| want.is_none()) {
                 let h = String::from_utf8_lossy(buf.get(..i).unwrap_or_default());
                 let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
-                let most = if h.starts_with("POST /thread ") {
+                let most = if h.starts_with("POST /thread ") || h.starts_with("POST /action ") {
                     140 << 20 // #405: up to 10 files a message
                 } else if h.starts_with("POST /report ") {
                     3 << 20 // #363: a report carries its screenshot
                 } else {
                     32_768
                 };
+                over = i + 4 + n > most;
                 want = Some((i + 4 + n).min(most));
             }
             if want.map_or(buf.len() >= 32_768, |w| buf.len() >= w) {
@@ -849,6 +851,9 @@ impl<'a> Server<'a> {
                 0 => break,
                 n => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
             }
+        }
+        if over {
+            return s.write_all(TOO_LARGE);
         }
         let req = String::from_utf8_lossy(&buf).replacen(
             "\r\n",
