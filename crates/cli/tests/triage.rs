@@ -175,3 +175,64 @@ fn tick_runs_triage_weekly_only_where_the_fleet_turns_it_on() {
     assert_eq!(filed(&on, "triage-tick", &[0, 6, 7]), [1, 0, 1]);
     assert_eq!(filed(CONFIG, "triage-off", &[0, 7]), [0, 0]);
 }
+
+#[test]
+fn the_docs_pass_files_one_docs_issue_with_each_finding_and_none_when_clean() {
+    std::env::set_var("DROVER_LANE", LANE);
+    let c = ctx(&tmpdir("triage-docs"), CONFIG);
+    let root = c.worktrees.join("repo");
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(root.join("README.md"), "# sendmeter\n\n## Non-goals\n- no web UI\n").unwrap();
+    std::fs::write(root.join("docs/use.md"), "Pass `--legacy` to send.\nOpen the web UI.\n").unwrap();
+    let r = Fake::default().reply(
+        "gh issue create",
+        "https://github.com/jirathip-dev/sendmeter/issues/91\n",
+    );
+    let (findings, clean) = (c.worktrees.join("findings.md"), c.worktrees.join("clean.md"));
+    std::fs::write(&clean, "\n").unwrap();
+    std::fs::write(
+        &findings,
+        "docs/use.md:1: names `--legacy`, removed: crates/core/src/cli.rs has no such flag\n\
+         - docs/use.md:2: a web UI contradicts README.md:3 non-goals\n",
+    )
+    .unwrap();
+    let docs = |f: &std::path::Path, root: &std::path::Path| {
+        let (f, root) = (f.to_str().unwrap(), root.to_str().unwrap());
+        run(
+            &c,
+            &r,
+            &["triage", "docs", "sendmeter", "--findings", f, "--root", root],
+        )
+    };
+    let (code, out) = docs(&clean, &root);
+    assert!(code == 0 && out.contains("no docs issue"), "{code} {out}");
+    assert_eq!(r.count("gh issue create"), 0, "a clean pass files nothing");
+
+    let (code, out) = docs(&findings, &root);
+    assert!(code == 0 && out.contains("filed sendmeter#91"), "{code} {out}");
+    let want = "gh issue create -R jirathip-dev/sendmeter --title docs: sendmeter stale agent-read text, week of \
+                1970-01-12 --body Triage (sendmeter:90:triage) found these passages stale, contradicting or bloated. \
+                Fix each in its file; never edit the README's top (intent) section.\n\n\
+                - docs/use.md:1: names `--legacy`, removed: crates/core/src/cli.rs has no such flag\n\
+                - docs/use.md:2: a web UI contradicts README.md:3 non-goals\n";
+    assert!(r.called(want), "{:?}", r.calls.borrow());
+    let (code, out) = docs(&findings, &root);
+    assert!(code == 3 && out.contains("ALREADY_FILED"), "{code} {out}");
+    assert_eq!(r.count("gh issue create"), 1, "one docs issue a run");
+    let events = read(&c.state).unwrap();
+    let ev = events.iter().rfind(|e| e.kind == "triage-docs").unwrap();
+    assert_eq!(ev.str("undo"), Some("gh issue close 91 -R jirathip-dev/sendmeter"));
+
+    let bare = ctx(&tmpdir("triage-docs-bare"), CONFIG);
+    let (f, root) = (findings.to_str().unwrap(), bare.worktrees.to_str().unwrap());
+    let (code, out) = run(
+        &bare,
+        &r,
+        &["triage", "docs", "sendmeter", "--findings", f, "--root", root],
+    );
+    assert_eq!(code, 0, "{out}");
+    let calls = r.calls.borrow();
+    let body = calls.iter().rfind(|c| c.starts_with("gh issue create")).unwrap();
+    let first = body.split("\n\n").nth(1).unwrap().lines().next().unwrap();
+    assert!(first.starts_with("- README.md:1: no intent section"), "{body}");
+}

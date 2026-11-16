@@ -652,11 +652,11 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover lesson` (#419)".into());
     }
     let triage = lane.split(':').nth(2) == Some("triage");
-    let acts = matches!(r.get(1), Some(&("close" | "fold" | "label")));
+    let acts = matches!(r.get(1), Some(&("close" | "fold" | "label" | "docs")));
     if !orchestrator && r.first() == Some(&"triage") && !(acts && triage) {
         return Some(
             "REFUSED ORCHESTRATOR_ONLY: an orchestrator or the owner runs `drover triage <fleet>`; only a triage lane \
-             closes, folds or labels (#1100)"
+             closes, folds, labels or files docs (#1100)"
                 .into(),
         );
     }

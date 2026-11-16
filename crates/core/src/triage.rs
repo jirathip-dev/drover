@@ -3,7 +3,7 @@ use crate::events::{append, fold, open_asks, working, Event};
 use crate::gate::refused;
 use crate::runner::{argv, json, ok, Runner};
 use crate::Ctx;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
 
@@ -227,6 +227,7 @@ pub fn done(
                 e.str("evidence").unwrap_or_default()
             ),
             "triage-folded" => format!("folded ({} amendments)", e.val("amendments")),
+            "triage-docs" => format!("docs issue ({} findings)", e.val("findings")),
             _ => format!("labeled {}", e.val("labels")),
         };
         let undo = e.str("undo").unwrap_or_default();
@@ -238,4 +239,62 @@ pub fn done(
         None => writeln!(out, "{fleet}: no orchestrator thread; the summary is on #{n}")?,
     }
     crate::lesson::close(ctx, cfg, r, out, (fleet, n), &s)
+}
+
+/// #1100: `drover triage docs`: file the run's one `docs:` issue from the `findings` file (one per line); no finding, no issue; a README with no non-goals goes first.
+pub fn docs(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleet: &str,
+    (findings, root): (&std::path::Path, &std::path::Path),
+) -> Result<()> {
+    let text = std::fs::read_to_string(findings)?;
+    let mut items: Vec<String> = (text.lines().map(str::trim))
+        .filter(|l| !l.is_empty())
+        .map(|l| format!("- {}", l.trim_start_matches("- ")))
+        .collect();
+    if items.is_empty() {
+        return Ok(writeln!(out, "{fleet}: no docs finding, no docs issue")?);
+    }
+    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
+    let filed = working(&ctx.state)?
+        .iter()
+        .any(|e| e.kind == "triage-docs" && e.str("lane") == Some(&lane));
+    if filed {
+        return refused("ALREADY_FILED", format!("{lane} filed its one docs issue already"));
+    }
+    let readme = std::fs::read_to_string(root.join("README.md")).unwrap_or_default();
+    let intent = |l: &str| l.starts_with('#') && l.to_lowercase().contains("non-goals");
+    if !readme.lines().any(intent) {
+        items.insert(
+            0,
+            "- README.md:1: no intent section (what it is, principles, non-goals): the owner writes it".into(),
+        );
+    }
+    let f = cfg.fleet(fleet)?;
+    let title = format!(
+        "docs: {fleet} stale agent-read text, week of {}",
+        crate::lesson::ymd(ctx.now / 86400)
+    );
+    let body = format!(
+        "Triage ({lane}) found these passages stale, contradicting or bloated. Fix each in its file; never edit the \
+         README's top (intent) section.\n\n{}\n",
+        items.join("\n")
+    );
+    let url = ok(
+        r,
+        "gh",
+        &["issue", "create", "-R", &f.repo, "--title", &title, "--body", &body],
+    )?;
+    let n: u64 = (url.trim().rsplit('/').next().and_then(|n| n.parse().ok())).context("gh issue create: no number")?;
+    let undo = format!("gh issue close {n} -R {}", f.repo);
+    log(
+        ctx,
+        fleet,
+        "triage-docs",
+        json!({"target": n, "findings": items.len(), "undo": undo}),
+    )?;
+    Ok(writeln!(out, "filed {fleet}#{n}: {title} ({} findings)", items.len())?)
 }

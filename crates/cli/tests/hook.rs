@@ -414,6 +414,7 @@ fn a_triage_lane_changes_issues_only_through_its_verbs_and_never_code() {
         "drover triage close synergy 5 --why done --evidence abc1234",
         "drover triage fold synergy 7 --spec spec.md",
         "drover triage label synergy 9 stale?",
+        "drover triage docs synergy --findings f.md",
     ];
     for cmd in acts {
         assert_eq!(run("synergy:90:triage", cmd), "", "{cmd}");

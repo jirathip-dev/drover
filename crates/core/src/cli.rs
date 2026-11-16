@@ -1083,6 +1083,20 @@ enum TriageCmd {
         #[arg(required = true)]
         labels: Vec<String>,
     },
+    #[command(
+        about = "File the run's one `docs:` issue: each stale, contradicting or bloated agent-read passage, one per line; none, no issue"
+    )]
+    Docs {
+        fleet: String,
+        #[arg(
+            help = "A file of findings, one per line: `file:line: what is wrong: the code or decision that proves it`"
+        )]
+        #[arg(long)]
+        findings: std::path::PathBuf,
+        #[arg(help = "The checkout whose README.md intent section is checked")]
+        #[arg(long, default_value = ".")]
+        root: std::path::PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2144,9 +2158,13 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     TriageCmd::Label { fleet, issue, labels } => {
                         crate::triage::label(ctx, &cfg, r, out, (&fleet, issue), &labels)?;
                     }
+                    TriageCmd::Docs { fleet, findings, root } => {
+                        crate::triage::docs(ctx, &cfg, r, out, &fleet, (&findings, &root))?;
+                    }
                 },
                 Cmd::Triage { fleet, .. } => {
-                    let fleet = fleet.context("usage: drover triage <FLEET> | drover triage close|fold|label …")?;
+                    let fleet =
+                        fleet.context("usage: drover triage <FLEET> | drover triage close|fold|label|docs …")?;
                     if !crate::triage::run(ctx, &cfg, r, out, &fleet)? {
                         return Ok(4);
                     }
