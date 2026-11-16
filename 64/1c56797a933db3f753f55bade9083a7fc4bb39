@@ -1,0 +1,5 @@
+Decided: a second reviewer refused NO_PROOF at the same head escalates needs-human instead of another supersede
+Because: "Drive never spawns the same rev lane again and again with nothing new in between"
+Rejected: loosening I9 — the issue says "Don't loosen I9"
+Check: drive.rs is 2185 lines, at its arch.toml baseline (CI arch-check was red at 2189)
+Owner: A reviewer that keeps skipping its proof now gets one retry, then the issue comes to you.
