@@ -177,7 +177,7 @@ fn needs_and_ask(s: &Server, cookie: &str, now: u64) -> (Value, Value) {
 }
 
 #[test]
-fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
+fn parity_69_the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (c, _sh) = setup(
         "design-surfaces",

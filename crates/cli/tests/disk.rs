@@ -95,7 +95,7 @@ fn a_builder_with_a_pass_frees_its_build_folders() {
 }
 
 #[test]
-fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
+fn parity_r24_over_budget_frees_the_idlest_lane_first_then_disk_budget() {
     let cfg = |gb: f64| format!("{CONFIG}worktree_budget_gb = {gb}\n");
     let d = tmpdir("disk-budget");
     let c = ctx(&d, &cfg(10240.0 / 1_073_741_824.0));

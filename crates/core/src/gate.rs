@@ -233,7 +233,7 @@ pub fn verdict(
     check::purge(r, cfg, fleet, out, Path::new(wt), false)?;
     let gone = match crate::spawn::dirty(r, Path::new(wt)) {
         Some(why) => Err(anyhow::anyhow!(why)),
-        None => check::reap(ctx, cfg, r, (fleet, Some(issue)), wt)
+        None => check::reap(ctx, cfg, r, Some(e), (fleet, Some(issue)), wt)
             .and_then(|_| check::remove(r, cfg, fleet, wt, false))
             .and_then(|()| term::close(ctx, r, pane).map(drop)),
     };

@@ -2,12 +2,12 @@
 // button, run, images, form and its fields and `submit`, sheet). A block that acts calls `ctx.act`; a tap that goes somewhere
 // calls `ctx.tap`. No block knows which screen it is on.
 import type { Blk } from './ops';
-import { esc, figure, word } from './theme';
+import { esc, figure, get, put, word } from './theme';
 
 export type Act = { action: string; block?: string; values?: Blk; confirm?: Blk };
 export type Ctx = {
   screen: string;
-  act: (a: Act, el?: HTMLElement) => void | Promise<void>;
+  act: (a: Act, el?: HTMLElement) => Promise<boolean>;
   tap: (t: Blk) => void;
   open: Set<string>;
 };
@@ -18,14 +18,24 @@ export const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html
   if (html) e.innerHTML = html;
   return e;
 };
-const btn = (label: string, cls = '') => {
-  const b = el('button', cls);
-  b.type = 'button';
+const href = (a: HTMLAnchorElement, url: string) => Object.assign(a, { href: url, target: '_blank', rel: 'noopener' });
+const btn = (label: string, cls = '', url?: string) => {
+  const b = url ? href(el('a', `btn ${cls}`), url) : Object.assign(el('button', cls), { type: 'button' });
   b.append(el('span', '', esc(label)));
   return b;
 };
 const GROUP: Record<string, string> = { waiting: 'needs', blocked: 'needs', asleep: 'idle', in: 'working' };
 const tone = (v: unknown) => (typeof v === 'object' && v ? (v as Blk) : { text: v });
+const draft = (i: HTMLInputElement, key: string) => {
+  i.dataset.draft = key;
+  i.value = get(key) ?? i.value;
+  i.addEventListener('input', () => put(key, i.value || null));
+};
+/** Clears the drafts of the fields under `box`, here and in any copy on the page, once their action succeeded. */
+export const sent = (box: Element) => box.querySelectorAll<HTMLInputElement>('[data-draft]').forEach(i => {
+  put(i.dataset.draft!, null);
+  document.querySelectorAll<HTMLInputElement>(`[data-draft="${CSS.escape(i.dataset.draft!)}"]`).forEach(x => { x.value = x.dataset.was ?? ''; });
+});
 
 /** Minimal markdown: code fences, `code`, **bold**, [links](url); everything else escaped. */
 export function md(s: string): string {
@@ -49,7 +59,7 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     s.dataset.id = b.id;
     const head = el('p', 'tabh', `<span class=tw>${word(`tab-${b.id}`, String(b.title ?? '').toLowerCase())}</span>`);
     for (const a of b.actions ?? []) for (const m of a.menu ?? [a]) {
-      const x = btn(m.label);
+      const x = btn(m.label, '', m.tap?.url);
       x.onclick = () => (m.tap ? c.tap(m.tap) : c.act({ action: m.action, values: m.values, confirm: m.confirm }, x));
       head.append(x);
     }
@@ -70,7 +80,8 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     return l;
   },
   row(b, c) {
-    const r = el('div', `row${b.style === 'link' ? ' link' : ''}${b.indent ? ' in' + Math.min(b.indent, 3) : ''}`);
+    const cls = `row${b.style === 'link' ? ' link' : ''}${b.indent ? ' in' + Math.min(b.indent, 3) : ''}`;
+    const r: HTMLElement = b.tap?.url ? href(el('a', cls), b.tap.url) : el('div', cls);
     r.dataset.id = b.id ?? '';
     const sub = b.subtitle == null ? null : tone(b.subtitle), badge = b.badge == null ? null : tone(b.badge);
     r.innerHTML = (b.figure ? figure(b.figure) : '') + `<span class=rm><span class=rt>${esc(b.title)}</span>` +
@@ -78,7 +89,8 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
       (sub ? `<span class="rs ${esc(sub.tone ?? '')}">${esc(sub.text)}</span>` : '') + '</span>' +
       (b.value != null ? `<span class=rv>${esc(value(b.value))}</span>` : '');
     const swipe: Blk[] = b.swipe ?? [];
-    if (b.tap || swipe.length) {
+    if (b.tap?.url) r.classList.add('tap');
+    else if (b.tap || swipe.length) {
       r.classList.add('tap');
       r.tabIndex = 0;
       r.setAttribute('role', 'button');
@@ -172,19 +184,20 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
       const f = el('form', 'other');
       const i = el('input');
       Object.assign(i, { name: 'other', placeholder: b.other.placeholder ?? 'other…', autocomplete: 'off' });
+      draft(i, `draft:${c.screen}:${b.id}:other`);
       const go = btn('send');
       go.type = 'submit';
       f.append(i, go);
       f.onsubmit = e => {
         e.preventDefault();
-        if (i.value.trim()) c.act({ action: b.action, block: b.id, values: { ...b.values, choice: b.other.for ?? '', other: i.value } }, go);
+        if (i.value.trim()) c.act({ action: b.action, block: b.id, values: { ...b.values, choice: b.other.for ?? '', other: i.value } }, go).then(ok => ok && sent(f));
       };
       s.append(f);
     }
     return s;
   },
   button(b, c) {
-    const x = btn(b.label, b.style ?? '');
+    const x = btn(b.label, b.style ?? '', b.tap?.url);
     x.dataset.id = b.id ?? '';
     x.onclick = () => (b.tap ? c.tap(b.tap) : c.act({ action: b.action, block: b.id, values: b.values ?? {}, confirm: b.confirm }, x));
     return x;
@@ -203,9 +216,7 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
   images(b) {
     const s = el('div', 'imgs');
     for (const i of b.items ?? []) {
-      const a = el('a');
-      a.href = new URL(String(i.src).replace(/^\//, ''), document.baseURI).href;
-      a.target = '_blank';
+      const a = href(el('a'), new URL(String(i.src).replace(/^\//, ''), document.baseURI).href);
       const im = el('img');
       Object.assign(im, { src: a.href, alt: i.alt ?? '', loading: 'lazy' });
       a.append(im);
@@ -216,14 +227,14 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
   form(b, c) {
     const f = el('div', `form${b.submit ? ' say' : ''}`);
     f.dataset.id = b.id ?? '';
-    for (const x of b.fields ?? []) f.append(field(x));
+    for (const x of b.fields ?? []) f.append(field(x, `draft:${c.screen}:${b.id}:`));
     if (!b.submit) return f;
     const s = b.submit, go = btn(s.label), word = go.firstElementChild!;
     const send = () => {
       const v = values(f);
       if (!String(v.text ?? '').trim()) return;
       word.textContent = 'sending…';
-      Promise.resolve(c.act({ action: s.action, block: b.id, values: { ...s.values, ...v } }, go)).finally(() => { word.textContent = s.label; });
+      c.act({ action: s.action, block: b.id, values: { ...s.values, ...v } }, go).then(ok => ok && sent(f)).finally(() => { word.textContent = s.label; });
     };
     go.onclick = send;
     f.querySelector('input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
@@ -245,7 +256,7 @@ function toggle(e: HTMLElement, id: string, c: Ctx, card = false) {
 }
 
 /** A form field (toggle, text, picker, secret) as a labelled control named by the field's `name`. */
-function field(x: Blk): HTMLElement {
+function field(x: Blk, key: string): HTMLElement {
   const l = el('label', 'fd');
   l.append(el('span', 'fk', esc(x.label ?? x.name)));
   if (x.type === 'toggle') {
@@ -262,6 +273,7 @@ function field(x: Blk): HTMLElement {
     const i = el('input');
     Object.assign(i, { type: x.type === 'secret' ? 'password' : 'text', name: x.name, value: x.value ?? '', placeholder: x.placeholder ?? '', autocomplete: 'off' });
     i.dataset.was = i.value;
+    if (x.type !== 'secret') draft(i, key + x.name);
     l.append(i);
   }
   return l;
