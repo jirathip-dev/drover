@@ -172,6 +172,41 @@ fn parity_24_opening_a_thread_pushes_history_and_back_returns_to_the_list() {
 }
 
 #[test]
+fn parity_24_an_edge_swipe_past_40_percent_goes_back_to_the_list_where_it_was_and_a_short_one_stays() {
+    if no_webkit() {
+        return;
+    }
+    let (_, url) = page("parity-24-swipe", |c| {
+        thread(c, 4, &json!([]));
+        for n in 2..=40 {
+            let d = json!({"thread": format!("t{n}"), "title": format!("Thread {n}"), "harness": "claude"});
+            ev(c, now() - 5_000 + n, None, "thread-new", d);
+        }
+    });
+    let js = "location.hash = '#threads'; \
+        await until(() => $('.card[data-id^=\"older-\"] > .fold')); $('.card[data-id^=\"older-\"] > .fold').click(); \
+        await until(() => $$('.row[data-id^=\"t\"]').length >= 30); \
+        scrollTo(0, 400); await w(100); const y0 = scrollY; \
+        $('.row[data-id=\"t1\"]').click(); \
+        await until(() => $('.cmp')); await w(300); \
+        const touch = (type, x) => { const at = document.elementFromPoint(5, 400) ?? document.body, p = { identifier: 1, target: at, clientX: x, clientY: 400 }; \
+          const list = a => Object.assign(a, { item: i => a[i] ?? null }), e = new Event(type, { bubbles: true, cancelable: true }); \
+          Object.defineProperties(e, { touches: { value: list(type === 'touchend' ? [] : [p]) }, changedTouches: { value: list([p]) } }); at.dispatchEvent(e); }; \
+        const moved = () => $$('main > section:not([hidden]) > *').some(k => k.style.transform.includes('translateX')); \
+        const drag = to => { touch('touchstart', 8); for (let x = 8; x <= to; x += 20) touch('touchmove', x); const f = +moved(); touch('touchend', to); return f; }; \
+        const follows = drag(innerWidth * 0.3); await w(400); \
+        const stayed = +(!!$('.cmp') && !moved()); \
+        drag(innerWidth * 0.6); \
+        const back = await until(() => $('.row[data-id^=\"t\"]') && !$('.cmp')); await w(200); \
+        return [scrollY > 0 ? 1 : 0, follows, stayed, +back, +!moved(), Math.round(scrollY - y0)];";
+    assert_eq!(
+        late(&url, "parity-24-swipe-png", js),
+        [1.0, 1.0, 1.0, 1.0, 1.0, 0.0],
+        "the list scrolled, the view follows the finger, a 30% drag stays, a 60% drag goes back, no slide left, the list where it was"
+    );
+}
+
+#[test]
 fn parity_r4_in_a_thread_only_the_messages_scroll_and_the_composer_sits_at_the_bottom() {
     if no_webkit() {
         return;
