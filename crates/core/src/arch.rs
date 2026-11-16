@@ -295,7 +295,7 @@ pub fn check(
     Ok(i32::from(!bad.is_empty()))
 }
 
-/// #890: the globs `text`, an arch.toml, lists as frozen or generated: converted, so never a hotspot.
+/// The globs `text`, an arch.toml, lists as frozen or generated: converted, so never a hotspot.
 pub fn converted(text: &str) -> Result<Vec<String>> {
     let a: Arch = toml::from_str(text).context("parsing .drover/arch.toml")?;
     Ok(a.frozen.into_iter().chain(a.generated).collect())

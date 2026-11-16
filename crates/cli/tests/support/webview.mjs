@@ -1,15 +1,15 @@
-// #862: Playwright's WebKit (Linux CI, iOS Safari's engine) renders a page at a phone width; prints `scrollWidth
+// Playwright's WebKit (Linux CI, iOS Safari's engine) renders a page at a phone width; prints `scrollWidth
 // viewportWidth` of the body with every <details> open, and optionally saves a full-height PNG (with `js`: run it after
 // the tab/mode switch and save one 844 px tall screen, e.g. an open sheet).
 // Numbers the js leaves in `window.measure` are printed after the two widths (with a png, `window.late` instead if set).
-// #200, with `close`: the page under a sheet as it closes. A baseline before `js` opens the sheet, then `close` and
+// With `close`: the page under a sheet as it closes. A baseline before `js` opens the sheet, then `close` and
 // screenshots back to back for 400 ms; prints the frame count, the worst frame's share of pixels above the open sheet
 // that are not the baseline dimmed evenly, no darker than under the open sheet (the backdrop fading), and how dimmed
 // the last frame is (0: the page as it was); the worst frame goes to out.png.
-// #206: `DROVER_TAB` is the stored tab before the page loads; tab `-`: no tab()/mode() and no <details> opened.
-// #334: `<page.html>` may be an http URL instead (a real `serve`), loaded with the `DROVER_COOKIE` (`name=value`) set;
+// `DROVER_TAB` is the stored tab before the page loads; tab `-`: no tab()/mode() and no <details> opened.
+// `<page.html>` may be an http URL instead (a real `serve`), loaded with the `DROVER_COOKIE` (`name=value`) set;
 // `DROVER_WAIT` is the wait (s) before `window.late` is read (default 0.5). `DROVER_PRE`: js run at document start.
-// #337 `DROVER_WARM`: the URL loads twice in one WebKit (its caches and service worker warm).
+// `DROVER_WARM`: the URL loads twice in one WebKit (its caches and service worker warm).
 // A file's page is served at `DROVER_BASE` (serve's assets beside it). Playwright resolves through NODE_PATH.
 // node webview.mjs <page.html | http URL> <width> <tab> <mode> [out.png] [js] [close]
 import { readFileSync, writeFileSync } from "node:fs";
@@ -100,7 +100,7 @@ if (url) {
 } else {
   await page.setContent(readFileSync(page0, "utf8"));
 }
-// #440: a file's page waits for herd.js's theme (its words and sprites), else they land mid-`js` on some runs.
+// A file's page waits for the page's theme (its words and sprites), else they land mid-`js` on some runs.
 at = "js";
 const themed = url ? "" : "typeof themed === 'object' && await themed;";
 if (close) {
@@ -128,7 +128,7 @@ const js =
     : `tab('${tab}'); mode('${mode}'); ${extra};
 ${png ? "document.querySelectorAll('section').forEach(s => { const d = s.querySelector('details'); if (d) d.open = true; });" : "document.querySelectorAll('details').forEach(d => d.open = true);"}
 [document.body.scrollWidth, document.documentElement.clientWidth, document.documentElement.scrollHeight, ...(window.measure || [])]`;
-// #269: on a real server the TypeScript board draws every tab from the API: the tab's first draw lands before `js`.
+// On a real server the TypeScript board draws every tab from the API: the tab's first draw lands before `js`.
 const drawn = tab === "-" ? "" : url ? `tab('${tab}'); await window.boardReady; await window.boardTab?.('${tab}');` : themed;
 await body(`${drawn} return 1`).catch(() => {});
 const nums = (v) => Array.isArray(v) && v.every((n) => typeof n === "number" || typeof n === "boolean");
@@ -139,7 +139,7 @@ if (!png) done(0, ...wide, ...v.slice(3).map(Number));
 at = "shot";
 await page.setViewportSize({ width, height: extra ? 844 : Math.ceil(v[2]) });
 await sleep(Number(env.DROVER_WAIT ?? 0.5));
-// #315: numbers the js leaves in `window.late` are read after the wait (a sheet's poll has landed) instead.
+// Numbers the js leaves in `window.late` are read after the wait (a sheet's poll has landed) instead.
 const m = await run("window.late || null");
 console.log([...wide, ...(nums(m) ? m : v.slice(3)).map(Number)].join(" "));
 writeFileSync(png, await shot());

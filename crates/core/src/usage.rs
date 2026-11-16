@@ -121,7 +121,7 @@ pub fn epoch(s: &str) -> Option<u64> {
     u64::try_from(days * 86400 + h * 3600 + mi * 60 + se - off).ok()
 }
 
-/// `drover statusline`: the lane's `fleet #N` for its harness's status line (#923: no usage meter).
+/// `drover statusline`: the lane's `fleet #N` for its harness's status line (no usage meter).
 pub fn statusline(lane: &str, out: &mut dyn Write) {
     let label = match lane.split(':').collect::<Vec<_>>()[..] {
         [f, i, _] if i != "-" => format!("{f} #{i}"),

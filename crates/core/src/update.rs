@@ -48,12 +48,12 @@ pub fn self_update(
     Ok(code.max(install(ctx, cfg, r, out, f, &events, t)?))
 }
 
-/// #894: the control socket of the serve listening on `port` (`drover_server::handover`).
+/// The control socket of the serve listening on `port` (`drover_server::handover`).
 pub fn serve_sock(ctx: &Ctx, port: u16) -> PathBuf {
     ctx.state.with_file_name(format!("serve-{port}.sock"))
 }
 
-/// This repo's own fleet, by either name until the GitHub repo is renamed too (#456).
+/// This repo's own fleet, by either name until the GitHub repo is renamed too.
 pub fn ours(f: &crate::config::Fleet) -> bool {
     ["drover", "herdsman"].contains(&f.repo_name())
 }
@@ -195,7 +195,7 @@ fn staging_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Path) -> Result
     Ok(format!("staging serve on {addr}"))
 }
 
-/// #708: `! self-update — paused since <time> → …` while the last toggle is a pause (doctor and the board).
+/// `! self-update — paused since <time> → …` while the last toggle is a pause (doctor and the board).
 pub fn paused_line(r: &dyn Runner, events: &[Event]) -> Option<String> {
     let e = events
         .iter()

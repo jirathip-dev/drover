@@ -10,7 +10,7 @@ use std::time::Duration;
 
 pub use shed_proto as proto;
 
-/// #637: the shed a `shed-acp` host's bootstrap installs: the build proven with drover on the main host. shed's repo, beside drover's own.
+/// The shed a `shed-acp` host's bootstrap installs: the build proven with drover on the main host. shed's repo, beside drover's own.
 pub fn git() -> String {
     env!("CARGO_PKG_REPOSITORY").replace("/herdsman", "/shed")
 }
@@ -70,7 +70,7 @@ fn answer(text: &str) -> Result<(Hello, Value)> {
     }
 }
 
-/// #1031: doctor's `shed` line for the server on `w`: its version and protocol against drover's, `✗` on a mismatch, `!` when it does not answer.
+/// Doctor's `shed` line for the server on `w`: its version and protocol against drover's, `✗` on a mismatch, `!` when it does not answer.
 pub fn line(r: &dyn Runner, w: &Wire) -> String {
     let theirs = exchange(r, w, Method::Ls, json!(proto::LsParams::default())).and_then(|t| answer(&t));
     match theirs {
@@ -83,7 +83,7 @@ pub fn line(r: &dyn Runner, w: &Wire) -> String {
     }
 }
 
-/// #1031: a `SHED_VERSION` refusal in `res` alerts `shed-version` once per distinct refusal, and `shed-version-ok` once a call gets through again; whether `res` was one.
+/// A `SHED_VERSION` refusal in `res` alerts `shed-version` once per distinct refusal, and `shed-version-ok` once a call gets through again; whether `res` was one.
 pub fn version_alert<T>(ctx: &Ctx, cfg: &Config, res: &Result<T>) -> Result<bool> {
     let refused = res.as_ref().err().map(|e| format!("{e:#}"));
     let refused = refused.filter(|e| e.starts_with("SHED_VERSION"));
@@ -151,7 +151,7 @@ pub fn events(w: &Wire, since: u64, quiet: Duration) -> Result<Vec<shed_proto::E
     Ok(out)
 }
 
-/// #529: `events` kept open: `f(None)` once the server took it, then `f(Some(event))` for each kept event after `since` and each new one, until the stream ends (or is quiet for `quiet`).
+/// `events` kept open: `f(None)` once the server took it, then `f(Some(event))` for each kept event after `since` and each new one, until the stream ends (or is quiet for `quiet`).
 pub fn follow(
     w: &Wire,
     since: u64,

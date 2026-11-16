@@ -22,7 +22,7 @@ pub struct Outcome {
     pub seed: u64,
     pub failure: Option<String>,
     pub trace: Vec<String>,
-    /// #686: every event the run appended, in order, and (a replay's `keep_going`) each violation with its step.
+    /// Every event the run appended, in order, and (a replay's `keep_going`) each violation with its step.
     pub events: Vec<drover::events::Event>,
     pub violations: Vec<String>,
     /// Steps taken (the failing step, if it failed), and what the run reached and its peaks (`hunt::coverage`).
@@ -51,12 +51,12 @@ impl Outcome {
     }
 }
 
-/// Run `seed` (seed 1 is the #370 incident, any other a random fleet), `sabotage` breaking one invariant on purpose.
+/// Run `seed` (seed 1 is a replayed incident, any other a random fleet), `sabotage` breaking one invariant on purpose.
 pub fn run(seed: u64, sabotage: Option<Sabotage>) -> Outcome {
     run_plan(&hunt::Plan::of(seed), sabotage)
 }
 
-/// Run `plan` (#688: a seed's scenario, or a hunt's mutant of one).
+/// Run `plan` (a seed's scenario, or a hunt's mutant of one).
 pub fn run_plan(plan: &hunt::Plan, sabotage: Option<Sabotage>) -> Outcome {
     let cfg = scenario::config(plan.cfg.0, plan.cfg.1);
     run_world(plan.seed, (plan.model(), cfg), plan.steps, sabotage)

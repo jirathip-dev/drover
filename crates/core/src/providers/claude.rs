@@ -15,7 +15,7 @@ pub static PROVIDER: Claude = Claude;
 
 const BETA_HEADER: &str = "anthropic-beta";
 const OAUTH_BETA: &str = "oauth-2025-04-20";
-/// #770: what `acp_profile` copies into a worktree (the lane's own files, never its work) and the folder it makes.
+/// What `acp_profile` copies into a worktree (the lane's own files, never its work) and the folder it makes.
 pub const LOCAL_FILES: [&str; 2] = ["CLAUDE.local.md", ".claude/settings.local.json"];
 pub const LOCAL_DIR: &str = ".claude/";
 
@@ -186,7 +186,7 @@ impl Provider for Claude {
     }
 }
 
-/// #536: removes Claude Code's temp dir for worktree `wt`, `<root>/claude-<uid>/<wt, each non-alphanumeric as ->`.
+/// Removes Claude Code's temp dir for worktree `wt`, `<root>/claude-<uid>/<wt, each non-alphanumeric as ->`.
 pub fn remove_tmp(roots: &[PathBuf], wt: &str) {
     let key: String = wt
         .chars()

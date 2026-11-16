@@ -8,12 +8,12 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 pub const TICK: &str = "dev.drover.tick";
-/// #212: the every-minute `drive --fast` job, its own job so the slow tick never delays it.
+/// The every-minute `drive --fast` job, its own job so the slow tick never delays it.
 pub const FAST: &str = "dev.drover.fast";
-/// #237: the build's own jobs (label, args); `install` derives each one's interval from its args. #345: `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
+/// The build's own jobs (label, args); `install` derives each one's interval from its args. `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
 pub const SERVICE: &str = "dev.drover.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
-/// #845: the tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
+/// The tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
 pub const TICK_STEPS: [(&str, &[&str]); 7] = [
     (
         "check",
@@ -37,13 +37,13 @@ pub const TICK_STEPS: [(&str, &[&str]); 7] = [
     ("hotspots", &[]),
     ("compact", &[]),
 ];
-/// #557: drover's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
+/// Drover's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
 pub const UPDATE: &str = "dev.drover.update";
 pub const CLEAN: &str = "dev.drover.clean";
-/// #894: the optional read-only staging serve (`[self_update] staging_serve`), from its own install root.
+/// The optional read-only staging serve (`[self_update] staging_serve`), from its own install root.
 pub const STAGING: &str = "dev.drover.serve-staging";
 pub const MORE: [(&str, &[&str]); 2] = [(UPDATE, &["self-update"]), (CLEAN, &["clean", "--scheduled"])];
-/// #557: the `every` of a job that runs daily at 03:30 (launchd `StartCalendarInterval`, systemd `OnCalendar`).
+/// The `every` of a job that runs daily at 03:30 (launchd `StartCalendarInterval`, systemd `OnCalendar`).
 pub const DAILY: u64 = 86_400;
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "drover timer install";
@@ -95,7 +95,7 @@ fn ctl(ctx: &Ctx, label: &str, every: bool) -> [String; 3] {
     ["is-active", "enable --now", "disable --now"].map(|a| format!("systemctl --user {a} {unit}"))
 }
 
-/// #557: restart job `label` on the binary just installed: `launchctl kickstart -k`, else `systemctl --user restart`.
+/// Restart job `label` on the binary just installed: `launchctl kickstart -k`, else `systemctl --user restart`.
 pub fn restart(ctx: &Ctx, r: &dyn Runner, label: &str) -> Result<String> {
     let probe = ctl(ctx, label, false)[0].replacen("print", "kickstart -k", 1);
     exec(r, &probe.replacen("is-active", "restart", 1))
@@ -119,7 +119,7 @@ fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Ve
     files(ctx, label, &cmd, path, secs, MAC)
 }
 
-/// #237: each own job against this build: `loaded`, `missing` (no file, or not loaded) or `outdated (args or interval differ)`; PATH is the host's, never compared.
+/// Each own job against this build: `loaded`, `missing` (no file, or not loaded) or `outdated (args or interval differ)`; PATH is the host's, never compared.
 pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'static str)> {
     let same = |(p, t): &(PathBuf, String)| {
         let x = std::fs::read_to_string(p).unwrap_or_default();
@@ -139,7 +139,7 @@ pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'st
     JOBS.map(state).to_vec()
 }
 
-/// #600: the PATH the tick job runs with: its installed file's, else the one `install` would write.
+/// The PATH the tick job runs with: its installed file's, else the one `install` would write.
 pub fn job_path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     let file = &expect(ctx, cfg, JOBS[0].0, JOBS[0].1, "")[0].0;
     let key = if MAC {
@@ -370,7 +370,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     Ok(0)
 }
 
-/// #791: the running tick's start, while its `tick.beat` is at most 2 tick intervals old; `None`: no tick runs, or it stalled (no heartbeat for over 2 intervals: stuck).
+/// The running tick's start, while its `tick.beat` is at most 2 tick intervals old; `None`: no tick runs, or it stalled (no heartbeat for over 2 intervals: stuck).
 pub fn running(ctx: &Ctx, cfg: &Config) -> Option<u64> {
     let text = std::fs::read_to_string(ctx.state.with_file_name("tick.beat")).ok()?;
     let mut w = text.split_whitespace().map(|x| x.parse::<u64>().ok());
@@ -378,7 +378,7 @@ pub fn running(ctx: &Ctx, cfg: &Config) -> Option<u64> {
     (ctx.now <= beat + stuck_secs(cfg)).then_some(since)
 }
 
-/// #972: the running tick's `tick.step` and its age, when that step began over 3 × `slow_secs` ago.
+/// The running tick's `tick.step` and its age, when that step began over 3 × `slow_secs` ago.
 pub fn stuck_step(ctx: &Ctx, cfg: &Config) -> Option<(String, u64)> {
     let m: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(ctx.state.with_file_name("tick.step")).ok()?).ok()?;
@@ -387,7 +387,7 @@ pub fn stuck_step(ctx: &Ctx, cfg: &Config) -> Option<(String, u64)> {
     (secs > 3 * cfg.limits.slow_secs).then(|| (m["step"].as_str().unwrap_or("?").to_string(), secs))
 }
 
-/// #791: 2 tick intervals: no pass started and no heartbeat for longer reads stuck.
+/// 2 tick intervals: no pass started and no heartbeat for longer reads stuck.
 pub fn stuck_secs(cfg: &Config) -> u64 {
     2 * cfg.limits.slow_secs
 }
@@ -474,7 +474,7 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     crate::doctor::doctor(ctx, r, out, false, false)
 }
 
-/// #345 `drover service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands that swap it in for the fast-step job (and the board job, with `--board`); loads nothing itself.
+/// `drover service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands that swap it in for the fast-step job (and the board job, with `--board`); loads nothing itself.
 pub fn service_unit(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, api: &str, board: Option<&str>) -> Result<()> {
     let cfg = Config::load(&ctx.config)?;
     let mut args = vec!["service", "--api", api];
@@ -489,7 +489,7 @@ pub fn service_unit(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, api: &str, b
     Ok(())
 }
 
-/// The phone alerts state (#87): on/off, devices and last sent, unless a webpush failure is newer.
+/// The phone alerts state: on/off, devices and last sent, unless a webpush failure is newer.
 pub fn phone(ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> (&'static str, String) {
     let subs = crate::webpush::load(&ctx.state).len();
     let sent = crate::events::of_kind(events, &["push-sent"]).pop();

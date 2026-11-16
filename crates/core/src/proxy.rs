@@ -135,7 +135,7 @@ pub fn revoke(ctx: &Ctx, cfg: &Config, id: &str, out: &mut dyn Write) -> Result<
     Ok(writeln!(out, "revoked {id}")?)
 }
 
-/// #923: the token the proxy signs with, `[proxy] token-file` (0600), or why there is none and how to make it.
+/// The token the proxy signs with, `[proxy] token-file` (0600), or why there is none and how to make it.
 pub fn token(cfg: &Config) -> std::result::Result<String, String> {
     let cmd = crate::providers::proxied().map_or("", |p| p.setup);
     let setup = format!("run `{cmd}` on this host, save the token 0600 and set `[proxy] token-file` to its path");

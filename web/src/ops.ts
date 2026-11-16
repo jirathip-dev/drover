@@ -1,5 +1,3 @@
-// #927: a screen is JSON blocks (crates/server/src/screens.rs, the same cooee draws); its stream patches it in place
-// with ops: `screen` (all of it), `badge`, `merge` (fields into a block), `replace`, `remove`, `insert`.
 export type Blk = { [k: string]: any };
 export type Op = { op: string; id?: string; screen?: Blk; count?: number; fields?: Blk; block?: Blk; into?: string; before?: string };
 

@@ -26,22 +26,22 @@ pub struct Lane {
     pub session: Option<Session>,
     /// When drover spawned it (0: unknown).
     pub since: u64,
-    /// #83: a log-only lane whose worktree is clean and pushed: its short head sha.
+    /// A log-only lane whose worktree is clean and pushed: its short head sha.
     pub parked: Option<String>,
-    /// #157: the `[hosts]` host it runs on, when fleet.toml has hosts, and its ssh machine (none: this one).
+    /// The `[hosts]` host it runs on, when fleet.toml has hosts, and its ssh machine (none: this one).
     pub host: Option<String>,
     pub machine: Option<String>,
-    /// #248: why `check` keeps this done lane's session open (its newest `lane-kept-dirty`, none once closed).
+    /// Why `check` keeps this done lane's session open (its newest `lane-kept-dirty`, none once closed).
     pub kept: Option<String>,
-    /// #260: its worktree, from the spawn.
+    /// Its worktree, from the spawn.
     pub worktree: Option<String>,
-    /// #630: its workspace root, from the spawn.
+    /// Its workspace root, from the spawn.
     pub root: Option<String>,
-    /// #422: an orchestrator's chat thread (`t6`); with no session it is `asleep`.
+    /// An orchestrator's chat thread (`t6`); with no session it is `asleep`.
     pub thread: Option<String>,
-    /// #609: the runtime it was spawned in (`shed` | `shed-acp`), from its spawn: never the config's now.
+    /// The runtime it was spawned in (`shed` | `shed-acp`), from its spawn: never the config's now.
     pub runtime: String,
-    /// #609: where it runs, as every surface shows it: its host while 2+ hosts are enabled (`air`, or empty).
+    /// Where it runs, as every surface shows it: its host while 2+ hosts are enabled (`air`, or empty).
     pub place: String,
 }
 
@@ -225,7 +225,7 @@ pub fn whose<'a>(cfg: &Config, s: &'a Session) -> Option<(&'a str, Option<u64>, 
     Some((fleet, issue, s.labels.get("role").map(String::as_str)))
 }
 
-/// #1053: the running sessions labelled for a configured fleet that no `spawn`, adoption, conductor start or young `spawn-started` names.
+/// The running sessions labelled for a configured fleet that no `spawn`, adoption, conductor start or young `spawn-started` names.
 pub fn orphans<'a>(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &'a Sessions) -> Vec<&'a Session> {
     let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < crate::spawn::SPAWN_SECS;
     let kinds = ["spawn", "spawn-adopted", "spawn-started", "orchestrator-start"];
@@ -246,16 +246,16 @@ fn place(cfg: &Config, all: &mut [Lane]) {
 }
 
 impl Lane {
-    /// #609: its host as API v1 sends it: `local` with no `[hosts]`.
+    /// Its host as API v1 sends it: `local` with no `[hosts]`.
     pub fn at(&self) -> String {
         self.host.clone().unwrap_or_else(|| "local".into())
     }
-    /// #630: its worktree's uncommitted files and unpushed commits, read on `r` when shown (never in a drive pass).
+    /// Its worktree's uncommitted files and unpushed commits, read on `r` when shown (never in a drive pass).
     pub fn unsaved(&self, r: &dyn Runner) -> Option<(u64, u64)> {
         let wt = self.worktree.as_deref().filter(|_| self.thread.is_none())?;
         crate::spawn::unsaved(&self.on(r), Path::new(wt))
     }
-    /// #157: `r` on the lane's host.
+    /// `r` on the lane's host.
     pub fn on<'a>(&'a self, r: &'a dyn Runner) -> crate::hosts::On<'a> {
         crate::hosts::On::new(r, self.machine.as_deref())
     }
@@ -263,7 +263,7 @@ impl Lane {
     pub fn pane(&self) -> Option<&str> {
         self.session.as_ref().map(|s| s.name.as_str())
     }
-    /// #1033: shed's note on its reported state (`running: cargo test (8m)`), masked.
+    /// Shed's note on its reported state (`running: cargo test (8m)`), masked.
     pub fn note(&self) -> Option<String> {
         self.session.as_ref()?.note.as_deref().map(mask)
     }
@@ -439,7 +439,7 @@ pub fn tail(screen: &str, n: usize) -> Vec<String> {
         .collect()
 }
 
-/// #611: each enabled host's shed sessions that are no lane or conductor, or `{host, error}` for a host whose shed fails.
+/// Each enabled host's shed sessions that are no lane or conductor, or `{host, error}` for a host whose shed fails.
 pub fn others(cfg: &Config, r: &dyn Runner, events: &[Event]) -> Vec<Value> {
     let ours = crate::events::of_kind(events, &["spawn", "orchestrator-start"]).into_iter();
     let ours: BTreeSet<&str> = ours.filter_map(|e| e.str("agent")).collect();

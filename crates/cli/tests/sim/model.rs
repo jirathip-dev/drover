@@ -92,9 +92,9 @@ pub struct Model {
     pub died: Vec<String>,
     /// Test-only break switches (AC 3).
     pub sabotage: Option<crate::invariants::Sabotage>,
-    /// #685: every head's CI takes this long (else 1–15 min, drawn).
+    /// Every head's CI takes this long (else 1–15 min, drawn).
     pub ci_secs: Option<u64>,
-    /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed a head or wrote a verdict drover takes.
+    /// Ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed a head or wrote a verdict drover takes.
     pub ci_since: BTreeMap<String, u64>,
     pub ci_wait: u64,
     pub idle: u64,

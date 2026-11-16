@@ -1,14 +1,14 @@
 use crate::api::RouteTime;
 use std::collections::{BTreeMap, VecDeque};
 
-/// #859: the requests of the last hour, as (time, route, write, ms); #898: and the read 503s' times.
+/// The requests of the last hour, as (time, route, write, ms); and the read 503s' times.
 #[derive(Default)]
 pub struct Timing(VecDeque<(u64, String, bool, u64)>, VecDeque<u64>);
 
 const KEEP: u64 = 3600;
 const SHOWN: u64 = 600;
 
-/// #859: a request path as its route: `/api/v1/<name>`, `/screens/<name>`, else its first segment.
+/// A request path as its route: `/api/v1/<name>`, `/screens/<name>`, else its first segment.
 pub fn route(path: &str) -> String {
     let n = match path {
         p if p.starts_with("/api/v1/") => 4,
@@ -42,7 +42,7 @@ impl Timing {
         }
     }
 
-    /// #898: a read answered 503.
+    /// A read answered 503.
     pub fn busy(&mut self, now: u64) {
         self.1.push_back(now);
         while self.1.front().is_some_and(|t| t + 60 < now) {
@@ -50,7 +50,7 @@ impl Timing {
         }
     }
 
-    /// #898: the last minute's `/live` first bytes, `/api/v1` reads and writes, and its read 503s.
+    /// The last minute's `/live` first bytes, `/api/v1` reads and writes, and its read 503s.
     pub fn minute(&self, now: u64) -> (Vec<RouteTime>, u64) {
         let from = (now + 1).saturating_sub(60);
         let mut m: BTreeMap<&str, Vec<u64>> = BTreeMap::new();

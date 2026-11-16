@@ -8,12 +8,12 @@ use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Duration;
 
-/// `drover serve`: the board on `addr` plus, unless read-only, the Funnel listener on `[serve] hooks_addr` (#626).
+/// `drover serve`: the board on `addr` plus, unless read-only, the Funnel listener on `[serve] hooks_addr`.
 pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<()> {
     board(ctx, r, addr, read_only, !read_only)
 }
 
-/// #894: `serve`; `handover`: take over a predecessor's listeners and hand them to a successor (`crate::handover`).
+/// `serve`; `handover`: take over a predecessor's listeners and hand them to a successor (`crate::handover`).
 pub fn board(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool, handover: bool) -> Result<()> {
     let mut got = if handover { crate::runner::inherited() } else { vec![] }.into_iter();
     let inherited = got.len() > 0;

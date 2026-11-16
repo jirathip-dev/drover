@@ -16,7 +16,7 @@ use std::sync::Mutex;
 pub struct Snapshot {
     pub ts: u64,
     pub reads: BTreeMap<String, Option<String>>,
-    /// #447: the step's waits, and what they were worked out from (`wait_key`).
+    /// The step's waits, and what they were worked out from (`wait_key`).
     pub waits: Vec<Waiting>,
     pub key: String,
 }
@@ -35,7 +35,7 @@ pub fn remote(prog: &str) -> bool {
     prog == "ssh"
 }
 
-/// #344: the `board` row of the database's snapshots.
+/// The `board` row of the database's snapshots.
 pub fn load(ctx: &Ctx) -> Option<Snapshot> {
     crate::db::get(&ctx.state, "board").map(|s| s.1)
 }
@@ -174,7 +174,7 @@ pub fn lanes(cfg: &Config, r: &dyn Runner, (events, st): (&[Event], &States), se
     lanes::join(cfg, r, events, st, sessions)
 }
 
-/// #447: what waits are worked out from: the log's length and last row, and each lane's state.
+/// What waits are worked out from: the log's length and last row, and each lane's state.
 pub fn wait_key(events: &[Event], all: &[Lane]) -> String {
     let last = events.last().map_or(0, |e| e.seq);
     let lanes: Vec<_> = all.iter().map(|l| format!("{}={}", l.name, l.state.word())).collect();

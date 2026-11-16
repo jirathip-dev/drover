@@ -184,7 +184,7 @@ pub fn pass(
     Ok(())
 }
 
-/// #855: the issue's open promise once missed, with drive's real reason.
+/// The issue's open promise once missed, with drive's real reason.
 pub fn open_missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>) -> Option<(Promise, String)> {
     let mine: Vec<&Event> = events
         .iter()

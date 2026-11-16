@@ -76,7 +76,7 @@ pub struct World {
     pub root: PathBuf,
     pub step: u64,
     next_pid: u32,
-    /// #686: a replay records each violation (once per invariant and subject) with its step and runs on.
+    /// A replay records each violation (once per invariant and subject) with its step and runs on.
     pub keep_going: bool,
     pub violations: Vec<String>,
     /// Every `(agent, pane)` a spawn event logged (I5's index).

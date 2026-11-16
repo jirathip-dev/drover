@@ -8,7 +8,7 @@ use serde_json::json;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// #935: the fleet `name` is now, after every `fleet-renamed` in order.
+/// The fleet `name` is now, after every `fleet-renamed` in order.
 pub fn current(state: &Path, name: &str) -> String {
     let renames = crate::db::events(state, "type = 'fleet-renamed' AND seq > ?1", 0).unwrap_or_default();
     renames.iter().fold(name.to_string(), |n, e| {
@@ -73,7 +73,7 @@ fn files(ctx: &Ctx, cfg: &Config, old: &str, new: &str) -> Vec<(PathBuf, PathBuf
     v
 }
 
-/// #935 `drover fleet rename <old> <new> [--yes]`: every change printed; `yes` backs up and applies all or none.
+/// `drover fleet rename <old> <new> [--yes]`: every change printed; `yes` backs up and applies all or none.
 pub fn run(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, (old, new): (&str, &str), yes: bool) -> Result<()> {
     let text = std::fs::read_to_string(&ctx.config)?;
     let cfg = Config::parse(&text)?;

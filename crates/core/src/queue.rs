@@ -7,27 +7,27 @@ use serde_json::{json, Value};
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Item {
     pub issue: u64,
-    /// #505: every issue it waits on (`queue block --on A --on B`); a merged one drops out in `view`.
+    /// Every issue it waits on (`queue block --on A --on B`); a merged one drops out in `view`.
     pub blockers: Vec<u64>,
-    /// The first of `blockers` still open, set by `view`: the frozen board (#552) and /api/v1 rows show one.
+    /// The first of `blockers` still open, set by `view`: the frozen board and /api/v1 rows show one.
     pub blocked_by: Option<u64>,
-    /// #667: blockers in another fleet or repo (`fleet#n`, `owner/repo#n`); one drops out in `view` once merged in its fleet or read closed on GitHub (`blocker-closed`).
+    /// Blockers in another fleet or repo (`fleet#n`, `owner/repo#n`); one drops out in `view` once merged in its fleet or read closed on GitHub (`blocker-closed`).
     pub ext: Vec<String>,
-    /// #294: the serial groups it is marked for (`queue add --serial [G]`, `queue set <n> serial G`; `""` = the first).
+    /// The serial groups it is marked for (`queue add --serial [G]`, `queue set <n> serial G`; `""` = the first).
     pub serial: Vec<String>,
-    /// #157: host tags its lanes need besides the fleet's and role's (`--needs`, `queue set <n> needs`).
+    /// Host tags its lanes need besides the fleet's and role's (`--needs`, `queue set <n> needs`).
     pub needs: Vec<String>,
-    /// #365: queued from the board's backlog, its spec not checked yet (`needs-check`).
+    /// Queued from the board's backlog, its spec not checked yet (`needs-check`).
     pub check: bool,
-    /// #412: a design lane first, impl only once the owner approves it (`--design`, `queue set <n> design on|off`).
+    /// A design lane first, impl only once the owner approves it (`--design`, `queue set <n> design on|off`).
     pub design: bool,
-    /// #730: an architect lane first (before any design), same approval (`--architect`, `queue set <n> architect on|off`).
+    /// An architect lane first (before any design), same approval (`--architect`, `queue set <n> architect on|off`).
     pub architect: bool,
-    /// #417: the verify stage forced on or off (`--verify [on|off]`, `queue set <n> verify on|off`); unset = by rule.
+    /// The verify stage forced on or off (`--verify [on|off]`, `queue set <n> verify on|off`); unset = by rule.
     pub verify: Option<bool>,
-    /// #420: a bug fix that starts with a failing test (`--repro`, `queue set <n> repro on|off`).
+    /// A bug fix that starts with a failing test (`--repro`, `queue set <n> repro on|off`).
     pub repro: bool,
-    /// #734: `perf` or `refactor` (`--perf`, `--refactor`): the playbook its briefs and rev's PASS follow.
+    /// `perf` or `refactor` (`--perf`, `--refactor`): the playbook its briefs and rev's PASS follow.
     pub playbook: Option<String>,
 }
 
@@ -175,19 +175,19 @@ fn strs(v: &Value) -> Vec<String> {
     }
 }
 
-/// #505: a list of issue numbers, or one number (a `block`'s `on` before #505).
+/// A list of issue numbers, or one number (an old `block`'s `on`).
 pub fn nums(v: &Value) -> Vec<u64> {
     let all = v.as_array().into_iter().flatten().filter_map(Value::as_u64);
     v.as_u64().into_iter().chain(all).collect()
 }
 
-/// #667: a `block`'s `on` blockers in another fleet or repo (`fleet#n`, `owner/repo#n`).
+/// A `block`'s `on` blockers in another fleet or repo (`fleet#n`, `owner/repo#n`).
 pub fn refs(v: &Value) -> Vec<String> {
     let all = v.as_array().into_iter().flatten();
     all.filter_map(|b| b.as_str().map(String::from)).collect()
 }
 
-/// #667: blocker `b` (`fleet#n`, `owner/repo#n`) is merged in its fleet or read closed on GitHub.
+/// Blocker `b` (`fleet#n`, `owner/repo#n`) is merged in its fleet or read closed on GitHub.
 pub fn released(events: &[Event], st: &States, b: &str) -> bool {
     let merged = b
         .split_once('#')
@@ -198,7 +198,7 @@ pub fn released(events: &[Event], st: &States, b: &str) -> bool {
             .any(|e| e.kind == "blocker-closed" && e.str("ref") == Some(b))
 }
 
-/// #667: `#11, drover#633, cooee#87`: the item's open blockers, another repo's by its name.
+/// `#N, drover#N, cooee#N`: the item's open blockers, another repo's by its name.
 pub fn labels(i: &Item) -> String {
     let ext = i.ext.iter().map(|b| b.rsplit('/').next().unwrap_or(b).to_string());
     let all: Vec<String> = i.blockers.iter().map(|n| format!("#{n}")).chain(ext).collect();
@@ -212,13 +212,13 @@ fn onoff(v: &Value) -> Option<bool> {
         .map(|i| i == 1)
 }
 
-/// #157: the queued issue's `needs` (its queue item's, merged ones included).
+/// The queued issue's `needs` (its queue item's, merged ones included).
 pub fn needs_of(events: &[Event], fleet: &str, issue: u64) -> Vec<String> {
     let q = replay(events, fleet).into_iter().find(|i| i.issue == issue);
     q.map(|i| i.needs).unwrap_or_default()
 }
 
-/// #412: the pre-impl stage issue `n` is queued for that the owner has not approved yet: #730's `architect` first, then `design` (an approval names its stage's `role`; none before #730: `design`).
+/// The pre-impl stage issue `n` is queued for that the owner has not approved yet: `architect` first, then `design` (an approval names its stage's `role`; none: `design`).
 pub fn wants_design(events: &[Event], fleet: &str, n: u64) -> Option<&'static str> {
     let q = replay(events, fleet).into_iter().find(|i| i.issue == n)?;
     let approved = |r| {
@@ -232,12 +232,12 @@ pub fn wants_design(events: &[Event], fleet: &str, n: u64) -> Option<&'static st
         .map(|(r, _)| r)
 }
 
-/// #420: issue `n` is queued `--repro`.
+/// Issue `n` is queued `--repro`.
 pub fn repro(events: &[Event], fleet: &str, n: u64) -> bool {
     replay(events, fleet).iter().any(|i| i.issue == n && i.repro)
 }
 
-/// #734: issue `n`'s playbook, `perf` or `refactor`.
+/// Issue `n`'s playbook, `perf` or `refactor`.
 pub fn playbook(events: &[Event], fleet: &str, n: u64) -> Option<String> {
     replay(events, fleet).into_iter().find(|i| i.issue == n)?.playbook
 }
@@ -271,7 +271,7 @@ fn state<'a>(st: &'a States, fleet: &str, n: u64) -> &'a str {
     st.get(&(fleet.to_string(), n)).map_or("queued", |s| s.state.as_str())
 }
 
-/// #294: the serial groups issue `n` is in, by name: marked in queue `q` (`""` = the first group) or joined by its diff (`serial-joined`; #149's `serial-auto` = the first group), merged ones included.
+/// The serial groups issue `n` is in, by name: marked in queue `q` (`""` = the first group) or joined by its diff (`serial-joined`; `serial-auto` = the first group), merged ones included.
 pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> Vec<Serial> {
     let marks = q.iter().filter(|i| i.issue == n).flat_map(|i| &i.serial);
     let joined = crate::events::of_issue(events, fleet, n).into_iter();
@@ -290,7 +290,7 @@ pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> V
     gs
 }
 
-/// #891: the hot files of `fleet`'s last `hot-files` event (drive logs one when the list less converted files changes).
+/// The hot files of `fleet`'s last `hot-files` event (drive logs one when the list less converted files changes).
 pub fn hot_files(events: &[Event], fleet: &str) -> Vec<String> {
     let hot = crate::events::of_kind(events, &["hot-files"]);
     let last = hot.into_iter().rfind(|e| e.fleet == fleet);
@@ -300,7 +300,7 @@ pub fn hot_files(events: &[Event], fleet: &str) -> Vec<String> {
     files.iter().filter_map(|v| v.as_str().map(String::from)).collect()
 }
 
-/// #891: `fleet`'s serial groups: its configured ones, then one per hot file, `hot <file>` with one slot.
+/// `fleet`'s serial groups: its configured ones, then one per hot file, `hot <file>` with one slot.
 pub fn serials(events: &[Event], f: &Fleet, fleet: &str) -> Vec<Serial> {
     let hot = hot_files(events, fleet).into_iter().map(|p| Serial {
         name: format!("hot {p}"),
@@ -310,12 +310,12 @@ pub fn serials(events: &[Event], f: &Fleet, fleet: &str) -> Vec<Serial> {
     f.serial.iter().cloned().chain(hot).collect()
 }
 
-/// #1032: a hot-file group: its issues take all their groups at once or none.
+/// A hot-file group: its issues take all their groups at once or none.
 pub fn hot(g: &Serial) -> bool {
     g.name.starts_with("hot ")
 }
 
-/// #1060: `s` may hold no slot: a queue blocker is open or its lane is held on another issue.
+/// `s` may hold no slot: a queue blocker is open or its lane is held on another issue.
 pub fn stuck(events: &[Event], st: &States, s: &IssueState) -> bool {
     let open = view(events, st, &s.fleet)
         .iter()
@@ -328,14 +328,14 @@ pub fn in_flight(state: &str) -> bool {
     state == "impl" || state.starts_with("fix") || state.starts_with("review") || state == "ready"
 }
 
-/// #294: `n` waits for a slot in group `g`: its last `serial-held` / `serial-slot` there is a hold.
+/// `n` waits for a slot in group `g`: its last `serial-held` / `serial-slot` there is a hold.
 pub fn held(events: &[Event], fleet: &str, n: u64, g: &str) -> bool {
     let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(n) && e.str("group") == Some(g);
     let e = events.iter().rev().filter(mine).find(|e| e.kind.starts_with("serial-"));
     e.is_some_and(|e| e.kind == "serial-held")
 }
 
-/// #294: the issues holding a slot in group `g`: in flight, in it and not held; over `max` only if grandfathered.
+/// The issues holding a slot in group `g`: in flight, in it and not held; over `max` only if grandfathered.
 pub fn holders<'a>(events: &[Event], st: &'a States, f: &Fleet, fleet: &str, g: &str) -> Vec<&'a IssueState> {
     let q = replay(events, fleet);
     let isin = |s: &IssueState| groups(&q, events, f, fleet, s.issue).iter().any(|x| x.name == g);
@@ -343,7 +343,7 @@ pub fn holders<'a>(events: &[Event], st: &'a States, f: &Fleet, fleet: &str, g: 
     st.values().filter(|s| s.fleet == fleet).filter(holds).collect()
 }
 
-/// #294: `ci: #2968 holds 1/1`, group `g`'s holders.
+/// `ci: #N holds 1/1`, group `g`'s holders.
 pub fn holds(g: &Serial, h: &[&IssueState]) -> String {
     let who: Vec<_> = h.iter().map(|s| format!("#{}", s.issue)).collect();
     let s = ["", "s"][usize::from(h.len() == 1)];
@@ -388,7 +388,7 @@ pub fn next(events: &[Event], fleet: &str) -> (i32, String) {
     }
 }
 
-/// #505: `#3133, #3134`.
+/// `#N, #M`.
 pub fn hashes(ns: &[u64]) -> String {
     ns.iter().map(|n| format!("#{n}")).collect::<Vec<_>>().join(", ")
 }
@@ -401,7 +401,7 @@ pub fn startable(events: &[Event], fleet: &str) -> Vec<String> {
     q.into_iter().filter(free).map(|i| i.issue.to_string()).collect()
 }
 
-/// Drive's refused start of queued issue `n` in the last hour as (board, status) text, `skipped this pass`; #572: not once older than its last state change, or (other codes) than a merge in its serial groups. `SERIAL_BUSY` shows the group's holders now, or its free slot.
+/// Drive's refused start of queued issue `n` in the last hour as (board, status) text, `skipped this pass`; not once older than its last state change, or (other codes) than a merge in its serial groups. `SERIAL_BUSY` shows the group's holders now, or its free slot.
 pub fn skipped(
     events: &[Event],
     st: &States,
@@ -447,7 +447,7 @@ pub fn skipped(
     Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))
 }
 
-/// #712: a parked issue's `park --why`.
+/// A parked issue's `park --why`.
 pub fn park_why<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64) -> Option<&'a str> {
     let parked = |e: &&Event| e.kind == "parked";
     (state(st, fleet, n) == "parked").then(|| {

@@ -1,4 +1,4 @@
-/* #927: the page that draws the JSON screens, in the old board's look: monospace, bracketed controls, the scheme's tokens. */
+/* The page that draws the JSON screens: monospace, bracketed controls, the scheme's tokens. */
 :root{--fs:13px;--fs-meta:11px;--fs-input:16px;--fs-code:32px;--ctl:28px;--hit:44px;--s1:4px;--s2:8px;--s3:12px;--s4:16px}
 html{touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 html,body{overflow-x:hidden;overscroll-behavior:none}
@@ -125,7 +125,7 @@ body:not([data-pair]) .pairb{display:none}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 .sb>button,.scr>button,.sec>button,.shb>button,.card>button{margin:var(--s2) var(--s4) var(--s2) 0}
-/* #1072 Threads: a `focus` screen hides the cards; message cards by kind; the composer's `submit` sticks to the foot. */
+/* Threads: a `focus` screen hides the cards; message cards by kind; the composer's `submit` sticks to the foot. */
 html[data-focus] #cards{display:none}
 .scr .card.k-you,.scr .card.k-orch,.scr .card.k-ask{border-left-width:3px}
 .scr .card.k-you{border-left-color:var(--a)}

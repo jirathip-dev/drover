@@ -47,7 +47,7 @@ pub trait Runner: Sync {
 
 thread_local!(static REQUEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
 
-/// #859: `f` as a board GET request: it may read only what the background refreshed, never start a process.
+/// `f` as a board GET request: it may read only what the background refreshed, never start a process.
 pub fn request<T>(f: impl FnOnce() -> T) -> T {
     let was = REQUEST.replace(true);
     let t = f();
@@ -55,7 +55,7 @@ pub fn request<T>(f: impl FnOnce() -> T) -> T {
     t
 }
 
-/// #859: this thread is serving a board GET request (`request`).
+/// This thread is serving a board GET request (`request`).
 pub fn in_request() -> bool {
     REQUEST.get()
 }
@@ -65,7 +65,7 @@ extern "C" {
     fn fcntl(fd: i32, cmd: i32, ...) -> i32;
 }
 
-/// #894: `argv` with the listeners `fds` kept open across exec and named in `DROVER_SERVE_FDS`: a bridge in the background (sh reaps nothing), else exec'd in place.
+/// `argv` with the listeners `fds` kept open across exec and named in `DROVER_SERVE_FDS`: a bridge in the background (sh reaps nothing), else exec'd in place.
 pub fn hand_fds(argv: &[std::ffi::OsString], fds: &[i32], bridge: bool) -> Result<()> {
     use std::os::unix::process::CommandExt;
     let mut c = Command::new(if bridge { "sh".as_ref() } else { argv[0].as_os_str() });
@@ -97,7 +97,7 @@ pub fn hand_fds(argv: &[std::ffi::OsString], fds: &[i32], bridge: bool) -> Resul
     Ok(())
 }
 
-/// #894: the listeners a predecessor handed over (`hand_fds`), close-on-exec again; none for a fresh start.
+/// The listeners a predecessor handed over (`hand_fds`), close-on-exec again; none for a fresh start.
 pub fn inherited() -> Vec<std::net::TcpListener> {
     use std::os::fd::FromRawFd;
     let Some(v) = std::env::var_os(SERVE_FDS) else {
@@ -245,7 +245,7 @@ impl Real {
     }
 }
 
-/// #713: every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is killed and exits 124. - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08). - `git clone|fetch|pull|push`: 10 min; a large repo over the network. - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB. - `cargo`: 30 min; self-update's release build. - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`. - anything else: 60 s.
+/// Every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is killed and exits 124. - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08). - `git clone|fetch|pull|push`: 10 min; a large repo over the network. - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB. - `cargo`: 30 min; self-update's release build. - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`. - anything else: 60 s.
 pub fn limit(prog: &str, args: &[String]) -> Duration {
     let net = |w: &String| ["clone", "fetch", "pull", "push"].contains(&w.as_str());
     let name = std::path::Path::new(prog)
@@ -261,12 +261,12 @@ pub fn limit(prog: &str, args: &[String]) -> Duration {
     Duration::from_secs(secs)
 }
 
-/// #776: how long a folder's listing may take before its disk counts as not answering (`disk_probe_secs`).
+/// How long a folder's listing may take before its disk counts as not answering (`disk_probe_secs`).
 pub fn probe_wait() -> Duration {
     Duration::from_secs(crate::config::limits().disk_probe_secs)
 }
 
-/// #972: `dir` listed within `disk_probe_secs` (`hung`'s probe); a dead disk's root is skipped for the pass.
+/// `dir` listed within `disk_probe_secs` (`hung`'s probe); a dead disk's root is skipped for the pass.
 pub fn answers(dir: &std::path::Path) -> bool {
     !hung(&dir.to_string_lossy(), probe_wait(), list)
 }
@@ -325,7 +325,7 @@ fn is_sick(dev: u64) -> bool {
                 .is_some_and(fresh))
 }
 
-/// #776: mark the disk `dir`'s last probe named as hung for `disk_sick_secs` (a call on it ran out of time).
+/// Mark the disk `dir`'s last probe named as hung for `disk_sick_secs` (a call on it ran out of time).
 pub fn sicken(dir: &str) {
     use std::sync::atomic::Ordering::Relaxed;
     let dev = probes().get(dir).map_or(0, |p| p.dev.load(Relaxed));
@@ -338,7 +338,7 @@ pub fn sicken(dir: &str) {
     }
 }
 
-/// #776: whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and must finish within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread, until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
+/// Whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and must finish within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread, until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
 pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> + Send + 'static) -> bool {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
     use std::sync::Arc;
@@ -389,7 +389,7 @@ fn hangs_past(done: &std::sync::atomic::AtomicBool, dev: &std::sync::atomic::Ato
     !done.load(Relaxed)
 }
 
-/// #775: `path`'s bytes for a request thread (serve's screenshots, designs, thread files), within `PROBE`: a `TimedOut` error when its folder is hung (#776), an earlier read of it has not ended, or this one takes too long, which marks the folder's disk. The stuck read keeps its own thread, and holds the path until it ends.
+/// `path`'s bytes for a request thread (serve's screenshots, designs, thread files), within `PROBE`: a `TimedOut` error when its folder is hung, an earlier read of it has not ended, or this one takes too long, which marks the folder's disk. The stuck read keeps its own thread, and holds the path until it ends.
 pub fn read_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> {
     let path = path.as_ref().to_path_buf();
     let late = || std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{}: no answer", path.display()));
@@ -417,7 +417,7 @@ pub fn read_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> 
         })
 }
 
-/// #775: a started child as `settle` sees it. It has no blocking wait: one stuck in disk I/O outlives SIGKILL, so nothing may wait on it. Tests use one that never ends.
+/// A started child as `settle` sees it. It has no blocking wait: one stuck in disk I/O outlives SIGKILL, so nothing may wait on it. Tests use one that never ends.
 pub trait Proc: Send + 'static {
     fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>>;
     fn kill(&mut self) -> std::io::Result<()>;
@@ -438,7 +438,7 @@ impl Proc for std::process::Child {
     }
 }
 
-/// #775: how a call `settle` watched ended.
+/// How a call `settle` watched ended.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Ended {
     Exited(std::process::ExitStatus),
@@ -503,7 +503,7 @@ impl Drop for Claim {
     }
 }
 
-/// #775: `start` a call on `key` (None: no path) and watch it up to `limit`. At the limit its child is killed and abandoned, never waited on, and the caller gets `TimedOut` even when the child cannot die. No second call on `key` starts while one is in flight: it waits for it (within its own limit), or is `Busy` at once while an abandoned one lives.
+/// `start` a call on `key` (None: no path) and watch it up to `limit`. At the limit its child is killed and abandoned, never waited on, and the caller gets `TimedOut` even when the child cannot die. No second call on `key` starts while one is in flight: it waits for it (within its own limit), or is `Busy` at once while an abandoned one lives.
 pub fn settle<P: Proc>(key: Option<&str>, limit: Duration, start: impl FnOnce() -> Result<P>) -> Result<Ended> {
     let end = Instant::now() + limit;
     gone().retain_mut(|(c, _)| matches!(c.try_wait(), Ok(None)));

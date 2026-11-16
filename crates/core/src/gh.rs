@@ -34,7 +34,7 @@ pub(crate) fn store(p: &Path, v: &Value) -> Result<()> {
     crate::config::write_atomic(p, &v.to_string())
 }
 
-/// #212: when the cached PR read was taken (the fast step refreshes it each minute).
+/// When the cached PR read was taken (the fast step refreshes it each minute).
 pub fn cached_at(ctx: &Ctx, fleet: &str, issue: u64) -> Option<u64> {
     load::<Value>(&cache_path(ctx, "pr", fleet, issue))?["ts"].as_u64()
 }
@@ -44,12 +44,12 @@ pub fn cached_spec(ctx: &Ctx, fleet: &str, issue: u64) -> Option<Value> {
     load(&cache_path(ctx, "issue", fleet, issue))
 }
 
-/// #886: issue `v` (a `spec` read) is a pull request: GitHub's issue view answers for a PR's number too.
+/// Issue `v` (a `spec` read) is a pull request: GitHub's issue view answers for a PR's number too.
 pub fn is_pr(v: &Value) -> bool {
     v["url"].as_str().is_some_and(|u| u.contains("/pull/"))
 }
 
-/// The cached issue title, if any (#391: else the last backlog read's, for a row queued from it); never calls GitHub.
+/// The cached issue title, if any (else the last backlog read's, for a row queued from it); never calls GitHub.
 pub fn cached_title(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     let b = || load::<Value>(&cache_path(ctx, "backlog", fleet, 0)).map(|b| b["issues"][issue.to_string()].clone());
     Some(cached_spec(ctx, fleet, issue).or_else(b)?["title"].as_str()?.into())
@@ -66,7 +66,7 @@ fn amendment(c: &Value) -> Option<(String, String)> {
     Some((url.to_string(), text))
 }
 
-/// `{title, body + amendments, updatedAt, amended: last url}` (#101); `refresh` re-checks `updatedAt` first.
+/// `{title, body + amendments, updatedAt, amended: last url}`; `refresh` re-checks `updatedAt` first.
 pub fn spec(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, issue: u64, refresh: bool) -> Result<Value> {
     let p = cache_path(ctx, "issue", fleet, issue);
     let n = issue.to_string();
@@ -150,7 +150,7 @@ fn unchanged(r: &dyn Runner, f: &Fleet, etags: &mut Vec<Value>) -> bool {
 
 const PROBE_MAX: u64 = 300;
 
-/// #246: the fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says). #530: the fast step skips it while `unchanged` says nothing moved since the last query.
+/// The fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says). the fast step skips it while `unchanged` says nothing moved since the last query.
 pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Value> {
     let p = cache_path(ctx, "prs", fleet, 0);
     let old = load::<Value>(&p).unwrap_or_default();
@@ -207,7 +207,7 @@ const ISSUES_JQ: &str =
 labels: [.labels.nodes[].name], ac: (.body | test(\"acceptance criteria|(^|\\\\n)#+ *ac *(\\\\n|$)\"; \"i\")), \
 pr: any(.timelineItems.nodes[].source.state?; . == \"MERGED\" or . == \"CLOSED\")}";
 
-/// #365: the repo's open issues (the backlog) in `backlog-<fleet>-0.json`, one GraphQL read: all open ones, then those updated since (a closed one drops out); `ac`: has acceptance criteria, `pr`: a merged/closed PR mentions it.
+/// The repo's open issues (the backlog) in `backlog-<fleet>-0.json`, one GraphQL read: all open ones, then those updated since (a closed one drops out); `ac`: has acceptance criteria, `pr`: a merged/closed PR mentions it.
 pub fn backlog(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<()> {
     let p = cache_path(ctx, "backlog", fleet, 0);
     let mut c = load::<Value>(&p).unwrap_or_else(|| json!({"issues": {}}));
@@ -231,7 +231,7 @@ pub fn backlog(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<()> 
     store(&p, &c)
 }
 
-/// The PR for `branch` as of `now`, from the fleet's snapshot; Null when there is none. #246: a PR that left the open set, or one fleet just changed (`forget_pr`), is read alone (`gh pr view`).
+/// The PR for `branch` as of `now`, from the fleet's snapshot; Null when there is none. a PR that left the open set, or one fleet just changed (`forget_pr`), is read alone (`gh pr view`).
 pub fn pr(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), branch: &str, now: u64) -> Result<Value> {
     let p = cache_path(ctx, "pr", fleet, issue);
     let c = load::<Value>(&p).filter(|c| c["branch"] == branch);
@@ -256,7 +256,7 @@ pub fn cached_pr(ctx: &Ctx, fleet: &str, issue: u64) -> Value {
     load::<Value>(&cache_path(ctx, "pr", fleet, issue)).map_or(Value::Null, |c| c["pr"].clone())
 }
 
-/// #169: the latest Actions run url for an issue branch with no PR: one `gh run list` per 60 s, by the tick only.
+/// The latest Actions run url for an issue branch with no PR: one `gh run list` per 60 s, by the tick only.
 pub fn run(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), branch: &str, now: u64) {
     let p = cache_path(ctx, "run", fleet, issue);
     if FORCE.get() || load::<Value>(&p).is_some_and(|c| fresh(&c, now)) {
@@ -302,7 +302,7 @@ pub fn closed(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Re
     Ok(closed)
 }
 
-/// Files PR `num` changes at `head`, a rename's old name too, cached per head sha. #490: the paginated files API (the diff stops at 300 files); at its 3,000 cap, the fetched checkout's `git diff <base>...<head>`.
+/// Files PR `num` changes at `head`, a rename's old name too, cached per head sha. the paginated files API (the diff stops at 300 files); at its 3,000 cap, the fetched checkout's `git diff <base>...<head>`.
 pub fn diff_names(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -337,7 +337,7 @@ pub fn diff_names(
         .collect())
 }
 
-/// #626: the fleet's open-PR snapshot is read afresh by the next step (a webhook said a PR moved).
+/// The fleet's open-PR snapshot is read afresh by the next step (a webhook said a PR moved).
 pub fn stale(ctx: &Ctx, fleet: &str) {
     let p = cache_path(ctx, "prs", fleet, 0);
     if let Some(mut c) = load::<Value>(&p) {
@@ -346,7 +346,7 @@ pub fn stale(ctx: &Ctx, fleet: &str) {
     }
 }
 
-/// Drop the cached PR read (after fleet changed the PR itself): the next read is of that PR alone (#246).
+/// Drop the cached PR read (after fleet changed the PR itself): the next read is of that PR alone.
 pub fn forget_pr(ctx: &Ctx, fleet: &str, issue: u64) {
     let p = cache_path(ctx, "pr", fleet, issue);
     if let Some(c) = load::<Value>(&p) {
@@ -354,7 +354,7 @@ pub fn forget_pr(ctx: &Ctx, fleet: &str, issue: u64) {
     }
 }
 
-/// #285: a ready PR is caught up with integration only when the fleet says `update_ready = "always"` or integration's rule is `strict`: its ruleset's, else its classic protection's (read once an hour). `r` None: the cached read only.
+/// A ready PR is caught up with integration only when the fleet says `update_ready = "always"` or integration's rule is `strict`: its ruleset's, else its classic protection's (read once an hour). `r` None: the cached read only.
 pub fn update_ready(ctx: &Ctx, r: Option<&dyn Runner>, f: &Fleet, fleet: &str) -> bool {
     let p = cache_path(ctx, "strict", fleet, 0);
     let c = load::<Value>(&p).filter(|c| r.is_none() || ctx.now < c["ts"].as_u64().unwrap_or(0) + 3600);
@@ -377,12 +377,12 @@ pub fn has_label(pr: &Value, name: &str) -> bool {
     pr["labels"].as_array().into_iter().flatten().any(|l| l["name"] == name)
 }
 
-/// #947: the command that makes label `label` in fleet `f`'s repo.
+/// The command that makes label `label` in fleet `f`'s repo.
 pub fn label_fix(f: &Fleet, label: &str) -> String {
     format!("gh label create {label} --repo {} --force", f.repo)
 }
 
-/// #947: whether label `label` exists in fleet `f`'s repo (GitHub label names ignore case).
+/// Whether label `label` exists in fleet `f`'s repo (GitHub label names ignore case).
 pub fn label_exists(r: &dyn Runner, f: &Fleet, label: &str) -> Result<bool> {
     let args = [
         "label", "list", "--repo", &f.repo, "--search", label, "--json", "name", "--limit", "100",
@@ -392,7 +392,7 @@ pub fn label_exists(r: &dyn Runner, f: &Fleet, label: &str) -> Result<bool> {
     Ok(v.as_array().into_iter().flatten().any(same))
 }
 
-/// #947 `setup`'s row for fleet `f`'s `merge_label`: `= already` when it exists, else made (`✓`) or `✗ … → fix`.
+/// `setup`'s row for fleet `f`'s `merge_label`: `= already` when it exists, else made (`✓`) or `✗ … → fix`.
 pub fn ensure_label(r: &dyn Runner, f: &Fleet, label: &str) -> String {
     let (what, fix) = (format!("label {label} in {}", f.repo), label_fix(f, label));
     let create = ["label", "create", label, "--repo", &f.repo, "--force"];
@@ -422,7 +422,7 @@ pub fn check_name(c: &Value) -> &str {
     c["name"].as_str().or(c["context"].as_str()).unwrap_or("?")
 }
 
-/// #967: the latest run of each check name (by `startedAt`, `completedAt`, then id), only the `required` ones if set.
+/// The latest run of each check name (by `startedAt`, `completedAt`, then id), only the `required` ones if set.
 pub fn required(rollup: &Value, required: &[String]) -> Value {
     let all = rollup.as_array().map(Vec::as_slice).unwrap_or_default();
     let latest = |n: &str| {
@@ -542,7 +542,7 @@ pub fn wait(
     }
 }
 
-/// #388: an open PR head with no checks `ci_start_minutes` after its first event: CI broken (a jobless run) or missing.
+/// An open PR head with no checks `ci_start_minutes` after its first event: CI broken (a jobless run) or missing.
 pub fn missing(x: &Ctx, r: Option<&dyn Runner>, c: &Config, k: (&str, u64), e: &[Event], pr: &Value) -> Option<String> {
     let ((fleet, issue), g, f) = (k, c.limits.ci_start_minutes * 60, c.fleet(k.0).ok()?);
     let head = pr["headRefOid"].as_str().filter(|_| pr["state"] == "OPEN")?;

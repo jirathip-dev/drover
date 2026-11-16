@@ -19,7 +19,7 @@ pub enum Act {
     Escalate(&'static str, String),
 }
 
-/// #666: each of `fleet`'s active lanes the hook refused twice since its spawn: its pane closed, one needs-human card carrying the refusal (a respawn would only be refused again).
+/// Each of `fleet`'s active lanes the hook refused twice since its spawn: its pane closed, one needs-human card carrying the refusal (a respawn would only be refused again).
 pub fn refused(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event], fleet: &str) -> Result<()> {
     for s in fold(ev).values().filter(|s| s.fleet == fleet) {
         let Some((role, lane)) = s.active_lane() else { continue };
@@ -57,7 +57,7 @@ fn refusals<'a>(ev: &'a [Event], sp: &Event, role: &str) -> Vec<&'a Event> {
     ev.iter().filter(mine).collect()
 }
 
-/// #666: what to do about row `w`'s live lane that nothing else waits on, when `lanes::health` says it never started or stalled.
+/// What to do about row `w`'s live lane that nothing else waits on, when `lanes::health` says it never started or stalled.
 pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], sessions: &Sessions, w: &Waiting) -> Option<Act> {
     if w.who != "none" || w.next_cmd.is_some() {
         return None;
@@ -118,10 +118,10 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], sessions: 
     }
 }
 
-/// #819: a check lane with no verdict since its spawn and nothing new from shed this long is replaced.
+/// A check lane with no verdict since its spawn and nothing new from shed this long is replaced.
 pub const STALE_CHECK_SECS: u64 = 2 * 3600;
 
-/// #819: the minutes check lane `lane` of `fleet` #`n` has been quiet (no shed event, no status change), once that is [`STALE_CHECK_SECS`].
+/// The minutes check lane `lane` of `fleet` #`n` has been quiet (no shed event, no status change), once that is [`STALE_CHECK_SECS`].
 pub fn stale_check(ctx: &Ctx, ev: &[Event], agents: &[Session], (fleet, n): (&str, u64), lane: &str) -> Option<u64> {
     let i = ev
         .iter()
@@ -143,13 +143,13 @@ pub fn stale_check(ctx: &Ctx, ev: &[Event], agents: &[Session], (fleet, n): (&st
     (quiet >= STALE_CHECK_SECS).then_some(quiet / 60)
 }
 
-/// #792: the prompt a silent ACP lane gets once its turn is cancelled.
+/// The prompt a silent ACP lane gets once its turn is cancelled.
 pub const NUDGE: &str = "continue: your last step finished or failed; carry on, or end your turn with `drover turn`";
 
-/// #792: a lane's process tree at or over this much of one core runs its open tool call.
+/// A lane's process tree at or over this much of one core runs its open tool call.
 pub const BUSY_CPU_PCT: u64 = 10;
 
-/// #792: what drive does about a silent ACP lane (`fleet` #`issue`'s `lane`).
+/// What drive does about a silent ACP lane (`fleet` #`issue`'s `lane`).
 pub enum Silent {
     Nudge(String),
     Respawn(String, String),
@@ -198,7 +198,7 @@ pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Session], fleet: 
     out
 }
 
-/// #792: cancel silent lane `lane`'s turn and prompt it once; logged `nudged`.
+/// Cancel silent lane `lane`'s turn and prompt it once; logged `nudged`.
 pub fn nudge(
     ctx: &Ctx,
     r: &dyn Runner,

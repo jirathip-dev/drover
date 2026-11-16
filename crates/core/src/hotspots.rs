@@ -11,10 +11,10 @@ use std::io::Write;
 
 const DAYS: u64 = 14;
 const HOT: usize = 5;
-/// #892: how a hotspots issue's title starts.
+/// How a hotspots issue's title starts.
 pub const TITLE: &str = "hotspots: ";
 
-/// #889: a file `HOT` or more merged PRs touched in `DAYS` days, the distinct PR pairs it was predicted to conflict in (#973) and its PRs' update rounds.
+/// A file `HOT` or more merged PRs touched in `DAYS` days, the distinct PR pairs it was predicted to conflict in and its PRs' update rounds.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Hot {
     pub file: String,
@@ -23,7 +23,7 @@ pub struct Hot {
     pub updates: usize,
 }
 
-/// #889: `fleet`'s hot files from its integration branch's merges and every same-repo fleet's log, most-touched first.
+/// `fleet`'s hot files from its integration branch's merges and every same-repo fleet's log, most-touched first.
 pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<Hot>> {
     let f = cfg.fleet(fleet)?;
     let since = ctx.now.saturating_sub(DAYS * 86400);
@@ -106,7 +106,7 @@ fn converted(r: &dyn Runner, f: &crate::config::Fleet) -> Result<Vec<String>> {
     crate::repo_read("arch.toml", show).map_or(Ok(vec![]), |t| crate::arch::converted(&t))
 }
 
-/// #891: log `hot-files` when the stored hot files less those arch.toml now marks converted differ from the last one.
+/// Log `hot-files` when the stored hot files less those arch.toml now marks converted differ from the last one.
 pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<()> {
     let Ok(text) = std::fs::read_to_string(path(ctx, fleet)) else {
         return Ok(());
@@ -127,7 +127,7 @@ pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<()> 
     Ok(())
 }
 
-/// #889: the report `drover hotspots` prints and its issue's body.
+/// The report `drover hotspots` prints and its issue's body.
 pub fn report(fleet: &str, hot: &[Hot]) -> String {
     let mut s = format!("Hot files in {fleet}: {HOT} or more merged PRs in the last {DAYS} days\n\n");
     if hot.is_empty() {
@@ -140,12 +140,12 @@ pub fn report(fleet: &str, hot: &[Hot]) -> String {
     s
 }
 
-/// #889: where each run keeps `fleet`'s current hot files (#891 reads them).
+/// Where each run keeps `fleet`'s current hot files.
 pub fn path(ctx: &Ctx, fleet: &str) -> std::path::PathBuf {
     ctx.state.with_file_name(format!("hotspots-{fleet}.json"))
 }
 
-/// #889: report and store the hot files; with any, open (or update) the week's issue and queue it `--architect`.
+/// Report and store the hot files; with any, open (or update) the week's issue and queue it `--architect`.
 pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let f = cfg.fleet(fleet)?;
     let hot = find(ctx, cfg, r, fleet)?;
@@ -201,7 +201,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
     Ok(())
 }
 
-/// #889: `tick`'s run, at most once per 7 days per fleet (`hotspots = "off"` opts out; a paused fleet waits).
+/// `tick`'s run, at most once per 7 days per fleet (`hotspots = "off"` opts out; a paused fleet waits).
 pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let on = |f: &crate::config::Fleet| f.hotspots.as_deref() != Some("off") && !f.paused;
     for name in cfg.fleet.iter().filter(|(_, f)| on(f)).map(|x| x.0) {

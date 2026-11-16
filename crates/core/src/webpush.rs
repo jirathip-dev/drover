@@ -36,7 +36,7 @@ fn dir(log: &Path) -> PathBuf {
     log.parent().unwrap_or(log).join("webpush")
 }
 
-/// #344: the `push` rows of the database.
+/// The `push` rows of the database.
 pub fn load(log: &Path) -> Vec<Sub> {
     crate::db::list(log, "push")
 }
@@ -107,10 +107,10 @@ pub fn jwt(k: &SecretKey, endpoint: &str, sub: &str, now: u64) -> String {
     format!("{msg}.{}", B64.encode(sig.to_bytes()))
 }
 
-/// What a subscribe says with no webpush notifier: the device is kept, nothing is sent (#87).
+/// What a subscribe says with no webpush notifier: the device is kept, nothing is sent.
 pub const OFF: &str = "alerts are saved but off: add `[[notify]] type = \"webpush\"` to fleet.toml (docs/serve.md)";
 
-/// `POST /push/subscribe` (endpoint, p256dh, auth; #370 `words` JSON, `quiet`: no push): add or replace this endpoint's subscription, then (#87) push "alerts are on" to it alone; with no webpush notifier (`sub`), say the alerts are saved but off.
+/// `POST /push/subscribe` (endpoint, p256dh, auth; `words` JSON, `quiet`: no push): add or replace this endpoint's subscription, then push "alerts are on" to it alone; with no webpush notifier (`sub`), say the alerts are saved but off.
 pub fn subscribe(log: &Path, f: &BTreeMap<String, String>, label: &str, now: u64, sub: Option<&str>) -> Result<String> {
     let g = |k: &str| f.get(k).cloned().unwrap_or_default();
     let s = Sub {
@@ -193,7 +193,7 @@ fn post(s: &Sub, k: &SecretKey, sub: &str, body: &[u8]) -> Result<u16> {
     Ok(o.stdout.trim().parse().unwrap_or(0))
 }
 
-/// Push `ev` once to every subscription, or only to endpoint `only` (no retry): a 404/410 prunes it, any other failure is the error. A delivery logs one passive `push-sent` with the device count (#87).
+/// Push `ev` once to every subscription, or only to endpoint `only` (no retry): a 404/410 prunes it, any other failure is the error. A delivery logs one passive `push-sent` with the device count.
 pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<String> {
     let all: Vec<Sub> = load(log)
         .into_iter()

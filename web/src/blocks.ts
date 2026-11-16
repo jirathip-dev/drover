@@ -1,6 +1,3 @@
-// #927: one renderer per block type, the set cooee draws (screen, section, list, row, card, text, stat, chips, choice,
-// button, run, images, form and its fields and `submit`, sheet). A block that acts calls `ctx.act`; a tap that goes somewhere
-// calls `ctx.tap`. No block knows which screen it is on.
 import type { Blk } from './ops';
 import { esc, figure, word } from './theme';
 
@@ -204,7 +201,7 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     const s = el('div', 'imgs');
     for (const i of b.items ?? []) {
       const a = el('a');
-      a.href = new URL(String(i.src).replace(/^\//, ''), document.baseURI).href;
+      a.href = new URL(String(i.src).replace(/^[/]/, ''), document.baseURI).href;
       a.target = '_blank';
       const im = el('img');
       Object.assign(im, { src: a.href, alt: i.alt ?? '', loading: 'lazy' });
@@ -244,7 +241,6 @@ function toggle(e: HTMLElement, id: string, c: Ctx, card = false) {
   else (e.nextElementSibling as HTMLElement).hidden = !c.open.has(k);
 }
 
-/** A form field (toggle, text, picker, secret) as a labelled control named by the field's `name`. */
 function field(x: Blk): HTMLElement {
   const l = el('label', 'fd');
   l.append(el('span', 'fk', esc(x.label ?? x.name)));

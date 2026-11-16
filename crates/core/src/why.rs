@@ -201,7 +201,7 @@ pub fn turn(
     Ok(None)
 }
 
-/// #925: `body` has `## For humans`, no "Generated with" line, and names `head` as `scripts/evidence-check.sh` does.
+/// `body` has `## For humans`, no "Generated with" line, and names `head` as `scripts/evidence-check.sh` does.
 pub fn body(
     body: &str,
     head: &str,

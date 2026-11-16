@@ -73,7 +73,7 @@ pub enum Source {
     Replay(replay::Scenario),
 }
 
-/// One side's metrics (#685's, `waits` and `merges`) and every invariant failure.
+/// One side's metrics (`waits` and `merges`) and every invariant failure.
 #[derive(Debug, Default)]
 pub struct Side {
     pub metrics: BTreeMap<String, f64>,

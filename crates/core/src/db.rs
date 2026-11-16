@@ -37,7 +37,7 @@ thread_local! {
     static SCRATCH: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
-/// #344: until dropped, this thread's database is a new temporary one; the files beside the log are imported into it once and left where they are.
+/// Until dropped, this thread's database is a new temporary one; the files beside the log are imported into it once and left where they are.
 pub struct Scratch(PathBuf);
 
 impl Scratch {
@@ -295,7 +295,7 @@ fn rebuild_in(c: &Connection, state: &Path) -> Result<()> {
     Ok(())
 }
 
-/// #978: `drover compact --rebuild`: the current-state rows made again from every event, in one transaction.
+/// `drover compact --rebuild`: the current-state rows made again from every event, in one transaction.
 pub fn rebuild(state: &Path) -> Result<()> {
     with(state, true, (), |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -304,7 +304,7 @@ pub fn rebuild(state: &Path) -> Result<()> {
     })
 }
 
-/// #1023: the saved lane fold's events (each lane's newest lane event), kept after `compact` archives its issue.
+/// The saved lane fold's events (each lane's newest lane event), kept after `compact` archives its issue.
 pub fn lanes(state: &Path) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| {
         let mut q = c.prepare("SELECT seq, json FROM lanes")?;
@@ -317,12 +317,12 @@ pub fn lanes(state: &Path) -> Result<Vec<Event>> {
     })
 }
 
-/// #978: the current per-issue state, the `states` rows.
+/// The current per-issue state, the `states` rows.
 pub fn issues(state: &Path) -> Result<events::States> {
     since(state, i64::MAX as u64, true, None).map(|t| t.1)
 }
 
-/// #978: an ask's ending as its `asks` row holds it: (`ORDER` rank, `drover asks`' text); `None` while open.
+/// An ask's ending as its `asks` row holds it: (`ORDER` rank, `drover asks`' text); `None` while open.
 pub type Ending = Option<(usize, String)>;
 pub type Endings = std::collections::BTreeMap<u64, Ending>;
 
@@ -366,7 +366,7 @@ pub(crate) fn since(
     })
 }
 
-/// #978: `drover asks`' rows: the open asks (`all`: every ask), `fleet`'s, with their endings, oldest first.
+/// `drover asks`' rows: the open asks (`all`: every ask), `fleet`'s, with their endings, oldest first.
 pub fn asks(state: &Path, fleet: Option<&str>, all: bool) -> Result<Vec<(Event, Ending)>> {
     with(state, false, vec![], |c| {
         let q = "SELECT seq, json, rank, closed FROM asks WHERE (?1 IS NULL OR fleet = ?1) AND (?2 OR rank IS NULL) ORDER BY seq";
@@ -428,7 +428,7 @@ fn zstd_append(file: &Path, text: &str) -> Result<()> {
     Ok(std::fs::remove_file(part)?)
 }
 
-/// #978: every event `compact` moved to `archive/`, by seq.
+/// Every event `compact` moved to `archive/`, by seq.
 pub fn archived(state: &Path) -> Result<Vec<Event>> {
     let dir = std::fs::read_dir(state.with_file_name("archive"));
     let mut files: Vec<PathBuf> = dir.into_iter().flatten().filter_map(|e| Some(e.ok()?.path())).collect();
@@ -457,7 +457,7 @@ pub fn append(state: &Path, ev: &Event) -> Result<()> {
     })
 }
 
-/// #900, #906: `evs` in one transaction, each `needs-decision` under the highest `q<n>` logged plus 1; none if an ask keyed `once` is logged.
+/// `evs` in one transaction, each `needs-decision` under the highest `q<n>` logged plus 1; none if an ask keyed `once` is logged.
 pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Option<Vec<Event>>> {
     for ev in &evs {
         crate::sim::point(&crate::sim::Point::Append(ev));
@@ -491,7 +491,7 @@ pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Opti
     })
 }
 
-/// #935: fleet `old`'s events moved to `new` and `ev` logged, after a copy to `bak`; committed only once `then` succeeds.
+/// Fleet `old`'s events moved to `new` and `ev` logged, after a copy to `bak`; committed only once `then` succeeds.
 pub fn rename_fleet(
     state: &Path,
     (old, new): (&str, &str),
@@ -526,7 +526,7 @@ pub(crate) fn events(state: &Path, filter: &str, arg: impl rusqlite::ToSql) -> R
     with(state, false, vec![], |c| rows(c, filter, arg))
 }
 
-/// #701: event rows read from the database (a full read's cost is the log's length).
+/// Event rows read from the database (a full read's cost is the log's length).
 pub static ROWS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn rows(c: &Connection, filter: &str, arg: impl rusqlite::ToSql) -> Result<Vec<Event>> {
@@ -540,7 +540,7 @@ fn rows(c: &Connection, filter: &str, arg: impl rusqlite::ToSql) -> Result<Vec<E
     .collect()
 }
 
-/// #509: in one transaction, the latest `intent`/`done`/`failed` of `action_id` `id`; `evs` appended when `take` accepts it. Returns it and whether they were.
+/// In one transaction, the latest `intent`/`done`/`failed` of `action_id` `id`; `evs` appended when `take` accepts it. Returns it and whether they were.
 pub fn claim(
     state: &Path,
     evs: &[Event],
@@ -575,13 +575,13 @@ pub fn claim(
     })
 }
 
-/// #509: mark trigger `id` processed; false if it already was.
+/// Mark trigger `id` processed; false if it already was.
 pub fn processed(state: &Path, id: &str, now: u64) -> Result<bool> {
     let q = "INSERT OR IGNORE INTO processed (id, at) VALUES (?1, ?2)";
     with(state, true, 0, |c| Ok(c.execute(q, params![id, now])?)).map(|n| n > 0)
 }
 
-/// A snapshot row (`board`: #337's reads).
+/// A snapshot row (`board`'s reads).
 pub fn get<T: DeserializeOwned>(state: &Path, key: &str) -> Option<(u64, T)> {
     let q = "SELECT ts, json FROM snapshot WHERE key = ?1";
     let row = |r: &rusqlite::Row| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?));
@@ -598,7 +598,7 @@ pub fn stamp(state: &Path, key: &str) -> Option<u64> {
     .ok()?
 }
 
-/// #560: the database file's inode and its last compaction's stamp: a change makes `events::shared` read afresh.
+/// The database file's inode and its last compaction's stamp: a change makes `events::shared` read afresh.
 pub fn version(state: &Path) -> (Option<u64>, Option<u64>) {
     let ino = std::fs::metadata(file(state)).map(|m| m.ino()).ok();
     (ino, ino.and_then(|_| stamp(state, "archived")))
@@ -620,7 +620,7 @@ pub fn list<T: DeserializeOwned>(state: &Path, table: &str) -> Vec<T> {
     try_list(state, table).unwrap_or_default()
 }
 
-/// #501: `list`, its database error kept (a busy or unreadable `state.db` is no empty table).
+/// `list`, its database error kept (a busy or unreadable `state.db` is no empty table).
 pub fn try_list<T: DeserializeOwned>(state: &Path, table: &str) -> Result<Vec<T>> {
     let all = with(state, false, vec![], |c| {
         let mut q = c.prepare(&format!("SELECT json FROM {table} ORDER BY n"))?;
@@ -635,7 +635,7 @@ pub fn store<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
     with(state, true, (), |c| replace(c, table, all))
 }
 
-/// #893: `store`, failing at once while another connection holds the write lock (never waiting for it).
+/// `store`, failing at once while another connection holds the write lock (never waiting for it).
 pub fn store_now<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
     with(state, true, (), |c| {
         c.busy_timeout(std::time::Duration::ZERO)?;
@@ -850,7 +850,7 @@ fn import(c: &mut Connection, state: &Path) -> Result<()> {
     tx.commit().context("import commit")
 }
 
-/// `drover migrate`'s #344 step: import what is left, say what the database holds.
+/// `drover migrate`'s database step: import what is left, say what the database holds.
 pub fn migrate(state: &Path, out: &mut dyn std::io::Write) -> Result<()> {
     let left = legacy(state).0.len();
     let n: u64 = with(state, true, 0, |c| {

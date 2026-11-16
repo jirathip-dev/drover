@@ -94,7 +94,7 @@ pub fn local(ctx: &Ctx, cfg: &Config) -> Vec<PathBuf> {
     listed(cfg, name, None, &ctx.worktrees)
 }
 
-/// #972: this host's roots whose listing answered this pass.
+/// This host's roots whose listing answered this pass.
 pub fn answering(ctx: &Ctx, cfg: &Config) -> Vec<PathBuf> {
     local(ctx, cfg)
         .into_iter()
@@ -102,7 +102,7 @@ pub fn answering(ctx: &Ctx, cfg: &Config) -> Vec<PathBuf> {
         .collect()
 }
 
-/// #976: why a pass skips `sp`'s worktree: `off-root`, `root unreachable` or `root-hung` (its `.git` read timed out).
+/// Why a pass skips `sp`'s worktree: `off-root`, `root unreachable` or `root-hung` (its `.git` read timed out).
 pub fn skip(ctx: &Ctx, cfg: &Config, sp: &Event) -> Option<&'static str> {
     let wt = sp.str("worktree").filter(|_| sp.str("machine").is_none())?;
     let (roots, set) = (local(ctx, cfg), cfg.hosts.values().find(|h| h.machine.is_none()));
@@ -144,7 +144,7 @@ pub fn skip(ctx: &Ctx, cfg: &Config, sp: &Event) -> Option<&'static str> {
 static HANGS: std::sync::Mutex<std::collections::BTreeMap<PathBuf, std::collections::BTreeSet<String>>> =
     std::sync::Mutex::new(std::collections::BTreeMap::new());
 
-/// #972: the roots whose last `root-hung` / `root-answers` is `root-hung`.
+/// The roots whose last `root-hung` / `root-answers` is `root-hung`.
 pub fn hung_now(events: &[Event]) -> Vec<&str> {
     let mut last = std::collections::BTreeMap::new();
     for e in crate::events::of_kind(events, &["root-hung", "root-answers"]) {
@@ -155,7 +155,7 @@ pub fn hung_now(events: &[Event]) -> Vec<&str> {
     last.into_iter().filter(|x| x.1).map(|x| x.0).collect()
 }
 
-/// #972: the hung root (of `hung_now`) spawn `sp`'s lane on this host is under.
+/// The hung root (of `hung_now`) spawn `sp`'s lane on this host is under.
 pub fn hung_under<'a>(hung: &[&'a str], sp: Option<&Event>) -> Option<&'a str> {
     let sp = sp.filter(|e| e.str("machine").is_none())?;
     hung.iter().copied().find(|r| inside(sp, Path::new(r)))
@@ -209,7 +209,7 @@ pub fn eject(
     Ok(1)
 }
 
-/// #630: drive's look at each host's roots: one that vanished under a lane is noted once (`! root <path> gone`); #790: each pass, a lane still there restarts on the next root; one mounted again is logged back (new lanes use it).
+/// Drive's look at each host's roots: one that vanished under a lane is noted once (`! root <path> gone`); each pass, a lane still there restarts on the next root; one mounted again is logged back (new lanes use it).
 pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = working(&ctx.state)?;
     let cache = crate::hosts::cached(ctx);

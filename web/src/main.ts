@@ -1,6 +1,3 @@
-// #927: the phone page draws the screens cooee draws (cooee-plugin.toml's places, `PL` from the page shell): each
-// header-strip place is a tab, the menu-row places open from [⚙], the chat-cards place is the cards above every tab.
-// A screen is fetched, drawn block by block, patched by its `stream`, and its blocks post `/action`. No per-tab code.
 import { type Act, type Ctx, el, kids, render, values } from './blocks';
 import { apply, type Blk } from './ops';
 import { R, colours, esc, get, put, schemes, theme, themes } from './theme';
@@ -11,7 +8,7 @@ const B = document.body, H = document.documentElement;
 const ro = 'ro' in B.dataset, demo = 'demo' in B.dataset;
 const $ = <T extends Element = HTMLElement>(s: string) => document.querySelector<T>(s)!;
 const exported = B.dataset.root === '';
-const url = (p: string) => new URL(p.replace(/^\//, '') + (exported && /^\/screens\/[^?]*$/.test(p) ? '/index.html' : ''), R).href;
+const url = (p: string) => new URL(p.replace(/^[/]/, '') + (exported && /^\/screens\/[^?]*$/.test(p) ? '/index.html' : ''), R).href;
 
 type View = { path: string; model: Blk | null; at: number; live: boolean; es?: EventSource; root: HTMLElement; open: Set<string>; back: string[] };
 const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, root, open: new Set(), back: [] });
@@ -29,7 +26,6 @@ function sync() {
   if (t) stale.textContent = `last update ${hm}${old > 60_000 ? ` · ${Math.round(old / 60_000)}m ago` : ''}`;
 }
 
-// The last copy of each screen, painted at once (offline too), its age on the strip until a fresh one lands.
 const cached = (p: string): { t: number; v: Blk } | null => { try { return JSON.parse(get('scr:' + p) ?? 'null'); } catch { return null; } };
 async function fetchScreen(p: string): Promise<Blk> {
   const get = () => fetch(url(p), { cache: 'no-store' });
@@ -143,7 +139,6 @@ function toast(text: string, bad = false) {
   p.dataset.t = String(setTimeout(() => { p.hidden = true; }, bad ? 8000 : 3000));
 }
 
-// The sheet: a screen of type `sheet` (or any screen) over the page, its `done` posting the fields' values.
 const sh = $('#sheet'), shv = view('', $('#sheet .sb'));
 function closeSheet() { sh.hidden = true; H.classList.remove('sheet'); shv.model = null; }
 async function sheet(path: string) {
@@ -184,7 +179,6 @@ function tap(t: Blk) {
   else if (t.thread) toast('threads open in cooee');
 }
 
-// A confirm: the block's own words, [cancel] and its [ok] (a destructive one in red).
 function confirmed(c: Blk): Promise<boolean> {
   return new Promise(ok => {
     const box = $('#confirm');
@@ -235,7 +229,6 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement) {
   }
 }
 
-// #59 pairing: [pair] shows a code the Mac approves (`drover serve approve <code>`); claim polls until it is.
 let pairing = false;
 async function unpaired() {
   const r = await fetch(url('pair/status'), { cache: 'no-store' }).catch(() => null);
@@ -265,7 +258,6 @@ setInterval(async () => {
 }, 2000);
 if (!ro && !demo) fetch(url('pair/claim'), { method: 'POST' }).catch(() => null);
 
-// [⚙]: the menu-row screens (Fleets…), the look (theme, colours) and alerts on this phone.
 function settings() {
   const b = $('#sheet .sh'), body: HTMLElement[] = [];
   shv.model = null;

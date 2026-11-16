@@ -1,7 +1,3 @@
-// @ts-nocheck
-// #244 schemes: pure from here to `schemes:end` (tests/schemes.rs runs it under node). A scheme is
-// { "label", "color-scheme": "dark" | "light", "tokens": { "--bg": "#rrggbb", … } } (docs/themes.md, docs/design/schemes).
-// gate() is every check it must pass, with what failed; a refused one is named on the Host tab and never shown.
 const TOKENS = ['--bg', '--card', '--edge', '--line', '--scrim', '--fg', '--mute', '--l', '--link',
   '--g', '--a', '--r', '--p', '--c', '--fk-l', '--fk-p', '--fk-c', '--fk-g', '--fk-a'];
 const hex = s => {
@@ -13,7 +9,6 @@ const hex = s => {
 const lin = c => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-// `color-mix(in srgb, c p%, transparent)` over bg, as the board's tints are (.ask, .later, .grp[data-t]).
 const over = (c, bg, p) => c.map((v, i) => v * p + bg[i] * (1 - p));
 function lab([r, g, b]) {
   const [x, y, z] = [[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]
@@ -22,7 +17,6 @@ function lab([r, g, b]) {
   const [fx, fy, fz] = [x / 0.95047, y, z / 1.08883].map(f);
   return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
 }
-// CIEDE2000 (Sharma et al. 2005).
 function de(c1, c2) {
   const [L1, a1, b1] = lab(c1), [L2, a2, b2] = lab(c2), rad = Math.PI / 180;
   const C = (Math.hypot(a1, b1) + Math.hypot(a2, b2)) / 2, G = 0.5 * (1 - Math.sqrt(C ** 7 / (C ** 7 + 25 ** 7)));
@@ -37,9 +31,6 @@ function de(c1, c2) {
   const RT = -2 * Math.sqrt(Cm ** 7 / (Cm ** 7 + 25 ** 7)) * Math.sin(60 * Math.exp(-(((hm - 275) / 25) ** 2)) * rad);
   return Math.sqrt((dL / SL) ** 2 + (dC / SC) ** 2 + (dH / SH) ** 2 + RT * (dC / SC) * (dH / SH));
 }
-// Every check as [what, value, minimum]: text 4.5:1 (on --bg, --card and the tinted surfaces: the needs-you card with
-// its option buttons, the red and amber group headers), status colours 3:1, green/amber/red ΔE2000 ≥ 20 apart, and
-// the accent and links ≥ 20 from each status colour (a control never reads as a warning).
 function gate(s) {
   const t = (s && s.tokens) || {}, missing = TOKENS.filter(k => !hex(t[k] || ''));
   if (missing.length) return [[`missing or not #rrggbb[aa]: ${missing.join(' ')}`, 0, 1]];
@@ -60,12 +51,7 @@ function gate(s) {
   if (!['dark', 'light'].includes(s['color-scheme'])) rows.push(['color-scheme is not "dark" or "light"', 0, 1]);
   return rows;
 }
-// What a scheme fails, in words (none: it passes).
 const fails = s => gate(s).filter(r => r[1] < r[2]).map(([w, v, m]) => v ? `${w} ${v.toFixed(2)} < ${m}` : w);
-// A passing scheme's token block, as the head script applies it.
 const block = s => `:root{${TOKENS.map(k => `${k}:${s.tokens[k]}`).join(';')};color-scheme:${s['color-scheme']}}`;
-// The scheme a phone shows: its pick, else its theme's default (#423: a `{light, dark}` one by the phone's setting,
-// `dark`), else github-dark; each only if it passes.
 const choose = (all, pick, def, dark) => [pick, (def && def[dark ? 'dark' : 'light']) || def, 'github-dark'].find(n => all[n] && !fails(all[n]).length) || 'github-dark';
-// schemes:end
 export { block, choose, fails };

@@ -25,7 +25,7 @@ struct Breach {
     since: u64,
 }
 
-/// #855: each fleet SLO and missed promise: its known heal first, `stuck` if it still holds a pass later.
+/// Each fleet SLO and missed promise: its known heal first, `stuck` if it still holds a pass later.
 pub fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -61,7 +61,7 @@ pub fn pass(
     Ok(())
 }
 
-/// #855: the `stuck` alerts whose breach still holds: the owner's cards.
+/// The `stuck` alerts whose breach still holds: the owner's cards.
 pub fn open_stuck(events: &[Event]) -> Vec<&Event> {
     let eps = episodes(events);
     eps.into_values()

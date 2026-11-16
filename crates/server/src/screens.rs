@@ -36,7 +36,7 @@ pub fn places() -> Value {
     serde_json::to_value(m.get("places")).unwrap_or_default()
 }
 
-/// #1072: the standalone page's places: the manifest's, then the Threads tab (never the Cooee plugin's).
+/// The standalone page's places: the manifest's, then the Threads tab (never the Cooee plugin's).
 pub fn page_places() -> Value {
     let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
     let mut all = places().as_array().cloned().unwrap_or_default();

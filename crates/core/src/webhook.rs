@@ -17,7 +17,7 @@ const BRANCH: [&str; 3] = [
     "/check_run/check_suite/head_branch",
 ];
 
-/// #707: the secret in `[serve] webhook_secret_file` (0600), for each fleet; empty: webhooks are off.
+/// The secret in `[serve] webhook_secret_file` (0600), for each fleet; empty: webhooks are off.
 pub fn secrets(cfg: &Config) -> Result<Vec<(String, String)>> {
     let f = cfg.serve.webhook_secret_file.as_deref().map(crate::config::expand);
     let Some(key) = f.as_deref().map(crate::secret::file).transpose()?.flatten() else {

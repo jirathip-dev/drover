@@ -177,7 +177,7 @@ impl Cause {
             .into_iter()
             .find(|c| c.word() == w)
     }
-    /// #662: drover resumes the lane in its worktree.
+    /// Drover resumes the lane in its worktree.
     pub fn resumable(self) -> bool {
         matches!(self, Cause::Limit | Cause::Crash)
     }

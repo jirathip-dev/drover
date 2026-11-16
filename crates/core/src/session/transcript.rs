@@ -118,7 +118,7 @@ pub fn last_line(t: &Transcript) -> String {
         .into()
 }
 
-/// #248: an ACP log's prompts, final replies and commands run (shell tool titles), masked: the next lane's handover.
+/// An ACP log's prompts, final replies and commands run (shell tool titles), masked: the next lane's handover.
 pub fn said(t: &Transcript) -> [Vec<String>; 3] {
     let mut out: [Vec<String>; 3] = Default::default();
     let Transcript::Events(ev) = t else {
