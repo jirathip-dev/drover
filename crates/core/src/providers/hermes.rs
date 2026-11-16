@@ -1,13 +1,14 @@
 use super::{attempts, hook_command, Dialect, Home, Provider, Row};
 use crate::config::Config;
-use crate::term;
+use crate::events::Json;
 use crate::runner::{argv, Runner};
 use crate::spawn::Plan;
+use crate::term;
 use crate::Ctx;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::io::Write;
 use std::collections::BTreeSet;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const HERMES_HOOKS: &str = include_str!("../../hooks/hermes-hooks.yaml");
@@ -141,15 +142,17 @@ impl Provider for Hermes {
     }
 
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
-        let c = self.kick_cmds(p, pane);
-        term::exec(r, &c[0])?;
+        let [c0, c1, c2, c3, c4] = &self.kick_cmds(p, pane)[..] else {
+            return Ok(false);
+        };
+        term::exec(r, c0)?;
         for _ in attempts(r, 3, 10) {
-            term::exec(r, &c[1])?;
-            term::exec(r, &c[2])?;
-            if term::exec(r, &c[3])?.code == 0 {
+            term::exec(r, c1)?;
+            term::exec(r, c2)?;
+            if term::exec(r, c3)?.code == 0 {
                 return Ok(true);
             }
-            let screen = term::exec(r, &c[4])?;
+            let screen = term::exec(r, c4)?;
             if screen.code == 0 && screen.stdout.contains("ctx ") && !screen.stdout.contains("ctx --") {
                 return Ok(true);
             }
@@ -168,13 +171,16 @@ fn approve_hook(path: &Path, cmd: &str) -> Result<()> {
         .ok()
         .filter(Value::is_object)
         .unwrap_or_else(|| json!({}));
-    if !data["approvals"].is_array() {
-        data["approvals"] = json!([]);
+    if !data.at("approvals").is_array() {
+        data.put("approvals", json!([]));
     }
-    let list = data["approvals"].as_array_mut().context("approvals")?;
+    let list = data
+        .get_mut("approvals")
+        .and_then(Value::as_array_mut)
+        .context("approvals")?;
     let n = list.len();
     for ev in ["pre_tool_call", "post_tool_call"] {
-        if !list.iter().any(|e| e["event"] == ev && e["command"] == cmd) {
+        if !list.iter().any(|e| e.at("event") == ev && e.at("command") == cmd) {
             list.push(json!({"event": ev, "command": cmd}));
         }
     }
@@ -192,7 +198,7 @@ pub fn set_mcp(ctx: &Ctx, profile: &str, servers: &serde_json::Map<String, Value
     };
     let block: String = servers
         .iter()
-        .map(|(k, v)| format!("  {}: {v}\n", serde_json::to_string(k).unwrap()))
+        .map(|(k, v)| format!("  {}: {v}\n", serde_json::to_string(k).unwrap_or_default()))
         .collect();
     let block = if block.is_empty() {
         block

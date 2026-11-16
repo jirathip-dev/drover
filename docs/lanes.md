@@ -96,6 +96,10 @@ Every lane gets `DROVER_PORT` (#187): a stable hash of `<fleet>/<branch>` into t
 logs it and the Lanes tab shows it (`:41234`). Lanes start dev servers on it, never a fixed port; `env`
 values expand it: `[fleet.web.env] PORT = "$DROVER_PORT"`. `scripts/ui-audit.sh` serves on it when set.
 
+`sandbox = "srt"` in `[fleet.<n>]` (#782, a spike, off by default) starts the lane's agent as `srt --settings <worktree>.srt.json <harness …>`:
+spawn writes those rules (worktree, build and its own temp writable; `~` read-denied but toolchains, its repo and the agent's own
+folders; the secrets folder denied; network through srt's proxy to an allowlist). Profile, proofs and numbers: docs/spikes/lane-sandbox.md.
+
 `drover close <agent>` closes the terminal of a shed agent that is not a drover lane (by name or pane id),
 never touching files or worktrees, and logs a passive `closed-other`; a logged lane is refused `IS_LANE`
 (use stop, kill or clean). `drover stop <agent>` sends Esc (logs `stop`). `drover kill <agent>` prints what is lost

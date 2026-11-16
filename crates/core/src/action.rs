@@ -1,4 +1,4 @@
-use crate::events::{append, Event};
+use crate::events::{append, Event, Json};
 use crate::gate::{refuse, Refusal};
 use crate::runner::Runner;
 use anyhow::Result;
@@ -49,14 +49,15 @@ impl Intent {
 impl Drop for Intent {
     fn drop(&mut self) {
         if self.open && !std::thread::panicking() {
-            let _ = finish(&self.state, self.ev.ts, &self.ev, "failed", json!({}));
+            finish(&self.state, self.ev.ts, &self.ev, "failed", json!({})).ok();
         }
     }
 }
 
 /// `intent`'s outcome (`done` or `failed`) with its id and step, `d` beside; returns it.
 pub fn finish(state: &Path, now: u64, intent: &Event, kind: &str, mut d: Value) -> Result<Event> {
-    (d["action_id"], d["step"]) = (json!(id_of(intent)), json!(intent.str("step")));
+    d.put("action_id", json!(id_of(intent)))
+        .put("step", json!(intent.str("step")));
     let e = Event::new(now, &intent.fleet, intent.issue, kind, d);
     append(state, &e).map(|()| e)
 }
@@ -72,8 +73,10 @@ pub fn begin(
     probe: &dyn Fn(&Event) -> Result<Option<Value>>,
 ) -> Result<Seen> {
     let id = id(fleet, issue, step, key);
-    (inputs["action_id"], inputs["step"]) = (json!(id), json!(step));
-    (inputs["pid"], inputs["host"]) = (json!(crate::sim::pid()), json!(crate::db::host()));
+    inputs.put("action_id", json!(id)).put("step", json!(step));
+    inputs
+        .put("pid", json!(crate::sim::pid()))
+        .put("host", json!(crate::db::host()));
     let ev = Event::new(now, fleet, Some(issue), "intent", inputs);
     let intent = |ev: Event| Intent {
         state: state.into(),
@@ -93,7 +96,7 @@ pub fn begin(
         return Ok(Seen::Busy(last));
     }
     if let Some(mut d) = probe(&last)? {
-        d["recovered"] = json!(true);
+        d.put("recovered", json!(true));
         return Ok(Seen::Done(finish(state, now, &last, "done", d)?));
     }
     let mut failed = Event::new(

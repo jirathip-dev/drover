@@ -188,3 +188,57 @@ fn a_missed_promise_drive_healed_alerts_with_the_issue_reason_and_heal_one_pass_
     );
     assert_eq!(kinds(&c), ["stuck"]);
 }
+
+#[test]
+fn three_stuck_issues_in_one_fleet_push_once_and_show_one_card() {
+    let (c, sink, sh) = setup("slo-fold");
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/issue-9")).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "rm", "12"]).0, 0);
+    let line = "PASS · verify skipped · merging next pass";
+    for n in [7, 8, 9] {
+        let ev =
+            |ts, kind: &str, d: Value| append(&c.state, &Event::new(NOW + ts, "sendmeter", Some(n), kind, d)).unwrap();
+        let agent = format!("sendmeter-impl-{n}");
+        ev(
+            0,
+            "spawn",
+            json!({"role": "impl", "agent": agent, "pane": agent, "runtime": "shed", "worktree": "/x", "branch": format!("issue-{n}")}),
+        );
+        ev(
+            20,
+            "promise",
+            json!({"kind": "merging", "reason": line, "deadline": NOW + 620, "state": "impl", "head": ""}),
+        );
+        ev(
+            700,
+            "promise-missed",
+            json!({"kind": "merging", "promised": line, "age": 680, "why": "drive took no step"}),
+        );
+    }
+    fast(&at(&c, 700), &sh);
+    fast(&at(&c, 1000), &sh);
+    assert_eq!(kinds(&c), ["stuck", "stuck", "stuck"]);
+    let pushes = std::fs::read_to_string(&sink).unwrap();
+    assert_eq!(pushes.lines().count(), 1, "one push per fleet: {pushes}");
+    let f = Fake::default();
+    let r = sh.on(&f);
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let res = s.respond(
+        "GET /screens/cards HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n",
+        NOW + 1000,
+    );
+    let res = String::from_utf8_lossy(&res);
+    let v: Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+    let cards: Vec<&Value> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["title"] == "Drive is stuck")
+        .collect();
+    assert_eq!(cards.len(), 1, "{cards:?}");
+    let shown = cards[0].to_string();
+    for n in [7, 8, 9] {
+        assert!(shown.contains(&format!("drover why sendmeter#{n}")), "{shown}");
+    }
+    assert!(shown.contains("\"action\":\"drive-all\""), "{shown}");
+}

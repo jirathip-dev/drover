@@ -1,5 +1,5 @@
 use crate::config::{write_atomic, Config};
-use crate::events::{age, emit, working, Event};
+use crate::events::{age, emit, working, Event, Json};
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::{anyhow, bail, ensure, Context, Result};
@@ -9,7 +9,8 @@ use std::io::Write;
 
 /// Host `name`'s recipe (`<config>/recipes/<cloud>.toml`, else the built-in `boat`) and size: #635's old `medium` is `default` where the recipe prices no `medium`.
 pub fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, String)> {
-    let (c, size) = (&cfg.hosts[name].cloud, cfg.hosts[name].size.clone().unwrap_or_default());
+    let h = cfg.hosts.get(name).context("no such host")?;
+    let (c, size) = (&h.cloud, h.size.clone().unwrap_or_default());
     let rc = load(ctx, c.as_deref().unwrap_or(""))?;
     let rates = rc.get("rate_usd_hour").and_then(|t| t.as_table());
     let old = size == "medium" && rates.is_some_and(|t| !t.contains_key("medium") && t.contains_key("default"));
@@ -21,7 +22,7 @@ pub fn key(ctx: &Ctx, var: &str) -> Result<Option<(String, String)>> {
     if var.is_empty() {
         return Ok(None);
     }
-    if let Some(k) = std::env::var(var).ok().filter(|k| !k.is_empty()) {
+    if let Some(k) = crate::config::env(var).filter(|k| !k.is_empty()) {
         return Ok(Some((k, "env".into())));
     }
     let p = crate::secret::path(ctx, var);
@@ -90,7 +91,7 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, rc: &toml::Table, what: &str, line: &str, 
 }
 
 fn log(ctx: &Ctx, cfg: &Config, kind: &str, name: &str, mut d: Value) -> Result<()> {
-    d["host"] = json!(name);
+    d.put("host", json!(name));
     emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
@@ -134,7 +135,7 @@ pub fn spend(ctx: &Ctx, cfg: &Config, events: &[Event], name: &str) -> Result<(f
 
 /// Why host `name` may not run now: its month's budget (none set: 0) or today's `max_hours_day` used up.
 pub fn over(ctx: &Ctx, cfg: &Config, events: &[Event], name: &str) -> Option<String> {
-    let h = &cfg.hosts[name];
+    let h = cfg.hosts.get(name)?;
     let (b, m) = (h.budget_usd_month.unwrap_or(0.0), h.max_hours_day);
     let month = |usd: f64| (usd >= b).then(|| format!("spent ${usd:.2} of ${b} this month"));
     let day = |hrs: f64| m.filter(|m| hrs >= *m).map(|m| format!("{hrs:.1} h today of {m}"));
@@ -150,22 +151,33 @@ pub fn held(ctx: &Ctx, cfg: &Config, name: &str) -> Option<(&'static str, String
     budget.or_else(stopped)
 }
 
-/// Start host `name`, wait (5 min at most) for `status` to print `running`, then refresh its address; a failure stops it.
+/// Start host `name`, wait (5 min at most) for `status` to print `running`, run `ready` on a new one, then refresh its address; a failure stops it.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     log(ctx, cfg, "cloud-start", name, json!({}))?;
     let made = |v: &str| {
-        let _ = std::fs::remove_file(pin(ctx, name));
+        std::fs::remove_file(pin(ctx, name)).ok();
         cmd(ctx, cfg, r, name, v)
     };
     let snap = last(&working(&ctx.state)?, name, &["cloud-snapshot"]).is_some();
+    let rc = recipe(ctx, cfg, name)?.0;
+    let mut new = false;
     let up = cmd(ctx, cfg, r, name, "status").and_then(|s| match s.trim() {
-        "" if snap && recipe(ctx, cfg, name)?.0.contains_key("create_from") => made("create_from"),
-        "" => made("create"),
+        "" if snap && rc.contains_key("create_from") => {
+            new = true;
+            made("create_from")
+        }
+        "" => {
+            new = true;
+            made("create")
+        }
         _ => cmd(ctx, cfg, r, name, "start"),
     });
     let up = up.and_then(|_| {
         for _ in 0..30 {
             if cmd(ctx, cfg, r, name, "status")?.trim() == "running" {
+                if new && rc.contains_key("ready") {
+                    cmd(ctx, cfg, r, name, "ready")?;
+                }
                 return refresh(ctx, cfg, r, name, (true, true))
                     .map(|()| drop(crate::hosts::survey(ctx, cfg, r, true)));
             }
@@ -215,7 +227,6 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, (up, repin): (bo
         bad()
     );
     let (dir, known) = (ctx.home.join(".ssh/config.d"), pin(ctx, name));
-    let at = [format!("[{host}]:{port}"), host.into()];
     let was = std::fs::read_to_string(&known).unwrap_or_default();
     let was = was.split_once(' ').map_or("", |w| w.1.trim());
     let k = known.display();
@@ -232,11 +243,15 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, (up, repin): (bo
         "{name}: identity has whitespace"
     );
     let id = id.map_or(String::new(), |i| format!("  IdentityFile {i}\n  IdentitiesOnly yes\n"));
-    let pinned = format!("{} {key}\n", at[usize::from(port == "22")]);
+    let pinned = if port == "22" {
+        format!("{host} {key}\n")
+    } else {
+        format!("[{host}]:{port} {key}\n")
+    };
     std::fs::create_dir_all(&dir)?;
     std::fs::create_dir_all(known.parent().context("pin dir")?)?;
     let (a, b) = (format!("# herdsman {name}\n"), format!("# end {name}\n"));
-    let m = cfg.hosts[name].machine.as_deref().unwrap_or(name);
+    let m = cfg.hosts.get(name).and_then(|h| h.machine.as_deref()).unwrap_or(name);
     let s = format!("{a}Host {m}\n  HostName {host}\n  User {user}\n  Port {port}\n  UserKnownHostsFile {k}\n{id}{b}");
     let p = dir.join("herdsman");
     let old = std::fs::read_to_string(&p).unwrap_or_default();
@@ -247,7 +262,7 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, (up, repin): (bo
         log(ctx, cfg, "cloud-repin", name, json!({"was": was, "key": key}))?;
     }
     write_atomic(&known, &pinned)?;
-    let _ = std::fs::remove_file(dir.join(format!("herdsman-{name}.known")));
+    std::fs::remove_file(dir.join(format!("herdsman-{name}.known"))).ok();
     let (keep, tail) = old.split_once(&a).unwrap_or((&old, ""));
     let next = || tail.find("# herdsman ").map_or("", |i| &tail[i..]);
     let rest = keep.to_string() + tail.split_once(&b).map_or_else(next, |x| x.1);
@@ -319,7 +334,11 @@ pub fn card(ctx: &Ctx, cfg: &Config, ev: &[Event], (name, n): (&str, usize)) -> 
     let h = cfg.hosts.get(name).filter(|h| h.cloud.is_some())?;
     let st = state(ev, name);
     let paused = format!("stopped · {n} lane(s) paused: cloud host stopped");
-    let head = [st.replace("running", ""), paused][usize::from(st == "stopped")].clone();
+    let head = if st == "stopped" {
+        paused
+    } else {
+        st.replace("running", "")
+    };
     let (b, m) = (h.budget_usd_month.unwrap_or(0.0), h.max_hours_day.unwrap_or(24.0));
     let (usd, hrs) = spend(ctx, cfg, ev, name).unwrap_or((f64::INFINITY, 0.0));
     let at = usize::from((usd / b).max(hrs / m) >= 0.8) + usize::from(over(ctx, cfg, ev, name).is_some());
@@ -328,7 +347,7 @@ pub fn card(ctx: &Ctx, cfg: &Config, ev: &[Event], (name, n): (&str, usize)) -> 
     let (a, s, t) = (ago("cloud-up"), ago("cloud-start"), ago("cloud-stop"));
     let text =
         format!("{rc} {size} · spent ${usd:.0} of ${b} · {hrs:.1} h today of {m} · address {a} · last start {s}");
-    let tone = ["g", "a", "r"][at.min(2)].to_string();
+    let tone = ["g", "a", "r"].get(at.min(2)).unwrap_or(&"r").to_string();
     let gh = crate::hosts::cached(ctx).remove(name).map(|s| s.github);
     let gh = gh.filter(|g| !g.is_empty()).map(|g| format!(" · {g}"));
     Some([head, tone, format!("{text} · last stop {t}{}", gh.unwrap_or_default())])
@@ -349,11 +368,11 @@ pub fn token(text: &str, now: u64) -> (String, Option<String>) {
     let new = "→ a new fine-grained token, then hosts bootstrap";
     let [y, m, d] = n[..] else {
         let bad = format!("✗ github — gh there has no working token (expired?) {new}");
-        return [
-            (format!("{repos} · no expiry"), None),
-            ("github: unreadable".into(), Some(bad)),
-        ][usize::from(text.is_empty())]
-        .clone();
+        return if text.is_empty() {
+            ("github: unreadable".into(), Some(bad))
+        } else {
+            (format!("{repos} · no expiry"), None)
+        };
     };
     let (y, mp) = (y - i64::from(m <= 2), (m + 9) % 12);
     let (era, yoe) = (y.div_euclid(400), y.rem_euclid(400));
@@ -409,7 +428,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let fail = |what: &str, cmd: &str, o: &crate::runner::Out| {
         let tail = crate::lanes::tail(&format!("{}{}", o.stdout, o.stderr), 20).join("\n");
         let d = json!({"step": what, "cmd": cmd, "code": o.code, "tail": tail});
-        let _ = log(ctx, cfg, "host-bootstrap", name, d);
+        log(ctx, cfg, "host-bootstrap", name, d).ok();
         format!("{name}: {what}: `{cmd}` exit {}:\n{tail}", o.code)
     };
     let mut step = |line: &str| -> Result<()> {
@@ -467,12 +486,14 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     if on.read(p).and_then(|t| mine(&t.parse().ok()?)) == Some(true) {
         on.remove(p)?;
     }
-    let sync = format!("test ! -e '{conf}' || '{exe}' profiles sync");
-    let o = sh(&sync)?;
-    ensure!(o.code == 0, "{}", fail("profiles sync", &sync, &o));
-    writeln!(out, "✓ profiles sync — there")?;
+    if on.exists(p) {
+        let sync = format!("'{exe}' profiles sync");
+        let o = sh(&sync)?;
+        ensure!(o.code == 0, "{}", fail("profiles sync", &sync, &o));
+        writeln!(out, "✓ profiles sync — there")?;
+    }
     if acp {
-        for (p, family, _) in crate::hosts::acp_profiles(cfg, &tags) {
+        for (p, family, _) in crate::hosts::acp_profiles(cfg, name, &tags) {
             let args = ["profiles", "sync", "--profile", &p, "--role", family];
             let o = on.run(&exe, &argv(&args))?;
             ensure!(
@@ -497,22 +518,33 @@ command -v drover >/dev/null || { echo \"drover not on PATH $PATH\"; exit 1; }";
     Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)
 }
 
-/// #255 `hosts snapshot <name>`: after a fresh health look, up with no `✗`, the recipe's `snapshot`; logs `cloud-snapshot`.
+/// #255 `hosts snapshot <name>`: after a fresh health look, up with no `✗`, the recipe's `snapshot`; logs `cloud-snapshot`. #1127: then a shed there that does not answer is restarted once, else the error.
 pub fn snapshot(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     crate::hosts::survey(ctx, cfg, r, true);
     let s = crate::hosts::cached(ctx).remove(name).unwrap_or_default();
     let bad: Vec<_> = s.health.iter().filter(|w| w.starts_with('✗')).cloned().collect();
     ensure!(s.up && bad.is_empty(), "{name} is not healthy: {}", bad.join("; "));
     cmd(ctx, cfg, r, name, "snapshot")?;
-    log(ctx, cfg, "cloud-snapshot", name, json!({}))
+    log(ctx, cfg, "cloud-snapshot", name, json!({}))?;
+    let on = crate::hosts::On::new(r, cfg.hosts.get(name).context("no such host")?.machine.as_deref());
+    let dead = || crate::hosts::shed_row(&on).filter(|l| l.starts_with("✗ shed"));
+    if dead().is_none() {
+        return Ok(());
+    }
+    let o = on.run_in("sh", &argv(&["-c", crate::hosts::SHED_RESTART]), "")?;
+    let why = dead().map(|l| format!("{l} (restart exit {}: {})", o.code, o.stderr.trim()));
+    why.map_or(Ok(()), |w| {
+        bail!("{name}: shed does not answer after the snapshot: {w}")
+    })
 }
 
 /// #635 doctor rows for cloud host `name`: an old size, where its provider key is, and each recipe subcommand of its CLI (the recipe's name, e.g. `boat`) in that CLI's `--help`.
 pub fn doctor(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, rows: &mut Vec<String>) -> Result<()> {
     let (rc, size) = recipe(ctx, cfg, name)?;
-    let c = cfg.hosts[name].cloud.clone().unwrap_or_default();
-    if cfg.hosts[name].size.as_deref() != Some(&size) {
-        let old = cfg.hosts[name].size.clone().unwrap_or_default();
+    let h = cfg.hosts.get(name).context("no such host")?;
+    let c = h.cloud.clone().unwrap_or_default();
+    if h.size.as_deref() != Some(&size) {
+        let old = h.size.clone().unwrap_or_default();
         rows.push(format!(
             "! cloud {name} size — \"{old}\" is {c}'s \"{size}\" → set size = \"{size}\""
         ));
@@ -530,13 +562,11 @@ pub fn doctor(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, rows: &mut Ve
     }
     if let Some(i) = rc.get("identity").and_then(|v| v.as_str()) {
         let there = ctx.home.join(i.trim_start_matches("~/")).exists();
-        rows.push(
-            [
-                format!("✗ cloud {name} identity — {i} missing → put {c}'s ssh key there"),
-                format!("✓ cloud {name} identity — {i}"),
-            ][usize::from(there)]
-            .clone(),
-        );
+        rows.push(if there {
+            format!("✓ cloud {name} identity — {i}")
+        } else {
+            format!("✗ cloud {name} identity — {i} missing → put {c}'s ssh key there")
+        });
     }
     if let Some(p) = stale_override(ctx, &c) {
         let p = p.display();
@@ -555,9 +585,10 @@ pub fn doctor(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, rows: &mut Ve
             .filter(|w| !w.is_empty())
             .collect();
         uses.extend(
-            w.windows(2)
-                .filter(|p| p[0] == c && !p[1].starts_with('-'))
-                .map(|p| (p[1], verb, line)),
+            w.iter()
+                .zip(w.iter().skip(1))
+                .filter(|p| *p.0 == c && !p.1.starts_with('-'))
+                .map(|p| (*p.1, verb, line)),
         );
     }
     if uses.is_empty() {
