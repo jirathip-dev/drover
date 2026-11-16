@@ -166,7 +166,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
     let up = up.and_then(|_| {
         for _ in 0..30 {
             if cmd(ctx, cfg, r, name, "status")?.trim() == "running" {
-                return refresh(ctx, cfg, r, name, (true, false))
+                return refresh(ctx, cfg, r, name, (true, true))
                     .map(|()| drop(crate::hosts::survey(ctx, cfg, r, true)));
             }
             r.sleep(10);
