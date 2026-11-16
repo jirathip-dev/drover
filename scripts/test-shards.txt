@@ -63,12 +63,14 @@
 4 host_offline
 2 host_slots
 2 host_spared
+3 host_sync
 1 host_tab
 1 host_words
 3 hosts
 1 hotspots
 4 hung_read
 1 hung_root
+1 issue_sheet_webkit
 4 keychain_jam
 3 kick
 4 land

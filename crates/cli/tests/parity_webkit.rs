@@ -59,8 +59,13 @@ fn thread(c: &drover::Ctx, messages: u64, files: &Value) {
 }
 
 fn late(url: &str, name: &str, js: &str) -> Vec<f64> {
+    late_as(url, name, js, "")
+}
+
+fn late_as(url: &str, name: &str, js: &str, cookie: &str) -> Vec<f64> {
     let png = tmpdir(name).join("page.png");
     let o = webview()
+        .env("DROVER_COOKIE", cookie)
         .args([url, "390", "-", "-", png.to_str().unwrap()])
         .arg(format!("{PRELUDE} window.late = (async () => {{ {js} }})()"))
         .output()
@@ -168,6 +173,41 @@ fn parity_24_opening_a_thread_pushes_history_and_back_returns_to_the_list() {
         late(&url, "parity-24-png", js),
         [1.0, 1.0],
         "a history entry, and back shows the list"
+    );
+}
+
+#[test]
+fn parity_24_an_edge_swipe_past_40_percent_goes_back_to_the_list_where_it_was_and_a_short_one_stays() {
+    if no_webkit() {
+        return;
+    }
+    let (_, url) = page("parity-24-swipe", |c| {
+        thread(c, 4, &json!([]));
+        for n in 2..=40 {
+            let d = json!({"thread": format!("t{n}"), "title": format!("Thread {n}"), "harness": "claude"});
+            ev(c, now() - 5_000 + n, None, "thread-new", d);
+        }
+    });
+    let js = "location.hash = '#threads'; \
+        await until(() => $('.card[data-id^=\"older-\"] > .fold')); $('.card[data-id^=\"older-\"] > .fold').click(); \
+        await until(() => $$('.row[data-id^=\"t\"]').length >= 30); \
+        scrollTo(0, 400); await w(100); const y0 = scrollY; \
+        $('.row[data-id=\"t1\"]').click(); \
+        await until(() => $('.cmp')); await w(300); \
+        const touch = (type, x) => { const at = document.elementFromPoint(5, 400) ?? document.body, p = { identifier: 1, target: at, clientX: x, clientY: 400 }; \
+          const list = a => Object.assign(a, { item: i => a[i] ?? null }), e = new Event(type, { bubbles: true, cancelable: true }); \
+          Object.defineProperties(e, { touches: { value: list(type === 'touchend' ? [] : [p]) }, changedTouches: { value: list([p]) } }); at.dispatchEvent(e); }; \
+        const moved = () => $$('main > section:not([hidden]) > *').some(k => k.style.transform.includes('translateX')); \
+        const drag = to => { touch('touchstart', 8); for (let x = 8; x <= to; x += 20) touch('touchmove', x); const f = +moved(); touch('touchend', to); return f; }; \
+        const follows = drag(innerWidth * 0.3); await w(400); \
+        const stayed = +(!!$('.cmp') && !moved()); \
+        drag(innerWidth * 0.6); \
+        const back = await until(() => $('.row[data-id^=\"t\"]') && !$('.cmp')); await w(200); \
+        return [scrollY > 0 ? 1 : 0, follows, stayed, +back, +!moved(), Math.round(scrollY - y0)];";
+    assert_eq!(
+        late(&url, "parity-24-swipe-png", js),
+        [1.0, 1.0, 1.0, 1.0, 1.0, 0.0],
+        "the list scrolled, the view follows the finger, a 30% drag stays, a 60% drag goes back, no slide left, the list where it was"
     );
 }
 
@@ -309,5 +349,88 @@ fn parity_28_a_long_press_offers_copy_copy_as_markdown_and_quote() {
         late(&coded("parity-28"), "parity-28-png", &js),
         [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         "the menu's three items; copy as markdown copies the raw text; quote fills the composer"
+    );
+}
+
+fn handoffs(c: &drover::Ctx) {
+    let t = now();
+    let new = |ts, id: &str, title: &str| {
+        ev(
+            c,
+            ts,
+            None,
+            "thread-new",
+            json!({"thread": id, "title": title, "harness": "claude"}),
+        );
+    };
+    new(t - 4_000, "t1", "Search worker split");
+    new(t - 3_900, "t2", "Rate limits");
+    let d = json!({"thread": "t1", "from": "t1", "to": "t2", "title": "Burst size", "text": "burst 100, not 50",
+        "target": "Rate limits · t2"});
+    ev(c, t - 3_000, None, "thread-handoff", d);
+    let d = json!({"thread": "t2", "from": "t1", "text": "handoff to Rate limits · t2: burst 100, not 50"});
+    ev(c, t - 2_990, None, "thread-msg", d);
+    let d = json!({"thread": "t1", "from": "system", "via": "t2", "text": "filed #52: cap bursts at 100"});
+    ev(c, t - 2_000, None, "thread-msg", d);
+    let card = |id: &str, title: &str| {
+        let opts = [
+            "Rate limits · t2 — burst 100, not 50 (33m ago)".to_string(),
+            format!("new thread: {title}"),
+        ];
+        json!({"id": id, "question": format!("Hand off \"{title}\" to which sendmeter thread?"), "options": opts,
+            "kind": "owner", "thread": "t1", "handoff": {"repo": "sendmeter", "title": title, "text": "do it", "targets": ["t2", "new"]}})
+    };
+    ev(c, t - 1_500, None, "needs-decision", card("q2", "Old index"));
+    let d = json!({"id": "q2", "to": "t2", "reason": "t2's orchestrator is not reachable"});
+    ev(c, t - 1_400, None, "ask-failed", d);
+    ev(c, t - 1_000, None, "needs-decision", card("q1", "Index rebuild"));
+}
+
+#[test]
+fn parity_35_handoff_chips_flow_back_lines_and_a_pick_a_thread_tap_that_delivers_once() {
+    if no_webkit() {
+        return;
+    }
+    let (c, url) = page("parity-35", handoffs);
+    let f = Fake::default();
+    let ck = pair(
+        &drover::serve::Server::new(c, &f, Some("127.0.0.1:7777".into())),
+        c,
+        "Mozilla/5.0 (iPhone)",
+        now(),
+    );
+    let js = "location.hash = '#threads'; \
+        await until(() => $('.row[data-id=\"t1\"]')); $('.row[data-id=\"t1\"]').click(); \
+        await until(() => $('.cmp')); await w(300); \
+        const card = t => $$('main .card').find(k => k.textContent.includes(t)); \
+        const chip = (k, l) => !!k && [...k.querySelectorAll('button')].some(b => b.textContent === l); \
+        const sent = chip(card('Burst size'), 'continued in t2'), back = chip(card('filed #52'), 'from t2'); \
+        const bad = card('Old index'); \
+        const failed = !!bad && bad.classList.contains('bad') && bad.textContent.includes(\"not delivered: t2's orchestrator is not reachable\"); \
+        const picks = $$('main button[name=choice]').map(b => b.textContent); \
+        const rows = +(picks.some(p => p.startsWith('Rate limits · t2')) && picks.includes('new thread: Index rebuild')); \
+        const tap = $$('main button[name=choice]').find(b => b.textContent === 'new thread: Index rebuild'); tap.click(); \
+        const landed = await until(() => chip(card('Index rebuild'), 'continued in t3') && !$('main button[name=choice]')); \
+        tap.click(); await w(800); \
+        [...card('Burst size').querySelectorAll('button')].find(b => b.textContent === 'continued in t2').click(); \
+        const from = await until(() => { const k = $$('main .card.k-orch').find(k => k.textContent.includes('burst 100')); \
+            return !!k && k.querySelector('.ch b')?.textContent === 'from t1' && chip(k, 'from t1'); }); \
+        return [+sent, +back, +failed, rows, +landed, +from];";
+    assert_eq!(
+        late_as(&url, "parity-35-png", js, ck.trim().trim_start_matches("Cookie: ")),
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        "the sent row's chip, the flow-back row's chip, the failed card's error, the pick rows, the tap lands in a new t3, \
+         the target shows the message from t1 with its chip"
+    );
+    let log = drover::events::read(&c.state).unwrap();
+    let sent = log
+        .iter()
+        .filter(|e| e.kind == "thread-handoff" && e.str("ask") == Some("q1"));
+    let made = log.iter().filter(|e| e.kind == "thread-new");
+    let picked = log.iter().filter(|e| e.kind == "decision" && e.str("id") == Some("q1"));
+    assert_eq!(
+        (sent.count(), made.count(), picked.count()),
+        (1, 3, 1),
+        "two taps deliver once: one handoff, one new thread, one decision"
     );
 }
