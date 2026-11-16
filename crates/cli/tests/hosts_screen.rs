@@ -91,7 +91,7 @@ fn the_hosts_sheet_lists_main_first_then_a_to_z_with_state_and_lanes() {
 }
 
 #[test]
-fn a_paired_phone_turns_a_host_off_and_on_and_reaps_from_the_hosts_sheet() {
+fn parity_75() {
     let (c, wt) = fleet("hosts-toggle");
     let sh = FakeShed::attached(&c);
     let r = runner(&wt);
