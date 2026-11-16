@@ -157,7 +157,7 @@ TS: it imports them from `assets/types/api.d.ts`.
   at most 10 in `crates/` (CI counts them, #808). The workspace allows, all style noise for a CLI:
   - `must_use_candidate`: return values here are read or deliberately dropped; `#[must_use]` everywhere is noise.
   - `missing_errors_doc`: nearly every fn returns `anyhow::Result`, and the error is the message it prints.
-  - `missing_panics_doc`: the few `unwrap`s are on invariants, not inputs.
+  - `missing_panics_doc`: non-test code has no `unwrap`, `expect` or `panic!` to document (#809).
   - `too_many_lines`: dispatch and page renderers are long matches; splitting them only moves lines.
   - `format_push_string`: the HTML page is built with `+= &format!(..)`; one extra allocation per row is nothing.
   - `format_collect`: `.map(|x| format!(..)).collect()` reads better than a `fold` with `write!`.
@@ -165,11 +165,21 @@ TS: it imports them from `assets/types/api.d.ts`.
   - `struct_excessive_bools`: API rows and CLI flags are flat bool fields by design (serde, clap).
   - `too_many_arguments`: gate and drive steps take the context, config, runner and the step's own values.
   - `cast_precision_loss`: `u64` to `f64` only for shown hours, GB and percents.
+- **Banned APIs (#809):** in non-test code clippy denies `unwrap`, `expect`, `panic!`, `todo!`, `unimplemented!`,
+  `dbg!`, indexing and slicing, `as` casts, `print!`/`eprint!` (but `write_stderr`, behind `stderr!`), `let _ =` on a
+  `#[must_use]` value and an `#[allow]` without a `reason`; `unsafe_code` is forbidden in every crate but
+  `crates/sys` (`drover-sys`), which holds each OS call std has no safe form for, and the event log's shared
+  append buffer, behind safe fns (`// SAFETY:` on each block, `unsafe_op_in_unsafe_fn` denied). Tests may unwrap, index and
+  print (`clippy.toml`; CI's second clippy pass allows them in test targets). `.drover/arch.toml` keeps processes in
+  `runner.rs`, the environment in `config.rs` and the clock and sleeps in `clock.rs`. Each ban has a fixture CI must
+  see fail: `scripts/lint-fixtures.sh rust|ts` (`ci/lint-fixtures/rust/`, `web/lint-fixtures/`).
 - **Size cap:** at most `line_cap` (in `ci/cap.toml`) formatted lines of non-test Rust under `src/` and `crates/*/src/` (tests
   live in `crates/cli/tests/`), counted after `cargo fmt`. CI runs `drover cap-check --config ci/cap.toml`; a fleet can set its own
   `line_cap` under `[fleet.<name>]`. Raising the cap needs the owner's OK in an issue.
 
-History: one file per change in `docs/cap-history/<date>-<issue>.md`, so no two PRs edit the same line.
+#973: a raise is one new file, `ci/cap.d/<date>-<cap>.toml`, holding `line_cap` and a `why` string (the note); the
+effective cap is the highest `line_cap` among `ci/cap.toml` and that folder, so two raises never conflict or add up.
+`ci/cap.toml` is frozen (`.drover/arch.toml`). The notes before #973 stay in `docs/cap-history/`.
 - **Drive over time (#856):** a fix for a bug that shows only as drive runs pass after pass (a stuck tick, a lane
   never replaced, a hold that never lifts) adds its scenario to `crates/cli/tests/drive_sim.rs`: a fake clock,
   GitHub, shed terminals, hosts and processes, `tick` every 5 minutes and `drive --fast` every minute, asserted on the

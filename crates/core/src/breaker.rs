@@ -64,7 +64,7 @@ pub fn failed(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str, lane: &
         .map_or(0, |e| e.ts)
         .max(ctx.now.saturating_sub(l.runtime_down_minutes * 60));
     let count = 1 + ev.iter().filter(|e| e.ts >= since && failure_on(e, h)).count();
-    if (count as u64) < l.runtime_down_failures {
+    if u64::try_from(count).unwrap_or(u64::MAX) < l.runtime_down_failures {
         return Ok(false);
     }
     let reason = format!(

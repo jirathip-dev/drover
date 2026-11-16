@@ -74,7 +74,7 @@ fn the_merge_gate_reads_checks_from_the_snapshot() {
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(code, 0, "{out}");
     assert!(r.called(&format!(
-        "gh pr merge 112 -R jirathip-dev/sendmeter --merge --match-head-commit {HEAD}"
+        "gh pr merge 112 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {HEAD}"
     )));
     assert!(!r.called("gh pr view issue-12"), "{:?}", r.calls.borrow());
     assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "merged"));

@@ -87,7 +87,7 @@ fn order(c: &drover::Ctx) -> Vec<u64> {
 }
 
 #[test]
-fn queue_buttons_move_like_queue_mv() {
+fn parity_41_queue_buttons_move_like_queue_mv() {
     let (cli, web) = pair("mv");
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
@@ -129,7 +129,7 @@ fn queue_buttons_move_like_queue_mv() {
 }
 
 #[test]
-fn pause_button_matches_cli_and_blocks_next_and_spawn() {
+fn parity_42_pause_button_matches_cli_and_blocks_next_and_spawn() {
     let (cli, web) = pair("pause");
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
@@ -182,7 +182,7 @@ fn pause_button_matches_cli_and_blocks_next_and_spawn() {
 }
 
 #[test]
-fn role_dropdowns_set_like_drover_set() {
+fn parity_81_role_dropdowns_set_like_drover_set() {
     let (cli, web) = pair("set");
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
@@ -382,13 +382,13 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
     let page = get(&s, "/");
     let q = screen(&s, "/screens/queue");
     let row = find(&q, "q-sendmeter-12").unwrap_or_else(|| panic!("{q}"));
+    assert_eq!(row["subtitle"], json!("impl · PR #34 · CI ✓"), "{row}");
+    let sheet = screen(&s, row["tap"]["sheet"].as_str().unwrap_or_else(|| panic!("{row}")));
+    let pr = find(&sheet, "pr").unwrap_or_else(|| panic!("{sheet}"));
     assert_eq!(
-        (&row["subtitle"], &row["tap"]["url"]),
-        (
-            &json!("impl · PR #34 · CI ✓"),
-            &json!("https://github.com/jirathip-dev/sendmeter/pull/34")
-        ),
-        "{row}"
+        pr["tap"]["url"],
+        json!("https://github.com/jirathip-dev/sendmeter/pull/34"),
+        "{pr}"
     );
     assert!(!r.called("gh"), "no gh call per page load: {:?}", r.calls.borrow());
     for (path, ctype) in [

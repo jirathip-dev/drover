@@ -179,7 +179,7 @@ fn the_picker_default_is_serve_theme_and_lists_your_own() {
 }
 
 #[test]
-fn lookup_is_user_then_built_in_then_farm() {
+fn parity_10_lookup_is_user_then_built_in_then_farm() {
     let (c, r) = server(Some("kitchen"), &[]);
     let k: Value = serde_json::from_str(KITCHEN).unwrap();
     assert_eq!(json(&c, &r, "/themes/kitchen/theme.json"), resolve(&k, &farm()));
@@ -433,7 +433,7 @@ fn per_role_action_resolution() {
 }
 
 #[test]
-fn path_traversal_is_refused() {
+fn parity_r17_path_traversal_is_refused() {
     let (c, r) = server(Some(".."), &[]);
     std::fs::write(c.config.with_file_name("theme.json"), r#"{"leak":1}"#).unwrap();
     assert_eq!(json(&c, &r, "/themes/../theme.json"), resolve(&farm(), &farm()));

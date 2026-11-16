@@ -9,7 +9,7 @@ mod seeds;
 mod whatif;
 
 #[path = "../common/mod.rs"]
-#[allow(unused_imports)]
+#[allow(unused_imports, reason = "the sim uses part of the shared helpers")]
 mod common;
 
 use invariants::Sabotage;

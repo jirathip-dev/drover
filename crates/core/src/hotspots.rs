@@ -1,12 +1,12 @@
 use crate::config::Config;
-use crate::events::working;
+use crate::events::{working, Json};
 use crate::lesson::ymd;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
 const DAYS: u64 = 14;
@@ -14,7 +14,7 @@ const HOT: usize = 5;
 /// #892: how a hotspots issue's title starts.
 pub const TITLE: &str = "hotspots: ";
 
-/// #889: a file `HOT` or more merged PRs touched in `DAYS` days, its `conflict-predicted` events and its PRs' update rounds.
+/// #889: a file `HOT` or more merged PRs touched in `DAYS` days, the distinct PR pairs it was predicted to conflict in (#973) and its PRs' update rounds.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Hot {
     pub file: String,
@@ -51,7 +51,9 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
         }
     }
     let converted = converted(r, f)?;
-    touched.retain(|f, _| !crate::arch::any(&converted, f));
+    let tip = ok(r, "git", &["-C", &local, "ls-tree", "-r", "--name-only", &range])?;
+    let tip: BTreeSet<&str> = tip.lines().collect();
+    touched.retain(|f, _| tip.contains(f.as_str()) && !crate::arch::any(&converted, f));
     let (events, predicted) = (
         working(&ctx.state)?,
         crate::events::since(&ctx.state, &["conflict-predicted"], since)?,
@@ -78,7 +80,9 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
                 .and_then(Value::as_array)
                 .is_some_and(|a| a.contains(&json!(file)))
         };
-        predicted.iter().filter(same).filter(on).count()
+        let pair = |e: &crate::events::Event| (e.fleet.clone(), e.issue, e.data.get("other").map(Value::to_string));
+        let pairs: BTreeSet<_> = predicted.iter().filter(same).filter(on).map(pair).collect();
+        pairs.len()
     };
     let mut hot: Vec<Hot> = (touched.into_iter().filter(|(_, s)| s.len() >= HOT))
         .map(|(file, shas)| Hot {
@@ -191,7 +195,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         .all(|i| i.issue != n)
     {
         let mut op = crate::queue::op("add", &[n], false, None, None, None);
-        op["architect"] = json!(true);
+        op.put("architect", json!(true));
         writeln!(out, "{}", crate::queue_change(ctx, cfg, fleet, op, None)?)?;
     }
     Ok(())

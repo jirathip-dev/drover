@@ -1,9 +1,18 @@
+frozen = ["ci/cap.toml", "crates/core/src/events/passive.rs"]
+generated = ["assets/types/api.d.ts"]
+generate = "just types"
+
+[[collect]]
+dir = "ci/cap.d"
+glob = "*.toml"
+
 [comments]
 policy = "strict"
 except = [
     "assets/types/**",
     "web/dist/**",
     "web/src/**",
+    "web/lint-fixtures/**",
     "crates/server/src/serve.rs",
     "crates/server/src/serve/chat.rs",
     "crates/server/src/serve/fresh.rs",
@@ -116,6 +125,42 @@ reason = "#854: a waiting/next-step line is a typed promise: build it with crate
 pattern = "agent_status"
 paths = ["crates/*/src/**"]
 reason = "#1053: a lane's status is session::Status, mapped from shed once in crates/core/src/session/"
+
+[[ban]]
+pattern = "Command::new"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/runner.rs"]
+reason = "#809: processes start only in core's runner (crate::runner)"
+
+[[ban]]
+pattern = "std::process"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/runner.rs", "crates/sys/src/**"]
+reason = "#809: processes start only in core's runner (crate::runner, runner::pid, runner::exit)"
+
+[[ban]]
+pattern = "thread::sleep"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/clock.rs"]
+reason = "#809: time is read and waited on only in core's clock (crate::clock::sleep)"
+
+[[ban]]
+pattern = "env::var"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/config.rs"]
+reason = "#809: the environment is read only in core's config (crate::config::env)"
+
+[[ban]]
+pattern = "SystemTime::now"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/clock.rs"]
+reason = "#809: time is read and waited on only in core's clock (crate::clock)"
+
+[[ban]]
+pattern = "Instant::now"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/clock.rs"]
+reason = "#809: time is read and waited on only in core's clock (crate::clock::instant)"
 
 [[ban]]
 pattern = "pane_id"

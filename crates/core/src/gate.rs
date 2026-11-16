@@ -1,5 +1,5 @@
 use crate::config::{Check, Config, Fleet, Premerge};
-use crate::events::{emit, fold, working, Event, IssueState};
+use crate::events::{emit, fold, working, Event, IssueState, Json};
 use crate::overlap::git;
 use crate::runner::{argv, json, ok, Runner};
 use crate::Ctx;
@@ -46,7 +46,8 @@ pub fn branch_of(st: Option<&IssueState>, issue: u64) -> String {
 
 /// #418: each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call. The `NO_PROOF` text naming each one that doesn't.
 pub fn no_proof(body: &str) -> Option<String> {
-    let proofless = |(b, ls): (bool, Vec<&str>)| Some(format!("`{}` ({})", ls[0].trim(), unproven(&ls).filter(|_| b)?));
+    let proofless =
+        |(b, ls): (bool, Vec<&str>)| Some(format!("`{}` ({})", ls.first()?.trim(), unproven(&ls).filter(|_| b)?));
     let bad: Vec<String> = findings(body).into_iter().filter_map(proofless).collect();
     (!bad.is_empty()).then(|| bad.join("; "))
 }
@@ -233,7 +234,7 @@ pub fn verdict(
     check::purge(r, cfg, fleet, out, Path::new(wt), false)?;
     let gone = match crate::spawn::dirty(r, Path::new(wt)) {
         Some(why) => Err(anyhow::anyhow!(why)),
-        None => check::reap(ctx, cfg, r, (fleet, Some(issue)), wt)
+        None => check::reap(ctx, cfg, r, Some(e), (fleet, Some(issue)), wt)
             .and_then(|_| check::remove(r, cfg, fleet, wt, false))
             .and_then(|()| term::close(ctx, r, pane).map(drop)),
     };
@@ -343,7 +344,7 @@ pub fn form_only(body: &str, cats: &[String]) -> bool {
     let blockers: Vec<String> = findings(body)
         .iter()
         .filter(|f| f.0)
-        .map(|f| f.1[0].to_lowercase())
+        .filter_map(|f| f.1.first().map(|l| l.to_lowercase()))
         .collect();
     let tag = |l: &str| {
         let (_, rest) = l.split_once("blocking")?;
@@ -380,10 +381,10 @@ fn unproven(ls: &[&str]) -> Option<&'static str> {
     else {
         return Some("no Proof block");
     };
-    let kind = lc[at]
-        .split_once("proof:")
+    let kind = (lc.get(at))
+        .and_then(|l| l.split_once("proof:"))
         .map_or("", |k| k.1.trim_start_matches(['*', '_', '`', ' ']));
-    let text = ls[at + 1..].join("\n");
+    let text = ls.get(at + 1..).unwrap_or_default().join("\n");
     let p: Vec<&str> = text.split("```").map(str::trim).collect();
     let quote = |l: &&str| l.trim_start().starts_with('>');
     let loc = |w: &str| {
@@ -394,7 +395,11 @@ fn unproven(ls: &[&str]) -> Option<&'static str> {
     match kind {
         k if k.starts_with("run") && [".png", ".jpg", ".webp"].iter().any(|x| text.contains(x)) => None,
         k if k.starts_with("run") && p.get(1).is_none_or(|c| c.is_empty()) => Some("run proof has no fenced command"),
-        k if k.starts_with("run") => p[2..].iter().all(|o| o.is_empty()).then_some("run proof has no output"),
+        k if k.starts_with("run") => p
+            .iter()
+            .skip(2)
+            .all(|o| o.is_empty())
+            .then_some("run proof has no output"),
         k if k.starts_with("spec") && !text.lines().any(|l| quote(&l) && l.trim().len() > 1) => {
             Some("spec proof has no `>` quoted line")
         }
@@ -489,7 +494,7 @@ pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
     let ls: Vec<&str> = body.lines().collect();
     let at = ls.iter().position(|l| key(l).starts_with("repro:"))?;
     let mut fence = false;
-    let block = (ls[at + 1..].iter().copied())
+    let block = (ls.iter().skip(at + 1).copied())
         .take_while(|l| {
             let t = l.trim_start();
             let end = !fence && t.starts_with('#');
@@ -497,7 +502,7 @@ pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
             !end
         })
         .collect();
-    Some((key(ls[at]).split_off(6), block))
+    Some((key(ls.get(at)?).split_off(6), block))
 }
 
 fn repro_section(pr_body: &str) -> Option<String> {
@@ -642,16 +647,16 @@ fn premerge(
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     for _ in 0..2 {
         let base = tip()?;
-        let _ = tree(&["remove", "--force", &wts]);
+        tree(&["remove", "--force", &wts]).ok();
         tree(&["add", "-f", "--detach", &wts, &base])?;
         let clean = git(r, &wt, &["merge", "--no-ff", "--no-edit", head]).is_ok();
-        let t = std::time::Instant::now();
+        let t = crate::clock::instant();
         let fail = clean.then(|| run_checks(r, &wt, &base, &checks)).flatten();
         if clean && fail.is_none() {
             crate::lesson::record(ctx, r, &wt, (fleet, issue))?;
         }
         let secs = t.elapsed().as_secs();
-        let _ = tree(&["remove", "--force", &wts]);
+        tree(&["remove", "--force", &wts]).ok();
         if !clean {
             return Ok(Err(refuse("NOT_MERGEABLE", format!("{head:.7} conflicts with {into}"))));
         }
@@ -711,7 +716,8 @@ pub(crate) fn premerge_failed(
     let err = |l: &&&str| c.code.is_none() && l.contains("error");
     let first = lines.iter().find(err).or(lines.first()).map_or("failed", |l| l.trim());
     let msg = c.code.as_ref().map_or(format!("{}: {first}", c.name), |_| first.into());
-    let block = format!("\n```\n{}\n```\n", lines[lines.len().saturating_sub(20)..].join("\n"));
+    let tail = lines.get(lines.len().saturating_sub(20)..).unwrap_or_default();
+    let block = format!("\n```\n{}\n```\n", tail.join("\n"));
     let min = o.lines().find_map(|l| l.split_once("min_version="));
     let min = min.map_or("", |m| m.1.trim());
     let tpl = |t: &String| t.replace("{output}", &block).replace("{min}", min);
@@ -774,7 +780,7 @@ pub fn merge(
         return Ok(());
     }
     let landed = |num: &str| -> Result<bool> {
-        Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?["state"] == "MERGED")
+        Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?.at("state") == "MERGED")
     };
     if let Some(a) = unlogged_merge(&events, fleet, issue) {
         let (num, head) = (a.str("pr").unwrap_or_default(), a.str("head").unwrap_or_default());
@@ -784,7 +790,7 @@ pub fn merge(
         let d = json!({"pr": num, "head": head, "recovered": true});
         let done = a.kind == "done" || landed(num)?;
         if a.kind == "intent" {
-            crate::action::finish(&ctx.state, ctx.now, a, ["failed", "done"][usize::from(done)], d)?;
+            crate::action::finish(&ctx.state, ctx.now, a, if done { "done" } else { "failed" }, d)?;
         }
         if done {
             let over = a.data.get("over") == Some(&json!(true));
@@ -805,13 +811,13 @@ pub fn merge(
         json!({"baseRefName": f.integration})
     } else {
         match gh::pr(ctx, r, f, (fleet, issue), &branch, ctx.now)? {
-            v if v["state"] == "OPEN" => v,
+            v if v.at("state") == "OPEN" => v,
             _ => json!({"error": "no-pr"}),
         }
     };
     crate::land::mark(ctx, Some(r), f, (fleet, issue), &events, &mut pr);
-    let fast = pr["landing"] == "fast-first";
-    let h = pr["headRefOid"].as_str().unwrap_or_default();
+    let fast = pr.at("landing") == "fast-first";
+    let h = pr.at("headRefOid").as_str().unwrap_or_default();
     let st = st.map(|mut s| {
         if !h.is_empty() && !s.reviewed(h) && crate::overlap::pure(r, f, &s, h) {
             s.verdicts
@@ -819,7 +825,7 @@ pub fn merge(
         }
         s
     });
-    let num = pr["number"].as_u64().unwrap_or_default().to_string();
+    let num = pr.at("number").as_u64().unwrap_or_default().to_string();
     let res = if pr.get("error").is_some() {
         Err(refuse("NO_PR", format!("no open PR for branch {branch} in {}", f.repo)))
     } else {
@@ -828,21 +834,12 @@ pub fn merge(
     let res = match res {
         Ok(head) => match unjoined(ctx, r, f, (fleet, issue), (&num, &head))?
             .iter()
-            .find_map(|(g, p)| {
-                if f.serial.iter().any(|c| c.name == g.name) {
-                    return Some((
-                        "SERIAL_UNMARKED",
-                        format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
-                    ));
-                }
-                let st = fold(&events);
-                let h = crate::queue::holders(&events, &st, f, fleet, &g.name);
-                (h.len() >= g.max).then(|| {
-                    (
-                        "SERIAL_BUSY",
-                        format!("{}; retry after they merge", crate::queue::holds(g, &h)),
-                    )
-                })
+            .find(|(g, _)| f.serial.iter().any(|c| c.name == g.name))
+            .map(|(g, p)| {
+                (
+                    "SERIAL_UNMARKED",
+                    format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
+                )
             }) {
             Some((code, why)) => Err(refuse(code, why)),
             None if unverified(&events, (fleet, issue), &head) => Err(refuse(
@@ -874,7 +871,7 @@ pub fn merge(
                 || rf.code == "BEHIND"
                 || rf.code == "NO_PR" && st.as_ref().is_none_or(|s| s.lane.is_none())
                 || rf.code == "CI_NOT_GREEN"
-                    && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "pending" =>
+                    && gh::ci(&gh::required(pr.at("statusCheckRollup"), f.checks(&pr))) == "pending" =>
         {
             return Err(rf.into());
         }
@@ -902,14 +899,10 @@ pub fn merge(
         )?;
     }
     let m = [
-        "--merge",
-        "--match-head-commit",
-        &head,
-        "--subject",
-        &subject,
-        "--body",
-        &body,
-    ];
+        f.merge.flags(),
+        &["--match-head-commit", &head, "--subject", &subject, "--body", &body],
+    ]
+    .concat();
     let inputs = json!({"pr": num, "head": head, "over": over, "fast": fast});
     let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
     let at = (fleet, issue, "merge", head.as_str());
@@ -938,13 +931,13 @@ fn merged(
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
     let mc = json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "mergeCommit"])?;
-    let merge_sha = mc["mergeCommit"]["oid"].as_str().unwrap_or("?").to_string();
+    let merge_sha = mc.at("mergeCommit").at("oid").as_str().unwrap_or("?").to_string();
     let mut d = json!({"pr": num, "merge_sha": merge_sha, "verdict_sha": head, "into": f.integration});
     if let Some(s) = secs {
-        d["premerge_secs"] = json!(s);
+        d.put("premerge_secs", json!(s));
     }
     if over {
-        (d["by"], d["override"]) = (json!("owner"), json!("ROUND_LIMIT"));
+        d.put("by", json!("owner")).put("override", json!("ROUND_LIMIT"));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
     if f.land.is_some() {
@@ -965,6 +958,11 @@ fn merged(
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
     let log = working(&ctx.state)?;
+    if f.merge == crate::config::MergeMode::Squash {
+        if let Err(e) = crate::why::squash(ctx, r, f, (fleet, issue), &log, &merge_sha) {
+            writeln!(out, "why note not on {merge_sha:.7}: {e:#}")?;
+        }
+    }
     let why = log.iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
@@ -988,10 +986,11 @@ fn merged(
         emit(&ctx.state, cfg, e)?;
         bail!("{reason}; issue #{issue} left open");
     }
-    let _ = r.run(
+    r.run(
         "gh",
         &argv(&["issue", "close", &n, "-R", &f.repo, "--reason", "completed"]),
-    );
+    )
+    .ok();
     if let Err(e) = crate::check::teardown(ctx, cfg, r, out, fleet, issue) {
         writeln!(out, "teardown: {e:#}")?;
     }
@@ -1110,11 +1109,14 @@ pub fn unpark(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, (fleet, n): (&str, u
             format!("#{n} is {}, not parked", state.as_deref().unwrap_or("unknown")),
         );
     };
-    let was = |i: usize| fold(&events[..i]).remove(&(fleet.to_string(), n)).map(|s| s.state);
+    let was = |i: usize| {
+        fold(events.get(..i).unwrap_or_default())
+            .remove(&(fleet.to_string(), n))
+            .map(|s| s.state)
+    };
     let mut to = was(at).unwrap_or_else(|| "queued".into());
     if to == "needs-human" {
-        let nh = events[..at]
-            .iter()
+        let nh = (events.get(..at).unwrap_or_default().iter())
             .rposition(|e| mine(&e) && e.kind == "needs-human")
             .unwrap_or(at);
         to = was(nh)

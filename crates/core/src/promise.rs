@@ -1,5 +1,5 @@
 use crate::config::Limits;
-use crate::events::{age, emit, Event, IssueState};
+use crate::events::{age, emit, Event, IssueState, Json};
 use crate::waiting::Waiting;
 use crate::Ctx;
 use anyhow::Result;
@@ -59,7 +59,7 @@ impl Say {
             Say::ReviewerSlot(why) => format!("waiting for a reviewer slot: {why}"),
             Say::ReviewsAhead(n) => format!(
                 "review waits behind {n} earlier review{}",
-                ["s", ""][usize::from(*n == 1)]
+                if *n == 1 { "" } else { "s" }
             ),
             Say::Pass(r) => format!("drive's next pass{r}"),
             Say::Starts(r) => format!("{r}; starts next pass"),
@@ -112,8 +112,12 @@ impl Limits {
 
 fn open(mine: &[&Event]) -> Option<(Promise, Option<String>)> {
     let at = mine.iter().rposition(|e| e.kind == "promise")?;
-    let p = Promise::of(mine[at])?;
-    let missed = mine[at..].iter().rfind(|e| e.kind == "promise-missed");
+    let p = Promise::of(mine.get(at)?)?;
+    let since = mine.get(at..)?;
+    if since.iter().any(|e| e.kind == "promise-void") {
+        return None;
+    }
+    let missed = since.iter().rfind(|e| e.kind == "promise-missed");
     Some((p, missed.map(|e| e.str("why").unwrap_or_default().into())))
 }
 
@@ -139,7 +143,7 @@ fn why_now(mine: &[&Event], p: &Promise, now: &Waiting) -> String {
     }
 }
 
-/// A drive pass's promises: each new one logged `promise`, each one missed logged `promise-missed` once.
+/// A drive pass's promises: each new one logged `promise`, each one missed logged `promise-missed` once, each one a hold superseded `promise-void`.
 pub fn pass(
     ctx: &Ctx,
     cfg: &crate::config::Config,
@@ -155,7 +159,8 @@ pub fn pass(
             .iter()
             .filter(|e| e.fleet == fleet && e.issue == Some(s.issue))
             .collect();
-        let head = crate::gh::cached_pr(ctx, fleet, s.issue)["headRefOid"]
+        let head = crate::gh::cached_pr(ctx, fleet, s.issue)
+            .at("headRefOid")
             .as_str()
             .unwrap_or_default()
             .to_string();
@@ -171,6 +176,12 @@ pub fn pass(
         }
         let Some((p, None)) = was else { continue };
         if ctx.now < p.deadline || p.moved(s, &head) || matches!(s.state.as_str(), "merged" | "closed") {
+            continue;
+        }
+        if w.promise.is_none() {
+            let d = json!({"kind": p.kind, "promised": p.reason, "hold": w.what});
+            let e = Event::new(ctx.now, fleet, Some(s.issue), "promise-void", d).passive();
+            crate::events::append(&ctx.state, &e)?;
             continue;
         }
         let why = why_now(&mine, &p, w);
@@ -248,7 +259,7 @@ mod tests {
     }
 
     fn tmp(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("drover-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("drover-{name}-{}", crate::runner::pid()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -259,24 +270,57 @@ mod tests {
     }
 
     #[test]
-    fn a_promise_past_its_deadline_with_no_state_change_is_missed_exactly_once() {
+    fn a_promise_past_its_deadline_with_its_wait_unchanged_is_missed_exactly_once() {
         let d = tmp("promise-missed");
         let ready = st("ready");
         let line = Say::Merge("PASS · verify skipped".into()).line();
-        run(&d, 1000, &[row(&ready, Some(Kind::Merging), &line)]);
-        let ev = run(&d, 1300, &[row(&ready, None, "PASS · CI green · PR is a draft")]);
+        let same = || [row(&ready, Some(Kind::Merging), &line)];
+        run(&d, 1000, &same());
+        let ev = run(&d, 1300, &same());
         assert_eq!(count(&ev, "promise-missed"), 0, "inside its 2 passes");
-        let ev = run(&d, 1600, &[row(&ready, None, "PASS · CI green · PR is a draft")]);
-        let ev2 = run(&d, 1900, &[row(&ready, None, "PASS · CI green · PR is a draft")]);
+        let ev = run(&d, 1600, &same());
+        let ev2 = run(&d, 1900, &same());
         assert_eq!((count(&ev, "promise-missed"), count(&ev2, "promise-missed")), (1, 1));
         let m = ev2.iter().find(|e| e.kind == "promise-missed").unwrap();
-        assert_eq!(m.str("why"), Some("now: PASS · CI green · PR is a draft"));
+        assert_eq!(m.str("why"), Some("drive took no step"));
         assert_eq!(m.val("age"), 600);
         assert_eq!(
             missed(&ev2, &ready, "", None, 1900).as_deref(),
-            Some("⚠ missed 15m: now: PASS · CI green · PR is a draft")
+            Some("⚠ missed 15m: drive took no step")
         );
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_promise_a_known_hold_superseded_is_void_not_missed() {
+        for (i, hold) in [
+            "held until #261 merges",
+            "serial: hot `hub.rs` held by #189",
+            "PASS · CI running 9/12",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let d = tmp(&format!("promise-void-{i}"));
+            let line = Say::Drive {
+                reason: "pushed abc1234".into(),
+                step: "spawn review".into(),
+            }
+            .line();
+            run(&d, 1000, &[row(&st("impl"), Some(Kind::NextPass), &line)]);
+            run(&d, 1300, &[row(&st("impl"), None, hold)]);
+            run(&d, 1600, &[row(&st("impl"), None, hold)]);
+            let ev = run(&d, 1900, &[row(&st("impl"), None, hold)]);
+            assert_eq!(
+                (count(&ev, "promise-missed"), count(&ev, "promise-void")),
+                (0, 1),
+                "{hold}"
+            );
+            let v = ev.iter().find(|e| e.kind == "promise-void").unwrap();
+            assert_eq!((v.str("hold"), v.str("promised")), (Some(hold), Some(line.as_str())));
+            assert_eq!(missed(&ev, &st("impl"), "", None, 1900), None);
+            std::fs::remove_dir_all(&d).unwrap();
+        }
     }
 
     #[test]

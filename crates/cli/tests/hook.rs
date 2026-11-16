@@ -941,7 +941,7 @@ const NO_BROAD_KILL: &str = "drover: REFUSED NO_BROAD_KILL: lanes stop only thei
                              echo $! > f', stop with kill \"$(cat f)\"";
 
 #[test]
-fn broad_kills_are_denied_and_pid_kills_allowed() {
+fn parity_r8_broad_kills_are_denied_and_pid_kills_allowed() {
     for cmd in [
         "pkill -f x -n",
         "/usr/bin/pkill x",
@@ -1178,7 +1178,7 @@ fn pre_bash(cmd: &str) -> Value {
 }
 
 #[test]
-fn a_lane_hook_fails_closed() {
+fn parity_r13_a_lane_hook_fails_closed() {
     let d = tmpdir("hook-closed");
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
     let lane = [("DROVER_LANE", Some("sendmeter:7:impl"))];
@@ -1495,8 +1495,16 @@ fn impl_lane_never_edits_the_cap_file() {
     assert!(refused(call("24", "Write", json!({"file_path": "ci/cap.toml"}))));
     assert!(refused(bash("24", "sed -i '' 's/35500/36000/' ci/cap.toml")));
     assert!(refused(bash("24", "printf x > ci/cap.toml")));
+    assert!(refused(call(
+        "24",
+        "Write",
+        json!({"file_path": "/w/ci/cap.d/2026-11-14-50000.toml"})
+    )));
+    assert!(refused(bash("24", "printf 'line_cap = 50000' > ci/cap.d/x.toml")));
+    assert!(refused(bash("24", "cp up.toml ci/cap.d/x.toml")));
     for ok in [
         "cat ci/cap.toml",
+        "ls ci/cap.d/",
         "drover cap-check --config ci/cap.toml > cap.log 2>&1",
     ] {
         assert_eq!(bash("24", ok), "", "{ok}");
@@ -1508,6 +1516,10 @@ fn impl_lane_never_edits_the_cap_file() {
     std::fs::write(cache.join("issue-sendmeter-25.json"), spec.to_string()).unwrap();
     assert_eq!(call("25", "Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
     assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
+    assert_eq!(
+        call("25", "Write", json!({"file_path": "/w/ci/cap.d/2026-11-14-36000.toml"})),
+        ""
+    );
 }
 
 #[test]

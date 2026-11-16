@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::runner::{argv, ok, Runner};
-use crate::Ctx;
+use crate::{events::Json, Ctx};
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -27,7 +27,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
         row(&mut rows, gh, '✗', "gh — auth status → gh auth login");
     }
     match Config::load(&ctx.config) {
-        Ok(cfg) if config_only => config_rows(ctx, &cfg, &mut rows),
+        Ok(cfg) if config_only => config_rows(ctx, &cfg, r, &mut rows),
         Ok(cfg) => checks(ctx, &cfg, r, &mut rows),
         Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
     }
@@ -39,13 +39,14 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     Ok(i32::from(rows.iter().any(|line| line.starts_with('✗'))))
 }
 
-fn config_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
+fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     rows.push(format!("✓ config — {}", ctx.config.display()));
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
+    rows.extend(cfg.shed().map(|b| crate::shed::line(r, &b.wire)));
 }
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
-    config_rows(ctx, cfg, rows);
+    config_rows(ctx, cfg, r, rows);
     if cfg
         .runtime
         .as_ref()
@@ -77,7 +78,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let view = view
             .ok()
             .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
-        if view.is_some_and(|v| v["isArchived"] == true) {
+        if view.is_some_and(|v| v.at("isArchived") == true) {
             rows.push(format!(
                 "! gh {name} — {repo} is archived → remove [fleet.{name}] from fleet.toml"
             ));
@@ -285,8 +286,9 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let on = crate::hosts::On::new(r, Some(m));
         let Some((tags, home)) = crate::hosts::probe(&on) else {
             let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");
-            let why = ok(&on, "true", &[] as &[&str]).map_or_else(ssh, |_| "probe: unreadable answer".into());
+            let why = ok::<&str>(&on, "true", &[]).map_or_else(ssh, |_| "probe: unreadable answer".into());
             rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
+            rows.extend(on.shed().map(|_| format!("✗ host {name} shed — unreachable")));
             continue;
         };
         let tags = [tags, h.tags.clone()].concat();
@@ -295,8 +297,11 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
         let v = crate::VERSION;
         let ok = format!("✓ host {name} — git, gh, {logins}drover {v}, shed");
-        rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
+        let at = |w: &String| w.replacen(' ', &format!(" host {name} "), 1);
+        let shed = on.shed().filter(|_| !bad.iter().any(|w| w.contains(" shed")));
+        rows.extend(bad.iter().map(at));
         rows.extend(bad.is_empty().then_some(ok));
+        rows.extend(shed.map(|b| at(&crate::shed::line(&on, &b.wire))));
         rows.extend(login_token(&on, Some(name)));
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {
@@ -380,7 +385,7 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         .unwrap_or_default();
     for id in ids {
         let a = agents.as_array().into_iter().flatten().find(|a| a["id"] == id.as_str());
-        let Some(cmd) = a.and_then(|a| a["cmd"][0].as_str()) else {
+        let Some(cmd) = a.and_then(|a| a.at("cmd").at(0).as_str()) else {
             rows.push(format!("✗ shed agent {id} — not installed → shed agents add {id}"));
             continue;
         };

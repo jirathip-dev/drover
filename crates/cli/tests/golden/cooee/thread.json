@@ -14,13 +14,13 @@
         "state": "needs"
       },
       "id": "who",
+      "sticky": true,
       "subtitle": {
-        "text": "! choose",
+        "text": "! choose · sendmeter · claude · opus · awake",
         "tone": "warn"
       },
-      "title": "sendmeter · claude · opus",
-      "type": "row",
-      "value": "awake"
+      "title": "Rate limits for /v1/search · t2",
+      "type": "row"
     },
     {
       "blocks": [
@@ -69,16 +69,65 @@
       "blocks": [
         {
           "id": "m-8-t",
+          "markdown": "See t3 and https://example.com/a.",
+          "type": "text"
+        },
+        {
+          "id": "m-8-i",
+          "items": [
+            {
+              "alt": "shot.png",
+              "src": "/thread/t2/shot.png"
+            }
+          ],
+          "type": "images"
+        },
+        {
+          "id": "m-8-f",
+          "rows": [
+            {
+              "id": "m-8-f0",
+              "tap": {
+                "url": "/thread/t2/run.log"
+              },
+              "title": "run.log",
+              "type": "row",
+              "value": "1 KB"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "buttons": [
+        {
+          "id": "m-8-link",
+          "label": "from t3",
+          "tap": {
+            "thread": "t3"
+          },
+          "type": "button"
+        }
+      ],
+      "id": "m-8",
+      "kind": "orch",
+      "meta": "114m",
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-9-t",
           "markdown": "Limit per API key or per client IP?",
           "type": "text"
         },
         {
-          "id": "m-8-a",
+          "id": "m-9-a",
           "markdown": "✓ **per key** · owner · 111m",
           "type": "text"
         }
       ],
-      "id": "m-8",
+      "id": "m-9",
       "kind": "ask",
       "meta": "113m",
       "title": "q31",
@@ -88,7 +137,7 @@
     {
       "blocks": [
         {
-          "id": "m-10-t",
+          "id": "m-11-t",
           "markdown": "✗ not delivered: no pane",
           "type": "text"
         }
@@ -96,17 +145,17 @@
       "buttons": [
         {
           "action": "thread-retry",
-          "id": "m-10-retry",
+          "id": "m-11-retry",
           "label": "retry",
           "style": "bad",
           "type": "button",
           "values": {
-            "msg": 10,
+            "msg": 11,
             "thread": "t2"
           }
         }
       ],
-      "id": "m-10",
+      "id": "m-11",
       "kind": "you",
       "meta": "8m",
       "title": "you",
@@ -116,7 +165,7 @@
     {
       "blocks": [
         {
-          "id": "m-11-t",
+          "id": "m-12-t",
           "markdown": "Retry-After only, or the X-RateLimit headers too?",
           "type": "text"
         },
@@ -143,7 +192,7 @@
           }
         }
       ],
-      "id": "m-11",
+      "id": "m-12",
       "kind": "ask",
       "meta": "5m",
       "title": "q33",

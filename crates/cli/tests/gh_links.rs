@@ -33,6 +33,17 @@ fn row(s: &Server, n: u64) -> (serde_json::Value, serde_json::Value) {
     (r, block)
 }
 
+fn tapped(s: &Server, block: &serde_json::Value) -> String {
+    let path = block["tap"]["sheet"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no sheet tap: {block}"));
+    let res = s.respond(
+        &format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"),
+        1_000_000,
+    );
+    String::from_utf8_lossy(&res).into_owned()
+}
+
 fn spawned(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
@@ -55,7 +66,7 @@ fn spawned(name: &str) -> drover::Ctx {
 }
 
 #[test]
-fn queue_row_links_the_issue_and_its_card_shows_three_links() {
+fn parity_40_queue_row_links_the_issue_and_its_card_shows_three_links() {
     let c = spawned("links-queue");
     let sh = FakeShed::new();
     sh.attach(&c);
@@ -65,7 +76,14 @@ fn queue_row_links_the_issue_and_its_card_shows_three_links() {
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let (api_row, block) = row(&s, 12);
     assert_eq!(api_row["pr"]["pr"], 33, "{api_row}");
-    assert_eq!(block["tap"], json!({"url": format!("{GH}/pull/33")}), "{block}");
+    let sheet = tapped(&s, &block);
+    for u in [
+        format!("{GH}/issues/12"),
+        format!("{GH}/pull/33"),
+        format!("{GH}/pull/33/checks"),
+    ] {
+        assert!(sheet.contains(&format!("\"url\":\"{u}\"")), "{u} in {sheet}");
+    }
     let lanes = api(&s, "127.0.0.1:7777", "", 1_000_000, "lanes");
     assert!(
         lanes.contains("\"pr\":{\"pr\":33,"),
@@ -78,13 +96,15 @@ fn queue_row_links_the_issue_and_its_card_shows_three_links() {
 fn an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing() {
     let c = spawned("links-nopr");
     let f = Fake::default();
-    let (api_row, block) = row(&Server::new(&c, &f, Some("127.0.0.1:7777".into())), 17);
+    let s = Server::new(&c, &f, Some("127.0.0.1:7777".into()));
+    let (api_row, block) = row(&s, 17);
     assert_eq!(
         (&api_row["pr"]["pr"], &api_row["pr"]["run"]),
         (&json!(null), &json!(null)),
         "no PR read yet"
     );
-    assert!(block.get("tap").is_none(), "{block}");
+    let sheet = tapped(&s, &block);
+    assert!(!sheet.contains("checks") && !sheet.contains("/pull/"), "{sheet}");
     let url = format!("{GH}/actions/runs/99");
     let sh = FakeShed::new();
     sh.attach(&c);
@@ -103,7 +123,12 @@ fn an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing() {
         "{:?}",
         r.calls.borrow()
     );
-    let (api_row, block) = row(&Server::new(&c, &f, Some("127.0.0.1:7777".into())), 17);
+    let s = Server::new(&c, &f, Some("127.0.0.1:7777".into()));
+    let (api_row, block) = row(&s, 17);
     assert_eq!(api_row["pr"]["run"], url, "{api_row}");
-    assert!(!block.to_string().contains("actions?query"), "{block}");
+    let sheet = tapped(&s, &block);
+    assert!(
+        sheet.contains(&format!("\"url\":\"{url}\"")) && !sheet.contains("actions?query"),
+        "{sheet}"
+    );
 }

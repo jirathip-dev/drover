@@ -89,7 +89,7 @@ fn last_seen_is_written_at_most_hourly() {
 }
 
 #[test]
-fn concurrent_device_updates_all_land_without_a_write_failure() {
+fn parity_r18_concurrent_device_updates_all_land_without_a_write_failure() {
     let c = ctx(&tmpdir("state-write-race"), CONFIG);
     std::thread::scope(|s| {
         for _ in 0..16 {

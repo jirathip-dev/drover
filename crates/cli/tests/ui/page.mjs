@@ -60,7 +60,7 @@ try {
 
   await tap('button[data-id="pause-sendmeter"]', 'pause');
   out.steps.pause = await toast('pause');
-  await tap('button[data-id="pause-sendmeter"]', 'resume');
+  await tap('[data-id="fleet-sendmeter"] .fold button.main', 'resume');
   out.steps.resume = await toast('resume');
 
   await tap('nav a', 'lanes');
