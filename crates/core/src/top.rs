@@ -63,12 +63,12 @@ fn ps(r: &dyn Runner, cfg: &Config) -> Vec<Proc> {
         let (prog, rest) = cmd.split_once(' ').unwrap_or((&cmd, ""));
         let bare = format!("{} {rest}", prog.rsplit('/').next().unwrap_or(prog));
         Some(Proc {
-            pid: w[0].into(),
-            ppid: w[1].into(),
+            pid: w.first()?.to_string(),
+            ppid: w.get(1)?.to_string(),
             depth: 0,
             kind: heavy.kind(bare.trim_end()).map(String::from),
-            cpu: w[2].parse().ok()?,
-            secs: host::etime_secs(w[3]),
+            cpu: w.get(2)?.parse().ok()?,
+            secs: host::etime_secs(w.get(3)?),
             cmd,
         })
     };

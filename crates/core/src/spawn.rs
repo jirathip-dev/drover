@@ -1,6 +1,6 @@
 use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
-use crate::events::{emit, fold, last_spawn, plain, working, Event};
+use crate::events::{emit, fold, last_spawn, plain, working, Event, Json};
 use crate::gate::refused;
 use crate::providers;
 use crate::runner::{argv, ok, Runner};
@@ -94,9 +94,9 @@ pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-        let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
-        for h in pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten()) {
-            let cmd = h["command"].as_str().unwrap_or_default();
+        let pre = settings.at("hooks").at("PreToolUse").as_array().into_iter().flatten();
+        for h in pre.flat_map(|m| m.at("hooks").as_array().into_iter().flatten()) {
+            let cmd = h.at("command").as_str().unwrap_or_default();
             if let Some(exe) = providers::hook_program(cmd).filter(|_| !providers::runs_this(ctx, cmd)) {
                 stray.push(format!("{profile} hook runs {exe}, not {}", ctx.exe));
             }
@@ -134,6 +134,8 @@ pub struct Plan {
     pub session: Option<(String, bool)>,
     /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
     pub lane_key: Option<String>,
+    /// #782: the fleet's `sandbox`; `start_cmd` runs the harness inside it.
+    pub sandbox: Option<crate::config::Sandbox>,
 }
 
 /// #979: a build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
@@ -190,7 +192,7 @@ impl Plan {
     }
 
     pub fn start_cmd(&self, ctx: &Ctx, pane: &str) -> Vec<String> {
-        providers::get(&self.harness).start_cmd(ctx, self, pane)
+        crate::sandbox::wrap(self, providers::get(&self.harness).start_cmd(ctx, self, pane))
     }
 
     pub fn kick_cmds(&self, pane: &str) -> Vec<Vec<String>> {
@@ -237,7 +239,7 @@ pub struct Delivered<'a>(&'a crate::hosts::On<'a>, Option<PathBuf>);
 impl Drop for Delivered<'_> {
     fn drop(&mut self) {
         if let Some(f) = &self.1 {
-            let _ = self.0.remove(f);
+            self.0.remove(f).ok();
         }
     }
 }
@@ -376,6 +378,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         title,
         session: None,
         lane_key: None,
+        sandbox: f.sandbox,
     })
 }
 
@@ -425,13 +428,14 @@ fn brief(
                 .as_ref()
                 .map_or("render a PNG of each page or view".into(), |c| format!("run `{c}`")),
             sizes = recipe.sizes,
-            clip = [
-                "",
+            clip = if recipe.clip {
                 " The design moves: also a short clip of it (`clip.gif` or `clip.mp4`) beside the images."
-            ][usize::from(recipe.clip)]
+            } else {
+                ""
+            }
         ),
         "architect" => {
-            let hot = ["", include_str!("../roles/brief-hotspots-architect.md")];
+            let hot = include_str!("../roles/brief-hotspots-architect.md");
             format!(
                 include_str!("../roles/brief-architect.md"),
                 branch = branch,
@@ -440,7 +444,11 @@ fn brief(
             .trim_end()
             .to_string()
                 + "\n"
-                + hot[usize::from(title.starts_with(crate::hotspots::TITLE))]
+                + if title.starts_with(crate::hotspots::TITLE) {
+                    hot
+                } else {
+                    ""
+                }
         }
         _ => format!(
             include_str!("../roles/brief-impl.md"),
@@ -531,8 +539,8 @@ pub fn unguarded(ctx: &Ctx, (profile, family, h): (&str, &str, &str), id: &str, 
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
-    let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
-    let mut hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
+    let pre = settings.at("hooks").at("PreToolUse").as_array().into_iter().flatten();
+    let mut hooks = pre.flat_map(|m| m.at("hooks").as_array().into_iter().flatten());
     if providers::get(h).acp() != Some(id) {
         format!("ACP agent {id} runs no {h} hook")
     } else if !remote && !hooks.any(|h| h["command"].as_str().is_some_and(|c| providers::guards(ctx, c, family))) {
@@ -556,9 +564,9 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     let agents: Value = serde_json::from_str(&crate::shed::cli(r, &["agents", "--json"])?.stdout)?;
     let agent = agents.as_array().into_iter().flatten().find(|a| a["id"] == id);
     let cmd: Vec<String> = agent
-        .and_then(|a| serde_json::from_value(a["cmd"].clone()).ok())
+        .and_then(|a| serde_json::from_value(a.at("cmd").clone()).ok())
         .with_context(|| format!("ACP agent {id} is not installed; `shed agents add {id}`"))?;
-    let mut words = home(p.lane_cmd("")[3..].to_vec());
+    let mut words = home(p.lane_cmd("").get(3..).unwrap_or_default().to_vec());
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
     let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
     let dir = PathBuf::from(home(vec![dir.display().to_string()]).remove(0));
@@ -678,7 +686,7 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         let run = term::Shed::run_params(pane, labels, &p.worktree.to_string_lossy());
         cmds.push(sent("shed", argv(&["run", &json!(run).to_string()])));
         let typed = [home(p.lane_cmd(pane)), term::typed(pane, &home(p.start_cmd(ctx, pane)))];
-        let shown = |a: Vec<String>| term::shed_line(&a)[1..].to_vec();
+        let shown = |a: Vec<String>| term::shed_line(&a).get(1..).unwrap_or_default().to_vec();
         cmds.extend(
             typed
                 .into_iter()
@@ -755,7 +763,7 @@ pub fn lockfiles_match(locks: &[&str], local: &Path, wt: &Path) -> bool {
 pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> Option<Value> {
     use std::os::unix::fs::MetadataExt;
     let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
-    let (t, mut done, mut errs) = (std::time::Instant::now(), vec![], vec![]);
+    let (t, mut done, mut errs) = (crate::clock::instant(), vec![], vec![]);
     for d in dirs {
         let locks: &[&str] = match d.as_str() {
             "target" => &["Cargo.lock"],
@@ -778,7 +786,7 @@ pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> 
         match res.and_then(|_| Ok(std::fs::rename(&tmp, &dst)?)) {
             Ok(()) => done.push(d),
             Err(e) => {
-                let _ = std::fs::remove_dir_all(&tmp);
+                std::fs::remove_dir_all(&tmp).ok();
                 errs.push(format!("{d}: {}", first_lines(&e)));
             }
         }
@@ -823,7 +831,7 @@ pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     let ls = std::fs::read_dir(b).ok()?.flatten().filter(mine);
     let src = ls.map(|e| e.path()).max_by_key(|p| crate::check::mtime(p))?;
     let tmp = b.join(format!(".{}.clone", t.file_name()?.to_string_lossy()));
-    let at = std::time::Instant::now();
+    let at = crate::clock::instant();
     let (s, d) = (src.to_string_lossy(), tmp.to_string_lossy());
     let args: &[&str] = if cfg!(target_os = "macos") {
         &["-cR"]
@@ -833,7 +841,7 @@ pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     let res = ok(r, "cp", &[args, &[&s, &d]].concat());
     let res = res.and_then(|_| Ok(std::fs::rename(&tmp, t)?));
     let errs: Vec<String> = res.err().map(|e| first_lines(&e)).into_iter().collect();
-    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::remove_dir_all(&tmp).ok();
     let dirs: Vec<String> = errs.is_empty().then(|| t.display().to_string()).into_iter().collect();
     Some(json!({"dirs": dirs, "from": src, "secs": at.elapsed().as_secs(), "errors": errs}))
 }
@@ -866,7 +874,7 @@ pub fn unsaved(r: &dyn Runner, wt: &Path) -> Option<(u64, u64)> {
         &["-C", &wt, "rev-list", "--count", "HEAD", "--not", "--remotes"],
     )
     .ok()?;
-    Some((changes(&st) as u64, n.trim().parse().ok()?))
+    Some((u64::try_from(changes(&st)).unwrap_or(u64::MAX), n.trim().parse().ok()?))
 }
 
 /// #630: `+<files> ⇡<commits>` of unsaved work `u`, none when there is none.
@@ -973,7 +981,7 @@ pub fn spawn(
         term::Shed(crate::shed::Shed { wire, acp, ..b })
     };
     if on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
-        let path = std::env::var("PATH").unwrap_or_default();
+        let path = crate::config::env("PATH").unwrap_or_default();
         let fix = "`drover timer install` from a shell where `which shed` finds it";
         return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
     }
@@ -989,7 +997,7 @@ pub fn spawn(
     };
     let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
     if o.dry_run {
-        pj["dry_run"] = json!(true);
+        pj.put("dry_run", json!(true));
         print_plan(out, &pj, o.json)?;
         return Ok(true);
     }
@@ -1037,14 +1045,12 @@ pub fn spawn(
     let over = |a: &&Session| {
         let sp = (events.iter()).rposition(|e| e.is("spawn", fleet, issue) && e.str("agent") == Some(a.name.as_str()));
         let after = |i: usize| {
-            events[i + 1..]
-                .iter()
-                .any(|e| e.is("verdict", fleet, issue) || e.is("spawn", fleet, issue))
+            (events.iter().skip(i + 1)).any(|e| e.is("verdict", fleet, issue) || e.is("spawn", fleet, issue))
         };
         matches!(a.status(), Some(Status::Done | Status::Idle)) && sp.is_some_and(after)
     };
     if !stale && !live.is_empty() {
-        let st = live[0].status().map_or("unknown", Status::word);
+        let st = live.first().and_then(|l| l.status()).map_or("unknown", Status::word);
         let finished = if unfinished.is_none() && live.iter().all(over) {
             format!("finished ({st}) lane(s) ")
         } else {
@@ -1112,7 +1118,11 @@ pub fn spawn(
         Some((code, why)) => return refused(code, why),
         None => {}
     }
-    let step = ["spawn", "supersede"][usize::from(o.supersede && !dup.is_empty())];
+    let step = if o.supersede && !dup.is_empty() {
+        "supersede"
+    } else {
+        "spawn"
+    };
     let round = events
         .iter()
         .rfind(|e| e.is("spawn", fleet, issue))
@@ -1157,7 +1167,8 @@ pub fn spawn(
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
         let mut d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; "), "wip": wip});
         if let Some(e) = stale {
-            (d["stale_host"], d["stale_pane"]) = (json!(e.str("host")), json!(e.str("pane")));
+            d.put("stale_host", json!(e.str("host")))
+                .put("stale_pane", json!(e.str("pane")));
         }
         event("supersede", d)?;
     }
@@ -1183,7 +1194,7 @@ pub fn spawn(
             "git",
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
-        let body = iss["body"].as_str().unwrap_or("");
+        let body = iss.at("body").as_str().unwrap_or("");
         let recipe = match p.family {
             "design" => crate::design::Recipe::at(r, &local, &p.base, body),
             _ => crate::design::Recipe::of("", body),
@@ -1236,14 +1247,17 @@ pub fn spawn(
         }
         if p.family == "rev" && reopen {
             ok(r, "git", &["-C", &wt, "reset", "--hard", &p.base])?;
-            let _ = on.remove(&p.worktree.join("verdict.md"));
+            on.remove(&p.worktree.join("verdict.md")).ok();
         }
         if p.family == "rev" || crate::events::STAGES.contains(&p.family) {
             sha = ok(r, "git", &["-C", &wt, "rev-parse", "HEAD"])
                 .ok()
                 .map(|h| h.trim().to_string());
         }
-        let (title, body) = (iss["title"].as_str().unwrap_or(""), iss["body"].as_str().unwrap_or(""));
+        let (title, body) = (
+            iss.at("title").as_str().unwrap_or(""),
+            iss.at("body").as_str().unwrap_or(""),
+        );
         p.title = lane_title(&p.head, title);
         note = prior
             .filter(|_| o.supersede && !dup.is_empty())
@@ -1329,6 +1343,11 @@ pub fn spawn(
         crate::proxy::ensure(ctx, cfg, base, (&pl.name, pl.machine.as_deref().unwrap_or_default()))?;
     }
     let _secrets = deliver(ctx, &on, &p)?;
+    if p.sandbox.is_some() {
+        let rules = serde_json::to_string_pretty(&crate::sandbox::settings(ctx, f, &p, on.machine.is_none()))?;
+        on.write(&crate::sandbox::file(&p), &home(vec![rules]).remove(0))?;
+        on.write(&crate::sandbox::tmp(&p).join(".keep"), "")?;
+    }
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
     let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
     if let Some(rl) = &rules {
@@ -1369,27 +1388,28 @@ pub fn spawn(
                 None => h.kick(r, &p, &pane),
             };
             let mut d = lane_data(&p, &pane);
-            d["runtime"] = json!(["shed", "shed-acp"][usize::from(bt.0.acp.is_some())]);
+            d.put("runtime", json!(if bt.0.acp.is_some() { "shed-acp" } else { "shed" }));
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
-            d["confirmed"] = json!(confirmed);
-            d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
-            d["update"] = json!(o.update);
-            d["handover"] = json!(note);
+            d.put("confirmed", json!(confirmed))
+                .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))));
+            d.put("update", json!(o.update)).put("handover", json!(note));
             if let Some(pl) = &placed {
-                (d["host"], d["machine"], d["root"]) = (json!(pl.name), json!(pl.machine), json!(pl.root));
+                d.put("host", json!(pl.name))
+                    .put("machine", json!(pl.machine))
+                    .put("root", json!(pl.root));
                 if let Some(w) = &pl.why {
-                    d["why"] = json!(w);
+                    d.put("why", json!(w));
                 }
             }
             if let Some(h) = sha.filter(|h| !h.is_empty()) {
-                d["sha"] = json!(h);
+                d.put("sha", json!(h));
             }
             if let Some(rl) = &rules {
-                d["rules"] = json!(rl);
+                d.put("rules", json!(rl));
             }
             if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
                 if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a.name == old) {
-                    let _ = term::close(ctx, r, old);
+                    term::close(ctx, r, old).ok();
                     let c = json!({"agent": agent, "reason": "superseded", "pane": old});
                     event("lane-closed", c)?;
                 }
@@ -1397,8 +1417,7 @@ pub fn spawn(
             intent.done(json!({"agent": p.agent, "pane": pane}))?;
             event("spawn", d)?;
             kicked?;
-            pj["pane"] = json!(pane);
-            pj["confirmed"] = json!(confirmed);
+            pj.put("pane", json!(pane)).put("confirmed", json!(confirmed));
             print_plan(out, &pj, o.json)?;
             Ok(confirmed)
         })();
@@ -1437,7 +1456,7 @@ pub(crate) fn lane_admit(
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
     let gs = crate::queue::groups(&crate::queue::replay(events, fleet), events, f, fleet, issue);
-    let pushed = crate::gh::cached_pr(ctx, fleet, issue)["state"] == "OPEN";
+    let pushed = crate::gh::cached_pr(ctx, fleet, issue).at("state") == "OPEN";
     for g in gs.into_iter().filter(|_| role == "impl" && !pushed) {
         let h = crate::queue::holders(events, &st, f, fleet, &g.name);
         if !h.iter().any(|s| s.issue == issue) && h.len() >= g.max {
@@ -1511,7 +1530,7 @@ fn respawn_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue, role)
         .filter(|s| s.0 >= since)
         .filter_map(|s| Some(format!("{} ago: {}", crate::events::age(ctx.now - s.0), s.1?)))
         .collect();
-    if failed.len() < l.respawn_max as usize {
+    if failed.len() < usize::try_from(l.respawn_max).unwrap_or(usize::MAX) {
         return Ok(());
     }
     let why = format!(
@@ -1597,7 +1616,7 @@ fn handover(
     ];
     for (name, items) in sections.into_iter().filter(|s| !s.1.is_empty()) {
         out += &format!("\n{name}:");
-        for i in &items[items.len().saturating_sub(20)..] {
+        for i in items.iter().skip(items.len().saturating_sub(20)) {
             out += &format!("\n- {}", handover_item(i));
         }
     }
@@ -1643,13 +1662,17 @@ pub fn adopt(
         .filter(|s| s.running() && s.labels.contains_key("harness"))
         .with_context(|| format!("no harness running in pane {pane}"))?;
     let mut d = lane_data(&p, pane);
-    d["adopted"] = json!(true);
-    extra
-        .as_object()
-        .into_iter()
-        .flatten()
-        .for_each(|(k, v)| d[k] = v.clone());
-    writeln!(out, "adopted {pane} as {} ({} @ {})", p.agent, p.branch, d["worktree"])?;
+    d.put("adopted", json!(true));
+    extra.as_object().into_iter().flatten().for_each(|(k, v)| {
+        d.put(k, v.clone());
+    });
+    writeln!(
+        out,
+        "adopted {pane} as {} ({} @ {})",
+        p.agent,
+        p.branch,
+        d.at("worktree")
+    )?;
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "spawn", d))
 }
 
@@ -1686,7 +1709,9 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let head = |x: String| {
             Some((
                 x,
-                crate::gh::pr(ctx, r, f, (fleet, n), &branch, ctx.now).ok()?["headRefOid"]
+                crate::gh::pr(ctx, r, f, (fleet, n), &branch, ctx.now)
+                    .ok()?
+                    .at("headRefOid")
                     .as_str()?
                     .into(),
             ))

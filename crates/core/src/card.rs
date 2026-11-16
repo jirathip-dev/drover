@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::devices::sha256;
-use crate::events::{emit, working, Event};
+use crate::events::{emit, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::{argv, Runner};
 use crate::{orchestrator, Ctx};
@@ -116,7 +116,11 @@ pub fn settle_via(
         return refused("NO_SUCH_CARD", format!("no run card {id}"));
     };
     if let Some(s) = settled(&events, id) {
-        let how = ["was denied", "ran already"][usize::from(s.val("approved") == true)];
+        let how = if s.val("approved") == true {
+            "ran already"
+        } else {
+            "was denied"
+        };
         return refused("ALREADY_SETTLED", format!("{id} {how}; a new run needs a new card"));
     }
     let [thread, cmd, dir, sum] = ["thread", "cmd", "dir", "sha"].map(|k| c.str(k).unwrap_or_default());
@@ -137,7 +141,7 @@ pub fn settle_via(
     }
     let mut d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "approved": approve});
     if let Some(v) = via {
-        d["via"] = json!(v);
+        d.put("via", json!(v));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-settled", d))?;
     let line = if approve {
@@ -147,7 +151,7 @@ pub fn settle_via(
     } else {
         format!("run {id} denied by owner; nothing ran")
     };
-    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
+    orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)).ok();
     Ok(line)
 }
 
@@ -165,7 +169,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
         return refused("ALREADY_SETTLED", format!("{id} ran already; post a new card"));
     }
     let [thread, cmd, dir, sum] = ["thread", "cmd", "dir", "sha"].map(|k| c.str(k).unwrap_or_default());
-    let (pid, start) = (std::process::id(), crate::now());
+    let (pid, start) = (crate::runner::pid(), crate::now());
     let secs = c.val("timeout").as_u64().unwrap_or(600);
     let d = json!({"thread": thread, "id": id, "sha": sum, "pid": pid});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-started", d))?;
@@ -186,9 +190,9 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
     let d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "code": code, "tail": tail});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-done", d))?;
     let line = format!("run {id} approved by owner, ran in {dir}: exit {code}\n```\n{tail}\n```");
-    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
+    orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)).ok();
     if code == 124 {
-        let _ = r.run("kill", &argv(&["-KILL", "--", &format!("-{pid}")]));
+        r.run("kill", &argv(&["-KILL", "--", &format!("-{pid}")])).ok();
     }
     Ok(line)
 }

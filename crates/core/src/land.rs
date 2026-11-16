@@ -1,5 +1,5 @@
 use crate::config::{glob, Config, Fleet};
-use crate::events::{emit, Event};
+use crate::events::{emit, Event, Json};
 use crate::overlap::git;
 use crate::runner::{json, ok, Runner};
 use crate::{gh, Ctx};
@@ -26,7 +26,7 @@ pub fn mark(ctx: &Ctx, r: Option<&dyn Runner>, f: &Fleet, (fleet, n): (&str, u64
         Some(r) => gh::diff_names(ctx, r, f, (fleet, n), &pr["number"].to_string(), &head).ok(),
         None => crate::usage::load::<Value>(&gh::cache_path(ctx, "diff", fleet, n))
             .filter(|c| c["head"] == head.as_str())
-            .and_then(|c| serde_json::from_value::<Vec<String>>(c["files"].clone()).ok()),
+            .and_then(|c| serde_json::from_value::<Vec<String>>(c.at("files").clone()).ok()),
     };
     let full = |p: &String| l.full_first_paths.iter().any(|g| glob(g.as_bytes(), p.as_bytes()));
     if files.is_some_and(|fs| !fs.iter().any(full)) {
@@ -63,7 +63,7 @@ pub(crate) fn suite(r: &dyn Runner, f: &Fleet, sha: &str) -> (&'static str, Valu
     let all = json(r, "gh", &["api", &api, "--jq", jq]).unwrap_or(json!([]));
     let c = gh::required(&all, &f.required_checks);
     let none = all.as_array().is_none_or(Vec::is_empty);
-    ([gh::ci(&c), "none"][usize::from(none)], c)
+    (if none { "none" } else { gh::ci(&c) }, c)
 }
 
 fn red(checks: &Value) -> (String, String, bool) {
@@ -93,14 +93,14 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         let num = o.str("pr").unwrap_or_default();
         let fields = "headRefOid,statusCheckRollup,state";
         let pr = json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", fields])?;
-        let head = pr["headRefOid"].as_str().unwrap_or_default();
-        let st = gh::ci(&gh::required(&pr["statusCheckRollup"], &l.fast));
-        if pr["state"] != "OPEN" || st != "green" {
+        let head = pr.at("headRefOid").as_str().unwrap_or_default();
+        let st = gh::ci(&gh::required(pr.at("statusCheckRollup"), &l.fast));
+        if pr.at("state") != "OPEN" || st != "green" {
             let told = |e: &Event| mine("revert-failed")(&e) && e.str("pr") == Some(num);
-            if pr["state"] == "OPEN" && st == "failed" && !ev.iter().any(told) {
+            if pr.at("state") == "OPEN" && st == "failed" && !ev.iter().any(told) {
                 writeln!(out, "{fleet} revert PR #{num}: fast checks red")?;
                 let mut d = Value::Object(o.data.clone());
-                d["reason"] = json!(format!("revert PR #{num}: fast checks red"));
+                d.put("reason", json!(format!("revert PR #{num}: fast checks red")));
                 log(o.issue, "revert-failed", d)?;
             }
             continue;
@@ -116,7 +116,7 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         reopen(ctx, cfg, r, out, (f, fleet), o, ("reverted", &how))?;
     }
     let green = ev.iter().rposition(|e| mine("land-green")(&e)).map_or(0, |i| i + 1);
-    let since: Vec<&Event> = ev[green..].iter().filter(mine("landed")).collect();
+    let since: Vec<&Event> = ev.iter().skip(green).filter(mine("landed")).collect();
     let pause = paused(&ev, fleet);
     if since.is_empty() && pause.is_none() {
         return Ok(());
@@ -138,7 +138,7 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     if pause.is_none() {
         let again = |e: &Event| mine("land-rerun")(&e) && e.str("sha") == Some(&tip);
         if infra && !ev.iter().any(again) {
-            let _ = ok(r, "gh", &["run", "rerun", &run, "-R", &f.repo, "--failed"]);
+            ok(r, "gh", &["run", "rerun", &run, "-R", &f.repo, "--failed"]).ok();
             writeln!(
                 out,
                 "{fleet} {} red @ {tip:.7} ({job}): runner/infra, re-run once",
@@ -174,7 +174,7 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     let (wts, branch) = (wt.to_string_lossy(), format!("revert-{n}-{sha:.7}"));
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     git(r, &dir, &["fetch", "-q", "origin"])?;
-    let _ = tree(&["remove", "--force", &wts]);
+    tree(&["remove", "--force", &wts]).ok();
     tree(&["add", "-f", "--detach", &wts, &format!("origin/{}", f.integration)])?;
     let parents = git(r, &wt, &["log", "-1", "--format=%P", sha]).unwrap_or_default();
     let mainline: &[&str] = if parents.split_whitespace().count() > 1 {
@@ -189,10 +189,11 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
             &["push", "-q", "-f", "origin", &format!("HEAD:refs/heads/{branch}")],
         )
     });
-    let _ = tree(&["remove", "--force", &wts]);
+    tree(&["remove", "--force", &wts]).ok();
     if let Err(e) = pushed {
         writeln!(out, "{fleet} #{n} revert of {sha:.7} failed: {e:#}")?;
-        (d["reason"], d["error"]) = (json!(format!("revert of {sha:.7} failed")), json!(format!("{e:#}")));
+        d.put("reason", json!(format!("revert of {sha:.7} failed")))
+            .put("error", json!(format!("{e:#}")));
         return log(Some(n), "revert-failed", d);
     }
     let title = format!("Revert #{n}: `{job}` red on {}", f.integration);
@@ -212,7 +213,8 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     let url = ok(r, "gh", &[&["pr", "create", "-R", &f.repo][..], &a].concat())?;
     let num = url.trim().rsplit('/').next().unwrap_or_default().to_string();
     writeln!(out, "{fleet} #{n} revert PR #{num} opened: {job} red after {sha:.7}")?;
-    (d["pr"], d["reason"]) = (json!(num), json!(format!("revert PR #{num} for {job} red")));
+    d.put("pr", json!(num))
+        .put("reason", json!(format!("revert PR #{num} for {job} red")));
     log(Some(n), "revert-opened", d)
 }
 
@@ -256,7 +258,7 @@ fn culprit<'a>(
         }
         let tmp = format!("drover-bisect-{sha:.7}");
         let wf = json(r, "gh", &["run", "view", run, "-R", &f.repo, "--json", "workflowName"]).unwrap_or_default();
-        let wf = wf["workflowName"].as_str().unwrap_or_default();
+        let wf = wf.at("workflowName").as_str().unwrap_or_default();
         let push = ["push", "-q", "-f", "origin", &format!("{sha}:refs/heads/{tmp}")];
         let sent = git(r, &f.local_path(), &push).and_then(|_| {
             anyhow::ensure!(!wf.is_empty(), "no workflow for run {run}");
@@ -295,8 +297,9 @@ fn reopen(
     let tail: Vec<&str> = log.lines().rev().take(40).collect();
     let tail: Vec<&str> = tail.into_iter().rev().collect();
     let mut d = Value::Object(o.data.clone());
-    d["reason"] = json!(format!("{} red after #{n} landed: {}", f.integration, s("red_job")));
-    writeln!(out, "{fleet} #{n} {kind}: {}", d["reason"].as_str().unwrap_or_default())?;
+    let why = format!("{} red after #{n} landed: {}", f.integration, s("red_job"));
+    writeln!(out, "{fleet} #{n} {kind}: {why}")?;
+    d.put("reason", json!(why));
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), kind, d))?;
     let body = format!(
         "FAIL\n\n{} went red at {:.7} after this issue landed ({:.7}): `{}`. {how}\n\n```\n{}\n```\n",
@@ -310,7 +313,7 @@ fn reopen(
     let d = json!({"verdict": "FAIL", "sha": s("culprit"), "stage": p.gate(), "loop": p.loop_of(p.gate()),
         "body": body, "by": "drive"});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "verdict", d))?;
-    let _ = ok(r, "gh", &["issue", "reopen", &n.to_string(), "-R", &f.repo]);
+    ok(r, "gh", &["issue", "reopen", &n.to_string(), "-R", &f.repo]).ok();
     gh::forget_pr(ctx, fleet, n);
     Ok(())
 }
@@ -337,7 +340,7 @@ pub fn stats(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Resul
             v.map(|v| l.ts - v.ts)
         };
         let span = lands.first().map_or(1, |l| ctx.now.saturating_sub(l.ts).max(86_400));
-        let day = lands.len() as u64 * 864_000 / span;
+        let day = u64::try_from(lands.len()).unwrap_or(u64::MAX) * 864_000 / span;
         let secs = lands
             .iter()
             .filter_map(|l| l.data.get("checks_secs").and_then(Value::as_u64));
@@ -354,8 +357,9 @@ pub fn stats(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Resul
     }
     let mut red = 0;
     for (i, p) in ev.iter().enumerate().filter(|(_, e)| e.kind == "land-paused") {
-        let end = ev[i..]
+        let end = ev
             .iter()
+            .skip(i)
             .find(|e| e.kind == "land-resumed")
             .map_or(ctx.now, |e| e.ts);
         red += end.saturating_sub(p.ts);
