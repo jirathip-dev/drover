@@ -23,7 +23,7 @@ pub struct State {
     pub waits: BTreeMap<String, String>,
     /// What it answers `hello` with.
     pub hello: Option<Hello>,
-    /// A request naming this terminal waits until the test clears it and notifies `FakeShed::moved`.
+    /// A `send`, `keys` or `kill` naming this terminal waits until the test clears it and notifies `FakeShed::moved`.
     pub held: Option<String>,
 }
 
@@ -209,7 +209,8 @@ fn conn(c: UnixStream, st: &Mutex<State>, moved: &Condvar) {
     let mut w = c.try_clone().unwrap();
     for line in BufReader::new(c).lines().map_while(Result::ok) {
         let q: Request = serde_json::from_str(&line).unwrap();
-        let held = |s: &mut State| s.held.is_some() && s.held.as_deref() == q.params["name"].as_str();
+        let writes = matches!(q.method.as_str(), "send" | "keys" | "kill");
+        let held = |s: &mut State| writes && s.held.is_some() && s.held.as_deref() == q.params["name"].as_str();
         drop(moved.wait_while(st.lock().unwrap(), held).unwrap());
         writeln!(w, "{}", answer(st, &q)).unwrap();
         if q.method == "events" {
