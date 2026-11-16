@@ -474,9 +474,10 @@ pub struct Hygiene {
     pub triage: Option<String>,
     pub docs_trust: Option<Vec<String>>,
     pub issue_spec: Option<String>,
+    pub docs: Option<String>,
 }
 
-/// #1101: the defaults: squash merges, strict comments, a setup baseline, weekly triage, `docs/archive/` unread, specs folded by triage.
+/// #1101: the defaults: squash merges, strict comments, a setup baseline, weekly triage, `docs/archive/` unread, specs folded by triage, a `[docs]` check.
 pub fn hygiene_default() -> Hygiene {
     let s = |v: &str| Some(v.to_string());
     Hygiene {
@@ -486,6 +487,7 @@ pub fn hygiene_default() -> Hygiene {
         triage: s("weekly"),
         docs_trust: Some(vec!["docs/archive/".into()]),
         issue_spec: s("triage"),
+        docs: s("on"),
     }
 }
 
@@ -498,6 +500,7 @@ impl Hygiene {
             triage: self.triage.clone().or_else(|| b.triage.clone()),
             docs_trust: self.docs_trust.clone().or_else(|| b.docs_trust.clone()),
             issue_spec: self.issue_spec.clone().or_else(|| b.issue_spec.clone()),
+            docs: self.docs.clone().or_else(|| b.docs.clone()),
         }
     }
 
@@ -511,12 +514,13 @@ impl Hygiene {
         };
         let o = |v: &Option<String>| v.clone().unwrap_or_default();
         format!(
-            "merge {} · comments {} · baseline {} · triage {} · docs_trust {deny} · issue_spec {}",
+            "merge {} · comments {} · baseline {} · triage {} · docs_trust {deny} · issue_spec {} · docs {}",
             o(&self.merge),
             o(&self.comments),
             o(&self.baseline),
             o(&self.triage),
-            o(&self.issue_spec)
+            o(&self.issue_spec),
+            o(&self.docs)
         )
     }
 }

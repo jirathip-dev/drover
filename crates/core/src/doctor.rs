@@ -74,23 +74,28 @@ fn hygiene(
             "! hygiene {name} — merge: {repo} does not allow {m}, hygiene says {m} → gh repo edit {repo} --enable-{opt}"
         ));
     }
-    if h.comments.as_deref() == Some("strict") {
-        let at = format!("origin/{}:.drover/arch.toml", f.integration);
-        let dir = f.local_path().display().to_string();
-        let o = r.run("git", &argv(&["-C", &dir, "show", &at]));
-        let policy = match o {
-            Ok(o) if o.code == 0 => toml::from_str::<toml::Value>(&o.stdout).ok().map(|v| {
-                let p = v.get("comments").and_then(|c| c.get("policy")).and_then(|p| p.as_str());
-                p.unwrap_or("unset").to_string()
-            }),
-            Ok(o) if o.stderr.contains("does not exist") => Some("unset".into()),
-            _ => None,
-        };
-        if let Some(p) = policy.filter(|p| p != "strict") {
-            rows.push(format!(
-                "! hygiene {name} — comments is {p}, hygiene says strict → set [comments] policy = \"strict\" in .drover/arch.toml"
-            ));
-        }
+    let at = format!("origin/{}:.drover/arch.toml", f.integration);
+    let dir = f.local_path().display().to_string();
+    let arch = match r.run("git", &argv(&["-C", &dir, "show", &at])) {
+        Ok(o) if o.code == 0 => toml::from_str::<toml::Table>(&o.stdout).ok(),
+        Ok(o) if o.stderr.contains("does not exist") => Some(toml::Table::new()),
+        _ => None,
+    };
+    let Some(arch) = arch else { return };
+    let policy = arch
+        .get("comments")
+        .and_then(|c| c.get("policy"))
+        .and_then(|p| p.as_str());
+    let policy = policy.unwrap_or("unset");
+    if h.comments.as_deref() == Some("strict") && policy != "strict" {
+        rows.push(format!(
+            "! hygiene {name} — comments is {policy}, hygiene says strict → set [comments] policy = \"strict\" in .drover/arch.toml"
+        ));
+    }
+    if h.docs.as_deref() == Some("on") && !arch.contains_key("docs") {
+        rows.push(format!(
+            "! hygiene {name} — docs: .drover/arch.toml has no [docs], hygiene says on → drover setup writes it"
+        ));
     }
 }
 

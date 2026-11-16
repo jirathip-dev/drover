@@ -582,7 +582,7 @@ fn hygiene_is_on_by_default_and_drift_is_flagged() {
     assert_eq!(code, 0, "{out}");
     assert_eq!(
         line(&out, "hygiene demo"),
-        "✓ hygiene demo — merge squash · comments strict · baseline setup · triage weekly · docs_trust deny docs/archive/ · issue_spec triage"
+        "✓ hygiene demo — merge squash · comments strict · baseline setup · triage weekly · docs_trust deny docs/archive/ · issue_spec triage · docs on"
     );
     assert!(!out.contains("! hygiene"), "{out}");
     let show = format!(
@@ -605,11 +605,12 @@ fn hygiene_is_on_by_default_and_drift_is_flagged() {
         [
             "! hygiene demo — merge: o/demo does not allow squash, hygiene says squash → gh repo edit o/demo --enable-squash-merge",
             "! hygiene demo — comments is off, hygiene says strict → set [comments] policy = \"strict\" in .drover/arch.toml",
+            "! hygiene demo — docs: .drover/arch.toml has no [docs], hygiene says on → drover setup writes it",
         ],
         "{out}"
     );
     let own = std::fs::read_to_string(&c.config).unwrap()
-        + "\n[hygiene]\ncomments = \"off\"\n\n[fleet.demo.hygiene]\nmerge = \"merge\"\n";
+        + "\n[hygiene]\ncomments = \"off\"\ndocs = \"off\"\n\n[fleet.demo.hygiene]\nmerge = \"merge\"\n";
     std::fs::write(&c.config, own).unwrap();
     let (_, out) = run(&c, &drift(), &["doctor"]);
     assert!(
