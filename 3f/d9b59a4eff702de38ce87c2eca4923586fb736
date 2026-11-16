@@ -1,0 +1,13 @@
+Decided: promise::pass logs promise-void (passive, with the hold line) instead of promise-missed once the deadline passes and the current wait carries no promise
+Because: "A promise is **closed, not missed**, when the issue's current wait is a known hold"
+Decided: a voided promise is closed: open() returns None after a promise-void, so it never voids twice and a later promising wait logs a new promise
+Decided: a promise already missed is not voided later: its row shows the missed line with no promise, so voiding it would void every miss
+Because: crates/core/src/waiting.rs:882
+Decided: the draft-PR #854 waiting test now checks an unchanged wait (missed: drive took no step) plus a draft variant (void, row shows the draft)
+Because: "A promise whose wait is unchanged past its deadline → still missed and still `stuck`"
+Decided: stuck stays one episode per breach key; only the first open stuck of a fleet is emitted (pushed), the rest are appended silently
+Because: "Three stuck issues in one fleet → one card and one push"
+Decided: open_stuck groups by fleet; the card lists each breach with `drover why fleet#n` and a Drive now button (drive-all: the tick SLO has no fleet)
+Rejected: a [dismiss] button — no dismissed state exists; a dismissed breach would re-alert the next pass, so it needs its own design
+Check: #263 (rev PASS, verify not spawned) not investigated here: no cooee log replay in this lane
+Owner: Drive's stuck alerts no longer fire for issues that are simply waiting on a dependency, a serial lock or CI; real ones arrive as one card and one push per fleet.
