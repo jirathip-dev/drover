@@ -181,6 +181,15 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
     up
 }
 
+/// #1123: `status` printed nothing, so the VM was deleted outside drover: logs `cloud-stop {why: gone}`. A failing `status` is not gone.
+pub fn gone(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<bool> {
+    if !cmd(ctx, cfg, r, name, "status").is_ok_and(|s| s.trim().is_empty()) {
+        return Ok(false);
+    }
+    log(ctx, cfg, "cloud-stop", name, json!({"why": "gone"}))?;
+    Ok(true)
+}
+
 fn pin(ctx: &Ctx, name: &str) -> std::path::PathBuf {
     ctx.home.join(format!(".ssh/herdsman/{name}.known"))
 }
@@ -280,7 +289,14 @@ pub type Live = BTreeMap<String, Option<Vec<crate::session::Session>>>;
 pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Live, out: &mut dyn std::io::Write) -> Result<()> {
     let (events, seen) = (working(&ctx.state).unwrap_or_default(), crate::hosts::cached(ctx));
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.cloud.is_some()) {
-        let Some(Some(agents)) = live.get(name).filter(|_| state(&events, name) == "running") else {
+        if state(&events, name) != "running" {
+            continue;
+        }
+        if gone(ctx, cfg, r, name)? {
+            writeln!(out, "cloud {name}: gone (status prints nothing), logged stopped")?;
+            continue;
+        }
+        let Some(Some(agents)) = live.get(name) else {
             continue;
         };
         let idle = h.idle_stop_minutes.unwrap_or(cfg.limits.cloud_idle_stop_minutes) * 60;
@@ -362,9 +378,10 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let h = cfg.hosts.get(name).context("no such host")?;
     let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
     let acp = cfg.host_acp(name).is_some();
-    if h.cloud.is_some() && state(&working(&ctx.state)?, name) != "running" {
+    let cloud = h.cloud.is_some();
+    if cloud && (state(&working(&ctx.state)?, name) != "running" || gone(ctx, cfg, r, name)?) {
         start(ctx, cfg, r, name)?;
-    } else if h.cloud.is_some() {
+    } else if cloud {
         moved(ctx, cfg, r, name, true)?;
     }
     let on = crate::hosts::On::new(r, Some(m));
@@ -409,7 +426,11 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     steps += &format!("{RUST}\n");
     let (git, rev, sv) = (crate::shed::git(), crate::shed::REV, crate::shed::proto::VERSION);
     let shed = format!("cargo install --git {git} --rev {rev} --locked --force shed");
-    steps += &format!("shed\t[ \"$(shed --version)\" = 'shed {sv}' ]\t{shed}\n{SHED}\n");
+    let pin = format!(
+        "v=$(shed --version) && s=${{v#'shed {sv} ('}} && s=${{s%')'}} && [ -n \"$s\" ] && \
+[ \"$v\" = \"shed {sv} ($s)\" ] && case '{rev}' in \"$s\"*) ;; *) false ;; esac"
+    );
+    steps += &format!("shed\t{pin}\t{shed}\n{SHED}\n");
     if acp {
         steps += &ACP.replace("{acp}", crate::providers::default_acp().unwrap_or_default());
         steps += "\n";

@@ -559,7 +559,7 @@ fn boot_fake(gh_in: bool) -> Fake {
     );
     let f = Fake::default()
         .reply(&format!("{SSH}'sh' '-c' 'uname -s"), "Linux\nx86_64\n/home/me\n")
-        .reply(&step("[ \"$(shed --version)\""), "")
+        .reply(&step("v=$(shed --version)"), "")
         .reply(&step("shed doctor"), "")
         .once(&step("command -v gh"), 1, "")
         .once(&step(&mine), 1, "")
@@ -604,7 +604,7 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
         "apt_ gh",
         "command -v claude",
         "command -v cargo",
-        "[ \"$(shed --version)\"",
+        "v=$(shed --version)",
         "shed doctor",
     ];
     let at: Vec<_> = order.iter().map(|s| r.index(&step(s)).unwrap()).collect();
@@ -829,4 +829,140 @@ fn a_snapshot_needs_a_green_health_check_first() {
         drover::hosts::cached(&c)["cloud1"].github.starts_with("github:"),
         "the look reads the token too"
     );
+}
+
+struct ShedThere<'a>(&'a Fake, std::path::PathBuf);
+
+impl Runner for ShedThere<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        let line = format!("{prog} {}", args.join(" "));
+        let Some(script) = args.last().filter(|_| line.starts_with(&step("v=$(shed --version)"))) else {
+            return self.0.run(prog, args);
+        };
+        self.0.calls.borrow_mut().push(line);
+        let o = std::process::Command::new("sh")
+            .args(["-c", script])
+            .env("HOME", &self.1)
+            .output()?;
+        Ok(Out {
+            code: o.status.code().unwrap_or(1),
+            stdout: String::from_utf8_lossy(&o.stdout).into(),
+            stderr: String::from_utf8_lossy(&o.stderr).into(),
+        })
+    }
+}
+
+fn boot_with_shed(name: &str, version: &str) -> (Fake, String) {
+    use std::os::unix::fs::PermissionsExt;
+    let (c, cfg) = running(name);
+    let home = tmpdir(name);
+    let bin = home.join(".local/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("shed"), format!("#!/bin/sh\necho '{version}'\n")).unwrap();
+    std::fs::set_permissions(bin.join("shed"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let f = boot_fake(true);
+    let mut out = vec![];
+    let _ = drover::cloud::bootstrap(&c, &cfg, &ShedThere(&f, home), "cloud1", &mut out);
+    (f, String::from_utf8(out).unwrap())
+}
+
+fn shed_install() -> String {
+    step(&format!(
+        "cargo install --git {} --rev {}",
+        drover::shed::git(),
+        drover::shed::REV
+    ))
+}
+
+#[test]
+fn bootstrap_keeps_a_shed_whose_version_names_the_pinned_rev() {
+    let sv = drover::shed::proto::VERSION;
+    let (f, out) = boot_with_shed("cloud-shed-pin", &format!("shed {sv} ({})", &drover::shed::REV[..7]));
+    assert!(out.contains("✓ shed — there"), "{out}");
+    assert!(!f.called(&shed_install()), "{:?}", f.calls.borrow());
+}
+
+#[test]
+fn bootstrap_installs_over_a_shed_of_another_build() {
+    let sv = drover::shed::proto::VERSION;
+    for v in [format!("shed {sv} (abc1234)"), format!("shed {sv}")] {
+        let (f, out) = boot_with_shed("cloud-shed-other", &v);
+        assert!(!out.contains("✓ shed — there"), "{v}: {out}");
+        assert!(f.called(&shed_install()), "{v}: {:?}", f.calls.borrow());
+    }
+}
+
+fn gone_stops(c: &drover::Ctx) -> Vec<Event> {
+    let events = read(&c.state).unwrap();
+    let gone = |e: &&Event| e.kind == "cloud-stop" && e.str("why") == Some("gone");
+    events.iter().filter(gone).cloned().collect()
+}
+
+#[test]
+fn bootstrap_of_a_vm_deleted_outside_drover_logs_it_gone_and_creates_it() {
+    let (c, cfg) = running("cloud-gone-boot");
+    let p = c.config.with_file_name("recipes/fake.toml");
+    std::fs::write(&p, format!("create = \"fakecloud create {{name}} {{size}}\"\n{RECIPE}")).unwrap();
+    let r = boot_fake(false)
+        .once(&rc("status"), 0, "")
+        .once(&rc("status"), 0, "")
+        .reply(&rc("status"), "running\n")
+        .reply(&rc("create"), "")
+        .reply(&rc("address"), "ubuntu@10.0.0.8 2222\nssh-ed25519 AAAAC3fakekey\n");
+    let (here, cloud) = (FakeShed::new(), FakeShed::new());
+    let there = on_cloud(&r, &cloud);
+    let e = drover::cloud::bootstrap(&c, &cfg, &here.on(&there), "cloud1", &mut vec![]).unwrap_err();
+    assert!(format!("{e:#}").contains("log in in terminal"), "{e:#}");
+    assert_eq!(gone_stops(&c).len(), 1, "{:?}", r.calls.borrow());
+    assert!(
+        r.called(&rc("create")) && !r.called(&rc("start")),
+        "{:?}",
+        r.calls.borrow()
+    );
+    let events = read(&c.state).unwrap();
+    let kinds: Vec<_> = events
+        .iter()
+        .map(|e| e.kind.as_str())
+        .filter(|k| k.starts_with("cloud-"))
+        .collect();
+    assert_eq!(
+        kinds,
+        ["cloud-start", "cloud-up", "cloud-stop", "cloud-start", "cloud-up"]
+    );
+}
+
+#[test]
+fn tick_logs_a_vm_deleted_outside_drover_gone_once_and_stops_counting_its_spend() {
+    let (c, cfg) = running("cloud-gone-tick");
+    let r = lane_fake().once(&rc("status"), 0, "");
+    let out = tick(&c, &cfg, &r, &idle());
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert!(!r.called(&rc("stop")), "{:?}", r.calls.borrow());
+    assert_eq!(gone_stops(&c).len(), 1);
+    let events = read(&c.state).unwrap();
+    assert_eq!(drover::cloud::state(&events, "cloud1"), "stopped");
+    let later = drover::Ctx {
+        now: NOW + 3600,
+        ..c.clone()
+    };
+    let r = Fake::default().reply(&rc("status"), "");
+    assert_eq!(tick(&later, &cfg, &r, &idle()), [] as [String; 0]);
+    assert!(!r.called(&rc("stop")) && gone_stops(&c).len() == 1);
+    let events = read(&c.state).unwrap();
+    let spend = |c: &drover::Ctx| drover::cloud::spend(c, &cfg, &events, "cloud1").unwrap();
+    assert_eq!(spend(&c), spend(&later));
+}
+
+#[test]
+fn a_failing_status_is_not_gone() {
+    let (c, cfg) = running("cloud-gone-err");
+    let r = lane_fake().once_err(&rc("status"), 1, "network unreachable");
+    assert_eq!(tick(&c, &cfg, &r, &BTreeMap::new()), [] as [String; 0]);
+    let (here, cloud) = (FakeShed::new(), FakeShed::new());
+    let r = boot_fake(false);
+    let there = on_cloud(&r, &cloud);
+    let _ = drover::cloud::bootstrap(&c, &cfg, &here.on(&there), "cloud1", &mut vec![]);
+    assert!(r.called(&rc("status")) && !r.called(&rc("create")) && !r.called(&rc("start")));
+    assert!(gone_stops(&c).is_empty());
+    assert_eq!(drover::cloud::state(&read(&c.state).unwrap(), "cloud1"), "running");
 }
