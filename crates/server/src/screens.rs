@@ -1144,6 +1144,7 @@ impl Server<'_> {
             }
             "/screens/ask" => ask_sheet(ctx, q)?,
             "/screens/hosts" => self.hosts_sheet(ctx)?,
+            "/screens/proxy-token" => Self::proxy_how(ctx)?,
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
                 return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
             }
@@ -1196,12 +1197,32 @@ impl Server<'_> {
                 )
             })
             .collect();
-        Some(
-            json!({"type": "sheet", "id": "hosts", "title": "Hosts", "cancel": "Close", "blocks": [{"type": "section",
-            "id": "hosts-sec", "header": format!("hosts ({})", rows.len()),
+        let mut blocks = vec![
+            json!({"type": "section", "id": "hosts-sec", "header": format!("hosts ({})", rows.len()),
             "footer": "Tap a host for its buttons. Host history and charts live in Beacon.",
-            "blocks": [{"type": "list", "id": "hosts-list", "rows": rows}]}]}),
-        )
+            "blocks": [{"type": "list", "id": "hosts-list", "rows": rows}]}),
+        ];
+        if let Some(facts) = crate::proxy::status(ctx, &cfg, &self.r) {
+            let mut rows: Vec<Value> = (facts.iter().enumerate())
+                .map(|(i, f)| json!({"type": "row", "id": format!("px-{i}"), "title": f}))
+                .collect();
+            rows.push(json!({"type": "row", "id": "px-how", "title": "How to set", "accessory": "chevron", "tap": {"sheet": "/screens/proxy-token"}}));
+            blocks.push(json!({"type": "section", "id": "proxy-sec", "header": "Token proxy",
+                "footer": "The token shows no expiry: days left estimate saved + 365 d.",
+                "blocks": [{"type": "list", "id": "proxy-list", "rows": rows}]}));
+        }
+        Some(json!({"type": "sheet", "id": "hosts", "title": "Hosts", "cancel": "Close", "blocks": blocks}))
+    }
+
+    fn proxy_how(ctx: &Ctx) -> Option<Value> {
+        let (path, _) = crate::proxy::token_file(&Config::kept(ctx).ok()?);
+        let setup = crate::providers::proxied()?.setup;
+        let md = format!("On the main host:\n\n1. `{setup}`, then copy the token it prints.\n2. `umask 077; mkdir -p \"$(dirname {path})\"`\n\
+3. `pbpaste > {path}` (macOS), or `read -rs t && printf '%s\\n' \"$t\" > {path}; unset t` and paste, then Enter.\n\
+4. `chmod 600 {path}` and `[proxy] token-file = \"{path}\"` in fleet.toml.\n\nIt lasts about a year: redo these to renew it.");
+        let how = json!([{"type": "text", "id": "proxy-how", "markdown": md}]);
+        let v = json!({"type": "sheet", "id": "proxy-token", "title": "Set the proxy token", "cancel": "Done", "blocks": how});
+        Some(v)
     }
 
     fn lane_sheet(&self, ctx: &Ctx, agent: &str) -> Option<Value> {

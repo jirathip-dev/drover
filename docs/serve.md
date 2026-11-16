@@ -306,7 +306,8 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   action runs the board's `act` (the CLI verb, `confirm`ed) or `send`, logged `act`/`prompt` with `device: cooee`;
 - #1091: `GET /screens/hosts`, the page's Hosts sheet (a [⚙] row, not cooee's): one row per host, main first, then
   A→Z, with its kind, on/off and live lane count; a remote host's [Off]/[On] runs `host` (`host-off`/`host-on`) and
-  the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed. No gauges or charts (Beacon's);
+  the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token
+  proxy section under it holds doctor's proxy facts and [How to set], `GET /screens/proxy-token`, the token's steps;
 - `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
   `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
