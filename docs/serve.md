@@ -305,6 +305,12 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   for an Others agent), a Send line and the transcript (`/api/v1/lane/<agent>`'s blocks as text and row blocks). Each
   action runs the board's `act` (the CLI verb, `confirm`ed) or `send`, logged `act`/`prompt` with `device: cooee`. The
   Host tab is not ported (#926): `drover doctor` and `GET /api/v1/host` remain;
+- #1092: `GET /screens/herd`, the page's Herd (page-only, [⚙] → Herd; cooee draws its own scene): one `scene` block
+  with `weather` (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `line`)
+  and `repos`, each a fleet (then `others`) with its queued issues at the gate and its lanes in bands (working, idle,
+  done, blocked) as rows with figures. The page draws the theme's `scene.svg` (the pinned swag pack; a `<config
+  dir>/themes/<name>/scene.svg` overrides it; farm and terminal, with none, get a drawn ranch), [‹] [›] switch repo
+  and [☾] switches night;
 - `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
   `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
