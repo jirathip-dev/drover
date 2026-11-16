@@ -1,0 +1,13 @@
+Decided: the swipe works on every pushed screen (back stack non-empty), in Safari and the installed app alike; it starts only at x<20 with no sheet open
+Because: "a swipe from the left edge goes back, the same as [‹ back] or `history.back()`"
+Decided: the screen's children translate, not the tab section, so the thread's fixed scroller and composer move with the finger instead of re-anchoring
+Because: web/src/board.css:146
+Decided: the offset is cleared in a hashchange listener added after the router's, so the list is painted before the thread snaps back (no flash)
+Because: "The view follows your finger and snaps back if you let go early. No flash and no grey frame"
+Decided: a touch starting in #iv, .imgs or pre is ignored, and a mostly vertical first move drops the swipe
+Because: "doesn't fight the iOS PWA's own back gesture, horizontal scrolling in code blocks, or the image viewer"
+Decided: go() saves scrollY per path and restores it when going back, which also fixes it for [‹ back]
+Because: "returns to the thread list, with the list's scroll position kept"
+Rejected: pointer events — iOS sends pointercancel once it starts a pan; touch events reach the page in full
+Check: CI ui-webkit runs parity_webkit; locally WebKit timed out at newPage for every test on this host
+Owner: In a thread, swipe in from the left edge of the phone to go back to the list, which stays where you left it.
