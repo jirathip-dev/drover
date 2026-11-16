@@ -139,3 +139,67 @@ fn a_recorded_rev_verdict_closes_the_rev_pane() {
     assert_eq!(code, 0, "{out}");
     assert!(sh.called("kill", rev) && !sh.has(rev), "{out} {:?}", sh.methods());
 }
+
+const HOSTS: &str = "[hosts.a]\nmachine = \"a\"\nmax_working = 4\n\n[hosts.b]\nmax_working = 4\ntags = [\"gpu\"]\n\n\
+[hosts.c]\nmachine = \"c\"\nmax_working = 4\n\n[limits]";
+
+fn three_hosts(name: &str, needs: &[&str]) -> (drover::Ctx, FakeShed) {
+    let c = ctx(&tmpdir(name), &CONFIG.replace("[limits]", HOSTS));
+    let add = [&["queue", "sendmeter", "add", "9"][..], needs].concat();
+    assert_eq!(run(&c, &Fake::default(), &add).0, 0);
+    let seen = json!({"a": {"up": false}, "b": {"up": true, "tags": ["gpu"]}, "c": {"up": true}});
+    std::fs::write(c.state.with_file_name("hosts.json"), seen.to_string()).unwrap();
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    (c, sh)
+}
+
+fn bound(c: &drover::Ctx, n: u64, host: &str) -> Event {
+    let at = |kind, d| append(&c.state, &Event::new(c.now, "sendmeter", Some(n), kind, d)).unwrap();
+    at(
+        "spawn-started",
+        json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "host": host}),
+    );
+    Event::new(c.now, "sendmeter", Some(n), "spawn", json!({"role": "impl"}))
+}
+
+fn slot(c: &drover::Ctx, start: &[Event]) -> Option<String> {
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let ev = read(&c.state).unwrap();
+    drover::hosts::slot_before(c, &cfg, &fake(), &ev, ("sendmeter", 9, "impl"), start)
+}
+
+#[test]
+fn an_offline_host_and_a_full_one_leave_the_idle_host_free() {
+    let (c, sh) = three_hosts("slots-offline", &[]);
+    for n in 1..=4 {
+        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("sendmeter-impl-{n}")});
+        append(&c.state, &Event::new(c.now, "sendmeter", Some(n), "spawn", d)).unwrap();
+        sh.lane(&format!("sendmeter-impl-{n}"), "working", "/w");
+    }
+    assert_eq!(slot(&c, &[]), None);
+}
+
+#[test]
+fn a_pending_start_counts_only_against_its_own_host() {
+    let (c, _sh) = three_hosts("slots-bound", &[]);
+    let start: Vec<Event> = (1..=4).map(|n| bound(&c, n, "b")).collect();
+    assert_eq!(slot(&c, &start), None);
+    let (c, _sh) = three_hosts("slots-bound-gpu", &["--needs", "gpu"]);
+    let start: Vec<Event> = (1..=4).map(|n| bound(&c, n, "b")).collect();
+    assert_eq!(
+        slot(&c, &start).as_deref(),
+        Some("waiting for a slot: 4/4 working on b")
+    );
+}
+
+#[test]
+fn when_every_up_host_is_full_the_hold_never_names_the_offline_one() {
+    let (c, _sh) = three_hosts("slots-all-full", &[]);
+    let start: Vec<Event> = (1..=8).map(|n| bound(&c, n, if n > 4 { "c" } else { "b" })).collect();
+    let why = slot(&c, &start).unwrap_or_default();
+    assert!(
+        why == "waiting for a slot: 4/4 working on b" || why == "waiting for a slot: 4/4 working on c",
+        "{why}"
+    );
+}
