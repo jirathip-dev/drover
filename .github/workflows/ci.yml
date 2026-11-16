@@ -196,7 +196,7 @@ jobs:
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
           webkit=false
-          grep -qE '^(web/|assets/|crates/server/src/(serve\.rs|screens\.rs)|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs))' changed.txt && webkit=true
+          grep -qE '^(web/|assets/|crates/server/src/(serve\.rs|screens\.rs)|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|page_drafts\.rs|ui/drafts\.mjs))' changed.txt && webkit=true
           echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
 
   # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.
@@ -222,3 +222,5 @@ jobs:
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
       - name: "url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)"
         run: cargo test --locked --test url_links
+      - name: "typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65)"
+        run: cargo test --locked --test page_drafts
