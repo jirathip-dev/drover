@@ -1,0 +1,7 @@
+Decided: the second memory handover test waits for the fifth "phone page on" line and for every bridge to close its stderr before it ends
+Because: crates/server/src/handover.rs:152
+Because: crates/cli/tests/handover.rs:565
+Rejected: rerunning the shard as a flake — staging fails the same temp-dir step, and the leftover is a live detached serve
+Rejected: killing the bridges by pid — the test never learns the second bridge's pid, but the pipe's EOF proves they are all gone
+Check: after `cargo test --test handover`, no drover serve from a fleet-test-ho-* dir is still running
+Owner: the shared test run no longer leaves a stray background server behind, which was turning CI red at random
