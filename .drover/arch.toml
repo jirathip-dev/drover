@@ -1,6 +1,18 @@
 frozen = ["ci/cap.toml", "crates/core/src/events/passive.rs"]
-generated = ["assets/types/api.d.ts"]
-generate = "just types"
+generated = [
+    "assets/types/api.d.ts",
+    "web/dist/board.js",
+    "web/dist/board.css",
+    "docs/workflow.md",
+    "crates/cli/tests/golden/briefs/design.md",
+    "crates/cli/tests/golden/briefs/impl.md",
+    "crates/cli/tests/golden/briefs/impl-fix.md",
+    "crates/cli/tests/golden/briefs/impl-repro.md",
+    "crates/cli/tests/golden/briefs/impl-update.md",
+    "crates/cli/tests/golden/briefs/rev.md",
+    "crates/cli/tests/golden/briefs/rev-repro.md",
+]
+generate = "just gen"
 shared = [
     "crates/core/src/check.rs",
     "crates/core/src/cli.rs",

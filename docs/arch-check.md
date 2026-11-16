@@ -111,6 +111,10 @@ dir = "src/features"
 glob = "*.rs"
 ```
 
+This repo lists every built file `generated` with `generate = "just gen"` (#1147): the TS types, `web/dist`,
+`docs/workflow.md` and the brief goldens. When one conflicts in an update round, take either side, run `just gen` and
+commit; never merge it by hand.
+
 A frozen or generated file counts as converted: `drover hotspots` leaves it out. So does a `shared` one (#1147):
 
 ```toml
