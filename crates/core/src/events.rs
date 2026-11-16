@@ -914,7 +914,7 @@ pub fn of_agent<'a>(events: &'a [Event], agent: &str) -> Vec<&'a Event> {
     at.map_or_else(Vec::new, |v| v.iter().filter_map(|i| events.get(*i)).collect())
 }
 
-/// Current per-issue state (the states in `roles/usage-tail.md`); #859: the cached log's fold when `events` is it.
+/// Current per-issue state (the states in `roles/usage/20-states.md`); #859: the cached log's fold when `events` is it.
 pub fn fold(events: &[Event]) -> States {
     if let Some(l) = cached(events) {
         return l.states.clone();

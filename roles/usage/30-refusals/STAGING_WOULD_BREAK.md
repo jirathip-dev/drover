@@ -1,0 +1,1 @@
+- STAGING_WOULD_BREAK: merge: a `premerge` check fails on the PR merged with current integration (→ fix round, not counted)

@@ -1,0 +1,1 @@
+- HOST_OFFLINE: the lane's host is unreachable; its lanes show `host offline` and wait for it
