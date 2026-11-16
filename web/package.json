@@ -5,7 +5,8 @@
   "description": "#265: the TypeScript board; `npm run build` writes dist/ (committed, embedded in the binary)",
   "scripts": {
     "build": "esbuild src/main.ts --bundle --minify --format=esm --target=es2020 --outfile=dist/board.js && esbuild src/board.css --bundle --minify --outfile=dist/board.css",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "lint": "node --no-warnings lint.mjs src"
   },
   "devDependencies": {
     "esbuild": "0.28.2",

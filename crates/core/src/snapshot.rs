@@ -223,7 +223,7 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     let sessions = crate::session::all(cfg, &s);
     if sessions.listed() {
         if let Err(e) = crate::session::stamp::observe(ctx, cfg, &sessions) {
-            eprintln!("drover: lane states: {e:#}");
+            crate::stderr!("drover: lane states: {e:#}");
         }
         let events = crate::events::working(&ctx.state).unwrap_or_default();
         let all = lanes(cfg, &s, (&events, &crate::events::fold(&events)), &sessions);
@@ -236,6 +236,6 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
         waits: ws,
         key,
     };
-    let _ = crate::db::put(&ctx.state, "board", ctx.now, &snap);
+    crate::db::put(&ctx.state, "board", ctx.now, &snap).ok();
     s
 }
