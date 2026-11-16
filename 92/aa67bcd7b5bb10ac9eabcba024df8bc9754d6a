@@ -1,0 +1,4 @@
+Decided: merged origin/staging, keeping this branch's per-fleet closed reconcile and staging's .at reads and queue card layout
+Because: crates/server/src/screens.rs:295
+Rejected: none
+Owner: The branch is brought up to date with staging, with no change in behaviour beyond the issue's fix.
