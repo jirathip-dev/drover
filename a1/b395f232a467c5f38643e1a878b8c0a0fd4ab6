@@ -1,0 +1,12 @@
+Decided: run the drover version read and sync start first in a host's survey, right after the probe, before proxy and health
+Because: "Every tick, a remote host whose drover differs from the main host's gets its sync started"
+Because: crates/core/src/hosts.rs:350
+Rejected: let the sync bypass the pass's offline mark — an offline host must stay uncontacted for the pass
+Decided: a done line from the sync reruns health in the same pass
+Because: "Once a sync reports done, that host's health (the acp guard version) is read again in the same pass"
+Decided: host-sync-skipped is logged when the status read fails and the last pass read a version, or none was ever logged
+Because: "it logs a `host-sync-skipped` event with the reason, once per streak"
+Decided: the pass's not-sent reason now says which of offline or over budget applied, for that event's reason
+Decided: moved the sync tests to tests/host_sync.rs; hosts.rs was over its 1791-line arch baseline
+Check: the regression test stays in tests/hosts.rs; a 124 on the hourly health git ls-remote no longer hides the sync
+Owner: remote hosts now start their drover update every tick even when a slow health check times out, and are usable as soon as it lands
