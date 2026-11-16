@@ -158,3 +158,28 @@ fn a_kind_flagged_passive_where_it_is_emitted_is_not_activity() {
     let s = &fold(&read(&c.state).unwrap())[&("app".to_string(), 1)];
     assert_eq!((s.last_event.as_str(), s.last_ts), ("brand-new-note", 30));
 }
+
+#[test]
+#[ignore = "perf: cargo test --release -p drover --test state_db hot_db_calls -- --ignored --nocapture"]
+fn hot_db_calls_on_a_20k_claim_log() {
+    let p = tmpdir("db-hot").join("events.jsonl");
+    let evs: Vec<Event> = (0..20_000)
+        .map(|i| {
+            let kind = ["intent", "done", "failed"][i % 3];
+            Event::new(1, "app", Some(1), kind, json!({"action_id": format!("a{i}")}))
+        })
+        .collect();
+    db::ask(&p, evs, None).unwrap();
+    let t = std::time::Instant::now();
+    for i in 0..1_000 {
+        let none = |l: Option<&Event>| l.is_none();
+        assert!(db::claim(&p, &[], &format!("new{i}"), &none).unwrap().1);
+    }
+    let claim = t.elapsed().as_millis();
+    let t = std::time::Instant::now();
+    for _ in 0..1_000 {
+        assert_eq!(db::last_seq(&p), 20_000);
+    }
+    let seq = t.elapsed().as_millis();
+    eprintln!("1000 claims: {claim} ms; 1000 last_seq: {seq} ms");
+}
