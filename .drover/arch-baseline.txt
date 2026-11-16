@@ -3,7 +3,7 @@ crates/cli/tests/hook.rs 1629
 crates/cli/tests/hosts.rs 1763
 crates/cli/tests/shed.rs 2495
 crates/core/src/arch.rs:check 159
-crates/core/src/check.rs 2556
+crates/core/src/check.rs 2531
 crates/core/src/check.rs:check 543
 crates/core/src/check.rs:clean_all 267
 crates/core/src/cli.rs 2506

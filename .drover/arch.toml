@@ -57,7 +57,7 @@ except = [
 paths = ["docs/**/*.md", "README.md"]
 watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/server/src/api.rs"]
 cli = true
-skip = [".drover/**"]
+skip = [".drover/**", "roles/usage-tail.md"]
 
 [[ban]]
 pattern = "claude"
