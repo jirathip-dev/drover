@@ -455,6 +455,15 @@ pub struct Fleet {
     pub runtime: Option<Runtime>,
     /// #732: lets `rev` share `impl`'s provider; its line needs a `#` reason comment.
     pub rev_same_provider: Option<bool>,
+    /// #782: `srt` starts every lane's agent inside sandbox-runtime with the rules `sandbox::settings` writes; unset = off.
+    pub sandbox: Option<Sandbox>,
+}
+
+/// #782: the kernel sandbox a lane's agent runs in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sandbox {
+    Srt,
 }
 
 /// #1097: `squash` lands a PR as one commit carrying its why notes and deletes its branch; `merge` keeps every commit.

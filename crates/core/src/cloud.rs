@@ -467,12 +467,14 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     if on.read(p).and_then(|t| mine(&t.parse().ok()?)) == Some(true) {
         on.remove(p)?;
     }
-    let sync = format!("test ! -e '{conf}' || '{exe}' profiles sync");
-    let o = sh(&sync)?;
-    ensure!(o.code == 0, "{}", fail("profiles sync", &sync, &o));
-    writeln!(out, "✓ profiles sync — there")?;
+    if on.exists(p) {
+        let sync = format!("'{exe}' profiles sync");
+        let o = sh(&sync)?;
+        ensure!(o.code == 0, "{}", fail("profiles sync", &sync, &o));
+        writeln!(out, "✓ profiles sync — there")?;
+    }
     if acp {
-        for (p, family, _) in crate::hosts::acp_profiles(cfg, &tags) {
+        for (p, family, _) in crate::hosts::acp_profiles(cfg, name, &tags) {
             let args = ["profiles", "sync", "--profile", &p, "--role", family];
             let o = on.run(&exe, &argv(&args))?;
             ensure!(
@@ -497,14 +499,24 @@ command -v drover >/dev/null || { echo \"drover not on PATH $PATH\"; exit 1; }";
     Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)
 }
 
-/// #255 `hosts snapshot <name>`: after a fresh health look, up with no `✗`, the recipe's `snapshot`; logs `cloud-snapshot`.
+/// #255 `hosts snapshot <name>`: after a fresh health look, up with no `✗`, the recipe's `snapshot`; logs `cloud-snapshot`. #1127: then a shed there that does not answer is restarted once, else the error.
 pub fn snapshot(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     crate::hosts::survey(ctx, cfg, r, true);
     let s = crate::hosts::cached(ctx).remove(name).unwrap_or_default();
     let bad: Vec<_> = s.health.iter().filter(|w| w.starts_with('✗')).cloned().collect();
     ensure!(s.up && bad.is_empty(), "{name} is not healthy: {}", bad.join("; "));
     cmd(ctx, cfg, r, name, "snapshot")?;
-    log(ctx, cfg, "cloud-snapshot", name, json!({}))
+    log(ctx, cfg, "cloud-snapshot", name, json!({}))?;
+    let on = crate::hosts::On::new(r, cfg.hosts[name].machine.as_deref());
+    let dead = || crate::hosts::shed_row(&on).filter(|l| l.starts_with("✗ shed"));
+    if dead().is_none() {
+        return Ok(());
+    }
+    let o = on.run_in("sh", &argv(&["-c", crate::hosts::SHED_RESTART]), "")?;
+    let why = dead().map(|l| format!("{l} (restart exit {}: {})", o.code, o.stderr.trim()));
+    why.map_or(Ok(()), |w| {
+        bail!("{name}: shed does not answer after the snapshot: {w}")
+    })
 }
 
 /// #635 doctor rows for cloud host `name`: an old size, where its provider key is, and each recipe subcommand of its CLI (the recipe's name, e.g. `boat`) in that CLI's `--help`.

@@ -1061,6 +1061,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         head,
         session: Some((session.clone(), resume)),
         lane_key: None,
+        sandbox: None,
     };
     p.env.insert("DROVER_THREAD".into(), id.into());
     p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());
