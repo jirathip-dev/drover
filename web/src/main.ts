@@ -17,7 +17,14 @@ type View = { path: string; model: Blk | null; at: number; live: boolean; es?: E
 const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, root, open: new Set(), back: [] });
 const tabs = PL.filter(p => p.type === 'header-strip' && p.screen).map(p => ({ ...p, v: view(p.screen!, el('section', 'tab')), a: el('a') }));
 const cards = PL.some(p => p.type === 'chat-cards') ? view('/screens/cards', $('#cards')) : null;
-let cur = tabs.find(t => t.id === (location.hash.slice(1) || get('tab'))) ?? tabs[0];
+type Tab = (typeof tabs)[number];
+const hashOf = (t: Tab, p: string) => '#' + t.id + (p.startsWith(t.screen + '/') ? p.slice(t.screen!.length) : '');
+const route = (h = location.hash.slice(1) || (get('tab') ?? '')): [Tab, string] | null => {
+  const t = tabs.find(x => h === x.id || h.startsWith(x.id + '/'));
+  return t ? [t, t.screen + h.slice(t.id!.length)] : null;
+};
+const at = route();
+let cur = at?.[0] ?? tabs[0];
 
 const dot = $('#dot'), stale = $('#stale');
 function sync() {
@@ -90,7 +97,7 @@ function paint(v: View, before?: Blk | null) {
   if (v.back.length && body[0]) {
     const b = el('button', '', '<span>‹ back</span>');
     b.type = 'button';
-    b.onclick = () => go(v, v.back.pop()!, false);
+    b.onclick = () => (v === cur.v ? history.back() : go(v, v.back.pop()!, false));
     body[0].prepend(b);
   }
   const keep = f && v.root.contains(f) && f.matches('input, select') ? f.closest('[data-id]') : null;
@@ -165,6 +172,7 @@ const close = (v: View) => { v.es?.close(); v.es = undefined; v.live = false; };
 
 function go(v: View, path: string, push = true) {
   if (push) v.back.push(v.path);
+  if (push && v === cur.v) history.pushState(null, '', hashOf(cur, path));
   const s = spot(scroller(v));
   if (s) spots.set(v.path, s);
   close(v);
@@ -172,11 +180,15 @@ function go(v: View, path: string, push = true) {
   load(v);
 }
 
-function show(t: (typeof tabs)[number]) {
+function show(t: Tab, path = t.v.path) {
   if (cur !== t) close(cur.v);
+  if (path !== t.v.path) {
+    close(t.v);
+    [t.v.path, t.v.model, t.v.back] = [path, null, path === t.screen ? [] : [t.screen!]];
+  }
   cur = t;
   put('tab', t.id ?? null);
-  if (location.hash.slice(1) !== t.id) history.replaceState(null, '', '#' + t.id);
+  if (location.hash !== hashOf(t, t.v.path)) history.replaceState(null, '', hashOf(t, t.v.path));
   tabs.forEach(x => { x.a.classList.toggle('on', x === t); x.v.root.hidden = x !== t; });
   H.dataset.tab = t.id;
   load(t.v, !!t.v.model);
@@ -234,7 +246,15 @@ addEventListener('keydown', e => { if (e.key === 'Escape' && !sh.hidden) closeSh
 function tap(t: Blk) {
   if (t.sheet) sheet(t.sheet);
   else if (t.open) go(cur.v, t.open, !t.keep);
-  else if (t.thread) toast('threads open in cooee');
+  else if (t.copy != null) void copy(t.copy);
+  else if (t.thread) /^t\d+$/.test(t.thread) ? thread(t.thread) : sheet(`/screens/lanes/${t.thread}`);
+}
+function thread(id: string) {
+  const t = tabs.find(x => x.id === 'threads');
+  if (!t) return toast('no Threads tab on this page', true);
+  closeSheet();
+  history.pushState(null, '', hashOf(t, `${t.screen}/${id}`));
+  show(t, `${t.screen}/${id}`);
 }
 
 // A confirm: the block's own words, [cancel] and its [ok] (a destructive one in red).
@@ -273,6 +293,7 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<bo
       close(v);
       v.model = apply(v.model ?? {}, ops as never);
       v.path = String(v.model.stream ?? v.path).replace(/\/stream/, '') || v.path;
+      if (v === cur.v) history.replaceState(null, '', hashOf(cur, v.path));
       [v.at] = [Date.now()];
       put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
       paint(v);
@@ -344,8 +365,7 @@ function settings() {
   if (menu.length) body.push(sec('screens', menu.map(p => row(p.label ?? p.screen!, false, () => sheet(p.screen!), p.subtitle))));
   body.push(sec('theme', themes().map(n => row(n, n === H.dataset.theme, () => { put('theme', n); H.dataset.theme = n; colours(); theme(n).then(redraw); settings(); }))));
   body.push(sec('colours', schemes().map(n => row(n, n === H.dataset.scheme, () => { put('scheme', n); colours(); settings(); }))));
-  const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
-  if (standalone && 'PushManager' in window && B.dataset.key) body.push(sec('alerts', [row('enable alerts on this phone', false, alerts)]));
+  if (app && 'PushManager' in window && B.dataset.key) body.push(sec('alerts', [row('enable alerts on this phone', false, alerts)]));
   body.push(el('p', 'm foot', 'this phone only · the home-screen icon keeps its install-time look'));
   shv.root.replaceChildren(...body);
   sh.hidden = false;
@@ -407,9 +427,9 @@ async function copy(text: string, b?: HTMLElement) {
   }
 }
 main.addEventListener('click', e => {
-  const t = e.target as Element, c = t.closest<HTMLElement>('.cpy'), a = t.closest<HTMLElement>('a[data-open]');
+  const t = e.target as Element, c = t.closest<HTMLElement>('.cpy'), a = t.closest<HTMLElement>('a[data-thread]');
   if (c) copy(c.previousElementSibling!.textContent ?? '', c);
-  if (a) { e.preventDefault(); go(cur.v, a.dataset.open!); }
+  if (a) { e.preventDefault(); thread(a.dataset.thread!); }
 });
 function press(k: HTMLElement) {
   const txt = [...k.querySelectorAll<HTMLElement>(':scope > .txt')], plain = txt.map(t => t.innerText).join('\n\n'), raw = txt.map(t => t.dataset.md).join('\n\n');
@@ -438,11 +458,28 @@ $('#sysb').onclick = settings;
 document.querySelectorAll<HTMLElement>('.pairb').forEach(b => { b.onclick = pair; });
 addEventListener('online', sync);
 addEventListener('offline', sync);
-addEventListener('hashchange', () => { const t = tabs.find(x => x.id === location.hash.slice(1)); if (t && t !== cur) show(t); });
+addEventListener('hashchange', () => {
+  const r = route(location.hash.slice(1));
+  if (!r) return;
+  const [t, p] = r;
+  if (t !== cur) return show(t, p);
+  if (p === t.v.path) return;
+  if (t.v.back[t.v.back.length - 1] === p) t.v.back.pop();
+  else t.v.back.push(t.v.path);
+  go(t.v, p, false);
+});
+let edge = -1;
+const app = matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
+if (app) addEventListener('touchstart', e => { edge = e.touches[0].clientX < 24 ? e.touches[0].clientX : -1; }, { passive: true });
+addEventListener('touchend', e => { if (edge >= 0 && e.changedTouches[0].clientX - edge > 80 && cur.v.back.length && sh.hidden) history.back(); edge = -1; }, { passive: true });
 setInterval(() => { if (!document.hidden) { paint(cur.v); sync(); } }, 30_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && !cur.v.live) load(cur.v, true); });
 colours();
 theme(H.dataset.theme ?? 'farm').then(redraw);
 if (cards) load(cards);
-show(cur);
+if (at && at[1] !== cur.screen) {
+  history.replaceState(null, '', '#' + cur.id);
+  history.pushState(null, '', hashOf(cur, at[1]));
+}
+show(cur, at?.[1]);
 if ('serviceWorker' in navigator && !demo) navigator.serviceWorker.register(url('sw.js')).catch(() => {});

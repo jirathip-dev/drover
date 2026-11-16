@@ -100,10 +100,10 @@
       ],
       "buttons": [
         {
-          "id": "m-8-l",
+          "id": "m-8-link",
           "label": "from t3",
           "tap": {
-            "open": "/screens/threads/t3"
+            "thread": "t3"
           },
           "type": "button"
         }

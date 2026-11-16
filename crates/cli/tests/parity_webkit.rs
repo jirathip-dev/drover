@@ -151,7 +151,6 @@ fn parity_2_a_live_update_never_moves_the_scroll_or_replaces_a_kept_node() {
 }
 
 #[test]
-#[ignore = "red until #1088: opening a thread pushes no history entry"]
 fn parity_24_opening_a_thread_pushes_history_and_back_returns_to_the_list() {
     if no_webkit() {
         return;
@@ -267,7 +266,7 @@ fn parity_18_a_message_links_its_urls_and_thread_refs_and_keeps_its_markdown() {
     }
     let js = format!(
         "{OPEN} return [+!!card.querySelector('a[href=\"https://example.com/a\"]'), \
-        +!!card.querySelector('a[data-open=\"/screens/threads/t2\"]'), +(card.querySelector('.txt b')?.textContent === 'this')];"
+        +!!card.querySelector('a[data-thread=\"t2\"]'), +(card.querySelector('.txt b')?.textContent === 'this')];"
     );
     assert_eq!(
         late(&coded("parity-18"), "parity-18-png", &js),

@@ -155,3 +155,4 @@ html[data-focus] .form.say{bottom:0}
 #iv.z{overflow:auto}
 #iv>.bar{position:fixed;bottom:env(safe-area-inset-bottom);left:0;right:0;justify-content:center;background:var(--bg)}
 #iv .bar>a{display:inline-flex;align-items:center;height:var(--ctl);color:var(--l);text-decoration:none}
+.card .form.say{position:static;border:0;padding:0;background:none}

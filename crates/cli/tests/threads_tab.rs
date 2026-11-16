@@ -190,8 +190,8 @@ fn the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only() {
     assert_eq!(find(&t, "m-8-i")["items"][0]["src"], "/thread/t2/shot.png");
     assert_eq!(find(&t, "m-8-f0")["tap"], json!({"url": "/thread/t2/run.log"}));
     assert_eq!(
-        (&find(&t, "m-8-l")["label"], &find(&t, "m-8-l")["tap"]),
-        (&json!("from t3"), &json!({"open": "/screens/threads/t3"}))
+        (&find(&t, "m-8-link")["label"], &find(&t, "m-8-link")["tap"]),
+        (&json!("from t3"), &json!({"thread": "t3"}))
     );
     let bad = blocks.iter().find(|b| b["tone"] == "bad").unwrap();
     assert_eq!(bad["buttons"][0]["action"], "thread-retry", "{t}");
@@ -405,4 +405,174 @@ fn the_keyboard_keeps_the_composer_flush_on_it_in_webkit_and_the_page_still() {
         box.focus(); kb(336); const at = await look(vv.offsetTop + vv.height); \
         box.blur(); kb(0); at.push(...await look($('nav').getBoundingClientRect().top), errs.length); return at;";
     assert_eq!(webkit("thread-kb-webkit", js), [0., 0., 1., 0., 0., 1., 0.]);
+}
+
+fn cards(name: &str) -> drover::Ctx {
+    let c = recorded(name);
+    let f = Fake::default();
+    assert_eq!(run(&c, &f, &["thread", "new", "sendmeter", "Ops"]).1, "t4\n");
+    let file = c.config.with_file_name("proposed.toml");
+    let old = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&file, old.replacen("model = \"opus\"", "model = \"sonnet\"", 1)).unwrap();
+    assert_eq!(
+        run(&c, &f, &["config", "propose", "t4", file.to_str().unwrap()]),
+        (0, "c1\n".into())
+    );
+    let secret = ["secret", "request", "t4", "API_KEY", "--why", "the search API"];
+    assert_eq!(run(&c, &f, &secret).0, 0);
+    let card = |cmd: &str| {
+        let a = [
+            "card",
+            "post",
+            "t4",
+            "--cmd",
+            cmd,
+            "--why",
+            "owner asked",
+            "--blast",
+            "read-only",
+            "--dir",
+            "/srv/app",
+        ];
+        let (code, id) = run(&c, &f, &a);
+        assert_eq!(code, 0, "{id}");
+        id.trim().to_string()
+    };
+    card("git log -1");
+    let done = card("git status");
+    let ev = |ts: u64, kind: &str, d: Value| append(&c.state, &Event::new(ts, "sendmeter", None, kind, d)).unwrap();
+    ev(T, "run-settled", json!({"id": done, "approved": true, "by": "owner"}));
+    ev(
+        T,
+        "run-done",
+        json!({"id": done, "code": 1, "tail": "fatal: not a git repository"}),
+    );
+    let lane =
+        json!({"id": "q9", "question": "Split the worker?", "options": ["yes", "no"], "recommend": 1, "kind": "owner"});
+    append(
+        &c.state,
+        &Event::new(T - 120, "sendmeter", Some(12), "needs-decision", lane),
+    )
+    .unwrap();
+    ev(
+        T - 60,
+        "decision",
+        json!({"id": "q9", "choice": "yes", "by": "orchestrator-t4"}),
+    );
+    let say = |d: Value| ev(T - 30, "thread-msg", d);
+    say(json!({"thread": "t4", "from": "system", "text": "answered q9 for you: yes", "change": "q9"}));
+    say(json!({"thread": "t4", "from": "system", "text": "claude is signed out: sign in", "signin": "claude"}));
+    ev(
+        T - 20,
+        "thread-handoff",
+        json!({"thread": "t4", "to": "t2", "title": "Rate limits"}),
+    );
+    c
+}
+
+#[test]
+fn every_card_kind_in_a_thread_is_its_golden_json() {
+    let c = cards("thread-cards-get");
+    let r = OnShed::new(Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let t = get(&s, "/screens/threads/t4", "");
+    golden("thread-cards", &t);
+    let blocks = t["blocks"].as_array().unwrap();
+    let kinds: Vec<&str> = blocks.iter().filter_map(|b| b["kind"].as_str()).collect();
+    assert_eq!(kinds, ["config", "secret", "run", "run", "ask", "sys", "sys"], "{t}");
+    assert_eq!(
+        blocks[0]["subtitle"],
+        json!({"text": "waiting: config c1 · no orchestrator yet · sendmeter · claude · opus", "tone": "warn"}),
+        "the bar names the waiting proposal"
+    );
+    let config = &blocks[1];
+    let acts: Vec<&Value> = config["buttons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| &b["values"]["act"])
+        .collect();
+    assert_eq!(acts, [&json!("apply"), &json!("discard")]);
+    assert!(config.to_string().contains(r#"+ model = \"sonnet\""#), "{config}");
+    assert!(
+        blocks[2].to_string().contains("pair this device") && !blocks[2].to_string().contains("\"form\""),
+        "an unpaired device sees no secret entry: {}",
+        blocks[2]
+    );
+}
+
+#[test]
+fn parity_32_the_owner_settles_each_card_from_inside_its_thread() {
+    let c = cards("thread-cards-act");
+    let r = OnShed::new(Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let t = get(&s, "/screens/threads/t4", &ck);
+    let secret = find(&t, "m-17-f");
+    assert_eq!(
+        secret["fields"][0]["type"], "secret",
+        "a paired device enters it masked: {t}"
+    );
+    let post = |a: &Value| {
+        let (status, v) = req(&s, "POST", "/action", &a.to_string(), &ck);
+        assert_eq!(status, 200, "{a}: {v}");
+    };
+    let tap =
+        |b: &Value| json!({"screen": "thread-t4", "block": b["id"], "action": b["action"], "values": b["values"]});
+    let logged = |kind: &str| read(&c.state).unwrap().to_vec().into_iter().rfind(|e| e.kind == kind);
+
+    post(&tap(find(&t, "m-16-apply")));
+    assert!(std::fs::read_to_string(&c.config)
+        .unwrap()
+        .contains("model = \"sonnet\""));
+    assert_eq!(
+        logged("config-settled")
+            .and_then(|e| e.str("id").map(String::from))
+            .as_deref(),
+        Some("c1")
+    );
+
+    let mut save = tap(&secret["submit"]);
+    save["values"]["text"] = json!("s3cr3t-value");
+    post(&save);
+    assert!(logged("secret-set").is_some_and(|e| e.str("name") == Some("API_KEY")));
+    assert!(!format!("{:?}", read(&c.state).unwrap().to_vec()).contains("s3cr3t-value"));
+
+    let run = find(&t, "r1");
+    post(
+        &json!({"screen": "thread-t4", "block": "r1", "action": run["action"], "values": {"choice": "deny", "sha": run["sha"]}}),
+    );
+    let settled = logged("run-settled").unwrap();
+    assert_eq!(
+        (settled.str("id"), settled.val("approved")),
+        (Some("r1"), &json!(false))
+    );
+
+    let mut change = tap(find(&t, "q9"));
+    change["values"]["choice"] = json!("no");
+    post(&change);
+    let d = logged("decision").unwrap();
+    assert_eq!(
+        (d.str("id"), d.str("choice"), d.str("by")),
+        (Some("q9"), Some("no"), Some("owner"))
+    );
+
+    post(&tap(find(&t, "m-25-sign-in")));
+    assert!(
+        logged("setup").is_some_and(|e| e.str("name") == Some("claude")),
+        "a sign-in terminal starts"
+    );
+
+    let t = get(&s, "/screens/threads/t4", &ck);
+    let kinds: Vec<&str> = t["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|b| b["kind"].as_str())
+        .collect();
+    assert!(
+        !kinds.contains(&"config") && !kinds.contains(&"secret"),
+        "settled cards leave: {t}"
+    );
+    assert!(!t.to_string().contains(r#""type":"choice""#), "{t}");
 }

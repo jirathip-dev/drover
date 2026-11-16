@@ -41,7 +41,7 @@ export const sent = (box: Element) => box.querySelectorAll<HTMLInputElement>('[d
  * that thread; everything else escaped. */
 export function md(s: string, refs = false): string {
   const link = new RegExp(String.raw`\[([^\]]+)\]\((https?:[^)\s]+)\)|(https?:\/\/[^\s<]*[^\s<.,;:!?)])|\b(${refs ? 't\\d+' : '(?!)'})\b`, 'g');
-  const a = (_: string, t: string, u: string, bare: string, ref: string) => ref ? `<a href="#" data-open="/screens/threads/${ref}">${ref}</a>` :
+  const a = (_: string, t: string, u: string, bare: string, ref: string) => ref ? `<a href="#" data-thread="${ref}">${ref}</a>` :
     `<a href="${u ?? bare}" target=_blank rel=noopener>${t ?? bare}</a>`;
   return String(s ?? '').split(/```(?:[a-z]*)\n?/).map((part, i) => i % 2 ? `<div class=cb><pre>${esc(part.replace(/\n$/, ''))}</pre><button type=button class=cpy><span>copy</span></button></div>` :
     esc(part).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(link, a).replace(/\n/g, '<br>')).join('');
