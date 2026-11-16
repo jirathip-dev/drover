@@ -136,7 +136,7 @@ fn a_bad_scheme_is_refused_with_the_reason() {
 }
 
 #[test]
-fn a_user_scheme_is_served_and_overrides_a_built_in() {
+fn parity_11_a_user_scheme_is_served_and_overrides_a_built_in() {
     let mut mine = built("nord");
     mine["tokens"]["--l"] = json!("#99ccff");
     let p = page(

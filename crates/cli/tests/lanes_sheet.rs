@@ -64,7 +64,7 @@ fn json_of(res: &str) -> serde_json::Value {
 }
 
 #[test]
-fn lanes_group_by_state_then_repo_with_counts() {
+fn parity_49_lanes_group_by_state_then_repo_with_counts() {
     let (c, r) = fixture("group");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let lanes = json_of(&req(&s, "GET", "/api/v1/lanes", "", "", T));
@@ -165,7 +165,7 @@ fn sheet_transcript_is_the_masked_pane_tail() {
 }
 
 #[test]
-fn others_sheet_offers_only_close_pane() {
+fn parity_53_others_sheet_offers_only_close_pane() {
     let (c, r) = fixture("others");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = paired(&s, &c);
@@ -236,7 +236,7 @@ fn ask_pair(s: &Server, ip: &str, now: u64) -> (String, String, String) {
 }
 
 #[test]
-fn pairing_is_a_phone_request_approved_on_the_mac() {
+fn parity_6_pairing_is_a_phone_request_approved_on_the_mac() {
     let (c, r) = fixture("pair-req");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let at = |now: u64| drover::Ctx { now, ..c.clone() };
