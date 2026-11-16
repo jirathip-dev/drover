@@ -141,7 +141,7 @@ html[data-focus] #cards{display:none}
 .form.say .fd{flex:1;border:0;min-height:0}
 .form.say .fk:empty{display:none}
 .scr[data-id^=thread-]{max-width:760px;margin-inline:auto}
-.hsc{position:relative;height:188px;overflow:hidden;border-radius:6px;background:var(--card)}
+.hsc{position:relative;aspect-ratio:392/188;overflow:hidden;border-radius:6px;background:var(--card)}
 .hsc svg{display:block;width:100%;height:100%}
 .hsc::after{content:"";position:absolute;inset:0;pointer-events:none}
 .herd.night .hsc svg{filter:brightness(.45) saturate(.6)}
