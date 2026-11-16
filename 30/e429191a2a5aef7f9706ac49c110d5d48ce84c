@@ -1,0 +1,4 @@
+Decided: merged origin/staging into issue-1097 with no conflicts; the squash merge change is the same as round 1
+Because: "`drover merge` squashes: one commit per PR on the integration branch"
+Rejected: none
+Owner: The squash merge change is now up to date with staging; nothing in it changed.
