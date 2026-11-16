@@ -1068,60 +1068,15 @@ pub struct Notify {
     pub sub: Option<String>,
 }
 
-/// A webpush notifier's events when `on` is unset: the alert set plus the asks (#40) and needs-human (#130).
-pub const WEBPUSH_ON: &[&str] = &[
-    "slo-api",
-    "stuck",
-    "config-invalid",
-    "thread-msg",
-    "blocked",
-    "stall",
-    "lane-hog",
-    "lane-dead",
-    "usage-limit",
-    "signed-out",
-    "lane-failed-start",
-    "respawn-refused",
-    "rev-stale-replaced",
-    "ready-unmerged",
-    "ci-missing",
-    "outbox-stale",
-    "merged",
-    "needs-decision",
-    "needs-human",
-    "ask-waiting",
-    "answer-undelivered",
-    "state-write-failed",
-    "wip-blocked",
-    "spawn-held",
-    "spawn-failing",
-    "host-busy",
-    "cap-near",
-    "orphan-issue",
-    "config-warning",
-    "keychain-locked",
-    "keychain-jammed",
-    "self-update-failed",
-    "shed-version",
-    "shed-version-ok",
-    "auto-update-failed",
-    "host-sync-failed",
-    "clean-failed",
-    "runners-low",
-    "runners-ok",
-    "runtime-down",
-    "heavy-timeout",
-    "host-overloaded",
-];
-
 impl Notify {
     pub fn webpush(&self) -> bool {
         self.kind.as_deref() == Some("webpush")
     }
     /// #350: every landing pause and revert (or failed revert), and #345's stalled service, goes to each notifier, whatever its `on` says; #363: so does a board report, to each notifier but the phones'.
-    pub fn wants(&self, kind: &str) -> bool {
+    pub fn wants(&self, e: &crate::events::Event) -> bool {
+        let kind = e.kind.as_str();
         self.on.iter().any(|k| k == kind)
-            || (self.on.is_empty() && self.webpush() && WEBPUSH_ON.contains(&kind))
+            || (self.on.is_empty() && self.webpush() && e.is_push())
             || matches!(kind, "land-paused" | "reverted" | "revert-failed" | "service-stalled")
             || kind == "report" && !self.webpush()
     }

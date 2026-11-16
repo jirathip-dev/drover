@@ -737,15 +737,18 @@ fn fire(
     kind: &str,
     d: serde_json::Value,
 ) -> Result<()> {
-    if events
-        .iter()
-        .any(|e| e.kind == kind && e.fleet == fleet && e.issue == issue && e.data.get("key") == d.get("key"))
+    fire_event(ctx, cfg, out, events, Event::new(ctx.now, fleet, issue, kind, d))
+}
+
+fn fire_event(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event], ev: Event) -> Result<()> {
+    let key = ev.data.get("key");
+    if (events.iter())
+        .any(|e| e.kind == ev.kind && e.fleet == ev.fleet && e.issue == ev.issue && e.data.get("key") == key)
     {
         return Ok(());
     }
-    let ev = Event::new(ctx.now, fleet, issue, kind, d);
     writeln!(out, "{}", plain(&ev))?;
-    let ((sent, held), push) = (PUSHES.get(), crate::config::WEBPUSH_ON.contains(&kind));
+    let ((sent, held), push) = (PUSHES.get(), ev.is_push());
     if push && sent >= cfg.limits.max_pushes_per_pass {
         PUSHES.set((sent, held + 1));
         return crate::events::append(&ctx.state, &ev);

@@ -398,10 +398,7 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
     assert_eq!(events(&c, "wip-blocked").len(), 1);
     run(&c, &r(), &["clean", "--yes"]);
     assert_eq!(events(&c, "wip-blocked").len(), 1, "once, not every sweep");
-    assert!(
-        drover::config::WEBPUSH_ON.contains(&"wip-blocked"),
-        "pushed to the phone"
-    );
+    assert!(events(&c, "wip-blocked")[0].is_push(), "pushed to the phone");
 }
 
 #[test]

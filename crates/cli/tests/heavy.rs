@@ -187,5 +187,5 @@ fn a_wait_past_the_limit_runs_and_logs_heavy_timeout_once() {
     assert_eq!(late[0].str("cmd"), Some("sh test.sh c"));
     assert_eq!(late[0].str("kind"), Some("test"));
     let phone: drover::config::Notify = toml::from_str("cmd = \"\"\ntype = \"webpush\"").unwrap();
-    assert!(phone.wants("heavy-timeout"), "a default phone notifier alerts on it");
+    assert!(phone.wants(late[0]), "a default phone notifier alerts on it");
 }
