@@ -1,0 +1,9 @@
+Decided: merged origin/staging; config.rs keeps staging's sandbox and merge-mode types beside Baseline, and staging's new remote-git test matches gained --no-replace-objects
+Because: crates/cli/tests/hosts.rs:1801
+Decided: grafts skip the ancestry check and config writes once a clone is built for this baseline, so a pass in the steady state only reads
+Because: crates/core/src/baseline.rs:57
+Decided: the sim's exact-metrics and hunt runs use a no-baseline fleet with lock_wait pinned at 13 (the baseline probe is a new yield point); fixed seeds and replay keep the baseline
+Because: q1779
+Rejected: re-pinning every metric with the baseline on and raising the hunt's round bound — the owner chose option 1
+Check: cargo test --locked -p drover --test sim: 10 passed with the baseline on the fixed seeds; --test baseline still covers since, cut before, re-baseline and removal
+Owner: The history baseline now sits on top of the latest staging changes; the simulator's timing pins moved by one step, as you approved.
