@@ -386,9 +386,11 @@ pub fn token(text: &str, now: u64) -> (String, Option<String>) {
 pub const SH: &str = "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; apt_() { sudo apt-get update -qq && \
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
 const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh";
-const SHED: &str =
-    "shed job\tshed doctor >/dev/null 2>&1\tshed install --force && { { systemctl --user daemon-reload && \
-systemctl --user enable --now shed.service && { sudo loginctl enable-linger \"$USER\" || true; }; } 2>/dev/null || \
+const SHED: &str = "shed job\tshed doctor >/dev/null 2>&1 && { [ -f \"$HOME/Library/LaunchAgents/dev.shed.serve.plist\" ] || \
+grep -qx OOMPolicy=continue \"$HOME/.config/systemd/user/shed.service.d/drover.conf\"; }\tshed install --force && \
+{ { mkdir -p \"$HOME/.config/systemd/user/shed.service.d\" && \
+printf '[Service]\\nOOMPolicy=continue\\n' > \"$HOME/.config/systemd/user/shed.service.d/drover.conf\" && \
+systemctl --user daemon-reload && systemctl --user enable --now shed.service && { sudo loginctl enable-linger \"$USER\" || true; }; } 2>/dev/null || \
 launchctl bootstrap gui/$(id -u) \"$HOME/Library/LaunchAgents/dev.shed.serve.plist\"; }";
 const ACP: &str = "node\tcommand -v node && command -v npx\tapt_ nodejs npm
 {acp}\tshed agents --json | grep -q '\"{acp}\"'\tshed agents add {acp}";

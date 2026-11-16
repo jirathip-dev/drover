@@ -1251,3 +1251,51 @@ fn a_failing_status_is_not_gone() {
     assert!(gone_stops(&c).is_empty() && outside_stops(&c) == 0);
     assert_eq!(drover::cloud::state(&read(&c.state).unwrap(), "cloud1"), "running");
 }
+
+#[test]
+fn bootstrap_writes_the_oom_policy_drop_in_before_it_enables_the_shed_job() {
+    let (c, cfg) = running("cloud-oom");
+    let r = boot_fake(false)
+        .once(&step("shed doctor"), 1, "")
+        .reply(&step("shed install --force"), "");
+    let (here, cloud) = (FakeShed::new(), FakeShed::new());
+    let _ = drover::cloud::bootstrap(&c, &cfg, &here.on(&on_cloud(&r, &cloud)), "cloud1", &mut vec![]);
+    let sent = |p: &str| {
+        let calls = r.calls.borrow();
+        let line = calls.iter().find(|l| l.starts_with(&step(p))).cloned();
+        let line = line.unwrap_or_else(|| panic!("no {p}: {calls:?}"));
+        let s = line.strip_prefix(&format!("{SSH}'sh' '-c' '")).unwrap();
+        s.strip_suffix('\'').unwrap().replace("'\\''", "'")
+    };
+    let (check, install) = (sent("shed doctor"), sent("shed install --force"));
+    let home = tmpdir("cloud-oom-home");
+    let bin = home.join(".local/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log =
+        "echo \"$*|$(cat \"$HOME/.config/systemd/user/shed.service.d/drover.conf\" 2>/dev/null)\" >> \"$HOME/log\"";
+    for (tool, body) in [("shed", "exit 0"), ("sudo", "exit 0"), ("systemctl", log)] {
+        let p = bin.join(tool);
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        let mut m = std::fs::metadata(&p).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut m, 0o755);
+        std::fs::set_permissions(&p, m).unwrap();
+    }
+    let sh = |s: &str| {
+        let o = std::process::Command::new("sh")
+            .args(["-c", s])
+            .env("HOME", &home)
+            .output()
+            .unwrap();
+        (o.status.code(), String::from_utf8_lossy(&o.stderr).into_owned())
+    };
+    assert_ne!(sh(&check).0, Some(0), "a job without the drop-in is not there yet");
+    assert_eq!(sh(&install).0, Some(0), "{}", sh(&install).1);
+    let calls = std::fs::read_to_string(home.join("log")).unwrap();
+    let with = "|[Service]\nOOMPolicy=continue";
+    assert!(calls.contains(&format!("--user daemon-reload{with}")), "{calls}");
+    assert!(
+        calls.contains(&format!("--user enable --now shed.service{with}")),
+        "{calls}"
+    );
+    assert_eq!(sh(&check).0, Some(0), "the job with its drop-in is there");
+}
