@@ -1,0 +1,7 @@
+Decided: replace the stale bootstrap sentence with the frozen DROVER_RULES rule and the respawn rule
+Because: "rules are frozen at spawn in its rules file (`DROVER_RULES`), and its host's own fleet.toml is never read"
+Decided: name drover board and drover waiting, not drover status, as where rules stale shows
+Because: crates/core/src/queue.rs:529
+Rejected: saying drover status shows it — status never calls hook::rules_stale
+Check: docs/lanes.md per-host paragraph names DROVER_RULES and the respawn rule
+Owner: the lanes doc now says remote lanes get their rules from the main host at spawn
