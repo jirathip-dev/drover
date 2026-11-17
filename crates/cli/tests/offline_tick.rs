@@ -172,7 +172,7 @@ fn a_tick_past_its_budget_still_pushes_a_remote_lanes_commits_every_pass() {
             "pass {pass}: {out}"
         );
         assert!(
-            out.contains("tick: past its 0 s budget; skipped: clean, trim, lesson, hotspots, compact"),
+            out.contains("tick: past its 0 s budget; skipped: clean, trim, lesson, triage, hotspots, compact"),
             "pass {pass}: {out}"
         );
     }

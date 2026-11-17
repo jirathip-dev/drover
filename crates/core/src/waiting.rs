@@ -747,7 +747,7 @@ pub fn scan_where(
                 _ => None,
             });
         let waiting_turn = turn(mine, &s);
-        if idle && s.build.as_deref() == Some("lesson") && settled() {
+        if idle && crate::lesson::no_pr(s.build.as_deref()) && settled() {
             let asked = mine
                 .iter()
                 .rfind(|e| e.kind == "lesson-prompted" && e.str("agent") == Some(built.as_str()));

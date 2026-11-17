@@ -24,6 +24,7 @@ pub fn role_prompt(role: &str) -> &'static str {
             include_str!("../roles/orchestrator/thread.md")
         ),
         "lesson" => include_str!("../roles/lesson.md"),
+        "triage" => include_str!("../roles/triage.md"),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
     }
@@ -39,7 +40,7 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
 }
 
 fn prompt_kind<'a>(f: &'a Fleet, role: &'a str) -> &'a str {
-    let own = role == "lesson" || role == "verify" && f.family(role) == "rev";
+    let own = matches!(role, "lesson" | "triage") || role == "verify" && f.family(role) == "rev";
     if own {
         role
     } else {
@@ -455,6 +456,12 @@ fn brief(
                     ""
                 }
         }
+        _ if p.role == "triage" => format!(
+            include_str!("../roles/brief-triage.md"),
+            fleet = p.lane.split(':').next().unwrap_or_default(),
+            integration = integration,
+            issue = issue
+        ),
         _ => format!(
             include_str!("../roles/brief-impl.md"),
             branch = branch,
