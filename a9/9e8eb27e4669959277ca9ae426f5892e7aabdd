@@ -1,0 +1,5 @@
+Decided: write the Queue screen's in-flight stat items more compactly so screens.rs drops to 1998 lines, under arch-check's 2000 limit
+Because: "The Queue screen (`crates/server/src/screens.rs`) shows the fleet's `in flight N/M` in its header"
+Rejected: moving the stat block to a new file — a larger diff, when 9 lines of the in-flight loop were enough
+Check: arch-check has no size violation for crates/server/src/screens.rs, and cooee_screens still passes
+Owner: Nothing changes for users; the code was tidied so CI's file size check passes.
