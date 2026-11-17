@@ -8,6 +8,8 @@ pub enum Sabotage {
     DoubleLane,
     RedMerge,
     Planted,
+    /// #959: the model's GitHub ignores `--match-head-commit`, so a head pushed after the PASS gets merged.
+    HeadSha,
 }
 
 /// I7: an event may be this far behind the true time it is appended at (owner, q836).
@@ -115,18 +117,25 @@ pub fn on_merge(w: &mut World, issue: u64, head: &str, base: &str) {
     if w.model.sabotage == Some(Sabotage::RedMerge) {
         w.model.ci.insert(head.into(), Some(false));
     }
+    if base != "staging" {
+        return w.fail(format!("I4 merge: #{issue} merged into {base} at {head:.7}"));
+    }
+    if let Some(why) = always(w, issue, head) {
+        w.fail(format!("A1 always: GitHub merge {why}"));
+    }
+}
+
+/// #959's "always" property: `issue`'s latest verdict at exactly `head` is PASS and that head's CI is green; else why not.
+pub fn always(w: &World, issue: u64, head: &str) -> Option<String> {
     let v = (w.wrote.iter().rev())
         .find(|x| x.ev.kind == "verdict" && x.ev.issue == Some(issue) && x.ev.str("sha") == Some(head))
         .and_then(|x| x.ev.str("verdict").map(String::from));
     let green = w.model.ci.get(head).copied().flatten() == Some(true);
-    if base != "staging" || v.as_deref() != Some("PASS") || !green {
-        w.fail(format!(
-            "I4 merge: #{issue} merged into {base} at {head:.7}: verdict {v:?}, CI green {green}"
-        ));
-    }
+    (v.as_deref() != Some("PASS") || !green)
+        .then(|| format!("#{issue} merged at {head:.7}: verdict {v:?}, CI green {green}"))
 }
 
-/// After every step: I1, I5 (at quiet points), I6, and the merged event's verdict sha (I4).
+/// After every step: I1, I5 (at quiet points), I6, the merged event's verdict sha (I4), and A1 on each new merged event.
 pub fn after_step(w: &mut World) {
     if w.failure.is_some() {
         return;
@@ -161,6 +170,19 @@ pub fn after_step(w: &mut World) {
         .collect();
     for why in bad {
         w.fail(why);
+    }
+    let new: Vec<(u64, String)> = (w.wrote[w.always..].iter())
+        .filter(|x| x.ev.kind == "merged")
+        .map(|x| {
+            (
+                x.ev.issue.unwrap_or(0),
+                x.ev.str("verdict_sha").unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    w.always = w.wrote.len();
+    if let Some(why) = new.iter().find_map(|(n, h)| always(w, *n, h)) {
+        w.fail(format!("A1 always: merged event {why}"));
     }
     if w.procs.iter().all(|p| !p.live() || p.starting.is_none()) {
         let orphan =
