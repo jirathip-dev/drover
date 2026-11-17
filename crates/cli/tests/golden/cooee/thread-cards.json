@@ -32,7 +32,7 @@
       ],
       "buttons": [
         {
-          "action": "thread-config",
+          "action": "config-card",
           "id": "m-16-apply",
           "label": "apply",
           "style": "primary",
@@ -44,7 +44,7 @@
           }
         },
         {
-          "action": "thread-config",
+          "action": "config-card",
           "id": "m-16-discard",
           "label": "discard",
           "style": "",

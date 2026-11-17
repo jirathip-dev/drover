@@ -95,7 +95,7 @@ pub fn open_stuck(events: &[Event]) -> BTreeMap<&str, Vec<&Event>> {
         .into_iter()
         .filter(|(k, _)| broken(k))
         .filter_map(|(_, ep)| ep.into_iter().find(|e| e.kind == "stuck"))
-        .filter(|e| !started(e))
+        .filter(|e| !started(e) && !e.str("reason").is_some_and(crate::promise::reviews_ahead))
     {
         m.entry(e.fleet.as_str()).or_default().push(e);
     }

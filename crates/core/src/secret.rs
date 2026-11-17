@@ -51,13 +51,10 @@ pub fn request(ctx: &Ctx, cfg: &Config, thread: &str, name: &str, why: &str) -> 
             "a secret's name is A-Z, 0-9 and _, and --why says what it is for",
         );
     }
-    let t = orchestrator::find(&working(&ctx.state)?, thread)?.clone();
+    let events = working(&ctx.state)?;
+    let fleet = orchestrator::fleet_of(&events, thread)?;
     let d = json!({"thread": thread, "name": name, "why": why});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, &t.fleet, None, "secret-request", d),
-    )
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "secret-request", d))
 }
 
 /// Thread `id`'s open request for `name` (no `secret-set` or `secret-dismissed` after it).
@@ -96,7 +93,7 @@ pub fn settle(
         format!("secret {name} set ✓ (by owner)"),
     ];
     let line = if value.is_some() { &line[1] } else { &line[0] };
-    orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false)).ok();
+    orchestrator::tell(ctx, cfg, r, id, line);
     Ok(line.clone())
 }
 
