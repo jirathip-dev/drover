@@ -1,0 +1,8 @@
+Decided: clear the lane's DROVER_* env once per test process in common's tmpdir/ctx/run, and route every test's own set_var through set_env so the clear always precedes it
+Because: "the lane's `DROVER_*` env is cleared or overridden for the test process (e.g. in the test harness helper)"
+Rejected: .cargo/config.toml [env] — can only set, not unset; an empty DROVER_LANE differs from unset in cli.rs
+Rejected: clearing every DROVER_* var — perf/profile tests read DROVER_PERF_* and DROVER_PROFILE*
+Decided: the fleet check lives in cli::foreign so the outbox drain and the service token path share it
+Because: "The outbox drain refuses or drops a line whose fleet isn't configured"
+Check: hosts.rs re-runs the remote-lane test as a child with DROVER_OUTBOX set to a file and asserts the file stays empty
+Owner: running tests on a remote lane can no longer queue fixture commands into that lane's real outbox
