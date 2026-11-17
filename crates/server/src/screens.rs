@@ -1409,7 +1409,7 @@ impl Server<'_> {
             p if paired && p.starts_with("/screens/lanes/") => self.lane_sheet(ctx, &p[15..])?,
             "/screens/events" => events_screen(ctx, q),
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
-            "/screens/cards" => self.chat_cards(ctx),
+            "/screens/cards" => self.chat_cards(ctx, paired),
             "/screens/workflow" => workflow(ctx),
             "/screens/herd" => herd_screen(&self.herd(ctx, None).ok()?),
             "/screens/hot" => self.on_row(ctx, q, |c, r| {
@@ -1582,10 +1582,11 @@ impl Server<'_> {
             "actions": [{"icon": "more", "label": "More", "menu": menu}], "blocks": blocks})
     }
 
-    fn chat_cards(&self, ctx: &Ctx) -> Value {
+    fn chat_cards(&self, ctx: &Ctx, paired: bool) -> Value {
         let tab = self.needs_tab(ctx, true);
         let ev = working(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
+        cards.extend(super::chat::owner_cards(ctx, &ev, paired));
         cards.extend(tab.config.as_ref().map(|e| {
             json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
                 "title": "fleet.toml is invalid", "blocks": [{"type": "text", "id": "config-why", "markdown": e}]})

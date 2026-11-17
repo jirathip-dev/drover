@@ -233,18 +233,11 @@ fn page(
                 a.data.insert("recommend".into(), e.val("recommend").clone());
                 ask(events, &a, m("ask", s("question")))
             }
-            ("config-propose", _) if crate::propose::settled(events, &s("id")).is_none() => Msg {
-                from: s("id"),
-                open: !crate::propose::stale(ctx, e), // #460: stale, it can no longer apply
-                ..m("config", s("diff"))
-            },
-            ("secret-request", _)
-                if crate::secret::open(events, id, &s("name")).is_some_and(|o| std::ptr::eq(o, e)) =>
-            {
-                Msg {
-                    from: s("name"),
-                    ..m("secret", s("why"))
-                }
+            ("config-propose" | "secret-request", _) => {
+                let Some(m) = owner_card(ctx, events, e) else {
+                    continue;
+                };
+                m
             }
             ("run-card", _) => {
                 let run = run_card(ctx, events, e);
@@ -293,7 +286,10 @@ fn page(
 
 /// #408: API v1 `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
 pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>) -> Option<ThreadPage> {
-    let (cfg, t) = (Config::kept(ctx).ok()?, conductor::find(events, id).ok()?);
+    let t = conductor::find(events, id)
+        .ok()
+        .or_else(|| conductor::attached(events, id))?;
+    let cfg = Config::kept(ctx).ok()?;
     let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
     Some(page(ctx, &cfg, events, t, (before, u64::MAX, n), u64::MAX))
@@ -744,6 +740,46 @@ fn composer(label: &str, action: &str, values: &Value, more: Value) -> Value {
         o.extend(m.into_iter().filter(|(_, v)| !v.is_null()));
     }
     c
+}
+
+/// An open config proposal (#460: `open` unless stale) or secret request as its thread's message.
+fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
+    let s = |k| e.str(k).unwrap_or_default().to_string();
+    let m = |kind: &str, from: String, text: String, open: bool| Msg {
+        seq: e.seq,
+        ts: e.ts,
+        kind: kind.into(),
+        from,
+        text,
+        open,
+        ..Msg::default()
+    };
+    match e.kind.as_str() {
+        "config-propose" if crate::propose::settled(events, &s("id")).is_none() => {
+            Some(m("config", s("id"), s("diff"), !crate::propose::stale(ctx, e)))
+        }
+        "secret-request" => {
+            let open = crate::secret::open(events, e.str("thread")?, &s("name"));
+            open.is_some_and(|o| std::ptr::eq(o, e))
+                .then(|| m("secret", s("name"), s("why"), false))
+        }
+        _ => None,
+    }
+}
+
+/// #1066: every open config proposal and secret request, a drover thread's or a cooee chat's, as its thread draws it.
+pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Value> {
+    let all = crate::events::of_kind(events, &["config-propose", "secret-request"]);
+    let card = |e: &Event| {
+        Some(msg_body(
+            ctx.now,
+            e.str("thread")?,
+            &owner_card(ctx, events, e)?,
+            paired,
+            None,
+        ))
+    };
+    all.into_iter().filter_map(card).collect()
 }
 
 /// #1086: a message's card with its files (images inline, others as rows) and its link's chip, which opens that thread.

@@ -13,6 +13,16 @@ one source of the orchestrator's text for both a drover thread and a cooee chat
   (`orchestrator-attached`, `via: profile`), once per thread. `drover ask --thread <it>` then works; lane asks are
   never routed to it. A read-only `serve` answers 405.
 
+## Owner cards from a chat (#1066)
+
+A linked chat's id (`$DROVER_THREAD`) stands where a thread id does in `drover card post`, `drover config propose` and
+`drover secret request`; the card is logged on the chat's fleet. `CARD_FORBIDDEN`, the 15-minute approval window and
+the owner-only approve, apply and secret entry are unchanged. `GET /screens/cards` shows the open run, config and
+secret cards of every thread and chat with their actions (`run-card`, `thread-config` [apply]/[discard],
+`thread-secret` masked entry for the plugin or a paired device). How each settled is one `system` line in the chat,
+read as a `note` in `GET /api/v1/thread/<chat>`: the exit code and output tail, applied or discarded,
+`secret <NAME> set ✓`. The secret's value is never logged or served.
+
 ## A profile's keys
 
 | Key | Value |
