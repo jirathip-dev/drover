@@ -98,7 +98,7 @@ fn install(
                 cfg.self_update.staging_addr
             )
         } else {
-            "would run profiles sync and hand serve over (a restart if no serve answers)".into()
+            "would run profiles sync and restart the serve job".into()
         };
         let plan = [
             format!(
@@ -123,7 +123,8 @@ fn install(
             return staging_serve(ctx, cfg, r, &live).context("installed, then the staging serve");
         }
         let synced = ok(r, &live.to_string_lossy(), &["profiles", "sync"]).context("installed, then profiles sync");
-        synced.and_then(|_| hand_over(ctx, cfg, r).context("installed, then the serve restart"))
+        let served = synced.and_then(|_| restart_serve(ctx, cfg, r).context("installed, then the serve restart"));
+        served.map(|s| [vec![s], crate::timer::heal(ctx, r)].concat().join("; "))
     });
     let Err(e) = res else {
         let d = json!({"sha": sha, "branch": branch});
@@ -157,20 +158,9 @@ fn install(
     Ok(1)
 }
 
-fn hand_over(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
-    let port = cfg
-        .serve
-        .addr()
-        .rsplit_once(':')
-        .and_then(|(_, p)| p.parse().ok())
-        .unwrap_or(7777);
-    let asked = ask_handover(&serve_sock(ctx, port), cfg.limits.serve_handover_secs);
-    asked
-        .map(|pid| format!("serve handed over (bridge pid {pid})"))
-        .or_else(|_| {
-            let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
-            crate::timer::restart(ctx, r, label).map(|_| "serve restarted".into())
-        })
+fn restart_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
+    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
+    crate::timer::restart(ctx, r, label).map(|_| "serve restarted".into())
 }
 
 /// #894: ask the serve on control socket `sock` to hand over; the bridge's pid once it serves.

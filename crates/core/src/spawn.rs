@@ -18,7 +18,11 @@ pub fn role_prompt(role: &str) -> &'static str {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
         "architect" => include_str!("../roles/architect.md"),
-        "orchestrator" => include_str!("../roles/orchestrator.md"),
+        "orchestrator" => concat!(
+            include_str!("../roles/orchestrator/role.md"),
+            "\n",
+            include_str!("../roles/orchestrator/thread.md")
+        ),
         "lesson" => include_str!("../roles/lesson.md"),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
@@ -724,6 +728,18 @@ pub const OWN_FILES: &[&str] = &[
     ".review-brief.md",
     "why.md",
     ".verify-browser.mjs",
+    ".verify.md",
+];
+
+const OWN_REPO: [&str; 8] = [
+    ".drover/rules.md",
+    ".drover/verify.md",
+    ".drover/design.md",
+    ".drover/arch.toml",
+    ".herdsman/rules.md",
+    ".herdsman/verify.md",
+    ".herdsman/design.md",
+    ".herdsman/arch.toml",
 ];
 
 /// #770: `OWN_FILES` and the harness files spawn copies in (`providers::LOCAL_FILES`).
@@ -929,6 +945,57 @@ pub struct Opts {
     pub update: bool,
     #[arg(skip = Some(actor()))]
     pub by: Option<String>,
+}
+
+fn integration_view(
+    ctx: &Ctx,
+    (r, on): (&dyn Runner, &crate::hosts::On),
+    f: &crate::config::Fleet,
+    p: &Plan,
+    (fleet, issue, update): (&str, u64, bool),
+    local: &str,
+) -> Result<(Option<String>, Option<String>)> {
+    let own = || crate::repo_read("rules.md", |x| on.read(&p.worktree.join(x)));
+    let int = &f.integration;
+    if p.family != "rev" {
+        return Ok((
+            own(),
+            update.then(|| format!(include_str!("../roles/brief-update.md"), int)),
+        ));
+    }
+    ok(r, "git", &["-C", local, "fetch", "origin", int])?;
+    let at_int = |name: &str| {
+        crate::repo_read(name, |x| {
+            ok(r, "git", &["-C", local, "show", &format!("origin/{int}:{x}")]).ok()
+        })
+    };
+    if let Some(v) = (p.role == "verify").then(|| at_int("verify.md")).flatten() {
+        on.write(&p.worktree.join(".verify.md"), &v)?;
+    }
+    if crate::lesson::is_lesson(ctx, None, (fleet, issue)) {
+        return Ok((own(), None));
+    }
+    let wt = p.worktree.to_string_lossy();
+    let diff = ok(
+        r,
+        "git",
+        &[
+            &["-C", &wt, "diff", &format!("origin/{int}...HEAD"), "--"][..],
+            &OWN_REPO,
+        ]
+        .concat(),
+    );
+    let d = diff.unwrap_or_default();
+    let names: Vec<String> = (d.lines())
+        .filter_map(|l| Some(format!("`{}`", l.strip_prefix("diff --git a/")?.split(" b/").next()?)))
+        .collect();
+    let changed = (!names.is_empty()).then(|| {
+        format!(
+            "This PR changes {}: you are briefed with the integration branch's copy; the change itself is under review.\n\n~~~diff\n{d}~~~",
+            names.join(", ")
+        )
+    });
+    Ok((at_int("rules.md").or_else(own), changed))
 }
 
 fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygiene) -> Result<()> {
@@ -1290,9 +1357,6 @@ pub fn spawn(
         let fix = last
             .filter(|e| p.family == "impl" && e.str("verdict") == Some("FAIL"))
             .and_then(|e| e.str("body"));
-        let update = o
-            .update
-            .then(|| format!(include_str!("../roles/brief-update.md"), f.integration));
         let adr = events
             .iter()
             .rfind(|e| e.is("design-approved", fleet, issue) && e.str("role") == Some("architect"))
@@ -1302,11 +1366,12 @@ pub fn spawn(
                 "rev" => format!("Architecture: the owner approved the ADR in `{a}/`; check the diff against it."),
                 _ => format!("Architecture: the owner approved the ADR in `{a}/` on this branch; build to it, and add any `.drover/arch.toml` lines it ends with in this PR."),
             });
+        let (rules, int_note) = integration_view(ctx, (r, &on), f, &p, (fleet, issue, o.update), &local)?;
         let decided = events
             .iter()
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
-            .chain(update)
+            .chain(int_note)
             .chain(adr)
             .chain((!crate::events::STAGES.contains(&p.family)).then(|| {
                 let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
@@ -1326,7 +1391,7 @@ pub fn spawn(
             &decided.fold(body.to_string(), |b, d| b + &d),
             (
                 fix,
-                crate::repo_read("rules.md", |f| on.read(&p.worktree.join(f))).as_deref(),
+                rules.as_deref(),
                 crate::queue::repro(&events, fleet, issue),
                 crate::queue::playbook(&events, fleet, issue),
             ),
