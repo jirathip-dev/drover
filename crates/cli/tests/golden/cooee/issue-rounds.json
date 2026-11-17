@@ -1,0 +1,213 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "stage",
+          "name": "stage",
+          "options": [
+            {
+              "label": "▲ impl",
+              "value": "impl"
+            },
+            {
+              "label": "◆ rev",
+              "value": "rev"
+            },
+            {
+              "label": "◫ gates",
+              "value": "gates"
+            }
+          ],
+          "selected": [
+            "gates"
+          ],
+          "type": "chips"
+        },
+        {
+          "id": "status-list",
+          "rows": [
+            {
+              "id": "now",
+              "title": "ready",
+              "type": "row",
+              "value": {
+                "since": "1970-01-12T13:13:20Z"
+              }
+            },
+            {
+              "id": "at",
+              "subtitle": "gone",
+              "title": "lane sendmeter-rev-12-r2",
+              "type": "row"
+            },
+            {
+              "badge": {
+                "text": "✓",
+                "tone": "ok"
+              },
+              "id": "ci",
+              "title": "CI",
+              "type": "row"
+            },
+            {
+              "badge": {
+                "text": "PASS",
+                "tone": "ok"
+              },
+              "id": "v-rev",
+              "title": "rev",
+              "type": "row",
+              "value": "2/3"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "status",
+      "id": "status",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "links-list",
+          "rows": [
+            {
+              "id": "issue",
+              "style": "link",
+              "tap": {
+                "url": "https://github.com/jirathip-dev/sendmeter/issues/12"
+              },
+              "title": "issue #12",
+              "type": "row"
+            },
+            {
+              "id": "pr",
+              "style": "link",
+              "subtitle": "count rounds once",
+              "tap": {
+                "url": "https://github.com/jirathip-dev/sendmeter/pull/281"
+              },
+              "title": "PR #281",
+              "type": "row"
+            },
+            {
+              "id": "checks",
+              "style": "link",
+              "tap": {
+                "url": "https://github.com/jirathip-dev/sendmeter/pull/281/checks"
+              },
+              "title": "checks",
+              "type": "row"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "links",
+      "id": "links",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "lanes-list",
+          "rows": [
+            {
+              "id": "l-sendmeter-rev-12-r2",
+              "subtitle": {
+                "text": "PASS",
+                "tone": "ok"
+              },
+              "tap": {
+                "sheet": "/screens/lanes/sendmeter-rev-12-r2"
+              },
+              "title": "sendmeter-rev-12-r2",
+              "type": "row",
+              "value": "45m"
+            },
+            {
+              "id": "l-sendmeter-impl-12",
+              "subtitle": "working",
+              "tap": {
+                "sheet": "/screens/lanes/sendmeter-impl-12"
+              },
+              "title": "sendmeter-impl-12",
+              "type": "row",
+              "value": "50m"
+            },
+            {
+              "id": "l-sendmeter-rev-12-r1",
+              "subtitle": {
+                "text": "FAIL",
+                "tone": "bad"
+              },
+              "tap": {
+                "sheet": "/screens/lanes/sendmeter-rev-12-r1"
+              },
+              "title": "sendmeter-rev-12-r1",
+              "type": "row",
+              "value": "66m"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "lanes",
+      "id": "lanes",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "history-list",
+          "rows": [
+            {
+              "id": "h-3",
+              "subtitle": {
+                "text": "PASS · ccccccc · 33m",
+                "tone": "ok"
+              },
+              "tap": {
+                "sheet": "/screens/verdict?repo=sendmeter&issue=12&seq=17"
+              },
+              "title": "review 2",
+              "type": "row"
+            },
+            {
+              "id": "h-2",
+              "title": "fix 1",
+              "type": "row"
+            },
+            {
+              "id": "h-1",
+              "subtitle": {
+                "text": "FAIL · aaaaaaa · 58m",
+                "tone": "bad"
+              },
+              "tap": {
+                "sheet": "/screens/verdict?repo=sendmeter&issue=12&seq=7"
+              },
+              "title": "review 1",
+              "type": "row"
+            },
+            {
+              "id": "h-0",
+              "title": "impl",
+              "type": "row"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "history",
+      "id": "history",
+      "type": "section"
+    }
+  ],
+  "cancel": "Done",
+  "id": "issue-sendmeter-12",
+  "title": "#12",
+  "type": "sheet"
+}
