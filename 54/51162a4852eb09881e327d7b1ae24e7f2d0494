@@ -1,0 +1,31 @@
+Decided: the tick lifts its budget for the trim step only, so the remote sweep runs after drive even when drive overran; clean, lesson, hotspots and compact are still skipped.
+Because: "The remote-host sweep runs on a schedule that drive overruns can't starve"
+Rejected: a second unbounded pass or a separate timer — each remote call is already killed at ssh_call_secs and a hung host goes offline for the pass, so lifting the budget for one step is bounded.
+Decided: reclaim sweeps enabled remote hosts with the tick's sweep in a Preview or Apply mode, which never takes the tick's disk-low branch (idle unfinished lanes).
+Because: "`drover reclaim` on an enabled remote host with a finished rev lane's scratch reports and frees it; live lanes are never touched."
+Decided: the sweep code (disabled, sweep_off, sweep, sweep_in, scratch) moved into crates/core/src/check/sweep.rs because check.rs is over its 2000-line size baseline and may not grow.
+Because: crates/core/src/check.rs:23
+Decided: verdict removes the reviewer's .scratch/<agent> before the busy check, through the same scratch script that skips a folder whose cargo lock is held.
+Because: "`drover verdict` frees that rev lane's `.scratch/<lane>` folder (local and remote)."
+Decided: a spawn admission on a low remote host runs the tick's sweep there after the build trim and reads the disk again before refusing DISK_LOW.
+Because: "Spawn on a host under min_free_gb sweeps that host first"
+Check: offline_tick's overrun test now allows one air timeout: the sweep is meant to reach enabled hosts after an overrun.
+Owner: Finished lanes' build space on remote machines is now cleared every tick, by reclaim, before a full-disk refusal, and when a review is recorded.
+
+Decided: the remote trim and sweep run even after the tick overruns its budget, with the pass budget lifted for that one step
+Because: "The remote-host sweep runs on a schedule that drive overruns can't starve"
+Rejected: keeping staging's "trim skipped past budget" assertions in offline_tick.rs — they contradict the spec
+Check: the sim shard failure (hunt, seed 1003) reproduces with timer.rs reverted to staging; staging tip CI is red in sim too
+Owner: Finished lanes' remote build and scratch folders now get cleaned even on slow ticks, by reclaim, before a disk-full refusal, and at a reviewer's verdict.
+
+Decided: a lane whose shed agent is not running counts as ended in sweep_in; its scratch goes, and its build folder too when a spawn names it
+Because: q1866
+Rejected: keeping unknown-name build folders swept too — a build folder no spawn names may not be a lane's, so only scratch is swept by name alone
+Check: crates/cli/tests/scratch.rs a_lane_no_longer_running_in_shed_is_swept_without_a_verdict fails before the sweep.rs change and passes after
+Owner: Lanes that crashed or stopped now have their leftover build space cleared like finished ones; running lanes are never touched.
+
+Decided: shed.rs's build-trim test expects the exited lane's scratch removed by the sweep as an ended lane, not trimmed by budget
+Because: q1866
+Rejected: keeping trim as the remover of exited lanes' scratch — q1866 makes a lane not running in shed finished, so the sweep removes it first
+Check: crates/cli/tests/shed.rs the_build_trim_keeps_a_running_shed_lanes_scratch still asserts the running lane's scratch and build stay
+Owner: A test was updated to match the agreed rule that stopped lanes count as finished.
