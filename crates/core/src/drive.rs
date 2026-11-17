@@ -1196,7 +1196,7 @@ fn pass(
     let agents = sessions.running();
     let ev = working(&ctx.state)?;
     let st = fold(&ev);
-    for s in st.values().filter(|s| s.fleet == fleet) {
+    for s in st.values().filter(|s| s.fleet == fleet && !s.done()) {
         let on = crate::events::held_on(&ev, s);
         let open = |b: &u64| st.get(&(fleet.into(), *b)).is_none_or(|b| b.state != "merged");
         if on.is_empty() || on.iter().any(open) {
@@ -1285,7 +1285,7 @@ fn pass(
     let mut updated = false;
     for (s, w) in waits
         .iter()
-        .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
+        .filter(|(s, w)| s.fleet == fleet && !(fast && s.done()) && s.lane.as_ref() == Some(&w.lane))
     {
         let lock = format!("drive-{fleet}-{}.lock", s.issue);
         let Some(_mine) = take(ctx, r, &lock, STALE_LOCK_SECS, fleet) else {
@@ -1305,8 +1305,7 @@ fn pass(
         if crate::gate::ready_draft(ctx, cfg, r, out, s, &pr)? && merge(w) {
             continue;
         }
-        let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
-        if let Some(e) = crate::events::working(&ctx.state)?.iter().rfind(|e| now(e)).cloned() {
+        if let Some(e) = crate::events::last_at(&working(&ctx.state)?, "auto-updated", (fleet, s.issue), ctx.now) {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
