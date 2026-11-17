@@ -1,0 +1,10 @@
+Decided: the job's serve stops the foreign holder of its port and binds itself, instead of exiting 0 or asking a handover
+Because: "A job-started serve that finds a serve not owned by the job on its port takes it over (handover, else stop it)"
+Rejected: asking the holder to hand over — the #894 handover leaves the listener in a bridge outside the job, the state this issue reports
+Decided: self-update restarts serve only via timer::restart (kickstart -k / systemctl restart)
+Because: "self-update's serve restart is the kickstart / systemctl restart command, and no other `serve` spawn"
+Decided: the job is identified by its manager's pid (launchctl print / systemctl show MainPID), the same lookup doctor uses
+Because: crates/core/src/timer.rs:119
+Rejected: an env marker in the plist — it would mark every installed job outdated until timer install reruns
+Check: crates/server/src/hooks.rs take_over only runs when job_pid equals this process's pid; a manually started serve keeps the #1081 behaviour
+Owner: The board's background job now always owns the board port; updates restart it through the job, and doctor flags a stray serve.
