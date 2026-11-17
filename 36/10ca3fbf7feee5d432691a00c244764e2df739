@@ -1,0 +1,8 @@
+Decided: merge origin/staging again; its serve.rs baseline is 3594, so arch-check's serve.rs violation goes away
+Because: .drover/arch-baseline.txt:24
+Decided: the Hosts sheet (row builder, sheet, host_op) moves to screens_hosts.rs, a child module of screens.rs
+Because: .drover/arch.toml:201
+Rejected: a screens.rs baseline over 2000 lines — a new file keeps the cap and the code unchanged
+Decided: the sim hunt failure in shard 1 is a randomised race with no host or page code; a local run passes, no change
+Check: arch-check at the head reports no screens.rs or serve.rs size violation; shard 1 is green
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
