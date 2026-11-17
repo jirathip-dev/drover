@@ -118,7 +118,7 @@ fn a_run_block_needs_two_outputs_and_a_failing_base() {
 
 #[test]
 fn a_verify_block_needs_the_pr_bodys_repro_section_and_its_quote() {
-    let (c, d) = setup("repro-verify", CONFIG, true);
+    let (c, d) = setup("repro-verify", &(CONFIG.to_string() + VERIFY), true);
     let cases = [
         ("Closes #12\n", VERIFY_BLOCK, "the PR body has no `## Repro` section"),
         (SECTION, "Repro: verify\nno quote here\n", "has no `>` quoted reason"),

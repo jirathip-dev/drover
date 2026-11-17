@@ -611,6 +611,19 @@ pub fn needs(f: &Fleet, role: &str, events: &[Event], (fleet, issue): (&str, u64
     n
 }
 
+fn repro_os(r: &dyn Runner, f: &Fleet, events: &[Event], (fleet, issue, role): (&str, u64, &str)) -> Option<String> {
+    if f.family(role) != "rev" || !crate::queue::repro(events, fleet, issue) {
+        return None;
+    }
+    let st = crate::events::fold(events).remove(&(fleet.to_string(), issue));
+    let branch = crate::gate::branch_of(st.as_ref(), issue);
+    let diff = ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo]).ok()?;
+    diff.lines().filter(|l| l.starts_with('+')).find_map(|l| {
+        let os = l.split_once("cfg(target_os")?.1.split('"').nth(1)?;
+        Some(format!("os:{os}"))
+    })
+}
+
 const IDLE: [&str; 6] = ["ready", "needs-human", "parked", "blocked", "merged", "closed"];
 const SLOTS: [&str; 2] = ["working", "simulators"];
 
@@ -1274,7 +1287,8 @@ pub fn place(
         }
         return Ok(Some(at(ctx, cfg, f, r, (h, machine), pre)));
     }
-    let needs = needs(f, role, events, (fleet, issue));
+    let mut needs = needs(f, role, events, (fleet, issue));
+    needs.extend(repro_os(r, f, events, (fleet, issue, role)));
     let seen = cached(ctx);
     let fit = |n: &str, h: &HostCfg| needs.iter().all(|t| tags(h, seen.get(n)).contains(t));
     if let Some(e) = last {
