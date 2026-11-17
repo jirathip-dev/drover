@@ -1,0 +1,5 @@
+Decided: merge current staging to clear CI red that came from staging, not from this PR's three files.
+Because: crates/server/src/serve.rs:1 is untouched by this PR; the arch-check size violation came from the staging merge CI ran against.
+Rejected: trimming serve.rs here — it is outside the issue's scope and staging's own CI is green now.
+Check: CI is green at the merged head; the WebKit test still passes in ui-webkit.
+Owner: no behaviour change this round; only the branch was brought up to date.
