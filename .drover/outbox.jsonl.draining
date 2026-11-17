@@ -1,0 +1,2 @@
+{"args":["verdict","sendmeter","12","FAIL","--sha","a000000000000000000000000000000000000000","--file","/tmp/fleet-test-verify-shots-872444-12/lane/verdict.md"],"lane":"herdsman:1146:rev","ts":1794830472291}
+{"args":["verdict","sendmeter","12","FAIL","--sha","a000000000000000000000000000000000000000","--file","/tmp/fleet-test-verify-rounds-872444-13/verdict.md"],"lane":"herdsman:1146:rev","ts":1794830472309}
