@@ -1571,6 +1571,12 @@ impl Server<'_> {
         self.op(ctx, &f)
     }
 
+    fn host_op(&self, ctx: &Ctx, op: &str, host: String, to: String) -> Result<Value> {
+        let line = self.form_op(ctx, op, &[("host", host), ("to", to)])?;
+        let sh = self.hosts_sheet(ctx).context("no hosts")?;
+        Ok(json!({"ops": [{"op": "screen", "screen": sh}], "toast": line}))
+    }
+
     fn action(&self, ctx: &Ctx, name: &str, a: &Value) -> Result<Value> {
         let v = &a["values"];
         let s = |k: &str| match &v[k] {
@@ -1719,11 +1725,7 @@ impl Server<'_> {
                 }
                 line
             }
-            "host" | "reap" => {
-                let line = self.form_op(ctx, name, &[("host", s("host")), ("to", s("to"))])?;
-                let sh = self.hosts_sheet(ctx).context("no hosts")?;
-                return Ok(json!({"ops": [{"op": "screen", "screen": sh}], "toast": line}));
-            }
+            "host" | "reap" => return self.host_op(ctx, name, s("host"), s("to")),
             "save-fleets" => self.save_fleets(ctx, &cfg, v)?,
             "remove-fleet" => {
                 let hash = crate::propose::view(ctx)?.hash;
