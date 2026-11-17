@@ -1656,10 +1656,10 @@ impl Server<'_> {
                     Ok(d) if !plugin => d.label.clone(),
                     _ => "cooee".into(),
                 };
-                let res = if name == "later" {
-                    self.hide_card(ctx, &by, a.at("values"))
-                } else {
-                    self.action(ctx, name, &a)
+                let res = match name {
+                    "later" => self.hide_card(ctx, &by, a.at("values")),
+                    n if HOST_ACTIONS.contains(&n) => self.host_op(ctx, n, a.at("values")),
+                    _ => self.action(ctx, name, &a),
                 };
                 match res {
                     Ok(v) => out("200 OK", &v),
@@ -1827,7 +1827,6 @@ impl Server<'_> {
                 }
                 line
             }
-            "host" | "reap" => return self.host_op(ctx, name, s("host"), s("to")),
             "save-fleets" => self.save_fleets(ctx, &cfg, v)?,
             "remove-fleet" => {
                 let hash = crate::propose::view(ctx)?.hash;
