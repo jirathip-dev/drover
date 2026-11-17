@@ -11,6 +11,7 @@
 1 ask_ids
 2 ask_scale
 1 asks
+2 autonomy
 4 backlog
 4 blocked_respawn
 1 board_errors
@@ -70,6 +71,7 @@
 1 hotspots
 4 hung_read
 1 hung_root
+3 issue_sheet_webkit
 4 keychain_jam
 3 kick
 4 land

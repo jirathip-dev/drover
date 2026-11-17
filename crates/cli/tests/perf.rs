@@ -758,6 +758,30 @@ impl Runner for NoSpawn {
 }
 
 #[test]
+fn stats_autonomy_on_a_150k_event_log_stays_under_its_budget() {
+    let (c, _) = huge_with(150_000, 50_000);
+    let args = ["stats", "autonomy", "sendmeter"];
+    let first = Instant::now();
+    assert_eq!(run(&c, &Fake::default(), &args).0, 0);
+    let first = ms(first);
+    let t = Instant::now();
+    let (code, out) = run(&c, &Fake::default(), &args);
+    let t = ms(t);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("sendmeter total: merged 200 · no owner action 200 (100%)"),
+        "{out}"
+    );
+    report(&format!(
+        "#962 perf (150,000 events): stats autonomy first {first} ms (with the import), then {t} ms"
+    ));
+    if cfg!(debug_assertions) {
+        return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
+    }
+    assert!(t < 1000, "stats autonomy took {t} ms (budget 1000)");
+}
+
+#[test]
 fn parity_r7_no_board_request_starts_a_process() {
     let (c, r) = fixture();
     let (c, r, addr) = serve(c, NoSpawn(r, Mutex::default()));
