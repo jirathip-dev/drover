@@ -1,0 +1,5 @@
+Decided: staging build fix: the sim's planted bug fires on rev panes only, the same line open PR #1231 makes
+Because: crates/cli/tests/sim/model.rs:179
+Rejected: raising the planted threshold to 4 starts — the hunt then missed it within 40 rounds
+Check: the_hunt test fails on staging d0cba316 and on c3d24d5d, passes on c3d24d5d^ and at this head
+Owner: Staging's simulation test broke after #1183; this PR carries the same one-line test fix as #1231.
