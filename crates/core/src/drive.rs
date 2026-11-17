@@ -1116,6 +1116,7 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
             stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), (&lane, None), "LANE_SILENT", &why)?,
         }
     }
+    crate::limit::due(ctx, r, out, &ev, agents, fleet)?;
     let reviews = fold(&ev)
         .into_values()
         .filter(|s| s.fleet == fleet && s.state.starts_with("review"));
@@ -1205,11 +1206,8 @@ fn pass(
         let mut episode = ev.iter().rev().take_while(|e| !e.is("held", fleet, s.issue));
         if outlived && !episode.any(|e| e.is("hold-stale", fleet, s.issue)) {
             let d = json!({"on": on, "merged_at": at});
-            emit(
-                &ctx.state,
-                cfg,
-                Event::new(ctx.now, fleet, Some(s.issue), "hold-stale", d),
-            )?;
+            let e = Event::new(ctx.now, fleet, Some(s.issue), "hold-stale", d);
+            emit(&ctx.state, cfg, e)?;
         }
         let Some((role, lane)) = s.active_lane() else {
             let e = Event::new(ctx.now, fleet, Some(s.issue), "released", json!({"on": on}));

@@ -4,8 +4,8 @@
     "devices": [
       {
         "created": 1000000,
-        "hash": "f34cdb3777ac5992ddfd17ea03cdd100bf787556163bc60fcd4f81c5146359ce",
-        "label": "iPhone f34c",
+        "hash": "b57fd9ff073550d0829a0d7e7edba496e36cac61a36760f7659bad7c8d86f006",
+        "label": "iPhone b57f",
         "used": 1000000
       }
     ],
@@ -161,10 +161,10 @@
         "words": "offline · last seen never"
       }
     ],
-    "key": "BKT7jJj_M1RLc3Sry3gJpwQShkvBWXrdd0ASv5G87YWEdwW4Ilz4mHZWJ-tyXnhuHZSZwO3oAPyw4cG9-ZVmZXk",
+    "key": "BMHbOF8TM3cJDrnPCT5hYdiRIPM8Bk_KRh3VZjII0zQsmQR3iEJPgh6dvlsOmFe61Pkksq7nv2xe9wMg5W6IVvU",
     "leftovers": null,
     "live": true,
-    "mtime": "1793969430121521119",
+    "mtime": "1794801054570310696",
     "notify": [],
     "now": 1000000,
     "orphans": 0,
@@ -192,12 +192,6 @@
         "detail": "ran never · job missing",
         "fix": "drover timer install",
         "name": "fast step",
-        "tone": "r"
-      },
-      {
-        "detail": "not on PATH, or no server",
-        "fix": "herdr",
-        "name": "herdr",
         "tone": "r"
       }
     ],
