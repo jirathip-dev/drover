@@ -1,0 +1,8 @@
+Decided: bound every remote shed connect in shed::connect itself with ssh_call_secs, and end its wait loop on 124/255
+Because: "is killed at `ssh_call_secs` wall clock, whatever runner reaches it"
+Because: crates/core/src/shed.rs:258
+Rejected: per-runner fixes only in Pass — kicks, spawn and serve reach connect without Pass and got 60 s per call, ten times over
+Rejected: a total budget across the wait loop — a call answering in time while the server starts is the loop's purpose
+Check: the wait loop breaks on 124/255, so a hung host costs one ssh_call_secs, not ten 60 s calls
+Check: Snap and Memo forward run_for's limit instead of dropping it through the trait default
+Owner: a hung remote shed no longer stalls a whole pass; other hosts still get their lanes
