@@ -789,7 +789,7 @@ pub fn scan_where(
             } else if last > 0 && ctx.now < last + RESPAWN_SECS {
                 format!(
                     "{why}{NO_PUSH}respawned {} ago, again after 30 min",
-                    age(ctx.now - last)
+                    age(ctx.now.saturating_sub(last))
                 )
             } else {
                 format!("{why}{NO_PUSH}respawning {role}")

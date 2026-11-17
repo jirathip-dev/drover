@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt, clippy
@@ -71,8 +71,10 @@ jobs:
         run: scripts/timing-check.sh
       - name: "parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`"
         run: scripts/parity-check.sh HEAD^1
-      - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
-        run: ./target/release/drover cap-check --config ci/cap.toml
+      - name: "line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; a PR's cap edit carries a `Cap:` trailer)"
+        run: ./target/release/drover cap-check --config ci/cap.toml ${BASE:+--base "$BASE"}
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
       - name: "arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)"
         env:
           BODY: ${{ github.event.pull_request.body }}

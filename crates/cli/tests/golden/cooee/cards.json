@@ -22,7 +22,8 @@
       { "type": "choice", "id": "q947", "action": "answer", "recommended": "move",
         "options": [ { "value": "move", "label": "move it out, wip/ first" }, { "value": "refuse", "label": "refuse LANE_LIVE" } ],
         "other": { "placeholder": "other…" },
-        "default": { "value": "move", "until": "2026-11-09T09:53:00Z", "label": "takes the recommendation in {rel}" } } ] },
+        "default": { "value": "move", "until": "2026-11-09T09:53:00Z", "label": "takes the recommendation in {rel}" } } ],
+    "buttons": [ { "type": "button", "id": "ask-q947-later", "label": "later", "action": "later", "values": { "card": "ask-q947" } } ] },
   { "type": "card", "id": "nh-2708", "kind": "ask", "tone": "bad", "title": "synergy #2708 · review 3", "meta": "needs-human · 12m",
     "fold": { "line": "#2708 · needs-human · Round limit: review 3 FAIL · 1 finding · 12m", "main": { "block": "nh2708", "action": "needs-human", "value": "extend", "label": "one more round", "values": { "fleet": "synergy", "issue": 2708 } } },
     "blocks": [
@@ -30,5 +31,16 @@
       { "type": "choice", "id": "nh2708", "action": "needs-human",
         "options": [ { "value": "extend", "label": "one more round" },
           { "value": "merge", "label": "merge anyway", "confirm": { "title": "Merge #2708 past its FAIL?", "message": "Logged by: owner. CI and serial still gate it.", "ok": "Merge", "destructive": true } },
-          { "value": "park", "label": "park" } ] } ] }
+          { "value": "park", "label": "park" } ] } ] },
+  { "type": "card", "id": "later", "kind": "later", "tone": "mute", "fold": { "line": "2 later" },
+    "blocks": [
+      { "type": "card", "id": "run-c40", "kind": "run", "title": "Delete #47's wip snapshot",
+        "blocks": [
+          { "type": "run", "id": "c40", "action": "run-card", "command": "git push origin --delete wip/cooee-impl-47-20261108-2010",
+            "sha": "9a1f0c55e2b4", "dir": "~/Projects/cooee", "touches": "origin: 1 wip/ branch", "until": "2026-11-09T09:40:00Z" } ] },
+      { "type": "card", "id": "ask-q944", "kind": "ask", "tone": "warn", "title": "herdsman #719", "meta": "owner · 40m",
+        "blocks": [
+          { "type": "text", "markdown": "**Split the board's sheet into two?**" },
+          { "type": "choice", "id": "q944", "action": "answer", "options": [ { "value": "split", "label": "split" }, { "value": "keep", "label": "keep" } ],
+            "other": { "placeholder": "other…" } } ] } ] }
 ]

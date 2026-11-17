@@ -472,6 +472,25 @@ pub fn append(state: &Path, ev: &Event) -> Result<()> {
     })
 }
 
+/// The hidden `archive-events`: rebuild the tables (`rebuild`), else archive old events and heartbeats; says which in `out`.
+pub fn archive_events(state: &Path, now: u64, rebuild: bool, out: &mut dyn std::io::Write) -> Result<()> {
+    if rebuild {
+        self::rebuild(state)?;
+        return Ok(writeln!(out, "rebuilt the issue, lane and ask tables")?);
+    }
+    let (gone, moved) = compact(state, now)?;
+    Ok(writeln!(out, "{gone} heartbeats deleted, {moved} events archived")?)
+}
+
+/// #1121: `evs`, each numbered next, in one transaction.
+pub fn append_all(state: &Path, evs: &[Event]) -> Result<()> {
+    with(state, true, (), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        evs.iter().try_for_each(|ev| log(&tx, ev))?;
+        Ok(tx.commit()?)
+    })
+}
+
 /// #900, #906: `evs` in one transaction, each `needs-decision` under the highest `q<n>` logged plus 1; none if an ask keyed `once` is logged.
 pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Option<Vec<Event>>> {
     for ev in &evs {

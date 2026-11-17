@@ -1,0 +1,5 @@
+- `README.md`: what is on staging today, and the open queue
+- `docs/*.md`: one page per area (setup, config, pipeline, lanes, hosts, serve, architecture, …); `docs/workflow.md` is `drover diagram`'s output
+- `docs/design/<slug>/`: the mockups of screens that exist or are queued
+- `roles/`: the role prompts, briefs and the usage doc's parts
+- `drover help --agent`: the CLI's usage
