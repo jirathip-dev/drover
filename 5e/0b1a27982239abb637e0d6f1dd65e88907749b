@@ -1,0 +1,7 @@
+Decided: rev and verify lanes read rules.md and verify.md from origin/<integration>; changes to .drover files are named in the brief with their diff
+Because: "rev and verify lanes are briefed with `.herdsman/rules.md`, `.herdsman/verify.md`"
+Decided: staging build fix: the serve.rs size baseline is set to 3591, the size staging's #1089 merge left it at
+Because: .drover/arch-baseline.txt:24
+Rejected: trimming serve.rs — it is #1089's code, outside this issue; the baseline line is the smallest fix
+Check: the sim hunt test passes at this head, so q1801's hold on that red gate no longer applies
+Owner: reviewers now judge a PR by the integration branch's rules, not the ones the PR itself edits
