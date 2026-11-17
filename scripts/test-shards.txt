@@ -64,6 +64,7 @@
 3 host_deadline
 1 host_history
 4 host_offline
+1 hosts_screen
 2 host_slots
 2 host_spared
 3 host_sync
