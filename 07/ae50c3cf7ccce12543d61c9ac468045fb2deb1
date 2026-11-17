@@ -1,0 +1,11 @@
+Decided: a host sample runs all its probes in one sh -c through snapshot::batch, the helper snapshot's step look already used, so a remote host is one ssh
+Because: "The probes of one host run as one command (`sh -c`), as `snapshot::fetch` already does"
+Decided: the swap-out rate is the count's change since the host's last kept count (swapcount file per host), scaled to pages per 2 s; a first sample has no rate
+Because: crates/core/src/host.rs:343
+Decided: a first sample reports no rate and admits
+Because: "A first sample with no previous one reports no rate and does not block a start by itself."
+Rejected: keeping the previous count in the swapouts window file — it would change that file's format and the window test
+Check: spawn_guard's swap test seeds the kept count instead of two vm_stat replies and asserts no sleep; the test fakes answer a local sh -c batch probe by probe
+Decided: the sim exact metrics are re-pinned after merging staging, since samples no longer spend 2 s of virtual time
+Because: crates/cli/tests/sim/main.rs:355
+Owner: Starting a lane or checking a host no longer waits a fixed two seconds per host; remote hosts are checked in one connection.
