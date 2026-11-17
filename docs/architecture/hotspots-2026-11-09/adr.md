@@ -51,8 +51,7 @@ the report itself is noise that would send next week's architect after the wrong
   `line_cap` as the floor and `warn_within`, and is listed `frozen`; the folder is a `[[collect]]`. One reader
   (`overlap::cap_at_sha`) serves `cap-check` (the working tree), `cap_at` and `cap_view` (a sha). The hook's
   `CAP_FILE` refusal covers the folder too, with the same exemption (an issue titled `cap:`). Highest, not sum: two
-  raises filed from the same measurement merge cleanly and never double. `docs/cap-history/` keeps its 46 notes and
-  gets no new ones.
+  raises filed from the same measurement merge cleanly and never double.
 - **The help budget (slice 3).** `HELP_AGENT_MAX` and the `<=` assertion go; the completeness assertion stays. The
   context guard this leaves is the weekly table itself: `roles/usage-tail.md` is on it.
 - **Passive events (slice 4).** `Event` gains `passive: bool` (serde default, skipped when false, so the on-disk

@@ -25,6 +25,7 @@
 3 check_clean
 2 ci_templates
 2 cloud
+1 compact
 2 compaction
 1 config_api
 1 config_card
@@ -63,6 +64,7 @@
 3 host_deadline
 1 host_history
 4 host_offline
+1 hosts_screen
 2 host_slots
 2 host_spared
 3 host_sync
@@ -78,6 +80,7 @@
 4 land
 3 lane_actions
 3 lane_asks
+1 lane_dead_remote
 1 lane_fold
 4 lane_hog
 2 lane_host_move
@@ -174,6 +177,7 @@
 3 spawn_guard
 1 ssh_deadline
 4 stale_rev
+2 stall_move
 4 stalled_host
 3 stalled_lanes
 2 state_db

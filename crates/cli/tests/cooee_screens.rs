@@ -197,7 +197,7 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     }
     let row = find(&q, "q-sendmeter-12");
     assert_eq!(row["title"], "#12");
-    assert_eq!(row["subtitle"], "impl ✓ · review 1 ✗ · fix 1 ▸ sendmeter-impl-12");
+    assert_eq!(row["subtitle"], "impl ✓ · review 1 ✗ · fix 1 ▸ working · sendmete…");
     assert_eq!(row["tap"], json!({"sheet": "/screens/issue?repo=sendmeter&issue=12"}));
     for (id, n) in [("q-722", 722), ("q-456", 456), ("q-690", 690)] {
         let tap = json!({"sheet": format!("/screens/issue?repo=herdsman&issue={n}")});
@@ -756,6 +756,41 @@ fn the_workflow_screen_is_two_diagram_blocks_with_live_counts_and_limit_nodes() 
     }
 }
 
+#[test]
+fn a_dropped_blocker_clears_the_held_subtitle_in_the_next_snapshot() {
+    let (c, r) = recorded("cooee-unblock");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let before = req(&s, T, "GET", "/screens/queue", "", "").1;
+    assert_eq!(
+        find(&before, "q-sendmeter-20")["subtitle"],
+        json!({"text": "held until #17", "tone": "bad"})
+    );
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "unblock", "20"]).0, 0);
+    let after = req(&s, T + 1, "GET", "/screens/queue", "", "").1;
+    let row = find(&after, "q-sendmeter-20");
+    assert!(!row.to_string().contains("held until"), "{row}");
+}
+
+#[test]
+fn a_fleet_card_says_amber_when_the_last_pass_was_killed_or_runs_past_its_limit() {
+    let (c, r) = recorded("cooee-killed");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let beat = c.state.with_file_name("tick.beat");
+    let card = |now| find(&req(&s, now, "GET", "/screens/queue", "", "").1, "fleet-sendmeter")["subtitle"].clone();
+    std::fs::write(&beat, format!("{} {}", T - 900, T - 720)).unwrap();
+    assert_eq!(
+        card(T),
+        json!({"text": "drive · last pass killed 12m ago", "tone": "warn"})
+    );
+    std::fs::write(&beat, format!("{} {}", T - 900, T - 30)).unwrap();
+    assert_eq!(
+        card(T),
+        json!({"text": "drive · last pass running for 15m", "tone": "warn"})
+    );
+    std::fs::write(&beat, format!("{} {}", T - 60, T - 30)).unwrap();
+    assert!(card(T).is_string(), "{}", card(T));
+}
+
 fn rows_of<'a>(v: &'a Value, list: &str) -> Vec<&'a str> {
     let rows = find(v, list)["rows"].as_array().unwrap();
     rows.iter().map(|r| r["id"].as_str().unwrap()).collect()
@@ -1229,4 +1264,182 @@ fn parity_46_a_queue_rows_sheet_links_its_asking_thread_in_webkit_and_back_retur
         "1 1",
         "a push's link opens t9; back is the list"
     );
+}
+
+fn later_of(cards: &Value) -> Vec<&str> {
+    let all = cards.as_array().unwrap();
+    let later = all.iter().find(|c| c["id"] == "later");
+    let blocks = later.map_or(vec![], |l| l["blocks"].as_array().unwrap().iter().collect());
+    blocks.into_iter().map(|c| c["id"].as_str().unwrap()).collect()
+}
+
+fn top_of(cards: &Value) -> Vec<&str> {
+    cards
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap())
+        .collect()
+}
+
+fn stuck(c: &drover::Ctx, n: u64, reason: &str) {
+    let d = json!({"key": format!("error:sendmeter#{n}"), "reason": reason});
+    append(&c.state, &Event::new(T - 60, "sendmeter", Some(n), "stuck", d)).unwrap();
+}
+
+fn head(c: &drover::Ctx, n: u64, sha: &str) {
+    let cache = c.state.parent().unwrap().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let pr = json!({"number": 100 + n, "state": "OPEN", "headRefOid": sha.repeat(40), "statusCheckRollup": []});
+    let file = json!({"ts": T, "branch": format!("issue-{n}"), "pr": pr});
+    std::fs::write(cache.join(format!("pr-sendmeter-{n}.json")), file.to_string()).unwrap();
+}
+
+fn later(s: &Server, ck: &str, card: &str, all: bool) -> Value {
+    let tap = json!({"screen": "cards", "block": format!("{card}-later"), "action": "later", "values": {"card": card, "all": all}});
+    let (status, v) = req(s, T, "POST", "/action", &tap.to_string(), ck);
+    assert_eq!(status, 200, "{v}");
+    v
+}
+
+#[test]
+fn parity_68_later_hides_a_card_on_every_client_logs_it_and_folds_into_one_n_later_line() {
+    let (c, r) = recorded("cooee-later");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let cards = req(&s, T, "GET", "/screens/cards", "", "").1;
+    assert_eq!(
+        find(&cards, "ask-q7-later"),
+        &json!({"type": "button", "id": "ask-q7-later", "label": "later", "action": "later", "values": {"card": "ask-q7"}})
+    );
+    assert_eq!(later_of(&cards), Vec::<&str>::new());
+    let v = later(&s, &ck, "ask-q7", false);
+    assert_eq!(v["ops"], json!([{"op": "remove", "id": "ask-q7"}]), "{v}");
+    later(&s, &ck, "run-r1", false);
+    let e = read(&c.state).unwrap().to_vec();
+    let logged: Vec<&Event> = e.iter().filter(|e| e.kind == "card-later").collect();
+    assert_eq!(logged.len(), 2);
+    assert_eq!(
+        (logged[0].str("card"), logged[0].str("row")),
+        (Some("ask-q7"), Some(""))
+    );
+    assert_eq!(logged[0].str("fp").unwrap().len(), 12, "{:?}", logged[0]);
+    assert!(!logged[0].str("by").unwrap_or_default().is_empty(), "{:?}", logged[0]);
+    let restarted = Server::new(&c, &r, Some(ADDR.into()));
+    for (s, ck) in [(&s, ""), (&s, ck.as_str()), (&restarted, "")] {
+        let cards = req(s, T, "GET", "/screens/cards", "", ck).1;
+        assert_eq!(top_of(&cards), ["nhc-sendmeter-5", "later"]);
+        assert_eq!(later_of(&cards), ["run-r1", "ask-q7"]);
+        let line = find(&cards, "later");
+        assert_eq!(
+            (&line["fold"]["line"], &line["kind"]),
+            (&json!("2 later"), &json!("later"))
+        );
+        like(&cards, "cards", false);
+    }
+}
+
+#[test]
+fn a_hidden_card_returns_on_a_new_reason_state_or_head_sha_and_not_otherwise() {
+    for change in ["reason", "state", "head"] {
+        let (c, r) = recorded(&format!("cooee-later-{change}"));
+        stuck(
+            &c,
+            17,
+            "spawn fails the same way 3 times: boom; tried: nothing (no known heal)",
+        );
+        head(&c, 17, "a");
+        let s = Server::new(&c, &r, Some(ADDR.into()));
+        let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+        let cards = |s: &Server| req(s, T, "GET", "/screens/cards", "", "").1;
+        assert!(top_of(&cards(&s)).contains(&"stuck-sendmeter"), "{change}");
+        later(&s, &ck, "stuck-sendmeter", false);
+        let ping = json!({"key": "pass-error:other", "reason": "x"});
+        append(&c.state, &Event::new(T, "sendmeter", None, "drive-pass", ping)).unwrap();
+        head(&c, 17, "a");
+        let restarted = Server::new(&c, &r, Some(ADDR.into()));
+        assert!(
+            !top_of(&cards(&restarted)).contains(&"stuck-sendmeter"),
+            "{change}: unchanged stays hidden"
+        );
+        assert_eq!(later_of(&cards(&restarted)), ["stuck-sendmeter"], "{change}");
+        match change {
+            "reason" => {
+                let ok = json!({"key": "error:sendmeter#17"});
+                append(&c.state, &Event::new(T, "sendmeter", Some(17), "slo-ok", ok)).unwrap();
+                stuck(
+                    &c,
+                    17,
+                    "spawn fails the same way 3 times: bang; tried: nothing (no known heal)",
+                );
+            }
+            "state" => {
+                let d = json!({"code": "ROUND_LIMIT", "reason": "out"});
+                append(&c.state, &Event::new(T, "sendmeter", Some(17), "needs-human", d)).unwrap();
+            }
+            _ => head(&c, 17, "b"),
+        }
+        let back = cards(&Server::new(&c, &r, Some(ADDR.into())));
+        assert!(top_of(&back).contains(&"stuck-sendmeter"), "{change}: {back}");
+        assert!(!later_of(&back).contains(&"stuck-sendmeter"), "{change}");
+    }
+}
+
+#[test]
+fn later_all_hides_each_row_and_a_change_returns_only_that_row_inside_the_card() {
+    let (c, r) = recorded("cooee-later-all");
+    for n in [17, 20] {
+        stuck(
+            &c,
+            n,
+            "spawn fails the same way 3 times: boom; tried: nothing (no known heal)",
+        );
+        head(&c, n, "a");
+    }
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let cards = || req(&s, T, "GET", "/screens/cards", "", "").1;
+    assert_eq!(
+        find(&cards(), "stuck-sendmeter-later-all")["values"],
+        json!({"card": "stuck-sendmeter", "all": true})
+    );
+    later(&s, &ck, "stuck-sendmeter", true);
+    let rows: Vec<Option<String>> = (read(&c.state).unwrap().iter())
+        .filter(|e| e.kind == "card-later")
+        .map(|e| e.str("row").map(String::from))
+        .collect();
+    assert_eq!(rows, [Some("#17".into()), Some("#20".into())]);
+    let hid = cards();
+    assert!(!top_of(&hid).contains(&"stuck-sendmeter"), "{hid}");
+    assert_eq!(later_of(&hid), ["stuck-sendmeter"]);
+    head(&c, 17, "b");
+    let back = cards();
+    let card = find(&back, "stuck-sendmeter");
+    let md = card["blocks"][0]["markdown"].as_str().unwrap();
+    assert!(md.contains("#17") && !md.contains("#20"), "{md}");
+    let forces: Vec<&Value> = (card["buttons"].as_array().unwrap().iter())
+        .filter(|b| b["action"] == "force")
+        .map(|b| &b["values"]["issue"])
+        .collect();
+    assert_eq!(forces, [&json!(17)]);
+    assert_eq!(later_of(&back), ["later-stuck-sendmeter"]);
+    let hidden = find(&back, "later-stuck-why")["markdown"].as_str().unwrap();
+    assert!(hidden.contains("#20") && !hidden.contains("#17"), "{hidden}");
+}
+
+#[test]
+fn a_review_queue_wait_alone_never_makes_a_stuck_row() {
+    let (c, r) = recorded("cooee-stuck-queue");
+    stuck(
+        &c,
+        17,
+        "⚠ missed 11m: SPAWN_PENDING · now: review waits behind 2 earlier reviews; tried: nothing (no known heal)",
+    );
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cards = || req(&s, T, "GET", "/screens/cards", "", "").1;
+    assert!(!cards().to_string().contains("stuck-sendmeter"), "{}", cards());
+    stuck(&c, 20, "no drive pass for 40 min; tried: nothing (no known heal)");
+    let card = find(&cards(), "stuck-sendmeter").clone();
+    let md = card["blocks"][0]["markdown"].as_str().unwrap().to_string();
+    assert!(md.contains("#20") && !md.contains("#17"), "{md}");
 }

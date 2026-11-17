@@ -12,14 +12,14 @@
         "imp": false,
         "issue": null,
         "k": null,
-        "plain": "sendmeter conductor-attached",
+        "plain": "sendmeter orchestrator-attached",
         "pr": null,
         "run": null,
-        "seq": 13,
-        "text": "conductor-attached",
+        "seq": 14,
+        "text": "orchestrator-attached",
         "tone": "m",
         "ts": 1000000,
-        "type": "conductor-attached"
+        "type": "orchestrator-attached"
       },
       {
         "act": "blocked",
@@ -27,7 +27,7 @@
         "data": {
           "agent": null,
           "host": null,
-          "id": "q1",
+          "id": "q2",
           "kind": "owner",
           "options": [
             "small",
@@ -42,18 +42,18 @@
         "imp": true,
         "issue": null,
         "k": "needs-you",
-        "plain": "sendmeter needs you (? asks q1): Which scope?\n  1) small\n  2) full (recommended)\n  drover answer sendmeter q1 <n|\"text\">",
+        "plain": "sendmeter needs you (? asks q2): Which scope?\n  1) small\n  2) full (recommended)\n  drover answer sendmeter q2 <n|\"text\">",
         "pr": null,
         "run": null,
-        "seq": 14,
-        "text": "asks you (q1) · Which scope?",
+        "seq": 15,
+        "text": "asks you (q2) · Which scope?",
         "tone": "r",
         "ts": 1000000,
         "type": "needs-decision"
       }
     ],
     "refresh": false,
-    "seq": 14
+    "seq": 15
   },
   "route": "GET /api/v1/events",
   "schema": {
