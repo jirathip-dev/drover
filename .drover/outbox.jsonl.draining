@@ -1,0 +1,3 @@
+{"args":["verdict","sendmeter","12","PASS","--sha","abc0000000000000000000000000000000000000","--file","/tmp/fleet-test-drive-no-label-3769792-70/state/verdict.md"],"lane":"herdsman:952:rev","ts":1794863413915}
+{"args":["verdict","sendmeter","3","PASS","--sha","cc504bb620f7dfbba7d731577a53371369ac31f0","--file","/tmp/fleet-test-au-no-carry-3798810-1/worktrees/rev-3/verdict.md"],"lane":"herdsman:952:rev","ts":1794863718035}
+{"args":["verdict","sendmeter","3","PASS","--sha","cc504bb620f7dfbba7d731577a53371369ac31f0","--file","/tmp/fleet-test-au-carry-3798810-2/worktrees/rev-3/verdict.md"],"lane":"herdsman:952:rev","ts":1794863718533}
