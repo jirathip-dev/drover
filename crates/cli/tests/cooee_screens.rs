@@ -217,6 +217,18 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     assert_eq!(find(&q, "done-today-sendmeter")["value"], "1");
     assert_eq!(find(&q, "stats")["items"][0]["value"], "1");
     assert_eq!(find(&q, "stats")["items"][0]["spark"], json!([0, 0, 0, 0, 0, 0, 1]));
+    let labels: Vec<&Value> = find(&q, "repo")["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| &o["label"])
+        .collect();
+    assert_eq!(labels, [&json!("all 4"), &json!("sendmeter 4 ●")]);
+    let counts: Vec<String> = (find(&q, "counts")["items"].as_array().unwrap().iter())
+        .map(|i| format!("{} {}", i["label"].as_str().unwrap(), i["value"].as_str().unwrap()))
+        .collect();
+    assert_eq!(counts, ["needs you 1", "in progress 1", "queued 2", "done today 1"]);
+    assert_eq!(q["badge"], 2);
     let none = get("/screens/queue?repo=nope");
     assert_eq!(find(&none, "repo")["selected"], json!(["all"]));
 
@@ -694,7 +706,7 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
         "",
     )
     .1;
-    screen.as_object_mut().unwrap().remove("badge");
+    assert_eq!(fresh["badge"], 1);
     assert_eq!(screen, fresh, "the ops turned the first answer into today's");
 }
 
@@ -762,7 +774,7 @@ fn parity_38_the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_mo
     };
     let q = get("/screens/queue");
     like(&q, "queue", false);
-    assert_eq!(find(&q, "repo")["options"][1]["label"], "sendmeter ●", "a needs dot");
+    assert_eq!(find(&q, "repo")["options"][1]["label"], "sendmeter 9 ●", "a needs dot");
     assert_eq!(find(&q, "fleet-sendmeter")["tone"], "warn", "needs you");
     assert_eq!(
         rows_of(&q, "queued-list-sendmeter"),
@@ -930,7 +942,11 @@ fn parity_45_a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thr
         .map(|r| &r["title"]);
     assert_eq!(
         past.collect::<Vec<_>>(),
-        [&json!("fix 1"), &json!("review 1 ✗"), &json!("impl ✓")]
+        [&json!("fix 1"), &json!("review 1"), &json!("impl")]
+    );
+    assert_eq!(
+        find(&fix, "h-1")["subtitle"],
+        json!({"text": "FAIL · aaaaaaa · 58m", "tone": "bad"})
     );
     let asked = get("/screens/issue?repo=sendmeter&issue=17");
     let thread = find(&asked, "asked");
@@ -956,6 +972,160 @@ fn parity_45_a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thr
         req(&s, T, "GET", "/screens/issue?repo=sendmeter&issue=99", "", "").0,
         404
     );
+}
+
+fn rev(c: &drover::Ctx, ts: u64, n: u64, agent: &str) {
+    let d = json!({"role": "rev", "stage": "rev", "check": true, "agent": agent, "harness": "claude"});
+    append(&c.state, &Event::new(ts, "sendmeter", Some(n), "spawn", d)).unwrap();
+}
+
+fn sheet_of(s: &Server, n: u64) -> Value {
+    let (status, v) = req(s, T, "GET", &format!("/screens/issue?repo=sendmeter&issue={n}"), "", "");
+    assert_eq!(status, 200, "{v}");
+    v
+}
+
+#[test]
+fn issue_1238_a_respawned_review_is_one_round_and_the_sheet_shows_ci_and_each_stages_verdict() {
+    let (c, r) = recorded("cooee-rounds");
+    for ts in [T - 2_900, T - 2_800, T - 2_700] {
+        rev(&c, ts, 12, "sendmeter-rev-12-r2");
+    }
+    let pass = json!({"verdict": "PASS", "sha": "c".repeat(40), "stage": "rev", "loop": "rev", "round": 2,
+        "body": "PASS\n\nevery AC met"});
+    append(&c.state, &Event::new(T - 2_000, "sendmeter", Some(12), "verdict", pass)).unwrap();
+    let cache = c.state.parent().unwrap().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let green = json!([{"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
+    let pr = json!({"ts": T, "pr": {"number": 281, "title": "count rounds once", "statusCheckRollup": green}});
+    std::fs::write(cache.join("pr-sendmeter-12.json"), pr.to_string()).unwrap();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let sheet = sheet_of(&s, 12);
+    assert_eq!(sheet, fixture_json("issue-rounds"));
+    like(&sheet, "issue", false);
+    let hist: Vec<(&Value, &Value)> = find(&sheet, "history-list")["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (&r["title"], &r["subtitle"]["text"]))
+        .collect();
+    assert_eq!(
+        hist,
+        [
+            (&json!("review 2"), &json!("PASS · ccccccc · 33m")),
+            (&json!("fix 1"), &Value::Null),
+            (&json!("review 1"), &json!("FAIL · aaaaaaa · 58m")),
+            (&json!("impl"), &Value::Null),
+        ]
+    );
+    assert_eq!(find(&sheet, "ci")["badge"], json!({"text": "✓", "tone": "ok"}));
+    let last = find(&sheet, "v-rev");
+    assert_eq!(
+        (&last["badge"], &last["value"]),
+        (&json!({"text": "PASS", "tone": "ok"}), &json!("2/3"))
+    );
+    assert_eq!(find(&sheet, "pr")["subtitle"], "count rounds once");
+    assert_eq!(
+        find(&sheet, "l-sendmeter-rev-12-r2")["subtitle"],
+        json!({"text": "PASS", "tone": "ok"})
+    );
+    let open = find(&sheet, "h-3")["tap"]["sheet"].as_str().unwrap().to_string();
+    let (status, verdict) = req(&s, T, "GET", &open, "", "");
+    assert_eq!(status, 200, "{verdict}");
+    assert_eq!(find(&verdict, "verdict-body")["markdown"], "PASS\n\nevery AC met");
+    let (_, q) = req(&s, T, "GET", "/screens/queue", "", "");
+    let sub = find(&q, "q-sendmeter-12")["subtitle"].as_str().unwrap();
+    assert!(
+        sub.starts_with("impl ✓ · review 1 ✗ · fix 1 ✓ · review 2 ✓ · "),
+        "{sub}"
+    );
+}
+
+#[test]
+fn issue_1238_a_review_that_exits_without_a_verdict_shows_no_verdict_never_a_tick() {
+    let (c, r) = recorded("cooee-no-verdict");
+    rev(&c, T - 2_900, 12, "sendmeter-rev-12-r2");
+    let fix = json!({"role": "fix", "agent": "sendmeter-impl-12", "harness": "claude"});
+    append(&c.state, &Event::new(T - 2_500, "sendmeter", Some(12), "spawn", fix)).unwrap();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let sheet = sheet_of(&s, 12);
+    let review = find(&sheet, "h-3");
+    assert_eq!(
+        (&review["title"], &review["subtitle"]),
+        (&json!("review 2"), &json!({"text": "no verdict", "tone": "warn"}))
+    );
+    let (_, q) = req(&s, T, "GET", "/screens/queue", "", "");
+    let sub = find(&q, "q-sendmeter-12")["subtitle"].as_str().unwrap();
+    assert!(sub.starts_with("impl ✓ · review 1 ✗ · fix 1 ✓ · review 2 · "), "{sub}");
+}
+
+#[test]
+fn issue_1238_dead_needs_check_decided_by_default_and_parked_each_show_their_line_or_button() {
+    let (c, r) = recorded("cooee-old-lines");
+    let ev =
+        |n: u64, kind: &str, d: Value| append(&c.state, &Event::new(T - 100, "sendmeter", Some(n), kind, d)).unwrap();
+    ev(
+        17,
+        "spawn",
+        json!({"role": "impl", "agent": "sendmeter-impl-17", "harness": "claude"}),
+    );
+    ev(
+        17,
+        "needs-decision",
+        json!({"id": "q3", "question": "Split?", "options": ["split", "keep"], "recommend": 2, "kind": "routine"}),
+    );
+    ev(17, "decision", json!({"id": "q3", "choice": "keep", "by": "default"}));
+    ev(5, "parked", json!({"by": "owner"}));
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let mut add = drover::queue::op("add", &[40], false, None, None, None);
+    add["check"] = json!(true);
+    drover::queue_change(&c, &cfg, "sendmeter", add, None).unwrap();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let dead = sheet_of(&s, 17);
+    assert_eq!(
+        find(&dead, "dead")["subtitle"],
+        json!({"text": "the log has this lane open, no such agent", "tone": "bad"})
+    );
+    let decided = find(&dead, "decided");
+    assert_eq!(decided["header"], "decided by default: keep");
+    let change = find(&dead, "q3");
+    assert_eq!(
+        (&change["type"], &change["action"]),
+        (&json!("choice"), &json!("answer"))
+    );
+    assert_eq!(
+        change["options"][0]["values"],
+        json!({"fleet": "sendmeter", "issue": 17})
+    );
+    let backlog = sheet_of(&s, 40);
+    assert_eq!(
+        find(&backlog, "needs-check")["subtitle"]["text"],
+        "from the backlog, spec not checked"
+    );
+    let parked = sheet_of(&s, 5);
+    let unpark = find(&parked, "Unpark");
+    assert_eq!(
+        (&unpark["action"], &unpark["values"]),
+        (&json!("unpark"), &json!({"fleet": "sendmeter", "issue": 5}))
+    );
+    like(&dead, "issue", false);
+    like(&parked, "issue", false);
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let tap = json!({"screen": "issue", "block": "Unpark", "action": "unpark", "values": unpark["values"]});
+    let (status, v) = req(&s, T, "POST", "/action", &tap.to_string(), &ck);
+    assert_eq!(status, 200, "{v}");
+    let kinds: Vec<String> = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.issue == Some(5))
+        .map(|e| e.kind.clone())
+        .collect();
+    assert_eq!(kinds.last().map(String::as_str), Some("unparked"), "{kinds:?}");
+    assert!(sheet_of(&s, 5)["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|b| b["id"] != "Unpark"));
 }
 
 #[test]

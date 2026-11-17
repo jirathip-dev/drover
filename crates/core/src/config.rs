@@ -727,6 +727,7 @@ pub struct Limits {
     pub slo_api_minutes: u64,
     pub slo_idle_minutes: u64,
     pub slo_tick_minutes: u64,
+    pub slo_pass_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -848,6 +849,7 @@ impl Default for Limits {
             slo_api_minutes: 10,
             slo_idle_minutes: 20,
             slo_tick_minutes: 10,
+            slo_pass_minutes: 30,
         }
     }
 }
@@ -1098,7 +1100,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "serve_handover_secs",
-        "`self-update` waits this long for the running serve to hand over before restarting it",
+        "how long serve waits for a held port's serve to answer, hand over, or let go of the port (#1244)",
     ),
     (
         "serve_mem_mb",
@@ -1119,6 +1121,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "slo_tick_minutes",
         "a tick running longer than this breaches `slo-tick`; the next fast step stops it",
+    ),
+    (
+        "slo_pass_minutes",
+        "no slow drive pass of a fleet for this long shows the owner's `Drive is stuck` card",
     ),
 ];
 
@@ -1170,6 +1176,25 @@ impl Notify {
             || matches!(kind, "land-paused" | "reverted" | "revert-failed" | "service-stalled")
             || kind == "report" && !self.webpush()
     }
+}
+
+fn orchestrator_ids(c: &Config) -> Result<()> {
+    if let Some((id, f)) = (c.orchestrator.more.iter())
+        .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
+    {
+        bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
+    }
+    let named = |id: &String| {
+        id != "default"
+            && !id.is_empty()
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    };
+    if let Some(id) = c.orchestrator.more.keys().find(|id| !named(id)) {
+        bail!("orchestrator.{id}: an id is lowercase letters, digits and `-`, and not `default`");
+    }
+    Ok(())
 }
 
 impl Config {
@@ -1279,11 +1304,7 @@ impl Config {
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
         }
-        if let Some((id, f)) = (c.orchestrator.more.iter())
-            .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
-        {
-            bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
-        }
+        orchestrator_ids(&c)?;
         if let Some(g) = c
             .orchestrator
             .groups()

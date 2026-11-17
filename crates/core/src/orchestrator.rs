@@ -9,6 +9,9 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
 
+mod brief;
+pub mod chat;
+
 /// #620: how many times `of` ran (#701: `WALKS`, the events it looked at).
 pub static SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -67,19 +70,24 @@ pub fn fleet_of<'a>(events: &'a [Event], id: &str) -> Result<&'a str> {
     Ok(&attached(events, id).map_or_else(|| find(events, id), Ok)?.fleet)
 }
 
-pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
-    let f = cfg.fleet(fleet)?;
-    let (_, role) = defaults(cfg, fleet)?;
+fn hold(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str, mut extra: Value) -> Result<Event> {
     let ok = |c: char| c.is_ascii_alphanumeric() || "-_.:".contains(c);
     if id.is_empty() || id.len() > 128 || !id.chars().all(ok) {
         return refused("BAD_VALUE", "thread: a cooee thread id (letters, digits, `-_.:`)");
     }
-    let events = working(&ctx.state)?;
-    if find(&events, id).is_ok() {
+    if find(&working(&ctx.state)?, id).is_ok() {
         return refused("BAD_VALUE", format!("{id} is drover's own thread"));
     }
-    let t = Event::new(ctx.now, fleet, None, "orchestrator-attached", json!({"thread": id}));
+    extra.put("thread", json!(id));
+    let t = Event::new(ctx.now, fleet, None, "orchestrator-attached", extra);
     emit(&ctx.state, cfg, t.clone())?;
+    Ok(t)
+}
+
+pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
+    let f = cfg.fleet(fleet)?;
+    let (_, role) = defaults(cfg, fleet)?;
+    let t = hold(ctx, cfg, fleet, id, json!({}))?;
     let p = role.profile_or("orchestrator");
     let acp = providers::get(&role.harness).acp().unwrap_or(&role.harness);
     let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, false);
@@ -89,7 +97,7 @@ pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
         "DROVER_PORT": port.to_string()});
     let message = format!("{id} is {fleet}'s orchestrator thread");
     Ok(
-        json!({"ok": true, "code": "OK", "message": message, "brief": profile(cfg, &t, fleet),
+        json!({"ok": true, "code": "OK", "message": message, "brief": brief::thread(cfg, &t, fleet),
         "settings": settings, "env": env, "guarded": why.is_empty(), "why": why}),
     )
 }
@@ -123,6 +131,16 @@ pub fn by(b: &str) -> String {
 pub fn acting() -> Option<String> {
     let lane = crate::config::env("DROVER_LANE")?;
     is_role(lane.split(':').nth(2)?).then(|| crate::config::env("DROVER_ORCHESTRATOR"))?
+}
+
+/// #962: who runs this command, the `by` its events carry: `drive`, `orchestrator-<id>`, `lane` or `owner`.
+pub fn actor() -> String {
+    match acting() {
+        _ if crate::drive::in_act() => "drive".into(),
+        Some(id) => format!("orchestrator-{id}"),
+        None if crate::config::env("DROVER_LANE").is_some() => "lane".into(),
+        None => "owner".into(),
+    }
 }
 
 /// #780: the orchestrator a thread from before #780 (none named) belongs to, the one `[orchestrator]` itself names.
@@ -474,7 +492,10 @@ pub fn handoff_text(e: &Event) -> String {
 /// #541: the thread a lane's ask on `fleet` goes to: `[fleet.<n>] ask_thread`, else the repo's most recently active one (neither archived); none without a conductor role. #633: an attached cooee thread is one of them.
 pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a str> {
     let own = role(cfg, fleet).is_ok();
-    let repo = |e: &&'a Event| e.fleet == fleet && (own && e.kind == "thread-new" || e.kind == "orchestrator-attached");
+    let chat = |e: &Event| e.str("via") == Some("profile");
+    let repo = |e: &&'a Event| {
+        e.fleet == fleet && (own && e.kind == "thread-new" || e.kind == "orchestrator-attached" && !chat(e))
+    };
     let ids = events.iter().filter(repo).filter_map(|e| e.str("thread"));
     let live = |id: &&str| match link_of(events, id) {
         Some(_) => attached(events, id).is_some_and(|e| e.fleet == fleet),
@@ -1092,7 +1113,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         None => None,
     };
     h.ready(ctx, r, &p)?;
-    let text = profile(cfg, t, fleet);
+    let text = brief::thread(cfg, t, fleet);
     on.write(&brief, &text)?;
     h.prepare(ctx, &on, &p)?;
     if let Some(acp) = &acp {
@@ -1143,50 +1164,6 @@ fn started(ctx: &Ctx, cfg: &Config, t: &Event, d: Value) -> Result<String> {
         Event::new(ctx.now, &t.fleet, None, "orchestrator-start", d),
     )?;
     Ok(agent)
-}
-
-fn profile(cfg: &Config, t: &Event, fleet: &str) -> String {
-    let (id, title) = (t.str("thread").unwrap_or_default(), t.str("title").unwrap_or_default());
-    let repo = cfg.fleet.get(&t.fleet).map_or("all repos".into(), |f| {
-        format!("{} (fleet {}, checkout {})", f.repo, t.fleet, f.local)
-    });
-    let mut s = format!(
-        "# Orchestrator brief: thread {id}\n\n{}\n\nThread: {id}, {title}\nRepo: {repo}\nFleet for asks: {fleet}\n",
-        crate::spawn::role_prompt("orchestrator").trim_end()
-    );
-    let c = &cfg.orchestrator;
-    if let Some(p) = &c.instructions {
-        let text = std::fs::read_to_string(expand(p)).unwrap_or_else(|e| format!("({p} unreadable: {e})"));
-        s += &format!("\n## Instructions ({p})\n\n{}\n", text.trim_end());
-    }
-    let files = |d: &Option<String>| {
-        let all = d.as_deref().and_then(|d| std::fs::read_dir(expand(d)).ok());
-        let mut v: Vec<_> = all.into_iter().flatten().flatten().map(|e| e.path()).collect();
-        v.sort();
-        v
-    };
-    for m in files(&c.memory)
-        .iter()
-        .filter(|p| p.extension().is_some_and(|x| x == "md"))
-    {
-        let text = std::fs::read_to_string(m).unwrap_or_default();
-        s += &format!("\n## Memory: {}\n\n{}\n", m.display(), text.trim_end());
-    }
-    s += "\n## Capability groups ([orchestrator] allow)\n\n";
-    for (g, verbs) in crate::config::GROUPS {
-        let on = if c.groups().contains(g) { "on" } else { "off" };
-        s += &format!("- `{g}` ({on}): {verbs}\n");
-    }
-    s += "\nA verb of an off group is refused `GROUP_OFF`: propose `[orchestrator] allow` with `drover config propose`.\n";
-    let skills = files(&c.skills);
-    if !skills.is_empty() {
-        s += "\n## Skills (read one when it applies)\n\n";
-        s += &skills
-            .iter()
-            .map(|p| format!("- {}\n", p.display()))
-            .collect::<String>();
-    }
-    s
 }
 
 /// The thread as items: messages (`from`, `text`) and asks (`ask`, `question`, numbered `options` with the recommended one first, `open`).
