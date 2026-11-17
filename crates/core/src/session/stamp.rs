@@ -1,6 +1,8 @@
 use super::{pulse, Cause, Exit, Life, Session, Sessions, Status};
 use crate::config::Config;
 use crate::events::{append, last_spawn, Event, Json};
+use crate::hosts::On;
+use crate::runner::Runner;
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -93,6 +95,9 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> 
     let Some((fleet, issue)) = whose(cfg, &e.labels) else {
         return Ok(false);
     };
+    if last_spawn(&crate::events::working(&ctx.state)?, &e.name).is_some_and(|sp| sp.str("machine").is_some()) {
+        return Ok(false);
+    }
     pulse::hear(ctx, &e.name, &e.kind, e.replay)?;
     let Some(issue) = issue else {
         return Ok(false);
@@ -155,10 +160,19 @@ fn word(s: Status) -> Option<&'static str> {
     }
 }
 
-fn look(ctx: &Ctx, cfg: &Config, events: &[Event], s: &Session) -> Result<bool> {
-    let Some((fleet, Some(issue))) = whose(cfg, &s.labels).filter(|_| last_spawn(events, &s.name).is_some()) else {
+fn look(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], m: Option<&str>, s: &Session) -> Result<bool> {
+    let (Some((fleet, Some(issue))), Some(sp)) = (whose(cfg, &s.labels), last_spawn(events, &s.name)) else {
         return Ok(false);
     };
+    if sp.str("machine") != m {
+        if !s.running() {
+            let on = On::new(r, m);
+            if let Some(Err(e)) = on.shed().map(|b| crate::term::Shed(b).rm(&on, &s.name)) {
+                crate::stderr!("drover: {} on its old host: {e:#}", s.name);
+            }
+        }
+        return Ok(false);
+    }
     let at = (fleet.as_str(), issue);
     match s.life {
         Life::Running(st) => {
@@ -180,12 +194,14 @@ fn look(ctx: &Ctx, cfg: &Config, events: &[Event], s: &Session) -> Result<bool> 
     }
 }
 
-/// A pass's look at every lane session: a changed status or an exit stamped into the log as `lane-state`; how many.
-pub fn observe(ctx: &Ctx, cfg: &Config, sessions: &Sessions) -> Result<usize> {
+/// A pass's look at every lane session on its spawn's host: a changed status or an exit stamped into the log as `lane-state`; how many. #1225: an exited one of the same name on another host is removed.
+pub fn observe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, sessions: &Sessions) -> Result<usize> {
     let mut n = 0;
-    for s in sessions.every() {
-        let events = crate::events::working(&ctx.state)?;
-        n += usize::from(look(ctx, cfg, &events, s)?);
+    for (m, got) in &sessions.0 {
+        for s in got.iter().flatten() {
+            let events = crate::events::working(&ctx.state)?;
+            n += usize::from(look(ctx, cfg, r, &events, m.as_deref(), s)?);
+        }
     }
     Ok(n)
 }
