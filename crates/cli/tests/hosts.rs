@@ -173,6 +173,31 @@ fn needs_pick_the_host_whose_tags_cover_them_else_no_host() {
 }
 
 #[test]
+fn a_repro_issues_rev_runs_on_the_os_its_target_gated_test_needs() {
+    let c = setup("hosts-repro-os", "", true, 0);
+    let diff = "+++ b/src/a.rs\n+#[cfg(target_os = \"linux\")]\n+#[test]\n+fn reaps() {}\n";
+    let r = fake(0.1, 2.0).reply("gh pr diff issue-12", diff);
+    assert_eq!(placed(&c, &r, 12, "rev", None).as_deref(), Ok("mini"), "not --repro");
+    run(&c, &r, &["queue", "sendmeter", "add", "12", "--repro"]);
+    assert_eq!(
+        placed(&c, &r, 12, "impl", None).as_deref(),
+        Ok("mini"),
+        "impl: least busy"
+    );
+    assert_eq!(
+        placed(&c, &r, 12, "rev", None).as_deref(),
+        Ok("bazzite"),
+        "rev: os:linux"
+    );
+    let mac = fake(0.1, 2.0).reply("gh pr diff issue-12", "+fn plain() {}\n");
+    assert_eq!(
+        placed(&c, &mac, 12, "rev", None).as_deref(),
+        Ok("mini"),
+        "no gated test"
+    );
+}
+
+#[test]
 fn the_least_busy_host_wins() {
     let c = setup("hosts-busy", "", true, 0);
     assert_eq!(placed(&c, &fake(2.0, 0.2), 12, "impl", None).as_deref(), Ok("bazzite"));
