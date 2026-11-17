@@ -948,14 +948,17 @@ fn integration_view(
     (r, on): (&dyn Runner, &crate::hosts::On),
     f: &crate::config::Fleet,
     p: &Plan,
-    (fleet, issue): (&str, u64),
+    (fleet, issue, update): (&str, u64, bool),
     local: &str,
 ) -> Result<(Option<String>, Option<String>)> {
     let own = || crate::repo_read("rules.md", |x| on.read(&p.worktree.join(x)));
-    if p.family != "rev" {
-        return Ok((own(), None));
-    }
     let int = &f.integration;
+    if p.family != "rev" {
+        return Ok((
+            own(),
+            update.then(|| format!(include_str!("../roles/brief-update.md"), int)),
+        ));
+    }
     ok(r, "git", &["-C", local, "fetch", "origin", int])?;
     let at_int = |name: &str| {
         crate::repo_read(name, |x| {
@@ -1352,9 +1355,6 @@ pub fn spawn(
         let fix = last
             .filter(|e| p.family == "impl" && e.str("verdict") == Some("FAIL"))
             .and_then(|e| e.str("body"));
-        let update = o
-            .update
-            .then(|| format!(include_str!("../roles/brief-update.md"), f.integration));
         let adr = events
             .iter()
             .rfind(|e| e.is("design-approved", fleet, issue) && e.str("role") == Some("architect"))
@@ -1364,13 +1364,12 @@ pub fn spawn(
                 "rev" => format!("Architecture: the owner approved the ADR in `{a}/`; check the diff against it."),
                 _ => format!("Architecture: the owner approved the ADR in `{a}/` on this branch; build to it, and add any `.drover/arch.toml` lines it ends with in this PR."),
             });
-        let (rules, changed) = integration_view(ctx, (r, &on), f, &p, (fleet, issue), &local)?;
+        let (rules, int_note) = integration_view(ctx, (r, &on), f, &p, (fleet, issue, o.update), &local)?;
         let decided = events
             .iter()
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
-            .chain(changed)
-            .chain(update)
+            .chain(int_note)
             .chain(adr)
             .chain((!crate::events::STAGES.contains(&p.family)).then(|| {
                 let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
