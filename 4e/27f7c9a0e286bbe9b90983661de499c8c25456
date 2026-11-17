@@ -1,0 +1,8 @@
+Decided: schemes stays web/src/schemes.ts, typed, so the strict comment policy and the TS lint both cover it
+Because: "arch-check's strict policy then checks **whole files**, not only the diff, so the repo cannot drift back"
+Decided: its test writes the slice as t.ts and node 24 strips the types; allowJs is gone
+Because: crates/cli/tests/schemes.rs:31
+Rejected: adding .js/.mjs to the comment policy — it would pull in docs/design and test scripts outside the issue's scope
+Check: a `// #999:` line appended to web/src/schemes.ts fails arch-check (schemes.ts:63)
+Check: arch-check's only local violation is `just gen` exit 127 (no just on this host); web/dist rebuilt by hand and stays clean
+Owner: The colour-scheme checker is TypeScript again, so the no-history-comments rule covers it too.
