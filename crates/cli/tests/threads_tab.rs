@@ -555,6 +555,44 @@ return [thumbs, kept, text, shown, all('.cmp .tb').length];
 }
 
 #[test]
+fn a_sent_message_with_a_photo_shows_once_from_tap_to_echo_in_webkit_at_390() {
+    if no_webkit() {
+        return;
+    }
+    let js = format!("window.late = (async () => {{ {CMP}
+const ES = window.EventSource;
+window.EventSource = class extends ES {{ set onmessage(f) {{ super.onmessage = e => setTimeout(() => {{ f(e); window.got = (window.got ?? 0) + 1; }}, 1500); }} get onmessage() {{ return super.onmessage; }} }};
+(await wait(() => q('.row[data-id=\"t2\"]'))).click();
+await wait(() => q('.cmp textarea') && window.got);
+const px = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+const dt = new DataTransfer();
+dt.items.add(new File([px], 'once.png', {{ type: 'image/png' }}));
+const pick = q('.cmp input[type=file]');
+pick.files = dt.files;
+pick.dispatchEvent(new Event('change'));
+await wait(() => all('.cmp .tb img').length);
+type('only once please');
+const mine = () => all('.card.k-you').filter(c => c.textContent.includes('only once please'));
+let most = 0;
+const seen = () => {{ most = Math.max(most, mine().length); }};
+new MutationObserver(seen).observe(document.body, {{ subtree: true, childList: true, characterData: true }});
+q('.cmp .cr button.primary').click();
+await wait(() => mine().length);
+const t = Date.now();
+await wait(() => Date.now() - t > 3000);
+seen();
+const one = mine();
+return [most, one.length, Number(one.length === 1 && one[0].textContent.includes('✓')), one.length === 1 ? one[0].querySelectorAll('.imgs img').length : 0];
+}})()");
+    let v = composer_in_webkit("threads-webkit-once", &js);
+    assert_eq!(
+        v,
+        [1.0, 1.0, 1.0, 1.0],
+        "never two bubbles, one after the echo, its ✓, its photo"
+    );
+}
+
+#[test]
 fn a_thread_opens_at_its_end_in_webkit_with_its_bar_on_top_and_the_page_still() {
     if no_webkit() {
         return;
