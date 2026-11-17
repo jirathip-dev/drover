@@ -1,0 +1,8 @@
+Decided: gh::closed takes the tracked issue numbers and asks one aliased GraphQL query (`i<n>:issue(number:n){state}`) for exactly those, cached 60 s per fleet while the cache covers the asked set.
+Because: "Ask only about the issues herdsman tracks as open: one aliased GraphQL query for those numbers"
+Because: crates/core/src/check.rs:1900 passes the fleet's open tracked issues; drive passes the one issue whose PR closed.
+Decided: clean asks about the fleet's tracked issues that are not merged (merged ones are cleaned before the closed check).
+Rejected: the backlog `since` delta — it only sees issues updated after its first read and depends on backlog running first; the aliased query is exact.
+Rejected: chunking the aliases — "No fixed limit" and tracked open issues stay well under GitHub's node limits.
+Check: a deleted or transferred tracked number makes GraphQL return an error, so that fleet's closed read fails for the tick, as any gh failure did before.
+Owner: Each tick now asks GitHub only about the issues drover is tracking, in one request, and sees closures no matter how many closed issues the repo has.
