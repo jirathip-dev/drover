@@ -1,0 +1,5 @@
+Decided: the remote trim and sweep run even after the tick overruns its budget, with the pass budget lifted for that one step
+Because: "The remote-host sweep runs on a schedule that drive overruns can't starve"
+Rejected: keeping staging's "trim skipped past budget" assertions in offline_tick.rs — they contradict the spec
+Check: the sim shard failure (hunt, seed 1003) reproduces with timer.rs reverted to staging; staging tip CI is red in sim too
+Owner: Finished lanes' remote build and scratch folders now get cleaned even on slow ticks, by reclaim, before a disk-full refusal, and at a reviewer's verdict.
