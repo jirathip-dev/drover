@@ -410,8 +410,8 @@ pub fn skipped(
     st: &States,
     f: Option<&Fleet>,
     fleet: &str,
-    n: u64,
-    now: u64,
+    (n, now): (u64, u64),
+    slots: &str,
 ) -> Option<(String, String)> {
     let s = |e: &&Event| e.kind == "driven" && e.fleet == fleet && e.issue == Some(n) && e.str("step") == Some("start");
     let is = st.get(&(fleet.to_string(), n)).filter(|s| s.state == "queued")?;
@@ -447,6 +447,11 @@ pub fn skipped(
     let merged = |m: &Event| m.kind == "merged" && m.fleet == fleet && m.ts > e.ts && m.issue.is_some_and(mine);
     (!events.iter().any(merged)).then_some(())?;
     let why = e.str("result")?.split_once(": ").map_or("", |w| w.1);
+    let why = if code == "SPAWN_PENDING" {
+        Some(slots).filter(|s| !s.is_empty())?
+    } else {
+        why
+    };
     let ago = age(now.saturating_sub(e.ts));
     Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))
 }

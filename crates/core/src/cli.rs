@@ -1323,9 +1323,13 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let off = cfg.as_ref().map(|c| crate::hosts::idle_off(c, &events));
                 let spared = crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), None);
                 let look = crate::snapshot::Snap::read(ctx, &spared);
+                let slots = cfg
+                    .as_ref()
+                    .map(|c| crate::starts::held_now(ctx, c, &look))
+                    .unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
                     let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
-                    let skip = queue::skipped(&events, &all, f, &s.fleet, s.issue, ctx.now);
+                    let skip = queue::skipped(&events, &all, f, &s.fleet, (s.issue, ctx.now), &slots);
                     skip.map(|s| format!("skipped this pass: {}", s.1))
                 };
                 let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
@@ -1866,6 +1870,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         .map(|x| x.1)
                         .collect();
                     let (log, st) = (crate::waiting::Log::new(&events), crate::events::fold(&events));
+                    let slots = crate::starts::held_now(ctx, &cfg, r);
                     for s in crate::waiting::guarded(&events, &cfg) {
                         let (Some(f), pr) = (cfg.fleet.get(&s.fleet), crate::gh::cached_pr(ctx, &s.fleet, s.issue))
                         else {
@@ -1886,8 +1891,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))
-                                .or_else(|| crate::queue::skipped(&events, &st, Some(f), &s.fleet, s.issue, ctx.now))
-                            {
+                                .or_else(|| {
+                                    crate::queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx.now), &slots)
+                                }) {
                                 Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
                                 None => ("drive", format!("next in the queue: drive starts it{note}")),
                             },
