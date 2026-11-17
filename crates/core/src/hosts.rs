@@ -348,6 +348,7 @@ impl<'a> Pass<'a> {
             } else {
                 "host offline this pass"
             };
+            self.note("");
             self.unsent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let stderr = format!("{m}: not sent ({why})");
             return Ok(Out {
