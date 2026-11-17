@@ -12,6 +12,9 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
    host (#337) are one ssh call per step. A pass checks all of a host's
    lane worktrees with one ssh call (#880); a host whose call runs past its limit shows in the tick's log as
    `tick: <host>: over budget; skipped for the rest of this pass`, and the pass goes on for the other hosts.
+   #1252: a tick past its `slow_secs` budget skips only its maintenance (clean, trim, lesson, hotspots, compact);
+   check and drive still reach every host that answers. Hosts skipped two passes running log one `hosts-skipped`
+   alert with the calls not sent and the pass's slowest step.
 2. On the new host, install and log in to:
    - shed (its server job running; `hosts bootstrap` installs it);
    - git;
