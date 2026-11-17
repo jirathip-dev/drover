@@ -1,0 +1,11 @@
+Decided: the session pass (stamp.rs, run by every check) logs `lane-alive` (key `alive:<the lane-dead's key>`) when a lane logged dead runs again on its spawn's host; a proxy key ignores a lane-dead so disproved.
+Because: "does not leave the key `ended`"
+Because: crates/core/src/proxy.rs:96
+Because: crates/core/src/session/stamp.rs:66
+Decided: no change to when lane-dead fires; the tests show an unread or over-budget remote host already logs none.
+Because: crates/core/src/session/mod.rs:276
+Rejected: a passive lane-alive — the issue's last activity would not move, so a later real death would reuse the old lane-dead key and fire's dedup would swallow it.
+Rejected: matching lane-alive to lane-dead by timestamp — two events in one second would undo a later real death.
+Rejected: the code in check.rs — it would push check.rs and its check fn over their arch size baselines.
+Check: a_lane_logged_dead_and_then_seen_running_again_keeps_a_live_key also proves a second, real death ends the key again.
+Owner: a lane wrongly reported dead gets its proxy key back the next time drover sees it running, so its model calls work again.
