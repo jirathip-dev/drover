@@ -1,0 +1,19 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1170/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.18s
+     Running tests/parity_webkit.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1170/debug/deps/parity_webkit-ae15b2b31f70f207)
+
+running 11 tests
+test parity_2_a_live_update_never_moves_the_scroll_or_replaces_a_kept_node ... ignored, red until #1084: a live update repaints every node
+test parity_r25_a_sheet_closes_without_a_flash ... ok
+test parity_r4_in_a_thread_only_the_messages_scroll_and_the_composer_sits_at_the_bottom ... ok
+test parity_r5_a_slow_load_shows_the_strip_after_300ms_and_the_page_stays_tappable ... ok
+test parity_28_a_long_press_offers_copy_copy_as_markdown_and_quote ... ok
+test parity_20_a_tapped_image_opens_fitted_in_the_viewer ... ok
+test parity_24_opening_a_thread_pushes_history_and_back_returns_to_the_list ... ok
+test parity_18_a_message_links_its_urls_and_thread_refs_and_keeps_its_markdown ... ok
+test parity_19_a_fenced_block_copies_its_exact_text ... ok
+test parity_24_an_edge_swipe_past_40_percent_goes_back_to_the_list_where_it_was_and_a_short_one_stays ... ok
+test parity_29_a_long_thread_shows_its_last_30_and_older_ones_load_on_scroll ... ok
+
+test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 15.33s
+
