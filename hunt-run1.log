@@ -1,0 +1,10 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1237/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.64s
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1237/debug/deps/sim-477a3e0a0c69cb28)
+
+running 1 test
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it has been running for over 60 seconds
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 72.00s
+
