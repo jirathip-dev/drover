@@ -123,7 +123,7 @@ pub struct NeedsTab {
     pub asks: Vec<NeedAsk>,
     pub blocked: Vec<Blocked>,
     pub issues: Vec<NeedIssue>,
-    /// fleet.toml fails to load: `config invalid: <error> (fleet.toml:<line>)`, the red banner above every tab.
+    /// Fleet.toml fails to load: `config invalid: <error> (fleet.toml:<line>)`, the red banner above every tab.
     pub config: Option<String>,
 }
 
@@ -190,7 +190,7 @@ pub struct LanesTab {
     pub sections: Vec<LaneSection>,
     /// Each lane's workspace root and unsaved work.
     pub unsaved: Vec<LaneUnsaved>,
-    /// fleet.toml's mtime, for a row's [unpark] form.
+    /// Fleet.toml's mtime, for a row's [unpark] form.
     pub mtime: String,
     /// A paired device's folded `Other in shed` rows (API v1's `shed`).
     pub shed: Vec<ShedRow>,
@@ -708,7 +708,7 @@ pub struct QueueTab {
     pub fleets: Vec<QueueCard>,
 }
 
-/// A fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of `done_n`), the backlog and the [config] sheet.
+/// A fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog and the [config] sheet.
 pub struct QueueCard {
     pub name: String,
     pub k: String,
@@ -813,12 +813,15 @@ pub struct QueueLane {
     pub link: String,
 }
 
-/// A row of `done today`: its land note (else state), age and merged PR.
+/// A `merged` event of `done today`: its issue's title, land note (else `merged`), age, time `t`, PR and merge sha.
 pub struct DoneRow {
     pub issue: u64,
+    pub title: Option<String>,
     pub note: String,
     pub age: String,
+    pub t: u64,
     pub pr: Option<String>,
+    pub sha: Option<String>,
 }
 
 /// The open issues not queued and with no lane, by number, as last read `ago`.
@@ -889,7 +892,7 @@ pub struct Conductor {
     pub models: Vec<String>,
 }
 
-/// Contract: the events after `since` (up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
+/// The events after `since` (up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
 pub struct Events {
     pub seq: u64,
     pub refresh: bool,
@@ -977,7 +980,7 @@ pub struct Digest {
     pub text: String,
 }
 
-/// API v1's `setup/<pane>`: the setup pane's masked `lines` and every `https://` URL in it (a wrapped one joined), or `closed`.
+/// API v1's `setup/<pane>` (the old board's `/lane?setup=`): the setup pane's masked `lines` and every `https://` URL in it (a wrapped one joined), or `closed`.
 pub struct SetupScreen {
     pub lines: Vec<String>,
     pub urls: Vec<String>,
@@ -1064,7 +1067,7 @@ pub struct ConductorAttach {
     /// The synced conductor provider settings (`PreToolUse`: `drover hook`).
     pub settings: String,
     pub env: AttachEnv,
-    /// ACP guard holds; else `why` not.
+    /// The ACP guard holds; else `why` not.
     pub guarded: bool,
     pub why: String,
 }

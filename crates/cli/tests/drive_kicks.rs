@@ -356,16 +356,15 @@ fn fix_due(c: &drover::Ctx, n: u64) {
 }
 
 #[test]
-fn fix_rounds_launch_before_starts_and_starts_keep_one_slot_free() {
+fn starts_run_before_the_pr_reads_and_keep_one_slot_for_a_fix_round() {
     let (c, _sh) = fleet("kicks-order", 6, 10);
     (21..=22).for_each(|n| fix_due(&c, n));
     let r = fake("1.0");
     let d = pass(&c, &r);
     let at = |n: u64| r.index(&format!("sh -c nohup '/opt/drover/bin/drover' kick sendmeter {n} "));
-    let (fixes, starts) = ([at(21), at(22)], (1..=10).filter_map(at).collect::<Vec<_>>());
-    assert!(fixes.iter().all(Option::is_some), "{d}");
-    assert!(starts.iter().all(|s| fixes.iter().all(|f| f < &Some(*s))), "{d}");
-    assert_eq!((starts.len(), Some(pending(&d))), (3, Some(5)), "{d}");
+    let starts = (1..=10).filter_map(at).collect::<Vec<_>>();
+    assert!(at(21).is_some_and(|f| starts.iter().all(|s| *s < f)), "{d}");
+    assert_eq!((starts.len(), at(22), pending(&d)), (5, None, 6), "{d}");
 }
 
 #[test]
@@ -411,16 +410,16 @@ fn review_due(c: &drover::Ctx, n: u64, f: Fake) -> Fake {
 }
 
 #[test]
-fn room_for_one_spawn_goes_to_the_review() {
-    let (c, _sh) = fleet("kicks-review-first", 1, 1);
+fn the_kept_slot_goes_to_the_review_before_a_fix_round() {
+    let (c, _sh) = fleet("kicks-review-first", 2, 1);
     fix_due(&c, 21);
     let r = fake_with("1.0", review_due(&c, 22, Fake::default()));
     let d = pass(&c, &r);
-    assert_eq!((launched(&r, 22), launched(&r, 21), launched(&r, 1)), (1, 0, 0), "{d}");
+    assert_eq!((launched(&r, 22), launched(&r, 21), launched(&r, 1)), (1, 0, 1), "{d}");
 }
 
 #[test]
-fn a_busy_host_holds_every_spawn_behind_the_review() {
+fn a_busy_host_holds_every_spawn_and_stops_the_starts() {
     let (c, _sh) = fleet("kicks-busy", 6, 2);
     let f = review_due(&c, 22, Fake::default());
     let r = fake_with("40.0", f);
@@ -428,16 +427,16 @@ fn a_busy_host_holds_every_spawn_behind_the_review() {
     assert_eq!((launched(&r, 22), launched(&r, 1), launched(&r, 2)), (0, 0, 0), "{d}");
     let a = d["actions"].as_array().unwrap();
     assert!(a.iter().any(|a| a["issue"] == 22 && a["code"] == "HOST_BUSY"), "{d}");
-    assert!(a.iter().all(|a| a["step"] != "start"), "no start tried: {d}");
+    assert!(a.iter().all(|a| a["issue"] != 2), "one busy start stops the rest: {d}");
     let r = fake_with("1.0", review_due(&c, 22, Fake::default()));
     pass(&c, &r);
     let at = |n: u64| r.index(&format!("sh -c nohup '/opt/drover/bin/drover' kick sendmeter {n} "));
-    assert!(at(22).is_some() && at(22) < at(1), "{:?}", r.calls.borrow());
+    assert!(at(1).is_some() && at(1) < at(22), "{:?}", r.calls.borrow());
 }
 
 #[test]
 fn waiting_names_the_reviews_ahead() {
-    let (c, _sh) = fleet("kicks-review-order", 1, 1);
+    let (c, _sh) = fleet("kicks-review-order", 2, 1);
     let f = (21..=23).fold(Fake::default(), |f, n| review_due(&c, n, f));
     let r = fake_with("1.0", f);
     pass(&c, &r);
@@ -944,4 +943,163 @@ fn two_fleets_passes_at_once_never_admit_a_spawn_past_the_host_limit() {
     let held = drover::db::leases(&c.state, "spawn-");
     assert_eq!(held.len(), 1, "one start slot of two: {held:?} {out}");
     assert!(out.contains("REFUSED SPAWN_PENDING"), "{out}");
+}
+
+fn hosted(dir: &str, names: &[(&str, usize)], max: usize, hosts: &str) -> drover::Ctx {
+    let (fleet, limits) = CONFIG.split_once("[limits]").unwrap();
+    let weighted = |(n, w): &(&str, usize)| {
+        fleet.replace("sendmeter", n).replace(
+            "integration = \"staging\"",
+            &format!("integration = \"staging\"\nweight = {w}"),
+        )
+    };
+    let all: String = names.iter().map(weighted).collect();
+    let limits = limits.replace("max_parallel_spawns = 0", &format!("max_parallel_spawns = {max}"));
+    let c = ctx(&tmpdir(dir), &format!("{all}[limits]{limits}{hosts}"));
+    for (n, _) in names {
+        let add = ["queue", n, "add", "1", "2", "3", "4", "5"];
+        assert_eq!(run(&c, &Fake::default(), &add).0, 0);
+    }
+    c
+}
+
+fn starting_on(c: &drover::Ctx) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut by = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for l in drover::db::leases(&c.state, "spawn-") {
+        let e: serde_json::Value = serde_json::from_str(&l.data).unwrap();
+        let host = e["host"].as_str().unwrap_or("none").to_string();
+        by.entry(host)
+            .or_default()
+            .push(e["fleet"].as_str().unwrap().to_string());
+    }
+    by
+}
+
+const BOATS: &str = "\n[hosts.mini]\n\n[hosts.boat1]\nmachine = \"boat1\"\n\n[hosts.boat2]\nmachine = \"boat2\"\n";
+
+#[test]
+fn each_host_fills_its_own_start_slots_in_one_pass() {
+    let c = hosted("kicks-1186-hosts", &[("alpha", 1), ("beta", 1), ("gamma", 1)], 3, BOATS);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = fake_with("1.0", Fake::default().reply("ssh ", ""));
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let on = starting_on(&c);
+    let n = |h: &str| on.get(h).map_or(0, Vec::len);
+    assert_eq!((n("mini"), n("boat1"), n("boat2")), (2, 2, 2), "{on:?}\n{out}");
+    for h in ["boat1", "boat2"] {
+        let fleets: std::collections::BTreeSet<_> = on[h].iter().collect();
+        assert_eq!(fleets.len(), 2, "{h} is split between fleets: {on:?}");
+    }
+    assert!(out.contains("2/2 starting"), "{out}");
+}
+
+#[test]
+fn a_shared_host_splits_its_start_slots_by_fleet_weight() {
+    let hosts = "\n[hosts.mini]\nstart_max = 0\n\n[hosts.boat1]\nmachine = \"boat1\"\nstart_max = 4\n";
+    let c = hosted(
+        "kicks-1186-weight",
+        &[("alpha", 2), ("beta", 1), ("gamma", 1)],
+        6,
+        hosts,
+    );
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = fake_with("1.0", Fake::default().reply("ssh ", ""));
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let on = starting_on(&c);
+    let n = |f: &str| on.get("boat1").map_or(0, |v| v.iter().filter(|x| *x == f).count());
+    assert_eq!((n("alpha"), n("beta"), n("gamma")), (2, 1, 1), "{on:?}\n{out}");
+    assert!(!on.contains_key("mini"), "{on:?}");
+    assert!(out.contains("SPAWN_PENDING: boat1 "), "{out}");
+}
+
+#[test]
+fn a_fast_pass_starts_a_queued_issue_once_a_slot_frees() {
+    let (c, _sh) = fleet("kicks-1186-fast", 2, 2);
+    mark(&c, 9, 4242, 10);
+    let alive = || {
+        fake("1.0")
+            .reply("kill -0 4242", "")
+            .reply("ps -o etime= -p 4242", "  00:10\n")
+    };
+    let r = alive();
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(launched(&r, 1), 0, "no slot free yet");
+    drover::db::release(&c.state, "spawn-sendmeter-9.pending", None);
+    let r = alive();
+    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!((launched(&r, 1), launched(&r, 2)), (1, 0), "{out}");
+}
+
+fn started_mark(c: &drover::Ctx, n: u64, release: &str) -> (drover::Ctx, Fake) {
+    let e = serde_json::json!({"ts": 1, "fleet": "sendmeter", "issue": n, "type": "spawn", "role": "impl",
+        "pid": 4242, "host": "mini", "started": true});
+    let key = format!("spawn-sendmeter-{n}.pending");
+    let l = drover::db::take(&c.state, &key, c.now - 10, 300, &e.to_string(), &|_| true).unwrap();
+    assert!(drover::db::renew(
+        &c.state,
+        &l,
+        &drover::db::Lease { pid: 4242, ..l.clone() }
+    ));
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    let hosts = format!("\n[hosts.mini]\nstart_release = \"{release}\"\n");
+    std::fs::write(&c.config, cfg + &hosts).unwrap();
+    let r = fake("1.0")
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "  00:10\n");
+    (c.clone(), r)
+}
+
+#[test]
+fn a_start_whose_harness_is_up_frees_its_slot_before_its_prompt_is_confirmed() {
+    let (c, _sh) = fleet("kicks-1186-started", 2, 2);
+    let (c, r) = started_mark(&c, 9, "started");
+    let d = pass(&c, &r);
+    assert_eq!(launched(&r, 1), 1, "{d}");
+    let (c2, _sh2) = fleet("kicks-1186-confirmed", 2, 2);
+    let (c2, r2) = started_mark(&c2, 9, "confirmed");
+    let d = pass(&c2, &r2);
+    assert_eq!(launched(&r2, 1), 0, "{d}");
+    assert!(codes(&d).contains(&"SPAWN_PENDING".to_string()), "{d}");
+}
+
+struct KickWatch(drover::Ctx, Shared<Vec<bool>>);
+impl drover::runner::Runner for KickWatch {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        let started = marker(&self.0, 1).is_some_and(|l| l.data.contains(r#""started":true"#));
+        self.1.borrow_mut().push(started);
+        fake("1.0").run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+#[test]
+fn a_kicks_spawn_marks_its_slot_started_once_its_harness_is_up() {
+    let (c, sh) = fleet("kicks-1186-mark", 6, 1);
+    pass(&c, &fake("1.0"));
+    assert!(marker(&c, 1).is_some_and(|l| !l.data.contains("started")));
+    let r = KickWatch(c.clone(), Shared::default());
+    let (code, out) = run(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(started(&sh), "{out}");
+    let seen = r.1.borrow().clone();
+    let first = seen.iter().position(|s| *s);
+    assert!(first.is_some_and(|i| i > 0), "{seen:?}");
+    assert!(marker(&c, 1).is_none(), "the kick releases its marker when it ends");
+}
+
+#[test]
+fn one_free_slot_goes_to_the_fix_round_and_over_the_load_limit_neither_spawns() {
+    let (c, _sh) = fleet("kicks-fix-first", 1, 1);
+    fix_due(&c, 21);
+    let busy = fake("40.0");
+    let d = pass(&c, &busy);
+    assert_eq!((launched(&busy, 21), launched(&busy, 1)), (0, 0), "{d}");
+    let r = fake("1.0");
+    let d = pass(&c, &r);
+    assert_eq!((launched(&r, 21), launched(&r, 1)), (1, 0), "{d}");
 }

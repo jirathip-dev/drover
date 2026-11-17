@@ -6,7 +6,13 @@ const NS = 'http://www.w3.org/2000/svg';
 const H = document.documentElement;
 export const R = new URL('.', document.baseURI).href;
 export const get = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
-export const put = (k: string, v: string | null) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch {} };
+const set = (k: string, v: string | null) => (v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v));
+/** Stores `v` under `k` (null removes it); a full storage drops the cached screens first, so a draft is never lost. */
+export const put = (k: string, v: string | null) => {
+  try { set(k, v); } catch {
+    try { Object.keys(localStorage).forEach(x => { if (x.startsWith('scr:') && x !== k) localStorage.removeItem(x); }); set(k, v); } catch {}
+  }
+};
 
 export let T: Blk = {};
 const defs = document.createElementNS(NS, 'svg');
@@ -34,7 +40,7 @@ const GLYPH: Record<string, string> = { working: '●', needs: '!', fail: '✗',
 const WORD: Record<string, string> = { working: 'working', needs: 'needs you', fail: 'failed', done: 'done', merged: 'merged', idle: 'idle' };
 const TONE: Record<string, string> = { working: 'g', needs: 'r', fail: 'r', done: 'mute', idle: 'mute', merged: 'g' };
 
-/** A figure as HTML: the theme's sprite (24 px row, or a lane's avatar in its coat), else its state glyph. */
+/** A figure as HTML: the theme's sprite (24 px row, its stage's plant where the theme has `stages`, or a lane's avatar in its coat), else its state glyph. */
 export function figure(f: Blk): string {
   const lane = 'coat' in f, a = act(f, lane), s = String(f.state), word = WORD[s] ?? f.state, has = (id: string) => !!document.getElementById(id);
   const tone = TONE[s] ?? 'mute';
@@ -45,7 +51,7 @@ export function figure(f: Blk): string {
     const art = has('ha-' + a) ? `<svg class=px viewBox="0 0 132 100" style="${style}"><use href="#ha-${a}"/></svg>` : g;
     return `<span class="av ${f.state}" role=img aria-label="${word}" title="${word}">${art}</span>`;
   }
-  const id = has('hr-' + a) ? 'hr-' + a : '';
+  const id = has('hg-' + f.grow) ? 'hg-' + f.grow : has('hr-' + a) ? 'hr-' + a : '';
   const box = id && document.getElementById(id)?.getAttribute('viewBox');
   return `<span class="rsg ${f.state}" role=img aria-label="${word}" title="${word}">${id ? `<svg class=rsp viewBox="${box}" aria-hidden=true><use href="#${id}"/></svg>` : g}</span>`;
 }
@@ -85,6 +91,7 @@ export async function theme(name: string): Promise<void> {
     if (rs) sym('hr-' + a, rs[a], fa[a]);
   });
   if (rs) ['queued', 'needs', 'merged', 'fail'].forEach(k => sym('hr-' + k, rs[k]));
+  Object.entries(obj(T.stages)).forEach(([k, id]) => sym('hg-' + k, id));
 }
 
 const DARK = matchMedia('(prefers-color-scheme: dark)');

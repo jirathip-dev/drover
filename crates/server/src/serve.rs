@@ -143,6 +143,7 @@ type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>, String)>>>;
 const PER_DEVICE: usize = 4;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
+const TOO_LARGE: &[u8] = b"HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"line\":\"request body too large\"}";
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
 pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> Result<()> {
@@ -767,19 +768,20 @@ impl<'a> Server<'a> {
 
     fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
         s.set_read_timeout(Some(Duration::from_secs(5)))?;
-        let (mut buf, mut chunk, mut want) = (vec![], vec![0u8; 1 << 16], None);
+        let (mut buf, mut chunk, mut want, mut over) = (vec![], vec![0u8; 1 << 16], None, false);
         loop {
             let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
             if let Some(i) = end.filter(|_| want.is_none()) {
                 let h = String::from_utf8_lossy(buf.get(..i).unwrap_or_default());
                 let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
-                let most = if h.starts_with("POST /thread ") {
+                let most = if h.starts_with("POST /thread ") || h.starts_with("POST /action ") {
                     140 << 20
                 } else if h.starts_with("POST /report ") {
                     3 << 20
                 } else {
                     32_768
                 };
+                over = i + 4 + n > most;
                 want = Some((i + 4 + n).min(most));
             }
             if want.map_or(buf.len() >= 32_768, |w| buf.len() >= w) {
@@ -790,14 +792,11 @@ impl<'a> Server<'a> {
                 n => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
             }
         }
-        let req = String::from_utf8_lossy(&buf).replacen(
-            "\r\n",
-            &format!(
-                "\r\nX-Peer: {}\r\n",
-                s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default()
-            ),
-            1,
-        );
+        if over {
+            return s.write_all(TOO_LARGE);
+        }
+        let peer = s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
+        let req = String::from_utf8_lossy(&buf).replacen("\r\n", &format!("\r\nX-Peer: {peer}\r\n"), 1);
         let (t0, target) = (
             drover_core::clock::instant(),
             req.split_whitespace().nth(1).unwrap_or_default(),
@@ -1676,7 +1675,7 @@ impl<'a> Server<'a> {
         let mins = cfg.map_or(Limits::default().ask_default_minutes, |c| c.limits.ask_default_minutes);
         let asks = crate::events::open_asks(ev)
             .into_iter()
-            .filter(|a| a.str("thread").is_none() || a.issue.is_some() || crate::design::is_ask(a))
+            .filter(|a| asked_here(a))
             .map(|a| need_ask(ctx.now, mins, ev, a));
         NeedsTab {
             now: ctx.now,
@@ -1733,12 +1732,17 @@ impl<'a> Server<'a> {
                     .map(String::from),
             }
         };
-        let pend = |s: &IssueState| match s.last_event.as_str() {
-            "round-extended" if crate::waiting::unspawned(events, s) => Some(card(s, true)),
-            _ if s.state == "needs-human" || s.last_event == "extend-failed" => Some(card(s, false)),
-            _ => None,
-        };
-        st.values().filter_map(pend).collect()
+        st.values()
+            .filter_map(|s| pending(events, s).map(|p| card(s, p)))
+            .collect()
+    }
+
+    pub(super) fn needs_count(&self, ctx: &Ctx, events: &crate::events::Log) -> usize {
+        let cfg = Config::kept(ctx).ok();
+        let all = cfg.and_then(|c| self.lanes(ctx.now, &c, events, &events.states));
+        let blocked = all.map_or(0, |l| l.iter().filter(|l| l.state.word() == "blocked").count());
+        let asks = crate::events::open_asks(events).into_iter().filter(|a| asked_here(a));
+        blocked + asks.count() + events.states.values().filter(|s| pending(events, s).is_some()).count()
     }
 
     fn blocked(&self, ctx: &Ctx, l: &lanes::Lane, paired: bool) -> Blocked {
@@ -1919,20 +1923,19 @@ impl<'a> Server<'a> {
             }
             rows.sort_by_key(|r| r.0);
             let need = rows.iter().filter(|r| r.0 == 0).count();
-            let mut done: Vec<&&IssueState> = mine
-                .iter()
-                .filter(|s| s.done() && now.saturating_sub(s.last_ts) < 86_400)
+            let mut done: Vec<(u64, &Event)> = (events.iter())
+                .filter(|e| e.kind == "merged" && e.fleet == *f && now.saturating_sub(e.ts) < 86_400)
+                .filter_map(|e| Some((e.issue?, e)))
                 .collect();
-            done.sort_by_key(|s| std::cmp::Reverse(s.last_ts));
-            let done_row = |s: &&&IssueState| DoneRow {
-                issue: s.issue,
-                note: crate::land::note(events, f, s.issue).unwrap_or_else(|| s.state.clone()),
-                age: age(now.saturating_sub(s.last_ts)),
-                pr: crate::events::of_issue(events, f, s.issue)
-                    .into_iter()
-                    .rfind(|e| e.kind == "merged")
-                    .and_then(|e| e.str("pr"))
-                    .map(Into::into),
+            done.sort_by_key(|d| std::cmp::Reverse(d.1.ts));
+            let done_row = |&(n, e): &(u64, &Event)| DoneRow {
+                issue: n,
+                title: titles(ctx, f, n),
+                note: crate::land::note(events, f, n).unwrap_or_else(|| "merged".into()),
+                age: age(now.saturating_sub(e.ts)),
+                t: e.ts,
+                pr: e.str("pr").map(Into::into),
+                sha: e.str("merge_sha").map(Into::into),
             };
             let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
             let mut open: BTreeMap<String, BacklogIssue> =
@@ -1951,7 +1954,7 @@ impl<'a> Server<'a> {
                 paths: fc.serial.iter().map(|g| g.paths.join(", ")).collect(),
                 need,
                 rows: rows.into_iter().map(|r| r.1).collect(),
-                done: done.iter().take(5).map(done_row).collect(),
+                done: done.iter().map(done_row).collect(),
                 done_n: done.len(),
                 backlog,
                 config: config_sheet(ctx, cfg, f, fc, st),
@@ -3357,4 +3360,16 @@ fn pipe(fleet: &str, fc: &crate::config::Fleet, st: &States) -> serde_json::Valu
     json!({"fleet": fleet, "into": fc.integration, "builtin": p.builtin, "stages": stages, "bad": bad,
         "checks": checks, "required": fc.required_checks, "queued": count(&|s| s.state == "queued"),
         "parked": count(&|s| s.state == "needs-human")})
+}
+
+fn asked_here(a: &Event) -> bool {
+    a.str("thread").is_none() || a.issue.is_some() || crate::design::is_ask(a)
+}
+
+fn pending(events: &[Event], s: &IssueState) -> Option<bool> {
+    match s.last_event.as_str() {
+        "round-extended" if crate::waiting::unspawned(events, s) => Some(true),
+        _ if s.state == "needs-human" || s.last_event == "extend-failed" => Some(false),
+        _ => None,
+    }
 }

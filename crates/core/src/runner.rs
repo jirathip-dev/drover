@@ -481,11 +481,16 @@ pub fn settle<P: Proc>(key: Option<&str>, limit: Duration, start: impl FnOnce() 
         c => c.flatten(),
     };
     let mut c = start()?;
-    while crate::clock::instant() < end {
+    let mut step = poll() / 32;
+    while let Some(left) = end
+        .checked_duration_since(crate::clock::instant())
+        .filter(|d| !d.is_zero())
+    {
         if let Some(st) = c.try_wait()? {
             return Ok(Ended::Exited(st));
         }
-        crate::clock::sleep(poll());
+        crate::clock::sleep(step.min(left));
+        step = (step * 2).min(poll());
     }
     c.kill().ok();
     if let Some(cl) = &claim {

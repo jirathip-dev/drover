@@ -108,12 +108,12 @@ pub fn detach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<String> 
     Ok(format!("{id} detached from {fleet}"))
 }
 
-/// The old role name an older lane still carries (`DROVER_LANE`), read for one release.
+/// The old role name a lane started before still carries (`DROVER_LANE`), read for one release.
 pub fn is_role(role: &str) -> bool {
     matches!(role, "orchestrator" | "conductor")
 }
 
-/// A `by` in the old spelling (`conductor-<thread>`: a flag, an older event) as `orchestrator-<thread>`.
+/// A `by` in the old spelling (`conductor-<thread>`: a flag, a pre-event) as `orchestrator-<thread>`.
 pub fn by(b: &str) -> String {
     b.strip_prefix("conductor-")
         .map_or_else(|| b.into(), |t| format!("orchestrator-{t}"))
@@ -125,7 +125,17 @@ pub fn acting() -> Option<String> {
     is_role(lane.split(':').nth(2)?).then(|| crate::config::env("DROVER_ORCHESTRATOR"))?
 }
 
-/// The orchestrator an older thread (none named) belongs to, the one `[orchestrator]` itself names.
+/// Who runs this command, the `by` its events carry: `drive`, `orchestrator-<id>`, `lane` or `owner`.
+pub fn actor() -> String {
+    match acting() {
+        _ if crate::drive::in_act() => "drive".into(),
+        Some(id) => format!("orchestrator-{id}"),
+        None if crate::config::env("DROVER_LANE").is_some() => "lane".into(),
+        None => "owner".into(),
+    }
+}
+
+/// The orchestrator a thread from before (none named) belongs to, the one `[orchestrator]` itself names.
 pub const DEFAULT: &str = "default";
 
 /// Orchestrator `id`'s name, what every label shows (code keys off the role and the id only).

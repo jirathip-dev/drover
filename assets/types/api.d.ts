@@ -48,7 +48,7 @@ export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?
  */
 export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, 
 /**
- * fleet.toml fails to load: `config invalid: <error> (fleet.toml:<line>)`, the red banner above every tab.
+ * Fleet.toml fails to load: `config invalid: <error> (fleet.toml:<line>)`, the red banner above every tab.
  */
 config?: string | null, };
 
@@ -82,7 +82,7 @@ export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolea
  */
 unsaved: Array<LaneUnsaved>, 
 /**
- * fleet.toml's mtime, for a row's [unpark] form.
+ * Fleet.toml's mtime, for a row's [unpark] form.
  */
 mtime: string, 
 /**
@@ -333,7 +333,7 @@ export type Vendor = { name: string, vendor: string, };
 export type QueueTab = { now: number, rw: boolean, live: boolean, mtime: string, error?: string | null, fleets: Array<QueueCard>, };
 
 /**
- * A fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of `done_n`), the backlog and the [config] sheet.
+ * A fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog and the [config] sheet.
  */
 export type QueueCard = { name: string, k: string, serial: Array<string>, paths: Array<string>, need: number, paused?: string | null, drive: Drive, notes: Array<string>, rows: Array<QueueRow>, done: Array<DoneRow>, done_n: number, backlog?: Backlog | null, config: ConfigSheet, marks: { [key in string]: Marks }, };
 
@@ -367,9 +367,9 @@ export type PrLine = { pr?: number | null, run?: string | null, ci?: string | nu
 export type QueueLane = { name: string, state: string, tone: string, ago: string, link: string, };
 
 /**
- * A row of `done today`: its land note (else state), age and merged PR.
+ * A `merged` event of `done today`: its issue's title, land note (else `merged`), age, time `t`, PR and merge sha.
  */
-export type DoneRow = { issue: number, note: string, age: string, pr?: string | null, };
+export type DoneRow = { issue: number, title?: string | null, note: string, age: string, t: number, pr?: string | null, sha?: string | null, };
 
 /**
  * The open issues not queued and with no lane, by number, as last read `ago`.
@@ -394,7 +394,7 @@ export type RoleRow = { name: string, profile: string, harness: string, model?: 
 export type Conductor = { default: boolean, profile: string, harness: string, model?: string | null, effort?: string | null, efforts: Array<string>, models: Array<string>, };
 
 /**
- * Contract: the events after `since` (up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
+ * The events after `since` (up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
  */
 export type Events = { seq: number, refresh: boolean, list: Array<Ev>, };
 
@@ -441,7 +441,7 @@ export type LessonRun = { issue: number, ts: number, state: string, };
 export type Digest = { fleet: string, days: number, text: string, };
 
 /**
- * API v1's `setup/<pane>`: the setup pane's masked `lines` and every `https://` URL in it (a wrapped one joined), or `closed`.
+ * API v1's `setup/<pane>` (the old board's `/lane?setup=`): the setup pane's masked `lines` and every `https://` URL in it (a wrapped one joined), or `closed`.
  */
 export type SetupScreen = { lines: Array<string>, urls: Array<string>, closed: boolean, };
 
@@ -482,7 +482,7 @@ brief: string,
  */
 settings: string, env: AttachEnv, 
 /**
- * ACP guard holds; else `why` not.
+ * The ACP guard holds; else `why` not.
  */
 guarded: boolean, why: string, };
 

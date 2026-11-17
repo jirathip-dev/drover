@@ -992,7 +992,7 @@ fn handoffs(events: &[Event], page: &mut Value) {
     page["msgs"] = Value::Array(msgs.collect());
 }
 
-fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
+pub(super) fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
     let card = o.kind == "needs-decision";
     let (h, from, id) = (
         o.data.get("handoff").unwrap_or(&Value::Null),
