@@ -68,9 +68,11 @@ is printed on stderr and never blocks the tool call. The kick's confirmation (`w
 board's agent status read these states.
 
 #1053: every lane fact drover shows comes from shed through one module, `crates/core/src/session/`
-(docs/architecture/shed-native/). shed's `reported.state` maps once to a status: `working`/`running` is working,
-`blocked`/`waiting-approval` blocked, `done` done, and every other word (`idle`, `rate-limited`, `error`,
-`hibernated`, `stuck`) shows as idle with shed's note beside it. shed's `rate-limited` is the usage limit; `error`
+(docs/architecture/shed-native/). shed's `reported.state` maps once to a status and every surface shows shed's own
+word with its note (#983): `working`, `running`, `blocked`, `waiting-approval`, `rate-limited`, `done`, `idle`,
+`error`, `hibernated`; a word drover does not know shows as `unknown`. `working` and `running` are busy; drover's own
+`waiting-owner` lies over `done` while the lane's issue has an open ask or a blocked turn-end. shed's `rate-limited`
+is the usage limit; `error`
 with an `auth:` note is a sign-out. A lane is stalled when shed has said a quiet status for `stall_minutes` (since
 drover's `lane-state` stamp) and the lane logged no turn-end; dead when shed lists it exited, or no more on a host
 that answered, and drover did not close it; an orphan when no spawn names a session drover labelled. No screen is
