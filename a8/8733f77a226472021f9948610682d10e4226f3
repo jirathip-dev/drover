@@ -1,0 +1,16 @@
+Decided: spawn freezes cap_raise into a remote lane's rules file from the main host's title cache
+Because: "Either spawn sends the issue title (or a `cap_raise` flag) to the remote lane with its brief"
+Rejected: pin cap: issues to the main host — breaks when that host is busy; the rules file is already the remote lane's frozen policy
+Rejected: read the title from .brief.md — the lane can edit its brief, so it could forge a cap: title
+Because: crates/core/src/hook.rs:51
+Check: rules_stale carries the recorded cap_raise over so a cap lane is not shown as rules stale
+Check: no flag and no cache keeps cap on (fails closed)
+Owner: a cap-raise issue's lane can now raise the cap from any host, not only the main one
+
+Decided: spawn freezes a cap_raise flag into a remote lane's rules file, and the hook honours it
+Because: "Either spawn sends the issue title (or a `cap_raise` flag) to the remote lane with its brief"
+Because: crates/core/src/spawn.rs:1365
+Rejected: pinning cap: issues to the main host — it would add a placement rule and still leave the hook wrong
+Check: the test at ebf83990 exits 101 (cap: lane refused CAP_FILE) and exits 0 at head
+Check: an untitled remote lane (no cached title) is still refused CAP_FILE
+Owner: a cap-raise lane can now run on a remote host
