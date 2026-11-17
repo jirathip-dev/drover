@@ -1,4 +1,5 @@
 mod common;
+mod lane_states;
 use common::*;
 use drover::events::Event;
 use drover::hosts::On;
@@ -1064,8 +1065,8 @@ fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
         "a running ACP lane's scratch is never trimmed, oldest or not: {out}"
     );
     assert!(!exited.exists(), "an exited lane's goes over budget: {out}");
-    let want = format!("builds: trimmed {} ", exited.display());
-    assert!(out.contains(&want) && out.contains("no live agent"), "{out}");
+    let want = format!("scratch: local: removed {} ", exited.display());
+    assert!(out.contains(&want) && out.contains("(lane ended)"), "{out}");
 }
 
 fn git(dir: &std::path::Path, a: &[&str]) -> String {
@@ -1107,7 +1108,7 @@ impl Runner for Push<'_> {
 }
 
 fn acp_lane(name: &str) -> (drover::Ctx, FakeShed, Fake, PathBuf, PathBuf) {
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     let b = FakeShed::new();
     let cfg = acp_config(&b.sock, "claude");
     let c = acp_ctx(name, &cfg);
@@ -2111,21 +2112,6 @@ fn a_silent_design_lane_is_nudged() {
 }
 
 #[test]
-fn a_pending_tool_call_in_a_live_session_is_not_silent() {
-    let (c, b, f, wt, _) = acp_lane("acp-tool");
-    mid_turn(&b);
-    session(&b, &[turn(), tool("in_progress"), cpu(80)]);
-    let cli = Push(b.cli(&f), wt.clone());
-    drive_at(&c, &cli, 60 + 3 * SILENT);
-    assert!(!f.called("shed cancel"));
-    assert!(logged(&c, "nudged").is_empty());
-    session(&b, &[tool("completed")]);
-    drive_at(&c, &cli, 60 + 3 * SILENT + 1);
-    let out = drive_at(&c, &cli, 60 + 4 * SILENT + 1);
-    assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
-}
-
-#[test]
 fn a_pending_tool_call_whose_process_died_is_silent() {
     let (c, b, f, wt, _) = acp_lane("acp-tool-dead");
     mid_turn(&b);
@@ -2354,7 +2340,7 @@ fn clean_removes_exited_shed_terminals_of_merged_lanes_only() {
         json!({"fleet": "sendmeter", "issue": "13", "role": "impl", "harness": "claude"}),
     );
     b.exit("sendmeter-impl-13");
-    let f = Fake::default().reply("gh issue list", "[]");
+    let f = Fake::default().reply("gh api graphql -f", r#"{"data": {"repository": {}}}"#);
     let (_, out) = run(&c, &f, &["clean"]);
     assert!(
         out.contains("would remove exited shed terminal sendmeter-verify-12-r1 (sendmeter#12 merged)"),

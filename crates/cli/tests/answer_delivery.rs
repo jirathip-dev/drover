@@ -23,7 +23,7 @@ fn spawn(c: &drover::Ctx, extra: &Value) {
 }
 
 fn lane_ask(c: &drover::Ctx) {
-    std::env::set_var("DROVER_LANE", "sendmeter:36:impl");
+    set_env("DROVER_LANE", "sendmeter:36:impl");
     let args = [
         "ask",
         "sendmeter",

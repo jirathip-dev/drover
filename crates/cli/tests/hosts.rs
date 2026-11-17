@@ -191,7 +191,8 @@ fn admission_runs_per_host() {
     let low = || fake(1.0, 0.1).reply(&format!("{SSH}'df' '-k' '/'"), df);
     assert_eq!(placed(&c, &low(), 12, "impl", None).as_deref(), Ok("mini"));
     let e = placed(&c, &low(), 12, "impl", Some("bazzite")).unwrap_err();
-    let nothing = "nothing for `drover clean --yes` there; `drover reclaim` frees idle build folders";
+    let nothing =
+        "nothing for `drover clean --yes` there; `drover reclaim --apply` frees idle and finished lanes' build folders";
     assert_eq!(e, format!("DISK_LOW: bazzite: 1.0 GB free < 10; {nothing}"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (_sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), low());
@@ -535,6 +536,29 @@ fn a_sticky_host_refusing_disk_low_yields_unless_its_worktree_has_unpushed_work(
     );
     let e = placed(&c, &low(), 12, "impl", Some("bazzite")).unwrap_err();
     assert!(e.starts_with("DISK_LOW: bazzite"), "{e}");
+}
+
+#[test]
+fn a_signed_out_sticky_host_yields_unless_its_worktree_has_unpushed_work() {
+    let c = setup("hosts-sticky-login", "", true, 0);
+    remote_spawn(&c, NOW - 60);
+    ev(
+        &c,
+        NOW - 30,
+        12,
+        "signed-out",
+        json!({"host": "bazzite", "machine": "bazzite", "reason": "signed out"}),
+    );
+    assert_eq!(placed(&c, &fake(2.0, 0.1), 12, "rev", None).as_deref(), Ok("mini"));
+    let kept = fake(2.0, 0.1)
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "2\n");
+    let e = placed(&c, &kept, 12, "impl", None).unwrap_err();
+    assert_eq!(
+        e,
+        "LOGIN_NEEDED: bazzite: signed out; stays on bazzite: its worktree there has unpushed work"
+    );
 }
 
 #[test]
@@ -1000,6 +1024,26 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     let other: Vec<_> = calls.iter().filter(|c| !c.contains("'shed' 'connect'")).collect();
     assert_eq!(other.len(), 1, "{calls:?}");
     assert!(f.called("sh -c nohup '/opt/drover/bin/drover' kick sendmeter 12 --why answer --now"));
+}
+
+#[test]
+fn a_lanes_outbox_env_never_reaches_the_remote_lane_test() {
+    let wt = tmpdir("hosts-lane-env");
+    std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
+    let ob = wt.join(".drover/outbox.jsonl");
+    std::fs::create_dir_all(ob.parent().unwrap()).unwrap();
+    std::fs::write(&ob, "").unwrap();
+    let o = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "a_remote_lane_knows_the_main_host_and_answers_reach_it"])
+        .current_dir(&wt)
+        .env("DROVER_OUTBOX", &ob)
+        .env("DROVER_LANE", "drover:1131:impl")
+        .env("DROVER_HOST", "boat-dev-4")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stdout));
+    assert_eq!(std::fs::read_to_string(&ob).unwrap(), "");
+    assert!(!wt.join(".drover/outbox.jsonl.draining").exists());
 }
 
 #[test]
@@ -1710,4 +1754,36 @@ fn a_tick_starts_the_sync_of_a_reachable_host_though_its_health_check_times_out(
     let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(r.count(&format!("{SSH}{START}")), 1, "{:#?}", r.calls.borrow());
+}
+
+#[test]
+fn disk_low_on_a_remote_host_sweeps_its_finished_lanes_scratch_before_refusing() {
+    let c = setup("hosts-sweep-low", "", true, 0);
+    let rev = "sendmeter-rev-9-r1";
+    let d = json!({"role": "rev", "agent": rev, "pane": rev, "workspace": "", "host": "bazzite", "machine": "bazzite",
+                   "worktree": "/home/me/.local/share/drover/work/sendmeter/rev-9-r1"});
+    ev(&c, 10, 9, "spawn", d);
+    ev(&c, 20, 9, "verdict", json!({"verdict": "FAIL", "sha": "a"}));
+    let df = |kb: u64| format!("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 {kb} 90% /\n");
+    let sweep = format!("{SSH}'sh' '-c' 'b=$1;");
+    let low = |listed: &str| {
+        fake(1.0, 0.1)
+            .once(&format!("{SSH}'df' '-k' '/'"), 0, &df(1_048_576))
+            .reply(&format!("{SSH}'df' '-k' '/'"), &df(30 * 1_048_576))
+            .once(&sweep, 0, listed)
+            .reply(&sweep, &format!("20971520 {rev}\n"))
+    };
+    let r = low(&format!("{rev}\n"));
+    assert_eq!(placed(&c, &r, 12, "impl", Some("bazzite")).as_deref(), Ok("bazzite"));
+    let calls = r.calls.borrow();
+    assert!(
+        calls
+            .iter()
+            .any(|l| l.starts_with(&sweep) && l.ends_with(&format!(".build/.scratch' '{rev}'"))),
+        "{calls:?}"
+    );
+    drop(calls);
+    let e = placed(&c, &low(""), 12, "impl", Some("bazzite")).unwrap_err();
+    assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
+    assert!(e.contains("`drover reclaim --apply`"), "{e}");
 }

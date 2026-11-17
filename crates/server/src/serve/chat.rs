@@ -1,4 +1,4 @@
-//! #386: the `[chat]` tab (docs/design/conductor-chat/): per repo its conductor threads, and each thread as #138's chat
+//! #386: the `[chat]` tab (docs/design/threads-tab/): per repo its conductor threads, and each thread as #138's chat
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
 use crate::api::{
@@ -233,18 +233,11 @@ fn page(
                 a.data.insert("recommend".into(), e.val("recommend").clone());
                 ask(events, &a, m("ask", s("question")))
             }
-            ("config-propose", _) if crate::propose::settled(events, &s("id")).is_none() => Msg {
-                from: s("id"),
-                open: !crate::propose::stale(ctx, e), // #460: stale, it can no longer apply
-                ..m("config", s("diff"))
-            },
-            ("secret-request", _)
-                if crate::secret::open(events, id, &s("name")).is_some_and(|o| std::ptr::eq(o, e)) =>
-            {
-                Msg {
-                    from: s("name"),
-                    ..m("secret", s("why"))
-                }
+            ("config-propose" | "secret-request", _) => {
+                let Some(m) = owner_card(ctx, events, e) else {
+                    continue;
+                };
+                m
             }
             ("run-card", _) => {
                 let run = run_card(ctx, events, e);
@@ -293,7 +286,10 @@ fn page(
 
 /// #408: API v1 `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
 pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>) -> Option<ThreadPage> {
-    let (cfg, t) = (Config::kept(ctx).ok()?, conductor::find(events, id).ok()?);
+    let t = conductor::find(events, id)
+        .ok()
+        .or_else(|| conductor::attached(events, id))?;
+    let cfg = Config::kept(ctx).ok()?;
     let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
     Some(page(ctx, &cfg, events, t, (before, u64::MAX, n), u64::MAX))
@@ -746,6 +742,46 @@ fn composer(label: &str, action: &str, values: &Value, more: Value) -> Value {
     c
 }
 
+/// An open config proposal (#460: `open` unless stale) or secret request as its thread's message.
+fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
+    let s = |k| e.str(k).unwrap_or_default().to_string();
+    let m = |kind: &str, from: String, text: String, open: bool| Msg {
+        seq: e.seq,
+        ts: e.ts,
+        kind: kind.into(),
+        from,
+        text,
+        open,
+        ..Msg::default()
+    };
+    match e.kind.as_str() {
+        "config-propose" if crate::propose::settled(events, &s("id")).is_none() => {
+            Some(m("config", s("id"), s("diff"), !crate::propose::stale(ctx, e)))
+        }
+        "secret-request" => {
+            let open = crate::secret::open(events, e.str("thread")?, &s("name"));
+            open.is_some_and(|o| std::ptr::eq(o, e))
+                .then(|| m("secret", s("name"), s("why"), false))
+        }
+        _ => None,
+    }
+}
+
+/// #1066: every open config proposal and secret request, a drover thread's or a cooee chat's, as its thread draws it.
+pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Value> {
+    let all = crate::events::of_kind(events, &["config-propose", "secret-request"]);
+    let card = |e: &Event| {
+        Some(msg_body(
+            ctx.now,
+            e.str("thread")?,
+            &owner_card(ctx, events, e)?,
+            paired,
+            None,
+        ))
+    };
+    all.into_iter().filter_map(card).collect()
+}
+
 /// #1086: a message's card with its files (images inline, others as rows) and its link's chip, which opens that thread.
 fn msg_card(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> Value {
     let (mut v, key) = (msg_body(now, id, m, paired, h), format!("m-{}", m.seq));
@@ -912,9 +948,9 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> V
         }
         "config" => {
             let v = |act: &str| json!({"thread": id, "id": m.from, "act": act});
-            let mut buttons = vec![button("discard", "", "thread-config", v("discard"))];
+            let mut buttons = vec![button("discard", "", "config-card", v("discard"))];
             if m.open {
-                buttons.insert(0, button("apply", "primary", "thread-config", v("apply")));
+                buttons.insert(0, button("apply", "primary", "config-card", v("apply")));
             }
             let sub = or(
                 m.open,
@@ -930,11 +966,11 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> V
             if paired {
                 let field = json!({"type": "secret", "name": "text", "label": "", "value": "", "placeholder": format!("value of {}", m.from)});
                 blocks.push(json!({"type": "form", "id": format!("{key}-f"), "fields": [field],
-                    "submit": {"label": "save", "action": "thread-secret", "values": {"thread": id, "name": m.from, "act": "save"}}}));
+                    "submit": {"label": "save", "action": "secret-card", "values": {"thread": id, "name": m.from, "act": "save"}}}));
                 buttons.push(button(
                     "dismiss",
                     "",
-                    "thread-secret",
+                    "secret-card",
                     json!({"thread": id, "name": m.from, "act": "dismiss"}),
                 ));
             } else {

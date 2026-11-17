@@ -1,0 +1,1 @@
+- IN_FLIGHT_CAP: spawn: a first start of a queued issue while the fleet's PRs in flight (impl, fix, review, verify, ready, or held with an open PR) fill `max_in_flight` (default 8, `0` off); it names the count and the issues; drive lands them first; `--force` overrides (the owner's or an orchestrator's, logged `override` with `by`)

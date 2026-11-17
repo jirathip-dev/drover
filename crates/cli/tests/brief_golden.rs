@@ -12,6 +12,8 @@ fn fake() -> Fake {
             "gh issue view 12",
             r#"{"title":"Fix the meter","body":"AC: it {works} \\ `ok`"}"#,
         )
+        .once_err("git -C /tmp/does-not-matter/api show origin/staging:", 128, "no rules")
+        .once_err("git -C /tmp/does-not-matter/api show origin/staging:", 128, "no rules")
         .reply("git -C", "0\n")
         .reply("which shed", "/opt/shed/bin/shed\n")
 }

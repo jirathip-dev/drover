@@ -27,7 +27,7 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
 - **Lane state** (#529) comes from shed's `events` stream, not from polling: the service follows it (keeping
   `shed.seq`, so drive's intake finds nothing left). Each lane's change is logged as a passive `lane-state`
   (`working`, `idle`, `done`, `blocked`; `gone` once its process exits) as it happens. A dropped stream logs
-  `lane-stream` (`state: down`, `why`), the Host tab's `shed lane events` row turns amber ("down …: why · polling"),
+  `lane-stream` (`state: down`, `why`), `GET /api/v1/host`'s `shed lane events` row turns amber ("down …: why · polling"),
   and the service reconnects every 5 s.
 
 ## Remote lanes over HTTP

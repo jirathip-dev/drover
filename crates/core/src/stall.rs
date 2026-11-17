@@ -171,7 +171,10 @@ pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Session], fleet: 
             continue;
         };
         let open = !o.open_tools.is_empty() && o.cpu_pct >= Some(BUSY_CPU_PCT);
-        if !o.turn_open || open || !agents.iter().any(|a| a.name == lane) {
+        let Some(a) = agents.iter().find(|a| a.name == lane) else {
+            continue;
+        };
+        if !o.turn_open || open || crate::lanes::held(ev, a) {
             continue;
         }
         let mine = |k: &'static str| move |e: &&Event| e.kind == k && e.str("agent") == Some(lane);

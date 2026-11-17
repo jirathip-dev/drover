@@ -202,7 +202,7 @@ fn the_owners_verdict_and_spawn_count_and_a_lanes_do_not() {
     let spawn = ["spawn", "sendmeter", "12", "impl", "--supersede"];
     let owner = |c: &drover::Ctx, k: &str| total(c, &[])["owner_actions"][k].clone();
     std::env::remove_var("DROVER_ORCHESTRATOR");
-    std::env::set_var("DROVER_LANE", "sendmeter:12:rev");
+    set_env("DROVER_LANE", "sendmeter:12:rev");
     assert_eq!(run(&c, &r, &args).0, 0);
     let (code, out) = run(&c, &r, &spawn);
     assert_eq!(code, 0, "{out}");
