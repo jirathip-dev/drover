@@ -1,0 +1,4 @@
+Decided: merge origin/staging; take staging's sim/main.rs hunt test over this branch's earlier staging build fix
+Because: crates/cli/tests/sim/main.rs:279
+Rejected: none
+Owner: the branch is current with staging again; the proxy sign-out fix itself is unchanged
