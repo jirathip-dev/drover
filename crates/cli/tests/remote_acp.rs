@@ -728,6 +728,7 @@ fn an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane() {
 
 fn lane_key_401_respawns_the_lane(name: &str, why: &str) {
     let (c, _) = setup(name, &["boat1"]);
+    let _main = FakeShed::attached(&c);
     let f = spawn_fake();
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
     let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
@@ -760,6 +761,7 @@ fn lane_key_401_respawns_the_lane(name: &str, why: &str) {
 #[test]
 fn a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login() {
     let (c, _) = setup("racp-signed-out", &["boat1"]);
+    let _main = FakeShed::attached(&c);
     let f = spawn_fake();
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
     let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
