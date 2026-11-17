@@ -62,7 +62,7 @@ fn card(c: &drover::Ctx, sh: &FakeShed, now: u64) -> Option<Value> {
 }
 
 #[test]
-fn idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later() {
+fn idle_21_minutes_with_spawnable_work_heals_and_never_makes_a_card() {
     let (c, sink, sh) = setup("slo-idle-stuck");
     fast(&c, &sh);
     assert!(kinds(&c).is_empty(), "idle starts now: no breach yet");
@@ -78,167 +78,215 @@ fn idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later() {
                 .any(|l| l.contains("kick sendmeter 12 --why slo-idle"))
     );
     let ev = read(&c.state).unwrap();
-    let idle = ev.iter().find(|e| e.kind == "slo-idle").unwrap();
-    assert_eq!(
-        idle.str("reason"),
-        Some("0 lanes working for 21 min with #12 spawnable; held: DISK_BUDGET (worktrees 0.0 GB)")
-    );
     let heal = ev.iter().find(|e| e.kind == "self-heal").unwrap();
     assert_eq!(
         heal.str("did"),
         Some("recounted worktrees 0.0 → 0.0 GB; retried #12's spawn")
     );
-    fast(&at(&c, 22 * 60), &sh);
-    assert_eq!(kinds(&c), ["slo-idle", "self-heal"], "the heal gets one pass");
+    for m in [22, 26, 27, 40] {
+        fast(&at(&c, m * 60), &sh);
+    }
+    assert_eq!(kinds(&c), ["slo-idle", "self-heal"], "a wait: no stuck");
     assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
-    fast(&at(&c, 26 * 60), &sh);
-    fast(&at(&c, 27 * 60), &sh);
-    fast(&at(&c, 40 * 60), &sh);
-    assert_eq!(kinds(&c), ["slo-idle", "self-heal", "stuck"]);
-    let pushes = std::fs::read_to_string(&sink).unwrap();
-    assert_eq!(pushes.lines().count(), 1, "one push per episode: {pushes}");
-    assert!(
-        pushes.starts_with("sendmeter stuck: 0 lanes working for 26 min with #12 spawnable")
-            && pushes
-                .trim_end()
-                .ends_with("tried: recounted worktrees 0.0 → 0.0 GB; retried #12's spawn"),
-        "{pushes}"
-    );
-    let shown = card(&c, &sh, NOW + 40 * 60).expect("the owner's card").to_string();
-    assert!(
-        shown.contains("sendmeter stuck: 0 lanes working") && shown.contains("tried: recounted"),
-        "{shown}"
-    );
+    assert_eq!(card(&c, &sh, NOW + 40 * 60), None);
     sh.lane("sendmeter-impl-12", "working", "/x");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "runtime": "shed", "worktree": "/x", "branch": "issue-12"});
     append(&c.state, &Event::new(NOW + 41 * 60, "sendmeter", Some(12), "spawn", d)).unwrap();
     fast(&at(&c, 42 * 60), &sh);
-    assert_eq!(kinds(&c), ["slo-idle", "self-heal", "stuck", "slo-ok"]);
-    assert_eq!(card(&c, &sh, NOW + 42 * 60), None, "recovered: the card clears");
-}
-
-#[test]
-fn idle_that_recovers_after_the_heal_never_alerts() {
-    let (c, sink, sh) = setup("slo-idle-recovers");
-    fast(&c, &sh);
-    fast(&at(&c, 21 * 60), &sh);
-    assert_eq!(kinds(&c), ["slo-idle", "self-heal"]);
-    sh.lane("sendmeter-impl-12", "working", "/x");
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "runtime": "shed", "worktree": "/x", "branch": "issue-12"});
-    append(&c.state, &Event::new(NOW + 22 * 60, "sendmeter", Some(12), "spawn", d)).unwrap();
-    fast(&at(&c, 23 * 60), &sh);
-    fast(&at(&c, 30 * 60), &sh);
     assert_eq!(kinds(&c), ["slo-idle", "self-heal", "slo-ok"]);
-    assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
-    assert_eq!(card(&c, &sh, NOW + 30 * 60), None);
 }
 
 #[test]
-fn idle_with_no_known_cause_alerts_at_once_naming_the_refusal() {
-    let (c, sink, sh) = setup("slo-idle-unknown");
+fn idle_held_by_host_busy_is_a_wait_not_a_card() {
+    let (c, sink, sh) = setup("slo-idle-busy");
     std::fs::remove_dir_all(c.worktrees.join("sendmeter/issue-9")).unwrap();
     let d = json!({"code": "HOST_BUSY", "reason": "load 9.1 per cpu"});
     append(&c.state, &Event::new(NOW, "sendmeter", Some(12), "driven", d)).unwrap();
-    fast(&c, &sh);
-    fast(&at(&c, 21 * 60), &sh);
-    fast(&at(&c, 30 * 60), &sh);
-    assert_eq!(kinds(&c), ["slo-idle", "stuck"]);
-    let pushes = std::fs::read_to_string(&sink).unwrap();
-    assert_eq!(
-        pushes,
-        "sendmeter stuck: 0 lanes working for 21 min with #12 spawnable; #12's last start: HOST_BUSY load 9.1 per cpu; \
-         tried: nothing (no known heal)\n"
-    );
+    for m in [0, 21, 30, 60] {
+        fast(&at(&c, m * 60), &sh);
+    }
+    assert_eq!(kinds(&c), ["slo-idle"]);
+    assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
+    assert_eq!(card(&c, &sh, NOW + 60 * 60), None);
+}
+
+fn quiet(name: &str) -> (drover::Ctx, std::path::PathBuf, FakeShed) {
+    let (c, sink, sh) = setup(name);
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/issue-9")).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "rm", "12"]).0, 0);
+    (c, sink, sh)
+}
+
+fn ev(c: &drover::Ctx, n: u64, ts: u64, kind: &str, d: Value) {
+    append(&c.state, &Event::new(NOW + ts, "sendmeter", Some(n), kind, d)).unwrap();
+}
+
+fn spawned(c: &drover::Ctx, n: u64) {
+    let agent = format!("sendmeter-impl-{n}");
+    let d = json!({"role": "impl", "agent": agent, "pane": agent, "runtime": "shed", "worktree": "/x", "branch": format!("issue-{n}")});
+    ev(c, n, 0, "spawn", d);
 }
 
 #[test]
-fn a_missed_promise_drive_healed_alerts_with_the_issue_reason_and_heal_one_pass_later() {
-    let (c, sink, sh) = setup("slo-promise");
+fn a_missed_promise_with_its_lane_gone_makes_no_card_and_a_live_one_clears() {
+    let (c, sink, sh) = quiet("slo-promise");
+    spawned(&c, 7);
+    let line = "PASS · verify skipped · merging next pass";
+    let p = json!({"kind": "merging", "reason": line, "deadline": NOW + 620, "state": "impl", "head": ""});
+    ev(&c, 7, 20, "promise", p);
+    let m = json!({"kind": "merging", "promised": line, "age": 680, "why": "drive took no step"});
+    ev(&c, 7, 700, "promise-missed", m);
+    let old = json!({"key": format!("promise:sendmeter#7:{}", NOW + 20), "reason": "⚠ missed 11m: drive took no step"});
+    ev(&c, 7, 710, "stuck", old);
+    assert!(card(&c, &sh, NOW + 710).is_some(), "the card live before deploy");
+    fast(&at(&c, 720), &sh);
+    assert_eq!(card(&c, &sh, NOW + 720), None, "cleared on the first pass");
+    fast(&at(&c, 1100), &sh);
+    assert_eq!(kinds(&c), ["stuck", "slo-ok"]);
+    assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
+}
+
+#[test]
+fn no_drive_pass_for_30_minutes_is_one_card_and_push_until_the_next_pass() {
+    let (c, sink, sh) = quiet("slo-no-pass");
+    let last = c.state.with_file_name("drive-sendmeter.last");
+    std::fs::write(&last, NOW.to_string()).unwrap();
+    fast(&at(&c, 29 * 60), &sh);
+    assert!(kinds(&c).is_empty(), "{:?}", kinds(&c));
+    fast(&at(&c, 31 * 60), &sh);
+    fast(&at(&c, 36 * 60), &sh);
+    assert_eq!(kinds(&c), ["stuck"]);
+    let pushes = std::fs::read_to_string(&sink).unwrap();
+    assert_eq!(
+        pushes,
+        "sendmeter stuck: no drive pass for 31 min; tried: nothing (no known heal)\n"
+    );
+    let shown = card(&c, &sh, NOW + 36 * 60).expect("the card").to_string();
+    assert!(shown.contains("no drive pass for 31 min"), "{shown}");
+    std::fs::write(&last, (NOW + 37 * 60).to_string()).unwrap();
+    fast(&at(&c, 37 * 60), &sh);
+    assert_eq!(kinds(&c), ["stuck", "slo-ok"]);
+    assert_eq!(card(&c, &sh, NOW + 37 * 60), None);
+}
+
+fn failing(c: &drover::Ctx, n: u64) {
+    spawned(c, n);
+    for ts in [100, 400] {
+        let d = json!({"step": "respawn", "error": "shed run: exit 1", "head": null});
+        ev(c, n, ts, "spawn-error", d);
+    }
+}
+
+#[test]
+fn three_issues_drive_cannot_retry_push_once_and_show_one_card_with_a_force_each() {
+    let (c, sink, sh) = quiet("slo-fold");
+    for n in [7, 8, 9] {
+        failing(&c, n);
+    }
+    let d = json!({"step": "respawn", "error": "shed run: exit 1", "head": null});
+    ev(
+        &c,
+        10,
+        0,
+        "spawn",
+        json!({"role": "impl", "agent": "sendmeter-impl-10", "pane": "p", "worktree": "/x", "branch": "issue-10"}),
+    );
+    ev(&c, 10, 400, "spawn-error", d);
+    fast(&at(&c, 500), &sh);
+    fast(&at(&c, 800), &sh);
+    assert_eq!(kinds(&c), ["stuck", "stuck", "stuck"], "one error is retried: no card");
+    let pushes = std::fs::read_to_string(&sink).unwrap();
+    assert_eq!(pushes.lines().count(), 1, "one push per fleet: {pushes}");
+    assert!(
+        pushes.contains("respawn fails the same way 2 times: shed run: exit 1"),
+        "{pushes}"
+    );
+    let k = card(&c, &sh, NOW + 800).expect("one card");
+    let shown = k.to_string();
+    for n in [7, 8, 9] {
+        let force = k["buttons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["label"] == format!("Force #{n}"));
+        let force = force.unwrap_or_else(|| panic!("{shown}"));
+        assert_eq!(
+            (force["action"].as_str(), &force["values"]),
+            (Some("force"), &json!({"fleet": "sendmeter", "issue": n}))
+        );
+    }
+    assert!(!shown.contains("drover why"), "{shown}");
+    assert!(shown.contains("`drover waiting sendmeter`"), "{shown}");
+    let (code, out) = run(&at(&c, 800), &sh.on(&Fake::default()), &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+}
+
+#[test]
+fn force_on_a_stuck_issue_spawns_it_past_the_load_limit_by_the_owner_and_its_line_clears() {
+    std::env::remove_var("DROVER_LANE");
+    std::env::remove_var("DROVER_ORCHESTRATOR");
+    let (c, _sink, sh) = quiet("slo-force");
+    failing(&c, 7);
+    failing(&c, 8);
+    fast(&at(&c, 500), &sh);
+    assert!(card(&c, &sh, NOW + 500).is_some());
+    let r = Fake::default()
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+        .reply("sysctl -n vm.loadavg", "{ 40.0 40.0 40.0 }\n")
+        .reply("sysctl -n hw.ncpu", "10\n")
+        .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
+        .reply("git -C", "")
+        .reply("gh issue view 7", r#"{"title":"t","body":"b"}"#);
+    let on = sh.on(&r);
+    let c5 = at(&c, 500);
+    let s = Server::new(&c5, &on, Some("127.0.0.1:7777".into()));
+    let cookie = pair(&s, &c, "", NOW + 500);
+    let body = json!({"screen": "cards", "action": "force", "values": {"fleet": "sendmeter", "issue": 7}}).to_string();
+    let req = format!(
+        "POST /action HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let res = String::from_utf8_lossy(&s.respond(&req, NOW + 500)).into_owned();
+    assert!(res.starts_with("HTTP/1.1 200"), "{res}");
+    assert!(
+        res.contains("drover spawn sendmeter 7 impl") && res.contains("--force"),
+        "{res}"
+    );
+    let ev = read(&c.state).unwrap();
+    let o: Vec<_> = ev.iter().filter(|e| e.kind == "override").collect();
+    assert_eq!(o.len(), 1, "{o:?}");
+    assert_eq!(
+        (o[0].issue, o[0].str("code"), o[0].str("by")),
+        (Some(7), Some("HOST_BUSY"), Some("owner"))
+    );
+    let shown = card(&c, &sh, NOW + 500).expect("#8 still stuck").to_string();
+    assert!(!shown.contains("Force #7") && shown.contains("Force #8"), "{shown}");
+}
+
+#[test]
+fn a_missed_promise_a_hold_took_over_shows_no_stuck_card() {
+    let (c, sink, sh) = setup("slo-missed-held");
     std::fs::remove_dir_all(c.worktrees.join("sendmeter/issue-9")).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "rm", "12"]).0, 0);
     let ev = |ts, kind: &str, d: Value| append(&c.state, &Event::new(NOW + ts, "sendmeter", Some(7), kind, d)).unwrap();
     let d = json!({"role": "impl", "agent": "sendmeter-impl-7", "pane": "sendmeter-impl-7", "runtime": "shed", "worktree": "/x", "branch": "issue-7"});
     ev(0, "spawn", d);
-    let line = "PASS · verify skipped · merging next pass";
+    let line = "pushed abc1234, waiting for drive (next pass ≤ 5 min) to spawn review";
     ev(
         20,
         "promise",
-        json!({"kind": "merging", "reason": line, "deadline": NOW + 620, "state": "impl", "head": ""}),
+        json!({"kind": "next-pass", "reason": line, "deadline": NOW + 620, "state": "impl", "head": ""}),
     );
-    ev(690, "marked-ready", json!({"pr": 100, "sha": "abc"}));
     ev(
         700,
         "promise-missed",
-        json!({"kind": "merging", "promised": line, "age": 680, "why": "now: PASS · CI pending"}),
+        json!({"kind": "next-pass", "promised": line, "age": 680, "why": "drive took no step"}),
     );
-    fast(&at(&c, 700), &sh);
-    assert!(
-        kinds(&c).is_empty(),
-        "drive's heal (#839) was tried a pass ago: {:?}",
-        kinds(&c)
-    );
-    fast(&at(&c, 800), &sh);
-    assert!(kinds(&c).is_empty(), "the heal gets one pass");
-    fast(&at(&c, 990), &sh);
-    fast(&at(&c, 1100), &sh);
-    let pushes = std::fs::read_to_string(&sink).unwrap();
-    assert_eq!(
-        pushes,
-        "sendmeter #7 stuck: ⚠ missed 16m: now: lane gone, no push: respawning impl; tried: marked-ready\n"
-    );
-    assert_eq!(kinds(&c), ["stuck"]);
-}
-
-#[test]
-fn three_stuck_issues_in_one_fleet_push_once_and_show_one_card() {
-    let (c, sink, sh) = setup("slo-fold");
-    std::fs::remove_dir_all(c.worktrees.join("sendmeter/issue-9")).unwrap();
-    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "rm", "12"]).0, 0);
-    let line = "PASS · verify skipped · merging next pass";
-    for n in [7, 8, 9] {
-        let ev =
-            |ts, kind: &str, d: Value| append(&c.state, &Event::new(NOW + ts, "sendmeter", Some(n), kind, d)).unwrap();
-        let agent = format!("sendmeter-impl-{n}");
-        ev(
-            0,
-            "spawn",
-            json!({"role": "impl", "agent": agent, "pane": agent, "runtime": "shed", "worktree": "/x", "branch": format!("issue-{n}")}),
-        );
-        ev(
-            20,
-            "promise",
-            json!({"kind": "merging", "reason": line, "deadline": NOW + 620, "state": "impl", "head": ""}),
-        );
-        ev(
-            700,
-            "promise-missed",
-            json!({"kind": "merging", "promised": line, "age": 680, "why": "drive took no step"}),
-        );
-    }
-    fast(&at(&c, 700), &sh);
-    fast(&at(&c, 1000), &sh);
-    assert_eq!(kinds(&c), ["stuck", "stuck", "stuck"]);
-    let pushes = std::fs::read_to_string(&sink).unwrap();
-    assert_eq!(pushes.lines().count(), 1, "one push per fleet: {pushes}");
-    let f = Fake::default();
-    let r = sh.on(&f);
-    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let res = s.respond(
-        "GET /screens/cards HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n",
-        NOW + 1000,
-    );
-    let res = String::from_utf8_lossy(&res);
-    let v: Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    let cards: Vec<&Value> = v
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|c| c["title"] == "Drive is stuck")
-        .collect();
-    assert_eq!(cards.len(), 1, "{cards:?}");
-    let shown = cards[0].to_string();
-    for n in [7, 8, 9] {
-        assert!(shown.contains(&format!("drover why sendmeter#{n}")), "{shown}");
-    }
-    assert!(shown.contains("\"action\":\"drive-all\""), "{shown}");
+    ev(710, "held", json!({"on": [8]}));
+    fast(&at(&c, 720), &sh);
+    fast(&at(&c, 1020), &sh);
+    assert!(!kinds(&c).contains(&"stuck".to_string()), "{:?}", kinds(&c));
+    assert_eq!(card(&c, &sh, NOW + 1020), None);
+    assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
 }

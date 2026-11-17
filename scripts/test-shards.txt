@@ -11,6 +11,7 @@
 1 ask_ids
 2 ask_scale
 1 asks
+2 autonomy
 4 backlog
 4 blocked_respawn
 1 board_errors
