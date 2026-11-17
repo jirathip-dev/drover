@@ -104,7 +104,7 @@ pub struct Model {
     pub idle: u64,
     pub polled: u64,
     pub produced: Vec<String>,
-    /// What happens to an issue's head once rev's PASS lands, and a `drive`/`merge` that dies right after GitHub's merge call.
+    /// Faults: what happens to an issue's head once rev's PASS lands, and a `drive`/`merge` that dies right after GitHub's merge call.
     pub after_pass: Vec<(u64, crate::gates::AfterPass)>,
     pub crash_on_merge: bool,
     /// The "sometimes" states this run reached (`gates::SOMETIMES`).

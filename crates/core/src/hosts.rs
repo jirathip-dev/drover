@@ -813,7 +813,7 @@ pub fn held_since(events: &[Event], machine: Option<&str>) -> u64 {
     events.iter().rfind(on).map_or(0, |e| e.ts)
 }
 
-/// The alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`; a proxy lane's sign-out once its retry window passed with no proxy call through since.
+/// The alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`, or a proxy lane's sign-out once its retry window passed with no proxy call through since.
 pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>, (now, retry): (u64, u64)) -> Option<&'a str> {
     let mine = |e: &Event| e.str("machine") == machine;
     let from = events
@@ -1411,7 +1411,7 @@ pub fn place(
     Ok(Some(p))
 }
 
-/// Does worktree `wt` on its host hold changes to tracked files or unpushed commits (unreadable: no)? untracked files never pin a lane.
+/// Does worktree `wt` on its host hold changes to tracked files or unpushed commits (unreadable: no)? Untracked files never pin a lane.
 pub fn unsaved(on: &On, wt: &Path) -> bool {
     let w = wt.to_string_lossy();
     let git = |a: &[&str]| ok(on, "git", &[&["-C", &*w][..], a].concat());

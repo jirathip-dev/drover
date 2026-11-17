@@ -1,27 +1,30 @@
 const TOKENS = ['--bg', '--card', '--edge', '--line', '--scrim', '--fg', '--mute', '--l', '--link',
   '--g', '--a', '--r', '--p', '--c', '--fk-l', '--fk-p', '--fk-c', '--fk-g', '--fk-a'];
-const hex = s => {
+type Rgb = number[];
+type Row = [string, number, number];
+type Scheme = { tokens?: Record<string, string>; 'color-scheme'?: string };
+const hex = (s: string): Rgb | null => {
   const m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(s);
   if (!m) return null;
   const n = parseInt(m[1], 16);
   return [n >> 16, (n >> 8) & 255, n & 255];
 };
-const lin = c => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-const over = (c, bg, p) => c.map((v, i) => v * p + bg[i] * (1 - p));
-function lab([r, g, b]) {
+const lin = (c: number) => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+const lum = ([r, g, b]: Rgb) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+const ratio = (a: Rgb, b: Rgb) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const over = (c: Rgb, bg: Rgb, p: number): Rgb => c.map((v, i) => v * p + bg[i] * (1 - p));
+function lab([r, g, b]: Rgb) {
   const [x, y, z] = [[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]
     .map(row => row[0] * lin(r) + row[1] * lin(g) + row[2] * lin(b));
-  const f = t => t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
+  const f = (t: number) => t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
   const [fx, fy, fz] = [x / 0.95047, y, z / 1.08883].map(f);
   return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
 }
-function de(c1, c2) {
+function de(c1: Rgb, c2: Rgb) {
   const [L1, a1, b1] = lab(c1), [L2, a2, b2] = lab(c2), rad = Math.PI / 180;
   const C = (Math.hypot(a1, b1) + Math.hypot(a2, b2)) / 2, G = 0.5 * (1 - Math.sqrt(C ** 7 / (C ** 7 + 25 ** 7)));
   const ap1 = a1 * (1 + G), ap2 = a2 * (1 + G), C1 = Math.hypot(ap1, b1), C2 = Math.hypot(ap2, b2);
-  const h = (b, a) => { const v = Math.atan2(b, a) / rad; return v < 0 ? v + 360 : v; };
+  const h = (b: number, a: number) => { const v = Math.atan2(b, a) / rad; return v < 0 ? v + 360 : v; };
   const h1 = h(b1, ap1), h2 = h(b2, ap2), dL = L2 - L1, dC = C2 - C1;
   const dh = C1 * C2 === 0 ? 0 : h2 - h1 > 180 ? h2 - h1 - 360 : h2 - h1 < -180 ? h2 - h1 + 360 : h2 - h1;
   const dH = 2 * Math.sqrt(C1 * C2) * Math.sin(dh * rad / 2), Lm = (L1 + L2) / 2, Cm = (C1 + C2) / 2;
@@ -31,11 +34,11 @@ function de(c1, c2) {
   const RT = -2 * Math.sqrt(Cm ** 7 / (Cm ** 7 + 25 ** 7)) * Math.sin(60 * Math.exp(-(((hm - 275) / 25) ** 2)) * rad);
   return Math.sqrt((dL / SL) ** 2 + (dC / SC) ** 2 + (dH / SH) ** 2 + RT * (dC / SC) * (dH / SH));
 }
-function gate(s) {
-  const t = (s && s.tokens) || {}, missing = TOKENS.filter(k => !hex(t[k] || ''));
+function gate(s: Scheme | null | undefined): Row[] {
+  const t: Record<string, string> = (s && s.tokens) || {}, missing = TOKENS.filter(k => !hex(t[k] || ''));
   if (missing.length) return [[`missing or not #rrggbb[aa]: ${missing.join(' ')}`, 0, 1]];
-  const c = Object.fromEntries(TOKENS.map(k => [k, hex(t[k])])), rows = [];
-  const on = (ks, bg, min, name = bg) => ks.forEach(k => rows.push([`${k} on ${name}`, ratio(c[k], bg.map ? bg : c[bg]), min]));
+  const c: Record<string, Rgb> = Object.fromEntries(TOKENS.map(k => [k, hex(t[k] ?? '') ?? [0, 0, 0]])), rows: Row[] = [];
+  const on = (ks: string[], bg: string | Rgb, min: number, name = String(bg)) => ks.forEach(k => rows.push([`${k} on ${name}`, ratio(c[k], typeof bg === 'string' ? c[bg] : bg), min]));
   const card = over(c['--r'], c['--bg'], 0.15), red = over(c['--r'], c['--bg'], 0.12), amber = over(c['--a'], c['--bg'], 0.12);
   for (const bg of ['--bg', '--card']) {
     on(['--fg', '--mute', '--l', '--link', '--fk-l', '--fk-p', '--fk-c', '--fk-g', '--fk-a'], bg, 4.5);
@@ -48,10 +51,12 @@ function gate(s) {
   on(['--a'], amber, 3, 'an amber group header');
   for (const [x, y] of [['--g', '--a'], ['--a', '--r'], ['--g', '--r'], ...['--l', '--link'].flatMap(x => ['--g', '--a', '--r'].map(y => [x, y]))])
     rows.push([`ΔE2000 ${x} ↔ ${y}`, de(c[x], c[y]), 20]);
-  if (!['dark', 'light'].includes(s['color-scheme'])) rows.push(['color-scheme is not "dark" or "light"', 0, 1]);
+  if (!['dark', 'light'].includes(s?.['color-scheme'] ?? '')) rows.push(['color-scheme is not "dark" or "light"', 0, 1]);
   return rows;
 }
-const fails = s => gate(s).filter(r => r[1] < r[2]).map(([w, v, m]) => v ? `${w} ${v.toFixed(2)} < ${m}` : w);
-const block = s => `:root{${TOKENS.map(k => `${k}:${s.tokens[k]}`).join(';')};color-scheme:${s['color-scheme']}}`;
-const choose = (all, pick, def, dark) => [pick, (def && def[dark ? 'dark' : 'light']) || def, 'github-dark'].find(n => all[n] && !fails(all[n]).length) || 'github-dark';
+const fails = (s: Scheme | null | undefined): string[] => gate(s).filter(r => r[1] < r[2]).map(([w, v, m]) => v ? `${w} ${v.toFixed(2)} < ${m}` : w);
+const block = (s: { tokens: Record<string, string>; 'color-scheme'?: string }) => `:root{${TOKENS.map(k => `${k}:${s.tokens[k]}`).join(';')};color-scheme:${s['color-scheme']}}`;
+const theirs = (def: unknown, dark: boolean): unknown => (def && typeof def === 'object' && Reflect.get(def, dark ? 'dark' : 'light')) || def;
+const choose = (all: Record<string, Scheme>, pick: unknown, def: unknown, dark: boolean): string =>
+  [pick, theirs(def, dark), 'github-dark'].find((n): n is string => typeof n === 'string' && !!all[n] && !fails(all[n]).length) || 'github-dark';
 export { block, choose, fails };

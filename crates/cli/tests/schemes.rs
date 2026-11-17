@@ -27,11 +27,11 @@ fn node(js: &str) -> Option<Value> {
         eprintln!("skipping: no node here");
         return None;
     }
-    let src = include_str!("../../../web/src/schemes.js");
-    let part = &src[src.find("const TOKENS").unwrap()..src.find("export {").unwrap()];
+    let src = include_str!("../../../web/src/schemes.ts");
+    let part = &src[..src.find("export {").unwrap()];
     let d = tmpdir("schemes-js");
-    std::fs::write(d.join("t.js"), format!("{part}\nconsole.log(JSON.stringify({js}))")).unwrap();
-    let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
+    std::fs::write(d.join("t.ts"), format!("{part}\nconsole.log(JSON.stringify({js}))")).unwrap();
+    let o = std::process::Command::new("node").arg(d.join("t.ts")).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     Some(serde_json::from_slice(&o.stdout).unwrap())
 }

@@ -142,7 +142,7 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
             == git(r, dir, &["rev-parse", &format!("{h}^{{tree}}")]).ok()
 }
 
-/// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` against the first `[fleet.<n>] line_cap` in `config`; under `warn_within` lines of headroom it warns and still passes. `web/src/**/*.ts` lines are reported, never capped. with `base`, every commit since it that edits the cap must carry a `Cap:` trailer.
+/// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` against the first `[fleet.<n>] line_cap` in `config`; under `warn_within` lines of headroom it warns and still passes. `web/src/**/*.ts` lines are reported, never capped. With `base`, every commit since it that edits the cap must carry a `Cap:` trailer.
 pub fn cap_check(
     r: &dyn Runner,
     config: &Path,

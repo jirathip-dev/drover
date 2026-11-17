@@ -158,7 +158,7 @@ thread_local!(static PASS: std::cell::RefCell<Kept> = std::cell::RefCell::defaul
 
 thread_local!(pub static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) });
 
-/// The fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says). the fast step skips it while `unchanged` says nothing moved since the last query.
+/// The fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says). The fast step skips it while `unchanged` says nothing moved since the last query.
 pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Rc<Value>> {
     let p = cache_path(ctx, "prs", fleet, 0);
     let stamp = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
