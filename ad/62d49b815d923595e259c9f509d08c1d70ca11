@@ -1,0 +1,8 @@
+Decided: merge's NO_REPRO check reads only the latest non-verify PASS at the head
+Because: q1876
+Rejected: any Repro: verify PASS at the head blocks — berth#134's 7 old verify PASSes would block 16 later run PASSes forever
+Decided: the rev placement test lives in its own file crates/cli/tests/repro_host.rs
+Because: crates/cli/tests/repro_host.rs:59
+Rejected: keeping it in hosts.rs — its arch baseline (1791 lines) may only shrink, CI's arch-check failed on growth
+Check: a_later_run_pass_at_the_head_clears_earlier_verify_passes fails on the test-only commit, passes at the head
+Owner: An issue whose newest review gave a real test run now merges even if older reviews asked for a verify step.
