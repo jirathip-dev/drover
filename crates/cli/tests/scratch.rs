@@ -555,3 +555,29 @@ fn a_disabled_hosts_scratch_stays_only_for_its_own_live_agents() {
         "{out}"
     );
 }
+
+#[test]
+fn a_tick_past_its_budget_still_sweeps_an_enabled_hosts_finished_scratch() {
+    let (c, home, s) = air_setup("scratch-overrun");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        text.replace("build_budget_gb = 1000", "build_budget_gb = 1000\nslow_secs = 0"),
+    )
+    .unwrap();
+    air_spawn(&c, 12, "rev", "sendmeter-rev-12-r1");
+    merged(&c, 12);
+    air_spawn(&c, 13, "impl", "sendmeter-impl-13");
+    let [ended, working] = ["sendmeter-rev-12-r1", "sendmeter-impl-13"].map(|a| blob(&s, &format!("{a}/debug")));
+    let air = [("sendmeter-impl-13", "working")];
+    let (_, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    assert!(out.contains("tick: past its 0 s budget"), "{out}");
+    assert!(!ended.exists(), "{out}");
+    assert!(working.exists(), "a live lane's scratch stays: {out}");
+    assert!(
+        out.contains(&format!(
+            "scratch: air: removed {AIR_ROOT}/.build/.scratch/sendmeter-rev-12-r1 "
+        )),
+        "{out}"
+    );
+}
