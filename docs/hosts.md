@@ -92,7 +92,7 @@ A lane needs the union of three lists:
 
 Admission runs per host: `DISK_LOW`, `MEM_LOW`, then `HOST_BUSY`. A host that fails admission (or is unreachable) is
 skipped. A `DISK_LOW` names the done lanes' worktrees `drover clean --yes` would remove on that host (or says there
-are none and points to `drover reclaim`), and a spawn still starting toward a full host holds no `max_parallel_spawns`
+are none and points to `drover reclaim --apply`); a remote host's finished lanes' folders are swept first (#1215), and a spawn still starting toward a full host holds no `max_parallel_spawns`
 slot, so it never holds back spawns bound for another host (#416). `drover clean` covers every host's merged or
 closed lanes (shown as `<host>:<path>`) and lists the orphan folders under each enabled host's worktree root;
 `--orphans --yes` removes them. When every fitting host fails, the spawn is refused with the least-busy host's reason. The load in `HOST_BUSY` leaves out

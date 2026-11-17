@@ -11,6 +11,8 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+mod pickup;
+
 /// One pass's steps in order (`lap` names each, `pass-slow` the slowest) and the `[limits]` keys that time them.
 pub const STEPS: [(&str, &[&str]); 8] = [
     ("read log, host sample", &[]),
@@ -1305,6 +1307,12 @@ fn pass(
         if crate::gate::ready_draft(ctx, cfg, r, out, s, &pr)? && merge(w) {
             continue;
         }
+        let fetched = match pickup::fetch(ctx, r, out, &events, (s, w), &pr)? {
+            pickup::Picked::Held => continue,
+            pickup::Picked::Fetched(x) => Some(x),
+            pickup::Picked::No => None,
+        };
+        let w = fetched.as_ref().unwrap_or(w);
         if let Some(e) = crate::events::last_at(&working(&ctx.state)?, "auto-updated", (fleet, s.issue), ctx.now) {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
@@ -1422,6 +1430,10 @@ fn pass(
                 save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
+            if step == "verdict" && matches!(code, Some("ERROR" | "EXIT")) {
+                let why = last_why(fleet).unwrap_or_default();
+                pickup::failed(ctx, out, &events, (fleet, s.issue, &w.lane), &why)?;
+            }
             let stale = (code == Some("LANE_LIVE") && step == "review")
                 .then(|| s.lanes.get(arg(3)))
                 .flatten()
@@ -1596,6 +1608,10 @@ fn no_proof(
         append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "lane-lost", d))?;
     }
     Ok(Some(code))
+}
+
+fn last_why(fleet: &str) -> Option<String> {
+    ACTS.with_borrow(|m| m.get(fleet)?.last()?["why"].as_str().map(String::from))
 }
 
 fn repro_seen(r: &dyn Runner, ev: &[Event], (fleet, n): (&str, u64), args: &[&str]) -> (String, bool) {

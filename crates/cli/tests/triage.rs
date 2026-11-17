@@ -46,7 +46,7 @@ fn fake() -> Fake {
 
 #[test]
 fn a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo() {
-    std::env::set_var("DROVER_LANE", LANE);
+    set_env("DROVER_LANE", LANE);
     let c = ctx(&tmpdir("triage-run"), CONFIG);
     let sh = FakeShed::attached(&c);
     ev(&c, None, "thread-new", json!({"thread": "t1", "title": "chat"}));
@@ -154,7 +154,7 @@ fn a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo() 
 
 #[test]
 fn tick_runs_triage_weekly_only_where_the_fleet_turns_it_on() {
-    std::env::set_var("DROVER_LANE", LANE);
+    set_env("DROVER_LANE", LANE);
     let on = CONFIG.replace(
         "integration = \"staging\"   # never main",
         "integration = \"staging\"\ntriage = \"weekly\"",
@@ -178,7 +178,7 @@ fn tick_runs_triage_weekly_only_where_the_fleet_turns_it_on() {
 
 #[test]
 fn the_docs_pass_files_one_docs_issue_with_each_finding_and_none_when_clean() {
-    std::env::set_var("DROVER_LANE", LANE);
+    set_env("DROVER_LANE", LANE);
     let c = ctx(&tmpdir("triage-docs"), CONFIG);
     let root = c.worktrees.join("repo");
     std::fs::create_dir_all(root.join("docs")).unwrap();

@@ -187,7 +187,7 @@ fn parity_69_the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
     assert!(post(&s, "/thread", "op=new&repo=sendmeter&text=Design+first", &cookie, c.now).contains("t1"));
-    std::env::set_var("DROVER_THREAD", "t1");
+    set_env("DROVER_THREAD", "t1");
     let q = run(
         &c,
         &Fake::default(),
@@ -813,7 +813,7 @@ fn staged(name: &str, flag: &str) -> (drover::Ctx, std::path::PathBuf, RealGit, 
     std::fs::write(&c.config, format!("{toml}{ARCHITECT}")).unwrap();
     let t = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "meter"]);
     assert!(t.0 == 0 && t.1.contains("t1"), "{}", t.1);
-    std::env::set_var("DROVER_THREAD", "t1");
+    set_env("DROVER_THREAD", "t1");
     let q = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", flag]);
     std::env::remove_var("DROVER_THREAD");
     assert_eq!(q.0, 0, "{}", q.1);

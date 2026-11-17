@@ -1065,8 +1065,8 @@ fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
         "a running ACP lane's scratch is never trimmed, oldest or not: {out}"
     );
     assert!(!exited.exists(), "an exited lane's goes over budget: {out}");
-    let want = format!("builds: trimmed {} ", exited.display());
-    assert!(out.contains(&want) && out.contains("no live agent"), "{out}");
+    let want = format!("scratch: local: removed {} ", exited.display());
+    assert!(out.contains(&want) && out.contains("(lane ended)"), "{out}");
 }
 
 fn git(dir: &std::path::Path, a: &[&str]) -> String {
@@ -1108,7 +1108,7 @@ impl Runner for Push<'_> {
 }
 
 fn acp_lane(name: &str) -> (drover::Ctx, FakeShed, Fake, PathBuf, PathBuf) {
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     let b = FakeShed::new();
     let cfg = acp_config(&b.sock, "claude");
     let c = acp_ctx(name, &cfg);

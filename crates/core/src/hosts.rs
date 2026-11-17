@@ -925,7 +925,7 @@ pub fn build_dirs(sp: &Event) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim`.
+/// The host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim --apply`; a remote one's finished lanes swept first.
 pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     let (min, events) = (cfg.limits.min_free_gb, working(&ctx.state).unwrap_or_default());
     let low = || host::free_gb(on).filter(|g| *g < min);
@@ -936,6 +936,14 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     };
     let trim = |l| crate::check::trim_on(ctx, on, cfg, 0.0, l, &mut std::io::sink()).unwrap_or(0);
     if live.as_ref().is_some_and(|l| trim(l) > 0) {
+        gb = low()?;
+    }
+    let name = on
+        .machine
+        .and_then(|m| cfg.hosts.iter().find(|h| h.1.machine.as_deref() == Some(m)));
+    let swept =
+        |(n, _): (&String, _)| crate::check::sweep(ctx, cfg, on, n, &mut std::io::sink(), crate::check::Sweep::Tick);
+    if name.map(swept).is_some_and(|b| b.is_ok_and(|b| b > 0)) {
         gb = low()?;
     }
     let st = fold(&events);
@@ -957,7 +965,7 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     wts.retain(|w| there.contains(w));
     let names: Vec<&str> = wts.iter().filter_map(|w| w.rsplit('/').next()).collect();
     let free = match names.len() {
-        0 => "nothing for `drover clean --yes` there; `drover reclaim` frees idle build folders".into(),
+        0 => "nothing for `drover clean --yes` there; `drover reclaim --apply` frees idle and finished lanes' build folders".into(),
         n => format!(
             "`drover clean --yes` frees {n} lane worktree(s) there: {}",
             names.join(", ")
