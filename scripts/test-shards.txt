@@ -71,7 +71,6 @@
 1 host_tab
 1 host_words
 3 hosts
-2 hosts_screen
 1 hotspots
 4 hung_read
 1 hung_root
