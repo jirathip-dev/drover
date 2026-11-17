@@ -1,0 +1,77 @@
+Decided: the Hosts screen is built from the existing host tab data (API v1's `host`), turned into the page's blocks; no new host logic
+Because: "A **Hosts** JSON screen (`/screens/hosts`), page-only, opened from [⚙] as a menu row"
+Decided: its actions (host, reap, orphans, sign-in) are page-only like the thread actions, not added to cooee-plugin.toml
+Rejected: adding them to the manifest's [permissions] — it is cooee's contract and its fixture (golden/cooee/permissions.json) would no longer match
+Decided: the page opens a sheet's stream while the sheet shows, so the Hosts screen (opened from [⚙] as a sheet) streams
+Because: "Its stream, while open, stamps `host-watch.at`, so watched sampling works again."
+Decided: the dead `/live?tab=host` stamp is deleted; its test now opens `/screens/hosts/stream`
+Because: crates/cli/tests/host_history.rs:220
+Decided: [sign in] starts the login in a pane and opens a paired-only sheet with its screen, links and a reply line, refreshed every 2 s
+Check: an unpaired device gets 401 for /screens/sign-in/<pane> and for every host action
+Check: the golden crates/cli/tests/golden/page/hosts.json: mini (main) first, cloud1 with spend/budget and a confirmed [off]
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
+
+Decided: the Hosts screen is built from the existing host tab data (API v1's `host`), turned into the page's blocks; no new host logic
+Because: "A **Hosts** JSON screen (`/screens/hosts`), page-only, opened from [⚙] as a menu row"
+Decided: its actions (host, reap, orphans, sign-in) are page-only like the thread actions, not added to cooee-plugin.toml
+Rejected: adding them to the manifest's [permissions] — it is cooee's contract and golden/cooee/permissions.json would no longer match
+Decided: the page opens a sheet's stream while the sheet shows, so the Hosts screen (a [⚙] sheet) streams
+Because: "Its stream, while open, stamps `host-watch.at`, so watched sampling works again."
+Decided: the dead `/live?tab=host` stamp is deleted; its test now opens `/screens/hosts/stream`
+Because: crates/cli/tests/host_history.rs:220
+Decided: a sheet's redraw uses #1084's keep-the-focused-field swap, so a streaming sign-in sheet keeps a reply being typed
+Because: web/src/main.ts:71
+Check: an unpaired device gets 401 for /screens/sign-in/<pane> and for every host action
+Check: golden crates/cli/tests/golden/page/hosts.json: mini (main) first, cloud1 with spend/budget and a confirmed [off]
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
+
+Decided: the full Hosts screen of round 1 (gauges, charts, sign-in, providers, sheet streams) is dropped; the page gets the approved bare list from docs/design/hosts-menu
+Because: "No gauges, sparklines, charts, health/services, spend or provider meters."
+Decided: the sheet reads fleet.toml's hosts, lanes_on and the reap leftovers count only, not the heavy host tab (df, ps, services)
+Because: "Each row: name, on/off state, live lane count."
+Decided: [Reap N] sits on the main host's row, only while leftovers exist; the main host has no [Off] (the host op refuses it)
+Because: q1784
+Decided: host and reap are page-only actions like the thread actions, not added to cooee-plugin.toml
+Rejected: listing them in the manifest's [permissions] — that is cooee's contract and its golden permissions fixture would change
+Decided: no sheet stream and no host-watch.at stamp; an action's answer redraws the sheet with a screen op
+Because: "Watched `procs` sampling (`host-watch.at`) is not restored by this issue"
+Check: golden crates/cli/tests/golden/page/hosts.json: mini (main, 2 leftovers, [Reap 2]) first, then cloud1 (cloud host, 1 lane, confirmed [Off])
+Check: hosts_screen.rs posts off, then on, then reap through POST /action: host-off/host-on logged, kill -TERM sent
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
+
+Decided: parity row 75 is page-only, guarded by parity_75 (the off/on/reap test in hosts_screen.rs, renamed)
+Because: crates/cli/tests/hosts_screen.rs:94
+Decided: rows 72, 73, 74, 76 and 78 read dropped q1784; the owner approved the bare list
+Because: "No gauges, sparklines, charts, health/services, spend or provider meters."
+Decided: rows 77 and 79 go from open #1091 to plain open; this issue does not bring them back
+Rejected: marking them dropped — no owner decision names them
+Check: scripts/parity-check.sh origin/staging exits 0 and the PR body has a ## Parity section
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
+
+Decided: hosts_screen goes in shard 1, the shard with the fewest targets
+Because: scripts/test-shards.sh:16
+Decided: the host/reap arm calls one host_op so action stays at or under its 170-line baseline
+Because: .drover/arch-baseline.txt:23
+Decided: page_places lists Threads, then Hosts, then staging's Herd row; serve.md keeps both sheet lines
+Because: "opened from [⚙] as a menu row"
+Rejected: trimming serve.rs — staging's own file is already 3591 lines and this PR does not touch it
+Check: CI test shards run hosts_screen; arch-check flags no screens.rs:action size
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
+
+Decided: merge origin/staging again; its serve.rs baseline is 3594, so arch-check's serve.rs violation goes away
+Because: .drover/arch-baseline.txt:24
+Decided: the Hosts sheet (row builder, sheet, host_op) moves to screens_hosts.rs, a child module of screens.rs
+Because: .drover/arch.toml:201
+Rejected: a screens.rs baseline over 2000 lines — a new file keeps the cap and the code unchanged
+Decided: the sim hunt failure in shard 1 is a randomised race with no host or page code; a local run passes, no change
+Check: arch-check at the head reports no screens.rs or serve.rs size violation; shard 1 is green
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
+
+Decided: shard 3's red is a wall-clock duration flake in drive_now_on_the_board; no code change for it
+Because: crates/cli/tests/drive.rs:783
+Decided: merge origin/staging; keep staging's 11 THREAD_ACTIONS and both serve.md sheet lines
+Decided: host/reap dispatch moves from action to the POST /action handler so action stays at its baseline
+Because: .drover/arch-baseline.txt:23
+Rejected: raising action's size baseline — moving the one arm keeps the cap
+Check: arch-check flags no screens.rs:action size; hosts_screen posts off, on, reap through POST /action
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
