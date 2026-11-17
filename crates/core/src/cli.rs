@@ -1204,7 +1204,7 @@ pub(crate) fn forward(r: &dyn Runner, args: &[String]) -> Option<Result<runner::
     }))
 }
 
-pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<String> {
+pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event], fleets: &[&str]) -> Option<String> {
     let cli = Cli::try_parse_from(std::iter::once("drover").chain(args.iter().map(String::as_str)));
     let is = |e: &&Event, f: &str, id: &str| e.kind == "needs-decision" && e.fleet == f && e.str("id") == Some(id);
     let asked = |f: &str, id: &str| events.iter().rfind(|e| is(e, f, id))?.issue;
@@ -1227,7 +1227,9 @@ pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<S
             ))
         }
     };
-    (!lane.starts_with(&format!("{f}:{n}:"))).then(|| format!("names {f}#{n}, not the lane's {lane}"))
+    let unknown = (!fleets.contains(&f.as_str())).then(|| format!("fleet {f} is not configured"));
+    unknown
+        .or_else(|| (!lane.starts_with(&format!("{f}:{n}:"))).then(|| format!("names {f}#{n}, not the lane's {lane}")))
 }
 
 pub(crate) fn run(args: &[&str], ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {

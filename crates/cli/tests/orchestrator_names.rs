@@ -124,8 +124,8 @@ fn two(name: &str) -> drover::Ctx {
 }
 
 fn as_orch(c: &drover::Ctx, r: &Fake, id: &str, args: &[&str]) -> (i32, String) {
-    std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
-    std::env::set_var("DROVER_ORCHESTRATOR", id);
+    set_env("DROVER_LANE", "sendmeter:-:orchestrator");
+    set_env("DROVER_ORCHESTRATOR", id);
     let out = run(c, r, args);
     std::env::remove_var("DROVER_LANE");
     std::env::remove_var("DROVER_ORCHESTRATOR");

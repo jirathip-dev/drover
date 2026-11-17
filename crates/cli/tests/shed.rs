@@ -1108,7 +1108,7 @@ impl Runner for Push<'_> {
 }
 
 fn acp_lane(name: &str) -> (drover::Ctx, FakeShed, Fake, PathBuf, PathBuf) {
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     let b = FakeShed::new();
     let cfg = acp_config(&b.sock, "claude");
     let c = acp_ctx(name, &cfg);
