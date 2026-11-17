@@ -1,0 +1,30 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1215/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.49s
+     Running tests/spawn_guard.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1215/debug/deps/spawn_guard-6789c1a56c1319a7)
+
+running 22 tests
+test an_orch_spawn_is_refused_and_every_lane_takes_an_issue ... ok
+test host_busy_creates_no_worktree_dir ... ok
+test host_busy_on_load_per_cpu ... ok
+test hermes_kick_retries_after_dropped_first_prompt ... ok
+test host_busy_on_memory_pressure ... ok
+test a_new_lane_brief_carries_the_issue_decisions ... ok
+test adopt_records_running_lane ... ok
+test force_admits_busy_host_and_logs_override ... ok
+test live_agent_in_worktree_is_lane_live ... ok
+test dirty_unknown_worktree_is_worktree_dirty ... ok
+test disk_low_under_min_free_gb ... ok
+test host_under_every_threshold_admits ... ok
+test load_from_drovers_own_processes_admits_and_an_outside_one_is_named ... ok
+test many_live_agents_with_normal_signals_admit ... ok
+test named_orphan_in_worktree_is_adopted_not_lane_live ... ok
+test fix_round_brief_carries_fail_findings ... ok
+test mem_low_under_the_floor ... ok
+test parity_r11_kick_failure_after_start_still_logs_unconfirmed_spawn ... ok
+test unfinished_lane_in_log_is_lane_live ... ok
+test swap_refuses_on_sustained_median_with_pressure_not_one_spike ... ok
+test supersede_kills_old_agent_then_spawns ... ok
+test supersede_closes_old_pane_after_confirm_unless_working ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
