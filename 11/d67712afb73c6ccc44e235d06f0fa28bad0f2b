@@ -1,0 +1,9 @@
+Decided: the shed verb's clap enum lives in shed.rs; cli.rs keeps a one-line Shed(shed::Cmd) variant so cli.rs and dispatch stay within their arch baselines
+Because: crates/core/src/cli.rs:511
+Decided: spawn's SHED_MISSING and SHED_VERSION checks move into one shed::ready call so spawn's function shrinks back under its baseline
+Because: crates/core/src/spawn.rs:1002
+Decided: docs/runtimes.md's setup step documents `drover shed install` and its --yes flag
+Because: docs/runtimes.md:201
+Rejected: bumping .drover/arch-baseline.txt — the baselines are meant to shrink, and a trim was possible
+Check: cargo run -q -p drover -- arch-check --base origin/staging reports only staging's serve.rs
+Owner: The CI layout check now passes for this change; only the shed server file that staging already had over its limit is still flagged.
