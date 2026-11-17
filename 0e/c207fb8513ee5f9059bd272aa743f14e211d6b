@@ -1,0 +1,8 @@
+Decided: shard 3's red is a wall-clock duration flake in drive_now_on_the_board; no code change for it
+Because: crates/cli/tests/drive.rs:783
+Decided: merge origin/staging; keep staging's 11 THREAD_ACTIONS and both serve.md sheet lines
+Decided: host/reap dispatch moves from action to the POST /action handler so action stays at its baseline
+Because: .drover/arch-baseline.txt:23
+Rejected: raising action's size baseline — moving the one arm keeps the cap
+Check: arch-check flags no screens.rs:action size; hosts_screen posts off, on, reap through POST /action
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
