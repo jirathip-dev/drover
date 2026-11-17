@@ -718,12 +718,21 @@ fn a_start_that_never_runs_leaves_the_running_lanes_key_live() {
 
 #[test]
 fn a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane() {
-    let (c, _) = setup("racp-key-revoked", &["boat1"]);
+    lane_key_401_respawns_the_lane("racp-key-revoked", "401 lane key cd26f051 revoked");
+}
+
+#[test]
+fn an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane() {
+    lane_key_401_respawns_the_lane("racp-key-unknown", "401 unknown lane key");
+}
+
+fn lane_key_401_respawns_the_lane(name: &str, why: &str) {
+    let (c, _) = setup(name, &["boat1"]);
     let f = spawn_fake();
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
     let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{o}");
-    let err = "auth: Failed to authenticate. API Error: 401 lane key cd26f051 revoked";
+    let err = format!("auth: Failed to authenticate. API Error: {why}");
     let note = json!({"state": "error", "note": err});
     b.machines
         .borrow_mut()
