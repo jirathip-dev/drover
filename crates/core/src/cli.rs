@@ -602,10 +602,10 @@ enum Cmd {
         #[arg(long, required = true)]
         jsonl: bool,
     },
-    #[command(about = "Landing numbers: `stats land <fleet>`")]
+    #[command(about = "Numbers from the event log: `stats land <fleet>`, `stats autonomy <fleet>`")]
     Stats {
         #[command(subcommand)]
-        cmd: StatsCmd,
+        cmd: crate::autonomy::Stats,
     },
     #[command(about = "Help; --agent prints the usage doc agents get")]
     Help {
@@ -937,14 +937,6 @@ enum PushCmd {
         about = "Send a test alert to every subscribed device (needs a `type = \"webpush\"` notifier for its `sub`)"
     )]
     Test,
-}
-
-#[derive(Subcommand)]
-enum StatsCmd {
-    #[command(
-        about = "#350: per landing mode, median PASS → landed, landings per day, reverts, check time; red minutes on integration"
-    )]
-    Land { fleet: String },
 }
 
 #[derive(Subcommand)]
@@ -1970,9 +1962,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                 }
                 Cmd::Protection => return protection::protection(&cfg, r, out),
-                Cmd::Stats {
-                    cmd: StatsCmd::Land { fleet },
-                } => crate::land::stats(ctx, &cfg, out, &fleet)?,
+                Cmd::Stats { cmd } => cmd.run(ctx, &cfg, out)?,
                 Cmd::Clean {
                     fleet,
                     lane,
