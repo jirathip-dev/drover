@@ -1,0 +1,27 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1169/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1169/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1169/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1169/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.73s
+     Running tests/service.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1169/debug/deps/service-d7d8018b8488d7f3)
+
+running 1 test
+test a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes ... FAILED
+
+failures:
+
+---- a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes stdout ----
+
+thread 'a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes' (1734942) panicked at crates/cli/tests/service.rs:286:5:
+assertion `left == right` failed
+  left: Some(0)
+ right: Some(1734948)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.82s
+
+error: test failed, to rerun pass `-p drover --test service`

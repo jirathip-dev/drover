@@ -1,0 +1,851 @@
+test (shard 1/4)	UNKNOWN STEP	﻿2026-11-16T15:27:17.8409839Z Current runner version: '2.338.2'
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8445595Z ##[group]Runner Image Provisioner
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8447274Z Hosted Compute Agent
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8448318Z Version: 20261103.629
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8449522Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8450821Z Build Date: 2026-11-03T17:26:59Z
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8452058Z Worker ID: {b6e8205b-2f63-4ae7-8584-a10ab541c518}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8453492Z Region: eastus
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8454461Z Cloud: Azure
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8455484Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8458145Z ##[group]Operating System
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8459350Z Ubuntu
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8460248Z 26.04.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8461152Z LTS
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8462031Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8462943Z ##[group]Runner Image
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8464183Z Image: ubuntu-26.04
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8465143Z Version: 20261111.196.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8467550Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261111.196/images/ubuntu/Ubuntu2604-Readme.md
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8470426Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261111.196
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8472372Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8474551Z ##[group]GITHUB_TOKEN Permissions
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8477856Z Contents: read
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8478905Z Metadata: read
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8479949Z Packages: read
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8480858Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8484170Z Secret source: Actions
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8485806Z Cache mode: write
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.8487716Z Prepare workflow directory
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.9075229Z Prepare all required actions
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:17.9149384Z Getting action download info
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:18.1599331Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:18.2788555Z Download action repository 'dtolnay/rust-toolchain@1.99.1' (SHA:263313d2989f864a2b8613f97277288638e7d8f8)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:18.3790275Z Download action repository 'Swatinem/rust-cache@v2' (SHA:d1527c8f67ef9af357290475d4af4b0fab8f12e0)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:18.5109457Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:18.5858965Z Download action repository 'taiki-e/install-action@v2' (SHA:ab49d3c64680143e184118bed66a46419fc15519)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:18.9472211Z Complete job name: test (shard 1/4)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0506501Z ##[group]Run actions/checkout@v4
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0507721Z with:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0508338Z   repository: jirathip-dev/drover
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0516425Z   token: ***
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0517059Z   ssh-strict: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0517675Z   ssh-user: git
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0518307Z   persist-credentials: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0519006Z   clean: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0519628Z   sparse-checkout-cone-mode: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0520388Z   fetch-depth: 1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0520987Z   fetch-tags: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0521612Z   show-progress: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0522255Z   lfs: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0522865Z   submodules: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0523507Z   set-safe-directory: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0524288Z   allow-unsafe-pr-checkout: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0525368Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0526128Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.0527003Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3212267Z Syncing repository: jirathip-dev/drover
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3216779Z ##[group]Getting Git version info
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3218850Z Working directory is '/home/runner/work/drover/drover'
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3221831Z [command]/usr/bin/git version
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3223577Z git version 2.56.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3229146Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3238164Z Temporarily overriding HOME='/home/runner/work/_temp/4776b2d3-ddd7-449c-a93e-dc39076b91db' before making global git config changes
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3242502Z Adding repository directory to the temporary git global config as a safe directory
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3246396Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/drover/drover
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3311835Z Deleting the contents of '/home/runner/work/drover/drover'
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3316703Z ##[group]Initializing the repository
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3320223Z [command]/usr/bin/git init /home/runner/work/drover/drover
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3438947Z hint: Using 'master' as the name for the initial branch. This default branch name
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3441589Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3444079Z hint: to use in all of your new repositories, which will suppress this warning,
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3446258Z hint: call:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3447906Z hint:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3449883Z hint: 	git config --global init.defaultBranch <name>
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3451856Z hint:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3453838Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3456897Z hint: 'development'. The just-created branch can be renamed via this command:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3458910Z hint:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3460088Z hint: 	git branch -m <name>
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3461641Z hint:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3464192Z hint: Disable this message with "git config set advice.defaultBranchName false"
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3468189Z Initialized empty Git repository in /home/runner/work/drover/drover/.git/
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3474043Z [command]/usr/bin/git remote add origin https://github.com/jirathip-dev/drover
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3529621Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3532692Z ##[group]Disabling automatic garbage collection
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3535250Z [command]/usr/bin/git config --local gc.auto 0
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3571404Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3574375Z ##[group]Setting up auth
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3580446Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.3621263Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.4104159Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.4143262Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.4426560Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.4464143Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.4741437Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.4782860Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.4784837Z ##[group]Fetching the repository
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:19.4796396Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +e002e9e55106443c58e7413ea15ffcf9ba9fb724:refs/remotes/pull/1173/merge
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:20.7680772Z From https://github.com/jirathip-dev/drover
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:20.7681833Z  * [new ref]         e002e9e55106443c58e7413ea15ffcf9ba9fb724 -> pull/1173/merge
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:20.7698343Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:20.7699201Z ##[group]Determining the checkout info
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:20.7700250Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:20.7716998Z [command]/usr/bin/git sparse-checkout disable
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:20.7785564Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:20.7829406Z ##[group]Checking out the ref
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:20.7830566Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/1173/merge
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0488299Z Note: switching to 'refs/remotes/pull/1173/merge'.
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0488880Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0489237Z You are in 'detached HEAD' state. You can look around, make experimental
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0491370Z changes and commit them, and you can discard any commits you make in this
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0492224Z state without impacting any branches by switching back to a branch.
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0492774Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0493153Z If you want to create a new branch to retain commits you create, you may
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0493936Z do so (now or later) by using -c with the switch command. Example:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0494375Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0494559Z   git switch -c <new-branch-name>
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0494861Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0495038Z Or undo this operation with:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0495330Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0495474Z   git switch -
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0495733Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0496308Z Turn off this advice by setting config variable advice.detachedHead to false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0496859Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0497302Z HEAD is now at e002e9e Merge 932afa5f7971472413c4b07a28ff6a1829102024 into 80a3be3c9ecc52461c4a76ed2a9775f62b996b69
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0509849Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0563782Z [command]/usr/bin/git log -1 --format=%H
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0591056Z e002e9e55106443c58e7413ea15ffcf9ba9fb724
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0983549Z ##[group]Run dtolnay/rust-toolchain@1.99.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0983887Z with:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0984072Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0984293Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.0984575Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1047332Z ##[start-action display=Parse toolchain version;id=__dtolnay_rust-toolchain.parse]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1117272Z ##[group]Run if [[ -z $toolchain ]]; then
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1117696Z ^[[36;1mif [[ -z $toolchain ]]; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1118247Z ^[[36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1118822Z ^[[36;1m  echo "'toolchain' is a required input" >&2^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1119134Z ^[[36;1m  exit 1^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1119468Z ^[[36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1119911Z ^[[36;1m  if [[ Linux == macOS ]]; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1120491Z ^[[36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1121008Z ^[[36;1m  else^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1121414Z ^[[36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1121876Z ^[[36;1m  fi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1122176Z ^[[36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1122712Z ^[[36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1123180Z ^[[36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1123716Z ^[[36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1124226Z ^[[36;1melse^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1124426Z ^[[36;1m  delimiter=EOF^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1124739Z ^[[36;1m  while [[ $toolchain == *$delimiter* ]]; do delimiter+=_; done^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1125248Z ^[[36;1m  printf 'toolchain<<%s\n%s\n%s\n' "$delimiter" "$toolchain" "$delimiter" >> $GITHUB_OUTPUT^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1125678Z ^[[36;1mfi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1178669Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1179034Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1179263Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1179550Z   toolchain: 1.99.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1179756Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1308431Z ##[end-action id=__dtolnay_rust-toolchain.parse;outcome=success;conclusion=success;duration_ms=25]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1313048Z ##[start-action display=Set $CARGO_HOME;id=__dtolnay_rust-toolchain.__run]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1357461Z ##[group]Run echo CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1357958Z ^[[36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1405774Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1406263Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1406503Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1406821Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1483847Z ##[end-action id=__dtolnay_rust-toolchain.__run;outcome=success;conclusion=success;duration_ms=16]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1486620Z ##[start-action display=Install rustup if needed;id=__dtolnay_rust-toolchain.__run_2]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1566817Z ##[group]Run if ! command -v rustup &>/dev/null; then
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1567208Z ^[[36;1mif ! command -v rustup &>/dev/null; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1567992Z ^[[36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1568774Z ^[[36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1569092Z ^[[36;1mfi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1614778Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1615371Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1615631Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1616206Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1616480Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1695718Z ##[end-action id=__dtolnay_rust-toolchain.__run_2;outcome=success;conclusion=success;duration_ms=20]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1698627Z ##[start-action display=Install rustup if needed on windows;id=__dtolnay_rust-toolchain.__run_3]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1706655Z ##[end-action id=__dtolnay_rust-toolchain.__run_3;outcome=skipped;conclusion=skipped;duration_ms=0]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1722131Z ##[start-action display=rustup toolchain install 1.99.1;id=__dtolnay_rust-toolchain.__run_4]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1750999Z ##[group]Run set -f  # split targets and components on commas and whitespace, without glob expansion
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1751693Z ^[[36;1mset -f  # split targets and components on commas and whitespace, without glob expansion^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1752155Z ^[[36;1mflags=()^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1752445Z ^[[36;1mfor t in ${targets//,/ }; do flags+=(--target "$t"); done^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1752859Z ^[[36;1mfor c in ${components//,/ }; do flags+=(--component "$c"); done^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1753361Z ^[[36;1mif [[ $toolchain == nightly && -n $components ]]; then flags+=(--allow-downgrade); fi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1753796Z ^[[36;1mlog=$(mktemp)^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1754052Z ^[[36;1mtrap 'rm -f "$log"' EXIT^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1754360Z ^[[36;1mfor attempt in 1 2 3 4 5; do^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1754956Z ^[[36;1m  if rustup toolchain install "$toolchain" "${flags[@]}" --profile minimal --no-self-update --force-non-host 2>&1 | tee "$log"; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1755540Z ^[[36;1m    break^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1755749Z ^[[36;1m  else^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1756200Z ^[[36;1m    status=$?^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1756435Z ^[[36;1m  fi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1756736Z ^[[36;1m  if [[ $attempt == 5 ]] || ! grep -Fq 'checksum failed for ' "$log" \^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1757319Z ^[[36;1m      || ! grep -Fq 'this is likely due to an ongoing update of the official release server' "$log"; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1757791Z ^[[36;1m    exit "$status"^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1758018Z ^[[36;1m  fi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1758378Z ^[[36;1m  echo "Retrying rustup toolchain install in 30 seconds (retry $attempt of 4)" >&2^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1758801Z ^[[36;1m  sleep 30^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1759005Z ^[[36;1mdone^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1804039Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1804410Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1804632Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1804947Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1805207Z   toolchain: 1.99.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1805409Z   targets: 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1805596Z   components: 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1805804Z   RUSTUP_PERMIT_COPY_RENAME: 1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.1806580Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.2321202Z info: syncing channel updates for 1.99.1-x86_64-unknown-linux-gnu
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.4597770Z info: latest update on 2026-10-15 for version 1.99.1 (58cf8f9c3 2026-10-13)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:21.4598319Z info: downloading 3 components
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5340601Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5408979Z   1.99.1-x86_64-unknown-linux-gnu installed - rustc 1.99.1 (58cf8f9c3 2026-10-13)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5409650Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5727985Z ##[end-action id=__dtolnay_rust-toolchain.__run_4;outcome=success;conclusion=success;duration_ms=8400]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5734515Z ##[start-action display=rustup default 1.99.1;id=__dtolnay_rust-toolchain.__run_5]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5754300Z ##[group]Run rustup default "$toolchain" --force-non-host
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5754699Z ^[[36;1mrustup default "$toolchain" --force-non-host^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5802722Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5803062Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5803285Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5803590Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5804030Z   toolchain: 1.99.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5804239Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5912260Z info: using existing install for 1.99.1-x86_64-unknown-linux-gnu
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5931559Z info: default toolchain set to 1.99.1-x86_64-unknown-linux-gnu
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5931886Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5995538Z   1.99.1-x86_64-unknown-linux-gnu unchanged - rustc 1.99.1 (58cf8f9c3 2026-10-13)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5996310Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.5999100Z info: note that the toolchain '1.99.1-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/drover/drover/rust-toolchain.toml')
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6013213Z ##[end-action id=__dtolnay_rust-toolchain.__run_5;outcome=success;conclusion=success;duration_ms=27]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6017110Z ##[start-action display=Create cachekey;id=__dtolnay_rust-toolchain.rustc-version]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6036964Z ##[group]Run DATE=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6037875Z ^[[36;1mDATE=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6038549Z ^[[36;1mHASH=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-hash: //p')^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6039066Z ^[[36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6086635Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6086977Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6087207Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6087497Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6087737Z   toolchain: 1.99.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6087937Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6426381Z ##[end-action id=__dtolnay_rust-toolchain.rustc-version;outcome=success;conclusion=success;duration_ms=40]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6428967Z ##[start-action display=Disable incremental compilation;id=__dtolnay_rust-toolchain.__run_6]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6449019Z ##[group]Run if [ -z "${CARGO_INCREMENTAL+set}" ]; then
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6449393Z ^[[36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6449737Z ^[[36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6450035Z ^[[36;1mfi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6498149Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6498487Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6498704Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6498999Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6499243Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6568851Z ##[end-action id=__dtolnay_rust-toolchain.__run_6;outcome=success;conclusion=success;duration_ms=13]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6570914Z ##[start-action display=Enable colors in Cargo output;id=__dtolnay_rust-toolchain.__run_7]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6589534Z ##[group]Run if [ -z "${CARGO_TERM_COLOR+set}" ]; then
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6590073Z ^[[36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6590417Z ^[[36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6590759Z ^[[36;1mfi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6633441Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6633800Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6634022Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6634323Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6634578Z   CARGO_INCREMENTAL: 0
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6634796Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6703558Z ##[end-action id=__dtolnay_rust-toolchain.__run_7;outcome=success;conclusion=success;duration_ms=13]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6706970Z ##[start-action display=Enable Cargo sparse registry;id=__dtolnay_rust-toolchain.__run_8]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6727050Z ##[group]Run # implemented in 1.66, stabilized in 1.68, made default in 1.70
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6727544Z ^[[36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6728405Z ^[[36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6729148Z ^[[36;1m  if rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.6[89]\.'; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6729727Z ^[[36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6730250Z ^[[36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6730748Z ^[[36;1m  elif rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.6[67]\.'; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6731314Z ^[[36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6731814Z ^[[36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6732150Z ^[[36;1m  fi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6732336Z ^[[36;1mfi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6774946Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6775286Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6775506Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6775803Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6776362Z   CARGO_INCREMENTAL: 0
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6776577Z   CARGO_TERM_COLOR: always
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6776789Z   toolchain: 1.99.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.6776984Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7073518Z ##[end-action id=__dtolnay_rust-toolchain.__run_8;outcome=success;conclusion=success;duration_ms=36]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7078459Z ##[start-action display=Work around spurious network errors in curl 8.0;id=__dtolnay_rust-toolchain.__run_9]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7100445Z ##[group]Run # https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7101291Z ^[[36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7101997Z ^[[36;1mif rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.7[01]\.'; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7102559Z ^[[36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7102910Z ^[[36;1mfi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7151468Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7151840Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7152081Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7152406Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7152681Z   CARGO_INCREMENTAL: 0
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7152918Z   CARGO_TERM_COLOR: always
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7153158Z   toolchain: 1.99.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7153377Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7332843Z ##[end-action id=__dtolnay_rust-toolchain.__run_9;outcome=success;conclusion=success;duration_ms=25]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7337587Z ##[start-action display=rustc +1.99.1 --version --verbose;id=__dtolnay_rust-toolchain.__run_10]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7357284Z ##[group]Run rustc +"$toolchain" --version --verbose
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7357657Z ^[[36;1mrustc +"$toolchain" --version --verbose^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7402649Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7403054Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7403305Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7403651Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7403954Z   CARGO_INCREMENTAL: 0
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7404208Z   CARGO_TERM_COLOR: always
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7404466Z   toolchain: 1.99.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7404700Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7564699Z rustc 1.99.1 (58cf8f9c3 2026-10-13)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7565222Z binary: rustc
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7565712Z commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7566329Z commit-date: 2026-10-13
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7566625Z host: x86_64-unknown-linux-gnu
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7567051Z release: 1.99.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7567701Z LLVM version: 23.1.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7581751Z ##[end-action id=__dtolnay_rust-toolchain.__run_10;outcome=success;conclusion=success;duration_ms=24]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7710993Z ##[group]Run Swatinem/rust-cache@v2
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7711437Z with:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7711641Z   prefix-key: v0-rust
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7711866Z   add-job-id-key: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7712102Z   add-rust-environment-hash-key: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7712364Z   cache-targets: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7712572Z   cache-all-crates: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7712804Z   cache-workspace-crates: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7713035Z   save-if: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7713233Z   cache-provider: github
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7713457Z   cache-bin: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7713653Z   lookup-only: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7713853Z   cmd-format: {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7714036Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7714240Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7714530Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7714775Z   CARGO_INCREMENTAL: 0
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7714983Z   CARGO_TERM_COLOR: always
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:29.7715196Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1347908Z ##[group]Cache Configuration
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1348563Z Cache Provider:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1348974Z     github
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1349319Z Workspaces:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1349627Z     /home/runner/work/drover/drover
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1350170Z Cache Paths:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1350531Z     /home/runner/.cargo/bin
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1351060Z     /home/runner/.cargo/.crates.toml
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1351635Z     /home/runner/.cargo/.crates2.json
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1352226Z     /home/runner/.cargo/registry
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1352726Z     /home/runner/.cargo/git
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1353290Z     /home/runner/work/drover/drover/target
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1354074Z Restore Key:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1354474Z     v0-rust-test-shard-Linux-x64-43488e7b
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1354929Z Cache Key:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1355382Z     v0-rust-test-shard-Linux-x64-43488e7b-19d2c0c6
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1356109Z .. Prefix:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1356464Z   - v0-rust-test-shard-Linux-x64
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1356948Z .. Environment considered:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1357350Z   - Rust Versions:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1357886Z     - 1.99.1 x86_64-unknown-linux-gnu 58cf8f9c35b355199727627d07ae34a4e2846d67
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1358496Z   - CARGO_HOME
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1358830Z   - CARGO_INCREMENTAL
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1359184Z   - CARGO_PROFILE_DEV_DEBUG
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1359642Z   - CARGO_TERM_COLOR
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1359972Z .. Lockfiles considered:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1360373Z   - /home/runner/work/drover/drover/Cargo.lock
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1360940Z   - /home/runner/work/drover/drover/crates/cli/Cargo.toml
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1361332Z   - /home/runner/work/drover/drover/crates/core/Cargo.toml
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1361711Z   - /home/runner/work/drover/drover/crates/server/Cargo.toml
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1362107Z   - /home/runner/work/drover/drover/crates/service/Cargo.toml
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1362483Z   - /home/runner/work/drover/drover/crates/sys/Cargo.toml
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1362851Z   - /home/runner/work/drover/drover/rust-toolchain.toml
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1363636Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1363759Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.1363851Z ... Restoring cache ...
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.2556094Z Cache hit for: v0-rust-test-shard-Linux-x64-43488e7b-19d2c0c6
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.8361068Z Received 115396089 of 115396089 (100.0%), 209.2 MBs/sec
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.8361859Z Cache Size: ~110 MB (115396089 B)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:31.8424350Z [command]/usr/bin/tar -xf /home/runner/work/_temp/832d0c3d-67df-4f1c-ae11-0368e6d7b477/cache.tzst -P -C /home/runner/work/drover/drover --use-compress-program unzstd
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.4913699Z Cache restored successfully
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.4970303Z Restored from cache key "v0-rust-test-shard-Linux-x64-43488e7b-19d2c0c6" full match: true.
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5221633Z ##[group]Run actions/setup-node@v4
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5221933Z with:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5222129Z   node-version: 24
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5222351Z   always-auth: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5222570Z   check-latest: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5224811Z   token: ***
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5225009Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5225222Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5225537Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5225803Z   CARGO_INCREMENTAL: 0
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5226217Z   CARGO_TERM_COLOR: always
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5226447Z   CACHE_ON_FAILURE: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.5226668Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.6727129Z (node:2578) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.6728396Z (Use `node --trace-deprecation ...` to show where the warning was created)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.6737845Z Found in cache @ /opt/hostedtoolcache/node/24.22.2/x64
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:32.6738883Z ##[group]Environment details
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.0856314Z node: v24.22.2
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.0856750Z npm: 11.19.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.0857093Z yarn: 1.22.22
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.0858010Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1041869Z ##[group]Run taiki-e/install-action@v2
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1042184Z with:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1042376Z   tool: cargo-nextest
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1042589Z   checksum: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1042794Z   fallback: cargo-binstall
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1043012Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1043215Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1043512Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1043759Z   CARGO_INCREMENTAL: 0
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1043974Z   CARGO_TERM_COLOR: always
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1044207Z   CACHE_ON_FAILURE: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1044432Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1050394Z ##[start-action display=Run bail() {;id=__taiki-e_install-action.__run]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1069110Z ##[group]Run bail() {
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1069378Z ^[[36;1mbail() {^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1069644Z ^[[36;1m  printf '::error::install-action: %s\n' "$*"^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1069958Z ^[[36;1m  exit 1^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1070150Z ^[[36;1m}^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1070536Z ^[[36;1m# If /bin/sh is dash, environment variable containing % is not imported, but is fine^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1071076Z ^[[36;1m# because it also means that it will not be exposed to subprocess.^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1071496Z ^[[36;1mif /usr/bin/env | grep -Eq '^BASH_FUNC_'; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1072031Z ^[[36;1m  bail 'bash function injection via BASH_FUNC_ environment variable is not allowed for security reasons'^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1072523Z ^[[36;1mfi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1072746Z ^[[36;1mif ! command -v bash >/dev/null; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1073088Z ^[[36;1m  if grep -Eq '^ID=alpine' /etc/os-release; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1073533Z ^[[36;1m    printf '::group::Install packages required for install-action (bash)\n'^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1073963Z ^[[36;1m    # NB: sync with apk_install in main.sh^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1074294Z ^[[36;1m    if command -v sudo >/dev/null; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1074601Z ^[[36;1m      sudo apk --no-cache add bash^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1074913Z ^[[36;1m    elif command -v doas >/dev/null; then^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1075391Z ^[[36;1m      doas apk --no-cache add bash^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1075665Z ^[[36;1m    else^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1076016Z ^[[36;1m      apk --no-cache add bash^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1076278Z ^[[36;1m    fi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1076489Z ^[[36;1m    printf '::endgroup::\n'^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1076743Z ^[[36;1m  else^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1076960Z ^[[36;1m    bail 'this action requires bash'^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1077230Z ^[[36;1m  fi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1077408Z ^[[36;1mfi^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1077686Z ^[[36;1mbash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1078851Z shell: /usr/bin/env -u ENV -u BASH_ENV -u CDPATH -u SHELLOPTS -u BASHOPTS /bin/sh -eu {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1079259Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1079478Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1079769Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1080023Z   CARGO_INCREMENTAL: 0
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1080241Z   CARGO_TERM_COLOR: always
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1080482Z   CACHE_ON_FAILURE: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1080710Z   INPUT_TOOL: cargo-nextest
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1080938Z   INPUT_CHECKSUM: true
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1081163Z   INPUT_FALLBACK: cargo-binstall
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1083507Z   DEFAULT_GITHUB_TOKEN: ***
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1083804Z   ACTION_USER_AGENT: taiki-e/install-action (v2)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1084106Z   RUNNER_OS: Linux
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1084319Z   RUNNER_ARCH: X64
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1084516Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1259617Z info: host platform: x86_64_linux
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1543615Z info: installing cargo-nextest@latest
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.1774209Z info: downloading https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.152/cargo-nextest-0.9.152-x86_64-unknown-linux-gnu.tar.gz
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.2847278Z info: verifying sha256 checksum for cargo-nextest-0.9.152-x86_64-unknown-linux-gnu.tar.gz
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4620720Z info: cargo-nextest installed at /home/runner/.cargo/bin/cargo-nextest
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4623624Z + cargo-nextest nextest --version
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4653696Z cargo-nextest 0.9.152 (26ebeda79 2026-11-13)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4654394Z release: 0.9.152
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4655111Z commit-hash: 26ebeda79b9ae1d008cf64ddb01984bcaa6e1239
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4655823Z commit-date: 2026-11-13
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4656599Z host: x86_64-unknown-linux-gnu
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4659766Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4674608Z ##[end-action id=__taiki-e_install-action.__run;outcome=success;conclusion=success;duration_ms=362]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4681072Z ##[start-action display=Run Set-StrictMode -Version Latest;id=__taiki-e_install-action.__run_2]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4685146Z ##[end-action id=__taiki-e_install-action.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4717631Z ##[group]Run flags=$(scripts/test-shards.sh 1)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4718200Z ^[[36;1mflags=$(scripts/test-shards.sh 1)^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4718604Z ^[[36;1mread -ra targets <<<"$flags"^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4719240Z ^[[36;1mcargo nextest run --locked --no-fail-fast --workspace "${targets[@]}"^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4777456Z shell: /usr/bin/bash -e {0}
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4792011Z env:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4792346Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4792793Z   CARGO_HOME: /home/runner/.cargo
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4793165Z   CARGO_INCREMENTAL: 0
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4793485Z   CARGO_TERM_COLOR: always
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4793814Z   CACHE_ON_FAILURE: false
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.4794131Z ##[endgroup]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:33.6216288Z ^[[1m^[[92m    Updating^[[0m crates.io index
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:34.2603901Z ^[[1m^[[92m   Compiling^[[0m drover-core v0.1.0 (/home/runner/work/drover/drover/crates/core)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:34.2625594Z ^[[1m^[[92m   Compiling^[[0m drover-sys v0.1.0 (/home/runner/work/drover/drover/crates/sys)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:34.2629912Z ^[[1m^[[92m   Compiling^[[0m drover v0.1.0 (/home/runner/work/drover/drover/crates/cli)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:46.3180958Z ^[[1m^[[92m   Compiling^[[0m drover-server v0.1.0 (/home/runner/work/drover/drover/crates/server)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:27:58.9360249Z ^[[1m^[[92m   Compiling^[[0m drover-service v0.1.0 (/home/runner/work/drover/drover/crates/service)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:17.8040382Z ^[[1m^[[92m    Finished^[[0m `test` profile [unoptimized + debuginfo] target(s) in 43.62s
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:17.9767012Z ────────────
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:17.9768006Z ^[[32;1m Nextest run^[[0m ID ^[[1m6b252050-2a89-4875-813b-7fd072d0fef4^[[0m with nextest profile: ^[[1mdefault^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:17.9768941Z ^[[32;1m    Starting^[[0m ^[[1m309^[[0m tests across ^[[1m45^[[0m binaries (^[[1m6^[[0m tests ^[[33;1mskipped^[[0m)
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.0358852Z ^[[32;1m        PASS^[[0m [   0.058s] (  1/309) ^[[35;1mdrover::answer_delivery^[[0m ^[[34;1ma_remote_lane_is_answered_on_its_machines_shed^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.0424440Z ^[[32;1m        PASS^[[0m [   0.065s] (  2/309) ^[[35;1mdrover::answer_delivery^[[0m ^[[34;1ma_closed_lane_whose_agent_still_runs_in_its_worktree_gets_the_answer^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.0438284Z ^[[32;1m        PASS^[[0m [   0.066s] (  3/309) ^[[35;1mdrover::answer_delivery^[[0m ^[[34;1ma_lane_ask_stores_its_agent_and_the_answer_is_typed_into_its_pane^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.0937697Z ^[[32;1m        PASS^[[0m [   0.051s] (  4/309) ^[[35;1mdrover::answer_delivery^[[0m ^[[34;1man_ask_without_an_agent_is_answered_into_the_issues_current_lane^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.1084346Z ^[[32;1m        PASS^[[0m [   0.131s] (  5/309) ^[[35;1mdrover::answer_delivery^[[0m ^[[34;1ma_sleeping_lanes_answer_waits_for_room_then_lands^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.1586240Z ^[[32;1m        PASS^[[0m [   0.123s] (  6/309) ^[[35;1mdrover::answer_delivery^[[0m ^[[34;1ma_superseded_lanes_successor_gets_its_answer_typed_into_its_pane^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.1622467Z ^[[32;1m        PASS^[[0m [   0.053s] (  7/309) ^[[35;1mdrover::answer_delivery^[[0m ^[[34;1mparity_r9_a_supersede_close_logged_after_the_new_spawn_does_not_close_it^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.1677265Z ^[[32;1m        PASS^[[0m [   0.009s] (  8/309) ^[[35;1mdrover::api_v1_contract^[[0m ^[[34;1ma_changed_shape_fails_the_contract^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.2029004Z ^[[32;1m        PASS^[[0m [   0.035s] (  9/309) ^[[35;1mdrover::ask_ids^[[0m ^[[34;1ma_new_ask_takes_the_highest_id_plus_one_even_when_the_count_lags^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.2131471Z ^[[32;1m        PASS^[[0m [   0.118s] ( 10/309) ^[[35;1mdrover::answer_delivery^[[0m ^[[34;1mparity_71_an_answer_with_no_lane_alerts_once_from_check^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:18.6058819Z ^[[32;1m        PASS^[[0m [   0.543s] ( 11/309) ^[[35;1mdrover::answer_delivery^[[0m ^[[34;1mdrive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.2380392Z ^[[32;1m        PASS^[[0m [   0.652s] ( 12/309) ^[[35;1mdrover::ask_ids^[[0m ^[[34;1mno_ask_id_is_counted_from_the_log_in_core^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.2804260Z ^[[32;1m        PASS^[[0m [   0.042s] ( 13/309) ^[[35;1mdrover::ask_ids^[[0m ^[[34;1mtwo_asks_racing_on_one_state_dir_get_distinct_ids^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.3156509Z ^[[32;1m        PASS^[[0m [   1.104s] ( 14/309) ^[[35;1mdrover::ask_ids^[[0m ^[[34;1mfifty_concurrent_asks_from_different_fleets_get_fifty_distinct_ids^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.3389411Z ^[[32;1m        PASS^[[0m [   0.058s] ( 15/309) ^[[35;1mdrover::ask_ids^[[0m ^[[34;1mtwo_events_for_one_ask_id_show_one_row_in_the_thread_and_on_the_board^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.3758792Z ^[[32;1m        PASS^[[0m [   0.060s] ( 16/309) ^[[35;1mdrover::ask_ids^[[0m ^[[34;1mwithdraw_on_a_shared_id_closes_the_callers_threads_ask_and_leaves_the_other_alone^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.3948746Z ^[[32;1m        PASS^[[0m [   1.191s] ( 17/309) ^[[35;1mdrover::ask_ids^[[0m ^[[34;1mconcurrent_full_fast_and_kick_passes_over_one_finished_design_lane_post_one_ask^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.4521752Z ^[[32;1m        PASS^[[0m [   1.291s] ( 18/309) ^[[35;1mdrover::api_v1_contract^[[0m ^[[34;1mevery_route_keeps_its_fixtures_shape^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.4693851Z ^[[32;1m        PASS^[[0m [   0.130s] ( 19/309) ^[[35;1mdrover::asks^[[0m ^[[34;1ma_manual_answer_before_30_min_prevents_the_default^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.5097658Z ^[[32;1m        PASS^[[0m [   0.134s] ( 20/309) ^[[35;1mdrover::asks^[[0m ^[[34;1ma_paired_device_answers_from_the_card_and_bad_text_is_refused^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.5574384Z ^[[32;1m        PASS^[[0m [   0.047s] ( 21/309) ^[[35;1mdrover::asks^[[0m ^[[34;1man_ask_from_outside_a_lane_names_no_agent^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.6019265Z ^[[32;1m        PASS^[[0m [   0.150s] ( 22/309) ^[[35;1mdrover::asks^[[0m ^[[34;1man_answer_the_agent_never_picks_up_is_retried_once_then_pushed^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.6381041Z ^[[32;1m        PASS^[[0m [   0.244s] ( 23/309) ^[[35;1mdrover::asks^[[0m ^[[34;1ma_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.6564905Z ^[[32;1m        PASS^[[0m [   0.187s] ( 24/309) ^[[35;1mdrover::asks^[[0m ^[[34;1man_ask_closes_when_its_issue_merges_or_its_lane_goes^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.6959776Z ^[[32;1m        PASS^[[0m [   0.138s] ( 25/309) ^[[35;1mdrover::asks^[[0m ^[[34;1man_ask_made_during_its_lanes_startup_stays_open_answerable_and_alerts_once^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.7148393Z ^[[32;1m        PASS^[[0m [   0.113s] ( 26/309) ^[[35;1mdrover::asks^[[0m ^[[34;1man_open_ask_re_alerts_once_as_ask_waiting_after_30_min^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.7167575Z ^[[32;1m        PASS^[[0m [   0.021s] ( 27/309) ^[[35;1mdrover::asks^[[0m ^[[34;1mask_refuses_an_empty_question_or_five_options^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.7568388Z ^[[32;1m        PASS^[[0m [   0.099s] ( 28/309) ^[[35;1mdrover::asks^[[0m ^[[34;1mask_answer_round_trip_prompts_the_asker_once^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.7778510Z ^[[32;1m        PASS^[[0m [   0.138s] ( 29/309) ^[[35;1mdrover::asks^[[0m ^[[34;1manswer_to_a_gone_agent_records_the_decision_and_exits_0^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.7890172Z ^[[32;1m        PASS^[[0m [   0.070s] ( 30/309) ^[[35;1mdrover::asks^[[0m ^[[34;1masks_json_says_why_an_ask_closed^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.8108360Z ^[[32;1m        PASS^[[0m [   0.055s] ( 31/309) ^[[35;1mdrover::asks^[[0m ^[[34;1mnotifier_gets_the_question_numbered_options_and_answer_command^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.8293432Z ^[[32;1m        PASS^[[0m [   0.018s] ( 32/309) ^[[35;1mdrover::board_errors^[[0m ^[[34;1mparity_85_a_tab_names_the_real_read_error^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.8868872Z ^[[32;1m        PASS^[[0m [   0.099s] ( 33/309) ^[[35;1mdrover::asks^[[0m ^[[34;1mthe_needs_you_card_is_a_cards_screen_block_and_answer_needs_a_paired_device^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.9055197Z ^[[32;1m        PASS^[[0m [   0.191s] ( 34/309) ^[[35;1mdrover::asks^[[0m ^[[34;1mask_waiting_pushes_are_capped_per_pass^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:19.9323106Z ^[[32;1m        PASS^[[0m [   0.102s] ( 35/309) ^[[35;1mdrover::chat_pick^[[0m ^[[34;1ma_hermes_thread_starts_its_orchestrator_on_hermes^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.0635191Z ^[[32;1m        PASS^[[0m [   0.128s] ( 36/309) ^[[35;1mdrover::chat_pick^[[0m ^[[34;1ma_pick_dropped_from_the_models_list_is_refused_on_send_and_the_message_stays^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.1149010Z ^[[32;1m        PASS^[[0m [   0.209s] ( 37/309) ^[[35;1mdrover::chat_pick^[[0m ^[[34;1ma_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.1341948Z ^[[32;1m        PASS^[[0m [   0.354s] ( 38/309) ^[[35;1mdrover::asks^[[0m ^[[34;1mroutine_needs_a_recommendation_and_no_owner_topic^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.1462126Z ^[[32;1m        PASS^[[0m [   0.031s] ( 39/309) ^[[35;1mdrover::chat_pick^[[0m ^[[34;1mchat_defaults_come_from_the_chat_table_else_the_conductor_role^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.1512466Z ^[[32;1m        PASS^[[0m [   0.264s] ( 40/309) ^[[35;1mdrover::chat_pick^[[0m ^[[34;1ma_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.2020847Z ^[[32;1m        PASS^[[0m [   0.139s] ( 41/309) ^[[35;1mdrover::chat_pick^[[0m ^[[34;1man_old_thread_without_a_harness_renders_and_starts_on_the_default^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.2267087Z ^[[32;1m        PASS^[[0m [   0.080s] ( 42/309) ^[[35;1mdrover::chat_pick^[[0m ^[[34;1mthe_model_chip_offers_the_models_list_and_a_pick_from_it_is_taken^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.3620299Z ^[[32;1m        PASS^[[0m [   0.160s] ( 43/309) ^[[35;1mdrover::config_api^[[0m ^[[34;1ma_field_edit_keeps_comments_backs_up_and_logs_the_owner^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.3768962Z ^[[32;1m        PASS^[[0m [   0.225s] ( 44/309) ^[[35;1mdrover::chat_pick^[[0m ^[[34;1mthread_new_harness_is_recorded_and_its_conductor_starts_on_it^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.3829847Z ^[[32;1m        PASS^[[0m [   0.252s] ( 45/309) ^[[35;1mdrover::chat_pick^[[0m ^[[34;1mthe_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.4654120Z ^[[32;1m        PASS^[[0m [   0.089s] ( 46/309) ^[[35;1mdrover::config_api^[[0m ^[[34;1mread_gives_every_setting_with_secrets_as_names_and_needs_a_paired_device^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.4920776Z ^[[32;1m        PASS^[[0m [   0.129s] ( 47/309) ^[[35;1mdrover::config_api^[[0m ^[[34;1ma_stale_hash_or_an_invalid_edit_writes_nothing^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.5312784Z ^[[32;1m        PASS^[[0m [   0.304s] ( 48/309) ^[[35;1mdrover::config_api^[[0m ^[[34;1ma_fleet_is_added_removed_paused_and_resumed_with_each_logged^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.5438127Z ^[[32;1m        PASS^[[0m [   0.052s] ( 49/309) ^[[35;1mdrover::config_card^[[0m ^[[34;1ma_proposal_stored_truncated_refuses_to_apply_and_asks_for_a_new_one^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.5656992Z ^[[32;1m        PASS^[[0m [   0.182s] ( 50/309) ^[[35;1mdrover::config_card^[[0m ^[[34;1ma_proposal_over_16_kb_applies_byte_for_byte^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.6846325Z ^[[32;1m        PASS^[[0m [   0.118s] ( 51/309) ^[[35;1mdrover::config_card^[[0m ^[[34;1mapplying_a_new_role_syncs_its_profile_and_hook_approval^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.6899424Z ^[[32;1m        PASS^[[0m [   0.144s] ( 52/309) ^[[35;1mdrover::config_card^[[0m ^[[34;1mapplying_a_new_fleet_kicks_its_first_queued_issue^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.7276841Z ^[[32;1m        PASS^[[0m [   0.195s] ( 53/309) ^[[35;1mdrover::config_card^[[0m ^[[34;1ma_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.7478751Z ^[[32;1m        PASS^[[0m [   0.020s] ( 54/309) ^[[35;1mdrover::cooee_token^[[0m ^[[34;1mthe_manifest_attaches_to_the_running_serve_with_its_token_file^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:20.7623963Z ^[[32;1m        PASS^[[0m [   0.077s] ( 55/309) ^[[35;1mdrover::cooee_token^[[0m ^[[34;1mcooees_plugin_token_reads_screens_and_posts_actions_without_a_paired_device^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.0084359Z ^[[32;1m        PASS^[[0m [   0.320s] ( 56/309) ^[[35;1mdrover::cooee_token^[[0m ^[[34;1mserve_makes_the_cooee_token_file_once_and_accepts_it_on_action_and_screens^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.0161568Z ^[[32;1m        PASS^[[0m [   0.008s] ( 57/309) ^[[35;1mdrover::empty_env^[[0m ^[[34;1mempty_values_are_unset^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.0968720Z ^[[32;1m        PASS^[[0m [   0.079s] ( 58/309) ^[[35;1mdrover::events_log^[[0m ^[[34;1mcorrupt_middle_line_warns_torn_tail_is_silent^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.1035082Z ^[[32;1m        PASS^[[0m [   0.007s] ( 59/309) ^[[35;1mdrover::events_log^[[0m ^[[34;1mkill9_child_writer^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.4009630Z ^[[32;1m        PASS^[[0m [   0.638s] ( 60/309) ^[[35;1mdrover::demo_export^[[0m ^[[34;1mdemo_page_is_inert_and_relative^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.4067040Z ^[[32;1m        PASS^[[0m [   0.006s] ( 61/309) ^[[35;1mdrover::events_log^[[0m ^[[34;1mread_child^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.4394593Z ^[[32;1m        PASS^[[0m [   0.693s] ( 62/309) ^[[35;1mdrover::demo_export^[[0m ^[[34;1mdemo_export_writes_the_file_set_without_running_anything^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.4722653Z ^[[32;1m        PASS^[[0m [   0.033s] ( 63/309) ^[[35;1mdrover::events_log^[[0m ^[[34;1mtorn_last_line_is_ignored_and_next_append_is_clean^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.4791325Z ^[[32;1m        PASS^[[0m [   0.007s] ( 64/309) ^[[35;1mdrover::events_log^[[0m ^[[34;1mwriter_child^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.4859923Z ^[[32;1m        PASS^[[0m [   0.007s] ( 65/309) ^[[35;1mdrover::form_only^[[0m ^[[34;1ma_blocking_heading_is_ignored^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.5385044Z ^[[32;1m        PASS^[[0m [   0.052s] ( 66/309) ^[[35;1mdrover::form_only^[[0m ^[[34;1ma_fleet_overrides_the_form_categories^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.5837811Z ^[[32;1m        PASS^[[0m [   0.045s] ( 67/309) ^[[35;1mdrover::form_only^[[0m ^[[34;1man_all_form_fail_is_not_counted^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.5900668Z ^[[32;1m        PASS^[[0m [   0.007s] ( 68/309) ^[[35;1mdrover::form_only^[[0m ^[[34;1mform_only_parses_tags^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.6392313Z ^[[32;1m        PASS^[[0m [   0.049s] ( 69/309) ^[[35;1mdrover::form_only^[[0m ^[[34;1mone_substantive_or_untagged_blocker_counts^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.7032295Z ^[[32;1m        PASS^[[0m [   0.064s] ( 70/309) ^[[35;1mdrover::form_only^[[0m ^[[34;1mpast_form_rounds_they_count_and_needs_you_says_how_many_were_form^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.7413901Z ^[[32;1m        PASS^[[0m [   0.038s] ( 71/309) ^[[35;1mdrover::form_only^[[0m ^[[34;1mthe_antipatterns_line_is_accepted^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.7909959Z ^[[32;1m        PASS^[[0m [   0.050s] ( 72/309) ^[[35;1mdrover::form_only^[[0m ^[[34;1mthe_queue_row_says_not_counted_in_amber^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.7961488Z ^[[32;1m        PASS^[[0m [   0.005s] ( 73/309) ^[[35;1mdrover::gate_unit^[[0m ^[[34;1mlatest_failed_run_of_a_name_stays_red^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.8010136Z ^[[32;1m        PASS^[[0m [   0.005s] ( 74/309) ^[[35;1mdrover::gate_unit^[[0m ^[[34;1mnewer_failure_is_refused^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.8059202Z ^[[32;1m        PASS^[[0m [   0.005s] ( 75/309) ^[[35;1mdrover::gate_unit^[[0m ^[[34;1mnewer_success_supersedes_older_failure^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.8115832Z ^[[32;1m        PASS^[[0m [   0.005s] ( 76/309) ^[[35;1mdrover::gate_unit^[[0m ^[[34;1mpending_required_is_refused^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.8172790Z ^[[32;1m        PASS^[[0m [   0.006s] ( 77/309) ^[[35;1mdrover::gate_unit^[[0m ^[[34;1mrequired_quality_ignores_narrowed_failure^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.8223962Z ^[[32;1m        PASS^[[0m [   0.005s] ( 78/309) ^[[35;1mdrover::gate_unit^[[0m ^[[34;1mrequired_quality_missing_is_refused^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.8268516Z ^[[32;1m        PASS^[[0m [   0.004s] ( 79/309) ^[[35;1mdrover::gate_unit^[[0m ^[[34;1msame_start_ties_break_by_completed_then_id^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.8324894Z ^[[32;1m        PASS^[[0m [   0.006s] ( 80/309) ^[[35;1mdrover::gate_unit^[[0m ^[[34;1msuperseded_failure_at_the_same_second_is_ignored^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.8377769Z ^[[32;1m        PASS^[[0m [   0.005s] ( 81/309) ^[[35;1mdrover::gate_unit^[[0m ^[[34;1munset_checks_every_check^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.9010775Z ^[[32;1m        PASS^[[0m [   0.063s] ( 82/309) ^[[35;1mdrover::hermes_hooks^[[0m ^[[34;1msync_approves_the_hook_once_per_role^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.9188675Z ^[[32;1m        PASS^[[0m [   0.018s] ( 83/309) ^[[35;1mdrover::hermes_hooks^[[0m ^[[34;1msync_check_requires_allowed_hooks^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.9453721Z ^[[32;1m        PASS^[[0m [   0.026s] ( 84/309) ^[[35;1mdrover::hermes_hooks^[[0m ^[[34;1msync_removes_agent_reasoning_effort_only^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:21.9997720Z ^[[32;1m        PASS^[[0m [   0.054s] ( 85/309) ^[[35;1mdrover::hermes_hooks^[[0m ^[[34;1msync_writes_only_the_hooks_key_idempotently^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.0080260Z ^[[32;1m        PASS^[[0m [   0.008s] ( 86/309) ^[[35;1mdrover::host_history^[[0m ^[[34;1mdownsampling_keeps_the_worst_per_bucket^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.1099986Z ^[[32;1m        PASS^[[0m [   0.102s] ( 87/309) ^[[35;1mdrover::host_history^[[0m ^[[34;1mno_process_table_walk_while_nobody_watches^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.2134690Z ^[[32;1m        PASS^[[0m [   0.103s] ( 88/309) ^[[35;1mdrover::host_history^[[0m ^[[34;1mone_host_keeps_24h_and_rewrites_rarely^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.2595414Z ^[[32;1m        PASS^[[0m [   1.156s] ( 89/309) ^[[35;1mdrover::events_log^[[0m ^[[34;1mkill9_mid_append_never_corrupts^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.2667639Z ^[[32;1m        PASS^[[0m [   0.007s] ( 90/309) ^[[35;1mdrover::host_history^[[0m ^[[34;1mrows_older_than_24h_are_dropped^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.3005787Z ^[[32;1m        PASS^[[0m [   0.087s] ( 91/309) ^[[35;1mdrover::host_history^[[0m ^[[34;1mrows_are_appended_per_host_per_step^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.3599517Z ^[[32;1m        PASS^[[0m [   0.953s] ( 92/309) ^[[35;1mdrover::events_log^[[0m ^[[34;1mseq_is_monotonic_across_concurrent_writers^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.4551860Z ^[[32;1m        PASS^[[0m [   0.095s] ( 93/309) ^[[35;1mdrover::host_history^[[0m ^[[34;1mthe_file_stays_under_the_size_bound^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.4864612Z ^[[32;1m        PASS^[[0m [   0.031s] ( 94/309) ^[[35;1mdrover::host_history^[[0m ^[[34;1mthe_host_api_has_a_card_per_host_with_its_24h_series^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.5087068Z ^[[32;1m        PASS^[[0m [   0.022s] ( 95/309) ^[[35;1mdrover::host_tab^[[0m ^[[34;1mthe_host_api_carries_the_cards_gauges_and_this_phones_key^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.5300051Z ^[[32;1m        PASS^[[0m [   0.021s] ( 96/309) ^[[35;1mdrover::host_tab^[[0m ^[[34;1mthe_host_api_gives_each_provider_login_its_vendor_and_no_account^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.5561053Z ^[[32;1m        PASS^[[0m [   0.026s] ( 97/309) ^[[35;1mdrover::host_tab^[[0m ^[[34;1mthe_host_api_shows_each_root_with_its_state_and_free_space^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.5607332Z ^[[32;1m        PASS^[[0m [   0.005s] ( 98/309) ^[[35;1mdrover::host_words^[[0m ^[[34;1mevery_refusal_and_outcome_has_its_plain_words^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.8770713Z ^[[32;1m        PASS^[[0m [   0.316s] ( 99/309) ^[[35;1mdrover::hotspots^[[0m ^[[34;1ma_file_gone_from_the_integration_tip_is_never_hot^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:22.9133475Z ^[[32;1m        PASS^[[0m [   2.449s] (100/309) ^[[35;1mdrover::config_card^[[0m ^[[34;1ma_proposal_reaches_a_thread_open_on_the_phone_live^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:23.1908355Z ^[[32;1m        PASS^[[0m [   0.314s] (101/309) ^[[35;1mdrover::hotspots^[[0m ^[[34;1ma_file_the_arch_toml_lists_frozen_or_generated_is_converted_and_never_hot^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:23.3406579Z ^[[32;1m        PASS^[[0m [   0.426s] (102/309) ^[[35;1mdrover::hotspots^[[0m ^[[34;1ma_second_run_in_the_week_updates_the_open_issue_queued_architect^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:23.3487853Z ^[[32;1m        PASS^[[0m [   1.081s] (103/309) ^[[35;1mdrover::host_history^[[0m ^[[34;1msampling_resumes_once_the_host_tab_is_open^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:23.5194711Z ^[[32;1m        PASS^[[0m [   0.329s] (104/309) ^[[35;1mdrover::hotspots^[[0m ^[[34;1ma_shared_file_is_decided_and_counted_in_the_header_not_listed^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:23.7175593Z ^[[32;1m        PASS^[[0m [   0.370s] (105/309) ^[[35;1mdrover::hotspots^[[0m ^[[34;1mconflicts_count_distinct_pr_pairs_not_every_push^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:23.7445518Z ^[[32;1m        PASS^[[0m [   0.405s] (106/309) ^[[35;1mdrover::hotspots^[[0m ^[[34;1ma_sweep_over_forty_files_is_not_counted^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:23.8534273Z ^[[32;1m        PASS^[[0m [   0.333s] (107/309) ^[[35;1mdrover::hotspots^[[0m ^[[34;1mreports_only_files_five_merged_prs_touched_with_their_conflicts_and_updates^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:24.1064932Z ^[[32;1m        PASS^[[0m [   0.389s] (108/309) ^[[35;1mdrover::hotspots^[[0m ^[[34;1mthe_bar_rises_to_one_in_twenty_merges^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:24.1299741Z ^[[32;1m        PASS^[[0m [   1.829s] (109/309) ^[[35;1mdrover::host_history^[[0m ^[[34;1mthe_byte_bound_holds_with_long_command_lines^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:24.5976217Z ^[[32;1m        PASS^[[0m [   0.853s] (110/309) ^[[35;1mdrover::hotspots^[[0m ^[[34;1mtick_skips_a_fleet_with_hotspots_off^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:24.7049185Z ^[[32;1m        PASS^[[0m [   0.575s] (111/309) ^[[35;1mdrover::hung_root^[[0m ^[[34;1ma_pass_stuck_past_three_pass_max_secs_is_logged_and_the_next_pass_takes_its_lock^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:24.9056779Z ^[[32;1m        PASS^[[0m [   0.308s] (112/309) ^[[35;1mdrover::hung_root^[[0m ^[[34;1ma_probe_another_thread_started_is_waited_out_not_taken_for_a_hang^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:25.1730888Z ^[[32;1m        PASS^[[0m [   0.267s] (113/309) ^[[35;1mdrover::hung_root^[[0m ^[[34;1ma_tick_stuck_on_one_step_shows_in_doctor_and_the_next_fast_drive^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:25.4788784Z ^[[32;1m        PASS^[[0m [   0.774s] (114/309) ^[[35;1mdrover::hung_root^[[0m ^[[34;1ma_root_whose_listing_never_returns_costs_one_probe_and_the_pass_goes_on^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:25.6303480Z ^[[32;1m        PASS^[[0m [   0.457s] (115/309) ^[[35;1mdrover::hung_root^[[0m ^[[34;1mroot_hung_alerts_once_per_episode_and_clears_when_the_root_answers^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:25.6898928Z ^[[32;1m        PASS^[[0m [   0.059s] (116/309) ^[[35;1mdrover::lanes_sheet^[[0m ^[[34;1mlane_card_shows_its_port^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:25.8054559Z ^[[32;1m        PASS^[[0m [   0.115s] (117/309) ^[[35;1mdrover::lanes_sheet^[[0m ^[[34;1mpage_has_no_dash_placeholders^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.0171262Z ^[[32;1m        PASS^[[0m [   0.212s] (118/309) ^[[35;1mdrover::lanes_sheet^[[0m ^[[34;1mpairing_behind_a_proxy_and_retaps^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.1774662Z ^[[32;1m        PASS^[[0m [   0.160s] (119/309) ^[[35;1mdrover::lanes_sheet^[[0m ^[[34;1mpairing_codes_devices_and_prompt_events^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.2092915Z ^[[32;1m        PASS^[[0m [   2.102s] (120/309) ^[[35;1mdrover::hung_root^[[0m ^[[34;1ma_lane_whose_reads_block_or_whose_root_was_removed_never_holds_clean_or_the_tick^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.2255124Z ^[[32;1m        PASS^[[0m [   0.048s] (121/309) ^[[35;1mdrover::lanes_sheet^[[0m ^[[34;1mparity_49_lanes_group_by_state_then_repo_with_counts^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.2865766Z ^[[32;1m        PASS^[[0m [   0.078s] (122/309) ^[[35;1mdrover::lanes_sheet^[[0m ^[[34;1mparity_53_others_sheet_offers_only_close_pane^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.3912399Z ^[[32;1m        PASS^[[0m [   0.165s] (123/309) ^[[35;1mdrover::lanes_sheet^[[0m ^[[34;1mparity_6_pairing_is_a_phone_request_approved_on_the_mac^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.4743048Z ^[[32;1m        PASS^[[0m [   0.083s] (124/309) ^[[35;1mdrover::lanes_sheet^[[0m ^[[34;1msheet_transcript_is_the_masked_pane_tail^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.4777253Z ^[[32;1m        PASS^[[0m [   0.191s] (125/309) ^[[35;1mdrover::lanes_sheet^[[0m ^[[34;1mreply_refusals_rate_limit_and_read_only^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.4821960Z ^[[32;1m        PASS^[[0m [   0.008s] (126/309) ^[[35;1mdrover::lanes_sheet^[[0m ^[[34;1mvector_horses_keep_a_coat_per_name^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.5223198Z ^[[32;1m        PASS^[[0m [   0.044s] (127/309) ^[[35;1mdrover::merge^[[0m ^[[34;1ma_fleet_set_to_merge_keeps_its_commits_and_branch^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.5350257Z ^[[32;1m        PASS^[[0m [   0.053s] (128/309) ^[[35;1mdrover::merge^[[0m ^[[34;1man_extend_after_an_overrun_round_grants_the_next_one^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.5745404Z ^[[32;1m        PASS^[[0m [   0.039s] (129/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mevidence_comment_retry_that_lands_closes_issue^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.5847769Z ^[[32;1m        PASS^[[0m [   0.062s] (130/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mevidence_comment_failing_twice_leaves_issue_open_and_exits_nonzero^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.6561974Z ^[[32;1m        PASS^[[0m [   0.081s] (131/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mextend_and_park_refuse_outside_needs_human_and_park_clears_it^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.6579456Z ^[[32;1m        PASS^[[0m [   0.073s] (132/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mextend_no_spawn_records_one_round_and_the_next_pass_merges_without_override^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.6834162Z ^[[32;1m        PASS^[[0m [   0.027s] (133/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mfailed_update_round_counts_as_a_review_round^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.6977937Z ^[[32;1m        PASS^[[0m [   0.040s] (134/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mlist_form_premerge_still_runs_its_checks^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.7220470Z ^[[32;1m        PASS^[[0m [   0.039s] (135/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mmerge_into_fleet_repo_prints_reinstall_command_last^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.7410099Z ^[[32;1m        PASS^[[0m [   0.043s] (136/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mmerge_message_copies_the_human_summary_and_the_facts_line^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.7805313Z ^[[32;1m        PASS^[[0m [   0.039s] (137/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mmerge_twice_says_already_merged_and_logs_nothing^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.8134849Z ^[[32;1m        PASS^[[0m [   0.033s] (138/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mmerge_without_a_human_summary_gives_the_facts_line_only^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.8337074Z ^[[32;1m        PASS^[[0m [   0.111s] (139/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mmerge_tears_down_clean_lanes_and_keeps_unpushed_ones^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.8562796Z ^[[32;1m        PASS^[[0m [   0.043s] (140/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mmerges_with_exact_head_pass_and_green_ci^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.8767621Z ^[[32;1m        PASS^[[0m [   0.043s] (141/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mnamed_premerge_failure_refuses_with_its_code_and_a_fix_round^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.8971785Z ^[[32;1m        PASS^[[0m [   0.041s] (142/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mnamed_premerge_skips_when_its_paths_are_unchanged^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.9192643Z ^[[32;1m        PASS^[[0m [   0.042s] (143/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mowner_override_merges_past_round_limit_and_says_so^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.9620886Z ^[[32;1m        PASS^[[0m [   0.043s] (144/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mpremerge_cap_failure_refuses_without_merging_and_goes_to_fix^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:26.9705523Z ^[[32;1m        PASS^[[0m [   0.073s] (145/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mowner_override_still_refuses_red_ci_and_a_stale_verdict^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.0043628Z ^[[32;1m        PASS^[[0m [   0.042s] (146/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mpremerge_default_needs_cap_toml^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.0120637Z ^[[32;1m        PASS^[[0m [   0.041s] (147/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mpremerge_logs_the_shadow_lesson_checks^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.0570573Z ^[[32;1m        PASS^[[0m [   0.053s] (148/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mpremerge_passing_merges_and_logs_its_time^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.0574389Z ^[[32;1m        PASS^[[0m [   0.045s] (149/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mpremerge_rechecks_when_staging_moved^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.0921177Z ^[[32;1m        PASS^[[0m [   0.035s] (150/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mrefuses_fail_verdict^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.0927578Z ^[[32;1m        PASS^[[0m [   0.035s] (151/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mrefuses_main_as_integration_target^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.1317592Z ^[[32;1m        PASS^[[0m [   0.039s] (152/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mrefuses_verdict_for_older_sha^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.1328844Z ^[[32;1m        PASS^[[0m [   0.041s] (153/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mrefuses_pr_based_on_main^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.1640596Z ^[[32;1m        PASS^[[0m [   3.310s] (154/309) ^[[35;1mdrover::hotspots^[[0m ^[[34;1mtick_stores_the_list_daily_and_files_the_issue_weekly^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.1793295Z ^[[32;1m        PASS^[[0m [   0.046s] (155/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mrefuses_when_round_limit_exceeded^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.2070643Z ^[[32;1m        PASS^[[0m [   0.043s] (156/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mrefuses_without_open_pr^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.2188651Z ^[[32;1m        PASS^[[0m [   0.039s] (157/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mrefuses_without_verdict^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.2378190Z ^[[32;1m        PASS^[[0m [   0.106s] (158/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mrefuses_when_ci_not_green^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.2704629Z ^[[32;1m        PASS^[[0m [   0.051s] (159/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mreverdict_on_same_sha_is_one_round^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.2826204Z ^[[32;1m        PASS^[[0m [   0.075s] (160/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mrequired_checks_gate_only_the_latest_named_run^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.3161676Z ^[[32;1m        PASS^[[0m [   0.046s] (161/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mthe_closing_comment_carries_the_why_owner_line^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.3492830Z ^[[32;1m        PASS^[[0m [   0.066s] (162/309) ^[[35;1mdrover::merge^[[0m ^[[34;1munpark_restores_the_round_and_requeues_it_last^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.3559040Z ^[[32;1m        PASS^[[0m [   0.116s] (163/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mround_extended_allows_exactly_one_more_round^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.3611917Z ^[[32;1m        PASS^[[0m [   0.045s] (164/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mupdate_round_does_not_count_toward_review_rounds^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.3757276Z ^[[32;1m        PASS^[[0m [   0.015s] (165/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mfailed_state_move_rolls_the_config_move_back^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.4052420Z ^[[32;1m        PASS^[[0m [   0.055s] (166/309) ^[[35;1mdrover::merge^[[0m ^[[34;1mverdict_pins_exact_branch_head^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.4064147Z ^[[32;1m        PASS^[[0m [   0.030s] (167/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mhook_with_pre_rename_home_prints_only_its_json_decision^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.4225328Z ^[[32;1m        PASS^[[0m [   0.016s] (168/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mmigrate_refuses_an_empty_drover_home_and_leaves_the_cwd_alone^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.4403260Z ^[[32;1m        PASS^[[0m [   0.086s] (169/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mempty_path_vars_resolve_to_the_defaults^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.4542157Z ^[[32;1m        PASS^[[0m [   0.032s] (170/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mmigrate_with_nothing_to_move_says_so^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.4681398Z ^[[32;1m        PASS^[[0m [   0.064s] (171/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mmigrate_moves_both_once^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.4819811Z ^[[32;1m        PASS^[[0m [   0.014s] (172/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mstatus_with_neither_home_is_an_empty_board_without_hint^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.4843935Z ^[[32;1m        PASS^[[0m [   0.044s] (173/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mrun_as_herdsman_it_works_and_prints_the_rename_notice^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.4905287Z ^[[32;1m        PASS^[[0m [   0.036s] (174/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mstatus_refuses_until_migrated_and_moves_nothing^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.5174966Z ^[[32;1m        PASS^[[0m [   0.027s] (175/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mthe_old_lane_variable_alone_still_arms_the_hook^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.5323537Z ^[[32;1m        PASS^[[0m [   0.050s] (176/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1msymlinked_old_dir_migrates_as_a_link^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.5483898Z ^[[32;1m        PASS^[[0m [   0.031s] (177/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mversion_and_help_touch_nothing^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.5508094Z ^[[32;1m        PASS^[[0m [   0.066s] (178/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mthe_live_state_dir_is_migrated_only_with_live^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.6026201Z ^[[32;1m        PASS^[[0m [   0.070s] (179/309) ^[[35;1mdrover::migrate^[[0m ^[[34;1mwith_both_trees_the_new_one_is_read_and_migrate_moves_nothing^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:27.9890629Z ^[[32;1m        PASS^[[0m [   0.438s] (180/309) ^[[35;1mdrover::never_started^[[0m ^[[34;1mthe_card_offers_start_lane_only_for_a_lane_that_never_ran^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:28.9277005Z ^[[32;1m        PASS^[[0m [   0.939s] (181/309) ^[[35;1mdrover::offline_tick^[[0m ^[[34;1ma_host_that_drops_after_its_probe_costs_one_timeout_and_drive_still_starts^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:28.9681468Z ^[[32;1m        PASS^[[0m [   1.420s] (182/309) ^[[35;1mdrover::never_started^[[0m ^[[34;1ma_granted_extend_on_a_never_started_lane_spawns_it_once_the_host_admits^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.0679910Z ^[[32;1m        PASS^[[0m [   0.100s] (183/309) ^[[35;1mdrover::orphan_issue^[[0m ^[[34;1ma_healthy_fleet_raises_none^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.1528239Z ^[[32;1m        PASS^[[0m [   0.085s] (184/309) ^[[35;1mdrover::orphan_issue^[[0m ^[[34;1ma_lane_live_loop_on_a_finished_lane_is_an_orphan^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.2051041Z ^[[32;1m        PASS^[[0m [   0.052s] (185/309) ^[[35;1mdrover::orphan_issue^[[0m ^[[34;1ma_paused_fleet_raises_none^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.2815104Z ^[[32;1m        PASS^[[0m [   0.076s] (186/309) ^[[35;1mdrover::orphan_issue^[[0m ^[[34;1mdrive_going_silent_on_an_issue_alerts_30_min_after_its_last_action^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.3093327Z ^[[32;1m        PASS^[[0m [   3.830s] (187/309) ^[[35;1mdrover::lane_fold^[[0m ^[[34;1mquiet_merged_lanes_and_old_ask_endings_come_from_the_saved_folds^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.3655792Z ^[[32;1m        PASS^[[0m [   0.084s] (188/309) ^[[35;1mdrover::orphan_issue^[[0m ^[[34;1mfix_lane_ended_without_pushing_alerts_once_at_30_min^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.3819114Z ^[[32;1m        PASS^[[0m [   0.454s] (189/309) ^[[35;1mdrover::offline_tick^[[0m ^[[34;1ma_tick_past_its_budget_skips_the_rest_says_so_and_ends^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.3993612Z ^[[32;1m        PASS^[[0m [   0.090s] (190/309) ^[[35;1mdrover::orphan_issue^[[0m ^[[34;1mno_change_fix_round_with_merge_label_alerts_once^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.4189071Z ^[[32;1m        PASS^[[0m [   0.037s] (191/309) ^[[35;1mdrover::orphan_issue^[[0m ^[[34;1mwaiting_names_an_issue_nothing_drives^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.4491367Z ^[[32;1m        PASS^[[0m [   0.049s] (192/309) ^[[35;1mdrover::orphan_issue^[[0m ^[[34;1mwaiting_names_why_drive_has_not_started_a_queued_issue^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.4664007Z ^[[32;1m        PASS^[[0m [   0.047s] (193/309) ^[[35;1mdrover::orphan_issue^[[0m ^[[34;1mwaiting_reads_a_long_running_tick_as_running_not_stuck^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.4715258Z ^[[32;1m        PASS^[[0m [   0.106s] (194/309) ^[[35;1mdrover::orphan_issue^[[0m ^[[34;1mundelivered_answer_alerts_once_after_the_ask_closes^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.4808013Z ^[[32;1m        PASS^[[0m [   1.876s] (195/309) ^[[35;1mdrover::never_started^[[0m ^[[34;1mwaiting_names_the_card_or_the_load_never_a_question_mark^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.5532527Z ^[[32;1m        PASS^[[0m [   0.082s] (196/309) ^[[35;1mdrover::orphans^[[0m ^[[34;1ma_lane_spawned_during_the_remote_listing_is_not_adopted^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.5587173Z ^[[32;1m        PASS^[[0m [   0.080s] (197/309) ^[[35;1mdrover::orphans^[[0m ^[[34;1ma_merged_issues_orphan_is_closed^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.5613152Z ^[[32;1m        PASS^[[0m [   0.113s] (198/309) ^[[35;1mdrover::orphans^[[0m ^[[34;1ma_crash_after_spawn_started_is_adopted_by_the_next_step^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.5768568Z ^[[32;1m        PASS^[[0m [   0.110s] (199/309) ^[[35;1mdrover::orphans^[[0m ^[[34;1ma_finished_orphan_review_at_the_head_is_recorded_then_closed^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.6317631Z ^[[32;1m        PASS^[[0m [   0.079s] (200/309) ^[[35;1mdrover::orphans^[[0m ^[[34;1ma_remote_orphan_is_adopted_on_its_host^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.6469138Z ^[[32;1m        PASS^[[0m [   0.085s] (201/309) ^[[35;1mdrover::orphans^[[0m ^[[34;1man_orphan_rev_lane_of_the_wrong_round_is_closed^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.6568831Z ^[[32;1m        PASS^[[0m [   0.098s] (202/309) ^[[35;1mdrover::orphans^[[0m ^[[34;1ma_stale_head_orphan_review_is_closed_not_recorded^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.6650486Z ^[[32;1m        PASS^[[0m [   0.089s] (203/309) ^[[35;1mdrover::orphans^[[0m ^[[34;1man_unmatched_pane_is_only_alerted^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.6907943Z ^[[32;1m        PASS^[[0m [   0.044s] (204/309) ^[[35;1mdrover::pair_status^[[0m ^[[34;1mpair_status_says_whether_this_browser_is_paired^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.7302183Z ^[[32;1m        PASS^[[0m [   0.073s] (205/309) ^[[35;1mdrover::pair_status^[[0m ^[[34;1mpairing_the_same_browser_again_keeps_one_row^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.7305466Z ^[[32;1m        PASS^[[0m [   0.098s] (206/309) ^[[35;1mdrover::orphans^[[0m ^[[34;1mspawn_logs_spawn_started_before_the_harness_starts^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.7529649Z ^[[32;1m        PASS^[[0m [   0.088s] (207/309) ^[[35;1mdrover::pair_status^[[0m ^[[34;1mparity_r3_a_database_error_is_503_never_401_and_each_refusal_logs_one_line^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.7920076Z ^[[32;1m        PASS^[[0m [   0.062s] (208/309) ^[[35;1mdrover::playbooks^[[0m ^[[34;1ma_perf_pass_needs_a_baseline_commit_and_a_perf_block^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.7966320Z ^[[32;1m        PASS^[[0m [   0.044s] (209/309) ^[[35;1mdrover::playbooks^[[0m ^[[34;1ma_refactor_pass_needs_tests_only_moved_or_renamed^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.8280726Z ^[[32;1m        PASS^[[0m [   0.036s] (210/309) ^[[35;1mdrover::playbooks^[[0m ^[[34;1man_unmarked_issues_pass_reads_neither_commits_nor_diff^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.8477244Z ^[[32;1m        PASS^[[0m [   0.051s] (211/309) ^[[35;1mdrover::queue_blockers^[[0m ^[[34;1ma_self_block_or_a_cycle_is_refused_and_logs_nothing^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.8607481Z ^[[32;1m        PASS^[[0m [   0.033s] (212/309) ^[[35;1mdrover::queue_blockers^[[0m ^[[34;1man_old_single_blocker_log_replays_as_a_set_of_one^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.9227646Z ^[[32;1m        PASS^[[0m [   0.062s] (213/309) ^[[35;1mdrover::queue_blockers^[[0m ^[[34;1munblock_drops_one_or_all^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.9446487Z ^[[32;1m        PASS^[[0m [   0.097s] (214/309) ^[[35;1mdrover::queue_blockers^[[0m ^[[34;1mseveral_blockers_add_up_and_the_issue_starts_once_all_merged^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.9735387Z ^[[32;1m        PASS^[[0m [   0.051s] (215/309) ^[[35;1mdrover::reclaim^[[0m ^[[34;1ma_y_answer_applies^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:29.9986051Z ^[[32;1m        PASS^[[0m [   0.054s] (216/309) ^[[35;1mdrover::reclaim^[[0m ^[[34;1mbusy_or_recent_worktrees_are_skipped^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.0245658Z ^[[32;1m        PASS^[[0m [   0.051s] (217/309) ^[[35;1mdrover::reclaim^[[0m ^[[34;1mpreview_changes_nothing_and_apply_removes_only_build_folders^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.0377750Z ^[[32;1m        PASS^[[0m [   0.039s] (218/309) ^[[35;1mdrover::reclaim^[[0m ^[[34;1mthe_shared_build_folder_is_trimmed_past_its_budget_except_a_building_profile^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.0858773Z ^[[32;1m        PASS^[[0m [   0.060s] (219/309) ^[[35;1mdrover::run_card^[[0m ^[[34;1ma_card_sleeping_90s_with_timeout_300_runs_in_the_background_and_reports_exit_0^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.1494955Z ^[[32;1m        PASS^[[0m [   0.065s] (220/309) ^[[35;1mdrover::run_card^[[0m ^[[34;1ma_changed_or_expired_card_is_refused_and_deny_runs_nothing^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.3033410Z ^[[32;1m        PASS^[[0m [   0.154s] (221/309) ^[[35;1mdrover::run_card^[[0m ^[[34;1ma_config_card_switches_a_group_on_only_at_the_owners_apply^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.3756904Z ^[[32;1m        PASS^[[0m [   0.072s] (222/309) ^[[35;1mdrover::run_card^[[0m ^[[34;1ma_hard_no_is_refused_at_posting^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.4209857Z ^[[32;1m        PASS^[[0m [   0.045s] (223/309) ^[[35;1mdrover::run_card^[[0m ^[[34;1ma_run_past_its_timeout_is_killed_and_reported_with_its_tail^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.4686584Z ^[[32;1m        PASS^[[0m [   0.778s] (224/309) ^[[35;1mdrover::pending_actions^[[0m ^[[34;1ma_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_admitted^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.4765121Z ^[[32;1m        PASS^[[0m [   0.055s] (225/309) ^[[35;1mdrover::run_card^[[0m ^[[34;1mapprove_runs_the_exact_command_once_and_posts_its_masked_output^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.4820144Z ^[[32;1m        PASS^[[0m [   0.014s] (226/309) ^[[35;1mdrover::run_card^[[0m ^[[34;1mgroups_default_to_all_but_pause_and_set_and_name_only_known_groups^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.5156650Z ^[[32;1m        PASS^[[0m [   0.478s] (227/309) ^[[35;1mdrover::run_card^[[0m ^[[34;1ma_card_tapped_twice_on_the_board_is_one_job_and_runs_once^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.5452825Z ^[[32;1m        PASS^[[0m [   0.069s] (228/309) ^[[35;1mdrover::run_card^[[0m ^[[34;1mthe_orchestrator_brief_lists_the_fleets_groups^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.5777645Z ^[[32;1m        PASS^[[0m [   0.062s] (229/309) ^[[35;1mdrover::runners^[[0m ^[[34;1mcheck_pushes_a_token_once_the_last_is_30_min_old^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.5794167Z ^[[32;1m        PASS^[[0m [   0.097s] (230/309) ^[[35;1mdrover::runners^[[0m ^[[34;1madd_creates_within_the_cap_refuses_past_it_and_only_an_owner_yes_lets_it_on^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.6116741Z ^[[32;1m        PASS^[[0m [   0.032s] (231/309) ^[[35;1mdrover::runners^[[0m ^[[34;1mrevive_pushes_a_fresh_token_restarts_and_logs_it_never_showing_the_token^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.6202231Z ^[[32;1m        PASS^[[0m [   0.042s] (232/309) ^[[35;1mdrover::runners^[[0m ^[[34;1mretire_local_stops_and_deregisters_the_idle_local_runners_only_with_the_vms_up^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.6274131Z ^[[32;1m        PASS^[[0m [   0.007s] (233/309) ^[[35;1mdrover::runners^[[0m ^[[34;1mthe_built_in_boat_recipe_has_every_runner_command^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.6311113Z ^[[32;1m        PASS^[[0m [   0.085s] (234/309) ^[[35;1mdrover::runners^[[0m ^[[34;1mremove_drains_then_deregisters_then_deletes_and_the_last_vm_needs_the_owner^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.6469913Z ^[[32;1m        PASS^[[0m [   0.035s] (235/309) ^[[35;1mdrover::runners^[[0m ^[[34;1mstatus_prints_the_health_line_each_vm_and_each_runner^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.7016945Z ^[[32;1m        PASS^[[0m [   0.055s] (236/309) ^[[35;1mdrover::schemes^[[0m ^[[34;1ma_light_dark_scheme_follows_the_phone_and_a_pick_still_wins^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.7289555Z ^[[32;1m        PASS^[[0m [   0.101s] (237/309) ^[[35;1mdrover::runners^[[0m ^[[34;1mtokens_reach_every_vm_and_check_refreshes_them_and_alerts_low_and_ok_once_each^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.7787491Z ^[[32;1m        PASS^[[0m [   0.077s] (238/309) ^[[35;1mdrover::schemes^[[0m ^[[34;1meach_theme_names_its_default_and_the_first_paint_is_the_board_themes^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.7857099Z ^[[32;1m        PASS^[[0m [   0.007s] (239/309) ^[[35;1mdrover::schemes^[[0m ^[[34;1mgithub_dark_is_todays_board^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.8059450Z ^[[32;1m        PASS^[[0m [   0.175s] (240/309) ^[[35;1mdrover::schemes^[[0m ^[[34;1ma_bad_scheme_is_refused_with_the_reason^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.8209707Z ^[[32;1m        PASS^[[0m [   0.092s] (241/309) ^[[35;1mdrover::schemes^[[0m ^[[34;1mevery_built_in_has_the_whole_token_set_and_passes_the_gate^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.8465777Z ^[[32;1m        PASS^[[0m [   0.061s] (242/309) ^[[35;1mdrover::schemes^[[0m ^[[34;1mparity_11_a_user_scheme_is_served_and_overrides_a_built_in^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.8603169Z ^[[32;1m        PASS^[[0m [   0.055s] (243/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mfetch_only_reads_redirect_navigations_to_the_board^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.8847249Z ^[[32;1m        PASS^[[0m [   0.024s] (244/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mone_lane_per_agent_name^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.8915344Z ^[[32;1m        PASS^[[0m [   0.045s] (245/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mlanes_group_by_fleet_with_others^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.8989882Z ^[[32;1m        PASS^[[0m [   0.014s] (246/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mpage_never_samples_the_host_and_links_immutable_assets^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.9394062Z ^[[32;1m        PASS^[[0m [   0.048s] (247/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mpage_reads_only_cached_pr_data_and_serves_pwa_assets^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:30.9437097Z ^[[32;1m        PASS^[[0m [   0.122s] (248/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mforeign_host_or_origin_is_403_and_read_only_is_405^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:31.0268073Z ^[[32;1m        PASS^[[0m [   0.128s] (249/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mparity_41_queue_buttons_move_like_queue_mv^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:31.0893481Z ^[[32;1m        PASS^[[0m [   0.146s] (250/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mparity_81_role_dropdowns_set_like_drover_set^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:31.0959397Z ^[[32;1m        PASS^[[0m [   0.007s] (251/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1msecrets_in_shown_text_are_masked^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:31.1235041Z ^[[32;1m        PASS^[[0m [   0.184s] (252/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mparity_42_pause_button_matches_cli_and_blocks_next_and_spawn^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:31.2072665Z ^[[32;1m        PASS^[[0m [   0.084s] (253/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mstale_mtime_refuses_without_writing^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:31.2430806Z ^[[32;1m        PASS^[[0m [   0.147s] (254/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mset_refuses_toml_injection_on_web_and_cli^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:31.3233996Z ^[[32;1m        PASS^[[0m [   0.297s] (255/309) ^[[35;1mdrover::serve_web^[[0m ^[[34;1mqueue_shows_open_work_only_and_folds_paused_retired_and_noise^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:31.3728655Z ^[[32;1m        PASS^[[0m [   0.130s] (256/309) ^[[35;1mdrover::service^[[0m ^[[34;1mthe_service_runs_a_lanes_command_with_its_token_and_refuses_any_other^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:31.3799864Z ^[[32;1m        PASS^[[0m [   0.007s] (257/309) ^[[35;1mdrover::sim^[[0m ^[[34;1ma_busy_window_blocks_spawns_only_while_it_takes_every_host^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3234083Z ^[[31;1m        FAIL^[[0m [   1.115s] (258/309) ^[[35;1mdrover::service^[[0m ^[[34;1ma_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3236248Z ^[[31;1m ^[[0m ^[[31;1mstdout^[[0m ^[[31;1m───^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3237072Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3237372Z     running 1 test
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3237987Z     test a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes ... FAILED
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3238476Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3238686Z     failures:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3238922Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3239125Z     failures:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3239617Z         a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3240038Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3241069Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 1.11s
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3241825Z     ^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3242344Z ^[[31;1m ^[[0m ^[[31;1mstderr^[[0m ^[[31;1m───^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3242696Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3243601Z     ^[[0m^[[31;1mthread 'a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes' (7242) panicked at crates/cli/tests/service.rs:290:5:^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3245189Z     ^[[31;1massertion `left == right` failed^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3245776Z       left: ["kick-sendmeter-1.lock"]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3246961Z      right: ["spawn-sendmeter-1.pending", "kick-sendmeter-1.lock"]
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3248379Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.3249241Z 
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:32.8521411Z ^[[32;1m        PASS^[[0m [   3.122s] (259/309) ^[[35;1mdrover::pending_actions^[[0m ^[[34;1man_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:35.6826107Z ^[[32;1m        PASS^[[0m [   4.359s] (260/309) ^[[35;1mdrover::sim^[[0m ^[[34;1ma_broken_invariant_fails_with_seed_and_trace^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:28:47.0272384Z ^[[32;1m        PASS^[[0m [  14.703s] (261/309) ^[[35;1mdrover::sim^[[0m ^[[34;1ma_metric_over_20_percent_worse_is_a_warning^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:18.7849725Z ^[[32;1m        PASS^[[0m [  45.930s] (262/309) ^[[35;1mdrover::sim^[[0m ^[[34;1ma_seed_replays_to_the_same_trace^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:19.6042523Z ^[[32;1m        PASS^[[0m [  43.922s] (263/309) ^[[35;1mdrover::sim^[[0m ^[[34;1mfixed_seeds_hold_every_invariant^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:20.9426329Z ^[[32;1m        PASS^[[0m [  49.562s] (264/309) ^[[35;1mdrover::sim^[[0m ^[[34;1ma_fixture_db_replays_to_its_merge_order_and_counts^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:30.3988455Z ^[[32;1m        PASS^[[0m [  10.791s] (265/309) ^[[35;1mdrover::sim^[[0m ^[[34;1mthe_incident_seed_records_the_verdict_with_one_supersede^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:30.9289096Z ^[[32;1m        PASS^[[0m [   0.532s] (266/309) ^[[35;1mdrover::slo^[[0m ^[[34;1ma_missed_promise_drive_healed_alerts_with_the_issue_reason_and_heal_one_pass_later^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:31.7569763Z ^[[32;1m        PASS^[[0m [   0.826s] (267/309) ^[[35;1mdrover::slo^[[0m ^[[34;1midle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:32.2091692Z ^[[32;1m        PASS^[[0m [  11.266s] (268/309) ^[[35;1mdrover::sim^[[0m ^[[34;1mthe_known_fleet_gives_exact_metrics^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:32.2392927Z ^[[32;1m        PASS^[[0m [   0.484s] (269/309) ^[[35;1mdrover::slo^[[0m ^[[34;1midle_that_recovers_after_the_heal_never_alerts^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:32.6076256Z ^[[32;1m        PASS^[[0m [   0.396s] (270/309) ^[[35;1mdrover::slo^[[0m ^[[34;1midle_with_no_known_cause_alerts_at_once_naming_the_refusal^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:32.6703065Z ^[[32;1m        PASS^[[0m [   0.065s] (271/309) ^[[35;1mdrover::ssh_deadline^[[0m ^[[34;1mevery_ssh_drover_starts_is_bounded_by_a_deadline^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:32.6901540Z ^[[32;1m        PASS^[[0m [   0.450s] (272/309) ^[[35;1mdrover::slo^[[0m ^[[34;1mthree_stuck_issues_in_one_fleet_push_once_and_show_one_card^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:32.7559574Z ^[[32;1m        PASS^[[0m [   0.084s] (273/309) ^[[35;1mdrover::store^[[0m ^[[34;1mmigrate_leaves_the_keychain_alone_and_prints_how_to_delete_its_items^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:32.8103066Z ^[[32;1m        PASS^[[0m [   0.119s] (274/309) ^[[35;1mdrover::store^[[0m ^[[34;1msecret_rm_deletes_the_secret_file^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:32.9687168Z ^[[32;1m        PASS^[[0m [   0.159s] (275/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1ma_dead_fix_lane_is_respawned_not_parked^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:32.9885443Z ^[[32;1m        PASS^[[0m [   0.230s] (276/309) ^[[35;1mdrover::store^[[0m ^[[34;1mserve_starts_with_no_secret_store^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:33.0942939Z ^[[32;1m        PASS^[[0m [   0.110s] (277/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1ma_killed_lane_waits_on_drive_to_respawn_it^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:33.2075446Z ^[[32;1m        PASS^[[0m [   0.112s] (278/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1ma_long_reason_stays_whole_and_only_on_its_lane^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:33.3936196Z ^[[32;1m        PASS^[[0m [   0.424s] (279/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1ma_green_pass_on_a_draft_or_unlabelled_pr_names_the_cause^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:33.6147124Z ^[[32;1m        PASS^[[0m [   0.408s] (280/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1ma_pass_a_draft_pr_holds_voids_the_merge_promise_and_shows_the_hold^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:33.8353157Z ^[[32;1m        PASS^[[0m [   0.443s] (281/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1ma_pass_left_unmerged_for_three_passes_shows_the_missed_promise_with_the_real_reason^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.0059055Z ^[[32;1m        PASS^[[0m [   0.389s] (282/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1ma_promise_missed_after_the_disk_recovers_is_stuck_on_the_current_hold_not_disk_low^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.0603318Z ^[[32;1m        PASS^[[0m [   0.223s] (283/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1mevery_case_has_its_who_what_and_next_command^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.2246400Z ^[[32;1m        PASS^[[0m [   0.213s] (284/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1mevery_idle_lane_of_an_issue_gets_a_reason^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.3706515Z ^[[32;1m        PASS^[[0m [   0.313s] (285/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1midle_lanes_render_their_reason^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.5283567Z ^[[32;1m        PASS^[[0m [   0.310s] (286/309) ^[[35;1mdrover::waiting^[[0m ^[[34;1mwaiting_lists_every_open_item_with_its_next_command^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.5477488Z ^[[32;1m        PASS^[[0m [   0.175s] (287/309) ^[[35;1mdrover::webhook^[[0m ^[[34;1ma_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.6359015Z ^[[32;1m        PASS^[[0m [   0.107s] (288/309) ^[[35;1mdrover::webhook^[[0m ^[[34;1ma_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.6592319Z ^[[32;1m        PASS^[[0m [   0.113s] (289/309) ^[[35;1mdrover::webhook^[[0m ^[[34;1ma_webhook_secret_file_others_can_read_is_refused^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.6722994Z ^[[32;1m        PASS^[[0m [   0.038s] (290/309) ^[[35;1mdrover::webhook^[[0m ^[[34;1ma_webhook_secret_inline_in_fleet_toml_is_still_refused^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.7318863Z ^[[32;1m        PASS^[[0m [   0.072s] (291/309) ^[[35;1mdrover::webhook^[[0m ^[[34;1man_unknown_repo_or_branch_is_202_and_ignored_ping_is_200^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.7532257Z ^[[32;1m        PASS^[[0m [   0.019s] (292/309) ^[[35;1mdrover::webhook^[[0m ^[[34;1mthe_signature_check_matches_githubs_documented_example^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.8076398Z ^[[32;1m        PASS^[[0m [   0.134s] (293/309) ^[[35;1mdrover::webhook^[[0m ^[[34;1mthe_funnel_listener_answers_no_path_but_hooks_github^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:34.8120434Z ^[[32;1m        PASS^[[0m [   0.056s] (294/309) ^[[35;1mdrover::webhook^[[0m ^[[34;1mwith_no_secret_the_endpoint_is_503_and_doctor_warns^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:35.1008871Z ^[[32;1m        PASS^[[0m [   0.293s] (295/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1ma_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:35.2819471Z ^[[32;1m        PASS^[[0m [   0.182s] (296/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1mcheck_warns_once_when_devices_are_subscribed_but_no_notifier_is^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:35.4670358Z ^[[32;1m        PASS^[[0m [   0.659s] (297/309) ^[[35;1mdrover::webhook^[[0m ^[[34;1mwith_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:35.6621854Z ^[[32;1m        PASS^[[0m [   0.197s] (298/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1mneeds_human_push_names_the_issue_the_reason_and_the_finding^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:35.6812200Z ^[[32;1m        PASS^[[0m [   0.396s] (299/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1mdelivery_201_sent_410_pruned_500_notify_failed^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:35.8528515Z ^[[32;1m        PASS^[[0m [   0.189s] (300/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1mparity_8_subscribe_needs_a_paired_device_and_unsubscribe_removes_it^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:35.9458920Z ^[[32;1m        PASS^[[0m [   0.267s] (301/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1mparity_9_no_push_for_the_thread_open_on_a_board^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:36.1848541Z ^[[32;1m        PASS^[[0m [   0.332s] (302/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1mphones_hear_owner_asks_and_defaults_never_a_waiting_routine_ask^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:36.2406425Z ^[[32;1m        PASS^[[0m [   0.055s] (303/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1mrfc8291_vector_encrypts_and_decrypts_back^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:36.8428376Z ^[[32;1m        PASS^[[0m [   0.895s] (304/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1mpush_titles_use_each_devices_theme_words^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:36.8845674Z ^[[32;1m        PASS^[[0m [   0.044s] (305/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1mvapid_jwt_verifies_with_the_public_key^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:36.8986174Z ^[[32;1m        PASS^[[0m [   0.014s] (306/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1mwebpush_notifier_needs_sub^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:37.1409461Z ^[[32;1m        PASS^[[0m [   0.902s] (307/309) ^[[35;1mdrover::webpush^[[0m ^[[34;1msubscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:29:38.2264474Z ^[[32;1m        PASS^[[0m [  51.199s] (308/309) ^[[35;1mdrover::sim^[[0m ^[[34;1mraising_a_serial_max_cuts_waits_without_a_new_invariant_failure^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:18.7864932Z ^[[33;1m        SLOW^[[0m [> 60.000s] (───────) ^[[35;1mdrover::sim^[[0m ^[[34;1mthe_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.6213939Z ^[[32;1m        PASS^[[0m [  73.839s] (309/309) ^[[35;1mdrover::sim^[[0m ^[[34;1mthe_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.6215374Z ────────────
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.6216738Z ^[[31;1m     Summary^[[0m [ 134.645s] ^[[1m309^[[0m tests run: ^[[1m308^[[0m ^[[32;1mpassed^[[0m (^[[1m1^[[0m ^[[33;1mslow^[[0m), ^[[1m1^[[0m ^[[31;1mfailed^[[0m, ^[[1m6^[[0m ^[[33;1mskipped^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.6224909Z ^[[31;1m        FAIL^[[0m [   1.115s] (258/309) ^[[35;1mdrover::service^[[0m ^[[34;1ma_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes^[[0m
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.6225678Z ^[[31;1merror^[[0m: test run failed
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.6254325Z ##[error]Process completed with exit code 100.
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.6393232Z Post job cleanup.
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7309255Z [command]/usr/bin/git version
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7368413Z git version 2.56.1
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7415398Z Temporarily overriding HOME='/home/runner/work/_temp/6b4fa1c8-b207-45c4-b81d-8c73eb6c7c1d' before making global git config changes
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7417641Z Adding repository directory to the temporary git global config as a safe directory
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7454905Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/drover/drover
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7492519Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7533144Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7911282Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7931011Z http.https://github.com/.extraheader
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7943250Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.7985577Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.8321418Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.8359228Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.8805309Z Cleaning up orphan processes
+test (shard 1/4)	UNKNOWN STEP	2026-11-16T15:30:32.9258865Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

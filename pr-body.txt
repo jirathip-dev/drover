@@ -1,0 +1,39 @@
+1173
+Closes #1169
+
+## For humans
+Text you type in a thread now stays put, whether the box is focused or not, while messages arrive, on the 30-second refresh, when you come back to the app and after a reload.
+New messages are added in place instead of redrawing the whole thread, so there is no flash, no image reload and no scroll jump.
+When the phone's storage for the page is full, old cached screens are dropped so your draft is still saved.
+
+## Parity
+none: no row of docs/parity.md is changed or dropped. Row 2 (scroll never jumps) stays `open #1084`; its ignored `parity_2` is the Events tab's page scroll, not the thread view.
+
+## Cause
+A composer that was not focused was rebuilt on every repaint and got its text back only from the draft saved in local storage. With storage full of cached screens (a used phone), that save fails silently, so the rebuilt box came back empty. The repro fills storage and blurs the box: on the base the text is `""` after the stream and 7 nodes were replaced.
+
+## What changed
+- `web/src/blocks.ts` `morph()`: a repaint patches the page in place, children keyed by `data-id`; a block whose JSON and open state are unchanged keeps its node (field, focus, scroll, image); a changed leaf block is replaced, containers (screen, section, list, sheet, #1120's `.msgs`) are patched.
+- `web/src/main.ts`: the focus-only graft (`input, select` match) is deleted; the first fetch after painting the cached copy highlights no row.
+- `web/src/theme.ts` `put()`: a full storage drops the `scr:` caches and retries, so a draft is always saved.
+- CI: `ui/repaint.mjs` changes trigger ui-webkit.
+
+## Repro
+Commit 1 `03020dc` is the test only. CI ui-webkit at 03020dc: `cargo test --locked --test page_drafts` exit 101, `a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node` failed: stream `{"value":"","same":false,"removed":7}`, reloaded `""`.
+
+## Evidence (head 932afa5)
+- Merge round at 932afa5: origin/staging (#1087's composer) merged. Conflicts in `web/src/blocks.ts` (the `.msgs` box now splits on `.cmp`), `web/src/main.ts` (kept `morph`, dropped staging's widened graft) and `web/dist/board.js` (rebuilt). `ui/repaint.mjs` now drives the real `.cmp textarea`, since #1087 made the composer a textarea; its input/textarea mode switch is gone.
+- Local at 932afa5: `npm ci` 0, `npm run check` 0, `npm run lint` 0, `npm run build` 0; `cargo test -p drover --test page_drafts` exit 0, but WebKit is not installed here, so its 2 cases skipped. WebKit runs in CI ui-webkit only.
+- CI at 932afa5: pending.
+
+### Earlier
+Evidence (head 4417167)
+- CI ui-webkit at 4417167: `cargo test --locked --test page_drafts` 2 passed, exit 0 (both the input and textarea composers); `cargo test --locked --test threads_tab webkit -- --test-threads=1` 5 passed; `parity_webkit` 9 passed; `url_links`, first paint and parity_46 green. CI rust, test shards 1-4, ui, web, actionlint, evidence: pass at 4417167.
+- CI ui-webkit at 38078d0 (before the staging merge): page_drafts 2 passed.
+- Local at 4417167: `npm run check` 0, `npm run lint` 0, `npm run build` 0.
+- Local at 38078d0: `cargo test --locked --test page --test threads_tab --test page_drafts --test cooee_screens` exit 0 (WebKit cases skip: WebKit crashes on this host, so WebKit ran in CI only).
+- The ignored `parity_2` (Events tab) now keeps the row node but still moves 53 px when a row arrives above it: page scroll on the Events tab, not this issue's thread view; left ignored.
+
+src/ net +0 (budget n/a): the change is all in web/src (TypeScript is not under the Rust line cap); web/src +41 net.
+
+
