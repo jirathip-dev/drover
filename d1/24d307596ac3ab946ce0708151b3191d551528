@@ -1,0 +1,42 @@
+Decided: cap-check --base <sha> refuses a commit since the base touching ci/cap.toml or ci/cap.d without a `Cap:` trailer; CI passes the PR's base sha, full history
+Because: "`drover cap-check` refuses a `ci/cap.toml` change without that trailer"
+Decided: `drover cap log` reads git log -p of ci/cap.toml, ci/cap.d and the pre-#129 ci.yml cap line: 44 rows here, each with its trailer or subject
+Because: "`drover cap log` prints the history from `git log -p ci/cap.toml` and those trailers"
+Decided: briefs carry `.drover/docs.md` as "Docs you may trust" when the repo has one; this repo lists README, docs/*.md, the kept mockups, roles and help --agent
+Because: "**Lane briefs** list the docs a lane may trust"
+Decided: deleted docs/cap-history, docs/runtime-hc.md, docs/snapshots and 5 mockup folders (conductor-chat, fleet-cards, pickers, sim-680, why-notes); 2 demo images moved to demo/files
+Because: "keep only those of screens that exist or are queued (#1086–#1092); delete the rest"
+Rejected: editing the ci/cap.toml header — the lane hook refuses it (REFUSED CAP_FILE); it still names docs/cap-history
+Check: rg -l 'Host tab|herd\.json|\[chat\] tab|/frag' docs roles README.md prints nothing
+Check: doc lines net -3468
+Owner: Stale docs about removed screens are gone, the README shows only what ships now and what is queued, and cap raises are recorded in git, with `drover cap log` printing them.
+
+Decided: merged origin/staging after #1084 (a merge, no rebase); the README quick start and command table moved to docs/setup.md's Quick start, and readme.rs reads them there
+Because: "**README**: Today = what is on staging now; Next = the open queue. Nothing else."
+Decided: README issue links keep the jirathip-dev/herdsman/issues/ form, the one setup_neutral.rs allows; GitHub redirects them
+Because: crates/cli/tests/setup_neutral.rs:114
+Rejected: keeping the table in README — the issue allows nothing but Today and Next there
+Check: readme.rs's quick_start_runs_as_written and table_commands_exist run against docs/setup.md's Quick start section only
+Check: the earlier evidence at d6e6943 ran 0 tests (zsh arg bug); the PR body says so, and this head's run is 24 binaries, 257 passed
+Owner: The setup steps and command list now live in the setup guide, so the front page shows only what ships and what is next.
+
+Decided: merged origin/staging after #1084 and #1088 (merges, no rebase); README moves #1081, #1084, #1088, #1094 from Next to Today
+Because: "**README**: Today = what is on staging now; Next = the open queue. Nothing else."
+Decided: docs/parity.md row 89 keeps its number, test and status; only its feature text drops the removed route's name
+Because: scripts/parity-check.sh:19
+Rejected: deleting row 89 — parity-check fails a gone row unless it reads `dropped q<N>`, and the owner has not decided it
+Check: rg -l 'Host tab|herd\.json|\[chat\] tab|/frag' docs roles README.md prints nothing; parity-check passes against origin/staging
+Owner: The docs sweep is up to date with the latest merges: the front page lists what just shipped, and the queue list no longer shows it.
+
+Decided: merged origin/staging again (a merge, no rebase); README Today takes the merged queue items, Next is the queue as it stands now
+Because: "**README**: Today = what is on staging now; Next = the open queue. Nothing else."
+Decided: deleted docs/cap-history/2026-11-17-1201.md, which staging added after the sweep
+Because: "Delete `docs/cap-history/`; git keeps the 47 notes."
+Decided: the cap trailer rule moved into roles/orchestrator/role.md, where staging's split put the cap-raise line
+Because: roles/orchestrator/role.md:33
+Decided: spawn's arch baseline 501 → 502 for the brief's docs.md line; the brief reads rules from the integration view (#958), docs.md from the worktree
+Because: crates/core/src/spawn.rs:1400
+Rejected: folding docs.md into staging's docs_trust deny list — that one prunes the checkout; the issue asks for a list the brief names
+Check: rg -l 'Host tab|herd\.json|\[chat\] tab|/frag' docs roles README.md prints nothing; docs/cap-history is gone
+Check: the 4 macOS launchd/serve test failures are outside this diff; doctor's fails on clean staging too
+Owner: The docs sweep is caught up with the latest merges: the front page lists what shipped since, and the queue list matches today's queue.
