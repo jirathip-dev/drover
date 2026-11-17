@@ -1,0 +1,7 @@
+Decided: an insert op drops any block with its id first, so a stream insert after the post-send reload never adds a second bubble.
+Because: web/src/main.ts:333 reloads the screen 300 ms after an action while the stream (crates/server/src/screens.rs:1773) inserts the same m-<seq> card.
+Because: "A sent message shows once, from tap to delivery"
+Rejected: a client nonce on a pending bubble — the page draws no pending bubble; both copies are the logged card with one id.
+Rejected: dropping the post-action reload — other screens rely on it for actions whose stream lags.
+Check: the WebKit test fails at 54d7c0f7 (most = 2) and passes at head.
+Owner: a message you send now shows once, photo and tick included.
