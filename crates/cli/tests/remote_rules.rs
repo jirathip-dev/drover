@@ -290,12 +290,20 @@ fn spawn_syncs_the_lanes_profile_on_a_host_with_no_fleet_toml() {
 #[test]
 fn a_remote_cap_lane_may_write_the_cap_file_and_no_other_lane_may() {
     for (name, title, allowed) in [
-        ("remote-rules-cap", "cap: raise the src/ line cap to 53,500", true),
-        ("remote-rules-nocap", "Fix the meter", false),
+        ("remote-rules-cap", Some("cap: raise the src/ line cap to 53,500"), true),
+        ("remote-rules-nocap", Some("Fix the meter"), false),
+        ("remote-rules-untitled", None, false),
     ] {
         let (c, _sh) = setup(name);
-        let spec = json!({"title": title, "body": "AC: it works"}).to_string();
-        let (f, bazzite) = (remote_fake().once("gh issue view 12", 0, &spec), FakeShed::new());
+        let f = match title {
+            Some(t) => remote_fake().once(
+                "gh issue view 12",
+                0,
+                &json!({"title": t, "body": "AC: it works"}).to_string(),
+            ),
+            None => remote_fake(),
+        };
+        let bazzite = FakeShed::new();
         let r = OverSsh {
             f: &f,
             hosts: vec![("bazzite", &bazzite)],
@@ -306,9 +314,9 @@ fn a_remote_cap_lane_may_write_the_cap_file_and_no_other_lane_may() {
         let env = lane_env(&f, &bazzite, &remote);
         let out = hook_there(&env, &remote, None, "printf 'line_cap = 53500' > ci/cap.d/x.toml");
         assert!(!remote.join("state/cache").exists());
-        assert_eq!(out.contains("REFUSED CAP_FILE"), !allowed, "{title}: {out}");
+        assert_eq!(out.contains("REFUSED CAP_FILE"), !allowed, "{title:?}: {out}");
         if allowed {
-            assert_eq!(out, "", "{title}");
+            assert_eq!(out, "", "{title:?}");
         }
         let (_, board) = run(&c, &r, &["board", "sendmeter"]);
         assert!(!board.contains("rules stale"), "{board}");
