@@ -1,0 +1,5 @@
+Decided: no trim and no cap ask; merging origin/staging brings its queue-wide cap raise, so the PR fits
+Because: ci/cap.d/2026-11-17-53500.toml:1
+Rejected: trimming 146 lines from baseline.rs — the raise made it unneeded and it would cut ADR-planned code
+Check: drover cap-check --config ci/cap.toml exits 0 at this head (47979 / 53500)
+Owner: The line-cap failure is gone after merging staging's cap raise; no code changed this round.
