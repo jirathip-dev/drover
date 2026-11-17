@@ -1,0 +1,95 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1244/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.33s
+     Running tests/doctor.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1244/debug/deps/doctor-b2f9fdb300989fa1)
+
+running 1 test
+test a_serve_on_the_port_the_job_does_not_own_is_red ... FAILED
+
+failures:
+
+---- a_serve_on_the_port_the_job_does_not_own_is_red stdout ----
+
+thread 'a_serve_on_the_port_the_job_does_not_own_is_red' (918804) panicked at crates/cli/tests/doctor.rs:642:5:
+assertion `left == right` failed: ✓ host — sysctl + vm_stat
+✓ gh — auth status
+✓ config — /tmp/fleet-test-doc-job-pid-918803-0/config/fleet.toml
+✓ spawns starting 0/6
+✓ board auth — 24 h: 0 × 401, 0 × 503
+✓ worktrees — /tmp/fleet-test-doc-job-pid-918803-0/worktrees
+✓ gh demo — read o/demo
+✓ local demo — /tmp/fleet-test-doc-job-pid-918803-0/local has origin/staging
+✓ hygiene demo — merge squash · comments strict · baseline setup · triage weekly · docs_trust deny docs/archive/ · issue_spec triage · docs on
+✓ pipeline demo — valid (built-in)
+✓ webhook — secret set
+✓ keychain readers — 0 waiting over 60 s: 
+✓ harness — claude on PATH
+✓ profile hooks — run this binary
+✓ serve hosts — [mac.tail.ts.net]
+✓ serve — listening on 127.0.0.1:7777
+✓ tailscale — serve maps to 127.0.0.1:7777
+✓ phone — 1 paired
+✓ vapid.key — mode 600
+✓ push — 1 subscriptions, notifier true
+✓ watchdog check — ran 60s
+✓ watchdog drive — ran 60s
+✓ tick step — advancing
+✓ timer — dev.drover.tick loaded
+✓ timer — dev.drover.fast loaded
+
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_serve_on_the_port_the_job_does_not_own_is_red
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p drover --test doctor`
+     Running tests/handover.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1244/debug/deps/handover-23e65540b16d4c8a)
+
+running 1 test
+test a_job_started_serve_takes_the_port_from_a_same_build_serve_it_does_not_own ... FAILED
+
+failures:
+
+---- a_job_started_serve_takes_the_port_from_a_same_build_serve_it_does_not_own stdout ----
+
+thread 'a_job_started_serve_takes_the_port_from_a_same_build_serve_it_does_not_own' (918829) panicked at crates/cli/tests/handover.rs:604:5:
+the job's serve never exits 0 while it should run: Some(ExitStatus(unix_wait_status(0)))
+drover serve: 127.0.0.1:44989 already serves 09bc29d
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_job_started_serve_takes_the_port_from_a_same_build_serve_it_does_not_own
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 10.62s
+
+error: test failed, to rerun pass `-p drover --test handover`
+     Running tests/self_update.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1244/debug/deps/self_update-776d573b86ff6d45)
+
+running 1 test
+test the_serve_restart_is_the_jobs_own_restart_never_a_handover ... FAILED
+
+failures:
+
+---- the_serve_restart_is_the_jobs_own_restart_never_a_handover stdout ----
+
+thread 'the_serve_restart_is_the_jobs_own_restart_never_a_handover' (920073) panicked at crates/cli/tests/self_update.rs:310:5:
+no serve was asked to hand over
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    the_serve_restart_is_the_jobs_own_restart_never_a_handover
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 1.07s
+
+error: test failed, to rerun pass `-p drover --test self_update`
+error: 3 targets failed:
+    `-p drover --test doctor`
+    `-p drover --test handover`
+    `-p drover --test self_update`

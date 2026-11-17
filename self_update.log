@@ -1,0 +1,19 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1244/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.32s
+     Running tests/self_update.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1244/debug/deps/self_update-776d573b86ff6d45)
+
+running 11 tests
+test a_config_with_telegram_keys_loads_with_a_warning ... ok
+test red_ci_installs_nothing ... ok
+test a_missing_signing_identity_keeps_the_old_binary_and_alerts ... ok
+test the_serve_restart_is_the_jobs_own_restart_never_a_handover ... ok
+test green_is_built_signed_gated_swapped_synced_and_restarted ... ok
+test a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head ... ok
+test pause_and_resume_are_logged_and_pause_stops_the_job ... ok
+test branch_main_ignores_a_newer_green_staging_head_and_installs_a_new_green_main_head ... ok
+test setup_and_timer_write_the_update_and_daily_clean_jobs ... ok
+test the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state ... ok
+test scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_once ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+

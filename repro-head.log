@@ -1,0 +1,60 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1244/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1244/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1244/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1244/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.65s
+     Running tests/doctor.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1244/debug/deps/doctor-b2f9fdb300989fa1)
+
+running 17 tests
+test an_archived_fleet_repo_is_named_with_its_fix ... ok
+test a_missing_merge_label_is_red_with_its_create_command_then_green ... ok
+test a_serve_on_the_port_the_job_does_not_own_is_red ... ok
+test a_login_shell_exporting_the_token_warns ... ok
+test launchd_row_follows_the_configured_label ... ok
+test all_good_exits_zero_and_never_writes ... ok
+test a_long_tick_with_a_fresh_heartbeat_is_running_not_stuck ... ok
+test a_paused_self_update_shows_in_doctor_and_the_board ... ok
+test a_hook_naming_another_binary_is_named ... ok
+test hygiene_is_on_by_default_and_drift_is_flagged ... ok
+test retired_account_keys_warn_until_they_are_dropped ... ok
+test secrets_never_echo ... ok
+test warnings_do_not_fail ... ok
+test tailscale_missing_is_a_warning ... ok
+test bad_config_and_hermes_profiles ... ok
+test spawns_row_dedupes_stale_names ... ok
+test each_check_fails_with_its_fix_and_exit_one ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.62s
+
+     Running tests/handover.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1244/debug/deps/handover-23e65540b16d4c8a)
+
+running 7 tests
+drover serve: phone page on http://127.0.0.1:39229/
+drover serve: webhooks on http://127.0.0.1:42323/hooks/github
+test a_serve_on_a_port_an_older_build_holds_has_it_hand_over_to_this_binary ... ok
+test a_second_serve_on_a_port_its_own_build_holds_exits_0_once ... ok
+test a_job_started_serve_takes_the_port_from_a_same_build_serve_it_does_not_own ... ok
+test a_serve_that_starts_over_its_memory_limit_logs_once_and_keeps_serving ... ok
+test a_handover_fails_no_request_and_loses_no_live_event ... ok
+test a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit ... ok
+test a_serve_over_its_memory_limit_hands_over_with_no_failed_request ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.23s
+
+     Running tests/self_update.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1244/debug/deps/self_update-776d573b86ff6d45)
+
+running 11 tests
+test a_config_with_telegram_keys_loads_with_a_warning ... ok
+test red_ci_installs_nothing ... ok
+test a_missing_signing_identity_keeps_the_old_binary_and_alerts ... ok
+test branch_main_ignores_a_newer_green_staging_head_and_installs_a_new_green_main_head ... ok
+test a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head ... ok
+test the_serve_restart_is_the_jobs_own_restart_never_a_handover ... ok
+test setup_and_timer_write_the_update_and_daily_clean_jobs ... ok
+test green_is_built_signed_gated_swapped_synced_and_restarted ... ok
+test pause_and_resume_are_logged_and_pause_stops_the_job ... ok
+test the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state ... ok
+test scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_once ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.70s
+
