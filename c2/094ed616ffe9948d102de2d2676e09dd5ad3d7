@@ -1,0 +1,47 @@
+Decided: mint no longer revokes the agent's older keys; proxy::state already ends a key once a second spawn of its agent is logged or its lane is closed or dead.
+Because: "A lane's proxy key is revoked only once its replacement has actually started (or the old lane is gone), never by a start that is refused."
+Rejected: revoke at the spawn event instead — state() already derives `ended` from the log, a second write would be a second way to say it.
+Decided: an `auth:` note naming `lane key` is Session::key_refused, never signed_out; lanes::health reports it Stalled at once so drive's existing stall path respawns the lane.
+Because: "A 401 that names a revoked or expired lane key is a lane fault (respawn that lane), never `signed-out` for the host."
+Rejected: a new Health variant or alert kind — the stall respawn and its one-retry escalation already fit.
+Decided: hold_alert on a remote shed-acp lane (the proxy-signed case spawn's remote_acp sets up) points at `[proxy] token-file` on the main host, not the harness login.
+Because: "On a proxy-signed host, `signed-out` tells the owner what to do there (proxy token-file on the main host), not `claude /login`."
+Check: AC1 mints a second key for the agent with no spawn logged (a start that never runs); the lane-key test drives check then drive on a fake proxy host and sees one respawn.
+Owner: a respawn that never starts no longer cuts off the running lane, and a lane-key 401 respawns that lane instead of holding the whole host.
+
+Decided: mint no longer revokes the agent's older keys; proxy::state already ends a key once its replacement's spawn is logged or its lane is gone.
+Because: "A lane's proxy key is revoked only once its replacement has actually started"
+Decided: a 401 naming a lane key is a lane fault, reported stalled so drive's existing stall path respawns that one lane.
+Because: crates/core/src/session/mod.rs:141
+Because: crates/core/src/lanes.rs:198
+Decided: a proxied host's signed-out alert points at the proxy token-file, not /login.
+Because: crates/core/src/hosts.rs:806
+Decided: staging build fix: serve.rs baseline raised to 3591, the size #1108 merged it at; serve.rs untouched here.
+Rejected: trimming serve.rs by 16 lines — unrelated refactor of another issue's file.
+Rejected: a new Health variant or alert kind — the stall respawn already does what the spec wants.
+Check: CI arch-check is green at cc153fa6 and the three remote_acp regression tests pass.
+Owner: A refused respawn no longer cuts off a running proxy lane, and its 401 restarts that lane instead of holding the host.
+
+Decided: merged origin/staging; .drover/arch-baseline.txt took staging's serve.rs 3594, replacing this branch's 3591 staging fix.
+Because: .drover/arch-baseline.txt:24
+Decided: the red sim hunt test passes at the merged head (exit 0, twice); no code change for it.
+Because: crates/cli/tests/sim/main.rs:276
+Decided: the lane-key 401 test now also runs the 'unknown lane key' form.
+Because: q1867
+Rejected: none
+Check: an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane fails with session/lanes reverted and passes at head.
+Owner: Brought up to date with staging and added the owner's 'unknown lane key' case to the tests.
+
+Decided: merged origin/staging; lanes.rs health keeps the lane-key 401 arm before staging's held arm
+Because: "A 401 that names a revoked or expired lane key is a lane fault (respawn that lane)"
+Rejected: held arm first — a refused-key pane reported as running would never be respawned
+Check: crates/core/src/lanes.rs health match order; remote_acp tests pass
+Owner: merge-only round; full test suite left to CI because the host disk is full
+
+Decided: the lane-key 401 and proxy sign-out tests attach a fake main-host shed, so check and drive never reach the host's own socket.
+Because: crates/cli/tests/common/fake_shed.rs:97
+Rejected: unsetting XDG_RUNTIME_DIR in the tests — they would then rely on the no-socket path skipping lane checks, which hides the 401 the test needs check to read.
+Decided: merged origin/staging again; no conflicts.
+Because: crates/cli/tests/remote_acp.rs:731
+Check: with XDG_RUNTIME_DIR=/nonexistent and the lane DROVER_* env unset, remote_acp passes 14/14 at head and fails the 4 regression tests with the fix reverted.
+Owner: The new tests no longer depend on the machine they run on, so CI can check them.
