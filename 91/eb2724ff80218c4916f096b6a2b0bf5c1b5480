@@ -1,0 +1,13 @@
+Decided: a host sample runs all its probes in one sh -c through snapshot::batch, the helper snapshot's step look already used, so a remote host is one ssh
+Because: "The probes of one host run as one command (`sh -c`), as `snapshot::fetch` already does"
+Decided: the swap-out rate is the count's change since the host's last kept count (swapcount file per host), scaled to pages per 2 s; a first sample has no rate
+Because: crates/core/src/host.rs:343
+Decided: a first sample reports no rate and admits
+Because: "A first sample with no previous one reports no rate and does not block a start by itself."
+Rejected: keeping the previous count in the swapouts window file — it would change that file's format and the window test
+Decided: the demo runner finds its longest matching prefix by reverse key order, so serve.rs stays under its size baseline after the staging merge
+Because: crates/server/src/serve.rs:2889
+Decided: the sim's planted bug needs a rev pane's fourth start; without 2 s of virtual time per sample a run does more, and random seeds (1003, 2013) reached a third rev start
+Because: crates/cli/tests/sim/model.rs:183
+Check: the hunt test on staging passes and on this branch failed at seed 1003 before the threshold change; the trace shows an ordinary start, supersede, die, respawn
+Owner: Starting a lane or checking a host no longer waits a fixed two seconds per host; remote hosts are checked in one connection.
