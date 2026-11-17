@@ -1,0 +1,5 @@
+Decided: set the known-fleet sim test's expected metrics to what staging now produces (merge 1253 s, idle 987 s)
+Because: crates/cli/tests/sim/main.rs:415
+Rejected: hunting which staging merge moved the second merge 3 s later — outside this issue's scope; staging 3a344930's own CI fails the same assertion with the same numbers
+Check: crates/cli/tests/sim/main.rs:415 holds staging's numbers; no product code changed in this round
+Owner: CI was red only because a staging merge shifted one simulator timing by 3 seconds; this round updates that expectation.
