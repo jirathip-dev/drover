@@ -942,7 +942,11 @@ fn parity_45_a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thr
         .map(|r| &r["title"]);
     assert_eq!(
         past.collect::<Vec<_>>(),
-        [&json!("fix 1"), &json!("review 1 ✗"), &json!("impl ✓")]
+        [&json!("fix 1"), &json!("review 1"), &json!("impl")]
+    );
+    assert_eq!(
+        find(&fix, "h-1")["subtitle"],
+        json!({"text": "FAIL · aaaaaaa · 58m", "tone": "bad"})
     );
     let asked = get("/screens/issue?repo=sendmeter&issue=17");
     let thread = find(&asked, "asked");
