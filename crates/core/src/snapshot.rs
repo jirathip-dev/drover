@@ -257,7 +257,7 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     let (mut key, mut ws) = (String::new(), vec![]);
     let sessions = crate::session::all(cfg, &s);
     if sessions.listed() {
-        if let Err(e) = crate::session::stamp::observe(ctx, cfg, &sessions) {
+        if let Err(e) = crate::session::stamp::observe(ctx, cfg, &s, &sessions) {
             crate::stderr!("drover: lane states: {e:#}");
         }
         let events = crate::events::working(&ctx.state).unwrap_or_default();

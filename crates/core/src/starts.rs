@@ -28,11 +28,16 @@ fn hosts(cfg: &Config) -> Vec<&str> {
         .collect()
 }
 
+fn freed(cfg: &Config, h: &str, p: &Event) -> bool {
+    p.data.get("started") == Some(&json!(true)) && cfg.start_release(h) == StartRelease::Started
+}
+
 fn full(cfg: &Config, live: &[&Event], h: &str, (fleet, weight, others): Me, start: bool) -> Option<String> {
     let h = if cfg.hosts.contains_key(h) { h } else { main_host(cfg) };
-    let freed =
-        |p: &Event| p.data.get("started") == Some(&json!(true)) && cfg.start_release(h) == StartRelease::Started;
-    let on: Vec<&&Event> = live.iter().filter(|p| host_of(cfg, p) == h && !freed(p)).collect();
+    let on: Vec<&&Event> = live
+        .iter()
+        .filter(|p| host_of(cfg, p) == h && !freed(cfg, h, p))
+        .collect();
     let max = cfg.start_max(h);
     let main = cfg.hosts.get(h).is_none_or(|c| c.machine.is_none());
     let room = max.saturating_sub(usize::from(main && start && max > 1));
@@ -47,6 +52,39 @@ pub fn every_full(cfg: &Config, live: &[&Event], me: Me, start: bool) -> Option<
     let all = hosts(cfg);
     let held: Vec<String> = all.iter().map_while(|h| full(cfg, live, h, me, start)).collect();
     (held.len() == all.len() && !held.is_empty()).then(|| held.join(", "))
+}
+
+/// #1234: the start slots held now, as a refusal names them (`<host> N/max starting: <marker> <age>, …`); empty when none is.
+pub fn held_now(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
+    let pending = crate::drive::pending(ctx, cfg, r);
+    let on = |h: &str| {
+        pending
+            .iter()
+            .filter(|p| host_of(cfg, p) == h && !freed(cfg, h, p))
+            .count()
+    };
+    let full: Vec<String> = (hosts(cfg).into_iter())
+        .filter_map(|h| Some((h, on(h))).filter(|x| x.1 > 0))
+        .map(|(h, n)| format!("{h} {n}/{} starting", cfg.start_max(h)))
+        .collect();
+    if full.is_empty() {
+        return String::new();
+    }
+    format!("{}: {}", full.join(", "), crate::drive::held_by(ctx, cfg, r))
+}
+
+/// #1234: spawn marker `l`'s spawn has ended since it was taken: logged, failed with `spawn-error`, or its intent `failed`.
+pub fn ended(ev: &[Event], l: &crate::db::Lease) -> bool {
+    let Some(p) = serde_json::from_str::<Event>(&l.data)
+        .ok()
+        .filter(|p| p.issue.is_some())
+    else {
+        return false;
+    };
+    let end = |e: &&Event| {
+        e.fleet == p.fleet && e.issue == p.issue && ["spawn", "spawn-error", "failed"].contains(&e.kind.as_str())
+    };
+    ev.iter().rev().take_while(|e| e.ts >= l.at).any(|e| end(&e))
 }
 
 /// #1186: some host has a free start slot, the `pending` spawns counted.

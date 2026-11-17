@@ -271,15 +271,21 @@ impl Drop for Made {
 
 thread_local!(static MADE: Made = const { Made(std::cell::RefCell::new(Vec::new())) });
 
-static ALL: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
-static AT_EXIT: std::sync::Once = std::sync::Once::new();
-
-extern "C" fn sweep() {
-    if let Ok(all) = ALL.try_lock() {
-        for d in all.iter() {
-            let _ = std::fs::remove_dir_all(d);
-        }
-    }
+fn reap_at_exit(d: &Path) {
+    use std::io::Write;
+    static REAPER: std::sync::OnceLock<std::sync::Mutex<std::process::Child>> = std::sync::OnceLock::new();
+    let reaper = REAPER.get_or_init(|| {
+        let script = r#"while IFS= read -r d; do set -- "$@" "$d"; done; [ $# -eq 0 ] || { chmod -R u+rwx -- "$@" 2>/dev/null; rm -rf -- "$@"; }"#;
+        let child = std::process::Command::new("sh")
+            .args(["-c", script, "reaper"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        std::sync::Mutex::new(child)
+    });
+    let mut reaper = reaper.lock().unwrap();
+    writeln!(reaper.stdin.as_mut().unwrap(), "{}", d.display()).unwrap();
 }
 
 pub fn tmpdir(name: &str) -> PathBuf {
@@ -290,10 +296,9 @@ pub fn tmpdir(name: &str) -> PathBuf {
         N.fetch_add(1, Ordering::SeqCst)
     ));
     let _ = std::fs::remove_dir_all(&d);
+    reap_at_exit(&d);
     std::fs::create_dir_all(&d).unwrap();
     MADE.with(|m| m.0.borrow_mut().push(d.clone()));
-    AT_EXIT.call_once(|| assert!(drover_sys::at_exit(sweep)));
-    ALL.lock().unwrap().push(d.clone());
     d
 }
 
