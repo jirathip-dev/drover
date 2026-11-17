@@ -1,0 +1,6 @@
+Decided: no code change for the red `rust` check; `drive_kicks::failing_retries_never_starve_another_fleets_start` is a flake, and the head is pushed again so CI reruns.
+Because: crates/cli/tests/drive_kicks.rs:700
+Check: the same test failed on issue-958's CI run 44009443130, which shares no code with this branch; locally it passes 6 of 6 runs.
+Decided: the sim/model.rs merge conflict takes staging's line, which plants the same rev-only bug as a69d2f2.
+Rejected: changing drive_kicks timing in this PR — the flake predates #1216 and is outside its scope.
+Owner: the red check was a test that fails at random on other branches too; this round only merges staging and refreshes the evidence.
