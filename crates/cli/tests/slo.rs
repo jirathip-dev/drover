@@ -290,3 +290,105 @@ fn a_missed_promise_a_hold_took_over_shows_no_stuck_card() {
     assert_eq!(card(&c, &sh, NOW + 1020), None);
     assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
 }
+
+const H2: u64 = 2 * 3600;
+
+fn spawner(c: &drover::Ctx, sh: &FakeShed) -> Fake {
+    let r = Fake::default()
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply("sysctl -n vm.loadavg", "{ 1.0 1.0 1.0 }\n")
+        .reply("sysctl -n hw.ncpu", "10\n")
+        .reply("git ", "")
+        .reply("gh issue view 7", r#"{"title":"t","body":"b"}"#)
+        .reply("sh -c nohup", "4321");
+    let (code, out) = run(c, &sh.on(&r), &["drive", "--fast"]);
+    assert_eq!(code, 0, "{out}");
+    r
+}
+
+fn of_kind(c: &drover::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
+}
+
+#[test]
+fn a_lane_silent_for_the_stall_window_restarts_once_and_a_second_stall_is_a_stuck_card() {
+    std::env::remove_var("DROVER_LANE");
+    std::env::remove_var("DROVER_ORCHESTRATOR");
+    let (c, _sink, sh) = quiet("slo-stall-restart");
+    spawned(&c, 7);
+    spawner(&at(&c, H2 - 60), &sh);
+    assert!(of_kind(&c, "stall-restart").is_empty(), "inside the window");
+    spawner(&at(&c, H2 + 60), &sh);
+    let r = of_kind(&c, "stall-restart");
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert_eq!(
+        (r[0].issue, r[0].str("role"), r[0].str("by")),
+        (Some(7), Some("impl"), Some("drover"))
+    );
+    assert!(
+        r[0].str("reason").unwrap().contains("no push, verdict or lane event"),
+        "{r:?}"
+    );
+    let spawns = of_kind(&c, "spawn");
+    assert_eq!(spawns.len(), 2, "the same role respawned: {spawns:?}");
+    assert_eq!((spawns[1].ts, spawns[1].str("role")), (NOW + H2 + 60, Some("impl")));
+    spawner(&at(&c, 2 * H2 + 120), &sh);
+    assert_eq!(of_kind(&c, "stall-restart").len(), 1, "restarted once");
+    assert_eq!(of_kind(&c, "spawn").len(), 2);
+    let shown = card(&c, &sh, NOW + 2 * H2 + 120)
+        .expect("the second stall's card")
+        .to_string();
+    assert!(shown.contains("#7") && shown.contains("stalled"), "{shown}");
+}
+
+#[test]
+fn named_waits_never_restart_or_move_a_quiet_lane() {
+    std::env::remove_var("DROVER_LANE");
+    std::env::remove_var("DROVER_ORCHESTRATOR");
+    type Wait = fn(&drover::Ctx);
+    let waits: [(&str, Wait); 6] = [
+        ("held", |c| {
+            assert_eq!(run(c, &Fake::default(), &["queue", "sendmeter", "add", "7"]).0, 0);
+            assert_eq!(
+                run(c, &Fake::default(), &["queue", "sendmeter", "block", "--on", "8", "7"]).0,
+                0
+            );
+        }),
+        ("ci", |c| {
+            let pr = json!({"ts": NOW + H2 + 60, "pr": {"number": 34, "state": "OPEN", "headRefOid": "abc",
+                "statusCheckRollup": [{"__typename": "CheckRun", "name": "test", "status": "IN_PROGRESS", "conclusion": ""}]}});
+            let p = drover::gh::cache_path(c, "pr", "sendmeter", 7);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, pr.to_string()).unwrap();
+        }),
+        ("slot", |c| {
+            let d = json!({"step": "respawn", "result": "REFUSED SPAWN_PENDING: a spawn is starting", "code": "SPAWN_PENDING"});
+            ev(c, 7, 3600, "driven", d);
+        }),
+        ("ask", |c| {
+            ev(c, 7, 600, "needs-decision", json!({"id": "q1", "question": "which?"}))
+        }),
+        ("working", |c| {
+            ev(c, 7, 3600, "turn-end", json!({"state": "working", "why": "long build"}))
+        }),
+        ("load-young", |c| {
+            let d = json!({"step": "respawn", "result": "REFUSED HOST_BUSY: mini: load", "code": "HOST_BUSY"});
+            ev(c, 7, 3600, "driven", d);
+        }),
+    ];
+    for (name, wait) in waits {
+        let (c, _sink, sh) = quiet(&format!("slo-stall-wait-{name}"));
+        spawned(&c, 7);
+        wait(&c);
+        spawner(&at(&c, H2 + 60), &sh);
+        assert!(of_kind(&c, "stall-restart").is_empty(), "{name}: no restart");
+        assert!(of_kind(&c, "stall-move").is_empty(), "{name}: no move");
+        assert_eq!(of_kind(&c, "spawn").len(), 1, "{name}: no respawn");
+        assert_eq!(card(&c, &sh, NOW + H2 + 60), None, "{name}: no card");
+    }
+}

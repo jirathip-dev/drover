@@ -124,3 +124,14 @@ fn timing_check_passes_this_tree() {
         .unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stdout));
 }
+
+#[test]
+fn config_show_lists_stall_restart_hours_default_2() {
+    let c = ctx(&tmpdir("limits-stall"), "");
+    let (code, out) = run(&c, &Fake::default(), &["config", "show"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.lines().any(|l| l.starts_with("stall_restart_hours = 2  # ")),
+        "{out}"
+    );
+}
