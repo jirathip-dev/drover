@@ -1,0 +1,11 @@
+Decided: a later is a passive card-later event {card, row, fp, by}; a card or row stays hidden while its latest fp matches
+Because: "State of a later = (card id or issue row, fingerprint of reason + round/state + head sha)"
+Decided: fp = sha256 of the card's blocks (reason) + issue state + cached PR head, computed server-side from the card id
+Rejected: trusting an fp sent by the client — the server recomputes it, so nobody can forge one
+Decided: [later all] logs one fp per stuck row; [later] logs one card-level fp built from every row
+Because: "a change to one issue brings back only that issue's row, in the card"
+Decided: review-queue-only stuck reasons are filtered in slo::open_stuck via promise::reviews_ahead (parsed against Say::ReviewsAhead)
+Because: "An issue whose only reason is \"review waits behind N earlier reviews\" is a queue position"
+Decided: the cards code moved to crates/server/src/later.rs; later is dispatched before action() so action stays under its size baseline
+Check: hidden cards fold into one card id "later", with fold.line "N later" and the hidden cards as its blocks (no web code)
+Owner: put cards aside with later; they return only when something about them really changes
