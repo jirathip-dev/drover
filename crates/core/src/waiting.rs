@@ -95,7 +95,24 @@ const DRAFT: &str = "PR is a draft";
 pub const TURN_NUDGE: &str = "reported done, nothing new pushed: nudging it once";
 pub const TURN_GO_ON: &str = "reported working, idle: prompting it to continue";
 pub const TURN_BLOCKED: &str = "reported blocked: ";
+/// #1263: a reviewer's verdict.md drive could not fetch or record; drive tries again each pass.
+pub const PICKUP: &str = "verdict pickup failed: ";
 const NUDGE_SECS: u64 = 600;
+const IDLE: &str = "rev idle without a verdict (check the pane)";
+
+fn this_review<'a>(events: &'a [Event], (f, n): (&'a str, u64)) -> impl Iterator<Item = &'a Event> {
+    (events.iter().rev())
+        .filter(move |e| e.fleet == f && e.issue == Some(n))
+        .take_while(|e| !(e.kind == "spawn" && crate::events::checks(e)))
+}
+
+fn pickup(events: &[Event], at: (&str, u64)) -> Option<Say> {
+    let e = this_review(events, at).find(|e| e.kind == "verdict-pickup-failed")?;
+    Some(Say::Drive {
+        reason: format!("{PICKUP}{}", e.str("why")?),
+        step: "fetch it again".into(),
+    })
+}
 
 fn failed_start(events: &[Event], s: &IssueState) -> bool {
     let Some(sp) = s.lane.as_deref().and_then(|l| last_spawn(events, l)) else {
@@ -452,21 +469,21 @@ fn waits(
                         head.unwrap_or_default().0
                     )
                 });
-                let refused = (events.iter().rev())
-                    .filter(|e| e.fleet == *f && e.issue == Some(n))
-                    .take_while(|e| !(e.kind == "spawn" && crate::events::checks(e)))
+                let refused = this_review(events, (f, n))
                     .find(|e| e.kind == "repro-refused" && head.is_some_and(|h| e.str("sha") == Some(h.0)));
                 let what = match (&next, refused) {
                     (Some(_), Some(e)) => {
                         let why = format!("verdict refused NO_REPRO: {}", e.str("why").unwrap_or_default());
                         return w("drive", &why, s.last_ts, next);
                     }
-                    (Some(_), None) => Say::Record("review done".into()),
+                    (Some(_), None) => pickup(events, (f, n)).unwrap_or(Say::Record("review done".into())),
                     (None, _) => drive("verdict written", "record it"),
                 };
                 said(what, s.last_ts, next)
             }
-            None => w("none", "rev idle without a verdict (check the pane)", s.last_ts, None),
+            None => {
+                pickup(events, (f, n)).map_or_else(|| w("none", IDLE, s.last_ts, None), |p| said(p, s.last_ts, None))
+            }
         },
         "fix"
             if !pushed.is_empty()

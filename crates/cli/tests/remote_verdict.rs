@@ -134,6 +134,27 @@ fn a_remote_reviewer_that_exited_leaving_verdict_md_is_recorded_next_pass_after_
     assert!(!reviewed(&c), "{out}");
 }
 
+#[test]
+fn a_verdict_md_the_look_missed_is_fetched_and_recorded_in_the_same_pass() {
+    let c = setup("remote-verdict-fetch");
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", REV);
+    let verdict = format!(
+        "FAIL\n\nReviewed head: {}\n- blocking [code] a.rs:1: x\n  Proof: spec\n  > AC 1\n",
+        head()
+    );
+    let f = boat(Ok(&verdict)).once_err(&format!("{SSH}'cat' '{REV}/verdict.md'"), 255, DOWN);
+    let (code, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let v = kinds(&c, "verdict");
+    assert_eq!(v.len(), 1, "{out}");
+    assert_eq!(
+        (v[0].str("verdict"), v[0].str("sha")),
+        (Some("FAIL"), Some(head().as_str()))
+    );
+    assert!(kinds(&c, "verdict-pickup-failed").is_empty(), "{out}");
+}
+
 fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
     OverSsh {
         f,
