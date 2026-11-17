@@ -1,0 +1,7 @@
+Decided: the lane-key 401 and proxy sign-out tests attach a fake main-host shed, so check and drive never reach the host's own socket.
+Because: crates/cli/tests/common/fake_shed.rs:97
+Rejected: unsetting XDG_RUNTIME_DIR in the tests — they would then rely on the no-socket path skipping lane checks, which hides the 401 the test needs check to read.
+Decided: merged origin/staging again; no conflicts.
+Because: crates/cli/tests/remote_acp.rs:731
+Check: with XDG_RUNTIME_DIR=/nonexistent and the lane DROVER_* env unset, remote_acp passes 14/14 at head and fails the 4 regression tests with the fix reverted.
+Owner: The new tests no longer depend on the machine they run on, so CI can check them.
