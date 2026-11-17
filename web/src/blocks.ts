@@ -397,7 +397,7 @@ function composer(b: Blk, c: Ctx): HTMLElement {
   return f;
 }
 
-/** #1086: the image viewer over the page: fitted; a double tap or a pinch zooms, a swipe goes to the next, [save]. */
+/** The image viewer over the page: fitted; a double tap or a pinch zooms, a swipe goes to the next, [save]. */
 export function viewer(list: [string, string][], at: number) {
   const v = el('div', 'iv'), im = el('img'), bar = el('div', 'bar'), save = el('a', '', '<span>save</span>');
   v.id = 'iv';
@@ -516,7 +516,7 @@ function same(a: Node, b: Node, trust: boolean): Node {
   morph(a, [...b.childNodes], trust);
   return a;
 }
-/** #1169: `box`'s children become `want` in place: a node whose block is unchanged stays (its field, focus, scroll, image). */
+/** `box`'s children become `want` in place: a node whose block is unchanged stays (its field, focus, scroll, image). */
 export function morph(box: Element, want: Node[], trust = false) {
   const old = [...box.childNodes], byId = new Map<string, Node>(), plain: Node[] = [];
   old.forEach(n => (idOf(n) ? byId.set(idOf(n), n) : plain.push(n)));
