@@ -1,0 +1,5 @@
+Decided: shed.rs's build-trim test expects the exited lane's scratch removed by the sweep as an ended lane, not trimmed by budget
+Because: q1866
+Rejected: keeping trim as the remover of exited lanes' scratch — q1866 makes a lane not running in shed finished, so the sweep removes it first
+Check: crates/cli/tests/shed.rs the_build_trim_keeps_a_running_shed_lanes_scratch still asserts the running lane's scratch and build stay
+Owner: A test was updated to match the agreed rule that stopped lanes count as finished.
