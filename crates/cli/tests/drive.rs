@@ -626,12 +626,10 @@ fn a_pr_closed_outside_drover_closes_or_blocks_the_issue_once() {
             "verdict",
             json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
         );
+        let shut = json!({"data": {"repository": {"i12": {"state": issues}}}}).to_string();
         let r = fake(NONE)
             .reply("gh pr view issue-12", &gone_pr("CLOSED"))
-            .reply(
-                "gh api graphql -f",
-                &json!({"data": {"repository": {"i12": {"state": issues}}}}).to_string(),
-            )
+            .reply("gh api graphql -f", &shut)
             .reply("git -C", "");
         let (out, _) = drive(&c, &r);
         assert!(

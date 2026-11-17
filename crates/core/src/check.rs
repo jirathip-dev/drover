@@ -924,7 +924,7 @@ pub fn clean_all(
             |why: &str| crate::gate::refused("UNSAFE_CLEAN", format!("{}: {why}", lane.unwrap_or_default()));
         let why = if states.get(&(e.fleet.clone(), n)).is_some_and(|s| s.state == "merged") {
             "merged"
-        } else if closed_issues((ctx, cfg, r, out), &states, &mut closed, &e.fleet).contains(&n) {
+        } else if closed_in((ctx, cfg, r, out), &states, &mut closed, &e.fleet).contains(&n) {
             "issue closed"
         } else if lane.is_some() {
             let p = Some(gh::cached_pr(ctx, &e.fleet, n))
@@ -1083,8 +1083,7 @@ pub fn clean_all(
         };
         let why = if states.get(&(fl.clone(), n)).is_some_and(|s| s.state == "merged") {
             "merged"
-        } else if cfg.fleet.contains_key(fl) && closed_issues((ctx, cfg, r, out), &states, &mut closed, fl).contains(&n)
-        {
+        } else if cfg.fleet.contains_key(fl) && closed_in((ctx, cfg, r, out), &states, &mut closed, fl).contains(&n) {
             "issue closed"
         } else {
             continue;
@@ -1916,29 +1915,26 @@ fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write
     Ok(ev)
 }
 
-fn closed_issues<'a>(
+fn closed_in<'a>(
     (ctx, cfg, r, out): (&Ctx, &Config, &dyn Runner, &mut dyn Write),
     states: &BTreeMap<(String, u64), crate::events::IssueState>,
     memo: &'a mut BTreeMap<String, Vec<u64>>,
     fleet: &str,
 ) -> &'a Vec<u64> {
-    if !memo.contains_key(fleet) {
+    memo.entry(fleet.to_string()).or_insert_with(|| {
         let mine = states.values().filter(|s| s.fleet == fleet && s.state != "merged");
-        let issues: Vec<u64> = mine.map(|s| s.issue).collect();
-        let got = cfg
-            .fleet(fleet)
-            .and_then(|f| gh::closed(ctx, r, f, fleet, &issues, ctx.now));
-        let list = got.unwrap_or_else(|e| {
-            writeln!(
-                out,
-                "cannot list closed issues of {fleet} ({e:#}); only merged lanes are candidates"
-            )
-            .ok();
-            vec![]
-        });
-        memo.insert(fleet.to_string(), list);
-    }
-    &memo[fleet]
+        let ids: Vec<u64> = mine.map(|s| s.issue).collect();
+        let f = cfg.fleet(fleet);
+        f.and_then(|f| gh::closed(ctx, r, f, fleet, &ids, ctx.now))
+            .unwrap_or_else(|e| {
+                writeln!(
+                    out,
+                    "cannot list closed issues of {fleet} ({e:#}); only merged lanes are candidates"
+                )
+                .ok();
+                vec![]
+            })
+    })
 }
 
 pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, saved: bool) -> Result<()> {
