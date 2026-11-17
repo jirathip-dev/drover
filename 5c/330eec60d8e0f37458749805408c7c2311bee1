@@ -1,0 +1,20 @@
+Decided: a start slot is held only while its spawn is in flight; a logged spawn, spawn-error or failed intent for that issue since the marker frees it at once.
+Because: "A start slot frees as soon as its spawn ends"
+Decided: waiting and the board read the live slot count when they render; a past SPAWN_PENDING refusal shows nothing once no slot is held.
+Because: "`drover waiting` and the board read the live slot count when they render"
+Rejected: shortening spawn_pending_max_secs — the slot would still outlive its spawn by the TTL.
+Check: crates/core/src/starts.rs ended() is called by drive::holds, so admit counts and removes ended markers.
+Check: the fair-share test passes on base too; it guards the cross-fleet case as a regression test.
+Owner: A finished or failed start no longer blocks other starts, and the board stops showing old "starting" counts.
+
+Decided: a start slot is held only while its spawn is in flight; a logged spawn, spawn-error or failed intent for that issue since the marker frees it at once.
+Because: "A start slot frees as soon as its spawn ends"
+Decided: waiting and the board read the live slot count when they render, through places(), which now returns the lane places and the held slot line together.
+Because: "`drover waiting` and the board read the live slot count when they render"
+Decided: a `spawn` event frees the slot under start_release = confirmed too: spawn.rs logs it only after the kick returned, so the spawn is over.
+Because: crates/core/src/spawn.rs:1494
+Rejected: shortening spawn_pending_max_secs — the slot would still outlive its spawn by the TTL.
+Rejected: a new helper for the slot line in cli.rs — dispatch and cli.rs sit at their arch-check size baselines.
+Check: round-2 FAIL did not reproduce: at ae27ad7 on a clean checkout and fresh target the AC1/AC4 tests pass; the FAIL's head output equals 0b83108 (tests only).
+Check: crates/core/src/starts.rs ended() is called by drive::holds, so admit counts and removes ended markers.
+Owner: A finished or failed start no longer blocks other starts, and the board stops showing old "starting" counts.
