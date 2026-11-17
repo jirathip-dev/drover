@@ -122,8 +122,42 @@ pub fn restart(ctx: &Ctx, r: &dyn Runner, label: &str) -> Result<String> {
     if refused(ctx, r, label, false) {
         return rebootstrap(ctx, r, label, false);
     }
+    exec(r, &restart_cmd(ctx, label))
+}
+
+/// #1244: the command that restarts job `label`.
+pub fn restart_cmd(ctx: &Ctx, label: &str) -> String {
     let probe = ctl(ctx, label, false)[0].replacen("print", "kickstart -k", 1);
-    exec(r, &probe.replacen("is-active", "restart", 1))
+    probe.replacen("is-active", "restart", 1)
+}
+
+/// #1244: the pid job `label` runs (`None` while stopped); `Err` if the job is not loaded.
+pub fn job_pid(ctx: &Ctx, r: &dyn Runner, label: &str) -> Result<Option<u32>> {
+    let out = if MAC {
+        exec(r, &ctl(ctx, label, false)[0])?
+    } else {
+        let o = exec(
+            r,
+            &format!("systemctl --user show -p MainPID -p LoadState {label}.service"),
+        )?;
+        anyhow::ensure!(o.contains("LoadState=loaded"), "{label} is not loaded");
+        o
+    };
+    let pid = out.lines().find_map(|l| {
+        let l = l.trim();
+        l.strip_prefix("pid = ")
+            .or_else(|| l.strip_prefix("MainPID="))?
+            .parse()
+            .ok()
+    });
+    Ok(pid.filter(|p| *p > 0))
+}
+
+/// #1244: the pids listening on `addr`'s port.
+pub fn listeners(r: &dyn Runner, addr: &str) -> Vec<u32> {
+    let port = format!("-iTCP:{}", addr.rsplit(':').next().unwrap_or_default());
+    let out = ok(r, "lsof", &["-nP", "-t", &port, "-sTCP:LISTEN"]).unwrap_or_default();
+    out.lines().filter_map(|l| l.trim().parse().ok()).collect()
 }
 
 /// #1243: the own interval jobs launchd refuses (`spawn failed`, `OS_REASON_CODESIGNING`).
@@ -330,6 +364,25 @@ fn compact_daily(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
+fn skipped(ctx: &Ctx, cfg: &Config, pass: &crate::hosts::Pass) -> Result<()> {
+    let at = ctx.state.with_file_name("tick.skipped");
+    let hosts = pass.late();
+    if hosts.is_empty() {
+        std::fs::remove_file(&at).ok();
+        return Ok(());
+    }
+    let was = std::fs::read_to_string(&at).ok();
+    let runs = was.and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0) + 1;
+    std::fs::write(&at, runs.to_string())?;
+    if runs != 2 {
+        return Ok(());
+    }
+    let (step, secs) = pass.slowest();
+    let d =
+        serde_json::json!({"hosts": hosts, "passes": runs, "not_sent": pass.unsent(), "step": step, "step_secs": secs});
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "hosts-skipped", d))
+}
+
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
     if log.metadata().is_ok_and(|m| m.len() > 1 << 20) {
@@ -395,6 +448,9 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     });
     for m in pass.late() {
         writeln!(out, "tick: {m}: over budget; skipped for the rest of this pass")?;
+    }
+    if let Ok(cfg) = &loaded {
+        skipped(ctx, cfg, &pass)?;
     }
     std::fs::remove_file(&mark).ok();
     drop(stop);

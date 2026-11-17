@@ -53,7 +53,7 @@ pub fn new_key() -> Result<String> {
     ))
 }
 
-/// Record `key` for lane `agent` of `fleet#issue` on `host`; the agent's older keys are revoked (a new spawn supersedes them). Its id.
+/// Record `key` for lane `agent` of `fleet#issue` on `host`; the agent's older keys end only once this one's lane logs its `spawn` (see [`state`]). Its id.
 pub fn mint(
     ctx: &Ctx,
     cfg: &Config,
@@ -62,9 +62,6 @@ pub fn mint(
     host: &str,
 ) -> Result<String> {
     let mut all = keys(ctx);
-    for k in all.iter_mut().filter(|k| k.agent == agent && k.revoked.is_none()) {
-        k.revoked = Some(ctx.now);
-    }
     let sha = sha(key);
     let k = Key {
         id: sha[..8].into(),
@@ -87,7 +84,15 @@ pub fn mint(
 pub fn state(now: u64, events: &[Event], k: &Key) -> &'static str {
     let mine = |e: &&Event| e.kind == "spawn" && e.str("agent") == Some(&k.agent) && e.ts >= k.created;
     let spawns: Vec<&Event> = events.iter().filter(mine).collect();
-    let dead = |e: &Event| e.kind == "lane-dead" && e.str("key").is_some_and(|x| x.ends_with(&format!(":{}", k.agent)));
+    let back = |d: &Event| {
+        let key = format!("alive:{}", d.str("key").unwrap_or_default());
+        events
+            .iter()
+            .any(|e| e.kind == "lane-alive" && e.str("key") == Some(&key))
+    };
+    let dead = |e: &Event| {
+        e.kind == "lane-dead" && e.str("key").is_some_and(|x| x.ends_with(&format!(":{}", k.agent))) && !back(e)
+    };
     let gone = spawns.first().is_some_and(|sp| {
         spawns.len() > 1
             || events

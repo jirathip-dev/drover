@@ -83,13 +83,13 @@ fn with_later(mut card: Value, group: bool) -> Value {
 }
 
 impl Server<'_> {
-    pub(super) fn chat_cards(&self, ctx: &Ctx) -> Value {
+    pub(super) fn chat_cards(&self, ctx: &Ctx, paired: bool) -> Value {
         let ev = working(&ctx.state).unwrap_or_default();
         let hid = laters(&ev);
         let is_hid =
             |id: &str, row: &str, fp: &str| hid.get(&(id.to_string(), row.to_string())).is_some_and(|h| h == fp);
         let (mut shown, mut later) = (vec![], vec![]);
-        for o in self.owner_cards(ctx, &ev) {
+        for o in self.owner_cards(ctx, &ev, paired) {
             let whole = is_hid(&o.id, "", &o.fp);
             let (gone, kept): (Vec<&Line>, Vec<&Line>) =
                 o.rows.iter().partition(|l| whole || is_hid(&o.id, &l.key, &l.fp));
@@ -111,9 +111,10 @@ impl Server<'_> {
         Value::Array(shown)
     }
 
-    fn owner_cards(&self, ctx: &Ctx, ev: &crate::events::Log) -> Vec<Owned> {
+    fn owner_cards(&self, ctx: &Ctx, ev: &crate::events::Log, paired: bool) -> Vec<Owned> {
         let tab = self.needs_tab(ctx, true);
         let mut cards = run_cards(ctx.now, ev);
+        cards.extend(super::super::chat::owner_cards(ctx, ev, paired));
         cards.extend(tab.config.as_ref().map(|e| {
             json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
                 "title": "fleet.toml is invalid", "blocks": [{"type": "text", "id": "config-why", "markdown": e}]})
@@ -162,7 +163,7 @@ impl Server<'_> {
     pub(super) fn hide_card(&self, ctx: &Ctx, by: &str, v: &Value) -> Result<Value> {
         let ev = working(&ctx.state)?;
         let id = v.at("card").as_str().unwrap_or_default();
-        let o = self.owner_cards(ctx, &ev).into_iter().find(|o| o.id == id);
+        let o = self.owner_cards(ctx, &ev, true).into_iter().find(|o| o.id == id);
         let o = o.with_context(|| format!("no card {id}"))?;
         let marks: Vec<(&str, &str)> = if v.at("all") == &Value::Bool(true) && !o.rows.is_empty() {
             o.rows.iter().map(|l| (l.key.as_str(), l.fp.as_str())).collect()
