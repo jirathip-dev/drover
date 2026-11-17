@@ -1,0 +1,7 @@
+Decided: round 6 merges origin/staging 7a86cb96 to fix the shard 1/4 sim hunt red; the sim test passes after the merge
+Because: crates/cli/tests/sim/main.rs:291
+Decided: the arch-baseline conflict keeps serve.rs at 3594, staging's 3591 plus this PR's 3 router lines
+Because: q1714
+Rejected: changing the sim test or its seeds — it is staging's test, and it passes at the merged head
+Check: CI test shard 1/4 is green at 5375ba3; the live cooee chat still waits on cooee's paired persona issue
+Owner: Staging's latest changes are merged in, which clears the failing test; cooee chat profiles work as before.
