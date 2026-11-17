@@ -269,3 +269,19 @@ fn a_merge_no_repro_on_a_fleet_without_verify_is_needs_human_not_a_rerun() {
         nh.str("reason")
     );
 }
+
+#[test]
+fn a_later_run_pass_at_the_head_clears_earlier_verify_passes() {
+    let (c, _d) = setup("repro-latest-pass", CONFIG, true);
+    for (ts, repro) in [(3, "verify"), (4, "verify"), (5, "run"), (6, "run")] {
+        let v = json!({"verdict": "PASS", "sha": sha(), "stage": "rev", "loop": "rev", "body": "PASS", "repro": repro});
+        append(&c.state, &Event::new(ts, "sendmeter", Some(12), "verdict", v)).unwrap();
+    }
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = drive_fake();
+    run(&c, &r, &["drive"]);
+    let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(r.called("gh pr merge 100"));
+}
