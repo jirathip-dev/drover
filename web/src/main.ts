@@ -229,8 +229,9 @@ function toast(text: string, bad = false, retry?: () => void) {
 
 // The sheet: a screen of type `sheet` (or any screen) over the page, its `done` posting the fields' values.
 const sh = $('#sheet'), shv = view('', $('#sheet .sb'));
-function closeSheet() { sh.hidden = true; H.classList.remove('sheet'); shv.model = null; }
-async function sheet(path: string) {
+function closeSheet() { sh.hidden = true; H.classList.remove('sheet'); shv.model = null; shv.back = []; }
+async function sheet(path: string, push = true) {
+  if (push && !sh.hidden && shv.model) shv.back.push(shv.path);
   shv.path = path;
   shv.open.clear();
   try {
@@ -248,6 +249,12 @@ function drawSheet() {
   if (!m) return;
   const c = ctx(shv, String(m.id)), head = $('#sheet .sh'), done = m.done;
   head.replaceChildren(el('b', '', esc(m.title)));
+  if (shv.back.length) {
+    const b = el('button', 'bk', '<span>‹ back</span>');
+    b.type = 'button';
+    b.onclick = () => { const p = shv.back.pop(); if (p) void sheet(p, false); };
+    head.prepend(b);
+  }
   const x = el('button', '', `<span>${esc(m.cancel ?? 'close')}</span>`);
   x.type = 'button';
   x.onclick = closeSheet;

@@ -68,9 +68,11 @@ is printed on stderr and never blocks the tool call. The kick's confirmation (`w
 board's agent status read these states.
 
 #1053: every lane fact drover shows comes from shed through one module, `crates/core/src/session/`
-(docs/architecture/shed-native/). shed's `reported.state` maps once to a status: `working`/`running` is working,
-`blocked`/`waiting-approval` blocked, `done` done, and every other word (`idle`, `rate-limited`, `error`,
-`hibernated`, `stuck`) shows as idle with shed's note beside it. shed's `rate-limited` is the usage limit; `error`
+(docs/architecture/shed-native/). shed's `reported.state` maps once to a status and every surface shows shed's own
+word with its note (#983): `working`, `running`, `blocked`, `waiting-approval`, `rate-limited`, `done`, `idle`,
+`error`, `hibernated`; a word drover does not know shows as `unknown`. `working` and `running` are busy; drover's own
+`waiting-owner` lies over `done` while the lane's issue has an open ask or a blocked turn-end. shed's `rate-limited`
+is the usage limit; `error`
 with an `auth:` note is a sign-out. A lane is stalled when shed has said a quiet status for `stall_minutes` (since
 drover's `lane-state` stamp) and the lane logged no turn-end; dead when shed lists it exited, or no more on a host
 that answered, and drover did not close it; an orphan when no spawn names a session drover labelled. No screen is
@@ -197,7 +199,10 @@ adapter loads both the same way. The tests in `crates/cli/tests/shed.rs` cover s
 ## Setup
 
 1. Install shed on every host that runs lanes, and start its server (`shed serve --detach`, or shed's launchd or
-   systemd unit). `shed connect --autostart` starts it on another host when needed.
+   systemd unit). `shed connect --autostart` starts it on another host when needed. #937: on the main host,
+   `drover shed install` (a dry run that lists the terminals on serve; `--yes` to run it, as the `cmd` of a run
+   card) installs the rev drover pins and restarts `shed serve` onto it, then reads both builds back. Spawn
+   refuses `SHED_VERSION` while the shed on PATH or the running serve is off that pin.
 2. Set `[runtime] kind = "shed"` in fleet.toml on the main host (and on another host's fleet.toml if its lane hooks
    should use a non-default socket; without one, the hook uses shed's default socket).
 3. Run `drover profiles sync` so the Claude profiles get the state hooks.

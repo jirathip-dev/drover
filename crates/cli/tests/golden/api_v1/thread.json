@@ -1,7 +1,7 @@
 {
   "response": {
     "archived": false,
-    "dir": "<tmp>/state/conductor/t1",
+    "dir": "<tmp>/state/orchestrator/t1",
     "id": "t1",
     "msgs": [
       {
@@ -74,6 +74,7 @@
         "open": true,
         "retry": false,
         "routine": false,
+        "run": null,
         "seq": 9,
         "signin": null,
         "text": "Hand off \"Facets\" to which sendmeter thread? Nothing is delivered until you tap one.",

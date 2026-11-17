@@ -507,7 +507,13 @@ fn lanes_group_by_fleet_with_others() {
             (Some("synergy"), "synergy-design-5", "design", "done".into(), false),
             (Some("synergy"), "w3", "other", "working".into(), false),
             (None, "side-project", "other", "idle".into(), false),
-            (Some("synergy"), "synergy-impl-7", "impl", "blocked".into(), false),
+            (
+                Some("synergy"),
+                "synergy-impl-7",
+                "impl",
+                "waiting-approval".into(),
+                false
+            ),
             (Some("sendmeter"), "sendmeter-rev-9-r1", "rev", "dead".into(), false),
         ]
     );
@@ -692,7 +698,7 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     assert!(dead.get("swipe").is_none(), "no action on a dead lane: {dead}");
     assert_eq!(
         find(&q, "q-sendmeter-17").unwrap()["badge"]["text"],
-        "impl",
+        "[▲ impl] ◆ ◫",
         "live lane stays impl"
     );
 }

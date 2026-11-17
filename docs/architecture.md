@@ -20,9 +20,9 @@ import or a device change is all or nothing) and **leases** (a lock can no longe
 | `devices`, `push` | paired phones and web push subscriptions (were `serve/devices.json`, `webpush/subs.json`) |
 | `snapshot` | `board`: #337's reads; `archived`: the last compaction's stamp |
 | `processed` | #509: the trigger ids (`kick --id`: a verdict's sha, a decision) already driven, each driven once |
-| `issues`, `lanes`, `asks` | #978: the current state, one row per issue, lane (its latest `spawn`) and ask (with its ending), updated in the transaction that appends each event; `drover compact --rebuild` makes them again from every event |
+| `issues`, `lanes`, `asks` | #978: the current state, one row per issue, lane (its latest `spawn`) and ask (with its ending), updated in the transaction that appends each event; `drover archive-events --rebuild` makes them again from every event |
 
-**Hot database and archive (#978):** `tick` runs `drover compact` once a day, after drive: `drive-pass`, `driven`
+**Hot database and archive (#978):** `tick` runs `drover archive-events` once a day, after drive: `drive-pass`, `driven`
 and `kick` rows over 48 h are deleted; a merged or closed issue's events over 14 days old are appended to
 `archive/events-YYYY-MM.jsonl.zst` (by their month) and deleted; the file is vacuumed and its WAL truncated. An open
 issue's events and the last 14 days stay. `history` (`drover why`, `drover lesson digest`) reads the archive and
@@ -138,8 +138,8 @@ lane terminal call, on shed) and `gh` (cached GitHub reads).
 
 ## API types
 
-Every JSON shape the page reads or posts has one definition, in Rust: `crates/server/src/api.rs` (`/herd.json`, the
-lane chat, `/live`'s `ev`, API v1's tabs (#269: the needs cards, Lanes, [chat]), the `/send`, `/answer`, `/act` and `/setup` bodies) and the core rows the
+Every JSON shape the page reads or posts has one definition, in Rust: `crates/server/src/api.rs` (the lane chat,
+`/live`'s `ev`, API v1's reads (#269: the needs cards, Lanes, threads), the `/send`, `/answer`, `/act` and `/setup` bodies) and the core rows the
 board shows (`Event` for events and asks, `IssueState`, `Waiting`, `HostSeen`, `HostRow`). `ts-rs`, behind the server's
 `ts` feature (never in the release build; CI checks `cargo tree -e normal`), turns them into `assets/types/api.d.ts`:
 `just types` writes it (`cargo test -p drover-server --features ts export_bindings`). The types follow serde's JSON:
@@ -175,11 +175,10 @@ TS: it imports them from `assets/types/api.d.ts`.
   see fail: `scripts/lint-fixtures.sh rust|ts` (`ci/lint-fixtures/rust/`, `web/lint-fixtures/`).
 - **Size cap:** at most `line_cap` (in `ci/cap.toml`) formatted lines of non-test Rust under `src/` and `crates/*/src/` (tests
   live in `crates/cli/tests/`), counted after `cargo fmt`. CI runs `drover cap-check --config ci/cap.toml`; a fleet can set its own
-  `line_cap` under `[fleet.<name>]`. Raising the cap needs the owner's OK in an issue.
-
-#973: a raise is one new file, `ci/cap.d/<date>-<cap>.toml`, holding `line_cap` and a `why` string (the note); the
-effective cap is the highest `line_cap` among `ci/cap.toml` and that folder, so two raises never conflict or add up.
-`ci/cap.toml` is frozen (`.drover/arch.toml`). The notes before #973 stay in `docs/cap-history/`.
+  `line_cap` under `[fleet.<name>]`. Raising the cap needs the owner's OK in the cap issue (its q-number). The
+  commit that edits `ci/cap.toml` (or adds a `ci/cap.d/*.toml` raise; the highest `line_cap` wins) carries
+  `Cap: <old> → <new> (#issue, q<N>)`; on a PR, `cap-check --base` refuses a cap commit without it. `drover cap log`
+  prints the history from git.
 - **Drive over time (#856):** a fix for a bug that shows only as drive runs pass after pass (a stuck tick, a lane
   never replaced, a hold that never lifts) adds its scenario to `crates/cli/tests/drive_sim.rs`: a fake clock,
   GitHub, shed terminals, hosts and processes, `tick` every 5 minutes and `drive --fast` every minute, asserted on the

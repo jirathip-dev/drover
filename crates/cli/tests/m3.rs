@@ -324,7 +324,7 @@ fn board_log(c: &drover::Ctx) {
 }
 
 const BOARD: &str = "\
-sendmeter: 3 queued, 2 active
+sendmeter: 3 queued, 2 active, in flight 2/8
  Q ISSUE  STATE       LANE                 EFF   AGE  LAST
  1 #17    queued      -                    -     -    -
  2 #18    queued      -                    -     -    on #17
@@ -362,7 +362,7 @@ fn serve_is_read_only_html() {
         assert!(q.contains(&format!("\"issue\":{n},")), "queued #{n} missing: {q}");
     }
     assert!(
-        q.contains("\"issue\":13,\"note\":\"merged\",\"age\":\"60m\",\"pr\":\"15\""),
+        q.contains("\"issue\":13,\"title\":null,\"note\":\"merged\",\"age\":\"60m\",\"t\":996400,\"pr\":\"15\""),
         "done #13, PR 15: {q}"
     );
     let rw = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));

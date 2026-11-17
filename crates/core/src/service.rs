@@ -97,7 +97,12 @@ pub fn authorize(ctx: &Ctx, cfg: &Config, token: &str, args: &[String]) -> Resul
         return refused("TOKEN", "no command");
     }
     let events = working(&ctx.state)?;
-    if let Some(why) = crate::cli::foreign(args, &g.lane, &events) {
+    if let Some(why) = crate::cli::foreign(
+        args,
+        &g.lane,
+        &events,
+        &cfg.fleet.keys().map(String::as_str).collect::<Vec<_>>(),
+    ) {
         return refused("TOKEN", why);
     }
     if args.first().is_some_and(|a| a == "verdict") && !cfg.fleet(&g.fleet)?.flow().is_check(&g.role) {

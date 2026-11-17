@@ -178,7 +178,10 @@ fn a_pushed_diff_joins_a_free_group_and_carries_on() {
     assert!(logged(&c, 12, "serial-held").is_empty(), "a free slot: no hold");
     assert_eq!(queue_groups(&c, 12), ["ci"]);
     let (_, status) = run(&c, &Fake::default(), &["status", "sendmeter"]);
-    assert!(status.contains("sendmeter: serial: db 0/10 · ci 1/1\n"), "{status}");
+    assert!(
+        status.contains("sendmeter: in flight 1/8, serial: db 0/10 · ci 1/1\n"),
+        "{status}"
+    );
 }
 
 #[test]

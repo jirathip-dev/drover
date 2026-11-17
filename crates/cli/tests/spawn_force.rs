@@ -29,8 +29,8 @@ fn a_forced_spawn_logs_its_override_by_the_owner_or_the_orchestrator() {
     std::env::remove_var("DROVER_ORCHESTRATOR");
     let o = forced("force-owner");
     assert_eq!((o.str("code"), o.str("by")), (Some("HOST_BUSY"), Some("owner")));
-    std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
-    std::env::set_var("DROVER_ORCHESTRATOR", "ops");
+    set_env("DROVER_LANE", "sendmeter:-:orchestrator");
+    set_env("DROVER_ORCHESTRATOR", "ops");
     let o = forced("force-orchestrator");
     assert_eq!(o.str("by"), Some("orchestrator-ops"));
 }

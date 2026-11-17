@@ -116,17 +116,17 @@ fn the_tables_match_the_events_and_a_rebuild_gives_identical_rows() {
         assert!(ends(&copy).iter().any(Option::is_some), "seed {seed}: some ask closed");
         let rows = tables(&p);
         assert!(rows.iter().any(|r| r.starts_with("asks ")) && rows.iter().any(|r| r.starts_with("lanes ")));
-        let (code, out) = run(&c, &Fake::default(), &["compact", "--rebuild"]);
+        let (code, out) = run(&c, &Fake::default(), &["archive-events", "--rebuild"]);
         assert_eq!(code, 0, "{out}");
         assert_eq!(tables(&p), rows, "seed {seed}: rebuild");
         c.now = 1_000 + 300 * 600 + 30 * DAY;
-        let (code, out) = run(&c, &Fake::default(), &["compact"]);
+        let (code, out) = run(&c, &Fake::default(), &["archive-events"]);
         assert_eq!(code, 0, "{out}");
         assert!(
             read(&p).unwrap().len() < live.len(),
             "seed {seed}: some events archived: {out}"
         );
-        let (code, out) = run(&c, &Fake::default(), &["compact", "--rebuild"]);
+        let (code, out) = run(&c, &Fake::default(), &["archive-events", "--rebuild"]);
         assert_eq!(code, 0, "{out}");
         assert_eq!(tables(&p), rows, "seed {seed}: rebuild from the archive");
     }
@@ -162,7 +162,7 @@ fn compaction_archives_old_done_issues_and_deletes_old_heartbeats() {
         append(&p, e).unwrap();
     }
     let (before, st) = (history(&p).unwrap(), states(&p).unwrap());
-    let (code, out) = run(&c, &Fake::default(), &["compact"]);
+    let (code, out) = run(&c, &Fake::default(), &["archive-events"]);
     assert_eq!((code, out.trim()), (0, "2 heartbeats deleted, 5 events archived"));
     let kinds = |v: &[Event]| v.iter().map(|e| format!("{}{:?}", e.kind, e.issue)).collect::<Vec<_>>();
     let hot = kinds(&read(&p).unwrap());
@@ -200,7 +200,7 @@ fn compaction_archives_old_done_issues_and_deletes_old_heartbeats() {
     );
     let wal = std::fs::metadata(d.join("state/state.db-wal")).map_or(0, |m| m.len());
     assert_eq!(wal, 0, "the WAL truncated");
-    let (_, out) = run(&c, &Fake::default(), &["compact"]);
+    let (_, out) = run(&c, &Fake::default(), &["archive-events"]);
     assert_eq!(out.trim(), "0 heartbeats deleted, 0 events archived");
     assert_eq!(rows(&history(&p).unwrap()), rows(&kept));
 }
@@ -301,4 +301,17 @@ fn a_5mb_build_cloned_is_stored_in_16kb() {
     );
     assert_eq!(serde_json::to_value(&back[0]).unwrap()["agent"], "a-impl-1");
     same(&fold(&back), &fold(&ev));
+}
+
+#[test]
+fn a_compaction_that_moves_nothing_keeps_the_shared_log() {
+    let d = tmpdir("noop");
+    let p = d.join("events.jsonl");
+    write(&p, &log(5, 20_000, 1_000));
+    let held = drover::events::shared(&p).unwrap();
+    let key = drover::db::version(&p);
+    assert_eq!(drover::db::compact(&p, 1_001).unwrap(), (0, 0));
+    let again = drover::events::shared(&p).unwrap();
+    assert_eq!(drover::db::version(&p), key, "the version unchanged");
+    assert!(std::sync::Arc::ptr_eq(&held, &again), "the held log not rebuilt");
 }
