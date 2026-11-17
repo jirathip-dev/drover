@@ -1,0 +1,7 @@
+Decided: an insert drops an existing block with its id only once its target list is found, then inserts the new copy.
+Because: web/src/main.ts:333 reloads the screen 300 ms after an action while the stream (crates/server/src/screens.rs:1773) inserts the same m-<seq> card.
+Because: "A sent message shows once, from tap to delivery"
+Rejected: a client nonce on a pending bubble — the page draws no pending bubble; both copies are the logged card with one id.
+Rejected: dropping before the target lookup — an insert into a missing target would delete the block (round-1 review).
+Check: the WebKit test fails at 54d7c0f7 (most = 2) and passes at head; the reviewer's node command keeps m1.
+Owner: a message you send now shows once, photo and tick included.
