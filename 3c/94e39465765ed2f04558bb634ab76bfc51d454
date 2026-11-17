@@ -1,0 +1,8 @@
+Decided: rev and verify lanes read rules.md and verify.md from origin/<integration>; changes to .drover files are named in the brief with their diff
+Because: "rev and verify lanes are briefed with `.herdsman/rules.md`, `.herdsman/verify.md`"
+Decided: the update-round brief line moves into integration_view so spawn stays within its 501-line arch baseline after staging grew it
+Because: crates/core/src/spawn.rs:946
+Rejected: raising the spawn size baseline — the baseline file is the arch gate; trimming is cheaper
+Check: the sim hunt test passes at this head after the staging merge (q1801's hold was about that red gate)
+Check: the arch-check serve.rs violation and the shed test failure reproduce on plain staging and are not from this diff
+Owner: reviewers now judge a PR by the integration branch's rules, not the ones the PR itself edits
