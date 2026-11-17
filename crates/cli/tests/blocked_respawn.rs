@@ -23,7 +23,7 @@ fn spawn(c: &drover::Ctx, ts: u64) {
 }
 
 fn lane(name: &str, title: &str) -> (drover::Ctx, Fake, FakeShed) {
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     let c = ctx(&tmpdir(name), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);

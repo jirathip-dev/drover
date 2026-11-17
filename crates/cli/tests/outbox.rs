@@ -33,8 +33,8 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     std::fs::create_dir_all(wt.join("src")).unwrap();
     std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
     std::env::set_current_dir(wt.join("src")).unwrap();
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
-    std::env::set_var("DROVER_OUTBOX", "1");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_OUTBOX", "1");
     let r = Fake::default().reply("ssh", "q9\n");
     let (code, out) = run(
         &lane,
