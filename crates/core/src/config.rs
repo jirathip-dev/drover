@@ -703,6 +703,7 @@ pub struct Limits {
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
     pub proxy_connect_secs: u64,
+    pub proxy_retry_secs: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
     pub disk_sick_secs: u64,
@@ -825,6 +826,7 @@ impl Default for Limits {
             gate_check_minutes: 30,
             shed_read_millis: 300,
             proxy_connect_secs: 1,
+            proxy_retry_secs: 300,
             service_call_secs: 2,
             disk_probe_secs: 2,
             disk_sick_secs: 300,
@@ -1029,6 +1031,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "how long drive's intake waits for shed's state changes",
     ),
     ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
+    (
+        "proxy_retry_secs",
+        "a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it",
+    ),
     (
         "service_call_secs",
         "a call to the running service's socket times out after this long",

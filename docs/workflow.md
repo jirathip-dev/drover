@@ -113,6 +113,7 @@ flowchart TD
     other -.- k_cloud_idle_stop_minutes(["cloud_idle_stop_minutes = 20"])
     other -.- k_notify_secs(["notify_secs = 15"])
     other -.- k_proxy_connect_secs(["proxy_connect_secs = 1"])
+    other -.- k_proxy_retry_secs(["proxy_retry_secs = 300"])
     other -.- k_service_call_secs(["service_call_secs = 2"])
     other -.- k_disk_probe_secs(["disk_probe_secs = 2"])
     other -.- k_disk_sick_secs(["disk_sick_secs = 300"])
