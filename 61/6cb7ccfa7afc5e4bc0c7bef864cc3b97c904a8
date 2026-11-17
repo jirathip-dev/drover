@@ -1,0 +1,8 @@
+Decided: merged origin/staging (#1121 compact, #1237 hunt, #1254); kept both sides' arch.toml bans and both workflow.md sections (baseline then compact).
+Decided: the hunt's random window stays at seed 2015, not staging's 1016, since the baseline probe adds a yield.
+Because: q1805
+Decided: spawn reads the issue body once (it was bound twice in one block) and declares note and history in one let, so the merged spawn fits its 501-line size baseline.
+Because: .drover/arch-baseline.txt:19
+Rejected: raising the size baseline — it is a ratchet; a duplicate read was the cheaper subtraction.
+Check: arch-check shows no size violation; the sim hunt test passes at seed 2015.
+Owner: Brought the history-baseline branch up to date with staging; no behaviour change.
