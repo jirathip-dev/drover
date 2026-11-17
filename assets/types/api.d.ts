@@ -229,7 +229,7 @@ export type Setup = { host: string, name: string, };
  */
 export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, 
 /**
- * #983: the lanes `working` or `running` (`busy`), and those waiting on approval, the owner or a rate limit.
+ * The lanes `working` or `running` (`busy`), and those waiting on approval, the owner or a rate limit.
  */
 counts: LaneCounts, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, 
 /**
@@ -261,7 +261,7 @@ export type PendingStart = { action: string, since: number, reason?: string | nu
  */
 export type Lane = { name: string, fleet?: string | null, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, state: string, 
 /**
- * #983: shed's note on `state` as shed gave it (a `rate-limited` lane's reset time).
+ * Shed's note on `state` as shed gave it (a `rate-limited` lane's reset time).
  */
 note?: string | null, shown: string, tone: string, since: number, runtime: string, host: string, where: string, };
 

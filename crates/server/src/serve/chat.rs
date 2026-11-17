@@ -686,7 +686,6 @@ fn composer(label: &str, action: &str, values: &Value, more: Value) -> Value {
     c
 }
 
-/// An open config proposal (`open` unless stale) or secret request as its thread's message.
 fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
     let s = |k| e.str(k).unwrap_or_default().to_string();
     let m = |kind: &str, from: String, text: String, open: bool| Msg {
@@ -711,7 +710,6 @@ fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
     }
 }
 
-/// Every open config proposal and secret request, a drover thread's or a cooee chat's, as its thread draws it.
 pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Value> {
     let all = crate::events::of_kind(events, &["config-propose", "secret-request"]);
     let card = |e: &Event| {
@@ -726,7 +724,6 @@ pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Valu
     all.into_iter().filter_map(card).collect()
 }
 
-/// A message's card with its files (images inline, others as rows) and its link's chip, which opens that thread.
 fn msg_card(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> Value {
     let (mut v, key) = (msg_body(now, id, m, paired, h), format!("m-{}", m.seq));
     let src = |f: &FileRef| format!("/thread/{id}/{}", f.name);
