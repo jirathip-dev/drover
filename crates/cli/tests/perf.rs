@@ -1013,12 +1013,12 @@ fn a_fast_step_over_50k_worktree_files_walks_none_of_them() {
         }
     }
     let (fast, fast_ms, out) = walked(&c, &r, &["drive", "--fast"]);
-    assert_eq!(fast, 0, "drive --fast walked {fast} entries: {out}");
-    let (slow, slow_ms, out) = walked(&c, &r, &["drive"]);
-    assert!(slow >= 50_000, "the slow pass walked only {slow} entries: {out}");
+    let (slow, slow_ms, slow_out) = walked(&c, &r, &["drive"]);
     report(&format!(
         "#949 perf (50,000 worktree files): drive --fast {fast_ms} ms, {fast} entries walked · drive {slow_ms} ms, {slow} walked"
     ));
+    assert_eq!(fast, 0, "drive --fast walked {fast} entries: {out}");
+    assert!(slow >= 50_000, "the slow pass walked only {slow} entries: {slow_out}");
 }
 
 #[test]
@@ -1034,21 +1034,19 @@ fn over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane() {
         "{out}"
     );
     std::fs::remove_dir_all(&wt).unwrap();
-    let toml = std::fs::read_to_string(&c.config).unwrap();
-    std::fs::write(
-        &c.config,
-        toml.replace("max_parallel_spawns = 0", "max_parallel_spawns = 2"),
-    )
-    .unwrap();
     let (walks, _, out) = walked(&c, &r, &["drive", "--fast"]);
     assert_eq!(walks, 0, "{out}");
-    let kick = "sh -c nohup '/opt/drover/bin/drover' kick sendmeter 1 --why drive --now";
-    assert_eq!(r.count(kick), 1, "the fast pass starts #1 by its kick: {out}");
-    let (_, _, out) = walked(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
-    assert!(
-        out.contains("sendmeter #1 start: REFUSED DISK_BUDGET: worktrees"),
-        "{out}"
+    let (walks, _, out) = walked(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
+    assert_eq!(walks, 0, "{out}");
+    let ev = drover::events::read(&c.state).unwrap();
+    let kicked = ev.iter().rfind(|e| e.kind == "drive-pass").unwrap();
+    assert_eq!(kicked.data["kick"], 1, "{out}");
+    let start = &kicked.data["actions"][0];
+    assert_eq!(
+        (&start["step"], &start["code"]),
+        (&"start".into(), &"DISK_BUDGET".into()),
+        "{start}"
     );
-    let spawns = drover::events::read(&c.state).unwrap();
-    assert!(!spawns.iter().any(|e| e.kind == "spawn"), "{out}");
+    assert_eq!(kicked.data["spawns_launched"], 0, "{start}");
+    assert!(!ev.iter().any(|e| e.kind == "spawn"), "{out}");
 }
