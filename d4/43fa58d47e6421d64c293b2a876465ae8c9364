@@ -1,0 +1,8 @@
+Decided: merge origin/staging to clear arch-check's serve.rs size violation; no code change
+Because: .drover/arch-baseline.txt:24
+Check: this PR's diff does not touch crates/server/src/serve.rs; staging's d048a8cb grew it and raised the baseline
+Rejected: raising the serve.rs baseline in this PR — staging already raised it to 3591, a second edit would conflict
+Decided: each fleet-test-* dir is fed to a reaper process that removes it once the test process is gone
+Because: "a path skipped on early return/panic in a child"
+Decided: CI's leak step prints every leftover dir before it fails
+Owner: tests no longer leave temp folders behind; this round only brings in the latest shared branch
