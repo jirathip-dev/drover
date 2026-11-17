@@ -670,6 +670,12 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if r.first() == Some(&"wip") && !r.contains(&"--dry-run") {
         return Some("REFUSED OWNER_ONLY: only the owner prunes wip branches (a run card), never a lane (#646)".into());
     }
+    if !orchestrator && r.first() == Some(&"compact") && !r.contains(&"--dry-run") {
+        return Some(
+            "REFUSED OWNER_ONLY: a lane runs only `drover compact … --dry-run`, never the compact itself (#1121)"
+                .into(),
+        );
+    }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `drover setup`, never a lane (#303)".into());
     }

@@ -20,9 +20,9 @@ import or a device change is all or nothing) and **leases** (a lock can no longe
 | `devices`, `push` | paired phones and web push subscriptions (were `serve/devices.json`, `webpush/subs.json`) |
 | `snapshot` | `board`: #337's reads; `archived`: the last compaction's stamp |
 | `processed` | #509: the trigger ids (`kick --id`: a verdict's sha, a decision) already driven, each driven once |
-| `issues`, `lanes`, `asks` | #978: the current state, one row per issue, lane (its latest `spawn`) and ask (with its ending), updated in the transaction that appends each event; `drover compact --rebuild` makes them again from every event |
+| `issues`, `lanes`, `asks` | #978: the current state, one row per issue, lane (its latest `spawn`) and ask (with its ending), updated in the transaction that appends each event; `drover archive-events --rebuild` makes them again from every event |
 
-**Hot database and archive (#978):** `tick` runs `drover compact` once a day, after drive: `drive-pass`, `driven`
+**Hot database and archive (#978):** `tick` runs `drover archive-events` once a day, after drive: `drive-pass`, `driven`
 and `kick` rows over 48 h are deleted; a merged or closed issue's events over 14 days old are appended to
 `archive/events-YYYY-MM.jsonl.zst` (by their month) and deleted; the file is vacuumed and its WAL truncated. An open
 issue's events and the last 14 days stay. `history` (`drover why`, `drover lesson digest`) reads the archive and

@@ -600,10 +600,12 @@ enum Cmd {
         hide = true,
         about = "Archive old events of done issues, delete old heartbeats (daily by tick)"
     )]
-    Compact {
+    ArchiveEvents {
         #[arg(long, help = "Rebuild the issue, lane and ask tables from every event instead")]
         rebuild: bool,
     },
+    #[command(about = "A repo's fresh start: one root before a cut, one commit per landed PR after it; archive, undo")]
+    Compact(crate::compact::Opts),
     #[command(about = "The event log in its JSONL format (one event a line, with its seq), for external readers")]
     #[command(hide = true)]
     Events {
@@ -1476,14 +1478,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             }
             write!(out, "{}", boards.join("\n"))?;
         }
-        Cmd::Compact { rebuild: true } => {
-            crate::db::rebuild(&ctx.state)?;
-            writeln!(out, "rebuilt the issue, lane and ask tables")?;
-        }
-        Cmd::Compact { rebuild: false } => {
-            let (gone, moved) = crate::db::compact(&ctx.state, ctx.now)?;
-            writeln!(out, "{gone} heartbeats deleted, {moved} events archived")?;
-        }
+        Cmd::ArchiveEvents { rebuild } => crate::db::archive_events(&ctx.state, ctx.now, rebuild, out)?,
+        Cmd::Compact(o) => crate::compact::cli(ctx, r, out, o)?,
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
             scope: Scope { fleet, json },
