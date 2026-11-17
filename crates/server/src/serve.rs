@@ -10,7 +10,7 @@ use crate::gate::{gate, refused, Refusal};
 use crate::handover::Handover;
 use crate::host::{self, Host};
 use crate::runner::{Out, Runner};
-use crate::snapshot::Snapshot;
+use crate::snapshot::{key_in, out, Snapshot};
 use crate::{devices, gh, lanes, queue, term, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::json;
@@ -297,14 +297,16 @@ impl Runner for Memo<'_> {
         Ok(crate::snapshot::out(out))
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
+        self.run_for(prog, args, input, crate::runner::limit(prog, args))
+    }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
         }
         if self.4.ts > 0 && crate::snapshot::remote(prog) {
-            let read = self.4.reads.get(&crate::snapshot::key_in(prog, args, input));
-            return Ok(crate::snapshot::out(read.cloned().flatten()));
+            return Ok(out(self.4.reads.get(&key_in(prog, args, input)).cloned().flatten()));
         }
-        self.0.run_in(prog, args, input)
+        self.0.run_for(prog, args, input, limit)
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.0.shed()

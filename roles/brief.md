@@ -6,6 +6,6 @@
 
 {body}
 
-{rules}{fix}## Output contract
+{rules}{docs}{fix}## Output contract
 
 {contract}

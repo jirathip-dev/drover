@@ -284,7 +284,8 @@ pub fn closed(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, issues: &[u64],
     }
     let p = cache_path(ctx, "closed", fleet, 0);
     let has = |c: &Value, k: &str, n: &u64| c.at(k).as_array().is_some_and(|a| a.contains(&json!(n)));
-    let cached = load::<Value>(&p).filter(|c| fresh(c, now) && issues.iter().all(|n| has(c, "asked", n)));
+    let kept = |c: &Value| c.at("ts").as_u64().is_some_and(|t| now >= t && now - t < PR_TTL);
+    let cached = load::<Value>(&p).filter(|c| kept(c) && issues.iter().all(|n| has(c, "asked", n)));
     let c = if let Some(c) = cached {
         c
     } else {

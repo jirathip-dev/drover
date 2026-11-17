@@ -190,7 +190,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             gh::spec(ctx, r, f, name, i.issue, false).ok();
         }
     }
-    let events = closed_on_github(ctx, cfg, r, out, events)?;
+    let events = closed_on_github((ctx, cfg, r, &mut *out), events, None)?;
     crate::drive::markers(ctx, cfg, r, true);
     let passes = crate::events::since(&ctx.state, &["drive-pass"], ctx.now.saturating_sub(2 * 86_400))?;
     let mut held = BTreeMap::<(&str, u64), (u64, u64)>::new();
@@ -1886,20 +1886,21 @@ fn walk(p: &Path, seen: &mut Seen) -> u64 {
     }
 }
 
-fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: Arc<Log>) -> Result<Arc<Log>> {
+pub(crate) fn closed_on_github(
+    (ctx, cfg, r, out): (&Ctx, &Config, &dyn Runner, &mut dyn Write),
+    ev: Arc<Log>,
+    only: Option<&str>,
+) -> Result<Arc<Log>> {
     let st = fold(&ev);
     let mut any = false;
-    for (name, f) in &cfg.fleet {
+    for (name, f) in cfg.fleet.iter().filter(|(n, _)| only.is_none_or(|o| o == *n)) {
         let state = |n: u64| st.get(&(name.clone(), n));
         let mut open: Vec<u64> = (st.values().filter(|s| s.fleet == *name && !s.done()))
             .map(|s| s.issue)
             .collect();
         open.extend((crate::queue::replay(&ev, name).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
         open.retain(|n| gh::cached_pr(ctx, name, *n).at("state") != "MERGED");
-        let Some(closed) = (!open.is_empty())
-            .then(|| gh::closed(ctx, r, f, name, &open, ctx.now).ok())
-            .flatten()
-        else {
+        let Ok(closed) = gh::closed(ctx, r, f, name, &open, ctx.now) else {
             continue;
         };
         for n in open.into_iter().filter(|n| closed.contains(n)) {
@@ -2279,11 +2280,6 @@ fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
     let dirty = changes(&git(&["status", "--porcelain"])?);
     let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?;
     Ok((dirty, ahead.trim().parse().unwrap_or(0)))
-}
-
-/// Does worktree `wt` on its host hold dirty files or unpushed commits (unreadable: no)?
-pub fn unsaved(on: &On, wt: &Path) -> bool {
-    on.exists(wt) && pending(on, &wt.to_string_lossy()).is_ok_and(|p| p != (0, 0))
 }
 
 fn close_gone(ctx: &Ctx, on: &On, agent: &str, pane: &str) -> Result<()> {

@@ -11,6 +11,9 @@ use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Duration;
 
+#[path = "later.rs"]
+mod later;
+
 const MANIFEST: &str = include_str!("../../../cooee-plugin.toml");
 static STREAMS: AtomicUsize = AtomicUsize::new(0);
 type Res = (&'static str, &'static str, Vec<u8>);
@@ -366,7 +369,7 @@ fn tree<'a>(rs: &[&'a QueueRow]) -> Vec<(&'a QueueRow, usize)> {
     out
 }
 
-fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane]) -> Value {
+fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane], late: Option<&String>) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
     let paused = c.paused.is_some();
@@ -431,8 +434,8 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane]) -> 
     }
     let busy = rows("inprogress", busy.into_iter().map(|r| (r, 0)).collect());
     let tone = if c.need > 0 { "warn" } else { "accent" };
-    let mut v = json!({"type": "card", "id": format!("fleet-{f}"), "tone": tone, "title": f,
-        "subtitle": c.paused.clone().unwrap_or_else(|| c.drive.line.clone()), "badge": badge.get(usize::from(paused)),
+    let mut v = json!({"type": "card", "id": format!("fleet-{f}"), "tone": tone, "title": f, "badge": badge.get(usize::from(paused)),
+        "subtitle": c.paused.as_ref().map_or_else(|| late.map_or(json!(c.drive.line), |l| json!({"text": l, "tone": "warn"})), |p| json!(p)),
         "buttons": [
             {"type": "button", "id": format!("drive-{f}"), "label": "Drive now", "style": "primary", "action": "drive", "values": {"fleet": f}},
             {"type": "button", "id": format!("pause-{f}"), "label": if paused { "Resume" } else { "Pause" }, "action": "pause", "values": {"fleet": f, "on": !paused}}],
@@ -1564,6 +1567,7 @@ impl Server<'_> {
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
         let (tab, ev) = (self.queue_tab(ctx), working(&ctx.state).unwrap_or_default());
         let lanes = Config::kept(ctx).map_or(vec![], |cfg| self.lane_list(ctx, &cfg, &ev, &ev.states));
+        let late = Config::kept(ctx).ok().and_then(|c| crate::timer::unfinished(ctx, &c));
         let sel = q
             .get("repo")
             .filter(|r| tab.fleets.iter().any(|f| &f.name == *r))
@@ -1582,7 +1586,7 @@ impl Server<'_> {
         if let Some(e) = &tab.error {
             blocks.push(json!({"type": "text", "id": "error", "markdown": e}));
         }
-        blocks.extend(shown.into_iter().map(|c| fleet_card(ctx, &ev, c, q, &lanes)));
+        blocks.extend(shown.iter().map(|c| fleet_card(ctx, &ev, c, q, &lanes, late.as_ref())));
         let mut kept = q.clone();
         kept.retain(|k, _| k != "repo" || sel.is_some());
         let stream = view(&kept, "", "").replacen("/screens/queue", "/screens/queue/stream", 1);
@@ -1594,35 +1598,6 @@ impl Server<'_> {
         let badge = self.needs_count(ctx, &ev);
         json!({"type": "screen", "id": "queue", "title": "Queue", "stream": stream, "badge": badge,
             "actions": [{"icon": "more", "label": "More", "menu": menu}], "blocks": blocks})
-    }
-
-    fn chat_cards(&self, ctx: &Ctx, paired: bool) -> Value {
-        let tab = self.needs_tab(ctx, true);
-        let ev = working(&ctx.state).unwrap_or_default();
-        let mut cards = run_cards(ctx.now, &ev);
-        cards.extend(super::chat::owner_cards(ctx, &ev, paired));
-        cards.extend(tab.config.as_ref().map(|e| {
-            json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
-                "title": "fleet.toml is invalid", "blocks": [{"type": "text", "id": "config-why", "markdown": e}]})
-        }));
-        cards.extend(super::v1::slo_open(&ev).map(|e| {
-            json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
-                "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
-        }));
-        cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|(f, es)| {
-            let mut md: Vec<String> = es.iter().map(|e| format!("- {}", crate::events::plain(e))).collect();
-            md.push(format!("`drover waiting {f}`"));
-            let mut buttons = vec![json!({"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"})];
-            buttons.extend(es.iter().filter_map(|e| e.issue).map(|n| {
-                json!({"type": "button", "id": format!("stuck-force-{f}-{n}"), "label": format!("Force #{n}"), "action": "force", "values": {"fleet": f, "issue": n}})
-            }));
-            json!({"type": "card", "id": format!("stuck-{f}"), "kind": "alert", "tone": "warn",
-                "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": md.join("\n")}],
-                "buttons": buttons})
-        }));
-        cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
-        cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
-        Value::Array(cards)
     }
 
     pub(super) fn plugin(ctx: &Ctx, head: &str) -> bool {
@@ -1671,7 +1646,16 @@ impl Server<'_> {
                         format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
                     return line("403 Forbidden", &why);
                 }
-                match self.action(ctx, name, &a) {
+                let by = match auth {
+                    Ok(d) if !plugin => d.label.clone(),
+                    _ => "cooee".into(),
+                };
+                let res = if name == "later" {
+                    self.hide_card(ctx, &by, a.at("values"))
+                } else {
+                    self.action(ctx, name, &a)
+                };
+                match res {
                     Ok(v) => out("200 OK", &v),
                     Err(e) if e.downcast_ref::<Refusal>().is_some() => line("409 Conflict", &shown(&e)),
                     Err(e) => line("400 Bad Request", &shown(&e)),

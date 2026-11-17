@@ -67,6 +67,16 @@ impl Say {
     }
 }
 
+/// A stuck reason whose only wait is the review queue (`Say::ReviewsAhead`): a queue position.
+pub fn reviews_ahead(reason: &str) -> bool {
+    let wait = reason.split("; tried: ").next().unwrap_or(reason);
+    let tail = wait.rsplit(": ").next().unwrap_or(wait);
+    let n = tail
+        .strip_prefix("review waits behind ")
+        .and_then(|r| r.split(' ').next()?.parse().ok());
+    n.is_some_and(|n| Say::ReviewsAhead(n).line() == tail)
+}
+
 /// A line that ends catching up, without that ending.
 pub fn strip_catch_up(line: &str) -> Option<&str> {
     line.strip_suffix(CATCH_UP)
