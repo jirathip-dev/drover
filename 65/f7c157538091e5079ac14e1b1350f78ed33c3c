@@ -1,0 +1,9 @@
+Decided: rounds come from one history() in screens.rs; a check spawn while its round has no verdict is a respawn and adds no row
+Because: "A respawn of the same round adds no row. A round with no verdict shows `no verdict` (amber), never ✓."
+Decided: the newest check round has no `no verdict` mark while its lane is live: it is still running
+Decided: a verdict row taps a new /screens/verdict sheet with the logged verdict body, keyed by the event's seq
+Because: "A verdict row opens its verdict.md text."
+Decided: [unpark] is a sheet button whose action reuses the existing unpark form op; the manifest and cooee's permissions fixture list it
+Rejected: making the whole history row title `review 2 · FAIL · sha · 3h` — the row could not carry the verdict's tone, so the verdict line is a toned subtitle
+Check: crates/cli/tests/golden/cooee/issue-rounds.json shows review 2 PASS, fix 1, review 1 FAIL, impl for three respawns of r2
+Owner: The issue sheet counts a restarted review once and shows each round's PASS/FAIL, CI and the old card's lines again.
