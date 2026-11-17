@@ -1,0 +1,12 @@
+Decided: one OWNER table in crates/core/src/autonomy.rs decides owner actions; --explain prints it
+Because: "What counts as an owner action is one table in the code, printed by `--explain`, so the number can be audited."
+Decided: spawn (from the CLI), verdict and lane-killed events now carry `by` (drive, orchestrator-<id>, lane or owner)
+Because: crates/core/src/orchestrator.rs:129
+Rejected: inferring a manual spawn or verdict from the log alone — reviewer lanes run `drover verdict` themselves and evacuations spawn outside drive, so nothing in the log told them apart
+Rejected: stamping every spawn in db::insert — evacuate and lesson spawns would read as the owner's
+Decided: the stats subcommand enum moved from cli.rs to autonomy.rs so cli.rs stays under its size baseline
+Because: crates/core/src/autonomy.rs:188
+Decided: run-card approvals belong to a thread, not an issue: they count in a week's owner actions but never break one issue's autonomy
+Check: crates/cli/tests/autonomy.rs drives the real CLI: an owner-answered ask breaks autonomy, an orchestrator answer does not, the round-3 issue counts, --since/--weeks cut, --json matches the table
+Check: perf gate stats_autonomy_on_a_150k_event_log_stays_under_its_budget (1000 ms in release) is added to the CI perf step
+Owner: real-fleet output could not be produced from this remote lane (no event store on it); run `drover stats autonomy herdsman` on the main host
