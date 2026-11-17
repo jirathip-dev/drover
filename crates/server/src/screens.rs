@@ -11,8 +11,6 @@ use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Duration;
 
-#[path = "hosts_sheet.rs"]
-mod hosts_sheet;
 #[path = "later.rs"]
 mod later;
 
@@ -42,7 +40,7 @@ pub fn places() -> Value {
     serde_json::to_value(m.get("places")).unwrap_or_default()
 }
 
-/// #1072: the standalone page's places: the manifest's, then the Threads tab, #1091's Hosts and #1092's Herd rows (never the plugin's).
+/// #1072: the standalone page's places: the manifest's, then the Threads tab and #1091's Hosts row (never the plugin's).
 pub fn page_places() -> Value {
     let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
     let hosts = json!({"type": "menu-row", "label": "Hosts", "subtitle": "on/off and reap, per host", "screen": "/screens/hosts"});
@@ -51,6 +49,10 @@ pub fn page_places() -> Value {
     all.extend([threads, hosts, herd]);
     Value::Array(all)
 }
+
+#[path = "screens_hosts.rs"]
+mod hosts;
+use hosts::HOST_ACTIONS;
 
 const THREAD_ACTIONS: [&str; 11] = [
     "thread-new",
@@ -1646,9 +1648,7 @@ impl Server<'_> {
                     return line("400 Bad Request", "bad request body");
                 };
                 let name = a.at("action").as_str().unwrap_or_default();
-                if !permitted(name)
-                    && (plugin || !THREAD_ACTIONS.contains(&name) && !hosts_sheet::HOST_ACTIONS.contains(&name))
-                {
+                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name) && !HOST_ACTIONS.contains(&name)) {
                     let why =
                         format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
                     return line("403 Forbidden", &why);
@@ -1657,12 +1657,10 @@ impl Server<'_> {
                     Ok(d) if !plugin => d.label.clone(),
                     _ => "cooee".into(),
                 };
-                let res = if name == "later" {
-                    self.hide_card(ctx, &by, a.at("values"))
-                } else if hosts_sheet::HOST_ACTIONS.contains(&name) {
-                    self.host_action(ctx, name, &a)
-                } else {
-                    self.action(ctx, name, &a)
+                let res = match name {
+                    "later" => self.hide_card(ctx, &by, a.at("values")),
+                    n if HOST_ACTIONS.contains(&n) => self.host_op(ctx, n, a.at("values")),
+                    _ => self.action(ctx, name, &a),
                 };
                 match res {
                     Ok(v) => out("200 OK", &v),
