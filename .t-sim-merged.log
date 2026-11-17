@@ -1,0 +1,130 @@
+   Compiling subtle v2.6.1
+   Compiling zeroize v1.9.1
+   Compiling libc v0.2.191
+   Compiling typenum v1.20.1
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling cfg-if v1.0.5
+   Compiling cmov v0.5.4
+   Compiling proc-macro2 v1.0.107
+   Compiling ctutils v0.4.7
+   Compiling const-oid v0.10.2
+   Compiling cpubits v0.1.1
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling autocfg v1.5.1
+   Compiling hybrid-array v0.4.15
+   Compiling num-traits v0.2.19
+   Compiling block-buffer v0.12.1
+   Compiling syn v3.0.9
+   Compiling serde_core v1.0.229
+   Compiling crypto-common v0.2.2
+   Compiling digest v0.11.3
+   Compiling crypto-bigint v0.7.10
+   Compiling ff v0.14.0
+   Compiling serde v1.0.229
+   Compiling hmac v0.13.0
+   Compiling der v0.8.3
+   Compiling foldhash v0.2.0
+   Compiling cpufeatures v0.3.1
+   Compiling hashbrown v0.17.1
+   Compiling group v0.14.0
+   Compiling inout v0.2.5
+   Compiling base16ct v1.0.0
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.15
+   Compiling sec1 v0.8.1
+   Compiling cc v1.11.0
+   Compiling hkdf v0.13.0
+   Compiling utf8parse v0.2.2
+   Compiling pkg-config v0.3.34
+   Compiling vcpkg v0.2.15
+   Compiling serde_derive v1.0.229
+   Compiling zmij v1.0.23
+   Compiling anstyle-parse v1.0.0
+   Compiling elliptic-curve v0.14.3
+   Compiling cipher v0.5.2
+   Compiling primefield v0.14.0
+   Compiling universal-hash v0.6.1
+   Compiling equivalent v1.0.3
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling serde_json v1.0.154
+   Compiling colorchoice v1.0.5
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling indexmap v2.14.2
+   Compiling anstream v1.0.0
+   Compiling polyval v0.7.3
+   Compiling libsqlite3-sys v0.39.1
+   Compiling wnaf v0.14.1
+   Compiling rfc6979 v0.6.0
+   Compiling spki v0.8.1
+   Compiling signature v3.0.0
+   Compiling heck v0.5.0
+   Compiling toml_write v0.1.2
+   Compiling shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=9b88eb5be5bc9ba8c5c75480483b9861ddc6e993#9b88eb5b)
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling anyhow v1.0.104
+   Compiling strsim v0.11.1
+   Compiling clap_lex v1.1.1
+   Compiling winnow v0.7.15
+   Compiling clap_builder v4.6.7
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling toml_edit v0.22.27
+   Compiling clap_derive v4.6.7
+   Compiling ecdsa v0.17.0
+   Compiling primeorder v0.14.0
+   Compiling ghash v0.6.0
+   Compiling aes v0.9.3
+   Compiling ctr v0.10.1
+   Compiling hashlink v0.12.2
+   Compiling aead v0.6.1
+   Compiling sha2 v0.11.1
+   Compiling bitflags v2.13.2
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling fallible-iterator v0.3.0
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1215/crates/core)
+   Compiling smallvec v1.16.4
+   Compiling p256 v0.14.0
+   Compiling aes-gcm v0.11.1
+   Compiling clap v4.6.7
+   Compiling toml v0.8.23
+   Compiling drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1215/crates/sys)
+   Compiling base64 v0.23.1
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.12.1
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1215/crates/cli)
+   Compiling tokio v1.54.1
+   Compiling rusqlite v0.41.1
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1215/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1215/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.89s
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1215/debug/deps/sim-477a3e0a0c69cb28)
+
+running 1 test
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it ... FAILED
+
+failures:
+
+---- the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it stdout ----
+FAIL hunt round 5: I1 one-lane: #104 rev has 2 live lanes: ["drover-rev-104-r1 on drover-rev-104-r1", "drover-rev-104-r1 on drover-rev-104-r1x"]
+minimised from 17 to 6 faults and scripts, 5000 to 2950 steps; for seeds.rs PLANS:
+    ("seed=4 cfg=2,2 steps=2950 | +18 T 60 drive --fast | +136 T 300 drive | +242 T 300 check | +1269 R queue drover add 103 | +1596 R queue drover add 104 | +2218 R queue drover add 102 | +2529 R queue drover add 101 | +3175 R queue drover add 105 | impl P 752 1", "hunt: I1 one-lane: #104 rev has 2 live lanes: ["drover-rev-104-r1 on drover-rev-104-r1"),
+replay: DROVER_SIM_PLAN='seed=4 cfg=2,2 steps=2950 | +18 T 60 drive --fast | +136 T 300 drive | +242 T 300 check | +1269 R queue drover add 103 | +1596 R queue drover add 104 | +2218 R queue drover add 102 | +2529 R queue drover add 101 | +3175 R queue drover add 105 | impl P 752 1' cargo test -p drover --test sim
+
+
+thread 'the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it' (310405) panicked at crates/cli/tests/sim/main.rs:291:9:
+random seed 1003 found it within the hunt's 5 rounds: I1 one-lane: #104 impl has 2 live lanes: ["drover-impl-104 on drover-impl-104", "drover-impl-104 on drover-impl-104x"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 45.17s
+
+error: test failed, to rerun pass `-p drover --test sim`

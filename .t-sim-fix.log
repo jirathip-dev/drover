@@ -1,0 +1,33 @@
+
+running 16 tests
+iiiii.test a_broken_invariant_fails_with_seed_and_trace has been running for over 60 seconds
+test a_fixture_db_replays_to_its_merge_order_and_counts has been running for over 60 seconds
+test a_metric_over_20_percent_worse_is_a_warning has been running for over 60 seconds
+test a_seed_replays_to_the_same_trace has been running for over 60 seconds
+test fixed_seeds_hold_every_invariant has been running for over 60 seconds
+test raising_a_serial_max_cuts_waits_without_a_new_invariant_failure has been running for over 60 seconds
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it has been running for over 60 seconds
+test the_incident_seed_records_the_verdict_with_one_supersede has been running for over 60 seconds
+..i...... 15/16
+the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it --- FAILED
+
+failures:
+
+---- the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it stdout ----
+FAIL hunt round 4: I1 one-lane: #101 impl has 2 live lanes: ["drover-impl-101 on drover-impl-101", "drover-impl-101 on drover-impl-101x"]
+minimised from 12 to 2 faults and scripts, 5000 to 4529 steps; for seeds.rs PLANS:
+    ("seed=9 cfg=2,4 steps=4529 | +1 T 300 check | +16 T 300 drive | +49 T 60 drive --fast | +1034 R queue drover add 101 | +1435 R queue drover add 102", "hunt: I1 one-lane: #101 impl has 2 live lanes: ["drover-impl-101 on drover-impl-101", "),
+replay: DROVER_SIM_PLAN='seed=9 cfg=2,4 steps=4529 | +1 T 300 check | +16 T 300 drive | +49 T 60 drive --fast | +1034 R queue drover add 101 | +1435 R queue drover add 102' cargo test -p drover --test sim
+
+
+thread 'the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it' (505391) panicked at crates/cli/tests/sim/main.rs:291:9:
+random seed 1003 found it within the hunt's 4 rounds: I1 one-lane: #104 impl has 2 live lanes: ["drover-impl-104 on drover-impl-104", "drover-impl-104 on drover-impl-104x"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it
+
+test result: FAILED. 9 passed; 1 failed; 6 ignored; 0 measured; 0 filtered out; finished in 240.52s
+
+error: test failed, to rerun pass `-p drover --test sim`

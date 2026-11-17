@@ -1,0 +1,25 @@
+
+running 1 test
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it has been running for over 60 seconds
+the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it --- FAILED
+
+failures:
+
+---- the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it stdout ----
+FAIL hunt round 11: I1 one-lane: #106 impl has 2 live lanes: ["drover-impl-106 on drover-impl-106", "drover-impl-106 on drover-impl-106x"]
+minimised from 9 to 3 faults and scripts, 5000 to 2131 steps; for seeds.rs PLANS:
+    ("seed=2 cfg=4,4 steps=2131 | +9 T 60 drive --fast | +76 T 300 check | +139 R queue drover add 106 | +160 T 300 drive | +171 R queue drover add 104 | impl P 848 1", "hunt: I1 one-lane: #106 impl has 2 live lanes: ["drover-impl-106 on drover-impl-106", "),
+replay: DROVER_SIM_PLAN='seed=2 cfg=4,4 steps=2131 | +9 T 60 drive --fast | +76 T 300 check | +139 R queue drover add 106 | +160 T 300 drive | +171 R queue drover add 104 | impl P 848 1' cargo test -p drover --test sim
+
+
+thread 'the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it' (385797) panicked at crates/cli/tests/sim/main.rs:291:9:
+random seed 1003 found it within the hunt's 11 rounds: I1 one-lane: #104 impl has 2 live lanes: ["drover-impl-104 on drover-impl-104", "drover-impl-104 on drover-impl-104x"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 173.07s
+
+error: test failed, to rerun pass `-p drover --test sim`
