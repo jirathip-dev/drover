@@ -1,0 +1,9 @@
+Decided: one aliased GraphQL query for exactly the tracked numbers replaces the 1,000-row closed list
+Because: "one aliased GraphQL query for those numbers"
+Rejected: the backlog since delta — it only sees issues updated after its first read
+Decided: the sim model answers the aliased query from its own closed list, so its metrics stay exact
+Because: crates/cli/tests/sim/model.rs:355
+Decided: closed_in memoises with entry().or_insert_with to keep check.rs under its arch-check size baseline
+Because: crates/core/src/check.rs:1924
+Check: drover::sim passes with the same exact metrics and arch-check reports no size violation
+Owner: Drover now asks GitHub about just the issues it tracks, in one request, so closed issues are never missed
