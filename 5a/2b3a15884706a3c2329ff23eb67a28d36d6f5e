@@ -1,0 +1,7 @@
+Decided: the triage test target runs in CI shard 1; test-shards.sh fails every shard while a target is in none
+Because: scripts/test-shards.txt:191
+Decided: no block on the cap raise; #1201 already merged it (line_cap 53500), so this PR is within the cap after merging staging
+Because: q1803
+Rejected: blocking this issue on #1201 per q1803 — #1201 is already merged, so waiting would hold a PR that already fits
+Check: scripts/test-shards.sh check exits 0, and cap-check reads 48179 / 53500
+Owner: The triage lane's tests now run in CI, and the PR fits under the raised line cap.
