@@ -1,0 +1,7 @@
+Decided: triage tests set DROVER_LANE through set_env, not std::env::set_var
+Because: crates/cli/tests/common/mod.rs:311
+Rejected: clearing lane env on every helper call — it would wipe each test's own lane env mid-test
+Decided: staging build fix, sim known-fleet metrics set to the values staging produces since #1180
+Because: crates/cli/tests/sim/main.rs:415
+Check: run each triage test alone (--exact) as nextest does; all four pass
+Owner: the test suite passes again on CI; triage tests no longer lose their lane setting
