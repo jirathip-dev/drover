@@ -1,0 +1,7 @@
+Decided: list the new compact test target in shard 1 of scripts/test-shards.txt
+Because: scripts/test-shards.sh:16
+Decided: spawn.rs conflict keeps compact's old-root check and staging's host admission
+Because: crates/core/src/spawn.rs:1031
+Rejected: merging compact.rs into compaction.rs — the two test different verbs (compact vs archive-events)
+Check: CI rust shards all run; shed.rs missing-shed test fails locally only because this host has /usr/local/bin/shed
+Owner: the CI test run was failing only because a new test file was not assigned to a shard; it now is, and staging is merged in
