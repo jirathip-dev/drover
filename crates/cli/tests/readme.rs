@@ -14,6 +14,12 @@ fn readme() -> String {
     std::fs::read_to_string(root().join("README.md")).unwrap()
 }
 
+fn quick_start() -> String {
+    let doc = std::fs::read_to_string(root().join("docs/setup.md")).unwrap();
+    let rest = doc.split("## Quick start\n").nth(1).unwrap().to_string();
+    rest.split("\n## ").next().unwrap().to_string()
+}
+
 fn doc_files() -> Vec<PathBuf> {
     let mut v = vec![root().join("README.md")];
     for e in std::fs::read_dir(root().join("docs")).unwrap() {
@@ -35,7 +41,7 @@ fn readme_is_short() {
 fn readme_commands_are_in_help_agent() {
     let help = Command::new(BIN).args(["help", "--agent"]).output().unwrap();
     let help = String::from_utf8(help.stdout).unwrap();
-    let text = readme();
+    let text = quick_start();
     let table = text.lines().filter(|l| l.starts_with("| `"));
     let cells = table.flat_map(|row| row[2..].split(" | ").next().unwrap().split(" / "));
     let mut cmds: Vec<&str> = cells
@@ -67,7 +73,7 @@ fn table_commands_exist() {
         .filter_map(|l| l.strip_prefix("  ")?.split_whitespace().next())
         .collect();
     let mut n = 0;
-    for row in readme().lines().filter(|l| l.starts_with("| `")) {
+    for row in quick_start().lines().filter(|l| l.starts_with("| `")) {
         for cell in row[2..].split(" | ").next().unwrap().split(" / ") {
             let cmd = cell.trim_matches('`').split_whitespace().next().unwrap();
             assert!(known.contains(&cmd), "README lists `{cmd}`, not in drover --help");
@@ -118,7 +124,7 @@ fn docs_leak_no_ids_tokens_or_personal_paths() {
 
 #[test]
 fn quick_start_runs_as_written() {
-    let text = readme();
+    let text = quick_start();
     let block = text.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
     let home = common::tmpdir("readme-quick-start");
     let bindir = Path::new(BIN).parent().unwrap();

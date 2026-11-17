@@ -4,11 +4,12 @@ use anyhow::Result;
 use serde_json::json;
 
 /// Refusals that only mean "not yet": the action stays pending.
-pub const SOFT: [&str; 10] = [
+pub const SOFT: [&str; 11] = [
     "HOST_BUSY",
     "HOST_FULL",
     "MEM_LOW",
     "CAP",
+    "IN_FLIGHT_CAP",
     "LOGIN_NEEDED",
     "SPAWN_PENDING",
     "SERIAL_BUSY",

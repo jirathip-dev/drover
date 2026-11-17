@@ -128,7 +128,7 @@ fn repo(name: &str) -> Repo {
 }
 
 fn lane(repo: &Repo, update: bool) -> (drover::Ctx, FakeShed) {
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     let c = ctx(
         &repo.dir,
         &CONFIG.replace("/tmp/does-not-matter/sendmeter", repo.local.to_str().unwrap()),
@@ -435,7 +435,7 @@ fn a_squash_merge_lands_one_commit_carrying_every_lane_note() {
     g(&repo.wt, &["pull", "-q", "origin", "issue-12"]);
     let second = "Decided: test the meter\nBecause: q5\nRejected: no test — the meter would drift\nCheck: c.rs holds the test\nOwner: the meter has a test\n";
     std::fs::write(repo.wt.join("why.md"), second).unwrap();
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     let r = pr(&head);
     let (code, out) = run(&c, &Git::new(&r), &["turn", "done"]);
     assert_eq!(code, 0, "{out}");

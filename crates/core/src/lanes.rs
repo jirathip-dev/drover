@@ -53,6 +53,7 @@ pub enum LaneState {
     Parked,
     Held(Vec<u64>),
     Asleep,
+    Owner,
 }
 
 impl Default for LaneState {
@@ -70,11 +71,20 @@ impl LaneState {
             LaneState::Parked => "parked".into(),
             LaneState::Held(on) => format!("held by {}", crate::queue::hashes(on)),
             LaneState::Asleep => "asleep".into(),
+            LaneState::Owner => "waiting-owner".into(),
         }
     }
     /// shed runs it and says `s`.
     pub fn is(&self, s: Status) -> bool {
         *self == LaneState::Live(s)
+    }
+    /// shed says it is busy: working or running.
+    pub fn busy(&self) -> bool {
+        matches!(self, LaneState::Live(s) if s.busy())
+    }
+    /// shed says it waits on someone: blocked or an approval.
+    pub fn blocked(&self) -> bool {
+        matches!(self, LaneState::Live(Status::Blocked | Status::Approval))
     }
 }
 
@@ -107,8 +117,11 @@ pub fn join(cfg: &Config, r: &dyn Runner, events: &[Event], st: &States, session
         };
         if let Some(e) = by_name(&a.name) {
             l = from_spawn(e, l);
+            if a.status() == Some(Status::Done) && owner(events, e) {
+                l.state = LaneState::Owner;
+            }
             if !seen.insert(a.name.clone()) {
-                let rank = |s: &LaneState| SECTIONS.iter().position(|x| *x == s.word()).unwrap_or(2);
+                let rank = |s: &LaneState| SECTIONS.iter().position(|x| *x == s.word()).unwrap_or(IDLE);
                 if let Some(o) = out.iter_mut().find(|o: &&mut Lane| o.name == a.name) {
                     if rank(&l.state) < rank(&o.state) {
                         *o = l;
@@ -195,6 +208,12 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
     let live = match sessions.seen(lane, sp.str("machine")) {
         Seen::Unreachable => return Health::Unknown,
         Seen::Absent => return Health::Dead(stamp::exit(events, lane)),
+        Seen::Here(x) if x.key_refused() => {
+            return Health::Stalled {
+                since: stamp::since(events, lane).unwrap_or(sp.ts).max(sp.ts),
+            }
+        }
+        Seen::Here(x) if held(events, x) => return Health::Fine,
         Seen::Here(x) => match x.status() {
             Some(st) => st,
             None => return Health::Dead(ended(events, sessions, sp)),
@@ -216,6 +235,29 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
         return Health::Stalled { since };
     }
     Health::Fine
+}
+
+/// #983: session `a` waits or works by design: running, on approval, on the owner or a rate limit; never nudged, stalled or dead.
+pub fn held(events: &[Event], a: &Session) -> bool {
+    match a.status() {
+        Some(Status::Running | Status::Approval | Status::Limited) => true,
+        Some(Status::Done) => last_spawn(events, &a.name).is_some_and(|sp| owner(events, sp)),
+        _ => false,
+    }
+}
+
+fn owner(events: &[Event], sp: &Event) -> bool {
+    let mine = |e: &&Event| e.seq > sp.seq && e.fleet == sp.fleet && e.issue == sp.issue;
+    let asked = crate::events::open_asks(events).iter().any(mine);
+    let ended = events.iter().filter(mine).rfind(|e| e.kind == "turn-end");
+    let ended = ended.filter(|t| matches!(t.str("state"), Some("blocked" | "need-input")));
+    let answered = |t: &Event| {
+        events
+            .iter()
+            .filter(mine)
+            .any(|e| e.kind == "decision" && e.seq > t.seq)
+    };
+    asked || ended.is_some_and(|t| !answered(t))
 }
 
 /// A session's fleet, issue and role from drover's labels on it, when its fleet is configured.
@@ -304,13 +346,28 @@ fn orchestrator(events: &[Event], e: &Event, l: Lane) -> Lane {
 }
 
 /// Section order on the page; any other state (unknown) counts as idle.
-pub const SECTIONS: &[&str] = &["blocked", "working", "idle", "done", "parked", "dead"];
+pub const SECTIONS: &[&str] = &[
+    "blocked",
+    "waiting-approval",
+    "waiting-owner",
+    "rate-limited",
+    "working",
+    "running",
+    "idle",
+    "done",
+    "parked",
+    "dead",
+];
+const IDLE: usize = 6;
+
+/// #983: the states the busy count counts.
+pub const BUSY: [&str; 2] = ["working", "running"];
 
 pub type Groups<'a> = Vec<(&'static str, Vec<(String, Vec<&'a Lane>)>)>;
 
 /// Non-empty [`SECTIONS`], each split by fleet (alphabetical, Others last), newest `changed` first.
 pub fn group(all: &[Lane], changed: impl Fn(&Lane) -> u64) -> Groups<'_> {
-    let section = |l: &Lane| SECTIONS.iter().position(|s| *s == l.state.word()).unwrap_or(2);
+    let section = |l: &Lane| SECTIONS.iter().position(|s| *s == l.state.word()).unwrap_or(IDLE);
     let mut v: Vec<&Lane> = all.iter().collect();
     v.sort_by_key(|l| {
         (

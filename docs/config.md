@@ -41,7 +41,7 @@ review or ready).
   like any other, and counts toward the group's use. A conflict at merge gets an update round as usual.
 - Issues already in flight over a limit when a group is added keep going (grandfathered).
 
-Board, status and the Host tab show each group's use: `serial: db 3/10 · ci 1/1`.
+`status` and `board` show each group's use: `serial: db 3/10 · ci 1/1`.
 
 Hot files (#891): each file the last stored hotspots list names is its own one-slot group, `hot <file>`, joined
 only by a PR's diff (never a `--serial` mark). Drive drops a file from it on its next pass once
@@ -103,6 +103,12 @@ left out. It keeps the list in the state folder as
 `hotspots-<fleet>.json`. With any hot file it opens `hotspots: <fleet> week of <monday>`, or updates that issue while it
 is open, and queues it `--architect`. `drover tick` stores each fleet's list daily and files its issue weekly; `hotspots = "off"` in `[fleet.<n>]` opts
 out.
+
+## In-flight cap (#1129)
+
+`max_in_flight = N` in `[fleet.<n>]` caps the fleet's PRs in flight (an issue in impl, fix, review, verify or ready,
+or one held with an open PR); unset is 8, `0` is off. At the cap drive starts no new issue but keeps reviewing, fixing
+and merging; `drover spawn` of a new issue is refused `IN_FLIGHT_CAP` unless `--force`.
 
 ## Hygiene (#1101)
 
@@ -187,6 +193,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `gate_check_minutes` | `30` | a premerge or gate check (a build or test run) is killed after this long |
 | `shed_read_millis` | `300` | how long drive's intake waits for shed's state changes |
 | `proxy_connect_secs` | `1` | the token proxy's liveness connect timeout |
+| `proxy_retry_secs` | `300` | a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it |
 | `service_call_secs` | `2` | a call to the running service's socket times out after this long |
 | `disk_probe_secs` | `2` | a folder listing slower than this marks its disk as not answering |
 | `disk_sick_secs` | `300` | a disk that let a call run out of time stays hung this long |
@@ -205,10 +212,11 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `serve_remote_secs` | `10` | serve re-reads the remote hosts (ssh) in the background this often |
 | `serve_host_secs` | `10` | serve re-samples this host's load in the background this often |
 | `serve_heartbeat_secs` | `15` | `/live` pings this often; a stream whose last 2 pings are still unsent is dropped |
-| `serve_handover_secs` | `300` | `self-update` waits this long for the running serve to hand over before restarting it |
+| `serve_handover_secs` | `300` | how long serve waits for a held port's serve to answer, hand over, or let go of the port (#1244) |
 | `serve_mem_mb` | `300` | serve over this much RSS logs `serve-mem-high` once and hands over to a fresh copy of itself |
 | `slo_api_p95_ms` | `1000` | `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once |
 | `slo_api_minutes` | `10` | how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api` |
 | `slo_idle_minutes` | `20` | no lane working this long while the queue has spawnable work breaches `slo-idle` |
 | `slo_tick_minutes` | `10` | a tick running longer than this breaches `slo-tick`; the next fast step stops it |
 | `slo_pass_minutes` | `30` | no slow drive pass of a fleet for this long shows the owner's `Drive is stuck` card |
+| `stall_restart_hours` | `2` | an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own) |

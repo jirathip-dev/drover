@@ -72,7 +72,7 @@ fn pass(c: &drover::Ctx, r: &Fake) -> serde_json::Value {
 
 #[test]
 fn a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness() {
-    let (c, sh) = fleet("kicks-ten", 11, 10);
+    let (c, sh) = fleet_with("kicks-ten", 11, "max_in_flight = 0", 10, &[]);
     let r = fake("1.0");
     let t0 = std::time::Instant::now();
     let d = pass(&c, &r);
@@ -1102,4 +1102,73 @@ fn one_free_slot_goes_to_the_fix_round_and_over_the_load_limit_neither_spawns() 
     let r = fake("1.0");
     let d = pass(&c, &r);
     assert_eq!((launched(&r, 21), launched(&r, 1)), (1, 0), "{d}");
+}
+
+fn ended(c: &drover::Ctx, n: u64, kind: &str) {
+    let d = serde_json::json!({"step": "spawn", "role": "impl", "error": "git worktree add: exit 255"});
+    let e = drover::events::Event::new(c.now - 5, "sendmeter", Some(n), kind, d);
+    drover::events::append(&c.state, &e).unwrap();
+}
+
+#[test]
+fn a_start_whose_spawn_ended_frees_its_slot_while_its_holder_lives() {
+    for kind in ["spawn", "spawn-error", "failed"] {
+        let (c, _sh) = fleet(&format!("kicks-1234-{kind}"), 2, 1);
+        mark(&c, 9, 4242, 10);
+        ended(&c, 9, kind);
+        let r = fake("1.0")
+            .reply("kill -0 4242", "")
+            .reply("ps -o etime= -p 4242", "  00:10\n");
+        let d = pass(&c, &r);
+        assert_eq!(launched(&r, 1), 1, "{kind}: {d}");
+        assert!(!codes(&d).contains(&"SPAWN_PENDING".to_string()), "{kind}: {d}");
+        assert!(marker(&c, 9).is_none(), "{kind}: the ended start's marker is removed");
+    }
+}
+
+#[test]
+fn one_fleets_stale_markers_never_hold_another_fleets_start() {
+    let hosts = "\n[hosts.mini]\nstart_max = 0\n\n[hosts.boat1]\nmachine = \"boat1\"\nstart_max = 2\n";
+    let c = hosted("kicks-1234-fleets", &[("alpha", 1), ("beta", 1)], 4, hosts);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let stale = |n: u64, at: u64, pid: u32| {
+        let e = serde_json::json!({"ts": 1, "fleet": "alpha", "issue": n, "type": "spawn", "role": "impl", "host": "boat1"});
+        let key = format!("spawn-alpha-{n}.pending");
+        let l = drover::db::take(&c.state, &key, at, 300, &e.to_string(), &|_| true).unwrap();
+        assert!(drover::db::renew(&c.state, &l, &drover::db::Lease { pid, ..l.clone() }));
+    };
+    stale(8, c.now - 730, 4242);
+    stale(9, c.now - 10, 4343);
+    let r = fake_with("1.0", Fake::default().reply("ssh ", ""));
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let on = starting_on(&c);
+    assert!(
+        on.get("boat1").is_some_and(|f| f.iter().any(|f| f == "beta")),
+        "{on:?}\n{out}"
+    );
+    let gone = ["spawn-alpha-8.pending", "spawn-alpha-9.pending"];
+    assert!(gone.iter().all(|k| lease_on(&c, k).is_none()), "{out}");
+}
+
+#[test]
+fn waiting_shows_no_starting_count_once_the_slot_is_free() {
+    let (c, _sh) = fleet("kicks-1234-waiting", 2, 1);
+    mark(&c, 9, 4343, 10);
+    let r = fake("1.0")
+        .reply("kill -0 4343", "")
+        .reply("ps -o etime= -p 4343", "  00:10\n");
+    let d = pass(&c, &r);
+    assert!(codes(&d).contains(&"SPAWN_PENDING".to_string()), "{d}");
+    let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("1/2 starting"), "held while the start lives: {out}");
+    ended(&c, 9, "spawn-error");
+    let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("starting"), "{out}");
+    let (code, out) = run(&c, &r, &["board", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("starting"), "{out}");
 }

@@ -12,7 +12,7 @@ use crate::gate::{gate, refused, Refusal};
 use crate::handover::Handover;
 use crate::host::{self, Host};
 use crate::runner::{Out, Runner};
-use crate::snapshot::Snapshot;
+use crate::snapshot::{key_in, out, Snapshot};
 use crate::{devices, gh, lanes, queue, term, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::json;
@@ -28,6 +28,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+#[path = "cooee.rs"]
+mod cooee;
 mod fresh;
 mod jobs;
 #[path = "screens.rs"]
@@ -209,9 +211,9 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
     let (s, busy, open) = (&s, &AtomicUsize::new(0), &AtomicUsize::new(0));
     std::thread::scope(|sc| {
         let limits = || Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
-        // #57: the host every 10 s (its 2 s vm_stat delta included) here, never on a request.
         sc.spawn(move || loop {
             let mut hs = host::sample(r);
+            host::pace(&ctx.state, None, &mut hs, crate::now());
             host::window(&ctx.state, &mut hs);
             *lock(&h) = hs;
             s.r.sampled(crate::now());
@@ -311,16 +313,17 @@ impl Runner for Memo<'_> {
         cache().insert(key, (t, out.clone()));
         Ok(crate::snapshot::out(out))
     }
-    /// #298: a call with stdin (`shed connect`, a file write) is never a cached read.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
+        self.run_for(prog, args, input, crate::runner::limit(prog, args))
+    }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
         }
         if self.4.ts > 0 && crate::snapshot::remote(prog) {
-            let read = self.4.reads.get(&crate::snapshot::key_in(prog, args, input));
-            return Ok(crate::snapshot::out(read.cloned().flatten()));
+            return Ok(out(self.4.reads.get(&key_in(prog, args, input)).cloned().flatten()));
         }
-        self.0.run_in(prog, args, input)
+        self.0.run_for(prog, args, input, limit)
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.0.shed()
@@ -628,7 +631,8 @@ fn names(name: &str, v: &str) -> bool {
 /// green = merged/PASS/ready/working, amber = queued/impl/review/fix/idle, red = blocked/dead/FAIL/needs you.
 pub fn tone(state: &str) -> &'static str {
     match state.split('(').next().unwrap_or_default() {
-        "merged" | "ready" | "PASS" | "working" | "done" | "ok" | "normal" => "g",
+        "merged" | "ready" | "PASS" | "working" | "running" | "done" | "ok" | "normal" => "g",
+        s if s.starts_with("waiting-") => "r",
         "blocked"
         | "needs-human"
         | "design-review"
@@ -763,8 +767,9 @@ pub fn act(role: &str, state: &str) -> &'static str {
     };
     match state.split('(').next().unwrap_or_default() {
         "blocked" | "dead" | "needs-human" | "⏸ waiting: decision" => "blocked",
+        s if s.starts_with("waiting-") => "blocked",
         "done" | "ready" | "merged" => "done",
-        "working" => busy(role),
+        "working" | "running" => busy(role),
         "fix" if role == "update" => "update",
         s @ ("impl" | "fix" | "review") => busy(s),
         _ => "idle",
@@ -1184,6 +1189,7 @@ impl<'a> Server<'a> {
         };
         let (status, ctype, body) = match (method, path) {
             (_, p) if p.starts_with("/api/") => self.api(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
+            (_, p) if p.starts_with("/cooee/") => self.cooee(ctx, head, (method, p), body),
             (_, p) if p.starts_with("/screens/") || p == "/action" => self.screens(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
@@ -2125,7 +2131,7 @@ impl<'a> Server<'a> {
             if !lanes.is_empty() {
                 meta.push(format!("{} lane{}", lanes.len(), plural(lanes.len())));
             }
-            meta.extend(queue::serial_use(events, st, f, Some(cfg)));
+            meta.extend(queue::fleet_use(ctx, events, st, f, Some(cfg)));
             card.drive = drive(ctx, events, f, meta);
             // #173: a refused pipeline stops this fleet only; its card says so in red.
             if !fc.bad.is_empty() {
@@ -2351,15 +2357,12 @@ impl<'a> Server<'a> {
             o(&l.port),
             a,
         ];
-        let busy = l
-            .note()
-            .filter(|_| l.state.is(crate::session::Status::Working))
-            .map(|n| LaneNow {
-                title: n.clone(),
-                w: None,
-                n: Some(n),
-                t: None,
-            });
+        let busy = l.note().filter(|_| l.state.busy()).map(|n| LaneNow {
+            title: n.clone(),
+            w: None,
+            n: Some(n),
+            t: None,
+        });
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
@@ -2400,7 +2403,7 @@ impl<'a> Server<'a> {
             pr: l.issue.zip(l.fleet.as_ref()).map(|(n, f)| pr_data(ctx, fc, f, n, s)),
             repo: fc.map(|c| c.repo.clone()),
             dead: l.state.word() == "dead",
-            blocked: (l.state.is(crate::session::Status::Blocked)).then(|| self.blocked(ctx, l, paired)),
+            blocked: l.state.blocked().then(|| self.blocked(ctx, l, paired)),
             unpark: l.fleet.clone().filter(|_| s.is_some_and(|s| s.state == "parked")),
         }
     }
@@ -2881,16 +2884,14 @@ struct Canned(BTreeMap<String, String>);
 
 impl Runner for Canned {
     fn run(&self, prog: &str, args: &[String]) -> Result<crate::runner::Out> {
-        let line = format!("{prog} {}", args.join(" "));
-        let out = self
-            .0
-            .iter()
-            .filter(|(k, _)| line.starts_with(k.as_str()))
-            .max_by_key(|(k, _)| k.len());
-        Ok(crate::runner::Out {
-            code: i32::from(out.is_none()),
-            stdout: out.map_or(String::new(), |o| o.1.clone()),
-            stderr: String::new(),
+        crate::snapshot::each_probe(prog, args, &|prog, args| {
+            let line = format!("{prog} {}", args.join(" "));
+            let out = self.0.iter().rev().find(|(k, _)| line.starts_with(k.as_str()));
+            Ok(crate::runner::Out {
+                code: i32::from(out.is_none()),
+                stdout: out.map_or(String::new(), |o| o.1.clone()),
+                stderr: String::new(),
+            })
         })
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<crate::runner::Out> {

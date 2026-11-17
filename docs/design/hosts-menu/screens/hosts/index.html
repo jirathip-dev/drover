@@ -1,0 +1,78 @@
+{
+ "type": "sheet",
+ "id": "hosts",
+ "title": "Hosts",
+ "cancel": "Close",
+ "stream": "/screens/hosts/stream",
+ "blocks": [
+  {
+   "type": "section",
+   "id": "hosts-sec",
+   "header": "hosts (2)",
+   "footer": "Tap a host for its buttons. Host history and charts live in Beacon.",
+   "blocks": [
+    {
+     "type": "list",
+     "id": "hosts-list",
+     "rows": [
+      {
+       "type": "row",
+       "id": "h-mini",
+       "title": "mini",
+       "badge": {
+        "text": "on",
+        "tone": "ok"
+       },
+       "subtitle": {
+        "text": "main host \u00b7 2 leftovers"
+       },
+       "value": "4 lanes",
+       "swipe": [
+        {
+         "label": "Reap 2",
+         "tone": "bad",
+         "action": "reap",
+         "values": {},
+         "confirm": {
+          "title": "Reap 2 leftover processes on mini?",
+          "message": "They run in closed lanes' worktrees (310 MB). TERM, then KILL.",
+          "ok": "Reap"
+         }
+        }
+       ]
+      },
+      {
+       "type": "row",
+       "id": "h-boat1",
+       "title": "boat1",
+       "badge": {
+        "text": "on",
+        "tone": "ok"
+       },
+       "subtitle": {
+        "text": "cloud host"
+       },
+       "value": "1 lane",
+       "swipe": [
+        {
+         "label": "Off",
+         "tone": "bad",
+         "action": "host",
+         "values": {
+          "host": "boat1",
+          "to": "off"
+         },
+         "confirm": {
+          "title": "Turn boat1 off?",
+          "message": "No new lanes go to boat1; its 1 live lane finishes there.",
+          "ok": "Turn off"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -137,7 +137,7 @@ fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
     let r = Fake::default();
     hook(&r);
     assert!(r.calls.borrow().is_empty(), "inert: {:?}", r.calls.borrow());
-    std::env::set_var("DROVER_LANE", "sendmeter:24:impl");
+    set_env("DROVER_LANE", "sendmeter:24:impl");
     let r = Fake::default();
     hook(&r);
     std::env::remove_var("DROVER_LANE");
