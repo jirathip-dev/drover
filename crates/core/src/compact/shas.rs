@@ -9,6 +9,23 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
+/// Every saved commit sha compact remaps, as (record kind, field); `moves` reads only these.
+pub const SAVED: &[(&str, &str)] = &[
+    ("merged", "merge_sha"),
+    ("merged", "verdict_sha"),
+    ("verdict", "sha"),
+    ("why", "sha"),
+];
+
+/// The sha-named fields compact leaves as they are, each with why.
+pub const KEPT: &[(&str, &str)] = &[
+    ("spawn_sha", "a verify verdict's lane start, compared before merge only"),
+    (
+        "red_sha",
+        "a land's red integration tip, read only while that land runs",
+    ),
+];
+
 /// A compact run as its `compacted` record names it.
 #[derive(Debug, Clone)]
 pub struct Run {

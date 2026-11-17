@@ -105,6 +105,9 @@ fn compact_keeps_every_tree_answers_why_needs_a_fresh_review_and_undoes_exactly(
     g(&seed, &["checkout", "-q", "staging"]);
     g(&seed, &["merge", "-q", "--no-ff", "-m", "a: two (#1) (#11)", "issue-1"]);
     let m1 = g(&seed, &["rev-parse", "HEAD"]);
+    g(&seed, &["checkout", "-qb", "main", &format!("{cut}^1")]);
+    g(&seed, &["merge", "-q", "--no-ff", "-m", "release", &m1]);
+    g(&seed, &["checkout", "-q", "staging"]);
     g(&seed, &["checkout", "-qb", "issue-2"]);
     commit(&seed, "d.rs", "d\n", "d: add");
     g(&seed, &["checkout", "-q", "staging"]);
@@ -112,7 +115,15 @@ fn compact_keeps_every_tree_answers_why_needs_a_fresh_review_and_undoes_exactly(
     g(&seed, &["checkout", "-q", "issue-2"]);
     g(&seed, &["merge", "-q", "--no-edit", "staging"]);
     let o2 = g(&seed, &["rev-parse", "HEAD"]);
-    let all = ["staging", "issue-1", "issue-2", "issue-5", "old-wip", "refs/notes/why"];
+    let all = [
+        "staging",
+        "main",
+        "issue-1",
+        "issue-2",
+        "issue-5",
+        "old-wip",
+        "refs/notes/why",
+    ];
     g(&seed, &[&["push", "-q", "origin"][..], &all].concat());
     g(&seed, &["push", "-q", "origin", "issue-2:refs/pull/22/head"]);
     g(
@@ -148,6 +159,8 @@ fn compact_keeps_every_tree_answers_why_needs_a_fresh_review_and_undoes_exactly(
     let before = refs();
     let undo = before.lines().find(|l| l.ends_with("refs/heads/staging")).unwrap()[..40].to_string();
     let old_tree = g(&local, &["rev-parse", "origin/staging^{tree}"]);
+    let main_old = g(&local, &["rev-parse", "origin/main"]);
+    let main_tree = g(&local, &["rev-parse", "origin/main^{tree}"]);
     let body = format!("Closes #2\n\n## Evidence (head {o2:.9})");
     let fake = Fake::default()
         .reply(
@@ -188,23 +201,71 @@ fn compact_keeps_every_tree_answers_why_needs_a_fresh_review_and_undoes_exactly(
     let (_, again) = run(&c, &r, &["compact", "sendmeter", "--cut", &cut, "--dry-run"]);
     assert_eq!(tip(&again), new, "the plan is the same on a second run");
 
-    let push = format!("drover compact sendmeter --push {new}");
+    let moved = out
+        .lines()
+        .find_map(|l| l.strip_prefix(&format!("main      {main_old:.9} → ")));
+    assert!(moved.unwrap().ends_with("· its own card"), "{out}");
+
     let (code, out) = run(&c, &r, &["compact", "sendmeter", "--push", &new]);
     assert_eq!((code, out.contains("COMPACT_UNAPPROVED")), (3, true), "{out}");
-    let card = |id: &str, cmd: &str| {
+    let thread = json!({"thread": "t", "title": "compact"});
+    append(&c.state, &Event::new(15, "sendmeter", None, "thread-new", thread)).unwrap();
+    let (code, out) = run(&c, &r, &["compact", "sendmeter", "--cut", &cut, "--thread", "t"]);
+    assert_eq!(code, 0, "{out}");
+    let cards = || -> Vec<(String, String, String)> {
+        let e = history(&c.state).unwrap();
+        let s = |e: &Event, k: &str| e.str(k).unwrap().to_string();
+        let posted = e.iter().filter(|e| e.kind == "run-card");
+        posted.map(|e| (s(e, "id"), s(e, "cmd"), s(e, "blast"))).collect()
+    };
+    let posted = cards();
+    assert_eq!(posted.len(), 2, "two separate cards: {posted:?}");
+    let (line, main) = (&posted[0], &posted[1]);
+    assert_eq!(line.1, format!("drover compact sendmeter --push {new}"));
+    assert!(
+        line.2.contains("every ref of jirathip-dev/sendmeter but main"),
+        "{line:?}"
+    );
+    let main_new = main
+        .1
+        .strip_prefix("drover compact sendmeter --main --push ")
+        .unwrap()
+        .to_string();
+    assert!(moved.unwrap().starts_with(&main_new[..9]), "{main:?}");
+    assert!(
+        main.2.contains(&format!("lease on {main_old:.12}")) && main.2.contains("main-merge workflows"),
+        "{main:?}"
+    );
+    let approve = |id: &str| {
         for (kind, d) in [
-            ("run-card", json!({"id": id, "cmd": cmd, "thread": "t"})),
             ("run-settled", json!({"id": id, "approved": true})),
             ("run-started", json!({"id": id})),
         ] {
             append(&c.state, &Event::new(20, "sendmeter", None, kind, d)).unwrap();
         }
     };
-    card("r1", &push);
+    let on = |b: &str| g(&dir, &["--git-dir", origin.to_str().unwrap(), "rev-parse", b]);
+    approve(&line.0);
+    let (code, out) = run(&c, &r, &["compact", "sendmeter", "--main", "--push", &main_new]);
+    assert_eq!(
+        (code, out.contains("COMPACT_UNAPPROVED")),
+        (3, true),
+        "the line's card does not cover main: {out}"
+    );
+    approve(&main.0);
+    let (code, out) = run(&c, &r, &["compact", "sendmeter", "--main", "--push", &main_new]);
+    assert_eq!((code, out.contains("COMPACT_NOT_READY")), (3, true), "{out}");
+    assert_eq!(refs(), before, "main waits for the line's card");
     let (code, out) = run(&c, &r, &["compact", "sendmeter", "--push", &new]);
     assert_eq!(code, 0, "{out}");
-    let on = |b: &str| g(&dir, &["--git-dir", origin.to_str().unwrap(), "rev-parse", b]);
     assert_eq!(on("staging"), new);
+    assert_eq!(on("main"), main_old, "the line's card leaves main alone");
+    let (code, out) = run(&c, &r, &["compact", "sendmeter", "--main", "--push", &main_new]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(on("main"), main_new);
+    assert_ne!(main_new, main_old);
+    assert_eq!(on("main^{tree}"), main_tree, "main's tip tree is identical");
+    assert_eq!(on("main^1"), on("staging~1"), "main's release stands on the new line");
     assert_eq!(on("staging^{tree}"), old_tree, "the tip tree is identical");
     assert_eq!(
         g(
@@ -259,11 +320,78 @@ fn compact_keeps_every_tree_answers_why_needs_a_fresh_review_and_undoes_exactly(
     let old = drover::compact::rooted(&r, &events, ("sendmeter", f), &local, &o2).unwrap_err();
     assert_eq!(old.code, "OLD_ROOT");
 
-    card("r2", &format!("drover compact sendmeter --undo --push {undo}"));
+    let (code, out) = run(&c, &r, &["compact", "sendmeter", "--undo", "--thread", "t"]);
+    assert_eq!(code, 0, "{out}");
+    let posted = cards();
+    let undo_cmds: Vec<&str> = posted[2..].iter().map(|p| p.1.as_str()).collect();
+    assert_eq!(
+        undo_cmds,
+        [
+            format!("drover compact sendmeter --undo --push {undo}"),
+            format!("drover compact sendmeter --undo --main --push {main_old}")
+        ]
+    );
+    approve(&posted[2].0);
     let (code, out) = run(&c, &r, &["compact", "sendmeter", "--undo", "--push", &undo]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(on("main"), main_new, "the line's undo leaves main alone");
+    approve(&posted[3].0);
+    let (code, out) = run(
+        &c,
+        &r,
+        &["compact", "sendmeter", "--undo", "--main", "--push", &main_old],
+    );
     assert_eq!(code, 0, "{out}");
     assert_eq!(refs(), before, "undo restores the old tip and every ref exactly");
     let events = history(&c.state).unwrap();
     assert!(events.iter().any(|e| e.kind == "compact-undone"));
     drover::compact::rooted(&r, &events, ("sendmeter", f), &local, &o2).unwrap();
+}
+
+fn unlisted(src: &str) -> Vec<String> {
+    let listed: Vec<&str> = (drover::compact::SAVED.iter().map(|s| s.1))
+        .chain(drover::compact::KEPT.iter().map(|k| k.0))
+        .collect();
+    let mut out: Vec<String> = (src.match_indices("\": "))
+        .filter_map(|(i, _)| Some(src[..i].rsplit_once('"')?.1))
+        .filter(|key| *key == "sha" || key.ends_with("_sha"))
+        .filter(|key| key.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
+        .map(String::from)
+        .filter(|key| !listed.contains(&key.as_str()))
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn sources() -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut todo: Vec<_> = ["core/src", "server/src", "cli/src"].map(|d| root.join(d)).into();
+    let mut all = String::new();
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                todo.push(p);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                all += &std::fs::read_to_string(&p).unwrap();
+            }
+        }
+    }
+    all
+}
+
+#[test]
+fn every_saved_sha_field_is_in_compacts_list() {
+    assert_eq!(
+        unlisted(&sources()),
+        Vec::<String>::new(),
+        "a saved commit sha compact does not remap: add it to compact::SAVED, or to KEPT with why"
+    );
+}
+
+#[test]
+fn a_planted_saved_sha_field_fails_the_list_check() {
+    let planted = sources() + "\nlet d = json!({\"pr\": num, \"base_sha\": base});\n";
+    assert_eq!(unlisted(&planted), ["base_sha"]);
 }
