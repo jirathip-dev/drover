@@ -1,0 +1,23 @@
+Decided: drive reads a remote reviewer's verdict.md live when the pass's batched look had none (rev idle, exited, or pickup failed) and records it via `drover verdict` if it names the PR head.
+Because: "A boat reviewer's finished `verdict.md` is recorded within one drive pass, whether the reviewer ran `drover verdict` (via the outbox) or only wrote the file."
+Because: crates/core/src/snapshot.rs:163 a remote read the look's batch lost is cached as None for the whole pass, with its ssh error dropped, so the scan saw a finished review as "reviewer exited without a verdict" and re-reviewed it.
+Decided: a failed fetch or failed `drover verdict` logs a passive `verdict-pickup-failed` with its reason (deduped per review), holds the re-review, and waiting shows it until a pass works.
+Because: "A failed pickup (ssh error, file missing) is logged with its reason and retried next pass, never left as 'recording within 1 min'."
+Decided: a missing verdict.md (cat's "No such file") keeps today's path: an exited reviewer is reviewed again.
+Rejected: copying the remote file to the state dir and recording that copy — no_proof, repro and verify shots read --file on the lane's host, so a local copy would break them.
+Rejected: one more live read inside the scan — the scan also feeds the board and status, which must never ssh on a request path.
+Check: crates/cli/tests/remote_verdict.rs: pass 1 with the boat unreachable holds the review and logs the reason; pass 2 records it; a look that missed the file is fetched and recorded in the same pass.
+Owner: A boat review that finished but could not be read is no longer thrown away; drive keeps fetching it, shows why it failed, and records it as soon as the boat answers.
+
+Decided: drive reads a remote reviewer's verdict.md live when the pass's batched look had none (rev idle, exited, or pickup failed) and records it via `drover verdict` if it names the PR head.
+Because: "A boat reviewer's finished `verdict.md` is recorded within one drive pass, whether the reviewer ran `drover verdict` (via the outbox) or only wrote the file."
+Because: crates/core/src/snapshot.rs:163 a remote read the look's batch lost is cached as None for the whole pass, with its ssh error dropped, so the scan saw a finished review as "reviewer exited without a verdict" and re-reviewed it.
+Decided: a failed fetch or failed `drover verdict` logs a passive `verdict-pickup-failed` with its reason (deduped per review), holds the re-review, and waiting shows it until a pass works.
+Because: "A failed pickup (ssh error, file missing) is logged with its reason and retried next pass, never left as 'recording within 1 min'."
+Decided: a missing verdict.md (cat's "No such file") keeps today's path: an exited reviewer is reviewed again.
+Rejected: copying the remote file to the state dir and recording that copy — no_proof, repro and verify shots read --file on the lane's host, so a local copy would break them.
+Rejected: one more live read inside the scan — the scan also feeds the board and status, which must never ssh on a request path.
+Check: crates/cli/tests/remote_verdict.rs: pass 1 with the boat unreachable holds the review and logs the reason; pass 2 records it; a look that missed the file is fetched and recorded in the same pass.
+Decided: remote_verdict goes in shard 1 of scripts/test-shards.txt, the smallest shard.
+Because: scripts/test-shards.sh:9 fails CI when a test target is in no shard, so every test shard failed at b248ee03.
+Owner: A boat review that finished but could not be read is no longer thrown away; drive keeps fetching it, shows why it failed, and records it as soon as the boat answers.
