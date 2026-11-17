@@ -2875,16 +2875,18 @@ struct Canned(BTreeMap<String, String>);
 
 impl Runner for Canned {
     fn run(&self, prog: &str, args: &[String]) -> Result<crate::runner::Out> {
-        let line = format!("{prog} {}", args.join(" "));
-        let out = self
-            .0
-            .iter()
-            .filter(|(k, _)| line.starts_with(k.as_str()))
-            .max_by_key(|(k, _)| k.len());
-        Ok(crate::runner::Out {
-            code: i32::from(out.is_none()),
-            stdout: out.map_or(String::new(), |o| o.1.clone()),
-            stderr: String::new(),
+        crate::snapshot::each_probe(prog, args, &|prog, args| {
+            let line = format!("{prog} {}", args.join(" "));
+            let out = self
+                .0
+                .iter()
+                .filter(|(k, _)| line.starts_with(k.as_str()))
+                .max_by_key(|(k, _)| k.len());
+            Ok(crate::runner::Out {
+                code: i32::from(out.is_none()),
+                stdout: out.map_or(String::new(), |o| o.1.clone()),
+                stderr: String::new(),
+            })
         })
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<crate::runner::Out> {

@@ -74,6 +74,30 @@ pub fn batch(r: &dyn Runner, lines: &[String]) -> Vec<Option<String>> {
     lines.iter().map(|_| each()).collect()
 }
 
+/// #951: a `batch` script answered probe by probe through `one`; any other command goes to `one` whole.
+pub fn each_probe(
+    prog: &str,
+    args: &[String],
+    one: &dyn Fn(&str, &[String]) -> anyhow::Result<Out>,
+) -> anyhow::Result<Out> {
+    let script = match (prog, args) {
+        ("sh", [c, s]) if c == "-c" && s.contains("\\036") => s,
+        _ => return one(prog, args),
+    };
+    let mut stdout = String::new();
+    for l in script.lines() {
+        let cmd = l.split(" </dev/null").next().unwrap_or_default().trim_matches('\'');
+        let words: Vec<String> = cmd.split("' '").map(|w| w.replace("'\\''", "'")).collect();
+        let Some((p, rest)) = words.split_first() else { continue };
+        let o = one(p, rest)?;
+        stdout += &format!("{}\x1e{}\x1e", o.stdout, o.code);
+    }
+    Ok(Out {
+        stdout,
+        ..Out::default()
+    })
+}
+
 pub struct Snap<'a> {
     r: &'a dyn Runner,
     miss: Miss,
