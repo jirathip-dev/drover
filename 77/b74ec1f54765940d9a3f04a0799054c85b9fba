@@ -1,0 +1,26 @@
+Decided: gh::closed takes the tracked issue numbers and asks one aliased GraphQL query (`i<n>:issue(number:n){state}`) for exactly those, cached 60 s per fleet while the cache covers the asked set.
+Because: "Ask only about the issues herdsman tracks as open: one aliased GraphQL query for those numbers"
+Because: crates/core/src/check.rs:1900 passes the fleet's open tracked issues; drive passes the one issue whose PR closed.
+Decided: clean asks about the fleet's tracked issues that are not merged (merged ones are cleaned before the closed check).
+Rejected: the backlog `since` delta — it only sees issues updated after its first read and depends on backlog running first; the aliased query is exact.
+Rejected: chunking the aliases — "No fixed limit" and tracked open issues stay well under GitHub's node limits.
+Check: a deleted or transferred tracked number makes GraphQL return an error, so that fleet's closed read fails for the tick, as any gh failure did before.
+Owner: Each tick now asks GitHub only about the issues drover is tracking, in one request, and sees closures no matter how many closed issues the repo has.
+
+Decided: one aliased GraphQL query for exactly the tracked numbers replaces the 1,000-row closed list
+Because: "one aliased GraphQL query for those numbers"
+Rejected: the backlog since delta — it only sees issues updated after its first read
+Decided: the sim model answers the aliased query from its own closed list, so its metrics stay exact
+Because: crates/cli/tests/sim/model.rs:355
+Decided: closed_in memoises with entry().or_insert_with to keep check.rs under its arch-check size baseline
+Because: crates/core/src/check.rs:1924
+Check: drover::sim passes with the same exact metrics and arch-check reports no size violation
+Owner: Drover now asks GitHub about just the issues it tracks, in one request, so closed issues are never missed
+
+Decided: fix round 3 is a merge of origin/staging only; the red sim hunt test came from the branch being 15 commits behind staging
+Because: crates/core/src/spawn.rs:998
+Decided: keep one aliased GraphQL query for exactly the tracked numbers
+Because: "one aliased GraphQL query for those numbers"
+Rejected: retuning the hunt test or the planted sabotage — staging's own seeds already hold once merged
+Check: seed 1003's sim trace at this head equals staging's except the closed-issue read line, and seeds 1000-1004 hold under the planted sabotage
+Owner: The failing check came from an out-of-date branch; after catching up with staging the simulator behaves exactly as before apart from the new GitHub query
