@@ -1,0 +1,7 @@
+Decided: the red shard was host_deadline, a hung-ssh timing test that staging's #1254 fixes; I merged origin/staging and changed no test code
+Decided: chat_cards in later.rs takes paired and includes staging's chat owner cards, so config proposals and secret requests get [later] too
+Because: "Each card has [later]; each grouped card has [later all]."
+Decided: hide_card builds the owner cards with paired=true; the fingerprint hashes only blocks, which paired does not change
+Rejected: keeping staging's chat_cards in screens.rs — that would mean two card builders and the later filter would miss staging's cards
+Check: cooee-plugin.toml and the permissions golden keep "later" next to staging's limit, config-card and secret-card
+Owner: the branch is caught up with staging and the card-later feature is unchanged
