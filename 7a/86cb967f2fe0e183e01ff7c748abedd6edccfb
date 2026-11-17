@@ -1,0 +1,36 @@
+Decided: a rev or verify lane's rules come from `git show origin/<integration>:.drover/rules.md` in the fleet's checkout, not the worktree
+Because: "as they are on the integration branch, not as the PR has them"
+Decided: a PR that touches rules.md, verify.md, design.md or arch.toml gets one brief line naming them with the `origin/<integration>...HEAD` diff of those files
+Because: "naming the files and saying the change itself is under review, with the diff"
+Decided: the verify lane reads the integration recipe drover writes to `.verify.md` in its folder (an own file, like .verify-browser.mjs), and drive's recipe probe asks the API at the integration ref
+Because: crates/core/src/verify.rs:54
+Rejected: checking the integration copies out over the PR's in the rev worktree — the lane's folder would look dirty to kill, clean and wip saves
+Decided: a lessons issue keeps today's path: its rev brief reads the worktree's rules and gets no changed-files line
+Because: "Lesson PRs keep their own path"
+Check: design.md and arch.toml are not read into a rev brief today; they are covered by the changed-files line only
+Owner: Reviewers and verifiers now follow the rules and app recipe already on the integration branch, so a PR can no longer soften the checks on itself; lesson PRs are reviewed as before.
+
+Decided: rev and verify lanes read rules.md and verify.md from origin/<integration>; changes to .drover files are named in the brief with their diff
+Because: "rev and verify lanes are briefed with `.herdsman/rules.md`, `.herdsman/verify.md`"
+Decided: the update-round brief line moves into integration_view so spawn stays within its 501-line arch baseline after staging grew it
+Because: crates/core/src/spawn.rs:946
+Rejected: raising the spawn size baseline — the baseline file is the arch gate; trimming is cheaper
+Check: the sim hunt test passes at this head after the staging merge (q1801's hold was about that red gate)
+Check: the arch-check serve.rs violation and the shed test failure reproduce on plain staging and are not from this diff
+Owner: reviewers now judge a PR by the integration branch's rules, not the ones the PR itself edits
+
+Decided: rev and verify lanes read rules.md and verify.md from origin/<integration>; changes to .drover files are named in the brief with their diff
+Because: "rev and verify lanes are briefed with `.herdsman/rules.md`, `.herdsman/verify.md`"
+Decided: staging build fix: the serve.rs size baseline is set to 3591, the size staging's #1089 merge left it at
+Because: .drover/arch-baseline.txt:24
+Rejected: trimming serve.rs — it is #1089's code, outside this issue; the baseline line is the smallest fix
+Check: the sim hunt test passes at this head, so q1801's hold on that red gate no longer applies
+Owner: reviewers now judge a PR by the integration branch's rules, not the ones the PR itself edits
+
+Decided: rev and verify lanes read rules.md and verify.md from origin/<integration>; changes to .drover files are named in the brief with their diff
+Because: "rev and verify lanes are briefed with `.herdsman/rules.md`, `.herdsman/verify.md`"
+Decided: round 5 only merges staging again; the red drive_kicks test is a flake also seen on unrelated PR issue-1216
+Because: crates/cli/tests/drive_kicks.rs:700
+Rejected: changing the drive_kicks test — it is staging's flake, outside this issue, and passes 5 of 5 at this head
+Check: CI at this head; if failing_retries_never_starve_another_fleets_start flakes again it is not from this diff
+Owner: reviewers now judge a PR by the integration branch's rules, not the ones the PR itself edits
