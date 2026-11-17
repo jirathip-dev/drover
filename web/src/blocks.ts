@@ -59,7 +59,7 @@ export function value(v: unknown): string {
   return String(v ?? '');
 }
 
-const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
+export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
   screen(b, c) {
     const s = el('div', 'scr');
     s.dataset.id = String(b.id);
@@ -72,8 +72,9 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     s.append(head, ...kids(b.blocks, c));
     if (b.focus) {
       const m = el('div', 'msgs');
-      m.append(...[...s.children].filter(e => !e.matches('.row.sticky, .form.say')));
-      s.insertBefore(m, s.querySelector(':scope > .form.say'));
+      drawn.set(m, { key: JSON.stringify(b), box: true });
+      m.append(...[...s.children].filter(e => !e.matches('.row.sticky, .cmp')));
+      s.insertBefore(m, s.querySelector(':scope > .cmp'));
     }
     return s;
   },
@@ -265,12 +266,141 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     f.append(go);
     return f;
   },
+  composer,
   sheet(b, c) {
     const s = el('div', 'shb');
     s.append(...kids(b.blocks, c));
     return s;
   },
 };
+
+type Att = { name: string; type: string; data: string };
+type Draft = { files: Att[]; picks: Blk; q?: number; st?: string; steer?: boolean; stopping?: boolean };
+const drafts = new Map<string, Draft>();
+
+const read = (f: File) => new Promise<Att>(ok => {
+  const r = new FileReader();
+  r.onload = () => ok({ name: f.name, type: f.type, data: String(r.result).split(',')[1] ?? '' });
+  r.readAsDataURL(f);
+});
+
+function composer(b: Blk, c: Ctx): HTMLElement {
+  const key = `draft:${c.screen}:${String(b.id)}:text`, acts = obj(b.acts), base = obj(b.values), act = (k: string) => String(acts[k] ?? '');
+  const d: Draft = drafts.get(key) ?? { files: [], picks: {} };
+  drafts.set(key, d);
+  if (!b.working) d.stopping = d.steer = false;
+  const f = el('div', 'cmp');
+  f.dataset.id = String(b.id ?? '');
+  const ta = el('textarea');
+  Object.assign(ta, { name: 'text', rows: 1, value: get(key) ?? '', placeholder: String(b.placeholder ?? '') });
+  const grow = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
+  ta.oninput = () => { put(key, ta.value || null); d.st = d.st === 'sent' ? '' : d.st; grow(); };
+  ta.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } };
+  const pick = el('input');
+  Object.assign(pick, { type: 'file', multiple: true, hidden: true });
+  pick.onchange = async () => {
+    d.files = [...d.files, ...(await Promise.all([...(pick.files ?? [])].map(read)))].slice(0, 10);
+    pick.value = '';
+    d.st = '';
+    draw();
+  };
+  const post = async (action: string, values: Blk, x?: HTMLElement) => c.act({ action, block: b.id, values: { ...base, ...values } }, x);
+  const send = async (steer = false) => {
+    if (!ta.value.trim() && !d.files.length) return;
+    const queue = !steer && (b.working || d.q != null) ? act('queue') : '', action = steer ? act('steer') : queue || String(b.action);
+    const v: Blk = { ...d.picks, text: ta.value, name: d.files.map(x => x.name).join('/'), data: d.files.map(x => x.data).join(',') };
+    if (queue && d.q != null) v.q = d.q;
+    [d.st, d.steer] = ['sending', false];
+    draw();
+    if (await post(action, v, steer ? undefined : f.querySelector<HTMLElement>('.cr button.primary') ?? undefined)) {
+      Object.assign(d, { files: [], q: undefined, st: 'sent' });
+      ta.value = '';
+      put(key, null);
+      grow();
+    } else d.st = 'failed';
+    draw();
+  };
+  function draw() {
+    const top: HTMLElement[] = [];
+    if (b.working) {
+      const p = el('div', 'pill');
+      const tick = () => {
+        if (!navigator.onLine) return p.replaceChildren(el('span', 'r', 'offline · tap to retry'));
+        const s = Math.max(0, Math.floor((Date.now() - Date.parse(String(obj(b.working).since))) / 1000));
+        p.replaceChildren(...nodes(`${figure({ state: 'working' })}<span class=pt>${d.stopping ? 'stopping…' : `working ${s >= 60 ? `${Math.floor(s / 60)}m ` : ''}${s % 60}s`}</span>`));
+        const x = btn('stop', 'bad');
+        x.onclick = async e => { e.stopPropagation(); if (await post(act('stop'), {}, x)) { d.stopping = true; tick(); } };
+        if (act('stop') && !d.stopping) p.append(x);
+      };
+      p.onclick = () => { if (!navigator.onLine) f.dispatchEvent(new CustomEvent('redraw', { bubbles: true })); };
+      tick();
+      const t = setInterval(() => (p.isConnected ? tick() : clearInterval(t)), 1000);
+      top.push(p);
+    }
+    for (const m of blks(b.queued)) {
+      const text = String(m.text ?? '');
+      const r = el('div', 'qd', `<span class=qt>${esc(text)}</span>`);
+      r.dataset.q = String(m.q);
+      const now = btn('send now', 'primary'), edit = btn('edit'), rm = btn('remove', 'bad');
+      now.onclick = () => post(act('steer'), { q: m.q }, now);
+      edit.onclick = () => { [d.q, ta.value] = [Number(m.q), text]; put(key, text); grow(); ta.focus(); draw(); };
+      rm.onclick = () => post(act('unqueue'), { q: m.q }, rm);
+      r.append(now, edit, rm);
+      top.push(r);
+    }
+    if (d.files.length) {
+      const th = el('div', 'th');
+      d.files.forEach((a, i) => {
+        const t = el('span', 'tb', a.type.startsWith('image/') ? `<img alt="${esc(a.name)}" src="data:${esc(a.type)};base64,${a.data}">` : `<span>${esc(a.name)}</span>`);
+        const x = btn('×');
+        x.setAttribute('aria-label', `remove ${a.name}`);
+        x.onclick = () => { d.files.splice(i, 1); draw(); };
+        t.append(x);
+        th.append(t);
+      });
+      top.push(th);
+    }
+    if (d.st) {
+      const s = el('p', `cs ${d.st === 'failed' ? 'r' : 'm'}`, esc({ sending: 'sending…', sent: '✓ sent', failed: 'not sent' }[d.st] ?? ''));
+      if (d.st === 'failed') {
+        const x = btn('retry', 'bad');
+        x.onclick = () => send();
+        s.append(' ', x);
+      }
+      top.push(s);
+    }
+    const row = el('div', 'cr'), add = btn('+'), go = btn(d.q != null ? 'save' : b.working ? 'queue' : String(b.label ?? ''), 'primary');
+    add.setAttribute('aria-label', 'attach');
+    add.onclick = () => pick.click();
+    let held = false, hold = 0;
+    go.onpointerdown = () => { held = false; hold = window.setTimeout(() => { held = true; if (b.working && act('steer')) { d.steer = true; draw(); } }, 500); };
+    go.onpointerup = go.onpointerleave = () => clearTimeout(hold);
+    go.oncontextmenu = e => e.preventDefault();
+    go.onclick = () => { if (!held) send(); held = false; };
+    if (d.st === 'sending') go.setAttribute('aria-busy', 'true');
+    row.append(add, pick, ta, go);
+    if (d.steer) {
+      const st = btn('steer');
+      st.onclick = () => send(true);
+      row.append(st);
+    }
+    const chips = blks(b.chips).map(ch => {
+      const s = el('div', 'chips'), n = String(ch.name);
+      const cur = String(d.picks[n] ?? ch.cur ?? '');
+      for (const o of isList(ch.all) ? ch.all.map(String) : []) {
+        const x = btn(`${n} ${o}`, o === cur ? 'on' : '');
+        x.setAttribute('aria-pressed', String(o === cur));
+        x.onclick = () => (act('model') ? post(act('model'), { [n]: o }, x) : ((d.picks[n] = o), draw()));
+        s.append(x);
+      }
+      return s;
+    });
+    f.replaceChildren(...top, row, ...chips);
+  }
+  draw();
+  setTimeout(grow);
+  return f;
+}
 
 /** #1086: the image viewer over the page: fitted; a double tap or a pinch zooms, a swipe goes to the next, [save]. */
 export function viewer(list: [string, string][], at: number) {
@@ -362,12 +492,50 @@ export function kids(bs: unknown, c: Ctx): HTMLElement[] {
   return blks(bs).map(b => render(b, c)).filter((e): e is HTMLElement => !!e);
 }
 
+const drawn = new WeakMap<Element, { key: string; box: boolean }>();
+const BOX = new Set(['screen', 'section', 'list', 'sheet']);
+
 /** A block as DOM; a type this page has no renderer for draws its children, else nothing. */
 export function render(b: Blk, c: Ctx): HTMLElement | null {
   const f = R[String(b.type)];
-  if (f) return f(b, c);
-  if (!b.blocks) return null;
-  const d = el('div');
-  d.append(...kids(b.blocks, c));
-  return d;
+  const e = f ? f(b, c) : b.blocks ? el('div') : null;
+  if (!e) return null;
+  if (!f) e.append(...kids(b.blocks, c));
+  drawn.set(e, { key: `${c.open.has(String(b.id))}${c.open.has(`sw:${b.id}`)}${JSON.stringify(b)}`, box: !f || BOX.has(String(b.type)) });
+  return e;
+}
+
+const idOf = (n: Node) => (n instanceof HTMLElement ? n.dataset.id ?? '' : '');
+function same(a: Node, b: Node, trust: boolean): Node {
+  if (a.nodeName !== b.nodeName) return b;
+  if (!(a instanceof Element && b instanceof Element)) {
+    if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
+    return a;
+  }
+  const da = drawn.get(a), db = drawn.get(b);
+  if (da || db) {
+    if (!da || !db || (!db.box && da.key !== db.key)) return b;
+    trust = da.key === db.key;
+  } else if (!trust) return a.isEqualNode(b) ? a : b;
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name)) a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  morph(a, [...b.childNodes], trust);
+  return a;
+}
+/** #1169: `box`'s children become `want` in place: a node whose block is unchanged stays (its field, focus, scroll, image). */
+export function morph(box: Element, want: Node[], trust = false) {
+  const old = [...box.childNodes], byId = new Map<string, Node>(), plain: Node[] = [];
+  old.forEach(n => (idOf(n) ? byId.set(idOf(n), n) : plain.push(n)));
+  const next = want.map(n => {
+    const k = idOf(n), o = k ? byId.get(k) : plain.shift();
+    byId.delete(k);
+    return o ? same(o, n, trust) : n;
+  });
+  const keep = new Set(next);
+  old.forEach(n => { if (!keep.has(n)) n.remove(); });
+  let at = box.firstChild;
+  for (const n of next) {
+    if (n === at) at = n.nextSibling;
+    else box.insertBefore(n, at);
+  }
 }

@@ -2,7 +2,8 @@
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
 use crate::api::{
-    Answered, ChatRepo, ChatTab, Chip, FileRef, Link, Msg, QueuedMsg, RunCard, ThreadPage, ThreadRow, ThreadView,
+    Answered, ChatRepo, ChatTab, Chip, FileRef, Handoff, Link, Msg, QueuedMsg, RunCard, ThreadPage, ThreadRow,
+    ThreadView,
 };
 use crate::conductor::{self, of};
 use crate::config::Config;
@@ -232,18 +233,11 @@ fn page(
                 a.data.insert("recommend".into(), e.val("recommend").clone());
                 ask(events, &a, m("ask", s("question")))
             }
-            ("config-propose", _) if crate::propose::settled(events, &s("id")).is_none() => Msg {
-                from: s("id"),
-                open: !crate::propose::stale(ctx, e), // #460: stale, it can no longer apply
-                ..m("config", s("diff"))
-            },
-            ("secret-request", _)
-                if crate::secret::open(events, id, &s("name")).is_some_and(|o| std::ptr::eq(o, e)) =>
-            {
-                Msg {
-                    from: s("name"),
-                    ..m("secret", s("why"))
-                }
+            ("config-propose" | "secret-request", _) => {
+                let Some(m) = owner_card(ctx, events, e) else {
+                    continue;
+                };
+                m
             }
             ("run-card", _) => {
                 let run = run_card(ctx, events, e);
@@ -292,7 +286,10 @@ fn page(
 
 /// #408: API v1 `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
 pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>) -> Option<ThreadPage> {
-    let (cfg, t) = (Config::kept(ctx).ok()?, conductor::find(events, id).ok()?);
+    let t = conductor::find(events, id)
+        .ok()
+        .or_else(|| conductor::attached(events, id))?;
+    let cfg = Config::kept(ctx).ok()?;
     let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
     Some(page(ctx, &cfg, events, t, (before, u64::MAX, n), u64::MAX))
@@ -735,15 +732,59 @@ pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]
         "stream": "/screens/threads/stream", "blocks": blocks})
 }
 
-/// #1072: the composer: one text field whose `[label]` posts `action` with `values`.
-fn composer(label: &str, action: &str, values: &Value) -> Value {
-    json!({"type": "form", "id": "say", "fields": [{"type": "text", "name": "text", "label": "", "value": "", "placeholder": "message the orchestrator"}],
-        "submit": {"label": label, "action": action, "values": values}})
+/// #1087: the composer, a page-only block: its `[label]` posts `action` with `values`, text and files.
+fn composer(label: &str, action: &str, values: &Value, more: Value) -> Value {
+    let mut c = json!({"type": "composer", "id": "say", "label": label, "action": action, "values": values,
+        "placeholder": "message the orchestrator"});
+    if let (Some(o), Value::Object(m)) = (c.as_object_mut(), more) {
+        o.extend(m.into_iter().filter(|(_, v)| !v.is_null()));
+    }
+    c
+}
+
+/// An open config proposal (#460: `open` unless stale) or secret request as its thread's message.
+fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
+    let s = |k| e.str(k).unwrap_or_default().to_string();
+    let m = |kind: &str, from: String, text: String, open: bool| Msg {
+        seq: e.seq,
+        ts: e.ts,
+        kind: kind.into(),
+        from,
+        text,
+        open,
+        ..Msg::default()
+    };
+    match e.kind.as_str() {
+        "config-propose" if crate::propose::settled(events, &s("id")).is_none() => {
+            Some(m("config", s("id"), s("diff"), !crate::propose::stale(ctx, e)))
+        }
+        "secret-request" => {
+            let open = crate::secret::open(events, e.str("thread")?, &s("name"));
+            open.is_some_and(|o| std::ptr::eq(o, e))
+                .then(|| m("secret", s("name"), s("why"), false))
+        }
+        _ => None,
+    }
+}
+
+/// #1066: every open config proposal and secret request, a drover thread's or a cooee chat's, as its thread draws it.
+pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Value> {
+    let all = crate::events::of_kind(events, &["config-propose", "secret-request"]);
+    let card = |e: &Event| {
+        Some(msg_body(
+            ctx.now,
+            e.str("thread")?,
+            &owner_card(ctx, events, e)?,
+            paired,
+            None,
+        ))
+    };
+    all.into_iter().filter_map(card).collect()
 }
 
 /// #1086: a message's card with its files (images inline, others as rows) and its link's chip, which opens that thread.
-fn msg_card(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
-    let (mut v, key) = (msg_body(now, id, m, paired), format!("m-{}", m.seq));
+fn msg_card(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> Value {
+    let (mut v, key) = (msg_body(now, id, m, paired, h), format!("m-{}", m.seq));
     let src = |f: &FileRef| format!("/thread/{id}/{}", f.name);
     let (imgs, docs): (Vec<&FileRef>, Vec<&FileRef>) = m
         .files
@@ -819,7 +860,7 @@ fn run_body(now: u64, key: &str, r: &RunCard) -> (Vec<Value>, Vec<Value>, &'stat
 }
 
 /// #1072: a message as a card: `kind` you, orch, tool, sys or ask (choice rows while open, else its answer).
-fn msg_body(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
+fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> Value {
     let (key, age) = (format!("m-{}", m.seq), crate::events::age(now.saturating_sub(m.ts)));
     let text = |k: &str, t: &str| json!({"type": "text", "id": format!("{key}-{k}"), "markdown": t});
     let sys = |t: &str| json!({"type": "card", "id": key, "kind": "sys", "blocks": [text("t", t)]});
@@ -829,7 +870,11 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
             json!({"type": "card", "id": key, "kind": "you", "title": "you", "meta": format!("✓ {age}"), "blocks": [text("t", &m.text)]})
         }
         "msg" => {
-            json!({"type": "card", "id": key, "kind": "orch", "title": "orchestrator", "meta": age, "blocks": [text("t", &m.text)]})
+            let who = m
+                .link
+                .as_ref()
+                .map_or("orchestrator".into(), |l| format!("{} {}", l.w, l.t));
+            json!({"type": "card", "id": key, "kind": "orch", "title": who, "meta": age, "blocks": [text("t", &m.text)]})
         }
         "note" if m.retry => {
             json!({"type": "card", "id": key, "kind": "you", "tone": "bad", "title": "you", "meta": age,
@@ -860,10 +905,28 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
                 if let Some(r) = rec {
                     ch.put("recommended", json!(r));
                 }
+                if h.is_some() {
+                    ch.put("values", json!({"thread": id, "fleet": a.fleet}));
+                }
                 blocks.push(ch);
             }
-            json!({"type": "card", "id": key, "kind": "ask", "tone": or(m.open && m.answer.is_none(), "warn", ""),
-                "title": format!("{}{}", a.id, or(m.routine, " · routine", "")), "meta": age, "blocks": blocks})
+            let mut tone = or(m.open && m.answer.is_none(), "warn", "");
+            let mut buttons = vec![];
+            match h.map(|h| (h.state.as_str(), h.to.as_str(), h.error.as_deref())) {
+                Some(("delivered", Some(to), _)) => buttons.push(json!({"type": "button", "id": format!("{key}-to"),
+                    "label": format!("continued in {to}"), "tap": {"thread": to}})),
+                Some(("failed", _, e)) => {
+                    tone = "bad";
+                    blocks.push(text("e", &format!("✗ not delivered: {}", e.unwrap_or_default())));
+                }
+                _ => {}
+            }
+            let mut c = json!({"type": "card", "id": key, "kind": "ask", "tone": tone,
+                "title": format!("{}{}", a.id, or(m.routine, " · routine", "")), "meta": age, "blocks": blocks});
+            if !buttons.is_empty() {
+                c.put("buttons", json!(buttons));
+            }
+            c
         }
         "note" if m.open && m.ask.is_some() => {
             let Some(a) = &m.ask else { return sys(&m.text) };
@@ -885,9 +948,9 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
         }
         "config" => {
             let v = |act: &str| json!({"thread": id, "id": m.from, "act": act});
-            let mut buttons = vec![button("discard", "", "thread-config", v("discard"))];
+            let mut buttons = vec![button("discard", "", "config-card", v("discard"))];
             if m.open {
-                buttons.insert(0, button("apply", "primary", "thread-config", v("apply")));
+                buttons.insert(0, button("apply", "primary", "config-card", v("apply")));
             }
             let sub = or(
                 m.open,
@@ -903,11 +966,11 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool) -> Value {
             if paired {
                 let field = json!({"type": "secret", "name": "text", "label": "", "value": "", "placeholder": format!("value of {}", m.from)});
                 blocks.push(json!({"type": "form", "id": format!("{key}-f"), "fields": [field],
-                    "submit": {"label": "save", "action": "thread-secret", "values": {"thread": id, "name": m.from, "act": "save"}}}));
+                    "submit": {"label": "save", "action": "secret-card", "values": {"thread": id, "name": m.from, "act": "save"}}}));
                 buttons.push(button(
                     "dismiss",
                     "",
-                    "thread-secret",
+                    "secret-card",
                     json!({"thread": id, "name": m.from, "act": "dismiss"}),
                 ));
             } else {
@@ -960,9 +1023,28 @@ pub fn thread_screen(
         json!({"type": "button", "id": "older", "label": "↑ older messages",
         "tap": {"open": format!("/screens/threads/{id}?before={n}"), "keep": true}})
     }));
-    blocks.extend(v.page.msgs.iter().map(|m| msg_card(ctx.now, id, m, paired)));
+    let at = |m: &Msg| events.get(events.binary_search_by_key(&m.seq, |e| e.seq).ok()?);
+    let handoff = |m: &Msg| {
+        let e = at(m).filter(|e| m.kind == "ask" && e.data.get("handoff").is_some())?;
+        Some(super::v1::handoff(events, e, true))
+    };
+    blocks.extend(
+        v.page
+            .msgs
+            .iter()
+            .map(|m| msg_card(ctx.now, id, m, paired, handoff(m).as_ref())),
+    );
     if !arch {
-        blocks.push(composer("send", "thread-say", &json!({ "thread": id })));
+        let working = v.since.map(|t| json!({ "since": super::screens::iso(t) }));
+        blocks.push(composer(
+            "send",
+            "thread-say",
+            &json!({ "thread": id }),
+            json!({
+            "acts": {"queue": "thread-queue", "steer": "thread-steer", "unqueue": "thread-unqueue",
+                "stop": "thread-stop", "model": "thread-model"},
+            "queued": v.queued, "chips": v.chips, "working": working}),
+        ));
     }
     let q = if before == u64::MAX {
         String::new()
@@ -980,12 +1062,19 @@ pub fn thread_screen(
 pub fn new_screen(cfg: &Config, repo: &str) -> Option<Value> {
     let role = conductor::defaults(cfg, repo).ok()?.1;
     let who = super::join(&[repo, role.harness.as_str(), role.model.as_deref().unwrap_or_default()]);
+    let chips = [chip("harness", Some(&role.harness), &crate::providers::lane_names())];
+    let c = composer(
+        "start",
+        "thread-new",
+        &json!({ "repo": repo }),
+        json!({ "chips": chips }),
+    );
     let hint = "Your first message starts the thread and its orchestrator, and titles it with its first line. Nothing is logged until you send.";
     Some(
         json!({"type": "screen", "id": format!("thread-new-{repo}"), "title": "New thread", "focus": true, "blocks": [
         {"type": "row", "id": "who", "figure": {"state": "idle"}, "title": who, "subtitle": "no orchestrator yet"},
         {"type": "text", "id": "hint", "markdown": hint},
-        composer("start", "thread-new", &json!({ "repo": repo }))]}),
+        c]}),
     )
 }
 

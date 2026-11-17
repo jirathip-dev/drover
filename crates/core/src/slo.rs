@@ -9,6 +9,7 @@ use std::io::Write;
 
 const KINDS: [&str; 5] = ["slo-idle", "slo-tick", "self-heal", "stuck", "slo-ok"];
 const DRIVE_HEALS: [&str; 3] = ["respawned-silent", "nudged", "marked-ready"];
+const WAITS: [&str; 1] = ["slo-idle:"];
 
 enum Heal {
     StopTick(String),
@@ -25,7 +26,7 @@ struct Breach {
     since: u64,
 }
 
-/// #855: each fleet SLO and missed promise: its known heal first, `stuck` if it still holds a pass later.
+/// #855: each fleet SLO: its known heal first; #1183: `stuck` a pass later only when drive itself is broken.
 pub fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -38,12 +39,13 @@ pub fn pass(
     let mut now: Vec<Breach> = tick(ctx, cfg, r).into_iter().collect();
     for f in fleets {
         now.extend(idle(ctx, cfg, &events, &agents, f));
-        now.extend(missed(ctx, &events, f));
+        now.extend(no_pass(ctx, cfg, f));
+        now.extend(errors(ctx, &events, f));
     }
     let eps = episodes(&events);
     let mut loud: BTreeSet<String> = eps
         .iter()
-        .filter(|(k, ep)| now.iter().any(|b| &b.key == *k) && ep.iter().any(|e| e.kind == "stuck"))
+        .filter(|(k, ep)| broken(k) && now.iter().any(|b| &b.key == *k) && ep.iter().any(|e| e.kind == "stuck"))
         .filter_map(|(_, ep)| Some(ep.first()?.fleet.clone()))
         .collect();
     for (key, ep) in eps.iter().filter(|(k, _)| !now.iter().any(|b| &b.key == *k)) {
@@ -68,16 +70,26 @@ pub fn pass(
     Ok(())
 }
 
-/// #855: the `stuck` alerts whose breach still holds, by fleet: one owner's card each (#1093).
+/// #855: the `stuck` alerts whose breach still holds, by fleet: one owner's card each (#1093); an issue's goes once its lane starts.
 pub fn open_stuck(events: &[Event]) -> BTreeMap<&str, Vec<&Event>> {
     let mut m: BTreeMap<&str, Vec<&Event>> = BTreeMap::new();
+    let started = |e: &Event| {
+        e.issue
+            .is_some_and(|n| events.iter().any(|x| x.seq > e.seq && x.is("spawn", &e.fleet, n)))
+    };
     for e in episodes(events)
-        .into_values()
-        .filter_map(|ep| ep.into_iter().find(|e| e.kind == "stuck"))
+        .into_iter()
+        .filter(|(k, _)| broken(k))
+        .filter_map(|(_, ep)| ep.into_iter().find(|e| e.kind == "stuck"))
+        .filter(|e| !started(e))
     {
         m.entry(e.fleet.as_str()).or_default().push(e);
     }
     m
+}
+
+fn broken(key: &str) -> bool {
+    !WAITS.iter().any(|w| key.starts_with(w))
 }
 
 fn episodes(events: &[Event]) -> BTreeMap<String, Vec<&Event>> {
@@ -130,6 +142,9 @@ fn step(
             &ctx.state,
             &ev("self-heal", json!({"key": b.key, "did": did, "reason": b.reason})),
         );
+    }
+    if !broken(&b.key) {
+        return Ok(());
     }
     if tried.iter().any(|t| ctx.now < t.0 + cfg.limits.slow_secs) {
         return Ok(());
@@ -256,24 +271,92 @@ fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[crate::session::Ses
     })
 }
 
-fn missed(ctx: &Ctx, events: &[Event], fleet: &str) -> Vec<Breach> {
+fn no_pass(ctx: &Ctx, cfg: &Config, fleet: &str) -> Option<Breach> {
+    let last = crate::drive::last_pass(ctx, fleet)?;
+    let mins = ctx.now.saturating_sub(last) / 60;
+    (mins >= cfg.limits.slo_pass_minutes).then(|| Breach {
+        key: format!("no-pass:{fleet}:{last}"),
+        fleet: fleet.into(),
+        issue: None,
+        slo: None,
+        reason: format!("no drive pass for {mins} min"),
+        heal: None,
+        since: last,
+    })
+}
+
+fn errors(ctx: &Ctx, events: &[Event], fleet: &str) -> Vec<Breach> {
+    let slow = |e: &&Event| {
+        e.kind == "drive-pass"
+            && e.fleet == fleet
+            && e.str("by") != Some("fast")
+            && e.data.get("kick").is_none_or(Value::is_null)
+    };
+    let last = events.iter().rfind(slow);
+    let acts = last
+        .and_then(|e| e.data.get("actions")?.as_array())
+        .into_iter()
+        .flatten();
+    let failed = acts
+        .filter(|a| a["step"] == "pass" && a["outcome"] == "error")
+        .map(|a| Breach {
+            key: format!("pass-error:{fleet}"),
+            fleet: fleet.into(),
+            issue: None,
+            slo: None,
+            reason: format!("drive's pass {}", a.at("words").as_str().unwrap_or("failed")),
+            heal: None,
+            since: last.map_or(ctx.now, |e| e.ts),
+        });
+    let mut out: Vec<Breach> = failed.take(1).collect();
     let st = fold(events);
-    let open = st.values().filter(|s| s.fleet == fleet).filter_map(|s| {
-        let head = crate::gh::cached_pr(ctx, fleet, s.issue)
-            .at("headRefOid")
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-        let (p, why) = crate::promise::open_missed(events, s, &head, None)?;
-        Some(Breach {
-            key: format!("promise:{fleet}#{}:{}", s.issue, p.made_at),
+    let open = st
+        .values()
+        .filter(|s| s.fleet == fleet && !matches!(s.state.as_str(), "merged" | "closed"));
+    for s in open {
+        let f = crate::drive::failures(events, fleet, s.issue);
+        let Some((k, error)) = crate::drive::same_run(&f).filter(|(k, _)| *k >= 2) else {
+            continue;
+        };
+        let (Some(first), Some(last)) = (f.len().checked_sub(k).and_then(|i| f.get(i)), f.last()) else {
+            continue;
+        };
+        let head = crate::gh::cached_pr(ctx, fleet, s.issue).at("headRefOid").clone();
+        if head.as_str() != last.str("head") {
+            continue;
+        }
+        out.push(Breach {
+            key: format!("error:{fleet}#{}", s.issue),
             fleet: fleet.into(),
             issue: Some(s.issue),
             slo: None,
-            reason: format!("promise `{}` missed: {why}", p.reason),
+            reason: format!(
+                "{} fails the same way {k} times: {error}",
+                last.str("step").unwrap_or("spawn")
+            ),
             heal: None,
-            since: p.made_at,
-        })
-    });
-    open.collect()
+            since: first.ts,
+        });
+    }
+    out
+}
+
+/// #1183: a stuck card's [force]: the issue's `drover waiting` next command, once, with `--force`.
+pub fn force(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, (fleet, n): (&str, u64)) -> Result<String> {
+    let events = crate::events::working(&ctx.state)?;
+    let agents = crate::session::all(cfg, r).checked()?.running();
+    let rows = crate::waiting::scan(ctx, cfg, r, &events, &agents, false, Some(fleet));
+    let next = rows
+        .into_iter()
+        .find(|(s, _)| s.issue == n)
+        .and_then(|(_, w)| w.next_cmd);
+    let Some(cmd) = next.filter(|c| c.starts_with("drover spawn ")) else {
+        return crate::gate::refused("BAD_VALUE", format!("{fleet} #{n} has no spawn to force"));
+    };
+    let mut args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
+    args.push("--force");
+    match crate::cli::run(&args, ctx, r, out)? {
+        0 => Ok(format!("{cmd} --force")),
+        c => anyhow::bail!("{cmd} --force: exit {c}"),
+    }
 }

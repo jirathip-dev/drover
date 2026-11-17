@@ -12,6 +12,9 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
    host (#337) are one ssh call per step. A pass checks all of a host's
    lane worktrees with one ssh call (#880); a host whose call runs past its limit shows in the tick's log as
    `tick: <host>: over budget; skipped for the rest of this pass`, and the pass goes on for the other hosts.
+   #1252: a tick past its `slow_secs` budget skips only its maintenance (clean, trim, lesson, hotspots, compact);
+   check and drive still reach every host that answers. Hosts skipped two passes running log one `hosts-skipped`
+   alert with the calls not sent and the pass's slowest step.
 2. On the new host, install and log in to:
    - shed (its server job running; `hosts bootstrap` installs it);
    - git;
@@ -99,6 +102,20 @@ card never comes back for the load. When no host fits at
 all (or only a cloud host over its budget fits), it is refused with `REFUSED NO_HOST: no host with docker`, plus
 ` (cloud host stopped or over budget)` when fleet.toml has a cloud host; the Host tab reads it as `waiting`. drive
 retries on its next pass.
+
+### Start slots (#1186)
+
+Each host starts its own lanes: `[hosts.<name>] start_max = 2` caps the lanes starting at once there (unset: `[limits]
+start_max`, 2), so a clone and install burst on one host never waits on another host's starts. The main host is also
+bounded by `[limits] max_parallel_spawns` (6), and keeps one of those slots for a fix round or review. Drive picks the
+host at admission, passing over hosts whose start or working slots are full, and the spawn runs there; when every
+fitting host is full it is skipped with `SPAWN_PENDING: boat-dev-2 2/2 starting`. A host's start slots are split
+between the fleets with something to start, by fleet weight. `start_release = "started"` (the default, also in
+`[limits]`) frees a start's slot once its harness is up on the host; `"confirmed"` holds it until its first prompt is
+confirmed. `spawn_pending_max_secs` stays the stale backstop. Every pass, the fast step too, runs the start step
+before its PR reads, while some host has a free start slot; a full pass tries once more at its end for the issues its
+own steps just released. With `max_parallel_spawns = 0` (spawns in the pass) only that end-of-pass step runs.
+`max_working` and the heavy-slot gate still bound the running load.
 
 ### Working-lane and simulator slots (#984)
 
@@ -231,6 +248,11 @@ The next tick logs the result as `host-sync` (host, from, to, ok). A failure ale
 install there succeeds, and the tick after retries it. Until the versions match, a shed-acp host takes no lanes
 (`acp guard`). `drover hosts` shows each remote host's drover sha, with `✓` when it matches the main host's.
 
+The version read comes first in a host's look, before its health checks, so a slow health check cannot hold it
+back. A tick that reaches the host but cannot read it (the host offline for the pass, or the tick past its budget)
+logs `host-sync-skipped` with the reason, once per streak. The pass that reads a finished install checks the host's
+health again at once, so its `acp guard` row clears and lanes can be placed there.
+
 ## When the main host is down
 
 Nothing new starts. Lanes on other hosts keep running in their own shed servers. When the main host comes back,
@@ -274,10 +296,12 @@ overflow_after_minutes = 10  # the default
   `<config dir>/secrets/<key_env>`, and each command gets it on stdin and exports it (the `[ci_runners]` API calls use
   it as `$BOAT_API_KEY`). `drover doctor` names the one it found (`✓ cloud boat1 key — env`), or warns `!` with none.
   It never appears in argv, fleet.toml or the event log.
-- **Start on demand.** Placement uses a cloud host, stopped or running, in two cases only: every local host has been
-  refused (busy, low memory or disk) for `overflow_after_minutes`, or the lane needs a tag only the cloud host has (#256:
-  local Macs first, even when the cloud host is idle). The `spawn` event's `why` says which (`overflow: every local host
-  busy 12 min`, `needs docker: no local host has it`), and `drover status` shows it as `on <host>: <why>`. A respawn on a lane's
+- **Start on demand.** Local Macs come first, even when a cloud host is idle (#256). A running cloud host that admits
+  and has `max_working` room takes a lane as soon as every local host refuses or is full (#1152). A stopped one is
+  started only when every local host has been refused (busy, low memory or disk) for `overflow_after_minutes`, or the
+  lane needs a tag only the cloud host has. The `spawn` event's `why` says which (`HOST_BUSY mini: …; cloud1 is up with
+  room`, `overflow: every local host busy 12 min`, `needs docker: no local host has it`), `drover status` shows it as
+  `on <host>: <why>`, and `spawn --dry-run` prints it as `on <host>: <why>`. A respawn on a lane's
   own host, `--host`, or a role `host` pin starts it too. `spawn` runs `start`, then polls `status` for up to 5 min.
   It then rewrites the host's block in `~/.ssh/config.d/herdsman` and its own known_hosts file
   (`~/.ssh/herdsman/<name>.known`, outside `config.d`) from `address`, and then spawns. A dry run never starts a host.

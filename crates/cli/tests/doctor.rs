@@ -574,3 +574,75 @@ fn an_archived_fleet_repo_is_named_with_its_fix() {
     let fix = "! gh demo — o/demo is archived → remove [fleet.demo] from fleet.toml";
     assert!(out.contains(fix), "{out}");
 }
+
+#[test]
+fn hygiene_is_on_by_default_and_drift_is_flagged() {
+    let (c, d) = setup("doc-hygiene", "claude");
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        line(&out, "hygiene demo"),
+        "✓ hygiene demo — merge squash · comments strict · baseline setup · triage weekly · docs_trust deny docs/archive/ · issue_spec triage · docs on"
+    );
+    assert!(!out.contains("! hygiene"), "{out}");
+    let show = format!(
+        "git -C {} show origin/staging:.drover/arch.toml",
+        d.join("local").display()
+    );
+    let drift = || {
+        good()
+            .once(
+                "gh repo view o/demo",
+                0,
+                r#"{"squashMergeAllowed":false,"mergeCommitAllowed":true}"#,
+            )
+            .once(&show, 0, "[comments]\npolicy = \"off\"\n")
+    };
+    let (_, out) = run(&c, &drift(), &["doctor"]);
+    let rows: Vec<_> = out.lines().filter(|l| l.starts_with("! hygiene demo — ")).collect();
+    assert_eq!(
+        rows,
+        [
+            "! hygiene demo — merge: o/demo does not allow squash, hygiene says squash → gh repo edit o/demo --enable-squash-merge",
+            "! hygiene demo — comments is off, hygiene says strict → set [comments] policy = \"strict\" in .drover/arch.toml",
+            "! hygiene demo — docs: .drover/arch.toml has no [docs], hygiene says on → drover setup writes it",
+        ],
+        "{out}"
+    );
+    let own = std::fs::read_to_string(&c.config).unwrap()
+        + "\n[hygiene]\ncomments = \"off\"\ndocs = \"off\"\n\n[fleet.demo.hygiene]\nmerge = \"merge\"\n";
+    std::fs::write(&c.config, own).unwrap();
+    let (_, out) = run(&c, &drift(), &["doctor"]);
+    assert!(
+        line(&out, "hygiene demo").starts_with("✓ hygiene demo — merge merge · comments off · "),
+        "{out}"
+    );
+    let rows: Vec<_> = out.lines().filter(|l| l.starts_with("! hygiene")).collect();
+    assert_eq!(
+        rows,
+        ["! hygiene demo — merge is squash, hygiene says merge → set [fleet.demo] merge = \"merge\""],
+        "a fleet's own keys win; drover's own merge mode drifts: {out}"
+    );
+}
+
+#[test]
+fn a_serve_on_the_port_the_job_does_not_own_is_red() {
+    let (c, _) = setup("doc-job-pid", "claude");
+    let job = |pid: &str| {
+        good()
+            .once("lsof -nP -t -iTCP:7777", 0, "44987\n")
+            .once("launchctl print gui/", 0, &format!("state = running\n\tpid = {pid}\n"))
+            .once(
+                "systemctl --user show -p MainPID -p LoadState dev.drover.serve.service",
+                0,
+                &format!("MainPID={pid}\nLoadState=loaded\n"),
+            )
+    };
+    let (code, out) = run(&c, &job("123"), &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    let l = line(&out, "serve job");
+    assert!(l.starts_with('✗') && l.contains("44987") && l.contains("123"), "{l}");
+    let (code, out) = run(&c, &job("44987"), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(line(&out, "serve job").starts_with('✓'), "{out}");
+}

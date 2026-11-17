@@ -154,6 +154,8 @@ enum Cmd {
         #[arg(long, default_value = "owner")]
         by: String,
     },
+    #[command(about = "Owner only: a rate-limited lane's [wait], one `continue` at shed's reset; logs `limit-picked`")]
+    Limit(crate::limit::Pick),
     #[command(
         about = "Owner only: a parked issue back to the state it had, in its queue place (else last); logs `unparked`"
     )]
@@ -505,6 +507,11 @@ enum Cmd {
     )]
     Protection,
     #[command(
+        about = "#937: shed's one install path: the pinned rev onto PATH, shed serve restarted onto it, read back"
+    )]
+    #[command(subcommand)]
+    Shed(crate::shed::Cmd),
+    #[command(
         about = "Remove worktree + pane of merged or closed-issue lanes (never live ones; unsaved work goes to `wip/` first, kept on a secret) and list orphan folders; dry run unless --yes"
     )]
     Clean {
@@ -602,10 +609,10 @@ enum Cmd {
         #[arg(long, required = true)]
         jsonl: bool,
     },
-    #[command(about = "Landing numbers: `stats land <fleet>`")]
+    #[command(about = "Numbers from the event log: `stats land <fleet>`, `stats autonomy <fleet>`")]
     Stats {
         #[command(subcommand)]
-        cmd: StatsCmd,
+        cmd: crate::autonomy::Stats,
     },
     #[command(about = "Help; --agent prints the usage doc agents get")]
     Help {
@@ -940,14 +947,6 @@ enum PushCmd {
 }
 
 #[derive(Subcommand)]
-enum StatsCmd {
-    #[command(
-        about = "#350: per landing mode, median PASS → landed, landings per day, reverts, check time; red minutes on integration"
-    )]
-    Land { fleet: String },
-}
-
-#[derive(Subcommand)]
 enum HostsCmd {
     #[command(about = "Probe every host's tags again (else hourly, by `check`)")]
     Refresh,
@@ -1114,7 +1113,7 @@ pub fn usage_doc() -> String {
             s += &format!("  --{}  {h}\n", a.get_long().unwrap_or_default());
         }
     }
-    s + include_str!("../roles/usage-tail.md")
+    s + include_str!(concat!(env!("OUT_DIR"), "/usage-tail.md"))
 }
 
 /// Entry point used by main and tests. Returns the process exit code.
@@ -1331,9 +1330,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let off = cfg.as_ref().map(|c| crate::hosts::idle_off(c, &events));
                 let spared = crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), None);
                 let look = crate::snapshot::Snap::read(ctx, &spared);
+                let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
                     let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
-                    let skip = queue::skipped(&events, &all, f, &s.fleet, s.issue, ctx.now);
+                    let skip = queue::skipped(&events, &all, f, &s.fleet, (s.issue, ctx.now), &slots);
                     skip.map(|s| format!("skipped this pass: {}", s.1))
                 };
                 let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
@@ -1350,7 +1350,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     )
                 });
                 let cfg = Config::load(&ctx.config).ok();
-                let at = cfg.as_ref().map(|c| places(c, &look, &events)).unwrap_or_default();
                 let hosts = cfg.as_ref().is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
                 let pad = if hosts { 63 } else { 5 };
                 let c = |h: &str| format!(" {h:<14}").repeat(usize::from(hosts));
@@ -1461,7 +1460,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             );
             let cfg = Config::load(&ctx.config).ok();
             let look = crate::snapshot::Snap::read(ctx, r);
-            let at = cfg.as_ref().map(|c| places(c, &look, &events)).unwrap_or_default();
+            let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
             let board = |f: &String| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f), &at);
             let boards: Vec<_> = all.iter().map(board).collect();
             for (k, _) in cfg.iter().flat_map(Config::warnings) {
@@ -1524,9 +1523,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             demo,
             ..
         } => (SERVE.get().context("no serve")?.1)(ctx, r, &dir, demo)?,
-        Cmd::Serve { addr, read_only, .. } => {
-            (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?;
-        }
+        Cmd::Serve { addr, read_only, .. } => (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?,
         Cmd::Push { cmd: PushCmd::Test } => {
             let cfg = Config::load(&ctx.config)?;
             let Some(sub) = cfg.webpush_sub() else {
@@ -1672,9 +1669,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     issue,
                     role,
                     pane,
-                } => {
-                    spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane, &serde_json::json!({}))?;
-                }
+                } => spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane, &serde_json::json!({}))?,
                 Cmd::Ask {
                     cmd: Some(AskCmd::Withdraw { fleet, id, by, new }),
                     ..
@@ -1866,7 +1861,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let (events, agents) = (working(&ctx.state)?, crate::session::all(&cfg, r).running());
-                    let at = places(&cfg, r, &events);
+                    let (at, slots) = places(ctx, &cfg, r, &events);
                     let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true, None);
                     let mut rows: Vec<_> = all
                         .into_iter()
@@ -1894,7 +1889,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))
-                                .or_else(|| crate::queue::skipped(&events, &st, Some(f), &s.fleet, s.issue, ctx.now))
+                                .or_else(|| queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx.now), &slots))
                             {
                                 Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
                                 None => ("drive", format!("next in the queue: drive starts it{note}")),
@@ -1970,9 +1965,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                 }
                 Cmd::Protection => return protection::protection(&cfg, r, out),
-                Cmd::Stats {
-                    cmd: StatsCmd::Land { fleet },
-                } => crate::land::stats(ctx, &cfg, out, &fleet)?,
+                Cmd::Shed(crate::shed::Cmd::Install { yes }) => return crate::shed::install(ctx, r, out, yes),
+                Cmd::Stats { cmd } => cmd.run(ctx, &cfg, out)?,
                 Cmd::Clean {
                     fleet,
                     lane,
@@ -2102,6 +2096,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
+                Cmd::Limit(p) => crate::limit::pick(ctx, r, out, &p)?,
                 Cmd::Unpark { fleet, issue, by } => gate::unpark(ctx, &cfg, out, (&fleet, issue), &by)?,
                 Cmd::Brief { fleet, issue } => {
                     let v = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, issue, false)?;
@@ -2493,10 +2488,11 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     Ok(0)
 }
 
-fn places(cfg: &Config, r: &dyn Runner, events: &[Event]) -> std::collections::BTreeMap<String, String> {
+fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> queue::Places {
     let st = crate::events::fold(events);
     let ls = crate::snapshot::lanes(cfg, r, (events, &st), &crate::session::all(cfg, r));
-    ls.into_iter().map(|l| (l.name, l.place)).collect()
+    let at = ls.into_iter().map(|l| (l.name, l.place)).collect();
+    (at, crate::starts::held_now(ctx, cfg, r))
 }
 
 /// `stderr!`'s writer: the one place drover prints outside a `Write` it was handed.

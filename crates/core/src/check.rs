@@ -12,11 +12,14 @@ use crate::spawn::{changes, dirty, own_files, SHOT_DIRS};
 use crate::Ctx;
 use crate::{gh, term};
 use anyhow::{Context, Result};
+use fire::{fire, PUSHES};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
+
+mod fire;
 
 fn ready<'a>(ctx: &Ctx, r: &dyn Runner, cfg: &'a Config, s: &IssueState) -> Option<(&'a Fleet, Value)> {
     let f = cfg.fleet(&s.fleet).ok().filter(|_| s.state == "ready")?;
@@ -86,7 +89,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let stall = cfg.limits.stall_minutes * 60;
     let remote = crate::hosts::survey(ctx, cfg, r, false);
     let sessions = with_remote(cfg, local, &remote);
-    crate::session::stamp::observe(ctx, cfg, &sessions)?;
+    crate::session::stamp::observe(ctx, cfg, r, &sessions)?;
     let events = working(&ctx.state)?;
     crate::cloud::tick(ctx, cfg, r, &remote, out)?;
     for (name, a) in &remote {
@@ -187,7 +190,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             gh::spec(ctx, r, f, name, i.issue, false).ok();
         }
     }
-    let events = closed_on_github(ctx, cfg, r, out, events)?;
+    let events = closed_on_github((ctx, cfg, r, &mut *out), events, None)?;
     crate::drive::markers(ctx, cfg, r, true);
     let passes = crate::events::since(&ctx.state, &["drive-pass"], ctx.now.saturating_sub(2 * 86_400))?;
     let mut held = BTreeMap::<(&str, u64), (u64, u64)>::new();
@@ -726,34 +729,6 @@ fn overload(
     fire(ctx, cfg, out, events, ("drover", None), "host-overloaded", d)
 }
 
-thread_local!(static PUSHES: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) });
-
-fn fire(
-    ctx: &Ctx,
-    cfg: &Config,
-    out: &mut dyn Write,
-    events: &[Event],
-    (fleet, issue): (&str, Option<u64>),
-    kind: &str,
-    d: serde_json::Value,
-) -> Result<()> {
-    if events
-        .iter()
-        .any(|e| e.kind == kind && e.fleet == fleet && e.issue == issue && e.data.get("key") == d.get("key"))
-    {
-        return Ok(());
-    }
-    let ev = Event::new(ctx.now, fleet, issue, kind, d);
-    writeln!(out, "{}", plain(&ev))?;
-    let ((sent, held), push) = (PUSHES.get(), crate::config::WEBPUSH_ON.contains(&kind));
-    if push && sent >= cfg.limits.max_pushes_per_pass {
-        PUSHES.set((sent, held + 1));
-        return crate::events::append(&ctx.state, &ev);
-    }
-    PUSHES.set((sent + usize::from(push), held));
-    emit(&ctx.state, cfg, ev)
-}
-
 type Gate<'a> = (&'a str, &'a str, &'a str);
 fn host_gate(a: &serde_json::Value) -> Option<Gate<'_>> {
     let code = a["code"]
@@ -949,7 +924,7 @@ pub fn clean_all(
             |why: &str| crate::gate::refused("UNSAFE_CLEAN", format!("{}: {why}", lane.unwrap_or_default()));
         let why = if states.get(&(e.fleet.clone(), n)).is_some_and(|s| s.state == "merged") {
             "merged"
-        } else if closed_issues(ctx, cfg, r, out, &mut closed, &e.fleet).contains(&n) {
+        } else if closed_in((ctx, cfg, r, out), &states, &mut closed, &e.fleet).contains(&n) {
             "issue closed"
         } else if lane.is_some() {
             let p = Some(gh::cached_pr(ctx, &e.fleet, n))
@@ -1108,7 +1083,7 @@ pub fn clean_all(
         };
         let why = if states.get(&(fl.clone(), n)).is_some_and(|s| s.state == "merged") {
             "merged"
-        } else if cfg.fleet.contains_key(fl) && closed_issues(ctx, cfg, r, out, &mut closed, fl).contains(&n) {
+        } else if cfg.fleet.contains_key(fl) && closed_in((ctx, cfg, r, out), &states, &mut closed, fl).contains(&n) {
             "issue closed"
         } else {
             continue;
@@ -1911,10 +1886,29 @@ fn walk(p: &Path, seen: &mut Seen) -> u64 {
     }
 }
 
-fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: Arc<Log>) -> Result<Arc<Log>> {
+pub(crate) fn closed_on_github(
+    (ctx, cfg, r, out): (&Ctx, &Config, &dyn Runner, &mut dyn Write),
+    ev: Arc<Log>,
+    only: Option<&str>,
+) -> Result<Arc<Log>> {
+    let st = fold(&ev);
     let mut any = false;
-    for name in cfg.fleet.keys() {
-        any |= closed_in(ctx, cfg, r, out, &ev, name)?;
+    for (name, f) in cfg.fleet.iter().filter(|(n, _)| only.is_none_or(|o| o == *n)) {
+        let state = |n: u64| st.get(&(name.clone(), n));
+        let mut open: Vec<u64> = (st.values().filter(|s| s.fleet == *name && !s.done()))
+            .map(|s| s.issue)
+            .collect();
+        open.extend((crate::queue::replay(&ev, name).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
+        open.retain(|n| gh::cached_pr(ctx, name, *n).at("state") != "MERGED");
+        let Ok(closed) = gh::closed(ctx, r, f, name, &open, ctx.now) else {
+            continue;
+        };
+        for n in open.into_iter().filter(|n| closed.contains(n)) {
+            writeln!(out, "{name} #{n} closed on GitHub")?;
+            let d = json!({"by": "external", "why": "issue closed on GitHub"});
+            emit(&ctx.state, cfg, Event::new(ctx.now, name, Some(n), "closed-other", d))?;
+            any = true;
+        }
     }
     if any {
         return working(&ctx.state);
@@ -1922,59 +1916,26 @@ fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write
     Ok(ev)
 }
 
-pub(crate) fn closed_in(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    ev: &Log,
-    fleet: &str,
-) -> Result<bool> {
-    let st = fold(ev);
-    let state = |n: u64| st.get(&(fleet.to_string(), n));
-    let mut open: Vec<u64> = (st.values().filter(|s| s.fleet == fleet && !s.done()))
-        .map(|s| s.issue)
-        .collect();
-    open.extend((crate::queue::replay(ev, fleet).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
-    open.retain(|n| gh::cached_pr(ctx, fleet, *n).at("state") != "MERGED");
-    let f = cfg.fleet(fleet)?;
-    let Some(closed) = (!open.is_empty())
-        .then(|| gh::closed(ctx, r, f, fleet, ctx.now).ok())
-        .flatten()
-    else {
-        return Ok(false);
-    };
-    let mut any = false;
-    for n in open.into_iter().filter(|n| closed.contains(n)) {
-        writeln!(out, "{fleet} #{n} closed on GitHub")?;
-        let d = json!({"by": "external", "why": "issue closed on GitHub"});
-        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "closed-other", d))?;
-        any = true;
-    }
-    Ok(any)
-}
-
-fn closed_issues<'a>(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
+fn closed_in<'a>(
+    (ctx, cfg, r, out): (&Ctx, &Config, &dyn Runner, &mut dyn Write),
+    states: &BTreeMap<(String, u64), crate::events::IssueState>,
     memo: &'a mut BTreeMap<String, Vec<u64>>,
     fleet: &str,
 ) -> &'a Vec<u64> {
-    if !memo.contains_key(fleet) {
-        let got = cfg.fleet(fleet).and_then(|f| gh::closed(ctx, r, f, fleet, ctx.now));
-        let list = got.unwrap_or_else(|e| {
-            writeln!(
-                out,
-                "cannot list closed issues of {fleet} ({e:#}); only merged lanes are candidates"
-            )
-            .ok();
-            vec![]
-        });
-        memo.insert(fleet.to_string(), list);
-    }
-    &memo[fleet]
+    memo.entry(fleet.to_string()).or_insert_with(|| {
+        let mine = states.values().filter(|s| s.fleet == fleet && s.state != "merged");
+        let ids: Vec<u64> = mine.map(|s| s.issue).collect();
+        let f = cfg.fleet(fleet);
+        f.and_then(|f| gh::closed(ctx, r, f, fleet, &ids, ctx.now))
+            .unwrap_or_else(|e| {
+                writeln!(
+                    out,
+                    "cannot list closed issues of {fleet} ({e:#}); only merged lanes are candidates"
+                )
+                .ok();
+                vec![]
+            })
+    })
 }
 
 pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, saved: bool) -> Result<()> {

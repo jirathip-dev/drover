@@ -789,7 +789,7 @@ pub fn scan_where(
             } else if last > 0 && ctx.now < last + RESPAWN_SECS {
                 format!(
                     "{why}{NO_PUSH}respawned {} ago, again after 30 min",
-                    age(ctx.now - last)
+                    age(ctx.now.saturating_sub(last))
                 )
             } else {
                 format!("{why}{NO_PUSH}respawning {role}")
@@ -861,7 +861,7 @@ pub fn scan_where(
             (w.who, w.what, w.next_cmd, w.promise) = ("none", format!("parked: fleet paused{pr}"), None, None);
         }
         let head = pr.at("headRefOid").as_str().unwrap_or_default();
-        if let Some(m) = crate::promise::missed(mine, &s, head, w.promise, ctx.now) {
+        if let Some(m) = crate::promise::missed(mine, &s, head, &w, ctx.now) {
             w.what = m;
         }
         let s = IssueState {

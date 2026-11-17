@@ -287,6 +287,32 @@ fn green_is_built_signed_gated_swapped_synced_and_restarted() {
 }
 
 #[test]
+fn the_serve_restart_is_the_jobs_own_restart_never_a_handover() {
+    let config = format!("{FLEET}\n[limits]\nserve_handover_secs = 1\n");
+    let (c, live) = setup_with("upd-kick", &config);
+    let sock = drover::update::serve_sock(&c, 7777);
+    std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+    let ctl = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    ctl.set_nonblocking(true).unwrap();
+    let new = format!("{}.new", live.display());
+    let r = host("SUCCESS")
+        .reply(&format!("{new} doctor --config-only"), "")
+        .reply(&format!("{} profiles sync", live.display()), "");
+    let (code, out) = run(&c, &r, &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.trim_end().ends_with("serve restarted"), "{out}");
+    let restart = if cfg!(target_os = "macos") {
+        "launchctl kickstart -k gui/"
+    } else {
+        "systemctl --user restart dev.drover.serve.service"
+    };
+    assert!(r.called(restart), "{:?}", r.calls.borrow());
+    assert!(ctl.accept().is_err(), "no serve was asked to hand over");
+    let calls = r.calls.borrow().join("\n");
+    assert!(!calls.contains(" serve"), "no other serve start: {calls}");
+}
+
+#[test]
 fn a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head() {
     let (c, live) = setup("upd-doctor");
     let new = format!("{}.new", live.display());
@@ -472,4 +498,57 @@ fn a_config_with_telegram_keys_loads_with_a_warning() {
     assert!(out.starts_with("✓ config — "), "{out}");
     let warn = "! config — [telegram] is removed (#557): drover has no Telegram bridge now; drop the table";
     assert!(out.lines().any(|l| l == warn), "{out}");
+}
+
+#[test]
+fn a_job_launchd_refuses_is_rebootstrapped_after_the_swap() {
+    use std::os::unix::fs::MetadataExt;
+    let (c, live) = setup("upd-refused");
+    let uid = std::fs::metadata(&c.home).unwrap().uid();
+    let mac = cfg!(target_os = "macos");
+    let ctl = |label: &str, unit: &str| -> [String; 3] {
+        if mac {
+            [
+                format!("launchctl print gui/{uid}/{label}"),
+                format!("launchctl bootout gui/{uid}/{label}"),
+                format!(
+                    "launchctl bootstrap gui/{uid} {}",
+                    c.home.join(format!("Library/LaunchAgents/{label}.plist")).display()
+                ),
+            ]
+        } else {
+            ["is-active", "disable --now", "enable --now"].map(|a| format!("systemctl --user {a} {label}.{unit}"))
+        }
+    };
+    let [clean_probe, clean_down, clean_up] = ctl("dev.drover.clean", "timer");
+    let [serve_probe, serve_down, serve_up] = ctl("dev.drover.serve", "service");
+    let r = Fake::default()
+        .reply(&clean_probe, "job state = spawn failed\n")
+        .reply(&serve_probe, "last exit reason = OS_REASON_CODESIGNING\n")
+        .reply(&clean_down, "")
+        .reply(&clean_up, "")
+        .reply(&serve_down, "")
+        .reply(&serve_up, "")
+        .reply(&format!("{}.new doctor --config-only", live.display()), "")
+        .reply(&format!("{} profiles sync", live.display()), "");
+    let r = Fake {
+        replies: [r.replies, host("SUCCESS").replies].concat(),
+        ..Fake::default()
+    };
+    let (code, out) = run(&c, &r, &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    let at = |p: &str| {
+        r.index(p)
+            .unwrap_or_else(|| panic!("{p} not called: {:?}", r.calls.borrow()))
+    };
+    assert!(at(&clean_down) < at(&clean_up), "{:?}", r.calls.borrow());
+    assert!(at(&serve_down) < at(&serve_up), "{:?}", r.calls.borrow());
+    assert!(
+        !r.called("launchctl kickstart") && !r.called("systemctl --user restart"),
+        "re-bootstrapped, not kickstarted: {:?}",
+        r.calls.borrow()
+    );
+    let tick = ctl("dev.drover.tick", "timer");
+    assert!(!r.called(&tick[1]), "a healthy job is left alone");
+    assert!(out.contains("dev.drover.clean"), "{out}");
 }

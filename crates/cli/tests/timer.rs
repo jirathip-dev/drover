@@ -267,6 +267,41 @@ fn setup_makes_a_missing_merge_label_once_then_says_already() {
 }
 
 #[test]
+fn setup_writes_a_fleets_missing_hygiene_once() {
+    let d = tmpdir("timer-hygiene");
+    let local = d.join("sendmeter");
+    std::fs::create_dir_all(&local).unwrap();
+    let cfg = CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
+    let c = ctx(&d, &cfg);
+    let _sh = FakeShed::attached(&c);
+    let ls = format!("git -C {} ls-files", local.display());
+    let base = format!(
+        "sh -c cd '{}' && '{}' arch-check --write-baseline",
+        local.display(),
+        c.exe
+    );
+    let r = host(Fake::default())
+        .reply("launchctl print", "")
+        .reply("systemctl --user is-active", "")
+        .reply(&ls, "src/cli.rs\nsrc/main.rs\ncrates/x/src/config.rs\nREADME.md\n")
+        .reply(&base, "");
+    let (_, out) = run(&c, &r, &["setup", "--no-load"]);
+    let arch = local.join(".drover/arch.toml");
+    let wrote = format!("✓ hygiene sendmeter — wrote {} → commit it", arch.display());
+    assert!(out.lines().any(|l| l == wrote), "{out}");
+    let baseline = "✓ hygiene sendmeter — wrote the .drover/arch-baseline.txt baseline → commit it";
+    assert!(out.lines().any(|l| l == baseline), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(&arch).unwrap(),
+        "\n[comments]\npolicy = \"strict\"\n\n[docs]\npaths = [\"docs/**/*.md\", \"README.md\"]\nwatch = [\"src/cli.rs\", \"crates/x/src/config.rs\"]\n"
+    );
+    std::fs::write(local.join(".drover/arch-baseline.txt"), "").unwrap();
+    let (_, out) = run(&c, &r, &["setup", "--no-load"]);
+    assert!(!out.contains("hygiene sendmeter — wrote"), "{out}");
+    assert_eq!(r.count(&base), 1);
+}
+
+#[test]
 fn setup_adopts_a_serve_job_under_another_label() {
     let c = ctx(&tmpdir("timer-adopt"), CONFIG);
     let _sh = FakeShed::attached(&c);
@@ -571,4 +606,45 @@ fn install_beside_an_old_job_prints_the_swap_and_runs_none_of_it() {
         "{calls}"
     );
     assert!(!ran("enable", "dev.drover.tick"), "{calls}");
+}
+
+#[test]
+fn install_run_by_the_local_bin_symlink_names_the_install_roots_binary() {
+    let d = tmpdir("timer-canonical");
+    let mut c = ctx(&d, CONFIG);
+    let _sh = FakeShed::attached(&c);
+    let root = d.join("share/drover/bin/drover");
+    let link = d.join("local/bin/drover");
+    std::fs::create_dir_all(root.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::fs::write(&root, "BIN").unwrap();
+    std::os::unix::fs::symlink(&root, &link).unwrap();
+    c.exe = link.to_string_lossy().into();
+    let (code, out) = run(&c, &host(Fake::default()), &["timer", "install", "--no-load"]);
+    assert_eq!(code, 0, "{out}");
+    let text = std::fs::read_to_string(job(&c, "dev.drover.clean")).unwrap();
+    let root = std::fs::canonicalize(&root).unwrap();
+    assert!(text.contains(&format!("{}", root.display())), "{text}");
+    assert!(!text.contains(&format!("{}", link.display())), "{text}");
+}
+
+#[test]
+fn doctor_marks_a_job_launchd_refuses_red() {
+    use std::os::unix::fs::MetadataExt;
+    let c = ctx(&tmpdir("timer-refused"), CONFIG);
+    let _sh = FakeShed::attached(&c);
+    std::fs::create_dir_all(&c.home).unwrap();
+    let uid = std::fs::metadata(&c.home).unwrap().uid();
+    let probe = if MAC {
+        format!("launchctl print gui/{uid}/dev.drover.clean")
+    } else {
+        "systemctl --user is-active dev.drover.clean.timer".into()
+    };
+    let refused = "job state = spawn failed\nlast exit reason = OS_REASON_CODESIGNING\n";
+    let r = host(Fake::default()).reply(&probe, refused);
+    let (_, out) = run(&c, &r, &["doctor"]);
+    let line = "✗ timer — dev.drover.clean spawn failed → drover timer install";
+    assert!(out.lines().any(|l| l.starts_with(line)), "{out}");
+    let (_, out) = run(&c, &host(Fake::default()), &["doctor"]);
+    assert!(!out.contains("dev.drover.clean spawn failed"), "{out}");
 }

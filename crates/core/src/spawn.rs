@@ -2,6 +2,7 @@ use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event, Json};
 use crate::gate::refused;
+use crate::orchestrator::actor;
 use crate::providers;
 use crate::runner::{argv, ok, Runner};
 use crate::session::{Session, Status};
@@ -17,7 +18,11 @@ pub fn role_prompt(role: &str) -> &'static str {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
         "architect" => include_str!("../roles/architect.md"),
-        "orchestrator" => include_str!("../roles/orchestrator.md"),
+        "orchestrator" => concat!(
+            include_str!("../roles/orchestrator/role.md"),
+            "\n",
+            include_str!("../roles/orchestrator/thread.md")
+        ),
         "lesson" => include_str!("../roles/lesson.md"),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
@@ -723,6 +728,18 @@ pub const OWN_FILES: &[&str] = &[
     ".review-brief.md",
     "why.md",
     ".verify-browser.mjs",
+    ".verify.md",
+];
+
+const OWN_REPO: [&str; 8] = [
+    ".drover/rules.md",
+    ".drover/verify.md",
+    ".drover/design.md",
+    ".drover/arch.toml",
+    ".herdsman/rules.md",
+    ".herdsman/verify.md",
+    ".herdsman/design.md",
+    ".herdsman/arch.toml",
 ];
 
 /// #770: `OWN_FILES` and the harness files spawn copies in (`providers::LOCAL_FILES`).
@@ -731,7 +748,7 @@ pub fn own_files() -> impl Iterator<Item = &'static str> {
 }
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
-pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
+pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/", "shots/"];
 
 /// #646: a drover-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
 pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
@@ -926,6 +943,73 @@ pub struct Opts {
     /// Fix round that merges the integration branch into a conflicting or behind PR
     #[arg(long)]
     pub update: bool,
+    #[arg(skip = Some(actor()))]
+    pub by: Option<String>,
+}
+
+fn integration_view(
+    ctx: &Ctx,
+    (r, on): (&dyn Runner, &crate::hosts::On),
+    f: &crate::config::Fleet,
+    p: &Plan,
+    (fleet, issue, update): (&str, u64, bool),
+    local: &str,
+) -> Result<(Option<String>, Option<String>)> {
+    let own = || crate::repo_read("rules.md", |x| on.read(&p.worktree.join(x)));
+    let int = &f.integration;
+    if p.family != "rev" {
+        return Ok((
+            own(),
+            update.then(|| format!(include_str!("../roles/brief-update.md"), int)),
+        ));
+    }
+    ok(r, "git", &["-C", local, "fetch", "origin", int])?;
+    let at_int = |name: &str| {
+        crate::repo_read(name, |x| {
+            ok(r, "git", &["-C", local, "show", &format!("origin/{int}:{x}")]).ok()
+        })
+    };
+    if let Some(v) = (p.role == "verify").then(|| at_int("verify.md")).flatten() {
+        on.write(&p.worktree.join(".verify.md"), &v)?;
+    }
+    if crate::lesson::is_lesson(ctx, None, (fleet, issue)) {
+        return Ok((own(), None));
+    }
+    let wt = p.worktree.to_string_lossy();
+    let diff = ok(
+        r,
+        "git",
+        &[
+            &["-C", &wt, "diff", &format!("origin/{int}...HEAD"), "--"][..],
+            &OWN_REPO,
+        ]
+        .concat(),
+    );
+    let d = diff.unwrap_or_default();
+    let names: Vec<String> = (d.lines())
+        .filter_map(|l| Some(format!("`{}`", l.strip_prefix("diff --git a/")?.split(" b/").next()?)))
+        .collect();
+    let changed = (!names.is_empty()).then(|| {
+        format!(
+            "This PR changes {}: you are briefed with the integration branch's copy; the change itself is under review.\n\n~~~diff\n{d}~~~",
+            names.join(", ")
+        )
+    });
+    Ok((at_int("rules.md").or_else(own), changed))
+}
+
+fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygiene) -> Result<()> {
+    let verify = argv(&["-C", local, "rev-parse", "--verify", "--quiet", &p.branch]);
+    let have = r.run("git", &verify)?.code == 0;
+    ok(r, "git", &worktree_add(local, p, have))?;
+    let deny = h.docs_trust.clone().unwrap_or_default();
+    if !deny.is_empty() {
+        let pats = deny.iter().map(|d| format!("!/{}", d.trim_start_matches('/')));
+        let wt = p.worktree.to_string_lossy();
+        let set = ["-C", &wt, "sparse-checkout", "set", "--no-cone", "/*"].map(String::from);
+        ok(r, "git", &[set.to_vec(), pats.collect()].concat())?;
+    }
+    Ok(())
 }
 
 pub fn spawn(
@@ -945,7 +1029,8 @@ pub fn spawn(
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
     let ev = working(&ctx.state)?;
-    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), o.host.as_deref())?;
+    let host = o.host.clone().or_else(|| crate::starts::admitted(ctx, fleet, issue));
+    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
         return refused("RUNTIME_DOWN", why);
     }
@@ -980,10 +1065,8 @@ pub fn spawn(
             .map(|a| f.role(role).ok().and_then(|r| r.agent.clone()).unwrap_or(a));
         term::Shed(crate::shed::Shed { wire, acp, ..b })
     };
-    if on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
-        let path = crate::config::env("PATH").unwrap_or_default();
-        let fix = "`drover timer install` from a shell where `which shed` finds it";
-        return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
+    if on.machine.is_none() {
+        crate::shed::ready(&on, &bt.0.wire, o.dry_run)?;
     }
     let acp_id = bt.0.acp.clone();
     let n = round(&working(&ctx.state)?, fleet, issue, &p);
@@ -998,7 +1081,7 @@ pub fn spawn(
     let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
     if o.dry_run {
         pj.put("dry_run", json!(true));
-        print_plan(out, &pj, o.json)?;
+        print_plan(out, &pj, o.json, placed.as_ref())?;
         return Ok(true);
     }
     if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
@@ -1047,7 +1130,12 @@ pub fn spawn(
         let after = |i: usize| {
             (events.iter().skip(i + 1)).any(|e| e.is("verdict", fleet, issue) || e.is("spawn", fleet, issue))
         };
-        matches!(a.status(), Some(Status::Done | Status::Idle)) && sp.is_some_and(after)
+        let judged = |i: usize| {
+            let at = events.get(i).and_then(|e| e.str("stage"));
+            (events.iter().skip(i + 1)).any(|e| e.is("verdict", fleet, issue) && e.str("stage") == at)
+        };
+        let ended = matches!(a.status(), Some(Status::Done | Status::Idle));
+        sp.is_some_and(|i| ended && after(i) || f.family(role) == "rev" && judged(i))
     };
     if !stale && !live.is_empty() {
         let st = live.first().and_then(|l| l.status()).map_or("unknown", Status::word);
@@ -1110,8 +1198,7 @@ pub fn spawn(
     }
     match refusal {
         Some(("HOST_BUSY", why)) if o.force => {
-            let by = crate::orchestrator::acting().map_or_else(|| "owner".into(), |id| format!("orchestrator-{id}"));
-            let d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": by});
+            let d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": actor()});
             event("override", d)?;
         }
         Some(("HOST_BUSY", why)) => return refused("HOST_BUSY", format!("{why}; retry later or pass --force")),
@@ -1206,14 +1293,7 @@ pub fn spawn(
         }
         let make = || -> Result<()> {
             if !reopen {
-                let have = r
-                    .run(
-                        "git",
-                        &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
-                    )?
-                    .code
-                    == 0;
-                ok(r, "git", &worktree_add(&local, &p, have))?;
+                add_worktree(r, &local, &p, &cfg.hygiene(fleet))?;
             }
             Ok(())
         };
@@ -1277,9 +1357,6 @@ pub fn spawn(
         let fix = last
             .filter(|e| p.family == "impl" && e.str("verdict") == Some("FAIL"))
             .and_then(|e| e.str("body"));
-        let update = o
-            .update
-            .then(|| format!(include_str!("../roles/brief-update.md"), f.integration));
         let adr = events
             .iter()
             .rfind(|e| e.is("design-approved", fleet, issue) && e.str("role") == Some("architect"))
@@ -1289,11 +1366,12 @@ pub fn spawn(
                 "rev" => format!("Architecture: the owner approved the ADR in `{a}/`; check the diff against it."),
                 _ => format!("Architecture: the owner approved the ADR in `{a}/` on this branch; build to it, and add any `.drover/arch.toml` lines it ends with in this PR."),
             });
+        let (rules, int_note) = integration_view(ctx, (r, &on), f, &p, (fleet, issue, o.update), &local)?;
         let decided = events
             .iter()
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
-            .chain(update)
+            .chain(int_note)
             .chain(adr)
             .chain((!crate::events::STAGES.contains(&p.family)).then(|| {
                 let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
@@ -1313,7 +1391,7 @@ pub fn spawn(
             &decided.fold(body.to_string(), |b, d| b + &d),
             (
                 fix,
-                crate::repo_read("rules.md", |f| on.read(&p.worktree.join(f))).as_deref(),
+                rules.as_deref(),
                 crate::queue::repro(&events, fleet, issue),
                 crate::queue::playbook(&events, fleet, issue),
             ),
@@ -1364,6 +1442,7 @@ pub fn spawn(
         term::ok(r, &home(p.lane_cmd(&pane)))?;
         term::ok(r, &term::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
     }
+    crate::starts::started(ctx, fleet, issue);
     let mut dirs: Vec<String> = f.clone_build.clone();
     dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
     dirs.sort();
@@ -1391,7 +1470,8 @@ pub fn spawn(
             d.put("runtime", json!(if bt.0.acp.is_some() { "shed-acp" } else { "shed" }));
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d.put("confirmed", json!(confirmed))
-                .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))));
+                .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))))
+                .put("by", json!(o.by));
             d.put("update", json!(o.update)).put("handover", json!(note));
             if let Some(pl) = &placed {
                 d.put("host", json!(pl.name))
@@ -1418,7 +1498,7 @@ pub fn spawn(
             event("spawn", d)?;
             kicked?;
             pj.put("pane", json!(pane)).put("confirmed", json!(confirmed));
-            print_plan(out, &pj, o.json)?;
+            print_plan(out, &pj, o.json, placed.as_ref())?;
             Ok(confirmed)
         })();
         (res, c.join().ok())
@@ -1766,7 +1846,12 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
     Ok(any)
 }
 
-fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool) -> Result<()> {
+fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool, placed: Option<&crate::hosts::Placed>) -> Result<()> {
+    let mut v = pj.clone();
+    if let Some(pl) = placed {
+        v.put("host", json!(pl.name)).put("why", json!(pl.why));
+    }
+    let pj = &v;
     if as_json {
         writeln!(out, "{}", serde_json::to_string_pretty(pj)?)?;
     } else {
@@ -1775,6 +1860,10 @@ fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool) -> Result<()> {
             "{} [{} {}] {} @ {}",
             pj["agent"], pj["harness"], pj["profile"], pj["branch"], pj["worktree"]
         )?;
+        if let Some(h) = pj["host"].as_str() {
+            let why = pj["why"].as_str().map_or(String::new(), |w| format!(": {w}"));
+            writeln!(out, "  on {h}{why}")?;
+        }
         for c in pj["commands"].as_array().into_iter().flatten() {
             let words: Vec<&str> = c.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             writeln!(out, "  $ {}", words.join(" "))?;

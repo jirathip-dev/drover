@@ -573,10 +573,14 @@ fn the_repos_provider_ban_fails_a_web_file_naming_a_provider() {
 
 fn repo_conf() -> String {
     let conf = include_str!("../../../.drover/arch.toml");
-    conf.replace(
-        "generated = [\"assets/types/api.d.ts\"]\ngenerate = \"just types\"\n",
-        "",
-    )
+    let (head, rest) = conf.split_once("generated = [").unwrap();
+    let rest = rest.split_once("]\n").unwrap().1;
+    let rest = rest
+        .split_once('\n')
+        .filter(|r| r.0.starts_with("generate ="))
+        .unwrap()
+        .1;
+    format!("{head}{rest}")
 }
 
 const FROZEN: &str = "frozen = [\"src/registry.rs\"]\n\n[[collect]]\ndir = \"src/features\"\nglob = \"*.rs\"\n";
@@ -688,4 +692,22 @@ fn the_repos_809_bans_fail_each_api_outside_its_one_module() {
         assert!(out.contains(&want), "{want}\n{out}");
     }
     assert!(out.contains(&format!("{} violations", bans.len())), "{out}");
+}
+
+#[test]
+fn a_shared_file_under_no_size_rule_fails_and_one_under_a_rule_passes() {
+    let shared = |name: &str, glob: &str| {
+        repo(
+            name,
+            &[(".drover/arch.toml", &format!("shared = [\"{glob}\"]\n{ARCH}"))],
+        )
+    };
+    let (code, out) = arch(&shared("arch-shared-ok", "crates/core/src/drive.rs"), &[]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out) = arch(&shared("arch-shared-tests", "crates/*/tests/**"), &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("shared `crates/*/tests/**` falls under no `[[size]]` rule"),
+        "{out}"
+    );
 }
