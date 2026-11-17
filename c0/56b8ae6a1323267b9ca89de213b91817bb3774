@@ -1,0 +1,24 @@
+Decided: the stall is a slo breach (`stall:<fleet>#<n>:<role>@<round>`) whose heal restarts or moves once; a second stall, a failed heal or no free host is #1183's stuck card.
+Because: "A second stall on the same step gives a stuck card."
+Decided: a move is a `stall-move` event that `hosts::place` reads: the next spawn skips that host and spawn's existing moved-lane path saves the wip first.
+Because: "drover saves wip and moves the lane to another enabled host that is under its limits and fits its tags"
+Decided: only tracked changes and unpushed commits pin a lane (`hosts::unsaved`, moved from check.rs to its one caller, drops `??` lines); `body.md` joins `OWN_FILES`.
+Because: "only commits not on origin and changes to tracked files"
+Decided: named waits read from the log: a hold or queue blocker, a non-green cached PR rollup, a spawn-slot or CI promise, an open ask; an issue drive holds or last refused for a non-load code is not silent.
+Rejected: `waiting::scan` in the slo pass — #1183 took it out of the fast step for cost.
+Rejected: timing the load wait inside `place` — place also runs for dry runs and slot checks, so it must not log or save.
+Check: the restart is `spawn <role> --supersede`, as drive's own fix spawns, so wip save and lane clean are supersede's.
+Owner: a lane quiet for 2 hours is restarted once, a lane stuck behind a busy host moves to a free one, and a second time you get the stuck card.
+
+Decided: no code change for the red `rust` check; `drive_kicks::failing_retries_never_starve_another_fleets_start` is a flake, and the head is pushed again so CI reruns.
+Because: crates/cli/tests/drive_kicks.rs:700
+Check: the same test failed on issue-958's CI run 44009443130, which shares no code with this branch; locally it passes 6 of 6 runs.
+Decided: the sim/model.rs merge conflict takes staging's line, which plants the same rev-only bug as a69d2f2.
+Rejected: changing drive_kicks timing in this PR — the flake predates #1216 and is outside its scope.
+Owner: the red check was a test that fails at random on other branches too; this round only merges staging and refreshes the evidence.
+
+Decided: no code change for the red `test (shard 1/4)`; `service::a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes` is a flake, and this round only merges staging.
+Because: crates/cli/tests/service.rs:290
+Check: the slo stall breach cannot fire in that test, since its events are fresh and the window is 2h; on this host the test fails on clean origin/staging too, and CI run 44145593259 at the new head passes every shard.
+Rejected: changing the service test's timing in this PR — the flake predates #1216 and is outside its scope.
+Owner: the red check was a test that fails at random; after merging staging, CI is green with no code change.
