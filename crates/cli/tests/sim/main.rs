@@ -333,7 +333,6 @@ fn random_seeds() {
 }
 
 #[test]
-#[ignore = "parked: the planted bug trips on random seed 1017 since the per-pass closed read; follow-up makes it timing-robust"]
 fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let s = Some(Sabotage::Planted);
     let tripped = |f: &str| f.starts_with("I1 ") && f.contains(" rev has ");
