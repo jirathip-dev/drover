@@ -68,7 +68,7 @@ fn card(c: &drover::Ctx, sh: &FakeShed, now: u64) -> Option<Value> {
 #[test]
 fn idle_21_minutes_with_spawnable_work_heals_and_never_makes_a_card() {
     let (c, sink, sh) = setup("slo-idle-stuck");
-    pass(&c, &sh, &["drive"]);
+    pass(&c, &sh, &["check"]);
     fast(&c, &sh);
     assert!(kinds(&c).is_empty(), "idle starts now: no breach yet");
     fast(&at(&c, 19 * 60), &sh);
