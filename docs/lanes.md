@@ -340,6 +340,17 @@ its row names the wait. `slo-ok` ends the episode once it recovers, and the card
 soon as its lane starts. The card's hint is `drover waiting <fleet>`, and each issue on it has a [force] that runs
 its `drover waiting` next command (a spawn) once with `--force`, past the load limit, logged `override` `by: owner`.
 
+#1216: an in-flight issue with no push, verdict or lane event (`spawn`, `turn-end`, `pushed`) for
+`[limits] stall_restart_hours` (2; `stall_restart_hours` in `[fleet.<n>]` overrides it) is restarted once:
+`stall-restart` (`by: drover`), then `spawn <role> --supersede` (its wip saved to `wip/`, its lane cleaned, the same
+role respawned). A load wait (`HOST_BUSY`, `MEM_LOW`, `DISK_LOW`) that long logs `stall-move` instead: the next
+spawn skips that host, whatever its worktree holds, and goes to another enabled host under its limits that fits the
+tags, its wip saved first. A named wait never counts: held until #N, CI running or red, a spawn slot, an open ask,
+or a `turn working` younger than the window; nor does an issue drive is on (its pass holds the issue, or its
+last step since was refused or failed for another reason than load: that refusal or the same-failure card names it). A second stall on the same step, a failed restart, or a move with no
+free host is a stuck card. Only changes to tracked files and commits not on origin pin a lane to its host;
+untracked files never do (drover's scratch, `body.md` among `OWN_FILES`, is never saved; the rest travel in `wip/`).
+
 `drover check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
 checks `[limits] ci_start_minutes` (10) after its push: `CI broken: <workflow> did not start` when a failed run has
