@@ -1,0 +1,10 @@
+Decided: merged origin/staging, kept staging's code in all 13 conflicts and stripped the comments it brought back
+Because: "One pass removes every comment the strict policy bans, repo-wide"
+Decided: the red drive_kicks test is not this PR's: its file differs from the merge base only in comment lines
+Check: git diff origin/staging -- crates/cli/tests/sim/ crates/cli/tests/drive_kicks.rs has no code line
+Decided: fixture issue ids in sim seed docs kept as plain words ("issue 370", "issues 201 and 202")
+Because: crates/cli/tests/sim/seeds.rs:5
+Decided: main.ts regex again /^[/]/ so the comment scanner does not read // as a comment
+Because: web/src/main.ts:16
+Rejected: fixing the sim hunt test here — it fails on staging's own CI and is drive behaviour, not a comment
+Owner: Merged the latest staging and removed the history comments it brought back; nothing behaves differently.
