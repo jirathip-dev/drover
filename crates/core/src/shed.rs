@@ -169,10 +169,12 @@ pub fn ready(r: &dyn Runner, w: &Wire, dry: bool) -> Result<()> {
         let fix = "`drover timer install` from a shell where `which shed` finds it";
         return crate::gate::refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
     }
-    match gate(r, w) {
-        Err(e) if !dry => crate::gate::refused("SHED_VERSION", format!("{e:#}").replacen("SHED_VERSION: ", "", 1)),
-        _ => Ok(()),
+    if dry {
+        return Ok(());
     }
+    gate(r, w)
+        .map(drop)
+        .or_else(|e| crate::gate::refused("SHED_VERSION", format!("{e:#}").replacen("SHED_VERSION: ", "", 1)))
 }
 
 /// #937: `drover shed install`: the pinned rev onto PATH, then `shed install --force` restarts serve onto it, read back as doctor's line; unless `yes`, the plan and the terminals on serve.
