@@ -1,0 +1,5 @@
+Decided: document max_in_flight in a new docs/config.md section next to the other per-fleet keys
+Because: "`[fleet.<n>] max_in_flight = N` caps the in-flight PRs of that fleet"
+Rejected: a `no doc:` line in the PR body — the key is user-facing config, so it belongs in the config doc
+Check: arch-check's stale-doc rule no longer flags crates/core/src/config.rs for max_in_flight
+Owner: The new in-flight cap setting is now described in the config guide.
