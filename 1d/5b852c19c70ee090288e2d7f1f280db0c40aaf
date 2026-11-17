@@ -1,0 +1,16 @@
+Decided: clear the lane's DROVER_* env once per test process in common's tmpdir/ctx/run, and route every test's own set_var through set_env so the clear always precedes it
+Because: "the lane's `DROVER_*` env is cleared or overridden for the test process (e.g. in the test harness helper)"
+Rejected: .cargo/config.toml [env] — can only set, not unset; an empty DROVER_LANE differs from unset in cli.rs
+Rejected: clearing every DROVER_* var — perf/profile tests read DROVER_PERF_* and DROVER_PROFILE*
+Decided: the fleet check lives in cli::foreign so the outbox drain and the service token path share it
+Because: "The outbox drain refuses or drops a line whose fleet isn't configured"
+Check: hosts.rs re-runs the remote-lane test as a child with DROVER_OUTBOX set to a file and asserts the file stays empty
+Owner: running tests on a remote lane can no longer queue fixture commands into that lane's real outbox
+
+Decided: triage tests set DROVER_LANE through set_env, not std::env::set_var
+Because: crates/cli/tests/common/mod.rs:311
+Rejected: clearing lane env on every helper call — it would wipe each test's own lane env mid-test
+Decided: staging build fix, sim known-fleet metrics set to the values staging produces since #1180
+Because: crates/cli/tests/sim/main.rs:415
+Check: run each triage test alone (--exact) as nextest does; all four pass
+Owner: the test suite passes again on CI; triage tests no longer lose their lane setting
