@@ -1,0 +1,42 @@
+Decided: proxy lanes are marked on the spawn event; their signed-out advice names the token proxy and its setup command, never the host login
+Because: "the signed-out advice names the proxy (its token on the main host, `claude setup-token`)"
+Decided: the proxy logs one passive proxy-ok when a signed-out lane's call gets a 2xx; login_hold skips a proxy sign-out inside proxy_retry_secs or followed by proxy-ok
+Because: "A proxy lane auth error followed by a successful proxy request within the retry window does not set LOGIN_NEEDED"
+Decided: the retry window is a new [limits] key proxy_retry_secs, default 300
+Because: crates/core/src/config.rs:706
+Rejected: delaying the signed-out alert in check until the session stays failed a window — check is stateless and the AC asks for the proxy's own success as the signal
+Rejected: a per-request event or a last-ok field in proxy-keys.json — floods the log, or races spawn's mint on that file
+Check: a proxy lane's alert key includes its last proxy-ok, so a real failure after a cleared blip alerts and holds again
+Check: host-login lanes keep `claude /login` advice and the immediate hold (shed.rs an_auth_failure_alerts_signed_out_once_and_holds_the_host)
+Owner: a one-off dropped proxy call no longer locks a remote host for hours, and the alert points at the proxy token instead of a useless login step
+
+Decided: proxy lanes are marked on the spawn event; their signed-out advice names the token proxy and its setup command, never the host login
+Because: "the signed-out advice names the proxy (its token on the main host, `claude setup-token`)"
+Decided: the proxy logs one passive proxy-ok when a signed-out lane's call gets a 2xx; login_hold skips a proxy sign-out inside proxy_retry_secs or followed by proxy-ok
+Because: "A proxy lane auth error followed by a successful proxy request within the retry window does not set LOGIN_NEEDED"
+Decided: staging build fix: the sim hunt starts from seed 4 alone so its mutations run from round 2, before random seed 1003 trips the planted bug
+Because: crates/cli/tests/sim/main.rs:279
+Rejected: planted threshold back to 4 — the hunt then finds nothing within 40 rounds
+Rejected: delaying the signed-out alert in check — check is stateless and the AC asks for the proxy's own success as the signal
+Check: host-login lanes keep `claude /login` advice and the immediate hold (shed.rs an_auth_failure_alerts_signed_out_once_and_holds_the_host)
+Check: sim hunt finds I1 in round 2 and still minimises it
+Owner: a one-off dropped proxy call no longer locks a remote host for hours, and the alert points at the proxy token instead of a useless login step
+
+Decided: merge origin/staging; take staging's sim/main.rs hunt test over this branch's earlier staging build fix
+Because: crates/cli/tests/sim/main.rs:279
+Rejected: none
+Owner: the branch is current with staging again; the proxy sign-out fix itself is unchanged
+
+Decided: the proxy sign-out test attaches the suite's FakeShed as the main host's shed, so check reaches signed-out with no shed server on the runner
+Because: crates/core/src/check.rs:73
+Rejected: skipping the test when no shed server answers — the AC needs both cases covered in CI
+Check: XDG_RUNTIME_DIR pointed at an empty dir, remote_acp passes 11/11; commit 1 plus this fixture still fails on the old advice
+Owner: only the test changed; it now passes on CI runners that have no shed of their own
+
+Decided: merge origin/staging; proxy lanes are told apart as #1223 does (remote machine, shed-acp runtime), so the spawn event's own proxy mark goes
+Because: crates/core/src/hosts.rs:841
+Decided: keep this branch's advice text (token proxy, setup-token, host-on) and its per-lane alert key on top of #1223's test
+Because: "the signed-out advice names the proxy (its token on the main host, `claude setup-token`)"
+Rejected: keeping both the spawn mark and the runtime test — two ways to tell one thing
+Check: remote_acp 15/15 incl. #1223's lane-key 401 test, its login_hold call now an hour past the retry window
+Owner: the branch is current with staging again; the proxy sign-out fix behaves as before
