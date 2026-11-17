@@ -408,7 +408,7 @@ fn brief(
     p: &Plan,
     title: &str,
     body: &str,
-    (fix, rules, repro, play): (Option<&str>, Option<&str>, bool, Option<String>),
+    (fix, rules, docs, repro, play): (Option<&str>, Option<&str>, Option<&str>, bool, Option<String>),
     recipe: &crate::design::Recipe,
 ) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
@@ -481,6 +481,9 @@ fn brief(
     let rules = rules.map_or(String::new(), |r| {
         format!("## Repo rules (.drover/rules.md)\n\n{}\n\n", r.trim_end())
     });
+    let docs = docs.map_or(String::new(), |d| {
+        format!("## Docs you may trust (.drover/docs.md)\n\nAny other doc is not current: don't read it, unless this brief names it.\n\n{}\n\n", d.trim_end())
+    });
     let shared = include_str!("../rules/shared.md").trim_end();
     let rules = format!("## Shared rules (rules/shared.md)\n\n{shared}\n\n{rules}");
     format!(
@@ -493,6 +496,7 @@ fn brief(
         body = body,
         fix = fix,
         rules = rules,
+        docs = docs,
         contract = contract.trim_end()
     )
 }
@@ -1392,6 +1396,7 @@ pub fn spawn(
             (
                 fix,
                 rules.as_deref(),
+                crate::repo_read("docs.md", |f| on.read(&p.worktree.join(f))).as_deref(),
                 crate::queue::repro(&events, fleet, issue),
                 crate::queue::playbook(&events, fleet, issue),
             ),

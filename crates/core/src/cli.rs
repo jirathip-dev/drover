@@ -298,7 +298,7 @@ enum Cmd {
         json: bool,
     },
     #[command(
-        about = "#668: the queue-wide line-cap view: total, cap and headroom at integration, each open PR's `src/ net`, the queued issues with no PR, the projected total and the one raise to ask for"
+        about = "#668: the queue-wide line-cap view: total, cap and headroom at integration, each open PR's `src/ net`, the queued issues with no PR, the projected total and the one raise to ask for; `cap log`: every past cap change from git"
     )]
     Cap { fleet: String },
     #[command(
@@ -424,6 +424,8 @@ enum Cmd {
         config: std::path::PathBuf,
         #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
+        #[arg(long)]
+        base: Option<String>,
     },
     #[command(about = "CI (#734): the layers, bans and size limits in --config; exit 1 on a violation")]
     #[command(hide = true)]
@@ -1253,7 +1255,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
-        Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &crate::repo_path(&rules), out),
+        Cmd::CapCheck { config, rules, base } => {
+            return crate::overlap::cap_check(r, &config, &crate::repo_path(&rules), base.as_deref(), out)
+        }
+        Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
         Cmd::ArchCheck {
             config,
             write_baseline,

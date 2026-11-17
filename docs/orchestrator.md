@@ -70,9 +70,7 @@ drover thread ls [FLEET] [--json]           # per repo: title, last message, unr
   `DROVER_LANE` role `conductor` and the old `<state dir>/conductor/` folder are read as the new names, and so are
   the log's old rows: `conductor-start|sleep|attached|detached` as `orchestrator-…`, `from: conductor` and
   `by: conductor-<thread>`. New writes use the new names only. `doctor` prints one deprecation line while fleet.toml
-  has the old keys. The frozen old board (#552) still matches the old names (q1173): its chat tab no longer shows a
-  thread's awake, asleep or working state, its Stop, or a mid-turn message queue, it draws the orchestrator's messages
-  as yours, and its config sheet lists the orchestrator as a plain role. Cooee replaces it.
+  has the old keys.
 
 - **Sleep and resume:** `check` closes an awake orchestrator whose thread has been quiet for 30 min and that is not
   working (`orchestrator-sleep`). The next message starts it again with the same session id. Claude Code is started
@@ -122,79 +120,26 @@ drover thread ls [FLEET] [--json]           # per repo: title, last message, unr
 - **Commands:** the lane hook logs each `drover` or `gh` command the orchestrator runs (`thread-cmd`, not `thread
   reply`); the board shows them as closed tool rows.
 
-## The [chat] tab (#386)
+## The Threads tab (#1072)
 
-#1072: the tab is back as **Threads**, the last tab of the standalone page only (`[queue] [events] [lanes]
-[threads·N]`; `cooee-plugin.toml` has no Threads place, so the Cooee plugin never shows it). It is a JSON screen like
-the others (`docs/design/threads-tab/`): `/screens/threads` (the list), `/screens/threads/<id>` (a thread, opened in
-the same tab, its cards place hidden) and `/screens/threads/new/<repo>`. Its taps post `/action` `thread-new`,
-`thread-say`, `thread-retry`, `thread-archive`, `thread-restore` (the `POST /thread` ops below, standalone and paired
-only) and `answer`. Not yet on it: files, queued messages, config and secret cards. The rest of this section is the old
-tab's spec, which it follows.
+**Threads** is the last tab of the standalone page only (`[queue] [events] [lanes] [threads·N]`; `cooee-plugin.toml`
+has no Threads place, so the Cooee plugin never shows it), N the threads where a choice waits. It is a JSON screen
+like the others (`docs/design/threads-tab/`): `/screens/threads` (the list), `/screens/threads/<id>` (a thread, opened
+in the same tab, its cards place hidden) and `/screens/threads/new/<repo>`. Its taps post `/action` `thread-new`,
+`thread-say`, `thread-retry`, `thread-archive`, `thread-restore` (the `POST /thread` ops) and `answer`. #1088: a
+thread tap or push opens `#threads/<id>` (back returns to the list), and its config, secret and run cards show in the
+thread. Files and queued messages come with #1086 and #1087.
 
-Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, `[queue] [lanes] [chat] [host]
-[events]`, reading `[chat·N]` with N the threads where a choice waits.
-
-- **The list:** "all repos", then each fleet by name, a card each with its 3 newest threads (the rest fold under
-  "N older threads") and `[+ thread]`, which opens an empty thread (#405): nothing is logged until its first message,
-  which starts the thread (titled with that message's first line, cut to one row) and its orchestrator, and is the only
-  thing the orchestrator gets. After its first reply the orchestrator retitles it once with a short summary
-  (`drover thread title <thread> "<title>"`, logged `thread-title`). A row has the unread dot, the title, the age,
-  then `! choose`, `✻ working` or `☾ asleep` and the last message.
-- **Archive (#405):** a row swiped left shows `[archive]`: the thread's orchestrator stops (its pane closes; the folder,
-  uploads and log stay) and the thread folds under "N archived" at the bottom of its card, where `[restore]` brings
-  it back; its next message resumes the same session. CLI: `drover thread archive|restore <thread>` (logged
-  `thread-archive` / `thread-restore`). Nothing is deleted.
-- **A thread** is the lane sheet's chat blocks: your messages in the accent colour, the orchestrator's purple, its
-  commands as closed tool rows, system lines (resumed, asleep, account switch), images and file rows
-  (`GET /thread/<thread>/<name>`), plain links. An open ask shows its choice rows (recommended first) and an "other"
-  box, with an amber edge; a tap answers it (`DECISION` typed into the orchestrator); answered, a green `✓` line with
-  who and when stays. Thread asks never join the red needs-you stack. Below: the live line and the composer (`[+]`
-  attach, the text, `[send]`). Opening a thread marks it read.
-- **Linked threads (#413):** each handoff row, message from another thread and flow-back line carries a
-  `from t5` / `continued in t6` chip, and so does a linked thread's row in the list; a tap opens the other thread.
-- **At 1000 px and up** the list is a 400 px column with the open thread beside it.
-- **Not a paired owner device:** the thread reads the same; the choice rows, `[+ thread]` and the composer are off.
+- **Archive (#405):** the thread's orchestrator stops (its pane closes; the folder, uploads and log stay) and the
+  thread folds under "N archived"; `restore` brings it back and its next message resumes the same session. CLI:
+  `drover thread archive|restore <thread>` (logged `thread-archive` / `thread-restore`). Nothing is deleted.
 - **Writes** are `POST /thread` (`op` = `new`, `say` with an optional base64 file of at most 10 MB, `answer`,
-  `read`, `retry`; #407 `queue`, `unqueue`, `steer`, `stop`) from a paired device, 10 a minute. #403: `new` and `say` answer once the thread or message is
-  logged; starting or resuming the orchestrator and typing the line run after the reply. A failed delivery is a red
-  system line with `[retry]` (`retry` types the same line again, logging no copy). No chat post shows the loading
-  overlay.
-- **On a phone (#403):** `[send]` clears the box at once and shows the message `sending…`, then `✓`; failed, red
-  with `[retry]` and the text (and file) back in the box. The box grows to 6 lines, then scrolls; with the keyboard
-  up the tab bar hides and (#443) the composer sits flush on the keyboard: the page never scrolls, only the
-  messages do, and the message just above the box stays there as the keyboard opens or closes or the box grows. Opening a thread pushes a history entry: back, `[‹]` or a swipe right from the left edge
-  returns to the list. A working thread shows the theme's loading art (sprite, ascii frames or the glyph) inline
-  above the box.
-- **Comfort (#407, from t3code's mobile app):**
-  - *Scrolling:* the thread follows its end on a live update until your own drag (or wheel) leaves the end; back at
-    the very end, or on any send, it follows again. A reply streaming in never pulls you down while you read.
-  - *Pinned send:* after a send your message sits ~16 px under the top (under a bar that sticks there, else the
-    screen's top) and the reply grows below it; the room under it stays empty until the reply fills it.
-  - *Folded turns:* in a finished turn each run of commands is one tappable `▸ N commands` row (open, its rows);
-    replies stay shown. The live turn's commands stay rows. Each fold keeps its open state across live updates.
-  - *The pill:* one floating pill above the box: `working 1m 23s` with the theme's loading art and `[stop]` (Esc to
-    the orchestrator, `op=stop`), then `stopping…` until the turn ends; `reconnecting…` while the live stream is down,
-    `offline · tap to retry` after 30 s or offline. Idle and connected, none (it replaces the working line).
-  - *Queue or steer:* while a turn runs `[send]` is `[queue]` ("delivered when this turn ends · hold [queue] to
-    steer"): `op=queue` logs `thread-queue` and the server keeps it; when the orchestrator is no longer working the
-    board's watcher types the queued ones in, oldest first, each logged as your message (`thread-unqueue`, why
-    `sent`). A long press offers `[queue]` and `[steer]` (`op=steer`: Esc, then the message now), each with its
-    line. Queued messages sit above the box with `[send now]` (steered in), `[edit]` (the box shows `editing queued
-    message · [cancel]`; its send replaces it, `op=queue&q=`, and your draft comes back) and `[remove]`
-    (`op=unqueue`, why `removed`).
-  - *Undo:* `[archive]` after a swipe shows `archived · [undo]` for 5 s; `[undo]` restores it. One row is open at a time.
-  - *Drafts:* each thread keeps its draft text (localStorage) and picked files (IndexedDB) on the device, across tab
-    switches, closing the app and lost signal; a failed send keeps them.
-  - *Message menu:* a long press (or right click) on a message: `[copy]` (its text), `[copy as markdown]` (its
-    source), `[quote]` (`> ` lines into the box), then `copied`.
-  - *No push while you look:* the page's live stream names the thread open on a shown page (`/live?thread=`); while
-    it is connected the server stamps `<state dir>/watch-<thread>.at` each second, and a reply or ask in that thread
-    pushes nothing (within 5 s of the stamp). A hidden page's stream drops it.
+  `read`, `retry`; #407 `queue`, `unqueue`, `steer`, `stop`) from a paired device, 10 a minute. #403: `new` and `say`
+  answer once the thread or message is logged; starting or resuming the orchestrator and typing the line run after
+  the reply. A failed delivery is a red system line with `[retry]` (`retry` types the same line again, logging no copy).
 
 **Push** (a `webpush` notifier, default `on`): an orchestrator's reply is `<repo> · <thread title>: <its first line>`, a
-choice `<repo> · <thread title> asks: <question>`; a tap opens the thread. The owner's messages, commands and system
-lines never push, nor (#407) anything in a thread a board has open.
+choice `<repo> · <thread title> asks: <question>`. The owner's messages, commands and system lines never push.
 
 Events: `thread-new`, `thread-msg` (`files`; #413 `via`: a flow-back line), `thread-handoff`, `thread-cmd`, `thread-read`, #407 `thread-queue` (`text`, `files`, `q`: the one an edit replaces) and `thread-unqueue` (`q`, why: sent, removed), `orchestrator-start` (session, resumed),
 `orchestrator-sleep` (why: idle, gone, signed out); #387: `config-propose`, `config-settled`,
@@ -252,8 +197,8 @@ shows a sign-in prompt, it sleeps and the thread gets a `<harness> is signed out
   pane's shell sources, deleted after the start (docs/providers.md).
 - `drover secret ls` and `drover secret rm <fleet|all> <NAME>` are owner-only.
 
-## Telegram (removed, #557)
+## Telegram
 
-The Telegram bridge (#387) is gone: the board and web push are the only owner UI. A leftover `[telegram]` table in
-fleet.toml loads with a warning (`drover doctor` shows a `!` row); drop it.
+There is no Telegram bridge: the page and web push are the owner UI. A `[telegram]` table in fleet.toml loads with a
+warning (`drover doctor` shows a `!` row); drop it.
 
