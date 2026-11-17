@@ -1,0 +1,39 @@
+Decided: a shed counts as pinned when its build is a prefix of REV or its semver is proto::VERSION; serve must also run the same build as the shed on PATH
+Because: "are the build it pins, or speak its proto version"
+Decided: spawn gates on the main host only, after SHED_MISSING and before any worktree; remote hosts keep their bootstrap pin
+Because: crates/core/src/spawn.rs:1003
+Decided: an unreadable `shed --version` or a serve that does not answer is not a refusal; only a read mismatch refuses
+Because: crates/core/src/shed.rs:140
+Decided: the breaker counts distinct lanes with an unconfirmed spawn, reusing runtime_down_failures and runtime_down_minutes; a landed spawn or `shed-installed` clears it
+Because: crates/core/src/breaker.rs:119
+Rejected: new [limits] keys for N and M — the existing 5 lanes / 30 min covers the 5-in-15 case
+Decided: install is `drover shed install`, a dry run naming serve's live terminals unless --yes, then cargo install --rev REV and `shed install --force`, read back as doctor's line
+Because: crates/core/src/shed.rs:156
+Decided: the line cap is raised in one orchestrator-filed issue; this PR waits for it
+Because: q1812
+Check: cargo test -p drover --test shed_pin fails at 891888d (commit 1 on staging) and passes at the head
+Owner: drover now refuses to start lanes on a shed build that doesn't match its pin, stops respawning when prompts stop landing fleet-wide, and has one command that installs shed and restarts it.
+
+Decided: shed_pin goes in shard 4 of scripts/test-shards.txt, next to the other shed test targets
+Because: scripts/test-shards.txt:165
+Decided: in the merge, staging's `Cmd::Stats { cmd }` dispatch replaces this branch's old `StatsCmd::Land` arm; the `shed install` arm stays
+Because: crates/core/src/cli.rs:1984
+Rejected: fixing staging's other red checks (sim hunt, temp-dir leak, serve.rs size) here — outside this issue's files and not caused by it
+Check: scripts/test-shards.sh check exits 0 and CI's rust job passes the test shards step
+Owner: The CI failure was a missing test-shard entry; it is added and the branch is merged with current staging.
+
+Decided: the shed verb's clap enum lives in shed.rs; cli.rs keeps a one-line Shed(shed::Cmd) variant so cli.rs and dispatch stay within their arch baselines
+Because: crates/core/src/cli.rs:511
+Decided: spawn's SHED_MISSING and SHED_VERSION checks move into one shed::ready call so spawn's function shrinks back under its baseline
+Because: crates/core/src/spawn.rs:1002
+Decided: docs/runtimes.md's setup step documents `drover shed install` and its --yes flag
+Because: docs/runtimes.md:201
+Rejected: bumping .drover/arch-baseline.txt — the baselines are meant to shrink, and a trim was possible
+Check: cargo run -q -p drover -- arch-check --base origin/staging reports only staging's serve.rs
+Owner: The CI layout check now passes for this change; only the shed server file that staging already had over its limit is still flagged.
+
+Decided: a dry-run spawn skips the shed version probe; a real spawn still refuses SHED_VERSION
+Because: crates/cli/tests/spawn.rs:130
+Rejected: allowing `shed --version` in the dry-run test — the dry run threw that result away anyway
+Check: spawn::claude_role_dry_run_uses_synced_profile passes and shed_pin still refuses SHED_VERSION
+Owner: A dry-run spawn no longer probes the shed build; real spawns still check it.
