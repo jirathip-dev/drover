@@ -1,0 +1,5 @@
+Decided: a dry-run spawn skips the shed version probe; a real spawn still refuses SHED_VERSION
+Because: crates/cli/tests/spawn.rs:130
+Rejected: allowing `shed --version` in the dry-run test — the dry run threw that result away anyway
+Check: spawn::claude_role_dry_run_uses_synced_profile passes and shed_pin still refuses SHED_VERSION
+Owner: A dry-run spawn no longer probes the shed build; real spawns still check it.
