@@ -113,11 +113,21 @@ pub struct Home {
 impl Home {
     /// The folder: its env var when set and not empty, else the default under `home`.
     pub fn resolve(&self, home: &Path) -> PathBuf {
-        std::env::var_os(self.env)
+        crate::config::env_os(self.env)
             .filter(|v| !v.is_empty())
             .map_or_else(|| home.join(self.default), PathBuf::from)
     }
 }
+
+/// #782: what a harness needs in a lane sandbox: folders it reads, folders it writes, hosts it reaches.
+pub struct Needs {
+    pub read: Vec<PathBuf>,
+    pub write: Vec<PathBuf>,
+    pub hosts: Vec<&'static str>,
+}
+
+/// #782: the variable sandbox-runtime takes a sandboxed command's `TMPDIR` from.
+pub const SANDBOX_TMP_ENV: &str = "CLAUDE_CODE_TMPDIR";
 
 /// A `drover doctor` row: passed, its mark when not, its text.
 pub type Row = (bool, char, String);
@@ -171,6 +181,18 @@ pub trait Provider: Sync {
     }
     fn profile_files(&self, _ctx: &Ctx, _profile: &str) -> Vec<PathBuf> {
         vec![]
+    }
+    fn sandbox(&self, ctx: &Ctx, profile: &str) -> Needs {
+        let files = self.profile_files(ctx, profile).into_iter();
+        Needs {
+            read: files.filter_map(|f| Some(f.parent()?.to_path_buf())).collect(),
+            write: self
+                .home()
+                .map(|h| h.resolve(&crate::config::home()))
+                .into_iter()
+                .collect(),
+            hosts: vec![],
+        }
     }
     fn hooks_allowed(
         &self,
@@ -233,6 +255,9 @@ pub trait Provider: Sync {
     }
     fn acp_profile(&self, _settings: &str, _role: &str) -> String {
         String::new()
+    }
+    fn chat_settings(&self, profile: &std::path::Path) -> std::path::PathBuf {
+        profile.join("settings.json")
     }
     fn acp_meta(&self) -> Option<serde_json::Value> {
         None

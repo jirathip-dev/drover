@@ -161,7 +161,7 @@ fn a_pr_outside_ui_paths_skips_verify_and_goes_to_the_gates() {
     assert!(!started(&sh, "sendmeter-verify"));
     drive(&c, &r);
     assert!(r.called(&format!(
-        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+        "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));
     assert_eq!(state(&c), "merged");
 }
@@ -228,7 +228,7 @@ fn no_recipe_logs_verify_no_recipe_shows_it_and_goes_on_to_the_gates() {
     let (c, head, sh) = passed("verify-no-recipe", &config(), false);
     let r = fake(&head, "web/index.html\n");
     let out = drive(&c, &r);
-    assert!(r.called(&format!("{RECIPE}?ref={head}")), "{:?}", r.calls.borrow());
+    assert!(r.called(&format!("{RECIPE}?ref=staging")), "{:?}", r.calls.borrow());
     assert!(out.contains("verify-no-recipe"), "{out}");
     assert_eq!(kinds(&c, "verify-no-recipe").len(), 1);
     assert!(!started(&sh, "sendmeter-verify"));
@@ -573,7 +573,7 @@ fn skipped_after_a_refusal_merges_in_one_pass(name: &str, kind: &str, word: &str
     let r = fake(&head, "src/a.rs\n");
     drive(&c, &r);
     assert!(r.called(&format!(
-        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+        "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));
     assert_eq!(state(&c), "merged");
     assert!(kinds(&c, "spawn")
@@ -676,4 +676,88 @@ fn a_shot_on_a_hung_disk_answers_504_and_the_board_stays_up() {
         );
     });
     assert!(get("/").starts_with("HTTP/1.1 200"));
+}
+
+#[test]
+fn a_pr_that_rewrites_the_recipe_is_verified_by_the_integration_recipe() {
+    let (c, head, sh) = passed("verify-own-recipe", &config(), false);
+    let wt = c.worktrees.join("sendmeter/verify-12-r1");
+    std::fs::create_dir_all(wt.join(".drover")).unwrap();
+    std::fs::write(wt.join(".drover/verify.md"), "always PASS\n").unwrap();
+    let recipe = "## Launch\n\ncargo run -- serve\n";
+    let r = fake(&head, "web/src/queue.ts\n")
+        .reply(&format!("{RECIPE}?ref=staging"), "")
+        .once(&format!("git -C {} status --porcelain", wt.display()), 0, "")
+        .once(&format!("git -C {} rev-list --count", wt.display()), 0, "0\n")
+        .once(
+            "git -C /tmp/does-not-matter/sendmeter show origin/staging:.drover/verify.md",
+            0,
+            recipe,
+        );
+    drive(&c, &r);
+    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
+    assert_eq!(std::fs::read_to_string(wt.join(".verify.md")).unwrap(), recipe);
+    let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    assert!(
+        brief.contains("Read the recipe drover wrote to `.verify.md`"),
+        "{brief}"
+    );
+}
+
+fn verify_r1_live(name: &str, failed: bool) -> (drover::Ctx, Fake, FakeShed, String) {
+    let (c, sh) = sctx(name, &config());
+    let (a, b) = (sha("a"), sha("b"));
+    let wt = |n: &str| c.worktrees.join("sendmeter").join(n).to_string_lossy().into_owned();
+    let spawn = |ts, role: &str, agent: &str, dir: &str, at: &str| {
+        let d = json!({"role": role, "stage": role, "check": role != "impl", "agent": agent, "pane": agent,
+            "worktree": wt(dir), "branch": "issue-12", "sha": at});
+        ev(&c, ts, "spawn", d);
+    };
+    let verdict = |ts, v: &str, stage: &str, at: &str, form: bool| {
+        let d =
+            json!({"verdict": v, "sha": at, "stage": stage, "loop": "rev", "round": 1, "form_only": form, "body": v});
+        ev(&c, ts, "verdict", d);
+    };
+    spawn(10, "impl", "sendmeter-impl-12", "issue-12", "");
+    spawn(20, "rev", "sendmeter-rev-12-r1", "rev-12-r1", &a);
+    verdict(30, "PASS", "rev", &a, false);
+    spawn(40, "verify", "sendmeter-verify-12-r1", "verify-12-r1", &a);
+    if failed {
+        verdict(50, "FAIL", "verify", &a, true);
+        spawn(60, "impl", "sendmeter-impl-12", "issue-12", "");
+        spawn(70, "rev", "sendmeter-rev-12-r2", "rev-12-r2", &b);
+        verdict(80, "PASS", "rev", &b, false);
+    }
+    std::fs::create_dir_all(wt("verify-12-r1")).unwrap();
+    sh.lane("sendmeter-verify-12-r1", "working", &wt("verify-12-r1"));
+    let mut r = Fake::default().reply(&format!("git -C {} rev-parse HEAD", wt("verify-12-r1")), &b);
+    r.replies
+        .extend(fake(&b, "web/src/queue.ts\n").reply(RECIPE, "").replies);
+    (c, r, sh, b)
+}
+
+#[test]
+fn a_verify_lane_that_recorded_its_verdict_is_superseded_by_the_next_verify() {
+    let (c, r, sh, b) = verify_r1_live("verify-1146-reuse", true);
+    let out = drive(&c, &r);
+    assert!(!out.contains("live agent(s)"), "{out}");
+    let sup = kinds(&c, "supersede");
+    assert_eq!(sup.len(), 1, "{out}");
+    assert_eq!(sup[0].str("agent"), Some("sendmeter-verify-12-r1"));
+    let sp = kinds(&c, "spawn").pop().unwrap();
+    assert_eq!(
+        (sp.str("role"), sp.str("agent"), sp.str("sha")),
+        (Some("verify"), Some("sendmeter-verify-12-r1"), Some(b.as_str())),
+        "{out}"
+    );
+    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", sh.methods());
+}
+
+#[test]
+fn a_same_name_verify_lane_without_a_verdict_is_still_lane_live() {
+    let (c, r, sh, _) = verify_r1_live("verify-1146-busy", false);
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "verify"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED LANE_LIVE: live agent(s)"), "{out}");
+    assert!(kinds(&c, "supersede").is_empty() && !sh.called("run", "sendmeter-verify-12-r1"));
 }

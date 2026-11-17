@@ -36,7 +36,7 @@ stateDiagram-v2
     fix --> needs_human : turn blocked, or stalled past stall_minutes = 30
     ready --> review : verify stage at head for ui_paths, a verify or repro mark
     ready --> fix : update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds = 3
-    ready --> merged : merge with PASS at head and CI green, no STAGING_WOULD_BREAK
+    ready --> merged : squash-merge into one commit carrying its why notes, with PASS at head and CI green, no STAGING_WOULD_BREAK
     ready --> blocked : merge refused, or PR closed outside drover
     blocked --> fix : fix round spawned
     blocked --> review : review spawned at a new head
@@ -66,8 +66,8 @@ flowchart TD
     d2["roots, redeliver"] --> d3
     d3["look, orphans"] --> d4
     d4["repair, outbox"] --> d5
-    d5["PR reads, gates, steps"] --> d6
-    d6["spawns"] --> d7
+    d5["spawns"] --> d6
+    d6["PR reads, gates, steps"] --> d7
     d7["backlog"]
     t1 --> d0
     other["other timers: serve, hosts, store"]
@@ -91,17 +91,19 @@ flowchart TD
     d3 -.- k_ssh_quick_secs(["ssh_quick_secs = 5"])
     d3 -.- k_ssh_call_secs(["ssh_call_secs = 20"])
     d3 -.- k_import_max_age_hours(["import_max_age_hours = 24"])
-    d5 -.- k_webhook_poll_minutes(["webhook_poll_minutes = 10"])
-    d5 -.- k_silent_minutes(["silent_minutes = 10"])
-    d5 -.- k_ci_start_minutes(["ci_start_minutes = 10"])
-    d5 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
-    d5 -.- k_review_rounds(["review_rounds = 3"])
-    d5 -.- k_update_rounds(["update_rounds = 3"])
-    d6 -.- k_max_parallel_spawns(["max_parallel_spawns = 6"])
-    d6 -.- k_spawn_pending_max_secs(["spawn_pending_max_secs = 300"])
-    d6 -.- k_respawn_max(["respawn_max = 3"])
-    d6 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
-    d6 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])
+    d5 -.- k_max_parallel_spawns(["max_parallel_spawns = 6"])
+    d5 -.- k_start_max(["start_max = 2"])
+    d5 -.- k_start_release(["start_release = "started""])
+    d5 -.- k_spawn_pending_max_secs(["spawn_pending_max_secs = 300"])
+    d5 -.- k_respawn_max(["respawn_max = 3"])
+    d5 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
+    d5 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])
+    d6 -.- k_webhook_poll_minutes(["webhook_poll_minutes = 10"])
+    d6 -.- k_silent_minutes(["silent_minutes = 10"])
+    d6 -.- k_ci_start_minutes(["ci_start_minutes = 10"])
+    d6 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
+    d6 -.- k_review_rounds(["review_rounds = 3"])
+    d6 -.- k_update_rounds(["update_rounds = 3"])
     other -.- k_overload_minutes(["overload_minutes = 10"])
     other -.- k_transcript_days(["transcript_days = 30"])
     other -.- k_runtime_down_minutes(["runtime_down_minutes = 30"])
@@ -128,4 +130,5 @@ flowchart TD
     other -.- k_slo_api_minutes(["slo_api_minutes = 10"])
     other -.- k_slo_idle_minutes(["slo_idle_minutes = 20"])
     other -.- k_slo_tick_minutes(["slo_tick_minutes = 10"])
+    other -.- k_slo_pass_minutes(["slo_pass_minutes = 30"])
 ```

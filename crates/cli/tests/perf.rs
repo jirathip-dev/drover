@@ -440,13 +440,8 @@ fn parity_r6_waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     assert!(lanes < 300, "the lanes reads took {lanes} ms (target < 300)");
 }
 
-extern "C" {
-    fn getrusage(who: i32, usage: *mut [i64; 18]) -> i32;
-}
-
 fn cpu_ms() -> f64 {
-    let mut u = [0i64; 18];
-    assert_eq!(unsafe { getrusage(0, &raw mut u) }, 0);
+    let u = drover_sys::rusage().unwrap();
     let tv = |s: i64, us: i64| s as f64 * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
     tv(u[0], u[1]) + tv(u[2], u[3])
 }
@@ -760,6 +755,30 @@ impl Runner for NoSpawn {
     fn shed(&self) -> Option<drover::shed::Shed> {
         self.0.shed()
     }
+}
+
+#[test]
+fn stats_autonomy_on_a_150k_event_log_stays_under_its_budget() {
+    let (c, _) = huge_with(150_000, 50_000);
+    let args = ["stats", "autonomy", "sendmeter"];
+    let first = Instant::now();
+    assert_eq!(run(&c, &Fake::default(), &args).0, 0);
+    let first = ms(first);
+    let t = Instant::now();
+    let (code, out) = run(&c, &Fake::default(), &args);
+    let t = ms(t);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("sendmeter total: merged 200 · no owner action 200 (100%)"),
+        "{out}"
+    );
+    report(&format!(
+        "#962 perf (150,000 events): stats autonomy first {first} ms (with the import), then {t} ms"
+    ));
+    if cfg!(debug_assertions) {
+        return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
+    }
+    assert!(t < 1000, "stats autonomy took {t} ms (budget 1000)");
 }
 
 #[test]

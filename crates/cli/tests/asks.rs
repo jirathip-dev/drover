@@ -533,7 +533,7 @@ fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
         (u.len(), u[0].str("id"), u[0].str("agent"), u[0].str("text")),
         (1, Some("q1"), Some(LANE), Some("DECISION q1: no, trim"))
     );
-    assert!(drover::config::WEBPUSH_ON.contains(&"answer-undelivered"), "pushed");
+    assert!(u[0].is_push(), "pushed");
     assert!(kinds(&c, "answer-delivered").is_empty());
 }
 

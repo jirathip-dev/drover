@@ -19,6 +19,10 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
 }
 
 fn design_ask(name: &str, line: &str) -> drover::Ctx {
+    design_ask_on(name, 60, line)
+}
+
+fn design_ask_on(name: &str, n: u64, line: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     log(
         &c,
@@ -27,9 +31,9 @@ fn design_ask(name: &str, line: &str) -> drover::Ctx {
         "thread-new",
         json!({"thread": "t1", "title": "t1"}),
     );
-    let d = json!({"id": "q1", "question": "Design for #60 is ready: approve, revise or reject?",
+    let d = json!({"id": "q1", "question": format!("Design for #{n} is ready: approve, revise or reject?"),
         "options": ["approve", "revise", "reject"], "recommend": null, "kind": "owner", "design": true, "thread": "t1", "role": "design"});
-    log(&c, NOW - 90, Some(60), "needs-decision", d);
+    log(&c, NOW - 90, Some(n), "needs-decision", d);
     let said = json!({"thread": "t1", "from": "owner", "text": line});
     log(&c, NOW - 60, None, "thread-msg", said);
     c
@@ -126,4 +130,22 @@ fn a_typed_reject_with_a_note_rejects_and_keeps_the_note() {
     assert_eq!(kinds(&c, "design-rejected")[0].str("pre"), Some(pre.as_str()));
     let d = &kinds(&c, "decision")[0];
     assert_eq!((d.str("choice"), d.str("note")), (Some("reject"), Some(note)));
+}
+
+#[test]
+fn a_typed_issue_approve_on_its_own_design_ask_approves_and_another_issue_number_revises() {
+    for line in ["#213 approve", "approved", "OK", "#213 ok"] {
+        let c = design_ask_on("typed-q1305", 213, line);
+        let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "--typed", line]);
+        assert_eq!(code, 0, "{out}");
+        assert!(kinds(&c, "design-revise").is_empty(), "{line} is no revise");
+        assert_eq!(kinds(&c, "design-approved").len(), 1, "{line}");
+        assert_eq!(kinds(&c, "decision")[0].str("choice"), Some("approve"), "{line}");
+    }
+    let line = "#214 approve";
+    let c = design_ask_on("typed-other", 213, line);
+    let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "--typed", line]);
+    assert_eq!(code, 0, "{out}");
+    assert!(kinds(&c, "design-approved").is_empty(), "{line} approves no #213");
+    assert_eq!(kinds(&c, "design-revise")[0].str("note"), Some(line));
 }

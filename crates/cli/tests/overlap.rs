@@ -119,7 +119,7 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(Fake::default());
     let mut out = vec![];
-    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
     let to = head(&seed, "issue-3");
     let ev = read(&c.state).unwrap().to_vec();
     let up = ev.iter().find(|e| e.kind == "auto-updated").expect("auto-updated");
@@ -142,7 +142,7 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "3"]);
     assert_eq!(code, 0, "{out}");
     assert!(r.0.called(&format!(
-        "gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {to}"
+        "gh pr merge 13 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {to}"
     )));
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
     assert_eq!((st.state.as_str(), st.rounds), ("merged", 1));
@@ -278,7 +278,7 @@ fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
     assert_eq!(st(&c), "ready");
     c.now += 120;
     let (r, out) = pass(&c, &green_pr(3, &to));
-    let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {to}");
+    let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {to}");
     assert!(r.0.called(&merge), "{out}");
     assert_eq!(st(&c), "merged");
 }
@@ -291,7 +291,7 @@ fn conflicting_auto_update_spawns_an_update_lane() {
     git(&seed, &["merge", "-q", "--ff-only", "origin/issue-2"]);
     git(&seed, &["push", "-q", "origin", "HEAD:staging"]);
     let r = Mixed(Fake::default());
-    drover::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-1"), before, "nothing pushed");
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().all(|e| e.kind != "auto-updated"));
@@ -474,7 +474,7 @@ fn a_branch_in_review_is_not_updated() {
             sh.remove("sendmeter-rev-3-r1");
         }
         let r = Mixed(Fake::default());
-        drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+        drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
         assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     }
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "auto-updated"));
@@ -510,7 +510,7 @@ fn a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges() {
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "3"]);
     assert_eq!(code, 0, "{out}");
     assert!(r.0.called(&format!(
-        "gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {m}"
+        "gh pr merge 13 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {m}"
     )));
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
     assert_eq!((st.state.as_str(), st.rounds), ("merged", 1));
@@ -568,7 +568,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let from = head(&seed, "issue-3");
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(merger(3, &from).0.reply(PROTECTION, "false\n"));
-    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     let ev = read(&c.state).unwrap().to_vec();
     assert!(
@@ -595,7 +595,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let r = Mixed(r.0.reply("gh pr ", "").reply("gh issue", ""));
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {from}");
+    let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {from}");
     assert!(r.0.called(&merge), "{out}");
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "auto-updated"));
 }
@@ -609,7 +609,7 @@ fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(Fake::default().reply(RULES, "true\n").reply("gh pr edit", ""));
     let mut out = vec![];
-    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
     let out = String::from_utf8_lossy(&out);
     let to = head(&seed, "issue-3");
     assert!(out.contains("auto-updated"), "{out}");
@@ -1152,4 +1152,40 @@ fn cap_log_prints_every_cap_change_from_git() {
             format!("{} 150 → 200  Cap: 150 → 200 (#5, q7)", short("HEAD")),
         ]
     );
+}
+
+#[test]
+fn a_second_pass_with_nothing_moved_starts_no_worktree() {
+    let (d, seed, c, cfg) = repos("au-idle");
+    let sh = FakeShed::attached(&c);
+    for n in 1..=3 {
+        lane(&c, &seed, n, true);
+    }
+    commit(&seed, "c.txt", "c\n", "staging");
+    merge_staging(&d, None);
+    let heads: Vec<String> = (1..=3).map(|n| head(&seed, &format!("issue-{n}"))).collect();
+    let r = Mixed(Fake::default().reply(PROTECTION, "false\n"));
+    let t = std::time::Instant::now();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    let first = r.0.calls.borrow().len();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    let ms = t.elapsed().as_millis();
+    let second: Vec<String> = r.0.calls.borrow()[first..]
+        .iter()
+        .filter(|l| l.starts_with("git "))
+        .cloned()
+        .collect();
+    let tried = |w: &str| second.iter().filter(|l| l.contains(w)).count();
+    assert_eq!(
+        (tried(" worktree "), tried(" merge-tree "), tried(" merge ")),
+        (0, 0, 0),
+        "{} git calls in {ms} ms: {second:#?}",
+        second.len()
+    );
+    let now: Vec<String> = (1..=3).map(|n| head(&seed, &format!("issue-{n}"))).collect();
+    assert_eq!(now, heads, "nothing pushed");
+    assert!(read(&c.state)
+        .unwrap()
+        .iter()
+        .all(|e| e.kind != "auto-updated" && e.kind != "driven"));
 }

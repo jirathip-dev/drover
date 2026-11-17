@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{ends, working, Event};
+use crate::events::{ends, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::{argv, Out, Runner};
 use crate::Ctx;
@@ -30,7 +30,7 @@ pub fn call(ctx: &Ctx, req: &Value) -> Option<Value> {
 
 /// The running service's pid.
 pub fn up(ctx: &Ctx) -> Option<u64> {
-    call(ctx, &json!({"ping": true}))?["pid"].as_u64()
+    call(ctx, &json!({"ping": true}))?.at("pid").as_u64()
 }
 
 /// A kick the service drives in process at once: its pid (the spawn marker's holder).
@@ -39,15 +39,15 @@ pub fn kick(ctx: &Ctx, fleet: &str, issue: u64, why: &str, id: Option<&str>) -> 
         ctx,
         &json!({"kick": {"fleet": fleet, "issue": issue, "why": why, "id": id}}),
     )?;
-    v["pid"].as_u64().and_then(|p| u32::try_from(p).ok())
+    v.at("pid").as_u64().and_then(|p| u32::try_from(p).ok())
 }
 
 /// A lane on another host: `args` run by the service at `url` (`DROVER_SERVICE`) as the token's lane; a `--file` travels as its text. The token rides in the body, never in argv.
 pub fn post(r: &dyn Runner, url: &str, token: &str, args: &[String]) -> Result<Out> {
     let mut files = serde_json::Map::new();
-    for w in args.windows(2).filter(|w| w[0] == "--file") {
-        let text = std::fs::read_to_string(&w[1]).with_context(|| format!("cannot read {}", w[1]))?;
-        files.insert(w[1].clone(), text.into());
+    for (_, f) in args.iter().zip(args.iter().skip(1)).filter(|(a, _)| *a == "--file") {
+        let text = std::fs::read_to_string(f).with_context(|| format!("cannot read {f}"))?;
+        files.insert(f.clone(), text.into());
     }
     let body = json!({"token": token, "args": args, "files": files});
     let url = format!("{}/api/v1/cmd", url.trim_end_matches('/'));
@@ -57,8 +57,8 @@ pub fn post(r: &dyn Runner, url: &str, token: &str, args: &[String]) -> Result<O
     let Some(v) = v.filter(|_| o.code == 0) else {
         bail!("drover service at {url}: {}{}", o.stderr.trim(), o.stdout.trim())
     };
-    let text = |k: &str| v[k].as_str().unwrap_or_default().to_string();
-    let code = v["code"].as_i64().and_then(|c| i32::try_from(c).ok()).unwrap_or(1);
+    let text = |k: &str| v.at(k).as_str().unwrap_or_default().to_string();
+    let code = v.at("code").as_i64().and_then(|c| i32::try_from(c).ok()).unwrap_or(1);
     Ok(Out {
         code,
         stdout: text("stdout"),
@@ -100,7 +100,7 @@ pub fn authorize(ctx: &Ctx, cfg: &Config, token: &str, args: &[String]) -> Resul
     if let Some(why) = crate::cli::foreign(args, &g.lane, &events) {
         return refused("TOKEN", why);
     }
-    if args[0] == "verdict" && !cfg.fleet(&g.fleet)?.flow().is_check(&g.role) {
+    if args.first().is_some_and(|a| a == "verdict") && !cfg.fleet(&g.fleet)?.flow().is_check(&g.role) {
         return refused("TOKEN", format!("a {} lane records no verdict", g.role));
     }
     let mine = |e: &&Event| e.fleet == g.fleet && e.issue == Some(g.issue);

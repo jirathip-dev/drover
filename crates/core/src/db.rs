@@ -44,7 +44,7 @@ impl Scratch {
     pub fn start() -> Scratch {
         static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!("drover-scratch-{}-{n}.db", std::process::id()));
+        let p = std::env::temp_dir().join(format!("drover-scratch-{}-{n}.db", crate::runner::pid()));
         SCRATCH.set(Some(p.clone()));
         Scratch(p)
     }
@@ -55,7 +55,7 @@ impl Drop for Scratch {
         SCRATCH.set(None);
         OPEN.with_borrow_mut(|v| v.retain(|x| x.0 != self.0));
         for x in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(format!("{}{x}", self.0.display()));
+            std::fs::remove_file(format!("{}{x}", self.0.display())).ok();
         }
     }
 }
@@ -104,7 +104,7 @@ fn open(state: &Path) -> Result<Connection> {
         if mode(&c)? == "wal" || c.pragma_update(None, "journal_mode", "WAL").is_ok() {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(l.db_retry_millis));
+        crate::clock::sleep(std::time::Duration::from_millis(l.db_retry_millis));
     }
     anyhow::ensure!(mode(&c)? == "wal", "{} is not in WAL mode", file(state).display());
     c.execute_batch(SCHEMA)?;
@@ -144,6 +144,9 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
     if let Some(id) = crate::orchestrator::acting() {
         ev.data.entry("orchestrator").or_insert(id.into());
     }
+    if seq.is_none() && matches!(ev.kind.as_str(), "verdict" | "lane-killed") {
+        ev.data.entry("by").or_insert(crate::orchestrator::actor().into());
+    }
     let ev = if seq.is_none() { crate::events::capped(&ev) } else { ev };
     let json = serde_json::to_string(&ev)?;
     c.execute(
@@ -170,9 +173,10 @@ fn project(c: &Connection, ev: &Event) -> Result<()> {
             if let Some(j) = old {
                 m.insert(key.clone(), serde_json::from_str(&j)?);
             }
-            let s = &events::fold_into(m, std::slice::from_ref(ev))[&key];
-            let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
-            c.execute(q, params![ev.fleet, n, s.done(), serde_json::to_string(s)?])?;
+            if let Some(s) = events::fold_into(m, std::slice::from_ref(ev)).get(&key) {
+                let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
+                c.execute(q, params![ev.fleet, n, s.done(), serde_json::to_string(s)?])?;
+            }
         }
     }
     lane(c, ev)?;
@@ -239,11 +243,11 @@ fn project_ask(c: &Connection, e: &Event) -> Result<()> {
     for (seq, json, rank) in found {
         let a = numbered(seq, &json)?;
         let w = events::closes(&a, e, || first().ok().flatten().is_some_and(|f| f < seq));
-        let Some(r) = events::ORDER.iter().position(|o| Some(*o) == w) else {
+        let Some((r, o)) = events::ORDER.iter().enumerate().find(|o| Some(*o.1) == w) else {
             continue;
         };
         if r < rank.unwrap_or(events::ORDER.len()) {
-            let row = events::ending_row(events::ORDER[r], e);
+            let row = events::ending_row(o, e);
             let set = "UPDATE asks SET rank = ?2, closed = ?3, at = ?4 WHERE seq = ?1";
             c.execute(set, params![seq, r, row, e.seq])?;
         }
@@ -319,7 +323,7 @@ pub fn lanes(state: &Path) -> Result<Vec<Event>> {
 
 /// #978: the current per-issue state, the `states` rows.
 pub fn issues(state: &Path) -> Result<events::States> {
-    since(state, i64::MAX as u64, true, None).map(|t| t.1)
+    since(state, i64::MAX.unsigned_abs(), true, None).map(|t| t.1)
 }
 
 /// #978: an ask's ending as its `asks` row holds it: (`ORDER` rank, `drover asks`' text); `None` while open.
@@ -405,10 +409,13 @@ pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
             zstd_append(&dir.join(format!("events-{m}.jsonl.zst")), &text)?;
         }
         tx.execute(&format!("DELETE FROM events WHERE {done}"), [cut])?;
-        let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')";
-        tx.execute(q, [now])?;
+        let moved = gone + old.len() > 0;
+        if moved {
+            let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')";
+            tx.execute(q, [now])?;
+        }
         tx.commit()?;
-        if gone + old.len() > 0 {
+        if moved {
             c.execute_batch("VACUUM")?;
         }
         c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
@@ -670,8 +677,7 @@ pub struct Lease {
 
 /// This machine's name, as leases record their holder.
 pub fn host() -> String {
-    std::env::var("HOSTNAME")
-        .ok()
+    crate::config::env("HOSTNAME")
         .filter(|h| !h.is_empty())
         .unwrap_or_else(|| {
             std::fs::read_to_string("/etc/hostname").map_or_else(|_| "localhost".into(), |h| h.trim().into())

@@ -1,6 +1,5 @@
 use crate::config::Config;
-use crate::events::{append, emit, fold, working, Event, IssueState};
-use crate::overlap::git;
+use crate::events::{append, emit, fold, working, Event, IssueState, Json};
 use crate::runner::{ok, Runner};
 use crate::session::Session;
 use crate::waiting::Waiting;
@@ -26,6 +25,18 @@ pub const STEPS: [(&str, &[&str]); 8] = [
     ),
     ("repair, outbox", &[]),
     (
+        "spawns",
+        &[
+            "max_parallel_spawns",
+            "start_max",
+            "start_release",
+            "spawn_pending_max_secs",
+            "respawn_max",
+            "respawn_window_minutes",
+            "overflow_after_minutes",
+        ],
+    ),
+    (
         "PR reads, gates, steps",
         &[
             "webhook_poll_minutes",
@@ -34,16 +45,6 @@ pub const STEPS: [(&str, &[&str]); 8] = [
             "gate_check_minutes",
             "review_rounds",
             "update_rounds",
-        ],
-    ),
-    (
-        "spawns",
-        &[
-            "max_parallel_spawns",
-            "spawn_pending_max_secs",
-            "respawn_max",
-            "respawn_window_minutes",
-            "overflow_after_minutes",
         ],
     ),
     ("backlog", &[]),
@@ -119,7 +120,7 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
             json!({"file": name, "pid": l.pid, "age": age}),
         );
         if remove && crate::db::release(&ctx.state, &l.key, Some(&l)) {
-            let _ = append(&ctx.state, &e);
+            append(&ctx.state, &e).ok();
         }
         stale.push(e);
     }
@@ -329,7 +330,7 @@ fn launch(
     c: &[&str],
     start: bool,
 ) -> Result<i32> {
-    let role = c[3];
+    let role = c.get(3).copied().unwrap_or_default();
     markers(ctx, cfg, r, true);
     let low =
         |e: &Event| crate::host::free_gb(&crate::hosts::On::of(r, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
@@ -342,58 +343,48 @@ fn launch(
         .filter(|p| bound(p).is_some_and(low))
         .map(|p| (p.fleet, p.issue))
         .collect();
-    let others = waits_elsewhere(ctx, cfg, ev, fleet);
+    let others = crate::starts::others(ctx, cfg, ev, fleet);
     let _admit = admit(ctx, r)?;
-    let live = pending(ctx, cfg, r);
+    let all = pending(ctx, cfg, r);
     let counts = |p: &&Event| !full.iter().any(|f| f.0 == p.fleet && f.1 == p.issue);
-    let n_live = live.iter().filter(counts).count();
-    let max = cfg.limits.max_parallel_spawns;
-    let mine = live.iter().filter(counts).filter(|p| p.fleet == fleet).count();
-    let weight = cfg.fleet(fleet)?.weight.unwrap_or(1).max(1);
-    let share = start && mine * (weight + others) >= (max - usize::from(max > 1)) * weight;
-    if live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
-        || n_live >= max - usize::from(start && max > 1)
-        || others > 0 && (mine >= max.div_ceil(2) || share)
-    {
-        let by = Some(held_by(ctx, cfg, r)).filter(|b| !b.is_empty());
-        let by = by.map_or(String::new(), |b| format!(": {b}"));
-        return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
+    let live: Vec<&Event> = all.iter().filter(counts).collect();
+    let me = (fleet, cfg.fleet(fleet)?.weight.unwrap_or(1).max(1), others);
+    let by = || {
+        Some(held_by(ctx, cfg, r))
+            .filter(|b| !b.is_empty())
+            .map(|b| format!(": {b}"))
+    };
+    if all.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
+        return crate::gate::refused("SPAWN_PENDING", format!("#{n} is starting{}", by().unwrap_or_default()));
+    }
+    if let Some(held) = crate::starts::every_full(cfg, &live, me, start) {
+        return crate::gate::refused("SPAWN_PENDING", held + &by().unwrap_or_default());
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
-    if let Some(why) = crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &live) {
-        return crate::gate::refused("HOST_FULL", why);
-    }
+    let skip = |h: &str| crate::starts::skip(ctx, (cfg, r), ev, (&all, &live), (me, start, n, role), h);
+    let placed = crate::hosts::place(ctx, cfg, r, ev, (fleet, n, role), (None, &skip))?;
     if let Some((code, why)) = room(ctx, cfg, r) {
         return crate::gate::refused(code, why);
     }
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
+    if let Some(p) = placed {
+        d.put("host", p.name.into());
+    }
     let (key, ttl) = (format!("spawn-{fleet}-{n}.pending"), cfg.limits.spawn_pending_max_secs);
     let ev = |d: &Value| serde_json::to_string(&Event::new(ctx.now, fleet, Some(n), "spawn", d.clone()));
     let l = crate::db::take(&ctx.state, &key, ctx.now, ttl, &ev(&d)?, &|_| true);
     let l = l.ok_or_else(|| anyhow::anyhow!("cannot lease {key}"))?;
     let pid = kick(ctx, r, fleet, n, "drive");
-    d["pid"] = pid.into();
+    d.put("pid", pid.into());
     let data = if pid.is_some() { ev(&d)? } else { l.data.clone() };
     let pid = pid.unwrap_or(0);
     crate::db::renew(&ctx.state, &l, &crate::db::Lease { pid, data, ..l.clone() });
     Ok(0)
 }
 
-fn waits_elsewhere(ctx: &Ctx, cfg: &Config, ev: &[Event], fleet: &str) -> usize {
-    let others = cfg.fleet.iter().filter(|(g, f)| *g != fleet && !f.paused);
-    let waits = |g: &str| {
-        let start = |n: &String| n.parse().is_ok_and(|n| backoff(ctx, ev, g, n).is_none());
-        let pass = |e: &&Event| e.kind == "drive-pass" && e.fleet == g && e.data.get("kick").is_none_or(Value::is_null);
-        let held = ev
-            .iter()
-            .rfind(pass)
-            .and_then(|e| e.data.get("actions")?.as_array().cloned());
-        queue::startable(ev, g).iter().any(start) || held.into_iter().flatten().any(|a| a["code"] == "SPAWN_PENDING")
-    };
-    others
-        .filter(|(g, _)| waits(g))
-        .map(|(_, f)| f.weight.unwrap_or(1).max(1))
-        .sum()
+/// #1186: the spawn marker this kick holds for `fleet` #`n`, if it holds one.
+pub fn own_marker(ctx: &Ctx, fleet: &str, n: u64) -> Option<crate::db::Lease> {
+    held(ctx, &format!("spawn-{fleet}-{n}.pending")).filter(|_| SLOT.get())
 }
 
 type Admitter = (std::path::PathBuf, u32);
@@ -447,7 +438,7 @@ pub fn backoff(ctx: &Ctx, ev: &[Event], fleet: &str, n: u64) -> Option<(u64, Str
     let f = failures(ev, fleet, n);
     let (k, error) = same_run(&f)?;
     let last = f.last()?;
-    let pushed = gh::cached_pr(ctx, fleet, n)["headRefOid"].as_str() != last.str("head");
+    let pushed = gh::cached_pr(ctx, fleet, n).at("headRefOid").as_str() != last.str("head");
     let wait = (300u64 << k.checked_sub(2)?.min(4)).min(3600);
     let left = (last.ts + wait).saturating_sub(ctx.now);
     (!pushed && left > 0).then(|| (left, error.to_string()))
@@ -558,14 +549,14 @@ fn update(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str, n: u64) -
         return Ok(());
     };
     let mut d = Value::Object(e.data.clone());
-    let acts = d["actions"].as_array_mut();
+    let acts = d.get_mut("actions").and_then(Value::as_array_mut);
     let Some(a) = acts.and_then(|v| v.iter_mut().rfind(|a| a["issue"] == n && a["outcome"] == "pending")) else {
         return Ok(());
     };
     ended(&ev, fleet, a, e.ts);
     writeln!(out, "{}", line(fleet, a))?;
-    d["spawns_launched"] = launched(d["actions"].as_array().map_or(&[], Vec::as_slice)).into();
-    d["updated"] = ctx.now.into();
+    let sl = launched(d.at("actions").as_array().map_or(&[], Vec::as_slice));
+    d.put("spawns_launched", sl.into()).put("updated", ctx.now.into());
     append(&ctx.state, &Event::new(e.ts, fleet, None, "drive-pass", d))
 }
 
@@ -702,28 +693,28 @@ pub fn drive(
     manual: bool,
     fast: bool,
 ) -> Result<()> {
-    let t0 = std::time::Instant::now();
+    let t0 = crate::clock::instant();
     let mut slow = (t0, String::new(), 0.0);
-    let i = usize::from(fast);
-    let lock = ["drive.lock", "drive-fast.lock"][i];
+    let i = fast;
+    let lock = if i { "drive-fast.lock" } else { "drive.lock" };
     let mark = ctx.state.with_file_name(format!("{lock}.step"));
     let mut lap = |step: &str| {
         debug_assert!(STEPS.iter().any(|(s, _)| step.ends_with(s)), "{step} is not in STEPS");
         if KICK.get().is_none() {
-            let _ = std::fs::write(&mark, step);
+            std::fs::write(&mark, step).ok();
         }
         let secs = slow.0.elapsed().as_secs_f64();
         if secs > slow.2 {
             (slow.1, slow.2) = (step.to_string(), secs);
         }
-        slow.0 = std::time::Instant::now();
+        slow.0 = crate::clock::instant();
     };
     only.map(|f| cfg.fleet(f)).transpose()?;
     std::fs::create_dir_all(state_dir(ctx))?;
     gh::FORCE.set(fast || KICK.get().is_some());
     gh::CATCHUP.set(if fast { cfg.limits.webhook_poll_minutes * 60 } else { 0 });
-    let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
-    let _ = std::fs::write(&stamp, ctx.now.to_string());
+    let stamp = ctx.state.with_file_name(if i { "drive-fast.at" } else { "drive.at" });
+    std::fs::write(&stamp, ctx.now.to_string()).ok();
     let max = 3 * cfg.limits.pass_max_secs;
     let lead = match KICK.get() {
         Some(_) => None,
@@ -769,7 +760,8 @@ pub fn drive(
     let live: Vec<&str> = (cfg.fleet.keys().map(String::as_str))
         .filter(|n| only.is_none_or(|o| o == *n))
         .collect();
-    let fleets: Vec<&str> = live.iter().copied().filter(|n| !cfg.fleet[*n].paused).collect();
+    let on = |n: &&str| cfg.fleet.get(*n).is_some_and(|f| !f.paused);
+    let fleets: Vec<&str> = live.iter().copied().filter(on).collect();
     let events = (fast && first)
         .then(|| crate::events::working(&ctx.state).ok())
         .flatten()
@@ -846,17 +838,17 @@ pub fn drive(
     }
     let secs = (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0;
     if fast {
-        let _ = std::fs::write(&stamp, format!("{} {secs}", ctx.now));
+        std::fs::write(&stamp, format!("{} {secs}", ctx.now)).ok();
     }
     let tail = KICK.get().is_none().then(|| take(ctx, r, lock, max, "")).flatten();
     if fast && only.is_none() && tail.is_some() {
         crate::slo::pass(ctx, cfg, (r, &seen), out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "slo: {e:#}")));
     }
     if !fast && tail.is_some() {
-        crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: stale panes: {e:#}"));
-        crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-dup: {e:#}"));
+        crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| crate::stderr!("drover: stale panes: {e:#}"));
+        crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| crate::stderr!("drover: lane-dup: {e:#}"));
         if only.is_none() {
-            crate::check::hogs(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-hog: {e:#}"));
+            crate::check::hogs(ctx, cfg, r, out).unwrap_or_else(|e| crate::stderr!("drover: lane-hog: {e:#}"));
         }
     }
     lap("backlog");
@@ -864,7 +856,7 @@ pub fn drive(
     if t0.elapsed().as_secs() > cfg.limits.pass_max_secs {
         let r1 = |x: f64| (x * 10.0).round() / 10.0;
         let d = json!({"fast": fast, "secs": r1(secs), "step": slow.1, "step_secs": r1(slow.2), "kick": KICK.get()});
-        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-slow", d));
+        append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-slow", d)).ok();
     }
     res
 }
@@ -879,10 +871,10 @@ fn lease(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &str, max: u64, d
     if let Some(l) = stuck {
         let at = std::fs::read_to_string(&mark).unwrap_or_default();
         let d = json!({"lock": lock, "pid": l.pid, "since": l.at, "step": format!("after {}", at.trim())});
-        writeln!(out, "! a pass held {lock} past {max} s, {}: taken over", d["step"])?;
-        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-stuck", d));
+        writeln!(out, "! a pass held {lock} past {max} s, {}: taken over", d.at("step"))?;
+        append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-stuck", d)).ok();
     }
-    let _ = std::fs::write(&mark, "start");
+    std::fs::write(&mark, "start").ok();
     Ok(Some(held))
 }
 
@@ -894,8 +886,8 @@ fn one(
     name: &str,
     (manual, fast): (bool, bool),
 ) -> Result<()> {
-    let t0 = std::time::Instant::now();
-    let lock = format!("drive{}-{name}.lock", ["", "-fast"][usize::from(fast)]);
+    let t0 = crate::clock::instant();
+    let lock = format!("drive{}-{name}.lock", if fast { "-fast" } else { "" });
     let _held = match KICK.get() {
         Some(_) => None,
         None => match lease(ctx, r, out, &lock, 3 * cfg.limits.pass_max_secs, name)? {
@@ -906,19 +898,28 @@ fn one(
     };
     ACTS.with_borrow_mut(BTreeMap::clear);
     ROOM.set((false, None));
-    let res = pass(ctx, cfg, (r, seen), out, name, fast);
-    let mut slow = ("PR reads, gates, steps", t0.elapsed());
-    let res = res.and_then(|go| {
+    let t = crate::clock::instant();
+    let one_slot = cfg.limits.max_parallel_spawns == 1 && crate::starts::fix_due(&working(&ctx.state)?, name);
+    let early = cfg.limits.max_parallel_spawns > 0 && KICK.get().is_none() && !one_slot;
+    let res = if early {
+        starts(ctx, cfg, r, out, name, fast)
+    } else {
+        Ok(())
+    };
+    let mut spawns = t.elapsed();
+    let res = res.and(pass(ctx, cfg, (r, seen), out, name, fast));
+    let reads = t.elapsed().saturating_sub(spawns);
+    let t = crate::clock::instant();
+    let res = res.and_then(|()| {
         if fast {
-            return Ok(());
+            Ok(())
+        } else {
+            starts(ctx, cfg, r, out, name, false)
         }
-        let t = std::time::Instant::now();
-        let res = starts(ctx, cfg, r, out, name, go);
-        if t.elapsed() > slow.1 {
-            slow = ("spawns", t.elapsed());
-        }
-        res
     });
+    spawns += t.elapsed();
+    let slow = [("spawns", spawns), ("PR reads, gates, steps", reads)];
+    let slow = slow.into_iter().max_by_key(|s| s.1).unwrap_or(("spawns", spawns));
     if let Err(e) = &res {
         let a = json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": format!("failed: {e:#}")});
         ACTS.with_borrow_mut(|m| m.entry(name.into()).or_default().push(a));
@@ -926,23 +927,24 @@ fn one(
     settle(ctx, r, out)?;
     let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
     if !fast && KICK.get().is_none() {
-        let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
+        std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string()).ok();
     }
     if !acts.is_empty() || !fast && KICK.get().is_none() {
         let end = crate::now();
+        let i = usize::from(manual) + 2 * usize::from(fast);
         let (by, at) = (
-            ["auto", "manual", "fast"][usize::from(manual) + 2 * usize::from(fast)],
+            *["auto", "manual", "fast"].get(i).unwrap_or(&"fast"),
             crate::usage::date(r, end, "+%H:%M"),
         );
         let secs = (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0;
         let step_secs = (slow.1.as_secs_f64() * 10.0).round() / 10.0;
         let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs, "step": slow.0,
             "step_secs": step_secs, "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
-        let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
+        append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d)).ok();
     }
     if !fast && KICK.get().is_none() {
         crate::gh::backlog(ctx, r, cfg.fleet(name)?, name)
-            .unwrap_or_else(|e| eprintln!("drover: {name} backlog: {e:#}"));
+            .unwrap_or_else(|e| crate::stderr!("drover: {name} backlog: {e:#}"));
     }
     res
 }
@@ -953,7 +955,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
     let mut agents: Option<Vec<Session>> = None;
     for s in fold(&events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
         let on = log.blockers(&s.fleet, s.issue);
-        if on.is_empty() || !gh::cached_pr(ctx, &s.fleet, s.issue)["number"].is_null() {
+        if on.is_empty() || !gh::cached_pr(ctx, &s.fleet, s.issue).at("number").is_null() {
             continue;
         }
         if !(matches!(s.state.as_str(), "needs-human" | "impl") || s.state.starts_with("fix")) {
@@ -991,24 +993,24 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         let mine: Vec<(usize, &Event)> = (events.iter().enumerate())
             .filter(|(_, e)| e.fleet == s.fleet && e.issue == Some(s.issue))
             .collect();
-        let Some(at) = mine.iter().rposition(|(_, e)| e.kind == "needs-human") else {
+        let Some((at, &(ix, nh))) = mine.iter().enumerate().rfind(|(_, (_, e))| e.kind == "needs-human") else {
             continue;
         };
-        if s.build.as_deref() == Some("lesson") && mine[at].1.str("code") == Some("LANE_ENDS") {
+        if s.build.as_deref() == Some("lesson") && nh.str("code") == Some("LANE_ENDS") {
             crate::lesson::done(ctx, cfg, r, out, (&s.fleet, s.issue), "no repeated class")?;
             continue;
         }
-        let from = mine[..at].iter().rposition(|(_, e)| reset.contains(&e.kind.as_str()));
-        let round = &mine[from.map_or(0, |i| i + 1)..at];
+        let from = (mine.iter().take(at)).rposition(|(_, e)| reset.contains(&e.kind.as_str()));
+        let round = mine.get(from.map_or(0, |i| i + 1)..at).unwrap_or_default();
         let exited = |e: &Event| e.kind == "lane-state" && e.str("state") == Some("gone");
         let trimmed = round
             .windows(2)
-            .any(|w| w[0].1.kind == "lane-trimmed" && exited(w[1].1));
+            .any(|w| matches!(w, [a, b] if a.1.kind == "lane-trimmed" && exited(b.1)));
         let again = mine
             .iter()
             .any(|(_, e)| e.kind == "repaired" && e.val("trimmed") == true);
-        if mine[at].1.str("code") == Some("LANE_ENDS") && trimmed && !again {
-            let Some(was) = fold(&events[..mine[at].0])
+        if nh.str("code") == Some("LANE_ENDS") && trimmed && !again {
+            let Some(was) = fold(events.get(..ix).unwrap_or_default())
                 .remove(&(s.fleet.clone(), s.issue))
                 .map(|b| b.state)
             else {
@@ -1034,11 +1036,11 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         };
         let gone = (round.iter())
             .all(|(_, e)| e.kind != "respawn" || e.str("why").is_some_and(|w| w.starts_with("lane gone")));
-        if mine[at].1.str("code") != Some("LANE_ENDS") || !gone || !round[..first].iter().any(|(_, e)| adopted(e)) {
+        if nh.str("code") != Some("LANE_ENDS") || !gone || !round.iter().take(first).any(|(_, e)| adopted(e)) {
             continue;
         }
         let key = (s.fleet.clone(), s.issue);
-        let Some(was) = fold(&events[..mine[at].0]).remove(&key).map(|b| b.state) else {
+        let Some(was) = fold(events.get(..ix).unwrap_or_default()).remove(&key).map(|b| b.state) else {
             continue;
         };
         writeln!(
@@ -1175,7 +1177,7 @@ fn pass(
     out: &mut dyn Write,
     fleet: &str,
     fast: bool,
-) -> Result<bool> {
+) -> Result<()> {
     let f = cfg.fleet(fleet)?;
     let sessions = crate::session::all(cfg, seen).checked()?;
     let agents = sessions.running();
@@ -1243,7 +1245,6 @@ fn pass(
             writeln!(out, "{fleet} hotspots: {e:#}")?;
         }
     }
-    reconcile(ctx, cfg, fleet)?;
     let events = working(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
@@ -1271,7 +1272,7 @@ fn pass(
     let verdict = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover verdict "));
     let merge = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover merge "));
     waits.sort_by_key(|(s, w)| (!verdict(w), !merge(w), !rev(w), conflicts.contains_key(&s.issue)));
-    let (mut go, mut updated) = (true, false);
+    let mut updated = false;
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
@@ -1282,15 +1283,11 @@ fn pass(
         };
         let mut pr = gh::cached_pr(ctx, fleet, s.issue);
         crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
-        let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr)));
+        let ci = gh::ci(&gh::required(pr.at("statusCheckRollup"), f.checks(&pr)));
         let gone = gh::missing(ctx, None, cfg, (fleet, s.issue), &events, &pr).filter(|m| w.what.contains(m));
         let n = s.issue.to_string();
-        if pr["state"] == "OPEN"
-            && !s.done()
-            && !queue::serials(&events, f, fleet).is_empty()
-            && serial(ctx, cfg, r, out, (fleet, s), &pr, fast)?
-        {
-            continue;
+        if pr.at("state") == "OPEN" && !s.done() && !queue::serials(&events, f, fleet).is_empty() {
+            serial(ctx, cfg, r, out, (fleet, s), &pr)?;
         }
         if let Err(e) = crate::gate::sync_label(ctx, cfg, r, out, s, &pr) {
             writeln!(out, "{fleet} #{n} label: {e:#}")?;
@@ -1356,7 +1353,9 @@ fn pass(
             let ends =
                 gone.filter(|g| (w.next_cmd.is_none() || g.1.starts_with("respawning")) && !waiting::resumed(g.0));
             if let Some(g) = ends.filter(|_| !fast) {
-                if crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, g.0)? {
+                if crate::breaker::unlanded(ctx, cfg, r, out, fleet)?
+                    || crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, g.0)?
+                {
                     continue;
                 }
             }
@@ -1376,7 +1375,8 @@ fn pass(
             }
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
-            let step = match (args[0], args.get(3).copied()) {
+            let arg = |i: usize| args.get(i).copied().unwrap_or_default();
+            let step = match (arg(0), args.get(3).copied()) {
                 _ if gone.is_some() => "respawn",
                 ("spawn", Some(r)) if f.flow().is_check(r) => "review",
                 ("spawn", _) if cmd.ends_with("--update") => "conflict",
@@ -1387,26 +1387,16 @@ fn pass(
             if fast && !matches!(step, "verdict" | "merge") {
                 continue;
             }
-            if step == "review" && args[3] == "verify" && !crate::verify::due(ctx, cfg, r, out, s, &pr)? {
+            if step == "review" && arg(3) == "verify" && !crate::verify::due(ctx, cfg, r, out, s, &pr)? {
                 continue;
             }
-            if step == "verdict" && args[3] == "FAIL" {
-                if let Some(code) = no_proof(
-                    ctx,
-                    cfg,
-                    r,
-                    out,
-                    (&events, &agents),
-                    (fleet, s.issue, &w.lane),
-                    &args,
-                    fast,
-                )? {
-                    go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
-                    continue;
-                }
+            let verdict_fail = step == "verdict" && arg(3) == "FAIL";
+            let at = (fleet, s.issue, w.lane.as_str());
+            if verdict_fail && no_proof(ctx, cfg, r, out, (&events, &agents), at, &args, fast)?.is_some() {
+                continue;
             }
             let repro =
-                (step == "verdict" && args[3] == "PASS").then(|| repro_seen(r, &events, (fleet, s.issue), &args));
+                (step == "verdict" && arg(3) == "PASS").then(|| repro_seen(r, &events, (fleet, s.issue), &args));
             if repro.as_ref().is_some_and(|x| x.1) {
                 continue;
             }
@@ -1418,20 +1408,20 @@ fn pass(
                 .map(|x| x.cause)
                 .filter(|c| c.resumable());
             let cause = cause.map(crate::session::Cause::word);
-            if let Some(why) = cause.filter(|_| args[0] == "spawn") {
+            if let Some(why) = cause.filter(|_| arg(0) == "spawn") {
                 save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
             let stale = (code == Some("LANE_LIVE") && step == "review")
-                .then(|| s.lanes.get(args[3]))
+                .then(|| s.lanes.get(arg(3)))
                 .flatten()
                 .and_then(|l| Some((l, stall::stale_check(ctx, &events, &agents, (fleet, s.issue), l)?)));
-            if code == Some("LANE_LIVE") && args[0] == "spawn" && (last_words(fleet).contains(OLD) || stale.is_some()) {
+            if code == Some("LANE_LIVE") && arg(0) == "spawn" && (last_words(fleet).contains(OLD) || stale.is_some()) {
                 let a = [&args[..], &["--supersede"]].concat();
                 code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &a)?;
             }
             if let Some((old, mins)) = stale.filter(|_| code.is_none()) {
-                stale_replaced(ctx, cfg, out, (fleet, s.issue), args[3], old, mins)?;
+                stale_replaced(ctx, cfg, out, (fleet, s.issue), arg(3), old, mins)?;
             }
             if let Some((hash, _)) = repro.filter(|_| code == Some("NO_REPRO")) {
                 repro_refused(ctx, cfg, r, (&events, &agents), (fleet, s.issue, &w.lane), &args, &hash)?;
@@ -1445,7 +1435,7 @@ fn pass(
                 let why = ACTS.with_borrow(|m| m.get(fleet).and_then(|a| a.last()).map(|a| a["why"].clone()));
                 let reason = format!(
                     "{} respawn refused {c}: {}",
-                    args[3],
+                    arg(3),
                     why.as_ref().and_then(Value::as_str).unwrap_or("?")
                 );
                 writeln!(out, "{fleet} #{n} needs-human: {reason}")?;
@@ -1456,18 +1446,19 @@ fn pass(
                     Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
                 )?;
             }
-            go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "RESPAWN_PACED"));
             let mut merge = step == "merge";
-            let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
-            let green =
-                ci == "green" && pr["isDraft"] != true && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
+            let full = f.merge_label.is_some() && pr.at("landing") != "fast-first";
+            let green = ci == "green"
+                && pr.at("isDraft") != true
+                && pr.at("headRefOid").as_str() == args.get(5).copied()
+                && !full;
             let verified = || -> Result<bool> {
                 let st = fold(&working(&ctx.state)?).remove(&(fleet.to_string(), s.issue));
-                Ok(crate::gate::verified(f, st.as_ref(), args[5], false).is_ok())
+                Ok(crate::gate::verified(f, st.as_ref(), arg(5), false).is_ok())
             };
-            if step == "verdict" && code.is_none() && args[3] == "PASS" && green && verified()? {
+            if step == "verdict" && code.is_none() && arg(3) == "PASS" && green && verified()? {
                 merge = true;
-                code = if pr["mergeable"] == "CONFLICTING" {
+                code = if pr.at("mergeable") == "CONFLICTING" {
                     Some("NOT_MERGEABLE")
                 } else {
                     act(
@@ -1482,8 +1473,7 @@ fn pass(
                 };
             }
             if merge && !fast && conflicted(fleet, code) {
-                let code = update_lane(ctx, cfg, r, out, &events, fleet, s.issue)?;
-                go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
+                update_lane(ctx, cfg, r, out, &events, fleet, s.issue)?;
             } else if merge && !fast && code.is_none() {
                 updated = true;
                 catch_up(ctx, cfg, r, out, fleet)?;
@@ -1496,7 +1486,10 @@ fn pass(
                 &a,
                 stall::Act::Respawn(_, "failed start") | stall::Act::Escalate("START_FAILED", _)
             );
-            if start && crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, "no output after its spawn")? {
+            if start
+                && (crate::breaker::unlanded(ctx, cfg, r, out, fleet)?
+                    || crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, "no output after its spawn")?)
+            {
                 continue;
             }
             match a {
@@ -1508,7 +1501,6 @@ fn pass(
                         let d = json!({"role": role, "agent": w.lane, "why": why, "failed_on": on});
                         append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
                     }
-                    go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "RESPAWN_PACED"));
                 }
                 stall::Act::Escalate(code, why) => {
                     let on = crate::breaker::blame(&events, &w.lane);
@@ -1520,7 +1512,7 @@ fn pass(
             let d = json!({"why": w.what});
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "no-action", d))?;
         } else if !fast && s.state == "ready" && (ci == "failed" || gone.is_some()) {
-            let head = pr["headRefOid"].as_str().unwrap_or_default();
+            let head = pr.at("headRefOid").as_str().unwrap_or_default();
             let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
             let gone = gone.map(|m| format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"));
             std::fs::write(&file, gone.unwrap_or_else(|| ci_findings(r, f, &pr, head)))?;
@@ -1532,7 +1524,7 @@ fn pass(
     if !updated && !fast {
         catch_up(ctx, cfg, r, out, fleet)?;
     }
-    Ok(go)
+    Ok(())
 }
 
 fn no_proof(
@@ -1547,7 +1539,7 @@ fn no_proof(
 ) -> Result<Option<Code>> {
     let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
     let on = crate::hosts::On::of(r, sp);
-    let body = on.read(Path::new(args[7])).unwrap_or_default();
+    let body = on.read(Path::new(args.get(7).unwrap_or(&""))).unwrap_or_default();
     let Some(why) = crate::gate::no_proof(&body) else {
         return Ok(None);
     };
@@ -1557,7 +1549,7 @@ fn no_proof(
         .collect();
     let seen = mine
         .iter()
-        .any(|e| e.str("sha") == Some(args[5]) && e.str("hash") == Some(hash));
+        .any(|e| e.str("sha") == args.get(5).copied() && e.str("hash") == Some(hash));
     let pane = sp.and_then(|e| e.str("pane"));
     let open = pane.filter(|_| agents.iter().any(|a| a.name == lane));
     let told = mine.iter().any(|e| e.val("prompted") == true);
@@ -1567,13 +1559,22 @@ fn no_proof(
         let tell =
             |p| crate::term::reply(&on, false, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
         let prompted = open.filter(|_| !told).is_some_and(tell);
-        let d = json!({"sha": args[5], "hash": hash, "agent": lane, "prompted": prompted});
+        let d = json!({"sha": args.get(5), "hash": hash, "agent": lane, "prompted": prompted});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "proof-refused", d))?;
         if prompted {
             return Ok(Some(Some("NO_PROOF")));
         }
     }
     if fast {
+        return Ok(Some(Some("NO_PROOF")));
+    }
+    let spawned = ev
+        .iter()
+        .rposition(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
+    let mut before = ev.iter().take(spawned.unwrap_or_default());
+    if before.any(|e| e.is("proof-refused", fleet, n) && e.str("sha") == args.get(5).copied()) {
+        let why = format!("a re-review at the same head was refused NO_PROOF too: {why}");
+        escalate(ctx, cfg, out, (fleet, n), (lane, None), "NO_PROOF", &why)?;
         return Ok(Some(Some("NO_PROOF")));
     }
     let role = sp.and_then(|e| e.str("role")).unwrap_or("rev");
@@ -1589,12 +1590,14 @@ fn no_proof(
 
 fn repro_seen(r: &dyn Runner, ev: &[Event], (fleet, n): (&str, u64), args: &[&str]) -> (String, bool) {
     let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
-    let body = crate::hosts::On::of(r, sp).read(Path::new(args[7])).unwrap_or_default();
+    let body = crate::hosts::On::of(r, sp)
+        .read(Path::new(args.get(7).unwrap_or(&"")))
+        .unwrap_or_default();
     let hash = crate::devices::sha256(body.as_bytes())[..16].to_string();
     let seen = ev.iter().any(|e| {
         e.is("repro-refused", fleet, n)
             && sp.is_some_and(|p| e.ts >= p.ts)
-            && e.str("sha") == Some(args[5])
+            && e.str("sha") == args.get(5).copied()
             && e.str("hash") == Some(&hash)
     });
     (hash, seen)
@@ -1622,7 +1625,7 @@ fn repro_refused(
     let text = format!("drover verdict refused your verdict.md: REFUSED NO_REPRO: {why}. Fix the Repro block.");
     let tell = |p| crate::term::reply(&on, false, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
     let prompted = pane.is_some_and(tell);
-    let d = json!({"sha": args[5], "hash": hash, "agent": lane, "why": why, "prompted": prompted});
+    let d = json!({"sha": args.get(5), "hash": hash, "agent": lane, "why": why, "prompted": prompted});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "repro-refused", d))
 }
 
@@ -1666,12 +1669,9 @@ fn serial(
     out: &mut dyn Write,
     (fleet, s): (&str, &IssueState),
     pr: &Value,
-    fast: bool,
-) -> Result<bool> {
+) -> Result<()> {
     let (f, n, ev) = (cfg.fleet(fleet)?, s.issue, working(&ctx.state)?);
-    let (st, q) = (fold(&ev), queue::replay(&ev, fleet));
-    let mine = queue::groups(&q, &ev, f, fleet, n);
-    let (mut wait, mut text) = (mine.iter().any(|g| queue::held(&ev, fleet, n, &g.name)), None);
+    let q = queue::replay(&ev, fleet);
     let (num, head) = (pr["number"].to_string(), pr["headRefOid"].as_str().unwrap_or_default());
     for g in queue::groups(&q, &[], f, fleet, n) {
         let has = |e: &Event| e.is("serial-joined", fleet, n) && e.str("group") == Some(&g.name);
@@ -1680,167 +1680,22 @@ fn serial(
             emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-joined", d))?;
         }
     }
-    let new = crate::gate::unjoined(ctx, r, f, (fleet, n), (&num, head)).unwrap_or_default();
-    let old = s.state.starts_with("review") || s.state == "ready";
-    let mut by = ev
-        .iter()
-        .rev()
-        .find(|e| e.is("serial-held", fleet, n))
-        .and_then(|e| e.val("holder").as_u64());
-    let pos = |i: u64| (q.iter().position(|x| x.issue == i).unwrap_or(usize::MAX), i);
-    for (g, p) in &new {
+    for (g, p) in crate::gate::unjoined(ctx, r, f, (fleet, n), (&num, head)).unwrap_or_default() {
         writeln!(out, "{fleet} #{n} serial-joined {}: {p}", g.name)?;
         let d = json!({"group": g.name, "by": "diff", "path": p});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-joined", d))?;
-        let h = queue::holders(&ev, &st, f, fleet, &g.name);
-        let hot = queue::hot(g);
-        let ahead = st.values().find(|x| {
-            hot && x.fleet == fleet
-                && queue::in_flight(&x.state)
-                && queue::held(&ev, fleet, x.issue, &g.name)
-                && pos(x.issue) < pos(n)
-        });
-        if (!old || hot) && (wait || h.len() >= g.max || ahead.is_some()) {
-            let h = h.first().or(ahead.as_ref()).map(|h| h.issue).or(by).unwrap_or(0);
-            by = Some(h);
-            let d = json!({"group": g.name, "holder": h});
-            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
-            let stop = format!(
-                "stop: {} is held by #{h}; you'll get an update round when it merges",
-                g.name
-            );
-            (wait, text) = (true, text.or(Some(stop)));
-        }
     }
     let now = working(&ctx.state)?;
-    let gs = queue::groups(&q, &now, f, fleet, n);
-    let atomic = |i: u64| queue::groups(&q, &now, f, fleet, i).iter().any(queue::hot);
-    if let Some(at) = gs.iter().position(|g| queue::held(&now, fleet, n, &g.name)) {
-        let last = (now.iter().rev()).find(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(&gs[at].name));
-        let b = last.and_then(|e| e.val("holder").as_u64()).unwrap_or(0);
-        let all = atomic(n);
-        for (_, g) in (gs.iter().enumerate()).filter(|(i, g)| (all || *i > at) && !queue::held(&now, fleet, n, &g.name))
-        {
-            let d = json!({"group": g.name, "holder": b, "by": "order"});
-            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
-        }
-    }
-    if let (Some(text), Some(lane)) = (text, s.lane.as_deref()) {
-        writeln!(out, "{fleet} #{n} serial-held: {text}")?;
-        let sp = crate::events::last_spawn(&ev, lane);
-        let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
-        let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
-        crate::term::tell(&crate::hosts::On::of(r, sp), dsh, lane, pane, &text).ok();
-    }
-    if !wait || fast || !new.is_empty() {
-        return Ok(wait);
-    }
-    let ev = working(&ctx.state)?;
-    let atomic = |i: u64| queue::groups(&q, &ev, f, fleet, i).iter().any(queue::hot);
-    let mut slots = vec![];
-    for g in queue::groups(&q, &ev, f, fleet, n)
-        .into_iter()
-        .filter(|g| queue::held(&ev, fleet, n, &g.name))
-    {
-        let first_held = |i: u64| {
-            queue::groups(&q, &ev, f, fleet, i)
-                .into_iter()
-                .find(|y| queue::held(&ev, fleet, i, &y.name))
-        };
-        let free = |i: u64| {
-            queue::groups(&q, &ev, f, fleet, i)
-                .iter()
-                .filter(|y| queue::held(&ev, fleet, i, &y.name))
-                .all(|y| queue::holders(&ev, &st, f, fleet, &y.name).len() < y.max)
-        };
-        let waits = |x: &&IssueState| {
-            x.fleet == fleet
-                && queue::in_flight(&x.state)
-                && queue::held(&ev, fleet, x.issue, &g.name)
-                && (x.issue == n
-                    || if atomic(x.issue) {
-                        free(x.issue)
-                    } else {
-                        first_held(x.issue).is_some_and(|y| y.name == g.name)
-                    })
-                && !queue::stuck(&ev, &st, x)
-        };
-        let first = st.values().filter(waits).min_by_key(|x| pos(x.issue));
-        if queue::holders(&ev, &st, f, fleet, &g.name).len() >= g.max || first.map(|x| x.issue) != Some(n) {
-            return Ok(true);
-        }
-        let e = Event::new(ctx.now, fleet, Some(n), "serial-slot", json!({"group": g.name}));
-        if atomic(n) {
-            slots.push(e);
-        } else {
+    for g in queue::groups(&q, &now, f, fleet, n) {
+        if queue::held(&now, fleet, n, &g.name) {
+            let e = Event::new(ctx.now, fleet, Some(n), "serial-slot", json!({"group": g.name}));
             emit(&ctx.state, cfg, e)?;
         }
-    }
-    for e in slots {
-        emit(&ctx.state, cfg, e)?;
-    }
-    update_lane(ctx, cfg, r, out, &ev, fleet, n)?;
-    Ok(true)
-}
-
-fn reconcile(ctx: &Ctx, cfg: &Config, fleet: &str) -> Result<()> {
-    let (f, ev) = (cfg.fleet(fleet)?, working(&ctx.state)?);
-    let (st, q) = (fold(&ev), queue::replay(&ev, fleet));
-    let pos = |i: u64| (q.iter().position(|x| x.issue == i).unwrap_or(usize::MAX), i);
-    let live = st.values().filter(|s| s.fleet == fleet && queue::in_flight(&s.state));
-    let gs: BTreeMap<u64, (bool, Vec<crate::config::Serial>)> = live
-        .map(|s| {
-            (
-                s.issue,
-                (queue::stuck(&ev, &st, s), queue::groups(&q, &ev, f, fleet, s.issue)),
-            )
-        })
-        .filter(|(_, (_, g))| g.iter().any(queue::hot))
-        .collect();
-    let mut holds: Vec<(u64, String, u64)> = vec![];
-    let held = |holds: &[(u64, String, u64)], n: u64, g: &str| {
-        queue::held(&ev, fleet, n, g) || holds.iter().any(|h| h.0 == n && h.1 == g)
-    };
-    let holder = |holds: &[(u64, String, u64)], n: u64, g: &str| {
-        let new = holds.iter().find(|h| h.0 == n && h.1 == g).map(|h| h.2);
-        let last = || {
-            ev.iter()
-                .rfind(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(g))
-        };
-        new.or_else(|| last()?.val("holder").as_u64()).unwrap_or(0)
-    };
-    loop {
-        let before = holds.len();
-        for (&n, (stuck, mine)) in &gs {
-            let by = mine.iter().find(|g| held(&holds, n, &g.name));
-            let Some(by) = by.map(|g| holder(&holds, n, &g.name)).or(stuck.then_some(0)) else {
-                continue;
-            };
-            let free: Vec<_> = mine.iter().filter(|g| !held(&holds, n, &g.name)).collect();
-            holds.extend(free.into_iter().map(|g| (n, g.name.clone(), by)));
-        }
-        for g in queue::serials(&ev, f, fleet).iter().filter(|g| queue::hot(g)) {
-            let mut h: Vec<u64> = (gs.iter())
-                .filter(|(&n, (_, m))| m.iter().any(|x| x.name == g.name) && !held(&holds, n, &g.name))
-                .map(|(&n, _)| n)
-                .collect();
-            h.sort_by_key(|&i| pos(i));
-            for &n in h.iter().skip(g.max) {
-                holds.push((n, g.name.clone(), h[0]));
-            }
-        }
-        if holds.len() == before {
-            break;
-        }
-    }
-    for (n, g, h) in holds {
-        let d = json!({"group": g, "holder": h, "by": "reconcile"});
-        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
     }
     Ok(())
 }
 
-fn update_lane(
+pub(crate) fn update_lane(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
@@ -1882,19 +1737,20 @@ fn handoff(
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
     {
         let pr = gh::cached_pr(ctx, fleet, s.issue);
-        let head = pr["headRefOid"].as_str().unwrap_or_default();
+        let head = pr.at("headRefOid").as_str().unwrap_or_default();
         let handed = ev
             .iter()
             .any(|e| e.is("pushed", fleet, s.issue) && e.str("sha") == Some(head));
         let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
-        let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
+        let ci = gh::ci(&gh::required(pr.at("statusCheckRollup"), &f.required_checks));
         let turn = waiting::turn(ev, s);
         let done = s.reviewed(head) && waiting::fix_done(ev, fleet, s.issue).is_some()
             || turn.is_some_and(|t| t.str("state") == Some("done"));
         let unlabelled = f.merge_label.as_deref().is_some_and(|l| !gh::has_label(&pr, l));
         let quiet = w.who == "none" || w.what.contains(waiting::NO_PUSH) || turn.is_some();
         let idle = done || quiet && ctx.now >= w.since + 120;
-        if !(idle && building && (done || unlabelled || ci != "pending") && pr["state"] == "OPEN") || head.is_empty() {
+        if !(idle && building && (done || unlabelled || ci != "pending") && pr.at("state") == "OPEN") || head.is_empty()
+        {
             continue;
         }
         if s.reviewed(head) {
@@ -1939,10 +1795,11 @@ fn no_change(
     head: &str,
     ci: &str,
 ) -> Result<bool> {
-    let Some(i) = ev.iter().rposition(|e| e.is("verdict", fleet, n)) else {
+    let Some((v, since)) =
+        (ev.iter().rposition(|e| e.is("verdict", fleet, n))).and_then(|i| ev.get(i..)?.split_first())
+    else {
         return Ok(false);
     };
-    let (v, since) = (&ev[i], &ev[i + 1..]);
     let at = v.str("sha").is_some_and(|x| x.eq_ignore_ascii_case(head));
     if v.str("verdict") != Some("FAIL") || !at || since.iter().any(|e| e.is("fix-no-change", fleet, n)) {
         return Ok(false);
@@ -1979,14 +1836,14 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         .filter(|s| s.fleet == fleet && !s.done() && s.state != "parked" && KICK.get().is_none_or(|k| k == s.issue))
     {
         let pr = gh::cached_pr(ctx, fleet, s.issue);
-        let num = pr["number"].to_string();
+        let num = pr.at("number").to_string();
         let seen = |e: &Event| e.is("blocked", fleet, s.issue) && e.str("pr") == Some(&num);
         let back = |e: &Event| e.issue == Some(s.issue) && e.fleet == fleet && e.str("landed_pr") == Some(&num);
         let closed = || gh::closed(ctx, r, cfg.fleet(fleet)?, fleet, ctx.now).map(|c| c.contains(&s.issue));
-        let (kind, mut d) = match pr["state"].as_str() {
+        let (kind, mut d) = match pr.at("state").as_str() {
             Some("MERGED") if crate::gate::unlogged_merge(&events, fleet, s.issue).is_some() => continue,
             Some("MERGED") if !events.iter().any(back) => {
-                let m = json!({"into": pr["baseRefName"], "merge_sha": pr["mergeCommit"]["oid"], "merged_at": pr["mergedAt"]});
+                let m = json!({"into": pr.at("baseRefName"), "merge_sha": pr.at("mergeCommit").at("oid"), "merged_at": pr.at("mergedAt")});
                 ("merged", m)
             }
             Some("CLOSED") if closed()? => ("closed", json!({})),
@@ -1996,7 +1853,7 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
             ),
             _ => continue,
         };
-        (d["pr"], d["by"]) = (json!(num), json!("external"));
+        d.put("pr", json!(num)).put("by", json!("external"));
         writeln!(out, "{fleet} #{} {kind} outside drover (PR #{num})", s.issue)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))?;
     }
@@ -2016,13 +1873,13 @@ fn ext_closed(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, flee
             None => repo,
         };
         let p = gh::cache_path(ctx, "blocker", &b.replace(['/', '#'], "-"), 0);
-        let ts = crate::usage::load::<Value>(&p).and_then(|c| c["ts"].as_u64());
+        let ts = crate::usage::load::<Value>(&p).and_then(|c| c.at("ts").as_u64());
         if ts.is_some_and(|t| ctx.now < t + 300) {
             continue;
         }
         let v = crate::runner::json(r, "gh", &["issue", "view", n, "-R", repo, "--json", "state"]);
         gh::store(&p, &json!({"ts": ctx.now}))?;
-        if v.is_ok_and(|v| v["state"] == "CLOSED") {
+        if v.is_ok_and(|v| v.at("state") == "CLOSED") {
             writeln!(out, "{fleet}: blocker {b} closed")?;
             emit(
                 &ctx.state,
@@ -2046,18 +1903,22 @@ pub fn holders(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     by.join(", ")
 }
 
-fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, mut go: bool) -> Result<()> {
+fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, fast: bool) -> Result<()> {
     let events = working(&ctx.state)?;
     let one = |n: &String| KICK.get().is_none_or(|k| n == &k.to_string());
-    let mut res = Ok(());
-    for n in queue::startable(&events, fleet).into_iter().filter(one) {
-        if !go {
+    let acts = |f: &dyn Fn(&Value) -> bool| ACTS.with_borrow(|m| m.get(fleet).is_some_and(|v| v.iter().any(f)));
+    let tried =
+        |n: &String| acts(&|a| a["step"] == "start" && a["issue"].as_u64().is_some_and(|i| n == &i.to_string()));
+    let stop = crate::starts::stops;
+    let (mut res, mut go) = (Ok(()), !acts(&|a| a["step"] == "start" && stop(a["code"].as_str())));
+    for n in (queue::startable(&events, fleet).into_iter()).filter(|n| one(n) && !tried(n)) {
+        if !go || fast && !crate::starts::free(cfg, &pending(ctx, cfg, r)) {
             break;
         }
         let at = (fleet, n.parse().ok(), "start");
         let design = n.parse().ok().and_then(|n| queue::wants_design(&events, fleet, n));
         let again = n.parse().is_ok_and(|n| crate::pending::requeued(&events, fleet, n));
-        let f = &cfg.fleet[fleet];
+        let f = cfg.fleet(fleet)?;
         let c = ["spawn", fleet, &n, design.unwrap_or(f.flow().start()), "--supersede"];
         let code = match act(
             ctx,
@@ -2066,7 +1927,7 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
             out,
             &events,
             at,
-            &c[..4 + usize::from(design.is_some() || again)],
+            c.get(..4 + usize::from(design.is_some() || again)).unwrap_or(&c[..]),
         ) {
             Ok(c) => c,
             Err(e) => {
@@ -2074,10 +1935,10 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
                 break;
             }
         };
-        go &= !matches!(
-            code,
-            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "LOGIN_NEEDED" | "CAP")
-        );
+        go &= !stop(code);
+    }
+    if fast {
+        return res;
     }
     res.and(clean_merged(ctx, cfg, r, out, &events, fleet))
 }
@@ -2107,7 +1968,10 @@ fn clean_merged(
 }
 
 fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let Err(e) = auto_update(ctx, cfg, r, out, fleet) else {
+    if KICK.get().is_some() {
+        return Ok(());
+    }
+    let Err(e) = crate::land::auto_update(ctx, cfg, r, out, fleet) else {
         return Ok(());
     };
     writeln!(out, "{fleet} auto-update: {e:#}")?;
@@ -2125,74 +1989,6 @@ fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         cfg,
         Event::new(ctx.now, fleet, None, kinds[0], json!({"reason": reason})),
     )
-}
-
-/// #129: after a merge, merge integration into every other open ready PR whose lane isn't working, oldest PR first, in a scratch worktree (#207: never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`) only when needed (#285: `update_ready`), else the PR merges as it is; a ready PR's conflict gets an `--update` lane.
-pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    if KICK.get().is_some() {
-        return Ok(());
-    }
-    let (f, events, ag) = (
-        cfg.fleet(fleet)?,
-        working(&ctx.state)?,
-        crate::session::all(cfg, r).checked().unwrap_or_default(),
-    );
-    let busy = |l: &str| ag.busy(l);
-    let open = |s: &IssueState| {
-        let pr = gh::cached_pr(ctx, fleet, s.issue);
-        pr["number"].as_u64().filter(|_| pr["state"] == "OPEN")
-    };
-    let mut prs: Vec<(u64, IssueState)> = (fold(&events).into_values())
-        .filter(|s| s.fleet == fleet && s.state == "ready")
-        .filter(|s| !s.lane.as_deref().is_some_and(busy))
-        .filter_map(|s| Some((open(&s)?, s)))
-        .collect();
-    if prs.is_empty() {
-        return Ok(());
-    }
-    prs.sort_by_key(|p| p.0);
-    let (dir, wt) = (f.local_path(), ctx.state.with_file_name(format!("update-{fleet}")));
-    let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
-    git(r, &dir, &["fetch", "-q", "origin"])?;
-    let checks = crate::gate::premerge_checks(ctx, f);
-    let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
-    for (_, s) in prs {
-        let (n, branch) = (s.issue.to_string(), crate::gate::branch_of(Some(&s), s.issue));
-        let from = git(r, &dir, &["rev-parse", &format!("origin/{branch}")])?;
-        let _ = tree(&["remove", "--force", "--force", &wts]);
-        tree(&["add", "-f", "--detach", &wts, &from])?;
-        let clean = git(r, &wt, &["merge", "--no-edit", &into]).is_ok();
-        let to = git(r, &wt, &["rev-parse", "HEAD"])?;
-        let mut pr = gh::cached_pr(ctx, fleet, s.issue);
-        crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
-        let push = to != from && (pr["landing"] == "fast-first" || gh::update_ready(ctx, Some(r), f, fleet));
-        let fail = crate::gate::run_checks(r, &wt, &into, if clean && push { &checks[..] } else { &[] });
-        let res = if !clean {
-            update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
-        } else if let Some((c, o)) = fail {
-            let at = format!("{from:.7} updated onto {into}");
-            let rf = crate::gate::premerge_failed(ctx, cfg, r, out, (fleet, s.issue), (&from, &at), (c, &o));
-            rf.and_then(|rf| Ok(writeln!(out, "{fleet} #{n} {rf}")?))
-        } else if push {
-            git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")]).and_then(|_| {
-                gh::forget_pr(ctx, fleet, s.issue);
-                writeln!(out, "{fleet} #{n} auto-updated: {from:.7} → {to:.7}")?;
-                let d = json!({"from": from, "to": to});
-                emit(
-                    &ctx.state,
-                    cfg,
-                    Event::new(ctx.now, fleet, Some(s.issue), "auto-updated", d),
-                )?;
-                pr["headRefOid"] = json!(to);
-                crate::gate::sync_label(ctx, cfg, r, out, &s, &pr)
-            })
-        } else {
-            Ok(())
-        };
-        let _ = tree(&["remove", "--force", &wts]);
-        res?;
-    }
-    Ok(())
 }
 
 fn ci_findings(r: &dyn Runner, f: &crate::config::Fleet, pr: &serde_json::Value, head: &str) -> String {
@@ -2242,13 +2038,13 @@ type Code = Option<&'static str>;
 fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event], at: At, c: &[&str]) -> Result<Code> {
     let (fleet, issue, step) = at;
     let mut buf = vec![];
-    let kicks = c[0] == "spawn" && KICK.get().is_none() && cfg.limits.max_parallel_spawns > 0;
+    let kicks = c.first() == Some(&"spawn") && KICK.get().is_none() && cfg.limits.max_parallel_spawns > 0;
     IN_ACT.set(!kicks);
-    let spawn = issue.filter(|_| c[0] == "spawn");
+    let spawn = issue.filter(|_| c.first() == Some(&"spawn"));
     let back = spawn
         .filter(|_| KICK.get().is_none())
         .and_then(|n| retrying(ctx, ev, fleet, n));
-    let paced = (c[0] == "spawn" && step == "respawn" && KICK.get().is_none())
+    let paced = (c.first() == Some(&"spawn") && step == "respawn" && KICK.get().is_none())
         .then(|| paced(cfg, fleet))
         .flatten();
     let full = (spawn.filter(|_| KICK.get().is_none() && !kicks).zip(c.get(3)))
@@ -2273,7 +2069,7 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
             None => (format!("error: {e:#}"), Some("ERROR")),
         },
     };
-    if let Some(n) = issue.filter(|_| code.is_some() && c[0] == "spawn" && SLOT.get()) {
+    if let Some(n) = issue.filter(|_| code.is_some() && c.first() == Some(&"spawn") && SLOT.get()) {
         crate::db::release(&ctx.state, &format!("spawn-{fleet}-{n}.pending"), None);
     }
     if let Some(n) = spawn.filter(|_| matches!(code, Some("EXIT" | "ERROR"))) {
@@ -2284,7 +2080,7 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
             .next()
             .unwrap_or_default();
         let error = why.split("; closed ").next().unwrap_or(why);
-        let head = gh::cached_pr(ctx, fleet, n)["headRefOid"].clone();
+        let head = gh::cached_pr(ctx, fleet, n).at("headRefOid").clone();
         let d = json!({"step": step, "error": error, "head": head});
         append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "spawn-error", d))?;
     }
@@ -2303,10 +2099,10 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
         words(code, step, &result)
     };
     let why = code.map(|_| result.split_once(": ").map_or(&*result, |p| p.1));
-    if let Some((n, k)) = spawn
-        .zip(code)
-        .filter(|_| !cfg.fleet(fleet).is_ok_and(|f| f.flow().is_check(c[3])))
-    {
+    if let Some((n, k)) = spawn.zip(code).filter(|_| {
+        !cfg.fleet(fleet)
+            .is_ok_and(|f| f.flow().is_check(c.get(3).copied().unwrap_or_default()))
+    }) {
         crate::pending::refused(ctx, (fleet, n), k, why.unwrap_or_default())?;
     }
     ACTS.with_borrow_mut(|a| {

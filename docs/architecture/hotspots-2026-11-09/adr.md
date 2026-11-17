@@ -89,7 +89,7 @@ the report itself is noise that would send next week's architect after the wrong
   same number until the first raise file exists. Rough size: slices 1–4 src net ≈ +90 against ≈ −60 (the budget
   comment, the list's doc lines, CI's types step); 5 and 6 are moves.
 - Docs: `docs/architecture.md`'s size-cap paragraph names the folder; `docs/config.md`'s hotspots paragraph says the
-  tip filter and pair count; `roles/orchestrator.md`, `roles/impl.md` and `roles/usage-tail.md` name the `cap.d` folder under `ci/`.
+  tip filter and pair count; `roles/orchestrator/role.md`, `roles/impl.md` and `roles/usage-tail.md` name the `cap.d` folder under `ci/`.
 - Not this week: `roles/usage-tail.md`, `fleet.example.toml` and the docs are prose every feature extends; a
   collected folder for prose moves the conflict, not the growth. `config.rs`'s `WEBPUSH_ON` (16 hunks) could take the
   same flag as `passive` later (an alert declares itself pushable); left for a week with cleaner numbers.

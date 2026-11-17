@@ -267,6 +267,41 @@ fn setup_makes_a_missing_merge_label_once_then_says_already() {
 }
 
 #[test]
+fn setup_writes_a_fleets_missing_hygiene_once() {
+    let d = tmpdir("timer-hygiene");
+    let local = d.join("sendmeter");
+    std::fs::create_dir_all(&local).unwrap();
+    let cfg = CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
+    let c = ctx(&d, &cfg);
+    let _sh = FakeShed::attached(&c);
+    let ls = format!("git -C {} ls-files", local.display());
+    let base = format!(
+        "sh -c cd '{}' && '{}' arch-check --write-baseline",
+        local.display(),
+        c.exe
+    );
+    let r = host(Fake::default())
+        .reply("launchctl print", "")
+        .reply("systemctl --user is-active", "")
+        .reply(&ls, "src/cli.rs\nsrc/main.rs\ncrates/x/src/config.rs\nREADME.md\n")
+        .reply(&base, "");
+    let (_, out) = run(&c, &r, &["setup", "--no-load"]);
+    let arch = local.join(".drover/arch.toml");
+    let wrote = format!("✓ hygiene sendmeter — wrote {} → commit it", arch.display());
+    assert!(out.lines().any(|l| l == wrote), "{out}");
+    let baseline = "✓ hygiene sendmeter — wrote the .drover/arch-baseline.txt baseline → commit it";
+    assert!(out.lines().any(|l| l == baseline), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(&arch).unwrap(),
+        "\n[comments]\npolicy = \"strict\"\n\n[docs]\npaths = [\"docs/**/*.md\", \"README.md\"]\nwatch = [\"src/cli.rs\", \"crates/x/src/config.rs\"]\n"
+    );
+    std::fs::write(local.join(".drover/arch-baseline.txt"), "").unwrap();
+    let (_, out) = run(&c, &r, &["setup", "--no-load"]);
+    assert!(!out.contains("hygiene sendmeter — wrote"), "{out}");
+    assert_eq!(r.count(&base), 1);
+}
+
+#[test]
 fn setup_adopts_a_serve_job_under_another_label() {
     let c = ctx(&tmpdir("timer-adopt"), CONFIG);
     let _sh = FakeShed::attached(&c);

@@ -3,9 +3,7 @@ use crate::runner::{Real, Runner};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, HashMap};
-use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -14,6 +12,7 @@ use std::time::Duration;
 use crate::db::Endings;
 
 mod passive;
+mod push;
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +31,10 @@ pub struct Event {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub passive: bool,
+    /// #1147: reaches a phone whose notifier sets no `on`; kinds pushed before the flag are in `push::LEGACY`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    pub push: bool,
     #[serde(flatten)]
     pub data: Map<String, Value>,
 }
@@ -49,6 +52,7 @@ impl Event {
             issue,
             kind: kind.into(),
             passive: false,
+            push: false,
             data,
         }
     }
@@ -62,6 +66,16 @@ impl Event {
     pub fn is_passive(&self) -> bool {
         self.passive || passive::LEGACY.contains(&self.kind.as_str())
     }
+    /// #1147: this event reaches a phone whose notifier sets no `on`.
+    #[must_use]
+    pub fn push(mut self) -> Event {
+        self.push = true;
+        self
+    }
+    /// #1147: flagged push, or a kind pushed before the flag.
+    pub fn is_push(&self) -> bool {
+        self.push || push::LEGACY.contains(&self.kind.as_str())
+    }
     pub fn str(&self, k: &str) -> Option<&str> {
         self.data.get(k).and_then(Value::as_str)
     }
@@ -72,6 +86,27 @@ impl Event {
     /// A `kind` event about `fleet` #`issue`.
     pub fn is(&self, kind: &str, fleet: &str, issue: u64) -> bool {
         self.kind == kind && self.fleet == fleet && self.issue == Some(issue)
+    }
+}
+
+/// Panic-free `Value` access: `at` reads like `v[i]` (`Null` when missing), `put` writes like `v[k] = x`.
+pub trait Json {
+    fn at<I: serde_json::value::Index>(&self, i: I) -> &Value;
+    fn put(&mut self, k: &str, v: Value) -> &mut Value;
+}
+
+impl Json for Value {
+    fn at<I: serde_json::value::Index>(&self, i: I) -> &Value {
+        self.get(i).unwrap_or(&Value::Null)
+    }
+    fn put(&mut self, k: &str, v: Value) -> &mut Value {
+        if !self.is_object() {
+            *self = Value::Object(Map::new());
+        }
+        if let Value::Object(m) = self {
+            m.insert(k.into(), v);
+        }
+        self
     }
 }
 
@@ -88,7 +123,10 @@ pub(crate) fn aliased(mut ev: Event) -> Event {
     ev
 }
 
-#[allow(clippy::trivially_copy_pass_by_ref)]
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if passes a reference"
+)]
 fn is_zero(n: &u64) -> bool {
     *n == 0
 }
@@ -125,12 +163,12 @@ pub(crate) fn parse(text: &str, path: &Path) -> Vec<Event> {
     for (i, l) in lines.iter().enumerate() {
         match serde_json::from_str::<Event>(l) {
             Ok(ev) if ev.seq == 0 => out.push(aliased(Event {
-                seq: i as u64 + 1,
+                seq: u64::try_from(i + 1).unwrap_or(u64::MAX),
                 ..ev
             })),
             Ok(ev) => out.push(aliased(ev)),
             Err(_) if l.trim().is_empty() || i + 1 == lines.len() => {}
-            Err(e) => eprintln!(
+            Err(e) => crate::stderr!(
                 "drover: {}: line {}: skipping corrupt record: {e}",
                 path.display(),
                 i + 1
@@ -231,7 +269,7 @@ pub fn path_in(state: &Path, rel: &str) -> PathBuf {
 }
 
 /// Append, then run notifiers. Notifier failures never fail the caller.
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value, reason = "callers hand over the event they built")]
 pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     append(state, &ev)?;
     notify(state, cfg, &ev)
@@ -260,7 +298,14 @@ fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
         "thread-msg" if ev.str("from") != Some("orchestrator") => "",
         k => k,
     };
-    let wanted = |n: &&crate::config::Notify| n.wants(if n.webpush() { push } else { &ev.kind });
+    let phone = (!push.is_empty()).then(|| Event {
+        kind: push.into(),
+        ..ev.clone()
+    });
+    let wanted = |n: &&crate::config::Notify| match (n.webpush(), &phone) {
+        (false, _) => n.wants(ev),
+        (true, p) => p.as_ref().is_some_and(|p| n.wants(p)),
+    };
     for n in cfg.notifiers(&ev.fleet).into_iter().filter(wanted) {
         let payload = if n.format.as_deref() == Some("json") {
             serde_json::to_string(ev)?
@@ -274,12 +319,13 @@ fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
         };
         if let Err(e) = res {
             let cmd = if n.webpush() { "webpush" } else { &n.cmd };
-            eprintln!("drover: notifier `{cmd}` failed: {e:#}");
+            crate::stderr!("drover: notifier `{cmd}` failed: {e:#}");
             let d = serde_json::json!({"cmd": cmd, "event": ev.kind, "error": format!("{e:#}")});
-            let _ = append(
+            append(
                 state,
                 &Event::new(ev.ts, &ev.fleet, ev.issue, "notify-failed", d).passive(),
-            );
+            )
+            .ok();
         }
     }
     Ok(())
@@ -341,8 +387,8 @@ pub fn plain(ev: &Event) -> String {
 }
 
 fn run_notifier(cmd: &str, payload: &str) -> Result<()> {
-    let mut args: Vec<String> = std::env::vars()
-        .map(|(k, _)| k)
+    let mut args: Vec<String> = crate::config::envs()
+        .filter_map(|(k, _)| k.into_string().ok())
         .filter(|k| crate::providers::all().any(|p| p.scrubs_env(k)))
         .flat_map(|k| ["-u".into(), k])
         .collect();
@@ -398,7 +444,7 @@ pub type States = BTreeMap<(String, u64), IssueState>;
 pub fn last_spawn<'a>(events: &'a [Event], agent: &str) -> Option<&'a Event> {
     let spawn = |e: &&Event| e.kind == "spawn" && e.str("agent") == Some(agent);
     match cached(events) {
-        Some(l) => l.lane_at.iter().rev().map(|i| &events[*i]).find(spawn),
+        Some(l) => l.lane_at.iter().rev().filter_map(|i| events.get(*i)).find(spawn),
         None => events.iter().rfind(spawn),
     }
 }
@@ -440,7 +486,7 @@ pub(crate) fn lane_id(e: &Event) -> Option<String> {
 /// #1023: the lane fold of `events` (each lane's newest lane event), in log order: the cached log's, else one pass.
 pub fn lanes(events: &[Event]) -> Vec<&Event> {
     if let Some(l) = cached(events) {
-        return l.lane_at.iter().map(|i| &events[*i]).collect();
+        return l.lane_at.iter().filter_map(|i| events.get(*i)).collect();
     }
     let mut m = HashMap::new();
     for (i, e) in events.iter().enumerate() {
@@ -448,7 +494,7 @@ pub fn lanes(events: &[Event]) -> Vec<&Event> {
     }
     let mut at: Vec<usize> = m.into_values().collect();
     at.sort_unstable();
-    at.into_iter().map(|i| &events[i]).collect()
+    at.into_iter().filter_map(|i| events.get(i)).collect()
 }
 
 /// #425: the issue `s`'s lane is held on (`held`, no `released` or `spawn` since). #505: the issues it waits on (`on`: one number before #505, a list since); empty when not held.
@@ -557,7 +603,7 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     };
     let x = &l.threads;
     let map = if kind == "decision" { &x.decisions } else { &x.asks };
-    map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
+    map.get(&(fleet.into(), id.into())).and_then(|i| events.get(*i))
 }
 
 /// #900: `e` repeats an ask logged before it (two passes raced to post it): every view shows the first alone.
@@ -583,11 +629,11 @@ pub static REBUILDS: AtomicUsize = AtomicUsize::new(0);
 
 fn index<T>(events: &[Event], f: impl FnOnce(&Endings, &dyn Fn(usize) -> u64) -> T) -> T {
     if let Some(l) = cached(events) {
-        return f(&l.asks, &|i| events[i].seq);
+        return f(&l.asks, &|i| events.get(i).map_or(0, |e| e.seq));
     }
     REBUILDS.fetch_add(1, Relaxed);
     let x = crate::db::endings(events).unwrap_or_default();
-    f(&x, &|i| i as u64 + 1)
+    f(&x, &|i| u64::try_from(i + 1).unwrap_or(u64::MAX))
 }
 
 /// #632: the live log (`read`), its ask index and fold, cached per log by its last seq: a new event is read and folded alone (a rotation or another database file since: all again).
@@ -615,75 +661,8 @@ impl std::ops::Deref for Log {
     }
 }
 
-/// #944: a log's events, in a buffer its later versions share and append to in place: each sees only its own `len`.
-#[derive(Default, Clone)]
-pub struct Events {
-    buf: Arc<Buf>,
-    len: usize,
-}
-
-#[derive(Default)]
-struct Buf {
-    len: Mutex<usize>,
-    cells: Box<[UnsafeCell<MaybeUninit<Event>>]>,
-}
-
-// SAFETY: a cell is written once, under `len`'s lock, before `len` passes it; only cells below `len` are ever read.
-unsafe impl Sync for Buf {}
-
-impl Drop for Buf {
-    fn drop(&mut self) {
-        let n = *self.len.get_mut().unwrap_or_else(PoisonError::into_inner);
-        for c in &mut self.cells[..n] {
-            // SAFETY: the first `n` cells were written (`push`) and are dropped only here.
-            unsafe { c.get_mut().assume_init_drop() };
-        }
-    }
-}
-
-impl std::ops::Deref for Events {
-    type Target = [Event];
-    fn deref(&self) -> &[Event] {
-        // SAFETY: the first `len` cells are written and never written again; a cell is laid out as its `Event`.
-        unsafe { std::slice::from_raw_parts(self.buf.cells.as_ptr().cast(), self.len) }
-    }
-}
-
-impl Events {
-    fn push(&mut self, e: Event) {
-        loop {
-            let mut at = self.buf.len.lock().unwrap_or_else(PoisonError::into_inner);
-            if *at == self.len && self.len < self.buf.cells.len() {
-                // SAFETY: cell `len` is past what every handle sees and `at`'s lock is held: nothing else touches it.
-                unsafe { (*self.buf.cells[self.len].get()).write(e) };
-                (*at, self.len) = (self.len + 1, self.len + 1);
-                return;
-            }
-            drop(at);
-            self.grow(1);
-        }
-    }
-
-    fn reserve(&mut self, n: usize) {
-        if self.len + n > self.buf.cells.len() {
-            self.grow(n);
-        }
-    }
-
-    fn grow(&mut self, n: usize) {
-        let cap = (self.len + n).next_power_of_two().max(64);
-        let cells = (0..cap).map(|_| UnsafeCell::new(MaybeUninit::uninit())).collect();
-        let mut next = Events {
-            buf: Arc::new(Buf {
-                len: Mutex::new(0),
-                cells,
-            }),
-            len: 0,
-        };
-        self.iter().for_each(|e| next.push(e.clone()));
-        *self = next;
-    }
-}
+/// #944: a log's events, in a buffer its later versions share and append to in place.
+pub type Events = drover_sys::Append<Event>;
 
 type Gated = (Arc<Mutex<()>>, Arc<Log>);
 
@@ -758,14 +737,14 @@ fn log(path: &Path, live: bool) -> Result<Arc<Log>> {
     let (last, key) = (crate::db::last_seq(path), crate::db::version(path));
     let mut l = {
         let mut m = logs();
-        let l = &mut m.get_mut(&file).expect("added above").1;
+        let l = &mut m.entry(file.clone()).or_default().1;
         if key == l.key && last == l.seq && last > 0 {
             return Ok(l.clone());
         }
         std::mem::take(l)
     };
     let got = catch_up(path, &mut l, last, key, live);
-    logs().get_mut(&file).expect("added above").1 = l.clone();
+    logs().entry(file).or_default().1 = l.clone();
     let mut live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
     live.retain(|w| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), Arc::as_ptr(&l)));
     live.push(Arc::downgrade(&l));
@@ -813,10 +792,10 @@ pub fn closed(events: &[Event], a: &Event) -> Option<&'static str> {
 }
 
 fn ending(events: &[Event], a: &Event) -> Option<(&'static str, String)> {
-    let at = (std::ptr::from_ref(a) as usize).wrapping_sub(events.as_ptr() as usize) / size_of::<Event>();
+    let at = std::ptr::from_ref(a).addr().wrapping_sub(events.as_ptr().addr()) / size_of::<Event>();
     let at = events.get(at).filter(|e| std::ptr::eq(*e, a)).map(|_| at)?;
     let (r, row) = index(events, |x, key| x.get(&key(at)).cloned())??;
-    Some((ORDER[r], row))
+    Some((*ORDER.get(r)?, row))
 }
 
 /// #584: `closed` as `drover asks` shows it: `withdrawn → q<new>`, `delivered to t<n>`.
@@ -875,8 +854,9 @@ pub fn finding<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a s
 /// `needs-decision` events not yet closed, oldest first (#978: the `asks` table's, for a cached log).
 pub fn open_asks(events: &[Event]) -> Vec<&Event> {
     index(events, |x, key| {
-        let open = |i: &usize| events[*i].kind == "needs-decision" && x.get(&key(*i)).is_some_and(Option::is_none);
-        (0..events.len()).filter(open).map(|i| &events[i]).collect()
+        let open =
+            |(i, e): &(usize, &Event)| e.kind == "needs-decision" && x.get(&key(*i)).is_some_and(Option::is_none);
+        events.iter().enumerate().filter(open).map(|(_, e)| e).collect()
     })
 }
 
@@ -890,7 +870,7 @@ pub fn of_issue<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> 
             .collect();
     };
     let at = l.issues.get(&(fleet.to_string(), n));
-    at.map_or_else(Vec::new, |v| v.iter().map(|i| &events[*i]).collect())
+    at.map_or_else(Vec::new, |v| v.iter().filter_map(|i| events.get(*i)).collect())
 }
 
 /// #971: the events of any of `kinds`, in order: the index's when `events` is a cached log, else one pass.
@@ -905,7 +885,7 @@ pub fn of_kind<'a>(events: &'a [Event], kinds: &[&str]) -> Vec<&'a Event> {
         .copied()
         .collect();
     at.sort_unstable();
-    at.into_iter().map(|i| &events[i]).collect()
+    at.into_iter().filter_map(|i| events.get(i)).collect()
 }
 
 /// #971: `fleet` #`n`'s events as one slice: the cached log's copy, extended by the events since (else copied now).
@@ -918,11 +898,11 @@ pub fn issue_log(events: &[Event], fleet: &str, n: u64) -> Events {
     let at = l.issues.get(&(fleet.to_string(), n)).map_or(&[][..], Vec::as_slice);
     let mut copies = l.copies.lock().unwrap_or_else(PoisonError::into_inner);
     let c = copies.entry((fleet.to_string(), n)).or_default();
-    at.iter().skip(c.len).for_each(|i| c.push(events[*i].clone()));
-    Events {
-        buf: c.buf.clone(),
-        len: at.len(),
-    }
+    at.iter()
+        .skip(c.len())
+        .filter_map(|i| events.get(*i))
+        .for_each(|e| c.push(e.clone()));
+    c.prefix(at.len())
 }
 
 /// #971: the events naming `agent`, in order: the index's when `events` is a cached log, else one pass.
@@ -931,10 +911,10 @@ pub fn of_agent<'a>(events: &'a [Event], agent: &str) -> Vec<&'a Event> {
         return events.iter().filter(|e| e.str("agent") == Some(agent)).collect();
     };
     let at = l.agents.get(agent);
-    at.map_or_else(Vec::new, |v| v.iter().map(|i| &events[*i]).collect())
+    at.map_or_else(Vec::new, |v| v.iter().filter_map(|i| events.get(*i)).collect())
 }
 
-/// Current per-issue state (the states in `roles/usage-tail.md`); #859: the cached log's fold when `events` is it.
+/// Current per-issue state (the states in `roles/usage/20-states.md`); #859: the cached log's fold when `events` is it.
 pub fn fold(events: &[Event]) -> States {
     if let Some(l) = cached(events) {
         return l.states.clone();
@@ -1133,7 +1113,7 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
                 "fix(n)",
                 "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
             ),
-            ("merged", "merge with PASS at head and CI green, no STAGING_WOULD_BREAK"),
+            ("merged", "squash-merge into one commit carrying its why notes, with PASS at head and CI green, no STAGING_WOULD_BREAK"),
             ("blocked", "merge refused, or PR closed outside drover"),
         ],
     ),
