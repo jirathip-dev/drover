@@ -1,0 +1,1 @@
+- SHED_VERSION: spawn: the `shed` on PATH or the running `shed serve` is off drover's pinned build or proto version, or serve runs another build than PATH (restart it); `drover shed install --yes` installs the pin and restarts serve
