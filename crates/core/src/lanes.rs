@@ -195,6 +195,11 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
     let live = match sessions.seen(lane, sp.str("machine")) {
         Seen::Unreachable => return Health::Unknown,
         Seen::Absent => return Health::Dead(stamp::exit(events, lane)),
+        Seen::Here(x) if x.key_refused() => {
+            return Health::Stalled {
+                since: stamp::since(events, lane).unwrap_or(sp.ts).max(sp.ts),
+            }
+        }
         Seen::Here(x) => match x.status() {
             Some(st) => st,
             None => return Health::Dead(ended(events, sessions, sp)),
