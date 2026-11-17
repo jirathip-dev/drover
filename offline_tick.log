@@ -1,0 +1,15 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1100/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1100/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1100/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1100/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 28.34s
+     Running tests/offline_tick.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1100/debug/deps/offline_tick-189513a25301bc42)
+
+running 4 tests
+test a_tick_past_its_budget_skips_the_rest_says_so_and_ends ... ok
+test waiting_after_a_tick_past_its_budget_shows_the_remote_lanes_next_step_not_host_offline ... ok
+test a_tick_past_its_budget_still_pushes_a_remote_lanes_commits_every_pass ... ok
+test a_host_that_drops_after_its_probe_costs_one_timeout_and_drive_still_starts ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
+
