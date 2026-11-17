@@ -1,0 +1,5 @@
+Decided: no code change for the red `test (shard 1/4)`; `service::a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes` is a flake, and this round only merges staging.
+Because: crates/cli/tests/service.rs:290
+Check: the slo stall breach cannot fire in that test, since its events are fresh and the window is 2h; on this host the test fails on clean origin/staging too, and CI run 44145593259 at the new head passes every shard.
+Rejected: changing the service test's timing in this PR — the flake predates #1216 and is outside its scope.
+Owner: the red check was a test that fails at random; after merging staging, CI is green with no code change.
