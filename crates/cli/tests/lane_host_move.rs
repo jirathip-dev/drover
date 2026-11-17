@@ -97,7 +97,11 @@ fn the_spawn_hosts_exit_still_records_gone_with_its_cause() {
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(
         (rows[0].str("state"), rows[0].str("cause"), rows[0].str("note")),
-        (Some("gone"), Some("adapter crash"), Some("acp: the agent closed its stdout"))
+        (
+            Some("gone"),
+            Some("adapter crash"),
+            Some("acp: the agent closed its stdout")
+        )
     );
     assert!(mini.has(LANE), "the spawn host's own exited terminal stays");
 }
