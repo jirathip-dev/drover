@@ -1,0 +1,27 @@
+Decided: held_on, the auto-updated lookup, promise::pass and gh::missing read the per-issue index through events::issue_events
+Because: "use the per-issue index the log already has; done issues are filtered out first"
+Decided: a fast pass skips done issues in the waits loop; a full pass keeps them
+Because: crates/core/src/drive.rs:1278
+Rejected: skipping done issues in every pass — stall::stalled acts on a merged issue's lane and the sim hunt test changed outcome
+Decided: gh::snapshot keeps the parsed snapshot per thread by cache file, now and mtime, returned as Rc
+Because: "The parsed PR snapshot is kept for the pass (per fleet and `now`), shared by reference"
+Rejected: one shared waiting::scan for every fleet — drive runs each fleet's pass on its own thread; #971 already removed the clone
+Decided: the perf gate measures CPU ms (median of 5 passes, budget 120) instead of wall time
+Because: crates/cli/tests/perf.rs:443
+Check: the perf gate fails on base src (148-204 ms CPU) and passes at head (55-78 ms)
+Owner: Drive's per-minute pass does about half the work on a long history; what it decides is unchanged.
+
+Decided: the #954 perf gate's CPU budget drops from 120 ms to 75 ms
+Because: "within a stated budget that the base fails"
+Because: crates/cli/tests/perf.rs:1039
+Rejected: keeping 120 ms — on a quiet host the base passed it in 2 of 3 review runs (96 and 103 ms)
+Decided: the ci.yml conflict with staging keeps both perf cases, #954 and #962, in one step
+Rejected: fixing staging's red sim hunt test and serve.rs size baseline here — both fail on a clean staging checkout and are out of #954's scope
+Check: base (staging src + this perf.rs) fails the 75 ms budget; head medians were 45-65 ms under load avg 6-9
+Owner: staging itself is red (sim hunt test, serve.rs over its size baseline); this PR's CI will show the same two failures until someone fixes them
+
+Decided: round 4 merges origin/staging again and leaves this PR's code unchanged
+Because: crates/cli/tests/sim/main.rs:336
+Rejected: re-tuning the sim hunt test here — staging parked it with #[ignore] and it is out of #954's scope
+Check: CI at this head is green; the red at e03ed2c8 was staging's sim hunt test and serve.rs's size baseline, both fixed on staging since
+Owner: no code change this round; it only picks up staging's fixes for its two red checks
