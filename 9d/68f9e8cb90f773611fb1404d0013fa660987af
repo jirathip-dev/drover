@@ -1,0 +1,7 @@
+Decided: spawn freezes a cap_raise flag into a remote lane's rules file, and the hook honours it
+Because: "Either spawn sends the issue title (or a `cap_raise` flag) to the remote lane with its brief"
+Because: crates/core/src/spawn.rs:1365
+Rejected: pinning cap: issues to the main host — it would add a placement rule and still leave the hook wrong
+Check: the test at ebf83990 exits 101 (cap: lane refused CAP_FILE) and exits 0 at head
+Check: an untitled remote lane (no cached title) is still refused CAP_FILE
+Owner: a cap-raise lane can now run on a remote host
