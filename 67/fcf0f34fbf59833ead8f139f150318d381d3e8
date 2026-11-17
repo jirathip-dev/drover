@@ -1,0 +1,9 @@
+Decided: hosts_screen goes in shard 1, the shard with the fewest targets
+Because: scripts/test-shards.sh:16
+Decided: the host/reap arm calls one host_op so action stays at or under its 170-line baseline
+Because: .drover/arch-baseline.txt:23
+Decided: page_places lists Threads, then Hosts, then staging's Herd row; serve.md keeps both sheet lines
+Because: "opened from [⚙] as a menu row"
+Rejected: trimming serve.rs — staging's own file is already 3591 lines and this PR does not touch it
+Check: CI test shards run hosts_screen; arch-check flags no screens.rs:action size
+Owner: open [⚙] → Hosts on the phone and turn a host off, then back on
