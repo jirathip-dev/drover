@@ -1052,10 +1052,7 @@ fn issue_1238_a_review_that_exits_without_a_verdict_shows_no_verdict_never_a_tic
     let review = find(&sheet, "h-3");
     assert_eq!(
         (&review["title"], &review["subtitle"]),
-        (
-            &json!("review 2"),
-            &json!({"text": "no verdict", "tone": "warn"})
-        )
+        (&json!("review 2"), &json!({"text": "no verdict", "tone": "warn"}))
     );
     let (_, q) = req(&s, T, "GET", "/screens/queue", "", "");
     let sub = find(&q, "q-sendmeter-12")["subtitle"].as_str().unwrap();
@@ -1065,7 +1062,8 @@ fn issue_1238_a_review_that_exits_without_a_verdict_shows_no_verdict_never_a_tic
 #[test]
 fn issue_1238_dead_needs_check_decided_by_default_and_parked_each_show_their_line_or_button() {
     let (c, r) = recorded("cooee-old-lines");
-    let ev = |n: u64, kind: &str, d: Value| append(&c.state, &Event::new(T - 100, "sendmeter", Some(n), kind, d)).unwrap();
+    let ev =
+        |n: u64, kind: &str, d: Value| append(&c.state, &Event::new(T - 100, "sendmeter", Some(n), kind, d)).unwrap();
     ev(
         17,
         "spawn",
@@ -1091,13 +1089,19 @@ fn issue_1238_dead_needs_check_decided_by_default_and_parked_each_show_their_lin
     let decided = find(&dead, "decided");
     assert_eq!(decided["header"], "decided by default: keep");
     let change = find(&dead, "q3");
-    assert_eq!((&change["type"], &change["action"]), (&json!("choice"), &json!("answer")));
+    assert_eq!(
+        (&change["type"], &change["action"]),
+        (&json!("choice"), &json!("answer"))
+    );
     assert_eq!(
         change["options"][0]["values"],
         json!({"fleet": "sendmeter", "issue": 17})
     );
     let backlog = sheet_of(&s, 40);
-    assert_eq!(find(&backlog, "needs-check")["subtitle"]["text"], "from the backlog, spec not checked");
+    assert_eq!(
+        find(&backlog, "needs-check")["subtitle"]["text"],
+        "from the backlog, spec not checked"
+    );
     let parked = sheet_of(&s, 5);
     let unpark = find(&parked, "Unpark");
     assert_eq!(

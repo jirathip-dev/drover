@@ -536,41 +536,14 @@ fn rows_list(id: &str, rows: &[Value]) -> Value {
     json!({"type": "list", "id": id, "rows": rows})
 }
 
-fn issue_sheet(
-    ctx: &Ctx,
-    ev: &crate::events::Log,
+fn check_rows(
+    st: Option<&crate::events::IssueState>,
+    hist: &[Round],
     fl: Option<&crate::config::Fleet>,
-    c: &QueueCard,
     r: &QueueRow,
-) -> Value {
-    let (f, n) = (c.name.as_str(), r.issue);
-    let titled = |id: String, title: &str| json!({"type": "row", "id": id, "title": title});
-    let sheet = |p: String| json!({ "sheet": p });
+) -> Vec<Value> {
     let toned = |id: &str, title: &str, text: &str, tone: &str| json!({"type": "row", "id": id, "title": title, "subtitle": {"text": text, "tone": tone}});
-    let hist = history(ev, f, n);
-    let mut status = vec![];
-    if !r.stage.is_empty() {
-        let label = |s: &super::Stage| format!("{} {}{}", s.g, s.name, if s.ok { " ✓" } else { "" });
-        let opts: Vec<Value> = r
-            .stage
-            .iter()
-            .map(|s| json!({"value": s.name, "label": label(s)}))
-            .collect();
-        let lit: Vec<&str> = r.stage.iter().filter(|s| s.at == 0).map(|s| s.name.as_str()).collect();
-        status.push(json!({"type": "chips", "id": "stage", "name": "stage", "selected": lit, "options": opts}));
-    }
-    let mut now = json!({"type": "row", "id": "now", "title": r.state, "value": {"since": iso(r.t)}});
-    let held = r.blocked_by.map(|b| format!("held until #{b}"));
-    if let Some(w) = crate::pending::waits(ev, f, n, c.paused.is_some()).or(held) {
-        now.put("subtitle", json!(w));
-    }
-    let mut rows = vec![now];
-    if !r.lane.is_empty() {
-        let mut l = titled("at".into(), &format!("lane {}", r.lane));
-        let at = [r.place.as_str(), r.host.as_str()].into_iter().find(|s| !s.is_empty());
-        l.put("subtitle", json!(at.unwrap_or(if r.live { "live" } else { "gone" })));
-        rows.push(l);
-    }
+    let mut rows = vec![];
     if r.dead {
         rows.push(toned(
             "dead",
@@ -595,7 +568,6 @@ fn issue_sheet(
         };
         rows.push(json!({"type": "row", "id": "ci", "title": "CI", "badge": {"text": g, "tone": tone}}));
     }
-    let st = ev.states.get(&(f.to_string(), n));
     let mut seen = vec![];
     for (h, v) in hist.iter().rev().filter_map(|h| Some((h, h.verdict?))) {
         if seen.contains(&h.key) {
@@ -622,6 +594,68 @@ fn issue_sheet(
         }
         rows.push(row);
     }
+    rows
+}
+
+fn history_rows(now: u64, f: &str, n: u64, hist: &[Round], live: bool) -> Vec<Value> {
+    let last = hist.len().saturating_sub(1);
+    let row = |(i, h): (usize, &Round)| {
+        let mut row = json!({"type": "row", "id": format!("h-{i}"), "title": h.name});
+        if let Some(v) = h.verdict {
+            let word = v.str("verdict").unwrap_or("?");
+            let sha: String = v.str("sha").unwrap_or_default().chars().take(7).collect();
+            let ago = crate::events::age(now.saturating_sub(v.ts));
+            row.put(
+                "subtitle",
+                json!({"text": format!("{word} · {sha} · {ago}"), "tone": verdict_tone(word)}),
+            );
+            row.put(
+                "tap",
+                json!({ "sheet": format!("/screens/verdict?repo={f}&issue={n}&seq={}", v.seq) }),
+            );
+        } else if h.check && !(i == last && live) {
+            row.put("subtitle", json!({"text": "no verdict", "tone": "warn"}));
+        }
+        row
+    };
+    hist.iter().enumerate().rev().map(row).collect()
+}
+
+fn issue_sheet(
+    ctx: &Ctx,
+    ev: &crate::events::Log,
+    fl: Option<&crate::config::Fleet>,
+    c: &QueueCard,
+    r: &QueueRow,
+) -> Value {
+    let (f, n) = (c.name.as_str(), r.issue);
+    let titled = |id: String, title: &str| json!({"type": "row", "id": id, "title": title});
+    let sheet = |p: String| json!({ "sheet": p });
+    let hist = history(ev, f, n);
+    let mut status = vec![];
+    if !r.stage.is_empty() {
+        let label = |s: &super::Stage| format!("{} {}{}", s.g, s.name, if s.ok { " ✓" } else { "" });
+        let opts: Vec<Value> = r
+            .stage
+            .iter()
+            .map(|s| json!({"value": s.name, "label": label(s)}))
+            .collect();
+        let lit: Vec<&str> = r.stage.iter().filter(|s| s.at == 0).map(|s| s.name.as_str()).collect();
+        status.push(json!({"type": "chips", "id": "stage", "name": "stage", "selected": lit, "options": opts}));
+    }
+    let mut now = json!({"type": "row", "id": "now", "title": r.state, "value": {"since": iso(r.t)}});
+    let held = r.blocked_by.map(|b| format!("held until #{b}"));
+    if let Some(w) = crate::pending::waits(ev, f, n, c.paused.is_some()).or(held) {
+        now.put("subtitle", json!(w));
+    }
+    let mut rows = vec![now];
+    if !r.lane.is_empty() {
+        let mut l = titled("at".into(), &format!("lane {}", r.lane));
+        let at = [r.place.as_str(), r.host.as_str()].into_iter().find(|s| !s.is_empty());
+        l.put("subtitle", json!(at.unwrap_or(if r.live { "live" } else { "gone" })));
+        rows.push(l);
+    }
+    rows.extend(check_rows(ev.states.get(&(f.to_string(), n)), &hist, fl, r));
     rows.extend(r.notes.iter().enumerate().map(|(i, x)| titled(format!("note-{i}"), x)));
     status.push(rows_list("status-list", &rows));
     let mut blocks = vec![section("status", "status", &status)];
@@ -679,27 +713,7 @@ fn issue_sheet(
         blocks.push(section("lanes", "lanes", &[rows_list("lanes-list", &rows)]));
     }
     if !hist.is_empty() {
-        let last = hist.len() - 1;
-        let row = |(i, h): (usize, &Round)| {
-            let mut row = titled(format!("h-{i}"), &h.name);
-            if let Some(v) = h.verdict {
-                let word = v.str("verdict").unwrap_or("?");
-                let sha: String = v.str("sha").unwrap_or_default().chars().take(7).collect();
-                let ago = crate::events::age(ctx.now.saturating_sub(v.ts));
-                row.put(
-                    "subtitle",
-                    json!({"text": format!("{word} · {sha} · {ago}"), "tone": verdict_tone(word)}),
-                );
-                row.put(
-                    "tap",
-                    sheet(format!("/screens/verdict?repo={f}&issue={n}&seq={}", v.seq)),
-                );
-            } else if h.check && !(i == last && r.live) {
-                row.put("subtitle", json!({"text": "no verdict", "tone": "warn"}));
-            }
-            row
-        };
-        let rows: Vec<Value> = hist.iter().enumerate().rev().map(row).collect();
+        let rows = history_rows(ctx.now, f, n, &hist, r.live);
         blocks.push(section("history", "history", &[rows_list("history-list", &rows)]));
     }
     let button = |l: &str, action: &str, values: Value| json!({"type": "button", "id": l, "label": l, "action": action, "values": values});
@@ -716,7 +730,11 @@ fn issue_sheet(
         );
         blocks.extend([button("Top", "top", vals), drop]);
     }
-    let title = format!("#{n} {}", spec.or_else(|| r.title.clone().filter(|_| r.state == "merged")).unwrap_or_default());
+    let title = format!(
+        "#{n} {}",
+        spec.or_else(|| r.title.clone().filter(|_| r.state == "merged"))
+            .unwrap_or_default()
+    );
     json!({"type": "sheet", "id": format!("issue-{f}-{n}"), "title": title.trim_end(), "cancel": "Done", "blocks": blocks})
 }
 
