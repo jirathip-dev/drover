@@ -1,0 +1,5 @@
+Decided: the new in_flight test target goes in shard 2, in alphabetical order after hung_root
+Because: scripts/test-shards.txt:77
+Rejected: a new shard for the target — four shards are the fixed CI matrix; shard 2 takes it like the others
+Check: CI's shard check and the four test shards are green at the head
+Owner: CI now runs the new in-flight cap tests; nothing else changed.
