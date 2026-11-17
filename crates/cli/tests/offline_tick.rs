@@ -133,3 +133,68 @@ fn a_tick_past_its_budget_skips_the_rest_says_so_and_ends() {
         "drive still starts local work: {out}"
     );
 }
+
+fn crashed_on_air(c: &drover::Ctx) -> String {
+    let wt = "/Users/me/.herdr/worktrees/sendmeter/issue-20".to_string();
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-20", "harness": "claude", "pane": "sendmeter-impl-20",
+                   "workspace": "", "worktree": wt, "branch": "issue-20", "host": "air", "machine": "air"});
+    append(&c.state, &Event::new(NOW - 700, "sendmeter", Some(20), "spawn", d)).unwrap();
+    let gone = json!({"agent": "sendmeter-impl-20", "state": "gone", "cause": "adapter crash"});
+    append(
+        &c.state,
+        &Event::new(NOW - 600, "sendmeter", Some(20), "lane-state", gone),
+    )
+    .unwrap();
+    format!("'git' '-C' '{wt}' 'push' 'origin' 'HEAD:refs/heads/issue-20'")
+}
+
+#[test]
+fn a_tick_past_its_budget_still_pushes_a_remote_lanes_commits_every_pass() {
+    let (c, _sh) = setup("budget-remote-push", "", "slow_secs = 0\n");
+    let push = crashed_on_air(&c);
+    for pass in 1..=2 {
+        let (f, air) = (main_host(), FakeShed::new());
+        let r = OverSsh {
+            f: &f,
+            hosts: vec![("air", &air)],
+        };
+        let (code, out) = run(&c, &r, &["tick"]);
+        assert_eq!(code, 0, "pass {pass}: {out}");
+        let calls = f.calls.borrow();
+        assert!(
+            calls.iter().any(|l| l.contains(" air -- ") && l.ends_with(&push)),
+            "pass {pass}: the crashed lane's commits are pushed on the Air: {calls:#?}\n{out}"
+        );
+        assert!(
+            !out.contains("not sent (the tick past its budget)"),
+            "pass {pass}: {out}"
+        );
+        assert!(
+            out.contains("tick: past its 0 s budget; skipped: clean, trim, lesson, hotspots, compact"),
+            "pass {pass}: {out}"
+        );
+    }
+}
+
+#[test]
+fn waiting_after_a_tick_past_its_budget_shows_the_remote_lanes_next_step_not_host_offline() {
+    let (c, _sh) = setup("budget-remote-waiting", "", "slow_secs = 0\n");
+    crashed_on_air(&c);
+    let (f, air) = (main_host(), FakeShed::new());
+    let r = OverSsh {
+        f: &f,
+        hosts: vec![("air", &air)],
+    };
+    let (code, out) = run(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    let offline = drover::events::read(&c.state)
+        .unwrap()
+        .iter()
+        .any(|e| e.kind == "host-offline");
+    assert!(!offline, "a host the budget held back is not offline: {out}");
+    let (code, w) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{w}");
+    let row = w.lines().find(|l| l.starts_with("sendmeter #20 ")).unwrap_or_default();
+    assert!(row.contains("respawning impl"), "{w}");
+    assert!(!row.contains("host offline") && !row.contains("SPAWN_PENDING"), "{w}");
+}
