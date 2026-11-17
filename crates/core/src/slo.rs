@@ -1,7 +1,6 @@
 use crate::config::Config;
-use crate::events::{append, emit, fold, Event, IssueState, Json};
+use crate::events::{append, emit, fold, Event, Json};
 use crate::runner::{ok, Runner};
-use crate::waiting::Waiting;
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -24,9 +23,10 @@ struct Breach {
     reason: String,
     heal: Option<Heal>,
     since: u64,
+    card: bool,
 }
 
-/// #855: each fleet SLO and missed promise: its known heal first, `stuck` if it still holds a pass later.
+/// #855: each fleet SLO: its known heal first; #1183: `stuck` a pass later only when drive itself is broken.
 pub fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -37,18 +37,22 @@ pub fn pass(
     let events = crate::events::working(&ctx.state)?;
     let agents = crate::session::all(cfg, seen).checked()?.running();
     let mut now: Vec<Breach> = tick(ctx, cfg, r).into_iter().collect();
-    let rows = crate::waiting::scan(ctx, cfg, seen, &events, &agents, false, None);
     for f in fleets {
         now.extend(idle(ctx, cfg, &events, &agents, f));
-        now.extend(missed(ctx, &events, &rows, f));
+        now.extend(no_pass(ctx, cfg, f));
+        now.extend(failed(&events, f));
     }
     let eps = episodes(&events);
+    let held = |k: &String, ep: &Vec<&Event>| {
+        now.iter()
+            .any(|b| &b.key == k && (b.card || !ep.iter().any(|e| e.kind == "stuck")))
+    };
     let mut loud: BTreeSet<String> = eps
         .iter()
-        .filter(|(k, ep)| now.iter().any(|b| &b.key == *k) && ep.iter().any(|e| e.kind == "stuck"))
+        .filter(|(k, ep)| held(k, ep) && ep.iter().any(|e| e.kind == "stuck"))
         .filter_map(|(_, ep)| Some(ep.first()?.fleet.clone()))
         .collect();
-    for (key, ep) in eps.iter().filter(|(k, _)| !now.iter().any(|b| &b.key == *k)) {
+    for (key, ep) in eps.iter().filter(|(k, ep)| !held(k, ep)) {
         let Some(e) = ep.first() else { continue };
         append(
             &ctx.state,
@@ -133,7 +137,7 @@ fn step(
             &ev("self-heal", json!({"key": b.key, "did": did, "reason": b.reason})),
         );
     }
-    if tried.iter().any(|t| ctx.now < t.0 + cfg.limits.slow_secs) {
+    if !b.card || tried.iter().any(|t| ctx.now < t.0 + cfg.limits.slow_secs) {
         return Ok(());
     }
     let tried: Vec<String> = tried.into_iter().map(|t| t.1).collect();
@@ -206,6 +210,7 @@ fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
         reason: format!("tick running {mins} min, in {step}; waiting on: {child}"),
         heal: named.map(Heal::StopTick),
         since,
+        card: true,
     })
 }
 
@@ -255,24 +260,38 @@ fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[crate::session::Ses
         ),
         heal: over.map(|_| Heal::Recount(fleet.into(), n)),
         since,
+        card: false,
     })
 }
 
-fn missed(ctx: &Ctx, events: &[Event], rows: &[(IssueState, Waiting)], fleet: &str) -> Vec<Breach> {
-    let mine = |(s, w): &&(IssueState, Waiting)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane);
-    let open = rows.iter().filter(mine).filter_map(|(s, w)| {
-        let pr = crate::gh::cached_pr(ctx, fleet, s.issue);
-        let head = pr.at("headRefOid").as_str().unwrap_or_default();
-        let p = crate::promise::open_missed(events, s, head, w.promise)?;
-        Some(Breach {
-            key: format!("promise:{fleet}#{}:{}", s.issue, p.made_at),
-            fleet: fleet.into(),
-            issue: Some(s.issue),
-            slo: None,
-            reason: w.what.clone(),
-            heal: None,
-            since: p.made_at,
-        })
-    });
-    open.collect()
+fn no_pass(ctx: &Ctx, cfg: &Config, fleet: &str) -> Option<Breach> {
+    let last = crate::drive::last_pass(ctx, fleet)?;
+    let mins = ctx.now.saturating_sub(last) / 60;
+    (ctx.now >= last + 6 * cfg.limits.slow_secs).then(|| Breach {
+        key: format!("no-pass:{fleet}:{last}"),
+        fleet: fleet.into(),
+        issue: None,
+        slo: None,
+        reason: format!("no drive pass for {mins} min"),
+        heal: None,
+        since: last,
+        card: true,
+    })
+}
+
+fn failed(events: &[Event], fleet: &str) -> Option<Breach> {
+    let pass = |e: &&Event| e.kind == "drive-pass" && e.fleet == fleet && e.val("kick").is_null();
+    let last = events.iter().rfind(pass)?;
+    let acts = last.val("actions").as_array()?;
+    let err = acts.iter().find(|a| a["step"] == "pass" && a["outcome"] == "error")?;
+    Some(Breach {
+        key: format!("drive-error:{fleet}"),
+        fleet: fleet.into(),
+        issue: None,
+        slo: None,
+        reason: format!("drive pass {}", err.at("words").as_str().unwrap_or("failed")),
+        heal: None,
+        since: last.ts,
+        card: true,
+    })
 }

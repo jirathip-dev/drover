@@ -31,6 +31,10 @@ pub fn permitted(action: &str) -> bool {
     list.unwrap_or_default().iter().any(|a| a.as_str() == Some(action))
 }
 
+fn forceable(w: &crate::waiting::Waiting) -> bool {
+    w.who == "drive" && w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover spawn "))
+}
+
 /// `cooee-plugin.toml`'s `[[places]]` as JSON: the tabs, menu rows and cards the phone page draws.
 pub fn places() -> Value {
     let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
@@ -1253,15 +1257,28 @@ impl Server<'_> {
             json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
         }));
-        cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|(f, es)| {
-            let line = |e: &Event| match e.issue {
-                Some(n) => format!("- {} · `drover why {f}#{n}`", crate::events::plain(e)),
-                None => format!("- {}", crate::events::plain(e)),
-            };
-            let md: Vec<String> = es.iter().map(|e| line(e)).collect();
+        let stuck = crate::slo::open_stuck(&ev);
+        let waits = match Config::kept(ctx) {
+            Ok(cfg) if !stuck.is_empty() => {
+                let all = self.lanes(ctx.now, &cfg, &ev, &ev.states).unwrap_or_default();
+                self.waits(ctx, &cfg, &ev, &all)
+            }
+            _ => vec![],
+        };
+        cards.extend(stuck.into_iter().map(|(f, es)| {
+            let held: Vec<_> = waits.iter().filter(|w| w.fleet == f && forceable(w)).collect();
+            let mut md: Vec<String> = es.iter().map(|e| format!("- {}", crate::events::plain(e))).collect();
+            md.extend(held.iter().map(|w| format!("- #{}: {}", w.issue, w.what)));
+            md.push(format!("`drover waiting {f}`"));
+            let mut buttons =
+                vec![json!({"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"})];
+            buttons.extend(held.iter().map(|w| {
+                json!({"type": "button", "id": format!("stuck-force-{f}-{}", w.issue), "label": format!("Force #{}", w.issue),
+                    "action": "force", "values": {"fleet": f, "issue": w.issue}})
+            }));
             json!({"type": "card", "id": format!("stuck-{f}"), "kind": "alert", "tone": "warn",
                 "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": md.join("\n")}],
-                "buttons": [{"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"}]})
+                "buttons": buttons})
         }));
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
         cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
@@ -1363,6 +1380,23 @@ impl Server<'_> {
                 return Ok(json!({"ops": [{"op": "screen", "screen": s}]}));
             }
             "drive" => self.form_op(ctx, "drive", &[("fleet", fleet)])?,
+            "force" => {
+                let (n, ev) = (n()?, working(&ctx.state)?);
+                let all = self.lanes(ctx.now, &cfg, &ev, &ev.states).unwrap_or_default();
+                let w = self.waits(ctx, &cfg, &ev, &all).into_iter();
+                let w = w.filter(forceable).find(|w| w.fleet == fleet && w.issue == n);
+                let cmd = w.and_then(|w| w.next_cmd).with_context(|| format!("{fleet} #{n} has no spawn to force"))?;
+                let args: Vec<&str> = cmd.split_whitespace().collect();
+                let o = crate::spawn::Opts {
+                    force: true,
+                    supersede: args.contains(&"--supersede"),
+                    update: args.contains(&"--update"),
+                    ..Default::default()
+                };
+                let role = args.get(4).copied().unwrap_or_default();
+                crate::spawn::spawn(ctx, &cfg, &self.r, &mut vec![], (&fleet, n, role), &o)?;
+                format!("#{n}: forced {cmd} --force")
+            }
             "drive-all" => {
                 let live = cfg.fleet.iter().filter(|f| !f.1.paused);
                 let lines: Vec<String> = live

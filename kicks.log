@@ -1,0 +1,46 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1183/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.02s
+     Running tests/drive_kicks.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1183/debug/deps/drive_kicks-dedb5123954f6c15)
+
+running 38 tests
+test a_dead_kicks_marker_counts_nowhere_and_the_hold_names_the_live_one ... ok
+test a_full_hosts_pending_spawn_holds_no_slot_for_another_host ... ok
+test a_due_fix_round_takes_the_reserved_slot ... ok
+test a_fleet_with_one_start_gets_a_slot_beside_one_with_six ... ok
+test a_fleet_whose_gh_hangs_never_holds_another_fleets_pass_or_its_spawn ... ok
+test a_busy_host_holds_every_spawn_behind_the_review ... ok
+test a_failed_kick_clears_its_marker_and_the_next_pass_retries ... ok
+test a_kick_refused_disk_low_leaves_no_driven_ok ... ok
+test a_kick_refused_host_busy_is_logged_refused_not_launched ... ok
+test a_kick_refused_host_busy_releases_its_slot_in_the_same_pass ... ok
+test a_hook_kick_never_clears_a_launched_kicks_marker ... ok
+test a_kick_running_past_its_pass_is_pending_then_updated ... ok
+test a_kick_that_spawns_inside_its_pass_counts_as_launched ... ok
+test a_manual_spawn_and_drives_launch_agree_on_the_slots ... ok
+test a_stale_marker_does_not_hold_the_issue_forever ... ok
+test every_start_refused_by_one_host_gate_for_30_min_alerts_once ... ok
+test a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness ... ok
+test a_panicking_kick_leaves_no_marker_or_lock ... ok
+test fix_rounds_launch_before_starts_and_starts_keep_one_slot_free ... ok
+test a_marker_carries_its_kicks_pid_and_goes_when_that_pid_dies ... ok
+test an_old_or_reused_pid_marker_is_stale ... ok
+test one_slot_and_nothing_in_flight_still_starts ... ok
+test a_pass_counts_starting_spawns_against_serial_and_cap ... ok
+test spawn_pending_for_15_minutes_alerts_once ... ok
+test over_the_load_limit_neither_a_due_fix_round_nor_a_start_spawns ... ok
+test room_for_one_spawn_goes_to_the_review ... ok
+test six_dead_markers_never_hold_a_new_spawn ... ok
+test kicks_respect_max_parallel_spawns_and_admission ... ok
+test waiting_names_the_marker_that_holds_the_slot ... ok
+test waiting_names_a_slot_wait_not_a_stuck_tick ... ok
+test waiting_names_the_reviews_ahead ... ok
+test two_quick_passes_launch_each_spawn_once ... ok
+test waiting_names_the_slot_holders ... ok
+test starts_share_slots_across_fleets_passing_at_once ... ok
+test three_identical_spawn_failures_alert_once ... ok
+test a_failing_spawn_backs_off_and_a_kick_retries_it_at_once ... ok
+test failing_retries_never_starve_another_fleets_start ... ok
+test two_fleets_passes_at_once_never_admit_a_spawn_past_the_host_limit ... ok
+
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.68s
+

@@ -1,0 +1,15 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1183/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running tests/slo.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1183/debug/deps/slo-f7b1a466b8e4326c)
+
+running 7 tests
+test a_card_left_by_a_missed_promise_clears_on_the_first_pass ... ok
+test idle_held_by_host_busy_makes_no_card ... ok
+test a_missed_promise_a_hold_took_over_makes_no_stuck_card ... ok
+test idle_that_recovers_after_the_heal_never_alerts ... ok
+test idle_21_minutes_with_spawnable_work_heals_and_never_makes_a_card ... ok
+test no_drive_pass_for_30_minutes_shows_one_card_and_one_push_until_the_next_pass ... ok
+test a_pass_drive_cannot_retry_names_its_error_and_forces_the_held_fix_round ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+

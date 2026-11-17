@@ -1,0 +1,24 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1183/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.54s
+     Running tests/slo.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1183/debug/deps/slo-f7b1a466b8e4326c)
+
+running 1 test
+test idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later ... FAILED
+
+failures:
+
+---- idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later stdout ----
+
+thread 'idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later' (1284852) panicked at crates/cli/tests/slo.rs:73:5:
+assertion failed: r.called("sh -c nohup") &&
+    r.calls.borrow().iter().any(|l|
+            l.contains("kick sendmeter 12 --why slo-idle"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.09s
+
+error: test failed, to rerun pass `-p drover --test slo`

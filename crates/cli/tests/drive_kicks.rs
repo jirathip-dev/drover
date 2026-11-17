@@ -382,6 +382,16 @@ fn a_due_fix_round_takes_the_reserved_slot() {
 }
 
 #[test]
+fn over_the_load_limit_neither_a_due_fix_round_nor_a_start_spawns() {
+    let (c, _sh) = fleet("kicks-busy-fix", 6, 1);
+    fix_due(&c, 21);
+    let r = fake("40.0");
+    let d = pass(&c, &r);
+    assert_eq!((launched(&r, 21), launched(&r, 1)), (0, 0), "{d}");
+    assert!(codes(&d).contains(&"HOST_BUSY".to_string()), "{d}");
+}
+
+#[test]
 fn one_slot_and_nothing_in_flight_still_starts() {
     let (c, _sh) = fleet("kicks-one", 1, 2);
     let r = fake("1.0");

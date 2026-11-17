@@ -634,7 +634,7 @@ fn a_pass_a_draft_pr_holds_voids_the_merge_promise_and_shows_the_hold() {
 }
 
 #[test]
-fn a_promise_missed_after_the_disk_recovers_is_stuck_on_the_current_hold_not_disk_low() {
+fn a_promise_missed_on_a_disk_then_serial_wait_makes_no_stuck_card() {
     let (mut c, r) = fixture("waiting-1122-stuck");
     let cfg = Config::load(&c.config).unwrap();
     let drive = |c: &drover::Ctx, r: &Fake| {
@@ -674,8 +674,5 @@ fn a_promise_missed_after_the_disk_recovers_is_stuck_on_the_current_hold_not_dis
     let mut out = vec![];
     drover::slo::pass(&c, &cfg, (&seen, &seen), &mut out, &["sendmeter"]).unwrap();
     let ev = read(&c.state).unwrap().to_vec();
-    let stuck = ev.iter().find(|e| e.kind == "stuck" && e.issue == Some(42));
-    let why = stuck.and_then(|e| e.str("reason")).unwrap_or_default();
-    assert!(why.contains("SERIAL_BUSY") && why.contains("#983"), "{why:?} {ev:?}");
-    assert!(!why.contains("DISK_LOW") && !why.contains("disk nearly full"), "{why}");
+    assert!(!ev.iter().any(|e| e.kind == "stuck"), "a serial wait is no card: {ev:?}");
 }

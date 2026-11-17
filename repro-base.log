@@ -1,0 +1,31 @@
+
+running 6 tests
+test idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later ... FAILED
+test a_missed_promise_a_hold_took_over_makes_no_stuck_card ... FAILED
+test three_stuck_issues_in_one_fleet_push_once_and_show_one_card ... ok
+test idle_with_no_known_cause_alerts_at_once_naming_the_refusal ... ok
+test idle_that_recovers_after_the_heal_never_alerts ... ok
+test a_missed_promise_drive_healed_alerts_with_the_issue_reason_and_heal_one_pass_later ... ok
+
+failures:
+
+---- idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later stdout ----
+
+thread 'idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later' (1283862) panicked at crates/cli/tests/slo.rs:73:5:
+assertion failed: r.called("sh -c nohup") &&
+    r.calls.borrow().iter().any(|l|
+            l.contains("kick sendmeter 12 --why slo-idle"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a_missed_promise_a_hold_took_over_makes_no_stuck_card stdout ----
+
+thread 'a_missed_promise_a_hold_took_over_makes_no_stuck_card' (1283860) panicked at crates/cli/tests/slo.rs:268:5:
+["stuck"]
+
+
+failures:
+    a_missed_promise_a_hold_took_over_makes_no_stuck_card
+    idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later
+
+test result: FAILED. 4 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+

@@ -143,7 +143,7 @@ fn why_now(mine: &[&Event], p: &Promise, now: &Waiting) -> String {
     }
 }
 
-/// A drive pass's promises: each new one logged `promise`, each one missed logged `promise-missed` once, each one a hold superseded `promise-void`.
+/// A drive pass's promises: each new one logged `promise`, each one missed logged `promise-missed` once, each one a hold superseded `promise-void`, missed or not.
 pub fn pass(
     ctx: &Ctx,
     cfg: &crate::config::Config,
@@ -174,7 +174,7 @@ pub fn pass(
             crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "promise", d))?;
             continue;
         }
-        let Some((p, None)) = was else { continue };
+        let Some((p, missed)) = was else { continue };
         if ctx.now < p.deadline || p.moved(s, &head) || matches!(s.state.as_str(), "merged" | "closed") {
             continue;
         }
@@ -182,6 +182,9 @@ pub fn pass(
             let d = json!({"kind": p.kind, "promised": p.reason, "hold": w.what});
             let e = Event::new(ctx.now, fleet, Some(s.issue), "promise-void", d).passive();
             crate::events::append(&ctx.state, &e)?;
+            continue;
+        }
+        if missed.is_some() {
             continue;
         }
         let why = why_now(&mine, &p, w);
@@ -195,8 +198,7 @@ pub fn pass(
     Ok(())
 }
 
-/// #855: the issue's open promise once missed.
-pub fn open_missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>) -> Option<Promise> {
+fn open_missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>) -> Option<Promise> {
     let mine: Vec<&Event> = events
         .iter()
         .filter(|e| e.fleet == s.fleet && e.issue == Some(s.issue))
