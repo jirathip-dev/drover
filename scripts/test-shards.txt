@@ -177,6 +177,7 @@
 3 spawn_guard
 1 ssh_deadline
 4 stale_rev
+2 stall_move
 4 stalled_host
 3 stalled_lanes
 2 state_db

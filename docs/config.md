@@ -213,3 +213,4 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `slo_idle_minutes` | `20` | no lane working this long while the queue has spawnable work breaches `slo-idle` |
 | `slo_tick_minutes` | `10` | a tick running longer than this breaches `slo-tick`; the next fast step stops it |
 | `slo_pass_minutes` | `30` | no slow drive pass of a fleet for this long shows the owner's `Drive is stuck` card |
+| `stall_restart_hours` | `2` | an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own) |

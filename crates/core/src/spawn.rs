@@ -731,6 +731,7 @@ pub const OWN_FILES: &[&str] = &[
     "verdict.md",
     ".review-brief.md",
     "why.md",
+    "body.md",
     ".verify-browser.mjs",
     ".verify.md",
 ];
