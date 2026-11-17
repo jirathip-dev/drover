@@ -555,6 +555,29 @@ fn a_sticky_host_refusing_disk_low_yields_unless_its_worktree_has_unpushed_work(
 }
 
 #[test]
+fn a_signed_out_sticky_host_yields_unless_its_worktree_has_unpushed_work() {
+    let c = setup("hosts-sticky-login", "", true, 0);
+    remote_spawn(&c, NOW - 60);
+    ev(
+        &c,
+        NOW - 30,
+        12,
+        "signed-out",
+        json!({"host": "bazzite", "machine": "bazzite", "reason": "signed out"}),
+    );
+    assert_eq!(placed(&c, &fake(2.0, 0.1), 12, "rev", None).as_deref(), Ok("mini"));
+    let kept = fake(2.0, 0.1)
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "2\n");
+    let e = placed(&c, &kept, 12, "impl", None).unwrap_err();
+    assert_eq!(
+        e,
+        "LOGIN_NEEDED: bazzite: signed out; stays on bazzite: its worktree there has unpushed work"
+    );
+}
+
+#[test]
 fn cli_and_board_toggles_both_log() {
     let c = setup("hosts-toggle", "", true, 0);
     let (sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), fake(1.0, 1.0));

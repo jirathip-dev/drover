@@ -1127,7 +1127,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "serve_handover_secs",
-        "`self-update` waits this long for the running serve to hand over before restarting it",
+        "how long serve waits for a held port's serve to answer, hand over, or let go of the port (#1244)",
     ),
     (
         "serve_mem_mb",
@@ -1203,6 +1203,25 @@ impl Notify {
             || matches!(kind, "land-paused" | "reverted" | "revert-failed" | "service-stalled")
             || kind == "report" && !self.webpush()
     }
+}
+
+fn orchestrator_ids(c: &Config) -> Result<()> {
+    if let Some((id, f)) = (c.orchestrator.more.iter())
+        .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
+    {
+        bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
+    }
+    let named = |id: &String| {
+        id != "default"
+            && !id.is_empty()
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    };
+    if let Some(id) = c.orchestrator.more.keys().find(|id| !named(id)) {
+        bail!("orchestrator.{id}: an id is lowercase letters, digits and `-`, and not `default`");
+    }
+    Ok(())
 }
 
 impl Config {
@@ -1312,11 +1331,7 @@ impl Config {
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
         }
-        if let Some((id, f)) = (c.orchestrator.more.iter())
-            .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
-        {
-            bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
-        }
+        orchestrator_ids(&c)?;
         if let Some(g) = c
             .orchestrator
             .groups()
