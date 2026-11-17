@@ -196,6 +196,7 @@
 2 timer_install
 3 tmpdir
 4 top
+1 triage
 2 turn
 4 typed_choice
 4 types

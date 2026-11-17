@@ -260,6 +260,9 @@ impl Sim {
     }
 
     fn point(&self, me: usize, p: &drover::sim::Point) {
+        if matches!(p, drover::sim::Point::Walk(_)) {
+            return;
+        }
         {
             let mut w = self.lock();
             if w.abort {
@@ -293,6 +296,7 @@ impl Sim {
                     crate::gates::on_append(&mut w);
                 }
                 drover::sim::Point::Lease(k) => w.log(&format!("{name} lease {k}")),
+                drover::sim::Point::Walk(_) => {}
             }
         }
         self.yield_now(me, 0);

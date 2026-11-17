@@ -356,6 +356,8 @@ enum Cmd {
         cmd: Option<LessonCmd>,
         fleet: Option<String>,
     },
+    #[command(about = "#1100: file this week's triage issue and spawn its lane, or a triage lane's verb")]
+    Triage(crate::triage::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
     #[command(alias = "host")]
     Hosts {
@@ -2096,6 +2098,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         return Ok(4);
                     }
                 }
+                Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
@@ -2154,7 +2157,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     };
                     let groups = &cfg.fleet(&fleet)?.serial;
                     let known = |g: &String| g.is_empty() || groups.iter().any(|x| x.name == *g);
-                    let d = match cmd {
+                    let mut d = match cmd {
                         QueueCmd::Add {
                             mut issues,
                             top,
@@ -2231,7 +2234,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
-                    let mut d = d;
                     if let Some(t) = crate::config::env("DROVER_THREAD")
                         .filter(|_| d.get("design").is_some() || d.get("architect").is_some())
                     {
@@ -2247,14 +2249,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
 }
 
 fn lane(issue: &str) -> Result<Option<u64>> {
-    match issue {
-        "-" => Ok(None),
-        n => {
-            Ok(Some(n.parse().map_err(|_| {
-                anyhow::anyhow!("issue must be a number or `-`, not `{n}`")
-            })?))
-        }
-    }
+    let bad = |_| anyhow::anyhow!("issue must be a number or `-`, not `{issue}`");
+    (issue != "-").then(|| issue.parse().map_err(bad)).transpose()
 }
 
 fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<()> {
