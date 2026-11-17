@@ -1,0 +1,10 @@
+Decided: mint no longer revokes the agent's older keys; proxy::state already ends a key once a second spawn of its agent is logged or its lane is closed or dead.
+Because: "A lane's proxy key is revoked only once its replacement has actually started (or the old lane is gone), never by a start that is refused."
+Rejected: revoke at the spawn event instead — state() already derives `ended` from the log, a second write would be a second way to say it.
+Decided: an `auth:` note naming `lane key` is Session::key_refused, never signed_out; lanes::health reports it Stalled at once so drive's existing stall path respawns the lane.
+Because: "A 401 that names a revoked or expired lane key is a lane fault (respawn that lane), never `signed-out` for the host."
+Rejected: a new Health variant or alert kind — the stall respawn and its one-retry escalation already fit.
+Decided: hold_alert on a remote shed-acp lane (the proxy-signed case spawn's remote_acp sets up) points at `[proxy] token-file` on the main host, not the harness login.
+Because: "On a proxy-signed host, `signed-out` tells the owner what to do there (proxy token-file on the main host), not `claude /login`."
+Check: AC1 mints a second key for the agent with no spawn logged (a start that never runs); the lane-key test drives check then drive on a fake proxy host and sees one respawn.
+Owner: a respawn that never starts no longer cuts off the running lane, and a lane-key 401 respawns that lane instead of holding the whole host.
