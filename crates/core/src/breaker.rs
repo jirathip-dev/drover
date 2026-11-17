@@ -112,3 +112,37 @@ pub fn probe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     }
     Ok(())
 }
+
+const UNLANDED: &str = "PROMPTS_UNLANDED";
+
+/// #937: true while drive holds every respawn: `runtime_down_failures` lanes' prompts never landed in `runtime_down_minutes` (trips it once: one `needs-human` naming the shed builds); a landed spawn or `shed-installed` clears it.
+pub fn unlanded(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<bool> {
+    let ev = working(&ctx.state)?;
+    let unconfirmed = |e: &Event| e.kind == "spawn" && e.data.get("confirmed") == Some(&json!(false));
+    let last = |k: &dyn Fn(&Event) -> bool| ev.iter().enumerate().rfind(|(_, e)| k(e));
+    let trip = last(&|e| e.kind == "needs-human" && e.str("code") == Some(UNLANDED));
+    let clear = last(&|e| e.kind == "shed-installed" || e.kind == "spawn" && !unconfirmed(e));
+    if trip.is_some_and(|t| clear.is_none_or(|c| c.0 < t.0)) {
+        return Ok(true);
+    }
+    let l = &cfg.limits;
+    let since = (trip.map_or(0, |t| t.1.ts + 1)).max(ctx.now.saturating_sub(l.runtime_down_minutes * 60));
+    let mut lanes: Vec<&str> = (ev.iter().filter(|e| e.ts >= since && unconfirmed(e)))
+        .filter_map(|e| e.str("agent"))
+        .collect();
+    lanes.sort_unstable();
+    lanes.dedup();
+    if u64::try_from(lanes.len()).unwrap_or(u64::MAX) < l.runtime_down_failures {
+        return Ok(false);
+    }
+    let reason = format!(
+        "{} lanes' prompts never landed in {} min ({}); drive respawns none until a prompt lands or `drover shed install --yes`",
+        lanes.len(),
+        l.runtime_down_minutes,
+        crate::shed::builds(r)
+    );
+    writeln!(out, "{fleet} needs-human: {reason}")?;
+    let d = json!({"code": UNLANDED, "reason": reason, "lanes": lanes});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "needs-human", d))?;
+    Ok(true)
+}
