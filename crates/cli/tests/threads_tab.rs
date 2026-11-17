@@ -525,7 +525,7 @@ fn parity_21_two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webk
 await wait(() => q('.cmp textarea'));
 const px = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
 const dt = new DataTransfer();
-for (const n of ['one.png', 'two.png']) dt.items.add(new File([px], n, {{ type: 'image/png' }}));
+for (const n of ['one.png', 'two.png']) dt.items.add(new File([px, new Uint8Array(40000)], n, {{ type: 'image/png' }}));
 const pick = q('.cmp input[type=file]');
 pick.files = dt.files;
 pick.dispatchEvent(new Event('change'));
@@ -811,4 +811,127 @@ fn parity_32_the_owner_settles_each_card_from_inside_its_thread() {
         "settled cards leave: {t}"
     );
     assert!(!t.to_string().contains(r#""type":"choice""#), "{t}");
+}
+
+#[test]
+fn a_composer_send_with_a_photo_over_32_kb_reaches_the_say_op_over_the_socket_and_an_over_limit_body_is_413() {
+    let c = recorded("threads-big-photo");
+    let b = Board::start(&c, OnShed::new(Fake::default()));
+    let (addr, ck) = (&b.addr, &b.cookie);
+    let photo = "QUJD".repeat(20_000);
+    let say = json!({"screen": "thread-t2", "block": "say", "action": "thread-say",
+        "values": {"thread": "t2", "text": "a photo", "name": "shot.png", "data": photo}})
+    .to_string();
+    assert!(say.len() > 32_768);
+    let res = http(
+        addr,
+        &format!(
+            "POST /action HTTP/1.1\r\nHost: {addr}\r\n{ck}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{say}",
+            say.len()
+        ),
+    );
+    assert!(res.starts_with("HTTP/1.1 200"), "{res}");
+    let got = http(
+        addr,
+        &format!("GET /thread/t2/shot.png HTTP/1.1\r\nHost: {addr}\r\n{ck}Connection: close\r\n\r\n"),
+    );
+    assert_eq!(got.split_once("\r\n\r\n").unwrap().1.len(), 60_000, "{}", &got[..200]);
+
+    let mut s = std::net::TcpStream::connect(addr.as_str()).unwrap();
+    let head = format!(
+        "POST /action HTTP/1.1\r\nHost: {addr}\r\n{ck}Content-Length: 200000000\r\nConnection: close\r\n\r\n{{\"action\":"
+    );
+    std::io::Write::write_all(&mut s, head.as_bytes()).unwrap();
+    s.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut over = String::new();
+    std::io::Read::read_to_string(&mut s, &mut over).unwrap();
+    assert!(over.starts_with("HTTP/1.1 413"), "{over}");
+    assert!(!over.contains("NOT_PERMITTED"), "{over}");
+}
+
+#[test]
+fn two_panes_in_webkit_at_1440_scroll_on_their_own_and_a_list_update_keeps_the_thread() {
+    if no_webkit() {
+        return;
+    }
+    let c = ctx(&tmpdir("threads-duo-webkit"), CONFIG);
+    let now = drover::now();
+    let ev = |ts: u64, kind: &str, d: Value| append(&c.state, &Event::new(ts, "sendmeter", None, kind, d)).unwrap();
+    for i in 1..=60u64 {
+        let d = json!({"thread": format!("t{i}"), "title": format!("Thread {i}"), "harness": "claude"});
+        ev(now - 9_000 + i, "thread-new", d);
+    }
+    for i in 0..200u64 {
+        let text = format!("m{i} with enough words to wrap onto a second line in the pane");
+        ev(
+            now - 8_000 + i,
+            "thread-msg",
+            json!({"thread": "t2", "from": "orchestrator", "text": text}),
+        );
+    }
+    ev(
+        now - 7_000,
+        "thread-msg",
+        json!({"thread": "t3", "from": "orchestrator", "text": "hi"}),
+    );
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let c2 = c.clone();
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, false));
+    let o = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/ui/duo.mjs"))
+        .arg(format!("http://{addr}/"))
+        .args(std::env::var("DROVER_SNAPSHOTS").ok())
+        .output()
+        .unwrap();
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    let n = |s: &str, k: &str| out[s][k].as_i64().unwrap();
+    assert_eq!(
+        (n("open", "rows"), &out["open"]["current"], n("open", "back")),
+        (60, &json!(["t2"]), 0),
+        "60 rows beside t2, its row marked, no back: {out}"
+    );
+    assert!(n("listed", "list") > 0, "the list scrolled: {out}");
+    assert!(n("top", "cards") > 30, "the thread reached its top: {out}");
+    assert_eq!(
+        (n("top", "list"), n("top", "doc")),
+        (n("listed", "list"), 0),
+        "scrolling the thread to its top leaves the list and the page: {out}"
+    );
+    assert_eq!(
+        (n("end", "listEnd"), n("end", "thread"), n("end", "doc")),
+        (1, n("top", "thread"), 0),
+        "scrolling the list to its end leaves the thread and the page: {out}"
+    );
+    assert_eq!(
+        (&out["typed"]["draft"], n("typed", "focus")),
+        (&json!("half a thought"), 1),
+        "{out}"
+    );
+    for k in ["thread", "list", "focus", "doc"] {
+        assert_eq!(
+            n("streamed", k),
+            n("typed", k),
+            "a list update keeps the thread's {k}: {out}"
+        );
+    }
+    assert_eq!(out["streamed"]["draft"], "half a thought", "{out}");
+    assert_eq!(
+        (
+            &out["swapped"]["hash"],
+            &out["swapped"]["current"],
+            n("swapped", "list"),
+            n("swapped", "back")
+        ),
+        (&json!("#threads/t9"), &json!(["t9"]), n("streamed", "list"), 0),
+        "a row click swaps the thread in place and keeps the list: {out}"
+    );
+    let p = out["panes"].as_array().unwrap();
+    assert!((340..=400).contains(&p[0].as_i64().unwrap()) && p[0] == p[1], "{out}");
+    assert!(
+        out["empty"]["text"].as_str().unwrap().contains("new thread") && out["empty"]["list"] == 60,
+        "{out}"
+    );
 }
