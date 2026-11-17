@@ -667,6 +667,16 @@ pub fn say(
     deliver(ctx, cfg, r, &t, &line)
 }
 
+/// #1066: a card's settle line into thread `id` as `system`: typed into a drover thread's orchestrator, logged for a cooee chat.
+pub fn tell(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, line: &str) {
+    let chat = working(&ctx.state).ok().and_then(|e| attached(&e, id).cloned());
+    match chat {
+        Some(t) => log(ctx, cfg, &t, "system", (line, &[])),
+        None => say(ctx, cfg, r, (id, line, &[]), ("system", false)).map(drop),
+    }
+    .ok();
+}
+
 thread_local! {
     static LATER: std::cell::RefCell<Option<Vec<(Event, String)>>> = const { std::cell::RefCell::new(None) };
 }
