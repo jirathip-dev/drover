@@ -1,0 +1,7 @@
+Decided: staging's host-sync tests match the remote git ls-remote line with --no-replace-objects, the flag this PR's runner adds to every git
+Because: crates/cli/tests/host_sync.rs:231
+Decided: the same fix in hosts.rs, whose timeout reply never matched and so tested nothing
+Because: crates/cli/tests/hosts.rs:1765
+Rejected: dropping the flag for ls-remote in the runner — one rule for every git keeps gate and why on full history
+Check: cargo test --locked -p drover --test host_sync --test hosts exits 0 (5 and 44 passed)
+Owner: CI was red because two tests brought in from staging expected the old git command line; they now match.
