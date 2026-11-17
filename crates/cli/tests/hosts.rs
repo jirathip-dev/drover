@@ -1762,7 +1762,7 @@ fn a_tick_starts_the_sync_of_a_reachable_host_though_its_health_check_times_out(
     std::fs::write(&hosts, cache.to_string()).unwrap();
     let _sh = FakeShed::attached(&c);
     let bazzite = FakeShed::new();
-    let r = synced("drover 0.1.0 (0ld)\n").once(&format!("{SSH}'git' 'ls-remote'"), 124, "");
+    let r = synced("drover 0.1.0 (0ld)\n").once(&format!("{SSH}'git' '--no-replace-objects' 'ls-remote'"), 124, "");
     let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(r.count(&format!("{SSH}{START}")), 1, "{:#?}", r.calls.borrow());
