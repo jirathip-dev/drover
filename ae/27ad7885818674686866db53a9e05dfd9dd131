@@ -1,0 +1,8 @@
+Decided: a start slot is held only while its spawn is in flight; a logged spawn, spawn-error or failed intent for that issue since the marker frees it at once.
+Because: "A start slot frees as soon as its spawn ends"
+Decided: waiting and the board read the live slot count when they render; a past SPAWN_PENDING refusal shows nothing once no slot is held.
+Because: "`drover waiting` and the board read the live slot count when they render"
+Rejected: shortening spawn_pending_max_secs — the slot would still outlive its spawn by the TTL.
+Check: crates/core/src/starts.rs ended() is called by drive::holds, so admit counts and removes ended markers.
+Check: the fair-share test passes on base too; it guards the cross-fleet case as a regression test.
+Owner: A finished or failed start no longer blocks other starts, and the board stops showing old "starting" counts.
