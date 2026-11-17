@@ -17,23 +17,42 @@ pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<(
     res
 }
 
-fn held(ctx: &Ctx, addr: &str, e: std::io::Error) -> Result<()> {
-    let secs = Config::kept(ctx)
-        .map(|c| c.limits)
-        .unwrap_or_default()
-        .serve_handover_secs;
+fn held(ctx: &Ctx, r: &dyn Runner, addr: &str, e: std::io::Error) -> Result<Option<TcpListener>> {
+    let cfg = Config::kept(ctx).unwrap_or_default();
+    let secs = cfg.limits.serve_handover_secs;
+    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
+    if crate::timer::job_pid(ctx, r, label).ok().flatten() == Some(drover_core::runner::pid()) {
+        return take_over(r, addr, secs).map(Some);
+    }
     let Some(sha) = crate::update::serving(addr, secs) else {
         return Err(e.into());
     };
     if sha == crate::SHA {
         drover_core::stderr!("drover serve: {addr} already serves {sha:.7}");
-        return Ok(());
+        return Ok(None);
     }
     let port = addr.rsplit_once(':').and_then(|(_, p)| p.parse().ok()).unwrap_or(0);
     let pid = crate::update::ask_handover(&crate::update::serve_sock(ctx, port), secs)
         .map_err(|h| anyhow::anyhow!("{e}; the serve there ({sha:.7}) did not hand over: {h:#}"))?;
     drover_core::stderr!("drover serve: {addr} ran {sha:.7}; handed over (bridge pid {pid})");
-    Ok(())
+    Ok(None)
+}
+
+fn take_over(r: &dyn Runner, addr: &str, secs: u64) -> Result<TcpListener> {
+    let pids = crate::timer::listeners(r, addr);
+    for p in &pids {
+        crate::runner::ok(r, "kill", &[&p.to_string()]).ok();
+    }
+    drover_core::stderr!("drover serve: {addr} was held by pid {pids:?}, not this job; stopped it");
+    let t = drover_core::clock::instant();
+    loop {
+        match TcpListener::bind(addr) {
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && t.elapsed() < Duration::from_secs(secs.max(1)) => {
+                drover_core::clock::sleep(Duration::from_millis(100));
+            }
+            res => return Ok(res?),
+        }
+    }
 }
 
 /// #894: `serve`; `handover`: take over a predecessor's listeners and hand them to a successor (`crate::handover`).
@@ -42,7 +61,10 @@ pub fn board(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool, handover: b
     let inherited = got.len() > 0;
     let l = match got.next().map_or_else(|| TcpListener::bind(addr), Ok) {
         Ok(l) => l,
-        Err(e) if handover && e.kind() == std::io::ErrorKind::AddrInUse => return held(ctx, addr, e),
+        Err(e) if handover && e.kind() == std::io::ErrorKind::AddrInUse => match held(ctx, r, addr, e)? {
+            Some(l) => l,
+            None => return Ok(()),
+        },
         Err(e) => return Err(e.into()),
     };
     let mode = if read_only { "read-only view" } else { "phone page" };

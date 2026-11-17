@@ -199,7 +199,10 @@ adapter loads both the same way. The tests in `crates/cli/tests/shed.rs` cover s
 ## Setup
 
 1. Install shed on every host that runs lanes, and start its server (`shed serve --detach`, or shed's launchd or
-   systemd unit). `shed connect --autostart` starts it on another host when needed.
+   systemd unit). `shed connect --autostart` starts it on another host when needed. #937: on the main host,
+   `drover shed install` (a dry run that lists the terminals on serve; `--yes` to run it, as the `cmd` of a run
+   card) installs the rev drover pins and restarts `shed serve` onto it, then reads both builds back. Spawn
+   refuses `SHED_VERSION` while the shed on PATH or the running serve is off that pin.
 2. Set `[runtime] kind = "shed"` in fleet.toml on the main host (and on another host's fleet.toml if its lane hooks
    should use a non-default socket; without one, the hook uses shed's default socket).
 3. Run `drover profiles sync` so the Claude profiles get the state hooks.

@@ -12,7 +12,6 @@ extern "C" {
     fn fcntl(fd: i32, cmd: i32, ...) -> i32;
     fn setsid() -> i32;
     fn kill(pid: i32, sig: i32) -> i32;
-    fn atexit(f: extern "C" fn()) -> i32;
     fn getrusage(who: i32, usage: *mut [i64; 18]) -> i32;
 }
 
@@ -59,12 +58,6 @@ pub fn kill_group(pid: u32) {
     let group = i32::try_from(pid).map_or(0, |p| -p);
     // SAFETY: kill(2) only sends SIGKILL to the child's own process group, which the runner made for it alone.
     unsafe { kill(group, 9) };
-}
-
-/// Run `f` when the process exits; false when it could not be registered.
-pub fn at_exit(f: extern "C" fn()) -> bool {
-    // SAFETY: `f` is a plain `extern "C"` fn with no arguments, as atexit(3) calls it.
-    unsafe { atexit(f) == 0 }
 }
 
 /// This process's `getrusage(2)` record (`RUSAGE_SELF`), as its 18 machine words.

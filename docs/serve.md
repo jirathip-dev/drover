@@ -192,6 +192,10 @@ appends `<ts> cold|handover` to `serve-starts` (the last day kept); a start that
 #1081: a `serve` whose port is held asks that port's health which build holds it: its own build, it exits 0 (launchd and
 systemd restart it only after a failed exit); an older one, it asks that serve over its control socket to hand over (its
 bridge runs the installed binary), then exits 0; nothing answers, it fails.
+#1244: a serve the launchd (or systemd) job started never exits 0 on a held port: it stops the serve on the port and
+listens itself, so the job's own pid is the one listener. `self-update` restarts serve only through the job
+(`launchctl kickstart -k`, `systemctl --user restart`), and `drover doctor`'s `serve job` row is ✗ while the port's
+listener is not the job's pid.
 
 `drover check` alerts once per state, then `<kind>-ok` when it clears:
 
