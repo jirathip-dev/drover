@@ -1,0 +1,11 @@
+Decided: each fleet-test-* dir is fed over a pipe to a reaper process that removes it once the test process is gone
+Because: "a path skipped on early return/panic in a child"
+Because: crates/server/src/serve.rs:213
+Check: serve_on's tick, refresh and host loops write state/ every second after the test returns; an in-process sweep raced them
+Check: on the base the new tmpdir test leaks its dir every run; at the head it passes and /tmp keeps no fleet-test-* dir
+Rejected: retrying remove_dir_all at exit — the writer threads still run during atexit, so any in-process remove can lose the race
+Rejected: a shutdown for serve and service — production code added only for tests
+Decided: the drop guard (Made) stays for early removal; the atexit sweep and drover_sys::at_exit go, nothing else called them
+Decided: CI's leak step prints every leftover dir before it fails
+Decided: the reaper makes a read-only dir writable first; migrate.rs:183 sets 0555 and a panic skipped its restore
+Owner: tests no longer leave temp folders behind when a background server keeps writing after the test ends
