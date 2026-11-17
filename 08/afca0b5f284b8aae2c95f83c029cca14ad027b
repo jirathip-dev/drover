@@ -1,0 +1,8 @@
+Decided: merged origin/staging again; the two conflicts (drive.rs, hosts.rs) were doc lines only and keep staging's wording without issue numbers
+Decided: stripped the issue numbers from three doc lines staging brought in (waiting.rs, check/sweep.rs, tests/common/mod.rs)
+Decided: replaced the PR body's per-merge history with one evidence section at the new head, as the review asked
+Because: "One pass removes every comment the strict policy bans, repo-wide"
+Rejected: keeping the stale per-merge sections — they named old shas and the review flagged them
+Check: rg '//.*#[0-9]{2,4}' crates web/src has no match at the head
+Check: the branch's own drover arch-check reports only `just gen` exit 127 (no just on this host); the gen recipe's commands run by hand leave no drift
+Owner: Brought the branch up to date with staging and removed the history comments that came with it; nothing behaves differently.
