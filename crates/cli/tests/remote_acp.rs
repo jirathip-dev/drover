@@ -752,6 +752,7 @@ fn a_proxy_lanes_auth_error_names_the_proxy_and_holds_its_host_unless_a_proxy_ca
             .unwrap()
             .replace("port = 9", &format!("port = 9\nupstream = \"http://127.0.0.1:{port}\""));
         std::fs::write(&c.config, toml).unwrap();
+        let _main = FakeShed::attached(&c);
         let f = spawn_fake().reply("gh issue view 13", r#"{"title":"Next","body":"AC: next"}"#);
         let b = Boat::new(&c, &f, &[("boat1", true, true)]);
         let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
