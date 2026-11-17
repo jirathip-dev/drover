@@ -1270,8 +1270,7 @@ pub fn spawn(
     }
 
     let mut sha = None;
-    let note;
-    let history;
+    let (note, history);
     let brief_text = {
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
@@ -1336,10 +1335,7 @@ pub fn spawn(
                 .ok()
                 .map(|h| h.trim().to_string());
         }
-        let (title, body) = (
-            iss.at("title").as_str().unwrap_or(""),
-            iss.at("body").as_str().unwrap_or(""),
-        );
+        let title = iss.at("title").as_str().unwrap_or("");
         p.title = lane_title(&p.head, title);
         note = prior
             .filter(|_| o.supersede && !dup.is_empty())
