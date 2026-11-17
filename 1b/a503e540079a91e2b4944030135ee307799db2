@@ -1,0 +1,7 @@
+Decided: rev and verify lanes read rules.md and verify.md from origin/<integration>; changes to .drover files are named in the brief with their diff
+Because: "rev and verify lanes are briefed with `.herdsman/rules.md`, `.herdsman/verify.md`"
+Decided: round 5 only merges staging again; the red drive_kicks test is a flake also seen on unrelated PR issue-1216
+Because: crates/cli/tests/drive_kicks.rs:700
+Rejected: changing the drive_kicks test — it is staging's flake, outside this issue, and passes 5 of 5 at this head
+Check: CI at this head; if failing_retries_never_starve_another_fleets_start flakes again it is not from this diff
+Owner: reviewers now judge a PR by the integration branch's rules, not the ones the PR itself edits
