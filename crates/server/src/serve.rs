@@ -315,6 +315,9 @@ impl Runner for Memo<'_> {
     }
     /// #298: a call with stdin (`shed connect`, a file write) is never a cached read.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
+        self.run_for(prog, args, input, crate::runner::limit(prog, args))
+    }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
         }
@@ -322,7 +325,7 @@ impl Runner for Memo<'_> {
             let read = self.4.reads.get(&crate::snapshot::key_in(prog, args, input));
             return Ok(crate::snapshot::out(read.cloned().flatten()));
         }
-        self.0.run_in(prog, args, input)
+        self.0.run_for(prog, args, input, limit)
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.0.shed()

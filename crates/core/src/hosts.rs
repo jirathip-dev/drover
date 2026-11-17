@@ -311,7 +311,6 @@ impl<'a> Pass<'a> {
                 ..Out::default()
             });
         }
-        self.note(&quote(prog, args));
         let over = self.over();
         if over {
             lock(&self.late).insert(m.into());
@@ -329,6 +328,7 @@ impl<'a> Pass<'a> {
                 ..Out::default()
             });
         }
+        self.note(&quote(prog, args));
         let limit = std::time::Duration::from_secs(crate::config::limits().ssh_call_secs);
         let input = input.unwrap_or_default();
         let refused =
