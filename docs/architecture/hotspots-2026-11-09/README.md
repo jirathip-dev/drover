@@ -81,7 +81,7 @@ events (one long-lived PR re-pushed against `justfile` 442 times; it is one pair
    in `git ls-tree` at the integration tip; count distinct `(issue, other)` pairs; list `assets/types/api.d.ts` as
    `generated` with `generate = "just types"` and delete CI's own stale-types step (one way to check).
 2. **Cap raises as a folder** (`crates/core/src/overlap.rs`, `crates/core/src/hook.rs`, `.drover/arch.toml`,
-   `roles/orchestrator.md`, `roles/impl.md`, `roles/usage-tail.md`, `docs/architecture.md`): the folder, the one
+   `roles/orchestrator/role.md`, `roles/impl.md`, `roles/usage-tail.md`, `docs/architecture.md`): the folder, the one
    reader, the hook's refusal widened to the folder, `ci/cap.toml` frozen. Old notes in `docs/cap-history/` stay.
 3. **Retire the help budget** (`crates/core/src/cli.rs`, `crates/cli/tests/spawn.rs`): delete `HELP_AGENT_MAX` and
    the `<=` assertion; the completeness half of the test stays.

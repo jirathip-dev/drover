@@ -51,7 +51,7 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
             "no design stage, no UI files, not queued --verify".to_string(),
         ),
         Some(w) => {
-            let api = |p: &str| format!("repos/{}/contents/{p}?ref={sha}", f.repo);
+            let api = |p: &str| format!("repos/{}/contents/{p}?ref={}", f.repo, f.integration);
             if crate::repo_read("verify.md", |p| ok(r, "gh", &["api", &api(p), "--silent"]).ok()).is_some() {
                 return Ok(true);
             }

@@ -133,6 +133,7 @@ fn role_texts_name_no_harness() {
             }
         }
     }
+    assert!(files.iter().any(|f| f.ends_with("orchestrator/role.md")));
     for f in files {
         let text = std::fs::read_to_string(&f).unwrap();
         for (n, line) in text.lines().enumerate() {

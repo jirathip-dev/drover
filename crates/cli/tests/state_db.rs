@@ -158,3 +158,56 @@ fn a_kind_flagged_passive_where_it_is_emitted_is_not_activity() {
     let s = &fold(&read(&c.state).unwrap())[&("app".to_string(), 1)];
     assert_eq!((s.last_event.as_str(), s.last_ts), ("brand-new-note", 30));
 }
+
+#[test]
+#[ignore = "perf: cargo test --release -p drover --test state_db hot_db_calls -- --ignored --nocapture"]
+fn hot_db_calls_on_a_20k_claim_log() {
+    let p = tmpdir("db-hot").join("events.jsonl");
+    let evs: Vec<Event> = (0..20_000)
+        .map(|i| {
+            let kind = ["intent", "done", "failed"][i % 3];
+            Event::new(1, "app", Some(1), kind, json!({"action_id": format!("a{i}")}))
+        })
+        .collect();
+    db::ask(&p, evs, None).unwrap();
+    let t = std::time::Instant::now();
+    for i in 0..1_000 {
+        let none = |l: Option<&Event>| l.is_none();
+        assert!(db::claim(&p, &[], &format!("new{i}"), &none).unwrap().1);
+    }
+    let claim = t.elapsed().as_millis();
+    let t = std::time::Instant::now();
+    for _ in 0..1_000 {
+        assert_eq!(db::last_seq(&p), 20_000);
+    }
+    let seq = t.elapsed().as_millis();
+    eprintln!("1000 claims: {claim} ms; 1000 last_seq: {seq} ms");
+}
+
+#[test]
+fn the_claim_lookup_is_an_index_search() {
+    let p = tmpdir("db-claim-plan").join("events.jsonl");
+    let ev = Event::new(1, "app", Some(1), "intent", json!({"action_id": "a1"}));
+    assert!(db::claim(&p, &[ev], "a1", &|l| l.is_none()).unwrap().1);
+    let c = rusqlite::Connection::open(db::file(&p)).unwrap();
+    let mut q = c.prepare(&format!("EXPLAIN QUERY PLAN {}", db::CLAIM)).unwrap();
+    let plan: Vec<String> = q
+        .query_map(["a1"], |r| r.get(3))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(plan.iter().any(|d| d.contains("USING INDEX events_action")), "{plan:?}");
+    let (last, took) = db::claim(&p, &[], "a1", &|l| l.is_none()).unwrap();
+    assert_eq!((last.map(|e| e.kind), took), (Some("intent".into()), false));
+}
+
+#[test]
+fn a_thousand_last_seq_calls_list_the_state_directory_once() {
+    let p = tmpdir("db-listed").join("state/events.jsonl");
+    let before = db::LISTED.get();
+    drover::events::append(&p, &Event::new(1, "app", None, "x", json!({}))).unwrap();
+    for _ in 0..1_000 {
+        assert_eq!(db::last_seq(&p), 1);
+    }
+    assert_eq!(db::LISTED.get() - before, 1);
+}
