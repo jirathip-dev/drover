@@ -1328,10 +1328,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let off = cfg.as_ref().map(|c| crate::hosts::idle_off(c, &events));
                 let spared = crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), None);
                 let look = crate::snapshot::Snap::read(ctx, &spared);
-                let slots = cfg
-                    .as_ref()
-                    .map(|c| crate::starts::held_now(ctx, c, &look))
-                    .unwrap_or_default();
+                let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
                     let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
                     let skip = queue::skipped(&events, &all, f, &s.fleet, (s.issue, ctx.now), &slots);
@@ -1351,7 +1348,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     )
                 });
                 let cfg = Config::load(&ctx.config).ok();
-                let at = cfg.as_ref().map(|c| places(c, &look, &events)).unwrap_or_default();
                 let hosts = cfg.as_ref().is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
                 let pad = if hosts { 63 } else { 5 };
                 let c = |h: &str| format!(" {h:<14}").repeat(usize::from(hosts));
@@ -1462,21 +1458,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             );
             let cfg = Config::load(&ctx.config).ok();
             let look = crate::snapshot::Snap::read(ctx, r);
-            let at = cfg.as_ref().map(|c| places(c, &look, &events)).unwrap_or_default();
-            let slots = cfg
-                .as_ref()
-                .map(|c| crate::starts::held_now(ctx, c, &look))
-                .unwrap_or_default();
-            let board = |f: &String| {
-                queue::board(
-                    ctx,
-                    &events,
-                    f,
-                    cfg.as_ref(),
-                    &crate::overlap::cached(ctx, f),
-                    (&at, &slots),
-                )
-            };
+            let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
+            let board = |f: &String| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f), &at);
             let boards: Vec<_> = all.iter().map(board).collect();
             for (k, _) in cfg.iter().flat_map(Config::warnings) {
                 writeln!(out, "! {k} is retired → drover doctor")?;
@@ -1880,7 +1863,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let (events, agents) = (working(&ctx.state)?, crate::session::all(&cfg, r).running());
-                    let at = places(&cfg, r, &events);
+                    let (at, slots) = places(ctx, &cfg, r, &events);
                     let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true, None);
                     let mut rows: Vec<_> = all
                         .into_iter()
@@ -1888,7 +1871,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         .map(|x| x.1)
                         .collect();
                     let (log, st) = (crate::waiting::Log::new(&events), crate::events::fold(&events));
-                    let slots = crate::starts::held_now(ctx, &cfg, r);
                     for s in crate::waiting::guarded(&events, &cfg) {
                         let (Some(f), pr) = (cfg.fleet.get(&s.fleet), crate::gh::cached_pr(ctx, &s.fleet, s.issue))
                         else {
@@ -1909,9 +1891,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))
-                                .or_else(|| {
-                                    crate::queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx.now), &slots)
-                                }) {
+                                .or_else(|| queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx.now), &slots))
+                            {
                                 Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
                                 None => ("drive", format!("next in the queue: drive starts it{note}")),
                             },
@@ -2508,10 +2489,11 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     Ok(0)
 }
 
-fn places(cfg: &Config, r: &dyn Runner, events: &[Event]) -> std::collections::BTreeMap<String, String> {
+fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> queue::Places {
     let st = crate::events::fold(events);
     let ls = crate::snapshot::lanes(cfg, r, (events, &st), &crate::session::all(cfg, r));
-    ls.into_iter().map(|l| (l.name, l.place)).collect()
+    let at = ls.into_iter().map(|l| (l.name, l.place)).collect();
+    (at, crate::starts::held_now(ctx, cfg, r))
 }
 
 /// `stderr!`'s writer: the one place drover prints outside a `Write` it was handed.

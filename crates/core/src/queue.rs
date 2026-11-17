@@ -474,6 +474,9 @@ pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
 
 pub const WIDTH: usize = 60;
 
+/// #1234: each lane's place by name, and the start slots held now.
+pub type Places = (std::collections::BTreeMap<String, String>, String);
+
 /// One fleet's board, lines ≤ 60 cols: the queue, other open issues, issues merged in the last 24 h.
 pub fn board(
     ctx: &crate::Ctx,
@@ -481,7 +484,7 @@ pub fn board(
     fleet: &str,
     cfg: Option<&crate::config::Config>,
     c: &Conflicts,
-    (at, slots): (&std::collections::BTreeMap<String, String>, &str),
+    (at, slots): &Places,
 ) -> String {
     let now = ctx.now;
     let st = fold(events);
