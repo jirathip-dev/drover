@@ -122,3 +122,19 @@ fn a_configured_host_whose_muxed_call_stalls_after_its_probe_is_skipped_for_the_
         "{out}"
     );
 }
+
+#[test]
+fn a_pass_that_skips_a_remote_host_logs_no_lane_dead_for_its_lane() {
+    let (c, _sh) = setup("stall-no-dead", "air");
+    let r = stall("air");
+    let (code, out) = run(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("tick: air: over budget"), "{out}");
+    let dead: Vec<Event> = drover::events::read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == "lane-dead")
+        .collect();
+    assert!(dead.is_empty(), "a lane on a skipped host is not dead: {dead:?}");
+}
