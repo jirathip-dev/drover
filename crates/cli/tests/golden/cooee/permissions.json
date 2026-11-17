@@ -5,8 +5,8 @@
     "places": ["header-strip: Queue", "header-strip: Events", "header-strip: Lanes", "menu-row: drover"],
     "chat_cards": true,
     "push": true,
-    "actions": ["filter", "drive", "pause", "drive-all", "top", "answer", "run-card", "needs-human", "save-fleets", "stop", "drop", "remove-fleet", "kill", "clean", "close", "send", "move", "queue"],
-    "destructive": ["stop", "drop", "remove-fleet", "run-card", "needs-human", "kill", "clean", "close"],
+    "actions": ["filter", "drive", "pause", "drive-all", "force", "top", "limit", "answer", "unpark", "run-card", "needs-human", "save-fleets", "stop", "drop", "remove-fleet", "kill", "clean", "close", "send", "move", "queue", "config-card", "secret-card"],
+    "destructive": ["stop", "drop", "remove-fleet", "run-card", "needs-human", "kill", "clean", "close", "config-card"],
     "network": ["api.github.com", "127.0.0.1:7878"]
   }
 }

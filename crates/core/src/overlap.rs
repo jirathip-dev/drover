@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::{emit, fold, Event, IssueState};
+use crate::events::{emit, fold, Event, IssueState, Json};
 use crate::runner::{argv, ok, Runner};
 use crate::{gh, Ctx};
 use anyhow::Result;
@@ -18,10 +18,10 @@ pub fn git(r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<String> {
 /// The last preview's conflicts; never runs git.
 pub fn cached(ctx: &Ctx, fleet: &str) -> Conflicts {
     let v = crate::usage::load::<Value>(&gh::cache_path(ctx, "conflicts", fleet, 0)).unwrap_or_default();
-    serde_json::from_value(v["conflicts"].clone()).unwrap_or_default()
+    serde_json::from_value(v.at("conflicts").clone()).unwrap_or_default()
 }
 
-fn collide(r: &dyn Runner, dir: &Path, a: &str, b: &str) -> Vec<String> {
+pub(crate) fn collide(r: &dyn Runner, dir: &Path, a: &str, b: &str) -> Vec<String> {
     let d = dir.to_string_lossy();
     let o = r.run(
         "git",
@@ -58,11 +58,11 @@ pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[E
     let old = crate::usage::load::<Value>(&p).unwrap_or_default();
     let (mut cache, mut out) = (BTreeMap::new(), Conflicts::new());
     for (i, (a, ha)) in heads.iter().enumerate() {
-        for (b, hb) in &heads[i + 1..] {
+        for (b, hb) in heads.get(i + 1..).unwrap_or_default() {
             let key = format!("{ha} {hb}");
             let files: Vec<String> =
-                serde_json::from_value(old["cache"][&key].clone()).unwrap_or_else(|_| collide(r, &dir, ha, hb));
-            if !files.is_empty() && old["cache"][&key].is_null() {
+                serde_json::from_value(old.at("cache").at(&key).clone()).unwrap_or_else(|_| collide(r, &dir, ha, hb));
+            if !files.is_empty() && old.at("cache").at(&key).is_null() {
                 ev(
                     *b,
                     "conflict-predicted",
@@ -338,8 +338,8 @@ pub fn cap_at(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Option<(S
     let dir = f.local_path();
     let sha = git(r, &dir, &["rev-parse", &format!("origin/{}", f.integration)]).ok()?;
     let old = crate::usage::load::<Value>(&p).unwrap_or_default();
-    let n = |k: &str| old[k].as_i64();
-    if old["sha"] == sha.as_str() {
+    let n = |k: &str| old.at(k).as_i64();
+    if old.at("sha") == sha.as_str() {
         return Some((sha, n("lines")?, n("cap")?, n("warn")?));
     }
     let Cap {
@@ -353,7 +353,7 @@ pub fn cap_at(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Option<(S
         .lines()
         .filter_map(|l| l.rsplit(':').next()?.parse::<i64>().ok())
         .sum();
-    let _ = gh::store(&p, &json!({"sha": sha, "lines": lines, "cap": cap, "warn": warn}));
+    gh::store(&p, &json!({"sha": sha, "lines": lines, "cap": cap, "warn": warn})).ok();
     Some((sha, lines, cap, warn))
 }
 
@@ -411,12 +411,12 @@ fn script_caps(
     );
     let wts = wt.to_string_lossy();
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
-    let _ = tree(&["remove", "--force", &wts]);
+    tree(&["remove", "--force", &wts]).ok();
     tree(&["add", "-f", "--detach", &wts, base]).map_err(|e| e.to_string())?;
     let merged = branch.is_none_or(|b| git(r, &wt, &["merge", "--no-ff", "--no-edit", b]).is_ok());
     let sh = argv(&["-c", &format!("cd \"$0\" && {script}"), &wts]);
     let o = merged.then(|| r.run("sh", &sh));
-    let _ = tree(&["remove", "--force", &wts]);
+    tree(&["remove", "--force", &wts]).ok();
     let o = o.ok_or("conflicts")?.map_err(|e| e.to_string())?;
     let num = |w: &str| w.replace(',', "").parse::<i64>().ok();
     let cap = |l: &str| {
@@ -443,7 +443,7 @@ fn script_caps(
 pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut dyn std::io::Write) -> Result<i32> {
     let f = cfg.fleet(fleet)?;
     let dir = f.local_path();
-    let _ = git(r, &dir, &["fetch", "-q", "origin"]);
+    git(r, &dir, &["fetch", "-q", "origin"]).ok();
     let head = git(r, &dir, &["rev-parse", &format!("origin/{}", f.integration)]);
     let script = head.as_ref().ok().and_then(|h| cap_script(r, f, h));
     let (sha, caps, warn) = if let Some(s) = &script {

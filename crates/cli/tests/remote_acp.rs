@@ -25,6 +25,7 @@ struct Boat<'a> {
     machines: Shared<BTreeMap<String, Machine>>,
     runs: Shared<Vec<(Vec<String>, String)>>,
     profiles: PathBuf,
+    conf: String,
 }
 
 fn words(line: &str) -> Vec<String> {
@@ -74,6 +75,7 @@ impl Boat<'_> {
             machines: Shared::default(),
             runs: Shared::default(),
             profiles: c.config.with_file_name("claude"),
+            conf: c.config.display().to_string(),
         };
         *b.machines.borrow_mut() = m.collect();
         b
@@ -91,6 +93,11 @@ impl Boat<'_> {
                 "wait" => json!({"outcome": "matched", "terminal": t[&name]}),
                 _ => json!({"text": "> the brief"}),
             },
+            "kill" if t.contains_key(&name) => {
+                t.get_mut(&name).unwrap()["state"] = json!("exited");
+                t[&name].clone()
+            }
+            "rm" if t.contains_key(&name) => t.remove(&name).unwrap(),
             _ => {
                 let e = json!({"code": -32001, "message": format!("no_such_terminal: {name}")});
                 return json!({"jsonrpc": "2.0", "id": id, "error": e});
@@ -150,8 +157,8 @@ impl Boat<'_> {
                     .push((w.to_vec(), String::from_utf8(o.stdout).unwrap()));
                 Ok(out(0, ""))
             }
-            [exe, "profiles", "sync", "--profile", p, ..] if exe == EXE => {
-                let hook = format!("'{EXE}' hook --role impl");
+            [exe, "profiles", "sync", "--profile", p, "--role", role] if exe == EXE => {
+                let hook = format!("'{EXE}' hook --role {role}");
                 let hooks = [json!({"matcher": "*", "hooks": [{"type": "command", "command": hook}]})];
                 let hooks = if self.machines.borrow()[m].hook {
                     json!(hooks)
@@ -165,6 +172,7 @@ impl Boat<'_> {
                 std::fs::write(dir.join("role.md"), "role").unwrap();
                 Ok(out(0, ""))
             }
+            ["sh", "-c", "test -e \"$1\"", "sh", p] if p == self.conf => Ok(out(1, "")),
             ["sh", "-c", script, "sh", _] if script.contains("cat >") || script.starts_with("test -e") => {
                 real(w, input)
             }
@@ -509,6 +517,60 @@ fn bootstrap_puts_shed_and_drover_on_a_hosts_non_login_ssh_path_so_the_survey_fi
     );
 }
 
+#[test]
+fn bootstrap_syncs_each_fitting_fleets_acp_profile_there_so_the_next_survey_passes_the_guard() {
+    let (c, _) = setup("racp-profiles", &["boat1"]);
+    let second = "\n[fleet.cargo]\nrepo = \"jirathip-dev/cargo\"\nlocal = \"/tmp/does-not-matter/cargo\"\n\
+integration = \"staging\"\n\n[fleet.cargo.role.impl]\nharness = \"claude\"\nprofile = \"cargo-impl\"\n";
+    let toml = std::fs::read_to_string(&c.config).unwrap() + second;
+    std::fs::write(&c.config, toml).unwrap();
+    let f = Fake::default()
+        .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat1 sh -c", "")
+        .reply("sh -c nohup", "4242\n");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat1"]);
+    assert_eq!(code, 0, "{o}");
+    let health = drover::hosts::cached(&c).remove("boat1").unwrap().health;
+    assert!(!health.iter().any(|r| r.starts_with("✗ acp guard")), "{health:?}");
+    let calls = f.calls.borrow().clone();
+    for p in ["fleet-impl", "cargo-impl"] {
+        let sync = format!("'profiles' 'sync' '--profile' '{p}' '--role' 'impl'");
+        let n = calls
+            .iter()
+            .filter(|l| l.starts_with("ssh boat1 ") && l.ends_with(&sync))
+            .count();
+        assert_eq!(n, 1, "{p}: {calls:?}");
+    }
+}
+
+#[test]
+fn bootstrap_with_no_config_there_prints_no_bare_sync_and_skips_a_main_pinned_role() {
+    let (c, _) = setup("racp-pinned", &["boat1"]);
+    let pinned = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\nhost = \"main\"\n";
+    let toml = std::fs::read_to_string(&c.config).unwrap() + pinned;
+    std::fs::write(&c.config, toml).unwrap();
+    let f = Fake::default()
+        .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat1 sh -c", "")
+        .reply("sh -c nohup", "4242\n");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat1"]);
+    assert_eq!(code, 0, "{o}");
+    assert!(!o.contains("✓ profiles sync — there"), "{o}");
+    assert!(o.contains("✓ profiles sync fleet-impl — there"), "{o}");
+    assert!(!o.contains("fleet-verify"), "{o}");
+    let calls = f.calls.borrow().clone();
+    assert!(!calls.iter().any(|l| l.contains("'fleet-verify'")), "{calls:?}");
+    let job = calls.iter().find(|l| l.starts_with("@boat1 sh -c V=")).unwrap();
+    assert!(
+        job.contains("profiles sync --profile 'fleet-impl' --role impl"),
+        "{job}"
+    );
+    let health = drover::hosts::cached(&c).remove("boat1").unwrap().health;
+    assert!(!health.iter().any(|r| r.starts_with("✗ acp guard")), "{health:?}");
+}
+
 fn upstream() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let (port, seen) = (
@@ -639,6 +701,89 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
 }
 
 #[test]
+fn a_start_that_never_runs_leaves_the_running_lanes_key_live() {
+    let (c, _) = setup("racp-key-keep", &["boat1"]);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let mint = || {
+        let k = drover::proxy::new_key().unwrap();
+        drover::proxy::mint(&c, &cfg, &k, ("sendmeter", 12, "sendmeter-impl-12"), "boat1").unwrap()
+    };
+    let (a, _refused) = (mint(), mint());
+    let (code, list) = run(&c, &Fake::default(), &["hosts", "keys"]);
+    assert!(
+        code == 0 && list.contains(&format!("{a}  live    sendmeter-impl-12 on boat1")),
+        "{list}"
+    );
+}
+
+#[test]
+fn a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane() {
+    lane_key_401_respawns_the_lane("racp-key-revoked", "401 lane key cd26f051 revoked");
+}
+
+#[test]
+fn an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane() {
+    lane_key_401_respawns_the_lane("racp-key-unknown", "401 unknown lane key");
+}
+
+fn lane_key_401_respawns_the_lane(name: &str, why: &str) {
+    let (c, _) = setup(name, &["boat1"]);
+    let _main = FakeShed::attached(&c);
+    let f = spawn_fake();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{o}");
+    let err = format!("auth: Failed to authenticate. API Error: {why}");
+    let note = json!({"state": "error", "note": err});
+    b.machines
+        .borrow_mut()
+        .get_mut("boat1")
+        .unwrap()
+        .terms
+        .get_mut("sendmeter-impl-12")
+        .unwrap()["reported"] = note;
+    let (code, o) = run(&c, &b, &["check"]);
+    assert_eq!(code, 0, "{o}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    assert!(ev.iter().all(|e| e.kind != "signed-out"), "no host sign-out: {o}");
+    assert_eq!(drover::hosts::login_hold(&ev, Some("boat1")), None, "no host hold");
+    let later = drover::Ctx {
+        now: c.now + 120,
+        ..c.clone()
+    };
+    let (code, o) = run(&later, &b, &["drive"]);
+    assert_eq!(code, 0, "{o}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    assert_eq!(spawned(&c).len(), 2, "the lane is respawned: {o}");
+    assert_eq!(ev.iter().filter(|e| e.kind == "respawn").count(), 1, "{o}");
+}
+
+#[test]
+fn a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login() {
+    let (c, _) = setup("racp-signed-out", &["boat1"]);
+    let _main = FakeShed::attached(&c);
+    let f = spawn_fake();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{o}");
+    let note = json!({"state": "error", "note": "auth: API Error: 401 · Please run /login"});
+    b.machines
+        .borrow_mut()
+        .get_mut("boat1")
+        .unwrap()
+        .terms
+        .get_mut("sendmeter-impl-12")
+        .unwrap()["reported"] = note;
+    let (code, o) = run(&c, &b, &["check"]);
+    assert_eq!(code, 0, "{o}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let s: Vec<_> = ev.iter().filter(|e| e.kind == "signed-out").collect();
+    assert_eq!(s.len(), 1, "{o}");
+    let why = s[0].str("reason").unwrap();
+    assert!(why.contains("[proxy] token-file") && !why.contains("/login"), "{why}");
+}
+
+#[test]
 fn a_remote_acp_lane_without_the_proxy_token_file_is_refused_with_the_setup_command() {
     let (c, _) = setup("racp-noacct", &["boat1"]);
     std::fs::remove_file(c.config.with_file_name("tokens/proxy")).unwrap();
@@ -680,7 +825,7 @@ fn doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does() {
     b.machines.borrow_mut().get_mut("boat1").unwrap().bare = false;
     let (_, o) = run(&c, &b, &["doctor"]);
     assert!(
-        o.contains("\n! host boat1 shed: ") && o.contains("shed: not found"),
+        o.contains("\n✗ host boat1 shed — does not answer: ") && o.contains("shed: not found"),
         "{o}"
     );
     assert!(!o.contains("✓ host boat1"), "{o}");

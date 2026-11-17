@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::devices::sha256;
-use crate::events::{emit, working, Event};
+use crate::events::{emit, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::{argv, Runner};
 use crate::{orchestrator, Ctx};
@@ -81,12 +81,12 @@ pub fn post(ctx: &Ctx, cfg: &Config, thread: &str, c: &Card) -> Result<String> {
         );
     }
     let events = working(&ctx.state)?;
-    let t = orchestrator::find(&events, thread)?;
+    let fleet = orchestrator::fleet_of(&events, thread)?;
     let id = format!("r{}", events.iter().filter(|e| e.kind == "run-card").count() + 1);
     let dir = std::path::absolute(c.dir)?.display().to_string();
     let d = json!({"thread": thread, "id": id, "cmd": c.cmd, "why": c.why, "blast": c.blast, "dir": dir,
         "host": "main", "timeout": c.timeout, "sha": sha256(c.cmd.as_bytes())});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "run-card", d))?;
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "run-card", d))?;
     Ok(id)
 }
 
@@ -94,6 +94,18 @@ pub fn post(ctx: &Ctx, cfg: &Config, thread: &str, c: &Card) -> Result<String> {
 pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     let settled = crate::events::of_kind(events, &["run-settled"]);
     settled.into_iter().find(|e| e.str("id") == Some(id))
+}
+
+/// #1121: a card with exactly `cmd` is approved, started and not yet done: the run it is.
+pub fn running(events: &[Event], cmd: &str) -> bool {
+    let id = |k: &str, id: &str| events.iter().any(|e| e.kind == k && e.str("id") == Some(id));
+    (events
+        .iter()
+        .filter(|e| e.kind == "run-card" && e.str("cmd") == Some(cmd)))
+    .filter_map(|c| c.str("id"))
+    .any(|c| {
+        settled(events, c).is_some_and(|s| s.val("approved") == true) && id("run-started", c) && !id("run-done", c)
+    })
 }
 
 /// The owner's [approve] (`sha`: the prefix of the command's sha the owner saw, if the tap carries it) or [deny] on card `id`; the line the thread records.
@@ -116,7 +128,11 @@ pub fn settle_via(
         return refused("NO_SUCH_CARD", format!("no run card {id}"));
     };
     if let Some(s) = settled(&events, id) {
-        let how = ["was denied", "ran already"][usize::from(s.val("approved") == true)];
+        let how = if s.val("approved") == true {
+            "ran already"
+        } else {
+            "was denied"
+        };
         return refused("ALREADY_SETTLED", format!("{id} {how}; a new run needs a new card"));
     }
     let [thread, cmd, dir, sum] = ["thread", "cmd", "dir", "sha"].map(|k| c.str(k).unwrap_or_default());
@@ -137,7 +153,7 @@ pub fn settle_via(
     }
     let mut d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "approved": approve});
     if let Some(v) = via {
-        d["via"] = json!(v);
+        d.put("via", json!(v));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-settled", d))?;
     let line = if approve {
@@ -147,7 +163,7 @@ pub fn settle_via(
     } else {
         format!("run {id} denied by owner; nothing ran")
     };
-    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
+    orchestrator::tell(ctx, cfg, r, thread, &line);
     Ok(line)
 }
 
@@ -165,7 +181,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
         return refused("ALREADY_SETTLED", format!("{id} ran already; post a new card"));
     }
     let [thread, cmd, dir, sum] = ["thread", "cmd", "dir", "sha"].map(|k| c.str(k).unwrap_or_default());
-    let (pid, start) = (std::process::id(), crate::now());
+    let (pid, start) = (crate::runner::pid(), crate::now());
     let secs = c.val("timeout").as_u64().unwrap_or(600);
     let d = json!({"thread": thread, "id": id, "sha": sum, "pid": pid});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-started", d))?;
@@ -186,9 +202,9 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
     let d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "code": code, "tail": tail});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-done", d))?;
     let line = format!("run {id} approved by owner, ran in {dir}: exit {code}\n```\n{tail}\n```");
-    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
+    orchestrator::tell(ctx, cfg, r, thread, &line);
     if code == 124 {
-        let _ = r.run("kill", &argv(&["-KILL", "--", &format!("-{pid}")]));
+        r.run("kill", &argv(&["-KILL", "--", &format!("-{pid}")])).ok();
     }
     Ok(line)
 }

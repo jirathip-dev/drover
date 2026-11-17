@@ -59,30 +59,46 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
   Fleets sheet and the cards (#927), plus a Threads tab of its own (#1072); its links open in a new tab (#1085).
 - Threads: a tap or push opens the thread, `#threads/<id>` with back, and config, secret and run cards in a thread
   (#1088); typed text, focus and scroll survive repaints, with per-thread drafts (#1084).
+- Threads at parity with the old chat: reading (#1086), the composer (#1087), two panes from 1000 px (#1118) and
+  an edge swipe back (#1170).
+- Queue counts and repo chips (#1089), a row tap always opens the issue sheet (#1090) with PASS/FAIL per round
+  (#1238), and done today opens today's merges (#1172).
+- The Herd scene back on the page (#1092).
 - Every #553 parity row names its test in `docs/parity.md`; CI fails a dropped one without the owner's q-number (#1094).
 - A held port hands over to the installed build; a stale or looping serve alerts (#1081).
+
+**cooee plugin**
+- Shed's lane states on the board and in the plugin (#983); each orchestrator as a cooee chat profile (#1057); run
+  cards, config proposals and secret requests in a cooee chat (#1066).
+
+**Merge, history and rules**
+- Squash merges carrying their why notes (#1097); one history and issue convention by default (#1101).
+- Design reviews and one more round from the owner's typed words (#828); a typed `#N approve` approves (#1080).
+- SLO promises a known hold supersedes are void, not missed (#1093); one log read per pass (#832).
+- Banned APIs (unwrap, panics, indexing, `as` casts) fail CI (#809).
+- `drover compact`: a one-time fresh start of the history, with an owner card and undo (#1121).
 
 ## Next
 
 The open queue, by area.
 
 **The page and its screens**
-- Threads at parity with the old chat: reading and the composer ([#1086](https://github.com/jirathip-dev/herdsman/issues/1086), [#1087](https://github.com/jirathip-dev/herdsman/issues/1087)).
-- Queue counts and chips, and a row tap that always opens the issue sheet ([#1089](https://github.com/jirathip-dev/herdsman/issues/1089), [#1090](https://github.com/jirathip-dev/herdsman/issues/1090)).
-- A Hosts screen ([#1091](https://github.com/jirathip-dev/herdsman/issues/1091)) and the Herd scene ([#1092](https://github.com/jirathip-dev/herdsman/issues/1092)) back on the page.
-
-**cooee plugin**
-- Shed's lane states on the board and in the plugin ([#983](https://github.com/jirathip-dev/herdsman/issues/983)); each orchestrator as a cooee profile ([#1057](https://github.com/jirathip-dev/herdsman/issues/1057)).
-- Run cards, config proposals and secret requests in a cooee chat ([#1066](https://github.com/jirathip-dev/herdsman/issues/1066)).
+- A Hosts screen on the page ([#1091](https://github.com/jirathip-dev/herdsman/issues/1091)); the remote-host token's state on it ([#1131](https://github.com/jirathip-dev/herdsman/issues/1131)).
+- [later] on owner cards ([#1248](https://github.com/jirathip-dev/herdsman/issues/1248)); model and effort picks as dropdowns ([#1182](https://github.com/jirathip-dev/herdsman/issues/1182)).
+- An answered ask card leaves at once ([#1185](https://github.com/jirathip-dev/herdsman/issues/1185)); a sent message shows once ([#1217](https://github.com/jirathip-dev/herdsman/issues/1217)); a new message keeps the
+  composer's focus ([#1219](https://github.com/jirathip-dev/herdsman/issues/1219)).
 
 **Drive, merge and gates**
-- Closed issues and dropped holds leave the Queue at once ([#1025](https://github.com/jirathip-dev/herdsman/issues/1025)); one log read per pass ([#832](https://github.com/jirathip-dev/herdsman/issues/832)).
-- SLO promises a known hold supersedes are not missed ([#1093](https://github.com/jirathip-dev/herdsman/issues/1093)).
-- Squash merges carrying their why notes ([#1097](https://github.com/jirathip-dev/herdsman/issues/1097)).
+- Closed issues and dropped holds leave the Queue at once ([#1025](https://github.com/jirathip-dev/herdsman/issues/1025)); a per-fleet cap on PRs in flight ([#1129](https://github.com/jirathip-dev/herdsman/issues/1129)).
+- A faster pass: no worktree walk each minute ([#949](https://github.com/jirathip-dev/herdsman/issues/949)), no per-issue log scan ([#954](https://github.com/jirathip-dev/herdsman/issues/954)), a host sample with no
+  sleep ([#951](https://github.com/jirathip-dev/herdsman/issues/951)).
+- A stalled lane restarts, a long load wait moves host ([#1216](https://github.com/jirathip-dev/herdsman/issues/1216)); remote scratch is swept ([#1215](https://github.com/jirathip-dev/herdsman/issues/1215)).
+- Proxy lanes' sign-out advice ([#1212](https://github.com/jirathip-dev/herdsman/issues/1212)); a `Repro: verify` PASS on a fleet with no verify role ([#1224](https://github.com/jirathip-dev/herdsman/issues/1224)).
+- `drover compact` as a kept feature ([#1202](https://github.com/jirathip-dev/herdsman/issues/1202)).
 
-**Orchestrators and asks**
-- Design reviews and one more round from the owner's typed words ([#828](https://github.com/jirathip-dev/herdsman/issues/828)); a typed `#N approve` approves ([#1080](https://github.com/jirathip-dev/herdsman/issues/1080)).
+**Hosts**
+- Remote drover from a prebuilt Linux binary ([#1165](https://github.com/jirathip-dev/herdsman/issues/1165)).
 
-**Rules and history**
-- Banned APIs enforced in CI ([#809](https://github.com/jirathip-dev/herdsman/issues/809)); legacy history comments stripped ([#1098](https://github.com/jirathip-dev/herdsman/issues/1098)).
-- A per-fleet git baseline ([#1099](https://github.com/jirathip-dev/herdsman/issues/1099)), a triage lane ([#1100](https://github.com/jirathip-dev/herdsman/issues/1100)) and shared history conventions ([#1101](https://github.com/jirathip-dev/herdsman/issues/1101)).
+**Rules, history and roles**
+- Legacy history comments stripped ([#1098](https://github.com/jirathip-dev/herdsman/issues/1098)); a per-fleet git baseline ([#1099](https://github.com/jirathip-dev/herdsman/issues/1099)); a triage lane ([#1100](https://github.com/jirathip-dev/herdsman/issues/1100)).
+- Simulation: gate-death scenarios ([#959](https://github.com/jirathip-dev/herdsman/issues/959)) and a timing-robust hunt test ([#1259](https://github.com/jirathip-dev/herdsman/issues/1259)).

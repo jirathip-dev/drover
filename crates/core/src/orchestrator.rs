@@ -1,5 +1,5 @@
 use crate::config::{expand, Config, Role};
-use crate::events::{self, emit, working, Event};
+use crate::events::{self, emit, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::Runner;
 use crate::session::Session;
@@ -8,6 +8,9 @@ use crate::{providers, term, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
+
+mod brief;
+pub mod chat;
 
 /// #620: how many times `of` ran (#701: `WALKS`, the events it looked at).
 pub static SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -27,7 +30,7 @@ pub fn of<'a>(events: &'a [Event], id: &str) -> impl DoubleEndedIterator<Item = 
         let id = id.to_string();
         events.iter().filter(move |e| e.str("thread") == Some(id.as_str()))
     });
-    let at = at.into_iter().flatten().map(move |i| &events[i]);
+    let at = at.into_iter().flatten().filter_map(move |i| events.get(i));
     at.chain(all.into_iter().flatten())
         .filter(move |e| !events::repeat(events, e))
 }
@@ -35,7 +38,7 @@ pub fn of<'a>(events: &'a [Event], id: &str) -> impl DoubleEndedIterator<Item = 
 /// #701: every thread's `thread-new`, oldest first.
 pub fn threads(events: &[Event]) -> Vec<&Event> {
     match events::cached(events) {
-        Some(l) => l.threads.new.iter().map(|i| &events[*i]).collect(),
+        Some(l) => l.threads.new.iter().filter_map(|i| events.get(*i)).collect(),
         None => events.iter().filter(|e| e.kind == "thread-new").collect(),
     }
 }
@@ -67,19 +70,24 @@ pub fn fleet_of<'a>(events: &'a [Event], id: &str) -> Result<&'a str> {
     Ok(&attached(events, id).map_or_else(|| find(events, id), Ok)?.fleet)
 }
 
-pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
-    let f = cfg.fleet(fleet)?;
-    let (_, role) = defaults(cfg, fleet)?;
+fn hold(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str, mut extra: Value) -> Result<Event> {
     let ok = |c: char| c.is_ascii_alphanumeric() || "-_.:".contains(c);
     if id.is_empty() || id.len() > 128 || !id.chars().all(ok) {
         return refused("BAD_VALUE", "thread: a cooee thread id (letters, digits, `-_.:`)");
     }
-    let events = working(&ctx.state)?;
-    if find(&events, id).is_ok() {
+    if find(&working(&ctx.state)?, id).is_ok() {
         return refused("BAD_VALUE", format!("{id} is drover's own thread"));
     }
-    let t = Event::new(ctx.now, fleet, None, "orchestrator-attached", json!({"thread": id}));
+    extra.put("thread", json!(id));
+    let t = Event::new(ctx.now, fleet, None, "orchestrator-attached", extra);
     emit(&ctx.state, cfg, t.clone())?;
+    Ok(t)
+}
+
+pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
+    let f = cfg.fleet(fleet)?;
+    let (_, role) = defaults(cfg, fleet)?;
+    let t = hold(ctx, cfg, fleet, id, json!({}))?;
     let p = role.profile_or("orchestrator");
     let acp = providers::get(&role.harness).acp().unwrap_or(&role.harness);
     let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, false);
@@ -89,7 +97,7 @@ pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
         "DROVER_PORT": port.to_string()});
     let message = format!("{id} is {fleet}'s orchestrator thread");
     Ok(
-        json!({"ok": true, "code": "OK", "message": message, "brief": profile(cfg, &t, fleet),
+        json!({"ok": true, "code": "OK", "message": message, "brief": brief::thread(cfg, &t, fleet),
         "settings": settings, "env": env, "guarded": why.is_empty(), "why": why}),
     )
 }
@@ -121,8 +129,18 @@ pub fn by(b: &str) -> String {
 
 /// #780: in an orchestrator lane, its `DROVER_ORCHESTRATOR` id; every event it logs names it (`db::insert`).
 pub fn acting() -> Option<String> {
-    let lane = std::env::var("DROVER_LANE").ok()?;
-    is_role(lane.split(':').nth(2)?).then(|| std::env::var("DROVER_ORCHESTRATOR").ok())?
+    let lane = crate::config::env("DROVER_LANE")?;
+    is_role(lane.split(':').nth(2)?).then(|| crate::config::env("DROVER_ORCHESTRATOR"))?
+}
+
+/// #962: who runs this command, the `by` its events carry: `drive`, `orchestrator-<id>`, `lane` or `owner`.
+pub fn actor() -> String {
+    match acting() {
+        _ if crate::drive::in_act() => "drive".into(),
+        Some(id) => format!("orchestrator-{id}"),
+        None if crate::config::env("DROVER_LANE").is_some() => "lane".into(),
+        None => "owner".into(),
+    }
 }
 
 /// #780: the orchestrator a thread from before #780 (none named) belongs to, the one `[orchestrator]` itself names.
@@ -193,7 +211,7 @@ pub fn new_with(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch
     let id = format!("t{}", events.iter().filter(|e| e.kind == "thread-new").count() + 1);
     let mut d = json!({"thread": id, "title": title, "harness": h});
     if orch != DEFAULT {
-        d["orchestrator"] = json!(orch);
+        d.put("orchestrator", json!(orch));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-new", d))?;
     Ok(id)
@@ -248,7 +266,7 @@ pub fn archive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, on: bool) -> R
             Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
         )?;
     }
-    let kind = ["thread-restore", "thread-archive"][usize::from(on)];
+    let kind = if on { "thread-archive" } else { "thread-restore" };
     emit(
         &ctx.state,
         cfg,
@@ -313,7 +331,11 @@ pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]:
     rows.sort_by_key(|r| std::cmp::Reverse(r.0));
     let row = |(ts, id): &(u64, &str)| {
         let last = items(&events, id).pop().unwrap_or_default();
-        let last = last["text"].as_str().or(last["question"].as_str()).unwrap_or_default();
+        let last = last
+            .at("text")
+            .as_str()
+            .or(last.at("question").as_str())
+            .unwrap_or_default();
         let topic: String = last
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -470,7 +492,10 @@ pub fn handoff_text(e: &Event) -> String {
 /// #541: the thread a lane's ask on `fleet` goes to: `[fleet.<n>] ask_thread`, else the repo's most recently active one (neither archived); none without a conductor role. #633: an attached cooee thread is one of them.
 pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a str> {
     let own = role(cfg, fleet).is_ok();
-    let repo = |e: &&'a Event| e.fleet == fleet && (own && e.kind == "thread-new" || e.kind == "orchestrator-attached");
+    let chat = |e: &Event| e.str("via") == Some("profile");
+    let repo = |e: &&'a Event| {
+        e.fleet == fleet && (own && e.kind == "thread-new" || e.kind == "orchestrator-attached" && !chat(e))
+    };
     let ids = events.iter().filter(repo).filter_map(|e| e.str("thread"));
     let live = |id: &&str| match link_of(events, id) {
         Some(_) => attached(events, id).is_some_and(|e| e.fleet == fleet),
@@ -565,7 +590,7 @@ pub fn text_ok(text: &str) -> Result<()> {
 fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, (text, files): (&str, &[Value])) -> Result<()> {
     let mut d = json!({"thread": t.str("thread"), "from": from, "text": text});
     if !files.is_empty() {
-        d["files"] = json!(files);
+        d.put("files", json!(files));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
 }
@@ -607,7 +632,7 @@ fn copy_in(ctx: &Ctx, cfg: &Config, t: &Event, p: &std::path::Path) -> Result<st
     let to = dir(ctx, cfg, id).join("files");
     std::fs::create_dir_all(&to)?;
     let to = to.join(name);
-    let _ = std::fs::remove_file(&to);
+    std::fs::remove_file(&to).ok();
     std::fs::copy(&from, &to).with_context(|| from.display().to_string())?;
     to.canonicalize().map_err(Into::into)
 }
@@ -640,6 +665,16 @@ pub fn say(
         return Ok(id.into());
     };
     deliver(ctx, cfg, r, &t, &line)
+}
+
+/// #1066: a card's settle line into thread `id` as `system`: typed into a drover thread's orchestrator, logged for a cooee chat.
+pub fn tell(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, line: &str) {
+    let chat = working(&ctx.state).ok().and_then(|e| attached(&e, id).cloned());
+    match chat {
+        Some(t) => log(ctx, cfg, &t, "system", (line, &[])),
+        None => say(ctx, cfg, r, (id, line, &[]), ("system", false)).map(drop),
+    }
+    .ok();
 }
 
 thread_local! {
@@ -767,9 +802,9 @@ pub fn hung<'a>(
 
 fn end(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (t, s): (&Event, &Event), mut d: Value) -> Result<()> {
     let agent = s.str("agent").unwrap_or_default();
-    let _ = crate::shed::cli(r, &["cancel", agent]);
+    crate::shed::cli(r, &["cancel", agent]).ok();
     crate::shed::cli(r, &["kill", agent])?;
-    (d["thread"], d["agent"]) = (json!(t.str("thread")), json!(agent));
+    d.put("thread", json!(t.str("thread"))).put("agent", json!(agent));
     emit(
         &ctx.state,
         cfg,
@@ -890,7 +925,7 @@ pub fn pick(ctx: &Ctx, cfg: &Config, id: &str, model: &str, effort: &str) -> Res
         .into_iter()
         .filter(|p| !p.1.is_empty())
     {
-        d[k] = json!(v);
+        d.put(k, json!(v));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-model", d))
 }
@@ -998,7 +1033,9 @@ fn save(ctx: &Ctx, r: &dyn Runner, new: &str) -> Result<Config> {
 
 fn uuid() -> Result<String> {
     let mut b = crate::devices::random(16)?;
-    (b[6], b[8]) = (b[6] & 0x0f | 0x40, b[8] & 0x3f | 0x80);
+    if let [_, _, _, _, _, _, x6, _, x8, ..] = b.as_mut_slice() {
+        (*x6, *x8) = (*x6 & 0x0f | 0x40, *x8 & 0x3f | 0x80);
+    }
     let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
     Ok(format!(
         "{}-{}-{}-{}-{}",
@@ -1061,6 +1098,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         head,
         session: Some((session.clone(), resume)),
         lane_key: None,
+        sandbox: None,
     };
     p.env.insert("DROVER_THREAD".into(), id.into());
     p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());
@@ -1085,7 +1123,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         None => None,
     };
     h.ready(ctx, r, &p)?;
-    let text = profile(cfg, t, fleet);
+    let text = brief::thread(cfg, t, fleet);
     on.write(&brief, &text)?;
     h.prepare(ctx, &on, &p)?;
     if let Some(acp) = &acp {
@@ -1129,57 +1167,13 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
 }
 
 fn started(ctx: &Ctx, cfg: &Config, t: &Event, d: Value) -> Result<String> {
-    let agent = d["agent"].as_str().unwrap_or_default().to_string();
+    let agent = d.at("agent").as_str().unwrap_or_default().to_string();
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, &t.fleet, None, "orchestrator-start", d),
     )?;
     Ok(agent)
-}
-
-fn profile(cfg: &Config, t: &Event, fleet: &str) -> String {
-    let (id, title) = (t.str("thread").unwrap_or_default(), t.str("title").unwrap_or_default());
-    let repo = cfg.fleet.get(&t.fleet).map_or("all repos".into(), |f| {
-        format!("{} (fleet {}, checkout {})", f.repo, t.fleet, f.local)
-    });
-    let mut s = format!(
-        "# Orchestrator brief: thread {id}\n\n{}\n\nThread: {id}, {title}\nRepo: {repo}\nFleet for asks: {fleet}\n",
-        crate::spawn::role_prompt("orchestrator").trim_end()
-    );
-    let c = &cfg.orchestrator;
-    if let Some(p) = &c.instructions {
-        let text = std::fs::read_to_string(expand(p)).unwrap_or_else(|e| format!("({p} unreadable: {e})"));
-        s += &format!("\n## Instructions ({p})\n\n{}\n", text.trim_end());
-    }
-    let files = |d: &Option<String>| {
-        let all = d.as_deref().and_then(|d| std::fs::read_dir(expand(d)).ok());
-        let mut v: Vec<_> = all.into_iter().flatten().flatten().map(|e| e.path()).collect();
-        v.sort();
-        v
-    };
-    for m in files(&c.memory)
-        .iter()
-        .filter(|p| p.extension().is_some_and(|x| x == "md"))
-    {
-        let text = std::fs::read_to_string(m).unwrap_or_default();
-        s += &format!("\n## Memory: {}\n\n{}\n", m.display(), text.trim_end());
-    }
-    s += "\n## Capability groups ([orchestrator] allow)\n\n";
-    for (g, verbs) in crate::config::GROUPS {
-        let on = ["off", "on"][usize::from(c.groups().contains(g))];
-        s += &format!("- `{g}` ({on}): {verbs}\n");
-    }
-    s += "\nA verb of an off group is refused `GROUP_OFF`: propose `[orchestrator] allow` with `drover config propose`.\n";
-    let skills = files(&c.skills);
-    if !skills.is_empty() {
-        s += "\n## Skills (read one when it applies)\n\n";
-        s += &skills
-            .iter()
-            .map(|p| format!("- {}\n", p.display()))
-            .collect::<String>();
-    }
-    s
 }
 
 /// The thread as items: messages (`from`, `text`) and asks (`ask`, `question`, numbered `options` with the recommended one first, `open`).
@@ -1189,13 +1183,16 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
         "thread-msg" => {
             let mut m = json!({"ts": e.ts, "from": e.str("from"), "text": e.str("text")});
             if let Some(f) = e.data.get("files") {
-                m["files"] = f.clone();
+                m.put("files", f.clone());
             }
             if let Some((w, t)) = link(e) {
-                m["link"] = json!(format!("{w} {t}"));
+                m.put("link", json!(format!("{w} {t}")));
             }
             if sent.contains(&e.seq) {
-                m["text"] = json!(format!("{} (forwarded)", e.str("text").unwrap_or_default()));
+                m.put(
+                    "text",
+                    json!(format!("{} (forwarded)", e.str("text").unwrap_or_default())),
+                );
             }
             Some(m)
         }

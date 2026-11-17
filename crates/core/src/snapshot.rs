@@ -141,11 +141,14 @@ impl Runner for Snap<'_> {
         self.r.sleep(secs);
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        self.run_for(prog, args, input, crate::runner::limit(prog, args))
+    }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> anyhow::Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
         }
         if !remote(prog) {
-            return self.r.run_in(prog, args, input);
+            return self.r.run_for(prog, args, input, limit);
         }
         let k = key_in(prog, args, input);
         if let ([.., m, _, line], Miss::Collect) = (args, self.miss) {
@@ -162,7 +165,7 @@ impl Runner for Snap<'_> {
         if self.miss == Miss::Local {
             return Ok(out(None));
         }
-        self.r.run_in(prog, args, input)
+        self.r.run_for(prog, args, input, limit)
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()
@@ -222,8 +225,8 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     let (mut key, mut ws) = (String::new(), vec![]);
     let sessions = crate::session::all(cfg, &s);
     if sessions.listed() {
-        if let Err(e) = crate::session::stamp::observe(ctx, cfg, &sessions) {
-            eprintln!("drover: lane states: {e:#}");
+        if let Err(e) = crate::session::stamp::observe(ctx, cfg, &s, &sessions) {
+            crate::stderr!("drover: lane states: {e:#}");
         }
         let events = crate::events::working(&ctx.state).unwrap_or_default();
         let all = lanes(cfg, &s, (&events, &crate::events::fold(&events)), &sessions);
@@ -236,6 +239,6 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
         waits: ws,
         key,
     };
-    let _ = crate::db::put(&ctx.state, "board", ctx.now, &snap);
+    crate::db::put(&ctx.state, "board", ctx.now, &snap).ok();
     s
 }

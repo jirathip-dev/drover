@@ -73,7 +73,9 @@ fn a_pass_lands_once_its_fast_checks_are_green() {
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     assert!(r.called(&format!("git -C {DIR} merge-base --is-ancestor origin/staging {HEAD}")));
-    assert!(r.called(&format!("gh pr merge 34 -R {REPO} --merge --match-head-commit {HEAD}")));
+    assert!(r.called(&format!(
+        "gh pr merge 34 -R {REPO} --squash --delete-branch --match-head-commit {HEAD}"
+    )));
     let l = event(&c, "landed").expect("landed");
     assert_eq!((l.str("mode"), l.str("sha")), (Some("fast-first"), Some("m3rg3")));
     assert_eq!(l.val("checks_secs"), 180);
@@ -139,11 +141,12 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
     let wt = d.join("state/update-sendmeter");
     let r = Fake::default()
         .once(&format!("git -C {DIR} rev-parse origin/issue-12"), 0, HEAD)
+        .once(&format!("git -C {DIR} merge-base --is-ancestor"), 1, "")
         .once(&format!("git -C {} rev-parse HEAD", wt.display()), 0, NEW)
         .reply("gh api repos/jirathip-dev/sendmeter/pulls/34/files", "src/a.rs\n")
         .reply("git", "");
     let cfg = Config::load(&c.config).unwrap();
-    drover::drive::auto_update(&c, &cfg, &r, &mut Vec::new(), "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &r, &mut Vec::new(), "sendmeter").unwrap();
     assert!(r.called(&format!("git -C {} push -q origin HEAD:issue-12", wt.display())));
     assert!(!r.called("gh pr edit"), "{:?}", r.calls.borrow());
     let u = event(&c, "auto-updated").expect("auto-updated");
@@ -159,7 +162,9 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
         .reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
-    assert!(r.called(&format!("gh pr merge 34 -R {REPO} --merge --match-head-commit {NEW}")));
+    assert!(r.called(&format!(
+        "gh pr merge 34 -R {REPO} --squash --delete-branch --match-head-commit {NEW}"
+    )));
 }
 
 fn landed(c: &drover::Ctx, rows: &[(u64, &str, &str)]) {
@@ -221,7 +226,7 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
     let out = watch(&c, &r);
     assert!(out.contains("revert PR #77"), "{out}");
     assert!(r.called(&format!(
-        "git -C {}/state/revert-sendmeter revert -m 1 --no-edit m1",
+        "git -C {}/state/revert-sendmeter revert --no-edit m1",
         d.display()
     )));
     let p = event(&c, "land-paused").expect("paused");
@@ -236,7 +241,9 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
         .reply("gh run view 99", "e2e\tboom: assertion failed\n")
         .reply("gh issue reopen", "");
     watch(&c, &r);
-    assert!(r.called(&format!("gh pr merge 77 -R {REPO} --merge --match-head-commit r3v")));
+    assert!(r.called(&format!(
+        "gh pr merge 77 -R {REPO} --squash --delete-branch --match-head-commit r3v"
+    )));
     assert!(r.called(&format!("gh issue reopen 12 -R {REPO}")));
     assert!(!r.called("gh pr create"), "one revert per culprit");
     let rv = event(&c, "reverted").expect("reverted");

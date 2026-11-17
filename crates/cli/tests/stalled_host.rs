@@ -122,3 +122,34 @@ fn a_configured_host_whose_muxed_call_stalls_after_its_probe_is_skipped_for_the_
         "{out}"
     );
 }
+
+#[test]
+fn hosts_skipped_two_passes_running_raise_one_alert_with_the_calls_not_sent() {
+    let (c, _sh) = setup("stall-alert", "air");
+    let skipped = || {
+        drover::events::read(&c.state)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "hosts-skipped")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let (code, out) = run(&c, &stall("air"), &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(skipped().is_empty(), "one pass is no alert yet: {out}");
+    for pass in 2..=3 {
+        let (code, out) = run(&c, &stall("air"), &["tick"]);
+        assert_eq!(code, 0, "pass {pass}: {out}");
+        let got = skipped();
+        assert_eq!(
+            got.len(),
+            1,
+            "pass {pass}: one alert while the state lasts: {got:?}\n{out}"
+        );
+        let e = &got[0];
+        assert_eq!(e.data["hosts"], json!(["air"]), "{e:?}");
+        assert_eq!(e.data["passes"], json!(2), "{e:?}");
+        assert!(e.data["not_sent"].as_u64().is_some(), "{e:?}");
+        assert!(e.str("step").is_some_and(|s| !s.is_empty()), "{e:?}");
+    }
+}

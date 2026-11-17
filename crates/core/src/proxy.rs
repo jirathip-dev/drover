@@ -53,7 +53,7 @@ pub fn new_key() -> Result<String> {
     ))
 }
 
-/// Record `key` for lane `agent` of `fleet#issue` on `host`; the agent's older keys are revoked (a new spawn supersedes them). Its id.
+/// Record `key` for lane `agent` of `fleet#issue` on `host`; the agent's older keys end only once this one's lane logs its `spawn` (see [`state`]). Its id.
 pub fn mint(
     ctx: &Ctx,
     cfg: &Config,
@@ -62,9 +62,6 @@ pub fn mint(
     host: &str,
 ) -> Result<String> {
     let mut all = keys(ctx);
-    for k in all.iter_mut().filter(|k| k.agent == agent && k.revoked.is_none()) {
-        k.revoked = Some(ctx.now);
-    }
     let sha = sha(key);
     let k = Key {
         id: sha[..8].into(),
@@ -87,7 +84,15 @@ pub fn mint(
 pub fn state(now: u64, events: &[Event], k: &Key) -> &'static str {
     let mine = |e: &&Event| e.kind == "spawn" && e.str("agent") == Some(&k.agent) && e.ts >= k.created;
     let spawns: Vec<&Event> = events.iter().filter(mine).collect();
-    let dead = |e: &Event| e.kind == "lane-dead" && e.str("key").is_some_and(|x| x.ends_with(&format!(":{}", k.agent)));
+    let back = |d: &Event| {
+        let key = format!("alive:{}", d.str("key").unwrap_or_default());
+        events
+            .iter()
+            .any(|e| e.kind == "lane-alive" && e.str("key") == Some(&key))
+    };
+    let dead = |e: &Event| {
+        e.kind == "lane-dead" && e.str("key").is_some_and(|x| x.ends_with(&format!(":{}", k.agent))) && !back(e)
+    };
     let gone = spawns.first().is_some_and(|sp| {
         spawns.len() > 1
             || events
@@ -170,11 +175,7 @@ const DROP: [&str; 9] = [
 pub fn serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<()> {
     let l =
         TcpListener::bind(("127.0.0.1", cfg.proxy.port)).with_context(|| format!("proxy port {}", cfg.proxy.port))?;
-    let clock = || {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(ctx.now, |d| d.as_secs())
-    };
+    let clock = crate::clock::wall;
     serve_on(ctx, cfg, r, &l, &clock)
 }
 
@@ -190,7 +191,7 @@ pub fn serve_on(
         for c in l.incoming().flatten() {
             s.spawn(move || {
                 if let Err(e) = handle(ctx, cfg, r, c, clock()) {
-                    eprintln!("proxy: {e:#}");
+                    crate::stderr!("proxy: {e:#}");
                 }
             });
         }
@@ -277,7 +278,7 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
     let res = r
         .stream("curl", &argv(&["-sS", "-N", "-g", "--http1.1", "-K", "-"]), &conf)
         .and_then(|up| relay(&mut BufReader::new(up), &mut c));
-    let _ = std::fs::remove_file(&tmp);
+    std::fs::remove_file(&tmp).ok();
     if res.is_err() {
         return reply(&mut c, 502, "upstream did not answer");
     }
@@ -312,7 +313,7 @@ fn relay(up: &mut impl BufRead, c: &mut TcpStream) -> Result<()> {
     loop {
         match up.read(&mut buf)? {
             0 => return Ok(()),
-            n => c.write_all(&buf[..n])?,
+            n => c.write_all(buf.get(..n).unwrap_or_default())?,
         }
     }
 }

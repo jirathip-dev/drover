@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::runner::{argv, ok, Runner};
-use crate::Ctx;
+use crate::{events::Json, Ctx};
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -34,9 +34,71 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     if json {
         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
     } else {
-        writeln!(out, "{}", rows.join("\n"))?;
+        let red = std::io::IsTerminal::is_terminal(&std::io::stdout());
+        let paint = |l: &String| {
+            if red && l.starts_with("! hygiene") {
+                format!("\x1b[31m{l}\x1b[0m")
+            } else {
+                l.clone()
+            }
+        };
+        writeln!(out, "{}", rows.iter().map(paint).collect::<Vec<_>>().join("\n"))?;
     }
     Ok(i32::from(rows.iter().any(|line| line.starts_with('✗'))))
+}
+
+const VIEW: &str = "name,isArchived,squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed";
+
+fn hygiene(
+    r: &dyn Runner,
+    (name, f): (&str, &crate::config::Fleet),
+    h: &crate::config::Hygiene,
+    view: Option<&serde_json::Value>,
+    rows: &mut Vec<String>,
+) {
+    rows.push(format!("✓ hygiene {name} — {}", h.line()));
+    let repo = &f.repo;
+    let m = h.merge.as_deref().unwrap_or("off");
+    let did = format!("{:?}", f.merge).to_lowercase();
+    if m != "off" && m != did {
+        rows.push(format!(
+            "! hygiene {name} — merge is {did}, hygiene says {m} → set [fleet.{name}] merge = \"{m}\""
+        ));
+    }
+    let flag = match m {
+        "squash" => Some(("squashMergeAllowed", "squash-merge")),
+        "merge" => Some(("mergeCommitAllowed", "merge-commit")),
+        "rebase" => Some(("rebaseMergeAllowed", "rebase-merge")),
+        _ => None,
+    };
+    if let Some((_, opt)) = flag.filter(|(k, _)| view.is_some_and(|v| v.at(k) == false)) {
+        rows.push(format!(
+            "! hygiene {name} — merge: {repo} does not allow {m}, hygiene says {m} → gh repo edit {repo} --enable-{opt}"
+        ));
+    }
+    let at = format!("origin/{}:.drover/arch.toml", f.integration);
+    let dir = f.local_path().display().to_string();
+    let arch = match r.run("git", &argv(&["-C", &dir, "show", &at])) {
+        Ok(o) if o.code == 0 => toml::from_str::<toml::Table>(&o.stdout).ok(),
+        Ok(o) if o.stderr.contains("does not exist") => Some(toml::Table::new()),
+        _ => None,
+    };
+    let Some(arch) = arch else { return };
+    let policy = arch
+        .get("comments")
+        .and_then(|c| c.get("policy"))
+        .and_then(|p| p.as_str());
+    let policy = policy.unwrap_or("unset");
+    if h.comments.as_deref() == Some("strict") && policy != "strict" {
+        rows.push(format!(
+            "! hygiene {name} — comments is {policy}, hygiene says strict → set [comments] policy = \"strict\" in .drover/arch.toml"
+        ));
+    }
+    if h.docs.as_deref() == Some("on") && !arch.contains_key("docs") {
+        rows.push(format!(
+            "! hygiene {name} — docs: .drover/arch.toml has no [docs], hygiene says on → drover setup writes it"
+        ));
+    }
 }
 
 fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
@@ -72,13 +134,11 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     );
     for (name, fleet) in &cfg.fleet {
         let repo = &fleet.repo;
-        let view = ok(r, "gh", &["repo", "view", repo, "--json", "name,isArchived"]);
+        let view = ok(r, "gh", &["repo", "view", repo, "--json", VIEW]);
         let read = format!("gh {name} — read {repo} → gh auth refresh");
         row(rows, view.is_ok(), '✗', &read);
-        let view = view
-            .ok()
-            .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
-        if view.is_some_and(|v| v["isArchived"] == true) {
+        let view: Option<serde_json::Value> = view.ok().and_then(|v| serde_json::from_str(&v).ok());
+        if view.as_ref().is_some_and(|v| v.at("isArchived") == true) {
             rows.push(format!(
                 "! gh {name} — {repo} is archived → remove [fleet.{name}] from fleet.toml"
             ));
@@ -94,6 +154,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || git clone https://github.com/{repo}.git {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
+        hygiene(r, (name, fleet), &cfg.hygiene(name), view.as_ref(), rows);
         if let Some(m) = fleet
             .land
             .as_ref()
@@ -202,9 +263,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let line = format!("serve hosts — [{hosts}] → set [serve] allowed_hosts = [\"<name>.ts.net\"]");
     row(rows, !hosts.is_empty(), '✗', &line);
     let addr = "127.0.0.1:7777";
-    let line = format!("serve — listening on {addr} → drover serve --addr {addr}");
-    let up = ok(r, "lsof", &["-nP", "-iTCP:7777", "-sTCP:LISTEN"]).is_ok();
-    row(rows, up, '✗', &line);
+    serve_rows(ctx, cfg, r, rows, addr);
     let tailscale = r.run("tailscale", &argv(&["serve", "status"]));
     let line = format!("tailscale — serve maps to {addr} → tailscale serve --bg --https=8443 http://{addr}");
     let bad = if tailscale.is_err() { '!' } else { '✗' };
@@ -268,7 +327,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         format!("tick step — stuck in {step} for {age} → stop the tick; what it waits on is not answering")
     });
     row(rows, stuck.is_none(), '✗', &line);
-    for (label, state) in crate::timer::drift(ctx, cfg, r) {
+    for (label, state) in crate::timer::states(ctx, cfg, r) {
         let line = format!("timer — {label} {state} → drover timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }
@@ -286,7 +345,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let on = crate::hosts::On::new(r, Some(m));
         let Some((tags, home)) = crate::hosts::probe(&on) else {
             let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");
-            let why = ok(&on, "true", &[] as &[&str]).map_or_else(ssh, |_| "probe: unreadable answer".into());
+            let why = ok::<&str>(&on, "true", &[]).map_or_else(ssh, |_| "probe: unreadable answer".into());
             rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
             rows.extend(on.shed().map(|_| format!("✗ host {name} shed — unreachable")));
             continue;
@@ -339,6 +398,21 @@ fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
     ))
 }
 
+fn serve_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>, addr: &str) {
+    let line = format!("serve — listening on {addr} → drover serve --addr {addr}");
+    let up = ok(r, "lsof", &["-nP", "-iTCP:7777", "-sTCP:LISTEN"]).is_ok();
+    row(rows, up, '✗', &line);
+    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
+    let (at, job) = (cfg.serve.addr(), crate::timer::job_pid(ctx, r, label));
+    let held = crate::timer::listeners(r, &at);
+    if let (Ok(job), false) = (job, held.is_empty()) {
+        let runs = job.map_or("nothing".into(), |p| format!("pid {p}"));
+        let fix = crate::timer::restart_cmd(ctx, label);
+        let line = format!("serve job — pid {held:?} listens on {at}, {label} runs {runs} → {fix}");
+        row(rows, held.iter().all(|p| Some(*p) == job), '✗', &line);
+    }
+}
+
 /// The launchd job: a plist under ~/Library/LaunchAgents that runs `drover serve`.
 pub fn serve_plist(ctx: &Ctx) -> Option<std::path::PathBuf> {
     serve_plists(ctx).into_iter().next()
@@ -385,7 +459,7 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         .unwrap_or_default();
     for id in ids {
         let a = agents.as_array().into_iter().flatten().find(|a| a["id"] == id.as_str());
-        let Some(cmd) = a.and_then(|a| a["cmd"][0].as_str()) else {
+        let Some(cmd) = a.and_then(|a| a.at("cmd").at(0).as_str()) else {
             rows.push(format!("✗ shed agent {id} — not installed → shed agents add {id}"));
             continue;
         };

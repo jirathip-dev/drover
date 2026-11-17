@@ -1,0 +1,1 @@
+- SNAPSHOT_FAILED: kill: the wip snapshot failed (index restored, nothing pushed, pane stays)

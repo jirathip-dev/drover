@@ -55,9 +55,11 @@ integration = "staging"
 # premerge = ["drover cap-check --config ci/cap.toml", "cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = the cap check if ci/cap.toml
 # cap_script = "scripts/line-cap.sh"   # #754: `drover cap` runs it and reads its `N / cap M` lines; unset = the first premerge check naming a cap, else the built-in Rust count
 merge_label = "merge-ready"   # the full CI runs only with this label; drover adds it on a PASS at the head (docs/ci.md)
+# merge = "merge"   # #1097: default "squash": one commit per PR carrying its why notes, lane branch deleted; "merge" keeps every commit
 # update_ready = "always"   # catch every behind PASSed PR up with integration; default "needed": only on a conflict or a strict branch rule
 # line_cap = 10000   # `drover cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
 # hotspots = "off"   # #889: `drover tick` runs `drover hotspots` weekly per fleet (default "weekly"); "off" opts out
+# hygiene = { merge = "merge", docs_trust = [] }   # #1101: this fleet's keys over [hygiene]'s (docs/config.md#hygiene-1101); "off" opts a key out
 # lessons = "off"   # #419: `drover tick` runs `drover lesson` weekly per fleet (default "weekly"); "off" opts out
 # max_impl = 2   # optional caps (CAP); unset = no cap, the host check protects the Mac
 # max_rev = 2
@@ -68,6 +70,7 @@ merge_label = "merge-ready"   # the full CI runs only with this label; drover ad
 # env = { PORT = "$DROVER_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
 # port_range = "41000-41999"   # DROVER_PORT's range (the default)
 # ui_paths = ["web/**", "assets/**"]   # #417: a PR touching these goes through the verify stage (needs [fleet.web.role.verify])
+# sandbox = "srt"   # #782 spike: start each lane's agent inside sandbox-runtime (`srt` on PATH); off by default (docs/spikes/lane-sandbox.md)
 # ask_thread = "t6"   # #541: lane asks go to this orchestrator thread first (default: the repo's most recently active one)
 
 # #294: serial groups: at most `max` (default 1) issues touching `paths` in flight at once (docs/config.md).
@@ -160,7 +163,9 @@ effort = "high"      # default for roles without `effort`; dsh accepts only "non
 # `deny_commands` replaces it (`[]` = off), its `deny_commands_add` extends it; see docs/lanes.md.
 fast_secs = 60       # `drover timer install`: the fast job (`drive --fast`: record verdicts, merge PASS + green)
 slow_secs = 300      # and the tick (check + the full pass that starts lanes)
-max_parallel_spawns = 6   # the pass launches each spawn as a detached kick, this many at once (0: spawn in the pass)
+max_parallel_spawns = 6   # the pass launches each spawn as a detached kick, this many at once on the main host (0: spawn in the pass)
+start_max = 2   # lanes starting at once on a remote host that sets no `start_max` of its own
+start_release = "started"   # a start frees its slot once its harness is up ("started") or its prompt is confirmed ("confirmed")
 spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or whose pid is gone) is stale
 # webhook_poll_minutes = 10   # #626: with GitHub webhooks on, the fast step's catch-up PR read runs this often
 # keychain_readers = 3   # #710: more Keychain readers waiting over 60 s alert `keychain-jammed` (troubleshooting §2)
@@ -176,6 +181,7 @@ spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or
 # slo_api_minutes = 10
 # slo_idle_minutes = 20   # #855: no lane working this long with spawnable work queued: `slo-idle`, a heal, then `stuck`
 # slo_tick_minutes = 10   # #855: a tick running longer: `slo-tick`; the next fast step stops it, then `stuck` if it lives
+# slo_pass_minutes = 30  # #1183: no slow drive pass of a fleet this long: the `Drive is stuck` card and one push
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin

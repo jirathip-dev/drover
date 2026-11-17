@@ -1,6 +1,6 @@
 use crate::config::{self, Config};
 use crate::devices::sha256;
-use crate::events::{emit, working, Event};
+use crate::events::{emit, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::Runner;
 use crate::{orchestrator, Ctx};
@@ -14,7 +14,7 @@ use std::path::Path;
 /// `drover config propose <thread> <file>`: `file` is the whole new fleet.toml; validated, its diff is the card.
 pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file: &Path) -> Result<()> {
     let events = working(&ctx.state)?;
-    let t = orchestrator::find(&events, thread)?;
+    let fleet = orchestrator::fleet_of(&events, thread)?;
     let text = std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
     Config::parse(&text).context("the proposed fleet.toml is invalid")?;
     let cur = std::fs::read_to_string(&ctx.config)?;
@@ -27,11 +27,7 @@ pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file:
     crate::devices::write0600(&stored_at(ctx, &id), text.as_bytes())?;
     stored(ctx, &id, Some(&sha))?;
     let d = json!({"thread": thread, "id": id, "diff": diff, "sha": sha, "base": sha256(cur.as_bytes())});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, &t.fleet, None, "config-propose", d),
-    )?;
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "config-propose", d))?;
     Ok(writeln!(out, "{id}")?)
 }
 
@@ -54,27 +50,31 @@ fn stored(ctx: &Ctx, id: &str, sha: Option<&str>) -> Result<String> {
 pub fn diff(a: &str, b: &str) -> String {
     let (a, b): (Vec<&str>, Vec<&str>) = (a.lines().collect(), b.lines().collect());
     let mut l = vec![vec![0u32; b.len() + 1]; a.len() + 1];
+    let at = |l: &[Vec<u32>], i: usize, j: usize| l.get(i).and_then(|r| r.get(j)).copied().unwrap_or(0);
     for i in (0..a.len()).rev() {
         for j in (0..b.len()).rev() {
-            l[i][j] = if a[i] == b[j] {
-                l[i + 1][j + 1] + 1
+            let v = if a.get(i) == b.get(j) {
+                at(&l, i + 1, j + 1) + 1
             } else {
-                l[i + 1][j].max(l[i][j + 1])
+                at(&l, i + 1, j).max(at(&l, i, j + 1))
             };
+            if let Some(c) = l.get_mut(i).and_then(|r| r.get_mut(j)) {
+                *c = v;
+            }
         }
     }
     let (mut i, mut j, mut out, mut sec, mut shown) = (0, 0, String::new(), "", "");
     while i < a.len() || j < b.len() {
-        let line = if i < a.len() && j < b.len() && a[i] == b[j] {
+        let line = if let Some(&x) = a.get(i).filter(|x| b.get(j) == Some(*x)) {
             (i, j) = (i + 1, j + 1);
-            sec = if a[i - 1].starts_with('[') { a[i - 1] } else { sec };
+            sec = if x.starts_with('[') { x } else { sec };
             continue;
-        } else if i < a.len() && (j == b.len() || l[i + 1][j] >= l[i][j + 1]) {
+        } else if i < a.len() && (j == b.len() || at(&l, i + 1, j) >= at(&l, i, j + 1)) {
             i += 1;
-            format!("- {}\n", a[i - 1])
+            format!("- {}\n", a.get(i - 1).copied().unwrap_or_default())
         } else {
             j += 1;
-            format!("+ {}\n", b[j - 1])
+            format!("+ {}\n", b.get(j - 1).copied().unwrap_or_default())
         };
         if sec != shown {
             (out, shown) = (out + &format!("  {sec}\n"), sec);
@@ -144,9 +144,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         }
         let text = stored(ctx, id, p.str("sha"))?;
         let (new, backup, ok) = install(ctx, r, &cur, &text)?;
-        d.as_object_mut()
-            .unwrap()
-            .extend([("backup".into(), json!(backup)), ("doctor".into(), json!(ok))]);
+        d.put("backup", json!(backup)).put("doctor", json!(ok));
         let mut kicked = String::new();
         for (f, _) in new
             .fleet
@@ -160,18 +158,18 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         }
         format!(
             "config {id} applied by owner, backup kept, doctor {}{kicked}",
-            ["✗ (run drover doctor)", "✓"][usize::from(ok)]
+            if ok { "✓" } else { "✗ (run drover doctor)" }
         )
     } else {
         format!("config {id} discarded by owner")
     };
-    d["applied"] = json!(apply);
+    d.put("applied", json!(apply));
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, &p.fleet, None, "config-settled", d),
     )?;
-    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
+    orchestrator::tell(ctx, cfg, r, thread, &line);
     Ok(line)
 }
 
@@ -399,6 +397,6 @@ pub fn edit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &ConfigChange, by: &str)
     emit(&ctx.state, &new, Event::new(ctx.now, fleet, None, "config-edit", d))?;
     Ok(format!(
         "fleet.toml edited by {by}, backup kept, doctor {}",
-        ["✗ (run drover doctor)", "✓"][usize::from(ok)]
+        if ok { "✓" } else { "✗ (run drover doctor)" }
     ))
 }

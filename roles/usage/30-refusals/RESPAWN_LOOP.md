@@ -1,0 +1,1 @@
+- RESPAWN_LOOP: spawn: [limits] respawn_max (3) failed starts of the issue's role in respawn_window_minutes (60); one owner ask, [try again] or [park]
