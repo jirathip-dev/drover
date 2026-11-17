@@ -12,7 +12,7 @@ use crate::gate::{gate, refused, Refusal};
 use crate::handover::Handover;
 use crate::host::{self, Host};
 use crate::runner::{Out, Runner};
-use crate::snapshot::Snapshot;
+use crate::snapshot::{key_in, out, Snapshot};
 use crate::{devices, gh, lanes, queue, term, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::json;
@@ -313,7 +313,6 @@ impl Runner for Memo<'_> {
         cache().insert(key, (t, out.clone()));
         Ok(crate::snapshot::out(out))
     }
-    /// #298: a call with stdin (`shed connect`, a file write) is never a cached read.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
         self.run_for(prog, args, input, crate::runner::limit(prog, args))
     }
@@ -322,8 +321,7 @@ impl Runner for Memo<'_> {
             return self.run(prog, args);
         }
         if self.4.ts > 0 && crate::snapshot::remote(prog) {
-            let read = self.4.reads.get(&crate::snapshot::key_in(prog, args, input));
-            return Ok(crate::snapshot::out(read.cloned().flatten()));
+            return Ok(out(self.4.reads.get(&key_in(prog, args, input)).cloned().flatten()));
         }
         self.0.run_for(prog, args, input, limit)
     }
