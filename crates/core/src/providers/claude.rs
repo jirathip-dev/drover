@@ -170,6 +170,9 @@ impl Provider for Claude {
         let [md, json] = LOCAL_FILES;
         format!(" && mkdir -p .claude && cp {settings} {json} && cp {role} {md}")
     }
+    fn chat_settings(&self, profile: &std::path::Path) -> std::path::PathBuf {
+        profile.into()
+    }
     fn acp_meta(&self) -> Option<serde_json::Value> {
         let global = crate::config::home().join(".claude/CLAUDE.md");
         let settings = json!({"claudeMdExcludes": [global]});

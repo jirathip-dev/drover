@@ -417,3 +417,26 @@ fn bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address() {
     let repin = ev.iter().find(|e| e.kind == "cloud-repin").expect("cloud-repin logged");
     assert_eq!(repin.str("was"), Some("ssh-ed25519 AAAAboatkey"));
 }
+
+#[test]
+fn bootstrap_of_a_shed_acp_boat_host_with_no_proxy_token_refuses_before_any_boat_call() {
+    let (c, bin) = setup("boat-no-token", "small");
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        toml.replace("cloud = \"boat\"", "cloud = \"boat\"\nruntime = \"shed-acp\""),
+    )
+    .unwrap();
+    let cfg = Config::load(&c.config).unwrap();
+    let r = Boat(Fake::default().reply("herdr machine list --json", "[]"), bin.clone());
+    let e = format!(
+        "{:#}",
+        drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut vec![]).unwrap_err()
+    );
+    assert!(
+        e.contains("REFUSED NO_PROXY_TOKEN") && e.contains("claude setup-token"),
+        "{e}"
+    );
+    assert_eq!(calls(&bin), "", "no boat call, so no VM");
+    assert!(read(&c.state).unwrap().to_vec().is_empty(), "no cloud-start");
+}

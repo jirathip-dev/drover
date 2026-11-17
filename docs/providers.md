@@ -45,7 +45,7 @@ key_env = "DEEPSEEK_API_KEY"     # the variable name
 ```
 
 drover reads `GET https://api.deepseek.com/user/balance` with `curl`, at most every 10 min.
-The key goes in a curl config on stdin, never in argv, so `ps` can't show it. The Host tab shows
+The key goes in a curl config on stdin, never in argv, so `ps` can't show it. `GET /api/v1/host` carries
 `deepseek · USD 2.28 · ok`. The row is hidden when no key is set. If `env_file` is set but unreadable, or
 lacks the variable, a dim `deepseek · key not found in <file>` row shows instead (or the refusal, for a loose file).
 `drover check` logs `provider-low` once each time the balance drops below `warn_below`.

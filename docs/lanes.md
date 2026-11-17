@@ -162,7 +162,7 @@ So do `drover ask`, `verdict` and `answer`, and the board's answer, override, ex
 moves. A kick returns at once: a detached `kick --now` (output in `<state>/kick.log`) drives that issue's
 due steps alone under the drive lock, logs `kick`, and coalesces kicks within 10 s (or while the lock is
 busy) into one follow-up. A lane on another host kicks the main host. The tick and fast timers stay the
-safety net for CI, outside merges and stalls; the Host tab shows the last kick.
+safety net for CI, outside merges and stalls.
 
 ### Denied commands (#216)
 
@@ -240,6 +240,8 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | a respawn refused for good (`RESPAWN_LOOP`, `DESIGN_MAIN_ONLY`, `HOST_OFFLINE`…) (#914) | `needs-human RESPAWN_REFUSED` (`RESPAWN_LOOP`: its one owner ask instead); `check` alerts `respawn-refused` once per lane and code |
 | a dead, stalled, silent or released lane's respawn (#908) | admitted like any spawn: `HOST_BUSY`, `MEM_LOW` and `DISK_LOW` hold it to a later pass, and `waiting` names the hold (`held: <code> <why>`); at most `[limits] respawn_per_pass` (default 2; `respawn_per_pass` in `[fleet.<n>]` overrides it) start a pass, the rest wait `RESPAWN_PACED`, still ahead of new starts |
 | a prompt drive or check sends a lane shed has asleep (`hibernated`: nudge, DECISION, turn, release, heads-up) (#908) | waking it starts a whole agent, so the host is admitted first; busy, the prompt is held and sent on a later pass |
+| an ACP lane shed reports `running`, `waiting-approval` or `rate-limited`, or one drover shows `waiting-owner` (its turn ended on an open ask or `turn blocked`/`need-input`, laid over shed's `done`) (#983) | held: no nudge, no stall, no `lane-dead`; the board and `/api/v1` show shed's state and note as-is |
+| a `rate-limited` lane (#983) | shown with shed's reset time; nothing until the owner's [wait]: `drover limit <fleet> <issue>` sends one `continue` at that time (`NO_RESET` when shed gave none); logged `limit-picked` `by: owner`, an orchestrator's relay `--typed` with the owner's line, `--by` names who |
 | a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
 | merged lanes left | `clean --yes` |
 
@@ -338,6 +340,17 @@ twice on the same head. A wait (a hold, CI, a spawn slot, HOST_BUSY, `slo-idle`,
 its row names the wait. `slo-ok` ends the episode once it recovers, and the card clears; an issue's line goes as
 soon as its lane starts. The card's hint is `drover waiting <fleet>`, and each issue on it has a [force] that runs
 its `drover waiting` next command (a spawn) once with `--force`, past the load limit, logged `override` `by: owner`.
+
+#1216: an in-flight issue with no push, verdict or lane event (`spawn`, `turn-end`, `pushed`) for
+`[limits] stall_restart_hours` (2; `stall_restart_hours` in `[fleet.<n>]` overrides it) is restarted once:
+`stall-restart` (`by: drover`), then `spawn <role> --supersede` (its wip saved to `wip/`, its lane cleaned, the same
+role respawned). A load wait (`HOST_BUSY`, `MEM_LOW`, `DISK_LOW`) that long logs `stall-move` instead: the next
+spawn skips that host, whatever its worktree holds, and goes to another enabled host under its limits that fits the
+tags, its wip saved first. A named wait never counts: held until #N, CI running or red, a spawn slot, an open ask,
+or a `turn working` younger than the window; nor does an issue drive is on (its pass holds the issue, or its
+last step since was refused or failed for another reason than load: that refusal or the same-failure card names it). A second stall on the same step, a failed restart, or a move with no
+free host is a stuck card. Only changes to tracked files and commits not on origin pin a lane to its host;
+untracked files never do (drover's scratch, `body.md` among `OWN_FILES`, is never saved; the rest travel in `wip/`).
 
 `drover check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
