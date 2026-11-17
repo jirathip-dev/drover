@@ -617,7 +617,7 @@ fn a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned() {
 
 #[test]
 fn a_pr_closed_outside_drover_closes_or_blocks_the_issue_once() {
-    for (issues, want) in [(r#"[{"number":12}]"#, "closed"), ("[]", "blocked")] {
+    for (issues, want) in [("CLOSED", "closed"), ("OPEN", "blocked")] {
         let c = setup(&format!("drive-external-{want}"));
         lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
         ev(
@@ -626,9 +626,10 @@ fn a_pr_closed_outside_drover_closes_or_blocks_the_issue_once() {
             "verdict",
             json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
         );
+        let shut = json!({"data": {"repository": {"i12": {"state": issues}}}}).to_string();
         let r = fake(NONE)
             .reply("gh pr view issue-12", &gone_pr("CLOSED"))
-            .reply("gh issue list", issues)
+            .reply("gh api graphql -f", &shut)
             .reply("git -C", "");
         let (out, _) = drive(&c, &r);
         assert!(

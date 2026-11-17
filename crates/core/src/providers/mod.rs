@@ -256,6 +256,9 @@ pub trait Provider: Sync {
     fn acp_profile(&self, _settings: &str, _role: &str) -> String {
         String::new()
     }
+    fn chat_settings(&self, profile: &std::path::Path) -> std::path::PathBuf {
+        profile.join("settings.json")
+    }
     fn acp_meta(&self) -> Option<serde_json::Value> {
         None
     }

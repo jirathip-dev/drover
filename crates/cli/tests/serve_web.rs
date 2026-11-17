@@ -507,7 +507,13 @@ fn lanes_group_by_fleet_with_others() {
             (Some("synergy"), "synergy-design-5", "design", "done".into(), false),
             (Some("synergy"), "w3", "other", "working".into(), false),
             (None, "side-project", "other", "idle".into(), false),
-            (Some("synergy"), "synergy-impl-7", "impl", "blocked".into(), false),
+            (
+                Some("synergy"),
+                "synergy-impl-7",
+                "impl",
+                "waiting-approval".into(),
+                false
+            ),
             (Some("sendmeter"), "sendmeter-rev-9-r1", "rev", "dead".into(), false),
         ]
     );

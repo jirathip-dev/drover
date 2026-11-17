@@ -185,7 +185,7 @@ pub fn answer(_sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[Str
                 w.procs[me].starting = Some(pane.clone());
                 let agent = Some(pane.clone());
                 let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
-                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 3;
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 3 && pane.contains("-rev-");
                 if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, &pane);
                 }
@@ -254,6 +254,10 @@ fn unmodelled() -> Out {
 
 fn shed(w: &mut World, a: &[&str]) -> Out {
     let now = w.now;
+    if a == ["--version"] {
+        let (v, b) = (drover::shed::proto::VERSION, drover::shed::proto::BUILD);
+        return ok(format!("shed {v} ({b})\n"));
+    }
     let [m, p] = a else { return unmodelled() };
     let p: Value = serde_json::from_str(p).unwrap_or_default();
     let name = p["name"].as_str().unwrap_or_default().to_string();
@@ -370,6 +374,14 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
             ok(open.map(|(b, p)| format!("{}\n", m.pr_json(b, p))).collect::<String>())
         }
         ["api", "graphql", "--paginate", "--jq", jq, ..] if jq.contains("issues") => ok(""),
+        ["api", "graphql", "-f", _, "-f", _, "-f", q] if q.contains(":issue(number:") => {
+            let repo: serde_json::Map<String, Value> = m
+                .closed
+                .iter()
+                .map(|n| (format!("i{n}"), json!({"state": "CLOSED"})))
+                .collect();
+            ok(json!({"data": {"repository": repo}}).to_string())
+        }
         ["api", "-i", ..] => ok(format!("HTTP/2.0 200 OK\netag: \"v{}\"\n\n[]", m.version)),
         ["api", path, "--jq", _] if path.contains("/rules/branches/") => ok("true\n"),
         ["api", path, "--paginate", ..] if path.ends_with("/files") => ok(""),
