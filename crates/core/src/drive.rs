@@ -899,7 +899,8 @@ fn one(
     ACTS.with_borrow_mut(BTreeMap::clear);
     ROOM.set((false, None));
     let t = crate::clock::instant();
-    let early = cfg.limits.max_parallel_spawns > 0 && KICK.get().is_none();
+    let one_slot = cfg.limits.max_parallel_spawns == 1 && crate::starts::fix_due(&working(&ctx.state)?, name);
+    let early = cfg.limits.max_parallel_spawns > 0 && KICK.get().is_none() && !one_slot;
     let res = if early {
         starts(ctx, cfg, r, out, name, fast)
     } else {
@@ -1352,7 +1353,9 @@ fn pass(
             let ends =
                 gone.filter(|g| (w.next_cmd.is_none() || g.1.starts_with("respawning")) && !waiting::resumed(g.0));
             if let Some(g) = ends.filter(|_| !fast) {
-                if crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, g.0)? {
+                if crate::breaker::unlanded(ctx, cfg, r, out, fleet)?
+                    || crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, g.0)?
+                {
                     continue;
                 }
             }
@@ -1483,7 +1486,10 @@ fn pass(
                 &a,
                 stall::Act::Respawn(_, "failed start") | stall::Act::Escalate("START_FAILED", _)
             );
-            if start && crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, "no output after its spawn")? {
+            if start
+                && (crate::breaker::unlanded(ctx, cfg, r, out, fleet)?
+                    || crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, "no output after its spawn")?)
+            {
                 continue;
             }
             match a {

@@ -21,8 +21,9 @@ Every difference is where the JSON differs from what the old tabs drew, or where
   blocked-lane `prompt` card is not a card in the JSON.
 - **Tab bar:** the manifest's places in order, `[queue] [events] [lanes]`; no `[chat·N]` (owner default: chat is
   cooee core's) and no Host tab.
-- **Queue:** the screen's own blocks: the screen's `[fleets…]` and `[drive all now]` actions, the repo chips (`[all]`
-  first, no per-repo counts or red dots), the stats row (merged · 7d, lanes, rounds / issue with sparklines), then a
+- **Queue:** the screen's own blocks: the screen's `[fleets…]` and `[drive all now]` actions, the repo chips (`[all N]`
+  first, `name N` with a red dot when it needs you, #1089), the stats row (merged · 7d, lanes, rounds / issue with
+  sparklines), the counts row (needs you · in progress · queued · done today), then a
   card per fleet with its `driving` badge, its sections (`in progress`, `queued`) and rows whose title holds the issue
   number and whose badge is the stage. The old `git log --graph` tree, `[config]`, the stage chips line and the
   `in impl 1h 26m` time words are not in the JSON.

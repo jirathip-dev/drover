@@ -11,6 +11,7 @@
 1 ask_ids
 2 ask_scale
 1 asks
+2 autonomy
 4 backlog
 4 blocked_respawn
 1 board_errors
@@ -78,6 +79,7 @@
 3 lane_asks
 1 lane_fold
 4 lane_hog
+2 lane_host_move
 4 lane_sandbox
 1 lanes_sheet
 2 lesson
@@ -161,6 +163,7 @@
 3 shed
 4 shed_native
 4 shed_others
+4 shed_pin
 4 shed_version
 1 sim
 1 slo
