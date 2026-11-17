@@ -93,6 +93,11 @@ impl Boat<'_> {
                 "wait" => json!({"outcome": "matched", "terminal": t[&name]}),
                 _ => json!({"text": "> the brief"}),
             },
+            "kill" if t.contains_key(&name) => {
+                t.get_mut(&name).unwrap()["state"] = json!("exited");
+                t[&name].clone()
+            }
+            "rm" if t.contains_key(&name) => t.remove(&name).unwrap(),
             _ => {
                 let e = json!({"code": -32001, "message": format!("no_such_terminal: {name}")});
                 return json!({"jsonrpc": "2.0", "id": id, "error": e});
@@ -693,6 +698,89 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
         assert!(status.contains("401") && body.contains("expired"), "{status} {body}");
         assert_eq!(seen.lock().unwrap().len(), 1, "refused calls never reach upstream");
     }
+}
+
+#[test]
+fn a_start_that_never_runs_leaves_the_running_lanes_key_live() {
+    let (c, _) = setup("racp-key-keep", &["boat1"]);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let mint = || {
+        let k = drover::proxy::new_key().unwrap();
+        drover::proxy::mint(&c, &cfg, &k, ("sendmeter", 12, "sendmeter-impl-12"), "boat1").unwrap()
+    };
+    let (a, _refused) = (mint(), mint());
+    let (code, list) = run(&c, &Fake::default(), &["hosts", "keys"]);
+    assert!(
+        code == 0 && list.contains(&format!("{a}  live    sendmeter-impl-12 on boat1")),
+        "{list}"
+    );
+}
+
+#[test]
+fn a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane() {
+    lane_key_401_respawns_the_lane("racp-key-revoked", "401 lane key cd26f051 revoked");
+}
+
+#[test]
+fn an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane() {
+    lane_key_401_respawns_the_lane("racp-key-unknown", "401 unknown lane key");
+}
+
+fn lane_key_401_respawns_the_lane(name: &str, why: &str) {
+    let (c, _) = setup(name, &["boat1"]);
+    let _main = FakeShed::attached(&c);
+    let f = spawn_fake();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{o}");
+    let err = format!("auth: Failed to authenticate. API Error: {why}");
+    let note = json!({"state": "error", "note": err});
+    b.machines
+        .borrow_mut()
+        .get_mut("boat1")
+        .unwrap()
+        .terms
+        .get_mut("sendmeter-impl-12")
+        .unwrap()["reported"] = note;
+    let (code, o) = run(&c, &b, &["check"]);
+    assert_eq!(code, 0, "{o}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    assert!(ev.iter().all(|e| e.kind != "signed-out"), "no host sign-out: {o}");
+    assert_eq!(drover::hosts::login_hold(&ev, Some("boat1")), None, "no host hold");
+    let later = drover::Ctx {
+        now: c.now + 120,
+        ..c.clone()
+    };
+    let (code, o) = run(&later, &b, &["drive"]);
+    assert_eq!(code, 0, "{o}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    assert_eq!(spawned(&c).len(), 2, "the lane is respawned: {o}");
+    assert_eq!(ev.iter().filter(|e| e.kind == "respawn").count(), 1, "{o}");
+}
+
+#[test]
+fn a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login() {
+    let (c, _) = setup("racp-signed-out", &["boat1"]);
+    let _main = FakeShed::attached(&c);
+    let f = spawn_fake();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{o}");
+    let note = json!({"state": "error", "note": "auth: API Error: 401 · Please run /login"});
+    b.machines
+        .borrow_mut()
+        .get_mut("boat1")
+        .unwrap()
+        .terms
+        .get_mut("sendmeter-impl-12")
+        .unwrap()["reported"] = note;
+    let (code, o) = run(&c, &b, &["check"]);
+    assert_eq!(code, 0, "{o}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let s: Vec<_> = ev.iter().filter(|e| e.kind == "signed-out").collect();
+    assert_eq!(s.len(), 1, "{o}");
+    let why = s[0].str("reason").unwrap();
+    assert!(why.contains("[proxy] token-file") && !why.contains("/login"), "{why}");
 }
 
 #[test]
