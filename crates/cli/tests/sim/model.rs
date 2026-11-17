@@ -180,7 +180,7 @@ fn reply(w: &mut World, me: usize, prog: &str, args: &[String]) -> Out {
                 w.procs[me].starting = Some(pane.clone());
                 let agent = Some(pane.clone());
                 let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
-                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 3 && pane.contains("-rev-");
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 4 && pane.contains("-rev-");
                 if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, &pane);
                 }
