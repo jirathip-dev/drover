@@ -1,0 +1,12 @@
+Decided: lane-state, pulse and exits come only from the terminal on the host its latest spawn names
+Because: "A lane's state comes only from the terminal on the host its latest spawn names"
+Decided: an exited same-name terminal on another host is removed with shed rm when a sweep lists it; a running one is left
+Because: "It never removes a running one; two running copies stay a `lane-dup`"
+Rejected: a flip-back guard in stamp — other-host rows no longer reach stamp, and on old rows with no host it could leave a running lane stuck at gone
+Decided: staging build fix: the sim's planted bug trips only on a rev lane's third start
+Because: crates/core/src/starts.rs:126
+Decided: staging build fix: serve.rs size baseline 3591, its size on staging since #1108
+Because: .drover/arch-baseline.txt:24
+Rejected: trimming serve.rs here — a refactor of #1108's code this issue did not ask for
+Check: lane_host_move fails at a55e819a and passes at head; arch-check reports no serve.rs size violation at head
+Owner: a moved lane stops flipping gone/working every pass; also fixes two staging CI breaks from other merges
