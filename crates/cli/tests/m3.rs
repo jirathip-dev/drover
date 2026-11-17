@@ -324,7 +324,7 @@ fn board_log(c: &drover::Ctx) {
 }
 
 const BOARD: &str = "\
-sendmeter: 3 queued, 2 active
+sendmeter: 3 queued, 2 active, in flight 2/8
  Q ISSUE  STATE       LANE                 EFF   AGE  LAST
  1 #17    queued      -                    -     -    -
  2 #18    queued      -                    -     -    on #17

@@ -138,14 +138,7 @@ fn each_orchestrator_is_served_with_the_owners_instructions_and_drovers_hook() {
     assert!(brief.contains(OWN) && brief.contains("# ROLE: ORCHESTRATOR"), "{brief}");
     assert!(brief.contains("Fleet for asks: sendmeter"), "{brief}");
     let own_part = brief.split("# drover — usage for agents").next().unwrap();
-    for verb in [
-        "thread reply",
-        "thread handoff",
-        "--typed",
-        "card post",
-        "config propose",
-        "secret request",
-    ] {
+    for verb in ["thread reply", "thread handoff", "--typed"] {
         assert!(!own_part.contains(verb), "{verb}: {own_part}");
     }
 
@@ -222,7 +215,7 @@ fn a_started_chat_is_linked_once_and_takes_no_lane_asks() {
     ];
     let (code, out) = run(&c, &r, &[&ask[..], &["--thread", "c-1"]].concat());
     assert_eq!(code, 0, "{out}");
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     let (code, _) = run(&c, &r, &ask);
     std::env::remove_var("DROVER_LANE");
     assert_eq!(code, 0);
@@ -248,5 +241,165 @@ fn an_orchestrator_id_cooee_cannot_name_is_refused_at_load() {
     }
     assert!(
         drover::config::Config::parse(&format!("{CONFIG}\n[orchestrator.ops-2]\nfleets = [\"sendmeter\"]\n")).is_ok()
+    );
+}
+
+fn block<'a>(v: &'a Value, id: &str) -> Option<&'a Value> {
+    if v["id"] == id {
+        return Some(v);
+    }
+    let kids: Vec<&Value> = match v {
+        Value::Array(a) => a.iter().collect(),
+        Value::Object(o) => o.values().collect(),
+        _ => vec![],
+    };
+    kids.into_iter().find_map(|k| block(k, id))
+}
+
+#[test]
+fn a_cooee_chat_posts_each_owner_card_and_reads_how_it_settled() {
+    for k in ["DROVER_OUTBOX", "DROVER_HOST", "DROVER_LANE"] {
+        std::env::remove_var(k);
+    }
+    let (c, _) = setup("cooee-chat-cards");
+    let r = Fake::default().reply("sh -c nohup", "4242").reply("sh -c exec", "");
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let dir = c.config.parent().unwrap().display().to_string();
+    let verb = ["card", "post"];
+    let card = |chat: &str, cmd: &str| {
+        let a = ["--cmd", cmd, "--why", "check", "--blast", "read-only", "--dir", &dir];
+        run(&c, &r, &[&verb[..], &[chat], &a[..]].concat())
+    };
+    let file = c.config.with_file_name("proposed.toml");
+    let cur = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&file, cur.replace("[orchestrator.ops]", "[orchestrator.ops2]")).unwrap();
+    let propose = |chat: &str| run(&c, &r, &["config", "propose", chat, file.to_str().unwrap()]);
+    let secret = |chat: &str| {
+        run(
+            &c,
+            &r,
+            &["secret", "request", chat, "API_KEY", "--why", "the search API"],
+        )
+    };
+
+    let (code, out) = card("c-1", "git status");
+    assert!(code != 0 && out.contains("NO_SUCH_THREAD"), "an unlinked chat: {out}");
+    let (code, out) = propose("c-1");
+    assert!(code != 0 && out.contains("NO_SUCH_THREAD"), "{out}");
+    let (code, out) = secret("c-1");
+    assert!(code != 0 && out.contains("NO_SUCH_THREAD"), "{out}");
+
+    let start = json!({"thread": "c-1", "profile": "default"}).to_string();
+    assert_eq!(call(&s, true, ("POST", "/cooee/thread-started"), &start).0, 200);
+    let (code, out) = card("c-1", "printenv");
+    assert!(code != 0 && out.contains("CARD_FORBIDDEN"), "{out}");
+    assert_eq!(card("c-1", "git status"), (0, "r1\n".into()));
+    assert_eq!(propose("c-1"), (0, "c1\n".into()));
+    assert_eq!(secret("c-1").0, 0);
+    let fleets: Vec<String> = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| ["run-card", "config-propose", "secret-request"].contains(&e.kind.as_str()))
+        .map(|e| format!("{} {}", e.kind, e.fleet))
+        .collect();
+    assert_eq!(
+        fleets,
+        [
+            "run-card sendmeter",
+            "config-propose sendmeter",
+            "secret-request sendmeter"
+        ]
+    );
+
+    assert_eq!(run(&c, &r, &["profiles", "sync"]).0, 0);
+    let p = &profiles(&s)[0];
+    for owner in ["drover card approve r1", "drover config apply c1"] {
+        let out = chat_call(&c, p, "c-1", true, owner);
+        assert!(out.contains("\"deny\""), "{owner} stays the owner's: {out}");
+    }
+
+    let (code, cards) = call(&s, true, ("GET", "/screens/cards"), "");
+    assert_eq!(code, 200, "{cards}");
+    let kinds: Vec<&str> = cards
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|c| c["kind"].as_str())
+        .collect();
+    assert!(["run", "config", "secret"].iter().all(|k| kinds.contains(k)), "{cards}");
+    let run_block = block(&cards, "r1").unwrap();
+    let config = cards
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["kind"] == "config")
+        .unwrap();
+    let apply = config["buttons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["label"] == "apply")
+        .unwrap();
+    let sec = cards
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["kind"] == "secret")
+        .unwrap();
+    let form = sec["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["type"] == "form")
+        .unwrap();
+    assert_eq!(form["fields"][0]["type"], "secret", "masked entry: {sec}");
+
+    let tap = |b: &Value, action: &Value, values: Value| {
+        let a = json!({"screen": "cards", "block": b, "action": action, "values": values});
+        let (code, v) = call(&s, true, ("POST", "/action"), &a.to_string());
+        assert_eq!(code, 200, "{a}: {v}");
+    };
+    let sha = run_block["sha"].clone();
+    tap(
+        &json!("r1"),
+        &run_block["action"],
+        json!({"choice": "approve", "sha": sha}),
+    );
+    assert_eq!(run(&c, &r, &["card", "run", "r1"]).0, 0);
+    tap(&apply["id"], &apply["action"], apply["values"].clone());
+    let mut save = form["submit"]["values"].clone();
+    save["text"] = json!("s3cr3t-value");
+    tap(&form["id"], &form["submit"]["action"], save);
+
+    let path = c.config.with_file_name("secrets").join("API_KEY");
+    assert_eq!(std::fs::read_to_string(path).unwrap().trim(), "s3cr3t-value");
+    let (code, page) = call(&s, true, ("GET", "/api/v1/thread/c-1"), "");
+    assert_eq!(code, 200, "{page}");
+    let lines: Vec<&str> = page["msgs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["kind"] == "note")
+        .filter_map(|m| m["text"].as_str())
+        .collect();
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    assert!(
+        lines[0].starts_with("run r1 approved by owner, running in"),
+        "{lines:?}"
+    );
+    assert!(
+        lines[1].starts_with("run r1 approved by owner, ran in") && lines[1].contains("exit "),
+        "{lines:?}"
+    );
+    assert!(lines[2].starts_with("config c1 applied by owner"), "{lines:?}");
+    assert_eq!(lines[3], "secret API_KEY set ✓ (by owner)");
+    let log = format!("{:?}", read(&c.state).unwrap().to_vec());
+    let (_, cards) = call(&s, true, ("GET", "/screens/cards"), "");
+    for seen in [log, page.to_string(), cards.to_string()] {
+        assert!(!seen.contains("s3cr3t-value"));
+    }
+    assert!(
+        !cards.to_string().contains("\"secret\""),
+        "settled cards leave: {cards}"
     );
 }

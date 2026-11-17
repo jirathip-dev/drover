@@ -27,7 +27,29 @@ every call with one token: run `claude setup-token` on the main host, save the t
 token-file = "~/.config/drover/tokens/proxy"
 ```
 
-The token lasts a year. A remote spawn without that file is refused `NO_PROXY_TOKEN` with the setup command.
+On the main host, step by step (#1131; the Hosts screen's Token proxy card shows the same under [How to set]):
+
+```sh
+claude setup-token                        # copy the token it prints
+umask 077; mkdir -p ~/.config/drover/tokens
+pbpaste > ~/.config/drover/tokens/proxy   # macOS; elsewhere:
+read -rs t && printf '%s\n' "$t" > ~/.config/drover/tokens/proxy; unset t   # paste, then Enter
+chmod 600 ~/.config/drover/tokens/proxy
+```
+
+The token lasts a year and shows no expiry, so drover estimates it from the file's mtime: saved + 365 d.
+With a `shed-acp` host configured, `drover doctor` has one proxy row, and the Hosts screen a Token proxy card,
+with the same facts:
+
+- `✓ proxy token set (saved 2026-11-16, ~365 d left)`; `!` from 30 d left, naming the steps again;
+- `✗ proxy token missing: run claude setup-token, save it 0600 at <path>`;
+- `✗ proxy token readable by others: chmod 600 <path>`;
+- then whether the proxy answers on its port, each `shed-acp` host's tunnel up or down, and the live lane keys.
+
+`drover check` alerts `proxy-token-expiring` (pushed) once at 30 d and once at 7 d left, naming the steps. An
+upstream 401 on the token alerts `proxy-token-rejected` (pushed) once per saved token, not once per lane. A remote
+spawn without the file is refused `NO_PROXY_TOKEN` with the setup command, and so is starting a `shed-acp` cloud
+host (`hosts bootstrap`, drive's start), before any VM is made or resumed.
 
 ## Retired keys
 

@@ -258,10 +258,12 @@ fn rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine() {
     let c = ctx(&tmpdir("lesson-rules"), CONFIG);
     let _sh = FakeShed::attached(&c);
     let rules = "- don't unwrap config reads (enforced by: clippy unwrap_used)\n";
+    let docs = "- `docs/setup.md`: install\n";
     for (role, dir) in [("impl", "issue-12"), ("rev", "rev-12-r1")] {
         let wt = c.worktrees.join("sendmeter").join(dir);
         std::fs::create_dir_all(wt.join(".drover")).unwrap();
         std::fs::write(wt.join(".drover/rules.md"), rules).unwrap();
+        std::fs::write(wt.join(".drover/docs.md"), docs).unwrap();
         let r = spawner(12)
             .once(&format!("git -C {} status --porcelain", wt.display()), 0, "")
             .once(
@@ -274,13 +276,24 @@ fn rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine() {
         let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
         let want = format!("## Repo rules (.drover/rules.md)\n\n{rules}\n## ");
         assert!(brief.contains(&want), "{role}: {brief}");
+        assert!(
+            brief.contains("## Docs you may trust (.drover/docs.md)\n\n"),
+            "{role}: {brief}"
+        );
+        assert!(
+            brief.contains(&format!("unless this brief names it.\n\n{docs}\n## ")),
+            "{role}: {brief}"
+        );
     }
     let c = ctx(&tmpdir("lesson-norules"), CONFIG);
     let _sh = FakeShed::attached(&c);
     let (code, out) = run(&c, &spawner(12), &["spawn", "sendmeter", "12", "impl"]);
     assert!(code == 0 || code == 4, "{code} {out}");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
-    assert!(!brief.contains("Repo rules"), "{brief}");
+    assert!(
+        !brief.contains("Repo rules") && !brief.contains("Docs you may trust"),
+        "{brief}"
+    );
 }
 
 #[test]

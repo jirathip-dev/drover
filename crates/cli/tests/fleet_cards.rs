@@ -142,7 +142,7 @@ fn parity_37_fleets_that_need_you_go_first_then_by_name_and_a_paused_one_is_empt
         (
             &json!("a"),
             &json!("drive · no pass yet"),
-            &json!(["stall check: #1 is due now", "1 lane"])
+            &json!(["stall check: #1 is due now", "1 lane", "in flight 1/8"])
         )
     );
 }

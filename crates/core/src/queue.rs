@@ -353,12 +353,53 @@ pub fn holds(g: &Serial, h: &[&IssueState]) -> String {
     format!("{}: {} hold{s} {}/{}", g.name, who.join(" "), h.len(), g.max)
 }
 
-/// `serial: db 3/10 · ci 1/1` for a fleet with serial groups: board, status and the Host tab.
-pub fn serial_use(events: &[Event], st: &States, fleet: &str, cfg: Option<&crate::config::Config>) -> Option<String> {
-    let f = cfg.and_then(|c| c.fleet.get(fleet)).filter(|f| !f.serial.is_empty())?;
+/// #1129: `in flight 7/8, serial: db 3/10 · ci 1/1`, the fleet's caps in use: board, status and the Host tab.
+pub fn fleet_use(
+    ctx: &crate::Ctx,
+    events: &[Event],
+    st: &States,
+    fleet: &str,
+    cfg: Option<&crate::config::Config>,
+) -> Option<String> {
+    let f = cfg.and_then(|c| c.fleet.get(fleet))?;
     let one = |g: &Serial| format!("{} {}/{}", g.name, holders(events, st, f, fleet, &g.name).len(), g.max);
     let gs: Vec<_> = f.serial.iter().map(one).collect();
-    Some(format!("serial: {}", gs.join(" · ")))
+    let serial = (!gs.is_empty()).then(|| format!("serial: {}", gs.join(" · ")));
+    let flight = flight(ctx, st, f, fleet).map(|(v, cap)| format!("in flight {}/{cap}", v.len()));
+    let both: Vec<String> = flight.into_iter().chain(serial).collect();
+    (!both.is_empty()).then(|| both.join(", "))
+}
+
+/// #1129: a `<fleet>: in flight 7/8, serial: …` line per fleet (or `only`) with a cap in use: status and waiting.
+pub fn fleets_use(
+    ctx: &crate::Ctx,
+    events: &[Event],
+    cfg: Option<&crate::config::Config>,
+    only: Option<&str>,
+) -> String {
+    let fleets = cfg
+        .iter()
+        .flat_map(|c| c.fleet.keys())
+        .filter(|f| only.is_none_or(|o| o == *f));
+    let line = |st: &States, f: &String| Some(format!("{f}: {}\n", fleet_use(ctx, events, st, f, cfg)?));
+    crate::events::with_states(events, |st| fleets.filter_map(|f| line(st, f)).collect())
+}
+
+/// #1129: the fleet's PRs in flight (at impl, fix, review, verify or ready, or held with an open PR) and its cap, unless off.
+pub fn flight(ctx: &crate::Ctx, st: &States, f: &Fleet, fleet: &str) -> Option<(Vec<u64>, usize)> {
+    let cap = f.in_flight_cap()?;
+    let pr = |n: u64| crate::gh::cached_pr(ctx, fleet, n).at("state") == "OPEN";
+    let held = |s: &IssueState| matches!(s.state.as_str(), "queued" | "blocked" | "needs-human") && pr(s.issue);
+    let flies = |s: &&IssueState| s.fleet == fleet && (in_flight(&s.state) || held(s));
+    Some((st.values().filter(flies).map(|s| s.issue).collect(), cap))
+}
+
+/// #1129: why a first start of queued issue `n` waits: the fleet's other in-flight PRs fill its cap.
+pub fn flight_full(ctx: &crate::Ctx, st: &States, f: &Fleet, fleet: &str, n: u64) -> Option<(Vec<u64>, usize)> {
+    let fresh = state(st, fleet, n) == "queued" && crate::gh::cached_pr(ctx, fleet, n).at("state") != "OPEN";
+    let (v, cap) = flight(ctx, st, f, fleet).filter(|_| fresh)?;
+    let v: Vec<u64> = v.into_iter().filter(|&m| m != n).collect();
+    (v.len() >= cap).then_some((v, cap))
 }
 
 /// The queue as shown: merged issues drop out; a blocker counts until it is merged.
@@ -404,17 +445,25 @@ pub fn startable(events: &[Event], fleet: &str) -> Vec<String> {
     q.into_iter().filter(free).map(|i| i.issue.to_string()).collect()
 }
 
-/// Drive's refused start of queued issue `n` in the last hour as (board, status) text, `skipped this pass`; #572: not once older than its last state change, or (other codes) than a merge in its serial groups. `SERIAL_BUSY` shows the group's holders now, or its free slot.
+/// Drive's refused start of queued issue `n` in the last hour as (board, status) text, `skipped this pass` (#1129: first the in-flight cap's wait); #572: not once older than its last state change, or (other codes) than a merge in its serial groups. `SERIAL_BUSY` shows the group's holders now, or its free slot.
 pub fn skipped(
     events: &[Event],
     st: &States,
     f: Option<&Fleet>,
     fleet: &str,
-    (n, now): (u64, u64),
+    (n, ctx): (u64, &crate::Ctx),
     slots: &str,
 ) -> Option<(String, String)> {
     let s = |e: &&Event| e.kind == "driven" && e.fleet == fleet && e.issue == Some(n) && e.str("step") == Some("start");
     let is = st.get(&(fleet.to_string(), n)).filter(|s| s.state == "queued")?;
+    let free = view(events, st, fleet)
+        .iter()
+        .any(|i| i.issue == n && labels(i).is_empty());
+    if let Some((v, cap)) = f.filter(|_| free).and_then(|f| flight_full(ctx, st, f, fleet, n)) {
+        let say = crate::promise::Say::InFlightCap(v.len(), cap).line();
+        return Some((format!("in-flight cap {}/{cap}", v.len()), say));
+    }
+    let now = ctx.now;
     let e = events
         .iter()
         .rev()
@@ -495,12 +544,12 @@ pub fn board(
         "{:>2} {:<6} {:<11} {:<20} {:<5} {:<4} LAST",
         "Q", "ISSUE", "STATE", "LANE", "EFF", "AGE"
     );
-    let serial = serial_use(events, &st, fleet, cfg).map_or(String::new(), |s| format!(", {s}"));
+    let serial = fleet_use(ctx, events, &st, fleet, cfg).map_or(String::new(), |s| format!(", {s}"));
     let mut lines = vec![format!("{fleet}: {} queued, {active} active{serial}", q.len()), head];
     let row = |pos: String, n: u64, last: Option<String>| {
         let s = st.get(&(fleet.to_string(), n));
         let f = cfg.and_then(|c| c.fleet.get(fleet));
-        let skip = skipped(events, &st, f, fleet, (n, now), slots).map(|s| s.0);
+        let skip = skipped(events, &st, f, fleet, (n, ctx), slots).map(|s| s.0);
         let lane: String = s
             .and_then(|s| s.lane.clone())
             .or(skip)

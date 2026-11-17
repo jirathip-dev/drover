@@ -1,6 +1,6 @@
 # Hosts history — design mockup (#234, phase 1)
 
-`index.html` is the Host tab with one HOSTS section: one card per host, main first, then the others A→Z. Each card's
+`index.html` is the Hosts screen (#1091) with one HOSTS section: one card per host, main first, then the others A→Z. Each card's
 load/cpu, swap-out, memory, disk and lanes rows carry a 24 h sparkline, and tapping a row opens its chart. The page
 uses assets/serve.css (removed in #927) unchanged (linked relatively) plus one `<style>` block that uses tokens only. That block moves
 to `serve.css` in phase 2. SERVICES, FLEETS and ALERTS are the demo export's markup, unchanged.
@@ -102,9 +102,8 @@ ellipsis. Colours are the existing tokens (`--fg`, `--mute`, `--r`, `--a`, `--p`
    gives a fixed order, so the mockup keeps it fixed. Groups still open themselves when red or amber, and a closed
    one's header still sums its worst rows. Cards never reorder: an offline host stays in its A→Z place and is no
    longer moved last. **Recommend: as mocked.**
-6. **Data path.** Sparklines ride in `/frag?id=host` as 120 numbers per row (5 rows × 3 hosts ≈ 9 KB). An open
-   chart's 1 h / 6 h / 24 h series comes from `frag?id=hist&host=…&k=…` on tap, which only reads the small file
-   (#160). **Recommend: as described**, not sending all three ranges on every refresh.
+6. **Data path.** Sparklines ride in the Hosts screen's JSON as 120 numbers per row (5 rows × 3 hosts ≈ 9 KB). An
+   open chart's 1 h / 6 h / 24 h series is read on tap, from the small file only (#160). **Recommend: as described**, not sending all three ranges on every refresh.
 7. **Main host name with no `[hosts]`.** The card title is the `[hosts]` entry without `machine`. With no `[hosts]` at
    all, use `hostname -s`. **Recommend: `hostname -s`.**
 8. **1440:** the cards sit side by side in #162's 56ch auto-fit grid (3 across). This is not in the issue; keep it?

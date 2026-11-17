@@ -397,6 +397,8 @@ pub struct Fleet {
     /// Optional caps on concurrent impl/fix and review lanes (CAP); unset = no cap.
     pub max_impl: Option<usize>,
     pub max_rev: Option<usize>,
+    /// #1129: a cap on the fleet's PRs in flight (`IN_FLIGHT_CAP`); unset = 8, `0` = off.
+    pub max_in_flight: Option<usize>,
     #[serde(default)]
     pub role: BTreeMap<String, Role>,
     /// Replace the global `[[notify]]` for this fleet's events; `notify_global` sends to both.
@@ -440,6 +442,8 @@ pub struct Fleet {
     pub form_rounds: Option<u32>,
     /// #908: this fleet's `respawn_per_pass`; `Config::parse` fills in `[limits]`'s when absent.
     pub respawn_per_pass: Option<usize>,
+    /// #1216: this fleet's `stall_restart_hours`; unset = `[limits]`'s.
+    pub stall_restart_hours: Option<u64>,
     /// #216: replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
@@ -457,6 +461,8 @@ pub struct Fleet {
     pub lessons: Option<String>,
     /// #889: `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
     pub hotspots: Option<String>,
+    /// #1100: `weekly` has `tick` run `drover triage` every 7 days; unset or `off`: only on demand.
+    pub triage: Option<String>,
     /// #909: `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
     #[serde(default)]
     pub heavy: BTreeMap<String, Vec<String>>,
@@ -703,6 +709,7 @@ pub struct Limits {
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
     pub proxy_connect_secs: u64,
+    pub proxy_retry_secs: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
     pub disk_sick_secs: u64,
@@ -728,6 +735,7 @@ pub struct Limits {
     pub slo_idle_minutes: u64,
     pub slo_tick_minutes: u64,
     pub slo_pass_minutes: u64,
+    pub stall_restart_hours: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -825,6 +833,7 @@ impl Default for Limits {
             gate_check_minutes: 30,
             shed_read_millis: 300,
             proxy_connect_secs: 1,
+            proxy_retry_secs: 300,
             service_call_secs: 2,
             disk_probe_secs: 2,
             disk_sick_secs: 300,
@@ -850,6 +859,7 @@ impl Default for Limits {
             slo_idle_minutes: 20,
             slo_tick_minutes: 10,
             slo_pass_minutes: 30,
+            stall_restart_hours: 2,
         }
     }
 }
@@ -1030,6 +1040,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
     (
+        "proxy_retry_secs",
+        "a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it",
+    ),
+    (
         "service_call_secs",
         "a call to the running service's socket times out after this long",
     ),
@@ -1100,7 +1114,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "serve_handover_secs",
-        "`self-update` waits this long for the running serve to hand over before restarting it",
+        "how long serve waits for a held port's serve to answer, hand over, or let go of the port (#1244)",
     ),
     (
         "serve_mem_mb",
@@ -1125,6 +1139,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "slo_pass_minutes",
         "no slow drive pass of a fleet for this long shows the owner's `Drive is stuck` card",
+    ),
+    (
+        "stall_restart_hours",
+        "an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own)",
     ),
 ];
 
@@ -1548,6 +1566,10 @@ impl Config {
 }
 
 impl Fleet {
+    /// #1129: `max_in_flight`, unset 8; `None` when `0` turns it off.
+    pub fn in_flight_cap(&self) -> Option<usize> {
+        Some(self.max_in_flight.unwrap_or(8)).filter(|&n| n > 0)
+    }
     /// #173: the fleet's pipeline (the built-in one unless fleet.toml has its own).
     pub fn flow(&self) -> &crate::pipeline::Pipeline {
         static NONE: crate::pipeline::Pipeline = crate::pipeline::Pipeline {
@@ -1602,9 +1624,9 @@ impl Fleet {
             .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
     }
-    /// #419: the configured role a lane runs as: a lesson lane is impl's unless `[fleet.<n>.role.lesson]` is set.
+    /// #419: the configured role a lane runs as: a lesson (#1100: triage) lane is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
-        if role == "lesson" && !self.role.contains_key(role) {
+        if matches!(role, "lesson" | "triage") && !self.role.contains_key(role) {
             "impl"
         } else {
             role

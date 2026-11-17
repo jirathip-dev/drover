@@ -177,6 +177,26 @@ impl Fake {
                 stderr: String::new(),
             });
         }
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
+        if let (true, ["-c", script]) = (prog == "sh", words.as_slice()) {
+            if script.contains("\\036") {
+                let mut out = String::new();
+                for l in script.lines() {
+                    let l = l.trim_end_matches(BATCH);
+                    let words: Vec<String> = l
+                        .trim_matches('\'')
+                        .split("' '")
+                        .map(|w| w.replace("'\\''", "'"))
+                        .collect();
+                    let o = self.answer(&words[0], &words[1..])?;
+                    out += &format!("{}\x1e{}\x1e", o.stdout, o.code);
+                }
+                return Ok(Out {
+                    stdout: out,
+                    ..Out::default()
+                });
+            }
+        }
         let mut onces = self.onces.borrow_mut();
         if let Some(i) = onces.iter().position(|(p, _)| line.starts_with(p.as_str())) {
             return Ok(onces.remove(i).1);
@@ -268,8 +288,34 @@ fn reap_at_exit(d: &Path) {
     writeln!(reaper.stdin.as_mut().unwrap(), "{}", d.display()).unwrap();
 }
 
+const LANE_ENV: [&str; 10] = [
+    "DROVER_LANE",
+    "DROVER_HOST",
+    "DROVER_OUTBOX",
+    "DROVER_SERVICE",
+    "DROVER_TOKEN",
+    "DROVER_RULES",
+    "DROVER_THREAD",
+    "DROVER_ORCHESTRATOR",
+    "DROVER_SCRATCH_TARGET",
+    "DROVER_PORT",
+];
+
+/// #1261: the env a lane exports, cleared once so a test run on a lane never sees it.
+pub fn without_lane_env() {
+    static CLEARED: std::sync::Once = std::sync::Once::new();
+    CLEARED.call_once(|| LANE_ENV.iter().for_each(|k| std::env::remove_var(k)));
+}
+
+/// A test's own lane env, set only after the inherited one is cleared.
+pub fn set_env(k: &str, v: &str) {
+    without_lane_env();
+    std::env::set_var(k, v);
+}
+
 pub fn tmpdir(name: &str) -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
+    without_lane_env();
     let d = std::env::temp_dir().join(format!(
         "fleet-test-{name}-{}-{}",
         std::process::id(),
@@ -293,6 +339,7 @@ pub fn secret_file(c: &Ctx, name: &str, value: &str, mode: u32) -> PathBuf {
 }
 
 pub fn ctx(dir: &Path, config: &str) -> Ctx {
+    without_lane_env();
     let cfgdir = dir.join("config");
     std::fs::create_dir_all(&cfgdir).unwrap();
     std::fs::write(cfgdir.join("fleet.toml"), config).unwrap();
@@ -309,6 +356,7 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
 }
 
 pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
+    without_lane_env();
     let mut out = Vec::new();
     let mut cmd = vec!["drover".to_string()];
     cmd.extend(args.iter().map(std::string::ToString::to_string));

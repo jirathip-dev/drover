@@ -6,7 +6,7 @@ use serde_json::json;
 const LANE: &str = "sendmeter-impl-12";
 
 fn setup(name: &str) -> drover::Ctx {
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     ctx(&tmpdir(name), CONFIG)
 }
 
