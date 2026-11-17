@@ -4,6 +4,49 @@ From zero to the board as an app on your phone's Home Screen. Every step ends wi
 Placeholders: `<owner>`, `<repo>`, `<home>` (your home directory), `<machine>`, `<tailnet>`,
 `<chat>`. Swap in your own values; keep them out of anything you commit.
 
+## Quick start
+
+```sh
+cargo install --path crates/cli
+mkdir -p ~/.config/drover
+cat > ~/.config/drover/fleet.toml <<'EOF'
+[fleet.app]
+repo = "you/app"
+local = "~/src/app"
+integration = "staging"
+
+[fleet.app.role.impl]
+harness = "claude"
+profile = "lane-impl"
+
+[fleet.app.role.rev]
+harness = "claude"
+profile = "lane-rev"
+
+[runtime]
+kind = "shed"
+EOF
+drover profiles sync                # per-role profiles and the lane hook
+drover spawn app 12 impl --dry-run  # print the plan; drop --dry-run to launch it
+drover status
+drover timer install                # the drive loop, every 5 minutes
+drover serve --addr 127.0.0.1:7777  # /api/v1, cooee's screens and the phone page
+```
+
+Self-update installs the green head of `[self_update] branch` (default `main`); serve hands its sockets to the new binary without dropping a request; `staging_serve = true` adds a read-only staging serve on `staging_addr` (default `127.0.0.1:7787`) ([below](#self-update-and-the-daily-clean-557)).
+
+| Command | What it does |
+|---|---|
+| `drive` / `timer` / `tick` | one pass; the job that runs it; check, then drive |
+| `queue` / `next` / `pause` / `resume` | the ordered queue; the first ready issue; hold a fleet |
+| `spawn` / `adopt` / `turn` | start a lane; record a running one; a lane's end of turn |
+| `verdict` / `merge` / `cap` | a verdict pinned to the head sha; merge if every gate passes; the line cap |
+| `status` / `board` / `waiting` / `serve` | per-issue state; compact board; who waits on whom; the server |
+| `ask` / `answer` / `asks` / `thread` / `card` | decisions; orchestrator threads; run cards |
+| `check` / `clean` / `reclaim` / `kill` | alerts; reclaim done lanes and build folders; stop a lane, work saved |
+| `profiles` / `hosts` / `secret` | per-role folders and hooks; hosts; secret files |
+| `setup` / `doctor` / `why` / `lesson` | install the jobs; host check; a line's reasoning; lesson checks |
+
 ## 1. Install
 
 You need `git`, `gh` (logged in), shed (its server job running, [runtimes](runtimes.md)), a Rust toolchain, and
@@ -131,8 +174,8 @@ no Hermes needed.
   `/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin` (`sysctl` and `vm_stat` live in `/usr/sbin`).
 - Both streams go to `~/.local/state/drover/tick.log`; the tick empties it past 1 MB.
 - A refusal (`HOST_BUSY`, …) is logged and the tick exits 0. A real error (config, shed missing)
-  logs `tick-failed`, which notifiers send at most once an hour. A red row in the Host tab's SERVICES
-  group sends one `service-red` an hour too.
+  logs `tick-failed`, which notifiers send at most once an hour. A red SERVICES row (`GET /api/v1/host`)
+  sends one `service-red` an hour too.
 
 `drover timer status` prints loaded or not and the last tick. Undo: `drover timer remove`
 (unloads it and deletes its files). Check it worked: `drover doctor` shows `✓ timer` and a
@@ -204,7 +247,7 @@ Check it worked: `echo hello | notify-telegram <chat>` arrives on your phone.
 ## 6. Board on the phone (Tailscale)
 
 `drover setup` writes and loads this job for you: label `[serve] launchd_label` (default
-`dev.drover.serve`), address `[serve] addr` (default `127.0.0.1:7777`), `KeepAlive` only after a failed exit (#1081: a serve that finds its port held by its own build exits 0, by an older one asks it to hand over, then exits 0), `ProcessType Interactive` (#893), the tick's PATH,
+`dev.drover.serve`), address `[serve] addr` (default `127.0.0.1:7777`), `KeepAlive` only after a failed exit (#1081: a serve that finds its port held by its own build exits 0, by an older one asks it to hand over, then exits 0; #1244: the job's own serve stops the holder and listens instead), `ProcessType Interactive` (#893), the tick's PATH,
 logs to `~/.local/state/drover/serve.log`. If a job under another label already runs
 `drover serve`, setup adopts it (`= adopted <plist>`) and never makes a second one. Re-labelling is
 manual: `launchctl bootout gui/$(id -u)/<old label>`, delete its plist, run `drover setup` again.
@@ -306,8 +349,6 @@ tapping Pair again replaces your own open request. The
 device cookie only goes to the browser that tapped Pair, so someone else who sees the code
 can't use it. The log records `pair-request` and `pair-approve` with the device label, never
 the code or the token. `drover serve pair` now only prints these steps.
-
-Check it worked: the Host tab lists the phone under ALERTS.
 
 ## 7. Web push
 

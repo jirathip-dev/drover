@@ -15,11 +15,11 @@ named like a built-in wins, file by file.
 
 Each phone picks its own in the **look** sheet: the header's `[◐]`, on every tab, opens the board's own bottom sheet
 with three lists, THEME (each theme's row sprite, else its icon), COLOURS (below) and STYLE (#335: `pixel`, the sprites,
-or `ascii`, the theme's ASCII figures on the Lanes scene, the Queue and Events rows, the Host miniature and the loading
+or `ascii`, the theme's ASCII figures on the Lanes scene, the Queue and Events rows and the loading
 overlay; default `pixel`, hidden for a theme without `ascii` in `modes`, like terminal), the current row of each ticked (#290).
 A tap, or Enter on a focused row (↑/↓ move), applies it in place, no reload, and the sheet stays open. The pick is kept
 in localStorage and applied before the first paint like the tab, so there is no flash; a switch swaps the favicon. A
-phone that never picked gets `[serve] theme = "<name>"` (default `farm`). The Host tab's `theme` row shows the board's
+phone that never picked gets `[serve] theme = "<name>"` (default `farm`). `GET /api/v1/host`'s `theme` row shows the page's
 default: green, or amber with the first problem when its theme.json breaks the contract (then farm is used). iOS keeps
 the home-screen icon it saved at install; the sheet's foot says so.
 
@@ -102,13 +102,12 @@ a scheme unless: text (`--fg`, `--mute`, `--l`, `--link`, the fleet colours) is 
 status colours ≥ 3:1 on both; `--bg` ≥ 4.5:1 on `--l` (the pressed control); on the tinted surfaces, `--fg`, `--mute`
 and `--l` (the option buttons) ≥ 4.5:1 and `--r` ≥ 3:1 on the needs-you card (`--r` 15 % over `--bg`), and `--r`/`--a`
 ≥ 3:1 on the red/amber group headers (12 %); green, amber and red ≥ 20 apart (CIEDE2000), and `--l` and `--link` ≥ 20
-from each of them, so a control never reads as a warning. A refused scheme is left out of the picker and named on the
-Host tab with its first reason; a phone that picked it gets its theme's default, then `github-dark`.
+from each of them, so a control never reads as a warning. A refused scheme is left out of the picker and named in
+`GET /api/v1/host`'s `theme` row with its first reason; a phone that picked it gets its theme's default, then `github-dark`.
 
-**Picking one:** the look sheet's COLOURS list (`[◐]`) shows every scheme that passes, each as `Aa` in its fg on its
+**Picking one:** the COLOURS list under `[⚙]` shows every scheme that passes, each as `Aa` in its fg on its
 bg, then its green, amber and red chips, per phone, kept in localStorage. A phone that never picked gets its theme's `scheme`, marked
 `(theme default)`: farm `farm`, kitchen `kitchen`, garden `garden-light` or `garden-dark` by the phone's light/dark
 setting, terminal `github-dark`; picking that row forgets the pick, so the
 colours follow the theme again. The page paints the phone's last scheme before the first paint (no flash; else the board
-theme's built-in default, a `{light, dark}` one by media query), and the iOS status bar takes its `--bg`. The Host tab's `theme` row names this phone's
-theme and colours. Debug: `?scheme=<name>` for one load.
+theme's built-in default, a `{light, dark}` one by media query), and the iOS status bar takes its `--bg`. Debug: `?scheme=<name>` for one load.

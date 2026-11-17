@@ -37,23 +37,7 @@
       "ask_minutes": 30,
       "builtin": true,
       "color_set": false,
-      "conductor": {
-        "default": true,
-        "effort": null,
-        "efforts": [
-          "none",
-          "low",
-          "medium",
-          "high",
-          "xhigh"
-        ],
-        "harness": "hermes",
-        "model": "opus",
-        "models": [
-          "opus"
-        ],
-        "profile": "lane-conductor"
-      },
+      "conductor": null,
       "deny": [
         "docker",
         "docker-compose",
@@ -191,6 +175,24 @@
           "model_default": "profile",
           "name": "impl",
           "profile": "fleet-impl"
+        },
+        {
+          "accounts": [],
+          "effort": null,
+          "effort_default": "none",
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "harness": "hermes",
+          "mcp": [],
+          "model": "opus",
+          "model_default": "profile",
+          "name": "orchestrator",
+          "profile": "lane-orchestrator"
         },
         {
           "accounts": [],
