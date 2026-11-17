@@ -1,0 +1,9 @@
+Decided: the baseline view and its failure event move out of spawn into baseline::lane, so spawn fits its size baseline
+Because: .drover/arch-baseline.txt:19
+Decided: hosts.rs tests match remote git through one GIT const; cli.rs keeps its size baseline (one-line about, one merged #[arg])
+Because: .drover/arch-baseline.txt:9
+Decided: the hunt's random comparison window starts at seed 2015
+Because: q1805
+Rejected: seed 2014 — after merging staging the hunt needs 3 rounds and 2014 trips the planted I1; a probe of 2000..2063 found 2015..2056 clean
+Check: drover arch-check --base origin/staging has only the local `just gen` miss; cargo test -p drover --test sim --test hosts --test baseline pass
+Owner: CI's size and stale-doc checks are green again; no behaviour changed this round.
