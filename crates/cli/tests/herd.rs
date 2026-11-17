@@ -136,7 +136,12 @@ fn the_herd_read_shape_on_a_fixture() {
     let h = &v["host"];
     assert_eq!(
         (&h["limit"], &h["pressure"], &h["swapouts"], &h["gate"]),
-        (&json!(2.5), &json!("warn"), &json!(0.0), &json!("memory pressure warn"))
+        (
+            &json!(2.5),
+            &json!("warn"),
+            &json!(null),
+            &json!("memory pressure warn")
+        )
     );
     assert!((h["load"].as_f64().unwrap() - 0.39).abs() < 1e-9, "{h}");
 }
@@ -192,7 +197,7 @@ fn the_herd_read_refuses_a_foreign_host_or_origin() {
 }
 
 #[test]
-fn a_shed_lane_reported_running_is_working_with_its_note() {
+fn a_shed_lane_reported_running_shows_running_with_its_note() {
     let (c, r) = fixture("running");
     let note = "running: cargo test (8m)";
     r.1.set("sendmeter-impl-12", |t| {
@@ -205,7 +210,7 @@ fn a_shed_lane_reported_running_is_working_with_its_note() {
     let l = &herd["fleets"][0]["lanes"][0];
     assert_eq!(
         (&l["name"], &l["state"], &l["act"]),
-        (&json!("sendmeter-impl-12"), &json!("working"), &json!("impl")),
+        (&json!("sendmeter-impl-12"), &json!("running"), &json!("impl")),
         "{l}"
     );
     assert_eq!(herd["fleets"][1]["lanes"][1]["act"], "idle", "{herd}");
@@ -221,8 +226,8 @@ fn a_shed_lane_reported_running_is_working_with_its_note() {
                 .collect()
         })
     };
-    let working = section("working");
-    let row = working
+    let running = section("running");
+    let row = running
         .iter()
         .find(|l| l["name"] == "sendmeter-impl-12")
         .unwrap_or_else(|| panic!("{lanes}"));

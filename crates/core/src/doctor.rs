@@ -21,7 +21,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     let mut rows = vec![];
     if !config_only {
         let sample = crate::host::sample(r);
-        let host = sample.pressure.is_some() && sample.swapout.is_some() && sample.load_per_cpu.is_some();
+        let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.load_per_cpu.is_some();
         row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH");
         let gh = ok(r, "gh", &["auth", "status"]).is_ok();
         row(&mut rows, gh, '✗', "gh — auth status → gh auth login");
@@ -109,6 +109,7 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, r, rows);
+    rows.extend(crate::proxy::status(ctx, cfg, r).map(|f| f.join(" · ")));
     if cfg
         .runtime
         .as_ref()
@@ -263,9 +264,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let line = format!("serve hosts — [{hosts}] → set [serve] allowed_hosts = [\"<name>.ts.net\"]");
     row(rows, !hosts.is_empty(), '✗', &line);
     let addr = "127.0.0.1:7777";
-    let line = format!("serve — listening on {addr} → drover serve --addr {addr}");
-    let up = ok(r, "lsof", &["-nP", "-iTCP:7777", "-sTCP:LISTEN"]).is_ok();
-    row(rows, up, '✗', &line);
+    serve_rows(ctx, cfg, r, rows, addr);
     let tailscale = r.run("tailscale", &argv(&["serve", "status"]));
     let line = format!("tailscale — serve maps to {addr} → tailscale serve --bg --https=8443 http://{addr}");
     let bad = if tailscale.is_err() { '!' } else { '✗' };
@@ -329,7 +328,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         format!("tick step — stuck in {step} for {age} → stop the tick; what it waits on is not answering")
     });
     row(rows, stuck.is_none(), '✗', &line);
-    for (label, state) in crate::timer::drift(ctx, cfg, r) {
+    for (label, state) in crate::timer::states(ctx, cfg, r) {
         let line = format!("timer — {label} {state} → drover timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }
@@ -398,6 +397,21 @@ fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
     Some(format!(
         "! a login shell{on} exports {var} (it overrides the host's own login in every lane) → remove it from {files}"
     ))
+}
+
+fn serve_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>, addr: &str) {
+    let line = format!("serve — listening on {addr} → drover serve --addr {addr}");
+    let up = ok(r, "lsof", &["-nP", "-iTCP:7777", "-sTCP:LISTEN"]).is_ok();
+    row(rows, up, '✗', &line);
+    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
+    let (at, job) = (cfg.serve.addr(), crate::timer::job_pid(ctx, r, label));
+    let held = crate::timer::listeners(r, &at);
+    if let (Ok(job), false) = (job, held.is_empty()) {
+        let runs = job.map_or("nothing".into(), |p| format!("pid {p}"));
+        let fix = crate::timer::restart_cmd(ctx, label);
+        let line = format!("serve job — pid {held:?} listens on {at}, {label} runs {runs} → {fix}");
+        row(rows, held.iter().all(|p| Some(*p) == job), '✗', &line);
+    }
 }
 
 /// The launchd job: a plist under ~/Library/LaunchAgents that runs `drover serve`.

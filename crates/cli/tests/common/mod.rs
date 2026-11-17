@@ -177,6 +177,26 @@ impl Fake {
                 stderr: String::new(),
             });
         }
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
+        if let (true, ["-c", script]) = (prog == "sh", words.as_slice()) {
+            if script.contains("\\036") {
+                let mut out = String::new();
+                for l in script.lines() {
+                    let l = l.trim_end_matches(BATCH);
+                    let words: Vec<String> = l
+                        .trim_matches('\'')
+                        .split("' '")
+                        .map(|w| w.replace("'\\''", "'"))
+                        .collect();
+                    let o = self.answer(&words[0], &words[1..])?;
+                    out += &format!("{}\x1e{}\x1e", o.stdout, o.code);
+                }
+                return Ok(Out {
+                    stdout: out,
+                    ..Out::default()
+                });
+            }
+        }
         let mut onces = self.onces.borrow_mut();
         if let Some(i) = onces.iter().position(|(p, _)| line.starts_with(p.as_str())) {
             return Ok(onces.remove(i).1);
@@ -251,29 +271,60 @@ impl Drop for Made {
 
 thread_local!(static MADE: Made = const { Made(std::cell::RefCell::new(Vec::new())) });
 
-static ALL: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
-static AT_EXIT: std::sync::Once = std::sync::Once::new();
+fn reap_at_exit(d: &Path) {
+    use std::io::Write;
+    static REAPER: std::sync::OnceLock<std::sync::Mutex<std::process::Child>> = std::sync::OnceLock::new();
+    let reaper = REAPER.get_or_init(|| {
+        let script = r#"while IFS= read -r d; do set -- "$@" "$d"; done; [ $# -eq 0 ] || { chmod -R u+rwx -- "$@" 2>/dev/null; rm -rf -- "$@"; }"#;
+        let child = std::process::Command::new("sh")
+            .args(["-c", script, "reaper"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        std::sync::Mutex::new(child)
+    });
+    let mut reaper = reaper.lock().unwrap();
+    writeln!(reaper.stdin.as_mut().unwrap(), "{}", d.display()).unwrap();
+}
 
-extern "C" fn sweep() {
-    if let Ok(all) = ALL.try_lock() {
-        for d in all.iter() {
-            let _ = std::fs::remove_dir_all(d);
-        }
-    }
+const LANE_ENV: [&str; 10] = [
+    "DROVER_LANE",
+    "DROVER_HOST",
+    "DROVER_OUTBOX",
+    "DROVER_SERVICE",
+    "DROVER_TOKEN",
+    "DROVER_RULES",
+    "DROVER_THREAD",
+    "DROVER_ORCHESTRATOR",
+    "DROVER_SCRATCH_TARGET",
+    "DROVER_PORT",
+];
+
+/// #1261: the env a lane exports, cleared once so a test run on a lane never sees it.
+pub fn without_lane_env() {
+    static CLEARED: std::sync::Once = std::sync::Once::new();
+    CLEARED.call_once(|| LANE_ENV.iter().for_each(|k| std::env::remove_var(k)));
+}
+
+/// A test's own lane env, set only after the inherited one is cleared.
+pub fn set_env(k: &str, v: &str) {
+    without_lane_env();
+    std::env::set_var(k, v);
 }
 
 pub fn tmpdir(name: &str) -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
+    without_lane_env();
     let d = std::env::temp_dir().join(format!(
         "fleet-test-{name}-{}-{}",
         std::process::id(),
         N.fetch_add(1, Ordering::SeqCst)
     ));
     let _ = std::fs::remove_dir_all(&d);
+    reap_at_exit(&d);
     std::fs::create_dir_all(&d).unwrap();
     MADE.with(|m| m.0.borrow_mut().push(d.clone()));
-    AT_EXIT.call_once(|| assert!(drover_sys::at_exit(sweep)));
-    ALL.lock().unwrap().push(d.clone());
     d
 }
 
@@ -288,6 +339,7 @@ pub fn secret_file(c: &Ctx, name: &str, value: &str, mode: u32) -> PathBuf {
 }
 
 pub fn ctx(dir: &Path, config: &str) -> Ctx {
+    without_lane_env();
     let cfgdir = dir.join("config");
     std::fs::create_dir_all(&cfgdir).unwrap();
     std::fs::write(cfgdir.join("fleet.toml"), config).unwrap();
@@ -304,6 +356,7 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
 }
 
 pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
+    without_lane_env();
     let mut out = Vec::new();
     let mut cmd = vec!["drover".to_string()];
     cmd.extend(args.iter().map(std::string::ToString::to_string));

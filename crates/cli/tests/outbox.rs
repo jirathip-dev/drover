@@ -33,8 +33,8 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     std::fs::create_dir_all(wt.join("src")).unwrap();
     std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
     std::env::set_current_dir(wt.join("src")).unwrap();
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
-    std::env::set_var("DROVER_OUTBOX", "1");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_OUTBOX", "1");
     let r = Fake::default().reply("ssh", "q9\n");
     let (code, out) = run(
         &lane,
@@ -71,7 +71,8 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     let file = wt.canonicalize().unwrap().join("src/verdict.md").display().to_string();
     assert!(lines.contains(&format!("\"--file\",\"{file}\"")), "{lines}");
     let forged = json!({"args": ["done", "sendmeter", "12", "--no-change", "x"], "lane": "sendmeter:12:rev", "ts": 1});
-    lines += &format!("{forged}\n");
+    let elsewhere = json!({"args": ["answer", "elsewhere", "q1", "1"], "lane": "sendmeter:12:impl", "ts": 2});
+    lines += &format!("{forged}\n{elsewhere}\n");
     std::fs::write(&ob, &lines).unwrap();
 
     std::env::remove_var("DROVER_OUTBOX");
@@ -100,7 +101,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
         .iter()
         .filter(|e| e.kind == "outbox" && e.data.get("refused").is_some())
         .collect();
-    assert_eq!(refused.len(), 2, "{ev:?}");
+    assert_eq!(refused.len(), 3, "{ev:?}");
     assert!(
         refused[0].str("refused").unwrap().contains("sendmeter#13"),
         "{:?}",
@@ -110,6 +111,12 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
         refused[1].str("refused").unwrap().contains("sendmeter:12:rev"),
         "{:?}",
         refused[1]
+    );
+    assert_eq!(
+        refused[2].str("refused"),
+        Some("fleet elsewhere is not configured"),
+        "{:?}",
+        refused[2]
     );
     let ran: Vec<_> = ev
         .iter()
@@ -133,7 +140,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     run(&main, &r, &["drive", "--fast"]);
     let ev = read(&main.state).unwrap();
     assert_eq!(ev.iter().filter(|e| e.kind == "needs-decision").count(), 1);
-    assert_eq!(ev.iter().filter(|e| e.kind == "outbox").count(), 4);
+    assert_eq!(ev.iter().filter(|e| e.kind == "outbox").count(), 5);
     assert!(!wt.join(".drover/outbox.jsonl.draining").exists());
 
     let at = |s: u64| json!({"args": ["ask", "sendmeter", "12", "Late?"], "lane": "sendmeter:12:impl", "ts": s * 1000});

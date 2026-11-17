@@ -51,8 +51,7 @@ the report itself is noise that would send next week's architect after the wrong
   `line_cap` as the floor and `warn_within`, and is listed `frozen`; the folder is a `[[collect]]`. One reader
   (`overlap::cap_at_sha`) serves `cap-check` (the working tree), `cap_at` and `cap_view` (a sha). The hook's
   `CAP_FILE` refusal covers the folder too, with the same exemption (an issue titled `cap:`). Highest, not sum: two
-  raises filed from the same measurement merge cleanly and never double. `docs/cap-history/` keeps its 46 notes and
-  gets no new ones.
+  raises filed from the same measurement merge cleanly and never double.
 - **The help budget (slice 3).** `HELP_AGENT_MAX` and the `<=` assertion go; the completeness assertion stays. The
   context guard this leaves is the weekly table itself: `roles/usage-tail.md` is on it.
 - **Passive events (slice 4).** `Event` gains `passive: bool` (serde default, skipped when false, so the on-disk
@@ -90,7 +89,7 @@ the report itself is noise that would send next week's architect after the wrong
   same number until the first raise file exists. Rough size: slices 1–4 src net ≈ +90 against ≈ −60 (the budget
   comment, the list's doc lines, CI's types step); 5 and 6 are moves.
 - Docs: `docs/architecture.md`'s size-cap paragraph names the folder; `docs/config.md`'s hotspots paragraph says the
-  tip filter and pair count; `roles/orchestrator.md`, `roles/impl.md` and `roles/usage-tail.md` name the `cap.d` folder under `ci/`.
+  tip filter and pair count; `roles/orchestrator/role.md`, `roles/impl.md` and `roles/usage-tail.md` name the `cap.d` folder under `ci/`.
 - Not this week: `roles/usage-tail.md`, `fleet.example.toml` and the docs are prose every feature extends; a
   collected folder for prose moves the conflict, not the growth. `config.rs`'s `WEBPUSH_ON` (16 hunks) could take the
   same flag as `passive` later (an alert declares itself pushable); left for a week with cleaner numbers.

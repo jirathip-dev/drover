@@ -20,13 +20,13 @@ fn env() -> MutexGuard<'static, ()> {
 }
 
 fn as_lane() {
-    std::env::set_var("DROVER_LANE", "sendmeter:36:impl");
+    set_env("DROVER_LANE", "sendmeter:36:impl");
     std::env::remove_var("DROVER_THREAD");
 }
 
 fn as_orchestrator(t: &str) {
-    std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
-    std::env::set_var("DROVER_THREAD", t);
+    set_env("DROVER_LANE", "sendmeter:-:orchestrator");
+    set_env("DROVER_THREAD", t);
 }
 
 fn as_owner() {

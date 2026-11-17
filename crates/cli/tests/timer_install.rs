@@ -32,8 +32,8 @@ fn timer_install_logs_who_ran_it() {
     assert_eq!((e.val("written"), e.val("reloaded")), (&jobs, &json!([])));
     assert!(e.str("thread").is_none());
 
-    std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
-    std::env::set_var("DROVER_THREAD", "t1");
+    set_env("DROVER_LANE", "sendmeter:-:orchestrator");
+    set_env("DROVER_THREAD", "t1");
     assert_eq!(run(&c, &r, &["timer", "install", "--no-load"]).0, 0);
     let e = &installs(&c)[1];
     assert_eq!(

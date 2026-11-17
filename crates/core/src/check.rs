@@ -20,6 +20,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod fire;
+mod sweep;
+
+use sweep::{disabled, sweep_off};
+pub use sweep::{drop_scratch, sweep, Sweep};
 
 fn ready<'a>(ctx: &Ctx, r: &dyn Runner, cfg: &'a Config, s: &IssueState) -> Option<(&'a Fleet, Value)> {
     let f = cfg.fleet(&s.fleet).ok().filter(|_| s.state == "ready")?;
@@ -89,7 +93,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let stall = cfg.limits.stall_minutes * 60;
     let remote = crate::hosts::survey(ctx, cfg, r, false);
     let sessions = with_remote(cfg, local, &remote);
-    crate::session::stamp::observe(ctx, cfg, &sessions)?;
+    crate::session::stamp::observe(ctx, cfg, r, &sessions)?;
     let events = working(&ctx.state)?;
     crate::cloud::tick(ctx, cfg, r, &remote, out)?;
     for (name, a) in &remote {
@@ -190,7 +194,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             gh::spec(ctx, r, f, name, i.issue, false).ok();
         }
     }
-    let events = closed_on_github(ctx, cfg, r, out, events)?;
+    let events = closed_on_github((ctx, cfg, r, &mut *out), events, None)?;
     crate::drive::markers(ctx, cfg, r, true);
     let passes = crate::events::since(&ctx.state, &["drive-pass"], ctx.now.saturating_sub(2 * 86_400))?;
     let mut held = BTreeMap::<(&str, u64), (u64, u64)>::new();
@@ -924,7 +928,7 @@ pub fn clean_all(
             |why: &str| crate::gate::refused("UNSAFE_CLEAN", format!("{}: {why}", lane.unwrap_or_default()));
         let why = if states.get(&(e.fleet.clone(), n)).is_some_and(|s| s.state == "merged") {
             "merged"
-        } else if closed_issues(ctx, cfg, r, out, &mut closed, &e.fleet).contains(&n) {
+        } else if closed_in((ctx, cfg, r, out), &states, &mut closed, &e.fleet).contains(&n) {
             "issue closed"
         } else if lane.is_some() {
             let p = Some(gh::cached_pr(ctx, &e.fleet, n))
@@ -1083,7 +1087,7 @@ pub fn clean_all(
         };
         let why = if states.get(&(fl.clone(), n)).is_some_and(|s| s.state == "merged") {
             "merged"
-        } else if cfg.fleet.contains_key(fl) && closed_issues(ctx, cfg, r, out, &mut closed, fl).contains(&n) {
+        } else if cfg.fleet.contains_key(fl) && closed_in((ctx, cfg, r, out), &states, &mut closed, fl).contains(&n) {
             "issue closed"
         } else {
             continue;
@@ -1313,7 +1317,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             emit(&ctx.state, cfg, Event::new(ctx.now, "all", None, "budget-freed", d))?;
         }
     }
-    sweep(ctx, cfg, &On::new(r, None), "local", out)?;
+    sweep(ctx, cfg, &On::new(r, None), "local", out, Sweep::Tick)?;
     trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, out, false)?;
     stamp(ctx, &if total == usage.total { usage } else { measure(ctx, cfg) })
 }
@@ -1386,7 +1390,7 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
         if !cfg.limits.sweep_remote {
             continue;
         }
-        if let Err(e) = sweep(ctx, cfg, &on, name, out) {
+        if let Err(e) = sweep(ctx, cfg, &on, name, out, Sweep::Tick) {
             writeln!(out, "scratch: {name}: {e:#}")?;
         }
     }
@@ -1394,57 +1398,6 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
 }
 
 pub type Live = std::collections::BTreeSet<String>;
-
-type Off<'c> = Vec<(&'c str, &'c str, Option<Vec<Session>>)>;
-
-fn disabled<'c>(cfg: &'c Config, r: &dyn Runner) -> Off<'c> {
-    let hosts = cfg.hosts.iter().filter(|h| !h.1.enabled);
-    let hosts = hosts.filter_map(|(n, h)| Some((n.as_str(), h.machine.as_deref()?)));
-    hosts
-        .map(|(n, m)| (n, m, crate::session::live_on(&On::new(r, Some(m))).ok()))
-        .collect()
-}
-
-fn sweep_off(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, off: &Off, dry: bool) -> Result<u64> {
-    let mut freed = 0;
-    for (name, m, agents) in off {
-        let Some(agents) = agents else {
-            writeln!(out, "scratch: {name}: host offline (not cleaned)")?;
-            continue;
-        };
-        let on = On::new(r, Some(m));
-        for b in build_dirs(ctx, cfg, &on) {
-            let b = format!("{b}/{}", crate::spawn::SCRATCH);
-            let res = scratch(&on, &b, &[]).and_then(|v| {
-                let held = |n: &String| agents.iter().any(|a| a.name == *n);
-                let gone: Vec<String> = v.into_iter().map(|n| n.0).filter(|n| !held(n)).collect();
-                if dry || gone.is_empty() {
-                    Ok(gone.into_iter().map(|n| (n, 0)).collect())
-                } else {
-                    scratch(&on, &b, &gone)
-                }
-            });
-            let gone = match res {
-                Ok(g) => g,
-                Err(e) => {
-                    writeln!(out, "scratch: {name}: {e:#}")?;
-                    continue;
-                }
-            };
-            for (n, bytes) in gone {
-                let p = format!("{b}/{n}");
-                let line = if dry {
-                    format!("would remove scratch {name}:{p}")
-                } else {
-                    format!("scratch: {name}: removed {p} {:.2} GB (no live lane there)", gb(bytes))
-                };
-                freed += bytes;
-                writeln!(out, "{line}")?;
-            }
-        }
-    }
-    Ok(freed)
-}
 
 pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
@@ -1454,132 +1407,6 @@ pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     let names = agents.iter().map(|a| a.name.as_str());
     Ok(names.chain(spawned).map(String::from).collect())
 }
-
-fn sweep(ctx: &Ctx, cfg: &Config, on: &On, host: &str, out: &mut dyn Write) -> Result<()> {
-    for b in build_dirs(ctx, cfg, on) {
-        sweep_in(ctx, cfg, on, host, &format!("{b}/{}", crate::spawn::SCRATCH), out)?;
-        sweep_in(ctx, cfg, on, host, &b, out)?;
-    }
-    Ok(())
-}
-
-fn finished(events: &[Event], states: &crate::events::States, sp: &Event) -> Option<&'static str> {
-    let (agent, role) = (sp.str("agent")?, sp.str("role").unwrap_or_default());
-    let s = states.get(&(sp.fleet.clone(), sp.issue?))?;
-    if s.done() {
-        return Some("lane finished");
-    }
-    if s.lanes.get(role).map(String::as_str) != Some(agent) {
-        return Some("superseded");
-    }
-    let ends = |e: &Event| match e.kind.as_str() {
-        "verdict" | "design-review" => true,
-        "turn-end" => e.str("state") == Some("done") && e.str("role") == Some(role),
-        _ => false,
-    };
-    let mine = crate::events::of_issue(events, &sp.fleet, sp.issue?);
-    mine.into_iter()
-        .filter(|e| e.seq > sp.seq)
-        .any(ends)
-        .then_some("lane finished")
-}
-
-fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, host: &str, b: &str, out: &mut dyn Write) -> Result<()> {
-    let names = scratch(on, b, &[])?;
-    if names.is_empty() {
-        return Ok(());
-    }
-    let scr = b.ends_with(crate::spawn::SCRATCH);
-    let (agents, events) = (crate::session::live_on(on)?, working(&ctx.state)?);
-    let states = fold(&events);
-    let agent = |n: &str| agents.iter().find(|a| a.name == n);
-    let lanes = lanes(&events);
-    let spawn = |n: &str| last_spawn(&events, n);
-    let spawned = |n: &str| (lanes.iter()).any(|e| e.kind.starts_with("spawn") && e.str("agent") == Some(n));
-    let low = host::free_gb(on).is_some_and(|g| g < cfg.limits.min_free_gb);
-    let (mut why, total) = (BTreeMap::new(), names.len());
-    for (n, _) in names {
-        if agent(&n).is_some_and(Session::busy) {
-            continue;
-        }
-        let ended = spawn(&n).and_then(|sp| finished(&events, &states, sp));
-        let unknown = !spawned(&n);
-        let w = match ended {
-            Some(w) => w,
-            None if unknown && scr && agent(&n).is_none() => "lane ended",
-            None if low && scr => "disk low",
-            None => continue,
-        };
-        why.insert(n, w);
-    }
-    let gone: Vec<String> = why.keys().cloned().collect();
-    let removed = if gone.is_empty() {
-        vec![]
-    } else {
-        scratch(on, b, &gone)?
-    };
-    for (n, bytes) in &removed {
-        let w = why.get(n).copied().unwrap_or_default();
-        let what = if scr { "scratch" } else { "builds" };
-        writeln!(out, "{what}: {host}: removed {b}/{n} {:.2} GB ({})", gb(*bytes), w)?;
-        if let Some(sp) = spawn(n) {
-            let d = json!({"agent": n, "bytes": bytes, "why": w, "host": host, "path": format!("{b}/{n}")});
-            emit(
-                &ctx.state,
-                cfg,
-                Event::new(ctx.now, &sp.fleet, sp.issue, "build-freed", d),
-            )?;
-        }
-    }
-    if on.machine.is_some() && scr {
-        writeln!(
-            out,
-            "scratch: {host}: {} kept, {} removed",
-            total - removed.len(),
-            removed.len()
-        )?;
-    }
-    Ok(())
-}
-
-fn scratch(on: &On, b: &str, rm: &[String]) -> Result<Vec<(String, u64)>> {
-    if on.machine.is_some() {
-        let args = crate::runner::argv(&["-c", SCRATCH, "sh", b]);
-        let args = [args, rm.to_vec()].concat();
-        let o = on.run("sh", &args)?;
-        anyhow::ensure!(o.code == 0, "sweep failed ({}): {}", o.code, o.stderr.trim());
-        let row = |l: &str| match l.split_once(' ') {
-            Some((kb, n)) if !rm.is_empty() => Some((n.into(), kb.parse::<u64>().ok()? * 1024)),
-            _ => (rm.is_empty() && !l.is_empty()).then(|| (l.into(), 0)),
-        };
-        return Ok(o.stdout.lines().filter_map(row).collect());
-    }
-    let root = crate::config::expand(b);
-    let ls = std::fs::read_dir(&root).into_iter().flatten().flatten();
-    let all = ls
-        .filter(|e| e.path().is_dir() && !e.file_name().as_encoded_bytes().starts_with(b"."))
-        .map(|e| (e.file_name().to_string_lossy().into_owned(), 0));
-    if rm.is_empty() {
-        return Ok(all.collect());
-    }
-    let mut v: Vec<_> = rm.iter().map(|n| (du(&root.join(n)), n)).collect();
-    v.sort_by(|a, b| b.cmp(a));
-    let gone = |(s, n): (u64, &String)| {
-        let d = root.join(n);
-        (!building(&d, 3) && std::fs::remove_dir_all(&d).is_ok()).then(|| (n.clone(), s))
-    };
-    Ok(v.into_iter().filter_map(gone).collect())
-}
-
-const SCRATCH: &str = r#"b=$1; shift; case $b in "~/"*) b=$HOME/${b#"~/"};; esac
-cd "$b" 2>/dev/null || exit 0
-[ $# -eq 0 ] && { for d in */; do [ -d "$d" ] && echo "${d%/}"; done; exit 0; }
-du -sk -- "$@" 2>/dev/null | sort -rn | while read -r s d; do
-  l=$(find "$d" -maxdepth 4 -name .cargo-lock 2>/dev/null)
-  [ -n "$l" ] && command -v lsof >/dev/null && [ -n "$(lsof $l 2>/dev/null)" ] && continue
-  rm -rf "./${d:?}" && echo "$s $d"
-done
-exit 0"#;
 
 fn building(d: &Path, depth: u8) -> bool {
     let held = std::fs::File::open(d.join(".cargo-lock")).is_ok_and(|f| f.try_lock().is_err());
@@ -1762,6 +1589,17 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
     }
     total += trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, o, !yes)?;
     total += sweep_off(ctx, cfg, r, o, &disabled(cfg, r), !yes)?;
+    let how = if yes { Sweep::Apply } else { Sweep::Preview };
+    let mut tried = std::collections::BTreeSet::new();
+    let hosts = cfg.hosts.iter().filter(|h| h.1.enabled);
+    for (name, m) in hosts.filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
+        if tried.insert(m) {
+            match sweep(ctx, cfg, &On::new(r, Some(m)), name, o, how) {
+                Ok(b) => total += b,
+                Err(e) => writeln!(o, "scratch: {name}: {e:#}")?,
+            }
+        }
+    }
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {
@@ -1875,7 +1713,7 @@ type Seen = std::collections::HashSet<(u64, u64)>;
 
 fn walk(p: &Path, seen: &mut Seen) -> u64 {
     use std::os::unix::fs::MetadataExt;
-    match std::fs::symlink_metadata(p) {
+    match crate::sim::lstat(p) {
         Ok(m) if m.is_dir() => std::fs::read_dir(p).map_or(0, |d| d.flatten().map(|e| walk(&e.path(), seen)).sum()),
         Ok(m) => {
             let id = m.is_file().then(|| drover_sys::clone_id(p)).flatten();
@@ -1886,20 +1724,21 @@ fn walk(p: &Path, seen: &mut Seen) -> u64 {
     }
 }
 
-fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: Arc<Log>) -> Result<Arc<Log>> {
+pub(crate) fn closed_on_github(
+    (ctx, cfg, r, out): (&Ctx, &Config, &dyn Runner, &mut dyn Write),
+    ev: Arc<Log>,
+    only: Option<&str>,
+) -> Result<Arc<Log>> {
     let st = fold(&ev);
     let mut any = false;
-    for (name, f) in &cfg.fleet {
+    for (name, f) in cfg.fleet.iter().filter(|(n, _)| only.is_none_or(|o| o == *n)) {
         let state = |n: u64| st.get(&(name.clone(), n));
         let mut open: Vec<u64> = (st.values().filter(|s| s.fleet == *name && !s.done()))
             .map(|s| s.issue)
             .collect();
         open.extend((crate::queue::replay(&ev, name).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
         open.retain(|n| gh::cached_pr(ctx, name, *n).at("state") != "MERGED");
-        let Some(closed) = (!open.is_empty())
-            .then(|| gh::closed(ctx, r, f, name, ctx.now).ok())
-            .flatten()
-        else {
+        let Ok(closed) = gh::closed(ctx, r, f, name, &open, ctx.now) else {
             continue;
         };
         for n in open.into_iter().filter(|n| closed.contains(n)) {
@@ -1915,27 +1754,26 @@ fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write
     Ok(ev)
 }
 
-fn closed_issues<'a>(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
+fn closed_in<'a>(
+    (ctx, cfg, r, out): (&Ctx, &Config, &dyn Runner, &mut dyn Write),
+    states: &BTreeMap<(String, u64), crate::events::IssueState>,
     memo: &'a mut BTreeMap<String, Vec<u64>>,
     fleet: &str,
 ) -> &'a Vec<u64> {
-    if !memo.contains_key(fleet) {
-        let got = cfg.fleet(fleet).and_then(|f| gh::closed(ctx, r, f, fleet, ctx.now));
-        let list = got.unwrap_or_else(|e| {
-            writeln!(
-                out,
-                "cannot list closed issues of {fleet} ({e:#}); only merged lanes are candidates"
-            )
-            .ok();
-            vec![]
-        });
-        memo.insert(fleet.to_string(), list);
-    }
-    &memo[fleet]
+    memo.entry(fleet.to_string()).or_insert_with(|| {
+        let mine = states.values().filter(|s| s.fleet == fleet && s.state != "merged");
+        let ids: Vec<u64> = mine.map(|s| s.issue).collect();
+        let f = cfg.fleet(fleet);
+        f.and_then(|f| gh::closed(ctx, r, f, fleet, &ids, ctx.now))
+            .unwrap_or_else(|e| {
+                writeln!(
+                    out,
+                    "cannot list closed issues of {fleet} ({e:#}); only merged lanes are candidates"
+                )
+                .ok();
+                vec![]
+            })
+    })
 }
 
 pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, saved: bool) -> Result<()> {
@@ -2280,11 +2118,6 @@ fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
     let dirty = changes(&git(&["status", "--porcelain"])?);
     let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?;
     Ok((dirty, ahead.trim().parse().unwrap_or(0)))
-}
-
-/// #676: does worktree `wt` on its host hold dirty files or unpushed commits (unreadable: no)?
-pub fn unsaved(on: &On, wt: &Path) -> bool {
-    on.exists(wt) && pending(on, &wt.to_string_lossy()).is_ok_and(|p| p != (0, 0))
 }
 
 fn close_gone(ctx: &Ctx, on: &On, agent: &str, pane: &str) -> Result<()> {

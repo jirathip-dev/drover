@@ -60,8 +60,8 @@ rounds = 3              # [limits] review_rounds, shared with rev
 next = { PASS = "gates", FAIL = "impl" }
 ```
 
-- **What it does:** a read-only lane (`roles/verify.md`) launches the app at the head, following the repo's
-  `.drover/verify.md`, runs its Doctor, drives each acceptance criterion a user can see and records PASS or FAIL.
+- **What it does:** a read-only lane (`roles/verify.md`) launches the app at the head, following the
+  integration branch's `.drover/verify.md` (#958: a PR's own copy is under review, never its recipe), runs its Doctor, drives each acceptance criterion a user can see and records PASS or FAIL.
   Any visual deviation from the approved `docs/design/<slug>/` PNGs is a FAIL. Its screenshots (1440 and 390 wide)
   stay in its lane's folder, listed by path in `verdict.md`; the verdict event carries them, and the board's
   needs-you card shows them inline.
@@ -70,7 +70,7 @@ next = { PASS = "gates", FAIL = "impl" }
 - **When it runs:** for a head rev PASSed, if the issue had a design stage (#412), the PR touches the fleet's
   `ui_paths` (globs), or it is queued `--verify`. `queue add N --verify [on|off]` and `queue set N verify on|off`
   force it either way. Otherwise drive logs `verify-skipped` at that head and the issue goes on to the gates.
-- **No recipe:** when it should run but the head has no `.drover/verify.md`, drive logs `verify-no-recipe`, the
+- **No recipe:** when it should run but the integration branch has no `.drover/verify.md`, drive logs `verify-no-recipe`, the
   Queue card says so, and the issue goes on to the gates. It never blocks. `roles/verify-recipe.md` is the brief
   for an impl lane that writes the recipe (Launch, Doctor, Drive, Evidence, Feature map, Known noise), proving each step.
 - Fleets without a `verify` role run the pipeline above, unchanged. A custom pipeline places a check with role

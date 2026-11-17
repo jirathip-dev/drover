@@ -258,23 +258,42 @@ fn rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine() {
     let c = ctx(&tmpdir("lesson-rules"), CONFIG);
     let _sh = FakeShed::attached(&c);
     let rules = "- don't unwrap config reads (enforced by: clippy unwrap_used)\n";
+    let docs = "- `docs/setup.md`: install\n";
     for (role, dir) in [("impl", "issue-12"), ("rev", "rev-12-r1")] {
         let wt = c.worktrees.join("sendmeter").join(dir);
         std::fs::create_dir_all(wt.join(".drover")).unwrap();
         std::fs::write(wt.join(".drover/rules.md"), rules).unwrap();
-        let r = spawner(12).once(&format!("git -C {} status --porcelain", wt.display()), 0, "");
+        std::fs::write(wt.join(".drover/docs.md"), docs).unwrap();
+        let r = spawner(12)
+            .once(&format!("git -C {} status --porcelain", wt.display()), 0, "")
+            .once(
+                "git -C /tmp/does-not-matter/sendmeter show origin/staging:.drover/rules.md",
+                0,
+                rules,
+            );
         let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", role]);
         assert!(code == 0 || code == 4, "{role}: {code} {out}");
         let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
         let want = format!("## Repo rules (.drover/rules.md)\n\n{rules}\n## ");
         assert!(brief.contains(&want), "{role}: {brief}");
+        assert!(
+            brief.contains("## Docs you may trust (.drover/docs.md)\n\n"),
+            "{role}: {brief}"
+        );
+        assert!(
+            brief.contains(&format!("unless this brief names it.\n\n{docs}\n## ")),
+            "{role}: {brief}"
+        );
     }
     let c = ctx(&tmpdir("lesson-norules"), CONFIG);
     let _sh = FakeShed::attached(&c);
     let (code, out) = run(&c, &spawner(12), &["spawn", "sendmeter", "12", "impl"]);
     assert!(code == 0 || code == 4, "{code} {out}");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
-    assert!(!brief.contains("Repo rules"), "{brief}");
+    assert!(
+        !brief.contains("Repo rules") && !brief.contains("Docs you may trust"),
+        "{brief}"
+    );
 }
 
 #[test]
@@ -602,4 +621,64 @@ fn a_prose_only_lesson_pr_is_a_fail() {
     );
     assert!(code == 0 && out.contains("recorded PASS"), "{out}");
     assert!(!r.called("gh pr diff"), "{out}");
+}
+
+#[test]
+fn a_pr_that_deletes_every_rule_is_reviewed_by_the_integration_rules() {
+    let c = ctx(&tmpdir("lesson-own-rules"), CONFIG);
+    let _sh = FakeShed::attached(&c);
+    let wt = c.worktrees.join("sendmeter").join("rev-12-r1");
+    std::fs::create_dir_all(wt.join(".drover")).unwrap();
+    std::fs::write(wt.join(".drover/rules.md"), "").unwrap();
+    let rules = "- don't unwrap config reads (enforced by: clippy unwrap_used)\n";
+    let diff = "diff --git a/.drover/rules.md b/.drover/rules.md\n--- a/.drover/rules.md\n+++ b/.drover/rules.md\n@@ -1 +0,0 @@\n-- don't unwrap config reads (enforced by: clippy unwrap_used)\n";
+    let r = spawner(12)
+        .once(&format!("git -C {} status --porcelain", wt.display()), 0, "")
+        .once(
+            "git -C /tmp/does-not-matter/sendmeter show origin/staging:.drover/rules.md",
+            0,
+            rules,
+        )
+        .once(
+            &format!("git -C {} diff origin/staging...HEAD --", wt.display()),
+            0,
+            diff,
+        );
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
+    assert!(code == 0 || code == 4, "{code} {out}");
+    let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    let want = format!("## Repo rules (.drover/rules.md)\n\n{rules}\n## ");
+    assert!(brief.contains(&want), "{brief}");
+    assert!(
+        brief.contains("This PR changes `.drover/rules.md`") && brief.contains(diff),
+        "{brief}"
+    );
+}
+
+#[test]
+fn a_lesson_pr_is_reviewed_by_its_own_rules_as_before() {
+    let c = ctx(&tmpdir("lesson-pr-rules"), CONFIG);
+    let _sh = FakeShed::attached(&c);
+    let wt = c.worktrees.join("sendmeter").join("rev-12-r1");
+    std::fs::create_dir_all(wt.join(".drover")).unwrap();
+    let rules = "- don't X (enforced by: lesson x `true`, shadow since 1970-01-12)\n";
+    std::fs::write(wt.join(".drover/rules.md"), rules).unwrap();
+    let r = Fake::default()
+        .reply(
+            "gh issue view 12",
+            r#"{"title":"lessons: sendmeter week of 1970-01-12","body":"b"}"#,
+        )
+        .reply("git -C", "0\n")
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .once(&format!("git -C {} status --porcelain", wt.display()), 0, "");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
+    assert!(code == 0 || code == 4, "{code} {out}");
+    let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    let want = format!("## Repo rules (.drover/rules.md)\n\n{rules}\n## ");
+    assert!(brief.contains(&want) && !brief.contains("This PR changes"), "{brief}");
+    assert!(
+        !r.called("git -C /tmp/does-not-matter/sendmeter show"),
+        "{:?}",
+        r.calls.borrow()
+    );
 }
