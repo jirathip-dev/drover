@@ -56,20 +56,21 @@ pub fn every_full(cfg: &Config, live: &[&Event], me: Me, start: bool) -> Option<
 
 /// #1234: the start slots held now, as a refusal names them (`<host> N/max starting: <marker> <age>, …`); empty when none is.
 pub fn held_now(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
-    let live = crate::drive::pending(ctx, cfg, r);
+    let pending = crate::drive::pending(ctx, cfg, r);
     let on = |h: &str| {
-        live.iter()
+        pending
+            .iter()
             .filter(|p| host_of(cfg, p) == h && !freed(cfg, h, p))
             .count()
     };
-    let line: Vec<String> = (hosts(cfg).into_iter())
+    let full: Vec<String> = (hosts(cfg).into_iter())
         .filter_map(|h| Some((h, on(h))).filter(|x| x.1 > 0))
         .map(|(h, n)| format!("{h} {n}/{} starting", cfg.start_max(h)))
         .collect();
-    if line.is_empty() {
+    if full.is_empty() {
         return String::new();
     }
-    format!("{}: {}", line.join(", "), crate::drive::held_by(ctx, cfg, r))
+    format!("{}: {}", full.join(", "), crate::drive::held_by(ctx, cfg, r))
 }
 
 /// #1234: spawn marker `l`'s spawn has ended since it was taken: logged, failed with `spawn-error`, or its intent `failed`.

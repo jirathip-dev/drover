@@ -481,7 +481,7 @@ pub fn board(
     fleet: &str,
     cfg: Option<&crate::config::Config>,
     c: &Conflicts,
-    at: &std::collections::BTreeMap<String, String>,
+    (at, slots): (&std::collections::BTreeMap<String, String>, &str),
 ) -> String {
     let now = ctx.now;
     let st = fold(events);
@@ -497,7 +497,7 @@ pub fn board(
     let row = |pos: String, n: u64, last: Option<String>| {
         let s = st.get(&(fleet.to_string(), n));
         let f = cfg.and_then(|c| c.fleet.get(fleet));
-        let skip = skipped(events, &st, f, fleet, n, now).map(|s| s.0);
+        let skip = skipped(events, &st, f, fleet, (n, now), slots).map(|s| s.0);
         let lane: String = s
             .and_then(|s| s.lane.clone())
             .or(skip)

@@ -1458,7 +1458,20 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let cfg = Config::load(&ctx.config).ok();
             let look = crate::snapshot::Snap::read(ctx, r);
             let at = cfg.as_ref().map(|c| places(c, &look, &events)).unwrap_or_default();
-            let board = |f: &String| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f), &at);
+            let slots = cfg
+                .as_ref()
+                .map(|c| crate::starts::held_now(ctx, c, &look))
+                .unwrap_or_default();
+            let board = |f: &String| {
+                queue::board(
+                    ctx,
+                    &events,
+                    f,
+                    cfg.as_ref(),
+                    &crate::overlap::cached(ctx, f),
+                    (&at, &slots),
+                )
+            };
             let boards: Vec<_> = all.iter().map(board).collect();
             for (k, _) in cfg.iter().flat_map(Config::warnings) {
                 writeln!(out, "! {k} is retired → drover doctor")?;
