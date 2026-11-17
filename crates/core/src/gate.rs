@@ -532,7 +532,9 @@ fn repro_section(pr_body: &str) -> Option<String> {
 fn unverified(events: &[Event], (fleet, n): (&str, u64), head: &str) -> bool {
     let at = |e: &&Event| e.is("verdict", fleet, n) && e.str("sha").is_some_and(|s| s.eq_ignore_ascii_case(head));
     let mut here = events.iter().filter(at);
-    here.clone().any(|e| e.str("repro") == Some("verify"))
+    let mut rev = here.clone().rev();
+    rev.find(|e| e.str("stage") != Some("verify") && e.str("verdict") == Some("PASS"))
+        .is_some_and(|e| e.str("repro") == Some("verify"))
         && !here.any(|e| e.str("stage") == Some("verify") && e.str("verdict") == Some("PASS"))
 }
 
