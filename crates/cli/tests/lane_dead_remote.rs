@@ -112,18 +112,19 @@ fn key_state(c: &drover::Ctx) -> String {
     row.split_whitespace().nth(1).unwrap().to_string()
 }
 
-struct ShedFails<'a>(&'a Fake);
+struct Unanswered<'a>(&'a Fake, i32);
 
-impl Runner for ShedFails<'_> {
+impl Runner for Unanswered<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         self.run_in(prog, args, "")
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
-        let there = prog == "ssh" && args.iter().any(|a| a == "bazzite");
-        if there && args.last().is_some_and(|l| l.contains("'shed' 'connect'")) {
+        let there = prog == "ssh" && args[0] != "-G" && args.iter().any(|a| a == "bazzite");
+        let shed = args.last().is_some_and(|l| l.contains("'shed' 'connect'"));
+        if there && (shed || self.1 == 124) {
             return Ok(Out {
-                code: 1,
-                stderr: "shed: server busy".into(),
+                code: self.1,
+                stderr: "shed: no answer".into(),
                 ..Out::default()
             });
         }
@@ -137,7 +138,7 @@ fn a_pass_that_cannot_read_a_remote_hosts_sessions_logs_no_lane_dead() {
     let (c, _sh, key, port) = setup("ldr-unread", "");
     let f = main_host();
     for _ in 0..2 {
-        let (code, out) = run(&c, &ShedFails(&f), &["check"]);
+        let (code, out) = run(&c, &Unanswered(&f, 1), &["check"]);
         assert_eq!(code, 0, "{out}");
     }
     assert_eq!(
@@ -151,16 +152,15 @@ fn a_pass_that_cannot_read_a_remote_hosts_sessions_logs_no_lane_dead() {
 }
 
 #[test]
-fn a_tick_past_its_budget_before_the_remote_host_logs_no_lane_dead() {
+fn a_tick_that_skips_a_remote_host_over_budget_logs_no_lane_dead() {
     let (c, _sh, key, port) = setup("ldr-budget", "slow_secs = 0\n");
-    let (f, bazzite) = (main_host(), FakeShed::new());
-    let r = OverSsh {
-        f: &f,
-        hosts: vec![("bazzite", &bazzite)],
-    };
-    let (code, out) = run(&c, &r, &["tick"]);
+    let f = main_host();
+    let (code, out) = run(&c, &Unanswered(&f, 124), &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("past its 0 s budget"), "{out}");
+    assert!(
+        out.contains("tick: bazzite: over budget; skipped for the rest of this pass"),
+        "{out}"
+    );
     assert_eq!(
         dead(&c),
         0,
