@@ -1,0 +1,7 @@
+Decided: the planted bug fires on a rev lane's restart only when the plan scripts rev lanes
+Because: "Its pass doesn't depend on a hand-picked seed set or rng that a small timing change (one extra gh call per pass) breaks."
+Because: crates/cli/tests/sim/scenario.rs:278
+Rejected: raising the start threshold to 4 — random seeds reach it at 1.6%, and the hunt was no faster (rng 2 round 51, rng 3 never in 68)
+Rejected: re-picking seeds or rng — the same timing fragility the issue reports
+Check: scenario::random never sets model.scripts, so random seeds cannot trip it; the hunt found it in rounds 6-25 across rngs 2,3,5,7,11,13
+Owner: The hunt test runs again and no longer breaks when fleet timing shifts.
