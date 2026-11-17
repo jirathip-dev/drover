@@ -144,6 +144,9 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
     if let Some(id) = crate::orchestrator::acting() {
         ev.data.entry("orchestrator").or_insert(id.into());
     }
+    if seq.is_none() && matches!(ev.kind.as_str(), "verdict" | "lane-killed") {
+        ev.data.entry("by").or_insert(crate::orchestrator::actor().into());
+    }
     let ev = if seq.is_none() { crate::events::capped(&ev) } else { ev };
     let json = serde_json::to_string(&ev)?;
     c.execute(
