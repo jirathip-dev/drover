@@ -212,6 +212,8 @@ pub struct Pass<'a> {
     t0: std::time::Instant,
     pub until: Option<std::time::Instant>,
     late: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    unsent: std::sync::atomic::AtomicU64,
+    slowest: std::sync::Mutex<(String, u64)>,
     off: std::collections::BTreeSet<String>,
     log: Option<(&'a Ctx, &'a Config)>,
 }
@@ -228,6 +230,8 @@ impl<'a> Pass<'a> {
             t0: crate::clock::instant(),
             until: None,
             late: std::sync::Mutex::default(),
+            unsent: std::sync::atomic::AtomicU64::new(0),
+            slowest: std::sync::Mutex::default(),
             off: std::collections::BTreeSet::new(),
             log: None,
         }
@@ -244,6 +248,21 @@ impl<'a> Pass<'a> {
     pub fn late(&self) -> Vec<String> {
         lock(&self.late).iter().cloned().collect()
     }
+    /// The remote calls this pass did not send.
+    pub fn unsent(&self) -> u64 {
+        self.unsent.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    /// The pass's slowest step so far and its seconds.
+    pub fn slowest(&self) -> (String, u64) {
+        let (step, at) = lock(&self.step).clone();
+        let now = (step, self.t0.elapsed().as_secs().saturating_sub(at));
+        let done = lock(&self.slowest).clone();
+        if now.1 >= done.1 {
+            now
+        } else {
+            done
+        }
+    }
     /// The fast step's one remote call per host, no probe; a call killed at 15 s marks its host down.
     pub fn fast(r: &'a dyn Runner) -> Self {
         Pass {
@@ -256,6 +275,12 @@ impl<'a> Pass<'a> {
             crate::timer::TICK_STEPS.iter().any(|t| t.0 == s),
             "{s} is not in TICK_STEPS"
         );
+        let ran = self.slowest();
+        let mut slowest = lock(&self.slowest);
+        if ran.1 >= slowest.1 {
+            *slowest = ran;
+        }
+        drop(slowest);
         *lock(&self.step) = (s.into(), self.t0.elapsed().as_secs());
         self.note("");
     }
@@ -312,7 +337,8 @@ impl<'a> Pass<'a> {
             });
         }
         self.note(&quote(prog, args));
-        let over = self.over();
+        let core = matches!(lock(&self.step).0.as_str(), "check" | "drive");
+        let over = !core && self.over();
         if over {
             lock(&self.late).insert(m.into());
         }
@@ -322,6 +348,7 @@ impl<'a> Pass<'a> {
             } else {
                 "host offline this pass"
             };
+            self.unsent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let stderr = format!("{m}: not sent ({why})");
             return Ok(Out {
                 code: 255,

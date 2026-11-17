@@ -277,33 +277,34 @@ pub fn cached_run(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     load::<Value>(&cache_path(ctx, "run", fleet, issue)).and_then(|c| c.at("url").as_str().map(String::from))
 }
 
-/// Numbers of the fleet's closed issues: one `gh issue list` per fleet, fresh for 60 s.
-pub fn closed(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Vec<u64>> {
-    let p = cache_path(ctx, "closed", fleet, 0);
-    if let Some(c) = load(&p).filter(|c| fresh(c, now)) {
-        return Ok(c
-            .at("closed")
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_u64)
-            .collect());
+/// Which of `issues` are closed on GitHub: one aliased `gh api graphql` for just those numbers, fresh for 60 s.
+pub fn closed(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, issues: &[u64], now: u64) -> Result<Vec<u64>> {
+    if issues.is_empty() {
+        return Ok(vec![]);
     }
-    let v = json(
-        r,
-        "gh",
-        &[
-            "issue", "list", "-R", &f.repo, "--state", "closed", "--limit", "1000", "--json", "number",
-        ],
-    )?;
-    let closed: Vec<u64> = v
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|i| i["number"].as_u64())
-        .collect();
-    store(&p, &json!({"ts": now, "closed": closed}))?;
-    Ok(closed)
+    let p = cache_path(ctx, "closed", fleet, 0);
+    let has = |c: &Value, k: &str, n: &u64| c.at(k).as_array().is_some_and(|a| a.contains(&json!(n)));
+    let cached = load::<Value>(&p).filter(|c| fresh(c, now) && issues.iter().all(|n| has(c, "asked", n)));
+    let c = if let Some(c) = cached {
+        c
+    } else {
+        let (owner, name) = f.repo.split_once('/').unwrap_or_default();
+        let each: String = issues
+            .iter()
+            .map(|n| format!("i{n}:issue(number:{n}){{state}}"))
+            .collect();
+        let q = format!("query=query($owner:String!,$name:String!){{repository(owner:$owner,name:$name){{{each}}}}}");
+        let (o, n) = (format!("owner={owner}"), format!("name={name}"));
+        let v = json(r, "gh", &["api", "graphql", "-f", &o, "-f", &n, "-f", &q])?;
+        let repo = v.at("data").at("repository");
+        let shut = issues
+            .iter()
+            .filter(|n| repo.at(format!("i{n}")).at("state") == "CLOSED");
+        let c = json!({"ts": now, "asked": issues, "closed": shut.collect::<Vec<_>>()});
+        store(&p, &c)?;
+        c
+    };
+    Ok(issues.iter().copied().filter(|n| has(&c, "closed", n)).collect())
 }
 
 /// Files PR `num` changes at `head`, a rename's old name too, cached per head sha. the paginated files API (the diff stops at 300 files); at its 3,000 cap, the fetched checkout's `git diff <base>...<head>`.

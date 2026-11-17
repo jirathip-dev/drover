@@ -364,6 +364,25 @@ fn compact_daily(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
+fn skipped(ctx: &Ctx, cfg: &Config, pass: &crate::hosts::Pass) -> Result<()> {
+    let at = ctx.state.with_file_name("tick.skipped");
+    let hosts = pass.late();
+    if hosts.is_empty() {
+        std::fs::remove_file(&at).ok();
+        return Ok(());
+    }
+    let was = std::fs::read_to_string(&at).ok();
+    let runs = was.and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0) + 1;
+    std::fs::write(&at, runs.to_string())?;
+    if runs != 2 {
+        return Ok(());
+    }
+    let (step, secs) = pass.slowest();
+    let d =
+        serde_json::json!({"hosts": hosts, "passes": runs, "not_sent": pass.unsent(), "step": step, "step_secs": secs});
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "hosts-skipped", d))
+}
+
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
     if log.metadata().is_ok_and(|m| m.len() > 1 << 20) {
@@ -429,6 +448,9 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     });
     for m in pass.late() {
         writeln!(out, "tick: {m}: over budget; skipped for the rest of this pass")?;
+    }
+    if let Ok(cfg) = &loaded {
+        skipped(ctx, cfg, &pass)?;
     }
     std::fs::remove_file(&mark).ok();
     drop(stop);

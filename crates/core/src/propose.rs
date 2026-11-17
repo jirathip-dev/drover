@@ -14,7 +14,7 @@ use std::path::Path;
 /// `drover config propose <thread> <file>`: `file` is the whole new fleet.toml; validated, its diff is the card.
 pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file: &Path) -> Result<()> {
     let events = working(&ctx.state)?;
-    let t = orchestrator::find(&events, thread)?;
+    let fleet = orchestrator::fleet_of(&events, thread)?;
     let text = std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
     Config::parse(&text).context("the proposed fleet.toml is invalid")?;
     let cur = std::fs::read_to_string(&ctx.config)?;
@@ -27,11 +27,7 @@ pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file:
     crate::devices::write0600(&stored_at(ctx, &id), text.as_bytes())?;
     stored(ctx, &id, Some(&sha))?;
     let d = json!({"thread": thread, "id": id, "diff": diff, "sha": sha, "base": sha256(cur.as_bytes())});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, &t.fleet, None, "config-propose", d),
-    )?;
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "config-propose", d))?;
     Ok(writeln!(out, "{id}")?)
 }
 
@@ -173,7 +169,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         cfg,
         Event::new(ctx.now, &p.fleet, None, "config-settled", d),
     )?;
-    orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)).ok();
+    orchestrator::tell(ctx, cfg, r, thread, &line);
     Ok(line)
 }
 

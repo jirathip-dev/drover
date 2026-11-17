@@ -1,8 +1,8 @@
 {
   "response": {
-    "code": "PAUSED",
+    "code": "BAD_VALUE",
     "job": null,
-    "message": "sendmeter is paused (`drover resume sendmeter`)",
+    "message": "no menu: shed reports none; answer with the reply box",
     "ok": false
   },
   "route": "POST /api/v1/menu",

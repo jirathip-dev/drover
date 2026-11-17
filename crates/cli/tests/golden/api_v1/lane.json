@@ -5,14 +5,25 @@
       "kill",
       "clean"
     ],
-    "before": 0,
+    "before": 10,
     "blocks": [
       {
         "k": "screen"
       }
     ],
     "harness": "claude",
-    "lines": [],
+    "lines": [
+      "╭──────────────────────────────────────────╮",
+      "│ Bash command                             │",
+      "│   cargo test --all                       │",
+      "│ Do you want to proceed?                  │",
+      "│ ❯ 1. Yes                                 │",
+      "│   2. Yes, and don't ask again for cargo  │",
+      "│      commands in /p/sendmeter            │",
+      "│   3. No, and tell Claude what to do      │",
+      "│      differently (esc)                   │",
+      "╰──────────────────────────────────────────╯"
+    ],
     "live": 0,
     "more": false,
     "notices": [

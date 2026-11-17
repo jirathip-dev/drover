@@ -37,7 +37,9 @@ pub enum Life {
 pub enum Status {
     Unreported,
     Working,
+    Running,
     Blocked,
+    Approval,
     Limited,
     Done,
     Idle,
@@ -51,8 +53,10 @@ impl Status {
     pub fn of(r: Option<&Reported>) -> Status {
         match r.map(|r| r.state.as_str()) {
             None => Status::Unreported,
-            Some("working" | "running") => Status::Working,
-            Some("blocked" | "waiting-approval") => Status::Blocked,
+            Some("working") => Status::Working,
+            Some("running") => Status::Running,
+            Some("blocked") => Status::Blocked,
+            Some("waiting-approval") => Status::Approval,
             Some("rate-limited") => Status::Limited,
             Some("done") => Status::Done,
             Some("idle") => Status::Idle,
@@ -68,22 +72,31 @@ impl Status {
             ..Reported::default()
         }))
     }
-    /// Working: the lane is mid-turn.
+    /// Working or running: the lane is mid-turn.
     pub fn busy(self) -> bool {
-        self == Status::Working
+        matches!(self, Status::Working | Status::Running)
     }
-    /// The stall clock runs: neither working, blocked nor unreported.
+    /// The stall clock runs: neither busy, blocked, waiting on approval or a limit, nor unreported.
     pub fn quiet(self) -> bool {
-        !matches!(self, Status::Working | Status::Blocked | Status::Unreported)
+        !self.busy()
+            && !matches!(
+                self,
+                Status::Blocked | Status::Approval | Status::Limited | Status::Unreported
+            )
     }
-    /// The word every surface shows: working, blocked, done, idle or unknown.
+    /// shed's own word, every surface shows it as-is; `unknown` for none or one drover does not know.
     pub fn word(self) -> &'static str {
         match self {
-            Status::Unreported => "unknown",
+            Status::Unreported | Status::Other => "unknown",
             Status::Working => "working",
+            Status::Running => "running",
             Status::Blocked => "blocked",
+            Status::Approval => "waiting-approval",
+            Status::Limited => "rate-limited",
             Status::Done => "done",
-            _ => "idle",
+            Status::Idle => "idle",
+            Status::Asleep => "hibernated",
+            Status::Failed => "error",
         }
     }
 }
@@ -157,7 +170,7 @@ impl Cause {
     pub fn of(code: Option<i32>, last: Status) -> Cause {
         match last {
             Status::Limited => Cause::Limit,
-            Status::Working | Status::Failed => Cause::Crash,
+            Status::Working | Status::Running | Status::Failed => Cause::Crash,
             _ if code != Some(0) => Cause::Crash,
             _ => Cause::Ended,
         }

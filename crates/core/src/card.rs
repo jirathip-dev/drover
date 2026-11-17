@@ -81,12 +81,12 @@ pub fn post(ctx: &Ctx, cfg: &Config, thread: &str, c: &Card) -> Result<String> {
         );
     }
     let events = working(&ctx.state)?;
-    let t = orchestrator::find(&events, thread)?;
+    let fleet = orchestrator::fleet_of(&events, thread)?;
     let id = format!("r{}", events.iter().filter(|e| e.kind == "run-card").count() + 1);
     let dir = std::path::absolute(c.dir)?.display().to_string();
     let d = json!({"thread": thread, "id": id, "cmd": c.cmd, "why": c.why, "blast": c.blast, "dir": dir,
         "host": "main", "timeout": c.timeout, "sha": sha256(c.cmd.as_bytes())});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "run-card", d))?;
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "run-card", d))?;
     Ok(id)
 }
 
@@ -151,7 +151,7 @@ pub fn settle_via(
     } else {
         format!("run {id} denied by owner; nothing ran")
     };
-    orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)).ok();
+    orchestrator::tell(ctx, cfg, r, thread, &line);
     Ok(line)
 }
 
@@ -190,7 +190,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
     let d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "code": code, "tail": tail});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-done", d))?;
     let line = format!("run {id} approved by owner, ran in {dir}: exit {code}\n```\n{tail}\n```");
-    orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)).ok();
+    orchestrator::tell(ctx, cfg, r, thread, &line);
     if code == 124 {
         r.run("kill", &argv(&["-KILL", "--", &format!("-{pid}")])).ok();
     }

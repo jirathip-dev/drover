@@ -501,12 +501,21 @@ pub struct State {
     pub fleets: Vec<Fleet>,
     pub queue: Vec<Queued>,
     pub lanes: Vec<Lane>,
+    /// The lanes `working` or `running` (`busy`), and those waiting on approval, the owner or a rate limit.
+    pub counts: LaneCounts,
     pub asks: Vec<Ask>,
     pub hosts: Vec<Row>,
     pub services: Vec<Row>,
     pub alerts: Vec<Row>,
     /// When the background last read each source the lanes come from (shed, remote, host).
     pub sources: BTreeMap<String, u64>,
+}
+
+pub struct LaneCounts {
+    pub busy: usize,
+    pub waiting_approval: usize,
+    pub waiting_owner: usize,
+    pub rate_limited: usize,
 }
 
 pub struct Fleet {
@@ -546,6 +555,8 @@ pub struct Lane {
     pub harness: String,
     pub model: Option<String>,
     pub state: String,
+    /// Shed's note on `state` as shed gave it (a `rate-limited` lane's reset time).
+    pub note: Option<String>,
     pub shown: String,
     pub tone: String,
     pub since: u64,
