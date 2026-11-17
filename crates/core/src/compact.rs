@@ -319,6 +319,14 @@ pub fn ready(cfg: &Config, r: &dyn Runner, events: &[Event], p: &Plan) -> Vec<St
     why
 }
 
+fn unready(cfg: &Config, r: &dyn Runner, events: &[Event], p: &Plan) -> Result<()> {
+    let why = ready(cfg, r, events, p);
+    if why.is_empty() {
+        return Ok(());
+    }
+    refused("COMPACT_NOT_READY", why.join("; "))
+}
+
 /// Each issue's stored ids that now live in the new history: (fleet, issue, its `moved` list).
 pub fn moves(
     events: &[Event],
@@ -563,10 +571,7 @@ pub fn run(
             }
             if *main {
                 if !*undo {
-                    let why = ready(cfg, r, &events, &p);
-                    if !why.is_empty() {
-                        return refused("COMPACT_NOT_READY", why.join("; "));
-                    }
+                    unready(cfg, r, &events, &p)?;
                     if push::finished(ctx, r, f, &d, &events, &names)?.is_none() {
                         return refused(
                             "COMPACT_NOT_READY",
@@ -578,10 +583,7 @@ pub fn run(
             } else if *undo {
                 push::undo(ctx, r, f, &d, &p, &names)?;
             } else {
-                let why = ready(cfg, r, &events, &p);
-                if !why.is_empty() {
-                    return refused("COMPACT_NOT_READY", why.join("; "));
-                }
+                unready(cfg, r, &events, &p)?;
                 push::push(ctx, r, f, &d, &p, &events, &names)?;
             }
             reset::all(r, f, &events, &names, out)
