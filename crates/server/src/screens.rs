@@ -1456,6 +1456,7 @@ impl Server<'_> {
             "/screens/queue/done" => done_screen(self.queue_tab(ctx).fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?),
             "/screens/ask" => ask_sheet(ctx, q)?,
             "/screens/hosts" => self.hosts_sheet(ctx)?,
+            "/screens/proxy-token" => Self::proxy_how(ctx)?,
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
                 return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
             }

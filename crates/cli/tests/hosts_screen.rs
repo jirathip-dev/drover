@@ -12,7 +12,8 @@ status = \"fakecloud status {name}\"\naddress = \"fakecloud address {name}\"\nde
 [rate_usd_hour]\nsmall = 1.0\n";
 
 fn fleet(name: &str) -> (drover::Ctx, String) {
-    let hosts = "[hosts.mini]\n\n[hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"fake\"\nsize = \"small\"\n";
+    let hosts = "[proxy]\nport = 9\ntoken-file = \"/nonexistent/drover/proxy\"\n\n[hosts.mini]\n\n\
+[hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"fake\"\nsize = \"small\"\nruntime = \"shed-acp\"\n";
     let c = ctx(&tmpdir(name), &format!("{CONFIG}\n{hosts}"));
     std::fs::create_dir_all(c.config.with_file_name("recipes")).unwrap();
     std::fs::write(c.config.with_file_name("recipes/fake.toml"), RECIPE).unwrap();
@@ -85,6 +86,15 @@ fn the_hosts_sheet_lists_main_first_then_a_to_z_with_state_and_lanes() {
         got,
         "`BLESS=1` rewrites it"
     );
+    let how = serde_json::to_string(&get(&s, "/screens/proxy-token").1).unwrap();
+    for step in [
+        "claude setup-token",
+        "pbpaste > /nonexistent/drover/proxy",
+        "read -rs t",
+        "chmod 600 /nonexistent/drover/proxy",
+    ] {
+        assert!(how.contains(step), "{step}: {how}");
+    }
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
     assert!(page.contains(r#""label":"Hosts""#), "[⚙] lists Hosts: {page}");

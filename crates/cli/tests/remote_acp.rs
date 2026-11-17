@@ -572,6 +572,10 @@ fn bootstrap_with_no_config_there_prints_no_bare_sync_and_skips_a_main_pinned_ro
 }
 
 fn upstream() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    upstream_with("200 OK")
+}
+
+fn upstream_with(status: &'static str) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let (port, seen) = (
         l.local_addr().unwrap().port(),
@@ -599,7 +603,7 @@ fn upstream() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
             let b = "event: message_start\ndata: {}\n\nevent: message_stop\ndata: {}\n\n";
             let _ = write!(
                 c,
-                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\n\r\n{b}",
+                "HTTP/1.1 {status}\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\n\r\n{b}",
                 b.len()
             );
         }
@@ -833,6 +837,142 @@ fn doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does() {
         "{o}"
     );
     assert!(!o.contains("✓ host boat1"), "{o}");
+}
+
+fn proxy_line(o: &str) -> &str {
+    o.lines()
+        .find(|l| l[l.find(' ').unwrap()..].starts_with(" proxy token "))
+        .unwrap_or_else(|| panic!("{o}"))
+}
+
+fn saved_at(c: &drover::Ctx, days_ago: u64) {
+    let f = std::fs::File::options()
+        .append(true)
+        .open(c.config.with_file_name("tokens/proxy"))
+        .unwrap();
+    let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(c.now - days_ago * 86_400);
+    f.set_modified(at).unwrap();
+}
+
+#[test]
+fn doctor_shows_the_proxy_token_missing_open_set_and_near_expiry_with_the_proxy_facts() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut c, _) = setup("racp-doctor-token", &["boat1"]);
+    c.now = 400 * 86_400;
+    let f = spawn_fake().reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let tf = c.config.with_file_name("tokens/proxy");
+    saved_at(&c, 10);
+    let (_, o) = run(&c, &b, &["doctor"]);
+    let l = proxy_line(&o);
+    assert!(
+        l.starts_with("✓ proxy token set (saved 1971-01-26, ~355 d left) · proxy "),
+        "{l}"
+    );
+    assert!(
+        l.contains(" on :9 · tunnel boat1 ") && l.ends_with(" · 0 live lane keys"),
+        "{l}"
+    );
+    saved_at(&c, 350);
+    let l = run(&c, &b, &["doctor"]).1;
+    let want = format!(
+        "! proxy token set (saved 1970-02-20, ~15 d left): run claude setup-token, save it 0600 at {} again · ",
+        tf.display()
+    );
+    assert!(proxy_line(&l).starts_with(&want), "{l}");
+    std::fs::set_permissions(&tf, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let (code, o) = run(&c, &b, &["doctor"]);
+    let want = format!("✗ proxy token readable by others: chmod 600 {} · ", tf.display());
+    assert!(code == 1 && proxy_line(&o).starts_with(&want), "{o}");
+    std::fs::remove_file(&tf).unwrap();
+    let (code, o) = run(&c, &b, &["doctor"]);
+    let want = format!(
+        "✗ proxy token missing: run claude setup-token, save it 0600 at {} · ",
+        tf.display()
+    );
+    assert!(code == 1 && proxy_line(&o).starts_with(&want), "{o}");
+    let (_, plain) = run(&setup("racp-doctor-none", &[]).0, &f, &["doctor"]);
+    assert!(
+        !plain.contains("proxy token"),
+        "no shed-acp host, no proxy row: {plain}"
+    );
+}
+
+#[test]
+fn check_alerts_the_proxy_token_once_at_30_and_once_at_7_days_left() {
+    let (mut c, _) = setup("racp-expiry", &["boat1"]);
+    c.now = 400 * 86_400;
+    let f = spawn_fake();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let alerts = |c: &drover::Ctx| {
+        let ev = drover::events::read(&c.state).unwrap().to_vec();
+        ev.into_iter()
+            .filter(|e| e.kind == "proxy-token-expiring")
+            .collect::<Vec<_>>()
+    };
+    saved_at(&c, 300);
+    run(&c, &b, &["check"]);
+    assert!(alerts(&c).is_empty(), "65 d left: no alert");
+    saved_at(&c, 340);
+    run(&c, &b, &["check"]);
+    run(&c, &b, &["check"]);
+    let a = alerts(&c);
+    assert_eq!(a.len(), 1, "{a:?}");
+    let why = a[0].str("reason").unwrap();
+    assert!(
+        a[0].push && why.contains("~25 d") && why.contains("claude setup-token"),
+        "{a:?}"
+    );
+    c.now += 20 * 86_400;
+    run(&c, &b, &["check"]);
+    run(&c, &b, &["check"]);
+    let a = alerts(&c);
+    assert!(a.len() == 2 && a[1].str("reason").unwrap().contains("~5 d"), "{a:?}");
+}
+
+#[test]
+fn an_upstream_401_on_the_proxy_token_alerts_proxy_token_rejected_once_not_per_lane() {
+    let (port, seen) = upstream_with("401 Unauthorized");
+    let (c, _) = setup("racp-401", &[]);
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        toml.replace("port = 9", &format!("port = 9\nupstream = \"http://127.0.0.1:{port}\"")),
+    )
+    .unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let keys: Vec<String> = ["sendmeter-impl-12", "sendmeter-rev-12"]
+        .iter()
+        .map(|a| {
+            let k = drover::proxy::new_key().unwrap();
+            drover::proxy::mint(&c, &cfg, &k, ("sendmeter", 12, a), "boat1").unwrap();
+            k
+        })
+        .collect();
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy_port = l.local_addr().unwrap().port();
+    let (pc, pcfg, pf): (&'static drover::Ctx, &'static drover::config::Config, &'static Fake) = (
+        Box::leak(Box::new(ctx(
+            c.config.parent().unwrap().parent().unwrap(),
+            &std::fs::read_to_string(&c.config).unwrap(),
+        ))),
+        Box::leak(Box::new(cfg)),
+        Box::leak(Box::new(Fake::default())),
+    );
+    let now = c.now;
+    std::thread::spawn(move || drover::proxy::serve_on(pc, pcfg, pf, &l, &move || now));
+    for k in keys.iter().chain(&keys) {
+        let (status, _) = call(proxy_port, k);
+        assert!(status.contains("401"), "{status}");
+    }
+    assert_eq!(seen.lock().unwrap().len(), 4, "each call went upstream");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let hits: Vec<_> = ev.iter().filter(|e| e.kind == "proxy-token-rejected").collect();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert!(
+        hits[0].push && hits[0].str("reason").unwrap().contains("claude setup-token"),
+        "{hits:?}"
+    );
 }
 
 #[test]

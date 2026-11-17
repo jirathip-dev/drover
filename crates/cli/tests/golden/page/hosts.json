@@ -68,6 +68,49 @@
       "header": "hosts (2)",
       "id": "hosts-sec",
       "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "proxy-list",
+          "rows": [
+            {
+              "id": "px-0",
+              "title": "✗ proxy token missing: run claude setup-token, save it 0600 at /nonexistent/drover/proxy",
+              "type": "row"
+            },
+            {
+              "id": "px-1",
+              "title": "proxy down on :9",
+              "type": "row"
+            },
+            {
+              "id": "px-2",
+              "title": "tunnel cloud1 down",
+              "type": "row"
+            },
+            {
+              "id": "px-3",
+              "title": "0 live lane keys",
+              "type": "row"
+            },
+            {
+              "accessory": "chevron",
+              "id": "px-how",
+              "tap": {
+                "sheet": "/screens/proxy-token"
+              },
+              "title": "How to set",
+              "type": "row"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "footer": "The token shows no expiry: days left estimate saved + 365 d.",
+      "header": "Token proxy",
+      "id": "proxy-sec",
+      "type": "section"
     }
   ],
   "cancel": "Close",
