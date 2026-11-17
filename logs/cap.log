@@ -1,0 +1,4 @@
+src lines (formatted): 47008 / cap 47200
+web lines (TypeScript, soft budget, not capped): 1239
+WARN: 192 lines of headroom (< 500)
+exit 0

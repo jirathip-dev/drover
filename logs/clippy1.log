@@ -1,0 +1,5 @@
+    Checking drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1178/crates/server)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1178/crates/cli)
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1178/crates/service)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.27s
+exit 0
