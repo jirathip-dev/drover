@@ -1,0 +1,10 @@
+Decided: refuse a Repro: verify PASS at verdict time when the fleet has no verify role, reusing NO_REPRO
+Because: "`drover verdict` refuses it at record time with a clear code (rev must give `Repro: run`)"
+Rejected: a new refusal code — NO_REPRO is already documented and drive re-prompts rev on it
+Decided: a merge NO_REPRO on a fleet with no verify role is logged needs-human, not blocked
+Because: "drive shows a needs-human reason that names it, never a silent re-review loop"
+Decided: a --repro rev needs os:X when the PR diff adds cfg(target_os = "X")
+Because: "the rev is placed on a host that can run it (e.g. one with the needed OS tag)"
+Rejected: following the impl lane's host OS — a role pin or busy host still moved rev off it in berth#134
+Check: crates/core/src/hosts.rs repro_os only reads the diff for a rev lane of a --repro issue
+Owner: Bug-fix reviews on fleets without a verify step now get a real test run on the right OS, or come to you with the reason.
