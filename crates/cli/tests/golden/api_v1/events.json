@@ -7,7 +7,7 @@
         "data": {
           "agent": "sendmeter-impl-12",
           "harness": "claude",
-          "pane": "w1:p2",
+          "pane": "sendmeter-impl-12",
           "role": "impl"
         },
         "fleet": "sendmeter",
@@ -30,7 +30,7 @@
         "data": {
           "agent": "sendmeter-rev-9-r1",
           "harness": "claude",
-          "pane": "w1:p3",
+          "pane": "sendmeter-rev-9-r1",
           "role": "rev"
         },
         "fleet": "sendmeter",
@@ -71,7 +71,7 @@
         "act": "idle",
         "coat": "",
         "data": {
-          "device": "iPhone f34c"
+          "device": "iPhone b57f"
         },
         "fleet": "drover",
         "glyph": "·",
@@ -133,9 +133,9 @@
       },
       {
         "act": "idle",
-        "coat": "--c:#a05c2c;--d:#7d4520;--m:#5d3317;--b:#efe7dc",
+        "coat": "--c:#8a5a33;--d:#6f4527;--m:#2e2019;--b:transparent",
         "data": {
-          "agent": "conductor-t1",
+          "agent": "orchestrator-t1",
           "confirmed": true,
           "effort": null,
           "harness": "hermes",
@@ -143,7 +143,7 @@
           "pane": "orchestrator-t1",
           "resumed": false,
           "runtime": "shed",
-          "session": "fdfd5b2b-9278-4304-bf9e-b7a9c365705a",
+          "session": "b6261e9b-bc8a-4dff-9a66-a0d8ec31d576",
           "thread": "t1"
         },
         "fleet": "sendmeter",
@@ -151,14 +151,14 @@
         "imp": false,
         "issue": null,
         "k": null,
-        "plain": "sendmeter conductor-start",
+        "plain": "sendmeter orchestrator-start",
         "pr": null,
         "run": null,
         "seq": 7,
-        "text": "conductor-start",
+        "text": "orchestrator-start",
         "tone": "m",
         "ts": 1000000,
-        "type": "conductor-start"
+        "type": "orchestrator-start"
       },
       {
         "act": "idle",
@@ -167,8 +167,8 @@
           "host": "bazzite",
           "machine": "bazzite",
           "name": "claude B",
-          "pane": "w9:p1",
-          "via": "web iPhone f34c"
+          "pane": "drover-setup-claude-B",
+          "via": "web iPhone b57f"
         },
         "fleet": "",
         "glyph": "·",

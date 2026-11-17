@@ -347,13 +347,17 @@ fn a_serve_that_starts_over_its_memory_limit_logs_once_and_keeps_serving() {
 }
 
 fn serve(c: &drover::Ctx, addr: &str) -> std::process::Child {
+    serve_on(c, addr, "/usr/bin:/bin")
+}
+
+fn serve_on(c: &drover::Ctx, addr: &str, path: &str) -> std::process::Child {
     std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
         .args(["serve", "--addr", addr])
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
         .env("FLEET_WORKTREES", &c.worktrees)
         .env("DROVER_HOME", &c.home)
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", path)
         .env_remove("DROVER_LANE")
         .env_remove("DROVER_SERVE_FDS")
         .stderr(std::process::Stdio::piped())
@@ -362,14 +366,18 @@ fn serve(c: &drover::Ctx, addr: &str) -> std::process::Child {
 }
 
 fn lines(p: &mut std::process::Child) -> Arc<Mutex<String>> {
+    piped(p).0
+}
+
+fn piped(p: &mut std::process::Child) -> (Arc<Mutex<String>>, std::thread::JoinHandle<()>) {
     let (log, err) = (Arc::new(Mutex::new(String::new())), p.stderr.take().unwrap());
     let l2 = log.clone();
-    std::thread::spawn(move || {
+    let reader = std::thread::spawn(move || {
         for l in BufReader::new(err).lines().map_while(Result::ok) {
             l2.lock().unwrap().push_str(&(l + "\n"));
         }
     });
-    log
+    (log, reader)
 }
 
 fn exited(p: &mut std::process::Child, secs: u64) -> Option<std::process::ExitStatus> {
@@ -498,7 +506,7 @@ fn a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit() {
     let c = ctx(&tmpdir("ho-mem-again"), &cfg(100_000));
     append(&c.state, &Event::new(c.now, "drover", None, "note", json!({}))).unwrap();
     let mut p = serve(&c, "127.0.0.1:0");
-    let log = lines(&mut p);
+    let (log, reader) = piped(&mut p);
     let addr = addr_of(&log);
     let port = addr.rsplit_once(':').unwrap().1.parse().unwrap();
     let sock = drover::update::serve_sock(&c, port);
@@ -535,12 +543,21 @@ fn a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit() {
     }
     std::fs::write(&c.config, cfg(100_000)).unwrap();
     let t = Instant::now();
-    while log.lock().unwrap().matches("phone page on").count() < 4 && t.elapsed() < Duration::from_secs(60) {
+    while log.lock().unwrap().matches("phone page on").count() < 5 && t.elapsed() < Duration::from_secs(60) {
         std::thread::sleep(Duration::from_millis(50));
     }
     std::thread::sleep(Duration::from_millis(1_000));
     let still = p.try_wait().unwrap();
     let _ = (p.kill(), p.wait());
+    let t = Instant::now();
+    while !reader.is_finished() && t.elapsed() < Duration::from_secs(60) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        reader.is_finished(),
+        "every bridge exited with the test: {}",
+        log.lock().unwrap()
+    );
     let (log, high, starts) = (log.lock().unwrap().clone(), high(), starts());
     assert!(!alive(&pid), "the first handover finished: {log}");
     assert!(
@@ -553,6 +570,56 @@ fn a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit() {
         "{high:?}"
     );
     let pages = log.matches("phone page on").count();
-    assert!(pages >= 4, "a bridge and an exec'd copy per handover: {log}");
+    assert!(pages >= 5, "a bridge and an exec'd copy per handover: {log}");
     assert!(still.is_none(), "the supervised pid serves on\n{log}");
+}
+
+fn listening(addr: &str) -> Vec<u32> {
+    let port = format!("-iTCP:{}", addr.rsplit_once(':').unwrap().1);
+    let o = std::process::Command::new("lsof")
+        .args(["-nP", "-t", &port, "-sTCP:LISTEN"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&o.stdout)
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .collect()
+}
+
+#[test]
+fn a_job_started_serve_takes_the_port_from_a_same_build_serve_it_does_not_own() {
+    use std::os::unix::fs::PermissionsExt;
+    let c = ctx(&tmpdir("ho-job"), CONFIG);
+    let mut stray = serve(&c, "127.0.0.1:0");
+    let addr = addr_of(&lines(&mut stray));
+    get(&addr).unwrap();
+    let bin = c.home.join("job-bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for (name, says) in [
+        ("launchctl", "echo \"state = running\"; echo \"\tpid = $PPID\""),
+        ("systemctl", "echo \"MainPID=$PPID\"; echo LoadState=loaded"),
+    ] {
+        let f = bin.join(name);
+        std::fs::write(&f, format!("#!/bin/sh\n{says}\n")).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let mut job = serve_on(&c, &addr, &format!("{}:/usr/bin:/bin", bin.display()));
+    let log = lines(&mut job);
+    let t = Instant::now();
+    while listening(&addr) != [job.id()] && job.try_wait().unwrap().is_none() && t.elapsed() < Duration::from_secs(30) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let (owner, ended) = (listening(&addr), job.try_wait().unwrap());
+    let health = drover::update::serving(&addr, 20);
+    let stray_gone = exited(&mut stray, 10);
+    let _ = (job.kill(), job.wait());
+    let log = log.lock().unwrap().clone();
+    assert!(
+        ended.is_none(),
+        "the job's serve never exits 0 while it should run: {ended:?}\n{log}"
+    );
+    assert_eq!(owner, [job.id()], "the job's own process listens\n{log}");
+    assert_eq!(health.as_deref(), Some(drover::SHA), "{log}");
+    assert!(stray_gone.is_some(), "the serve the job does not own is gone\n{log}");
+    assert!(!log.contains("already serves"), "{log}");
 }

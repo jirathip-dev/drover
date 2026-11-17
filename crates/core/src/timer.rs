@@ -8,13 +8,13 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 pub const TICK: &str = "dev.drover.tick";
-/// #212: the every-minute `drive --fast` job, its own job so the slow tick never delays it.
+/// The every-minute `drive --fast` job, its own job so the slow tick never delays it.
 pub const FAST: &str = "dev.drover.fast";
-/// #237: the build's own jobs (label, args); `install` derives each one's interval from its args. #345: `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
+/// The build's own jobs (label, args); `install` derives each one's interval from its args. `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
 pub const SERVICE: &str = "dev.drover.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
-/// #845: the tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
-pub const TICK_STEPS: [(&str, &[&str]); 7] = [
+/// The tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
+pub const TICK_STEPS: [(&str, &[&str]); 8] = [
     (
         "check",
         &[
@@ -34,16 +34,17 @@ pub const TICK_STEPS: [(&str, &[&str]); 7] = [
     ("clean", &[]),
     ("trim", &[]),
     ("lesson", &[]),
+    ("triage", &[]),
     ("hotspots", &[]),
     ("compact", &[]),
 ];
-/// #557: drover's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
+/// Drover's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
 pub const UPDATE: &str = "dev.drover.update";
 pub const CLEAN: &str = "dev.drover.clean";
-/// #894: the optional read-only staging serve (`[self_update] staging_serve`), from its own install root.
+/// The optional read-only staging serve (`[self_update] staging_serve`), from its own install root.
 pub const STAGING: &str = "dev.drover.serve-staging";
 pub const MORE: [(&str, &[&str]); 2] = [(UPDATE, &["self-update"]), (CLEAN, &["clean", "--scheduled"])];
-/// #557: the `every` of a job that runs daily at 03:30 (launchd `StartCalendarInterval`, systemd `OnCalendar`).
+/// The `every` of a job that runs daily at 03:30 (launchd `StartCalendarInterval`, systemd `OnCalendar`).
 pub const DAILY: u64 = 86_400;
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "drover timer install";
@@ -104,10 +105,75 @@ fn ctl(ctx: &Ctx, label: &str, every: bool) -> [String; 3] {
     ["is-active", "enable --now", "disable --now"].map(|a| format!("systemctl --user {a} {unit}"))
 }
 
-/// #557: restart job `label` on the binary just installed: `launchctl kickstart -k`, else `systemctl --user restart`.
+fn refused(ctx: &Ctx, r: &dyn Runner, label: &str, every: bool) -> bool {
+    let said = exec(r, &ctl(ctx, label, every)[0]).unwrap_or_default();
+    ["spawn failed", "OS_REASON_CODESIGNING"]
+        .iter()
+        .any(|w| said.contains(w))
+}
+
+fn rebootstrap(ctx: &Ctx, r: &dyn Runner, label: &str, every: bool) -> Result<String> {
+    let [_, up, down] = ctl(ctx, label, every);
+    exec(r, &down).ok();
+    exec(r, &up)
+}
+
+/// Restart job `label` on the binary just installed: `launchctl kickstart -k`, else `systemctl --user restart`; a job launchd refuses is re-bootstrapped.
 pub fn restart(ctx: &Ctx, r: &dyn Runner, label: &str) -> Result<String> {
+    if refused(ctx, r, label, false) {
+        return rebootstrap(ctx, r, label, false);
+    }
+    exec(r, &restart_cmd(ctx, label))
+}
+
+/// The command that restarts job `label`.
+pub fn restart_cmd(ctx: &Ctx, label: &str) -> String {
     let probe = ctl(ctx, label, false)[0].replacen("print", "kickstart -k", 1);
-    exec(r, &probe.replacen("is-active", "restart", 1))
+    probe.replacen("is-active", "restart", 1)
+}
+
+/// The pid job `label` runs (`None` while stopped); `Err` if the job is not loaded.
+pub fn job_pid(ctx: &Ctx, r: &dyn Runner, label: &str) -> Result<Option<u32>> {
+    let out = if MAC {
+        exec(r, &ctl(ctx, label, false)[0])?
+    } else {
+        let o = exec(
+            r,
+            &format!("systemctl --user show -p MainPID -p LoadState {label}.service"),
+        )?;
+        anyhow::ensure!(o.contains("LoadState=loaded"), "{label} is not loaded");
+        o
+    };
+    let pid = out.lines().find_map(|l| {
+        let l = l.trim();
+        l.strip_prefix("pid = ")
+            .or_else(|| l.strip_prefix("MainPID="))?
+            .parse()
+            .ok()
+    });
+    Ok(pid.filter(|p| *p > 0))
+}
+
+/// The pids listening on `addr`'s port.
+pub fn listeners(r: &dyn Runner, addr: &str) -> Vec<u32> {
+    let port = format!("-iTCP:{}", addr.rsplit(':').next().unwrap_or_default());
+    let out = ok(r, "lsof", &["-nP", "-t", &port, "-sTCP:LISTEN"]).unwrap_or_default();
+    out.lines().filter_map(|l| l.trim().parse().ok()).collect()
+}
+
+/// The own interval jobs launchd refuses (`spawn failed`, `OS_REASON_CODESIGNING`).
+pub fn refused_jobs(ctx: &Ctx, r: &dyn Runner) -> Vec<&'static str> {
+    let labels = JOBS.iter().chain(&MORE).map(|j| j.0);
+    labels.filter(|l| refused(ctx, r, l, true)).collect()
+}
+
+/// Re-bootstrap each refused own job, so launchd reads the new binary's signature.
+pub fn heal(ctx: &Ctx, r: &dyn Runner) -> Vec<String> {
+    let line = |l: &str| match rebootstrap(ctx, r, l, true) {
+        Ok(_) => format!("re-bootstrapped {l}"),
+        Err(e) => format!("{l}: {e:#}"),
+    };
+    refused_jobs(ctx, r).into_iter().map(line).collect()
 }
 
 fn exec(r: &dyn Runner, cmd: &str) -> Result<String> {
@@ -124,13 +190,14 @@ fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Ve
         "clean" => DAILY,
         _ => cfg.limits.slow_secs,
     };
-    let cmd: Vec<&str> = std::iter::once(ctx.exe.as_str()).chain(args.iter().copied()).collect();
+    let exe = std::fs::canonicalize(&ctx.exe).map_or(ctx.exe.clone(), |p| p.to_string_lossy().into());
+    let cmd: Vec<&str> = std::iter::once(exe.as_str()).chain(args.iter().copied()).collect();
     files(ctx, label, &cmd, path, secs, MAC)
 }
 
 const STATES: [&str; 3] = ["missing", "outdated (args or interval differ)", "loaded"];
 
-/// #237: each own job against this build: `loaded`, `missing` (no file, or not loaded) or `outdated (args or interval differ)`; PATH is the host's, never compared.
+/// Each own job against this build: `loaded`, `missing` (no file, or not loaded) or `outdated (args or interval differ)`; PATH is the host's, never compared.
 pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'static str)> {
     let same = |(p, t): &(PathBuf, String)| {
         let x = std::fs::read_to_string(p).unwrap_or_default();
@@ -150,7 +217,14 @@ pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'st
     JOBS.map(state).to_vec()
 }
 
-/// #600: the PATH the tick job runs with: its installed file's, else the one `install` would write.
+/// `drift`, then each own job launchd refuses as `spawn failed`.
+pub fn states(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'static str)> {
+    let drift = drift(ctx, cfg, r);
+    let refused = refused_jobs(ctx, r).into_iter().map(|l| (l, "spawn failed"));
+    drift.into_iter().chain(refused).collect()
+}
+
+/// The PATH the tick job runs with: its installed file's, else the one `install` would write.
 pub fn job_path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     let jobs = expect(ctx, cfg, JOBS[0].0, JOBS[0].1, "");
     let file = jobs.first().map_or(Path::new(""), |f| f.0.as_path());
@@ -187,7 +261,7 @@ pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&st
         expect(ctx, cfg, label, args, &path(ctx, cfg, r)),
     );
     let [probe, up, down] = ctl(ctx, label, every);
-    let live = load && exec(r, &probe).is_ok();
+    let live = load && exec(r, &probe).is_ok() && !refused(ctx, r, label, every);
     let same = |(p, t): &(PathBuf, String)| std::fs::read_to_string(p).is_ok_and(|x| x == *t);
     if (live || !load) && files.iter().all(same) {
         return format!("= already {label}");
@@ -291,6 +365,25 @@ fn compact_daily(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
+fn skipped(ctx: &Ctx, cfg: &Config, pass: &crate::hosts::Pass) -> Result<()> {
+    let at = ctx.state.with_file_name("tick.skipped");
+    let hosts = pass.late();
+    if hosts.is_empty() {
+        std::fs::remove_file(&at).ok();
+        return Ok(());
+    }
+    let was = std::fs::read_to_string(&at).ok();
+    let runs = was.and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0) + 1;
+    std::fs::write(&at, runs.to_string())?;
+    if runs != 2 {
+        return Ok(());
+    }
+    let (step, secs) = pass.slowest();
+    let d =
+        serde_json::json!({"hosts": hosts, "passes": runs, "not_sent": pass.unsent(), "step": step, "step_secs": secs});
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "hosts-skipped", d))
+}
+
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
     if log.metadata().is_ok_and(|m| m.len() > 1 << 20) {
@@ -326,18 +419,18 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         crate::check::check(ctx, cfg, &pass, out)?;
         pass.step("drive");
         let driven = drive::drive(ctx, cfg, &pass, out, None, false, false);
-        if pass.over() {
+        let over = pass.over();
+        if over {
             writeln!(
                 out,
-                "tick: past its {budget} s budget; skipped: clean, trim, lesson, hotspots, compact"
+                "tick: past its {budget} s budget; skipped: clean, lesson, triage, hotspots, compact"
             )?;
-            return driven;
         }
         let at = ctx.state.with_file_name("clean.at");
         let last = std::fs::read_to_string(&at)
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok());
-        if last.is_none_or(|t| ctx.now >= t + 3600) {
+        if !over && last.is_none_or(|t| ctx.now >= t + 3600) {
             pass.step("clean");
             std::fs::write(&at, ctx.now.to_string()).ok();
             if let Err(e) = crate::check::clean(ctx, cfg, &pass, out, None, (None, None, false), true) {
@@ -345,9 +438,16 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
             }
         }
         pass.step("trim");
+        let until = pass.until.take();
         crate::check::trim_hosts(ctx, cfg, &pass, out)?;
+        pass.until = until;
+        if over {
+            return driven;
+        }
         pass.step("lesson");
         crate::lesson::weekly(ctx, cfg, &pass, out)?;
+        pass.step("triage");
+        crate::triage::weekly(ctx, cfg, &pass, out)?;
         pass.step("hotspots");
         crate::hotspots::daily(ctx, cfg, &pass, out)?;
         pass.step("compact");
@@ -356,6 +456,9 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     });
     for m in pass.late() {
         writeln!(out, "tick: {m}: over budget; skipped for the rest of this pass")?;
+    }
+    if let Ok(cfg) = &loaded {
+        skipped(ctx, cfg, &pass)?;
     }
     std::fs::remove_file(&mark).ok();
     drop(stop);
@@ -379,15 +482,32 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     Ok(0)
 }
 
-/// #791: the running tick's start, while its `tick.beat` is at most 2 tick intervals old; `None`: no tick runs, or it stalled (no heartbeat for over 2 intervals: stuck).
+/// The running tick's start, while its `tick.beat` is at most 2 tick intervals old; `None`: no tick runs, or it stalled (no heartbeat for over 2 intervals: stuck).
 pub fn running(ctx: &Ctx, cfg: &Config) -> Option<u64> {
-    let text = std::fs::read_to_string(ctx.state.with_file_name("tick.beat")).ok()?;
-    let mut w = text.split_whitespace().map(|x| x.parse::<u64>().ok());
-    let (since, beat) = (w.next()??, w.next()??);
+    let (since, beat) = beat(ctx)?;
     (ctx.now <= beat + stuck_secs(cfg)).then_some(since)
 }
 
-/// #972: the running tick's `tick.step` and its age, when that step began over 3 × `slow_secs` ago.
+fn beat(ctx: &Ctx) -> Option<(u64, u64)> {
+    let text = std::fs::read_to_string(ctx.state.with_file_name("tick.beat")).ok()?;
+    let mut w = text.split_whitespace().map(|x| x.parse::<u64>().ok());
+    Some((w.next()??, w.next()??))
+}
+
+/// A fleet card's amber line for a tick that never finished: killed (its heartbeat stopped) or running past `slow_secs`.
+pub fn unfinished(ctx: &Ctx, cfg: &Config) -> Option<String> {
+    let (since, beat) = beat(ctx)?;
+    if running(ctx, cfg).is_none() {
+        return Some(format!(
+            "drive · last pass killed {} ago",
+            age(ctx.now.saturating_sub(beat))
+        ));
+    }
+    let secs = ctx.now.saturating_sub(since);
+    (secs > cfg.limits.slow_secs).then(|| format!("drive · last pass running for {}", age(secs)))
+}
+
+/// The running tick's `tick.step` and its age, when that step began over 3 × `slow_secs` ago.
 pub fn stuck_step(ctx: &Ctx, cfg: &Config) -> Option<(String, u64)> {
     let m: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(ctx.state.with_file_name("tick.step")).ok()?).ok()?;
@@ -396,7 +516,7 @@ pub fn stuck_step(ctx: &Ctx, cfg: &Config) -> Option<(String, u64)> {
     (secs > 3 * cfg.limits.slow_secs).then(|| (m.at("step").as_str().unwrap_or("?").to_string(), secs))
 }
 
-/// #791: 2 tick intervals: no pass started and no heartbeat for longer reads stuck.
+/// 2 tick intervals: no pass started and no heartbeat for longer reads stuck.
 pub fn stuck_secs(cfg: &Config) -> u64 {
     2 * cfg.limits.slow_secs
 }
@@ -484,7 +604,7 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     crate::doctor::doctor(ctx, r, out, false, false)
 }
 
-/// #345 `drover service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands that swap it in for the fast-step job (and the board job, with `--board`); loads nothing itself.
+/// `drover service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands that swap it in for the fast-step job (and the board job, with `--board`); loads nothing itself.
 pub fn service_unit(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, api: &str, board: Option<&str>) -> Result<()> {
     let cfg = Config::load(&ctx.config)?;
     let mut args = vec!["service", "--api", api];
@@ -499,7 +619,7 @@ pub fn service_unit(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, api: &str, b
     Ok(())
 }
 
-/// The phone alerts state (#87): on/off, devices and last sent, unless a webpush failure is newer.
+/// The phone alerts state: on/off, devices and last sent, unless a webpush failure is newer.
 pub fn phone(ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> (&'static str, String) {
     let subs = crate::webpush::load(&ctx.state).len();
     let sent = crate::events::of_kind(events, &["push-sent"]).pop();
@@ -618,4 +738,17 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     });
     rows.push(row("fleet disk", t, d, "drover clean --yes"));
     rows
+}
+
+/// Whether `<state dir>/<key>.at` is a week old or missing; a due run stamps it now.
+pub fn weekly_due(ctx: &Ctx, key: &str) -> Result<bool> {
+    let at = ctx.state.with_file_name(format!("{key}.at"));
+    let last = std::fs::read_to_string(&at)
+        .ok()
+        .and_then(|t| t.trim().parse::<u64>().ok());
+    if last.is_some_and(|t| ctx.now < t + 7 * 86400) {
+        return Ok(false);
+    }
+    std::fs::write(&at, ctx.now.to_string())?;
+    Ok(true)
 }

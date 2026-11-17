@@ -640,3 +640,20 @@ fn the_budget_counts_a_hard_link_and_a_clone_once() {
     let total = stamp.split_whitespace().next();
     assert_eq!(total, Some(size.to_string().as_str()), "cloned: {cloned}");
 }
+
+#[test]
+fn a_verdict_frees_its_reviewers_scratch() {
+    let c = ctx(&tmpdir("disk-rev-scratch"), CONFIG);
+    let _sh = FakeShed::attached(&c);
+    lane(&c, 10, 12, "impl", "issue-12");
+    lane(&c, 20, 12, "rev", "rev-12-r1");
+    let s = c.worktrees.join(".build/.scratch");
+    let (rev, imp) = (build(&s, "sendmeter-rev-12", 100), build(&s, "sendmeter-impl-12", 100));
+    let r = Fake::default()
+        .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
+        .reply("git -C", "");
+    let out = verdict(&c, &r, "FAIL");
+    assert!(!rev.exists(), "{out}");
+    assert!(imp.exists(), "the builder's scratch stays: {out}");
+    assert!(out.contains("(verdict recorded)"), "{out}");
+}

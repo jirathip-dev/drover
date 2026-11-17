@@ -26,22 +26,22 @@ pub struct Lane {
     pub session: Option<Session>,
     /// When drover spawned it (0: unknown).
     pub since: u64,
-    /// #83: a log-only lane whose worktree is clean and pushed: its short head sha.
+    /// A log-only lane whose worktree is clean and pushed: its short head sha.
     pub parked: Option<String>,
-    /// #157: the `[hosts]` host it runs on, when fleet.toml has hosts, and its ssh machine (none: this one).
+    /// The `[hosts]` host it runs on, when fleet.toml has hosts, and its ssh machine (none: this one).
     pub host: Option<String>,
     pub machine: Option<String>,
-    /// #248: why `check` keeps this done lane's session open (its newest `lane-kept-dirty`, none once closed).
+    /// Why `check` keeps this done lane's session open (its newest `lane-kept-dirty`, none once closed).
     pub kept: Option<String>,
-    /// #260: its worktree, from the spawn.
+    /// Its worktree, from the spawn.
     pub worktree: Option<String>,
-    /// #630: its workspace root, from the spawn.
+    /// Its workspace root, from the spawn.
     pub root: Option<String>,
-    /// #422: an orchestrator's chat thread (`t6`); with no session it is `asleep`.
+    /// An orchestrator's chat thread (`t6`); with no session it is `asleep`.
     pub thread: Option<String>,
-    /// #609: the runtime it was spawned in (`shed` | `shed-acp`), from its spawn: never the config's now.
+    /// The runtime it was spawned in (`shed` | `shed-acp`), from its spawn: never the config's now.
     pub runtime: String,
-    /// #609: where it runs, as every surface shows it: its host while 2+ hosts are enabled (`air`, or empty).
+    /// Where it runs, as every surface shows it: its host while 2+ hosts are enabled (`air`, or empty).
     pub place: String,
 }
 
@@ -53,6 +53,7 @@ pub enum LaneState {
     Parked,
     Held(Vec<u64>),
     Asleep,
+    Owner,
 }
 
 impl Default for LaneState {
@@ -70,11 +71,20 @@ impl LaneState {
             LaneState::Parked => "parked".into(),
             LaneState::Held(on) => format!("held by {}", crate::queue::hashes(on)),
             LaneState::Asleep => "asleep".into(),
+            LaneState::Owner => "waiting-owner".into(),
         }
     }
     /// shed runs it and says `s`.
     pub fn is(&self, s: Status) -> bool {
         *self == LaneState::Live(s)
+    }
+    /// shed says it is busy: working or running.
+    pub fn busy(&self) -> bool {
+        matches!(self, LaneState::Live(s) if s.busy())
+    }
+    /// shed says it waits on someone: blocked or an approval.
+    pub fn blocked(&self) -> bool {
+        matches!(self, LaneState::Live(Status::Blocked | Status::Approval))
     }
 }
 
@@ -107,8 +117,11 @@ pub fn join(cfg: &Config, r: &dyn Runner, events: &[Event], st: &States, session
         };
         if let Some(e) = by_name(&a.name) {
             l = from_spawn(e, l);
+            if a.status() == Some(Status::Done) && owner(events, e) {
+                l.state = LaneState::Owner;
+            }
             if !seen.insert(a.name.clone()) {
-                let rank = |s: &LaneState| SECTIONS.iter().position(|x| *x == s.word()).unwrap_or(2);
+                let rank = |s: &LaneState| SECTIONS.iter().position(|x| *x == s.word()).unwrap_or(IDLE);
                 if let Some(o) = out.iter_mut().find(|o: &&mut Lane| o.name == a.name) {
                     if rank(&l.state) < rank(&o.state) {
                         *o = l;
@@ -195,6 +208,12 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
     let live = match sessions.seen(lane, sp.str("machine")) {
         Seen::Unreachable => return Health::Unknown,
         Seen::Absent => return Health::Dead(stamp::exit(events, lane)),
+        Seen::Here(x) if x.key_refused() => {
+            return Health::Stalled {
+                since: stamp::since(events, lane).unwrap_or(sp.ts).max(sp.ts),
+            }
+        }
+        Seen::Here(x) if held(events, x) => return Health::Fine,
         Seen::Here(x) => match x.status() {
             Some(st) => st,
             None => return Health::Dead(ended(events, sessions, sp)),
@@ -218,6 +237,29 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
     Health::Fine
 }
 
+/// Session `a` waits or works by design: running, on approval, on the owner or a rate limit; never nudged, stalled or dead.
+pub fn held(events: &[Event], a: &Session) -> bool {
+    match a.status() {
+        Some(Status::Running | Status::Approval | Status::Limited) => true,
+        Some(Status::Done) => last_spawn(events, &a.name).is_some_and(|sp| owner(events, sp)),
+        _ => false,
+    }
+}
+
+fn owner(events: &[Event], sp: &Event) -> bool {
+    let mine = |e: &&Event| e.seq > sp.seq && e.fleet == sp.fleet && e.issue == sp.issue;
+    let asked = crate::events::open_asks(events).iter().any(mine);
+    let ended = events.iter().filter(mine).rfind(|e| e.kind == "turn-end");
+    let ended = ended.filter(|t| matches!(t.str("state"), Some("blocked" | "need-input")));
+    let answered = |t: &Event| {
+        events
+            .iter()
+            .filter(mine)
+            .any(|e| e.kind == "decision" && e.seq > t.seq)
+    };
+    asked || ended.is_some_and(|t| !answered(t))
+}
+
 /// A session's fleet, issue and role from drover's labels on it, when its fleet is configured.
 pub fn whose<'a>(cfg: &Config, s: &'a Session) -> Option<(&'a str, Option<u64>, Option<&'a str>)> {
     let fleet = s.labels.get("fleet").filter(|f| cfg.fleet.contains_key(*f))?;
@@ -225,7 +267,7 @@ pub fn whose<'a>(cfg: &Config, s: &'a Session) -> Option<(&'a str, Option<u64>, 
     Some((fleet, issue, s.labels.get("role").map(String::as_str)))
 }
 
-/// #1053: the running sessions labelled for a configured fleet that no `spawn`, adoption, conductor start or young `spawn-started` names.
+/// The running sessions labelled for a configured fleet that no `spawn`, adoption, conductor start or young `spawn-started` names.
 pub fn orphans<'a>(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &'a Sessions) -> Vec<&'a Session> {
     let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < crate::spawn::SPAWN_SECS;
     let kinds = ["spawn", "spawn-adopted", "spawn-started", "orchestrator-start"];
@@ -246,16 +288,16 @@ fn place(cfg: &Config, all: &mut [Lane]) {
 }
 
 impl Lane {
-    /// #609: its host as API v1 sends it: `local` with no `[hosts]`.
+    /// Its host as API v1 sends it: `local` with no `[hosts]`.
     pub fn at(&self) -> String {
         self.host.clone().unwrap_or_else(|| "local".into())
     }
-    /// #630: its worktree's uncommitted files and unpushed commits, read on `r` when shown (never in a drive pass).
+    /// Its worktree's uncommitted files and unpushed commits, read on `r` when shown (never in a drive pass).
     pub fn unsaved(&self, r: &dyn Runner) -> Option<(u64, u64)> {
         let wt = self.worktree.as_deref().filter(|_| self.thread.is_none())?;
         crate::spawn::unsaved(&self.on(r), Path::new(wt))
     }
-    /// #157: `r` on the lane's host.
+    /// `r` on the lane's host.
     pub fn on<'a>(&'a self, r: &'a dyn Runner) -> crate::hosts::On<'a> {
         crate::hosts::On::new(r, self.machine.as_deref())
     }
@@ -263,7 +305,7 @@ impl Lane {
     pub fn pane(&self) -> Option<&str> {
         self.session.as_ref().map(|s| s.name.as_str())
     }
-    /// #1033: shed's note on its reported state (`running: cargo test (8m)`), masked.
+    /// Shed's note on its reported state (`running: cargo test (8m)`), masked.
     pub fn note(&self) -> Option<String> {
         self.session.as_ref()?.note.as_deref().map(mask)
     }
@@ -304,13 +346,28 @@ fn orchestrator(events: &[Event], e: &Event, l: Lane) -> Lane {
 }
 
 /// Section order on the page; any other state (unknown) counts as idle.
-pub const SECTIONS: &[&str] = &["blocked", "working", "idle", "done", "parked", "dead"];
+pub const SECTIONS: &[&str] = &[
+    "blocked",
+    "waiting-approval",
+    "waiting-owner",
+    "rate-limited",
+    "working",
+    "running",
+    "idle",
+    "done",
+    "parked",
+    "dead",
+];
+const IDLE: usize = 6;
+
+/// The states the busy count counts.
+pub const BUSY: [&str; 2] = ["working", "running"];
 
 pub type Groups<'a> = Vec<(&'static str, Vec<(String, Vec<&'a Lane>)>)>;
 
 /// Non-empty [`SECTIONS`], each split by fleet (alphabetical, Others last), newest `changed` first.
 pub fn group(all: &[Lane], changed: impl Fn(&Lane) -> u64) -> Groups<'_> {
-    let section = |l: &Lane| SECTIONS.iter().position(|s| *s == l.state.word()).unwrap_or(2);
+    let section = |l: &Lane| SECTIONS.iter().position(|s| *s == l.state.word()).unwrap_or(IDLE);
     let mut v: Vec<&Lane> = all.iter().collect();
     v.sort_by_key(|l| {
         (
@@ -443,7 +500,7 @@ pub fn tail(screen: &str, n: usize) -> Vec<String> {
         .collect()
 }
 
-/// #611: each enabled host's shed sessions that are no lane or conductor, or `{host, error}` for a host whose shed fails.
+/// Each enabled host's shed sessions that are no lane or conductor, or `{host, error}` for a host whose shed fails.
 pub fn others(cfg: &Config, r: &dyn Runner, events: &[Event]) -> Vec<Value> {
     let ours = crate::events::of_kind(events, &["spawn", "orchestrator-start"]).into_iter();
     let ours: BTreeSet<&str> = ours.filter_map(|e| e.str("agent")).collect();

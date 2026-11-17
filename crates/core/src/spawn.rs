@@ -2,6 +2,7 @@ use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event, Json};
 use crate::gate::refused;
+use crate::orchestrator::actor;
 use crate::providers;
 use crate::runner::{argv, ok, Runner};
 use crate::session::{Session, Status};
@@ -17,8 +18,13 @@ pub fn role_prompt(role: &str) -> &'static str {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
         "architect" => include_str!("../roles/architect.md"),
-        "orchestrator" => include_str!("../roles/orchestrator.md"),
+        "orchestrator" => concat!(
+            include_str!("../roles/orchestrator/role.md"),
+            "\n",
+            include_str!("../roles/orchestrator/thread.md")
+        ),
         "lesson" => include_str!("../roles/lesson.md"),
+        "triage" => include_str!("../roles/triage.md"),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
     }
@@ -34,7 +40,7 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
 }
 
 fn prompt_kind<'a>(f: &'a Fleet, role: &'a str) -> &'a str {
-    let own = role == "lesson" || role == "verify" && f.family(role) == "rev";
+    let own = matches!(role, "lesson" | "triage") || role == "verify" && f.family(role) == "rev";
     if own {
         role
     } else {
@@ -52,7 +58,7 @@ pub(crate) fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)>
     all.filter(|p| done.insert(p.4.clone())).collect()
 }
 
-/// Write every harness's files for every role's profile, so `drover set` alone can switch a role's harness; a generated profile no role names any more (#155: a retired role's) is removed.
+/// Write every harness's files for every role's profile, so `drover set` alone can switch a role's harness; a generated profile no role names any more (a retired role's) is removed.
 pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) -> Result<()> {
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
@@ -85,7 +91,7 @@ pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Wri
     Ok(good)
 }
 
-/// #737: each synced profile's drover hook whose program is not the running binary: `<profile> hook runs <exe>`.
+/// Each synced profile's drover hook whose program is not the running binary: `<profile> hook runs <exe>`.
 pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
     let mut stray = vec![];
     for (_, _, _, _, profile) in profiles(cfg) {
@@ -108,7 +114,7 @@ pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
 pub struct Plan {
     pub agent: String,
     pub role: String,
-    /// #173: the pipeline stage it runs and the role's kind (`impl`, `rev` for a check, `design`).
+    /// The pipeline stage it runs and the role's kind (`impl`, `rev` for a check, `design`).
     pub stage: String,
     pub family: &'static str,
     pub harness: String,
@@ -130,24 +136,24 @@ pub struct Plan {
     /// Display title head (`<fleet> · <role> #<issue>`) and the full lane title built from it.
     pub head: String,
     pub title: String,
-    /// #355: an orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
+    /// An orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
     pub session: Option<(String, bool)>,
-    /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
+    /// A remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
     pub lane_key: Option<String>,
-    /// #782: the fleet's `sandbox`; `start_cmd` runs the harness inside it.
+    /// The fleet's `sandbox`; `start_cmd` runs the harness inside it.
     pub sandbox: Option<crate::config::Sandbox>,
 }
 
-/// #979: a build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
+/// A build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
 pub const BACKGROUND: &str = "&& if [ -x /usr/sbin/taskpolicy ]; then /usr/sbin/taskpolicy -b -p $$; else renice -n 10 -p $$ >/dev/null; ionice -c3 -p $$ 2>/dev/null; true; fi";
 
 impl Plan {
-    /// #979: build and check lanes run in the background; design, architect and orchestrator lanes do not.
+    /// Build and check lanes run in the background; design, architect and orchestrator lanes do not.
     pub fn qos(&self) -> Option<&'static str> {
         matches!(self.family, "impl" | "rev").then_some("background")
     }
 
-    /// Exports `DROVER_LANE`, `DROVER_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
+    /// Exports `DROVER_LANE`, `DROVER_PORT` and the fleet's `env`; sources the secrets `deliver` wrote.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
         let (lane, port) = (format!("DROVER_LANE='{}'", self.lane), self.port.to_string());
         let mut c = term::run_argv(pane, &["export", &lane, &format!("DROVER_PORT={port}")]);
@@ -186,7 +192,7 @@ impl Plan {
         PathBuf::from(format!("{}.env", self.worktree.display()))
     }
 
-    /// #592: a remote lane's hook rules, beside its worktree on its host.
+    /// A remote lane's hook rules, beside its worktree on its host.
     pub fn rules_file(&self) -> PathBuf {
         PathBuf::from(format!("{}.rules.json", self.worktree.display()))
     }
@@ -208,7 +214,7 @@ impl Plan {
     }
 }
 
-/// #707: the lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`) and
+/// The lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`) and
 pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<Delivered<'a>> {
     let mut text = String::new();
     for (var, _, name) in p.secrets() {
@@ -277,7 +283,7 @@ pub fn lane_title(head: &str, issue_title: &str) -> String {
     }
 }
 
-/// #187: `<fleet>/<branch>` hashed (FNV-1a) into `range` (default 41000-41999); a `taken` port takes the next free one.
+/// `<fleet>/<branch>` hashed (FNV-1a) into `range` (default 41000-41999); a `taken` port takes the next free one.
 pub fn lane_port(range: Option<&str>, key: &str, taken: &[u16]) -> u16 {
     let r = range.and_then(|r| r.split_once('-'));
     let r = r.and_then(|(a, b)| Some((a.trim().parse::<u16>().ok()?, b.trim().parse::<u16>().ok()?)));
@@ -391,7 +397,7 @@ fn shared_target<'a>(root: &Path, f: &'a Fleet, agent: &str) -> impl Iterator<It
         .filter(|v| !f.env.contains_key(&v.0) && !f.shared_cache.contains_key(&v.0))
 }
 
-/// #536: the folder under a root's `.build` holding each lane's scratch.
+/// The folder under a root's `.build` holding each lane's scratch.
 pub const SCRATCH: &str = ".scratch";
 
 const PUSHBACK: &str = "If a finding is wrong or out of scope, say so in your report with file:line proof; \
@@ -403,7 +409,7 @@ fn brief(
     p: &Plan,
     title: &str,
     body: &str,
-    (fix, rules, repro, play): (Option<&str>, Option<&str>, bool, Option<String>),
+    (fix, rules, docs, repro, play): (Option<&str>, Option<&str>, Option<&str>, bool, Option<String>),
     recipe: &crate::design::Recipe,
 ) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
@@ -450,6 +456,12 @@ fn brief(
                     ""
                 }
         }
+        _ if p.role == "triage" => format!(
+            include_str!("../roles/brief-triage.md"),
+            fleet = p.lane.split(':').next().unwrap_or_default(),
+            integration = integration,
+            issue = issue
+        ),
         _ => format!(
             include_str!("../roles/brief-impl.md"),
             branch = branch,
@@ -476,6 +488,9 @@ fn brief(
     let rules = rules.map_or(String::new(), |r| {
         format!("## Repo rules (.drover/rules.md)\n\n{}\n\n", r.trim_end())
     });
+    let docs = docs.map_or(String::new(), |d| {
+        format!("## Docs you may trust (.drover/docs.md)\n\nAny other doc is not current: don't read it, unless this brief names it.\n\n{}\n\n", d.trim_end())
+    });
     let shared = include_str!("../rules/shared.md").trim_end();
     let rules = format!("## Shared rules (rules/shared.md)\n\n{shared}\n\n{rules}");
     format!(
@@ -488,6 +503,7 @@ fn brief(
         body = body,
         fix = fix,
         rules = rules,
+        docs = docs,
         contract = contract.trim_end()
     )
 }
@@ -533,7 +549,7 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
     k.filter(|_| p.family == "rev").unwrap_or(n)
 }
 
-/// #565: why drover's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (#637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee conductor's `guarded` too.
+/// Why drover's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (on a remote host, its profile checked there instead); empty when it would. an attached cooee conductor's `guarded` too.
 pub fn unguarded(ctx: &Ctx, (profile, family, h): (&str, &str, &str), id: &str, remote: bool) -> String {
     let settings: Value = std::fs::read_to_string(providers::profiles_root(ctx).join(profile).join("settings.json"))
         .ok()
@@ -585,16 +601,16 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     })
 }
 
-/// #941: what `shed_meta` lacking means, for doctor's row and spawn's refusal.
+/// What `shed_meta` lacking means, for doctor's row and spawn's refusal.
 pub const SHED_OLD: &str =
     "this host's shed predates shed#94 (no `shed run --meta`): an ACP lane would load the owner's own setup";
 
-/// #941: the host's shed takes `run --meta`.
+/// The host's shed takes `run --meta`.
 pub fn shed_meta(r: &dyn Runner) -> bool {
     crate::shed::cli(r, &["help", "run"]).is_ok_and(|o| o.stdout.contains("--meta"))
 }
 
-/// #941: an ACP lane's `--mcp` file: the role's servers as ACP's list (stdio, `http`, `sse`).
+/// An ACP lane's `--mcp` file: the role's servers as ACP's list (stdio, `http`, `sse`).
 pub fn write_acp_mcp(on: &crate::hosts::On, p: &Plan, acp: &term::Acp) -> Result<()> {
     let Some(file) = &acp.mcp else { return Ok(()) };
     let pairs = |v: &Value| -> Vec<Value> {
@@ -722,18 +738,31 @@ pub const OWN_FILES: &[&str] = &[
     "verdict.md",
     ".review-brief.md",
     "why.md",
+    "body.md",
     ".verify-browser.mjs",
+    ".verify.md",
 ];
 
-/// #770: `OWN_FILES` and the harness files spawn copies in (`providers::LOCAL_FILES`).
+const OWN_REPO: [&str; 8] = [
+    ".drover/rules.md",
+    ".drover/verify.md",
+    ".drover/design.md",
+    ".drover/arch.toml",
+    ".herdsman/rules.md",
+    ".herdsman/verify.md",
+    ".herdsman/design.md",
+    ".herdsman/arch.toml",
+];
+
+/// `OWN_FILES` and the harness files spawn copies in (`providers::LOCAL_FILES`).
 pub fn own_files() -> impl Iterator<Item = &'static str> {
     OWN_FILES.iter().chain(&providers::LOCAL_FILES).copied()
 }
 
-/// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
+/// Screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/", "shots/"];
 
-/// #646: a drover-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
+/// A drover-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
 pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
     let all = "'+refs/heads/*:refs/remotes/origin/*'";
     format!(
@@ -742,7 +771,7 @@ pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
     )
 }
 
-/// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
+/// `git status --porcelain` lines that are not lane scratch or generated (screenshots, packages).
 pub fn changes(st: &str) -> usize {
     let own = |l: &&str| {
         (own_files()
@@ -753,13 +782,13 @@ pub fn changes(st: &str) -> usize {
     st.lines().filter(|l| !own(l)).count()
 }
 
-/// #103: some lockfile exists, and each one reads the same in the local checkout and the new lane.
+/// Some lockfile exists, and each one reads the same in the local checkout and the new lane.
 pub fn lockfiles_match(locks: &[&str], local: &Path, wt: &Path) -> bool {
     let read = |dir: &Path, l: &str| std::fs::read(dir.join(l)).ok();
     locks.iter().any(|l| read(local, l).is_some()) && locks.iter().all(|l| read(local, l) == read(wt, l))
 }
 
-/// #185: clone each `clone_build` folder whose lockfile matches (`Cargo.lock` for `target`, the package ones for `node_modules`); the `build-cloned` data, if any. Never a full copy: macOS `cp -c` copies across volumes, so it clones within one; elsewhere `--reflink=always` fails instead. Never over a folder the lane's agent made: the clone lands beside it and renames in only while the name is free.
+/// Clone each `clone_build` folder whose lockfile matches (`Cargo.lock` for `target`, the package ones for `node_modules`); the `build-cloned` data, if any. Never a full copy: macOS `cp -c` copies across volumes, so it clones within one; elsewhere `--reflink=always` fails instead. Never over a folder the lane's agent made: the clone lands beside it and renames in only while the name is free.
 pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> Option<Value> {
     use std::os::unix::fs::MetadataExt;
     let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
@@ -821,7 +850,7 @@ fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Session])
     (!moved.is_empty()).then(|| json!({"dirs": moved, "from": prev}))
 }
 
-/// #630: a new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there: one volume, so copy-on-write, never a full copy. The `build-cloned` data, if any.
+/// A new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there: one volume, so copy-on-write, never a full copy. The `build-cloned` data, if any.
 pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     let b = t.parent().filter(|b| b.ends_with(crate::roots::BUILD) && !t.exists())?;
     let mine = |e: &std::fs::DirEntry| {
@@ -846,7 +875,7 @@ pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     Some(json!({"dirs": dirs, "from": src, "secs": at.elapsed().as_secs(), "errors": errs}))
 }
 
-/// #630: the ignored files `.drover/worktree-include` lists (one path per line, `#` comments), copied from the main checkout into a new lane's worktree when missing there. Never secrets: those stay in `secret:` env.
+/// The ignored files `.drover/worktree-include` lists (one path per line, `#` comments), copied from the main checkout into a new lane's worktree when missing there. Never secrets: those stay in `secret:` env.
 pub fn copy_included(local: &Path, wt: &Path) -> Result<()> {
     let list = std::fs::read_to_string(crate::repo_path(&local.join(".drover/worktree-include"))).unwrap_or_default();
     for l in list
@@ -864,7 +893,7 @@ pub fn copy_included(local: &Path, wt: &Path) -> Result<()> {
     Ok(())
 }
 
-/// #630: worktree `wt`'s unsaved work, readable: its uncommitted files (`OWN_FILES` aside) and unpushed commits.
+/// Worktree `wt`'s unsaved work, readable: its uncommitted files (`OWN_FILES` aside) and unpushed commits.
 pub fn unsaved(r: &dyn Runner, wt: &Path) -> Option<(u64, u64)> {
     let wt = wt.to_string_lossy();
     let st = ok(r, "git", &["-C", &wt, "status", "--porcelain"]).ok()?;
@@ -877,7 +906,7 @@ pub fn unsaved(r: &dyn Runner, wt: &Path) -> Option<(u64, u64)> {
     Some((u64::try_from(changes(&st)).unwrap_or(u64::MAX), n.trim().parse().ok()?))
 }
 
-/// #630: `+<files> ⇡<commits>` of unsaved work `u`, none when there is none.
+/// `+<files> ⇡<commits>` of unsaved work `u`, none when there is none.
 pub fn unsaved_text(u: Option<(u64, u64)>) -> Option<String> {
     let (f, c) = u.filter(|u| *u != (0, 0))?;
     Some(format!("+{f} ⇡{c}"))
@@ -926,6 +955,59 @@ pub struct Opts {
     /// Fix round that merges the integration branch into a conflicting or behind PR
     #[arg(long)]
     pub update: bool,
+    #[arg(skip = Some(actor()))]
+    pub by: Option<String>,
+}
+
+fn integration_view(
+    ctx: &Ctx,
+    (r, on): (&dyn Runner, &crate::hosts::On),
+    f: &crate::config::Fleet,
+    p: &Plan,
+    (fleet, issue, update): (&str, u64, bool),
+    local: &str,
+) -> Result<(Option<String>, Option<String>)> {
+    let own = || crate::repo_read("rules.md", |x| on.read(&p.worktree.join(x)));
+    let int = &f.integration;
+    if p.family != "rev" {
+        return Ok((
+            own(),
+            update.then(|| format!(include_str!("../roles/brief-update.md"), int)),
+        ));
+    }
+    ok(r, "git", &["-C", local, "fetch", "origin", int])?;
+    let at_int = |name: &str| {
+        crate::repo_read(name, |x| {
+            ok(r, "git", &["-C", local, "show", &format!("origin/{int}:{x}")]).ok()
+        })
+    };
+    if let Some(v) = (p.role == "verify").then(|| at_int("verify.md")).flatten() {
+        on.write(&p.worktree.join(".verify.md"), &v)?;
+    }
+    if crate::lesson::is_lesson(ctx, None, (fleet, issue)) {
+        return Ok((own(), None));
+    }
+    let wt = p.worktree.to_string_lossy();
+    let diff = ok(
+        r,
+        "git",
+        &[
+            &["-C", &wt, "diff", &format!("origin/{int}...HEAD"), "--"][..],
+            &OWN_REPO,
+        ]
+        .concat(),
+    );
+    let d = diff.unwrap_or_default();
+    let names: Vec<String> = (d.lines())
+        .filter_map(|l| Some(format!("`{}`", l.strip_prefix("diff --git a/")?.split(" b/").next()?)))
+        .collect();
+    let changed = (!names.is_empty()).then(|| {
+        format!(
+            "This PR changes {}: you are briefed with the integration branch's copy; the change itself is under review.\n\n~~~diff\n{d}~~~",
+            names.join(", ")
+        )
+    });
+    Ok((at_int("rules.md").or_else(own), changed))
 }
 
 fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygiene) -> Result<()> {
@@ -958,7 +1040,7 @@ pub fn spawn(
         return refused("BAD_VALUE", "--update is an impl fix round");
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
-    let ev = working(&ctx.state)?;
+    let ev = crate::compact::on_root(r, working(&ctx.state)?, (fleet, f))?;
     let host = o.host.clone().or_else(|| crate::starts::admitted(ctx, fleet, issue));
     let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
@@ -995,10 +1077,8 @@ pub fn spawn(
             .map(|a| f.role(role).ok().and_then(|r| r.agent.clone()).unwrap_or(a));
         term::Shed(crate::shed::Shed { wire, acp, ..b })
     };
-    if on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
-        let path = crate::config::env("PATH").unwrap_or_default();
-        let fix = "`drover timer install` from a shell where `which shed` finds it";
-        return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
+    if on.machine.is_none() {
+        crate::shed::ready(&on, &bt.0.wire, o.dry_run)?;
     }
     let acp_id = bt.0.acp.clone();
     let n = round(&working(&ctx.state)?, fleet, issue, &p);
@@ -1107,7 +1187,7 @@ pub fn spawn(
         );
     }
 
-    lane_admit(ctx, (cfg, r), &events, fleet, issue, role)?;
+    lane_admit(ctx, (cfg, r), &events, (fleet, issue, role), o.force)?;
     respawn_guard(ctx, cfg, &events, (fleet, issue, role))?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
     if o.update && updates >= f.flow().update_limit() {
@@ -1130,8 +1210,7 @@ pub fn spawn(
     }
     match refusal {
         Some(("HOST_BUSY", why)) if o.force => {
-            let by = crate::orchestrator::acting().map_or_else(|| "owner".into(), |id| format!("orchestrator-{id}"));
-            let d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": by});
+            let d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": actor()});
             event("override", d)?;
         }
         Some(("HOST_BUSY", why)) => return refused("HOST_BUSY", format!("{why}; retry later or pass --force")),
@@ -1290,9 +1369,6 @@ pub fn spawn(
         let fix = last
             .filter(|e| p.family == "impl" && e.str("verdict") == Some("FAIL"))
             .and_then(|e| e.str("body"));
-        let update = o
-            .update
-            .then(|| format!(include_str!("../roles/brief-update.md"), f.integration));
         let adr = events
             .iter()
             .rfind(|e| e.is("design-approved", fleet, issue) && e.str("role") == Some("architect"))
@@ -1302,11 +1378,12 @@ pub fn spawn(
                 "rev" => format!("Architecture: the owner approved the ADR in `{a}/`; check the diff against it."),
                 _ => format!("Architecture: the owner approved the ADR in `{a}/` on this branch; build to it, and add any `.drover/arch.toml` lines it ends with in this PR."),
             });
+        let (rules, int_note) = integration_view(ctx, (r, &on), f, &p, (fleet, issue, o.update), &local)?;
         let decided = events
             .iter()
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
-            .chain(update)
+            .chain(int_note)
             .chain(adr)
             .chain((!crate::events::STAGES.contains(&p.family)).then(|| {
                 let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
@@ -1326,7 +1403,8 @@ pub fn spawn(
             &decided.fold(body.to_string(), |b, d| b + &d),
             (
                 fix,
-                crate::repo_read("rules.md", |f| on.read(&p.worktree.join(f))).as_deref(),
+                rules.as_deref(),
+                crate::repo_read("docs.md", |f| on.read(&p.worktree.join(f))).as_deref(),
                 crate::queue::repro(&events, fleet, issue),
                 crate::queue::playbook(&events, fleet, issue),
             ),
@@ -1362,7 +1440,11 @@ pub fn spawn(
         on.write(&crate::sandbox::tmp(&p).join(".keep"), "")?;
     }
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
-    let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
+    let cap_raise = crate::gh::cached_title(ctx, fleet, issue).is_some_and(|t| t.starts_with("cap:"));
+    let rules = rules.map(|pl| crate::hook::Rules {
+        cap_raise,
+        ..crate::hook::Rules::resolve(cfg, fleet, role, &pl.name)
+    });
     if let Some(rl) = &rules {
         on.write(&p.rules_file(), &serde_json::to_string(rl)?)?;
     }
@@ -1405,7 +1487,8 @@ pub fn spawn(
             d.put("runtime", json!(if bt.0.acp.is_some() { "shed-acp" } else { "shed" }));
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d.put("confirmed", json!(confirmed))
-                .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))));
+                .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))))
+                .put("by", json!(o.by));
             d.put("update", json!(o.update)).put("handover", json!(note));
             if let Some(pl) = &placed {
                 d.put("host", json!(pl.name))
@@ -1460,9 +1543,8 @@ pub(crate) fn lane_admit(
     ctx: &Ctx,
     (cfg, r): (&Config, &dyn Runner),
     events: &[Event],
-    fleet: &str,
-    issue: u64,
-    role: &str,
+    (fleet, issue, role): (&str, u64, &str),
+    force: bool,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
     let events = &[events, &crate::drive::pending(ctx, cfg, r)].concat();
@@ -1490,7 +1572,20 @@ pub(crate) fn lane_admit(
     if let Some(cap) = cap.filter(|&c| n >= c) {
         return refused("CAP", format!("{n} {role} lane(s) open in {fleet}, max_{fam} = {cap}"));
     }
-    Ok(())
+    let Some((v, cap)) = crate::queue::flight_full(ctx, &st, f, fleet, issue).filter(|_| fam == "impl") else {
+        return Ok(());
+    };
+    let why = format!(
+        "{}/{cap} PRs in flight in {fleet} ({})",
+        v.len(),
+        crate::queue::hashes(&v)
+    );
+    if !force {
+        return refused("IN_FLIGHT_CAP", format!("{why}; they land first, or pass --force"));
+    }
+    let by = crate::orchestrator::acting().map_or_else(|| "owner".into(), |id| format!("orchestrator-{id}"));
+    let d = json!({"code": "IN_FLIGHT_CAP", "reason": why, "role": role, "by": by});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "override", d))
 }
 
 fn starts<'a>(

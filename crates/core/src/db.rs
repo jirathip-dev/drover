@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS asks (seq INTEGER PRIMARY KEY, fleet TEXT NOT NULL, i
     twin TEXT, json TEXT NOT NULL, rank INTEGER, closed TEXT, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS asks_twin ON asks (twin);
 CREATE INDEX IF NOT EXISTS events_started ON events (json_extract(json, '$.agent'), json_extract(json, '$.pane'))
-    WHERE type = 'spawn-started';";
+    WHERE type = 'spawn-started';
+CREATE INDEX IF NOT EXISTS events_action ON events (json_extract(json, '$.action_id'))
+    WHERE type IN ('intent', 'done', 'failed');";
 
 pub fn file(state: &Path) -> PathBuf {
     SCRATCH
@@ -37,7 +39,7 @@ thread_local! {
     static SCRATCH: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
-/// #344: until dropped, this thread's database is a new temporary one; the files beside the log are imported into it once and left where they are.
+/// Until dropped, this thread's database is a new temporary one; the files beside the log are imported into it once and left where they are.
 pub struct Scratch(PathBuf);
 
 impl Scratch {
@@ -144,12 +146,15 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
     if let Some(id) = crate::orchestrator::acting() {
         ev.data.entry("orchestrator").or_insert(id.into());
     }
+    if seq.is_none() && matches!(ev.kind.as_str(), "verdict" | "lane-killed") {
+        ev.data.entry("by").or_insert(crate::orchestrator::actor().into());
+    }
     let ev = if seq.is_none() { crate::events::capped(&ev) } else { ev };
     let json = serde_json::to_string(&ev)?;
-    c.execute(
+    c.prepare_cached(
         "INSERT INTO events (seq, ts, fleet, issue, type, json, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![seq, ev.ts, ev.fleet, ev.issue, ev.kind, json, archived],
-    )?;
+    )?
+    .execute(params![seq, ev.ts, ev.fleet, ev.issue, ev.kind, json, archived])?;
     Ok(Event {
         seq: c.last_insert_rowid().try_into()?,
         ..crate::events::aliased(ev)
@@ -163,7 +168,10 @@ fn log(c: &Connection, ev: &Event) -> Result<()> {
 fn project(c: &Connection, ev: &Event) -> Result<()> {
     if let Some(n) = ev.issue {
         let q = "SELECT json FROM states WHERE fleet = ?1 AND issue = ?2";
-        let old: Option<String> = c.query_row(q, params![ev.fleet, n], |r| r.get(0)).optional()?;
+        let old: Option<String> = c
+            .prepare_cached(q)?
+            .query_row(params![ev.fleet, n], |r| r.get(0))
+            .optional()?;
         if old.is_none() || !ev.is_passive() {
             let key = (ev.fleet.clone(), n);
             let mut m = events::States::new();
@@ -172,7 +180,8 @@ fn project(c: &Connection, ev: &Event) -> Result<()> {
             }
             if let Some(s) = events::fold_into(m, std::slice::from_ref(ev)).get(&key) {
                 let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
-                c.execute(q, params![ev.fleet, n, s.done(), serde_json::to_string(s)?])?;
+                c.prepare_cached(q)?
+                    .execute(params![ev.fleet, n, s.done(), serde_json::to_string(s)?])?;
             }
         }
     }
@@ -183,7 +192,8 @@ fn project(c: &Connection, ev: &Event) -> Result<()> {
 fn lane(c: &Connection, e: &Event) -> Result<()> {
     if let Some(k) = events::lane_id(e) {
         let q = "INSERT OR REPLACE INTO lanes (lane, seq, json) VALUES (?1, ?2, ?3)";
-        c.execute(q, params![k, e.seq, serde_json::to_string(e)?])?;
+        c.prepare_cached(q)?
+            .execute(params![k, e.seq, serde_json::to_string(e)?])?;
     }
     Ok(())
 }
@@ -296,7 +306,7 @@ fn rebuild_in(c: &Connection, state: &Path) -> Result<()> {
     Ok(())
 }
 
-/// #978: `drover compact --rebuild`: the current-state rows made again from every event, in one transaction.
+/// `drover compact --rebuild`: the current-state rows made again from every event, in one transaction.
 pub fn rebuild(state: &Path) -> Result<()> {
     with(state, true, (), |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -305,7 +315,7 @@ pub fn rebuild(state: &Path) -> Result<()> {
     })
 }
 
-/// #1023: the saved lane fold's events (each lane's newest lane event), kept after `compact` archives its issue.
+/// The saved lane fold's events (each lane's newest lane event), kept after `compact` archives its issue.
 pub fn lanes(state: &Path) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| {
         let mut q = c.prepare("SELECT seq, json FROM lanes")?;
@@ -318,12 +328,12 @@ pub fn lanes(state: &Path) -> Result<Vec<Event>> {
     })
 }
 
-/// #978: the current per-issue state, the `states` rows.
+/// The current per-issue state, the `states` rows.
 pub fn issues(state: &Path) -> Result<events::States> {
     since(state, i64::MAX.unsigned_abs(), true, None).map(|t| t.1)
 }
 
-/// #978: an ask's ending as its `asks` row holds it: (`ORDER` rank, `drover asks`' text); `None` while open.
+/// An ask's ending as its `asks` row holds it: (`ORDER` rank, `drover asks`' text); `None` while open.
 pub type Ending = Option<(usize, String)>;
 pub type Endings = std::collections::BTreeMap<u64, Ending>;
 
@@ -333,7 +343,7 @@ pub fn endings(evs: &[Event]) -> Result<Endings> {
 }
 
 fn asks_since(c: &Connection, at: u64) -> Result<Endings> {
-    let mut q = c.prepare("SELECT seq, rank, closed FROM asks WHERE at > ?1")?;
+    let mut q = c.prepare_cached("SELECT seq, rank, closed FROM asks WHERE at > ?1")?;
     let rows = q.query_map([at], |r| {
         let (rank, why) = (r.get::<_, Option<usize>>(1)?, r.get::<_, Option<String>>(2)?);
         Ok((r.get::<_, u64>(0)?, rank.zip(why)))
@@ -355,7 +365,7 @@ pub(crate) fn since(
         };
         let q =
             "SELECT json FROM states WHERE ?1 OR (fleet, issue) IN (SELECT fleet, issue FROM events WHERE seq > ?2)";
-        let mut q = tx.prepare(q)?;
+        let mut q = tx.prepare_cached(q)?;
         let st = q.query_map(params![fresh, seq], |r| r.get::<_, String>(0))?.map(|j| {
             let s: events::IssueState = serde_json::from_str(&j?)?;
             Ok(((s.fleet.clone(), s.issue), s))
@@ -367,7 +377,7 @@ pub(crate) fn since(
     })
 }
 
-/// #978: `drover asks`' rows: the open asks (`all`: every ask), `fleet`'s, with their endings, oldest first.
+/// `drover asks`' rows: the open asks (`all`: every ask), `fleet`'s, with their endings, oldest first.
 pub fn asks(state: &Path, fleet: Option<&str>, all: bool) -> Result<Vec<(Event, Ending)>> {
     with(state, false, vec![], |c| {
         let q = "SELECT seq, json, rank, closed FROM asks WHERE (?1 IS NULL OR fleet = ?1) AND (?2 OR rank IS NULL) ORDER BY seq";
@@ -406,10 +416,13 @@ pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
             zstd_append(&dir.join(format!("events-{m}.jsonl.zst")), &text)?;
         }
         tx.execute(&format!("DELETE FROM events WHERE {done}"), [cut])?;
-        let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')";
-        tx.execute(q, [now])?;
+        let moved = gone + old.len() > 0;
+        if moved {
+            let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')";
+            tx.execute(q, [now])?;
+        }
         tx.commit()?;
-        if gone + old.len() > 0 {
+        if moved {
             c.execute_batch("VACUUM")?;
         }
         c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
@@ -429,7 +442,7 @@ fn zstd_append(file: &Path, text: &str) -> Result<()> {
     Ok(std::fs::remove_file(part)?)
 }
 
-/// #978: every event `compact` moved to `archive/`, by seq.
+/// Every event `compact` moved to `archive/`, by seq.
 pub fn archived(state: &Path) -> Result<Vec<Event>> {
     let dir = std::fs::read_dir(state.with_file_name("archive"));
     let mut files: Vec<PathBuf> = dir.into_iter().flatten().filter_map(|e| Some(e.ok()?.path())).collect();
@@ -445,7 +458,8 @@ pub fn archived(state: &Path) -> Result<Vec<Event>> {
 }
 
 fn last(c: &Connection) -> Result<u64> {
-    Ok(c.query_row("SELECT COALESCE(MAX(seq), 0) FROM events", [], |r| r.get(0))?)
+    Ok(c.prepare_cached("SELECT COALESCE(MAX(seq), 0) FROM events")?
+        .query_row([], |r| r.get(0))?)
 }
 
 /// One event, numbered next, with the rows it changes: one transaction.
@@ -458,7 +472,26 @@ pub fn append(state: &Path, ev: &Event) -> Result<()> {
     })
 }
 
-/// #900, #906: `evs` in one transaction, each `needs-decision` under the highest `q<n>` logged plus 1; none if an ask keyed `once` is logged.
+/// The hidden `archive-events`: rebuild the tables (`rebuild`), else archive old events and heartbeats; says which in `out`.
+pub fn archive_events(state: &Path, now: u64, rebuild: bool, out: &mut dyn std::io::Write) -> Result<()> {
+    if rebuild {
+        self::rebuild(state)?;
+        return Ok(writeln!(out, "rebuilt the issue, lane and ask tables")?);
+    }
+    let (gone, moved) = compact(state, now)?;
+    Ok(writeln!(out, "{gone} heartbeats deleted, {moved} events archived")?)
+}
+
+/// `evs`, each numbered next, in one transaction.
+pub fn append_all(state: &Path, evs: &[Event]) -> Result<()> {
+    with(state, true, (), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        evs.iter().try_for_each(|ev| log(&tx, ev))?;
+        Ok(tx.commit()?)
+    })
+}
+
+/// `evs` in one transaction, each `needs-decision` under the highest `q<n>` logged plus 1; none if an ask keyed `once` is logged.
 pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Option<Vec<Event>>> {
     for ev in &evs {
         crate::sim::point(&crate::sim::Point::Append(ev));
@@ -492,7 +525,7 @@ pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Opti
     })
 }
 
-/// #935: fleet `old`'s events moved to `new` and `ev` logged, after a copy to `bak`; committed only once `then` succeeds.
+/// Fleet `old`'s events moved to `new` and `ev` logged, after a copy to `bak`; committed only once `then` succeeds.
 pub fn rename_fleet(
     state: &Path,
     (old, new): (&str, &str),
@@ -527,11 +560,11 @@ pub(crate) fn events(state: &Path, filter: &str, arg: impl rusqlite::ToSql) -> R
     with(state, false, vec![], |c| rows(c, filter, arg))
 }
 
-/// #701: event rows read from the database (a full read's cost is the log's length).
+/// Event rows read from the database (a full read's cost is the log's length).
 pub static ROWS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn rows(c: &Connection, filter: &str, arg: impl rusqlite::ToSql) -> Result<Vec<Event>> {
-    let mut q = c.prepare(&format!("SELECT seq, json FROM events WHERE {filter} ORDER BY seq"))?;
+    let mut q = c.prepare_cached(&format!("SELECT seq, json FROM events WHERE {filter} ORDER BY seq"))?;
     let rows = q.query_map([arg], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
     rows.map(|r| {
         let (seq, json) = r?;
@@ -541,7 +574,11 @@ fn rows(c: &Connection, filter: &str, arg: impl rusqlite::ToSql) -> Result<Vec<E
     .collect()
 }
 
-/// #509: in one transaction, the latest `intent`/`done`/`failed` of `action_id` `id`; `evs` appended when `take` accepts it. Returns it and whether they were.
+/// `claim`'s lookup of an action id's latest `intent`/`done`/`failed`, served by the `events_action` index.
+pub const CLAIM: &str = "SELECT seq, json FROM events WHERE type IN ('intent', 'done', 'failed') \
+    AND json_extract(json, '$.action_id') = ?1 ORDER BY seq DESC LIMIT 1";
+
+/// In one transaction, the latest `intent`/`done`/`failed` of `action_id` `id`; `evs` appended when `take` accepts it. Returns it and whether they were.
 pub fn claim(
     state: &Path,
     evs: &[Event],
@@ -551,10 +588,7 @@ pub fn claim(
     crate::sim::point(&crate::sim::Point::Lease(id));
     with(state, true, (None, false), |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let q = "type IN ('intent', 'done', 'failed') AND json_extract(json, '$.action_id') = ?1";
-        let mut q = tx.prepare(&format!(
-            "SELECT seq, json FROM events WHERE {q} ORDER BY seq DESC LIMIT 1"
-        ))?;
+        let mut q = tx.prepare_cached(CLAIM)?;
         let last = q
             .query_row([id], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))
             .optional()?;
@@ -576,17 +610,20 @@ pub fn claim(
     })
 }
 
-/// #509: mark trigger `id` processed; false if it already was.
+/// Mark trigger `id` processed; false if it already was.
 pub fn processed(state: &Path, id: &str, now: u64) -> Result<bool> {
     let q = "INSERT OR IGNORE INTO processed (id, at) VALUES (?1, ?2)";
     with(state, true, 0, |c| Ok(c.execute(q, params![id, now])?)).map(|n| n > 0)
 }
 
-/// A snapshot row (`board`: #337's reads).
+/// A snapshot row (`board`'s reads).
 pub fn get<T: DeserializeOwned>(state: &Path, key: &str) -> Option<(u64, T)> {
     let q = "SELECT ts, json FROM snapshot WHERE key = ?1";
     let row = |r: &rusqlite::Row| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?));
-    let (ts, json) = with(state, false, None, |c| Ok(c.query_row(q, [key], row).optional()?)).ok()??;
+    let (ts, json) = with(state, false, None, |c| {
+        Ok(c.prepare_cached(q)?.query_row([key], row).optional()?)
+    })
+    .ok()??;
     Some((ts, serde_json::from_str(&json).ok()?))
 }
 
@@ -594,12 +631,12 @@ pub fn get<T: DeserializeOwned>(state: &Path, key: &str) -> Option<(u64, T)> {
 pub fn stamp(state: &Path, key: &str) -> Option<u64> {
     let q = "SELECT n FROM snapshot WHERE key = ?1";
     with(state, false, None, |c| {
-        Ok(c.query_row(q, [key], |r| r.get(0)).optional()?)
+        Ok(c.prepare_cached(q)?.query_row([key], |r| r.get(0)).optional()?)
     })
     .ok()?
 }
 
-/// #560: the database file's inode and its last compaction's stamp: a change makes `events::shared` read afresh.
+/// The database file's inode and its last compaction's stamp: a change makes `events::shared` read afresh.
 pub fn version(state: &Path) -> (Option<u64>, Option<u64>) {
     let ino = std::fs::metadata(file(state)).map(|m| m.ino()).ok();
     (ino, ino.and_then(|_| stamp(state, "archived")))
@@ -621,7 +658,7 @@ pub fn list<T: DeserializeOwned>(state: &Path, table: &str) -> Vec<T> {
     try_list(state, table).unwrap_or_default()
 }
 
-/// #501: `list`, its database error kept (a busy or unreadable `state.db` is no empty table).
+/// `list`, its database error kept (a busy or unreadable `state.db` is no empty table).
 pub fn try_list<T: DeserializeOwned>(state: &Path, table: &str) -> Result<Vec<T>> {
     let all = with(state, false, vec![], |c| {
         let mut q = c.prepare(&format!("SELECT json FROM {table} ORDER BY n"))?;
@@ -636,7 +673,7 @@ pub fn store<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
     with(state, true, (), |c| replace(c, table, all))
 }
 
-/// #893: `store`, failing at once while another connection holds the write lock (never waiting for it).
+/// `store`, failing at once while another connection holds the write lock (never waiting for it).
 pub fn store_now<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
     with(state, true, (), |c| {
         c.busy_timeout(std::time::Duration::ZERO)?;
@@ -771,19 +808,37 @@ fn retire(p: &Path) -> Result<()> {
     Ok(std::fs::rename(p, free)?)
 }
 
+static CLEAN: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+thread_local! {
+    /// How often this thread listed a state directory for files from an older layout.
+    pub static LISTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn legacy(state: &Path) -> (Vec<PathBuf>, [PathBuf; 2]) {
     let dir = state.parent().unwrap_or(Path::new("."));
-    let mut logs: Vec<PathBuf> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .collect();
-    logs.retain(|p| {
-        p.file_name()
-            .is_some_and(|n| n.to_string_lossy().ends_with(".jsonl.gz"))
-            || p == state
-    });
+    let mut clean = CLEAN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut logs: Vec<PathBuf> = Vec::new();
+    if state.exists() || !clean.contains(dir) {
+        LISTED.set(LISTED.get() + 1);
+        logs = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        logs.retain(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().ends_with(".jsonl.gz"))
+                || p == state
+        });
+        if logs.is_empty() {
+            clean.insert(dir.to_path_buf());
+        } else {
+            clean.remove(dir);
+        }
+    }
     (logs, [dir.join("serve/devices.json"), dir.join("webpush/subs.json")])
 }
 
@@ -850,7 +905,7 @@ fn import(c: &mut Connection, state: &Path) -> Result<()> {
     tx.commit().context("import commit")
 }
 
-/// `drover migrate`'s #344 step: import what is left, say what the database holds.
+/// `drover migrate`'s database step: import what is left, say what the database holds.
 pub fn migrate(state: &Path, out: &mut dyn std::io::Write) -> Result<()> {
     let left = legacy(state).0.len();
     let n: u64 = with(state, true, 0, |c| {

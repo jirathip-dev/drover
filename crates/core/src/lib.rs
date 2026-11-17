@@ -7,12 +7,14 @@ pub mod access;
 pub mod action;
 pub mod amend;
 pub mod arch;
+pub mod autonomy;
 pub mod breaker;
 pub mod card;
 pub mod check;
 mod cli;
 pub mod clock;
 pub mod cloud;
+pub mod compact;
 pub mod config;
 pub mod db;
 pub mod design;
@@ -31,6 +33,7 @@ pub mod hotspots;
 pub mod land;
 pub mod lanes;
 pub mod lesson;
+pub mod limit;
 pub mod orchestrator;
 pub mod outbox;
 pub mod overlap;
@@ -62,6 +65,7 @@ pub mod starts;
 pub mod term;
 pub mod timer;
 pub mod top;
+pub mod triage;
 pub mod update;
 pub mod usage;
 pub mod verify;
@@ -79,9 +83,9 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
 
-/// #235: `drover --version`: the crate version and the git sha it is built from (build.rs).
+/// `drover --version`: the crate version and the git sha it is built from (build.rs).
 pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("DROVER_SHA"), ")");
-/// #1081: the git sha this binary is built from; a serve reports it in `/api/v1/health`.
+/// The git sha this binary is built from; a serve reports it in `/api/v1/health`.
 pub const SHA: &str = env!("DROVER_SHA");
 
 #[derive(Clone)]
@@ -197,7 +201,7 @@ fn same(a: &std::path::Path, b: &std::path::Path) -> bool {
     a.canonicalize().is_ok_and(|a| b.canonicalize().is_ok_and(|b| a == b))
 }
 
-/// #456: a repo's `.drover/…` path, or its pre-rename `.herdsman/…` twin while only that exists (one release).
+/// A repo's `.drover/…` path, or its pre-rename `.herdsman/…` twin while only that exists (one release).
 pub fn repo_path(p: &std::path::Path) -> PathBuf {
     let old = |c| if c == ".drover" { ".herdsman".as_ref() } else { c };
     let old: PathBuf = p.iter().map(old).collect();
@@ -346,7 +350,7 @@ fn owner_topic(text: &str) -> bool {
     text.contains('$') || words.any(|w| OWNER_WORDS.split_whitespace().any(|o| o == w))
 }
 
-/// `drover ask`: log a `needs-decision` for the asking lane (`DROVER_LANE`, else none), notify, print its id. #541: a lane's ask (not a conductor's) goes to its repo's conductor thread first (`routed`, no push); with none, or the conductor not reached, to the owner.
+/// `drover ask`: log a `needs-decision` for the asking lane (`DROVER_LANE`, else none), notify, print its id. a lane's ask (not a conductor's) goes to its repo's conductor thread first (`routed`, no push); with none, or the conductor not reached, to the owner.
 pub fn ask(
     ctx: &Ctx,
     cfg: &Config,
@@ -410,7 +414,7 @@ pub fn ask(
     Ok(writeln!(out, "{id}")?)
 }
 
-/// #541: how long the owner may change a conductor's answer, in seconds (the board reads it).
+/// How long the owner may change a conductor's answer, in seconds (the board reads it).
 pub const CHANGE: u64 = config::ORCHESTRATOR_CHANGE_MINUTES * 60;
 
 fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
@@ -421,7 +425,7 @@ fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
         .unwrap_or(choice)
 }
 
-/// #541: `drover answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or names an answered decision; else `OWNER_ASK`, and a lane ask on its repo is put to the owner in the thread.
+/// `drover answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or names an answered decision; else `OWNER_ASK`, and a lane ask on its repo is put to the owner in the thread.
 pub fn orchestrator_answer(
     ctx: &Ctx,
     cfg: &Config,
@@ -469,7 +473,7 @@ pub fn orchestrator_answer(
     answer_with(ctx, cfg, r, out, ask, choice, (&by, None), (Some(&quote), None))
 }
 
-/// #817: `drover extend` by thread `t`'s orchestrator: the owner's `typed` line, else its extend ask answered on `basis`.
+/// `drover extend` by thread `t`'s orchestrator: the owner's `typed` line, else its extend ask answered on `basis`.
 pub fn orchestrator_extend(
     ctx: &Ctx,
     cfg: &Config,
@@ -520,7 +524,7 @@ pub fn orchestrator_extend(
 
 pub(crate) const TYPED: &str = "owner (typed)";
 
-/// #584: `drover answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the ask's thread (its own, or the one its lane ask was put to the owner in) after the ask; else `NOT_TYPED`.
+/// `drover answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the ask's thread (its own, or the one its lane ask was put to the owner in) after the ask; else `NOT_TYPED`.
 pub fn answer_typed(
     ctx: &Ctx,
     cfg: &Config,
@@ -585,7 +589,7 @@ pub fn answer_typed(
         .map_or(Ok(()), |(n, note)| amend::amend(ctx, cfg, r, out, (fleet, n), id, note))
 }
 
-/// #584: `drover ask withdraw`: the ask's own thread's orchestrator (`by`) closes an ask it replaced (`for`).
+/// `drover ask withdraw`: the ask's own thread's orchestrator (`by`) closes an ask it replaced (`for`).
 pub fn withdraw(
     ctx: &Ctx,
     cfg: &Config,
@@ -794,7 +798,7 @@ fn answer_lane<'a>(events: &'a [Event], ask: &Event) -> Option<&'a Event> {
     own.filter(open).or_else(|| events.iter().rfind(on_issue)).filter(open)
 }
 
-/// #325: type the answer `msg` into its lane, Enter; log `answer-delivered`, or (`first`: it must land) `-undelivered`.
+/// Type the answer `msg` into its lane, Enter; log `answer-delivered`, or (`first`: it must land) `-undelivered`.
 pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, first: bool) -> Result<Option<String>> {
     let events = working(&ctx.state)?;
     let sp = answer_lane(&events, ask);
@@ -829,7 +833,7 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, 
     Ok(why.is_empty().then(|| agent.into()))
 }
 
-/// #325: answers whose last delivery failed, newest first (one per ask).
+/// Answers whose last delivery failed, newest first (one per ask).
 pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
     let kinds = ["answer-undelivered", "answer-delivered", "answer-delivered-live"];
     let mut seen = std::collections::BTreeSet::new();

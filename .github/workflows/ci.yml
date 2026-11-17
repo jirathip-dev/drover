@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt, clippy
@@ -33,8 +33,8 @@ jobs:
         run: scripts/lint-fixtures.sh rust
       - name: "test shards (#1162: every test target is in exactly one shard of scripts/test-shards.txt)"
         run: scripts/test-shards.sh check
-      - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)"
-        run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests the_state_read_stays_under_300ms --nocapture --test-threads=1
+      - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events; #954: a drive pass over 30,000 events and 150 done issues; #962: stats autonomy on 150,000 events)"
+        run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests the_state_read_stays_under_300ms a_pass_over_30k_events_and_150_done_issues_stays_fast stats_autonomy_on_a_150k --nocapture --test-threads=1
       - name: "soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)"
         if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
         run: cargo test --release --locked --test soak -- --ignored --nocapture --test-threads=1
@@ -71,8 +71,10 @@ jobs:
         run: scripts/timing-check.sh
       - name: "parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`"
         run: scripts/parity-check.sh HEAD^1
-      - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
-        run: ./target/release/drover cap-check --config ci/cap.toml
+      - name: "line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; a PR's cap edit carries a `Cap:` trailer)"
+        run: ./target/release/drover cap-check --config ci/cap.toml ${BASE:+--base "$BASE"}
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
       - name: "arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)"
         env:
           BODY: ${{ github.event.pull_request.body }}
@@ -117,7 +119,9 @@ jobs:
           read -ra targets <<<"$flags"
           cargo nextest run --locked --no-fail-fast --workspace "${targets[@]}"
       - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
-        run: test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*' -print -quit)"
+        run: |
+          left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*')
+          test -z "$left" || { echo "::error::test temp dirs left behind:"; echo "$left"; exit 1; }
 
   # #1162: the one `test` check that branch protection and required_checks name, green only when every shard is.
   test:

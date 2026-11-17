@@ -94,6 +94,7 @@ fn drive_deletes_an_ended_lanes_scratch() {
     let sh = FakeShed::new();
     sh.attach(&c);
     sh.lane("sendmeter-impl-14", "idle", "/x");
+    sh.lane("sendmeter-rev-13-r2", "idle", "/x");
     let out = budget(&c, &sh);
     let gone = dirs.each_ref().map(|d| !d.exists());
     assert_eq!(
@@ -185,12 +186,14 @@ fn events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
 #[test]
 fn the_oldest_scratch_is_trimmed_over_budget() {
     let (c, s) = setup("scratch-trim", 6000);
-    spawn(&c, 9, "rev", "sendmeter-rev-9-r1");
     spawn(&c, 13, "impl", "sendmeter-impl-13");
-    let (old, new) = (blob(&s, "sendmeter-rev-9-r1"), blob(&s, "sendmeter-impl-13"));
+    let old = blob(s.parent().unwrap(), "stray/debug");
+    std::fs::write(old.join(".cargo-lock"), "").unwrap();
+    let new = blob(&s, "sendmeter-impl-13");
     age(&old, 1_000);
     let sh = FakeShed::new();
     sh.attach(&c);
+    sh.lane("sendmeter-impl-13", "idle", "/x");
     let out = budget(&c, &sh);
     assert!(!old.exists() && new.exists(), "{out}");
     assert!(out.contains("builds: trimmed"), "{out}");
@@ -479,7 +482,7 @@ fn air_off_hosts(c: &drover::Ctx) -> (Fake, FakeShed, FakeShed) {
     let wt = AIR_WT;
     let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
     let f = Fake::default()
-        .reply("gh issue list", "[]")
+        .reply("gh api graphql -f", r#"{"data": {"repository": {}}}"#)
         .reply(&format!("{ssh}'sh' '-c' 'test -e"), "")
         .reply(&format!("{ssh}'git' '-C' '{wt}' 'status'"), "")
         .reply(&format!("{ssh}'git' '-C' '{wt}' 'rev-list'"), "0\n")
@@ -551,6 +554,112 @@ fn a_disabled_hosts_scratch_stays_only_for_its_own_live_agents() {
     assert!(
         out.contains(&format!(
             "scratch: air: removed {AIR_ROOT}/.build/.scratch/sendmeter-impl-13 "
+        )),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_tick_past_its_budget_still_sweeps_an_enabled_hosts_finished_scratch() {
+    let (c, home, s) = air_setup("scratch-overrun");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        text.replace("build_budget_gb = 1000", "build_budget_gb = 1000\nslow_secs = 0"),
+    )
+    .unwrap();
+    air_spawn(&c, 12, "rev", "sendmeter-rev-12-r1");
+    merged(&c, 12);
+    air_spawn(&c, 13, "impl", "sendmeter-impl-13");
+    let [ended, working] = ["sendmeter-rev-12-r1", "sendmeter-impl-13"].map(|a| blob(&s, &format!("{a}/debug")));
+    let air = [("sendmeter-impl-13", "working")];
+    let (_, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    assert!(out.contains("tick: past its 0 s budget"), "{out}");
+    assert!(!ended.exists(), "{out}");
+    assert!(working.exists(), "a live lane's scratch stays: {out}");
+    assert!(
+        out.contains(&format!(
+            "scratch: air: removed {AIR_ROOT}/.build/.scratch/sendmeter-rev-12-r1 "
+        )),
+        "{out}"
+    );
+}
+
+#[test]
+fn reclaim_sweeps_an_enabled_hosts_finished_scratch_and_spares_live_lanes() {
+    let (c, home, s) = air_setup("scratch-on-reclaim");
+    air_spawn(&c, 12, "rev", "sendmeter-rev-12-r1");
+    ev(&c, 12, "verdict", json!({"verdict": "FAIL", "sha": "a"}));
+    air_spawn(&c, 14, "impl", "sendmeter-impl-14");
+    let [done, live] = ["sendmeter-rev-12-r1", "sendmeter-impl-14"].map(|a| blob(&s, &format!("{a}/debug")));
+    let path = format!("{AIR_ROOT}/.build/.scratch/sendmeter-rev-12-r1");
+    let (f, _here, air) = air_off_hosts(&c);
+    let (code, dry) = run(&c, &air_off_runner(&home, &f, &air), &["reclaim"]);
+    assert_eq!(code, 0, "{dry}");
+    assert!(
+        dry.contains(&format!("would remove scratch air:{path} (lane finished)")),
+        "{dry}"
+    );
+    assert!(done.exists(), "a preview removes nothing");
+    let (f, _here, air) = air_off_hosts(&c);
+    let (code, out) = run(&c, &air_off_runner(&home, &f, &air), &["reclaim", "--apply"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!done.exists(), "{out}");
+    assert!(live.exists(), "a live lane's scratch is never touched: {out}");
+    assert!(out.contains(&format!("scratch: air: removed {path} ")), "{out}");
+}
+
+#[test]
+fn a_verdict_frees_its_remote_reviewers_scratch() {
+    let (c, home, s) = air_setup("scratch-verdict-remote");
+    let d = json!({"role": "rev", "agent": "sendmeter-rev-12-r1", "pane": "sendmeter-rev-12-r1", "runtime": "shed",
+                   "worktree": "/Users/me/worktrees/sendmeter/sendmeter-rev-12-r1", "root": AIR_ROOT,
+                   "host": "air", "machine": "air"});
+    ev(&c, 12, "spawn", d);
+    let [rev, other] = ["sendmeter-rev-12-r1", "sendmeter-impl-13"].map(|a| blob(&s, &format!("{a}/debug")));
+    let head = "1111111111111111111111111111111111111111";
+    let file = c.state.with_file_name("verdict.md");
+    std::fs::write(&file, "FAIL\n").unwrap();
+    let f = Fake::default().reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", head);
+    let air = FakeShed::new();
+    let r = air_off_runner(&home, &f, &air);
+    let args = [
+        "verdict",
+        "sendmeter",
+        "12",
+        "FAIL",
+        "--sha",
+        head,
+        "--file",
+        file.to_str().unwrap(),
+    ];
+    let (code, out) = run(&c, &r, &args);
+    assert_eq!(code, 0, "{out}");
+    assert!(!rev.exists(), "{out}");
+    assert!(other.exists(), "only the reviewer's own scratch goes: {out}");
+    assert!(out.contains("(verdict recorded)"), "{out}");
+}
+
+#[test]
+fn a_lane_no_longer_running_in_shed_is_swept_without_a_verdict() {
+    let (c, home, s) = air_setup("scratch-crashed");
+    air_spawn(&c, 12, "rev", "sendmeter-rev-12-r1");
+    air_spawn(&c, 13, "impl", "sendmeter-impl-13");
+    let [crashed, idle] = ["sendmeter-rev-12-r1", "sendmeter-impl-13"].map(|a| blob(&s, &format!("{a}/debug")));
+    let b = s.parent().unwrap();
+    let [crashed_build, idle_build] =
+        ["sendmeter-rev-12-r1", "sendmeter-impl-13"].map(|a| blob(b, &format!("{a}/debug")));
+    let air = [("sendmeter-impl-13", "idle")];
+    let (_, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    assert!(!crashed.exists(), "{out}");
+    assert!(!crashed_build.parent().unwrap().exists(), "{out}");
+    assert!(
+        idle.exists() && idle_build.exists(),
+        "a live lane is never touched: {out}"
+    );
+    assert!(
+        out.contains(&format!(
+            "scratch: air: removed {AIR_ROOT}/.build/.scratch/sendmeter-rev-12-r1 "
         )),
         "{out}"
     );

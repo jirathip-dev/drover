@@ -17,7 +17,7 @@ pub struct Stage {
     /// The fleet.toml line of its `[[…stage]]` header; 0 for the built-in pipeline.
     #[serde(skip)]
     pub line: usize,
-    /// #417: the check whose round count this one's FAILs park on (the built-in verify: rev's).
+    /// The check whose round count this one's FAILs park on (the built-in verify: rev's).
     #[serde(skip)]
     pub share: Option<String>,
 }
@@ -73,7 +73,7 @@ fn stage(name: &str, kind: &str, role: Option<&str>, rounds: Option<u32>, next: 
 }
 
 impl Pipeline {
-    /// Today's loop: `[limits] review_rounds` on rev, `update_rounds` on the gate; #417: with a `verify` role, rev's PASS goes to a verify check whose FAILs count against rev's rounds.
+    /// Today's loop: `[limits] review_rounds` on rev, `update_rounds` on the gate; with a `verify` role, rev's PASS goes to a verify check whose FAILs count against rev's rounds.
     pub fn builtin(l: &Limits, verify: bool) -> Pipeline {
         let pass = if verify { "verify" } else { "gates" };
         let mut v = stage(
@@ -107,7 +107,7 @@ impl Pipeline {
         Pipeline { stage, builtin: true }
     }
 
-    /// #417: the check whose rounds a FAIL of check `stage` counts toward: its `share`, else itself.
+    /// The check whose rounds a FAIL of check `stage` counts toward: its `share`, else itself.
     pub fn counts<'a>(&'a self, stage: &'a str) -> &'a str {
         self.get(stage).and_then(|s| s.share.as_deref()).unwrap_or(stage)
     }
@@ -173,7 +173,9 @@ impl Pipeline {
 
     /// The stage a role's spawn enters: `role` names a stage or a role.
     pub fn stage_of<'a>(&'a self, role: &'a str) -> &'a str {
-        let lesson = (role == "lesson").then(|| self.stage.first()).flatten();
+        let lesson = matches!(role, "lesson" | "triage")
+            .then(|| self.stage.first())
+            .flatten();
         self.get(role)
             .or(self.of_role(role))
             .or(lesson)

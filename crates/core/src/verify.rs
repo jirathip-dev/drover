@@ -51,7 +51,7 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
             "no design stage, no UI files, not queued --verify".to_string(),
         ),
         Some(w) => {
-            let api = |p: &str| format!("repos/{}/contents/{p}?ref={sha}", f.repo);
+            let api = |p: &str| format!("repos/{}/contents/{p}?ref={}", f.repo, f.integration);
             if crate::repo_read("verify.md", |p| ok(r, "gh", &["api", &api(p), "--silent"]).ok()).is_some() {
                 return Ok(true);
             }
@@ -64,7 +64,7 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
     Ok(false)
 }
 
-/// The PNGs (#731: and `.log`, `.json`, `.txt` evidence) verify's verdict.md (at `file`) lists, as `{name, path}`: #547: only a relative word with no `..` that is a regular file inside the verify lane's folder `lane` (none: none).
+/// The PNGs (and `.log`, `.json`, `.txt` evidence) verify's verdict.md (at `file`) lists, as `{name, path}`: only a relative word with no `..` that is a regular file inside the verify lane's folder `lane` (none: none).
 pub fn shots(body: &str, file: &Path, lane: Option<&str>) -> Vec<Value> {
     let dir = file.parent().unwrap_or(Path::new(""));
     let words = body.split(|c: char| c.is_whitespace() || "`()[]<>\"'".contains(c));
@@ -90,7 +90,7 @@ fn inside(path: &Path, dir: &Path) -> Option<PathBuf> {
     (p.starts_with(d) && p.is_file()).then_some(p)
 }
 
-/// #547: the shots of `fleet` #`n`'s last verdict the board shows and serves: a verify verdict's, each still a file inside one of the issue's lane folders (older events kept any `.png` word).
+/// The shots of `fleet` #`n`'s last verdict the board shows and serves: a verify verdict's, each still a file inside one of the issue's lane folders (older events kept any `.png` word).
 pub fn served(events: &[Event], (fleet, n): (&str, u64), at: Option<&str>) -> Vec<(String, PathBuf)> {
     let mine = crate::events::of_kind(events, &["spawn", "verdict"]);
     let mine: Vec<&Event> = mine

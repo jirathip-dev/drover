@@ -2,7 +2,7 @@ use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, St
 use super::{form, lanes, lock, refused, shown, view, working, Config, Ctx, Refusal, Result, Server};
 use crate::api::{
     ApprovalChoice, Ask, Block, Chat, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, Health,
-    IssueView, Lane, LaneChat, LessonFleet, LessonRun, ServeHealth,
+    IssueView, Lane, LaneChat, LaneCounts, LessonFleet, LessonRun, ServeHealth,
 };
 use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
 use crate::api::{
@@ -427,7 +427,7 @@ impl Server<'_> {
         rows.into_iter().map(row).collect()
     }
 
-    fn lane_list(&self, ctx: &Ctx, cfg: &Config, events: &[Event], st: &States) -> Vec<Lane> {
+    pub(crate) fn lane_list(&self, ctx: &Ctx, cfg: &Config, events: &[Event], st: &States) -> Vec<Lane> {
         let all = self.lanes(ctx.now, cfg, events, st).unwrap_or_default();
         let waits = self.waits(ctx, cfg, events, &all);
         let lane = |l: &lanes::Lane| {
@@ -441,6 +441,7 @@ impl Server<'_> {
                 harness: l.harness.clone(),
                 model: l.model.clone(),
                 state: l.state.word(),
+                note: l.session.as_ref().and_then(|x| x.note.clone()),
                 shown,
                 tone: tone.into(),
                 since: l.since,
@@ -519,6 +520,7 @@ impl Server<'_> {
             theme: super::active(ctx),
             fleets: cfg.fleet.iter().map(fleet).collect(),
             queue: queue.map(queued).collect(),
+            counts: counts(&lanes, None),
             lanes,
             asks: crate::events::open_asks(&events).into_iter().map(ask).collect(),
             hosts: crate::hosts::cards(&cfg, r).into_iter().map(host).collect(),
@@ -567,7 +569,7 @@ impl Server<'_> {
         }
     }
 
-    /// #859: `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
+    /// `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
     pub fn slo(&self, now: u64) {
         let pid = drover_core::runner::pid().to_string();
         let kb = crate::runner::ok(&self.r, "ps", &["-o", "rss=", "-p", &pid]).map(|s| s.trim().parse::<u64>());
@@ -1197,3 +1199,20 @@ fn acp_blocks(events: &[crate::shed::proto::Logged]) -> Vec<Block> {
 }
 
 const TITLE_LINE: usize = 120;
+
+pub(crate) fn counts(lanes: &[Lane], only: Option<&str>) -> LaneCounts {
+    let mine = |l: &&Lane| only.is_none_or(|f| l.fleet.as_deref() == Some(f));
+    let n = |s: &[&str]| {
+        lanes
+            .iter()
+            .filter(mine)
+            .filter(|l| s.contains(&l.state.as_str()))
+            .count()
+    };
+    LaneCounts {
+        busy: n(&lanes::BUSY),
+        waiting_approval: n(&["waiting-approval"]),
+        waiting_owner: n(&["waiting-owner"]),
+        rate_limited: n(&["rate-limited"]),
+    }
+}

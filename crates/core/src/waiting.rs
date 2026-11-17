@@ -21,7 +21,7 @@ pub struct Waiting {
     pub what: String,
     pub since: u64,
     pub next_cmd: Option<String>,
-    /// #854: the promise its line makes, when it makes one.
+    /// The promise its line makes, when it makes one.
     #[serde(skip)]
     #[cfg_attr(feature = "ts", ts(skip))]
     pub promise: Option<crate::promise::Kind>,
@@ -61,7 +61,7 @@ impl Waiting {
     }
 }
 
-/// #217: an extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none), logs before #778: the round's own event, last; #1058's requeued round waits in the queue instead.
+/// An extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none), older logs: the round's own event, last; requeued round waits in the queue instead.
 pub fn unspawned(events: &[Event], s: &IssueState) -> bool {
     let last = events
         .iter()
@@ -78,24 +78,41 @@ fn lost(events: &[Event], s: &IssueState, pushed: &str) -> bool {
     (pushed.is_empty() || s.reviewed(pushed)) && since.any(dead)
 }
 
-/// #445: the `fix-done` (`done --no-change`) logged since the issue's last verdict: its head is reviewed again.
+/// The `fix-done` (`done --no-change`) logged since the issue's last verdict: its head is reviewed again.
 pub fn fix_done<'a>(events: &'a [Event], f: &str, n: u64) -> Option<&'a Event> {
     let mut since = events.iter().rev().take_while(|e| !e.is("verdict", f, n));
     since.find(|e| e.is("fix-done", f, n))
 }
 
-/// #444: a gone impl/fix lane's wait (`lane gone, no push: respawning impl`); drive respawns no more often than this.
+/// A gone impl/fix lane's wait (`lane gone, no push: respawning impl`); drive respawns no more often than this.
 pub const NO_PUSH: &str = ", no push: ";
-/// #517: a lesson lane ended without a push or `done`: drive prompts it once, then closes the issue.
+/// A lesson lane ended without a push or `done`: drive prompts it once, then closes the issue.
 pub const LESSON_PROMPT: &str = "lesson lane ended without a push: prompting it once";
 pub const LESSON_CLOSE: &str = "lesson lane ended without a push: closing as no repeated class";
 const RESPAWN_SECS: u64 = 1800;
 const DRAFT: &str = "PR is a draft";
-/// #511: a build lane's typed turn end, as drive acts on it (`turn`): nudged once, prompted to go on, or blocked.
+/// A build lane's typed turn end, as drive acts on it (`turn`): nudged once, prompted to go on, or blocked.
 pub const TURN_NUDGE: &str = "reported done, nothing new pushed: nudging it once";
 pub const TURN_GO_ON: &str = "reported working, idle: prompting it to continue";
 pub const TURN_BLOCKED: &str = "reported blocked: ";
+/// A reviewer's verdict.md drive could not fetch or record; drive tries again each pass.
+pub const PICKUP: &str = "verdict pickup failed: ";
 const NUDGE_SECS: u64 = 600;
+const IDLE: &str = "rev idle without a verdict (check the pane)";
+
+fn this_review<'a>(events: &'a [Event], (f, n): (&'a str, u64)) -> impl Iterator<Item = &'a Event> {
+    (events.iter().rev())
+        .filter(move |e| e.fleet == f && e.issue == Some(n))
+        .take_while(|e| !(e.kind == "spawn" && crate::events::checks(e)))
+}
+
+fn pickup(events: &[Event], at: (&str, u64)) -> Option<Say> {
+    let e = this_review(events, at).find(|e| e.kind == "verdict-pickup-failed")?;
+    Some(Say::Drive {
+        reason: format!("{PICKUP}{}", e.str("why")?),
+        step: "fetch it again".into(),
+    })
+}
 
 fn failed_start(events: &[Event], s: &IssueState) -> bool {
     let Some(sp) = s.lane.as_deref().and_then(|l| last_spawn(events, l)) else {
@@ -112,7 +129,7 @@ fn failed_start(events: &[Event], s: &IssueState) -> bool {
         .any(|e| e.is("turn-end", &s.fleet, s.issue))
 }
 
-/// #511: the build lane's latest `drover turn` since its spawn and any extra round the owner gave.
+/// The build lane's latest `drover turn` since its spawn and any extra round the owner gave.
 pub fn turn<'a>(events: &'a [Event], s: &IssueState) -> Option<&'a Event> {
     let sp = last_spawn(events, s.build.as_ref().and_then(|b| s.lanes.get(b))?)?;
     let extended = events.iter().rfind(|e| e.is("round-extended", &s.fleet, s.issue));
@@ -180,24 +197,24 @@ pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
     (n, at.first().map_or(0, |e| e.ts))
 }
 
-/// #662: a gone lane's wait (or `respawn` why) that names a resumable exit cause.
+/// A gone lane's wait (or `respawn` why) that names a resumable exit cause.
 pub fn resumed(why: &str) -> bool {
     [Cause::Limit, Cause::Crash]
         .iter()
         .any(|c| why.contains(&format!("({})", c.word())))
 }
 
-/// The 40-hex sha on verdict.md's `Reviewed head` line (#293).
+/// The 40-hex sha on verdict.md's `Reviewed head` line.
 pub fn reviewed_head(t: &str) -> Option<&str> {
     let l = t.lines().find(|l| l.contains("Reviewed head"))?;
     l.split(|c: char| !c.is_ascii_hexdigit()).find(|w| w.len() == 40)
 }
 
-/// #447: the log read once for every issue's wait: all of it, and its open asks.
+/// The log read once for every issue's wait: all of it, and its open asks.
 pub struct Log<'a> {
     pub all: &'a [Event],
     pub asks: Vec<&'a Event>,
-    /// #639: each queued issue's blockers not merged yet (#667: another repo's too), as `#11, cooee#87`.
+    /// Each queued issue's blockers not merged yet (another repo's too), as `#N, cooee#N`.
     pub blocked: Vec<(&'a str, u64, String)>,
 }
 
@@ -222,14 +239,14 @@ impl<'a> Log<'a> {
         }
     }
 
-    /// #639: `fleet` #`n`'s open queue blockers: no lane of any kind starts while one is left.
+    /// `fleet` #`n`'s open queue blockers: no lane of any kind starts while one is left.
     pub fn blockers(&self, fleet: &str, n: u64) -> &str {
         let i = self.blocked.iter().find(|i| i.0 == fleet && i.1 == n);
         i.map_or("", |i| &i.2)
     }
 }
 
-/// Pure: the issue's wait reason. `log` = the whole log, `events` = the issue's part of it (or all of it). `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view; `rev` = the rev worktree's verdict.md (absolute path, first line) when written since the rev spawn. #173: each next step is the one `fc`'s pipeline maps the outcome to. #630: `waits`, plus what a pulled root lost (a `root-moved` since the issue's last push); #790: the lane moved on.
+/// Pure: the issue's wait reason. `log` = the whole log, `events` = the issue's part of it (or all of it). `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view; `rev` = the rev worktree's verdict.md (absolute path, first line) when written since the rev spawn. each next step is the one `fc`'s pipeline maps the outcome to. `waits`, plus what a pulled root lost (a `root-moved` since the issue's last push); the lane moved on.
 pub fn waiting_on(
     log: &Log,
     events: &[Event],
@@ -452,21 +469,21 @@ fn waits(
                         head.unwrap_or_default().0
                     )
                 });
-                let refused = (events.iter().rev())
-                    .filter(|e| e.fleet == *f && e.issue == Some(n))
-                    .take_while(|e| !(e.kind == "spawn" && crate::events::checks(e)))
+                let refused = this_review(events, (f, n))
                     .find(|e| e.kind == "repro-refused" && head.is_some_and(|h| e.str("sha") == Some(h.0)));
                 let what = match (&next, refused) {
                     (Some(_), Some(e)) => {
                         let why = format!("verdict refused NO_REPRO: {}", e.str("why").unwrap_or_default());
                         return w("drive", &why, s.last_ts, next);
                     }
-                    (Some(_), None) => Say::Record("review done".into()),
+                    (Some(_), None) => pickup(events, (f, n)).unwrap_or(Say::Record("review done".into())),
                     (None, _) => drive("verdict written", "record it"),
                 };
                 said(what, s.last_ts, next)
             }
-            None => w("none", "rev idle without a verdict (check the pane)", s.last_ts, None),
+            None => {
+                pickup(events, (f, n)).map_or_else(|| w("none", IDLE, s.last_ts, None), |p| said(p, s.last_ts, None))
+            }
         },
         "fix"
             if !pushed.is_empty()
@@ -558,7 +575,7 @@ pub fn scan(
     })
 }
 
-/// #971: `scan` of the issues `keep` passes (the board's: open ones, and done ones whose lane it shows).
+/// `scan` of the issues `keep` passes (the board's: open ones, and done ones whose lane it shows).
 pub fn scan_where(
     ctx: &Ctx,
     cfg: &Config,
@@ -747,7 +764,7 @@ pub fn scan_where(
                 _ => None,
             });
         let waiting_turn = turn(mine, &s);
-        if idle && s.build.as_deref() == Some("lesson") && settled() {
+        if idle && crate::lesson::no_pr(s.build.as_deref()) && settled() {
             let asked = mine
                 .iter()
                 .rfind(|e| e.kind == "lesson-prompted" && e.str("agent") == Some(built.as_str()));
@@ -789,7 +806,7 @@ pub fn scan_where(
             } else if last > 0 && ctx.now < last + RESPAWN_SECS {
                 format!(
                     "{why}{NO_PUSH}respawned {} ago, again after 30 min",
-                    age(ctx.now - last)
+                    age(ctx.now.saturating_sub(last))
                 )
             } else {
                 format!("{why}{NO_PUSH}respawning {role}")
@@ -899,7 +916,7 @@ pub fn scan_where(
     out
 }
 
-/// #493: the issues `check` guards: impl, fix, review or ready, and each fleet's next startable queued one.
+/// The issues `check` guards: impl, fix, review or ready, and each fleet's next startable queued one.
 pub fn guarded(events: &[Event], cfg: &Config) -> Vec<IssueState> {
     let st = fold(events);
     let busy = |s: &&IssueState| cfg.fleet.contains_key(&s.fleet) && crate::queue::in_flight(&s.state);
@@ -941,7 +958,7 @@ pub fn held(events: &[Event], (f, n): (&str, u64), cmd: Option<&str>) -> Option<
     ))
 }
 
-/// #792: a working lane's silent-lane recovery since its spawn: ` · nudged 3m ago: silent 10m mid-turn`.
+/// A working lane's silent-lane recovery since its spawn: ` · nudged 3m ago: silent 10m mid-turn`.
 pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
     let sp = last_spawn(events, lane);
     let mine = |e: &&Event| {
@@ -966,7 +983,7 @@ pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
 const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "LOGIN_NEEDED"];
 pub const ORPHAN_SECS: u64 = 1800;
 
-/// #493: since when nothing has driven guarded issue `s`, once that is 30 min: no working lane, no drive action on it (a due step, or a refused one drive retries) and no named wait (an open ask, a hold, a paused fleet, CI after PASS).
+/// Since when nothing has driven guarded issue `s`, once that is 30 min: no working lane, no drive action on it (a due step, or a refused one drive retries) and no named wait (an open ask, a hold, a paused fleet, CI after PASS).
 pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Session], now: u64) -> Option<u64> {
     let working = |l: &String| agents.iter().any(|a| a.name == *l && a.busy());
     let asked = |a: &&Event| {

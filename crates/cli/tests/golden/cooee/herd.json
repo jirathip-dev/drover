@@ -436,7 +436,7 @@
       ],
       "type": "scene",
       "weather": {
-        "line": "load 1.20 · mem normal · swap 0",
+        "line": "load 1.20 · mem normal · swap ?",
         "sky": "clear",
         "wind": 0.48
       }

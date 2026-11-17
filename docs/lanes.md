@@ -54,7 +54,8 @@ drover clean --orphans --yes        # also remove folders under the worktree roo
   `.next/`, `dist/`, `.cache/` and the fleet's `build_dirs`, only git-ignored ones) and their sizes, then asks; `--apply`
   skips the question. Idle means no live lane, no process with its cwd there, HEAD not moved and no changed or
   untracked file modified in 7 days. Sources, branches and worktree registrations stay. Sizes are logical: an
-  APFS-cloned folder shares blocks, so freeing it may save less.
+  APFS-cloned folder shares blocks, so freeing it may save less. #1215: it also sweeps each enabled remote host's
+  finished lanes' build and scratch folders, a lane no longer running in shed included (never a live lane's); a verdict frees its reviewer's scratch folder.
 - `LANE_LIVE`: a live agent is in the worktree, or the log has an unfinished lane.
 - `WORKTREE_DIRTY`: unpushed or uncommitted work from no known lane.
 - `SERIAL_BUSY`, `CAP`, `MCP_FORBIDDEN`, `MERGED`: see `drover help --agent`.
@@ -72,8 +73,9 @@ of disk (`DISK_LOW`) first loses every such profile, then its disk is read again
 dir, `DROVER_SCRATCH_TARGET=<root>/.build/.scratch/<agent>`, for second builds and checkouts (base, staging, head);
 the hook refuses a `CARGO_TARGET_DIR` or `--target-dir` outside `<root>/.build` (`REFUSED SCRATCH_TARGET`). Scratch dirs
 count toward `build_budget_gb` (oldest go first); drive deletes a lane's once it ended. #651: on every enabled host
-(remote ones in the tick, after their trim; `[limits] sweep_remote = false` keeps it to this one) a scratch dir stays only
-while its agent is working, it is an open issue's latest lane of its role, or a live agent no spawn names yet holds it.
+(remote ones in the tick, after their trim, even past its budget; `[limits] sweep_remote = false` keeps it to this one) a scratch dir stays only
+while its agent is working, or its agent still runs in shed and it is an open issue's latest lane of its role or no spawn names it yet;
+a lane no longer running in shed counts as finished, verdict or not (#1215), so its build folder goes too.
 Under `min_free_gb` every non-working lane's goes, largest first; each removal is logged with host, size and reason. `drover clean` lists the Cargo folders lanes left in `[limits] stray_roots`
 (`/tmp`, `$TMPDIR`) untouched a day, and with `--yes` removes them and each removed worktree's Claude temp dir. Node fleets: pnpm's store is
 already shared; for npm set `npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
@@ -161,7 +163,7 @@ So do `drover ask`, `verdict` and `answer`, and the board's answer, override, ex
 moves. A kick returns at once: a detached `kick --now` (output in `<state>/kick.log`) drives that issue's
 due steps alone under the drive lock, logs `kick`, and coalesces kicks within 10 s (or while the lock is
 busy) into one follow-up. A lane on another host kicks the main host. The tick and fast timers stay the
-safety net for CI, outside merges and stalls; the Host tab shows the last kick.
+safety net for CI, outside merges and stalls.
 
 ### Denied commands (#216)
 
@@ -239,6 +241,8 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | a respawn refused for good (`RESPAWN_LOOP`, `DESIGN_MAIN_ONLY`, `HOST_OFFLINE`…) (#914) | `needs-human RESPAWN_REFUSED` (`RESPAWN_LOOP`: its one owner ask instead); `check` alerts `respawn-refused` once per lane and code |
 | a dead, stalled, silent or released lane's respawn (#908) | admitted like any spawn: `HOST_BUSY`, `MEM_LOW` and `DISK_LOW` hold it to a later pass, and `waiting` names the hold (`held: <code> <why>`); at most `[limits] respawn_per_pass` (default 2; `respawn_per_pass` in `[fleet.<n>]` overrides it) start a pass, the rest wait `RESPAWN_PACED`, still ahead of new starts |
 | a prompt drive or check sends a lane shed has asleep (`hibernated`: nudge, DECISION, turn, release, heads-up) (#908) | waking it starts a whole agent, so the host is admitted first; busy, the prompt is held and sent on a later pass |
+| an ACP lane shed reports `running`, `waiting-approval` or `rate-limited`, or one drover shows `waiting-owner` (its turn ended on an open ask or `turn blocked`/`need-input`, laid over shed's `done`) (#983) | held: no nudge, no stall, no `lane-dead`; the board and `/api/v1` show shed's state and note as-is |
+| a `rate-limited` lane (#983) | shown with shed's reset time; nothing until the owner's [wait]: `drover limit <fleet> <issue>` sends one `continue` at that time (`NO_RESET` when shed gave none); logged `limit-picked` `by: owner`, an orchestrator's relay `--typed` with the owner's line, `--by` names who |
 | a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
 | merged lanes left | `clean --yes` |
 
@@ -327,12 +331,27 @@ notifier can subscribe to it) with the reason drive sees then, and `waiting`, `s
 
 #855: the fast step also checks two fleet SLOs: `slo-idle` (no lane working for `[limits] slo_idle_minutes` (20)
 while the queue has spawnable work) and `slo-tick` (a tick running past `slo_tick_minutes` (10), replacing
-`tick-stuck`). On a breach or a missed promise drive first tries the known heal and logs `self-heal`: a drover
+`tick-stuck`). On a breach drive first tries the known heal and logs `self-heal`: a drover
 tick or drive pid it can name gets SIGTERM, then SIGKILL after 10 s; a DISK_BUDGET hold is recounted and the
 queue's first spawn retried; drive's own pass already respawns a silent lane and marks a PASSed draft ready.
-Still breached a pass (`slow_secs`) after the heal, or with no heal known, it emits one `stuck` per episode
-(pushed, and an owner card naming the issue or fleet, the reason and what was tried); `slo-ok` ends the episode
-once the issue moves or the SLO recovers, and the card clears.
+#1183: a `stuck` (pushed once per fleet, and the owner's one `Drive is stuck` card per fleet) means drive itself is
+broken: a tick still hung a pass (`slow_secs`) after its heal, no slow drive pass of the fleet for
+`[limits] slo_pass_minutes` (30), drive's last pass of the fleet failing, or an issue's spawn failing the same way
+twice on the same head. A wait (a hold, CI, a spawn slot, HOST_BUSY, `slo-idle`, a missed promise) never makes one:
+its row names the wait. `slo-ok` ends the episode once it recovers, and the card clears; an issue's line goes as
+soon as its lane starts. The card's hint is `drover waiting <fleet>`, and each issue on it has a [force] that runs
+its `drover waiting` next command (a spawn) once with `--force`, past the load limit, logged `override` `by: owner`.
+
+#1216: an in-flight issue with no push, verdict or lane event (`spawn`, `turn-end`, `pushed`) for
+`[limits] stall_restart_hours` (2; `stall_restart_hours` in `[fleet.<n>]` overrides it) is restarted once:
+`stall-restart` (`by: drover`), then `spawn <role> --supersede` (its wip saved to `wip/`, its lane cleaned, the same
+role respawned). A load wait (`HOST_BUSY`, `MEM_LOW`, `DISK_LOW`) that long logs `stall-move` instead: the next
+spawn skips that host, whatever its worktree holds, and goes to another enabled host under its limits that fits the
+tags, its wip saved first. A named wait never counts: held until #N, CI running or red, a spawn slot, an open ask,
+or a `turn working` younger than the window; nor does an issue drive is on (its pass holds the issue, or its
+last step since was refused or failed for another reason than load: that refusal or the same-failure card names it). A second stall on the same step, a failed restart, or a move with no
+free host is a stuck card. Only changes to tracked files and commits not on origin pin a lane to its host;
+untracked files never do (drover's scratch, `body.md` among `OWN_FILES`, is never saved; the rest travel in `wip/`).
 
 `drover check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no

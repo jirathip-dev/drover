@@ -1,5 +1,3 @@
-//! #386: the `[chat]` tab (docs/design/conductor-chat/): per repo its conductor threads, and each thread as #138's chat
-//! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
 use crate::api::{
     Answered, ChatRepo, ChatTab, Chip, FileRef, Handoff, Link, Msg, QueuedMsg, RunCard, ThreadPage, ThreadRow,
@@ -16,7 +14,6 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-/// `a` if `c`, else `b`.
 fn or<'a>(c: bool, a: &'a str, b: &'a str) -> &'a str {
     if c {
         a
@@ -35,8 +32,6 @@ pub fn ext(name: &str) -> String {
     name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase()
 }
 
-/// Its open asks (`ask --thread`): they wait in the thread, never in the needs-you stack; #541: and the lane asks put
-/// to the owner here, while open.
 fn open_ask<'a>(events: &'a [Event], id: &'a str) -> Option<&'a Event> {
     let lane = |e: &Event| (e.kind == "ask-owner").then(|| conductor::lane_of(events, e)).flatten();
     of(events, id).find(|e| {
@@ -45,8 +40,6 @@ fn open_ask<'a>(events: &'a [Event], id: &'a str) -> Option<&'a Event> {
     })
 }
 
-/// #541: a conductor's FYI line on lane ask `id`: its ask, while the owner may still [change] it (the conductor's
-/// answer the last, under `CHANGE` old).
 fn change<'a>(ctx: &Ctx, events: &'a [Event], e: &Event) -> Option<&'a Event> {
     let id = e.str("change")?;
     let d = ask_event(events, "decision", &e.fleet, id)?;
@@ -55,7 +48,6 @@ fn change<'a>(ctx: &Ctx, events: &'a [Event], e: &Event) -> Option<&'a Event> {
     ask_event(events, "needs-decision", &e.fleet, id)
 }
 
-/// #407: a queued message's id, and its files.
 fn qid(e: &Event) -> u64 {
     e.data.get("q").and_then(Value::as_u64).unwrap_or(e.seq)
 }
@@ -63,7 +55,6 @@ fn qfiles(e: &Event) -> Vec<Value> {
     files_of(e).cloned().collect()
 }
 
-/// #407: the thread's queued messages, oldest first, by id (their first `thread-queue`'s seq; an edit names it `q`).
 fn queued<'a>(events: &'a [Event], id: &'a str) -> BTreeMap<u64, &'a Event> {
     let mut q = BTreeMap::new();
     for e in of(events, id) {
@@ -77,7 +68,6 @@ fn queued<'a>(events: &'a [Event], id: &'a str) -> BTreeMap<u64, &'a Event> {
     q
 }
 
-/// `choose` (an open ask), `working` (mid-turn), `asleep`, `awake` or `new` (no conductor yet).
 fn state(events: &[Event], id: &str, agents: &[Session]) -> &'static str {
     let lane = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     let a = lane.and_then(|l| agents.iter().find(|a| l.str("agent") == Some(a.name.as_str())));
@@ -97,7 +87,6 @@ pub fn choosing(events: &[Event]) -> usize {
         .count()
 }
 
-/// #413: a linked event's chip (`from t5`, `continued in t6`); a tap opens that thread (serve.js).
 fn link(e: &Event) -> Option<Link> {
     conductor::link(e).map(|(w, t)| Link {
         w: w.into(),
@@ -105,7 +94,6 @@ fn link(e: &Event) -> Option<Link> {
     })
 }
 
-/// An ask as its thread shows it: decided, the answer; else open (no `closed` event) for the choice rows.
 fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
     let answer = ask_event(events, "decision", &a.fleet, a.str("id").unwrap_or_default()).map(|d| {
         let c = d.str("choice").unwrap_or_default();
@@ -128,7 +116,6 @@ fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
     }
 }
 
-/// #669: run card `e` and how it stands: open (15 min), then approved (running until its `run-done`), denied or expired.
 fn run_card(ctx: &Ctx, events: &[Event], e: &Event) -> RunCard {
     let s = |e: &Event, k: &str| e.str(k).unwrap_or_default().to_string();
     let id = s(e, "id");
@@ -158,10 +145,6 @@ fn run_card(ctx: &Ctx, events: &[Event], e: &Event) -> RunCard {
     }
 }
 
-/// #408: the thread's `n` messages before seq `at` (and every later one) of those before seq `before` (web/src/chat.ts draws each block, tagged `data-n`), under
-/// `thread started …` or, older ones left, the marker serve.js loads them from (API v1 `thread/<t>?before=`). #407: a
-/// finished turn's commands fold, each run of them one `fold` (tagged as its first command); a run after `open` (the
-/// live turn's start) stays rows.
 fn page(
     ctx: &Ctx,
     cfg: &Config,
@@ -200,7 +183,6 @@ fn page(
         };
         let main = cfg.hosts.iter().find(|h| h.1.machine.is_none());
         let m = match (e.kind.as_str(), e.str("from").unwrap_or_default()) {
-            // #387: a signed-out line's [sign in]: the harness's login in a setup terminal on the main host (#303).
             ("thread-msg", _) if e.data.get("lane_ask").is_some() => continue,
             ("thread-msg", "system") => Msg {
                 ask: change(ctx, events, e).map(super::v1::ask),
@@ -233,18 +215,11 @@ fn page(
                 a.data.insert("recommend".into(), e.val("recommend").clone());
                 ask(events, &a, m("ask", s("question")))
             }
-            ("config-propose", _) if crate::propose::settled(events, &s("id")).is_none() => Msg {
-                from: s("id"),
-                open: !crate::propose::stale(ctx, e), // #460: stale, it can no longer apply
-                ..m("config", s("diff"))
-            },
-            ("secret-request", _)
-                if crate::secret::open(events, id, &s("name")).is_some_and(|o| std::ptr::eq(o, e)) =>
-            {
-                Msg {
-                    from: s("name"),
-                    ..m("secret", s("why"))
-                }
+            ("config-propose" | "secret-request", _) => {
+                let Some(m) = owner_card(ctx, events, e) else {
+                    continue;
+                };
+                m
             }
             ("run-card", _) => {
                 let run = run_card(ctx, events, e);
@@ -268,8 +243,6 @@ fn page(
         }
     }
     fold(&mut msgs, &mut run);
-    // #460: a waiting config card is never cut from the first page: past its window it stays right under the marker
-    // (so older pages leave it out).
     let pins: Vec<u64> = crate::propose::waiting(ctx, events, id).map(|e| e.seq).collect();
     if before != u64::MAX {
         msgs.retain(|m| !pins.contains(&m.seq));
@@ -291,16 +264,17 @@ fn page(
     }
 }
 
-/// #408: API v1 `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
+/// API v1 `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
 pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>) -> Option<ThreadPage> {
-    let (cfg, t) = (Config::kept(ctx).ok()?, conductor::find(events, id).ok()?);
+    let t = conductor::find(events, id)
+        .ok()
+        .or_else(|| conductor::attached(events, id))?;
+    let cfg = Config::kept(ctx).ok()?;
     let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
     Some(page(ctx, &cfg, events, t, (before, u64::MAX, n), u64::MAX))
 }
 
-/// One thread: the bar (fleet · harness · model · state), its last 30 messages and the live line's state; #407:
-/// working, the turn's start (`since`, serve.js times its pill), and the queued messages above the box.
 fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, at): (&[Session], u64)) -> ThreadView {
     let id = t.str("thread").unwrap_or_default();
     let st = state(events, id, agents);
@@ -331,7 +305,6 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, at): (&
     }
 }
 
-/// #404: a chip of `name`'s choices; `cur` none: the default.
 fn chip(name: &str, cur: Option<&str>, all: &[&str]) -> Chip {
     Chip {
         name: name.into(),
@@ -340,7 +313,6 @@ fn chip(name: &str, cur: Option<&str>, all: &[&str]) -> Chip {
     }
 }
 
-/// #404: the thread's model and effort chips, its harness's choices (one with a single choice set is left out).
 fn chips(cfg: &Config, r: &crate::config::Role) -> Vec<Chip> {
     let mut models = conductor::harness_models(cfg, &r.harness);
     if !models.is_empty() {
@@ -356,14 +328,11 @@ fn chips(cfg: &Config, r: &crate::config::Role) -> Vec<Chip> {
         .collect()
 }
 
-/// #460: the ids of the thread's config proposals that wait for the owner's tap.
 fn waiting(ctx: &Ctx, events: &[Event], id: &str) -> Vec<String> {
     let w = crate::propose::waiting(ctx, events, id);
     w.filter_map(|e| e.str("id").map(Into::into)).collect()
 }
 
-/// A thread's row: unread, title, age; its state and the last message; the threads it links to (not its flow-back
-/// lines), once each.
 fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Session]) -> (u64, ThreadRow) {
     let id = t.str("thread").unwrap_or_default();
     let mut msgs = of(events, id).filter(|e| matches!(e.kind.as_str(), "thread-msg" | "needs-decision"));
@@ -395,8 +364,6 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Session]) -> (u64, Thre
     (at, row)
 }
 
-/// #269: API v1's `chat`, the tab (web/src/chat.ts draws it): "all repos", then each fleet by name, a card each with
-/// its threads newest first (the archived ones apart); then every thread's view (serve.js shows the open one).
 pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Session], rw: bool) -> ChatTab {
     let mut tab = ChatTab {
         now: ctx.now,
@@ -440,10 +407,6 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Se
 }
 
 impl super::Server<'_> {
-    /// #269: the [chat] tab's data for a device that writes (`rw`) or only reads. #620: the fold is kept by the log's
-    /// last seq, fleet.toml's mtime, the agents, `rw` and the minute; a request in between reuses it, the log unread.
-    /// #701: one per `rw` (a paired and an unpaired device no longer evict each other's every tick), keyed by each
-    /// agent's name and status only (all a thread's state reads).
     pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> Value {
         let agents = self.sessions(ctx.now).map(|s| s.running()).unwrap_or_default();
         let seen: Vec<_> = agents
@@ -455,7 +418,6 @@ impl super::Server<'_> {
         let [ro, wr] = &mut *all;
         let c = if rw { wr } else { ro };
         if c.0 != key {
-            // #483: a config or log read error shows its own text (as the Queue tab does).
             let (cfg, events) = match (Config::kept(ctx), crate::events::working(&ctx.state)) {
                 (Ok(c), Ok(e)) => (Ok(c), e),
                 (Err(e), _) | (_, Err(e)) => (Err(format!("{e:#}")), std::sync::Arc::default()),
@@ -469,15 +431,12 @@ impl super::Server<'_> {
     }
 }
 
-/// #405: a new thread's title: its first message's first line, cut to one row.
 fn first(text: &str) -> String {
     let l = text.lines().find(|l| !l.trim().is_empty()).unwrap_or_default().trim();
     let cut: String = l.chars().take(60).collect();
     cut.replace(char::is_control, " ") + or(l.chars().count() > 60, "…", "")
 }
 
-/// The newest file named `name` a message in thread `id` carries (the owner's upload or the conductor's reply), if
-/// it lies in the thread's conductor folder; `demo` (the demo export) also takes the repo's relative fixtures.
 pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Option<std::path::PathBuf> {
     let f = of(events, id).rev().flat_map(files_of).find(|f| f["name"] == name);
     let p = std::path::Path::new(f.and_then(|f| f["path"].as_str())?);
@@ -488,11 +447,6 @@ pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Op
     conductor::inside(ctx, &Config::kept(ctx).ok()?, id, p)
 }
 
-/// `POST /thread` from a paired owner device: `new` (#405: a first message starts a thread and its conductor), `say`
-/// (#405: with files, `name`s `/`-separated, base64 `data` `,`-separated), #405's `archive` and `restore`, `answer`
-/// (a choice row or the "other" box), #387's `config` ([apply]/[discard]) and `secret` ([save] with `value`, or
-/// [dismiss]), `read`, or #403's `retry` (a red system line's [retry], its event `n`).
-/// #403: `new`, `say` and `retry` only log; `later` gets the line `deliver` types once the reply is out.
 pub fn post(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -504,9 +458,6 @@ pub fn post(
     let g = |k: &str| f.get(k).map_or("", String::as_str);
     let id = g("t");
     match g("op") {
-        // #405: `new` is a first message (in `repo`): the thread, titled with its first line, then the message.
-        // #407: `queue` keeps it for the turn's end (`q`: an edit of queued message q, its files kept unless new
-        // ones come); `steer` interrupts the turn (Esc) and sends it now (`q`: queued message q's text and files).
         "new" | "say" | "queue" | "steer" => {
             let mut names = g("name").split('/').map(|n| n.replace(char::is_control, ""));
             let data = g("data").split(',').filter(|d| !d.is_empty());
@@ -602,13 +553,11 @@ pub fn post(
     }
 }
 
-/// #407: queued message `e` leaves the queue: `sent` or `removed`.
 fn unqueue(ctx: &Ctx, e: &Event, why: &str) -> Result<()> {
     let d = json!({"thread": e.str("thread"), "q": qid(e), "why": why});
     crate::events::append(&ctx.state, &Event::new(ctx.now, &e.fleet, None, "thread-unqueue", d))
 }
 
-/// #407: Esc into the thread's live conductor: its turn stops (an asleep one has none).
 fn stop(r: &dyn Runner, events: &[Event], id: &str) {
     let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     if let Some(p) = last
@@ -619,8 +568,6 @@ fn stop(r: &dyn Runner, events: &[Event], id: &str) {
     }
 }
 
-/// #407: at a turn's end (the conductor no longer working) its queued messages go in, oldest first, each logged as
-/// the owner's and unqueued; the lines for `deliver`.
 pub fn flush(ctx: &Ctx, agents: &[Session]) -> Vec<(Event, String)> {
     let (Ok(cfg), Ok(events)) = (Config::kept(ctx), crate::events::working(&ctx.state)) else {
         return vec![];
@@ -648,8 +595,6 @@ pub fn flush(ctx: &Ctx, agents: &[Session]) -> Vec<(Event, String)> {
     out
 }
 
-/// #403: type a logged message into its conductor (after the reply went out); a failure is a red system line whose
-/// [retry] types it again.
 pub fn deliver(ctx: &Ctx, r: &dyn Runner, (t, line): &(Event, String)) {
     let Ok(cfg) = Config::kept(ctx) else { return };
     if let Err(e) = conductor::deliver(ctx, &cfg, r, t, line) {
@@ -663,12 +608,10 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, (t, line): &(Event, String)) {
     }
 }
 
-/// #1072: a thread state as the screens' row figure.
 fn figure(state: &str) -> Value {
     json!({"state": match state { "choose" => "needs", "working" => "working", _ => "idle" }})
 }
 
-/// #1072: a thread's row on the Threads screen: its sprite, `new`, the state word and last line, age; tap opens it.
 fn row_block(r: &ThreadRow, repo: Option<&str>) -> Value {
     let (word, tone) = match r.state.as_str() {
         "choose" => ("! choose · ", "warn"),
@@ -687,8 +630,6 @@ fn row_block(r: &ThreadRow, repo: Option<&str>) -> Value {
     v
 }
 
-/// #1072: the Threads tab (`/screens/threads`): a section per repo ("all repos" first) with its three newest threads,
-/// the older ones folded, `[+ thread]`; the archived ones folded at the foot; `badge` the threads waiting on a choice.
 pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]) -> Value {
     let threads = conductor::threads(events);
     let (mut blocks, mut arch) = (vec![], vec![]);
@@ -736,7 +677,6 @@ pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]
         "stream": "/screens/threads/stream", "blocks": blocks})
 }
 
-/// #1087: the composer, a page-only block: its `[label]` posts `action` with `values`, text and files.
 fn composer(label: &str, action: &str, values: &Value, more: Value) -> Value {
     let mut c = json!({"type": "composer", "id": "say", "label": label, "action": action, "values": values,
         "placeholder": "message the orchestrator"});
@@ -746,7 +686,44 @@ fn composer(label: &str, action: &str, values: &Value, more: Value) -> Value {
     c
 }
 
-/// #1086: a message's card with its files (images inline, others as rows) and its link's chip, which opens that thread.
+fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
+    let s = |k| e.str(k).unwrap_or_default().to_string();
+    let m = |kind: &str, from: String, text: String, open: bool| Msg {
+        seq: e.seq,
+        ts: e.ts,
+        kind: kind.into(),
+        from,
+        text,
+        open,
+        ..Msg::default()
+    };
+    match e.kind.as_str() {
+        "config-propose" if crate::propose::settled(events, &s("id")).is_none() => {
+            Some(m("config", s("id"), s("diff"), !crate::propose::stale(ctx, e)))
+        }
+        "secret-request" => {
+            let open = crate::secret::open(events, e.str("thread")?, &s("name"));
+            open.is_some_and(|o| std::ptr::eq(o, e))
+                .then(|| m("secret", s("name"), s("why"), false))
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Value> {
+    let all = crate::events::of_kind(events, &["config-propose", "secret-request"]);
+    let card = |e: &Event| {
+        Some(msg_body(
+            ctx.now,
+            e.str("thread")?,
+            &owner_card(ctx, events, e)?,
+            paired,
+            None,
+        ))
+    };
+    all.into_iter().filter_map(card).collect()
+}
+
 fn msg_card(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> Value {
     let (mut v, key) = (msg_body(now, id, m, paired, h), format!("m-{}", m.seq));
     let src = |f: &FileRef| format!("/thread/{id}/{}", f.name);
@@ -823,7 +800,6 @@ fn run_body(now: u64, key: &str, r: &RunCard) -> (Vec<Value>, Vec<Value>, &'stat
     (blocks, buttons, or(r.code.is_some_and(|c| c != 0), "bad", ""))
 }
 
-/// #1072: a message as a card: `kind` you, orch, tool, sys or ask (choice rows while open, else its answer).
 fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> Value {
     let (key, age) = (format!("m-{}", m.seq), crate::events::age(now.saturating_sub(m.ts)));
     let text = |k: &str, t: &str| json!({"type": "text", "id": format!("{key}-{k}"), "markdown": t});
@@ -912,9 +888,9 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> V
         }
         "config" => {
             let v = |act: &str| json!({"thread": id, "id": m.from, "act": act});
-            let mut buttons = vec![button("discard", "", "thread-config", v("discard"))];
+            let mut buttons = vec![button("discard", "", "config-card", v("discard"))];
             if m.open {
-                buttons.insert(0, button("apply", "primary", "thread-config", v("apply")));
+                buttons.insert(0, button("apply", "primary", "config-card", v("apply")));
             }
             let sub = or(
                 m.open,
@@ -930,11 +906,11 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> V
             if paired {
                 let field = json!({"type": "secret", "name": "text", "label": "", "value": "", "placeholder": format!("value of {}", m.from)});
                 blocks.push(json!({"type": "form", "id": format!("{key}-f"), "fields": [field],
-                    "submit": {"label": "save", "action": "thread-secret", "values": {"thread": id, "name": m.from, "act": "save"}}}));
+                    "submit": {"label": "save", "action": "secret-card", "values": {"thread": id, "name": m.from, "act": "save"}}}));
                 buttons.push(button(
                     "dismiss",
                     "",
-                    "thread-secret",
+                    "secret-card",
                     json!({"thread": id, "name": m.from, "act": "dismiss"}),
                 ));
             } else {
@@ -954,9 +930,6 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> V
     }
 }
 
-/// #1072: one thread (`/screens/threads/<id>`): its sticky bar (title · id, repo · harness · model · state, the waiting
-/// config), #1086: the 30 messages before `before` and every later one, under the marker that loads 30 more; the
-/// composer; `[archive]` or, archived, `[restore]` and no composer.
 pub fn thread_screen(
     ctx: &Ctx,
     cfg: &Config,
@@ -1022,7 +995,7 @@ pub fn thread_screen(
     )
 }
 
-/// #1072: a new thread in `repo` (`/screens/threads/new/<repo>`): its first message starts it (#405).
+/// A new thread in `repo` (`/screens/threads/new/<repo>`): its first message starts it.
 pub fn new_screen(cfg: &Config, repo: &str) -> Option<Value> {
     let role = conductor::defaults(cfg, repo).ok()?.1;
     let who = super::join(&[repo, role.harness.as_str(), role.model.as_deref().unwrap_or_default()]);
@@ -1043,8 +1016,6 @@ pub fn new_screen(cfg: &Config, repo: &str) -> Option<Value> {
 }
 
 impl super::Server<'_> {
-    /// #1072: the Threads tab's screens by `sub` path: empty the list, `/<id>` a thread (a paired live open marks it read),
-    /// `/new/<repo>` a new one.
     pub(super) fn threads_screen(&self, ctx: &Ctx, sub: &str, before: Option<&String>, paired: bool) -> Option<Value> {
         let (cfg, events) = (Config::kept(ctx).ok()?, crate::events::working(&ctx.state).ok()?);
         let agents = self.sessions(ctx.now).map(|s| s.running()).unwrap_or_default();

@@ -51,13 +51,10 @@ pub fn request(ctx: &Ctx, cfg: &Config, thread: &str, name: &str, why: &str) -> 
             "a secret's name is A-Z, 0-9 and _, and --why says what it is for",
         );
     }
-    let t = orchestrator::find(&working(&ctx.state)?, thread)?.clone();
+    let events = working(&ctx.state)?;
+    let fleet = orchestrator::fleet_of(&events, thread)?;
     let d = json!({"thread": thread, "name": name, "why": why});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, &t.fleet, None, "secret-request", d),
-    )
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "secret-request", d))
 }
 
 /// Thread `id`'s open request for `name` (no `secret-set` or `secret-dismissed` after it).
@@ -96,7 +93,7 @@ pub fn settle(
         format!("secret {name} set ✓ (by owner)"),
     ];
     let line = if value.is_some() { &line[1] } else { &line[0] };
-    orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false)).ok();
+    orchestrator::tell(ctx, cfg, r, id, line);
     Ok(line.clone())
 }
 
@@ -134,7 +131,7 @@ pub fn rm(ctx: &Ctx, cfg: &Config, fleet: &str, name: &str) -> Result<()> {
     )
 }
 
-/// #707 `drover migrate`: the old store's Keychain items are left alone; the commands that delete them (each `secret-set` the log `state` names, and a search for the rest), for the owner to run.
+/// `drover migrate`: the old store's Keychain items are left alone; the commands that delete them (each `secret-set` the log `state` names, and a search for the rest), for the owner to run.
 pub fn retired(state: &Path, out: &mut dyn Write) -> Result<()> {
     let set = working(state).unwrap_or_default();
     let svc: std::collections::BTreeSet<String> = (set.iter().filter(|e| e.kind == "secret-set"))

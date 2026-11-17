@@ -52,12 +52,12 @@ pub fn self_update(
     Ok(code.max(install(ctx, cfg, r, out, f, &events, t)?))
 }
 
-/// #894: the control socket of the serve listening on `port` (`drover_server::handover`).
+/// The control socket of the serve listening on `port` (`drover_server::handover`).
 pub fn serve_sock(ctx: &Ctx, port: u16) -> PathBuf {
     ctx.state.with_file_name(format!("serve-{port}.sock"))
 }
 
-/// This repo's own fleet, by either name until the GitHub repo is renamed too (#456).
+/// This repo's own fleet, by either name until the GitHub repo is renamed too.
 pub fn ours(f: &crate::config::Fleet) -> bool {
     ["drover", "herdsman"].contains(&f.repo_name())
 }
@@ -98,7 +98,7 @@ fn install(
                 cfg.self_update.staging_addr
             )
         } else {
-            "would run profiles sync and hand serve over (a restart if no serve answers)".into()
+            "would run profiles sync and restart the serve job".into()
         };
         let plan = [
             format!(
@@ -123,7 +123,8 @@ fn install(
             return staging_serve(ctx, cfg, r, &live).context("installed, then the staging serve");
         }
         let synced = ok(r, &live.to_string_lossy(), &["profiles", "sync"]).context("installed, then profiles sync");
-        synced.and_then(|_| hand_over(ctx, cfg, r).context("installed, then the serve restart"))
+        let served = synced.and_then(|_| restart_serve(ctx, cfg, r).context("installed, then the serve restart"));
+        served.map(|s| [vec![s], crate::timer::heal(ctx, r)].concat().join("; "))
     });
     let Err(e) = res else {
         let d = json!({"sha": sha, "branch": branch});
@@ -157,23 +158,12 @@ fn install(
     Ok(1)
 }
 
-fn hand_over(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
-    let port = cfg
-        .serve
-        .addr()
-        .rsplit_once(':')
-        .and_then(|(_, p)| p.parse().ok())
-        .unwrap_or(7777);
-    let asked = ask_handover(&serve_sock(ctx, port), cfg.limits.serve_handover_secs);
-    asked
-        .map(|pid| format!("serve handed over (bridge pid {pid})"))
-        .or_else(|_| {
-            let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
-            crate::timer::restart(ctx, r, label).map(|_| "serve restarted".into())
-        })
+fn restart_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
+    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
+    crate::timer::restart(ctx, r, label).map(|_| "serve restarted".into())
 }
 
-/// #894: ask the serve on control socket `sock` to hand over; the bridge's pid once it serves.
+/// Ask the serve on control socket `sock` to hand over; the bridge's pid once it serves.
 pub fn ask_handover(sock: &Path, secs: u64) -> Result<String> {
     let mut c = std::os::unix::net::UnixStream::connect(sock)?;
     c.set_read_timeout(Some(std::time::Duration::from_secs(secs.max(1))))?;
@@ -184,7 +174,7 @@ pub fn ask_handover(sock: &Path, secs: u64) -> Result<String> {
     Ok(pid.with_context(|| format!("serve: {}", line.trim()))?.to_string())
 }
 
-/// #1081: the build sha `/api/v1/health` on `addr` reports (`?` from a build before it did); `None` if nothing answers.
+/// The build sha `/api/v1/health` on `addr` reports (`?` from a build before it did); `None` if nothing answers.
 pub fn serving(addr: &str, secs: u64) -> Option<String> {
     use std::io::Read;
     let wait = Some(std::time::Duration::from_secs(secs.max(1)));
@@ -216,7 +206,7 @@ fn staging_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Path) -> Result
     Ok(format!("staging serve on {addr}"))
 }
 
-/// #708: `! self-update — paused since <time> → …` while the last toggle is a pause (doctor and the board).
+/// `! self-update — paused since <time> → …` while the last toggle is a pause (doctor and the board).
 pub fn paused_line(r: &dyn Runner, events: &[Event]) -> Option<String> {
     let e = events
         .iter()

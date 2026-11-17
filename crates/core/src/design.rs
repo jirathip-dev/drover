@@ -10,7 +10,7 @@ use std::path::Path;
 /// The design ask's options; free text is a revise note.
 pub const OPTIONS: [&str; 3] = ["approve", "revise", "reject"];
 
-/// #868: a design lane's hook scope: its worktree top (from the hook input's `cwd`) and its issue's design paths.
+/// A design lane's hook scope: its worktree top (from the hook input's `cwd`) and its issue's design paths.
 pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u64>) -> crate::hook::Design {
     let here = std::env::current_dir()
         .unwrap_or_default()
@@ -27,10 +27,10 @@ pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u6
     crate::hook::Design { root, allow }
 }
 
-/// #873: a repo's design recipe.
+/// A repo's design recipe.
 pub const RECIPE: &str = ".drover/design.md";
 
-/// #873: what a design lane draws, where, how it renders and the host tags it needs.
+/// What a design lane draws, where, how it renders and the host tags it needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recipe {
     pub medium: String,
@@ -42,7 +42,7 @@ pub struct Recipe {
 }
 
 impl Recipe {
-    /// The issue `body`'s own design path (#868), else the recipe `text`'s `key: value` lines, else HTML at 1440/390.
+    /// The issue `body`'s own design path, else the recipe `text`'s `key: value` lines, else HTML at 1440/390.
     pub fn of(text: &str, body: &str) -> Recipe {
         let mut r = Recipe {
             medium: medium(body).into(),
@@ -290,7 +290,7 @@ fn summary(r: &dyn Runner, wt: &str, head: &str, dir: &str) -> Option<String> {
     Some(out.trim_end().to_string())
 }
 
-/// #1080: `choice` on design or architect ask `ask` is an approval: `approve`, `approved` or `ok`, with at most one `#N` naming the ask's issue.
+/// `choice` on design or architect ask `ask` is an approval: `approve`, `approved` or `ok`, with at most one `#N` naming the ask's issue.
 pub fn is_approval(ask: &Event, choice: &str) -> bool {
     let words: Vec<String> = (choice.split_whitespace())
         .map(|w| w.trim_end_matches(['.', '!']).to_lowercase())
@@ -346,7 +346,7 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
     crate::pending::record(ctx, (f, n), action, role, None)
 }
 
-/// #873: a recipe tool tag the main host lacks ends the design lane's turn `blocked`, naming it, before anything is drawn.
+/// A recipe tool tag the main host lacks ends the design lane's turn `blocked`, naming it, before anything is drawn.
 pub fn tools(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (f, n, agent): (&str, u64, &str), rc: &Recipe) -> Result<()> {
     if rc.tools.is_empty() {
         return Ok(());

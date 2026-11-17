@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use shed_proto::{KeysParams, Method, ReadParams, RunParams, SendParams, Target, WaitParams};
 use std::path::PathBuf;
 
-/// #941: an ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`) and the provider's session options (`--meta`).
+/// An ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`) and the provider's session options (`--meta`).
 #[derive(Clone, Debug, Default)]
 pub struct Acp {
     pub cmd: Vec<String>,
@@ -14,7 +14,7 @@ pub struct Acp {
     pub meta: Option<Value>,
 }
 
-/// #298: shed's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
+/// Shed's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
 pub struct Shed(pub shed::Shed);
 
 impl Shed {
@@ -44,7 +44,7 @@ impl Shed {
             cols: None,
         }
     }
-    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565: its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
+    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
     pub fn start(
         &self,
         ctx: &crate::Ctx,
@@ -64,11 +64,11 @@ impl Shed {
         let a = self.acp_argv(name, labels, cwd, acp);
         shed::cli(r, &a.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
     }
-    /// #899: remove session `name`.
+    /// Remove session `name`.
     pub fn rm(&self, r: &dyn Runner, name: &str) -> Result<()> {
         self.call(r, Method::Rm, Target { name: name.into() }).map(drop)
     }
-    /// #938: a throwaway terminal running the breaker's canary shows its output: shed starts sessions again.
+    /// A throwaway terminal running the breaker's canary shows its output: shed starts sessions again.
     pub fn canary(&self, r: &dyn Runner) -> bool {
         let name = "drover-canary";
         self.rm(r, name).ok();
@@ -292,12 +292,12 @@ impl Shed {
     }
 }
 
-/// #298: a harness launch (`start_cmd`, a `pane run` line) as the line a lane's shell runs: `exec <line>`.
+/// A harness launch (`start_cmd`, a `pane run` line) as the line a lane's shell runs: `exec <line>`.
 pub fn typed(pane: &str, start: &[String]) -> Vec<String> {
     run_argv(pane, &["exec", &start.get(3..).unwrap_or_default().join(" ")])
 }
 
-/// #298: pane word `a` as the shed request a plan shows (`shed <method> <params>`).
+/// Pane word `a` as the shed request a plan shows (`shed <method> <params>`).
 pub fn shed_line(a: &[String]) -> Vec<String> {
     request(a).map_or_else(|| a.to_vec(), |(m, v)| argv(&["shed", m.name(), &v.to_string()]))
 }
@@ -364,7 +364,7 @@ pub fn reply(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> 
     Ok(())
 }
 
-/// #908: Err `HOST_BUSY` (the prompt held to a later pass) while shed has `agent` asleep and the host has no room to wake it.
+/// Err `HOST_BUSY` (the prompt held to a later pass) while shed has `agent` asleep and the host has no room to wake it.
 pub fn awake(r: &dyn Runner, agent: &str) -> Result<()> {
     let asleep = crate::session::get(r, agent).ok().flatten().and_then(|s| s.status());
     if asleep != Some(crate::session::Status::Asleep) {
@@ -378,19 +378,19 @@ pub fn awake(r: &dyn Runner, agent: &str) -> Result<()> {
     }
 }
 
-/// #908: `reply` once `awake` lets drover's prompt through.
+/// `reply` once `awake` lets drover's prompt through.
 pub fn tell(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> Result<()> {
     awake(r, agent)?;
     reply(r, dsh, agent, pane, text)
 }
 
-/// #143: whether a prompt the caller just entered moved the agent off idle within 20 s, typing it once more if not.
+/// Whether a prompt the caller just entered moved the agent off idle within 20 s, typing it once more if not.
 pub fn landed(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> bool {
     let up = || exec(r, &wait_working_argv(agent, "20000")).is_ok_and(|o| o.code == 0);
     up() || (reply(r, false, agent, pane, text).is_ok() && up())
 }
 
-/// Close the session, its log archived first (`session::transcript::archive`); one already gone (#249) is closed.
+/// Close the session, its log archived first (`session::transcript::archive`); one already gone is closed.
 pub fn close(ctx: &crate::Ctx, r: &dyn Runner, pane: &str) -> Result<String> {
     crate::session::transcript::archive(r, ctx, pane).ok();
     let o = exec(r, &argv(&["pane", "close", pane]))?;
@@ -407,7 +407,7 @@ pub fn failed_with(o: &Out, code: &str) -> bool {
         .any(|s| serde_json::from_str::<Value>(s.trim()).is_ok_and(|v| v.at("error").at("code") == code))
 }
 
-/// #477: a failed call's `error.message` (the JSON envelope), else its stderr.
+/// A failed call's `error.message` (the JSON envelope), else its stderr.
 pub fn message(o: &Out) -> String {
     let m = [&o.stderr, &o.stdout].iter().find_map(|s| {
         let v: Value = serde_json::from_str(s.trim()).ok()?;
@@ -416,7 +416,7 @@ pub fn message(o: &Out) -> String {
     m.unwrap_or_else(|| o.stderr.trim().into())
 }
 
-/// #359: how long a lane's startup is waited for.
+/// How long a lane's startup is waited for.
 pub const CONFIRM_SECS: u64 = 120;
 
 /// `pane run <pane> <words…>`: type a line into the pane's shell.

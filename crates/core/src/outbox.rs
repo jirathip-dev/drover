@@ -40,7 +40,7 @@ fn take(r: &dyn Runner, sp: &Event, p: &str) -> Result<String> {
     crate::runner::ok(&On::of(r, Some(sp)), "sh", &crate::runner::argv(&["-c", sh, "sh", p]))
 }
 
-/// #337: the step's look reads every outbox in its one call per host.
+/// The step's look reads every outbox in its one call per host.
 pub fn look(r: &dyn Runner, events: &[Event]) {
     for (sp, _, p) in boxes(events) {
         drop(take(r, sp, &p));
@@ -56,7 +56,7 @@ pub fn drain(ctx: &Ctx, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Wri
             continue;
         };
         for l in text.lines().filter(|l| !l.trim().is_empty()) {
-            apply(ctx, r, out, sp, &lane, l)?;
+            apply(ctx, r, out, (sp, &lane, fleets), l)?;
         }
         if !text.trim().is_empty() {
             On::of(r, Some(sp)).remove(format!("{p}.draining").as_ref())?;
@@ -65,7 +65,13 @@ pub fn drain(ctx: &Ctx, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Wri
     Ok(())
 }
 
-fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str, raw: &str) -> Result<()> {
+fn apply(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (sp, lane, fleets): (&Event, &str, &[&str]),
+    raw: &str,
+) -> Result<()> {
     let v: Value = serde_json::from_str(raw).unwrap_or_default();
     let (ts, events) = (v.at("ts").as_u64(), working(&ctx.state)?);
     let seen = |e: &Event| e.kind == "outbox" && e.str("lane") == Some(lane) && e.val("sent").as_u64() == ts;
@@ -75,7 +81,7 @@ fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str,
     let args: Vec<String> = serde_json::from_value(v.at("args").clone()).unwrap_or_default();
     let why = match v.at("lane").as_str() {
         _ if ts.is_none() || args.is_empty() => Some("unreadable line".into()),
-        Some(l) if l == lane => crate::cli::foreign(&args, lane, &events),
+        Some(l) if l == lane => crate::cli::foreign(&args, lane, &events, fleets),
         _ => Some(format!("names lane {}, not {lane}", v.at("lane"))),
     };
     let mut d = json!({"lane": lane, "sent": ts, "args": args});

@@ -81,12 +81,12 @@ pub fn post(ctx: &Ctx, cfg: &Config, thread: &str, c: &Card) -> Result<String> {
         );
     }
     let events = working(&ctx.state)?;
-    let t = orchestrator::find(&events, thread)?;
+    let fleet = orchestrator::fleet_of(&events, thread)?;
     let id = format!("r{}", events.iter().filter(|e| e.kind == "run-card").count() + 1);
     let dir = std::path::absolute(c.dir)?.display().to_string();
     let d = json!({"thread": thread, "id": id, "cmd": c.cmd, "why": c.why, "blast": c.blast, "dir": dir,
         "host": "main", "timeout": c.timeout, "sha": sha256(c.cmd.as_bytes())});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "run-card", d))?;
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "run-card", d))?;
     Ok(id)
 }
 
@@ -96,12 +96,24 @@ pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     settled.into_iter().find(|e| e.str("id") == Some(id))
 }
 
+/// A card with exactly `cmd` is approved, started and not yet done: the run it is.
+pub fn running(events: &[Event], cmd: &str) -> bool {
+    let id = |k: &str, id: &str| events.iter().any(|e| e.kind == k && e.str("id") == Some(id));
+    (events
+        .iter()
+        .filter(|e| e.kind == "run-card" && e.str("cmd") == Some(cmd)))
+    .filter_map(|c| c.str("id"))
+    .any(|c| {
+        settled(events, c).is_some_and(|s| s.val("approved") == true) && id("run-started", c) && !id("run-done", c)
+    })
+}
+
 /// The owner's [approve] (`sha`: the prefix of the command's sha the owner saw, if the tap carries it) or [deny] on card `id`; the line the thread records.
 pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, approve: bool, sha: Option<&str>) -> Result<String> {
     settle_via(ctx, cfg, r, id, approve, sha, None)
 }
 
-/// #725: `settle`, its `run-settled` logged `via` the surface the tap came from (the lifeboat's `lifeboat`).
+/// `settle`, its `run-settled` logged `via` the surface the tap came from (the lifeboat's `lifeboat`).
 pub fn settle_via(
     ctx: &Ctx,
     cfg: &Config,
@@ -151,11 +163,11 @@ pub fn settle_via(
     } else {
         format!("run {id} denied by owner; nothing ran")
     };
-    orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)).ok();
+    orchestrator::tell(ctx, cfg, r, thread, &line);
     Ok(line)
 }
 
-/// #821: run approved card `id` once, detached, up to its --timeout; log and post its exit code and output tail.
+/// Run approved card `id` once, detached, up to its --timeout; log and post its exit code and output tail.
 pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> {
     let events = working(&ctx.state)?;
     let Some(c) = events.iter().find(|e| e.kind == "run-card" && e.str("id") == Some(id)) else {
@@ -190,7 +202,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
     let d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "code": code, "tail": tail});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-done", d))?;
     let line = format!("run {id} approved by owner, ran in {dir}: exit {code}\n```\n{tail}\n```");
-    orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)).ok();
+    orchestrator::tell(ctx, cfg, r, thread, &line);
     if code == 124 {
         r.run("kill", &argv(&["-KILL", "--", &format!("-{pid}")])).ok();
     }

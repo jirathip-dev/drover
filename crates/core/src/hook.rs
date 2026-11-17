@@ -11,42 +11,45 @@ pub struct Policy {
     pub paths: Vec<String>,
     /// Reviewer lane: read-only (no edits but `verdict.md`, no commits, no pushes).
     pub reviewer: bool,
-    /// #216: the fleet's `deny_commands`.
+    /// The fleet's `deny_commands`.
     pub deny: Vec<Deny>,
-    /// #410: an orchestrator lane (`DROVER_LANE`'s role): it may spawn design lanes.
+    /// An orchestrator lane (`DROVER_LANE`'s role): it may spawn design lanes.
     pub orchestrator: bool,
-    /// #410: the orchestrator's thread folder, writable but for drover's `.brief.md` and `.thread.md`.
+    /// The orchestrator's thread folder, writable but for drover's `.brief.md` and `.thread.md`.
     pub own: Option<String>,
-    /// #538: the capability groups an orchestrator has on (`[orchestrator] allow`).
+    /// The capability groups an orchestrator has on (`[orchestrator] allow`).
     pub groups: Vec<String>,
-    /// #536: the lane's `DROVER_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
+    /// The lane's `DROVER_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
     pub scratch: Option<String>,
-    /// #668: an impl lane: `ci/cap.toml` is not its to write (but for the orchestrator-filed raise).
+    /// An impl lane: `ci/cap.toml` is not its to write (but for the orchestrator-filed raise).
     pub cap: bool,
-    /// #868: a design lane: its edits land only under its issue's design paths.
+    /// A design lane: its edits land only under its issue's design paths.
     pub design: Option<Design>,
 }
 
-/// #868: a design lane's worktree `root` and the folders under it (`crate::design::Recipe`) it may write.
+/// A design lane's worktree `root` and the folders under it (`crate::design::Recipe`) it may write.
 pub struct Design {
     pub root: String,
     pub allow: Vec<String>,
 }
 
-/// #592: a lane's hook rules as the main host resolves them from its fleet.toml. A remote lane's are frozen at spawn in its rules file (`DROVER_RULES`); its host's own fleet.toml is never read. No notifier, token or env value.
+/// A lane's hook rules as the main host resolves them from its fleet.toml. A remote lane's are frozen at spawn in its rules file (`DROVER_RULES`); its host's own fleet.toml is never read. No notifier, token or env value.
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Rules {
     /// main, master, staging and every fleet's integration branch.
     pub branches: Vec<String>,
-    /// #216/#256: the fleet's `deny_commands` under the lane host's rules, plus #502's broad-kill ban.
+    /// The fleet's `deny_commands` under the lane host's rules, plus the broad-kill ban.
     pub deny: Vec<Deny>,
     pub groups: Vec<String>,
     pub reviewer: bool,
-    /// #511: an impl-family lane (not lesson): its unreported turn end goes on once.
+    /// An impl-family lane (not lesson or triage): its unreported turn end goes on once.
     pub builds: bool,
-    /// #909: its fleet's heavy kinds under its host's slot limits (none: no heavy patterns).
+    /// Its fleet's heavy kinds under its host's slot limits (none: no heavy patterns).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heavy: Option<crate::heavy::Heavy>,
+    /// A `cap:` issue's lane, frozen at spawn from the main host's title cache.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cap_raise: bool,
 }
 
 impl Rules {
@@ -73,16 +76,26 @@ impl Rules {
             branches,
             deny,
             groups: cfg.orchestrator.groups().into_iter().map(String::from).collect(),
-            reviewer: family == Some("rev"),
-            builds: role != "lesson" && family == Some("impl"),
+            reviewer: family == Some("rev") || role == "triage",
+            builds: !matches!(role, "lesson" | "triage") && family == Some("impl"),
+            cap_raise: false,
         }
     }
 }
 
-/// #592: lane spawn `sp` froze rules (a remote lane's) that fleet.toml now resolves otherwise: a respawn takes them.
+/// Lane spawn `sp` froze rules (a remote lane's) that fleet.toml now resolves otherwise: a respawn takes them.
 pub fn rules_stale(cfg: &Config, fleet: &str, sp: &crate::events::Event) -> bool {
     let (role, host) = (sp.str("role").unwrap_or_default(), sp.str("host").unwrap_or_default());
-    let now = serde_json::to_value(Rules::resolve(cfg, fleet, role, host)).ok();
+    let cap_raise = sp
+        .data
+        .get("rules")
+        .and_then(|r| r.get("cap_raise"))
+        .and_then(serde_json::Value::as_bool);
+    let now = Rules {
+        cap_raise: cap_raise.unwrap_or_default(),
+        ..Rules::resolve(cfg, fleet, role, host)
+    };
+    let now = serde_json::to_value(now).ok();
     sp.data.get("rules").is_some_and(|r| now.as_ref() != Some(r))
 }
 
@@ -100,7 +113,7 @@ const WRITERS: &[&str] = &[
     "rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd", "sips",
 ];
 
-/// #668: the repo's line cap file and (#973) its folder of raises; one orchestrator-filed issue raises it for the queue.
+/// The repo's line cap file and its folder of raises; one orchestrator-filed issue raises it for the queue.
 pub const CAP_PATHS: &[&str; 2] = &["ci/cap.toml", "ci/cap.d/"];
 pub const NO_CAP_EDIT: &str =
     "REFUSED CAP_FILE: a lane never edits ci/cap.toml or ci/cap.d/; when your PR would cross \
@@ -110,11 +123,11 @@ fn cap_path(w: &str) -> bool {
     w.ends_with(CAP_PATHS[0]) || w.contains(CAP_PATHS[1])
 }
 
-/// #502: lanes share one user, so a pattern kill reaches every lane (BSD `pkill x -n` matched them all).
+/// Lanes share one user, so a pattern kill reaches every lane (BSD `pkill x -n` matched them all).
 pub const NO_BROAD_KILL: &str = "REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with \
                                  '& echo $! > f', stop with kill \"$(cat f)\"";
 
-/// #502: `pkill` and `killall`, denied to every lane on top of its fleet's and host's `deny_commands`.
+/// `pkill` and `killall`, denied to every lane on top of its fleet's and host's `deny_commands`.
 pub fn broad_kill() -> Vec<Deny> {
     ["pkill", "killall"]
         .map(|c| Deny::Why {
@@ -124,7 +137,7 @@ pub fn broad_kill() -> Vec<Deny> {
         .into()
 }
 
-/// #966: lanes share the host's CPU: one lane's burn holds every lane's spawn `HOST_BUSY`.
+/// Lanes share the host's CPU: one lane's burn holds every lane's spawn `HOST_BUSY`.
 pub const HOST_STRESS: &str = "REFUSED HOST_STRESS: lanes share this host's CPU, so never stress it from a lane: \
                                cap the run (cpulimit, or nice -n 20 under a timeout) or reproduce under load in CI";
 
@@ -153,7 +166,7 @@ pub fn after(input: &Value) -> bool {
     dialects().any(|d| d.post == ev || d.stop == ev)
 }
 
-/// #508: a call before a tool runs (a pre-tool event, or a bare `args` call without one), not a prompt or notification.
+/// A call before a tool runs (a pre-tool event, or a bare `args` call without one), not a prompt or notification.
 pub fn pre_call(input: &Value) -> bool {
     let ev = input["hook_event_name"].as_str().unwrap_or_default();
     ev.is_empty() || dialects().any(|d| d.pre == ev)
@@ -540,7 +553,7 @@ const WRAPPERS: &[&str] = &[
 ];
 const VALUE_FLAGS: &[&str] = &["-u", "-g", "-C", "-n", "-U", "-D", "-S", "-P", "-r", "-T"];
 
-/// #216: the first `deny` entry `cmd` runs as a command word, in any segment (pipe, `&&`, `;`, `$( )`), past wrappers and `VAR=…`, by full path too. An entry ending in `=` (`DOCKER_HOST=`) denies that assignment. Best-effort lexical matching: `D=docker; $D ps` or `ssh h docker ps` pass.
+/// The first `deny` entry `cmd` runs as a command word, in any segment (pipe, `&&`, `;`, `$( )`), past wrappers and `VAR=…`, by full path too. An entry ending in `=` (`DOCKER_HOST=`) denies that assignment. Best-effort lexical matching: `D=docker; $D ps` or `ssh h docker ps` pass.
 pub fn denied<'a>(cmd: &str, deny: &'a [Deny]) -> Option<&'a Deny> {
     cmd.split([';', '|', '&', '\n', '(', ')', '`']).find_map(|seg| {
         let t: Vec<&str> = seg.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
@@ -579,6 +592,14 @@ fn gh(t: &[&str]) -> Option<String> {
     if merge {
         return Some("merging is gated: run `drover merge <fleet> <issue>` (needs exact-head PASS + green CI)".into());
     }
+    let triage = crate::config::env("DROVER_LANE").is_some_and(|l| l.split(':').nth(2) == Some("triage"));
+    if triage && matches!(rest, ["issue", "close" | "edit" | "reopen", ..]) {
+        return Some(
+            "REFUSED TRIAGE_VERBS: a triage lane changes issues only through `drover triage close|fold|label`, \
+             which skip queued, laned, asked and `keep` issues (#1100)"
+                .into(),
+        );
+    }
     let api = rest.first() == Some(&"api");
     let comment = rest
         .windows(2)
@@ -603,7 +624,7 @@ fn group(r: &[&str]) -> Option<&'static str> {
     })
 }
 
-/// #538: the capability group of the `drover` verb `cmd` runs, if any (its thread row names it).
+/// The capability group of the `drover` verb `cmd` runs, if any (its thread row names it).
 pub fn group_of(cmd: &str) -> Option<&'static str> {
     cmd.split([';', '|', '&', '\n', '(', ')', '`']).find_map(|seg| {
         let t: Vec<&str> = seg.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
@@ -646,6 +667,15 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover lesson` (#419)".into());
     }
+    let triage = lane.split(':').nth(2) == Some("triage");
+    let acts = matches!(r.get(1), Some(&("close" | "fold" | "label" | "docs")));
+    if !orchestrator && r.first() == Some(&"triage") && !(acts && triage) {
+        return Some(
+            "REFUSED ORCHESTRATOR_ONLY: an orchestrator or the owner runs `drover triage <fleet>`; only a triage lane \
+             closes, folds, labels or files docs (#1100)"
+                .into(),
+        );
+    }
     if !orchestrator && r.first() == Some(&"amend") {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover amend` (#574)".into());
     }
@@ -656,6 +686,12 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     }
     if r.first() == Some(&"wip") && !r.contains(&"--dry-run") {
         return Some("REFUSED OWNER_ONLY: only the owner prunes wip branches (a run card), never a lane (#646)".into());
+    }
+    if !orchestrator && r.first() == Some(&"compact") && !r.contains(&"--dry-run") {
+        return Some(
+            "REFUSED OWNER_ONLY: a lane runs only `drover compact … --dry-run`, never the compact itself (#1121)"
+                .into(),
+        );
     }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `drover setup`, never a lane (#303)".into());
@@ -670,6 +706,9 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
             "REFUSED OWNER_ONLY: `spawn --force` passes HOST_BUSY: the owner's or an orchestrator's, never a lane's (#908)"
                 .into(),
         );
+    }
+    if !orchestrator && r.first() == Some(&"limit") {
+        return Some("REFUSED OWNER_ONLY: only the owner picks for a rate-limited lane, never a lane (#983)".into());
     }
     if !orchestrator && r.first() == Some(&"card") {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator posts run cards (#538)".into());
@@ -785,7 +824,7 @@ fn git_push(t: &[&str], cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Opti
     None
 }
 
-/// #198: the repo dir of a `git push` in a Bash/terminal call (for the co-author warning).
+/// The repo dir of a `git push` in a Bash/terminal call (for the co-author warning).
 pub fn push_dir(input: &Value) -> Option<String> {
     let ti = tool_input(input);
     let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
@@ -800,7 +839,7 @@ pub fn push_dir(input: &Value) -> Option<String> {
         })
 }
 
-/// #386: a shell call's command when it runs `drover` or `gh` (but `drover thread reply`, which is the reply itself): a conductor's tool row in its thread.
+/// A shell call's command when it runs `drover` or `gh` (but `drover thread reply`, which is the reply itself): a conductor's tool row in its thread.
 pub fn fleet_cmd(input: &Value) -> Option<&str> {
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let cmd = tool_input(input)["command"].as_str()?.trim();
@@ -811,7 +850,7 @@ pub fn fleet_cmd(input: &Value) -> Option<&str> {
     .then_some(cmd)
 }
 
-/// #413: a `gh issue create` that ran: its flow-back line (`filed #52: <title>`, number from the printed URL), if known.
+/// A `gh issue create` that ran: its flow-back line (`filed #N: <title>`, number from the printed URL), if known.
 pub fn issue_filed(input: &Value) -> Option<String> {
     let cmd = fleet_cmd(input).filter(|c| after(input) && c.contains("gh issue create"))?;
     let title = [" -t ", " --title ", " --title="].iter().find_map(|f| {
@@ -830,7 +869,7 @@ pub fn issue_filed(input: &Value) -> Option<String> {
     title.map(|t| format!("{head}: {t}")).or(n.map(|_| head))
 }
 
-/// #198: the first `Co-Authored-By:` line in a commit log that names an AI.
+/// The first `Co-Authored-By:` line in a commit log that names an AI.
 pub fn ai_coauthor(log: &str) -> Option<&str> {
     log.lines().map(str::trim).find(|l| {
         let l = l.to_ascii_lowercase();
@@ -838,7 +877,7 @@ pub fn ai_coauthor(log: &str) -> Option<&str> {
     })
 }
 
-/// #304: a post-tool or stop hook's kick reason: `push` for a `git push` that went through (no `rejected`, `fatal:` or `error:` in its output), `stop` at a turn's end; `None` for anything else (a pre-tool guard call).
+/// A post-tool or stop hook's kick reason: `push` for a `git push` that went through (no `rejected`, `fatal:` or `error:` in its output), `stop` at a turn's end; `None` for anything else (a pre-tool guard call).
 pub fn kick_why(input: &Value) -> Option<&'static str> {
     let ev = input["hook_event_name"].as_str()?;
     match dialects().find(|d| d.post == ev || d.stop == ev)? {
@@ -858,7 +897,7 @@ pub fn kick_why(input: &Value) -> Option<&'static str> {
     }
 }
 
-/// #298: the state a hook call reports to shed: `done` at a turn's end, `blocked` while the harness waits on a person, else `working`.
+/// The state a hook call reports to shed: `done` at a turn's end, `blocked` while the harness waits on a person, else `working`.
 pub fn reported(input: &Value) -> Option<&'static str> {
     let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
     Some(match dialects().find(|d| d.stop == ev || d.blocked == ev) {
@@ -868,17 +907,17 @@ pub fn reported(input: &Value) -> Option<&'static str> {
     })
 }
 
-/// #511: what the stop hook tells an impl lane whose turn ended unreported.
+/// What the stop hook tells an impl lane whose turn ended unreported.
 pub const TURN_ASK: &str = "drover: end your turn with `drover turn done|blocked|need-input|working [--why <text>]` \
 (done: pushed and ready for review; blocked: --why names the blocker; need-input: after `drover ask`; working: \
 stopped mid-task)";
 
-/// #511: the lane's turn marker on its own host: `prompt` once a prompt is submitted, `turn` once `drover turn` ran, `asked` once the stop hook told it.
+/// The lane's turn marker on its own host: `prompt` once a prompt is submitted, `turn` once `drover turn` ran, `asked` once the stop hook told it.
 pub fn turn_mark(state: &Path, lane: &str) -> PathBuf {
     state.with_file_name(format!("turn-{}", lane.replace([':', '/'], "-")))
 }
 
-/// #511: an impl lane (`builds`) whose turn ends with no `drover turn` since its last prompt goes on once with `TURN_ASK`; never twice (`asked`, or the harness's own `stop_hook_active`), so it never loops.
+/// An impl lane (`builds`) whose turn ends with no `drover turn` since its last prompt goes on once with `TURN_ASK`; never twice (`asked`, or the harness's own `stop_hook_active`), so it never loops.
 pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Option<Value> {
     let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
     let d = dialects().find(|d| d.prompt == ev || d.stop == ev)?;
@@ -897,7 +936,7 @@ pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Op
     Some(again(TURN_ASK))
 }
 
-/// #909: a shell call matching a heavy kind, rewritten (in a dialect that can) to run in a host slot under `exe heavy`.
+/// A shell call matching a heavy kind, rewritten (in a dialect that can) to run in a host slot under `exe heavy`.
 pub fn heavy(input: &Value, h: &crate::heavy::Heavy, exe: &str) -> Option<Value> {
     let tool = input["tool_name"].as_str()?;
     let rewrite = dialects().find(|d| (d.sent)(input) && d.shell == tool)?.rewrite?;

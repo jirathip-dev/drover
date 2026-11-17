@@ -33,10 +33,10 @@ const CM: [&str; 3] = [
     "-oControlPersist=10m",
 ];
 
-/// #880: `On::existing`'s script: the paths on stdin, a line each.
+/// `On::existing`'s script: the paths on stdin, a line each.
 pub const EXISTS: &str = "while IFS= read -r p; do test -e \"$p\" && echo y || echo n; done";
 
-/// #880: the worktrees of `spawns` that exist, as `(machine, worktree)`: one `existing` call per host.
+/// The worktrees of `spawns` that exist, as `(machine, worktree)`: one `existing` call per host.
 pub fn present<'e>(
     r: &dyn Runner,
     spawns: impl IntoIterator<Item = &'e Event>,
@@ -71,7 +71,7 @@ impl<'a> On<'a> {
             connect: crate::config::limits().ssh_connect_secs,
         }
     }
-    /// #485: a maintenance call that must not hold up a pass: a 5 s connect timeout.
+    /// A maintenance call that must not hold up a pass: a 5 s connect timeout.
     pub fn quick(r: &'a dyn Runner, machine: Option<&'a str>) -> Self {
         On {
             connect: crate::config::limits().ssh_quick_secs,
@@ -101,7 +101,7 @@ impl<'a> On<'a> {
             Some(_) => self.sh("test -e \"$1\"", p, "").is_ok_and(|o| o.code == 0),
         }
     }
-    /// #880: which of `paths` exist here: one call (one ssh to a remote host), a `y` or `n` line back per path.
+    /// Which of `paths` exist here: one call (one ssh to a remote host), a `y` or `n` line back per path.
     pub fn existing<'p>(&self, paths: &[&'p str]) -> std::collections::BTreeSet<&'p str> {
         if self.machine.is_none() || paths.is_empty() {
             return paths.iter().copied().filter(|p| Path::new(p).exists()).collect();
@@ -138,7 +138,7 @@ impl<'a> On<'a> {
         ensure!(o.code == 0, "writing {}: {}", p.display(), o.stderr.trim());
         Ok(())
     }
-    /// #441: `write` a file only its owner reads (a lane's secrets).
+    /// `write` a file only its owner reads (a lane's secrets).
     pub fn write_private(&self, p: &Path, text: &str) -> Result<()> {
         if self.machine.is_none() {
             use std::io::Write;
@@ -202,7 +202,7 @@ impl Runner for On<'_> {
     }
 }
 
-/// #561: a check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. #1056: a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step and the child it waits on, for `tick-stuck`.
+/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step and the child it waits on, for `tick-stuck`.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
     probe: bool,
@@ -212,6 +212,8 @@ pub struct Pass<'a> {
     t0: std::time::Instant,
     pub until: Option<std::time::Instant>,
     late: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    unsent: std::sync::atomic::AtomicU64,
+    slowest: std::sync::Mutex<(String, u64)>,
     off: std::collections::BTreeSet<String>,
     log: Option<(&'a Ctx, &'a Config)>,
 }
@@ -228,11 +230,13 @@ impl<'a> Pass<'a> {
             t0: crate::clock::instant(),
             until: None,
             late: std::sync::Mutex::default(),
+            unsent: std::sync::atomic::AtomicU64::new(0),
+            slowest: std::sync::Mutex::default(),
             off: std::collections::BTreeSet::new(),
             log: None,
         }
     }
-    /// #939: never contact the machines `off`; a host's changed key logs `host-key-changed` once (with `log`).
+    /// Never contact the machines `off`; a host's changed key logs `host-key-changed` once (with `log`).
     #[must_use]
     pub fn sparing(self, off: std::collections::BTreeSet<String>, log: Option<(&'a Ctx, &'a Config)>) -> Self {
         Pass { off, log, ..self }
@@ -240,11 +244,26 @@ impl<'a> Pass<'a> {
     pub fn over(&self) -> bool {
         self.until.is_some_and(|t| crate::clock::instant() >= t)
     }
-    /// #880: the hosts over budget this pass: a call there killed at its limit, or held back past the pass's budget.
+    /// The hosts over budget this pass: a call there killed at its limit, or held back past the pass's budget.
     pub fn late(&self) -> Vec<String> {
         lock(&self.late).iter().cloned().collect()
     }
-    /// The fast step's: #337's one remote call per host, no probe; a call killed at 15 s marks its host down.
+    /// The remote calls this pass did not send.
+    pub fn unsent(&self) -> u64 {
+        self.unsent.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    /// The pass's slowest step so far and its seconds.
+    pub fn slowest(&self) -> (String, u64) {
+        let (step, at) = lock(&self.step).clone();
+        let now = (step, self.t0.elapsed().as_secs().saturating_sub(at));
+        let done = lock(&self.slowest).clone();
+        if now.1 >= done.1 {
+            now
+        } else {
+            done
+        }
+    }
+    /// The fast step's one remote call per host, no probe; a call killed at 15 s marks its host down.
     pub fn fast(r: &'a dyn Runner) -> Self {
         Pass {
             probe: false,
@@ -256,6 +275,12 @@ impl<'a> Pass<'a> {
             crate::timer::TICK_STEPS.iter().any(|t| t.0 == s),
             "{s} is not in TICK_STEPS"
         );
+        let ran = self.slowest();
+        let mut slowest = lock(&self.slowest);
+        if ran.1 >= slowest.1 {
+            *slowest = ran;
+        }
+        drop(slowest);
         *lock(&self.step) = (s.into(), self.t0.elapsed().as_secs());
         self.note("");
     }
@@ -312,7 +337,8 @@ impl<'a> Pass<'a> {
             });
         }
         self.note(&quote(prog, args));
-        let over = self.over();
+        let core = matches!(lock(&self.step).0.as_str(), "check" | "drive");
+        let over = !core && self.over();
         if over {
             lock(&self.late).insert(m.into());
         }
@@ -322,6 +348,8 @@ impl<'a> Pass<'a> {
             } else {
                 "host offline this pass"
             };
+            self.note("");
+            self.unsent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let stderr = format!("{m}: not sent ({why})");
             return Ok(Out {
                 code: 255,
@@ -385,7 +413,7 @@ impl<'a> Pass<'a> {
 
 const KEY_CHANGED: &str = "REMOTE HOST IDENTIFICATION HAS CHANGED";
 
-/// #939: the machines of disabled hosts with no open lane logged there: drive, check and status never contact them.
+/// The machines of disabled hosts with no open lane logged there: drive, check and status never contact them.
 pub fn idle_off(cfg: &Config, events: &[Event]) -> std::collections::BTreeSet<String> {
     let idle = |(n, h): &(&String, &HostCfg)| !h.enabled && lanes_on(cfg, events, n).is_empty();
     cfg.hosts
@@ -426,22 +454,22 @@ pub struct Seen {
     pub load: Option<f64>,
     pub mem: Option<f64>,
     pub disk: Option<f64>,
-    /// #235: a remote host's failed checks from `health` (`✗` keeps lanes off it, `!` warns), with the probe.
+    /// A remote host's failed checks from `health` (`✗` keeps lanes off it, `!` warns), with the probe.
     pub health: Vec<String>,
-    /// #234: memory pressure 0 normal, 1 warn, 2 critical; swap-out pages/2s; the top memory users (remote hosts).
+    /// Memory pressure 0 normal, 1 warn, 2 critical; swap-out pages/2s; the top memory users (remote hosts).
     pub pressure: Option<u8>,
     pub swap: Option<f64>,
     pub top: Vec<String>,
-    /// #234: memory and disk size in GB (a bar shows the used part).
+    /// Memory and disk size in GB (a bar shows the used part).
     pub mem_total: Option<f64>,
     pub disk_total: Option<f64>,
-    /// #254: when it last had a live agent (a cloud host's idle stop).
+    /// When it last had a live agent (a cloud host's idle stop).
     pub busy: u64,
-    /// #255: a cloud host's gh token, as its card says it.
+    /// A cloud host's gh token, as its card says it.
     pub github: String,
-    /// #630: its set workspace roots.
+    /// Its set workspace roots.
     pub roots: Vec<crate::roots::Root>,
-    /// #917: a remote host's `drover --version` at the last look.
+    /// A remote host's `drover --version` at the last look.
     pub drover: String,
 }
 
@@ -527,7 +555,8 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                     (s.github, ()) = (card, s.health.extend(warn));
                 }
             }
-            let hs = host::sample(&on);
+            let mut hs = host::sample(&on);
+            host::pace(&ctx.state, on.machine, &mut hs, ctx.now);
             (s.load, s.mem, s.mem_total) = (hs.load_per_cpu, hs.free_mem_gb, hs.mem_total_gb);
             ((s.disk, s.disk_total), s.swap) = (host::df(&on).unzip(), hs.swapout);
             s.pressure = hs.pressure.as_deref().map(level);
@@ -620,7 +649,7 @@ fn sim(cfg: &Config, events: &[Event], e: &Event) -> bool {
     cfg.fleet(&e.fleet).is_ok_and(|f| need(f).iter().any(|t| t == "sim"))
 }
 
-/// #984: a host's live lanes (`agents`) but `skip`'s: those running a turn, and those holding a simulator.
+/// A host's live lanes (`agents`) but `skip`'s: those running a turn, and those holding a simulator.
 pub fn held_slots(cfg: &Config, events: &[Event], agents: &[Session], skip: Option<(&str, u64)>) -> [usize; 2] {
     let st = fold(events);
     let mut n = [0; 2];
@@ -641,7 +670,7 @@ pub fn held_slots(cfg: &Config, events: &[Event], agents: &[Session], skip: Opti
     n
 }
 
-/// #984: drive's check before a start: `waiting for a slot` while every enabled, up host the lane fits is full.
+/// Drive's check before a start: `waiting for a slot` while every enabled, up host the lane fits is full.
 pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: Lane, start: &[Event]) -> Option<String> {
     let need = needs(cfg.fleet(me.0).ok()?, me.2, ev, (me.0, me.1));
     let (seen, sims) = (cached(ctx), need.iter().any(|t| t == "sim"));
@@ -690,7 +719,7 @@ pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: La
     full
 }
 
-/// #1186: host `name`'s working or simulator slots are all held, counting the spawns `start` still starting there.
+/// Host `name`'s working or simulator slots are all held, counting the spawns `start` still starting there.
 pub fn working_full(
     ctx: &Ctx,
     cfg: &Config,
@@ -723,7 +752,7 @@ pub fn working_full(
     Some(format!("waiting for a slot: {u}/{c} {s} on {name}"))
 }
 
-/// #984: each capped host's `name: working N/cap · simulators N/cap` line, from its live `agents` (`host`-tagged remote).
+/// Each capped host's `name: working N/cap · simulators N/cap` line, from its live `agents` (`host`-tagged remote).
 pub fn slots_line(cfg: &Config, events: &[Event], agents: &[Session]) -> String {
     let mut out = String::new();
     for (name, h) in &cfg.hosts {
@@ -741,7 +770,7 @@ pub fn slots_line(cfg: &Config, events: &[Event], agents: &[Session]) -> String 
     out
 }
 
-/// #637: add `row` to host `name`'s last-seen health (a `✗` keeps new lanes off it until the next health look).
+/// Add `row` to host `name`'s last-seen health (a `✗` keeps new lanes off it until the next health look).
 pub fn sick(ctx: &Ctx, name: &str, row: &str) {
     let mut all = cached(ctx);
     let s = all.entry(name.into()).or_default();
@@ -751,12 +780,12 @@ pub fn sick(ctx: &Ctx, name: &str, row: &str) {
     }
 }
 
-/// #1056: some `[hosts]` entry runs on machine `m`.
+/// Some `[hosts]` entry runs on machine `m`.
 pub fn configured(cfg: &Config, m: &str) -> bool {
     cfg.hosts.values().any(|h| h.machine.as_deref() == Some(m))
 }
 
-/// #478: `host offline: <host>` for spawn `sp`'s lane when the last look (`survey`) could not reach its host; #1056: `host offline (not configured): <machine>` when no `[hosts]` entry runs on its machine.
+/// `host offline: <host>` for spawn `sp`'s lane when the last look (`survey`) could not reach its host; `host offline (not configured): <machine>` when no `[hosts]` entry runs on its machine.
 pub fn offline(ctx: &Ctx, cfg: Option<&Config>, sp: Option<&Event>) -> Option<String> {
     let sp = sp?;
     let m = sp.str("machine")?;
@@ -770,7 +799,7 @@ pub fn offline(ctx: &Ctx, cfg: Option<&Config>, sp: Option<&Event>) -> Option<St
         .then(|| format!("host offline: {h}"))
 }
 
-/// #877: spawn `sp`'s lane is on a host that is `off` or failed its last probe: a pass never reaches into it.
+/// Spawn `sp`'s lane is on a host that is `off` or failed its last probe: a pass never reaches into it.
 pub fn held(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
     let off = |h: &str| cfg.hosts.get(h).is_some_and(|c| !c.enabled);
     offline(ctx, Some(cfg), Some(sp)).is_some()
@@ -778,47 +807,69 @@ pub fn held(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
         || crate::roots::skip(ctx, cfg, sp).is_some()
 }
 
-/// #923: when the host on `machine` (None: the main one) last had new lanes let back on (`host-on`), else 0.
+/// When the host on `machine` (None: the main one) last had new lanes let back on (`host-on`), else 0.
 pub fn held_since(events: &[Event], machine: Option<&str>) -> u64 {
     let on = |e: &&Event| e.kind == "host-on" && e.str("machine") == machine;
     events.iter().rfind(on).map_or(0, |e| e.ts)
 }
 
-/// #923: the alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`.
-pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>) -> Option<&'a str> {
-    let at = |kinds: &[&str]| {
-        events
-            .iter()
-            .rposition(|e| kinds.contains(&e.kind.as_str()) && e.str("machine") == machine)
+/// The alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`, or a proxy lane's sign-out once its retry window passed with no proxy call through since.
+pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>, (now, retry): (u64, u64)) -> Option<&'a str> {
+    let mine = |e: &Event| e.str("machine") == machine;
+    let from = events
+        .iter()
+        .rposition(|e| e.kind == "host-on" && mine(e))
+        .map_or(0, |i| i + 1);
+    let retried = |e: &Event| {
+        e.val("proxy").as_bool() == Some(true) && (now < e.ts + retry || proxy_ok(events, e.str("agent")) >= Some(e.ts))
     };
-    let i = at(&["usage-limit", "signed-out"])?;
-    let e = events.get(i).filter(|_| at(&["host-on"]) < Some(i))?;
-    e.str("reason")
+    let hold = |e: &&Event| ["usage-limit", "signed-out"].contains(&e.kind.as_str()) && mine(e) && !retried(e);
+    events.iter().skip(from).rfind(hold)?.str("reason")
 }
 
-/// #923: the data of the alert that holds new lanes off spawn `sp`'s host because its lane `what` (keyed once per hold).
+/// When the token proxy last relayed a good answer to lane `agent` after it signed out.
+pub fn proxy_ok(events: &[Event], agent: Option<&str>) -> Option<u64> {
+    events
+        .iter()
+        .rfind(|e| e.kind == "proxy-ok" && e.str("agent") == agent)
+        .map(|e| e.ts)
+}
+
+/// The data of the alert that holds new lanes off spawn `sp`'s host because its lane `what` (keyed once per hold); a proxy lane's names the proxy, keyed again after each proxy call through.
 pub fn hold_alert(events: &[Event], sp: &Event, what: &str) -> Value {
     let (host, m, lane) = (sp.str("host").unwrap_or("main"), sp.str("machine"), sp.str("agent"));
-    let key = format!("{host}:{}", held_since(events, m));
-    let login = crate::providers::get(sp.str("harness").unwrap_or_default()).login();
-    let login = login.unwrap_or("its CLI login");
+    let proxied = m.is_some() && sp.str("runtime") == Some("shed-acp");
+    let mut key = format!("{host}:{}", held_since(events, m));
+    let fix = if proxied {
+        key += &format!(":{}:{}", lane.unwrap_or_default(), proxy_ok(events, lane).unwrap_or(0));
+        let setup = crate::providers::proxied().map_or("", |p| p.setup);
+        format!("it signs in through the token proxy: check the token proxy's `[proxy] token-file` on the main host (`{setup}` makes a new one)")
+    } else {
+        let login = crate::providers::get(sp.str("harness").unwrap_or_default()).login();
+        format!("run `{}` there", login.unwrap_or("its CLI login"))
+    };
     let why = format!(
-        "{} lane {} {what} on {host}; new lanes there wait: run `{login}` there, then `drover hosts on {host}`",
+        "{} lane {} {what} on {host}; new lanes there wait: {fix}, then `drover hosts on {host}`",
         sp.str("role").unwrap_or_default(),
         lane.unwrap_or_default()
     );
-    json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why})
+    json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why, "proxy": proxied})
 }
 
 /// Admission on one host, in order `LOGIN_NEEDED`, `DISK_LOW`, `MEM_LOW`, `HOST_BUSY`: its sample and the first refusal.
 pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, String)>) {
-    if let Some(why) = login_hold(&working(&ctx.state).unwrap_or_default(), on.machine) {
+    if let Some(why) = login_hold(
+        &working(&ctx.state).unwrap_or_default(),
+        on.machine,
+        (ctx.now, cfg.limits.proxy_retry_secs),
+    ) {
         return (Host::default(), Some(("LOGIN_NEEDED", why.to_string())));
     }
     if let Some(why) = disk_low(ctx, cfg, on) {
         return (Host::default(), Some(("DISK_LOW", why)));
     }
     let mut hs = host::sample(on);
+    host::pace(&ctx.state, on.machine, &mut hs, ctx.now);
     if on.machine.is_none() {
         host::window(&ctx.state, &mut hs);
     }
@@ -838,7 +889,7 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
     (hs, busy)
 }
 
-/// #966: each open issue's lanes on `machine`: worktree, build and scratch folder → agent.
+/// Each open issue's lanes on `machine`: worktree, build and scratch folder → agent.
 pub fn lane_dirs(events: &[Event], machine: Option<&str>) -> BTreeMap<PathBuf, String> {
     let (st, mut dirs) = (fold(events), BTreeMap::new());
     let open = |e: &&Event| {
@@ -859,7 +910,7 @@ pub fn lane_dirs(events: &[Event], machine: Option<&str>) -> BTreeMap<PathBuf, S
     dirs
 }
 
-/// #536: lane `sp`'s build and scratch folders under its root's `.build`.
+/// Lane `sp`'s build and scratch folders under its root's `.build`.
 pub fn build_dirs(sp: &Event) -> Vec<PathBuf> {
     let (Some(agent), Some(wt)) = (sp.str("agent"), sp.str("worktree").map(Path::new)) else {
         return vec![];
@@ -874,7 +925,7 @@ pub fn build_dirs(sp: &Event) -> Vec<PathBuf> {
         .collect()
 }
 
-/// #416: the host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim`.
+/// The host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim --apply`; a remote one's finished lanes swept first.
 pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     let (min, events) = (cfg.limits.min_free_gb, working(&ctx.state).unwrap_or_default());
     let low = || host::free_gb(on).filter(|g| *g < min);
@@ -885,6 +936,14 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     };
     let trim = |l| crate::check::trim_on(ctx, on, cfg, 0.0, l, &mut std::io::sink()).unwrap_or(0);
     if live.as_ref().is_some_and(|l| trim(l) > 0) {
+        gb = low()?;
+    }
+    let name = on
+        .machine
+        .and_then(|m| cfg.hosts.iter().find(|h| h.1.machine.as_deref() == Some(m)));
+    let swept =
+        |(n, _): (&String, _)| crate::check::sweep(ctx, cfg, on, n, &mut std::io::sink(), crate::check::Sweep::Tick);
+    if name.map(swept).is_some_and(|b| b.is_ok_and(|b| b > 0)) {
         gb = low()?;
     }
     let st = fold(&events);
@@ -906,7 +965,7 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     wts.retain(|w| there.contains(w));
     let names: Vec<&str> = wts.iter().filter_map(|w| w.rsplit('/').next()).collect();
     let free = match names.len() {
-        0 => "nothing for `drover clean --yes` there; `drover reclaim` frees idle build folders".into(),
+        0 => "nothing for `drover clean --yes` there; `drover reclaim --apply` frees idle and finished lanes' build folders".into(),
         n => format!(
             "`drover clean --yes` frees {n} lane worktree(s) there: {}",
             names.join(", ")
@@ -929,10 +988,10 @@ pub struct Placed {
 
 type Pre<'a> = (&'a [Event], Option<&'a str>);
 
-/// #1186: a host placement passes over, with the refusal it names (its start or working slots are full).
+/// A host placement passes over, with the refusal it names (its start or working slots are full).
 pub type Skip<'a> = &'a dyn Fn(&str) -> Option<(&'static str, String)>;
 
-/// #984: a lane by fleet, issue and role.
+/// A lane by fleet, issue and role.
 pub type Lane<'a> = (&'a str, u64, &'a str);
 
 fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str, Option<&str>), pre: Pre) -> Placed {
@@ -1035,7 +1094,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     bad
 }
 
-/// #1127: thaw a frozen shed service (its user manager, then the unit), then restart it.
+/// Thaw a frozen shed service (its user manager, then the unit), then restart it.
 pub const SHED_RESTART: &str =
     "{ sudo -n systemctl thaw \"user@$(id -u).service\"; systemctl --user thaw shed.service; } 2>/dev/null; \
 systemctl --user restart shed.service";
@@ -1083,7 +1142,7 @@ fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[Str
     bad
 }
 
-/// #1126: each ACP profile, once, of the roles `place` can put on host `name` (#1148: none pinned elsewhere) of the fleets its `tags` fit: (profile, role family, adapter id).
+/// Each ACP profile, once, of the roles `place` can put on host `name` (none pinned elsewhere) of the fleets its `tags` fit: (profile, role family, adapter id).
 pub fn acp_profiles(cfg: &Config, name: &str, tags: &[String]) -> Vec<(String, &'static str, &'static str)> {
     let mut seen = std::collections::BTreeSet::new();
     let fits = cfg.fleet.values().filter(|f| f.needs.iter().all(|t| tags.contains(t)));
@@ -1096,7 +1155,7 @@ pub fn acp_profiles(cfg: &Config, name: &str, tags: &[String]) -> Vec<(String, &
         .collect()
 }
 
-/// #637: why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: its drover is this one's version (#573), `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, and its shed lists the hooked adapter `id`. None: guarded.
+/// Why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: its drover is this one's version, `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, and its shed lists the hooked adapter `id`. None: guarded.
 pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &str, &str)) -> Option<String> {
     let exe = real_exe(ctx, home);
     let root = ok(on, &exe, &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
@@ -1148,7 +1207,7 @@ fn with_path(on: &On, exe: &str, root: String) -> (String, bool) {
     }
 }
 
-/// #1168: `~/.local/bin/drover` and a `/usr/local/bin/drover` there links to `exe`, the install root's binary.
+/// `~/.local/bin/drover` and a `/usr/local/bin/drover` there links to `exe`, the install root's binary.
 pub fn link_line(exe: &str) -> String {
     let (l, u) = ("\"$HOME/.local/bin/drover\"", "/usr/local/bin/drover");
     format!(
@@ -1157,7 +1216,7 @@ pub fn link_line(exe: &str) -> String {
     )
 }
 
-/// #917: `cargo install` of drover at `sha` into `root`, with its `herdsman` link: `hosts bootstrap`'s and `sync`'s.
+/// `cargo install` of drover at `sha` into `root`, with its `herdsman` link: `hosts bootstrap`'s and `sync`'s.
 pub fn install_line(root: &str, sha: &str) -> String {
     let repo = env!("CARGO_PKG_REPOSITORY");
     format!(
@@ -1175,7 +1234,7 @@ fn sha_of(v: &str) -> &str {
     v.rsplit_once('(').and_then(|p| p.1.strip_suffix(')')).unwrap_or(v)
 }
 
-/// #917: host `name`'s drover `--version` and whether an install landed (#1164), its last install logged `host-sync`, a mismatch's install started there; Err: why its status went unread.
+/// Host `name`'s drover `--version` and whether an install landed, its last install logged `host-sync`, a mismatch's install started there; Err: why its status went unread.
 pub fn sync(
     ctx: &Ctx,
     cfg: &Config,
@@ -1228,7 +1287,7 @@ pub fn sync(
     Ok((theirs, done))
 }
 
-/// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it is enabled, up, admitting (#676) and its tags cover the needs, or its worktree there has unpushed work (#1138), else the least-busy enabled host whose tags cover the needs.
+/// The host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it is enabled, up, admitting and its tags cover the needs, or its worktree there has tracked changes or unpushed commits, else the least-busy enabled host whose tags cover the needs; never one a `stall-move` since its last spawn left.
 pub fn place(
     ctx: &Ctx,
     cfg: &Config,
@@ -1277,15 +1336,16 @@ pub fn place(
     let needs = needs(f, role, events, (fleet, issue));
     let seen = cached(ctx);
     let fit = |n: &str, h: &HostCfg| needs.iter().all(|t| tags(h, seen.get(n)).contains(t));
-    if let Some(e) = last {
+    let left = left(events, fleet, issue);
+    if let Some(e) = last.filter(|e| left != Some(e.str("host").unwrap_or("local"))) {
         let was = (e.str("host").unwrap_or("local"), e.str("machine"));
         let mut p = at(ctx, cfg, f, r, was, pre);
         let code = p.refusal.as_ref().map(|x| x.0);
-        let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "MEM_LOW"));
+        let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "LOGIN_NEEDED" | "MEM_LOW"));
         let fits = cfg.hosts.get(was.0).map_or(needs.is_empty(), |h| fit(was.0, h));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
         let wt = wt.and_then(|l| l.str("worktree")).map(Path::new);
-        let unpushed = (busy || !fits) && wt.is_some_and(|w| crate::check::unsaved(&On::new(r, was.1), w));
+        let unpushed = (busy || !fits) && wt.is_some_and(|w| unsaved(&On::new(r, was.1), w));
         if unpushed {
             let note = format!("stays on {}: its worktree there has unpushed work", was.0);
             match p.refusal.as_mut() {
@@ -1301,7 +1361,9 @@ pub fn place(
             };
         }
     }
-    let fits: Vec<_> = cfg.hosts.iter().filter(|(n, h)| fit(n, h)).collect();
+    let fits: Vec<_> = (cfg.hosts.iter())
+        .filter(|(n, h)| fit(n, h) && left != Some(n.as_str()))
+        .collect();
     let (mut full, mut open) = (vec![], vec![]);
     for h in fits.iter().filter(|h| h.1.enabled) {
         match skip(h.0) {
@@ -1357,6 +1419,23 @@ pub fn place(
     Ok(Some(p))
 }
 
+/// Does worktree `wt` on its host hold changes to tracked files or unpushed commits (unreadable: no)? Untracked files never pin a lane.
+pub fn unsaved(on: &On, wt: &Path) -> bool {
+    let w = wt.to_string_lossy();
+    let git = |a: &[&str]| ok(on, "git", &[&["-C", &*w][..], a].concat());
+    let tracked = |st: String| st.lines().any(|l| !l.starts_with("??"));
+    let ahead = |n: String| n.trim().parse::<u64>().is_ok_and(|n| n > 0);
+    on.exists(wt)
+        && (git(&["status", "--porcelain"]).is_ok_and(tracked)
+            || git(&["rev-list", "--count", "HEAD", "--not", "--remotes"]).is_ok_and(ahead))
+}
+
+fn left<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a str> {
+    let mine = crate::events::of_issue(events, fleet, issue);
+    let since = mine.into_iter().rev().take_while(|e| e.kind != "spawn");
+    since.into_iter().find(|e| e.kind == "stall-move")?.str("from")
+}
+
 fn held_for(ctx: &Ctx, held: bool) -> u64 {
     let p = ctx.state.with_file_name("held-since");
     let s = std::fs::read_to_string(&p).unwrap_or_default();
@@ -1374,7 +1453,7 @@ fn held_for(ctx: &Ctx, held: bool) -> u64 {
     ctx.now.saturating_sub(since) * u64::from(held)
 }
 
-/// #254: start the stopped cloud host `place` picked (not on a dry run), then place on it afresh.
+/// Start the stopped cloud host `place` picked (not on a dry run), then place on it afresh.
 pub fn wake(ctx: &Ctx, cfg: &Config, r: &dyn Runner, f: (&Fleet, bool), p: Option<Placed>) -> Result<Option<Placed>> {
     match p {
         Some(p) if !f.1 && p.refusal.as_ref().is_some_and(|x| x.0 == "CLOUD_STOPPED") => {
@@ -1408,7 +1487,7 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
     })
 }
 
-/// #840: a remote host unreachable 15 min straight: its open lanes restart on the main host from their pushed branch.
+/// A remote host unreachable 15 min straight: its open lanes restart on the main host from their pushed branch.
 pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let seen = cached(ctx);
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.machine.is_some()) {
@@ -1524,7 +1603,9 @@ pub fn toggle(ctx: &Ctx, out: &mut dyn Write, name: &str, on: bool, by: &str) ->
     let cfg = Config::parse(&text)?;
     let events = working(&ctx.state)?;
     let machine = match cfg.hosts.get(name) {
-        None if on && name == "main" && login_hold(&events, None).is_some() => None,
+        None if on && name == "main" && login_hold(&events, None, (ctx.now, cfg.limits.proxy_retry_secs)).is_some() => {
+            None
+        }
         None => bail!("no [hosts.{name}] in fleet.toml"),
         Some(h) if !on && h.machine.is_none() => return refused("MAIN_HOST", "main host: edit fleet.toml by hand"),
         Some(h) => {
@@ -1542,7 +1623,7 @@ pub fn toggle(ctx: &Ctx, out: &mut dyn Write, name: &str, on: bool, by: &str) ->
     Ok(writeln!(out, "{name}: {word} for new lanes")?)
 }
 
-/// #234: memory pressure as the history keeps it: 0 normal, 1 warn, 2 critical.
+/// Memory pressure as the history keeps it: 0 normal, 1 warn, 2 critical.
 pub fn level(p: &str) -> u8 {
     match p {
         "warn" => 1,
@@ -1551,7 +1632,7 @@ pub fn level(p: &str) -> u8 {
     }
 }
 
-/// #234: the Host tab's cards in order: the main host (no `machine`; `hostname -s` without `[hosts]`), then A→Z.
+/// The Host tab's cards in order: the main host (no `machine`; `hostname -s` without `[hosts]`), then A→Z.
 pub fn cards<'a>(cfg: &'a Config, r: &dyn Runner) -> Vec<(String, Option<&'a HostCfg>)> {
     if cfg.hosts.is_empty() {
         let name = ok(r, "hostname", &["-s"]).map(|s| s.trim().to_string()).ok();
@@ -1565,7 +1646,7 @@ pub fn cards<'a>(cfg: &'a Config, r: &dyn Runner) -> Vec<(String, Option<&'a Hos
     v
 }
 
-/// #234: one row a minute per host in `<state dir>/host-history.jsonl`, written by the fast step; 24 h kept.
+/// One row a minute per host in `<state dir>/host-history.jsonl`, written by the fast step; 24 h kept.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable, rename = "HostRow"))]
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -1578,7 +1659,7 @@ pub struct Row {
     pub mem_free_gb: Option<f64>,
     pub disk_free_gb: Option<f64>,
     pub lanes: usize,
-    /// #352: MB per `host::groups` group, only while `/live?tab=host` was seen in the last 2 min (else no `ps` walk).
+    /// MB per `host::groups` group, only while `/live?tab=host` was seen in the last 2 min (else no `ps` walk).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub procs: Option<[u64; 5]>,
 }
@@ -1598,7 +1679,7 @@ impl Row {
 }
 
 const DAY: u64 = 86_400;
-/// #234: the history's size bound per host: 1,600 rows (#352: also its row cap) of up to 200 B, so 25 h fit.
+/// The history's size bound per host: 1,600 rows (also its row cap) of up to 200 B, so 25 h fit.
 pub const BOUND: usize = 320_000;
 
 fn history_file(ctx: &Ctx) -> PathBuf {
@@ -1610,7 +1691,7 @@ pub fn history(ctx: &Ctx) -> Vec<Row> {
     text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
-/// #234: append `rows`; once the oldest row is over 25 h old or the file over `BOUND` for each of `hosts`, it is rewritten to the last 24 h and 1,600 rows each (#352), newest first within 9/10 of the bound: once an hour at most.
+/// Append `rows`; once the oldest row is over 25 h old or the file over `BOUND` for each of `hosts`, it is rewritten to the last 24 h and 1,600 rows each, newest first within 9/10 of the bound: once an hour at most.
 pub fn record(ctx: &Ctx, rows: &[Row], hosts: usize) -> Result<()> {
     let (p, bound) = (history_file(ctx), BOUND * hosts.max(1));
     let new: String = rows
@@ -1654,9 +1735,10 @@ fn row(ts: u64, host: &str, s: &Seen, (lanes, procs): (usize, Option<[u64; 5]>))
     }
 }
 
-/// #234 the fast step: this host's history row, a minute apart (remote hosts' rows come from `survey`); #352: `procs`.
+/// The fast step: this host's history row, a minute apart (remote hosts' rows come from `survey`); `procs`.
 pub fn sample(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<()> {
-    let hs = host::sample(r);
+    let mut hs = host::sample(r);
+    host::pace(&ctx.state, None, &mut hs, ctx.now);
     let s = Seen {
         load: hs.load_per_cpu,
         mem: hs.free_mem_gb,
@@ -1676,7 +1758,7 @@ pub fn sample(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Resu
     record(ctx, &rows, cards.len())
 }
 
-/// #234: host `h`'s key `k` over the `secs` up to `now` in `n` buckets, each its worst row (the max; for free space the min) and that row's time, so a peak is never averaged away; None where no row fell.
+/// Host `h`'s key `k` over the `secs` up to `now` in `n` buckets, each its worst row (the max; for free space the min) and that row's time, so a peak is never averaged away; None where no row fell.
 pub fn spark(rows: &[Row], h: &str, k: &str, (now, secs, n): (u64, u64, usize)) -> Vec<Option<(f64, u64)>> {
     let (mut out, from) = (vec![None; n], now.saturating_sub(secs));
     for r in rows.iter().filter(|r| r.host == h && r.ts > from && r.ts <= now) {
@@ -1706,7 +1788,7 @@ fn ranges(rows: &[Row], (h, k, now, all): (&str, &str, u64, bool), f: &dyn Fn((f
         .join(";")
 }
 
-/// #234: `ranges` of the values, as few decimals as the row has.
+/// `ranges` of the values, as few decimals as the row has.
 pub fn series(rows: &[Row], h: &str, k: &str, now: u64, all: bool) -> String {
     let p = match k {
         "load" => 2,
@@ -1716,7 +1798,7 @@ pub fn series(rows: &[Row], h: &str, k: &str, now: u64, all: bool) -> String {
     ranges(rows, (h, k, now, all), &|(v, _)| format!("{v:.p$}"))
 }
 
-/// #234: an open chart's series, `|` apart: key `k`, the lanes and the memory pressure with every range, then the minutes ago of each of `k`'s worst rows (the read-out's time).
+/// An open chart's series, `|` apart: key `k`, the lanes and the memory pressure with every range, then the minutes ago of each of `k`'s worst rows (the read-out's time).
 pub fn chart(rows: &[Row], h: &str, k: &str, now: u64) -> String {
     let c = [k, "lanes", "pressure"]
         .map(|x| series(rows, h, x, now, true))
