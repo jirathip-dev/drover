@@ -1,0 +1,7 @@
+Decided: merge origin/staging 3c1ab50; the conflicts keep staging's unpark action and verdict_sheet with this branch's limit action and stats lane arg
+Because: crates/server/src/screens.rs:756
+Decided: no code change for the red sim hunt test; it passes on this host at the old head and the merged head
+Because: crates/cli/tests/sim/main.rs:274
+Rejected: loosening the hunt's random-seed assertion — that would weaken a staging test this issue does not touch
+Check: shard 1's sim test is green at the new head; cooee_screens and shed lane_states pass
+Owner: no behaviour change this round; the branch is brought up to date with staging
