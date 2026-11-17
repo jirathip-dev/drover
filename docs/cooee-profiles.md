@@ -18,8 +18,8 @@ one source of the orchestrator's text for both a drover thread and a cooee chat
 A linked chat's id (`$DROVER_THREAD`) stands where a thread id does in `drover card post`, `drover config propose` and
 `drover secret request`; the card is logged on the chat's fleet. `CARD_FORBIDDEN`, the 15-minute approval window and
 the owner-only approve, apply and secret entry are unchanged. `GET /screens/cards` shows the open run, config and
-secret cards of every thread and chat with their actions (`run-card`, `thread-config` [apply]/[discard],
-`thread-secret` masked entry for the plugin or a paired device). How each settled is one `system` line in the chat,
+secret cards of every thread and chat with their actions (`run-card`, `config-card` [apply]/[discard],
+`secret-card` masked entry for the plugin or a paired device). How each settled is one `system` line in the chat,
 read as a `note` in `GET /api/v1/thread/<chat>`: the exit code and output tail, applied or discarded,
 `secret <NAME> set ✓`. The secret's value is never logged or served.
 

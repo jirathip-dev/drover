@@ -46,7 +46,7 @@ pub fn page_places() -> Value {
     Value::Array(all)
 }
 
-const THREAD_ACTIONS: [&str; 13] = [
+const THREAD_ACTIONS: [&str; 11] = [
     "thread-new",
     "thread-say",
     "thread-retry",
@@ -57,8 +57,6 @@ const THREAD_ACTIONS: [&str; 13] = [
     "thread-unqueue",
     "thread-stop",
     "thread-model",
-    "thread-secret",
-    "thread-config",
     "thread-signin",
 ];
 
@@ -1814,9 +1812,9 @@ impl Server<'_> {
                 ];
                 self.form_op(ctx, "card", &kv)?
             }
-            "thread-config" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
+            "config-card" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
             "thread-signin" => crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("name"), "web")?,
-            n if THREAD_ACTIONS.contains(&n) => {
+            n if THREAD_ACTIONS.contains(&n) || n == "secret-card" => {
                 let keys = ["text", "repo", "name", "act", "data", "q", "harness", "model", "effort"];
                 let mut f: Q = keys.into_iter().map(|k| (k.into(), s(k))).collect();
                 f.extend([
@@ -1824,7 +1822,7 @@ impl Server<'_> {
                     ("n".into(), s("msg")),
                     ("value".into(), s("text")),
                 ]);
-                f.insert("op".into(), n[7..].into());
+                f.insert("op".into(), n.strip_prefix("thread-").unwrap_or("secret").into());
                 let mut later = vec![];
                 let (res, more) = crate::conductor::deferred(|| super::chat::post(ctx, &self.r, &f, &mut later));
                 self.later(ctx, later.into_iter().chain(more));

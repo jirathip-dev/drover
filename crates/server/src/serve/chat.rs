@@ -948,9 +948,9 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> V
         }
         "config" => {
             let v = |act: &str| json!({"thread": id, "id": m.from, "act": act});
-            let mut buttons = vec![button("discard", "", "thread-config", v("discard"))];
+            let mut buttons = vec![button("discard", "", "config-card", v("discard"))];
             if m.open {
-                buttons.insert(0, button("apply", "primary", "thread-config", v("apply")));
+                buttons.insert(0, button("apply", "primary", "config-card", v("apply")));
             }
             let sub = or(
                 m.open,
@@ -966,11 +966,11 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> V
             if paired {
                 let field = json!({"type": "secret", "name": "text", "label": "", "value": "", "placeholder": format!("value of {}", m.from)});
                 blocks.push(json!({"type": "form", "id": format!("{key}-f"), "fields": [field],
-                    "submit": {"label": "save", "action": "thread-secret", "values": {"thread": id, "name": m.from, "act": "save"}}}));
+                    "submit": {"label": "save", "action": "secret-card", "values": {"thread": id, "name": m.from, "act": "save"}}}));
                 buttons.push(button(
                     "dismiss",
                     "",
-                    "thread-secret",
+                    "secret-card",
                     json!({"thread": id, "name": m.from, "act": "dismiss"}),
                 ));
             } else {
