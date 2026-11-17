@@ -1,0 +1,49 @@
+Decided: a triage lane changes issues only through `drover triage close|fold|label`; its raw `gh issue close|edit|reopen` is refused, so the protected-issue rule cannot be skipped
+Because: "the hook allows them for this role alone"
+Decided: each verb refuses PROTECTED an issue that is queued, has a lane, waits on an open ask or is labeled keep, before any write
+Because: "an issue that is queued, has a live lane, waits on an open owner ask"
+Decided: the lane is read-only on code by reusing the reviewer rules (no commit, push or merge), and reports nothing via `drover turn`
+Because: crates/core/src/hook.rs:75
+Decided: weekly runs are opt-in with `triage = "weekly"` in [fleet.<n>]; `drover triage <fleet>` runs it on demand; role defaults to impl's like lesson
+Because: "First live run on `herdsman` and `cooee`; the owner reviews the summary"
+Decided: `done --no-change` builds the summary from the verbs' own events, each with its undo, posts it to the fleet's orchestrator thread and closes the triage issue
+Rejected: a free-text summary written by the lane — its undo lines could be wrong or missing
+Rejected: the concurrency sim in tests/sim — it models drive races; the fixture test drives the real CLI verbs against a fake gh
+Check: a `done` close needs a commit on origin/<integration> (NOT_ON_INTEGRATION otherwise); a later `drover amend` ignores the folded block
+Owner: Triage closes, folds and flags stale issues weekly where turned on, and tells you in the thread how to undo each change.
+
+Decided: the docs pass files its one `docs:` issue through `drover triage docs <fleet> --findings <file>`; an empty findings file files nothing
+Because: "files **one** `docs:` issue listing each stale, contradicting or bloated passage"
+Decided: the lane judges the findings (one `file:line: what: proof` line each); drover only files them, refuses ALREADY_FILED for a second one from the same lane, and puts a missing README non-goals section first
+Because: "triage judges what is too long, duplicated or obsolete"
+Rejected: a mechanical removed-flag or contradiction detector in code — the owner made it the lane's judgment, with no new per-PR checks
+Decided: the prompts name the scope and forbid editing docs or proposing a change to the README's intent section
+Because: "it never proposes changes to that section in the `docs:` issue"
+Check: the docs fixture test drives the real CLI verb against a fake gh: removed flag and non-goal findings give one issue with both, a clean file gives none
+Owner: Each weekly triage run now also lists stale or contradicting docs in one issue for a normal lane to fix, and files nothing when the docs are clean.
+
+Decided: the triage test target runs in CI shard 1; test-shards.sh fails every shard while a target is in none
+Because: scripts/test-shards.txt:191
+Decided: no block on the cap raise; #1201 already merged it (line_cap 53500), so this PR is within the cap after merging staging
+Because: q1803
+Rejected: blocking this issue on #1201 per q1803 — #1201 is already merged, so waiting would hold a PR that already fits
+Check: scripts/test-shards.sh check exits 0, and cap-check reads 48179 / 53500
+Owner: The triage lane's tests now run in CI, and the PR fits under the raised line cap.
+
+Decided: triage is a scheduled lane like lesson: weekly from tick, on demand with `drover triage <fleet>`, acting on GitHub only through `drover triage close|fold|label|docs` verbs.
+Because: "Acts on GitHub, through drover verbs only** (the hook allows them for this role alone)"
+Decided: the hook treats a triage lane as read-only (no commits or pushes) and refuses raw `gh issue close|edit` there with TRIAGE_VERBS.
+Because: "hook rules (triage may `gh issue close|edit|comment`, may not push code or merge)"
+Decided: fix round 4 merges origin/staging; README takes staging's text, hook.rs keeps triage's rules plus staging's `cap_raise: false`.
+Because: crates/core/src/hook.rs:79
+Rejected: changing the sim hunt test here — it is outside this PR's diff and staging fixed it in #1259.
+Check: the triage, sim, handover, cloud and spawn tests pass in CI at the new head, with no fleet-test-* dir left.
+Owner: CI's red was a flaky sim test and a temp dir another test left; both came from staging, which this round merges in.
+
+Decided: triage closes, folds and labels only through drover verbs, which refuse protected issues before any write.
+Because: "Acts on GitHub, through drover verbs only"
+Decided: the offline_tick test now expects triage among the skipped tick steps.
+Because: crates/core/src/timer.rs:425
+Rejected: raw gh issue close/edit for the lane — it would skip the queued/live/ask/keep guard.
+Check: a triage lane cannot push or merge, and each verb refuses PROTECTED on a queued issue.
+Owner: a weekly triage lane tidies issues and files one docs issue; every change has a one-line undo.
