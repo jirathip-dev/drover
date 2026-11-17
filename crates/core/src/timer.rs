@@ -476,10 +476,27 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
 
 /// #791: the running tick's start, while its `tick.beat` is at most 2 tick intervals old; `None`: no tick runs, or it stalled (no heartbeat for over 2 intervals: stuck).
 pub fn running(ctx: &Ctx, cfg: &Config) -> Option<u64> {
+    let (since, beat) = beat(ctx)?;
+    (ctx.now <= beat + stuck_secs(cfg)).then_some(since)
+}
+
+fn beat(ctx: &Ctx) -> Option<(u64, u64)> {
     let text = std::fs::read_to_string(ctx.state.with_file_name("tick.beat")).ok()?;
     let mut w = text.split_whitespace().map(|x| x.parse::<u64>().ok());
-    let (since, beat) = (w.next()??, w.next()??);
-    (ctx.now <= beat + stuck_secs(cfg)).then_some(since)
+    Some((w.next()??, w.next()??))
+}
+
+/// #1025: a fleet card's amber line for a tick that never finished: killed (its heartbeat stopped) or running past `slow_secs`.
+pub fn unfinished(ctx: &Ctx, cfg: &Config) -> Option<String> {
+    let (since, beat) = beat(ctx)?;
+    if running(ctx, cfg).is_none() {
+        return Some(format!(
+            "drive · last pass killed {} ago",
+            age(ctx.now.saturating_sub(beat))
+        ));
+    }
+    let secs = ctx.now.saturating_sub(since);
+    (secs > cfg.limits.slow_secs).then(|| format!("drive · last pass running for {}", age(secs)))
 }
 
 /// #972: the running tick's `tick.step` and its age, when that step began over 3 × `slow_secs` ago.

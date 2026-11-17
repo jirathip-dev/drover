@@ -756,6 +756,41 @@ fn the_workflow_screen_is_two_diagram_blocks_with_live_counts_and_limit_nodes() 
     }
 }
 
+#[test]
+fn a_dropped_blocker_clears_the_held_subtitle_in_the_next_snapshot() {
+    let (c, r) = recorded("cooee-unblock");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let before = req(&s, T, "GET", "/screens/queue", "", "").1;
+    assert_eq!(
+        find(&before, "q-sendmeter-20")["subtitle"],
+        json!({"text": "held until #17", "tone": "bad"})
+    );
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "unblock", "20"]).0, 0);
+    let after = req(&s, T + 1, "GET", "/screens/queue", "", "").1;
+    let row = find(&after, "q-sendmeter-20");
+    assert!(!row.to_string().contains("held until"), "{row}");
+}
+
+#[test]
+fn a_fleet_card_says_amber_when_the_last_pass_was_killed_or_runs_past_its_limit() {
+    let (c, r) = recorded("cooee-killed");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let beat = c.state.with_file_name("tick.beat");
+    let card = |now| find(&req(&s, now, "GET", "/screens/queue", "", "").1, "fleet-sendmeter")["subtitle"].clone();
+    std::fs::write(&beat, format!("{} {}", T - 900, T - 720)).unwrap();
+    assert_eq!(
+        card(T),
+        json!({"text": "drive · last pass killed 12m ago", "tone": "warn"})
+    );
+    std::fs::write(&beat, format!("{} {}", T - 900, T - 30)).unwrap();
+    assert_eq!(
+        card(T),
+        json!({"text": "drive · last pass running for 15m", "tone": "warn"})
+    );
+    std::fs::write(&beat, format!("{} {}", T - 60, T - 30)).unwrap();
+    assert!(card(T).is_string(), "{}", card(T));
+}
+
 fn rows_of<'a>(v: &'a Value, list: &str) -> Vec<&'a str> {
     let rows = find(v, list)["rows"].as_array().unwrap();
     rows.iter().map(|r| r["id"].as_str().unwrap()).collect()

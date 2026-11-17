@@ -369,7 +369,7 @@ fn tree<'a>(rs: &[&'a QueueRow]) -> Vec<(&'a QueueRow, usize)> {
     out
 }
 
-fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane]) -> Value {
+fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane], late: Option<&String>) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
     let paused = c.paused.is_some();
@@ -434,8 +434,8 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane]) -> 
     }
     let busy = rows("inprogress", busy.into_iter().map(|r| (r, 0)).collect());
     let tone = if c.need > 0 { "warn" } else { "accent" };
-    let mut v = json!({"type": "card", "id": format!("fleet-{f}"), "tone": tone, "title": f,
-        "subtitle": c.paused.clone().unwrap_or_else(|| c.drive.line.clone()), "badge": badge.get(usize::from(paused)),
+    let mut v = json!({"type": "card", "id": format!("fleet-{f}"), "tone": tone, "title": f, "badge": badge.get(usize::from(paused)),
+        "subtitle": c.paused.as_ref().map_or_else(|| late.map_or(json!(c.drive.line), |l| json!({"text": l, "tone": "warn"})), |p| json!(p)),
         "buttons": [
             {"type": "button", "id": format!("drive-{f}"), "label": "Drive now", "style": "primary", "action": "drive", "values": {"fleet": f}},
             {"type": "button", "id": format!("pause-{f}"), "label": if paused { "Resume" } else { "Pause" }, "action": "pause", "values": {"fleet": f, "on": !paused}}],
@@ -1567,6 +1567,7 @@ impl Server<'_> {
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
         let (tab, ev) = (self.queue_tab(ctx), working(&ctx.state).unwrap_or_default());
         let lanes = Config::kept(ctx).map_or(vec![], |cfg| self.lane_list(ctx, &cfg, &ev, &ev.states));
+        let late = Config::kept(ctx).ok().and_then(|c| crate::timer::unfinished(ctx, &c));
         let sel = q
             .get("repo")
             .filter(|r| tab.fleets.iter().any(|f| &f.name == *r))
@@ -1585,7 +1586,7 @@ impl Server<'_> {
         if let Some(e) = &tab.error {
             blocks.push(json!({"type": "text", "id": "error", "markdown": e}));
         }
-        blocks.extend(shown.into_iter().map(|c| fleet_card(ctx, &ev, c, q, &lanes)));
+        blocks.extend(shown.iter().map(|c| fleet_card(ctx, &ev, c, q, &lanes, late.as_ref())));
         let mut kept = q.clone();
         kept.retain(|k, _| k != "repo" || sel.is_some());
         let stream = view(&kept, "", "").replacen("/screens/queue", "/screens/queue/stream", 1);
