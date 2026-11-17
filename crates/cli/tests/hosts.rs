@@ -191,7 +191,8 @@ fn admission_runs_per_host() {
     let low = || fake(1.0, 0.1).reply(&format!("{SSH}'df' '-k' '/'"), df);
     assert_eq!(placed(&c, &low(), 12, "impl", None).as_deref(), Ok("mini"));
     let e = placed(&c, &low(), 12, "impl", Some("bazzite")).unwrap_err();
-    let nothing = "nothing for `drover clean --yes` there; `drover reclaim` frees idle build folders";
+    let nothing =
+        "nothing for `drover clean --yes` there; `drover reclaim --apply` frees idle and finished lanes' build folders";
     assert_eq!(e, format!("DISK_LOW: bazzite: 1.0 GB free < 10; {nothing}"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (_sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), low());
@@ -1753,4 +1754,36 @@ fn a_tick_starts_the_sync_of_a_reachable_host_though_its_health_check_times_out(
     let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(r.count(&format!("{SSH}{START}")), 1, "{:#?}", r.calls.borrow());
+}
+
+#[test]
+fn disk_low_on_a_remote_host_sweeps_its_finished_lanes_scratch_before_refusing() {
+    let c = setup("hosts-sweep-low", "", true, 0);
+    let rev = "sendmeter-rev-9-r1";
+    let d = json!({"role": "rev", "agent": rev, "pane": rev, "workspace": "", "host": "bazzite", "machine": "bazzite",
+                   "worktree": "/home/me/.local/share/drover/work/sendmeter/rev-9-r1"});
+    ev(&c, 10, 9, "spawn", d);
+    ev(&c, 20, 9, "verdict", json!({"verdict": "FAIL", "sha": "a"}));
+    let df = |kb: u64| format!("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 {kb} 90% /\n");
+    let sweep = format!("{SSH}'sh' '-c' 'b=$1;");
+    let low = |listed: &str| {
+        fake(1.0, 0.1)
+            .once(&format!("{SSH}'df' '-k' '/'"), 0, &df(1_048_576))
+            .reply(&format!("{SSH}'df' '-k' '/'"), &df(30 * 1_048_576))
+            .once(&sweep, 0, listed)
+            .reply(&sweep, &format!("20971520 {rev}\n"))
+    };
+    let r = low(&format!("{rev}\n"));
+    assert_eq!(placed(&c, &r, 12, "impl", Some("bazzite")).as_deref(), Ok("bazzite"));
+    let calls = r.calls.borrow();
+    assert!(
+        calls
+            .iter()
+            .any(|l| l.starts_with(&sweep) && l.ends_with(&format!(".build/.scratch' '{rev}'"))),
+        "{calls:?}"
+    );
+    drop(calls);
+    let e = placed(&c, &low(""), 12, "impl", Some("bazzite")).unwrap_err();
+    assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
+    assert!(e.contains("`drover reclaim --apply`"), "{e}");
 }

@@ -419,18 +419,18 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         crate::check::check(ctx, cfg, &pass, out)?;
         pass.step("drive");
         let driven = drive::drive(ctx, cfg, &pass, out, None, false, false);
-        if pass.over() {
+        let over = pass.over();
+        if over {
             writeln!(
                 out,
-                "tick: past its {budget} s budget; skipped: clean, trim, lesson, triage, hotspots, compact"
+                "tick: past its {budget} s budget; skipped: clean, lesson, triage, hotspots, compact"
             )?;
-            return driven;
         }
         let at = ctx.state.with_file_name("clean.at");
         let last = std::fs::read_to_string(&at)
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok());
-        if last.is_none_or(|t| ctx.now >= t + 3600) {
+        if !over && last.is_none_or(|t| ctx.now >= t + 3600) {
             pass.step("clean");
             std::fs::write(&at, ctx.now.to_string()).ok();
             if let Err(e) = crate::check::clean(ctx, cfg, &pass, out, None, (None, None, false), true) {
@@ -438,7 +438,12 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
             }
         }
         pass.step("trim");
+        let until = pass.until.take();
         crate::check::trim_hosts(ctx, cfg, &pass, out)?;
+        pass.until = until;
+        if over {
+            return driven;
+        }
         pass.step("lesson");
         crate::lesson::weekly(ctx, cfg, &pass, out)?;
         pass.step("triage");

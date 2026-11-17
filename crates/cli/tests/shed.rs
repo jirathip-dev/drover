@@ -1065,8 +1065,8 @@ fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
         "a running ACP lane's scratch is never trimmed, oldest or not: {out}"
     );
     assert!(!exited.exists(), "an exited lane's goes over budget: {out}");
-    let want = format!("builds: trimmed {} ", exited.display());
-    assert!(out.contains(&want) && out.contains("no live agent"), "{out}");
+    let want = format!("scratch: local: removed {} ", exited.display());
+    assert!(out.contains(&want) && out.contains("(lane ended)"), "{out}");
 }
 
 fn git(dir: &std::path::Path, a: &[&str]) -> String {
