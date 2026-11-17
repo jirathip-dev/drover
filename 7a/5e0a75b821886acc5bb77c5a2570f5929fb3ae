@@ -1,0 +1,4 @@
+Decided: merged origin/staging again; the only conflict was the generated docs/workflow.md, regenerated with drover diagram rather than hand-merged.
+Because: .drover/rules.md:16
+Rejected: none
+Owner: Brought the history-baseline branch up to date with staging again; no behaviour change.
