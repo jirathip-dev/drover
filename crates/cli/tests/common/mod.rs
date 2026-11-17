@@ -255,7 +255,7 @@ fn reap_at_exit(d: &Path) {
     use std::io::Write;
     static REAPER: std::sync::OnceLock<std::sync::Mutex<std::process::Child>> = std::sync::OnceLock::new();
     let reaper = REAPER.get_or_init(|| {
-        let script = r#"while IFS= read -r d; do set -- "$@" "$d"; done; [ $# -eq 0 ] || rm -rf -- "$@""#;
+        let script = r#"while IFS= read -r d; do set -- "$@" "$d"; done; [ $# -eq 0 ] || { chmod -R u+rwx -- "$@" 2>/dev/null; rm -rf -- "$@"; }"#;
         let child = std::process::Command::new("sh")
             .args(["-c", script, "reaper"])
             .stdin(std::process::Stdio::piped())
