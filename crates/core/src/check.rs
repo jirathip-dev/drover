@@ -924,7 +924,7 @@ pub fn clean_all(
             |why: &str| crate::gate::refused("UNSAFE_CLEAN", format!("{}: {why}", lane.unwrap_or_default()));
         let why = if states.get(&(e.fleet.clone(), n)).is_some_and(|s| s.state == "merged") {
             "merged"
-        } else if closed_issues(ctx, cfg, r, out, &mut closed, &e.fleet).contains(&n) {
+        } else if closed_issues((ctx, cfg, r, out), &states, &mut closed, &e.fleet).contains(&n) {
             "issue closed"
         } else if lane.is_some() {
             let p = Some(gh::cached_pr(ctx, &e.fleet, n))
@@ -1083,7 +1083,8 @@ pub fn clean_all(
         };
         let why = if states.get(&(fl.clone(), n)).is_some_and(|s| s.state == "merged") {
             "merged"
-        } else if cfg.fleet.contains_key(fl) && closed_issues(ctx, cfg, r, out, &mut closed, fl).contains(&n) {
+        } else if cfg.fleet.contains_key(fl) && closed_issues((ctx, cfg, r, out), &states, &mut closed, fl).contains(&n)
+        {
             "issue closed"
         } else {
             continue;
@@ -1897,7 +1898,7 @@ fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write
         open.extend((crate::queue::replay(&ev, name).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
         open.retain(|n| gh::cached_pr(ctx, name, *n).at("state") != "MERGED");
         let Some(closed) = (!open.is_empty())
-            .then(|| gh::closed(ctx, r, f, name, ctx.now).ok())
+            .then(|| gh::closed(ctx, r, f, name, &open, ctx.now).ok())
             .flatten()
         else {
             continue;
@@ -1916,15 +1917,17 @@ fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write
 }
 
 fn closed_issues<'a>(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
+    (ctx, cfg, r, out): (&Ctx, &Config, &dyn Runner, &mut dyn Write),
+    states: &BTreeMap<(String, u64), crate::events::IssueState>,
     memo: &'a mut BTreeMap<String, Vec<u64>>,
     fleet: &str,
 ) -> &'a Vec<u64> {
     if !memo.contains_key(fleet) {
-        let got = cfg.fleet(fleet).and_then(|f| gh::closed(ctx, r, f, fleet, ctx.now));
+        let mine = states.values().filter(|s| s.fleet == fleet && s.state != "merged");
+        let issues: Vec<u64> = mine.map(|s| s.issue).collect();
+        let got = cfg
+            .fleet(fleet)
+            .and_then(|f| gh::closed(ctx, r, f, fleet, &issues, ctx.now));
         let list = got.unwrap_or_else(|e| {
             writeln!(
                 out,
