@@ -1,0 +1,6 @@
+Decided: move the reply's remove-op mapping out of action into later::gone_ops, so screens.rs and action stay under their size caps
+Because: crates/server/src/later.rs:199
+Because: crates/server/src/screens.rs:1853
+Rejected: squeezing the match onto fewer lines — cargo fmt decides line breaks
+Check: arch-check reports no size violation for screens.rs or action
+Owner: no behaviour change; this only clears the code-size check that blocked the previous round
