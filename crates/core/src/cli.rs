@@ -1225,10 +1225,9 @@ pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event], fleets: &[&
             ))
         }
     };
-    if !fleets.contains(&f.as_str()) {
-        return Some(format!("fleet {f} is not configured"));
-    }
-    (!lane.starts_with(&format!("{f}:{n}:"))).then(|| format!("names {f}#{n}, not the lane's {lane}"))
+    let unknown = (!fleets.contains(&f.as_str())).then(|| format!("fleet {f} is not configured"));
+    unknown
+        .or_else(|| (!lane.starts_with(&format!("{f}:{n}:"))).then(|| format!("names {f}#{n}, not the lane's {lane}")))
 }
 
 pub(crate) fn run(args: &[&str], ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
