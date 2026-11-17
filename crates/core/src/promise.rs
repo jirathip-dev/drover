@@ -171,7 +171,7 @@ pub fn pass(
             crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "promise", d))?;
             continue;
         }
-        let Some((p, None)) = was else { continue };
+        let Some((p, missed)) = was else { continue };
         if ctx.now < p.deadline || p.moved(s, &head) || matches!(s.state.as_str(), "merged" | "closed") {
             continue;
         }
@@ -179,6 +179,9 @@ pub fn pass(
             let d = json!({"kind": p.kind, "promised": p.reason, "hold": w.what});
             let e = Event::new(ctx.now, fleet, Some(s.issue), "promise-void", d).passive();
             crate::events::append(&ctx.state, &e)?;
+            continue;
+        }
+        if missed.is_some() {
             continue;
         }
         let why = why_now(&mine, &p, w);
