@@ -1,0 +1,13 @@
+Decided: the tick lifts its budget for the trim step only, so the remote sweep runs after drive even when drive overran; clean, lesson, hotspots and compact are still skipped.
+Because: "The remote-host sweep runs on a schedule that drive overruns can't starve"
+Rejected: a second unbounded pass or a separate timer — each remote call is already killed at ssh_call_secs and a hung host goes offline for the pass, so lifting the budget for one step is bounded.
+Decided: reclaim sweeps enabled remote hosts with the tick's sweep in a Preview or Apply mode, which never takes the tick's disk-low branch (idle unfinished lanes).
+Because: "`drover reclaim` on an enabled remote host with a finished rev lane's scratch reports and frees it; live lanes are never touched."
+Decided: the sweep code (disabled, sweep_off, sweep, sweep_in, scratch) moved into crates/core/src/check/sweep.rs because check.rs is over its 2000-line size baseline and may not grow.
+Because: crates/core/src/check.rs:23
+Decided: verdict removes the reviewer's .scratch/<agent> before the busy check, through the same scratch script that skips a folder whose cargo lock is held.
+Because: "`drover verdict` frees that rev lane's `.scratch/<lane>` folder (local and remote)."
+Decided: a spawn admission on a low remote host runs the tick's sweep there after the build trim and reads the disk again before refusing DISK_LOW.
+Because: "Spawn on a host under min_free_gb sweeps that host first"
+Check: offline_tick's overrun test now allows one air timeout: the sweep is meant to reach enabled hosts after an overrun.
+Owner: Finished lanes' build space on remote machines is now cleared every tick, by reclaim, before a full-disk refusal, and when a review is recorded.
