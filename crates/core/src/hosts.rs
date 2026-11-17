@@ -212,6 +212,8 @@ pub struct Pass<'a> {
     t0: std::time::Instant,
     pub until: Option<std::time::Instant>,
     late: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    unsent: std::sync::atomic::AtomicU64,
+    slowest: std::sync::Mutex<(String, u64)>,
     off: std::collections::BTreeSet<String>,
     log: Option<(&'a Ctx, &'a Config)>,
 }
@@ -228,6 +230,8 @@ impl<'a> Pass<'a> {
             t0: crate::clock::instant(),
             until: None,
             late: std::sync::Mutex::default(),
+            unsent: std::sync::atomic::AtomicU64::new(0),
+            slowest: std::sync::Mutex::default(),
             off: std::collections::BTreeSet::new(),
             log: None,
         }
@@ -244,6 +248,21 @@ impl<'a> Pass<'a> {
     pub fn late(&self) -> Vec<String> {
         lock(&self.late).iter().cloned().collect()
     }
+    /// #1252: the remote calls this pass did not send.
+    pub fn unsent(&self) -> u64 {
+        self.unsent.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    /// #1252: the pass's slowest step so far and its seconds.
+    pub fn slowest(&self) -> (String, u64) {
+        let (step, at) = lock(&self.step).clone();
+        let now = (step, self.t0.elapsed().as_secs().saturating_sub(at));
+        let done = lock(&self.slowest).clone();
+        if now.1 >= done.1 {
+            now
+        } else {
+            done
+        }
+    }
     /// The fast step's: #337's one remote call per host, no probe; a call killed at 15 s marks its host down.
     pub fn fast(r: &'a dyn Runner) -> Self {
         Pass {
@@ -256,6 +275,12 @@ impl<'a> Pass<'a> {
             crate::timer::TICK_STEPS.iter().any(|t| t.0 == s),
             "{s} is not in TICK_STEPS"
         );
+        let ran = self.slowest();
+        let mut slowest = lock(&self.slowest);
+        if ran.1 >= slowest.1 {
+            *slowest = ran;
+        }
+        drop(slowest);
         *lock(&self.step) = (s.into(), self.t0.elapsed().as_secs());
         self.note("");
     }
@@ -312,7 +337,8 @@ impl<'a> Pass<'a> {
             });
         }
         self.note(&quote(prog, args));
-        let over = self.over();
+        let core = matches!(lock(&self.step).0.as_str(), "check" | "drive");
+        let over = !core && self.over();
         if over {
             lock(&self.late).insert(m.into());
         }
@@ -322,6 +348,8 @@ impl<'a> Pass<'a> {
             } else {
                 "host offline this pass"
             };
+            self.note("");
+            self.unsent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let stderr = format!("{m}: not sent ({why})");
             return Ok(Out {
                 code: 255,
@@ -809,12 +837,12 @@ pub fn proxy_ok(events: &[Event], agent: Option<&str>) -> Option<u64> {
 /// #923: the data of the alert that holds new lanes off spawn `sp`'s host because its lane `what` (keyed once per hold); #1212: a proxy lane's names the proxy, keyed again after each proxy call through.
 pub fn hold_alert(events: &[Event], sp: &Event, what: &str) -> Value {
     let (host, m, lane) = (sp.str("host").unwrap_or("main"), sp.str("machine"), sp.str("agent"));
-    let proxied = sp.val("proxy").as_bool() == Some(true);
+    let proxied = m.is_some() && sp.str("runtime") == Some("shed-acp");
     let mut key = format!("{host}:{}", held_since(events, m));
     let fix = if proxied {
         key += &format!(":{}:{}", lane.unwrap_or_default(), proxy_ok(events, lane).unwrap_or(0));
         let setup = crate::providers::proxied().map_or("", |p| p.setup);
-        format!("it signs in through the token proxy: check `[proxy] token-file` on the main host (`{setup}` makes a new one)")
+        format!("it signs in through the token proxy: check the token proxy's `[proxy] token-file` on the main host (`{setup}` makes a new one)")
     } else {
         let login = crate::providers::get(sp.str("harness").unwrap_or_default()).login();
         format!("run `{}` there", login.unwrap_or("its CLI login"))
@@ -1302,7 +1330,7 @@ pub fn place(
         let was = (e.str("host").unwrap_or("local"), e.str("machine"));
         let mut p = at(ctx, cfg, f, r, was, pre);
         let code = p.refusal.as_ref().map(|x| x.0);
-        let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "MEM_LOW"));
+        let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "LOGIN_NEEDED" | "MEM_LOW"));
         let fits = cfg.hosts.get(was.0).map_or(needs.is_empty(), |h| fit(was.0, h));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
         let wt = wt.and_then(|l| l.str("worktree")).map(Path::new);
