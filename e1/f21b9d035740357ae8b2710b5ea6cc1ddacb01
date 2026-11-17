@@ -1,0 +1,5 @@
+Decided: a lane whose shed agent is not running counts as ended in sweep_in; its scratch goes, and its build folder too when a spawn names it
+Because: q1866
+Rejected: keeping unknown-name build folders swept too — a build folder no spawn names may not be a lane's, so only scratch is swept by name alone
+Check: crates/cli/tests/scratch.rs a_lane_no_longer_running_in_shed_is_swept_without_a_verdict fails before the sweep.rs change and passes after
+Owner: Lanes that crashed or stopped now have their leftover build space cleared like finished ones; running lanes are never touched.
