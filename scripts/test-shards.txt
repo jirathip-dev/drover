@@ -63,6 +63,7 @@
 3 hook
 3 host_deadline
 1 host_history
+2 host_sample
 4 host_offline
 1 hosts_screen
 2 host_slots

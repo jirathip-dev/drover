@@ -181,6 +181,8 @@ pub struct Host {
     /// normal | warn | critical
     pub pressure: Option<String>,
     pub swapout: Option<f64>,
+    /// #951: `vm_stat`'s swap-out count since boot.
+    pub swap_count: Option<f64>,
     /// #168: the median of the last `WINDOW` swap-out samples (`window`); the gate reads this, not one spike.
     pub swap_median: Option<f64>,
     pub load_per_cpu: Option<f64>,
@@ -276,9 +278,33 @@ fn mem_gb(s: &str) -> Option<f64> {
     Some((field(s, "Pages free:")? + field(s, "Pages inactive:")?) * page / 1_073_741_824.0)
 }
 
-/// Sample the host (macOS: sysctl + two `vm_stat` samples 2 s apart).
+const PROBES: [&[&str]; 10] = [
+    &["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+    &["vm_stat"],
+    &["sysctl", "-n", "vm.loadavg"],
+    &["sysctl", "-n", "hw.ncpu"],
+    &["ps", "-Ao", "pid=,ppid=,pcpu=,comm="],
+    &["sysctl", "-n", "hw.memsize"],
+    &["cat", "/proc/loadavg"],
+    &["nproc"],
+    &["grep", "MemAvailable", "/proc/meminfo"],
+    &["grep", "MemTotal", "/proc/meminfo"],
+];
+
+/// Sample the host in one `sh -c` (#951: no sleep; `pace` turns the swap-out count into a rate).
 pub fn sample(r: &dyn Runner) -> Host {
-    let pressure = stdout(r, "sysctl", &["-n", "kern.memorystatus_vm_pressure_level"]).and_then(|s| {
+    let lines: Vec<String> = (PROBES.iter())
+        .map(|p| {
+            crate::hosts::quote(
+                p.first().copied().unwrap_or_default(),
+                &crate::runner::argv(p.get(1..).unwrap_or_default()),
+            )
+        })
+        .collect();
+    let mut outs = crate::snapshot::batch(r, &lines).into_iter();
+    let mut next = || outs.next().flatten();
+    let (pressure, vm, load, ncpu, ps, size) = (next(), next(), next(), next(), next(), next());
+    let pressure = pressure.and_then(|s| {
         match s.trim() {
             "1" | "normal" => Some("normal"),
             "2" | "warn" => Some("warn"),
@@ -287,37 +313,46 @@ pub fn sample(r: &dyn Runner) -> Host {
         }
         .map(String::from)
     });
-    let a = stdout(r, "vm_stat", &[]);
-    let b = a.as_ref().and_then(|_| {
-        r.sleep(2);
-        stdout(r, "vm_stat", &[])
-    });
-    let (a, b) = (a.unwrap_or_default(), b.unwrap_or_default());
-    let swapout = field(&a, "Swapouts:")
-        .zip(field(&b, "Swapouts:"))
-        .map(|(a, b)| (b - a).max(0.0));
-    let load = stdout(r, "sysctl", &["-n", "vm.loadavg"])
-        .and_then(|s| s.split_whitespace().find_map(|w| w.parse::<f64>().ok()));
-    let ncpu = stdout(r, "sysctl", &["-n", "hw.ncpu"]).and_then(|s| s.trim().parse::<f64>().ok());
-    let linux = |p: &str, a: &[&str]| b.is_empty().then(|| stdout(r, p, a)).flatten().unwrap_or_default();
-    let word = |s: String, n: usize| s.split_whitespace().nth(n)?.parse::<f64>().ok();
-    let load = load.or_else(|| word(linux("cat", &["/proc/loadavg"]), 0));
-    let ncpu = ncpu.or_else(|| word(linux("nproc", &[]), 0));
-    let avail = || Some(word(linux("grep", &["MemAvailable", "/proc/meminfo"]), 1)? / 1_048_576.0);
-    let (own, top) = own_load(&stdout(r, "ps", &PS).unwrap_or_default());
+    let vm = vm.unwrap_or_default();
+    let mut linux = || next().filter(|_| vm.is_empty()).unwrap_or_default();
+    let (cat, nproc, avail, total) = (linux(), linux(), linux(), linux());
+    let word = |s: &str, n: usize| s.split_whitespace().nth(n)?.parse::<f64>().ok();
+    let load = load.and_then(|s| s.split_whitespace().find_map(|w| w.parse::<f64>().ok()));
+    let load = load.or_else(|| word(&cat, 0));
+    let ncpu = ncpu
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .or_else(|| word(&nproc, 0));
+    let (own, top) = own_load(&ps.unwrap_or_default());
     let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| (l - own).max(0.0) / n);
-    let size = stdout(r, "sysctl", &["-n", "hw.memsize"]).and_then(|s| s.trim().parse::<f64>().ok());
-    let size = size.map(|b| b / 1_073_741_824.0);
-    let size = size.or_else(|| Some(word(linux("grep", &["MemTotal", "/proc/meminfo"]), 1)? / 1_048_576.0));
+    let size = size
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .map(|b| b / 1_073_741_824.0);
+    let size = size.or_else(|| Some(word(&total, 1)? / 1_048_576.0));
     Host {
         pressure,
-        swapout,
-        swap_median: None,
+        swap_count: field(&vm, "Swapouts:"),
         load_per_cpu,
-        free_mem_gb: mem_gb(&b).or_else(avail),
+        free_mem_gb: mem_gb(&vm).or_else(|| Some(word(&avail, 1)? / 1_048_576.0)),
         mem_total_gb: size,
         top,
+        ..Host::default()
     }
+}
+
+/// #951: `h.swapout` in pages per 2 s from the swap-out count's change since this host's last kept count beside `state`; none on the first.
+pub fn pace(state: &Path, machine: Option<&str>, h: &mut Host, now: u64) {
+    let name = machine.map_or("swapcount".into(), |m| format!("swapcount-{}", m.replace('/', "_")));
+    let file = state.with_file_name(name);
+    let old = std::fs::read_to_string(&file).unwrap_or_default();
+    let prev = old
+        .split_once(' ')
+        .and_then(|(t, n)| Some((t.parse::<u64>().ok()?, n.trim().parse::<f64>().ok()?)));
+    let Some(n) = h.swap_count.filter(|_| prev.is_none_or(|p| now > p.0)) else {
+        return;
+    };
+    std::fs::write(&file, format!("{now} {n}")).ok();
+    let secs = |t: u64| f64::from(u32::try_from(now - t).unwrap_or(u32::MAX));
+    h.swapout = prev.map(|(t, c)| (n - c).max(0.0) * 2.0 / secs(t));
 }
 
 const WINDOW: usize = 5;

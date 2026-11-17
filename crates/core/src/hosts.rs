@@ -555,7 +555,8 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                     (s.github, ()) = (card, s.health.extend(warn));
                 }
             }
-            let hs = host::sample(&on);
+            let mut hs = host::sample(&on);
+            host::pace(&ctx.state, on.machine, &mut hs, ctx.now);
             (s.load, s.mem, s.mem_total) = (hs.load_per_cpu, hs.free_mem_gb, hs.mem_total_gb);
             ((s.disk, s.disk_total), s.swap) = (host::df(&on).unzip(), hs.swapout);
             s.pressure = hs.pressure.as_deref().map(level);
@@ -868,6 +869,7 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
         return (Host::default(), Some(("DISK_LOW", why)));
     }
     let mut hs = host::sample(on);
+    host::pace(&ctx.state, on.machine, &mut hs, ctx.now);
     if on.machine.is_none() {
         host::window(&ctx.state, &mut hs);
     }
@@ -1727,7 +1729,8 @@ fn row(ts: u64, host: &str, s: &Seen, (lanes, procs): (usize, Option<[u64; 5]>))
 
 /// #234 the fast step: this host's history row, a minute apart (remote hosts' rows come from `survey`); #352: `procs`.
 pub fn sample(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<()> {
-    let hs = host::sample(r);
+    let mut hs = host::sample(r);
+    host::pace(&ctx.state, None, &mut hs, ctx.now);
     let s = Seen {
         load: hs.load_per_cpu,
         mem: hs.free_mem_gb,
