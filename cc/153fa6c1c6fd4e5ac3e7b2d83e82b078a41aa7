@@ -1,0 +1,12 @@
+Decided: mint no longer revokes the agent's older keys; proxy::state already ends a key once its replacement's spawn is logged or its lane is gone.
+Because: "A lane's proxy key is revoked only once its replacement has actually started"
+Decided: a 401 naming a lane key is a lane fault, reported stalled so drive's existing stall path respawns that one lane.
+Because: crates/core/src/session/mod.rs:141
+Because: crates/core/src/lanes.rs:198
+Decided: a proxied host's signed-out alert points at the proxy token-file, not /login.
+Because: crates/core/src/hosts.rs:806
+Decided: staging build fix: serve.rs baseline raised to 3591, the size #1108 merged it at; serve.rs untouched here.
+Rejected: trimming serve.rs by 16 lines — unrelated refactor of another issue's file.
+Rejected: a new Health variant or alert kind — the stall respawn already does what the spec wants.
+Check: CI arch-check is green at cc153fa6 and the three remote_acp regression tests pass.
+Owner: A refused respawn no longer cuts off a running proxy lane, and its 401 restarts that lane instead of holding the host.
