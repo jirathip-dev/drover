@@ -777,8 +777,7 @@ fn verdict_sheet(ev: &[Event], q: &Q) -> Option<Value> {
 }
 
 fn stats(ctx: &Ctx, ev: &[Event], states: &crate::events::States, only: Option<&str>, lanes: &[Lane]) -> Value {
-    let now = ctx.now;
-    let day = |e: &Event| usize::try_from(now.saturating_sub(e.ts) / 86_400).unwrap_or(usize::MAX);
+    let day = |e: &Event| usize::try_from(ctx.now.saturating_sub(e.ts) / 86_400).unwrap_or(usize::MAX);
     let merged: Vec<&Event> = ev
         .iter()
         .filter(|e| e.kind == "merged" && day(e) < 7 && only.is_none_or(|f| e.fleet == f))
@@ -808,18 +807,10 @@ fn stats(ctx: &Ctx, ev: &[Event], states: &crate::events::States, only: Option<&
         json!({"label": "rate-limited", "value": c.rate_limited.to_string()}),
         json!({"label": "rounds / issue", "value": format!("{:.1}", avg(n, r)), "spark": per.map(|p| avg(p.0, p.1))}),
     ];
-    let cfg = Config::kept(ctx).ok();
-    for (f, fc) in cfg
-        .iter()
-        .flat_map(|c| &c.fleet)
-        .filter(|f| only.is_none_or(|o| o == f.0))
-    {
-        let label = if only.is_some() {
-            "in flight".into()
-        } else {
-            format!("{f} in flight")
-        };
-        let flight = crate::queue::flight(ctx, states, fc, f);
+    let fleets = Config::kept(ctx).into_iter().flat_map(|c| c.fleet);
+    for (f, fc) in fleets.filter(|f| only.is_none_or(|o| o == f.0)) {
+        let label = only.map_or_else(|| format!("{f} in flight"), |_| "in flight".into());
+        let flight = crate::queue::flight(ctx, states, &fc, &f);
         items.extend(flight.map(|(v, cap)| json!({"label": label, "value": format!("{}/{cap}", v.len())})));
     }
     json!({"type": "stat", "id": "stats", "items": items})
