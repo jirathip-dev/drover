@@ -1745,11 +1745,7 @@ impl Server<'_> {
                 }
                 line
             }
-            "host" | "reap" => {
-                let line = self.form_op(ctx, name, &[("host", s("host")), ("to", s("to"))])?;
-                let sh = self.hosts_sheet(ctx).context("no hosts")?;
-                return Ok(json!({"ops": [{"op": "screen", "screen": sh}], "toast": line}));
-            }
+            "host" | "reap" => return self.host_action(ctx, name, s("host"), s("to")),
             "save-fleets" => self.save_fleets(ctx, &cfg, v)?,
             "remove-fleet" => {
                 let hash = crate::propose::view(ctx)?.hash;
@@ -1769,6 +1765,12 @@ impl Server<'_> {
             .into_iter()
             .collect();
         Ok(json!({"ops": ops, "toast": toast, "close": close}))
+    }
+
+    fn host_action(&self, ctx: &Ctx, name: &str, host: String, to: String) -> Result<Value> {
+        let line = self.form_op(ctx, name, &[("host", host), ("to", to)])?;
+        let sh = self.hosts_sheet(ctx).context("no hosts")?;
+        Ok(json!({"ops": [{"op": "screen", "screen": sh}], "toast": line}))
     }
 
     fn save_fleets(&self, ctx: &Ctx, cfg: &Config, v: &Value) -> Result<String> {
