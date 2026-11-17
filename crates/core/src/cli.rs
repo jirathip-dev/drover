@@ -505,6 +505,11 @@ enum Cmd {
     )]
     Protection,
     #[command(
+        about = "#937: shed's one install path: the pinned rev onto PATH, shed serve restarted onto it, read back"
+    )]
+    #[command(subcommand)]
+    Shed(crate::shed::Cmd),
+    #[command(
         about = "Remove worktree + pane of merged or closed-issue lanes (never live ones; unsaved work goes to `wip/` first, kept on a secret) and list orphan folders; dry run unless --yes"
     )]
     Clean {
@@ -1981,6 +1986,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                 }
                 Cmd::Protection => return protection::protection(&cfg, r, out),
+                Cmd::Shed(crate::shed::Cmd::Install { yes }) => return crate::shed::install(ctx, r, out, yes),
                 Cmd::Stats { cmd } => cmd.run(ctx, &cfg, out)?,
                 Cmd::Clean {
                     fleet,

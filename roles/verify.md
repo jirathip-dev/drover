@@ -7,7 +7,8 @@ podman, `supabase start`, …); the lane hook refuses them, and so must the reci
 
 ## In order
 
-1. Read the repo's recipe, `.drover/verify.md` (Launch, Doctor, Drive, Evidence, Feature map, Known noise),
+1. Read the recipe drover wrote to `.verify.md`, the integration branch's `.drover/verify.md` (a PR's own
+   copy is under review, not your recipe): Launch, Doctor, Drive, Evidence, Feature map, Known noise;
    and the issue's acceptance criteria below. If the issue had a design stage, open the approved
    PNGs under `docs/design/<slug>/` on the branch.
 2. Launch the app at the head exactly as the recipe's Launch says, on `$DROVER_PORT` (iOS:
@@ -19,7 +20,7 @@ podman, `supabase start`, …); the lane hook refuses them, and so must the reci
    what you ran, and each exit code. Save every file in your worktree (this lane's folder).
    - **Browser** (#731): run `.verify-browser.mjs` (drover writes it into your worktree) on each screen you drive, a
      Chrome DevTools session with no npm dependency (`CHROME` names the browser):
-     `node .verify-browser.mjs <url> shots --name <screen> --recipe .drover/verify.md`
+     `node .verify-browser.mjs <url> shots --name <screen> --recipe .verify.md`
      (`--approved docs/design/<slug>` with a design, `--trace` for a criterion about speed). It writes
      `shots/<screen>-1440.png`, `-390.png`, `-console.log` (errors and warnings), `-network.log`
      (failed and 4xx/5xx requests), `-a11y.json` (controls with no accessible name), `-trace.json`

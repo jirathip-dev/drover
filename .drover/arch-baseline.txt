@@ -21,7 +21,7 @@ crates/core/src/waiting.rs:scan_where 339
 crates/core/src/waiting.rs:waits 295
 crates/core/src/why.rs:show 152
 crates/server/src/screens.rs:action 170
-crates/server/src/serve.rs 3575
+crates/server/src/serve.rs 3591
 crates/server/src/serve.rs:cards 241
 crates/server/src/serve.rs:host_tab 156
 crates/server/src/serve.rs:queue_tab 260
