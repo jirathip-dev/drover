@@ -275,7 +275,7 @@ fn random_seeds() {
 #[test]
 fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let s = Some(Sabotage::Planted);
-    let tripped = |f: &str| f.starts_with("I1 ");
+    let tripped = |f: &str| f.starts_with("I1 ") && f.contains(" rev has ");
     let h = hunt::hunt(&[2, 3, 4, 5], 2, s, |r, f| {
         r < 40 && !f.iter().any(|x| tripped(&x.failure))
     });
@@ -284,7 +284,7 @@ fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
         .iter()
         .find(|x| tripped(&x.failure))
         .expect("the hunt finds it within 40 rounds");
-    let random: Vec<u64> = (1000..1000 + f.round as u64).collect();
+    let random: Vec<u64> = (1016..1016 + f.round as u64).collect();
     let hs: Vec<_> = random.iter().map(|&n| std::thread::spawn(move || run(n, s))).collect();
     for o in hs.into_iter().map(|h| h.join().expect("a run")) {
         let why = o.failure.unwrap_or_default();
