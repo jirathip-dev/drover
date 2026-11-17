@@ -1,0 +1,7 @@
+Decided: merge origin/staging to pick up the queue-wide cap raise instead of trimming or blocking
+Because: q1802
+Decided: raise the serve.rs size baseline to 3594, staging's 3591 plus this PR's 3 router lines
+Because: crates/server/src/serve.rs:1189
+Rejected: queue block on the raise issue — #1201 already merged to staging, nothing left to wait on
+Check: cap-check exits 0 at 47994 / 53500 and the cooee_profiles tests pass in CI
+Owner: The line limit raise has landed, so this PR is merged up to date and fits under it now.
