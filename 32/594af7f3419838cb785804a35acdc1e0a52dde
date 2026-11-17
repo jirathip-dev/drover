@@ -1,0 +1,9 @@
+Decided: triage is a scheduled lane like lesson: weekly from tick, on demand with `drover triage <fleet>`, acting on GitHub only through `drover triage close|fold|label|docs` verbs.
+Because: "Acts on GitHub, through drover verbs only** (the hook allows them for this role alone)"
+Decided: the hook treats a triage lane as read-only (no commits or pushes) and refuses raw `gh issue close|edit` there with TRIAGE_VERBS.
+Because: "hook rules (triage may `gh issue close|edit|comment`, may not push code or merge)"
+Decided: fix round 4 merges origin/staging; README takes staging's text, hook.rs keeps triage's rules plus staging's `cap_raise: false`.
+Because: crates/core/src/hook.rs:79
+Rejected: changing the sim hunt test here — it is outside this PR's diff and staging fixed it in #1259.
+Check: the triage, sim, handover, cloud and spawn tests pass in CI at the new head, with no fleet-test-* dir left.
+Owner: CI's red was a flaky sim test and a temp dir another test left; both came from staging, which this round merges in.
