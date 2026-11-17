@@ -581,3 +581,58 @@ fn a_tick_past_its_budget_still_sweeps_an_enabled_hosts_finished_scratch() {
         "{out}"
     );
 }
+
+#[test]
+fn reclaim_sweeps_an_enabled_hosts_finished_scratch_and_spares_live_lanes() {
+    let (c, home, s) = air_setup("scratch-on-reclaim");
+    air_spawn(&c, 12, "rev", "sendmeter-rev-12-r1");
+    ev(&c, 12, "verdict", json!({"verdict": "FAIL", "sha": "a"}));
+    air_spawn(&c, 14, "impl", "sendmeter-impl-14");
+    let [done, live] = ["sendmeter-rev-12-r1", "sendmeter-impl-14"].map(|a| blob(&s, &format!("{a}/debug")));
+    let path = format!("{AIR_ROOT}/.build/.scratch/sendmeter-rev-12-r1");
+    let (f, _here, air) = air_off_hosts(&c);
+    let (code, dry) = run(&c, &air_off_runner(&home, &f, &air), &["reclaim"]);
+    assert_eq!(code, 0, "{dry}");
+    assert!(
+        dry.contains(&format!("would remove scratch air:{path} (lane finished)")),
+        "{dry}"
+    );
+    assert!(done.exists(), "a preview removes nothing");
+    let (f, _here, air) = air_off_hosts(&c);
+    let (code, out) = run(&c, &air_off_runner(&home, &f, &air), &["reclaim", "--apply"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!done.exists(), "{out}");
+    assert!(live.exists(), "a live lane's scratch is never touched: {out}");
+    assert!(out.contains(&format!("scratch: air: removed {path} ")), "{out}");
+}
+
+#[test]
+fn a_verdict_frees_its_remote_reviewers_scratch() {
+    let (c, home, s) = air_setup("scratch-verdict-remote");
+    let d = json!({"role": "rev", "agent": "sendmeter-rev-12-r1", "pane": "sendmeter-rev-12-r1", "runtime": "shed",
+                   "worktree": "/Users/me/worktrees/sendmeter/sendmeter-rev-12-r1", "root": AIR_ROOT,
+                   "host": "air", "machine": "air"});
+    ev(&c, 12, "spawn", d);
+    let [rev, other] = ["sendmeter-rev-12-r1", "sendmeter-impl-13"].map(|a| blob(&s, &format!("{a}/debug")));
+    let head = "1111111111111111111111111111111111111111";
+    let file = c.state.with_file_name("verdict.md");
+    std::fs::write(&file, "FAIL\n").unwrap();
+    let f = Fake::default().reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", head);
+    let air = FakeShed::new();
+    let r = air_off_runner(&home, &f, &air);
+    let args = [
+        "verdict",
+        "sendmeter",
+        "12",
+        "FAIL",
+        "--sha",
+        head,
+        "--file",
+        file.to_str().unwrap(),
+    ];
+    let (code, out) = run(&c, &r, &args);
+    assert_eq!(code, 0, "{out}");
+    assert!(!rev.exists(), "{out}");
+    assert!(other.exists(), "only the reviewer's own scratch goes: {out}");
+    assert!(out.contains("(verdict recorded)"), "{out}");
+}

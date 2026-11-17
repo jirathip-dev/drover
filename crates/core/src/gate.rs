@@ -218,8 +218,8 @@ pub fn verdict(
             check::purge(r, cfg, fleet, out, wt, false)?;
         }
     }
-    let is_rev = |e: &&Event| e.is("spawn", fleet, issue) && crate::events::checks(e);
-    let rev = events.iter().rfind(is_rev);
+    let rev = (events.iter()).rfind(|e| e.is("spawn", fleet, issue) && crate::events::checks(e));
+    rev.map(|e| check::drop_scratch(r, e, out)).transpose()?;
     let on = rev.map(|e| crate::hosts::On::of(r, Some(e)));
     let exists = |w: &&str| on.as_ref().is_some_and(|on| on.exists(Path::new(w)));
     let (Some((e, wt)), Some(r)) = (rev.and_then(|e| Some((e, e.str("worktree").filter(exists)?))), &on) else {
