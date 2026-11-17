@@ -145,6 +145,7 @@
 1 remote_verdict
 3 report
 2 repro
+3 repro_host
 3 respawn_loop
 2 respawn_pace
 2 retired_keys
