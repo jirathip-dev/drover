@@ -3,7 +3,7 @@ use super::{
 };
 use super::{LaneRow, LanesTab, NeedAsk, NeedIssue, QueueCard, QueueRow, JSON};
 use crate::access::{civil_month_day, civil_year};
-use crate::api::{Block, Chat, Herd, HerdFleet, HerdLane};
+use crate::api::{Block, Chat, Herd, HerdFleet, HerdLane, Lane};
 use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Map, Value};
@@ -188,7 +188,7 @@ fn cut(s: &str, n: usize) -> String {
 
 const LINE: usize = 48;
 
-fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<usize>) -> Value {
+fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<usize>, lane: Option<&Lane>) -> Value {
     let mut fig = figure(&r.act, &r.state);
     fig.put("grow", json!(r.grow));
     let title = format!(
@@ -215,8 +215,20 @@ fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<u
         sub = format!("{sub} · CI ✓");
     }
     let live = r.live && !r.dead && !r.lane.is_empty();
+    let limited = lane.is_some_and(|l| l.state == "rate-limited");
+    let said = lane.filter(|_| live).map(|l| {
+        let note = l
+            .note
+            .as_deref()
+            .map(|n| if limited { format!("resets {n}") } else { n.into() });
+        [Some(l.state.clone()), note]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ")
+    });
     if live {
-        let at = [r.lane.as_str(), r.place.as_str()];
+        let at = [said.as_deref().unwrap_or_default(), r.lane.as_str(), r.place.as_str()];
         sub = format!(
             "{sub} ▸ {}",
             at.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
@@ -257,10 +269,13 @@ fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<u
     );
     if live {
         let confirm = json!({"title": format!("Stop #{}'s lane {}?", r.issue, r.lane), "ok": "Stop lane"});
-        v.put(
-            "swipe",
-            json!([{"label": "Stop", "tone": "bad", "action": "stop", "values": vals, "confirm": confirm}]),
-        );
+        let stop = json!({"label": "Stop", "tone": "bad", "action": "stop", "values": vals, "confirm": confirm});
+        if limited {
+            let wait = json!({"label": "Wait", "action": "limit", "values": {"fleet": f, "issue": r.issue}});
+            v.put("swipe", json!([wait, stop]));
+        } else {
+            v.put("swipe", json!([stop]));
+        }
     }
     if k.is_some() {
         let confirm = json!({"title": format!("Drop #{} from the queue?", r.issue), "ok": "Drop"});
@@ -353,7 +368,7 @@ fn tree<'a>(rs: &[&'a QueueRow]) -> Vec<(&'a QueueRow, usize)> {
     out
 }
 
-fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q) -> Value {
+fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane]) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
     let paused = c.paused.is_some();
@@ -362,7 +377,7 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q) -> Value {
         let mut i = 0;
         while let Some(&(r, d)) = ts.get(i) {
             let k = queued.iter().position(|x| x.issue == r.issue);
-            let mut v = row(ctx, ev, paused, f, r, k);
+            let mut v = row(ctx, ev, paused, f, r, k, lanes.iter().find(|l| l.name == r.lane));
             if d > 0 {
                 v.put("indent", json!(d.min(2)));
             }
@@ -755,7 +770,7 @@ fn verdict_sheet(ev: &[Event], q: &Q) -> Option<Value> {
     )
 }
 
-fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&str>) -> Value {
+fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&str>, lanes: &[Lane]) -> Value {
     let day = |e: &Event| usize::try_from(now.saturating_sub(e.ts) / 86_400).unwrap_or(usize::MAX);
     let merged: Vec<&Event> = ev
         .iter()
@@ -777,13 +792,13 @@ fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&s
         }
     };
     let (n, r) = per.iter().fold((0, 0), |a, p| (a.0 + p.0, a.1 + p.1));
-    let lanes = states.values().filter(|s| only.is_none_or(|f| s.fleet == f));
-    let lanes = lanes
-        .filter(|s| s.lane.is_some() && !s.done() && s.state != "queued")
-        .count();
+    let c = super::v1::counts(lanes, only);
     json!({"type": "stat", "id": "stats", "items": [
         {"label": "merged · 7d", "value": n.to_string(), "spark": per.map(|p| p.0)},
-        {"label": "lanes", "value": lanes.to_string()},
+        {"label": "busy", "value": c.busy.to_string()},
+        {"label": "approval", "value": c.waiting_approval.to_string()},
+        {"label": "owner", "value": c.waiting_owner.to_string()},
+        {"label": "rate-limited", "value": c.rate_limited.to_string()},
         {"label": "rounds / issue", "value": format!("{:.1}", avg(n, r)), "spark": per.map(|p| avg(p.0, p.1))}]})
 }
 
@@ -1550,6 +1565,7 @@ impl Server<'_> {
 
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
         let (tab, ev) = (self.queue_tab(ctx), working(&ctx.state).unwrap_or_default());
+        let lanes = Config::kept(ctx).map_or(vec![], |cfg| self.lane_list(ctx, &cfg, &ev, &ev.states));
         let sel = q
             .get("repo")
             .filter(|r| tab.fleets.iter().any(|f| &f.name == *r))
@@ -1562,13 +1578,13 @@ impl Server<'_> {
         shown.sort_by_key(|c| c.need == 0);
         let mut blocks = vec![
             json!({"type": "chips", "id": "repo", "name": "repo", "selected": [sel.unwrap_or("all")], "action": "filter", "options": opts}),
-            stats(ctx.now, &ev, &ev.states, sel),
+            stats(ctx.now, &ev, &ev.states, sel, &lanes),
             counts(&shown),
         ];
         if let Some(e) = &tab.error {
             blocks.push(json!({"type": "text", "id": "error", "markdown": e}));
         }
-        blocks.extend(shown.into_iter().map(|c| fleet_card(ctx, &ev, c, q)));
+        blocks.extend(shown.into_iter().map(|c| fleet_card(ctx, &ev, c, q, &lanes)));
         let mut kept = q.clone();
         kept.retain(|k, _| k != "repo" || sel.is_some());
         let stream = view(&kept, "", "").replacen("/screens/queue", "/screens/queue/stream", 1);
@@ -1745,6 +1761,7 @@ impl Server<'_> {
                 d.put("check", json!(true));
                 crate::queue_change(ctx, &cfg, f, d, Some("cooee"))? + " (needs-check)"
             }
+            "limit" => crate::limit::wait(ctx, &self.r, (&fleet, n()?), "owner")?,
             "stop" | "kill" | "clean" | "close" => {
                 let act = crate::api::Act {
                     agent: s("agent"),

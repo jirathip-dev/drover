@@ -192,6 +192,10 @@ appends `<ts> cold|handover` to `serve-starts` (the last day kept); a start that
 #1081: a `serve` whose port is held asks that port's health which build holds it: its own build, it exits 0 (launchd and
 systemd restart it only after a failed exit); an older one, it asks that serve over its control socket to hand over (its
 bridge runs the installed binary), then exits 0; nothing answers, it fails.
+#1244: a serve the launchd (or systemd) job started never exits 0 on a held port: it stops the serve on the port and
+listens itself, so the job's own pid is the one listener. `self-update` restarts serve only through the job
+(`launchctl kickstart -k`, `systemctl --user restart`), and `drover doctor`'s `serve job` row is ✗ while the port's
+listener is not the job's pid.
 
 `drover check` alerts once per state, then `<kind>-ok` when it clears:
 
@@ -327,6 +331,9 @@ Tests: `crates/cli/tests/cooee_screens.rs` against cooee's fixtures in `crates/c
 same code as the live page. Every URL in them is relative and the service worker keys its paths and cache on its
 registration scope, so the files work under a sub-path (the live server at `/` behaves as before). A plain export is
 the read-only view, without transcripts.
+
+#983: `/api/v1/state` has `counts`: `busy` (lanes `working` or `running`), `waiting_approval`, `waiting_owner` and
+`rate_limited`; each lane carries shed's `note` on its state (a `rate-limited` lane's reset time).
 
 `--demo` (#39) is the public demo at <https://jirathip-dev.github.io/herdsman/>, built from the synthetic
 `demo/` (3 made-up repos, `fleet.toml`, `events.jsonl`, `cache/` for issue/PR titles and CI, and
