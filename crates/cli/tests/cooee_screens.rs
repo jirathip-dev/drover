@@ -197,7 +197,7 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     }
     let row = find(&q, "q-sendmeter-12");
     assert_eq!(row["title"], "#12");
-    assert_eq!(row["subtitle"], "impl ✓ · review 1 ✗ · fix 1 ▸ sendmeter-impl-12");
+    assert_eq!(row["subtitle"], "impl ✓ · review 1 ✗ · fix 1 ▸ working · sendmete…");
     assert_eq!(row["tap"], json!({"sheet": "/screens/issue?repo=sendmeter&issue=12"}));
     for (id, n) in [("q-722", 722), ("q-456", 456), ("q-690", 690)] {
         let tap = json!({"sheet": format!("/screens/issue?repo=herdsman&issue={n}")});
