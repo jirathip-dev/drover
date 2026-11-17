@@ -1,0 +1,12 @@
+Decided: merged origin/staging again (a merge, no rebase); README Today takes the merged queue items, Next is the queue as it stands now
+Because: "**README**: Today = what is on staging now; Next = the open queue. Nothing else."
+Decided: deleted docs/cap-history/2026-11-17-1201.md, which staging added after the sweep
+Because: "Delete `docs/cap-history/`; git keeps the 47 notes."
+Decided: the cap trailer rule moved into roles/orchestrator/role.md, where staging's split put the cap-raise line
+Because: roles/orchestrator/role.md:33
+Decided: spawn's arch baseline 501 → 502 for the brief's docs.md line; the brief reads rules from the integration view (#958), docs.md from the worktree
+Because: crates/core/src/spawn.rs:1400
+Rejected: folding docs.md into staging's docs_trust deny list — that one prunes the checkout; the issue asks for a list the brief names
+Check: rg -l 'Host tab|herd\.json|\[chat\] tab|/frag' docs roles README.md prints nothing; docs/cap-history is gone
+Check: the 4 macOS launchd/serve test failures are outside this diff; doctor's fails on clean staging too
+Owner: The docs sweep is caught up with the latest merges: the front page lists what shipped since, and the queue list matches today's queue.
