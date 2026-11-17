@@ -1850,13 +1850,7 @@ impl Server<'_> {
         };
         let close = ["save-fleets", "remove-fleet", "kill", "clean", "close", "queue"].contains(&name)
             || name == "answer" && a["screen"] != "cards";
-        let gone = match name {
-            "answer" => Some(format!("ask-{block}")),
-            "needs-human" => Some(format!("nhc-{}-{}", s("fleet"), s("issue"))),
-            "run-card" => Some(format!("run-{block}")),
-            _ => None,
-        };
-        let ops: Vec<Value> = gone.map(|id| json!({"op": "remove", "id": id})).into_iter().collect();
+        let ops = later::gone_ops(name, block, &s("fleet"), &s("issue"));
         Ok(json!({"ops": ops, "toast": toast, "close": close}))
     }
 

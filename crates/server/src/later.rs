@@ -195,3 +195,13 @@ impl Server<'_> {
         Ok(json!({"ops": [{"op": "remove", "id": id}], "toast": format!("{id}: later, back when it changes")}))
     }
 }
+
+pub(super) fn gone_ops(name: &str, block: &str, fleet: &str, issue: &str) -> Vec<Value> {
+    let gone = match name {
+        "answer" => format!("ask-{block}"),
+        "needs-human" => format!("nhc-{fleet}-{issue}"),
+        "run-card" => format!("run-{block}"),
+        _ => return vec![],
+    };
+    vec![json!({"op": "remove", "id": gone})]
+}
