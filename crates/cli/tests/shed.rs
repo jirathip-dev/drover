@@ -2340,7 +2340,7 @@ fn clean_removes_exited_shed_terminals_of_merged_lanes_only() {
         json!({"fleet": "sendmeter", "issue": "13", "role": "impl", "harness": "claude"}),
     );
     b.exit("sendmeter-impl-13");
-    let f = Fake::default().reply("gh issue list", "[]");
+    let f = Fake::default().reply("gh api graphql -f", r#"{"data": {"repository": {}}}"#);
     let (_, out) = run(&c, &f, &["clean"]);
     assert!(
         out.contains("would remove exited shed terminal sendmeter-verify-12-r1 (sendmeter#12 merged)"),
