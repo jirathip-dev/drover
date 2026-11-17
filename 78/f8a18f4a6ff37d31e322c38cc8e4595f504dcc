@@ -1,0 +1,5 @@
+Decided: merged origin/staging; lanes.rs health keeps the lane-key 401 arm before staging's held arm
+Because: "A 401 that names a revoked or expired lane key is a lane fault (respawn that lane)"
+Rejected: held arm first — a refused-key pane reported as running would never be respawned
+Check: crates/core/src/lanes.rs health match order; remote_acp tests pass
+Owner: merge-only round; full test suite left to CI because the host disk is full
