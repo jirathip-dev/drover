@@ -204,7 +204,7 @@ Check it worked: `echo hello | notify-telegram <chat>` arrives on your phone.
 ## 6. Board on the phone (Tailscale)
 
 `drover setup` writes and loads this job for you: label `[serve] launchd_label` (default
-`dev.drover.serve`), address `[serve] addr` (default `127.0.0.1:7777`), `KeepAlive` only after a failed exit (#1081: a serve that finds its port held by its own build exits 0, by an older one asks it to hand over, then exits 0), `ProcessType Interactive` (#893), the tick's PATH,
+`dev.drover.serve`), address `[serve] addr` (default `127.0.0.1:7777`), `KeepAlive` only after a failed exit (#1081: a serve that finds its port held by its own build exits 0, by an older one asks it to hand over, then exits 0; #1244: the job's own serve stops the holder and listens instead), `ProcessType Interactive` (#893), the tick's PATH,
 logs to `~/.local/state/drover/serve.log`. If a job under another label already runs
 `drover serve`, setup adopts it (`= adopted <plist>`) and never makes a second one. Re-labelling is
 manual: `launchctl bootout gui/$(id -u)/<old label>`, delete its plist, run `drover setup` again.

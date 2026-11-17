@@ -122,8 +122,42 @@ pub fn restart(ctx: &Ctx, r: &dyn Runner, label: &str) -> Result<String> {
     if refused(ctx, r, label, false) {
         return rebootstrap(ctx, r, label, false);
     }
+    exec(r, &restart_cmd(ctx, label))
+}
+
+/// #1244: the command that restarts job `label`.
+pub fn restart_cmd(ctx: &Ctx, label: &str) -> String {
     let probe = ctl(ctx, label, false)[0].replacen("print", "kickstart -k", 1);
-    exec(r, &probe.replacen("is-active", "restart", 1))
+    probe.replacen("is-active", "restart", 1)
+}
+
+/// #1244: the pid job `label` runs (`None` while stopped); `Err` if the job is not loaded.
+pub fn job_pid(ctx: &Ctx, r: &dyn Runner, label: &str) -> Result<Option<u32>> {
+    let out = if MAC {
+        exec(r, &ctl(ctx, label, false)[0])?
+    } else {
+        let o = exec(
+            r,
+            &format!("systemctl --user show -p MainPID -p LoadState {label}.service"),
+        )?;
+        anyhow::ensure!(o.contains("LoadState=loaded"), "{label} is not loaded");
+        o
+    };
+    let pid = out.lines().find_map(|l| {
+        let l = l.trim();
+        l.strip_prefix("pid = ")
+            .or_else(|| l.strip_prefix("MainPID="))?
+            .parse()
+            .ok()
+    });
+    Ok(pid.filter(|p| *p > 0))
+}
+
+/// #1244: the pids listening on `addr`'s port.
+pub fn listeners(r: &dyn Runner, addr: &str) -> Vec<u32> {
+    let port = format!("-iTCP:{}", addr.rsplit(':').next().unwrap_or_default());
+    let out = ok(r, "lsof", &["-nP", "-t", &port, "-sTCP:LISTEN"]).unwrap_or_default();
+    out.lines().filter_map(|l| l.trim().parse().ok()).collect()
 }
 
 /// #1243: the own interval jobs launchd refuses (`spawn failed`, `OS_REASON_CODESIGNING`).
