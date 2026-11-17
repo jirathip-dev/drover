@@ -1,0 +1,10 @@
+Decided: the disk-budget walk runs on the slow pass only, no new [limits] key
+Because: "The budget walk runs on the slow pass only"
+Rejected: reuse a measurement younger than a new limits key — spawn already reads the last stamp, so a key adds nothing
+Because: crates/core/src/spawn.rs:1195
+Decided: the held-start test runs the kick a fast start launches and asserts its drive-pass logs start refused DISK_BUDGET, instead of counting a detach the fixture never makes
+Because: crates/core/src/drive.rs:910
+Decided: the 50k test reports its timings before asserting, so one release command times both base and head
+Because: crates/cli/tests/perf.rs:1017
+Check: over_budget fails with the drive.rs guard reverted (start comes out started); perf.rs 17 pass at the head
+Owner: The one-minute quick pass stops counting every worktree file; the regular pass still counts and holds new lanes when over budget.
