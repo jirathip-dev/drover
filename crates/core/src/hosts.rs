@@ -317,7 +317,12 @@ impl<'a> Pass<'a> {
             lock(&self.late).insert(m.into());
         }
         if over || !self.up(m) {
-            let stderr = format!("{m}: not sent (host offline this pass, or the tick past its budget)");
+            let why = if over {
+                "the tick past its budget"
+            } else {
+                "host offline this pass"
+            };
+            let stderr = format!("{m}: not sent ({why})");
             return Ok(Out {
                 code: 255,
                 stderr,
@@ -487,6 +492,26 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         s.busy = if live { ctx.now } else { s.busy };
         if s.up {
             s.seen = ctx.now;
+            let due = refresh || s.probed + 3600 <= ctx.now;
+            if let Some((tags, home)) = due.then(|| probe(&on)).flatten() {
+                (s.tags, s.home, s.probed) = (tags, home, ctx.now);
+            }
+            let mut landed = false;
+            if h.machine.is_some() && h.enabled && !s.home.is_empty() {
+                match sync(ctx, cfg, &on, (name, &s.home, &tags(h, Some(&*s)))) {
+                    Ok((v, done)) => (s.drover, landed) = (v, done),
+                    Err(why) => {
+                        let first = !events
+                            .iter()
+                            .any(|e| e.kind == "host-sync-skipped" && e.str("host") == Some(name));
+                        if first || !s.drover.is_empty() {
+                            let d = json!({"host": name, "reason": why});
+                            append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync-skipped", d)).ok();
+                        }
+                        s.drover = String::new();
+                    }
+                }
+            }
             if let Some(Err(e)) = h
                 .machine
                 .as_deref()
@@ -495,20 +520,12 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             {
                 crate::stderr!("proxy {name}: {e:#}");
             }
-            if refresh || s.probed + 3600 <= ctx.now {
-                if let Some((tags, home)) = probe(&on) {
-                    (s.tags, s.home, s.probed) = (tags, home, ctx.now);
+            if (due || landed) && h.machine.is_some() && h.enabled {
+                s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
+                if h.cloud.is_some() {
+                    let (card, warn) = crate::cloud::github(&on, ctx.now);
+                    (s.github, ()) = (card, s.health.extend(warn));
                 }
-                if h.machine.is_some() && h.enabled {
-                    s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
-                    if h.cloud.is_some() {
-                        let (card, warn) = crate::cloud::github(&on, ctx.now);
-                        (s.github, ()) = (card, s.health.extend(warn));
-                    }
-                }
-            }
-            if h.machine.is_some() && h.enabled && !s.home.is_empty() {
-                s.drover = sync(ctx, cfg, &on, (name, &s.home, &tags(h, Some(&*s))));
             }
             let hs = host::sample(&on);
             (s.load, s.mem, s.mem_total) = (hs.load_per_cpu, hs.free_mem_gb, hs.mem_total_gb);
@@ -671,6 +688,39 @@ pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: La
         full.get_or_insert(format!("waiting for a slot: {u}/{c} {s} on {name}"));
     }
     full
+}
+
+/// #1186: host `name`'s working or simulator slots are all held, counting the spawns `start` still starting there.
+pub fn working_full(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    ev: &[Event],
+    me: Lane,
+    start: &[&Event],
+    (name, h): (&str, &HostCfg),
+) -> Option<String> {
+    let sims = needs(cfg.fleet(me.0).ok()?, me.2, ev, (me.0, me.1))
+        .iter()
+        .any(|t| t == "sim");
+    let others: Vec<&&Event> = start
+        .iter()
+        .filter(|e| e.fleet != me.0 || e.issue != Some(me.1))
+        .collect();
+    let start = [others.len(), others.iter().filter(|e| sim(cfg, ev, e)).count()];
+    let caps = [h.max_working, h.max_simulators.filter(|_| sims)];
+    (caps != [None; 2]).then_some(())?;
+    let agents = crate::session::live_on(&On::new(r, h.machine.as_deref())).unwrap_or_default();
+    let held = held_slots(
+        cfg,
+        &crate::events::working(&ctx.state).unwrap_or_default(),
+        &agents,
+        Some((me.0, me.1)),
+    );
+    let used = [held[0] + start[0], held[1] + start[1]];
+    let (u, c, s) =
+        (caps.into_iter().zip(used).zip(SLOTS)).find_map(|((c, u), s)| c.filter(|&c| u >= c).map(|c| (u, c, s)))?;
+    Some(format!("waiting for a slot: {u}/{c} {s} on {name}"))
 }
 
 /// #984: each capped host's `name: working N/cap · simulators N/cap` line, from its live `agents` (`host`-tagged remote).
@@ -878,6 +928,9 @@ pub struct Placed {
 }
 
 type Pre<'a> = (&'a [Event], Option<&'a str>);
+
+/// #1186: a host placement passes over, with the refusal it names (its start or working slots are full).
+pub type Skip<'a> = &'a dyn Fn(&str) -> Option<(&'static str, String)>;
 
 /// #984: a lane by fleet, issue and role.
 pub type Lane<'a> = (&'a str, u64, &'a str);
@@ -1122,26 +1175,35 @@ fn sha_of(v: &str) -> &str {
     v.rsplit_once('(').and_then(|p| p.1.strip_suffix(')')).unwrap_or(v)
 }
 
-/// #917: host `name`'s drover `--version`, its last install logged `host-sync`, a mismatch's install started there.
-pub fn sync(ctx: &Ctx, cfg: &Config, on: &On, (name, home, tags): (&str, &str, &[String])) -> String {
+/// #917: host `name`'s drover `--version` and whether an install landed (#1164), its last install logged `host-sync`, a mismatch's install started there; Err: why its status went unread.
+pub fn sync(
+    ctx: &Ctx,
+    cfg: &Config,
+    on: &On,
+    (name, home, tags): (&str, &str, &[String]),
+) -> std::result::Result<(String, bool), String> {
     let (exe, sha) = (real_exe(ctx, home), env!("DROVER_SHA"));
-    let Ok(o) = ok(on, "sh", &["-c", SYNC_STATUS, "sh", &exe]) else {
-        return String::new();
-    };
-    let mut lines = o.lines().map(str::trim);
+    let o = on
+        .run("sh", &argv(&["-c", SYNC_STATUS, "sh", &exe]))
+        .map_err(|e| format!("{e:#}"))?;
+    if o.code != 0 {
+        return Err(format!("status exit {}: {}", o.code, o.stderr.trim()));
+    }
+    let (mut lines, mut done) = (o.stdout.lines().map(str::trim), false);
     let root = lines.next().unwrap_or_default().to_string();
     let theirs = with_path(on, &exe, root).0;
     let mut busy = false;
     for l in lines {
         busy |= l == "busy";
         if let Some((code, rest)) = l.strip_prefix("done ").and_then(|l| l.split_once(' ')) {
+            done = true;
             let (to, from) = rest.split_once(' ').unwrap_or((rest, ""));
             let d = json!({"host": name, "from": sha_of(from), "to": to, "ok": code == "0"});
             append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
         }
     }
     if busy || theirs == format!("drover {}", crate::VERSION) {
-        return theirs;
+        return Ok((theirs, done));
     }
     let conf = rehome(vec![ctx.config.display().to_string()], Some(home)).remove(0);
     let root = Path::new(&exe).parent().and_then(Path::parent).map(Path::display);
@@ -1163,7 +1225,7 @@ pub fn sync(ctx: &Ctx, cfg: &Config, on: &On, (name, home, tags): (&str, &str, &
         let d = json!({"host": name, "from": sha_of(&theirs), "to": sha, "ok": false, "error": format!("{e:#}")});
         append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
     }
-    theirs
+    Ok((theirs, done))
 }
 
 /// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it is enabled, up, admitting (#676) and its tags cover the needs, or its worktree there has unpushed work (#1138), else the least-busy enabled host whose tags cover the needs.
@@ -1173,7 +1235,7 @@ pub fn place(
     r: &dyn Runner,
     events: &[Event],
     (fleet, issue, role): (&str, u64, &str),
-    force: Option<&str>,
+    (force, skip): (Option<&str>, Skip),
 ) -> Result<Option<Placed>> {
     if cfg.hosts.is_empty() {
         return match force {
@@ -1207,6 +1269,9 @@ pub fn place(
                 format!("host {h}: {role} lanes run on the main host only"),
             );
         }
+        if let Some((code, why)) = skip(h) {
+            return refused(code, why);
+        }
         return Ok(Some(at(ctx, cfg, f, r, (h, machine), pre)));
     }
     let needs = needs(f, role, events, (fleet, issue));
@@ -1216,7 +1281,7 @@ pub fn place(
         let was = (e.str("host").unwrap_or("local"), e.str("machine"));
         let mut p = at(ctx, cfg, f, r, was, pre);
         let code = p.refusal.as_ref().map(|x| x.0);
-        let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "MEM_LOW"));
+        let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "LOGIN_NEEDED" | "MEM_LOW"));
         let fits = cfg.hosts.get(was.0).map_or(needs.is_empty(), |h| fit(was.0, h));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
         let wt = wt.and_then(|l| l.str("worktree")).map(Path::new);
@@ -1230,13 +1295,27 @@ pub fn place(
         }
         if cfg.hosts.get(was.0).is_none_or(|h| h.enabled) && (unpushed || fits && !busy && code != Some("HOST_OFFLINE"))
         {
-            return Ok(Some(p));
+            return match skip(was.0) {
+                Some((code, why)) => refused(code, why),
+                None => Ok(Some(p)),
+            };
         }
     }
     let fits: Vec<_> = cfg.hosts.iter().filter(|(n, h)| fit(n, h)).collect();
-    let mut on: Vec<Placed> = fits
-        .iter()
-        .filter(|h| h.1.enabled)
+    let (mut full, mut open) = (vec![], vec![]);
+    for h in fits.iter().filter(|h| h.1.enabled) {
+        match skip(h.0) {
+            Some(why) => full.push(why),
+            None => open.push(h),
+        }
+    }
+    if open.is_empty() && !full.is_empty() {
+        let starting = full.iter().any(|w| w.0 == "SPAWN_PENDING");
+        let code = if starting { "SPAWN_PENDING" } else { "HOST_FULL" };
+        let whys: Vec<String> = full.into_iter().map(|w| w.1).collect();
+        return refused(code, whys.join(", "));
+    }
+    let mut on: Vec<Placed> = (open.into_iter())
         .map(|(n, h)| at(ctx, cfg, f, r, (n, h.machine.as_deref()), pre))
         .collect();
     if on

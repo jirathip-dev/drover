@@ -3,7 +3,7 @@ use super::{
 };
 use super::{LaneRow, LanesTab, NeedAsk, NeedIssue, QueueCard, QueueRow, JSON};
 use crate::access::{civil_month_day, civil_year};
-use crate::api::{Block, Chat};
+use crate::api::{Block, Chat, Herd, HerdFleet, HerdLane};
 use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Map, Value};
@@ -40,8 +40,9 @@ pub fn places() -> Value {
 /// #1072: the standalone page's places: the manifest's, then the Threads tab (never the Cooee plugin's).
 pub fn page_places() -> Value {
     let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
+    let herd = json!({"type": "menu-row", "label": "Herd", "subtitle": "the ranch: lanes by state, weather from host load", "screen": "/screens/herd"});
     let mut all = places().as_array().cloned().unwrap_or_default();
-    all.push(threads);
+    all.extend([threads, herd]);
     Value::Array(all)
 }
 
@@ -95,35 +96,86 @@ fn badge_tone(fig: &Value) -> &str {
     fig["state"].as_str().filter(|s| *s != "idle").unwrap_or("mute")
 }
 
-fn rounds(events: &[Event], f: &str, n: u64) -> String {
-    let mut parts: Vec<(String, &str)> = vec![];
-    let (mut revs, mut fixes) = (0, 0);
-    for e in events.iter().filter(|e| e.fleet == f && e.issue == Some(n)) {
-        let role = e.str("role").unwrap_or_default();
-        match e.kind.as_str() {
-            "spawn" => {
-                if let Some(p) = parts.last_mut().filter(|p| p.1.is_empty()) {
-                    p.1 = "✓";
-                }
-                let name = match role {
-                    "rev" => (revs += 1, format!("review {revs}")).1,
-                    "fix" => (fixes += 1, format!("fix {fixes}")).1,
-                    r => r.to_string(),
-                };
-                parts.push((name, ""));
+struct Round<'a> {
+    key: &'a str,
+    name: String,
+    check: bool,
+    agent: Option<&'a str>,
+    verdict: Option<&'a Event>,
+}
+
+fn history<'a>(events: &'a [Event], f: &str, n: u64) -> Vec<Round<'a>> {
+    let mut out: Vec<Round> = vec![];
+    for e in crate::events::of_issue(events, f, n) {
+        let (check, key) = match e.kind.as_str() {
+            "spawn" if crate::events::checks(e) => (true, e.str("stage").or(e.str("role")).unwrap_or("rev")),
+            "spawn" => (false, e.str("role").unwrap_or_default()),
+            "verdict" => (true, e.str("stage").unwrap_or("rev")),
+            _ => continue,
+        };
+        if !out.last().is_some_and(|r| r.key == key && r.verdict.is_none()) {
+            let k = out.iter().filter(|r| r.key == key).count() + 1;
+            let name = match key {
+                "rev" => format!("review {k}"),
+                "fix" => format!("fix {k}"),
+                s if check => format!("{s} {k}"),
+                s => s.to_string(),
+            };
+            out.push(Round {
+                key,
+                name,
+                check,
+                agent: None,
+                verdict: None,
+            });
+        }
+        if let Some(r) = out.last_mut() {
+            if e.kind == "verdict" {
+                r.verdict = Some(e);
+            } else {
+                r.agent = e.str("agent");
             }
-            "verdict" => {
-                if let Some(p) = parts.last_mut() {
-                    p.1 = if e.str("verdict") == Some("PASS") { "✓" } else { "✗" };
-                }
-            }
-            _ => {}
         }
     }
-    let shown = parts
-        .iter()
-        .map(|(n, m)| if m.is_empty() { n.clone() } else { format!("{n} {m}") });
-    shown.collect::<Vec<_>>().join(" · ")
+    out
+}
+
+fn verdict_tone(word: &str) -> &'static str {
+    match word {
+        "PASS" => "ok",
+        "FAIL" => "bad",
+        _ => "warn",
+    }
+}
+
+fn verdict_badge(v: &Event) -> Value {
+    let word = v.str("verdict").unwrap_or("?");
+    json!({"text": word, "tone": verdict_tone(word)})
+}
+
+fn rounds(events: &[Event], f: &str, n: u64) -> Vec<String> {
+    let h = history(events, f, n);
+    let shown = h.iter().enumerate().map(|(i, r)| {
+        let mark = match r.verdict.map(|v| v.str("verdict")) {
+            Some(Some("PASS")) => " ✓",
+            Some(_) => " ✗",
+            None if !r.check && i + 1 < h.len() => " ✓",
+            None => "",
+        };
+        format!("{}{mark}", r.name)
+    });
+    shown.collect()
+}
+
+fn strip(stage: &[super::Stage]) -> String {
+    let chip = |s: &super::Stage| {
+        if s.at == 0 {
+            format!("[{} {}]", s.g, s.name)
+        } else {
+            s.g.clone()
+        }
+    };
+    stage.iter().map(chip).collect::<Vec<_>>().join(" ")
 }
 
 fn cut(s: &str, n: usize) -> String {
@@ -137,7 +189,8 @@ fn cut(s: &str, n: usize) -> String {
 const LINE: usize = 48;
 
 fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<usize>) -> Value {
-    let fig = figure(&r.act, &r.state);
+    let mut fig = figure(&r.act, &r.state);
+    fig.put("grow", json!(r.grow));
     let title = format!(
         "#{} {}",
         r.issue,
@@ -146,10 +199,15 @@ fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<u
     let state = r.state.replace('(', " ").replace(')', "").replace("⏸ waiting: ", "");
     let badge = match k {
         Some(k) => json!({"text": format!("#{}", k + 1), "tone": "mute"}),
+        None if !r.stage.is_empty()
+            && !["fail", "needs"].contains(&fig.get("state").and_then(Value::as_str).unwrap_or_default()) =>
+        {
+            json!({"text": strip(&r.stage), "tone": badge_tone(&fig)})
+        }
         None => json!({"text": state, "tone": badge_tone(&fig)}),
     };
     let mut v = json!({"type": "row", "id": format!("q-{f}-{}", r.issue), "figure": fig, "title": cut(title.trim_end(), LINE), "badge": badge});
-    let mut sub = rounds(ev, f, r.issue);
+    let mut sub = rounds(ev, f, r.issue).join(" · ");
     if let Some(pr) = r.pr.pr {
         sub = format!("{sub} · PR #{pr}");
     }
@@ -193,12 +251,10 @@ fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<u
     if k.is_none() {
         v.put("value", json!({ "since": iso(r.t) }));
     }
-    let tap = match r.open.as_ref().and_then(|a| a.thread.clone()) {
-        Some(t) => json!({ "thread": t }),
-        None if live => json!({ "sheet": format!("/screens/lanes/{}", r.lane) }),
-        None => json!({ "sheet": format!("/screens/issue?repo={f}&issue={}", r.issue) }),
-    };
-    v.put("tap", tap);
+    v.put(
+        "tap",
+        json!({ "sheet": format!("/screens/issue?repo={f}&issue={}", r.issue) }),
+    );
     if live {
         let confirm = json!({"title": format!("Stop #{}'s lane {}?", r.issue, r.lane), "ok": "Stop lane"});
         v.put(
@@ -351,7 +407,8 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q) -> Value {
         json!({"text": "paused", "tone": "mute"}),
     ];
     let mut end = vec![
-        json!({"type": "row", "id": format!("done-today-{f}"), "title": "done today", "value": c.done_n.to_string()}),
+        json!({"type": "row", "id": format!("done-today-{f}"), "title": "done today", "value": c.done.len().to_string(),
+            "accessory": "chevron", "tap": {"open": format!("/screens/queue/done?repo={f}")}}),
     ];
     if let Some(b) = &c.backlog {
         end.push(
@@ -378,6 +435,22 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q) -> Value {
     v
 }
 
+fn done_screen(c: &QueueCard) -> Value {
+    let f = &c.name;
+    let rows: Vec<Value> = (c.done.iter())
+        .map(|d| {
+            let sha: String = d.sha.as_deref().unwrap_or("?").chars().take(7).collect();
+            let at = format!("{:02}:{:02} UTC", d.t % 86_400 / 3600, d.t % 3600 / 60);
+            let title = format!("#{} {}", d.issue, d.title.as_deref().unwrap_or_default());
+            json!({"type": "row", "id": format!("done-{}-{}", d.issue, d.t), "title": title.trim_end(),
+                "subtitle": format!("merged {at} · {sha}"), "value": d.age, "accessory": "chevron",
+                "tap": {"sheet": format!("/screens/issue?repo={f}&issue={}", d.issue)}})
+        })
+        .collect();
+    json!({"type": "screen", "id": format!("done-{f}"), "title": format!("{f} · done today"),
+        "blocks": [{"type": "list", "id": "done-list", "rows": rows}]})
+}
+
 const LEGEND: [(&str, &str); 17] = [
     ("queued", "waiting its turn"),
     ("design · architect", "a design or ADR waits for your approval"),
@@ -388,12 +461,12 @@ const LEGEND: [(&str, &str); 17] = [
     ("update", "merging the integration branch into its PR"),
     ("ready", "passed, waiting to merge"),
     ("merged", "merged into the integration branch"),
-    ("waiting: decision", "a lane asked: tap the row for its thread"),
+    ("waiting: decision", "a lane asked: tap the row to answer in its sheet"),
     ("needs-human", "out of rounds or stuck: your call"),
     ("blocked · held until #N", "waits for another issue to merge"),
     ("parked", "lane closed, its work saved on the PR"),
     ("dead", "lane gone with unsaved work"),
-    ("stage chips", "the issue's pipeline, its current stage lit"),
+    ("▲ [◆ rev] ◫ ✓", "the issue's pipeline, its current stage in brackets"),
     ("🔒 group", "serial: one lane of the group at a time"),
     ("🔒 hot ×N", "holds N hot files, one lane at a time: tap to list them"),
 ];
@@ -455,9 +528,111 @@ fn backlog(now: u64, c: &QueueCard, q: &Q) -> Option<Value> {
     )
 }
 
-fn issue_sheet(repo: &str, f: &str, r: &QueueRow) -> Value {
-    let n = r.issue;
-    let mut blocks = vec![];
+fn section(id: &str, header: &str, blocks: &[Value]) -> Value {
+    json!({"type": "section", "id": id, "header": header, "blocks": blocks})
+}
+
+fn rows_list(id: &str, rows: &[Value]) -> Value {
+    json!({"type": "list", "id": id, "rows": rows})
+}
+
+fn check_rows(
+    st: Option<&crate::events::IssueState>,
+    hist: &[Round],
+    fl: Option<&crate::config::Fleet>,
+    r: &QueueRow,
+) -> Vec<Value> {
+    let toned = |id: &str, title: &str, text: &str, tone: &str| json!({"type": "row", "id": id, "title": title, "subtitle": {"text": text, "tone": tone}});
+    let mut rows = vec![];
+    if r.dead {
+        rows.push(toned(
+            "dead",
+            "dead",
+            "the log has this lane open, no such agent",
+            "bad",
+        ));
+    }
+    if r.check {
+        rows.push(toned(
+            "needs-check",
+            "needs-check",
+            "from the backlog, spec not checked",
+            "mute",
+        ));
+    }
+    if let Some(ci) = &r.pr.ci {
+        let (g, tone) = match ci.as_str() {
+            "green" => ("✓", "ok"),
+            "failed" => ("✗", "bad"),
+            _ => ("…", "warn"),
+        };
+        rows.push(json!({"type": "row", "id": "ci", "title": "CI", "badge": {"text": g, "tone": tone}}));
+    }
+    let mut seen = vec![];
+    for (h, v) in hist.iter().rev().filter_map(|h| Some((h, h.verdict?))) {
+        if seen.contains(&h.key) {
+            continue;
+        }
+        seen.push(h.key);
+        let lim = fl.map(|fl| crate::gate::limit(fl, v.str("loop").unwrap_or(h.key), st));
+        let lim = lim.filter(|l| l.0 != u32::MAX).map(|l| l.1).unwrap_or_default();
+        let round = v
+            .data
+            .get("round")
+            .and_then(Value::as_u64)
+            .map_or(String::new(), |k| format!("{k}{lim}"));
+        let mut row = json!({"type": "row", "id": format!("v-{}", h.key), "title": h.key, "badge": verdict_badge(v), "value": round});
+        if let Some(x) =
+            r.pr.form
+                .as_ref()
+                .filter(|_| v.data.get("form_only") == Some(&Value::Bool(true)))
+        {
+            row.put(
+                "subtitle",
+                json!({"text": format!("not counted · form {x}"), "tone": "warn"}),
+            );
+        }
+        rows.push(row);
+    }
+    rows
+}
+
+fn history_rows(now: u64, f: &str, n: u64, hist: &[Round], live: bool) -> Vec<Value> {
+    let last = hist.len().saturating_sub(1);
+    let row = |(i, h): (usize, &Round)| {
+        let mut row = json!({"type": "row", "id": format!("h-{i}"), "title": h.name});
+        if let Some(v) = h.verdict {
+            let word = v.str("verdict").unwrap_or("?");
+            let sha: String = v.str("sha").unwrap_or_default().chars().take(7).collect();
+            let ago = crate::events::age(now.saturating_sub(v.ts));
+            row.put(
+                "subtitle",
+                json!({"text": format!("{word} · {sha} · {ago}"), "tone": verdict_tone(word)}),
+            );
+            row.put(
+                "tap",
+                json!({ "sheet": format!("/screens/verdict?repo={f}&issue={n}&seq={}", v.seq) }),
+            );
+        } else if h.check && !(i == last && live) {
+            row.put("subtitle", json!({"text": "no verdict", "tone": "warn"}));
+        }
+        row
+    };
+    hist.iter().enumerate().rev().map(row).collect()
+}
+
+fn issue_sheet(
+    ctx: &Ctx,
+    ev: &crate::events::Log,
+    fl: Option<&crate::config::Fleet>,
+    c: &QueueCard,
+    r: &QueueRow,
+) -> Value {
+    let (f, n) = (c.name.as_str(), r.issue);
+    let titled = |id: String, title: &str| json!({"type": "row", "id": id, "title": title});
+    let sheet = |p: String| json!({ "sheet": p });
+    let hist = history(ev, f, n);
+    let mut status = vec![];
     if !r.stage.is_empty() {
         let label = |s: &super::Stage| format!("{} {}{}", s.g, s.name, if s.ok { " ✓" } else { "" });
         let opts: Vec<Value> = r
@@ -466,55 +641,118 @@ fn issue_sheet(repo: &str, f: &str, r: &QueueRow) -> Value {
             .map(|s| json!({"value": s.name, "label": label(s)}))
             .collect();
         let lit: Vec<&str> = r.stage.iter().filter(|s| s.at == 0).map(|s| s.name.as_str()).collect();
-        blocks.push(json!({"type": "chips", "id": "stage", "name": "stage", "selected": lit, "options": opts}));
+        status.push(json!({"type": "chips", "id": "stage", "name": "stage", "selected": lit, "options": opts}));
     }
-    let gh = format!("https://github.com/{repo}");
+    let mut now = json!({"type": "row", "id": "now", "title": r.state, "value": {"since": iso(r.t)}});
+    let held = r.blocked_by.map(|b| format!("held until #{b}"));
+    if let Some(w) = crate::pending::waits(ev, f, n, c.paused.is_some()).or(held) {
+        now.put("subtitle", json!(w));
+    }
+    let mut rows = vec![now];
+    if !r.lane.is_empty() {
+        let mut l = titled("at".into(), &format!("lane {}", r.lane));
+        let at = [r.place.as_str(), r.host.as_str()].into_iter().find(|s| !s.is_empty());
+        l.put("subtitle", json!(at.unwrap_or(if r.live { "live" } else { "gone" })));
+        rows.push(l);
+    }
+    rows.extend(check_rows(ev.states.get(&(f.to_string(), n)), &hist, fl, r));
+    rows.extend(r.notes.iter().enumerate().map(|(i, x)| titled(format!("note-{i}"), x)));
+    status.push(rows_list("status-list", &rows));
+    let mut blocks = vec![section("status", "status", &status)];
+    if let Some(a) = &r.open {
+        blocks.push(section(
+            "asks",
+            &format!("asks: {}", a.ask.question),
+            &[ask_choice(&a.ask)],
+        ));
+    }
+    let vals = json!({"fleet": f, "issue": n});
+    if let Some(d) = &r.decided {
+        let mut change = r.ask.as_ref().map(ask_choice);
+        if let Some(o) = change.as_mut().and_then(|c| c["options"].as_array_mut()) {
+            for o in o.iter_mut() {
+                o.put("values", vals.clone());
+            }
+        }
+        let change: Vec<Value> = change.into_iter().collect();
+        blocks.push(section("decided", &format!("decided by default: {d}"), &change));
+    }
+    let gh = format!("https://github.com/{}", c.config.repo);
     let url = |id: &str, t: String, u: String| link(id, &t, &json!({ "url": u }));
     let mut links = vec![url("issue", format!("issue #{n}"), format!("{gh}/issues/{n}"))];
+    let spec = crate::gh::cached_title(ctx, f, n);
     match (r.pr.pr, &r.pr.run) {
-        (Some(p), _) => links.extend([
-            url("pr", format!("PR #{p}"), format!("{gh}/pull/{p}")),
-            url("checks", "checks".into(), format!("{gh}/pull/{p}/checks")),
-        ]),
+        (Some(p), _) => {
+            let mut pr = url("pr", format!("PR #{p}"), format!("{gh}/pull/{p}"));
+            let cached = crate::gh::cached_pr(ctx, f, n);
+            if let Some(t) = cached.at("title").as_str().filter(|t| Some(*t) != spec.as_deref()) {
+                pr.put("subtitle", json!(t));
+            }
+            links.extend([pr, url("checks", "checks".into(), format!("{gh}/pull/{p}/checks"))]);
+        }
         (None, Some(run)) => links.push(url("checks", "checks".into(), run.clone())),
         _ => {}
     }
     if r.live && !r.lane.is_empty() {
-        links.push(link("lane", &format!("lane {}", r.lane), &json!({ "thread": r.lane })));
+        let tap = sheet(format!("/screens/lanes/{}", r.lane));
+        links.push(link("lane", &format!("lane {}", r.lane), &tap));
     }
-    let titled = |id: String, title: &str| json!({"type": "row", "id": id, "title": title});
-    if let Some(a) = &r.open {
-        let to = |t: &String| {
-            let title = format!("asked in {}", a.title.as_ref().unwrap_or(t));
-            link("asked", &title, &json!({ "thread": t }))
+    if let Some((a, t)) = r.open.as_ref().and_then(|a| Some((a, a.thread.as_ref()?))) {
+        let title = format!("asked in {}", a.title.as_ref().filter(|s| !s.is_empty()).unwrap_or(t));
+        links.push(link("asked", &title, &json!({ "thread": t })));
+    }
+    blocks.push(section("links", "links", &[rows_list("links-list", &links)]));
+    if !r.lanes.is_empty() {
+        let lane = |l: &super::QueueLane| {
+            let v = hist.iter().rev().find(|h| h.check && h.agent == Some(l.name.as_str()));
+            let state = v.and_then(|h| h.verdict).map_or(json!(l.state), verdict_badge);
+            json!({"type": "row", "id": format!("l-{}", l.name), "title": l.name, "subtitle": state, "value": l.ago,
+                "tap": sheet(format!("/screens/lanes/{}", l.name))})
         };
-        let opts = a.ask.options.iter().enumerate();
-        let mut rows: Vec<Value> = opts
-            .map(|(i, o)| titled(format!("opt-{i}"), &format!("{}. {o}", i + 1)))
-            .collect();
-        rows.extend(a.thread.as_ref().map(to));
-        blocks.push(
-            json!({"type": "section", "id": "asks", "header": format!("asks: {}", a.ask.question),
-            "blocks": [{"type": "list", "id": "asks-list", "rows": rows}]}),
+        let rows: Vec<Value> = r.lanes.iter().map(lane).collect();
+        blocks.push(section("lanes", "lanes", &[rows_list("lanes-list", &rows)]));
+    }
+    if !hist.is_empty() {
+        let rows = history_rows(ctx.now, f, n, &hist, r.live);
+        blocks.push(section("history", "history", &[rows_list("history-list", &rows)]));
+    }
+    let button = |l: &str, action: &str, values: Value| json!({"type": "button", "id": l, "label": l, "action": action, "values": values});
+    blocks.extend(moves(f, r, |l, values| button(l, "move", values)));
+    if r.state == "parked" {
+        blocks.push(button("Unpark", "unpark", vals.clone()));
+    }
+    if r.queued {
+        let mut drop = button("Drop", "drop", vals.clone());
+        drop.put("style", json!("destructive"));
+        drop.put(
+            "confirm",
+            json!({"title": format!("Drop #{n} from the queue?"), "ok": "Drop"}),
         );
+        blocks.extend([button("Top", "top", vals), drop]);
     }
-    blocks.push(json!({"type": "list", "id": "links", "rows": links}));
-    if !r.notes.is_empty() {
-        let rows: Vec<Value> = r
-            .notes
-            .iter()
-            .enumerate()
-            .map(|(i, x)| titled(format!("note-{i}"), x))
-            .collect();
-        blocks.push(json!({"type": "section", "id": "notes", "header": "notes", "blocks": [{"type": "list", "id": "notes-list", "rows": rows}]}));
-    }
-    blocks.extend(moves(
-        f,
-        r,
-        |l, values| json!({"type": "button", "id": l, "label": l, "action": "move", "values": values}),
-    ));
-    let title = format!("#{n} {}", r.title.clone().unwrap_or_default());
+    let title = format!(
+        "#{n} {}",
+        spec.or_else(|| r.title.clone().filter(|_| r.state == "merged"))
+            .unwrap_or_default()
+    );
     json!({"type": "sheet", "id": format!("issue-{f}-{n}"), "title": title.trim_end(), "cancel": "Done", "blocks": blocks})
+}
+
+fn verdict_sheet(ev: &[Event], q: &Q) -> Option<Value> {
+    let (f, n, seq) = (
+        q.get("repo")?,
+        q.get("issue")?.parse::<u64>().ok()?,
+        q.get("seq")?.parse::<u64>().ok()?,
+    );
+    let v = crate::events::of_issue(ev, f, n)
+        .into_iter()
+        .find(|e| e.kind == "verdict" && e.seq == seq)?;
+    let (stage, word) = (v.str("stage").unwrap_or("rev"), v.str("verdict").unwrap_or("?"));
+    let body = v.str("body").unwrap_or("no verdict.md text was logged");
+    Some(
+        json!({"type": "sheet", "id": format!("verdict-{f}-{n}-{seq}"), "title": format!("#{n} {stage} {word}"), "cancel": "Done",
+        "blocks": [{"type": "text", "id": "verdict-body", "markdown": body}]}),
+    )
 }
 
 fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&str>) -> Value {
@@ -549,6 +787,19 @@ fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&s
         {"label": "rounds / issue", "value": format!("{:.1}", avg(n, r)), "spark": per.map(|p| avg(p.0, p.1))}]})
 }
 
+fn counts(shown: &[&QueueCard]) -> Value {
+    let sum = |f: &dyn Fn(&QueueCard) -> usize| shown.iter().map(|c| f(c)).sum::<usize>();
+    let need = sum(&|c| c.need);
+    let queued = sum(&|c| c.rows.iter().filter(|r| r.state == "queued").count());
+    let busy = sum(&|c| c.rows.len()) - need - queued;
+    let tone = if need > 0 { "warn" } else { "" };
+    json!({"type": "stat", "id": "counts", "items": [
+        {"label": "needs you", "value": need.to_string(), "tone": tone},
+        {"label": "in progress", "value": busy.to_string()},
+        {"label": "queued", "value": queued.to_string()},
+        {"label": "done today", "value": sum(&|c| c.done_n).to_string()}]})
+}
+
 fn choice(id: &str, action: &str, options: &[Value]) -> Value {
     json!({"type": "choice", "id": id, "action": action, "options": options})
 }
@@ -559,11 +810,13 @@ fn fold(n: Option<u64>, kind: &str, q: &str, age: &str, main: &Value) -> Value {
     json!({"line": format!("{n}{kind} · {cut} · {age}"), "main": main})
 }
 
-fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
-    let q = &a.ask;
-    let rec = q
-        .recommend
-        .and_then(|n| q.options.get(usize::try_from(n).ok()?.checked_sub(1)?));
+fn recommended(q: &crate::api::Ask) -> Option<&String> {
+    q.recommend
+        .and_then(|n| q.options.get(usize::try_from(n).ok()?.checked_sub(1)?))
+}
+
+fn ask_choice(q: &crate::api::Ask) -> Value {
+    let rec = recommended(q);
     let (first, rest): (Vec<&String>, Vec<&String>) = q.options.iter().partition(|o| Some(*o) == rec);
     let opts: Vec<Value> = (first.into_iter().chain(rest))
         .map(|o| json!({"value": o, "label": o}))
@@ -572,12 +825,18 @@ fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
     if let Some(r) = rec {
         c.put("recommended", json!(r));
     }
-    let routine = a.kind.starts_with("routine");
     let other = match q.options.iter().find(|o| *o == "revise") {
         Some(r) => json!({"placeholder": "a revise note…", "for": r}),
         None => json!({"placeholder": "other…"}),
     };
     c.put("other", other);
+    c
+}
+
+fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
+    let (q, rec) = (&a.ask, recommended(&a.ask));
+    let routine = a.kind.starts_with("routine");
+    let mut c = ask_choice(&a.ask);
     if let Some(r) = rec.filter(|_| routine) {
         let until = iso(q.ts + 60 * mins);
         let d = json!({"value": r, "until": until, "label": "takes the recommendation in {rel}"});
@@ -865,6 +1124,85 @@ fn lane_row(fleet: &str, l: &LaneRow) -> Value {
         "subtitle": sub.join(" · "), "value": l.ago, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
 }
 
+const BANDS: [(&str, &[&str]); 4] = [
+    ("working", &["working"]),
+    ("idle", &["idle", "unknown", "parked"]),
+    ("done", &["done"]),
+    ("blocked", &["blocked", "dead"]),
+];
+
+fn band(id: &str, name: &str, rows: &[Value]) -> Option<Value> {
+    (!rows.is_empty()).then(|| {
+        json!({"type": "section", "id": format!("h-{id}-{name}"), "header": format!("{name} ({})", rows.len()),
+            "blocks": [{"type": "list", "id": format!("h-{id}-{name}-list"), "rows": rows}]})
+    })
+}
+
+fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>) -> Option<Value> {
+    let needs = f.map(|f| f.needs.as_slice()).unwrap_or_default();
+    let lanes: Vec<&HerdLane> = lanes.iter().filter(|l| !l.gone).collect();
+    let mut sum = vec![];
+    let gate: Vec<Value> = (f.map(|f| f.queue.as_slice()).unwrap_or_default().iter())
+        .filter(|q| !lanes.iter().any(|l| l.issue == Some(q.issue)))
+        .map(|q| {
+            let need = needs.contains(&q.issue);
+            let blocked = q.blocked_by.map(|b| format!("blocked by #{b}"));
+            let sub = need.then(|| "needs you".to_string()).or(blocked).or_else(|| q.title.clone());
+            json!({"type": "row", "id": format!("h-{name}-q{}", q.issue), "figure": {"state": if need { "needs" } else { "idle" }},
+                "title": format!("#{}", q.issue), "subtitle": sub.unwrap_or_default()})
+        })
+        .collect();
+    sum.push((gate.len(), "queued"));
+    let mut blocks: Vec<Value> = band(name, "queued", &gate).into_iter().collect();
+    for (b, states) in BANDS {
+        let rows: Vec<Value> = (lanes.iter())
+            .filter(|l| {
+                let need = l.issue.is_some_and(|i| needs.contains(&i));
+                if need { b == "blocked" } else { states.contains(&l.state.as_str()) }
+            })
+            .map(|l| {
+                let need = l.issue.is_some_and(|i| needs.contains(&i));
+                let shown = if need { "needs you" } else { l.shown.as_str() };
+                let sub: Vec<&str> = [shown, l.host.as_deref().unwrap_or_default()].into_iter().filter(|s| !s.is_empty()).collect();
+                json!({"type": "row", "id": format!("h-{}", l.name), "figure": lane_figure(&l.name, if need { "blocked" } else { &l.state }),
+                    "title": l.name, "subtitle": sub.join(" · "), "value": l.age, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
+            })
+            .collect();
+        sum.push((rows.len(), b));
+        blocks.extend(band(name, b, &rows));
+    }
+    let sum: Vec<String> = sum
+        .iter()
+        .filter(|s| s.0 > 0)
+        .map(|(n, w)| format!("{n} {w}"))
+        .collect();
+    (f.is_some() || !lanes.is_empty())
+        .then(|| json!({"id": name, "title": name, "color": color, "subtitle": sum.join(" · "), "blocks": blocks}))
+}
+
+fn herd_screen(h: &Herd) -> Value {
+    let mut repos: Vec<Value> = (h.fleets.iter())
+        .filter_map(|f| herd_repo(&f.name, &f.color, &f.lanes, Some(f)))
+        .collect();
+    repos.extend(herd_repo("others", "", &h.others, None));
+    let host = &h.host;
+    let wind = (host.load.unwrap_or_default() / host.limit.max(0.01)).clamp(0.0, 1.0);
+    let sky = match host.pressure.as_deref() {
+        _ if host.gate.is_some() => "storm",
+        Some("warn" | "critical") => "fog",
+        _ if wind >= 0.5 => "windy",
+        _ => "clear",
+    };
+    let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
+    let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
+    let line = format!(
+        "load {load} · mem {} · swap {swap}",
+        host.pressure.as_deref().unwrap_or("?")
+    );
+    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene",
+        "weather": {"sky": sky, "wind": (wind * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
+}
+
 fn section_word(state: &str) -> &str {
     match state {
         "blocked" => "waiting",
@@ -1019,23 +1357,8 @@ pub fn ops(a: &Value, b: &Value) -> Vec<Value> {
     out
 }
 
-fn count(v: &Value) -> Option<usize> {
-    let busy = |b: &&Value| b["id"].as_str().is_some_and(|i| i.starts_with("inprogress-"));
-    let cards = kids(v).iter().filter(|b| b["type"] == "card");
-    (v["id"] == "queue").then(|| {
-        cards
-            .flat_map(|c| kids(c).iter().filter(busy))
-            .filter_map(|s| {
-                s["header"]
-                    .as_str()?
-                    .rsplit_once('(')?
-                    .1
-                    .trim_end_matches(')')
-                    .parse::<usize>()
-                    .ok()
-            })
-            .sum()
-    })
+fn count(v: &Value) -> Option<u64> {
+    v["badge"].as_u64()
 }
 
 fn sheets(v: &Value, out: &mut Vec<String>) {
@@ -1088,19 +1411,28 @@ impl Server<'_> {
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx),
             "/screens/workflow" => workflow(ctx),
-            "/screens/hot" => self.on_row(ctx, q, |_, f, r| {
+            "/screens/herd" => herd_screen(&self.herd(ctx, None).ok()?),
+            "/screens/hot" => self.on_row(ctx, q, |c, r| {
+                let f = &c.name;
                 let rows: Vec<Value> = (hot(r).iter().enumerate())
                     .map(|(i, p)| json!({"type": "row", "id": format!("hot-{i}"), "title": p}))
                     .collect();
                 json!({"type": "sheet", "id": format!("hot-{f}-{}", r.issue), "title": format!("#{} · 🔒 hot ×{}", r.issue, rows.len()),
                     "cancel": "Done", "blocks": [{"type": "list", "id": "hot-paths", "rows": rows}]})
             })?,
-            "/screens/issue" => self.on_row(ctx, q, issue_sheet)?,
+            "/screens/issue" => {
+                let ev = working(&ctx.state).ok()?;
+                let cfg = Config::kept(ctx).ok();
+                let fl = |c: &QueueCard| cfg.as_ref().and_then(|x| x.fleet.get(&c.name));
+                self.on_row(ctx, q, |c, r| issue_sheet(ctx, &ev, fl(c), c, r))?
+            }
+            "/screens/verdict" => verdict_sheet(&working(&ctx.state).ok()?, q)?,
             "/screens/legend" => legend(),
             "/screens/backlog" => {
                 let tab = self.queue_tab(ctx);
                 backlog(ctx.now, tab.fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?, q)?
             }
+            "/screens/queue/done" => done_screen(self.queue_tab(ctx).fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?),
             "/screens/ask" => ask_sheet(ctx, q)?,
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
                 return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
@@ -1197,11 +1529,23 @@ impl Server<'_> {
         Some(v)
     }
 
-    fn on_row(&self, ctx: &Ctx, q: &Q, draw: impl Fn(&str, &str, &QueueRow) -> Value) -> Option<Value> {
+    fn on_row(&self, ctx: &Ctx, q: &Q, draw: impl Fn(&QueueCard, &QueueRow) -> Value) -> Option<Value> {
         let (f, n) = (q.get("repo")?, q.get("issue")?.parse::<u64>().ok()?);
         let tab = self.queue_tab(ctx);
         let c = tab.fleets.iter().find(|c| &c.name == f)?;
-        Some(draw(&c.config.repo, f, c.rows.iter().find(|r| r.issue == n)?))
+        let merged = |d: &super::DoneRow| QueueRow {
+            issue: n,
+            state: "merged".into(),
+            title: d.title.clone(),
+            pr: super::PrLine {
+                pr: d.pr.as_deref().and_then(|p| p.parse().ok()),
+                ..super::PrLine::default()
+            },
+            notes: vec![d.note.clone()],
+            ..QueueRow::default()
+        };
+        let done = c.done.iter().find(|d| d.issue == n).map(merged);
+        Some(draw(c, c.rows.iter().find(|r| r.issue == n).or(done.as_ref())?))
     }
 
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
@@ -1210,24 +1554,20 @@ impl Server<'_> {
             .get("repo")
             .filter(|r| tab.fleets.iter().any(|f| &f.name == *r))
             .map(String::as_str);
-        let mut opts = vec![json!({"value": "all", "label": "all"})];
-        let dot = |c: &QueueCard| {
-            if c.need > 0 {
-                format!("{} ●", c.name)
-            } else {
-                c.name.clone()
-            }
-        };
+        let all: usize = tab.fleets.iter().map(|c| c.rows.len()).sum();
+        let mut opts = vec![json!({"value": "all", "label": format!("all {all}")})];
+        let dot = |c: &QueueCard| format!("{} {}{}", c.name, c.rows.len(), if c.need > 0 { " ●" } else { "" });
         opts.extend(tab.fleets.iter().map(|f| json!({"value": f.name, "label": dot(f)})));
+        let mut shown: Vec<&QueueCard> = tab.fleets.iter().filter(|f| sel.is_none_or(|s| f.name == s)).collect();
+        shown.sort_by_key(|c| c.need == 0);
         let mut blocks = vec![
             json!({"type": "chips", "id": "repo", "name": "repo", "selected": [sel.unwrap_or("all")], "action": "filter", "options": opts}),
             stats(ctx.now, &ev, &ev.states, sel),
+            counts(&shown),
         ];
         if let Some(e) = &tab.error {
             blocks.push(json!({"type": "text", "id": "error", "markdown": e}));
         }
-        let mut shown: Vec<&QueueCard> = tab.fleets.iter().filter(|f| sel.is_none_or(|s| f.name == s)).collect();
-        shown.sort_by_key(|c| c.need == 0);
         blocks.extend(shown.into_iter().map(|c| fleet_card(ctx, &ev, c, q)));
         let mut kept = q.clone();
         kept.retain(|k, _| k != "repo" || sel.is_some());
@@ -1237,7 +1577,8 @@ impl Server<'_> {
             json!({"label": "Drive all now", "action": "drive-all"}),
             json!({"label": "Legend [?]", "tap": {"sheet": "/screens/legend"}}),
         ];
-        json!({"type": "screen", "id": "queue", "title": "Queue", "stream": stream,
+        let badge = self.needs_count(ctx, &ev);
+        json!({"type": "screen", "id": "queue", "title": "Queue", "stream": stream, "badge": badge,
             "actions": [{"icon": "more", "label": "More", "menu": menu}], "blocks": blocks})
     }
 
@@ -1254,21 +1595,22 @@ impl Server<'_> {
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
         }));
         cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|(f, es)| {
-            let line = |e: &Event| match e.issue {
-                Some(n) => format!("- {} · `drover why {f}#{n}`", crate::events::plain(e)),
-                None => format!("- {}", crate::events::plain(e)),
-            };
-            let md: Vec<String> = es.iter().map(|e| line(e)).collect();
+            let mut md: Vec<String> = es.iter().map(|e| format!("- {}", crate::events::plain(e))).collect();
+            md.push(format!("`drover waiting {f}`"));
+            let mut buttons = vec![json!({"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"})];
+            buttons.extend(es.iter().filter_map(|e| e.issue).map(|n| {
+                json!({"type": "button", "id": format!("stuck-force-{f}-{n}"), "label": format!("Force #{n}"), "action": "force", "values": {"fleet": f, "issue": n}})
+            }));
             json!({"type": "card", "id": format!("stuck-{f}"), "kind": "alert", "tone": "warn",
                 "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": md.join("\n")}],
-                "buttons": [{"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"}]})
+                "buttons": buttons})
         }));
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
         cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
         Value::Array(cards)
     }
 
-    fn plugin(ctx: &Ctx, head: &str) -> bool {
+    pub(super) fn plugin(ctx: &Ctx, head: &str) -> bool {
         let file = std::fs::read_to_string(ctx.config.with_file_name("cooee-token")).unwrap_or_default();
         let bearer = header(head, "authorization")
             .and_then(|h| h.strip_prefix("Bearer "))
@@ -1363,6 +1705,7 @@ impl Server<'_> {
                 return Ok(json!({"ops": [{"op": "screen", "screen": s}]}));
             }
             "drive" => self.form_op(ctx, "drive", &[("fleet", fleet)])?,
+            "force" => crate::slo::force(ctx, &cfg, &self.r, &mut vec![], (&fleet, n()?))?,
             "drive-all" => {
                 let live = cfg.fleet.iter().filter(|f| !f.1.paused);
                 let lines: Vec<String> = live
@@ -1433,6 +1776,7 @@ impl Server<'_> {
                 };
                 self.form_op(ctx, "answer", &[("fleet", at), ("id", block.into()), ("choice", pick)])?
             }
+            "unpark" => self.form_op(ctx, "unpark", &[("fleet", fleet), ("issue", n()?.to_string())])?,
             "needs-human" => {
                 let pick = s("choice");
                 let op = match pick.as_str() {

@@ -11,6 +11,7 @@
 1 ask_ids
 2 ask_scale
 1 asks
+2 autonomy
 4 backlog
 4 blocked_respawn
 1 board_errors
@@ -29,6 +30,7 @@
 1 config_api
 1 config_card
 4 config_invalid
+2 cooee_profiles
 4 cooee_screens
 1 cooee_token
 1 demo_export
@@ -64,12 +66,14 @@
 4 host_offline
 2 host_slots
 2 host_spared
+3 host_sync
 1 host_tab
 1 host_words
 3 hosts
 1 hotspots
 4 hung_read
 1 hung_root
+3 issue_sheet_webkit
 4 keychain_jam
 3 kick
 4 land
@@ -77,6 +81,7 @@
 3 lane_asks
 1 lane_fold
 4 lane_hog
+2 lane_host_move
 4 lane_sandbox
 1 lanes_sheet
 2 lesson
@@ -160,6 +165,7 @@
 3 shed
 4 shed_native
 4 shed_others
+4 shed_pin
 4 shed_version
 1 sim
 1 slo

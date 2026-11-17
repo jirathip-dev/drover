@@ -21,7 +21,7 @@ pub fn cached(ctx: &Ctx, fleet: &str) -> Conflicts {
     serde_json::from_value(v.at("conflicts").clone()).unwrap_or_default()
 }
 
-fn collide(r: &dyn Runner, dir: &Path, a: &str, b: &str) -> Vec<String> {
+pub(crate) fn collide(r: &dyn Runner, dir: &Path, a: &str, b: &str) -> Vec<String> {
     let d = dir.to_string_lossy();
     let o = r.run(
         "git",

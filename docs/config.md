@@ -163,7 +163,9 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `overflow_after_minutes` | `10` | every local host refused this long lets placement start a stopped cloud host |
 | `import_max_age_hours` | `24` | a remote host's asks older than this are never imported |
 | `max_pushes_per_pass` | `3` | push alerts `check` sends a pass before a summary |
-| `max_parallel_spawns` | `6` | concurrent detached spawn kicks (0: in the pass) |
+| `max_parallel_spawns` | `6` | concurrent detached spawn kicks on the main host (0: in the pass) |
+| `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
+| `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
 | `spawn_pending_max_secs` | `300` | a spawn marker or kick lock older than this is stale |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |
@@ -203,9 +205,10 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `serve_remote_secs` | `10` | serve re-reads the remote hosts (ssh) in the background this often |
 | `serve_host_secs` | `10` | serve re-samples this host's load in the background this often |
 | `serve_heartbeat_secs` | `15` | `/live` pings this often; a stream whose last 2 pings are still unsent is dropped |
-| `serve_handover_secs` | `300` | `self-update` waits this long for the running serve to hand over before restarting it |
+| `serve_handover_secs` | `300` | how long serve waits for a held port's serve to answer, hand over, or let go of the port (#1244) |
 | `serve_mem_mb` | `300` | serve over this much RSS logs `serve-mem-high` once and hands over to a fresh copy of itself |
 | `slo_api_p95_ms` | `1000` | `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once |
 | `slo_api_minutes` | `10` | how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api` |
 | `slo_idle_minutes` | `20` | no lane working this long while the queue has spawnable work breaches `slo-idle` |
 | `slo_tick_minutes` | `10` | a tick running longer than this breaches `slo-tick`; the next fast step stops it |
+| `slo_pass_minutes` | `30` | no slow drive pass of a fleet for this long shows the owner's `Drive is stuck` card |

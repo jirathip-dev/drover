@@ -302,3 +302,16 @@ fn a_5mb_build_cloned_is_stored_in_16kb() {
     assert_eq!(serde_json::to_value(&back[0]).unwrap()["agent"], "a-impl-1");
     same(&fold(&back), &fold(&ev));
 }
+
+#[test]
+fn a_compaction_that_moves_nothing_keeps_the_shared_log() {
+    let d = tmpdir("noop");
+    let p = d.join("events.jsonl");
+    write(&p, &log(5, 20_000, 1_000));
+    let held = drover::events::shared(&p).unwrap();
+    let key = drover::db::version(&p);
+    assert_eq!(drover::db::compact(&p, 1_001).unwrap(), (0, 0));
+    let again = drover::events::shared(&p).unwrap();
+    assert_eq!(drover::db::version(&p), key, "the version unchanged");
+    assert!(std::sync::Arc::ptr_eq(&held, &again), "the held log not rebuilt");
+}

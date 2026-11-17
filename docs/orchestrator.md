@@ -43,7 +43,7 @@ drover thread ls [FLEET] [--json]           # per repo: title, last message, unr
 - **No worktree:** it runs in `<state dir>/orchestrator/<thread>/` (or `<[orchestrator] dir>/<thread>/`) in its own shed terminal (an ACP session on a `shed-acp` fleet), as agent
   `orchestrator-<thread>`, with `DROVER_LANE=<fleet>:-:orchestrator` (so the lane hook guards it) and
   `DROVER_THREAD=<thread>`.
-- **Its brief** (`.brief.md` there, rewritten at each start) is `roles/orchestrator.md`, the thread and repo, then the
+- **Its brief** (`.brief.md` there, rewritten at each start) is `roles/orchestrator/role.md` and `thread.md`, the thread and repo, then the
   `[orchestrator]` profile:
 
   ```toml

@@ -333,7 +333,7 @@ export type Vendor = { name: string, vendor: string, };
 export type QueueTab = { now: number, rw: boolean, live: boolean, mtime: string, error?: string | null, fleets: Array<QueueCard>, };
 
 /**
- * #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of `done_n`), the backlog and the [config] sheet.
+ * #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog and the [config] sheet.
  */
 export type QueueCard = { name: string, k: string, serial: Array<string>, paths: Array<string>, need: number, paused?: string | null, drive: Drive, notes: Array<string>, rows: Array<QueueRow>, done: Array<DoneRow>, done_n: number, backlog?: Backlog | null, config: ConfigSheet, marks: { [key in string]: Marks }, };
 
@@ -367,9 +367,9 @@ export type PrLine = { pr?: number | null, run?: string | null, ci?: string | nu
 export type QueueLane = { name: string, state: string, tone: string, ago: string, link: string, };
 
 /**
- * A row of `done today`: its land note (else state), age and merged PR.
+ * #1172: a `merged` event of `done today`: its issue's title, land note (else `merged`), age, time `t`, PR and merge sha.
  */
-export type DoneRow = { issue: number, note: string, age: string, pr?: string | null, };
+export type DoneRow = { issue: number, title?: string | null, note: string, age: string, t: number, pr?: string | null, sha?: string | null, };
 
 /**
  * #365: the open issues not queued and with no lane, by number, as last read `ago`.
