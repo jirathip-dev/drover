@@ -742,3 +742,60 @@ fn doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does() {
     );
     assert!(!o.contains("✓ host boat1"), "{o}");
 }
+
+#[test]
+fn a_proxy_lanes_auth_error_names_the_proxy_and_holds_its_host_unless_a_proxy_call_clears_it() {
+    for (name, retried) in [("racp-auth-held", false), ("racp-auth-retry", true)] {
+        let (port, _) = upstream();
+        let (c, _) = setup(name, &["boat1"]);
+        let toml = std::fs::read_to_string(&c.config)
+            .unwrap()
+            .replace("port = 9", &format!("port = 9\nupstream = \"http://127.0.0.1:{port}\""));
+        std::fs::write(&c.config, toml).unwrap();
+        let f = spawn_fake().reply("gh issue view 13", r#"{"title":"Next","body":"AC: next"}"#);
+        let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+        let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
+        assert_eq!(code, 0, "{o}");
+        let key = adapter_env(&b)["ANTHROPIC_AUTH_TOKEN"].clone();
+        b.machines
+            .borrow_mut()
+            .get_mut("boat1")
+            .unwrap()
+            .terms
+            .get_mut("sendmeter-impl-12")
+            .unwrap()["reported"] = json!({"state": "error", "note": "auth: API Error: 401 authentication_error"});
+        let at = |s: u64| drover::Ctx {
+            now: c.now + s,
+            ..c.clone()
+        };
+        let (code, o) = run(&at(60), &b, &["check"]);
+        assert_eq!(code, 0, "{o}");
+        let ev = drover::events::read(&c.state).unwrap().to_vec();
+        let out: Vec<_> = ev.iter().filter(|e| e.kind == "signed-out").collect();
+        assert_eq!(out.len(), 1, "{name}: {o}");
+        let why = out[0].str("reason").unwrap();
+        assert!(
+            why.contains("token proxy") && why.contains("claude setup-token") && why.contains("drover hosts on boat1"),
+            "{why}"
+        );
+        assert!(!why.contains("claude /login"), "{why}");
+        if retried {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let proxy_port = l.local_addr().unwrap().port();
+            let pc: &'static drover::Ctx = Box::leak(Box::new(at(90)));
+            let pcfg: &'static drover::config::Config =
+                Box::leak(Box::new(drover::config::Config::load(&c.config).unwrap()));
+            let pf: &'static Fake = Box::leak(Box::new(Fake::default()));
+            let now = pc.now;
+            std::thread::spawn(move || drover::proxy::serve_on(pc, pcfg, pf, &l, &move || now));
+            let (status, body) = call(proxy_port, &key);
+            assert!(status.contains("200"), "{status} {body}");
+        }
+        let (code, o) = run(&at(3600), &b, &["spawn", "sendmeter", "13", "impl", "--host", "boat1"]);
+        if retried {
+            assert!(!o.contains("LOGIN_NEEDED"), "{name}: {o}");
+        } else {
+            assert!(code == 3 && o.contains("LOGIN_NEEDED"), "{name}: {o}");
+        }
+    }
+}
