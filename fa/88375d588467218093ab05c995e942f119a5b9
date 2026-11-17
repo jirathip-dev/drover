@@ -1,0 +1,9 @@
+Decided: merged origin/staging; .drover/arch-baseline.txt took staging's serve.rs 3594, replacing this branch's 3591 staging fix.
+Because: .drover/arch-baseline.txt:24
+Decided: the red sim hunt test passes at the merged head (exit 0, twice); no code change for it.
+Because: crates/cli/tests/sim/main.rs:276
+Decided: the lane-key 401 test now also runs the 'unknown lane key' form.
+Because: q1867
+Rejected: none
+Check: an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane fails with session/lanes reverted and passes at head.
+Owner: Brought up to date with staging and added the owner's 'unknown lane key' case to the tests.
