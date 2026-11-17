@@ -245,6 +245,11 @@ The next tick logs the result as `host-sync` (host, from, to, ok). A failure ale
 install there succeeds, and the tick after retries it. Until the versions match, a shed-acp host takes no lanes
 (`acp guard`). `drover hosts` shows each remote host's drover sha, with `✓` when it matches the main host's.
 
+The version read comes first in a host's look, before its health checks, so a slow health check cannot hold it
+back. A tick that reaches the host but cannot read it (the host offline for the pass, or the tick past its budget)
+logs `host-sync-skipped` with the reason, once per streak. The pass that reads a finished install checks the host's
+health again at once, so its `acp guard` row clears and lanes can be placed there.
+
 ## When the main host is down
 
 Nothing new starts. Lanes on other hosts keep running in their own shed servers. When the main host comes back,

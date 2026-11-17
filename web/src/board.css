@@ -169,3 +169,21 @@ html[data-focus] .scr>.cmp{position:static}
 #iv>.bar{position:fixed;bottom:env(safe-area-inset-bottom);left:0;right:0;justify-content:center;background:var(--bg)}
 #iv .bar>a{display:inline-flex;align-items:center;height:var(--ctl);color:var(--l);text-decoration:none}
 .card .form.say{position:static;border:0;padding:0;background:none}
+.hsc{position:relative;aspect-ratio:392/188;overflow:hidden;border-radius:6px;background:var(--card)}
+.hsc svg{display:block;width:100%;height:100%}
+.hsc::after{content:"";position:absolute;inset:0;pointer-events:none}
+.herd.night .hsc svg{filter:brightness(.45) saturate(.6)}
+.herd.night .hsc::after{background:#0b1838;opacity:.35}
+.herd[data-sky=windy] .hsc svg{filter:saturate(.8)}
+.herd[data-sky=fog] .hsc::after{background:#e8ecef;opacity:.45}
+.herd[data-sky=storm] .hsc svg{filter:brightness(.6) grayscale(.5)}
+.herd[data-sky=storm] .hsc::after{background:repeating-linear-gradient(105deg,transparent 0 9px,#cfe3ff55 9px 10px)}
+.herd.night[data-sky=storm] .hsc svg{filter:brightness(.35) grayscale(.5)}
+.hbar{display:flex;align-items:center;gap:var(--s2);margin-top:var(--s2)}
+.hbar .hs{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* #1118: from 1000 px the Threads tab is two panes between the header and the tab bar, each its own scroller. */
+html[data-duo]{--lw:clamp(340px,28vw,400px)}
+html[data-duo] main>.lst{position:fixed;top:var(--top,0);bottom:var(--bot,0);left:0;width:var(--lw);box-sizing:border-box;padding:0 var(--s3);overflow-y:auto;overscroll-behavior:contain;border-right:1px solid var(--line)}
+html[data-duo] main>.tab>.scr{left:var(--lw);max-width:none}
+html[data-duo] .scr .txt{max-width:100ch}
+.lst .row[aria-current]{background:color-mix(in srgb,var(--l) 15%,transparent);box-shadow:inset 3px 0 var(--l)}

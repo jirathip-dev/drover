@@ -59,7 +59,7 @@ export function value(v: unknown): string {
   return String(v ?? '');
 }
 
-const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
+export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
   screen(b, c) {
     const s = el('div', 'scr');
     s.dataset.id = String(b.id);

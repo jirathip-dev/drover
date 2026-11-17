@@ -153,3 +153,15 @@ fn demo_page_is_inert_and_relative() {
         "sw precaches this build's assets"
     );
 }
+
+#[test]
+fn the_herd_screen_of_the_demo_fleet_is_its_golden() {
+    let (site, _) = export();
+    let got = screen(&site, "screens/herd");
+    let f = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/cooee/herd.json");
+    if std::env::var_os("BLESS").is_some() {
+        std::fs::write(&f, serde_json::to_string_pretty(&got).unwrap() + "\n").unwrap();
+    }
+    let want: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+    assert_eq!(got, want, "`BLESS=1` rewrites tests/golden/cooee/herd.json");
+}

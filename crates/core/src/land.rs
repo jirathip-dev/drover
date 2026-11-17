@@ -1,5 +1,5 @@
 use crate::config::{glob, Config, Fleet};
-use crate::events::{emit, Event, Json};
+use crate::events::{emit, fold, working, Event, IssueState, Json};
 use crate::overlap::git;
 use crate::runner::{json, ok, Runner};
 use crate::{gh, Ctx};
@@ -81,7 +81,7 @@ fn red(checks: &Value) -> (String, String, bool) {
 pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let f = cfg.fleet(fleet)?;
     let Some(l) = f.fast_first() else { return Ok(()) };
-    let ev = crate::events::working(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let mine = |k: &'static str| move |e: &&Event| e.fleet == fleet && e.kind == k;
     let log = |n: Option<u64>, k: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, n, k, d));
     let done = |o: &&Event| {
@@ -365,5 +365,84 @@ pub fn stats(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Resul
         red += end.saturating_sub(p.ts);
     }
     writeln!(out, "{fleet} integration red (landings paused): {} min", red / 60)?;
+    Ok(())
+}
+
+/// #129: after a merge, merge integration into every other open ready PR whose lane isn't working, oldest PR first, in a scratch worktree (#207: never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`) only when needed (#285: `update_ready`), else the PR merges as it is; a ready PR's conflict gets an `--update` lane.
+pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+    let (f, events, ag) = (
+        cfg.fleet(fleet)?,
+        working(&ctx.state)?,
+        crate::session::all(cfg, r).checked().unwrap_or_default(),
+    );
+    let busy = |l: &str| ag.busy(l);
+    let open = |s: &IssueState| {
+        let pr = gh::cached_pr(ctx, fleet, s.issue);
+        pr.at("number").as_u64().filter(|_| pr.at("state") == "OPEN")
+    };
+    let mut prs: Vec<(u64, IssueState)> = (fold(&events).into_values())
+        .filter(|s| s.fleet == fleet && s.state == "ready")
+        .filter(|s| !s.lane.as_deref().is_some_and(busy))
+        .filter_map(|s| Some((open(&s)?, s)))
+        .collect();
+    if prs.is_empty() {
+        return Ok(());
+    }
+    prs.sort_by_key(|p| p.0);
+    let (dir, wt) = (f.local_path(), ctx.state.with_file_name(format!("update-{fleet}")));
+    let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
+    git(r, &dir, &["fetch", "-q", "origin"])?;
+    let checks = crate::gate::premerge_checks(ctx, f);
+    let base = git(r, &dir, &["rev-parse", &into])?;
+    let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
+    let (p, mut seen) = (gh::cache_path(ctx, "update", fleet, 0), serde_json::Map::new());
+    let old = crate::usage::load::<Value>(&p).unwrap_or_default();
+    for (_, s) in prs {
+        let (n, branch) = (s.issue.to_string(), crate::gate::branch_of(Some(&s), s.issue));
+        let from = git(r, &dir, &["rev-parse", &format!("origin/{branch}")])?;
+        if git(r, &dir, &["merge-base", "--is-ancestor", &base, &from]).is_ok() {
+            continue;
+        }
+        let key = format!("{from} {base}");
+        let clean =
+            (old.at(&key).as_bool()).unwrap_or_else(|| crate::overlap::collide(r, &dir, &from, &base).is_empty());
+        seen.insert(key, json!(clean));
+        gh::store(&p, &Value::Object(seen.clone()))?;
+        let mut pr = gh::cached_pr(ctx, fleet, s.issue);
+        crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
+        let push = pr.at("landing") == "fast-first" || gh::update_ready(ctx, Some(r), f, fleet);
+        if clean && !push {
+            continue;
+        }
+        let clean = clean && {
+            tree(&["remove", "--force", "--force", &wts]).ok();
+            tree(&["add", "-f", "--detach", &wts, &from])?;
+            git(r, &wt, &["merge", "--no-edit", &into]).is_ok()
+        };
+        let fail = crate::gate::run_checks(r, &wt, &into, if clean { &checks[..] } else { &[] });
+        let res = if !clean {
+            crate::drive::update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
+        } else if let Some((c, o)) = fail {
+            let at = format!("{from:.7} updated onto {into}");
+            let rf = crate::gate::premerge_failed(ctx, cfg, r, out, (fleet, s.issue), (&from, &at), (c, &o));
+            rf.and_then(|rf| Ok(writeln!(out, "{fleet} #{n} {rf}")?))
+        } else {
+            git(r, &wt, &["rev-parse", "HEAD"]).and_then(|to| {
+                git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")])?;
+                gh::forget_pr(ctx, fleet, s.issue);
+                writeln!(out, "{fleet} #{n} auto-updated: {from:.7} → {to:.7}")?;
+                let d = json!({"from": from, "to": to});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, fleet, Some(s.issue), "auto-updated", d),
+                )?;
+                pr.put("headRefOid", json!(to));
+                crate::gate::sync_label(ctx, cfg, r, out, &s, &pr)
+            })
+        };
+        tree(&["remove", "--force", &wts]).ok();
+        res?;
+    }
     Ok(())
 }
