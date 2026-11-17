@@ -84,7 +84,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 65 | Answer a blocked lane's menu by tap (stale-menu guard) | — | open |
 | 66 | Permission-prompt card: reason, command, auto-deny countdown | — | open |
 | 67 | Needs-human card: merge anyway, one more round, park | parity_67 | kept |
-| 68 | [later] and [later all] hide cards on this phone | — | open |
+| 68 | [later] and [later all] hide cards on every device until they change | parity_68 | kept |
 | 69 | Design review: PNGs inline, approve/revise/reject | parity_69 | kept |
 | 70 | Verify screenshots on cards (lane-folder images only) | parity_70 | kept |
 | 71 | Alert when an answer doesn't reach its lane | parity_71 | kept |
