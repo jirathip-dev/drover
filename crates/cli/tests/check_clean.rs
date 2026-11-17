@@ -574,8 +574,8 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
     let r = || {
         Fake::default()
             .reply(
-                "gh issue list -R jirathip-dev/sendmeter --state closed",
-                r#"[{"number": 21}, {"number": 22}, {"number": 99}]"#,
+                "gh api graphql -f owner=jirathip-dev -f name=sendmeter -f query=",
+                r#"{"data": {"repository": {"i21": {"state": "CLOSED"}, "i22": {"state": "CLOSED"}, "i23": {"state": "OPEN"}}}}"#,
             )
             .reply(&format!("git -C {unpushed} rev-list"), "1\n")
             .reply(&format!("git -C {done} rev-list"), "0\n")
@@ -608,7 +608,7 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
         !r0.calls
             .borrow()
             .iter()
-            .any(|l| l.starts_with("gh ") && !l.starts_with("gh issue list")),
+            .any(|l| l.starts_with("gh ") && !l.starts_with("gh api graphql -f")),
         "no GitHub writes"
     );
 

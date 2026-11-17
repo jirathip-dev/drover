@@ -46,7 +46,7 @@ pub fn page_places() -> Value {
     Value::Array(all)
 }
 
-const THREAD_ACTIONS: [&str; 13] = [
+const THREAD_ACTIONS: [&str; 11] = [
     "thread-new",
     "thread-say",
     "thread-retry",
@@ -57,8 +57,6 @@ const THREAD_ACTIONS: [&str; 13] = [
     "thread-unqueue",
     "thread-stop",
     "thread-model",
-    "thread-secret",
-    "thread-config",
     "thread-signin",
 ];
 
@@ -1424,7 +1422,7 @@ impl Server<'_> {
             p if paired && p.starts_with("/screens/lanes/") => self.lane_sheet(ctx, &p[15..])?,
             "/screens/events" => events_screen(ctx, q),
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
-            "/screens/cards" => self.chat_cards(ctx),
+            "/screens/cards" => self.chat_cards(ctx, paired),
             "/screens/workflow" => workflow(ctx),
             "/screens/herd" => herd_screen(&self.herd(ctx, None).ok()?),
             "/screens/hot" => self.on_row(ctx, q, |c, r| {
@@ -1598,10 +1596,11 @@ impl Server<'_> {
             "actions": [{"icon": "more", "label": "More", "menu": menu}], "blocks": blocks})
     }
 
-    fn chat_cards(&self, ctx: &Ctx) -> Value {
+    fn chat_cards(&self, ctx: &Ctx, paired: bool) -> Value {
         let tab = self.needs_tab(ctx, true);
         let ev = working(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
+        cards.extend(super::chat::owner_cards(ctx, &ev, paired));
         cards.extend(tab.config.as_ref().map(|e| {
             json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
                 "title": "fleet.toml is invalid", "blocks": [{"type": "text", "id": "config-why", "markdown": e}]})
@@ -1813,9 +1812,9 @@ impl Server<'_> {
                 ];
                 self.form_op(ctx, "card", &kv)?
             }
-            "thread-config" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
+            "config-card" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
             "thread-signin" => crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("name"), "web")?,
-            n if THREAD_ACTIONS.contains(&n) => {
+            n if THREAD_ACTIONS.contains(&n) || n == "secret-card" => {
                 let keys = ["text", "repo", "name", "act", "data", "q", "harness", "model", "effort"];
                 let mut f: Q = keys.into_iter().map(|k| (k.into(), s(k))).collect();
                 f.extend([
@@ -1823,7 +1822,7 @@ impl Server<'_> {
                     ("n".into(), s("msg")),
                     ("value".into(), s("text")),
                 ]);
-                f.insert("op".into(), n[7..].into());
+                f.insert("op".into(), n.strip_prefix("thread-").unwrap_or("secret").into());
                 let mut later = vec![];
                 let (res, more) = crate::conductor::deferred(|| super::chat::post(ctx, &self.r, &f, &mut later));
                 self.later(ctx, later.into_iter().chain(more));

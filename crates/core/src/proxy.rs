@@ -84,7 +84,15 @@ pub fn mint(
 pub fn state(now: u64, events: &[Event], k: &Key) -> &'static str {
     let mine = |e: &&Event| e.kind == "spawn" && e.str("agent") == Some(&k.agent) && e.ts >= k.created;
     let spawns: Vec<&Event> = events.iter().filter(mine).collect();
-    let dead = |e: &Event| e.kind == "lane-dead" && e.str("key").is_some_and(|x| x.ends_with(&format!(":{}", k.agent)));
+    let back = |d: &Event| {
+        let key = format!("alive:{}", d.str("key").unwrap_or_default());
+        events
+            .iter()
+            .any(|e| e.kind == "lane-alive" && e.str("key") == Some(&key))
+    };
+    let dead = |e: &Event| {
+        e.kind == "lane-dead" && e.str("key").is_some_and(|x| x.ends_with(&format!(":{}", k.agent))) && !back(e)
+    };
     let gone = spawns.first().is_some_and(|sp| {
         spawns.len() > 1
             || events
