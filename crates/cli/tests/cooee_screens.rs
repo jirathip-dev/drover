@@ -217,6 +217,18 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     assert_eq!(find(&q, "done-today-sendmeter")["value"], "1");
     assert_eq!(find(&q, "stats")["items"][0]["value"], "1");
     assert_eq!(find(&q, "stats")["items"][0]["spark"], json!([0, 0, 0, 0, 0, 0, 1]));
+    let labels: Vec<&Value> = find(&q, "repo")["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| &o["label"])
+        .collect();
+    assert_eq!(labels, [&json!("all 4"), &json!("sendmeter 4 ●")]);
+    let counts: Vec<String> = (find(&q, "counts")["items"].as_array().unwrap().iter())
+        .map(|i| format!("{} {}", i["label"].as_str().unwrap(), i["value"].as_str().unwrap()))
+        .collect();
+    assert_eq!(counts, ["needs you 1", "in progress 1", "queued 2", "done today 1"]);
+    assert_eq!(q["badge"], 2);
     let none = get("/screens/queue?repo=nope");
     assert_eq!(find(&none, "repo")["selected"], json!(["all"]));
 
@@ -694,7 +706,7 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
         "",
     )
     .1;
-    screen.as_object_mut().unwrap().remove("badge");
+    assert_eq!(fresh["badge"], 1);
     assert_eq!(screen, fresh, "the ops turned the first answer into today's");
 }
 
@@ -762,7 +774,7 @@ fn parity_38_the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_mo
     };
     let q = get("/screens/queue");
     like(&q, "queue", false);
-    assert_eq!(find(&q, "repo")["options"][1]["label"], "sendmeter ●", "a needs dot");
+    assert_eq!(find(&q, "repo")["options"][1]["label"], "sendmeter 9 ●", "a needs dot");
     assert_eq!(find(&q, "fleet-sendmeter")["tone"], "warn", "needs you");
     assert_eq!(
         rows_of(&q, "queued-list-sendmeter"),

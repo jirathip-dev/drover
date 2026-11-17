@@ -125,6 +125,16 @@ pub fn acting() -> Option<String> {
     is_role(lane.split(':').nth(2)?).then(|| crate::config::env("DROVER_ORCHESTRATOR"))?
 }
 
+/// #962: who runs this command, the `by` its events carry: `drive`, `orchestrator-<id>`, `lane` or `owner`.
+pub fn actor() -> String {
+    match acting() {
+        _ if crate::drive::in_act() => "drive".into(),
+        Some(id) => format!("orchestrator-{id}"),
+        None if crate::config::env("DROVER_LANE").is_some() => "lane".into(),
+        None => "owner".into(),
+    }
+}
+
 /// #780: the orchestrator a thread from before #780 (none named) belongs to, the one `[orchestrator]` itself names.
 pub const DEFAULT: &str = "default";
 
