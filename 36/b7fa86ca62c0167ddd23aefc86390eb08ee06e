@@ -1,0 +1,7 @@
+Decided: triage closes, folds and labels only through drover verbs, which refuse protected issues before any write.
+Because: "Acts on GitHub, through drover verbs only"
+Decided: the offline_tick test now expects triage among the skipped tick steps.
+Because: crates/core/src/timer.rs:425
+Rejected: raw gh issue close/edit for the lane — it would skip the queued/live/ask/keep guard.
+Check: a triage lane cannot push or merge, and each verb refuses PROTECTED on a queued issue.
+Owner: a weekly triage lane tidies issues and files one docs issue; every change has a one-line undo.
