@@ -1,3 +1,4 @@
+mod gates;
 mod hunt;
 mod invariants;
 mod metrics;
@@ -30,6 +31,8 @@ pub struct Outcome {
     pub cov: std::collections::BTreeSet<String>,
     pub peaks: Vec<u64>,
     pub metrics: metrics::Metrics,
+    /// #959: the "sometimes" states it reached.
+    pub reached: std::collections::BTreeSet<&'static str>,
 }
 
 impl Outcome {
@@ -115,6 +118,7 @@ pub fn play(seed: u64, m: model::Model, cfg: &str, end: u64, run_steps: u64, ste
         cov,
         peaks,
         metrics,
+        reached: std::mem::take(&mut w.model.reached),
     }
 }
 
@@ -210,7 +214,7 @@ fn a_seed_replays_to_the_same_trace() {
 
 #[test]
 fn a_broken_invariant_fails_with_seed_and_trace() {
-    for (s, code) in [(Sabotage::DoubleLane, "I1 "), (Sabotage::RedMerge, "I4 ")] {
+    for (s, code) in [(Sabotage::DoubleLane, "I1 "), (Sabotage::RedMerge, "A1 ")] {
         let o = (2..40)
             .map(|seed| run(seed, Some(s)))
             .find(|o| o.failure.is_some())
@@ -224,6 +228,62 @@ fn a_broken_invariant_fails_with_seed_and_trace() {
         );
         assert!(r.lines().count() > 50, "{r}");
     }
+}
+
+fn gate_runs(seeds: &[u64], sabotage: Option<Sabotage>) -> Vec<Outcome> {
+    let runs: Vec<_> = (seeds.iter())
+        .map(|&s| std::thread::spawn(move || run_world(s, gates::world(s), STEPS, sabotage)))
+        .collect();
+    runs.into_iter().map(|h| h.join().expect("a run")).collect()
+}
+
+#[test]
+fn gate_scenarios_hold_always_and_reach_every_sometimes() {
+    let all: Vec<u64> = gates::SCENARIOS.iter().map(|s| s.0).collect();
+    let one = seeds().into_iter().find(|s| all.contains(s));
+    let picked = one.map_or_else(|| all.clone(), |s| vec![s]);
+    let outs = gate_runs(&picked, None);
+    let again = gate_runs(&picked, None);
+    let mut bad = vec![];
+    for (o, b) in outs.iter().zip(&again) {
+        if let Some(f) = &o.failure {
+            eprintln!("{}", o.report());
+            bad.push(format!("seed {}: {f}", o.seed));
+        }
+        if o.trace != b.trace {
+            bad.push(format!("seed {}: a second run's trace differs", o.seed));
+        }
+    }
+    if one.is_none() {
+        bad.extend(gates::unreached(&outs, gates::SOMETIMES));
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
+#[test]
+fn breaking_the_head_sha_check_fails_always() {
+    let o = gate_runs(&[9591], Some(Sabotage::HeadSha)).remove(0);
+    let f = o.failure.clone().unwrap_or_default();
+    assert!(
+        f.starts_with("A1 always: GitHub merge #959 merged at 0000000"),
+        "{}",
+        o.report()
+    );
+    assert!(f.ends_with("verdict None, CI green true"), "{f}");
+}
+
+#[test]
+fn a_sometimes_state_never_reached_fails_the_run() {
+    let outs = gate_runs(&[9591], None);
+    assert!(outs[0].failure.is_none(), "{}", outs[0].report());
+    assert_eq!(
+        gates::unreached(&outs, &["merge-after-retried-verdict"]),
+        [] as [String; 0]
+    );
+    assert_eq!(
+        gates::unreached(&outs, &["round-limit"]),
+        ["sometimes round-limit: never reached in seeds [9591]"]
+    );
 }
 
 fn env(k: &str, default: u64) -> u64 {
