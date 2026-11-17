@@ -361,6 +361,7 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
         "t1\n"
     );
+    assert_eq!(run(&c, &b.cli(&acp()), &["thread", "say", "t1", "hi"]).0, 0);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -371,12 +372,15 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
         "Mozilla/5.0 (iPhone)",
         now,
     );
+    let (go, held) = std::sync::mpsc::channel();
+    let (typed, seen) = std::sync::mpsc::channel();
+    go.send(()).unwrap();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
     std::thread::spawn(move || {
         let f = acp();
-        drover::serve::serve_on(&c2, &b.cli(&f), l, false)
+        drover::serve::serve_on(&c2, &Held(b.cli(&f), held.into(), typed.into()), l, false)
     });
     let png: Vec<u8> = (0..600_000u32).map(|i| (i % 253) as u8).collect();
     let body = format!("op=say&t=t1&text=big&name=big.png&data={}", url_enc(&B64.encode(&png)));
@@ -393,6 +397,8 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
     let up = c.state.with_file_name("orchestrator").join("t1/uploads");
     let saved = std::fs::read_dir(&up).unwrap().next().unwrap().unwrap().path();
     assert_eq!(std::fs::read(saved).unwrap(), png);
+    let line = seen.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+    assert!(line.starts_with("shed send orchestrator-t1 "), "{line}");
 }
 
 #[test]
