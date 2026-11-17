@@ -1,0 +1,9 @@
+Decided: a linked cooee chat id stands for a thread id in card post, config propose and secret request, resolved by orchestrator::fleet_of
+Because: "accept the chat identity #1057 defines, as well as a thread id"
+Decided: settle lines go through one orchestrator::tell; a chat's is a logged system thread-msg read via /api/v1/thread/<chat>
+Because: "Shared data and actions go in `/api/v1`; cooee screens through the `drover` plugin."
+Decided: config and secret card buttons are config-card and secret-card, like run-card, so the plugin manifest holds no thread- action
+Because: crates/cli/tests/threads_tab.rs:216
+Rejected: loosening the #1072 manifest assert — it guards that the Threads tab stays standalone-only
+Check: the PR test refuses an unlinked chat, keeps CARD_FORBIDDEN and owner-only, and never shows the secret value
+Owner: cooee still needs its paired change to draw these cards; no live cooee check was run here
