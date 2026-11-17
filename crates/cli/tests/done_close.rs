@@ -126,3 +126,31 @@ fn a_spawn_whose_prompt_never_landed_is_not_closed_as_done() {
     assert_eq!(code, 0, "{out}");
     assert!(!sh.called("kill", LANE) && kinds(&c, "lane-closed").is_empty(), "{out}");
 }
+
+#[test]
+fn a_done_verify_lane_holding_only_its_own_outputs_closes() {
+    let st = "?? verdict.md\n?? .verify-browser.mjs\n?? shots/\n";
+    assert_eq!(drover::spawn::changes(st), 0, "{st}");
+    let c = ctx(&tmpdir("close-verify-shots"), CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let wt = c.worktrees.join("sendmeter/verify-12-r1");
+    std::fs::create_dir_all(&wt).unwrap();
+    let wt = wt.to_string_lossy().into_owned();
+    let lane = "sendmeter-verify-12-r1";
+    let ev = |ts, kind: &str, d| append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
+    let sp = json!({"role": "verify", "stage": "verify", "check": true, "agent": lane, "pane": lane, "worktree": wt});
+    ev(T - 3600, "spawn", sp);
+    ev(
+        T - 400,
+        "verdict",
+        json!({"verdict": "FAIL", "sha": "abc", "stage": "verify", "loop": "rev", "form_only": true}),
+    );
+    sh.lane(lane, "done", &wt);
+    let r = with(&wt, st, "0\n");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(kinds(&c, "lane-kept-dirty").is_empty(), "{out}");
+    assert_eq!(kinds(&c, "lane-closed").len(), 1, "{out}");
+    assert!(sh.called("kill", lane) && !sh.has(lane), "{:?}", sh.methods());
+}

@@ -1,5 +1,6 @@
 use crate::events::{append, working, Event};
-use crate::{config::Config, gate::refused, hosts::On, runner::Runner, term, Ctx};
+use crate::runner::{ok, Runner};
+use crate::{config::Config, gate::refused, hosts::On, term, Ctx};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
@@ -29,6 +30,63 @@ pub fn all(cfg: &Config) -> Vec<(String, String)> {
         }
     }
     v
+}
+
+/// #1101: write fleet `name`'s missing hygiene into its local clone (`[comments]`, `[docs]`, the first baseline); a row for each write.
+pub fn hygiene(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Vec<String> {
+    let (Some(f), h) = (cfg.fleet.get(name), cfg.hygiene(name)) else {
+        return vec![];
+    };
+    let dir = f.local_path();
+    if !dir.is_dir() {
+        return vec![];
+    }
+    let path = dir.join(".drover/arch.toml");
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let Ok(arch) = toml::from_str::<toml::Table>(&text) else {
+        return vec![format!("✗ hygiene {name} — {} does not parse → fix it", path.display())];
+    };
+    let mut add = String::new();
+    if h.comments.as_deref() == Some("strict") && !arch.contains_key("comments") {
+        add += "\n[comments]\npolicy = \"strict\"\n";
+    }
+    if h.docs.as_deref() == Some("on") && !arch.contains_key("docs") {
+        let files = ok(r, "git", &["-C", &dir.display().to_string(), "ls-files"]).unwrap_or_default();
+        let stem = |p: &&str| {
+            let n = p.rsplit('/').next().unwrap_or(p);
+            ["cli", "config", "api"].contains(&n.split('.').next().unwrap_or(n))
+        };
+        let watch: Vec<_> = files.lines().filter(stem).map(|p| format!("{p:?}")).collect();
+        add += &format!(
+            "\n[docs]\npaths = [\"docs/**/*.md\", \"README.md\"]\nwatch = [{}]\n",
+            watch.join(", ")
+        );
+    }
+    let mut rows = vec![];
+    if !add.is_empty() {
+        let wrote = std::fs::create_dir_all(dir.join(".drover")).and_then(|()| std::fs::write(&path, text + &add));
+        rows.push(match wrote {
+            Ok(()) => format!("✓ hygiene {name} — wrote {} → commit it", path.display()),
+            Err(e) => format!("✗ hygiene {name} — {}: {e}", path.display()),
+        });
+    }
+    let base = arch
+        .get("baseline")
+        .and_then(|b| b.as_str())
+        .unwrap_or(".drover/arch-baseline.txt");
+    if h.baseline.as_deref() == Some("setup") && path.exists() && !dir.join(base).exists() {
+        let q = |p: &str| format!("'{}'", p.replace('\'', "'\\''"));
+        let line = format!(
+            "cd {} && {} arch-check --write-baseline",
+            q(&dir.display().to_string()),
+            q(&ctx.exe)
+        );
+        rows.push(match ok(r, "sh", &["-c", &line]) {
+            Ok(_) => format!("✓ hygiene {name} — wrote the {base} baseline → commit it"),
+            Err(e) => format!("✗ hygiene {name} — baseline: {e:#}"),
+        });
+    }
+    rows
 }
 
 /// #830: the vendor of each setup in `all` that is a provider's login, by its name.
