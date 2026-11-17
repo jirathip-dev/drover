@@ -29,6 +29,7 @@
 1 config_api
 1 config_card
 4 config_invalid
+2 cooee_profiles
 4 cooee_screens
 1 cooee_token
 1 demo_export
