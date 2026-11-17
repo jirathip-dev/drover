@@ -96,6 +96,18 @@ pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     settled.into_iter().find(|e| e.str("id") == Some(id))
 }
 
+/// A card with exactly `cmd` is approved, started and not yet done: the run it is.
+pub fn running(events: &[Event], cmd: &str) -> bool {
+    let id = |k: &str, id: &str| events.iter().any(|e| e.kind == k && e.str("id") == Some(id));
+    (events
+        .iter()
+        .filter(|e| e.kind == "run-card" && e.str("cmd") == Some(cmd)))
+    .filter_map(|c| c.str("id"))
+    .any(|c| {
+        settled(events, c).is_some_and(|s| s.val("approved") == true) && id("run-started", c) && !id("run-done", c)
+    })
+}
+
 /// The owner's [approve] (`sha`: the prefix of the command's sha the owner saw, if the tap carries it) or [deny] on card `id`; the line the thread records.
 pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, approve: bool, sha: Option<&str>) -> Result<String> {
     settle_via(ctx, cfg, r, id, approve, sha, None)

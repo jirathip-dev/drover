@@ -746,7 +746,7 @@ pub fn drive(
         }
     }
     if only.is_none() && first {
-        if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
+        if let Err(e) = (!fast).then(|| crate::check::budget(ctx, cfg, r, out)).transpose() {
             writeln!(out, "budget: {e:#}")?;
         }
         if let Err(e) = crate::pending::requeue_waiting(ctx, cfg) {
@@ -765,7 +765,7 @@ pub fn drive(
     let live: Vec<&str> = (cfg.fleet.keys().map(String::as_str))
         .filter(|n| only.is_none_or(|o| o == *n))
         .collect();
-    let on = |n: &&str| cfg.fleet.get(*n).is_some_and(|f| !f.paused);
+    let on = |n: &&str| crate::compact::drives(ctx, cfg, r, n, out);
     let fleets: Vec<&str> = live.iter().copied().filter(on).collect();
     let events = (fast && first)
         .then(|| crate::events::working(&ctx.state).ok())
@@ -901,6 +901,13 @@ fn one(
             None => return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?),
         },
     };
+    if KICK.get().is_none() {
+        if let Err(e) =
+            working(&ctx.state).and_then(|ev| crate::check::closed_on_github((ctx, cfg, r, &mut *out), ev, Some(name)))
+        {
+            writeln!(out, "{name} closed issues: {e:#}")?;
+        }
+    }
     ACTS.with_borrow_mut(BTreeMap::clear);
     ROOM.set((false, None));
     let t = crate::clock::instant();
@@ -1001,8 +1008,8 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         let Some((at, &(ix, nh))) = mine.iter().enumerate().rfind(|(_, (_, e))| e.kind == "needs-human") else {
             continue;
         };
-        if s.build.as_deref() == Some("lesson") && nh.str("code") == Some("LANE_ENDS") {
-            crate::lesson::done(ctx, cfg, r, out, (&s.fleet, s.issue), "no repeated class")?;
+        if crate::lesson::no_pr(s.build.as_deref()) && nh.str("code") == Some("LANE_ENDS") {
+            crate::lesson::idle_done(ctx, cfg, r, out, (&s.fleet, s.issue), s.build.as_deref())?;
             continue;
         }
         let from = (mine.iter().take(at)).rposition(|(_, e)| reset.contains(&e.kind.as_str()));
@@ -1189,7 +1196,7 @@ fn pass(
     let agents = sessions.running();
     let ev = working(&ctx.state)?;
     let st = fold(&ev);
-    for s in st.values().filter(|s| s.fleet == fleet) {
+    for s in st.values().filter(|s| s.fleet == fleet && !s.done()) {
         let on = crate::events::held_on(&ev, s);
         let open = |b: &u64| st.get(&(fleet.into(), *b)).is_none_or(|b| b.state != "merged");
         if on.is_empty() || on.iter().any(open) {
@@ -1253,7 +1260,7 @@ fn pass(
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
     waits.retain(one);
     crate::promise::pass(ctx, cfg, fleet, &events, &waits)?;
-    external(ctx, cfg, r, out, fleet)?;
+    external(ctx, cfg, out, fleet)?;
     ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {
         if let Err(e) = crate::land::watch(ctx, cfg, r, out, fleet) {
@@ -1278,7 +1285,7 @@ fn pass(
     let mut updated = false;
     for (s, w) in waits
         .iter()
-        .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
+        .filter(|(s, w)| s.fleet == fleet && !(fast && s.done()) && s.lane.as_ref() == Some(&w.lane))
     {
         let lock = format!("drive-{fleet}-{}.lock", s.issue);
         let Some(_mine) = take(ctx, r, &lock, STALE_LOCK_SECS, fleet) else {
@@ -1298,12 +1305,12 @@ fn pass(
         if crate::gate::ready_draft(ctx, cfg, r, out, s, &pr)? && merge(w) {
             continue;
         }
-        let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
-        if let Some(e) = crate::events::working(&ctx.state)?.iter().rfind(|e| now(e)).cloned() {
+        if let Some(e) = crate::events::last_at(&working(&ctx.state)?, "auto-updated", (fleet, s.issue), ctx.now) {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
-            let Some(sent) = tell(r, &events, &w.lane, &crate::lesson::prompt(fleet, s.issue)) else {
+            let p = crate::lesson::prompt(fleet, s.issue, s.build.as_deref());
+            let Some(sent) = tell(r, &events, &w.lane, &p) else {
                 continue;
             };
             writeln!(
@@ -1350,7 +1357,7 @@ fn pass(
                 Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
             )?;
         } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE && !fast {
-            crate::lesson::done(ctx, cfg, r, out, (fleet, s.issue), "no repeated class")?;
+            crate::lesson::idle_done(ctx, cfg, r, out, (fleet, s.issue), s.build.as_deref())?;
         } else if w.who == "drive" {
             let gone = w.what.split_once(waiting::NO_PUSH);
             let ends =
@@ -1832,7 +1839,7 @@ fn no_change(
     Ok(true)
 }
 
-fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+fn external(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let events = working(&ctx.state)?;
     for s in fold(&events)
         .into_values()
@@ -1842,14 +1849,12 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         let num = pr.at("number").to_string();
         let seen = |e: &Event| e.is("blocked", fleet, s.issue) && e.str("pr") == Some(&num);
         let back = |e: &Event| e.issue == Some(s.issue) && e.fleet == fleet && e.str("landed_pr") == Some(&num);
-        let closed = || gh::closed(ctx, r, cfg.fleet(fleet)?, fleet, &[s.issue], ctx.now).map(|c| c.contains(&s.issue));
         let (kind, mut d) = match pr.at("state").as_str() {
             Some("MERGED") if crate::gate::unlogged_merge(&events, fleet, s.issue).is_some() => continue,
             Some("MERGED") if !events.iter().any(back) => {
                 let m = json!({"into": pr.at("baseRefName"), "merge_sha": pr.at("mergeCommit").at("oid"), "merged_at": pr.at("mergedAt")});
                 ("merged", m)
             }
-            Some("CLOSED") if closed()? => ("closed", json!({})),
             Some("CLOSED") if !events.iter().any(seen) => (
                 "blocked",
                 json!({"code": "PR_CLOSED", "reason": "PR closed outside drover"}),

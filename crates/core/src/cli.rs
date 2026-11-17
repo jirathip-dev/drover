@@ -298,7 +298,7 @@ enum Cmd {
         json: bool,
     },
     #[command(
-        about = "#668: the queue-wide line-cap view: total, cap and headroom at integration, each open PR's `src/ net`, the queued issues with no PR, the projected total and the one raise to ask for"
+        about = "#668: the queue-wide line-cap view: total, cap and headroom at integration, each open PR's `src/ net`, the queued issues with no PR, the projected total and the one raise to ask for; `cap log`: every past cap change from git"
     )]
     Cap { fleet: String },
     #[command(
@@ -356,6 +356,8 @@ enum Cmd {
         cmd: Option<LessonCmd>,
         fleet: Option<String>,
     },
+    #[command(about = "#1100: file this week's triage issue and spawn its lane, or a triage lane's verb")]
+    Triage(crate::triage::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
     #[command(alias = "host")]
     Hosts {
@@ -424,6 +426,8 @@ enum Cmd {
         config: std::path::PathBuf,
         #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
+        #[arg(long)]
+        base: Option<String>,
     },
     #[command(about = "CI (#734): the layers, bans and size limits in --config; exit 1 on a violation")]
     #[command(hide = true)]
@@ -598,10 +602,12 @@ enum Cmd {
         hide = true,
         about = "Archive old events of done issues, delete old heartbeats (daily by tick)"
     )]
-    Compact {
+    ArchiveEvents {
         #[arg(long, help = "Rebuild the issue, lane and ask tables from every event instead")]
         rebuild: bool,
     },
+    #[command(about = "A repo's fresh start: one root before a cut, one commit per landed PR after it; archive, undo")]
+    Compact(crate::compact::Opts),
     #[command(about = "The event log in its JSONL format (one event a line, with its seq), for external readers")]
     #[command(hide = true)]
     Events {
@@ -1251,7 +1257,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
-        Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &crate::repo_path(&rules), out),
+        Cmd::CapCheck { config, rules, base } => {
+            return crate::overlap::cap_check(r, &config, &crate::repo_path(&rules), base.as_deref(), out)
+        }
+        Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
         Cmd::ArchCheck {
             config,
             write_baseline,
@@ -1471,14 +1480,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             }
             write!(out, "{}", boards.join("\n"))?;
         }
-        Cmd::Compact { rebuild: true } => {
-            crate::db::rebuild(&ctx.state)?;
-            writeln!(out, "rebuilt the issue, lane and ask tables")?;
-        }
-        Cmd::Compact { rebuild: false } => {
-            let (gone, moved) = crate::db::compact(&ctx.state, ctx.now)?;
-            writeln!(out, "{gone} heartbeats deleted, {moved} events archived")?;
-        }
+        Cmd::ArchiveEvents { rebuild } => crate::db::archive_events(&ctx.state, ctx.now, rebuild, out)?,
+        Cmd::Compact(o) => crate::compact::cli(ctx, r, out, o)?,
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
             scope: Scope { fleet, json },
@@ -2093,6 +2096,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         return Ok(4);
                     }
                 }
+                Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
@@ -2151,7 +2155,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     };
                     let groups = &cfg.fleet(&fleet)?.serial;
                     let known = |g: &String| g.is_empty() || groups.iter().any(|x| x.name == *g);
-                    let d = match cmd {
+                    let mut d = match cmd {
                         QueueCmd::Add {
                             mut issues,
                             top,
@@ -2228,7 +2232,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
-                    let mut d = d;
                     if let Some(t) = crate::config::env("DROVER_THREAD")
                         .filter(|_| d.get("design").is_some() || d.get("architect").is_some())
                     {
@@ -2244,14 +2247,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
 }
 
 fn lane(issue: &str) -> Result<Option<u64>> {
-    match issue {
-        "-" => Ok(None),
-        n => {
-            Ok(Some(n.parse().map_err(|_| {
-                anyhow::anyhow!("issue must be a number or `-`, not `{n}`")
-            })?))
-        }
-    }
+    let bad = |_| anyhow::anyhow!("issue must be a number or `-`, not `{issue}`");
+    (issue != "-").then(|| issue.parse().map_err(bad)).transpose()
 }
 
 fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<()> {
@@ -2317,6 +2314,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     let mut it = lane.split(':');
     let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
     let cap = rules.builds
+        && !rules.cap_raise
         && !n
             .and_then(|n| crate::gh::cached_title(ctx, fleet, n))
             .is_some_and(|t| t.starts_with("cap:"));

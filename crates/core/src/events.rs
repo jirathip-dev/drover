@@ -500,10 +500,8 @@ pub fn lanes(events: &[Event]) -> Vec<&Event> {
 /// The issue `s`'s lane is held on (`held`, no `released` or `spawn` since). the issues it waits on (`on`: one number in older logs, else a list); empty when not held.
 pub fn held_on(events: &[Event], s: &IssueState) -> Vec<u64> {
     let kinds = ["held", "released", "spawn"];
-    let e = events
-        .iter()
-        .rev()
-        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind) && !design(e));
+    let pick = |e: &&Event| kinds.contains(&&*e.kind) && !design(e);
+    let e = issue_events(events, &s.fleet, s.issue).into_iter().rfind(pick);
     e.filter(|e| e.kind == "held")
         .map_or(vec![], |e| crate::queue::nums(e.val("on")))
 }
@@ -699,7 +697,7 @@ const WORKING: &str = concat!(
     " OR (fleet, issue) IN (SELECT fleet, issue FROM events WHERE seq > ?1 - 10000) OR type GLOB 'ask-*' OR type IN (",
     "'needs-decision', 'decision', 'queue', 'merged', 'closed', 'closed-other', 'why', ",
     "'premerge-failed', 'landed', 'revert-opened', ",
-    "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'lesson-skipped'",
+    "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'lesson-skipped', 'compacted', 'compact-undone'",
     ")))"
 );
 
@@ -871,6 +869,21 @@ pub fn of_issue<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> 
     };
     let at = l.issues.get(&(fleet.to_string(), n));
     at.map_or_else(Vec::new, |v| v.iter().filter_map(|i| events.get(*i)).collect())
+}
+
+pub(crate) fn issue_events<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> {
+    match cached(events) {
+        Some(_) => of_issue(events, fleet, n),
+        None => (events.iter())
+            .filter(|e| e.fleet == fleet && e.issue == Some(n))
+            .collect(),
+    }
+}
+
+pub(crate) fn last_at<'a>(events: &'a [Event], kind: &str, (fleet, n): (&str, u64), ts: u64) -> Option<&'a Event> {
+    issue_events(events, fleet, n)
+        .into_iter()
+        .rfind(|e| e.kind == kind && e.ts == ts)
 }
 
 /// The events of any of `kinds`, in order: the index's when `events` is a cached log, else one pass.

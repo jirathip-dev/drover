@@ -153,6 +153,9 @@ pub fn held(ctx: &Ctx, cfg: &Config, name: &str) -> Option<(&'static str, String
 
 /// Start host `name`, wait (5 min at most) for `status` to print `running`, run `ready` on a new one, then refresh its address; a failure stops it.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
+    if let Some(Err(why)) = cfg.host_acp(name).map(|_| crate::proxy::token(cfg)) {
+        return crate::gate::refused("NO_PROXY_TOKEN", why);
+    }
     log(ctx, cfg, "cloud-start", name, json!({}))?;
     let made = |v: &str| {
         std::fs::remove_file(pin(ctx, name)).ok();

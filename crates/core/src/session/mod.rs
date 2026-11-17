@@ -146,9 +146,17 @@ impl Session {
     pub fn lane(&self) -> bool {
         self.labels.contains_key("fleet")
     }
-    /// shed says its agent is signed out: `error` with an `auth:` note.
+    /// shed says its agent is signed out: `error` with an `auth:` note that is no [`Session::key_refused`].
     pub fn signed_out(&self) -> bool {
-        self.status() == Some(Status::Failed) && self.note.as_deref().is_some_and(|n| n.starts_with("auth:"))
+        self.auth().is_some_and(|n| !n.contains("lane key"))
+    }
+    /// The token proxy refused this lane's own key (`401 lane key <id> revoked`): the lane's fault, not the host's login.
+    pub fn key_refused(&self) -> bool {
+        self.auth().is_some_and(|n| n.contains("lane key"))
+    }
+    fn auth(&self) -> Option<&str> {
+        let n = self.note.as_deref().filter(|n| n.starts_with("auth:"));
+        n.filter(|_| self.status() == Some(Status::Failed))
     }
     /// Named `name`, or working inside `dir`.
     pub fn in_dir(&self, name: &str, dir: &Path) -> bool {

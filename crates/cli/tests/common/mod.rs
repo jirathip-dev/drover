@@ -177,6 +177,26 @@ impl Fake {
                 stderr: String::new(),
             });
         }
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
+        if let (true, ["-c", script]) = (prog == "sh", words.as_slice()) {
+            if script.contains("\\036") {
+                let mut out = String::new();
+                for l in script.lines() {
+                    let l = l.trim_end_matches(BATCH);
+                    let words: Vec<String> = l
+                        .trim_matches('\'')
+                        .split("' '")
+                        .map(|w| w.replace("'\\''", "'"))
+                        .collect();
+                    let o = self.answer(&words[0], &words[1..])?;
+                    out += &format!("{}\x1e{}\x1e", o.stdout, o.code);
+                }
+                return Ok(Out {
+                    stdout: out,
+                    ..Out::default()
+                });
+            }
+        }
         let mut onces = self.onces.borrow_mut();
         if let Some(i) = onces.iter().position(|(p, _)| line.starts_with(p.as_str())) {
             return Ok(onces.remove(i).1);

@@ -2,7 +2,7 @@
 
 Decision: Threads becomes a fourth tab, `[queue] [events] [lanes] [threads·N]`, in the standalone page only, drawn from a JSON screen like the other tabs. One list shows every repo's threads, "all repos" first, and tapping a thread opens it in the same tab: your messages, the orchestrator's replies, its commands as closed one-line rows, asks as choice rows, and a send box. N counts the threads waiting on your choice.
 Screens: the thread list, an open thread, and a new thread (plus each one's other states).
-Open questions: (1) At 1440 the old [chat] tab showed the list and the thread side by side. Here the thread replaces the list, centred at 760 px, as every other tab works. Recommended: keep it that way for v1. (2) The tab goes last, so the plugin's three tabs keep their order. The old tab sat in the middle. Recommended: last.
+Open questions: (1) At 1440 the thread replaces the list, centred at 760 px, as every other tab works. Recommended: keep it that way for v1. (2) The tab goes last, so the plugin's three tabs keep their order. Recommended: last.
 
 ## How it is drawn
 

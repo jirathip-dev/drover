@@ -16,7 +16,7 @@ crates/core/src/drive.rs:pass 364
 crates/core/src/gate.rs:verdict 192
 crates/core/src/pipeline.rs:validate 174
 crates/core/src/runners.rs:run 167
-crates/core/src/spawn.rs:spawn 506
+crates/core/src/spawn.rs:spawn 502
 crates/core/src/waiting.rs:scan_where 339
 crates/core/src/waiting.rs:waits 295
 crates/core/src/why.rs:show 152

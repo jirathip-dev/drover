@@ -83,6 +83,8 @@ pub struct World {
     pub spawned: std::collections::BTreeSet<(String, String)>,
     /// `(wrote, merges)` at the last full check of I4's merged sha and I6 (both read only those).
     pub checked: (usize, usize),
+    /// `wrote` up to here passed A1.
+    pub always: usize,
 }
 
 pub struct Sim {
@@ -123,6 +125,7 @@ impl Sim {
                 violations: vec![],
                 spawned: std::collections::BTreeSet::default(),
                 checked: (usize::MAX, 0),
+                always: 0,
             }),
             cv: Condvar::new(),
             threads: Mutex::new(vec![]),
@@ -257,6 +260,9 @@ impl Sim {
     }
 
     fn point(&self, me: usize, p: &drover::sim::Point) {
+        if matches!(p, drover::sim::Point::Walk(_)) {
+            return;
+        }
         {
             let mut w = self.lock();
             if w.abort {
@@ -287,8 +293,10 @@ impl Sim {
                         busy,
                     });
                     crate::invariants::on_append(&mut w, me);
+                    crate::gates::on_append(&mut w);
                 }
                 drover::sim::Point::Lease(k) => w.log(&format!("{name} lease {k}")),
+                drover::sim::Point::Walk(_) => {}
             }
         }
         self.yield_now(me, 0);

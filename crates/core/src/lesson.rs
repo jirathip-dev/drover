@@ -95,15 +95,24 @@ pub fn run(
     fleet: &str,
     by: Option<&str>,
 ) -> Result<bool> {
-    let f = cfg.fleet(fleet)?;
-    let day = ctx.now / 86400;
-    let (y, (m, d)) = (civil_year(day), civil_month_day(day));
-    let title = format!("lessons: {fleet} week of {y}-{m:02}-{d:02}");
+    let title = format!("lessons: {fleet} week of {}", ymd(ctx.now / 86400));
     let body = include_str!("../roles/lesson-issue.md").replace("{fleet}", fleet);
+    file(ctx, cfg, r, out, (fleet, "lesson", by), (&title, &body))
+}
+
+pub(crate) fn file(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, role, by): (&str, &str, Option<&str>),
+    (title, body): (&str, &str),
+) -> Result<bool> {
+    let f = cfg.fleet(fleet)?;
     let url = ok(
         r,
         "gh",
-        &["issue", "create", "-R", &f.repo, "--title", &title, "--body", &body],
+        &["issue", "create", "-R", &f.repo, "--title", title, "--body", body],
     )?;
     let n: u64 = url
         .trim()
@@ -117,7 +126,7 @@ pub fn run(
         op.put("by", json!(by));
     }
     writeln!(out, "{}", crate::queue_change(ctx, cfg, fleet, op, by.map(|_| "web"))?)?;
-    crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "lesson"), &crate::spawn::Opts::default())
+    crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, role), &crate::spawn::Opts::default())
 }
 
 fn at(ctx: &Ctx, fleet: &str) -> std::path::PathBuf {
@@ -185,11 +194,28 @@ pub fn done(
     why: &str,
 ) -> Result<()> {
     let st = crate::gate::issue_state(ctx, fleet, n)?;
+    if st
+        .as_ref()
+        .is_some_and(|s| s.build.as_deref() == Some("triage") && s.rounds == 0)
+    {
+        return crate::triage::done(ctx, cfg, r, out, (fleet, n), why);
+    }
     let filed = || crate::gh::cached_title(ctx, fleet, n).is_some_and(|t| t.starts_with("lessons: "));
     let no_pr = || crate::gh::cached_pr(ctx, fleet, n).at("number").is_null();
     if st.is_none_or(|s| s.build.as_deref() != Some("lesson") && !(filed() && no_pr()) || s.rounds > 0) {
         return Ok(());
     }
+    close(ctx, cfg, r, out, (fleet, n), why)
+}
+
+pub(crate) fn close(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    why: &str,
+) -> Result<()> {
     let repo = &cfg.fleet(fleet)?.repo;
     ok(
         r,
@@ -240,8 +266,34 @@ pub fn prose_only(diff: &str) -> bool {
 }
 
 /// The one prompt a lesson lane gets when its turn ends with no push and no `done`.
-pub fn prompt(fleet: &str, n: u64) -> String {
-    format!("no repeated class? end with `drover done --no-change \"no repeated class\" {fleet} {n}`")
+pub fn prompt(fleet: &str, n: u64, build: Option<&str>) -> String {
+    let why = idle_note(build);
+    format!("{why}? end with `drover done --no-change \"{why}\" {fleet} {n}`")
+}
+
+/// Close a lesson or triage lane's issue that ended without its own `done`.
+pub fn idle_done(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    at: (&str, u64),
+    build: Option<&str>,
+) -> Result<()> {
+    done(ctx, cfg, r, out, at, idle_note(build))
+}
+
+fn idle_note(build: Option<&str>) -> &'static str {
+    if build == Some("triage") {
+        "nothing to triage"
+    } else {
+        "no repeated class"
+    }
+}
+
+/// A lane that opens no PR and closes its own issue (lesson, triage).
+pub fn no_pr(build: Option<&str>) -> bool {
+    matches!(build, Some("lesson" | "triage"))
 }
 
 /// A check a lesson PR added: a `.drover/rules.md` line `- don't X (enforced by: <name> `<cmd>`, shadow since <date>)` (or `active since`). A line without that mark is hand-written: the lesson role never runs or changes it.

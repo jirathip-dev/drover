@@ -24,6 +24,7 @@ pub fn role_prompt(role: &str) -> &'static str {
             include_str!("../roles/orchestrator/thread.md")
         ),
         "lesson" => include_str!("../roles/lesson.md"),
+        "triage" => include_str!("../roles/triage.md"),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
     }
@@ -39,7 +40,7 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
 }
 
 fn prompt_kind<'a>(f: &'a Fleet, role: &'a str) -> &'a str {
-    let own = role == "lesson" || role == "verify" && f.family(role) == "rev";
+    let own = matches!(role, "lesson" | "triage") || role == "verify" && f.family(role) == "rev";
     if own {
         role
     } else {
@@ -408,7 +409,7 @@ fn brief(
     p: &Plan,
     title: &str,
     body: &str,
-    (fix, rules, repro, play): (Option<&str>, Option<&str>, bool, Option<String>),
+    (fix, rules, docs, repro, play): (Option<&str>, Option<&str>, Option<&str>, bool, Option<String>),
     recipe: &crate::design::Recipe,
 ) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
@@ -455,6 +456,12 @@ fn brief(
                     ""
                 }
         }
+        _ if p.role == "triage" => format!(
+            include_str!("../roles/brief-triage.md"),
+            fleet = p.lane.split(':').next().unwrap_or_default(),
+            integration = integration,
+            issue = issue
+        ),
         _ => format!(
             include_str!("../roles/brief-impl.md"),
             branch = branch,
@@ -481,6 +488,9 @@ fn brief(
     let rules = rules.map_or(String::new(), |r| {
         format!("## Repo rules (.drover/rules.md)\n\n{}\n\n", r.trim_end())
     });
+    let docs = docs.map_or(String::new(), |d| {
+        format!("## Docs you may trust (.drover/docs.md)\n\nAny other doc is not current: don't read it, unless this brief names it.\n\n{}\n\n", d.trim_end())
+    });
     let shared = include_str!("../rules/shared.md").trim_end();
     let rules = format!("## Shared rules (rules/shared.md)\n\n{shared}\n\n{rules}");
     format!(
@@ -493,6 +503,7 @@ fn brief(
         body = body,
         fix = fix,
         rules = rules,
+        docs = docs,
         contract = contract.trim_end()
     )
 }
@@ -727,6 +738,7 @@ pub const OWN_FILES: &[&str] = &[
     "verdict.md",
     ".review-brief.md",
     "why.md",
+    "body.md",
     ".verify-browser.mjs",
     ".verify.md",
 ];
@@ -1028,7 +1040,7 @@ pub fn spawn(
         return refused("BAD_VALUE", "--update is an impl fix round");
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
-    let ev = working(&ctx.state)?;
+    let ev = crate::compact::on_root(r, working(&ctx.state)?, (fleet, f))?;
     let host = o.host.clone().or_else(|| crate::starts::admitted(ctx, fleet, issue));
     let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
@@ -1392,6 +1404,7 @@ pub fn spawn(
             (
                 fix,
                 rules.as_deref(),
+                crate::repo_read("docs.md", |f| on.read(&p.worktree.join(f))).as_deref(),
                 crate::queue::repro(&events, fleet, issue),
                 crate::queue::playbook(&events, fleet, issue),
             ),
@@ -1427,7 +1440,11 @@ pub fn spawn(
         on.write(&crate::sandbox::tmp(&p).join(".keep"), "")?;
     }
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
-    let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
+    let cap_raise = crate::gh::cached_title(ctx, fleet, issue).is_some_and(|t| t.starts_with("cap:"));
+    let rules = rules.map(|pl| crate::hook::Rules {
+        cap_raise,
+        ..crate::hook::Rules::resolve(cfg, fleet, role, &pl.name)
+    });
     if let Some(rl) = &rules {
         on.write(&p.rules_file(), &serde_json::to_string(rl)?)?;
     }

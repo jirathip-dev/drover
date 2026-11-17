@@ -1,0 +1,120 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "hosts-list",
+          "rows": [
+            {
+              "badge": {
+                "text": "on",
+                "tone": "ok"
+              },
+              "id": "h-mini",
+              "subtitle": {
+                "text": "main host · 2 leftovers"
+              },
+              "swipe": [
+                {
+                  "action": "reap",
+                  "confirm": {
+                    "message": "They run in closed lanes' worktrees. TERM, then KILL.",
+                    "ok": "Reap",
+                    "title": "Reap 2 leftover processes on mini?"
+                  },
+                  "label": "Reap 2",
+                  "tone": "bad",
+                  "values": {}
+                }
+              ],
+              "title": "mini",
+              "type": "row",
+              "value": "0 lanes"
+            },
+            {
+              "badge": {
+                "text": "on",
+                "tone": "ok"
+              },
+              "id": "h-cloud1",
+              "subtitle": {
+                "text": "cloud host"
+              },
+              "swipe": [
+                {
+                  "action": "host",
+                  "confirm": {
+                    "message": "No new lanes go to cloud1; its 1 live lane finishes there.",
+                    "ok": "Turn off",
+                    "title": "Turn cloud1 off?"
+                  },
+                  "label": "Off",
+                  "tone": "bad",
+                  "values": {
+                    "host": "cloud1",
+                    "to": "off"
+                  }
+                }
+              ],
+              "title": "cloud1",
+              "type": "row",
+              "value": "1 lane"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "footer": "Tap a host for its buttons. Host history and charts live in Beacon.",
+      "header": "hosts (2)",
+      "id": "hosts-sec",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "proxy-list",
+          "rows": [
+            {
+              "id": "px-0",
+              "title": "✗ proxy token missing: run claude setup-token, save it 0600 at /nonexistent/drover/proxy",
+              "type": "row"
+            },
+            {
+              "id": "px-1",
+              "title": "proxy down on :9",
+              "type": "row"
+            },
+            {
+              "id": "px-2",
+              "title": "tunnel cloud1 down",
+              "type": "row"
+            },
+            {
+              "id": "px-3",
+              "title": "0 live lane keys",
+              "type": "row"
+            },
+            {
+              "accessory": "chevron",
+              "id": "px-how",
+              "tap": {
+                "sheet": "/screens/proxy-token"
+              },
+              "title": "How to set",
+              "type": "row"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "footer": "The token shows no expiry: days left estimate saved + 365 d.",
+      "header": "Token proxy",
+      "id": "proxy-sec",
+      "type": "section"
+    }
+  ],
+  "cancel": "Close",
+  "id": "hosts",
+  "title": "Hosts",
+  "type": "sheet"
+}
