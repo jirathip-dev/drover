@@ -727,6 +727,7 @@ pub struct Limits {
     pub slo_api_minutes: u64,
     pub slo_idle_minutes: u64,
     pub slo_tick_minutes: u64,
+    pub slo_pass_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -848,6 +849,7 @@ impl Default for Limits {
             slo_api_minutes: 10,
             slo_idle_minutes: 20,
             slo_tick_minutes: 10,
+            slo_pass_minutes: 30,
         }
     }
 }
@@ -1119,6 +1121,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "slo_tick_minutes",
         "a tick running longer than this breaches `slo-tick`; the next fast step stops it",
+    ),
+    (
+        "slo_pass_minutes",
+        "no slow drive pass of a fleet for this long shows the owner's `Drive is stuck` card",
     ),
 ];
 
