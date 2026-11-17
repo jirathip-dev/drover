@@ -163,6 +163,7 @@
 3 shed
 4 shed_native
 4 shed_others
+4 shed_pin
 4 shed_version
 1 sim
 1 slo

@@ -998,10 +998,8 @@ pub fn spawn(
             .map(|a| f.role(role).ok().and_then(|r| r.agent.clone()).unwrap_or(a));
         term::Shed(crate::shed::Shed { wire, acp, ..b })
     };
-    if on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
-        let path = crate::config::env("PATH").unwrap_or_default();
-        let fix = "`drover timer install` from a shell where `which shed` finds it";
-        return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
+    if on.machine.is_none() {
+        crate::shed::ready(&on, &bt.0.wire, o.dry_run)?;
     }
     let acp_id = bt.0.acp.clone();
     let n = round(&working(&ctx.state)?, fleet, issue, &p);

@@ -236,6 +236,10 @@ fn unmodelled() -> Out {
 
 fn shed(w: &mut World, a: &[&str]) -> Out {
     let now = w.now;
+    if a == ["--version"] {
+        let (v, b) = (drover::shed::proto::VERSION, drover::shed::proto::BUILD);
+        return ok(format!("shed {v} ({b})\n"));
+    }
     let [m, p] = a else { return unmodelled() };
     let p: Value = serde_json::from_str(p).unwrap_or_default();
     let name = p["name"].as_str().unwrap_or_default().to_string();
