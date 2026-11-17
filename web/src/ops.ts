@@ -47,7 +47,8 @@ export function apply(screen: Blk, ops: Blk[]): Blk {
         Object.assign(b, op.block);
       }
     } else if (op.op === 'remove') drop(screen, id);
-    else if (op.op === 'insert' && op.block) {
+    else if (op.op === 'insert' && isBlk(op.block)) {
+      drop(screen, op.block.id);
       const into = find(screen, op.into ?? '');
       if (!into) continue;
       const list = into.rows ?? (into.blocks ??= []);
