@@ -78,6 +78,7 @@
 4 land
 3 lane_actions
 3 lane_asks
+1 lane_dead_remote
 1 lane_fold
 4 lane_hog
 2 lane_host_move
