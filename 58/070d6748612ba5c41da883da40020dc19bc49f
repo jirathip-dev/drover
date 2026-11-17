@@ -1,0 +1,8 @@
+Decided: canonicalize the binary path in timer::expect, so every job file and drift compare name the install root's binary
+Because: "Every dev.drover.* plist names the install root's binary"
+Decided: a job whose probe shows spawn failed or OS_REASON_CODESIGNING is booted out and bootstrapped, both in restart and in a post-swap heal of the own jobs
+Because: "is re-bootstrapped (bootout + bootstrap), not just kickstarted, so launchd re-reads the new signature"
+Rejected: canonicalizing Ctx.exe for the whole process — it also changes hook and profile paths the issue does not cover
+Rejected: a separate doctor loop — doctor.rs checks is at its size baseline, so the refused rows join the drift rows via timer::states
+Check: states runs drift before the refused probe, so a doctor test's one-shot probe reply still reaches drift
+Owner: launchd jobs now name the real drover binary, and a job macOS refused after an update is reloaded and flagged by doctor
