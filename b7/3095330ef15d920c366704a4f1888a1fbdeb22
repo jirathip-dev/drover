@@ -1,0 +1,7 @@
+Decided: merge origin/staging; proxy lanes are told apart as #1223 does (remote machine, shed-acp runtime), so the spawn event's own proxy mark goes
+Because: crates/core/src/hosts.rs:841
+Decided: keep this branch's advice text (token proxy, setup-token, host-on) and its per-lane alert key on top of #1223's test
+Because: "the signed-out advice names the proxy (its token on the main host, `claude setup-token`)"
+Rejected: keeping both the spawn mark and the runtime test — two ways to tell one thing
+Check: remote_acp 15/15 incl. #1223's lane-key 401 test, its login_hold call now an hour past the retry window
+Owner: the branch is current with staging again; the proxy sign-out fix behaves as before
