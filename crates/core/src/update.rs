@@ -123,7 +123,8 @@ fn install(
             return staging_serve(ctx, cfg, r, &live).context("installed, then the staging serve");
         }
         let synced = ok(r, &live.to_string_lossy(), &["profiles", "sync"]).context("installed, then profiles sync");
-        synced.and_then(|_| restart_serve(ctx, cfg, r).context("installed, then the serve restart"))
+        let served = synced.and_then(|_| restart_serve(ctx, cfg, r).context("installed, then the serve restart"));
+        served.map(|s| [vec![s], crate::timer::heal(ctx, r)].concat().join("; "))
     });
     let Err(e) = res else {
         let d = json!({"sha": sha, "branch": branch});

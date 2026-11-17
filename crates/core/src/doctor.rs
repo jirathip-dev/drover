@@ -327,7 +327,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         format!("tick step — stuck in {step} for {age} → stop the tick; what it waits on is not answering")
     });
     row(rows, stuck.is_none(), '✗', &line);
-    for (label, state) in crate::timer::drift(ctx, cfg, r) {
+    for (label, state) in crate::timer::states(ctx, cfg, r) {
         let line = format!("timer — {label} {state} → drover timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }

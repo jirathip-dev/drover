@@ -499,3 +499,56 @@ fn a_config_with_telegram_keys_loads_with_a_warning() {
     let warn = "! config — [telegram] is removed (#557): drover has no Telegram bridge now; drop the table";
     assert!(out.lines().any(|l| l == warn), "{out}");
 }
+
+#[test]
+fn a_job_launchd_refuses_is_rebootstrapped_after_the_swap() {
+    use std::os::unix::fs::MetadataExt;
+    let (c, live) = setup("upd-refused");
+    let uid = std::fs::metadata(&c.home).unwrap().uid();
+    let mac = cfg!(target_os = "macos");
+    let ctl = |label: &str, unit: &str| -> [String; 3] {
+        if mac {
+            [
+                format!("launchctl print gui/{uid}/{label}"),
+                format!("launchctl bootout gui/{uid}/{label}"),
+                format!(
+                    "launchctl bootstrap gui/{uid} {}",
+                    c.home.join(format!("Library/LaunchAgents/{label}.plist")).display()
+                ),
+            ]
+        } else {
+            ["is-active", "disable --now", "enable --now"].map(|a| format!("systemctl --user {a} {label}.{unit}"))
+        }
+    };
+    let [clean_probe, clean_down, clean_up] = ctl("dev.drover.clean", "timer");
+    let [serve_probe, serve_down, serve_up] = ctl("dev.drover.serve", "service");
+    let r = Fake::default()
+        .reply(&clean_probe, "job state = spawn failed\n")
+        .reply(&serve_probe, "last exit reason = OS_REASON_CODESIGNING\n")
+        .reply(&clean_down, "")
+        .reply(&clean_up, "")
+        .reply(&serve_down, "")
+        .reply(&serve_up, "")
+        .reply(&format!("{}.new doctor --config-only", live.display()), "")
+        .reply(&format!("{} profiles sync", live.display()), "");
+    let r = Fake {
+        replies: [r.replies, host("SUCCESS").replies].concat(),
+        ..Fake::default()
+    };
+    let (code, out) = run(&c, &r, &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    let at = |p: &str| {
+        r.index(p)
+            .unwrap_or_else(|| panic!("{p} not called: {:?}", r.calls.borrow()))
+    };
+    assert!(at(&clean_down) < at(&clean_up), "{:?}", r.calls.borrow());
+    assert!(at(&serve_down) < at(&serve_up), "{:?}", r.calls.borrow());
+    assert!(
+        !r.called("launchctl kickstart") && !r.called("systemctl --user restart"),
+        "re-bootstrapped, not kickstarted: {:?}",
+        r.calls.borrow()
+    );
+    let tick = ctl("dev.drover.tick", "timer");
+    assert!(!r.called(&tick[1]), "a healthy job is left alone");
+    assert!(out.contains("dev.drover.clean"), "{out}");
+}
