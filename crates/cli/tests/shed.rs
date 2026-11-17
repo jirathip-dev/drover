@@ -1,4 +1,5 @@
 mod common;
+mod lane_states;
 use common::*;
 use drover::events::Event;
 use drover::hosts::On;
@@ -2108,21 +2109,6 @@ fn a_silent_design_lane_is_nudged() {
     let out = drive_at(&c, &cli, 60 + SILENT);
     assert!(f.called("shed cancel sendmeter-design-12"), "{out}");
     assert_eq!(logged(&c, "nudged").len(), 1, "{out}");
-}
-
-#[test]
-fn a_pending_tool_call_in_a_live_session_is_not_silent() {
-    let (c, b, f, wt, _) = acp_lane("acp-tool");
-    mid_turn(&b);
-    session(&b, &[turn(), tool("in_progress"), cpu(80)]);
-    let cli = Push(b.cli(&f), wt.clone());
-    drive_at(&c, &cli, 60 + 3 * SILENT);
-    assert!(!f.called("shed cancel"));
-    assert!(logged(&c, "nudged").is_empty());
-    session(&b, &[tool("completed")]);
-    drive_at(&c, &cli, 60 + 3 * SILENT + 1);
-    let out = drive_at(&c, &cli, 60 + 4 * SILENT + 1);
-    assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
 }
 
 #[test]

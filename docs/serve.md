@@ -332,6 +332,9 @@ same code as the live page. Every URL in them is relative and the service worker
 registration scope, so the files work under a sub-path (the live server at `/` behaves as before). A plain export is
 the read-only view, without transcripts.
 
+#983: `/api/v1/state` has `counts`: `busy` (lanes `working` or `running`), `waiting_approval`, `waiting_owner` and
+`rate_limited`; each lane carries shed's `note` on its state (a `rate-limited` lane's reset time).
+
 `--demo` (#39) is the public demo at <https://jirathip-dev.github.io/herdsman/>, built from the synthetic
 `demo/` (3 made-up repos, `fleet.toml`, `events.jsonl`, `cache/` for issue/PR titles and CI, and
 `runner.json`: the canned agent list, pane text and host values by command-line prefix). Nothing

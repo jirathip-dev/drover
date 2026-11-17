@@ -239,6 +239,8 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | a respawn refused for good (`RESPAWN_LOOP`, `DESIGN_MAIN_ONLY`, `HOST_OFFLINE`…) (#914) | `needs-human RESPAWN_REFUSED` (`RESPAWN_LOOP`: its one owner ask instead); `check` alerts `respawn-refused` once per lane and code |
 | a dead, stalled, silent or released lane's respawn (#908) | admitted like any spawn: `HOST_BUSY`, `MEM_LOW` and `DISK_LOW` hold it to a later pass, and `waiting` names the hold (`held: <code> <why>`); at most `[limits] respawn_per_pass` (default 2; `respawn_per_pass` in `[fleet.<n>]` overrides it) start a pass, the rest wait `RESPAWN_PACED`, still ahead of new starts |
 | a prompt drive or check sends a lane shed has asleep (`hibernated`: nudge, DECISION, turn, release, heads-up) (#908) | waking it starts a whole agent, so the host is admitted first; busy, the prompt is held and sent on a later pass |
+| an ACP lane shed reports `running`, `waiting-approval` or `rate-limited`, or one drover shows `waiting-owner` (its turn ended on an open ask or `turn blocked`/`need-input`, laid over shed's `done`) (#983) | held: no nudge, no stall, no `lane-dead`; the board and `/api/v1` show shed's state and note as-is |
+| a `rate-limited` lane (#983) | shown with shed's reset time; nothing until the owner's [wait]: `drover limit <fleet> <issue>` sends one `continue` at that time (`NO_RESET` when shed gave none); logged `limit-picked` `by: owner`, an orchestrator's relay `--typed` with the owner's line, `--by` names who |
 | a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
 | merged lanes left | `clean --yes` |
 
