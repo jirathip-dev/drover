@@ -479,7 +479,7 @@ fn air_off_hosts(c: &drover::Ctx) -> (Fake, FakeShed, FakeShed) {
     let wt = AIR_WT;
     let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
     let f = Fake::default()
-        .reply("gh issue list", "[]")
+        .reply("gh api graphql -f", r#"{"data": {"repository": {}}}"#)
         .reply(&format!("{ssh}'sh' '-c' 'test -e"), "")
         .reply(&format!("{ssh}'git' '--no-replace-objects' '-C' '{wt}' 'status'"), "")
         .reply(

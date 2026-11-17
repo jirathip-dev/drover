@@ -63,6 +63,21 @@ fn stamp(ctx: &Ctx, events: &[Event], (fleet, issue): (&str, u64), agent: &str, 
     Ok(true)
 }
 
+fn revive(ctx: &Ctx, events: &[Event], (fleet, issue): (&str, u64), sp: &Event) -> Result<()> {
+    let agent = sp.str("agent").unwrap_or_default();
+    let mine = |e: &&Event| {
+        e.kind == "lane-dead" && e.ts >= sp.ts && e.str("key").is_some_and(|k| k.ends_with(&format!(":{agent}")))
+    };
+    let key = events
+        .iter()
+        .rfind(mine)
+        .map(|d| format!("alive:{}", d.str("key").unwrap_or_default()));
+    let new = key.filter(|k| !events.iter().any(|e| e.kind == "lane-alive" && e.str("key") == Some(k)));
+    let Some(key) = new else { return Ok(()) };
+    let d = json!({"key": key, "agent": agent, "reason": format!("lane {agent} runs again on its host")});
+    append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-alive", d))
+}
+
 fn gone(ctx: &Ctx, cfg: &Config, (fleet, issue): (&str, u64), agent: &str, exit: &Exit, mut d: Value) -> Result<bool> {
     let events = crate::events::working(&ctx.state)?;
     if latest(&events, agent).is_some_and(|e| e.str("state") == Some("gone")) {
@@ -153,17 +168,11 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> 
 }
 
 fn word(s: Status) -> Option<&'static str> {
-    Some(match s {
-        Status::Unreported => return None,
-        Status::Working => "working",
-        Status::Blocked => "blocked",
-        Status::Limited => "rate-limited",
-        Status::Done => "done",
-        Status::Idle => "idle",
-        Status::Asleep => "hibernated",
-        Status::Failed => "error",
-        Status::Other => "stuck",
-    })
+    match s {
+        Status::Unreported => None,
+        Status::Other => Some("stuck"),
+        _ => Some(s.word()),
+    }
 }
 
 fn look(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], m: Option<&str>, s: &Session) -> Result<bool> {
@@ -182,6 +191,7 @@ fn look(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], m: Option<&st
     let at = (fleet.as_str(), issue);
     match s.life {
         Life::Running(st) => {
+            revive(ctx, events, at, sp)?;
             let Some(w) = word(st) else { return Ok(false) };
             let was = status(events, &s.name);
             if was == Some(st) {

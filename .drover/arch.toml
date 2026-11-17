@@ -239,3 +239,8 @@ pattern = "no-replace-objects"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/runner.rs", "crates/core/src/baseline.rs"]
 reason = "#1099: the runner makes every git call graft-blind; no call site adds or drops the flag (baseline.rs names it in the brief line)"
+
+[[ban]]
+pattern = "Shas"
+paths = ["crates/core/src/gate.rs", "crates/core/src/events.rs", "crates/core/src/db.rs"]
+reason = "#1121: a verdict is pinned to the exact commit reviewed; the gate, the fold and the log never read a compact map"

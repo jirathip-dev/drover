@@ -256,21 +256,23 @@ fn exchange(r: &dyn Runner, w: &Wire, m: Method, params: Value) -> Result<String
 }
 
 fn connect(r: &dyn Runner, q: &str) -> Result<String> {
-    let plain = || r.run_in("shed", &argv(&["connect"]), q);
-    let mut o = plain()?;
-    if o.stdout.is_empty() && !matches!(o.code, 124 | 255) {
+    let limit = Duration::from_secs(crate::config::limits().ssh_call_secs);
+    let send = |a: &[&str]| r.run_for("shed", &argv(a), q, limit);
+    let lost = |o: &Out| matches!(o.code, 124 | 255);
+    let mut o = send(&["connect"])?;
+    if o.stdout.is_empty() && !lost(&o) {
         match start_job(r) {
-            None => o = r.run_in("shed", &argv(&["connect", "--autostart"]), q)?,
+            None => o = send(&["connect", "--autostart"])?,
             Some(job) => {
                 for _ in 0..10 {
-                    if !o.stdout.is_empty() {
+                    if !o.stdout.is_empty() || lost(&o) {
                         break;
                     }
                     r.sleep(1);
-                    o = plain()?;
+                    o = send(&["connect"])?;
                 }
                 ensure!(
-                    !o.stdout.is_empty(),
+                    !o.stdout.is_empty() || lost(&o),
                     "SHED_JOB: the shed job is installed but its server is not up → {job}"
                 );
             }

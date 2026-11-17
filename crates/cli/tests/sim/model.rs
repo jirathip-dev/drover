@@ -357,6 +357,14 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
             ok(open.map(|(b, p)| format!("{}\n", m.pr_json(b, p))).collect::<String>())
         }
         ["api", "graphql", "--paginate", "--jq", jq, ..] if jq.contains("issues") => ok(""),
+        ["api", "graphql", "-f", _, "-f", _, "-f", q] if q.contains(":issue(number:") => {
+            let repo: serde_json::Map<String, Value> = m
+                .closed
+                .iter()
+                .map(|n| (format!("i{n}"), json!({"state": "CLOSED"})))
+                .collect();
+            ok(json!({"data": {"repository": repo}}).to_string())
+        }
         ["api", "-i", ..] => ok(format!("HTTP/2.0 200 OK\netag: \"v{}\"\n\n[]", m.version)),
         ["api", path, "--jq", _] if path.contains("/rules/branches/") => ok("true\n"),
         ["api", path, "--paginate", ..] if path.ends_with("/files") => ok(""),
