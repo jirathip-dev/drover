@@ -615,6 +615,19 @@ fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&s
         {"label": "rounds / issue", "value": format!("{:.1}", avg(n, r)), "spark": per.map(|p| avg(p.0, p.1))}]})
 }
 
+fn counts(shown: &[&QueueCard]) -> Value {
+    let sum = |f: &dyn Fn(&QueueCard) -> usize| shown.iter().map(|c| f(c)).sum::<usize>();
+    let need = sum(&|c| c.need);
+    let queued = sum(&|c| c.rows.iter().filter(|r| r.state == "queued").count());
+    let busy = sum(&|c| c.rows.len()) - need - queued;
+    let tone = if need > 0 { "warn" } else { "" };
+    json!({"type": "stat", "id": "counts", "items": [
+        {"label": "needs you", "value": need.to_string(), "tone": tone},
+        {"label": "in progress", "value": busy.to_string()},
+        {"label": "queued", "value": queued.to_string()},
+        {"label": "done today", "value": sum(&|c| c.done_n).to_string()}]})
+}
+
 fn choice(id: &str, action: &str, options: &[Value]) -> Value {
     json!({"type": "choice", "id": id, "action": action, "options": options})
 }
@@ -1172,23 +1185,8 @@ pub fn ops(a: &Value, b: &Value) -> Vec<Value> {
     out
 }
 
-fn count(v: &Value) -> Option<usize> {
-    let busy = |b: &&Value| b["id"].as_str().is_some_and(|i| i.starts_with("inprogress-"));
-    let cards = kids(v).iter().filter(|b| b["type"] == "card");
-    (v["id"] == "queue").then(|| {
-        cards
-            .flat_map(|c| kids(c).iter().filter(busy))
-            .filter_map(|s| {
-                s["header"]
-                    .as_str()?
-                    .rsplit_once('(')?
-                    .1
-                    .trim_end_matches(')')
-                    .parse::<usize>()
-                    .ok()
-            })
-            .sum()
-    })
+fn count(v: &Value) -> Option<u64> {
+    v["badge"].as_u64()
 }
 
 fn sheets(v: &Value, out: &mut Vec<String>) {
@@ -1381,24 +1379,20 @@ impl Server<'_> {
             .get("repo")
             .filter(|r| tab.fleets.iter().any(|f| &f.name == *r))
             .map(String::as_str);
-        let mut opts = vec![json!({"value": "all", "label": "all"})];
-        let dot = |c: &QueueCard| {
-            if c.need > 0 {
-                format!("{} ●", c.name)
-            } else {
-                c.name.clone()
-            }
-        };
+        let all: usize = tab.fleets.iter().map(|c| c.rows.len()).sum();
+        let mut opts = vec![json!({"value": "all", "label": format!("all {all}")})];
+        let dot = |c: &QueueCard| format!("{} {}{}", c.name, c.rows.len(), if c.need > 0 { " ●" } else { "" });
         opts.extend(tab.fleets.iter().map(|f| json!({"value": f.name, "label": dot(f)})));
+        let mut shown: Vec<&QueueCard> = tab.fleets.iter().filter(|f| sel.is_none_or(|s| f.name == s)).collect();
+        shown.sort_by_key(|c| c.need == 0);
         let mut blocks = vec![
             json!({"type": "chips", "id": "repo", "name": "repo", "selected": [sel.unwrap_or("all")], "action": "filter", "options": opts}),
             stats(ctx.now, &ev, &ev.states, sel),
+            counts(&shown),
         ];
         if let Some(e) = &tab.error {
             blocks.push(json!({"type": "text", "id": "error", "markdown": e}));
         }
-        let mut shown: Vec<&QueueCard> = tab.fleets.iter().filter(|f| sel.is_none_or(|s| f.name == s)).collect();
-        shown.sort_by_key(|c| c.need == 0);
         blocks.extend(shown.into_iter().map(|c| fleet_card(ctx, &ev, c, q)));
         let mut kept = q.clone();
         kept.retain(|k, _| k != "repo" || sel.is_some());
@@ -1408,7 +1402,8 @@ impl Server<'_> {
             json!({"label": "Drive all now", "action": "drive-all"}),
             json!({"label": "Legend [?]", "tap": {"sheet": "/screens/legend"}}),
         ];
-        json!({"type": "screen", "id": "queue", "title": "Queue", "stream": stream,
+        let badge = self.needs_count(ctx, &ev);
+        json!({"type": "screen", "id": "queue", "title": "Queue", "stream": stream, "badge": badge,
             "actions": [{"icon": "more", "label": "More", "menu": menu}], "blocks": blocks})
     }
 

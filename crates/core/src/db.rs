@@ -409,10 +409,13 @@ pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
             zstd_append(&dir.join(format!("events-{m}.jsonl.zst")), &text)?;
         }
         tx.execute(&format!("DELETE FROM events WHERE {done}"), [cut])?;
-        let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')";
-        tx.execute(q, [now])?;
+        let moved = gone + old.len() > 0;
+        if moved {
+            let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')";
+            tx.execute(q, [now])?;
+        }
         tx.commit()?;
-        if gone + old.len() > 0 {
+        if moved {
             c.execute_batch("VACUUM")?;
         }
         c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
