@@ -327,12 +327,16 @@ notifier can subscribe to it) with the reason drive sees then, and `waiting`, `s
 
 #855: the fast step also checks two fleet SLOs: `slo-idle` (no lane working for `[limits] slo_idle_minutes` (20)
 while the queue has spawnable work) and `slo-tick` (a tick running past `slo_tick_minutes` (10), replacing
-`tick-stuck`). On a breach or a missed promise drive first tries the known heal and logs `self-heal`: a drover
+`tick-stuck`). On a breach drive first tries the known heal and logs `self-heal`: a drover
 tick or drive pid it can name gets SIGTERM, then SIGKILL after 10 s; a DISK_BUDGET hold is recounted and the
 queue's first spawn retried; drive's own pass already respawns a silent lane and marks a PASSed draft ready.
-Still breached a pass (`slow_secs`) after the heal, or with no heal known, it emits one `stuck` per episode
-(pushed, and an owner card naming the issue or fleet, the reason and what was tried); `slo-ok` ends the episode
-once the issue moves or the SLO recovers, and the card clears.
+#1183: a `stuck` (pushed once per fleet, and the owner's one `Drive is stuck` card per fleet) means drive itself is
+broken: a tick still hung a pass (`slow_secs`) after its heal, no slow drive pass of the fleet for
+`[limits] slo_pass_minutes` (30), drive's last pass of the fleet failing, or an issue's spawn failing the same way
+twice on the same head. A wait (a hold, CI, a spawn slot, HOST_BUSY, `slo-idle`, a missed promise) never makes one:
+its row names the wait. `slo-ok` ends the episode once it recovers, and the card clears; an issue's line goes as
+soon as its lane starts. The card's hint is `drover waiting <fleet>`, and each issue on it has a [force] that runs
+its `drover waiting` next command (a spawn) once with `--force`, past the load limit, logged `override` `by: owner`.
 
 `drover check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
