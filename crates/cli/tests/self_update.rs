@@ -287,6 +287,32 @@ fn green_is_built_signed_gated_swapped_synced_and_restarted() {
 }
 
 #[test]
+fn the_serve_restart_is_the_jobs_own_restart_never_a_handover() {
+    let config = format!("{FLEET}\n[limits]\nserve_handover_secs = 1\n");
+    let (c, live) = setup_with("upd-kick", &config);
+    let sock = drover::update::serve_sock(&c, 7777);
+    std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+    let ctl = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    ctl.set_nonblocking(true).unwrap();
+    let new = format!("{}.new", live.display());
+    let r = host("SUCCESS")
+        .reply(&format!("{new} doctor --config-only"), "")
+        .reply(&format!("{} profiles sync", live.display()), "");
+    let (code, out) = run(&c, &r, &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.trim_end().ends_with("serve restarted"), "{out}");
+    let restart = if cfg!(target_os = "macos") {
+        "launchctl kickstart -k gui/"
+    } else {
+        "systemctl --user restart dev.drover.serve.service"
+    };
+    assert!(r.called(restart), "{:?}", r.calls.borrow());
+    assert!(ctl.accept().is_err(), "no serve was asked to hand over");
+    let calls = r.calls.borrow().join("\n");
+    assert!(!calls.contains(" serve"), "no other serve start: {calls}");
+}
+
+#[test]
 fn a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head() {
     let (c, live) = setup("upd-doctor");
     let new = format!("{}.new", live.display());

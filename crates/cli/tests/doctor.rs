@@ -624,3 +624,25 @@ fn hygiene_is_on_by_default_and_drift_is_flagged() {
         "a fleet's own keys win; drover's own merge mode drifts: {out}"
     );
 }
+
+#[test]
+fn a_serve_on_the_port_the_job_does_not_own_is_red() {
+    let (c, _) = setup("doc-job-pid", "claude");
+    let job = |pid: &str| {
+        good()
+            .once("lsof -nP -t -iTCP:7777", 0, "44987\n")
+            .once("launchctl print gui/", 0, &format!("state = running\n\tpid = {pid}\n"))
+            .once(
+                "systemctl --user show -p MainPID -p LoadState dev.drover.serve.service",
+                0,
+                &format!("MainPID={pid}\nLoadState=loaded\n"),
+            )
+    };
+    let (code, out) = run(&c, &job("123"), &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    let l = line(&out, "serve job");
+    assert!(l.starts_with('✗') && l.contains("44987") && l.contains("123"), "{l}");
+    let (code, out) = run(&c, &job("44987"), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(line(&out, "serve job").starts_with('✓'), "{out}");
+}
