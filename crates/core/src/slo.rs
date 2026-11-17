@@ -10,10 +10,23 @@ use std::io::Write;
 const KINDS: [&str; 5] = ["slo-idle", "slo-tick", "self-heal", "stuck", "slo-ok"];
 const DRIVE_HEALS: [&str; 3] = ["respawned-silent", "nudged", "marked-ready"];
 const WAITS: [&str; 1] = ["slo-idle:"];
+const PROGRESS: [&str; 5] = ["spawn", "verdict", "pushed", "lane-pushed", "turn-end"];
+const LOAD: [&str; 3] = ["HOST_BUSY", "MEM_LOW", "DISK_LOW"];
 
 enum Heal {
     StopTick(String),
     Recount(String, u64),
+    Restart(Stall),
+    Move(Stall),
+}
+
+struct Stall {
+    fleet: String,
+    issue: u64,
+    role: String,
+    step: String,
+    from: String,
+    reason: String,
 }
 
 struct Breach {
@@ -41,6 +54,7 @@ pub fn pass(
         now.extend(idle(ctx, cfg, &events, &agents, f));
         now.extend(no_pass(ctx, cfg, f));
         now.extend(errors(ctx, &events, f));
+        now.extend(stalls(ctx, cfg, &events, f));
     }
     let eps = episodes(&events);
     let mut loud: BTreeSet<String> = eps
@@ -187,7 +201,123 @@ fn heal(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, h: &Heal) 
             crate::drive::kick(ctx, r, fleet, *n, "slo-idle");
             format!("recounted worktrees {was:.1} → {now:.1} GB; retried #{n}'s spawn")
         }
+        Heal::Restart(s) => {
+            if let Err(e) = log(ctx, s, "stall-restart") {
+                return format!("restart not logged: {e:#}");
+            }
+            let n = s.issue.to_string();
+            match crate::cli::run(&["spawn", &s.fleet, &n, &s.role, "--supersede"], ctx, r, out) {
+                Ok(0) => format!("restarted #{n} {}: wip saved, lane cleaned, respawned", s.role),
+                Ok(c) => format!("restart of #{n} {}: exit {c}", s.role),
+                Err(e) => format!("restart of #{n} {}: {e:#}", s.role),
+            }
+        }
+        Heal::Move(s) => {
+            if let Err(e) = log(ctx, s, "stall-move") {
+                return format!("move not logged: {e:#}");
+            }
+            crate::drive::kick(ctx, r, &s.fleet, s.issue, "stall-move");
+            format!("moved #{} off {}; retried its spawn", s.issue, s.from)
+        }
     }
+}
+
+fn log(ctx: &Ctx, s: &Stall, kind: &str) -> Result<()> {
+    let d = json!({"role": s.role, "step": s.step, "from": s.from, "reason": s.reason, "by": "drover"});
+    append(&ctx.state, &Event::new(ctx.now, &s.fleet, Some(s.issue), kind, d))
+}
+
+fn stalls(ctx: &Ctx, cfg: &Config, events: &[Event], fleet: &str) -> Vec<Breach> {
+    let hours = (cfg.fleet(fleet).ok().and_then(|f| f.stall_restart_hours)).unwrap_or(cfg.limits.stall_restart_hours);
+    let st = fold(events);
+    let q = crate::queue::view(events, &st, fleet);
+    let asks = crate::events::open_asks(events);
+    let mut out = vec![];
+    for s in st
+        .values()
+        .filter(|s| s.fleet == fleet && s.state != "ready" && crate::queue::in_flight(&s.state))
+    {
+        let n = s.issue;
+        let mine = crate::events::of_issue(events, fleet, n);
+        let Some(at) = mine.iter().rposition(|e| PROGRESS.contains(&e.kind.as_str())) else {
+            continue;
+        };
+        let (Some(last), since) = (mine.get(at), mine.get(at + 1..).unwrap_or_default()) else {
+            continue;
+        };
+        let code = |e: &&&Event| e.kind == "driven" && e.str("code").is_some();
+        let codes: Vec<&str> = since.iter().filter(code).filter_map(|e| e.str("code")).collect();
+        let held = !crate::events::held_on(events, s).is_empty()
+            || q.iter()
+                .any(|i| i.issue == n && (i.blocked_by.is_some() || !i.ext.is_empty()));
+        let pr = crate::gh::cached_pr(ctx, fleet, n);
+        let ci = !pr.is_null() && crate::gh::ci(pr.at("statusCheckRollup")) != "green";
+        let asked = asks.iter().any(|e| e.fleet == fleet && e.issue == Some(n));
+        let promise = mine
+            .iter()
+            .rfind(|e| matches!(e.kind.as_str(), "promise" | "promise-void"));
+        let slot = promise.and_then(|e| e.str("kind").filter(|_| e.kind == "promise"));
+        let slot = slot.is_some_and(|k| matches!(k, "spawn-pending" | "waiting-on"));
+        let lock = format!("drive-{fleet}-{n}.lock");
+        let driving = crate::db::leases(&ctx.state, &lock)
+            .iter()
+            .any(|l| l.expires_at > ctx.now);
+        let load = codes.last().is_some_and(|c| LOAD.contains(c));
+        if held || ci || asked || slot || driving || !load && !codes.is_empty() {
+            continue;
+        }
+        let first = since
+            .iter()
+            .filter(code)
+            .find(|e| e.str("code").is_some_and(|c| LOAD.contains(&c)));
+        let start = first.filter(|_| load).map_or(last.ts, |e| e.ts);
+        if ctx.now < start + hours * 3600 {
+            continue;
+        }
+        let spawn = mine.iter().rfind(|e| e.kind == "spawn");
+        let fail = mine
+            .iter()
+            .rfind(|e| matches!(e.kind.as_str(), "spawn" | "verdict"))
+            .is_some_and(|e| e.str("verdict") == Some("FAIL"));
+        let role = match (fail, spawn.and_then(|e| e.str("role"))) {
+            (false, Some(r)) => r,
+            _ => s.build.as_deref().unwrap_or("impl"),
+        };
+        let step = format!("{role}@{}", s.rounds);
+        let from = spawn.and_then(|e| e.str("host")).unwrap_or("local");
+        let done = |k: &str| mine.iter().any(|e| e.kind == k && e.str("step") == Some(&step));
+        let (reason, kind) = if load {
+            let code = codes.last().copied().unwrap_or_default();
+            (
+                format!("#{n} {role} waited {hours}h+ on {from}'s load ({code})"),
+                "stall-move",
+            )
+        } else {
+            (
+                format!("#{n} {role} stalled {hours}h+: no push, verdict or lane event"),
+                "stall-restart",
+            )
+        };
+        let stall = Stall {
+            fleet: fleet.into(),
+            issue: n,
+            role: role.into(),
+            step: step.clone(),
+            from: from.into(),
+            reason: reason.clone(),
+        };
+        let heal = (!done(kind)).then_some(if load { Heal::Move(stall) } else { Heal::Restart(stall) });
+        out.push(Breach {
+            key: format!("stall:{fleet}#{n}:{step}"),
+            fleet: fleet.into(),
+            issue: Some(n),
+            slo: None,
+            reason,
+            heal,
+            since: start,
+        });
+    }
+    out
 }
 
 fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {

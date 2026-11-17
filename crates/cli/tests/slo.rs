@@ -294,7 +294,12 @@ fn a_missed_promise_a_hold_took_over_shows_no_stuck_card() {
 const H2: u64 = 2 * 3600;
 
 fn spawner(c: &drover::Ctx, sh: &FakeShed) -> Fake {
-    let r = Fake::default()
+    pass_with(c, sh, None)
+}
+
+fn pass_with(c: &drover::Ctx, sh: &FakeShed, pr: Option<&str>) -> Fake {
+    let r = pr
+        .map_or_else(Fake::default, |p| Fake::default().reply("gh pr view issue-7", p))
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n vm.loadavg", "{ 1.0 1.0 1.0 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -351,7 +356,7 @@ fn named_waits_never_restart_or_move_a_quiet_lane() {
     std::env::remove_var("DROVER_LANE");
     std::env::remove_var("DROVER_ORCHESTRATOR");
     type Wait = fn(&drover::Ctx);
-    let waits: [(&str, Wait); 6] = [
+    let waits: [(&str, Wait); 7] = [
         ("held", |c| {
             assert_eq!(run(c, &Fake::default(), &["queue", "sendmeter", "add", "7"]).0, 0);
             assert_eq!(
@@ -359,16 +364,15 @@ fn named_waits_never_restart_or_move_a_quiet_lane() {
                 0
             );
         }),
-        ("ci", |c| {
-            let pr = json!({"ts": NOW + H2 + 60, "pr": {"number": 34, "state": "OPEN", "headRefOid": "abc",
-                "statusCheckRollup": [{"__typename": "CheckRun", "name": "test", "status": "IN_PROGRESS", "conclusion": ""}]}});
-            let p = drover::gh::cache_path(c, "pr", "sendmeter", 7);
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, pr.to_string()).unwrap();
-        }),
+        ("ci", |_| {}),
         ("slot", |c| {
             let d = json!({"step": "respawn", "result": "REFUSED SPAWN_PENDING: a spawn is starting", "code": "SPAWN_PENDING"});
             ev(c, 7, 3600, "driven", d);
+        }),
+        ("review-queue", |c| {
+            let p = json!({"kind": "spawn-pending", "reason": "review waits behind 1 earlier review",
+                "deadline": NOW + 9 * H2, "state": "impl", "head": ""});
+            ev(c, 7, 600, "promise", p);
         }),
         ("ask", |c| {
             ev(c, 7, 600, "needs-decision", json!({"id": "q1", "question": "which?"}))
@@ -385,7 +389,8 @@ fn named_waits_never_restart_or_move_a_quiet_lane() {
         let (c, _sink, sh) = quiet(&format!("slo-stall-wait-{name}"));
         spawned(&c, 7);
         wait(&c);
-        spawner(&at(&c, H2 + 60), &sh);
+        let ci = r#"{"number": 34, "state": "OPEN", "headRefOid": "abc", "statusCheckRollup": [{"__typename": "CheckRun", "name": "test", "status": "IN_PROGRESS", "conclusion": ""}]}"#;
+        pass_with(&at(&c, H2 + 60), &sh, (name == "ci").then_some(ci));
         assert!(of_kind(&c, "stall-restart").is_empty(), "{name}: no restart");
         assert!(of_kind(&c, "stall-move").is_empty(), "{name}: no move");
         assert_eq!(of_kind(&c, "spawn").len(), 1, "{name}: no respawn");
