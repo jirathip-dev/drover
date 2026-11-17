@@ -1,0 +1,106 @@
+    Checking subtle v2.6.1
+    Checking zeroize v1.9.1
+    Checking typenum v1.20.1
+    Checking libc v0.2.191
+    Checking rand_core v0.10.1
+    Checking cfg-if v1.0.5
+    Checking cmov v0.5.4
+    Checking const-oid v0.10.2
+    Checking ctutils v0.4.7
+    Checking cpubits v0.1.1
+    Checking num-traits v0.2.19
+    Checking serde_core v1.0.229
+    Checking hybrid-array v0.4.15
+    Checking ff v0.14.0
+    Checking getrandom v0.4.3
+    Checking der v0.8.3
+    Checking foldhash v0.2.0
+    Checking cpufeatures v0.3.1
+    Checking hashbrown v0.17.1
+    Checking crypto-common v0.2.2
+    Checking block-buffer v0.12.1
+    Checking crypto-bigint v0.7.10
+    Checking inout v0.2.5
+    Checking digest v0.11.3
+    Checking group v0.14.0
+    Checking hmac v0.13.0
+    Checking base16ct v1.0.0
+    Checking hkdf v0.13.0
+    Checking sec1 v0.8.1
+    Checking utf8parse v0.2.2
+    Checking serde v1.0.229
+    Checking anstyle-parse v1.0.0
+    Checking cipher v0.5.2
+    Checking universal-hash v0.6.1
+    Checking is_terminal_polyfill v1.70.2
+    Checking colorchoice v1.0.5
+    Checking anstyle v1.0.14
+    Checking equivalent v1.0.3
+    Checking anstyle-query v1.1.5
+    Checking indexmap v2.14.2
+    Checking anstream v1.0.0
+    Checking toml_datetime v0.6.11
+    Checking serde_spanned v0.6.9
+    Checking polyval v0.7.3
+    Checking zmij v1.0.23
+    Checking signature v3.0.0
+    Checking spki v0.8.1
+    Checking clap_lex v1.1.1
+    Checking winnow v0.7.15
+    Checking toml_write v0.1.2
+    Checking itoa v1.0.18
+    Checking strsim v0.11.1
+    Checking memchr v2.8.3
+    Checking clap_builder v4.6.7
+    Checking primefield v0.14.0
+    Checking elliptic-curve v0.14.3
+    Checking wnaf v0.14.1
+    Checking rfc6979 v0.6.0
+    Checking serde_json v1.0.154
+    Checking ecdsa v0.17.0
+    Checking primeorder v0.14.0
+    Checking toml_edit v0.22.27
+    Checking libsqlite3-sys v0.39.1
+    Checking ghash v0.6.0
+    Checking ctr v0.10.1
+    Checking aes v0.9.3
+    Checking sha2 v0.11.1
+    Checking aead v0.6.1
+    Checking hashlink v0.12.2
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1250/crates/core)
+    Checking fallible-iterator v0.3.0
+    Checking smallvec v1.16.4
+    Checking fallible-streaming-iterator v0.1.9
+    Checking bitflags v2.13.2
+    Checking p256 v0.14.0
+    Checking rusqlite v0.41.1
+    Checking toml v0.8.23
+    Checking aes-gcm v0.11.1
+    Checking clap v4.6.7
+    Checking shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=9b88eb5be5bc9ba8c5c75480483b9861ddc6e993#9b88eb5b)
+    Checking anyhow v1.0.104
+    Checking base64 v0.23.1
+    Checking drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1250/crates/sys)
+    Checking mio v1.2.4
+    Checking socket2 v0.6.5
+    Checking bytes v1.12.1
+    Checking pin-project-lite v0.2.17
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1250/crates/cli)
+    Checking tokio v1.54.1
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/core/src/promise.rs:271:9
+    |
+271 |         let _ = std::fs::remove_dir_all(&d);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/core/src/promise.rs:271:17
+    |
+271 |         let _ = std::fs::remove_dir_all(&d);
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+    = note: requested on the command line with `-D clippy::let-underscore-must-use`
+
+error: could not compile `drover-core` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

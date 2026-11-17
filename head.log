@@ -1,0 +1,53 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1250/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.44s
+     Running tests/hosts.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1250/debug/deps/hosts-5429b8a4ec2b04ea)
+
+running 45 tests
+test a_disabled_host_gets_no_trim_call ... ok
+test a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_work ... ok
+test a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only ... ok
+test a_remote_lane_gets_the_service_url_and_its_own_token ... ok
+test a_remote_lane_knows_the_main_host_and_answers_reach_it ... ok
+test a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip ... ok
+test a_remote_dry_run_prints_the_argv_the_spawn_sends ... ok
+test a_remote_lane_runs_every_command_on_its_host ... ok
+test a_symlinked_drover_updates_and_reads_back_its_real_install_root ... ok
+test a_lane_of_the_same_name_on_another_host_keeps_no_worktree_live ... ok
+test a_signed_out_sticky_host_yields_unless_its_worktree_has_unpushed_work ... ok
+test a_sticky_host_refusing_disk_low_yields_unless_its_worktree_has_unpushed_work ... ok
+test a_remote_supersede_stays_on_its_host ... ok
+test a_wip_push_whose_ref_exists_retries_under_a_new_name ... ok
+test a_supersede_onto_another_host_closes_the_old_lane_on_its_own ... ok
+test admission_runs_per_host ... ok
+test a_remote_review_is_read_over_ssh_and_recorded ... ok
+test an_unreachable_host_costs_one_short_attempt_per_pass ... ok
+test a_worktree_whose_gitfile_points_at_another_host_is_reported_not_removed ... ok
+test after_hosts_off_the_issue_leaves_its_last_host ... ok
+test an_unhealthy_host_takes_no_lanes_and_shows_red ... ok
+test an_off_host_is_never_chosen_but_drains_its_lanes ... ok
+test a_supersede_saves_a_remote_lanes_dirty_work_first ... ok
+test an_offline_host_never_pages_and_shows_grey ... ok
+test disk_low_on_a_remote_host_trims_its_shared_build_folder_first ... ok
+test clean_closes_a_killed_lanes_leftover_shell_pane_then_removes_the_worktree ... ok
+test asks_stranded_on_a_remote_host_are_imported_once ... ok
+test clean_lists_and_removes_a_second_hosts_lane_and_orphan ... ok
+test doctor_flags_a_stale_remote_fleet_toml_and_leaves_it ... ok
+test clean_removes_a_remote_worktree_over_its_host ... ok
+test health_is_clean_only_when_drover_on_ssh_path_is_this_version ... ok
+test design_runs_on_the_main_host_only_and_a_role_pin_holds ... ok
+test doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh ... ok
+test cli_and_board_toggles_both_log ... ok
+test host_busy_names_the_lane_holding_the_cpu ... ok
+test each_health_check_says_what_failed_and_how_to_fix_it ... ok
+test remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pass ... ok
+test kill_saves_a_remote_lanes_work_on_its_own_host ... ok
+test the_least_busy_host_wins ... ok
+test kill_closes_a_remote_lanes_live_pane_and_clean_then_removes_it ... ok
+test the_lanes_screen_and_the_herd_name_the_host ... ok
+test needs_pick_the_host_whose_tags_cover_them_else_no_host ... ok
+test tags_are_detected_cached_and_refreshed_hourly ... ok
+test a_tick_starts_the_sync_of_a_reachable_host_though_its_health_check_times_out ... ok
+test the_tick_drives_before_it_trims_remote_hosts ... ok
+
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+
