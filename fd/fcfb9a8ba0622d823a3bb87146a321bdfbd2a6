@@ -1,0 +1,5 @@
+Decided: add LOGIN_NEEDED to the refusals that let place move a sticky issue to another host
+Because: "A signed-out last host is treated like a busy one: the lane goes to the least-busy other enabled host that fits."
+Rejected: a separate branch for signed-out hosts — the busy branch already runs the unpushed-work check (#1138), which this issue wants kept
+Check: crates/core/src/hosts.rs:1284 matches LOGIN_NEEDED, and the test covers both the move and the stay-on-unpushed-work cases
+Owner: Lanes no longer wait on a signed-out machine unless it holds unpushed work.
