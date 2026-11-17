@@ -52,6 +52,17 @@ pub fn no_proof(body: &str) -> Option<String> {
     (!bad.is_empty()).then(|| bad.join("; "))
 }
 
+fn pr_diff(r: &dyn Runner, f: &Fleet, branch: &str, head: &str) -> Result<String> {
+    match ok(r, "gh", &["pr", "diff", branch, "-R", &f.repo]) {
+        Err(e) if format!("{e:#}").contains("too_large") => {
+            let (dir, range) = (f.local_path(), format!("origin/{}...{head}", f.integration));
+            git(r, &dir, &["fetch", "-q", "origin"])?;
+            git(r, &dir, &["diff", &range])
+        }
+        d => d,
+    }
+}
+
 pub fn verdict(
     ctx: &Ctx,
     cfg: &Config,
@@ -97,7 +108,7 @@ pub fn verdict(
     };
     let lp = p.loop_of(stage);
     let prose = pass && stage != "verify" && crate::lesson::is_lesson(ctx, st.as_ref(), (fleet, issue)) && {
-        crate::lesson::prose_only(&ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo])?)
+        crate::lesson::prose_only(&pr_diff(r, f, &branch, &head)?)
     };
     let (pass, body) = if prose {
         writeln!(out, "prose-only lesson PR: recorded as a FAIL")?;
@@ -135,7 +146,7 @@ pub fn verdict(
             }
         }
         Some("refactor") => {
-            let diff = ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo])?;
+            let diff = pr_diff(r, f, &branch, &head)?;
             if let Some(files) = tests_changed(&diff) {
                 return refused(
                     "TESTS_CHANGED",
