@@ -4,7 +4,7 @@ pub mod reset;
 pub mod shas;
 pub mod write;
 
-pub use shas::{drives, head, on_root, rooted, Run, Shas};
+pub use shas::{drives, head, on_root, rooted, Run, Shas, KEPT, SAVED};
 
 use crate::config::{Config, Fleet};
 use crate::events::{fold, history, Event, Json};
@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 pub enum Act {
     Cut { cut: String, thread: Option<String> },
     Undo { thread: Option<String> },
-    Push { tip: String, undo: bool },
+    Push { tip: String, undo: bool, main: bool },
     Reset,
 }
 
@@ -44,6 +44,8 @@ pub struct Opts {
         help = "The approved card's run: the plan's new tip (with --undo, its old tip)"
     )]
     pub push: Option<String>,
+    #[arg(long, help = "With --push: the approved main card's run, main alone")]
+    pub main: bool,
     #[arg(long, help = "Reset the fleet's clone and lane folders onto origin's new branches")]
     pub reset: bool,
 }
@@ -52,7 +54,11 @@ pub struct Opts {
 pub fn cli(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, o: Opts) -> Result<()> {
     let act = match (o.cut, o.push) {
         _ if o.reset => Act::Reset,
-        (_, Some(tip)) => Act::Push { tip, undo: o.undo },
+        (_, Some(tip)) => Act::Push {
+            tip,
+            undo: o.undo,
+            main: o.main,
+        },
         _ if o.undo => Act::Undo { thread: o.thread },
         (Some(cut), None) => Act::Cut { cut, thread: o.thread },
         (None, None) => anyhow::bail!("usage: drover compact <fleet> --cut <date|sha> | --undo | --reset"),
@@ -93,6 +99,19 @@ pub struct Plan {
     pub refs: Vec<RefMove>,
     pub chain: Vec<Step>,
     pub forks: Vec<u64>,
+}
+
+const MAIN: &str = "refs/heads/main";
+
+impl Plan {
+    /// `m` is `main`, pushed only by its own card (never when main is the line itself).
+    pub fn is_main(&self, m: &RefMove) -> bool {
+        m.name == MAIN && self.line != "main"
+    }
+    /// `main`'s move, if the plan moves it.
+    pub fn main(&self) -> Option<&RefMove> {
+        (self.refs.iter()).find(|m| self.is_main(m) && m.new.as_deref() != Some(m.old.as_str()))
+    }
 }
 
 /// The repo's scratch folder: the bare copy, the plan and the map.
@@ -184,6 +203,15 @@ fn build(ctx: &Ctx, r: &dyn Runner, f: &Fleet, cut: &str) -> Result<Plan> {
             pr: pr_of(&m.name),
         })
         .collect();
+    if let Some(m) = refs
+        .iter()
+        .find(|m| m.name == MAIN && m.new.is_none() && f.integration != "main")
+    {
+        return refused(
+            "COMPACT_TREE",
+            format!("main ({:.12}) would be deleted; nothing was sent", m.old),
+        );
+    }
     let checked: Vec<&RefMove> = refs.iter().filter(|m| m.class != "Notes" && m.new.is_some()).collect();
     let ends: Vec<&str> = (checked.iter())
         .flat_map(|m| [m.old.as_str(), m.new.as_deref().unwrap_or_default()])
@@ -299,13 +327,10 @@ pub fn moves(
     root: &str,
 ) -> Vec<(String, u64, Value)> {
     let mut by: BTreeMap<(String, u64), Vec<String>> = BTreeMap::new();
-    for e in events
-        .iter()
-        .filter(|e| names.contains(&&e.fleet) && ["merged", "verdict", "why"].contains(&e.kind.as_str()))
-    {
+    for e in events.iter().filter(|e| names.contains(&&e.fleet)) {
         let Some(i) = e.issue else { continue };
-        let ids = by.entry((e.fleet.clone(), i)).or_default();
-        for k in ["merge_sha", "verdict_sha", "sha"] {
+        for (_, k) in SAVED.iter().filter(|s| s.0 == e.kind) {
+            let ids = by.entry((e.fleet.clone(), i)).or_default();
             ids.extend(e.str(k).filter(|s| !ids.iter().any(|x| x == s)).map(String::from));
         }
     }
@@ -377,6 +402,15 @@ fn report(out: &mut dyn Write, p: &Plan, mv: &[(String, u64, Value)], why: &[Str
             m.class
         )?;
     }
+    match p.main() {
+        Some(m) => writeln!(
+            out,
+            "main      {:.9} → {:.9} · its own card",
+            m.old,
+            m.new.as_deref().unwrap_or_default()
+        )?,
+        None => writeln!(out, "main      not moved")?,
+    }
     writeln!(out, "events    {} issues to remap", mv.len())?;
     for (fleet, i, v) in mv {
         for x in v.as_array().into_iter().flatten() {
@@ -412,11 +446,21 @@ pub fn run(
     let d = dir(ctx, &f.repo);
     let events = history(&ctx.state)?;
     let names: Vec<&String> = fleets(cfg, &f.repo).into_iter().map(|x| x.0).collect();
-    let card = |thread: &str, cmd: String, what: &str| -> Result<String> {
+    let all = format!(
+        "force-moves every ref of {} but main (archive first, lease on each)",
+        f.repo
+    );
+    let main_blast = |m: &RefMove, to: &str| {
+        format!(
+            "force-moves main of {} to {to:.12} (lease on {:.12}); the push may fire the repo's main-merge workflows (a prod deploy, migrations)",
+            f.repo, m.old
+        )
+    };
+    let card = |thread: &str, cmd: String, what: &str, blast: &str| -> Result<String> {
         let c = crate::card::Card {
             cmd: &cmd,
             why: what,
-            blast: &format!("force-moves every ref of {} (archive first, lease on each)", f.repo),
+            blast,
             dir: &ctx.state.parent().unwrap_or(Path::new(".")).to_string_lossy(),
             timeout: 3600,
         };
@@ -439,14 +483,27 @@ pub fn run(
                         t,
                         format!("drover compact {fleet} --push {}", p.new_tip),
                         "compact: archive, then one atomic push",
+                        &all,
                     )?;
-                    Ok(writeln!(out, "{line}")?)
+                    writeln!(out, "{line}")?;
+                    if let Some(m) = p.main() {
+                        let to = m.new.as_deref().unwrap_or_default();
+                        let line = card(
+                            t,
+                            format!("drover compact {fleet} --main --push {to}"),
+                            "compact main, after the line's card",
+                            &main_blast(m, to),
+                        )?;
+                        writeln!(out, "{line}")?;
+                    }
+                    Ok(())
                 }
             }
         }
         Act::Undo { thread } => {
             let p = load(&d)?;
-            push::at(r, f, &p, true)?;
+            push::at(r, f, &p, true, false)?;
+            push::at(r, f, &p, true, true)?;
             writeln!(
                 out,
                 "undo {} · {} refs back to their old values · line {:.9} → {:.9}",
@@ -462,15 +519,27 @@ pub fn run(
                         t,
                         format!("drover compact {fleet} --undo --push {}", p.old_tip),
                         "undo the compact",
+                        &all,
                     )?;
-                    Ok(writeln!(out, "{line}")?)
+                    writeln!(out, "{line}")?;
+                    if let Some(m) = p.main() {
+                        let line = card(
+                            t,
+                            format!("drover compact {fleet} --undo --main --push {}", m.old),
+                            "undo the compact of main",
+                            &main_blast(m, &m.old),
+                        )?;
+                        writeln!(out, "{line}")?;
+                    }
+                    Ok(())
                 }
             }
         }
-        Act::Push { tip, undo } => {
+        Act::Push { tip, undo, main } => {
             let want = format!(
-                "drover compact {fleet}{} --push {tip}",
-                if *undo { " --undo" } else { "" }
+                "drover compact {fleet}{}{} --push {tip}",
+                if *undo { " --undo" } else { "" },
+                if *main { " --main" } else { "" }
             );
             if !crate::card::running(&events, &want) {
                 return refused(
@@ -479,13 +548,34 @@ pub fn run(
                 );
             }
             let p = load(&d)?;
-            if *tip != *if *undo { &p.old_tip } else { &p.new_tip } {
+            let m = p.main();
+            let at = match (*main, *undo) {
+                (false, false) => Some(p.new_tip.as_str()),
+                (false, true) => Some(p.old_tip.as_str()),
+                (true, false) => m.and_then(|m| m.new.as_deref()),
+                (true, true) => m.map(|m| m.old.as_str()),
+            };
+            if at != Some(tip.as_str()) {
                 return refused(
                     "COMPACT_MOVED",
                     format!("{tip:.12} is not this plan's tip; run --cut again"),
                 );
             }
-            if *undo {
+            if *main {
+                if !*undo {
+                    let why = ready(cfg, r, &events, &p);
+                    if !why.is_empty() {
+                        return refused("COMPACT_NOT_READY", why.join("; "));
+                    }
+                    if push::finished(ctx, r, f, &d, &events, &names)?.is_none() {
+                        return refused(
+                            "COMPACT_NOT_READY",
+                            format!("{} is not compacted yet: its card runs first", p.line),
+                        );
+                    }
+                }
+                push::main(r, f, &d, &p, *undo)?;
+            } else if *undo {
                 push::undo(ctx, r, f, &d, &p, &names)?;
             } else {
                 let why = ready(cfg, r, &events, &p);

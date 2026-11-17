@@ -7,7 +7,7 @@ use crate::Ctx;
 use anyhow::{bail, Result};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn remote(r: &dyn Runner, url: &str) -> Result<BTreeMap<String, String>> {
     let out = ok(r, "git", &["ls-remote", url])?;
@@ -32,11 +32,11 @@ fn push_all(r: &dyn Runner, copy: &Path, url: &str, moves: &[(&str, &str, Option
     Ok(())
 }
 
-/// Every plan ref on origin at its old value (`undo`: its new one), else `COMPACT_MOVED`; the refs still to move.
-pub fn at(r: &dyn Runner, f: &Fleet, p: &Plan, undo: bool) -> Result<usize> {
+/// Every plan ref of one card (`main`: main alone, else all but main) on origin at its old value (`undo`: its new one), else `COMPACT_MOVED`; the refs still to move.
+pub fn at(r: &dyn Runner, f: &Fleet, p: &Plan, undo: bool, main: bool) -> Result<usize> {
     let now = remote(r, &origin(r, f)?)?;
     let (mut todo, mut moved) = (0, vec![]);
-    for m in &p.refs {
+    for m in p.refs.iter().filter(|m| p.is_main(m) == main) {
         let (from, to) = if undo {
             (m.new.as_deref(), Some(m.old.as_str()))
         } else {
@@ -218,9 +218,9 @@ pub fn push(
     events: &[Event],
     names: &[&String],
 ) -> Result<()> {
-    if at(r, f, p, false)? > 0 {
+    if at(r, f, p, false, false)? > 0 {
         archive(r, f, d, p, ctx.now)?;
-        let mv: Vec<(&str, &str, Option<&str>)> = (p.refs.iter())
+        let mv: Vec<(&str, &str, Option<&str>)> = (p.refs.iter().filter(|m| !p.is_main(m)))
             .map(|m| (m.name.as_str(), m.old.as_str(), m.new.as_deref()))
             .collect();
         push_all(r, &d.join("old.git"), &origin(r, f)?, &mv)?;
@@ -229,14 +229,41 @@ pub fn push(
     bodies(r, f, d, p)
 }
 
-/// The approved undo: every ref back to its old value, a lease on its new one, then `compact-undone`.
-pub fn undo(ctx: &Ctx, r: &dyn Runner, f: &Fleet, d: &Path, p: &Plan, names: &[&String]) -> Result<()> {
+fn copy(r: &dyn Runner, f: &Fleet, d: &Path, p: &Plan) -> Result<PathBuf> {
     let copy = d.join("old.git");
     if !copy.join("HEAD").exists() {
         super::write::mirror(r, &origin(r, f)?.replace(&f.repo, &p.archive), &copy)?;
     }
-    if at(r, f, p, true)? > 0 {
-        let mv: Vec<(&str, &str, Option<&str>)> = (p.refs.iter())
+    Ok(copy)
+}
+
+/// The approved main card: main alone to its new value (`undo`: its old one), a lease on the value it leaves.
+pub fn main(r: &dyn Runner, f: &Fleet, d: &Path, p: &Plan, undo: bool) -> Result<()> {
+    let Some(m) = p.main() else {
+        return refused("COMPACT_MOVED", "this plan does not move main");
+    };
+    let new = m.new.as_deref().unwrap_or_default();
+    let (from, to) = if undo {
+        (new, m.old.as_str())
+    } else {
+        (m.old.as_str(), new)
+    };
+    if at(r, f, p, undo, true)? > 0 {
+        push_all(
+            r,
+            &copy(r, f, d, p)?,
+            &origin(r, f)?,
+            &[(m.name.as_str(), from, Some(to))],
+        )?;
+    }
+    Ok(())
+}
+
+/// The approved undo: every ref but main back to its old value, a lease on its new one, then `compact-undone`.
+pub fn undo(ctx: &Ctx, r: &dyn Runner, f: &Fleet, d: &Path, p: &Plan, names: &[&String]) -> Result<()> {
+    let copy = copy(r, f, d, p)?;
+    if at(r, f, p, true, false)? > 0 {
+        let mv: Vec<(&str, &str, Option<&str>)> = (p.refs.iter().filter(|m| !p.is_main(m)))
             .map(|m| {
                 (
                     m.name.as_str(),
