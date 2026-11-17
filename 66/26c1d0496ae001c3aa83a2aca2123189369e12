@@ -1,0 +1,5 @@
+Decided: the proxy sign-out test attaches the suite's FakeShed as the main host's shed, so check reaches signed-out with no shed server on the runner
+Because: crates/core/src/check.rs:73
+Rejected: skipping the test when no shed server answers — the AC needs both cases covered in CI
+Check: XDG_RUNTIME_DIR pointed at an empty dir, remote_acp passes 11/11; commit 1 plus this fixture still fails on the old advice
+Owner: only the test changed; it now passes on CI runners that have no shed of their own
