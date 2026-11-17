@@ -31,14 +31,18 @@ fn at(c: &drover::Ctx, secs: u64) -> drover::Ctx {
     }
 }
 
-fn fast(c: &drover::Ctx, sh: &FakeShed) -> Fake {
+fn pass(c: &drover::Ctx, sh: &FakeShed, args: &[&str]) -> Fake {
     let r = Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git ", "")
         .reply("sh -c nohup", "4321");
-    let (code, out) = run(c, &sh.on(&r), &["drive", "--fast"]);
+    let (code, out) = run(c, &sh.on(&r), args);
     assert_eq!(code, 0, "{out}");
     r
+}
+
+fn fast(c: &drover::Ctx, sh: &FakeShed) -> Fake {
+    pass(c, sh, &["drive", "--fast"])
 }
 
 fn kinds(c: &drover::Ctx) -> Vec<String> {
@@ -64,6 +68,7 @@ fn card(c: &drover::Ctx, sh: &FakeShed, now: u64) -> Option<Value> {
 #[test]
 fn idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later() {
     let (c, sink, sh) = setup("slo-idle-stuck");
+    pass(&c, &sh, &["drive"]);
     fast(&c, &sh);
     assert!(kinds(&c).is_empty(), "idle starts now: no breach yet");
     fast(&at(&c, 19 * 60), &sh);
@@ -120,6 +125,7 @@ fn idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later() {
 #[test]
 fn idle_that_recovers_after_the_heal_never_alerts() {
     let (c, sink, sh) = setup("slo-idle-recovers");
+    pass(&c, &sh, &["drive"]);
     fast(&c, &sh);
     fast(&at(&c, 21 * 60), &sh);
     assert_eq!(kinds(&c), ["slo-idle", "self-heal"]);
