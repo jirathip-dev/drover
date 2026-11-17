@@ -1,0 +1,9 @@
+Decided: merged origin/staging up to d1b49f17; the per-fleet closed reconcile is closed_on_github with a fleet filter and runs first in each pass
+Because: "An issue closed on GitHub leaves the in-progress group (queue, `status`, Queue screen) within one fast pass"
+Decided: gh::closed keeps its 60 s cache in a fast pass, so a fast pass makes at most one closed-issue read per fleet a minute
+Because: crates/core/src/gh.rs:281
+Decided: the sim hunt test is #[ignore]d with a reason; the follow-up to make the planted bug timing-robust is in the PR body
+Because: q1922
+Rejected: a further seed re-pin — q1723's six runs found no set where the hunt beats random seed 1017
+Check: blocked_respawn's an_issue_closed_on_github_leaves_on_the_next_fast_pass_while_the_full_pass_hangs passes at head
+Owner: Closed issues leave the Queue within a minute; the hunt sim test is parked until a follow-up fixes its timing.
