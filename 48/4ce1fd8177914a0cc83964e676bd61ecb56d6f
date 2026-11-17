@@ -1,0 +1,7 @@
+Decided: a changed composer block redraws the live composer in place instead of replacing its element
+Because: "never moves focus out of the composer, nor its caret or selection, nor closes the phone keyboard"
+Rejected: refocusing the new textarea after a repaint — iOS will not reopen the keyboard on a programmatic focus
+Rejected: returning the old element from the renderer — its parent re-append detaches it and blurs it
+Decided: round 2 only merges current staging; CI's earlier reds were in files this PR does not touch
+Check: compose.mjs sends working on, then a reply with working null; textarea node, focus and caret [4,6] stay
+Owner: typing in a thread is no longer interrupted when the orchestrator replies
