@@ -746,7 +746,7 @@ pub fn drive(
         }
     }
     if only.is_none() && first {
-        if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
+        if let Err(e) = (!fast).then(|| crate::check::budget(ctx, cfg, r, out)).transpose() {
             writeln!(out, "budget: {e:#}")?;
         }
         if let Err(e) = crate::pending::requeue_waiting(ctx, cfg) {
@@ -1008,8 +1008,8 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         let Some((at, &(ix, nh))) = mine.iter().enumerate().rfind(|(_, (_, e))| e.kind == "needs-human") else {
             continue;
         };
-        if s.build.as_deref() == Some("lesson") && nh.str("code") == Some("LANE_ENDS") {
-            crate::lesson::done(ctx, cfg, r, out, (&s.fleet, s.issue), "no repeated class")?;
+        if crate::lesson::no_pr(s.build.as_deref()) && nh.str("code") == Some("LANE_ENDS") {
+            crate::lesson::idle_done(ctx, cfg, r, out, (&s.fleet, s.issue), s.build.as_deref())?;
             continue;
         }
         let from = (mine.iter().take(at)).rposition(|(_, e)| reset.contains(&e.kind.as_str()));
@@ -1196,7 +1196,7 @@ fn pass(
     let agents = sessions.running();
     let ev = working(&ctx.state)?;
     let st = fold(&ev);
-    for s in st.values().filter(|s| s.fleet == fleet) {
+    for s in st.values().filter(|s| s.fleet == fleet && !s.done()) {
         let on = crate::events::held_on(&ev, s);
         let open = |b: &u64| st.get(&(fleet.into(), *b)).is_none_or(|b| b.state != "merged");
         if on.is_empty() || on.iter().any(open) {
@@ -1285,7 +1285,7 @@ fn pass(
     let mut updated = false;
     for (s, w) in waits
         .iter()
-        .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
+        .filter(|(s, w)| s.fleet == fleet && !(fast && s.done()) && s.lane.as_ref() == Some(&w.lane))
     {
         let lock = format!("drive-{fleet}-{}.lock", s.issue);
         let Some(_mine) = take(ctx, r, &lock, STALE_LOCK_SECS, fleet) else {
@@ -1305,12 +1305,12 @@ fn pass(
         if crate::gate::ready_draft(ctx, cfg, r, out, s, &pr)? && merge(w) {
             continue;
         }
-        let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
-        if let Some(e) = crate::events::working(&ctx.state)?.iter().rfind(|e| now(e)).cloned() {
+        if let Some(e) = crate::events::last_at(&working(&ctx.state)?, "auto-updated", (fleet, s.issue), ctx.now) {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
-            let Some(sent) = tell(r, &events, &w.lane, &crate::lesson::prompt(fleet, s.issue)) else {
+            let p = crate::lesson::prompt(fleet, s.issue, s.build.as_deref());
+            let Some(sent) = tell(r, &events, &w.lane, &p) else {
                 continue;
             };
             writeln!(
@@ -1357,7 +1357,7 @@ fn pass(
                 Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
             )?;
         } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE && !fast {
-            crate::lesson::done(ctx, cfg, r, out, (fleet, s.issue), "no repeated class")?;
+            crate::lesson::idle_done(ctx, cfg, r, out, (fleet, s.issue), s.build.as_deref())?;
         } else if w.who == "drive" {
             let gone = w.what.split_once(waiting::NO_PUSH);
             let ends =

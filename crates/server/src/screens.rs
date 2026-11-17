@@ -40,14 +40,19 @@ pub fn places() -> Value {
     serde_json::to_value(m.get("places")).unwrap_or_default()
 }
 
-/// #1072: the standalone page's places: the manifest's, then the Threads tab (never the Cooee plugin's).
+/// #1072: the standalone page's places: the manifest's, then the Threads tab and #1091's Hosts row (never the plugin's).
 pub fn page_places() -> Value {
     let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
+    let hosts = json!({"type": "menu-row", "label": "Hosts", "subtitle": "on/off and reap, per host", "screen": "/screens/hosts"});
     let herd = json!({"type": "menu-row", "label": "Herd", "subtitle": "the ranch: lanes by state, weather from host load", "screen": "/screens/herd"});
     let mut all = places().as_array().cloned().unwrap_or_default();
-    all.extend([threads, herd]);
+    all.extend([threads, hosts, herd]);
     Value::Array(all)
 }
+
+#[path = "screens_hosts.rs"]
+mod hosts;
+use hosts::HOST_ACTIONS;
 
 const THREAD_ACTIONS: [&str; 11] = [
     "thread-new",
@@ -1467,6 +1472,8 @@ impl Server<'_> {
             }
             "/screens/queue/done" => done_screen(self.queue_tab(ctx).fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?),
             "/screens/ask" => ask_sheet(ctx, q)?,
+            "/screens/hosts" => self.hosts_sheet(ctx)?,
+            "/screens/proxy-token" => Self::proxy_how(ctx)?,
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
                 return self.threads_screen(ctx, &p[16..], q.get("before"), paired)
             }
@@ -1658,7 +1665,7 @@ impl Server<'_> {
                     return line("400 Bad Request", "bad request body");
                 };
                 let name = a.at("action").as_str().unwrap_or_default();
-                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name)) {
+                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name) && !HOST_ACTIONS.contains(&name)) {
                     let why =
                         format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
                     return line("403 Forbidden", &why);
@@ -1667,10 +1674,10 @@ impl Server<'_> {
                     Ok(d) if !plugin => d.label.clone(),
                     _ => "cooee".into(),
                 };
-                let res = if name == "later" {
-                    self.hide_card(ctx, &by, a.at("values"))
-                } else {
-                    self.action(ctx, name, &a)
+                let res = match name {
+                    "later" => self.hide_card(ctx, &by, a.at("values")),
+                    n if HOST_ACTIONS.contains(&n) => self.host_op(ctx, n, a.at("values")),
+                    _ => self.action(ctx, name, &a),
                 };
                 match res {
                     Ok(v) => out("200 OK", &v),

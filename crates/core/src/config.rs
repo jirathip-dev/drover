@@ -442,6 +442,8 @@ pub struct Fleet {
     pub form_rounds: Option<u32>,
     /// #908: this fleet's `respawn_per_pass`; `Config::parse` fills in `[limits]`'s when absent.
     pub respawn_per_pass: Option<usize>,
+    /// #1216: this fleet's `stall_restart_hours`; unset = `[limits]`'s.
+    pub stall_restart_hours: Option<u64>,
     /// #216: replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
@@ -459,6 +461,8 @@ pub struct Fleet {
     pub lessons: Option<String>,
     /// #889: `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
     pub hotspots: Option<String>,
+    /// #1100: `weekly` has `tick` run `drover triage` every 7 days; unset or `off`: only on demand.
+    pub triage: Option<String>,
     /// #909: `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
     #[serde(default)]
     pub heavy: BTreeMap<String, Vec<String>>,
@@ -731,6 +735,7 @@ pub struct Limits {
     pub slo_idle_minutes: u64,
     pub slo_tick_minutes: u64,
     pub slo_pass_minutes: u64,
+    pub stall_restart_hours: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -854,6 +859,7 @@ impl Default for Limits {
             slo_idle_minutes: 20,
             slo_tick_minutes: 10,
             slo_pass_minutes: 30,
+            stall_restart_hours: 2,
         }
     }
 }
@@ -1133,6 +1139,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "slo_pass_minutes",
         "no slow drive pass of a fleet for this long shows the owner's `Drive is stuck` card",
+    ),
+    (
+        "stall_restart_hours",
+        "an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own)",
     ),
 ];
 
@@ -1614,9 +1624,9 @@ impl Fleet {
             .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
     }
-    /// #419: the configured role a lane runs as: a lesson lane is impl's unless `[fleet.<n>.role.lesson]` is set.
+    /// #419: the configured role a lane runs as: a lesson (#1100: triage) lane is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
-        if role == "lesson" && !self.role.contains_key(role) {
+        if matches!(role, "lesson" | "triage") && !self.role.contains_key(role) {
             "impl"
         } else {
             role

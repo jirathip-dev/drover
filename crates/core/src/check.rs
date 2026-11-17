@@ -1875,7 +1875,7 @@ type Seen = std::collections::HashSet<(u64, u64)>;
 
 fn walk(p: &Path, seen: &mut Seen) -> u64 {
     use std::os::unix::fs::MetadataExt;
-    match std::fs::symlink_metadata(p) {
+    match crate::sim::lstat(p) {
         Ok(m) if m.is_dir() => std::fs::read_dir(p).map_or(0, |d| d.flatten().map(|e| walk(&e.path(), seen)).sum()),
         Ok(m) => {
             let id = m.is_file().then(|| drover_sys::clone_id(p)).flatten();
@@ -2280,11 +2280,6 @@ fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
     let dirty = changes(&git(&["status", "--porcelain"])?);
     let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?;
     Ok((dirty, ahead.trim().parse().unwrap_or(0)))
-}
-
-/// #676: does worktree `wt` on its host hold dirty files or unpushed commits (unreadable: no)?
-pub fn unsaved(on: &On, wt: &Path) -> bool {
-    on.exists(wt) && pending(on, &wt.to_string_lossy()).is_ok_and(|p| p != (0, 0))
 }
 
 fn close_gone(ctx: &Ctx, on: &On, agent: &str, pane: &str) -> Result<()> {

@@ -173,7 +173,9 @@ impl Pipeline {
 
     /// The stage a role's spawn enters: `role` names a stage or a role.
     pub fn stage_of<'a>(&'a self, role: &'a str) -> &'a str {
-        let lesson = (role == "lesson").then(|| self.stage.first()).flatten();
+        let lesson = matches!(role, "lesson" | "triage")
+            .then(|| self.stage.first())
+            .flatten();
         self.get(role)
             .or(self.of_role(role))
             .or(lesson)

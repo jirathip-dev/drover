@@ -68,16 +68,16 @@ fn swap_refuses_on_sustained_median_with_pressure_not_one_spike() {
         let c = ctx(&d, CONFIG);
         std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
         std::fs::write(c.state.with_file_name("swapouts"), prev).unwrap();
+        std::fs::write(c.state.with_file_name("swapcount"), "999998 100").unwrap();
         let (sh, r) = shed_happy(&c);
-        let r = r
-            .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, level)
-            .once("vm_stat", 0, "Swapouts: 100.\n")
-            .once("vm_stat", 0, "Swapouts: 5100.\n");
+        let r =
+            r.once("sysctl -n kern.memorystatus_vm_pressure_level", 0, level)
+                .once("vm_stat", 0, "Swapouts: 5100.\n");
         (c, sh, r)
     };
     let (c, sh, r) = swap("0 0 0 0", "1");
     assert_eq!(spawn(&c, &r, &[]).0, 0, "a spike with normal pressure admits");
-    assert!(r.called("sleep 2"), "two samples 2 s apart");
+    assert!(!r.called("sleep"), "the rate is from the count kept 2 s before");
     assert_eq!(sh.all("run").len(), 1, "the lane started");
     let (c, sh, r) = swap("0 0 0 0", "2");
     let out = assert_refused(&c, &sh, &r, &[], "HOST_BUSY");

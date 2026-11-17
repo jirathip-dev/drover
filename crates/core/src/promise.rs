@@ -167,10 +167,7 @@ pub fn pass(
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
     {
-        let mine: Vec<&Event> = events
-            .iter()
-            .filter(|e| e.fleet == fleet && e.issue == Some(s.issue))
-            .collect();
+        let mine = crate::events::issue_events(events, fleet, s.issue);
         let head = crate::gh::cached_pr(ctx, fleet, s.issue)
             .at("headRefOid")
             .as_str()

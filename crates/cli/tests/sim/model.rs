@@ -175,6 +175,10 @@ fn err(code: i32, stderr: &str) -> Out {
 
 /// Process `me`'s call `prog args`, answered from (and applied to) the world.
 pub fn answer(_sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[String]) -> Out {
+    reply(w, me, prog, args)
+}
+
+fn reply(w: &mut World, me: usize, prog: &str, args: &[String]) -> Out {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     let o = match prog {
         "shed" => {
@@ -185,13 +189,25 @@ pub fn answer(_sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[Str
                 w.procs[me].starting = Some(pane.clone());
                 let agent = Some(pane.clone());
                 let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
-                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 3 && pane.contains("-rev-");
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 2 && pane.contains("-rev-") && w.model.scripts.contains_key("rev");
                 if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, &pane);
                 }
             }
             o
         }
+        "sh" if a.first() == Some(&"-c") && a.get(1).is_some_and(|s| s.contains("\\036")) => {
+            let mut out = String::new();
+            for l in a[1].lines() {
+                let l = l.trim_end_matches(" </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"");
+                let words: Vec<String> = l.trim_matches('\'').split("' '").map(String::from).collect();
+                let o = reply(w, me, &words[0], &words[1..]);
+                out += &format!("{}\x1e{}\x1e", o.stdout, o.code);
+            }
+            ok(out)
+        }
+        "nproc" => err(1, "nproc"),
+        "cat" | "grep" if a.last().is_some_and(|f| f.starts_with("/proc/")) => err(1, "no /proc"),
         "which" => ok(format!("/usr/local/bin/{}\n", a.first().copied().unwrap_or_default())),
         "gh" => {
             let o = gh(w, &a);

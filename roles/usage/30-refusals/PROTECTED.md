@@ -1,0 +1,1 @@
+- PROTECTED / NOTHING_TO_FOLD / NOT_ON_INTEGRATION / ALREADY_FILED / TRIAGE_VERBS: triage close/fold/label: the issue is queued, has a lane, waits on an open ask or is labeled `keep`; fold: no `## Amendments`; close: the `done` commit is not on integration; docs: the lane filed its one `docs:` issue already; a triage lane's raw `gh issue close|edit|reopen`

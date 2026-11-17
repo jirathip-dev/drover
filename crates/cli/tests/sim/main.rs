@@ -333,7 +333,6 @@ fn random_seeds() {
 }
 
 #[test]
-#[ignore = "parked: the planted bug trips on random seed 1017 since the per-pass closed read; follow-up makes it timing-robust"]
 fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let s = Some(Sabotage::Planted);
     let tripped = |f: &str| f.starts_with("I1 ") && f.contains(" rev has ");
@@ -413,14 +412,14 @@ fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     assert!(o.failure.is_none(), "{}", o.report());
     let want = metrics::Metrics {
-        to_merge: vec![935, 1260],
+        to_merge: vec![927, 1250],
         spawns: 5,
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 992,
+        idle: 984,
         ci_wait: 600,
-        lock_wait: 7,
+        lock_wait: 5,
         serial: 0,
         host_busy: 0,
         caps: 0,
@@ -436,10 +435,10 @@ fn the_known_fleet_gives_exact_metrics() {
             ("caps", 0.0),
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 16.53),
-            ("lock_wait_min", 0.12),
-            ("queue_to_merge_p50_min", 15.58),
-            ("queue_to_merge_p90_min", 21.0),
+            ("idle_lane_min", 16.4),
+            ("lock_wait_min", 0.08),
+            ("queue_to_merge_p50_min", 15.45),
+            ("queue_to_merge_p90_min", 20.83),
             ("review_rounds_per_merge", 1.0),
             ("serial_busy", 0.0),
             ("supersedes_per_lane", 0.25),

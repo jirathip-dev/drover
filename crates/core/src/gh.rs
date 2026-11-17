@@ -7,6 +7,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 pub const PR_FIELDS: &str =
     "number,title,state,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels,mergedAt,mergeCommit,isDraft";
@@ -151,11 +152,27 @@ fn unchanged(r: &dyn Runner, f: &Fleet, etags: &mut Vec<Value>) -> bool {
 
 const PROBE_MAX: u64 = 300;
 
+type Kept = std::collections::HashMap<PathBuf, (u64, Option<std::time::SystemTime>, Rc<Value>)>;
+
+thread_local!(static PASS: std::cell::RefCell<Kept> = std::cell::RefCell::default());
+
+thread_local!(pub static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) });
+
 /// #246: the fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says). #530: the fast step skips it while `unchanged` says nothing moved since the last query.
-pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Value> {
+pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Rc<Value>> {
     let p = cache_path(ctx, "prs", fleet, 0);
+    let stamp = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let kept = PASS.with_borrow(|m| {
+        m.get(&p)
+            .filter(|k| k.0 == now && k.1 == stamp(&p))
+            .map(|k| k.2.clone())
+    });
+    if let Some(prs) = kept {
+        return Ok(prs);
+    }
+    READS.set(READS.get() + 1);
     let old = load::<Value>(&p).unwrap_or_default();
-    let c = if fresh(&old, now) {
+    let mut c = if fresh(&old, now) {
         old
     } else {
         let mut etags = old.at("etags").as_array().cloned().unwrap_or_default();
@@ -194,10 +211,12 @@ pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> 
         store(&p, &c).ok();
         c
     };
-    match c.at("error").as_str() {
-        Some(e) => anyhow::bail!("open PRs of {}: {e}", f.repo),
-        None => Ok(c.at("prs").clone()),
+    if let Some(e) = c.at("error").as_str() {
+        anyhow::bail!("open PRs of {}: {e}", f.repo);
     }
+    let prs = Rc::new(c.get_mut("prs").map(Value::take).unwrap_or_default());
+    PASS.with_borrow_mut(|m| m.insert(p.clone(), (now, stamp(&p), prs.clone())));
+    Ok(prs)
 }
 
 const ISSUES_QUERY: &str = "query($owner:String!,$name:String!,$since:DateTime,$endCursor:String){repository(owner:$owner,\
@@ -552,8 +571,12 @@ pub fn wait(
 pub fn missing(x: &Ctx, r: Option<&dyn Runner>, c: &Config, k: (&str, u64), e: &[Event], pr: &Value) -> Option<String> {
     let ((fleet, issue), g, f) = (k, c.limits.ci_start_minutes * 60, c.fleet(k.0).ok()?);
     let head = pr["headRefOid"].as_str().filter(|_| pr["state"] == "OPEN")?;
-    let named = |e: &&Event| e.fleet == fleet && e.issue == Some(issue) && e.str("sha").or(e.str("to")) == Some(head);
-    let since = e.iter().filter(named).map(|e| e.ts).min()?;
+    let named = |e: &&Event| e.str("sha").or(e.str("to")) == Some(head);
+    let since = crate::events::issue_events(e, fleet, issue)
+        .into_iter()
+        .filter(named)
+        .map(|e| e.ts)
+        .min()?;
     let labelled = f.merge_label.as_deref().is_none_or(|l| has_label(pr, l));
     (labelled && x.now >= since + g && pr["statusCheckRollup"].as_array().is_none_or(Vec::is_empty)).then_some(())?;
     let p = cache_path(x, "runs", fleet, issue);

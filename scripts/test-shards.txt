@@ -63,7 +63,9 @@
 3 hook
 3 host_deadline
 1 host_history
+2 host_sample
 4 host_offline
+1 hosts_screen
 2 host_slots
 2 host_spared
 3 host_sync
@@ -177,6 +179,7 @@
 3 spawn_guard
 1 ssh_deadline
 4 stale_rev
+2 stall_move
 4 stalled_host
 3 stalled_lanes
 2 state_db
@@ -194,6 +197,7 @@
 2 timer_install
 3 tmpdir
 4 top
+1 triage
 2 turn
 4 typed_choice
 4 types

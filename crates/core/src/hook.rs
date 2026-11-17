@@ -42,7 +42,7 @@ pub struct Rules {
     pub deny: Vec<Deny>,
     pub groups: Vec<String>,
     pub reviewer: bool,
-    /// #511: an impl-family lane (not lesson): its unreported turn end goes on once.
+    /// #511: an impl-family lane (not lesson or triage): its unreported turn end goes on once.
     pub builds: bool,
     /// #909: its fleet's heavy kinds under its host's slot limits (none: no heavy patterns).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -76,8 +76,8 @@ impl Rules {
             branches,
             deny,
             groups: cfg.orchestrator.groups().into_iter().map(String::from).collect(),
-            reviewer: family == Some("rev"),
-            builds: role != "lesson" && family == Some("impl"),
+            reviewer: family == Some("rev") || role == "triage",
+            builds: !matches!(role, "lesson" | "triage") && family == Some("impl"),
             cap_raise: false,
         }
     }
@@ -592,6 +592,14 @@ fn gh(t: &[&str]) -> Option<String> {
     if merge {
         return Some("merging is gated: run `drover merge <fleet> <issue>` (needs exact-head PASS + green CI)".into());
     }
+    let triage = crate::config::env("DROVER_LANE").is_some_and(|l| l.split(':').nth(2) == Some("triage"));
+    if triage && matches!(rest, ["issue", "close" | "edit" | "reopen", ..]) {
+        return Some(
+            "REFUSED TRIAGE_VERBS: a triage lane changes issues only through `drover triage close|fold|label`, \
+             which skip queued, laned, asked and `keep` issues (#1100)"
+                .into(),
+        );
+    }
     let api = rest.first() == Some(&"api");
     let comment = rest
         .windows(2)
@@ -658,6 +666,15 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     }
     if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover lesson` (#419)".into());
+    }
+    let triage = lane.split(':').nth(2) == Some("triage");
+    let acts = matches!(r.get(1), Some(&("close" | "fold" | "label" | "docs")));
+    if !orchestrator && r.first() == Some(&"triage") && !(acts && triage) {
+        return Some(
+            "REFUSED ORCHESTRATOR_ONLY: an orchestrator or the owner runs `drover triage <fleet>`; only a triage lane \
+             closes, folds, labels or files docs (#1100)"
+                .into(),
+        );
     }
     if !orchestrator && r.first() == Some(&"amend") {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover amend` (#574)".into());
