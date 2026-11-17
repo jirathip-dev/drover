@@ -96,10 +96,10 @@ fn a_shed_session_goes_running_idle_exited_on_every_surface() {
     let r = row(&c0, &sh, LANE);
     assert_eq!(
         (&r["state"], &r["now"]["n"]),
-        (&json!("working"), &json!("running: cargo test (8m)")),
+        (&json!("running"), &json!("running: cargo test (8m)")),
         "{r}"
     );
-    assert_eq!(herd(&c0, &sh, LANE)["state"], "working");
+    assert_eq!(herd(&c0, &sh, LANE)["state"], "running");
     assert_eq!(kinds(&check(&c0)), Vec::<&str>::new());
 
     sh.set(LANE, |t| t["reported"] = json!({"state": "idle", "note": "end_turn"}));
