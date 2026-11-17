@@ -1,0 +1,7 @@
+Decided: shed_pin goes in shard 4 of scripts/test-shards.txt, next to the other shed test targets
+Because: scripts/test-shards.txt:165
+Decided: in the merge, staging's `Cmd::Stats { cmd }` dispatch replaces this branch's old `StatsCmd::Land` arm; the `shed install` arm stays
+Because: crates/core/src/cli.rs:1984
+Rejected: fixing staging's other red checks (sim hunt, temp-dir leak, serve.rs size) here — outside this issue's files and not caused by it
+Check: scripts/test-shards.sh check exits 0 and CI's rust job passes the test shards step
+Owner: The CI failure was a missing test-shard entry; it is added and the branch is merged with current staging.
