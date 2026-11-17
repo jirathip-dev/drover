@@ -268,20 +268,21 @@ fn with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_a
         ..c.clone()
     };
     let step = |t: u64| assert_eq!(run(&at(t), &r, &["drive", "--fast"]).0, 0);
+    let prs = || r.count("gh api") - r.count("gh api graphql -f owner=");
     step(0);
-    let reads = r.count("gh ");
-    assert!(reads > 0 && r.count("gh api graphql") == 1);
+    let reads = prs();
+    assert!(reads > 0 && r.count("gh api graphql --paginate") == 1);
     for t in [60, 120, 540] {
         step(t);
     }
-    assert_eq!(r.count("gh "), reads, "{:?}", r.calls.borrow());
+    assert_eq!(prs(), reads, "{:?}", r.calls.borrow());
     step(600);
-    assert_eq!(r.count("gh api graphql"), 2, "{:?}", r.calls.borrow());
+    assert_eq!(r.count("gh api graphql --paginate"), 2, "{:?}", r.calls.borrow());
     let body = suite("jirathip-dev/sendmeter", "issue-7");
     let res = send(&at(660), &r, request("check_suite", Some(&sign(SECRET, &body)), &body));
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
     step(661);
-    assert_eq!(r.count("gh api graphql"), 3, "{:?}", r.calls.borrow());
+    assert_eq!(r.count("gh api graphql --paginate"), 3, "{:?}", r.calls.borrow());
 
     std::fs::remove_file(c.config.with_file_name("secrets/GITHUB_WEBHOOK_SECRET")).unwrap();
     step(720);

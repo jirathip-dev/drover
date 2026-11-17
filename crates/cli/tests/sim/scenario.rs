@@ -57,7 +57,7 @@ pub fn setup(root: &Path, cfg: &str) {
     std::fs::create_dir_all(root.join("config")).unwrap();
     let cfg = cfg.replace("LOCAL", &local.display().to_string());
     std::fs::write(root.join("config/fleet.toml"), cfg).unwrap();
-    for p in ["fleet-impl", "fleet-rev"] {
+    for p in ["fleet-impl", "fleet-rev", "fleet-verify"] {
         let d = root.join("config/claude").join(p);
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("settings.json"), "{}").unwrap();
@@ -141,7 +141,7 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
     let (cwd, script) = (w.model.panes[i].cwd.clone(), w.model.panes[i].script.clone());
     let n = issue_of(w.model.panes[i].agent.as_deref().unwrap_or_default());
     match (script, step) {
-        (Some(Script::Push { secs, .. } | Script::Review { secs, .. }), 0) => {
+        (Some(Script::Push { secs, .. } | Script::Review { secs, .. } | Script::Bad { secs, .. }), 0) => {
             w.model.at(
                 now + secs,
                 Ev::Lane {
@@ -169,14 +169,15 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
             let on = w.model.origin.get("staging").cloned().unwrap_or_default();
             w.model.base.insert(sha.clone(), on);
             w.model.origin.insert(branch.clone(), sha.clone());
-            let pr = w.model.prs.entry(branch).or_insert(Pr {
+            let pr = w.model.prs.entry(branch.clone()).or_insert(Pr {
                 number: n,
                 head: String::new(),
                 base: "staging".into(),
                 state: "OPEN".into(),
                 merged: None,
             });
-            pr.head.clone_from(&sha);
+            let old = std::mem::replace(&mut pr.head, sha.clone());
+            crate::gates::moved(w, &branch, &old);
             w.model.version += 1;
             let ci = w.model.ci_start(&sha, now, ci, &mut w.rng);
             let made = w.model.incarnation(i);
@@ -185,6 +186,17 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
             stop(sim, w, i, n);
         }
         (_, 3) => stop(sim, w, i, n),
+        (Some(Script::Bad { stale, .. }), 1) => {
+            let head = w.model.heads.get(&cwd).cloned().unwrap_or_default();
+            let body = if stale {
+                let older = w.model.base.get(&head).cloned().unwrap_or_default();
+                format!("PASS\n\nReviewed head: {older}\n\nAll criteria met.\n")
+            } else {
+                format!("PASS\n\nReviewed head: {}", head.get(..17).unwrap_or_default())
+            };
+            write_verdict(&cwd, &body, now);
+            stop(sim, w, i, n);
+        }
         (Some(Script::Review { pass, proof, .. }), 1 | 2) => {
             let head = w.model.heads.get(&cwd).cloned().unwrap_or_default();
             let fixed = step == 2 || proof;
@@ -199,17 +211,21 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
                 let made = w.model.incarnation(i);
                 w.model.produced.push(made);
             }
-            let f = Path::new(&cwd).join("verdict.md");
-            std::fs::write(&f, body).unwrap();
-            let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(now);
-            let _ = std::fs::File::options()
-                .write(true)
-                .open(&f)
-                .and_then(|f| f.set_modified(t));
+            write_verdict(&cwd, &body, now);
             stop(sim, w, i, n);
         }
         _ => {}
     }
+}
+
+fn write_verdict(cwd: &str, body: &str, now: u64) {
+    let f = Path::new(cwd).join("verdict.md");
+    std::fs::write(&f, body).unwrap();
+    let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(now);
+    let _ = std::fs::File::options()
+        .write(true)
+        .open(&f)
+        .and_then(|f| f.set_modified(t));
 }
 
 fn stop(sim: &Arc<Sim>, w: &mut World, i: usize, n: u64) {

@@ -12,6 +12,9 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
    host (#337) are one ssh call per step. A pass checks all of a host's
    lane worktrees with one ssh call (#880); a host whose call runs past its limit shows in the tick's log as
    `tick: <host>: over budget; skipped for the rest of this pass`, and the pass goes on for the other hosts.
+   #1252: a tick past its `slow_secs` budget skips only its maintenance (clean, trim, lesson, hotspots, compact);
+   check and drive still reach every host that answers. Hosts skipped two passes running log one `hosts-skipped`
+   alert with the calls not sent and the pass's slowest step.
 2. On the new host, install and log in to:
    - shed (its server job running; `hosts bootstrap` installs it);
    - git;
@@ -97,7 +100,7 @@ drover's own processes and the `cp` clones they run (#825), and a refusal on loa
 (`top: rustc 900%, …`). A tapped start held by load alone waits and starts on the first pass the host admits it; its
 card never comes back for the load. When no host fits at
 all (or only a cloud host over its budget fits), it is refused with `REFUSED NO_HOST: no host with docker`, plus
-` (cloud host stopped or over budget)` when fleet.toml has a cloud host; the Host tab reads it as `waiting`. drive
+` (cloud host stopped or over budget)` when fleet.toml has a cloud host. drive
 retries on its next pass.
 
 ### Start slots (#1186)
@@ -165,14 +168,12 @@ An answer reaches a remote lane through that host's shed (`send`, then Enter).
 
 ## Turn a host off
 
-`drover hosts off <name>` (or the `[off]` button on the host's card in the Host tab, paired devices only) sets
-`enabled = false` in fleet.toml and logs `host-off` with `by`. `hosts on` and `[on]` undo it, logging `host-on`.
-The buttons ask first (`turn air off? no new lanes; 2 running lanes finish`).
+`drover hosts off <name>` sets `enabled = false` in fleet.toml and logs `host-off` with `by`. `hosts on` undoes it,
+logging `host-on`.
 
 An off host gets no new issues. It keeps being monitored, and its running lanes drain there: their reviews and fix
-rounds still go to it. The Host tab shows such a host grey, as `off · draining 2 lanes` while lanes remain, then
-`off · not used for lanes`. The main host (no `machine`) runs drover, the board and the log: it has no `[off]`, and
-`hosts off` refuses it `MAIN_HOST`; set `enabled = false` in fleet.toml by hand if you mean it.
+rounds still go to it. `GET /api/v1/host` shows such a host grey, as `off · draining 2 lanes` while lanes remain,
+then `off · not used for lanes`. The main host (no `machine`) runs drover, the page and the log: `hosts off` refuses it `MAIN_HOST`; set `enabled = false` in fleet.toml by hand if you mean it.
 
 #939: once an off host has no open lane left, `drive`, `check`, `status` and the tick never contact it (no ssh at
 all); its lanes are still finished, cleaned and saved while any remain. Every remote call in a pass is killed with its
@@ -185,7 +186,7 @@ logs `host-key-changed <host>` once (again only after the host was back online) 
 - `drover hosts` prints, per host: on or off, reachable or offline, its tags, load/cpu, memory, disk, and its lanes.
 - `drover status` gets a `HOST` column once fleet.toml has `[hosts]`; #609: it shows a live lane's `where`
   (`mini · shed`, docs/serve.md), as `board` and `waiting` do.
-- The Host tab's HOSTS section has one card per host, main first, then A→Z, each with the same rows (#234): load/cpu,
+- `GET /api/v1/host`'s `hosts` has one card per host, main first, then A→Z, each with the same rows (#234): load/cpu,
   swap-out, memory, disk, top memory, lanes and tags, the state and why its dot is amber or red in its head. Remote
   values (and top memory, with its age) come from the 5-minute `check`. An unreachable host is grey
   (`offline · last seen 33m`) in the same layout, and its lanes never page (`lane-dead` and `stall` skip them).
@@ -205,19 +206,18 @@ logs `host-key-changed <host>` once (again only after the host was back online) 
 - History (#234): `<state dir>/host-history.jsonl` keeps 24 h of `{ts, host, load_cpu, pressure, swap_out, mem_free_gb,
   disk_free_gb, lanes}`: the main host a row a minute (`drive --fast`), a remote host a row every 5 minutes (`check`'s
   survey, no extra SSH). Rows past 24 h are dropped when it is rewritten (at most hourly), and it stays under
-  about 180 KB a host. Each row on a card has a 24 h sparkline; a tap opens a 1 h / 6 h / 24 h chart with the limit
-  dashed and the lane count as a step line. Downsampling keeps the worst row of each bucket (the max; free space the
+  about 180 KB a host. Each card row carries its 24 h series for a sparkline. Downsampling keeps the worst row of each bucket (the max; free space the
   min), so a peak is never hidden.
-- Watched sampling (#352): only while a board has the Host tab open (its `/live?tab=host` stream stamps
-  `<state dir>/host-watch.at`; seen in the last 2 min) does the main host's row also carry `procs`: the MB `ps` sees
+- Watched sampling (#352): only while a `/live?tab=host` stream is open (it stamps `<state dir>/host-watch.at`;
+  seen in the last 2 min) does the main host's row also carry `procs`: the MB `ps` sees
   in five fixed groups (lanes, CI/Colima, browsers, drover, other), never per PID. With nobody watching the fast
   step never walks the process table. The file is also capped at 1,600 rows a host on rewrite.
-- Each lane card, and each horse in the Herd, shows its host name.
+- Each lane row shows its host name.
 
 ## Health (#235)
 
 `drover doctor` checks every enabled remote host, and `check` does the same once an hour (with the tag probe). A
-failure turns the host red on the Host tab (`unhealthy · <reason>`) and keeps new lanes off it: placement refuses it
+failure marks the host red (`unhealthy · <reason>`) and keeps new lanes off it: placement refuses it
 with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
 
 - **git**: `ssh <host> git ls-remote https://github.com/<repo>.git` works for each fleet whose needs the host fits.
