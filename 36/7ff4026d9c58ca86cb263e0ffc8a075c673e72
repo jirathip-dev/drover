@@ -1,0 +1,5 @@
+Decided: on the staging merge, take staging's chat_cards move to later.rs and put the in-flight filters into owner_cards
+Because: crates/server/src/later.rs:116
+Rejected: keeping the old chat_cards in screens.rs — staging dispatches /screens/cards to later.rs, so it would be dead code
+Check: an answered ask, needs-human or run card is left out of /screens/cards while its job is in flight
+Owner: an answered card leaves the phone at once, now on the reorganised cards code too
