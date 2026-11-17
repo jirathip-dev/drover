@@ -1100,7 +1100,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "serve_handover_secs",
-        "`self-update` waits this long for the running serve to hand over before restarting it",
+        "how long serve waits for a held port's serve to answer, hand over, or let go of the port (#1244)",
     ),
     (
         "serve_mem_mb",

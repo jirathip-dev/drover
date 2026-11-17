@@ -153,17 +153,11 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> 
 }
 
 fn word(s: Status) -> Option<&'static str> {
-    Some(match s {
-        Status::Unreported => return None,
-        Status::Working => "working",
-        Status::Blocked => "blocked",
-        Status::Limited => "rate-limited",
-        Status::Done => "done",
-        Status::Idle => "idle",
-        Status::Asleep => "hibernated",
-        Status::Failed => "error",
-        Status::Other => "stuck",
-    })
+    match s {
+        Status::Unreported => None,
+        Status::Other => Some("stuck"),
+        _ => Some(s.word()),
+    }
 }
 
 fn look(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], m: Option<&str>, s: &Session) -> Result<bool> {

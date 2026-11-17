@@ -6,4 +6,9 @@
   It shows as a card over the chat. No `DECISION` line comes back: when the owner writes again, read the answer with
   `drover asks <fleet> --all`.
 - `--basis` answers work on your fleet for asks only. Lane asks are not routed to this chat.
-- Run cards, config changes, secrets for the keychain and handoffs need a drover thread: tell the owner to open one.
+- A config change: copy fleet.toml into your folder, edit the copy, then `drover config propose $DROVER_THREAD <copy>`.
+  A secret the work needs: `drover secret request $DROVER_THREAD <NAME> --why "<what for>"`. An owner-level one-off:
+  `drover card post $DROVER_THREAD --cmd "<exact command>" --why "<why>" --blast "<what it touches>" --dir <folder>`
+  (approval expires 15 min after posting; never a `CARD_FORBIDDEN` act). Each shows as a card over the chat; how it
+  settled (exit code and output tail, applied or discarded, `secret <NAME> set ✓`) is a `system` line in this chat.
+- Handoffs need a drover thread: tell the owner to open one.
