@@ -1,0 +1,9 @@
+Decided: gate scenarios live in crates/cli/tests/sim/gates.rs with fixed seeds 9591-9599, each run twice to prove replay
+Because: "Breaking the head-sha check in a fixture makes the"
+Decided: Sabotage::HeadSha makes the model's GitHub ignore --match-head-commit; breaking_the_head_sha_check_fails_always asserts A1 fires
+Decided: the drive-side CI-red gap seen in seed 9596 is reported, not fixed here
+Because: "A bug this finds is fixed in its own issue, test first."
+Decided: fix round merges origin/staging, whose #1237 fixed the flaky hunt test, and takes staging's serve.rs baseline
+Rejected: retuning the hunt test here — staging already fixed it
+Check: seed 9596 trace shows gh pr merge refused by the required check, then a new PASS and merge at the new head
+Owner: The sim now proves nothing merges without a PASS and green CI on the exact head, even when a reviewer or drive dies.
