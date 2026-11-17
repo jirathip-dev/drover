@@ -2,6 +2,7 @@ use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event, Json};
 use crate::gate::refused;
+use crate::orchestrator::actor;
 use crate::providers;
 use crate::runner::{argv, ok, Runner};
 use crate::session::{Session, Status};
@@ -926,6 +927,8 @@ pub struct Opts {
     /// Fix round that merges the integration branch into a conflicting or behind PR
     #[arg(long)]
     pub update: bool,
+    #[arg(skip = Some(actor()))]
+    pub by: Option<String>,
 }
 
 fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygiene) -> Result<()> {
@@ -1130,8 +1133,7 @@ pub fn spawn(
     }
     match refusal {
         Some(("HOST_BUSY", why)) if o.force => {
-            let by = crate::orchestrator::acting().map_or_else(|| "owner".into(), |id| format!("orchestrator-{id}"));
-            let d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": by});
+            let d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": actor()});
             event("override", d)?;
         }
         Some(("HOST_BUSY", why)) => return refused("HOST_BUSY", format!("{why}; retry later or pass --force")),
@@ -1421,7 +1423,8 @@ pub fn spawn(
             d.put("runtime", json!(if bt.0.acp.is_some() { "shed-acp" } else { "shed" }));
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d.put("confirmed", json!(confirmed))
-                .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))));
+                .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))))
+                .put("by", json!(o.by));
             d.put("update", json!(o.update)).put("handover", json!(note));
             if let Some(pl) = &placed {
                 d.put("host", json!(pl.name))

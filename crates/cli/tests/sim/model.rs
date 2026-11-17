@@ -485,6 +485,8 @@ fn git(w: &mut World, a: &[&str]) -> Out {
         | ["worktree", "prune"]
         | ["merge-base", "--is-ancestor", BASELINE, _]
         | ["sparse-checkout", "set", ..] => ok(""),
+        ["merge-base", "--is-ancestor", a, b] if a == b || m.base.get(*b).is_some_and(|s| s == a) => ok(""),
+        ["merge-base", "--is-ancestor", ..] => err(1, ""),
         ["merge-tree", ..] => ok(format!("{:040x}\n", 7)),
         ["show", _] => err(128, "fatal: path does not exist"),
         ["worktree", "add", .., path, rev] => {
