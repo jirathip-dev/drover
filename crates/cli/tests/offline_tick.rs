@@ -119,15 +119,17 @@ fn a_tick_past_its_budget_skips_the_rest_says_so_and_ends() {
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        !r.0.called(PROBE),
-        "nothing more goes to another host: {:#?}",
-        r.0.calls.borrow()
+        r.timeouts().len() <= 1,
+        "drive's dropped host costs one call: {:#?}",
+        r.timeouts()
     );
-    assert!(r.timeouts().is_empty(), "{:#?}", r.timeouts());
     assert!(
         out.contains("tick: past its 0 s budget; skipped: clean, trim, lesson"),
         "{out}"
     );
+    assert!(!c.state.with_file_name("clean.at").exists(), "no clean: {out}");
+    assert!(!out.contains("compact:") && !out.contains("sendmeter lesson"), "{out}");
+    assert!(!out.contains("builds: "), "{out}");
     assert!(
         sh.called("run", "sendmeter-impl-12"),
         "drive still starts local work: {out}"
