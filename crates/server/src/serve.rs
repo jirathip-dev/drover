@@ -2131,7 +2131,7 @@ impl<'a> Server<'a> {
             if !lanes.is_empty() {
                 meta.push(format!("{} lane{}", lanes.len(), plural(lanes.len())));
             }
-            meta.extend(queue::serial_use(events, st, f, Some(cfg)));
+            meta.extend(queue::fleet_use(ctx, events, st, f, Some(cfg)));
             card.drive = drive(ctx, events, f, meta);
             // #173: a refused pipeline stops this fleet only; its card says so in red.
             if !fc.bad.is_empty() {
