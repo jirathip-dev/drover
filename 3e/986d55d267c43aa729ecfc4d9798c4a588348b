@@ -1,0 +1,11 @@
+Decided: proxy lanes are marked on the spawn event; their signed-out advice names the token proxy and its setup command, never the host login
+Because: "the signed-out advice names the proxy (its token on the main host, `claude setup-token`)"
+Decided: the proxy logs one passive proxy-ok when a signed-out lane's call gets a 2xx; login_hold skips a proxy sign-out inside proxy_retry_secs or followed by proxy-ok
+Because: "A proxy lane auth error followed by a successful proxy request within the retry window does not set LOGIN_NEEDED"
+Decided: staging build fix: the sim hunt starts from seed 4 alone so its mutations run from round 2, before random seed 1003 trips the planted bug
+Because: crates/cli/tests/sim/main.rs:279
+Rejected: planted threshold back to 4 — the hunt then finds nothing within 40 rounds
+Rejected: delaying the signed-out alert in check — check is stateless and the AC asks for the proxy's own success as the signal
+Check: host-login lanes keep `claude /login` advice and the immediate hold (shed.rs an_auth_failure_alerts_signed_out_once_and_holds_the_host)
+Check: sim hunt finds I1 in round 2 and still minimises it
+Owner: a one-off dropped proxy call no longer locks a remote host for hours, and the alert points at the proxy token instead of a useless login step
