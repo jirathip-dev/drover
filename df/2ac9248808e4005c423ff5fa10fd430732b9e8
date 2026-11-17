@@ -1,0 +1,11 @@
+Decided: the stall is a slo breach (`stall:<fleet>#<n>:<role>@<round>`) whose heal restarts or moves once; a second stall, a failed heal or no free host is #1183's stuck card.
+Because: "A second stall on the same step gives a stuck card."
+Decided: a move is a `stall-move` event that `hosts::place` reads: the next spawn skips that host and spawn's existing moved-lane path saves the wip first.
+Because: "drover saves wip and moves the lane to another enabled host that is under its limits and fits its tags"
+Decided: only tracked changes and unpushed commits pin a lane (`hosts::unsaved`, moved from check.rs to its one caller, drops `??` lines); `body.md` joins `OWN_FILES`.
+Because: "only commits not on origin and changes to tracked files"
+Decided: named waits read from the log: a hold or queue blocker, a non-green cached PR rollup, a spawn-slot or CI promise, an open ask; an issue drive holds or last refused for a non-load code is not silent.
+Rejected: `waiting::scan` in the slo pass — #1183 took it out of the fast step for cost.
+Rejected: timing the load wait inside `place` — place also runs for dry runs and slot checks, so it must not log or save.
+Check: the restart is `spawn <role> --supersede`, as drive's own fix spawns, so wip save and lane clean are supersede's.
+Owner: a lane quiet for 2 hours is restarted once, a lane stuck behind a busy host moves to a free one, and a second time you get the stuck card.
