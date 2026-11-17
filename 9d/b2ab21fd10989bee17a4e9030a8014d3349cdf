@@ -1,0 +1,7 @@
+Decided: the red shard 2 is the temp-dir leak of chat_tab's large-attachment test; it now waits for serve's delivery before returning
+Because: crates/cli/tests/chat_tab.rs:400
+Rejected: leaving it as a staging flake — staging's own head fails the same step, and the rules ask a lane to fix such a break
+Decided: merge origin/staging; cooee actions keep staging's force and this branch's limit, screens.rs keeps staging's counts block and this branch's lane arg
+Because: crates/server/src/screens.rs:1407
+Check: the large-attachment test leaves no fleet-test-* dir over repeated single-test runs; shard 2's temp-dir step is green
+Owner: no behaviour change this round; a flaky test that left temp files behind is fixed and the branch is up to date with staging
