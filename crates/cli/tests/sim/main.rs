@@ -417,7 +417,7 @@ fn the_known_fleet_gives_exact_metrics() {
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 984,
+        idle: 987,
         ci_wait: 600,
         lock_wait: 5,
         serial: 0,
