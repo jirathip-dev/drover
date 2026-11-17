@@ -765,7 +765,7 @@ pub fn drive(
     let live: Vec<&str> = (cfg.fleet.keys().map(String::as_str))
         .filter(|n| only.is_none_or(|o| o == *n))
         .collect();
-    let on = |n: &&str| cfg.fleet.get(*n).is_some_and(|f| !f.paused);
+    let on = |n: &&str| crate::compact::drives(ctx, cfg, r, n, out);
     let fleets: Vec<&str> = live.iter().copied().filter(on).collect();
     let events = (fast && first)
         .then(|| crate::events::working(&ctx.state).ok())
