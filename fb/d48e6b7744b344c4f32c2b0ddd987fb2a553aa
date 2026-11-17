@@ -1,0 +1,30 @@
+Decided: the cards screen leaves out a card while its answer job is running, and the action reply removes needs-human and run cards too
+Because: "After any action on a card (an ask's approve / revise / reject or option, a needs-human button, a run card), the card goes away"
+Because: crates/server/src/serve/jobs.rs:53
+Because: crates/server/src/screens.rs:1592
+Rejected: reloading the cards on the whole-screen path as the issue guessed — an answer reply never carries a screen op, so it would not help
+Rejected: a client-side list of answered ids — it would hide a card whose answer failed, and the server already knows the job state
+Check: commit c9f0f851 alone fails page_drafts in the ui-webkit job, because the 300 ms reload redraws ask-q2 while the held approve runs
+Check: a refused or failed answer job brings its card back on the next cards fetch
+Owner: answering a card on the phone now makes it go away at once; tap approve on an ADR card to check
+
+Decided: the second memory handover test waits for the fifth "phone page on" line and for every bridge to close its stderr before it ends
+Because: crates/server/src/handover.rs:152
+Because: crates/cli/tests/handover.rs:565
+Rejected: rerunning the shard as a flake — staging fails the same temp-dir step, and the leftover is a live detached serve
+Rejected: killing the bridges by pid — the test never learns the second bridge's pid, but the pipe's EOF proves they are all gone
+Check: after `cargo test --test handover`, no drover serve from a fleet-test-ho-* dir is still running
+Owner: the shared test run no longer leaves a stray background server behind, which was turning CI red at random
+
+Decided: on the staging merge, take staging's chat_cards move to later.rs and put the in-flight filters into owner_cards
+Because: crates/server/src/later.rs:116
+Rejected: keeping the old chat_cards in screens.rs — staging dispatches /screens/cards to later.rs, so it would be dead code
+Check: an answered ask, needs-human or run card is left out of /screens/cards while its job is in flight
+Owner: an answered card leaves the phone at once, now on the reorganised cards code too
+
+Decided: move the reply's remove-op mapping out of action into later::gone_ops, so screens.rs and action stay under their size caps
+Because: crates/server/src/later.rs:199
+Because: crates/server/src/screens.rs:1853
+Rejected: squeezing the match onto fewer lines — cargo fmt decides line breaks
+Check: arch-check reports no size violation for screens.rs or action
+Owner: no behaviour change; this only clears the code-size check that blocked the previous round
