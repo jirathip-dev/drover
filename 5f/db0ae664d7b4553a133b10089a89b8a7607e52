@@ -1,0 +1,7 @@
+Decided: the hunt test counts only the planted rev-lane I1, and its random baseline starts at seed 1016
+Because: "The test must still show the hunt beating random seeds and minimising the trace."
+Because: crates/cli/tests/sim/model.rs:179
+Rejected: raising the round cap or changing drive — the red run was a real impl-lane bug (fixed by #1225), not the planted one
+Rejected: keeping the baseline at 1000 — seed 1002 trips the planted bug, so the hunt at round 2 had zero margin
+Check: the mutant with random start seeds 1016..1056 fails at seed 1049; three real runs pass
+Owner: A flaky simulation check no longer turns staging red over bugs it wasn't testing.
