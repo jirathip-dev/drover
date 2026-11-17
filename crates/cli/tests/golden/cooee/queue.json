@@ -3,6 +3,7 @@
  "id": "queue",
  "title": "Queue",
  "stream": "/screens/queue/stream",
+ "badge": 2,
  "actions": [
   {
    "icon": "more",
@@ -39,19 +40,19 @@
    "options": [
     {
      "value": "all",
-     "label": "all"
+     "label": "all 26"
     },
     {
      "value": "cooee",
-     "label": "cooee"
+     "label": "cooee 3 ●"
     },
     {
      "value": "herdsman",
-     "label": "herdsman"
+     "label": "herdsman 19"
     },
     {
      "value": "drover",
-     "label": "drover"
+     "label": "drover 4"
     }
    ]
   },
@@ -94,6 +95,29 @@
    ]
   },
   {
+   "type": "stat",
+   "id": "counts",
+   "items": [
+    {
+     "label": "needs you",
+     "value": "0",
+     "tone": ""
+    },
+    {
+     "label": "in progress",
+     "value": "7"
+    },
+    {
+     "label": "queued",
+     "value": "12"
+    },
+    {
+     "label": "done today",
+     "value": "6"
+    }
+   ]
+  },
+  {
    "type": "card",
    "id": "fleet-herdsman",
    "tone": "accent",
@@ -132,18 +156,19 @@
          "id": "q-722",
          "figure": {
           "state": "working",
-          "tool": "run"
+          "tool": "run",
+          "grow": "impl"
          },
          "title": "#722 spawn (shed): fix rounds fail git worktree add",
          "badge": {
-          "text": "impl",
+          "text": "[▲ impl] ◆ ◫ ✓",
           "tone": "working"
          },
          "value": {
           "since": "2026-11-09T09:32:00Z"
          },
          "tap": {
-          "open": "/screens/issue?n=722"
+          "sheet": "/screens/issue?repo=herdsman&issue=722"
          },
          "swipe": [
           {
@@ -174,7 +199,7 @@
           "since": "2026-11-09T09:35:00Z"
          },
          "tap": {
-          "sheet": "/screens/lanes/herdsman-impl-641"
+          "sheet": "/screens/issue?repo=herdsman&issue=641"
          },
          "subtitle": "impl ✓ · review 1 ✗ · fix 1 ▸ herdsman-impl-641 · mini"
         },
@@ -192,7 +217,7 @@
          },
          "value": "51m",
          "tap": {
-          "open": "/screens/issue?n=609"
+          "sheet": "/screens/issue?repo=herdsman&issue=609"
          },
          "subtitle": "impl ✓ · review 1–3 ✗ · fix 4 ▸ herdsman-impl-609 · air"
         },
@@ -209,9 +234,28 @@
          },
          "value": "1h",
          "tap": {
-          "open": "/screens/issue?n=708"
+          "sheet": "/screens/issue?repo=herdsman&issue=708"
          },
          "subtitle": "impl ✓ · review 1 ✗ · fix 1 ✓ · review 2 ✓ · CI ✓"
+        },
+        {
+         "type": "row",
+         "id": "q-690",
+         "figure": {
+          "state": "needs"
+         },
+         "title": "#690 doctor: say which host lacks the shed",
+         "badge": {
+          "text": "decision",
+          "tone": "needs"
+         },
+         "value": {
+          "since": "2026-11-09T09:41:00Z"
+         },
+         "tap": {
+          "sheet": "/screens/issue?repo=herdsman&issue=690"
+         },
+         "subtitle": "asks: Split the PR? · split / keep (recommended)"
         },
         {
          "type": "row",
@@ -244,6 +288,9 @@
          "badge": {
           "text": "#1",
           "tone": "mute"
+         },
+         "tap": {
+          "sheet": "/screens/issue?repo=herdsman&issue=456"
          },
          "swipe": [
           {

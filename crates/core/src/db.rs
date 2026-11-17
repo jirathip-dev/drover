@@ -146,6 +146,9 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
     if let Some(id) = crate::orchestrator::acting() {
         ev.data.entry("orchestrator").or_insert(id.into());
     }
+    if seq.is_none() && matches!(ev.kind.as_str(), "verdict" | "lane-killed") {
+        ev.data.entry("by").or_insert(crate::orchestrator::actor().into());
+    }
     let ev = if seq.is_none() { crate::events::capped(&ev) } else { ev };
     let json = serde_json::to_string(&ev)?;
     c.prepare_cached(
@@ -413,10 +416,13 @@ pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
             zstd_append(&dir.join(format!("events-{m}.jsonl.zst")), &text)?;
         }
         tx.execute(&format!("DELETE FROM events WHERE {done}"), [cut])?;
-        let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')";
-        tx.execute(q, [now])?;
+        let moved = gone + old.len() > 0;
+        if moved {
+            let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')";
+            tx.execute(q, [now])?;
+        }
         tx.commit()?;
-        if gone + old.len() > 0 {
+        if moved {
             c.execute_batch("VACUUM")?;
         }
         c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;

@@ -197,12 +197,13 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     }
     let row = find(&q, "q-sendmeter-12");
     assert_eq!(row["title"], "#12");
-    assert_eq!(row["badge"], json!({"text": "fix 1", "tone": "working"}));
-    assert_eq!(row["figure"], json!({"state": "working", "tool": "edit"}));
     assert_eq!(row["subtitle"], "impl ✓ · review 1 ✗ · fix 1 ▸ sendmeter-impl-12");
-    assert_eq!(row["tap"], json!({"sheet": "/screens/lanes/sendmeter-impl-12"}));
+    assert_eq!(row["tap"], json!({"sheet": "/screens/issue?repo=sendmeter&issue=12"}));
+    for (id, n) in [("q-722", 722), ("q-456", 456), ("q-690", 690)] {
+        let tap = json!({"sheet": format!("/screens/issue?repo=herdsman&issue={n}")});
+        assert_eq!(find(&fx, id)["tap"], tap, "{id}");
+    }
     assert_eq!(row["swipe"][0]["action"], "stop");
-    assert_eq!(find(&q, "q-sendmeter-5")["figure"], json!({"state": "needs"}));
     assert_eq!(
         find(&q, "q-sendmeter-17")["badge"],
         json!({"text": "#1", "tone": "mute"})
@@ -216,6 +217,18 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     assert_eq!(find(&q, "done-today-sendmeter")["value"], "1");
     assert_eq!(find(&q, "stats")["items"][0]["value"], "1");
     assert_eq!(find(&q, "stats")["items"][0]["spark"], json!([0, 0, 0, 0, 0, 0, 1]));
+    let labels: Vec<&Value> = find(&q, "repo")["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| &o["label"])
+        .collect();
+    assert_eq!(labels, [&json!("all 4"), &json!("sendmeter 4 ●")]);
+    let counts: Vec<String> = (find(&q, "counts")["items"].as_array().unwrap().iter())
+        .map(|i| format!("{} {}", i["label"].as_str().unwrap(), i["value"].as_str().unwrap()))
+        .collect();
+    assert_eq!(counts, ["needs you 1", "in progress 1", "queued 2", "done today 1"]);
+    assert_eq!(q["badge"], 2);
     let none = get("/screens/queue?repo=nope");
     assert_eq!(find(&none, "repo")["selected"], json!(["all"]));
 
@@ -284,6 +297,42 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
 }
 
 #[test]
+fn done_today_opens_todays_merged_events_and_a_row_opens_its_issue_card() {
+    let (c, r) = recorded("cooee-done");
+    let ev = |ts: u64, n: u64, d: Value| append(&c.state, &Event::new(ts, "sendmeter", Some(n), "merged", d)).unwrap();
+    ev(T - 90_000, 3, json!({"pr": "40", "merge_sha": "c".repeat(40)}));
+    ev(T - 200, 11, json!({"pr": "43", "merge_sha": "d".repeat(40)}));
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let get = |p: &str| {
+        let (status, v) = req(&s, T, "GET", p, "", "");
+        assert_eq!(status, 200, "{p}: {v}");
+        v
+    };
+    let row = find(&get("/screens/queue"), "done-today-sendmeter").clone();
+    assert_eq!(row["tap"], json!({"open": "/screens/queue/done?repo=sendmeter"}));
+    let d = get(row["tap"]["open"].as_str().unwrap());
+    assert_eq!(d["type"], "screen");
+    let rows = find(&d, "done-list")["rows"].as_array().unwrap().clone();
+    let shown: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|r| (r["title"].as_str().unwrap(), r["subtitle"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        shown,
+        [("#11", "merged 13:43 UTC · ddddddd"), ("#9", "merged 13:36 UTC · ?")],
+        "today's merged events, newest first; #3 merged 25 h ago is left out"
+    );
+    assert_eq!(row["value"], rows.len().to_string());
+    assert_eq!(
+        rows[0]["tap"],
+        json!({"sheet": "/screens/issue?repo=sendmeter&issue=11"})
+    );
+    let card = get(rows[0]["tap"]["sheet"].as_str().unwrap());
+    assert_eq!((&card["type"], &card["title"]), (&json!("sheet"), &json!("#11")));
+    assert_eq!(rows_of(&card, "links-list"), ["issue", "pr", "checks"]);
+}
+
+#[test]
 fn a_queue_row_is_one_short_title_line_without_the_pr_title() {
     let (c, r) = recorded("cooee-short-row");
     let (issue, pr) = ("Long issue title ".repeat(7), "Long PR title ".repeat(8));
@@ -317,7 +366,6 @@ fn a_queue_row_is_one_short_title_line_without_the_pr_title() {
     for line in [title, sub] {
         assert!(line.chars().count() <= 49 && !line.contains('\n'), "{line}");
     }
-    assert_eq!(row["tap"], json!({"sheet": "/screens/lanes/sendmeter-impl-12"}));
 }
 
 #[test]
@@ -619,7 +667,7 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
         (seq, &ops[0]["op"], &ops[0]["id"]),
         (42, &json!("merge"), &json!("q-sendmeter-12"))
     );
-    assert_eq!(ops[0]["fields"]["badge"]["text"], "review 2", "{ops:?}");
+    assert_eq!(ops[0]["fields"]["badge"]["text"], "▲ [◆ rev · r2] ◫", "{ops:?}");
     apply(&mut screen, &ops);
 
     ev(5, "merged", json!({"pr": 42, "into": "staging"}));
@@ -658,7 +706,7 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
         "",
     )
     .1;
-    screen.as_object_mut().unwrap().remove("badge");
+    assert_eq!(fresh["badge"], 1);
     assert_eq!(screen, fresh, "the ops turned the first answer into today's");
 }
 
@@ -726,7 +774,7 @@ fn parity_38_the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_mo
     };
     let q = get("/screens/queue");
     like(&q, "queue", false);
-    assert_eq!(find(&q, "repo")["options"][1]["label"], "sendmeter ●", "a needs dot");
+    assert_eq!(find(&q, "repo")["options"][1]["label"], "sendmeter 9 ●", "a needs dot");
     assert_eq!(find(&q, "fleet-sendmeter")["tone"], "warn", "needs you");
     assert_eq!(
         rows_of(&q, "queued-list-sendmeter"),
@@ -817,7 +865,31 @@ fn parity_38_the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_mo
 }
 
 #[test]
-fn a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thread() {
+fn parity_44_a_moving_row_shows_its_stage_strip_and_plant_a_stuck_one_its_state() {
+    let (c, r) = recorded("cooee-strip");
+    let (status, q) = req(
+        &Server::new(&c, &r, Some(ADDR.into())),
+        T,
+        "GET",
+        "/screens/queue",
+        "",
+        "",
+    );
+    assert_eq!(status, 200, "{q}");
+    let fix = find(&q, "q-sendmeter-12");
+    assert_eq!(fix["badge"], json!({"text": "[▲ impl · fix] ◆ ◫", "tone": "working"}));
+    assert_eq!(
+        fix["figure"],
+        json!({"state": "working", "tool": "edit", "grow": "fix"})
+    );
+    assert!(fix["value"]["since"].is_string(), "{fix}");
+    let stuck = find(&q, "q-sendmeter-5");
+    assert_eq!(stuck["figure"], json!({"state": "needs", "grow": "blocked"}));
+    assert!(!stuck["badge"]["text"].as_str().unwrap().contains('['), "{stuck}");
+}
+
+#[test]
+fn parity_45_a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thread() {
     let (c, r) = recorded("cooee-issue");
     let ask =
         json!({"id": "q8", "question": "Split the PR?", "options": ["split", "keep"], "recommend": 2, "thread": "t9"});
@@ -835,7 +907,10 @@ fn a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thread() {
     let q = get("/screens/queue");
     let waiting = find(&q, "q-sendmeter-17");
     assert_eq!(waiting["subtitle"], "asks: Split the PR? · split / keep (recommended)");
-    assert_eq!(waiting["tap"], json!({"thread": "t9"}));
+    assert_eq!(
+        waiting["tap"],
+        json!({"sheet": "/screens/issue?repo=sendmeter&issue=17"})
+    );
     let sheet = get(find(&q, "q-sendmeter-20")["tap"]["sheet"].as_str().unwrap());
     assert_eq!((&sheet["type"], &sheet["title"]), (&json!("sheet"), &json!("#20")));
     let issue = find(&sheet, "issue");
@@ -847,13 +922,48 @@ fn a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thread() {
     let stage = find(&fix, "stage");
     let lit = stage["selected"].as_array().unwrap();
     assert_eq!(lit, &[json!("impl · fix")], "the stage #12 is on, lit: {stage}");
-    assert_eq!(find(&fix, "lane")["tap"], json!({"thread": "sendmeter-impl-12"}));
+    let lane = json!({"sheet": "/screens/lanes/sendmeter-impl-12"});
+    assert_eq!(find(&fix, "lane")["tap"], lane);
+    let headers: Vec<&Value> = fix["blocks"].as_array().unwrap().iter().map(|b| &b["header"]).collect();
+    assert_eq!(
+        headers,
+        [&json!("status"), &json!("links"), &json!("lanes"), &json!("history")]
+    );
+    assert_eq!(find(&fix, "now")["title"], "fix(1)");
+    assert_eq!(
+        rows_of(&fix, "lanes-list"),
+        ["l-sendmeter-impl-12", "l-sendmeter-rev-12-r1"]
+    );
+    assert_eq!(find(&fix, "l-sendmeter-impl-12")["tap"], lane);
+    let past = find(&fix, "history-list")["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| &r["title"]);
+    assert_eq!(
+        past.collect::<Vec<_>>(),
+        [&json!("fix 1"), &json!("review 1 ✗"), &json!("impl ✓")]
+    );
     let asked = get("/screens/issue?repo=sendmeter&issue=17");
-    assert_eq!(find(&asked, "asked")["tap"], json!({"thread": "t9"}));
-    like(&asked, "fleets+queue", false);
+    let thread = find(&asked, "asked");
+    assert_eq!(
+        (&thread["title"], &thread["tap"]),
+        (&json!("asked in t9"), &json!({"thread": "t9"}))
+    );
+    like(&fix, "issue", false);
+    like(&asked, "issue", false);
     assert_eq!(find(&asked, "asks")["header"], "asks: Split the PR?");
-    assert_eq!(find(&asked, "opt-1")["title"], "2. keep");
+    let pick = find(&asked, "q8");
+    assert_eq!(
+        (&pick["type"], &pick["action"], &pick["recommended"]),
+        (&json!("choice"), &json!("answer"), &json!("keep"))
+    );
     assert_eq!(find(&asked, "▼")["action"], "move");
+    assert_eq!(find(&asked, "Drop")["action"], "drop");
+    assert_eq!(
+        find(&asked, "Top")["values"],
+        json!({"fleet": "sendmeter", "issue": 17})
+    );
     assert_eq!(
         req(&s, T, "GET", "/screens/issue?repo=sendmeter&issue=99", "", "").0,
         404
@@ -926,7 +1036,7 @@ fn walk(url: &str, tab: Option<&str>, js: &str) -> String {
 }
 
 #[test]
-fn parity_46_a_queue_row_with_an_ask_opens_its_thread_in_webkit_and_back_returns() {
+fn parity_46_a_queue_rows_sheet_links_its_asking_thread_in_webkit_and_back_returns() {
     if no_webkit() {
         return;
     }
@@ -943,14 +1053,15 @@ fn parity_46_a_queue_row_with_an_ask_opens_its_thread_in_webkit_and_back_returns
     let base = format!("http://{}/", l.local_addr().unwrap());
     let c2 = c.clone();
     std::thread::spawn(move || drover::serve::serve_on(&c2, &working(), l, false));
-    let tap = "const row = await wait(() => document.querySelector('[data-id=\"q-sendmeter-17\"]')); if (!row) return [0, 0, 0]; row.click();
+    let tap = "const row = await wait(() => document.querySelector('[data-id=\"q-sendmeter-17\"]')); if (!row) return [0, 0, 0, 0]; row.click();
+        const asked = await wait(() => document.querySelector('#sheet:not([hidden]) [data-id=\"asked\"]')); if (!asked) return [1, 0, 0, 0]; asked.click();
         const open = await wait(() => location.hash === '#threads/t9' && on('.scr[data-id=\"thread-t9\"]')); history.back();
         const back = await wait(() => location.hash === '#queue' && on('[data-id=\"q-sendmeter-17\"]'));
-        return [1, open ? 1 : 0, back ? 1 : 0];";
+        return [1, 1, open ? 1 : 0, back ? 1 : 0];";
     assert_eq!(
         walk(&base, Some("queue"), tap),
-        "1 1 1",
-        "row found, its thread opened, back on the Queue"
+        "1 1 1 1",
+        "row found, its issue sheet links the asking thread, the thread opened, back on the Queue"
     );
     let push = "const open = await wait(() => on('.scr[data-id=\"thread-t9\"]')); history.back();
         const list = await wait(() => location.hash === '#threads' && on('.scr[data-id=\"threads\"]'));
