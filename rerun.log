@@ -1,0 +1,376 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1025/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.37s
+     Running tests/answer_delivery.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/answer_delivery-5882a4e348475b9f)
+
+running 9 tests
+test a_remote_lane_is_answered_on_its_machines_shed ... ok
+test an_ask_without_an_agent_is_answered_into_the_issues_current_lane ... ok
+test a_closed_lane_whose_agent_still_runs_in_its_worktree_gets_the_answer ... ok
+test a_lane_ask_stores_its_agent_and_the_answer_is_typed_into_its_pane ... ok
+test parity_r9_a_supersede_close_logged_after_the_new_spawn_does_not_close_it ... ok
+test parity_71_an_answer_with_no_lane_alerts_once_from_check ... ok
+test a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane ... ok
+test a_sleeping_lanes_answer_waits_for_room_then_lands ... ok
+test drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running tests/blocked_respawn.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/blocked_respawn-10324c24ef819790)
+
+running 10 tests
+test an_extra_round_for_a_lane_that_never_pushed_is_no_review_fail ... ok
+test a_tick_over_five_tracked_issues_asks_github_once_for_just_their_state ... ok
+test an_issue_closed_on_github_leaves_on_the_next_fast_pass_while_the_full_pass_hangs ... ok
+test an_issue_closed_past_the_first_thousand_closed_issues_is_seen_closed ... ok
+test a_lessons_issue_done_with_no_change_and_no_pr_closes ... ok
+test an_issue_closed_on_github_reads_closed_after_one_check_and_drive_leaves_it ... ok
+test a_needs_human_issue_with_an_untrimmed_repair_in_its_history_drives_on ... ok
+test a_blocked_issue_given_an_extra_round_is_never_respawned_and_waits_for_its_blockers ... ok
+test two_blocked_turns_in_a_row_are_owner_cards_never_lane_ends ... ok
+test a_lane_ends_after_an_idle_trim_gets_one_respawn ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.14s
+
+     Running tests/dsh.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/dsh-881466d151bf69ff)
+
+running 11 tests
+test dry_run_launches_pinned_dsh_tui_with_role_patch ... ok
+warning: You appear to have cloned an empty repository.
+test spawn_refuses_unpinned_dsh_tui ... ok
+test pre_push_refuses_protected_branches_and_reviewer_pushes ... ok
+test sync_writes_per_role_dsh_patch ... ok
+test quick_turn_that_lands_on_done_confirms ... ok
+test pre_push_refuses_scripts_that_start_containers ... ok
+test never_idle_sends_no_prompt_and_exits_4 ... ok
+test spawn_waits_for_dsh_tui_idle_then_kicks_and_confirms_working ... ok
+test unconfirmed_prompt_is_retried_and_a_typed_kick_gets_enter ... ok
+test first_run_wizard_is_skipped_before_the_prompt ... ok
+test installed_hook_refuses_real_push_to_staging_from_lane_worktree_only ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/hook.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/hook-8c85c98ca1c22693)
+
+running 47 tests
+drover hook: config invalid: invalid table header; expected `.`, `]` (fleet.toml:1)
+test a_closed_deny_logs_one_event_and_alerts_once_per_cause_an_hour ... ok
+test a_lane_may_queue_block_only_its_own_issue ... ok
+test a_cargo_target_dir_outside_build_root_is_refused ... ok
+test a_orchestrator_command_is_logged_for_its_thread ... ok
+test ai_coauthor_trailer_is_spotted ... ok
+test a_orchestrator_writes_its_own_thread_folder ... ok
+test a_design_lane_writes_only_its_repos_recipe_folder ... ok
+test a_orchestrator_may_spawn_design_lanes ... ok
+test container_commands_are_allowed_outside_a_lane ... ok
+test a_lanes_git_notes_write_or_notes_push_is_refused ... ok
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+test config_apply_and_secret_ls_rm_are_owner_only ... ok
+test a_orchestrators_shell_writes_its_own_thread_folder ... ok
+test a_orchestrator_copies_into_its_own_thread_folder ... ok
+test design_spawn_is_owner_only ... ok
+test deny_commands_override_per_fleet_and_log_denials ... ok
+test delete_refspec_on_protected_branch_is_denied ... ok
+test a_design_lane_writes_only_its_issues_design_paths ... ok
+test capability_groups_gate_a_orchestrators_owner_verbs ... ok
+test files_a_lane_edits_never_change_the_hook_rules ... ok
+test gh_pr_merge_is_denied ... ok
+test fd_duplications_write_no_file ... ok
+test hermes_terminal_workdir_resolves_bare_push ... ok
+test docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac ... ok
+test drover_verbs_and_quoted_text_write_nothing ... ok
+test only_a_orchestrator_runs_amend ... ok
+test hook_is_inert_unless_fleet_lane_is_set ... ok
+test impl_lane_never_edits_the_cap_file ... ok
+test message_text_is_not_a_write_or_a_group_verb ... ok
+test legacy_fleet_lane_arms_the_hook_and_drover_lane_wins ... ok
+test github_comments_are_denied ... ok
+test only_a_orchestrator_runs_lesson ... ok
+test only_the_owner_or_an_orchestrator_forces_a_spawn ... ok
+test protected_config_edits_are_denied ... ok
+drover hook: config invalid: invalid table header; expected `.`, `]` (fleet.toml:38)
+test only_a_orchestrator_runs_timer_install ... ok
+test host_stress_is_refused_and_test_runs_allowed ... ok
+drover hook: config invalid: invalid table header; expected `.`, `]` (fleet.toml:38)
+drover hook: config invalid: invalid table header; expected `.`, `]` (fleet.toml:38)
+test push_to_staging_is_denied ... ok
+test push_to_feature_branch_is_allowed ... ok
+test run_cards_post_from_a_orchestrator_settle_by_the_owner_and_hard_nos_never_run ... ok
+drover hook: config invalid: invalid table header; expected `.`, `]` (fleet.toml:38)
+test setup_is_owner_only ... ok
+test parity_r13_a_lane_hook_fails_closed ... ok
+test the_stop_hook_asks_for_the_turn_only_in_impl_lanes ... ok
+test serve_approve_is_owner_only ... ok
+test quoted_text_is_not_a_command ... ok
+test reviewers_are_read_only ... ok
+test runners_verbs_are_a_orchestrators_and_docker_in_message_text_is_not_a_command ... ok
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+test parity_r8_broad_kills_are_denied_and_pid_kills_allowed ... ok
+test container_commands_are_denied_as_command_words ... ok
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.98s
+
+     Running tests/lane_asks.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/lane_asks-7972b120110ded76)
+
+running 7 tests
+test a_spec_quote_answer_reaches_the_lane_posts_an_fyi_and_pushes_nothing ... ok
+test an_empty_or_unmatched_basis_is_refused ... ok
+test a_lane_ask_wakes_the_newest_thread_and_stays_open_without_a_push ... ok
+test an_owner_topic_is_refused_and_put_to_the_owner_in_the_thread ... ok
+test with_no_thread_the_ask_goes_to_the_owner_as_before ... ok
+test the_pinned_thread_wins_over_the_newest ... ok
+test the_owner_changes_a_orchestrator_answer_within_30_minutes_only ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.75s
+
+     Running tests/orchestrator_attach.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/orchestrator_attach-47e558529a3a7f54)
+
+running 1 test
+test an_attached_cooee_thread_is_the_repos_orchestrator_until_detached ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/orchestrator_reviews.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/orchestrator_reviews-611ec289f2c8f3e2)
+
+running 4 tests
+test a_typed_extend_grants_one_round_after_the_card_only ... ok
+test a_basis_extend_posts_an_fyi_whose_change_parks_within_30_minutes_only ... ok
+test a_basis_answers_a_design_ask_with_an_fyi_and_refuses_a_non_quote_or_owner_topic ... ok
+test a_typed_design_answer_needs_the_owners_line_in_the_orchestrators_thread_after_the_ask ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests/pr_snapshot.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/pr_snapshot-6ddbf3572af754c6)
+
+running 4 tests
+test the_merge_gate_reads_checks_from_the_snapshot ... ok
+test status_and_serve_make_no_gh_call ... ok
+test a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet ... FAILED
+test an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query ... FAILED
+
+failures:
+
+---- a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet stdout ----
+
+thread 'a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet' (2392878) panicked at crates/cli/tests/pr_snapshot.rs:47:5:
+assertion `left == right` failed: one per fleet: ["gh api graphql -f owner=jirathip-dev -f name=sendmeter -f query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){i12:issue(number:12){state}i13:issue(number:13){state}i14:issue(number:14){state}i15:issue(number:15){state}}}", "gh api graphql --paginate --jq .data.repository.pullRequests.nodes[] | .labels = .labels.nodes | .statusCheckRollup = [.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?] | del(.commits) -f owner=jirathip-dev -f name=sendmeter -f query=query($owner:String!,$name:String!,$endCursor:String){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{number title body state baseRefName headRefName headRefOid isDraft mergeable mergeStateStatus labels(first:50){nodes{name}} commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename ...on CheckRun{databaseId name status conclusion startedAt completedAt detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}", "gh api graphql -f owner=jirathip-dev -f name=alpha -f query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){i5:issue(number:5){state}}}", "gh api graphql --paginate --jq .data.repository.pullRequests.nodes[] | .labels = .labels.nodes | .statusCheckRollup = [.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?] | del(.commits) -f owner=jirathip-dev -f name=alpha -f query=query($owner:String!,$name:String!,$endCursor:String){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{number title body state baseRefName headRefName headRefOid isDraft mergeable mergeStateStatus labels(first:50){nodes{name}} commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename ...on CheckRun{databaseId name status conclusion startedAt completedAt detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}"]
+  left: 4
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query stdout ----
+
+thread 'an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query' (2392879) panicked at crates/cli/tests/pr_snapshot.rs:128:5:
+assertion `left == right` failed: 30 PRs, one query: ["sysctl -n kern.memorystatus_vm_pressure_level", "vm_stat ", "sleep 2", "vm_stat ", "sysctl -n vm.loadavg", "sysctl -n hw.ncpu", "ps -Ao pid=,ppid=,pcpu=,comm=", "sysctl -n hw.memsize", "df -k /", "hostname -s", "df -k /", "hostname -s", "gh api graphql -f owner=jirathip-dev -f name=sendmeter -f query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){i1:issue(number:1){state}i2:issue(number:2){state}i3:issue(number:3){state}i4:issue(number:4){state}i5:issue(number:5){state}i6:issue(number:6){state}i7:issue(number:7){state}i8:issue(number:8){state}i9:issue(number:9){state}i10:issue(number:10){state}i11:issue(number:11){state}i12:issue(number:12){state}i13:issue(number:13){state}i14:issue(number:14){state}i15:issue(number:15){state}i16:issue(number:16){state}i17:issue(number:17){state}i18:issue(number:18){state}i19:issue(number:19){state}i20:issue(number:20){state}i21:issue(number:21){state}i22:issue(number:22){state}i23:issue(number:23){state}i24:issue(number:24){state}i25:issue(number:25){state}i26:issue(number:26){state}i27:issue(number:27){state}i28:issue(number:28){state}i29:issue(number:29){state}i30:issue(number:30){state}}}", "gh api -i repos/jirathip-dev/sendmeter/pulls?state=open&sort=updated&direction=desc&per_page=100", "gh api -i repos/jirathip-dev/sendmeter/actions/runs?per_page=50", "gh api -i repos/jirathip-dev/sendmeter/branches/staging", "gh api graphql --paginate --jq .data.repository.pullRequests.nodes[] | .labels = .labels.nodes | .statusCheckRollup = [.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?] | del(.commits) -f owner=jirathip-dev -f name=sendmeter -f query=query($owner:String!,$name:String!,$endCursor:String){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{number title body state baseRefName headRefName headRefOid isDraft mergeable mergeStateStatus labels(first:50){nodes{name}} commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename ...on CheckRun{databaseId name status conclusion startedAt completedAt detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}", "df -k /", "hostname -s"]
+  left: 2
+ right: 1
+
+
+failures:
+    a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet
+    an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+error: test failed, to rerun pass `-p drover --test pr_snapshot`
+     Running tests/run_card.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/run_card-eb833f9efc974cf3)
+
+running 9 tests
+test groups_default_to_all_but_pause_and_set_and_name_only_known_groups ... ok
+test a_run_past_its_timeout_is_killed_and_reported_with_its_tail ... ok
+test a_changed_or_expired_card_is_refused_and_deny_runs_nothing ... ok
+test approve_runs_the_exact_command_once_and_posts_its_masked_output ... ok
+test the_orchestrator_brief_lists_the_fleets_groups ... ok
+test a_card_sleeping_90s_with_timeout_300_runs_in_the_background_and_reports_exit_0 ... ok
+test a_hard_no_is_refused_at_posting ... ok
+test a_config_card_switches_a_group_on_only_at_the_owners_apply ... ok
+test a_card_tapped_twice_on_the_board_is_one_job_and_runs_once ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running tests/shed.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/shed-10bafdf7b00bc8b1)
+
+running 60 tests
+test a_host_with_the_shed_job_starts_it_and_never_autostarts_a_server_outside_it ... ok
+test a_hook_naming_another_binary_refuses_acp_unguarded ... ok
+test a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path ... ok
+test a_lane_spawns_on_shed ... ok
+test a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it ... FAILED
+test a_guarded_command_is_refused_inside_an_acp_lane ... ok
+test a_rev_on_the_impls_provider_refuses_to_load ... ok
+test a_live_agent_in_the_herdr_era_worktree_refuses_lane_live ... ok
+test a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login ... ok
+test a_pty_lane_still_returns_its_screen ... ok
+test a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves ... ok
+test a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root ... ok
+test a_shed_without_run_meta_is_a_doctor_cross_and_refuses_acp_lanes ... ok
+test a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_first_prompt ... ok
+test a_wait_that_times_out_answers_as_herdr ... ok
+test a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_and_restarts ... ok
+test an_acp_lane_gets_only_its_roles_mcp_servers_in_acps_shape ... ok
+test acp_transcripts_from_different_agents_give_the_same_blocks ... ok
+test a_lane_keeps_its_spawn_runtime_after_the_config_changes ... ok
+test a_skipped_fix_round_spawn_shows_its_refusal_in_waiting ... ok
+test an_acp_lane_with_no_account_starts_guarded_on_the_hosts_own_login ... ok
+test an_acp_lane_silent_after_its_first_turn_is_a_failed_start ... ok
+test a_pending_tool_call_whose_process_died_is_silent ... ok
+test a_silent_design_lane_is_nudged ... ok
+test an_acp_orchestrator_runs_under_the_orchestrator_guard ... ok
+test an_acp_transcript_pages_by_event_seq ... ok
+test an_unguardable_acp_lane_refuses_to_start ... ok
+test another_build_of_the_same_protocol_is_accepted ... ok
+test another_host_is_reached_through_shed_connect_over_ssh ... ok
+test another_product_at_the_same_version_is_refused ... ok
+test another_shed_protocol_is_refused_naming_both_sides ... ok
+test an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_back_to_herdr ... ok
+test an_acp_lanes_state_follows_its_turn_events ... ok
+test check_alerts_stall_once_for_a_hung_acp_orchestrator ... ok
+test clean_removes_exited_shed_terminals_of_merged_lanes_only ... ok
+test every_adapter_call_is_a_shed_request ... ok
+test an_auth_failure_alerts_signed_out_once_and_holds_the_host ... ok
+test lane_dead_and_waiting_carry_an_acp_lanes_exit_cause ... ok
+test an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once ... ok
+test drive_logs_sheds_state_changes_since_its_last_pass ... ok
+test drive_reads_berths_seq_file_once_when_sheds_is_missing ... ok
+test lane_states::each_shed_state_reaches_api_v1_and_the_plugin_unchanged ... ok
+test every_lane_says_where_it_runs ... ok
+test no_runtime_is_no_shed_and_herdr_fails_to_load ... ok
+test lane_states::a_lane_ending_its_turn_on_an_ask_waits_on_the_owner_until_it_is_answered ... ok
+test stop_ends_a_hung_acp_orchestrator_by_its_thread ... ok
+test spawning_verify_round_two_stops_round_ones_live_terminal_first ... ok
+test the_lane_hook_reports_its_state_to_shed ... ok
+test the_build_trim_keeps_a_running_shed_lanes_scratch ... ok
+test the_lanes_tab_lists_a_running_shed_acp_lane_live ... ok
+test the_old_kind_and_env_still_work_with_a_warning ... ok
+test a_silent_lanes_respawn_waits_under_host_busy_and_mem_low ... ok
+test lane_states::a_running_lane_is_never_nudged ... ok
+test lane_states::a_pending_tool_call_in_a_live_session_is_not_silent ... ok
+test thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one ... ok
+test an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_once_it_is_on ... ok
+test two_live_processes_of_one_lane_alert_once_and_the_next_drive_pass_keeps_the_newest ... ok
+test a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated ... ok
+test lane_states::wait_sends_continue_at_the_reset_only_on_the_owners_pick ... ok
+test the_service_follows_sheds_events_and_says_when_the_stream_drops ... ok
+
+failures:
+
+---- a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it stdout ----
+
+thread 'a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it' (2393062) panicked at crates/cli/tests/shed.rs:565:5:
+✗ host — sysctl + vm_stat → put /usr/sbin on PATH
+✗ gh — auth status → gh auth login
+✓ config — /tmp/fleet-test-shed-missing-2392995-10/config/fleet.toml
+✓ shed — server 0.0.0 (9b88eb5) protocol 1, drover speaks 0.0.0 (9b88eb5) protocol 1
+✓ spawns starting 0/0
+✓ board auth — 24 h: 0 × 401, 0 × 503
+✗ worktrees — /tmp/fleet-test-shed-missing-2392995-10/worktrees → mkdir -p /tmp/fleet-test-shed-missing-2392995-10/worktrees
+✗ gh sendmeter — read jirathip-dev/sendmeter → gh auth refresh
+✗ local sendmeter — /tmp/does-not-matter/sendmeter has origin/staging → git -C /tmp/does-not-matter/sendmeter fetch origin staging || git clone https://github.com/jirathip-dev/sendmeter.git /tmp/does-not-matter/sendmeter
+✓ hygiene sendmeter — merge squash · comments strict · baseline setup · triage weekly · docs_trust deny docs/archive/ · issue_spec triage · docs on
+✓ pipeline sendmeter — valid (built-in)
+! webhook — no secret → put the secret in a file, chmod 600, and name it in [serve] webhook_secret_file (docs/serve.md)
+✓ keychain readers — 0 waiting over 60 s: 
+✗ harness — claude on PATH → install claude
+✗ harness — hermes on PATH → install hermes
+✗ hermes fleet-rev — profile → hermes profile create fleet-rev
+✓ hermes hooks — profiles sync --check
+✓ profile hooks — run this binary
+✗ serve hosts — [] → set [serve] allowed_hosts = ["<name>.ts.net"]
+✗ serve — listening on 127.0.0.1:7777 → drover serve --addr 127.0.0.1:7777
+✗ tailscale — serve maps to 127.0.0.1:7777 → tailscale serve --bg --https=8443 http://127.0.0.1:7777
+! phone — 0 paired → open the page, then drover serve approve <code>
+✗ vapid.key — missing → drover push test && chmod 600 /tmp/fleet-test-shed-missing-2392995-10/state/webpush/vapid.key
+! push — 0 subscriptions, notifier false → turn alerts on; add a webpush [[notify]]
+✗ watchdog check — ran never → drover timer install
+✗ watchdog drive — ran never → drover timer install
+✓ tick step — advancing
+✗ timer — dev.drover.tick missing → drover timer install (the owner or an orchestrator)
+✗ timer — dev.drover.fast missing → drover timer install (the owner or an orchestrator)
+✓ shed — /usr/local/bin/shed on the timer's PATH
+✗ shed run --meta — this host's shed predates shed#94 (no `shed run --meta`): an ACP lane would load the owner's own setup → cargo install --git https://github.com/jirathip-dev/shed --rev 9b88eb5be5bc9ba8c5c75480483b9861ddc6e993 --locked --force shed
+✗ shed agent claude-acp — no-such-adapter-600 not on the timer's PATH → install no-such-adapter-600 in a folder on it (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin)
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it
+
+test result: FAILED. 59 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.48s
+
+error: test failed, to rerun pass `-p drover --test shed`
+     Running tests/turn.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/turn-a77fb2a89f5f8cd9)
+
+running 12 tests
+test no_state_reads_idle_without_pushing_as_before ... ok
+test need_input_without_an_ask_says_so ... ok
+test the_stop_hook_leaves_check_lanes_alone ... ok
+error: the following required arguments were not provided:
+  --why <WHY>
+
+Usage: drover turn --why <WHY> <STATE>
+
+For more information, try '--help'.
+test the_verb_logs_turn_end_with_the_lanes_role_and_is_no_issue_activity ... ok
+test the_stop_hook_asks_for_the_turn_once_per_prompt_and_never_loops ... ok
+test blocked_is_an_owner_card_with_its_reason ... ok
+test a_reported_lane_whose_pane_is_gone_takes_the_respawn_path ... ok
+test done_at_a_pushed_head_spawns_review_at_once_without_waiting_for_ci ... ok
+test a_working_lane_that_hibernated_and_died_is_respawned_after_a_false_failed_start ... ok
+test a_nudged_done_left_unanswered_is_blocked_after_10_min ... ok
+test working_gets_one_continue_prompt_after_the_idle_threshold_never_a_respawn ... ok
+test done_with_nothing_pushed_is_nudged_once_then_blocked ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.37s
+
+     Running tests/webhook.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/webhook-c5c8536631bc07e2)
+
+running 9 tests
+test the_signature_check_matches_githubs_documented_example ... ok
+test a_webhook_secret_inline_in_fleet_toml_is_still_refused ... ok
+test an_unknown_repo_or_branch_is_202_and_ignored_ping_is_200 ... ok
+test the_funnel_listener_answers_no_path_but_hooks_github ... ok
+test with_no_secret_the_endpoint_is_503_and_doctor_warns ... ok
+test a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive ... ok
+test a_webhook_secret_file_others_can_read_is_refused ... ok
+test a_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing ... ok
+test with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery ... FAILED
+
+failures:
+
+---- with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery stdout ----
+
+thread 'with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery' (2395956) panicked at crates/cli/tests/webhook.rs:273:5:
+assertion failed: reads > 0 && r.count("gh api graphql") == 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery
+
+test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p drover --test webhook`
+     Running tests/why_notes.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/why_notes-31b0d0b47175a8c8)
+
+running 9 tests
+test why_note_written_on_origin_pr_body_and_log ... ok
+test an_update_rounds_short_note_is_accepted ... ok
+test a_pr_body_without_the_heads_evidence_is_refused_before_review ... ok
+test a_note_pushed_between_fetch_and_push_is_kept ... ok
+test two_lanes_finishing_at_once_both_keep_their_notes ... ok
+test why_reads_a_merged_line_back ... ok
+test a_squash_merge_lands_one_commit_carrying_every_lane_note ... ok
+test an_invalid_note_is_refused_with_its_reason_and_nothing_is_pushed ... ok
+test a_refused_note_is_nudged_once_then_review_goes_ahead ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.82s
+
+error: 3 targets failed:
+    `-p drover --test pr_snapshot`
+    `-p drover --test shed`
+    `-p drover --test webhook`

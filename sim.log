@@ -1,0 +1,27 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1025/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1025/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1025/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1025/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.48s
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/sim-477a3e0a0c69cb28)
+
+running 16 tests
+test hunt ... ignored, long: `just sim --hunt`
+test metrics_batch ... ignored, long: `just sim --metrics`
+test parked_seeds ... ignored, parked: each seed's cause is its own issue
+test a_busy_window_blocks_spawns_only_while_it_takes_every_host ... ok
+test random_seeds ... ignored, long: `just sim`
+test replay_db ... ignored, long: `just sim --replay`
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it ... ignored, parked: the planted bug trips on random seed 1017 since the per-pass closed read; follow-up makes it timing-robust
+test a_broken_invariant_fails_with_seed_and_trace ... ok
+test what_if ... ignored, long: `just sim --what-if`
+test the_incident_seed_records_the_verdict_with_one_supersede ... ok
+test a_metric_over_20_percent_worse_is_a_warning ... ok
+test the_known_fleet_gives_exact_metrics ... ok
+test a_seed_replays_to_the_same_trace ... ok
+test a_fixture_db_replays_to_its_merge_order_and_counts ... ok
+test fixed_seeds_hold_every_invariant ... ok
+test raising_a_serial_max_cuts_waits_without_a_new_invariant_failure ... ok
+
+test result: ok. 9 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 22.22s
+

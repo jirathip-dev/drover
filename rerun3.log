@@ -1,0 +1,27 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1025/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.86s
+     Running tests/pr_snapshot.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/pr_snapshot-6ddbf3572af754c6)
+
+running 4 tests
+test the_merge_gate_reads_checks_from_the_snapshot ... ok
+test status_and_serve_make_no_gh_call ... ok
+test a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet ... ok
+test an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query ... FAILED
+
+failures:
+
+---- an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query stdout ----
+
+thread 'an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query' (2405349) panicked at crates/cli/tests/pr_snapshot.rs:146:5:
+assertion `left == right` failed
+  left: ["gh api graphql -f owner=jirathip-dev -f name=sendmeter -f query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){i1:issue(number:1){state}i2:issue(number:2){state}i3:issue(number:3){state}i4:issue(number:4){state}i5:issue(number:5){state}i6:issue(number:6){state}i7:issue(number:7){state}i8:issue(number:8){state}i9:issue(number:9){state}i10:issue(number:10){state}i11:issue(number:11){state}i12:issue(number:12){state}i13:issue(number:13){state}i14:issue(number:14){state}i15:issue(number:15){state}i16:issue(number:16){state}i17:issue(number:17){state}i18:issue(number:18){state}i19:issue(number:19){state}i20:issue(number:20){state}i21:issue(number:21){state}i22:issue(number:22){state}i23:issue(number:23){state}i24:issue(number:24){state}i25:issue(number:25){state}i26:issue(number:26){state}i27:issue(number:27){state}i28:issue(number:28){state}i29:issue(number:29){state}i30:issue(number:30){state}}}", "gh api -i -H If-None-Match: W/\"p1\" repos/jirathip-dev/sendmeter/pulls?state=open&sort=updated&direction=desc&per_page=100", "gh api -i -H If-None-Match: \"a1\" repos/jirathip-dev/sendmeter/actions/runs?per_page=50", "gh api -i -H If-None-Match: \"b1\" repos/jirathip-dev/sendmeter/branches/staging"]
+ right: ["gh api -i -H If-None-Match: W/\"p1\" repos/jirathip-dev/sendmeter/pulls?state=open&sort=updated&direction=desc&per_page=100", "gh api -i -H If-None-Match: \"a1\" repos/jirathip-dev/sendmeter/actions/runs?per_page=50", "gh api -i -H If-None-Match: \"b1\" repos/jirathip-dev/sendmeter/branches/staging"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.72s
+
+error: test failed, to rerun pass `-p drover --test pr_snapshot`

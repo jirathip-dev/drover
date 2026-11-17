@@ -1,0 +1,156 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1025/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.93s
+     Running tests/pr_snapshot.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/pr_snapshot-6ddbf3572af754c6)
+
+running 4 tests
+test the_merge_gate_reads_checks_from_the_snapshot ... ok
+test status_and_serve_make_no_gh_call ... ok
+test a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet ... ok
+test an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query ... FAILED
+
+failures:
+
+---- an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query stdout ----
+
+thread 'an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query' (2400179) panicked at crates/cli/tests/pr_snapshot.rs:145:5:
+assertion `left == right` failed
+  left: ["gh api graphql -f owner=jirathip-dev -f name=sendmeter -f query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){i1:issue(number:1){state}i2:issue(number:2){state}i3:issue(number:3){state}i4:issue(number:4){state}i5:issue(number:5){state}i6:issue(number:6){state}i7:issue(number:7){state}i8:issue(number:8){state}i9:issue(number:9){state}i10:issue(number:10){state}i11:issue(number:11){state}i12:issue(number:12){state}i13:issue(number:13){state}i14:issue(number:14){state}i15:issue(number:15){state}i16:issue(number:16){state}i17:issue(number:17){state}i18:issue(number:18){state}i19:issue(number:19){state}i20:issue(number:20){state}i21:issue(number:21){state}i22:issue(number:22){state}i23:issue(number:23){state}i24:issue(number:24){state}i25:issue(number:25){state}i26:issue(number:26){state}i27:issue(number:27){state}i28:issue(number:28){state}i29:issue(number:29){state}i30:issue(number:30){state}}}", "gh api -i -H If-None-Match: W/\"p1\" repos/jirathip-dev/sendmeter/pulls?state=open&sort=updated&direction=desc&per_page=100", "gh api -i -H If-None-Match: \"a1\" repos/jirathip-dev/sendmeter/actions/runs?per_page=50", "gh api -i -H If-None-Match: \"b1\" repos/jirathip-dev/sendmeter/branches/staging"]
+ right: ["gh api -i -H If-None-Match: W/\"p1\" repos/jirathip-dev/sendmeter/pulls?state=open&sort=updated&direction=desc&per_page=100", "gh api -i -H If-None-Match: \"a1\" repos/jirathip-dev/sendmeter/actions/runs?per_page=50", "gh api -i -H If-None-Match: \"b1\" repos/jirathip-dev/sendmeter/branches/staging"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.70s
+
+error: test failed, to rerun pass `-p drover --test pr_snapshot`
+     Running tests/shed.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/shed-10bafdf7b00bc8b1)
+
+running 60 tests
+test a_host_with_the_shed_job_starts_it_and_never_autostarts_a_server_outside_it ... ok
+test a_hook_naming_another_binary_refuses_acp_unguarded ... ok
+test a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path ... ok
+test a_lane_spawns_on_shed ... ok
+test a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it ... FAILED
+test a_live_agent_in_the_herdr_era_worktree_refuses_lane_live ... ok
+test a_guarded_command_is_refused_inside_an_acp_lane ... ok
+test a_rev_on_the_impls_provider_refuses_to_load ... ok
+test a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login ... ok
+test a_shed_without_run_meta_is_a_doctor_cross_and_refuses_acp_lanes ... ok
+test a_lane_keeps_its_spawn_runtime_after_the_config_changes ... ok
+test a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves ... ok
+test a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root ... ok
+test a_pty_lane_still_returns_its_screen ... ok
+test a_wait_that_times_out_answers_as_herdr ... ok
+test a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_first_prompt ... ok
+test a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_and_restarts ... ok
+test an_acp_lane_gets_only_its_roles_mcp_servers_in_acps_shape ... ok
+test an_acp_lane_silent_after_its_first_turn_is_a_failed_start ... ok
+test a_silent_design_lane_is_nudged ... ok
+test a_pending_tool_call_whose_process_died_is_silent ... ok
+test a_skipped_fix_round_spawn_shows_its_refusal_in_waiting ... ok
+test acp_transcripts_from_different_agents_give_the_same_blocks ... ok
+test an_acp_lane_with_no_account_starts_guarded_on_the_hosts_own_login ... ok
+test an_acp_lanes_state_follows_its_turn_events ... ok
+test an_unguardable_acp_lane_refuses_to_start ... ok
+test an_acp_orchestrator_runs_under_the_orchestrator_guard ... ok
+test another_build_of_the_same_protocol_is_accepted ... ok
+test another_host_is_reached_through_shed_connect_over_ssh ... ok
+test another_product_at_the_same_version_is_refused ... ok
+test another_shed_protocol_is_refused_naming_both_sides ... ok
+test an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_back_to_herdr ... ok
+test an_acp_transcript_pages_by_event_seq ... ok
+test an_auth_failure_alerts_signed_out_once_and_holds_the_host ... ok
+test check_alerts_stall_once_for_a_hung_acp_orchestrator ... ok
+test every_adapter_call_is_a_shed_request ... ok
+test clean_removes_exited_shed_terminals_of_merged_lanes_only ... ok
+test an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once ... ok
+test drive_reads_berths_seq_file_once_when_sheds_is_missing ... ok
+test drive_logs_sheds_state_changes_since_its_last_pass ... ok
+test lane_dead_and_waiting_carry_an_acp_lanes_exit_cause ... ok
+test every_lane_says_where_it_runs ... ok
+test a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated ... ok
+test no_runtime_is_no_shed_and_herdr_fails_to_load ... ok
+test a_silent_lanes_respawn_waits_under_host_busy_and_mem_low ... ok
+test lane_states::a_lane_ending_its_turn_on_an_ask_waits_on_the_owner_until_it_is_answered ... ok
+test lane_states::each_shed_state_reaches_api_v1_and_the_plugin_unchanged ... ok
+test the_lane_hook_reports_its_state_to_shed ... ok
+test the_build_trim_keeps_a_running_shed_lanes_scratch ... ok
+test stop_ends_a_hung_acp_orchestrator_by_its_thread ... ok
+test the_old_kind_and_env_still_work_with_a_warning ... ok
+test spawning_verify_round_two_stops_round_ones_live_terminal_first ... ok
+test the_lanes_tab_lists_a_running_shed_acp_lane_live ... ok
+test thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one ... ok
+test lane_states::a_running_lane_is_never_nudged ... ok
+test two_live_processes_of_one_lane_alert_once_and_the_next_drive_pass_keeps_the_newest ... ok
+test lane_states::a_pending_tool_call_in_a_live_session_is_not_silent ... ok
+test an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_once_it_is_on ... ok
+test lane_states::wait_sends_continue_at_the_reset_only_on_the_owners_pick ... ok
+test the_service_follows_sheds_events_and_says_when_the_stream_drops ... ok
+
+failures:
+
+---- a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it stdout ----
+
+thread 'a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it' (2400323) panicked at crates/cli/tests/shed.rs:565:5:
+✗ host — sysctl + vm_stat → put /usr/sbin on PATH
+✗ gh — auth status → gh auth login
+✓ config — /tmp/fleet-test-shed-missing-2400248-10/config/fleet.toml
+✓ shed — server 0.0.0 (9b88eb5) protocol 1, drover speaks 0.0.0 (9b88eb5) protocol 1
+✓ spawns starting 0/0
+✓ board auth — 24 h: 0 × 401, 0 × 503
+✗ worktrees — /tmp/fleet-test-shed-missing-2400248-10/worktrees → mkdir -p /tmp/fleet-test-shed-missing-2400248-10/worktrees
+✗ gh sendmeter — read jirathip-dev/sendmeter → gh auth refresh
+✗ local sendmeter — /tmp/does-not-matter/sendmeter has origin/staging → git -C /tmp/does-not-matter/sendmeter fetch origin staging || git clone https://github.com/jirathip-dev/sendmeter.git /tmp/does-not-matter/sendmeter
+✓ hygiene sendmeter — merge squash · comments strict · baseline setup · triage weekly · docs_trust deny docs/archive/ · issue_spec triage · docs on
+✓ pipeline sendmeter — valid (built-in)
+! webhook — no secret → put the secret in a file, chmod 600, and name it in [serve] webhook_secret_file (docs/serve.md)
+✓ keychain readers — 0 waiting over 60 s: 
+✗ harness — claude on PATH → install claude
+✗ harness — hermes on PATH → install hermes
+✗ hermes fleet-rev — profile → hermes profile create fleet-rev
+✓ hermes hooks — profiles sync --check
+✓ profile hooks — run this binary
+✗ serve hosts — [] → set [serve] allowed_hosts = ["<name>.ts.net"]
+✗ serve — listening on 127.0.0.1:7777 → drover serve --addr 127.0.0.1:7777
+✗ tailscale — serve maps to 127.0.0.1:7777 → tailscale serve --bg --https=8443 http://127.0.0.1:7777
+! phone — 0 paired → open the page, then drover serve approve <code>
+✗ vapid.key — missing → drover push test && chmod 600 /tmp/fleet-test-shed-missing-2400248-10/state/webpush/vapid.key
+! push — 0 subscriptions, notifier false → turn alerts on; add a webpush [[notify]]
+✗ watchdog check — ran never → drover timer install
+✗ watchdog drive — ran never → drover timer install
+✓ tick step — advancing
+✗ timer — dev.drover.tick missing → drover timer install (the owner or an orchestrator)
+✗ timer — dev.drover.fast missing → drover timer install (the owner or an orchestrator)
+✓ shed — /usr/local/bin/shed on the timer's PATH
+✗ shed run --meta — this host's shed predates shed#94 (no `shed run --meta`): an ACP lane would load the owner's own setup → cargo install --git https://github.com/jirathip-dev/shed --rev 9b88eb5be5bc9ba8c5c75480483b9861ddc6e993 --locked --force shed
+✗ shed agent claude-acp — no-such-adapter-600 not on the timer's PATH → install no-such-adapter-600 in a folder on it (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin)
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it
+
+test result: FAILED. 59 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.47s
+
+error: test failed, to rerun pass `-p drover --test shed`
+     Running tests/webhook.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1025/debug/deps/webhook-c5c8536631bc07e2)
+
+running 9 tests
+test the_signature_check_matches_githubs_documented_example ... ok
+test a_webhook_secret_inline_in_fleet_toml_is_still_refused ... ok
+test with_no_secret_the_endpoint_is_503_and_doctor_warns ... ok
+test an_unknown_repo_or_branch_is_202_and_ignored_ping_is_200 ... ok
+test a_webhook_secret_file_others_can_read_is_refused ... ok
+test a_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing ... ok
+test the_funnel_listener_answers_no_path_but_hooks_github ... ok
+test a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive ... ok
+test with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.55s
+
+error: 2 targets failed:
+    `-p drover --test pr_snapshot`
+    `-p drover --test shed`
