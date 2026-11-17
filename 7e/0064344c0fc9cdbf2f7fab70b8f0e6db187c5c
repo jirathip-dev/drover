@@ -1,0 +1,13 @@
+Decided: a partial expression index events_action on the action id, limited to intent/done/failed, with claim's SQL as the CLAIM const the plan test reads.
+Because: "An `action_id` column, or a partial expression index on the extract, so `claim` is an index lookup."
+Rejected: an action_id column — it needs a migration and a backfill of every row; the index is built by the existing CREATE IF NOT EXISTS on open.
+Decided: the state directory is listed once per process per directory, and again while `events.jsonl` exists or the last listing found old logs.
+Because: "The legacy check runs once per process (and again only after it found something)."
+Rejected: caching the stats too — crates/cli/tests/state_db.rs:89 writes events.jsonl after the db is open and expects it imported; three stats per call stay.
+Decided: prepare_cached on insert, the states/lanes projection, last, rows, claim, since, asks_since and snapshot get/stamp.
+Because: "`prepare_cached` on the hot statements."
+Decided: synchronous stays FULL.
+Because: "Take it only if a lost tail event is recoverable by the next pass"
+Rejected: synchronous = NORMAL — a lost tail could be an owner's decision, a reviewer's verdict or a merged event, which no later pass can rebuild.
+Check: EXPLAIN QUERY PLAN of db::CLAIM names events_action, and LISTED counts 1 over append plus 1000 last_seq.
+Owner: claim checks on a big log are an index lookup now, and the database stops re-scanning its folder on every call; crash safety is unchanged.
