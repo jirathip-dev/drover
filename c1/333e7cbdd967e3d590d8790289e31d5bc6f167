@@ -1,0 +1,5 @@
+Decided: merged origin/staging a sixth time; kept staging's code in all 14 conflicting files and stripped the issue numbers from its new doc lines
+Because: "One pass removes every comment the strict policy bans, repo-wide"
+Rejected: none
+Check: rg '//.*#[0-9]{2,4}' crates web/src has no match; git diff origin/staging changes only comment lines
+Owner: Merged the latest staging and removed the history comments it brought back; nothing behaves differently.
