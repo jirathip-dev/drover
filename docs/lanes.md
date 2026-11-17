@@ -55,7 +55,7 @@ drover clean --orphans --yes        # also remove folders under the worktree roo
   skips the question. Idle means no live lane, no process with its cwd there, HEAD not moved and no changed or
   untracked file modified in 7 days. Sources, branches and worktree registrations stay. Sizes are logical: an
   APFS-cloned folder shares blocks, so freeing it may save less. #1215: it also sweeps each enabled remote host's
-  finished lanes' build and scratch folders (never a live lane's); a verdict frees its reviewer's scratch folder.
+  finished lanes' build and scratch folders, a lane no longer running in shed included (never a live lane's); a verdict frees its reviewer's scratch folder.
 - `LANE_LIVE`: a live agent is in the worktree, or the log has an unfinished lane.
 - `WORKTREE_DIRTY`: unpushed or uncommitted work from no known lane.
 - `SERIAL_BUSY`, `CAP`, `MCP_FORBIDDEN`, `MERGED`: see `drover help --agent`.
@@ -74,7 +74,8 @@ dir, `DROVER_SCRATCH_TARGET=<root>/.build/.scratch/<agent>`, for second builds a
 the hook refuses a `CARGO_TARGET_DIR` or `--target-dir` outside `<root>/.build` (`REFUSED SCRATCH_TARGET`). Scratch dirs
 count toward `build_budget_gb` (oldest go first); drive deletes a lane's once it ended. #651: on every enabled host
 (remote ones in the tick, after their trim, even past its budget; `[limits] sweep_remote = false` keeps it to this one) a scratch dir stays only
-while its agent is working, it is an open issue's latest lane of its role, or a live agent no spawn names yet holds it.
+while its agent is working, or its agent still runs in shed and it is an open issue's latest lane of its role or no spawn names it yet;
+a lane no longer running in shed counts as finished, verdict or not (#1215), so its build folder goes too.
 Under `min_free_gb` every non-working lane's goes, largest first; each removal is logged with host, size and reason. `drover clean` lists the Cargo folders lanes left in `[limits] stray_roots`
 (`/tmp`, `$TMPDIR`) untouched a day, and with `--yes` removes them and each removed worktree's Claude temp dir. Node fleets: pnpm's store is
 already shared; for npm set `npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed

@@ -134,10 +134,9 @@ fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, (host, b): (&str, &str), out: &mut
             continue;
         }
         let ended = spawn(&n).and_then(|sp| finished(&events, &states, sp));
-        let unknown = !spawned(&n);
         let w = match ended {
             Some(w) => w,
-            None if unknown && scr && agent(&n).is_none() => "lane ended",
+            None if agent(&n).is_none() && (scr || spawned(&n)) => "lane ended",
             None if low && scr => "disk low",
             None => continue,
         };

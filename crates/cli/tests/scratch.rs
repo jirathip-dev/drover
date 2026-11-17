@@ -94,6 +94,7 @@ fn drive_deletes_an_ended_lanes_scratch() {
     let sh = FakeShed::new();
     sh.attach(&c);
     sh.lane("sendmeter-impl-14", "idle", "/x");
+    sh.lane("sendmeter-rev-13-r2", "idle", "/x");
     let out = budget(&c, &sh);
     let gone = dirs.each_ref().map(|d| !d.exists());
     assert_eq!(
@@ -185,12 +186,14 @@ fn events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
 #[test]
 fn the_oldest_scratch_is_trimmed_over_budget() {
     let (c, s) = setup("scratch-trim", 6000);
-    spawn(&c, 9, "rev", "sendmeter-rev-9-r1");
     spawn(&c, 13, "impl", "sendmeter-impl-13");
-    let (old, new) = (blob(&s, "sendmeter-rev-9-r1"), blob(&s, "sendmeter-impl-13"));
+    let old = blob(s.parent().unwrap(), "stray/debug");
+    std::fs::write(old.join(".cargo-lock"), "").unwrap();
+    let new = blob(&s, "sendmeter-impl-13");
     age(&old, 1_000);
     let sh = FakeShed::new();
     sh.attach(&c);
+    sh.lane("sendmeter-impl-13", "idle", "/x");
     let out = budget(&c, &sh);
     assert!(!old.exists() && new.exists(), "{out}");
     assert!(out.contains("builds: trimmed"), "{out}");
@@ -635,4 +638,29 @@ fn a_verdict_frees_its_remote_reviewers_scratch() {
     assert!(!rev.exists(), "{out}");
     assert!(other.exists(), "only the reviewer's own scratch goes: {out}");
     assert!(out.contains("(verdict recorded)"), "{out}");
+}
+
+#[test]
+fn a_lane_no_longer_running_in_shed_is_swept_without_a_verdict() {
+    let (c, home, s) = air_setup("scratch-crashed");
+    air_spawn(&c, 12, "rev", "sendmeter-rev-12-r1");
+    air_spawn(&c, 13, "impl", "sendmeter-impl-13");
+    let [crashed, idle] = ["sendmeter-rev-12-r1", "sendmeter-impl-13"].map(|a| blob(&s, &format!("{a}/debug")));
+    let b = s.parent().unwrap();
+    let [crashed_build, idle_build] =
+        ["sendmeter-rev-12-r1", "sendmeter-impl-13"].map(|a| blob(b, &format!("{a}/debug")));
+    let air = [("sendmeter-impl-13", "idle")];
+    let (_, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    assert!(!crashed.exists(), "{out}");
+    assert!(!crashed_build.parent().unwrap().exists(), "{out}");
+    assert!(
+        idle.exists() && idle_build.exists(),
+        "a live lane is never touched: {out}"
+    );
+    assert!(
+        out.contains(&format!(
+            "scratch: air: removed {AIR_ROOT}/.build/.scratch/sendmeter-rev-12-r1 "
+        )),
+        "{out}"
+    );
 }
