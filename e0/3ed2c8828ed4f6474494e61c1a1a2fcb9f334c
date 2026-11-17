@@ -1,0 +1,8 @@
+Decided: the #954 perf gate's CPU budget drops from 120 ms to 75 ms
+Because: "within a stated budget that the base fails"
+Because: crates/cli/tests/perf.rs:1039
+Rejected: keeping 120 ms — on a quiet host the base passed it in 2 of 3 review runs (96 and 103 ms)
+Decided: the ci.yml conflict with staging keeps both perf cases, #954 and #962, in one step
+Rejected: fixing staging's red sim hunt test and serve.rs size baseline here — both fail on a clean staging checkout and are out of #954's scope
+Check: base (staging src + this perf.rs) fails the 75 ms budget; head medians were 45-65 ms under load avg 6-9
+Owner: staging itself is red (sim hunt test, serve.rs over its size baseline); this PR's CI will show the same two failures until someone fixes them
