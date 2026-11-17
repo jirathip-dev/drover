@@ -52,7 +52,7 @@ export function apply(screen: Blk, ops: Blk[]): Blk {
       if (!into) continue;
       const list = into.rows ?? (into.blocks ??= []);
       if (!isList(list)) continue;
-      drop(screen, op.block.id);
+      if (op.block.id !== undefined) drop(screen, op.block.id);
       const at = op.before ? list.findIndex(x => isBlk(x) && x.id === op.before) : -1;
       list.splice(at < 0 ? list.length : at, 0, op.block);
     }
