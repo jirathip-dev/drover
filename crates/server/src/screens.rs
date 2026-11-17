@@ -1425,14 +1425,15 @@ impl Server<'_> {
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
         }));
         cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|(f, es)| {
-            let line = |e: &Event| match e.issue {
-                Some(n) => format!("- {} · `drover why {f}#{n}`", crate::events::plain(e)),
-                None => format!("- {}", crate::events::plain(e)),
-            };
-            let md: Vec<String> = es.iter().map(|e| line(e)).collect();
+            let mut md: Vec<String> = es.iter().map(|e| format!("- {}", crate::events::plain(e))).collect();
+            md.push(format!("`drover waiting {f}`"));
+            let mut buttons = vec![json!({"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"})];
+            buttons.extend(es.iter().filter_map(|e| e.issue).map(|n| {
+                json!({"type": "button", "id": format!("stuck-force-{f}-{n}"), "label": format!("Force #{n}"), "action": "force", "values": {"fleet": f, "issue": n}})
+            }));
             json!({"type": "card", "id": format!("stuck-{f}"), "kind": "alert", "tone": "warn",
                 "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": md.join("\n")}],
-                "buttons": [{"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"}]})
+                "buttons": buttons})
         }));
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
         cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
@@ -1534,6 +1535,7 @@ impl Server<'_> {
                 return Ok(json!({"ops": [{"op": "screen", "screen": s}]}));
             }
             "drive" => self.form_op(ctx, "drive", &[("fleet", fleet)])?,
+            "force" => crate::slo::force(ctx, &cfg, &self.r, &mut vec![], (&fleet, n()?))?,
             "drive-all" => {
                 let live = cfg.fleet.iter().filter(|f| !f.1.paused);
                 let lines: Vec<String> = live
