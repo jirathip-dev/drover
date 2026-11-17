@@ -43,7 +43,10 @@ fn a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet() {
     let (code, out) = run(&c, &r, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out}");
     let calls = r.calls.borrow();
-    let graphql: Vec<_> = calls.iter().filter(|l| l.starts_with("gh api graphql")).collect();
+    let graphql: Vec<_> = calls
+        .iter()
+        .filter(|l| l.starts_with("gh api graphql --paginate"))
+        .collect();
     assert_eq!(graphql.len(), 2, "one per fleet: {graphql:?}");
     assert!(graphql.iter().any(|l| l.contains("name=sendmeter")) && graphql.iter().any(|l| l.contains("name=alpha")));
     assert!(graphql
@@ -111,6 +114,7 @@ fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
     }
     let pulls = "gh api -i repos/jirathip-dev/sendmeter/pulls?";
     let r = calm()
+        .reply("gh api graphql -f owner=", r#"{"data": {"repository": {}}}"#)
         .reply("gh api graphql", &open_prs(&ns))
         .reply(pulls, &probe("200 OK", "W/\"p1\""))
         .reply(
@@ -125,7 +129,7 @@ fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
     let mut c = c;
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     assert_eq!(
-        r.count("gh api graphql"),
+        r.count("gh api graphql --paginate"),
         1,
         "30 PRs, one query: {:?}",
         r.calls.borrow()
@@ -158,5 +162,5 @@ fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
         .reply("gh api -i -H If-None-Match: ", &probe("304 Not Modified", "\"x\""));
     c.now += 15;
     assert_eq!(run(&c, &r2, &["drive", "--fast"]).0, 0);
-    assert_eq!(r2.count("gh api graphql"), 1, "{:?}", r2.calls.borrow());
+    assert_eq!(r2.count("gh api graphql --paginate"), 1, "{:?}", r2.calls.borrow());
 }

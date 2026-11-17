@@ -40,7 +40,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 21 | Instant send: sending…/✓, red retry on failure | parity_21 | page-only |
 | 22 | Growing composer, pinned send, smart follow-scroll | — | open |
 | 23 | iOS keyboard: composer sits on keyboard, page never jumps | parity_r4 | kept |
-| 24 | Back button and edge swipe; side-by-side layout ≥1000 px (#403) | parity_24 | open |
+| 24 | Back button and edge swipe (#1170); side-by-side layout ≥1000 px (#403, #1118) | parity_24 | kept |
 | 25 | Working pill with timer and [stop]; reconnecting/offline states | — | open |
 | 26 | Queue or steer during a turn; edit or remove queued | parity_26 | page-only |
 | 27 | Per-thread drafts, picked files included | — | open #1084 |
@@ -51,7 +51,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 32 | Config-proposal card: diff, apply/discard, stale, waiting bar | parity_32 | kept |
 | 33 | Secret request card with masked input | parity_32 | kept |
 | 34 | Harness pick at thread start; model/effort chip in composer | parity_34 | page-only |
-| 35 | Handoff chips, flow-back lines, pick-a-thread choice row | — | open |
+| 35 | Handoff chips, flow-back lines, pick-a-thread choice row | parity_35 | kept |
 | 36 | One repo at a time: chips, swipe, needs dot, [all] | — | open #1089 |
 | 37 | Fleet cards in their colour; paused folds; needs-you first | parity_37 | kept |
 | 38 | Blocked chains as a tree; chain collapsed to one row | parity_38 | kept |
@@ -60,8 +60,8 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 41 | Reorder rows ▲/▼ | parity_41 | kept |
 | 42 | Pause and resume a fleet | parity_42 | kept |
 | 43 | Drive now, plus per-fleet drive result line with details | — | open |
-| 44 | Pipeline stage chips on each row | — | open #1090 |
-| 45 | Issue card sections; its lanes newest first, tap opens sheet | — | open #1090 |
+| 44 | Pipeline stage chips on each row | parity_44 | kept |
+| 45 | Issue card sections; its lanes newest first, tap opens sheet | parity_45 | kept |
 | 46 | "waiting: decision" with options; link to the asking thread | parity_46 | kept |
 | 47 | Backlog: search, filters, tick issues, [queue N] | parity_47 | kept |
 | 48 | Legend sheet [?] and serial-group 🔒 tags | parity_38 | kept |
@@ -84,7 +84,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 65 | Answer a blocked lane's menu by tap (stale-menu guard) | — | open |
 | 66 | Permission-prompt card: reason, command, auto-deny countdown | — | open |
 | 67 | Needs-human card: merge anyway, one more round, park | parity_67 | kept |
-| 68 | [later] and [later all] hide cards on this phone | — | open |
+| 68 | [later] and [later all] hide cards on every device until they change | parity_68 | kept |
 | 69 | Design review: PNGs inline, approve/revise/reject | parity_69 | kept |
 | 70 | Verify screenshots on cards (lane-folder images only) | parity_70 | kept |
 | 71 | Alert when an answer doesn't reach its lane | parity_71 | kept |
@@ -105,7 +105,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 86 | Host and Events as tabs; [◐] look button (drop? in #553) | — | open |
 | 87 | Lanes mode button; fixed Corral horse art (drop? in #553) | — | open |
 | 88 | Queue as a table with per-row buttons (drop? in #553) | — | open |
-| 89 | Server-rendered HTML tabs and `/frag` fragments (drop? in #553) | — | open |
+| 89 | Server-rendered HTML tabs and their fragment route (drop? in #553) | — | open |
 | 90 | Public demo as a static export (drop? in #553) | — | open |
 | R1 | A keychain read waits forever on an invisible macOS prompt | parity_r1 | kept |
 | R2 | A retired or unknown config key stops the whole service | parity_r2 | kept |

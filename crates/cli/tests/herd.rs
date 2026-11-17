@@ -192,7 +192,7 @@ fn the_herd_read_refuses_a_foreign_host_or_origin() {
 }
 
 #[test]
-fn a_shed_lane_reported_running_is_working_with_its_note() {
+fn a_shed_lane_reported_running_shows_running_with_its_note() {
     let (c, r) = fixture("running");
     let note = "running: cargo test (8m)";
     r.1.set("sendmeter-impl-12", |t| {
@@ -205,7 +205,7 @@ fn a_shed_lane_reported_running_is_working_with_its_note() {
     let l = &herd["fleets"][0]["lanes"][0];
     assert_eq!(
         (&l["name"], &l["state"], &l["act"]),
-        (&json!("sendmeter-impl-12"), &json!("working"), &json!("impl")),
+        (&json!("sendmeter-impl-12"), &json!("running"), &json!("impl")),
         "{l}"
     );
     assert_eq!(herd["fleets"][1]["lanes"][1]["act"], "idle", "{herd}");
@@ -221,11 +221,86 @@ fn a_shed_lane_reported_running_is_working_with_its_note() {
                 .collect()
         })
     };
-    let working = section("working");
-    let row = working
+    let running = section("running");
+    let row = running
         .iter()
         .find(|l| l["name"] == "sendmeter-impl-12")
         .unwrap_or_else(|| panic!("{lanes}"));
     assert_eq!((&row["act"], &row["now"]["n"]), (&json!("impl"), &json!(note)), "{row}");
     assert!(section("idle").iter().any(|l| l["name"] == "synergy-impl-8"), "{lanes}");
+}
+
+#[test]
+fn the_scene_is_the_pinned_swag_packs_and_a_custom_theme_overrides_it() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/swag");
+    let sums = std::fs::read_to_string(root.join("SHA256SUMS")).unwrap();
+    let pin = std::fs::read_to_string(root.join("SOURCE")).unwrap();
+    assert!(
+        pin.starts_with("jirathip-dev/swag ") && pin.trim().rsplit(' ').next().unwrap().len() == 40,
+        "{pin}"
+    );
+    let (c, r) = fixture("swag");
+    let raw = |p: &str| s_raw(&Server::new(&c, &r, Some(ADDR.into())), p);
+    for t in ["kitchen", "garden"] {
+        let (head, svg) = raw(&format!("/themes/{t}/scene.svg"));
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{t}: {head}");
+        let sum = format!("{}  {t}/scene.svg", drover::devices::sha256(&svg));
+        assert!(
+            sums.lines().any(|l| l == sum),
+            "{t}'s scene is not the pinned pack's: {sum}"
+        );
+    }
+    assert!(
+        raw("/themes/farm/scene.svg").0.starts_with("HTTP/1.1 404 "),
+        "farm draws its own ranch"
+    );
+    let own = c.config.with_file_name("themes").join("kitchen");
+    std::fs::create_dir_all(&own).unwrap();
+    std::fs::write(own.join("theme.json"), "{}").unwrap();
+    std::fs::write(own.join("scene.svg"), "<svg id=mine/>").unwrap();
+    assert_eq!(raw("/themes/kitchen/scene.svg").1, b"<svg id=mine/>");
+}
+
+fn s_raw(s: &Server, path: &str) -> (String, Vec<u8>) {
+    let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T);
+    let at = res.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    (String::from_utf8_lossy(&res[..at]).into_owned(), res[at + 4..].to_vec())
+}
+
+#[test]
+fn the_herd_in_webkit_draws_a_figure_per_lane_switches_night_and_repo() {
+    if no_webkit() {
+        return;
+    }
+    let (c, r) = fixture("webkit");
+    let d = c.state.parent().unwrap().to_path_buf();
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    std::thread::spawn(move || drover::serve::serve_on(&c, &r, l, false));
+    let js = "window.late = (async () => { \
+        const w = f => new Promise(ok => { const t = Date.now(), g = () => { const v = f(); if (v) ok(v); else if (Date.now() - t > 8000) ok(null); else setTimeout(g, 50); }; g(); }); \
+        const q = s => document.querySelector(s), figs = () => document.querySelectorAll('#sheet .herd .av').length; \
+        q('#sysb').click(); \
+        (await w(() => [...document.querySelectorAll('#sheet .row')].find(r => r.textContent.toLowerCase().startsWith('herd')))).click(); \
+        await w(() => q('#sheet .herd .hsc svg')); \
+        const one = [figs(), !!q('#sheet .hsc #kglow'), q('#sheet .herd .hn').textContent === 'sendmeter', !!q('#sheet .herd.night')]; \
+        q('#sheet .herd button[aria-label=night]').click(); \
+        const night = !!q('#sheet .herd.night'); \
+        q('#sheet .herd button[aria-label=\"next repo\"]').click(); \
+        return [...one, night, q('#sheet .herd .hn').textContent === 'synergy', figs(), !!q('#sheet .herd.night')]; })()";
+    let o = webview()
+        .env("DROVER_PRE", "localStorage['herd-night'] = '0'")
+        .args([&format!("http://{addr}/?theme=kitchen"), "390", "-", "-"])
+        .arg(d.join("herd.png"))
+        .arg(js)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
+    let v: Vec<&str> = out.split_whitespace().collect();
+    assert_eq!(
+        v.get(2..),
+        Some(&["1", "1", "1", "0", "1", "1", "2", "1"][..]),
+        "figures in sendmeter, kitchen's scene, sendmeter first, day; [☾] night; [›] synergy, its 2 figures, still night: {out}"
+    );
 }

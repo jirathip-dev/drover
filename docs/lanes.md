@@ -161,7 +161,7 @@ So do `drover ask`, `verdict` and `answer`, and the board's answer, override, ex
 moves. A kick returns at once: a detached `kick --now` (output in `<state>/kick.log`) drives that issue's
 due steps alone under the drive lock, logs `kick`, and coalesces kicks within 10 s (or while the lock is
 busy) into one follow-up. A lane on another host kicks the main host. The tick and fast timers stay the
-safety net for CI, outside merges and stalls; the Host tab shows the last kick.
+safety net for CI, outside merges and stalls.
 
 ### Denied commands (#216)
 
@@ -185,8 +185,10 @@ sheet shows the active list. Each refusal is logged `hook-denied` (`rule` = the 
 Per host (#256): spawn exports `DROVER_HOST=<[hosts] name>`, and the hook applies that host's rules on top:
 `[hosts.<n>] deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops
 entries. A cloud host (`cloud = …`) defaults to allowing `docker`, `docker compose` and `supabase start` (a disposable
-machine; `allow_commands = []` keeps the ban); a Mac keeps the ban. `hosts bootstrap` writes that host's rules, its
-cloud default spelled out, into the config it leaves there, since the lane's hook reads that host's fleet.toml.
+machine; `allow_commands = []` keeps the ban); a Mac keeps the ban. A remote lane's hook rules (deny, branches,
+heavy slots) are resolved on the main host at spawn and written to its `DROVER_RULES` file (#592); the remote host's
+own fleet.toml is never read. A config change reaches a live lane only when it respawns; `drover board` and
+`drover waiting` show `rules stale` until then.
 
 Heavy checks (#909): `[fleet.<n>.heavy]` maps a kind to command patterns (`*` matches any text), e.g.
 `swiftlint = ["swiftlint analyze*"]`, `vitest = ["*vitest*"]`, `cargo = ["cargo test*", "cargo check*"]`. A lane's
@@ -237,6 +239,8 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | a respawn refused for good (`RESPAWN_LOOP`, `DESIGN_MAIN_ONLY`, `HOST_OFFLINE`…) (#914) | `needs-human RESPAWN_REFUSED` (`RESPAWN_LOOP`: its one owner ask instead); `check` alerts `respawn-refused` once per lane and code |
 | a dead, stalled, silent or released lane's respawn (#908) | admitted like any spawn: `HOST_BUSY`, `MEM_LOW` and `DISK_LOW` hold it to a later pass, and `waiting` names the hold (`held: <code> <why>`); at most `[limits] respawn_per_pass` (default 2; `respawn_per_pass` in `[fleet.<n>]` overrides it) start a pass, the rest wait `RESPAWN_PACED`, still ahead of new starts |
 | a prompt drive or check sends a lane shed has asleep (`hibernated`: nudge, DECISION, turn, release, heads-up) (#908) | waking it starts a whole agent, so the host is admitted first; busy, the prompt is held and sent on a later pass |
+| an ACP lane shed reports `running`, `waiting-approval` or `rate-limited`, or one drover shows `waiting-owner` (its turn ended on an open ask or `turn blocked`/`need-input`, laid over shed's `done`) (#983) | held: no nudge, no stall, no `lane-dead`; the board and `/api/v1` show shed's state and note as-is |
+| a `rate-limited` lane (#983) | shown with shed's reset time; nothing until the owner's [wait]: `drover limit <fleet> <issue>` sends one `continue` at that time (`NO_RESET` when shed gave none); logged `limit-picked` `by: owner`, an orchestrator's relay `--typed` with the owner's line, `--by` names who |
 | a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
 | merged lanes left | `clean --yes` |
 
@@ -325,12 +329,16 @@ notifier can subscribe to it) with the reason drive sees then, and `waiting`, `s
 
 #855: the fast step also checks two fleet SLOs: `slo-idle` (no lane working for `[limits] slo_idle_minutes` (20)
 while the queue has spawnable work) and `slo-tick` (a tick running past `slo_tick_minutes` (10), replacing
-`tick-stuck`). On a breach or a missed promise drive first tries the known heal and logs `self-heal`: a drover
+`tick-stuck`). On a breach drive first tries the known heal and logs `self-heal`: a drover
 tick or drive pid it can name gets SIGTERM, then SIGKILL after 10 s; a DISK_BUDGET hold is recounted and the
 queue's first spawn retried; drive's own pass already respawns a silent lane and marks a PASSed draft ready.
-Still breached a pass (`slow_secs`) after the heal, or with no heal known, it emits one `stuck` per episode
-(pushed, and an owner card naming the issue or fleet, the reason and what was tried); `slo-ok` ends the episode
-once the issue moves or the SLO recovers, and the card clears.
+#1183: a `stuck` (pushed once per fleet, and the owner's one `Drive is stuck` card per fleet) means drive itself is
+broken: a tick still hung a pass (`slow_secs`) after its heal, no slow drive pass of the fleet for
+`[limits] slo_pass_minutes` (30), drive's last pass of the fleet failing, or an issue's spawn failing the same way
+twice on the same head. A wait (a hold, CI, a spawn slot, HOST_BUSY, `slo-idle`, a missed promise) never makes one:
+its row names the wait. `slo-ok` ends the episode once it recovers, and the card clears; an issue's line goes as
+soon as its lane starts. The card's hint is `drover waiting <fleet>`, and each issue on it has a [force] that runs
+its `drover waiting` next command (a spawn) once with `--force`, past the load limit, logged `override` `by: owner`.
 
 `drover check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no

@@ -119,7 +119,7 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(Fake::default());
     let mut out = vec![];
-    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
     let to = head(&seed, "issue-3");
     let ev = read(&c.state).unwrap().to_vec();
     let up = ev.iter().find(|e| e.kind == "auto-updated").expect("auto-updated");
@@ -291,7 +291,7 @@ fn conflicting_auto_update_spawns_an_update_lane() {
     git(&seed, &["merge", "-q", "--ff-only", "origin/issue-2"]);
     git(&seed, &["push", "-q", "origin", "HEAD:staging"]);
     let r = Mixed(Fake::default());
-    drover::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-1"), before, "nothing pushed");
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().all(|e| e.kind != "auto-updated"));
@@ -474,7 +474,7 @@ fn a_branch_in_review_is_not_updated() {
             sh.remove("sendmeter-rev-3-r1");
         }
         let r = Mixed(Fake::default());
-        drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+        drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
         assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     }
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "auto-updated"));
@@ -568,7 +568,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let from = head(&seed, "issue-3");
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(merger(3, &from).0.reply(PROTECTION, "false\n"));
-    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     let ev = read(&c.state).unwrap().to_vec();
     assert!(
@@ -609,7 +609,7 @@ fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(Fake::default().reply(RULES, "true\n").reply("gh pr edit", ""));
     let mut out = vec![];
-    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
     let out = String::from_utf8_lossy(&out);
     let to = head(&seed, "issue-3");
     assert!(out.contains("auto-updated"), "{out}");
@@ -1077,4 +1077,115 @@ fn cap_reports_a_script_it_cannot_parse() {
     let err = drover::overlap::cap_view(&c, &cfg, &r, "sendmeter", &mut Vec::new()).unwrap_err();
     let want = "`sh scripts/line-cap.sh` at origin/staging printed no `N / cap M` line drover can parse: printed `total: 15 lines, limit 100`";
     assert_eq!(err.to_string(), want);
+}
+
+fn cap_repo(name: &str) -> (PathBuf, String) {
+    let d = tmpdir(name);
+    std::fs::create_dir_all(d.join("ci")).unwrap();
+    git(&d, &["init", "-q", "-b", "staging"]);
+    git(&d, &["config", "user.email", "t@example.com"]);
+    git(&d, &["config", "user.name", "t"]);
+    std::fs::write(d.join("ci/cap.toml"), "[fleet.x]\nline_cap = 100\n").unwrap();
+    git(&d, &["add", "."]);
+    git(&d, &["commit", "-qm", "ci: the first cap"]);
+    let base = git(&d, &["rev-parse", "HEAD"]);
+    (d, base)
+}
+
+fn raise(d: &Path, n: u32, msg: &str) {
+    std::fs::write(d.join("ci/cap.toml"), format!("[fleet.x]\nline_cap = {n}\n")).unwrap();
+    git(d, &["commit", "-qam", msg]);
+}
+
+fn drover_in(d: &Path, args: &[&str]) -> (i32, String) {
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(args)
+        .current_dir(d)
+        .output()
+        .unwrap();
+    (
+        o.status.code().unwrap(),
+        String::from_utf8_lossy(&o.stdout).into_owned(),
+    )
+}
+
+#[test]
+fn cap_check_refuses_a_cap_edit_without_its_trailer() {
+    let (d, base) = cap_repo("cap-trailer");
+    let check = || drover_in(&d, &["cap-check", "--config", "ci/cap.toml", "--base", &base]);
+    assert_eq!(check().0, 0);
+    std::fs::write(d.join("other.txt"), "x\n").unwrap();
+    git(&d, &["add", "."]);
+    git(&d, &["commit", "-qm", "not the cap"]);
+    assert_eq!(check().0, 0);
+    raise(&d, 200, "cap: raise to 200\n\nCap: 100 -> 200 (#5, q7)");
+    let (code, out) = check();
+    assert_eq!(code, 1, "{out}");
+    let sha = git(&d, &["rev-parse", "--short", "HEAD"]);
+    assert!(
+        out.contains(&format!("{sha} edits the line cap without a `Cap:")),
+        "{out}"
+    );
+    git(&d, &["reset", "-q", "--hard", "HEAD^"]);
+    raise(&d, 200, "cap: raise to 200\n\nCap: 100 → 200 (#5, q7)");
+    let (code, out) = check();
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(drover_in(&d, &["cap-check", "--config", "ci/cap.toml"]).0, 0);
+}
+
+#[test]
+fn cap_log_prints_every_cap_change_from_git() {
+    let (d, _) = cap_repo("cap-log");
+    raise(&d, 150, "cap: raise to 150 for #3");
+    std::fs::write(d.join("ci/cap.toml"), "# a header\n[fleet.x]\nline_cap = 150\n").unwrap();
+    git(&d, &["commit", "-qam", "ci: header only"]);
+    raise(&d, 200, "cap: raise to 200\n\nCap: 150 → 200 (#5, q7)");
+    let (code, out) = drover_in(&d, &["cap", "log"]);
+    assert_eq!(code, 0, "{out}");
+    let rows: Vec<&str> = out.lines().map(|l| l.split_once(' ').unwrap().1).collect();
+    let short = |r: &str| git(&d, &["rev-parse", "--short", r]);
+    assert_eq!(
+        rows,
+        [
+            format!("{} - → 100  ci: the first cap", short("HEAD~3")),
+            format!("{} 100 → 150  cap: raise to 150 for #3", short("HEAD~2")),
+            format!("{} 150 → 200  Cap: 150 → 200 (#5, q7)", short("HEAD")),
+        ]
+    );
+}
+
+#[test]
+fn a_second_pass_with_nothing_moved_starts_no_worktree() {
+    let (d, seed, c, cfg) = repos("au-idle");
+    let sh = FakeShed::attached(&c);
+    for n in 1..=3 {
+        lane(&c, &seed, n, true);
+    }
+    commit(&seed, "c.txt", "c\n", "staging");
+    merge_staging(&d, None);
+    let heads: Vec<String> = (1..=3).map(|n| head(&seed, &format!("issue-{n}"))).collect();
+    let r = Mixed(Fake::default().reply(PROTECTION, "false\n"));
+    let t = std::time::Instant::now();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    let first = r.0.calls.borrow().len();
+    drover::land::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
+    let ms = t.elapsed().as_millis();
+    let second: Vec<String> = r.0.calls.borrow()[first..]
+        .iter()
+        .filter(|l| l.starts_with("git "))
+        .cloned()
+        .collect();
+    let tried = |w: &str| second.iter().filter(|l| l.contains(w)).count();
+    assert_eq!(
+        (tried(" worktree "), tried(" merge-tree "), tried(" merge ")),
+        (0, 0, 0),
+        "{} git calls in {ms} ms: {second:#?}",
+        second.len()
+    );
+    let now: Vec<String> = (1..=3).map(|n| head(&seed, &format!("issue-{n}"))).collect();
+    assert_eq!(now, heads, "nothing pushed");
+    assert!(read(&c.state)
+        .unwrap()
+        .iter()
+        .all(|e| e.kind != "auto-updated" && e.kind != "driven"));
 }

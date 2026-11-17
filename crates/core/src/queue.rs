@@ -451,8 +451,8 @@ pub fn skipped(
     st: &States,
     f: Option<&Fleet>,
     fleet: &str,
-    n: u64,
-    ctx: &crate::Ctx,
+    (n, ctx): (u64, &crate::Ctx),
+    slots: &str,
 ) -> Option<(String, String)> {
     let s = |e: &&Event| e.kind == "driven" && e.fleet == fleet && e.issue == Some(n) && e.str("step") == Some("start");
     let is = st.get(&(fleet.to_string(), n)).filter(|s| s.state == "queued")?;
@@ -496,6 +496,11 @@ pub fn skipped(
     let merged = |m: &Event| m.kind == "merged" && m.fleet == fleet && m.ts > e.ts && m.issue.is_some_and(mine);
     (!events.iter().any(merged)).then_some(())?;
     let why = e.str("result")?.split_once(": ").map_or("", |w| w.1);
+    let why = if code == "SPAWN_PENDING" {
+        Some(slots).filter(|s| !s.is_empty())?
+    } else {
+        why
+    };
     let ago = age(now.saturating_sub(e.ts));
     Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))
 }
@@ -518,6 +523,9 @@ pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
 
 pub const WIDTH: usize = 60;
 
+/// #1234: each lane's place by name, and the start slots held now.
+pub type Places = (std::collections::BTreeMap<String, String>, String);
+
 /// One fleet's board, lines ≤ 60 cols: the queue, other open issues, issues merged in the last 24 h.
 pub fn board(
     ctx: &crate::Ctx,
@@ -525,7 +533,7 @@ pub fn board(
     fleet: &str,
     cfg: Option<&crate::config::Config>,
     c: &Conflicts,
-    at: &std::collections::BTreeMap<String, String>,
+    (at, slots): &Places,
 ) -> String {
     let now = ctx.now;
     let st = fold(events);
@@ -541,7 +549,7 @@ pub fn board(
     let row = |pos: String, n: u64, last: Option<String>| {
         let s = st.get(&(fleet.to_string(), n));
         let f = cfg.and_then(|c| c.fleet.get(fleet));
-        let skip = skipped(events, &st, f, fleet, n, ctx).map(|s| s.0);
+        let skip = skipped(events, &st, f, fleet, (n, ctx), slots).map(|s| s.0);
         let lane: String = s
             .and_then(|s| s.lane.clone())
             .or(skip)

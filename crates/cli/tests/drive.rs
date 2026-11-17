@@ -617,30 +617,28 @@ fn a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned() {
 
 #[test]
 fn a_pr_closed_outside_drover_closes_or_blocks_the_issue_once() {
-    for (issues, want) in [(r#"[{"number":12}]"#, "closed"), ("[]", "blocked")] {
+    for (issues, want) in [("CLOSED", "closed"), ("OPEN", "blocked")] {
         let c = setup(&format!("drive-external-{want}"));
+        let (kind, line) = match want {
+            "closed" => ("closed-other", "sendmeter #12 closed on GitHub".into()),
+            _ => (want, format!("sendmeter #12 {want} outside drover (PR #100)")),
+        };
         lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
-        ev(
-            &c,
-            20,
-            "verdict",
-            json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
-        );
+        let pass = json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"});
+        ev(&c, 20, "verdict", pass);
+        let shut = json!({"data": {"repository": {"i12": {"state": issues}}}}).to_string();
         let r = fake(NONE)
             .reply("gh pr view issue-12", &gone_pr("CLOSED"))
-            .reply("gh issue list", issues)
+            .reply("gh api graphql -f", &shut)
             .reply("git -C", "");
         let (out, _) = drive(&c, &r);
-        assert!(
-            out.contains(&format!("sendmeter #12 {want} outside drover (PR #100)")),
-            "{out}"
-        );
+        assert!(out.contains(&line), "{out}");
         assert_eq!(state(&c), want);
         let e = read(&c.state)
             .unwrap()
             .to_vec()
             .into_iter()
-            .rfind(|e| e.is(want, "sendmeter", 12))
+            .rfind(|e| e.is(kind, "sendmeter", 12))
             .unwrap();
         if want == "blocked" {
             assert_eq!(
@@ -651,7 +649,7 @@ fn a_pr_closed_outside_drover_closes_or_blocks_the_issue_once() {
             assert_eq!(e.str("by"), Some("external"));
         }
         drive(&c, &r);
-        assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == want).count(), 1);
+        assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count(), 1);
         assert!(!r.called("gh issue comment"));
     }
 }
@@ -1789,6 +1787,7 @@ fn auto_update_runs_in_a_pass_with_no_merge() {
     );
     let wt = c.state.with_file_name("update-sendmeter");
     let r = fake(NONE)
+        .once("git -C /tmp/does-not-matter/sendmeter merge-base --is-ancestor", 1, "")
         .reply("gh pr view issue-12", &pr(&head, "pending"))
         .reply("git -C /tmp/does-not-matter/sendmeter rev-parse", &format!("{head}\n"))
         .reply(
@@ -1830,6 +1829,7 @@ fn auto_update_rechecks_premerge_before_its_push() {
         let push = format!("git -C {} push -q origin HEAD:issue-12", wt.display());
         let r = fake(NONE)
             .once(&check, i32::from(fails), "lint: error: unused import\n")
+            .once("git -C /tmp/does-not-matter/sendmeter merge-base --is-ancestor", 1, "")
             .reply("gh pr view issue-12", &pr(&head, "pending"))
             .reply(
                 "gh api repos/jirathip-dev/sendmeter/branches/issue-12",

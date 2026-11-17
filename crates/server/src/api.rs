@@ -501,12 +501,21 @@ pub struct State {
     pub fleets: Vec<Fleet>,
     pub queue: Vec<Queued>,
     pub lanes: Vec<Lane>,
+    /// #983: the lanes `working` or `running` (`busy`), and those waiting on approval, the owner or a rate limit.
+    pub counts: LaneCounts,
     pub asks: Vec<Ask>,
     pub hosts: Vec<Row>,
     pub services: Vec<Row>,
     pub alerts: Vec<Row>,
     /// #859: when the background last read each source the lanes come from (shed, remote, host).
     pub sources: BTreeMap<String, u64>,
+}
+
+pub struct LaneCounts {
+    pub busy: usize,
+    pub waiting_approval: usize,
+    pub waiting_owner: usize,
+    pub rate_limited: usize,
 }
 
 pub struct Fleet {
@@ -546,6 +555,8 @@ pub struct Lane {
     pub harness: String,
     pub model: Option<String>,
     pub state: String,
+    /// #983: shed's note on `state` as shed gave it (a `rate-limited` lane's reset time).
+    pub note: Option<String>,
     pub shown: String,
     pub tone: String,
     pub since: u64,
@@ -708,7 +719,7 @@ pub struct QueueTab {
     pub fleets: Vec<QueueCard>,
 }
 
-/// #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of `done_n`), the backlog and the [config] sheet.
+/// #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog and the [config] sheet.
 pub struct QueueCard {
     pub name: String,
     pub k: String,
@@ -813,12 +824,15 @@ pub struct QueueLane {
     pub link: String,
 }
 
-/// A row of `done today`: its land note (else state), age and merged PR.
+/// #1172: a `merged` event of `done today`: its issue's title, land note (else `merged`), age, time `t`, PR and merge sha.
 pub struct DoneRow {
     pub issue: u64,
+    pub title: Option<String>,
     pub note: String,
     pub age: String,
+    pub t: u64,
     pub pr: Option<String>,
+    pub sha: Option<String>,
 }
 
 /// #365: the open issues not queued and with no lane, by number, as last read `ago`.

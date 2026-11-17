@@ -227,11 +227,17 @@ export type Setup = { host: string, name: string, };
 /**
  * #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s), the Events tab's time groups.
  */
-export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, 
+export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, 
+/**
+ * #983: the lanes `working` or `running` (`busy`), and those waiting on approval, the owner or a rate limit.
+ */
+counts: LaneCounts, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, 
 /**
  * #859: when the background last read each source the lanes come from (shed, remote, host).
  */
 sources: { [key in string]: number }, };
+
+export type LaneCounts = { busy: number, waiting_approval: number, waiting_owner: number, rate_limited: number, };
 
 export type Fleet = { name: string, repo: string, color: string, paused: boolean, };
 
@@ -253,7 +259,11 @@ export type PendingStart = { action: string, since: number, reason?: string | nu
 /**
  * `state` is the runtime's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
  */
-export type Lane = { name: string, fleet?: string | null, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, state: string, shown: string, tone: string, since: number, runtime: string, host: string, where: string, };
+export type Lane = { name: string, fleet?: string | null, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, state: string, 
+/**
+ * #983: shed's note on `state` as shed gave it (a `rate-limited` lane's reset time).
+ */
+note?: string | null, shown: string, tone: string, since: number, runtime: string, host: string, where: string, };
 
 export type Ask = { id: string, fleet: string, issue?: number | null, question: string, options: Array<string>, recommend?: number | null, ts: number, };
 
@@ -333,7 +343,7 @@ export type Vendor = { name: string, vendor: string, };
 export type QueueTab = { now: number, rw: boolean, live: boolean, mtime: string, error?: string | null, fleets: Array<QueueCard>, };
 
 /**
- * #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of `done_n`), the backlog and the [config] sheet.
+ * #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done`: today's `merged` events, newest first (`done_n` of them), the backlog and the [config] sheet.
  */
 export type QueueCard = { name: string, k: string, serial: Array<string>, paths: Array<string>, need: number, paused?: string | null, drive: Drive, notes: Array<string>, rows: Array<QueueRow>, done: Array<DoneRow>, done_n: number, backlog?: Backlog | null, config: ConfigSheet, marks: { [key in string]: Marks }, };
 
@@ -367,9 +377,9 @@ export type PrLine = { pr?: number | null, run?: string | null, ci?: string | nu
 export type QueueLane = { name: string, state: string, tone: string, ago: string, link: string, };
 
 /**
- * A row of `done today`: its land note (else state), age and merged PR.
+ * #1172: a `merged` event of `done today`: its issue's title, land note (else `merged`), age, time `t`, PR and merge sha.
  */
-export type DoneRow = { issue: number, note: string, age: string, pr?: string | null, };
+export type DoneRow = { issue: number, title?: string | null, note: string, age: string, t: number, pr?: string | null, sha?: string | null, };
 
 /**
  * #365: the open issues not queued and with no lane, by number, as last read `ago`.
