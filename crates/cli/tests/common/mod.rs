@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-/// #771: the shared fake shed server lane tests run on.
+/// The shared fake shed server lane tests run on.
 pub mod fake_shed;
 #[allow(unused_imports, reason = "not every test crate drives the fake shed")]
 pub use fake_shed::{FakeShed, OnShed, OverSsh};
@@ -113,7 +113,7 @@ impl Fake {
     }
 }
 
-/// #337's batch suffix: each remote read in the step's one ssh script ends with it.
+/// Batch suffix: each remote read in the step's one ssh script ends with it.
 pub const BATCH: &str = " </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"";
 
 impl Runner for Fake {
@@ -301,7 +301,7 @@ const LANE_ENV: [&str; 10] = [
     "DROVER_PORT",
 ];
 
-/// #1261: the env a lane exports, cleared once so a test run on a lane never sees it.
+/// The env a lane exports, cleared once so a test run on a lane never sees it.
 pub fn without_lane_env() {
     static CLEARED: std::sync::Once = std::sync::Once::new();
     CLEARED.call_once(|| LANE_ENV.iter().for_each(|k| std::env::remove_var(k)));
@@ -328,7 +328,7 @@ pub fn tmpdir(name: &str) -> PathBuf {
     d
 }
 
-/// #707: secret `name` as the 0600 (or `mode`) file `<config>/secrets/<name>`; its path.
+/// Secret `name` as the 0600 (or `mode`) file `<config>/secrets/<name>`; its path.
 pub fn secret_file(c: &Ctx, name: &str, value: &str, mode: u32) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let p = c.config.with_file_name("secrets").join(name);
@@ -393,7 +393,7 @@ pub fn webview() -> std::process::Command {
     c
 }
 
-/// #862: true (and a skip message) where node cannot load Playwright (`NODE_PATH`), so a `WebKit` test returns early.
+/// True (and a skip message) where node cannot load Playwright (`NODE_PATH`), so a `WebKit` test returns early.
 pub fn no_webkit() -> bool {
     static NO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let no = *NO.get_or_init(|| {
@@ -416,7 +416,7 @@ fn user_home() -> PathBuf {
 
 static HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// #560: scripts/ui-lock.sh's host lock held for a whole `WebKit` test whose steps are timed (a `/live` update 2.5 s in), so its clock starts once `WebKit` is its own; `swift()` meanwhile runs without the wrapper. Every `WebKit` test of a binary that takes it must take it.
+/// scripts/ui-lock.sh's host lock held for a whole `WebKit` test whose steps are timed (a `/live` update 2.5 s in), so its clock starts once `WebKit` is its own; `swift()` meanwhile runs without the wrapper. Every `WebKit` test of a binary that takes it must take it.
 pub struct UiLock(std::fs::File, std::sync::MutexGuard<'static, ()>);
 
 pub fn ui_lock() -> UiLock {
@@ -447,7 +447,7 @@ impl Drop for UiLock {
     }
 }
 
-/// #59: pair a browser at `now` as the page does (Pair → `serve approve <code>` → claim): its `Cookie:` line.
+/// Pair a browser at `now` as the page does (Pair → `serve approve <code>` → claim): its `Cookie:` line.
 pub fn pair(s: &drover::serve::Server, c: &Ctx, ua: &str, now: u64) -> String {
     let post = |path: &str, extra: &str| {
         String::from_utf8_lossy(&s.respond(
@@ -475,7 +475,7 @@ pub fn pair(s: &drover::serve::Server, c: &Ctx, ua: &str, now: u64) -> String {
     cookie
 }
 
-/// #138 gate 2: a sheet with every block type: you, assistant prose with markdown, a status line, a passing and a failing tool run (capped, with its tail), a diff with long lines, the gap line, a running call and the live line.
+/// Gate 2: a sheet with every block type: you, assistant prose with markdown, a status line, a passing and a failing tool run (capped, with its tail), a diff with long lines, the gap line, a running call and the live line.
 pub fn chat_fixture() -> serde_json::Value {
     let g = |s: &str| format!("\x1b[38;2;153;153;153m{s}\x1b[0m");
     let mut l = vec![
@@ -510,7 +510,7 @@ pub fn chat_fixture() -> serde_json::Value {
         "status": "✽ Gusting… (2m 47s · ↓ 1.8k tokens)", "before": l.len(), "more": true})
 }
 
-/// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the same) in the full view (#315: not the one `WebKit`'s stored `chat:full` says), every block open with [show all] pressed, or all collapsed.
+/// Page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the same) in the full view (not the one `WebKit`'s stored `chat:full` says), every block open with [show all] pressed, or all collapsed.
 pub fn chat_scene(open: bool) -> String {
     let fx = chat_fixture();
     format!(
@@ -525,7 +525,7 @@ pub fn chat_scene(open: bool) -> String {
     )
 }
 
-/// #269: API v1 `path` from `s` for a request with Host `host` (none taken: an empty one, a read-only server's) and `extra` header lines (a `Cookie: …\r\n`) at `now`: the body.
+/// API v1 `path` from `s` for a request with Host `host` (none taken: an empty one, a read-only server's) and `extra` header lines (a `Cookie: …\r\n`) at `now`: the body.
 pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &str) -> String {
     let req = |h: &str| format!("GET /api/v1/{path} HTTP/1.1\r\nHost: {h}\r\n{extra}\r\n");
     let mut r = String::from_utf8_lossy(&s.respond(&req(host), now)).into_owned();
@@ -536,7 +536,7 @@ pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &
     r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
 }
 
-/// #344: replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read imports `text`. Leases, devices and snapshots go with it.
+/// Replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read imports `text`. Leases, devices and snapshots go with it.
 pub fn rewrite_log(state: &Path, text: &str) {
     for f in ["state.db", "state.db-wal", "state.db-shm"] {
         let _ = std::fs::remove_file(state.with_file_name(f));
@@ -545,18 +545,18 @@ pub fn rewrite_log(state: &Path, text: &str) {
     std::fs::write(state, text).unwrap();
 }
 
-/// #344: lease `key` as process `pid` would hold it: taken at `at` for `secs`.
+/// Lease `key` as process `pid` would hold it: taken at `at` for `secs`.
 pub fn lease_as(c: &Ctx, key: &str, pid: u32, at: u64, secs: u64) {
     let l = drover::db::take(&c.state, key, at, secs, "", &|_| true).unwrap();
     assert!(drover::db::renew(&c.state, &l, &drover::db::Lease { pid, ..l.clone() }));
 }
 
-/// #344: the lease on `key`, expired or not.
+/// The lease on `key`, expired or not.
 pub fn lease_on(c: &Ctx, key: &str) -> Option<drover::db::Lease> {
     drover::db::leases(&c.state, key).into_iter().find(|l| l.key == key)
 }
 
-/// #441: `.0`, except that a `pane run <pane> export …` line also runs in a real `sh`, as the pane's shell would (spawn's secrets file exists only meanwhile); `.2` gets each run's `$<.1>`.
+/// `.0`, except that a `pane run <pane> export …` line also runs in a real `sh`, as the pane's shell would (spawn's secrets file exists only meanwhile); `.2` gets each run's `$<.1>`.
 pub struct Shell<'a>(pub &'a Fake, pub &'static str, pub Shared<Vec<String>>);
 
 impl Runner for Shell<'_> {
@@ -583,7 +583,7 @@ pub const REV: &str = "sendmeter-rev-9-r1";
 const V1_WS: &str = r#"{"result": {"root_pane": {"pane_id": "w9:p1"}}}"#;
 pub const V1_PERMISSION: &str = "╭──────────────────────────────────────────╮\n│ Bash command                             │\n│   cargo test --all                       │\n│ Do you want to proceed?                  │\n│ ❯ 1. Yes                                 │\n│   2. Yes, and don't ask again for cargo  │\n│      commands in /p/sendmeter            │\n│   3. No, and tell Claude what to do      │\n│      differently (esc)                   │\n╰──────────────────────────────────────────╯\n";
 
-/// #641: herdr's one saved machine profile for bazzite (`herdr machine list --json`).
+/// Herdr's one saved machine profile for bazzite (`herdr machine list --json`).
 pub const BAZZITE: &str = r#"[{"id": "b1", "label": "bazzite"}]"#;
 
 pub fn v1_board_on(name: &str, f: Fake) -> (drover::Ctx, OnShed) {
@@ -641,7 +641,7 @@ pub fn http(addr: &str, req: &str) -> String {
     res
 }
 
-/// #977: a live board (`serve_on`) and a paired device's cookie, for taps over HTTP.
+/// A live board (`serve_on`) and a paired device's cookie, for taps over HTTP.
 pub struct Board {
     pub addr: String,
     pub cookie: String,

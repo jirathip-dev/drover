@@ -69,7 +69,7 @@ impl Say {
     }
 }
 
-/// #1248: a stuck reason whose only wait is the review queue (`Say::ReviewsAhead`): a queue position.
+/// A stuck reason whose only wait is the review queue (`Say::ReviewsAhead`): a queue position.
 pub fn reviews_ahead(reason: &str) -> bool {
     let wait = reason.split("; tried: ").next().unwrap_or(reason);
     let tail = wait.rsplit(": ").next().unwrap_or(wait);
@@ -207,7 +207,7 @@ pub fn pass(
     Ok(())
 }
 
-/// #855: the issue's open promise once missed.
+/// The issue's open promise once missed.
 pub fn open_missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>) -> Option<Promise> {
     let mine: Vec<&Event> = events
         .iter()

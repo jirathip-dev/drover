@@ -1,4 +1,4 @@
-// #969: serve's sw.js under node, at DROVER_BASE: an in-memory `caches`, the real `fetch`. Each stdin line is a URL
+// Serve's sw.js under node, at DROVER_BASE: an in-memory `caches`, the real `fetch`. Each stdin line is a URL
 // fetched through the worker; its answer's body goes out as one hex line.
 import readline from 'node:readline';
 const base = process.env.DROVER_BASE, store = new Map(), pending = [];

@@ -10,11 +10,11 @@ use serde_json::json;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-/// #264: (`serve`, `serve --export`), set by the binary: the server crate depends on this one, never the reverse.
+/// (`serve`, `serve --export`), set by the binary: the server crate depends on this one, never the reverse.
 pub static SERVE: std::sync::OnceLock<(Serve, Export)> = std::sync::OnceLock::new();
 type Serve = fn(&Ctx, &dyn Runner, &str, bool) -> Result<()>;
 type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
-/// #345: `drover service` (api addr, board addr), set by the binary from the service crate.
+/// `drover service` (api addr, board addr), set by the binary from the service crate.
 pub static SERVICE: std::sync::OnceLock<Service> = std::sync::OnceLock::new();
 type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
 

@@ -178,7 +178,7 @@ fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, (host, b): (&str, &str), out: &mut
     Ok(removed.iter().map(|r| r.1).sum())
 }
 
-/// #1215: lane `sp`'s `.scratch/<agent>` folder removed, here or on its host, once its verdict is recorded.
+/// Lane `sp`'s `.scratch/<agent>` folder removed, here or on its host, once its verdict is recorded.
 pub fn drop_scratch(r: &dyn Runner, sp: &Event, out: &mut dyn Write) -> Result<()> {
     let (Some(agent), Some(d)) = (sp.str("agent"), crate::hosts::build_dirs(sp).pop()) else {
         return Ok(());

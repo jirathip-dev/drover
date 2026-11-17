@@ -9,7 +9,7 @@ use std::io::Write;
 
 type Rule = fn(&Event) -> bool;
 
-/// #962: what counts as an owner action: the event kind, its label, the rule as `--explain` prints it, the rule.
+/// What counts as an owner action: the event kind, its label, the rule as `--explain` prints it, the rule.
 pub const OWNER: [(&str, &str, &str, Rule); 11] = [
     ("decision", "ask answered", "`by` is the owner's", owned),
     ("needs-human", "needs-human", "every one", |_| true),
@@ -60,7 +60,7 @@ struct Acc {
     parked: u32,
 }
 
-/// #962: one week's (or the window's) autonomy numbers.
+/// One week's (or the window's) autonomy numbers.
 #[derive(Serialize)]
 pub struct Row {
     pub week: String,
@@ -154,7 +154,7 @@ fn line(r: &Row) -> String {
     )
 }
 
-/// #962: `--explain`: the owner-action table, one rule a line.
+/// `--explain`: the owner-action table, one rule a line.
 pub fn explain(out: &mut dyn Write) -> Result<()> {
     for (kind, label, rule, _) in OWNER {
         writeln!(out, "{label}: a `{kind}` event; {rule}")?;
@@ -223,7 +223,7 @@ impl Stats {
     }
 }
 
-/// #962: `drover stats autonomy <fleet>`: per week and in total, merges with no owner action, owner actions, asks, rounds, respawns, queue → merge time and its owner wait, closes and parks.
+/// `drover stats autonomy <fleet>`: per week and in total, merges with no owner action, owner actions, asks, rounds, respawns, queue → merge time and its owner wait, closes and parks.
 pub fn stats(
     ctx: &Ctx,
     cfg: &Config,

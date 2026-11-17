@@ -1,4 +1,4 @@
-// #1118: the two-pane Threads tab in Playwright's WebKit at 1440×900 on a real serve: node duo.mjs <url> [shots dir].
+// The two-pane Threads tab in Playwright's WebKit at 1440×900 on a real serve: node duo.mjs <url> [shots dir].
 // The wheel scrolls the thread to its top, then the list to its end; a stream update to the list lands while the composer
 // holds a focused draft; a row click swaps the thread in place. With a shots dir: 1440 and 1000 px, light and dark.
 // Prints one JSON object of what the page showed.

@@ -7,10 +7,10 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
 
-/// #1100: the head of a folded issue's `<details>` block, which holds its text before the fold.
+/// The head of a folded issue's `<details>` block, which holds its text before the fold.
 pub const FOLDED: &str = "<details><summary>Earlier text";
 
-/// #1100: `drover triage [<fleet> | close|fold|label|docs …]`.
+/// `drover triage [<fleet> | close|fold|label|docs …]`.
 #[derive(clap::Args)]
 #[command(args_conflicts_with_subcommands = true)]
 pub struct Args {
@@ -66,7 +66,7 @@ enum Verb {
     },
 }
 
-/// #1100: run `drover triage`: exit 4 when the lane's prompt was not confirmed.
+/// Run `drover triage`: exit 4 when the lane's prompt was not confirmed.
 pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, a: Args) -> Result<i32> {
     match a.cmd {
         Some(Verb::Close {
@@ -88,14 +88,14 @@ pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, a: Args
     Ok(0)
 }
 
-/// #1100: `drover triage <fleet>`: file this week's triage issue, queue it on top and spawn its `triage` lane; false when the lane's prompt was not confirmed (exit 4).
+/// `drover triage <fleet>`: file this week's triage issue, queue it on top and spawn its `triage` lane; false when the lane's prompt was not confirmed (exit 4).
 pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<bool> {
     let title = format!("triage: {fleet} week of {}", crate::lesson::ymd(ctx.now / 86400));
     let body = include_str!("../roles/triage-issue.md").replace("{fleet}", fleet);
     crate::lesson::file(ctx, cfg, r, out, (fleet, "triage", None), (&title, &body))
 }
 
-/// #1100: `tick`'s triage run, once per 7 days for each fleet with `triage = "weekly"` (a paused fleet waits).
+/// `tick`'s triage run, once per 7 days for each fleet with `triage = "weekly"` (a paused fleet waits).
 pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let on = |f: &crate::config::Fleet| f.triage.as_deref() == Some("weekly") && !f.paused;
     for name in cfg.fleet.iter().filter(|(_, f)| on(f)).map(|x| x.0) {
@@ -109,7 +109,7 @@ pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
     Ok(())
 }
 
-/// #1100: `body` without its folded block: the text a later amendment or fold reads.
+/// `body` without its folded block: the text a later amendment or fold reads.
 pub fn live(body: &str) -> String {
     match body.split_once(FOLDED) {
         Some((head, rest)) => head.to_string() + rest.rsplit_once("</details>").map_or("", |x| x.1),
@@ -178,7 +178,7 @@ fn link(r: &dyn Runner, f: &crate::config::Fleet, why: &str, evidence: &str) -> 
     }
 }
 
-/// #1100: `drover triage close`: close an unprotected issue that is done, a duplicate or superseded, with one comment linking the evidence and its undo.
+/// `drover triage close`: close an unprotected issue that is done, a duplicate or superseded, with one comment linking the evidence and its undo.
 pub fn close(
     ctx: &Ctx,
     cfg: &Config,
@@ -214,7 +214,7 @@ pub fn close(
     Ok(writeln!(out, "closed {fleet}#{n}: {why}: {url}")?)
 }
 
-/// #1100: `drover triage fold`: an unprotected issue's body becomes `## Spec (current)` (the `spec` file) over its old text in a `<details>` block; `NOTHING_TO_FOLD` without amendments.
+/// `drover triage fold`: an unprotected issue's body becomes `## Spec (current)` (the `spec` file) over its old text in a `<details>` block; `NOTHING_TO_FOLD` without amendments.
 pub fn fold_spec(
     ctx: &Ctx,
     cfg: &Config,
@@ -251,7 +251,7 @@ pub fn fold_spec(
     Ok(writeln!(out, "folded {fleet}#{n}: {amendments} amendments")?)
 }
 
-/// #1100: `drover triage label`: add `labels` (`stale?`, the fleet's own) to an unprotected issue.
+/// `drover triage label`: add `labels` (`stale?`, the fleet's own) to an unprotected issue.
 pub fn label(
     ctx: &Ctx,
     cfg: &Config,
@@ -277,7 +277,7 @@ pub fn label(
     Ok(writeln!(out, "labeled {fleet}#{n}: {l}")?)
 }
 
-/// #1100: a triage lane's `done --no-change <note>`: the summary of what it closed, folded and flagged (each with its undo) goes to the fleet's orchestrator thread, and closes its issue.
+/// A triage lane's `done --no-change <note>`: the summary of what it closed, folded and flagged (each with its undo) goes to the fleet's orchestrator thread, and closes its issue.
 pub fn done(
     ctx: &Ctx,
     cfg: &Config,
@@ -319,7 +319,7 @@ pub fn done(
     crate::lesson::close(ctx, cfg, r, out, (fleet, n), &s)
 }
 
-/// #1100: `drover triage docs`: file the run's one `docs:` issue from the `findings` file (one per line); no finding, no issue; a README with no non-goals goes first.
+/// `drover triage docs`: file the run's one `docs:` issue from the `findings` file (one per line); no finding, no issue; a README with no non-goals goes first.
 pub fn docs(
     ctx: &Ctx,
     cfg: &Config,

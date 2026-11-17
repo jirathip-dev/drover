@@ -28,10 +28,10 @@ fn node(js: &str) -> Option<Value> {
         return None;
     }
     let src = include_str!("../../../web/src/schemes.ts");
-    let part = &src[src.find("// #244 schemes").unwrap()..src.find("// schemes:end").unwrap()];
+    let part = &src[..src.find("export {").unwrap()];
     let d = tmpdir("schemes-js");
-    std::fs::write(d.join("t.js"), format!("{part}\nconsole.log(JSON.stringify({js}))")).unwrap();
-    let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
+    std::fs::write(d.join("t.ts"), format!("{part}\nconsole.log(JSON.stringify({js}))")).unwrap();
+    let o = std::process::Command::new("node").arg(d.join("t.ts")).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     Some(serde_json::from_slice(&o.stdout).unwrap())
 }

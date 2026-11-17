@@ -1,4 +1,4 @@
-/* #927: the page that draws the JSON screens, in the old board's look: monospace, bracketed controls, the scheme's tokens. */
+/* The page that draws the JSON screens: monospace, bracketed controls, the scheme's tokens. */
 :root{--fs:13px;--fs-meta:11px;--fs-input:16px;--fs-code:32px;--ctl:28px;--hit:44px;--s1:4px;--s2:8px;--s3:12px;--s4:16px}
 html{touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 html,body{overflow-x:hidden;overscroll-behavior:none}
