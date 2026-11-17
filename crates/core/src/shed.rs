@@ -152,6 +152,29 @@ pub fn builds(r: &dyn Runner) -> String {
     format!("shed on PATH {}, serve {}", s(on_path(r)), s(serve))
 }
 
+/// #937: `drover shed`'s verbs.
+#[derive(clap::Subcommand)]
+pub enum Cmd {
+    #[command(about = "Install the pinned shed and restart shed serve onto it; dry run unless --yes")]
+    Install {
+        #[arg(long, help = "Actually install and restart serve")]
+        yes: bool,
+    },
+}
+
+/// #937: a local spawn's shed: `SHED_MISSING` without one on PATH, `SHED_VERSION` (unless `dry`) when it or serve is off the pin.
+pub fn ready(r: &dyn Runner, w: &Wire, dry: bool) -> Result<()> {
+    if crate::runner::ok(r, "which", &["shed"]).is_err() {
+        let path = crate::config::env("PATH").unwrap_or_default();
+        let fix = "`drover timer install` from a shell where `which shed` finds it";
+        return crate::gate::refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
+    }
+    match gate(r, w) {
+        Err(e) if !dry => crate::gate::refused("SHED_VERSION", format!("{e:#}").replacen("SHED_VERSION: ", "", 1)),
+        _ => Ok(()),
+    }
+}
+
 /// #937: `drover shed install`: the pinned rev onto PATH, then `shed install --force` restarts serve onto it, read back as doctor's line; unless `yes`, the plan and the terminals on serve.
 pub fn install(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, yes: bool) -> Result<i32> {
     let w = r.shed().context(crate::config::NO_RUNTIME)?.wire;
