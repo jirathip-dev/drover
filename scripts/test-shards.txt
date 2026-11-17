@@ -25,6 +25,7 @@
 3 check_clean
 2 ci_templates
 2 cloud
+1 compact
 2 compaction
 1 config_api
 1 config_card

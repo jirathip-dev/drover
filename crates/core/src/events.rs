@@ -699,7 +699,7 @@ const WORKING: &str = concat!(
     " OR (fleet, issue) IN (SELECT fleet, issue FROM events WHERE seq > ?1 - 10000) OR type GLOB 'ask-*' OR type IN (",
     "'needs-decision', 'decision', 'queue', 'merged', 'closed', 'closed-other', 'why', ",
     "'premerge-failed', 'landed', 'revert-opened', ",
-    "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'lesson-skipped'",
+    "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'lesson-skipped', 'compacted', 'compact-undone'",
     ")))"
 );
 
