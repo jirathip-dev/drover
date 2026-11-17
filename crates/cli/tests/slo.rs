@@ -353,9 +353,9 @@ fn a_lane_silent_for_the_stall_window_restarts_once_and_a_second_stall_is_a_stuc
 
 #[test]
 fn named_waits_never_restart_or_move_a_quiet_lane() {
+    type Wait = fn(&drover::Ctx);
     std::env::remove_var("DROVER_LANE");
     std::env::remove_var("DROVER_ORCHESTRATOR");
-    type Wait = fn(&drover::Ctx);
     let waits: [(&str, Wait); 7] = [
         ("held", |c| {
             assert_eq!(run(c, &Fake::default(), &["queue", "sendmeter", "add", "7"]).0, 0);
@@ -375,10 +375,10 @@ fn named_waits_never_restart_or_move_a_quiet_lane() {
             ev(c, 7, 600, "promise", p);
         }),
         ("ask", |c| {
-            ev(c, 7, 600, "needs-decision", json!({"id": "q1", "question": "which?"}))
+            ev(c, 7, 600, "needs-decision", json!({"id": "q1", "question": "which?"}));
         }),
         ("working", |c| {
-            ev(c, 7, 3600, "turn-end", json!({"state": "working", "why": "long build"}))
+            ev(c, 7, 3600, "turn-end", json!({"state": "working", "why": "long build"}));
         }),
         ("load-young", |c| {
             let d = json!({"step": "respawn", "result": "REFUSED HOST_BUSY: mini: load", "code": "HOST_BUSY"});
