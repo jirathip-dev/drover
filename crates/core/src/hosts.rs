@@ -1277,7 +1277,7 @@ pub fn sync(
     Ok((theirs, done))
 }
 
-/// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it is enabled, up, admitting (#676) and its tags cover the needs, or its worktree there has unpushed work (#1138), else the least-busy enabled host whose tags cover the needs.
+/// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it is enabled, up, admitting (#676) and its tags cover the needs, or its worktree there has tracked changes or unpushed commits (#1138, #1216), else the least-busy enabled host whose tags cover the needs; never one a `stall-move` since its last spawn left (#1216).
 pub fn place(
     ctx: &Ctx,
     cfg: &Config,
@@ -1326,7 +1326,8 @@ pub fn place(
     let needs = needs(f, role, events, (fleet, issue));
     let seen = cached(ctx);
     let fit = |n: &str, h: &HostCfg| needs.iter().all(|t| tags(h, seen.get(n)).contains(t));
-    if let Some(e) = last {
+    let left = left(events, fleet, issue);
+    if let Some(e) = last.filter(|e| left != Some(e.str("host").unwrap_or("local"))) {
         let was = (e.str("host").unwrap_or("local"), e.str("machine"));
         let mut p = at(ctx, cfg, f, r, was, pre);
         let code = p.refusal.as_ref().map(|x| x.0);
@@ -1334,7 +1335,7 @@ pub fn place(
         let fits = cfg.hosts.get(was.0).map_or(needs.is_empty(), |h| fit(was.0, h));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
         let wt = wt.and_then(|l| l.str("worktree")).map(Path::new);
-        let unpushed = (busy || !fits) && wt.is_some_and(|w| crate::check::unsaved(&On::new(r, was.1), w));
+        let unpushed = (busy || !fits) && wt.is_some_and(|w| unsaved(&On::new(r, was.1), w));
         if unpushed {
             let note = format!("stays on {}: its worktree there has unpushed work", was.0);
             match p.refusal.as_mut() {
@@ -1350,7 +1351,9 @@ pub fn place(
             };
         }
     }
-    let fits: Vec<_> = cfg.hosts.iter().filter(|(n, h)| fit(n, h)).collect();
+    let fits: Vec<_> = (cfg.hosts.iter())
+        .filter(|(n, h)| fit(n, h) && left != Some(n.as_str()))
+        .collect();
     let (mut full, mut open) = (vec![], vec![]);
     for h in fits.iter().filter(|h| h.1.enabled) {
         match skip(h.0) {
@@ -1404,6 +1407,23 @@ pub fn place(
     };
     p.why = (!local(&p)).then_some(why);
     Ok(Some(p))
+}
+
+/// #676: does worktree `wt` on its host hold changes to tracked files or unpushed commits (unreadable: no)? #1216: untracked files never pin a lane.
+pub fn unsaved(on: &On, wt: &Path) -> bool {
+    let w = wt.to_string_lossy();
+    let git = |a: &[&str]| ok(on, "git", &[&["-C", &*w][..], a].concat());
+    let tracked = |st: String| st.lines().any(|l| !l.starts_with("??"));
+    let ahead = |n: String| n.trim().parse::<u64>().is_ok_and(|n| n > 0);
+    on.exists(wt)
+        && (git(&["status", "--porcelain"]).is_ok_and(tracked)
+            || git(&["rev-list", "--count", "HEAD", "--not", "--remotes"]).is_ok_and(ahead))
+}
+
+fn left<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a str> {
+    let mine = crate::events::of_issue(events, fleet, issue);
+    let since = mine.into_iter().rev().take_while(|e| e.kind != "spawn");
+    since.into_iter().find(|e| e.kind == "stall-move")?.str("from")
 }
 
 fn held_for(ctx: &Ctx, held: bool) -> u64 {

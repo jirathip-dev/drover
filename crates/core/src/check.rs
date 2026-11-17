@@ -2282,11 +2282,6 @@ fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
     Ok((dirty, ahead.trim().parse().unwrap_or(0)))
 }
 
-/// #676: does worktree `wt` on its host hold dirty files or unpushed commits (unreadable: no)?
-pub fn unsaved(on: &On, wt: &Path) -> bool {
-    on.exists(wt) && pending(on, &wt.to_string_lossy()).is_ok_and(|p| p != (0, 0))
-}
-
 fn close_gone(ctx: &Ctx, on: &On, agent: &str, pane: &str) -> Result<()> {
     term::close(ctx, on, pane)?;
     for again in [true, false] {
