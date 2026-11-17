@@ -1,0 +1,15 @@
+Decided: missed promises no longer make stuck breaches; old promise episodes get slo-ok on the first fast pass, so live cards clear
+Because: "Waits on load, another PR, CI or a spawn slot never make a card"
+Decided: drive is broken when no slow pass ran for [limits] slo_pass_minutes (30), its last pass of the fleet failed, or a tick hung past its heal
+Because: crates/core/src/slo.rs:274
+Decided: an error drive can't retry is an issue's spawn failing with the same error twice on the same head; one error is retried and makes no card
+Because: crates/core/src/slo.rs:288
+Decided: slo-idle keeps its heal (DISK_BUDGET recount) but never escalates to stuck, and its old stuck episodes are hidden
+Because: crates/core/src/slo.rs:12
+Rejected: keeping missed promises as cards and only voiding them on a hold — any wait would still make a card
+Decided: [force] is a core function the card's `force` action calls; it runs only a spawn next command, so --force means the load gate
+Because: crates/server/src/screens.rs:1367
+Decided: with one start slot and a fix round due, the early starts (#1186) skip; the start after the pass still runs
+Because: "With a fix round and a new impl both waiting and one slot free, the fix round spawns first"
+Check: crates/cli/tests/slo.rs covers each wait, no pass 30 min, three errors one push, and force by owner
+Owner: Drive is stuck cards now show only when drive itself breaks; waits stay on their rows, and each stuck issue has a Force button.
