@@ -1,0 +1,9 @@
+Decided: a linked cooee chat id stands for a thread id in the three verbs, resolved by the existing orchestrator::fleet_of
+Because: "accept the chat identity #1057 defines, as well as a thread id"
+Decided: settle lines go through one orchestrator::tell; a chat's is a logged system thread-msg, read via /api/v1/thread/<chat>
+Because: "Shared data and actions go in `/api/v1`; cooee screens through the `drover` plugin."
+Rejected: a new /cooee/ push route — drover cannot reach cooee; cooee already reads thread pages from /api/v1
+Decided: /screens/cards lists open config and secret cards with the same builder as a thread's
+Because: crates/server/src/serve/chat.rs:771
+Check: the new test refuses an unlinked chat, keeps CARD_FORBIDDEN and owner-only, and never shows the secret value
+Owner: cooee itself still needs its paired change to draw these cards and lines; no live cooee check was run here
