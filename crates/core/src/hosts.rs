@@ -828,10 +828,14 @@ pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>) -> Option<&'a 
 pub fn hold_alert(events: &[Event], sp: &Event, what: &str) -> Value {
     let (host, m, lane) = (sp.str("host").unwrap_or("main"), sp.str("machine"), sp.str("agent"));
     let key = format!("{host}:{}", held_since(events, m));
+    let proxied = m.is_some() && sp.str("runtime") == Some("shed-acp");
     let login = crate::providers::get(sp.str("harness").unwrap_or_default()).login();
-    let login = login.unwrap_or("its CLI login");
+    let login = match login.unwrap_or("its CLI login") {
+        _ if proxied => "check the token proxy's `[proxy] token-file` on the main host".to_string(),
+        l => format!("run `{l}` there"),
+    };
     let why = format!(
-        "{} lane {} {what} on {host}; new lanes there wait: run `{login}` there, then `drover hosts on {host}`",
+        "{} lane {} {what} on {host}; new lanes there wait: {login}, then `drover hosts on {host}`",
         sp.str("role").unwrap_or_default(),
         lane.unwrap_or_default()
     );

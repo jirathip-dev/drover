@@ -53,7 +53,7 @@ pub fn new_key() -> Result<String> {
     ))
 }
 
-/// Record `key` for lane `agent` of `fleet#issue` on `host`; the agent's older keys are revoked (a new spawn supersedes them). Its id.
+/// Record `key` for lane `agent` of `fleet#issue` on `host`; the agent's older keys end only once this one's lane logs its `spawn` (see [`state`]). Its id.
 pub fn mint(
     ctx: &Ctx,
     cfg: &Config,
@@ -62,9 +62,6 @@ pub fn mint(
     host: &str,
 ) -> Result<String> {
     let mut all = keys(ctx);
-    for k in all.iter_mut().filter(|k| k.agent == agent && k.revoked.is_none()) {
-        k.revoked = Some(ctx.now);
-    }
     let sha = sha(key);
     let k = Key {
         id: sha[..8].into(),
