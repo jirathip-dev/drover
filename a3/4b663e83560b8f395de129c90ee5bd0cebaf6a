@@ -1,0 +1,6 @@
+Decided: an insert drops an earlier copy only when the inserted block has an id.
+Because: web/src/ops.ts:55 dropped by `x.id === undefined`, which removed id-less siblings (round-3 review)
+Because: "A sent message shows once, from tap to delivery"
+Rejected: running WebKit in the lane — lanes may not install a browser; CI ui-webkit ran the test at head
+Check: the ui-webkit log at a34b663e shows the shows_once test ok, not skipped; verify shows base vs head
+Owner: no visible change this round; a rare edge case in screen updates is guarded.
