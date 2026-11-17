@@ -1,0 +1,103 @@
+Decided: lanes carry shed's agent_status and its note untouched; only waiting-owner is drover's own, laid over done
+Because: "drover's `lane-state` takes shed's state and note as-is for every ACP lane"
+Decided: waiting-owner reads the issue's open asks and blocked/need-input turn-ends since the lane's spawn, not since its turn ended
+Because: crates/core/src/lanes.rs:260
+Rejected: anchoring on shed's turn end time — a lane files its ask during the turn, so the ask always predates the turn end and was missed
+Decided: one held() test in stall.rs gates the nudge, the stall check and drover check alike
+Because: "never fire on a lane that is `running`, `waiting-approval`, `waiting-owner` or `rate-limited`"
+Decided: [switch account] re-spawns the lane with --resume of its shed session on the next uncapped account; [wait] logs the reset and drive sends continue once at it
+Because: "drover takes neither by itself: the owner picks per lane"
+Rejected: a separate typed-relay check shared with answer --typed — its ask/thread matching does not fit a lane with no ask
+Check: a lane that is rate-limited gets no continue and no new spawn until a limit-picked event exists
+Owner: rate-limited lanes now wait for you to pick switch account or wait; drover never picks for you
+
+Decided: lanes carry shed's agent_status and its note untouched; only waiting-owner is drover's own, laid over done
+Because: "drover's `lane-state` takes shed's state and note as-is for every ACP lane"
+Decided: waiting-owner reads the issue's open asks and blocked/need-input turn-ends since the lane's spawn, not since its turn ended
+Because: crates/core/src/lanes.rs:258
+Rejected: anchoring on shed's turn end time — a lane files its ask during the turn, so the ask always predates the turn end
+Decided: one held() test gates the nudge, the stall check and drover check alike
+Because: crates/core/src/stall.rs:129
+Decided: [switch account] respawns with --resume of the shed session on the next uncapped account; [wait] sends continue once at the reset
+Because: "drover takes neither by itself: the owner picks per lane"
+Decided: this round only merges staging and refreshes the PR evidence to the new head; the cap now fits so no raise is needed
+Because: q1666
+Check: a rate-limited lane gets no continue and no new spawn until a limit-picked event exists
+Owner: rate-limited lanes now wait for you to pick switch account or wait; drover never picks for you
+
+Decided: lanes carry shed's agent_status and its note untouched; only waiting-owner is drover's own, laid over done
+Because: "drover's `lane-state` takes shed's state and note as-is for every ACP lane"
+Decided: waiting-owner reads the issue's open asks and blocked/need-input turn-ends since the lane's spawn, not since its turn ended
+Because: crates/core/src/lanes.rs:258
+Rejected: anchoring on shed's turn end time — a lane files its ask during the turn, so the ask always predates the turn end
+Decided: one held() test gates the nudge, the stall check and drover check alike
+Because: crates/core/src/stall.rs:129
+Decided: the #611 conflict in v1.rs keeps staging's shed_rows and this branch's pub(crate) lane_list
+Because: crates/server/src/serve/v1.rs:419
+Decided: the cap fits after the staging merge, so no raise is needed
+Because: q1666
+Check: a rate-limited lane gets no continue and no new spawn until a limit-picked event exists
+Owner: rate-limited lanes now wait for you to pick switch account or wait; drover never picks for you
+
+Decided: session::Status keeps every shed word (running and waiting-approval are their own) and word() gives shed's word back
+Because: "No state is renamed or folded."
+Rejected: staging's #1053 fold of running into working and of error, rate-limited, hibernated into idle — AC1 forbids it
+Decided: waiting-owner is LaneState::Owner, laid over shed's done while the issue has an open ask or an unanswered blocked turn-end
+Because: crates/core/src/lanes.rs:228
+Decided: one lanes::held test gates the silent nudge and lanes::health, which drives both the stall and the lane-dead checks
+Because: "never fire on a lane that is `running`, `waiting-approval`, `waiting-owner` or `rate-limited`"
+Decided: [switch account] dropped with its resume plumbing; drover limit is the owner's [wait] only
+Because: q1728
+Decided: the reset time is read from shed's note; NO_RESET when it names none, never a guessed time
+Because: crates/core/src/limit.rs:39
+Decided: the queue row shows state and note before the lane name, so a 48-char subtitle keeps the reset time
+Because: crates/core/src/session/mod.rs:94
+Check: a rate-limited lane gets no continue until the owner's limit-picked, and that continue arrives once at the reset
+Owner: a rate-limited lane shows when it resets and offers only Wait; drover never continues it unasked
+
+Decided: merge origin/staging; health.json's conflict takes staging's timings, since the contract test compares shapes only
+Because: crates/cli/tests/api_v1_contract.rs:123
+Decided: screens.rs keeps staging's Json::put style and this branch's [wait] swipe on a rate-limited row
+Because: crates/server/src/screens.rs:211
+Decided: limit.rs follows staging's new lints and env ban: slice pattern, try_from, config::env
+Because: crates/core/src/limit.rs:69
+Rejected: none
+Owner: no behaviour change this round; the branch is brought up to date with staging
+
+Decided: merge origin/staging 40fcb58; no conflict but shed.rs, resolved by keeping both sides' tests
+Because: crates/cli/tests/shed.rs:2493
+Decided: the red shard 2 was its temp-dir step after 347/347 passed, the same step that fails on other PRs; no change for it
+Because: crates/cli/tests/common/mod.rs:265
+Decided: get back under staging's #1177 size baselines instead of raising them
+Because: crates/core/src/arch.rs:238
+Decided: drover limit's arguments are limit::Pick, and wait returns its line, so cli.rs and the screen's action shrink
+Because: crates/core/src/limit.rs:13
+Decided: the new tests and one related silent-lane test move unchanged to the shed target's lane_states module
+Because: crates/cli/tests/lane_states/mod.rs:1
+Rejected: raising .drover/arch-baseline.txt — the baseline only lets oversized files shrink
+Check: arch-check reports nothing but the missing just; shed still runs 60 tests
+Owner: no behaviour change this round; the branch is up to date with staging and back under the file size limits
+
+Decided: merge origin/staging 89cb67c; screens.rs keeps staging's issue-sheet tap and figure grow plus this branch's lane arg and [wait] swipe
+Because: crates/server/src/screens.rs:151
+Decided: cooee_screens takes staging's tap and fixture asserts with this branch's state-first subtitle
+Because: crates/cli/tests/cooee_screens.rs:200
+Rejected: keeping the lane-sheet tap on live rows — staging moved every queue row's tap to its issue sheet
+Check: cooee_screens and shed lane_states pass at the merged head
+Owner: no behaviour change this round; the branch is brought up to date with staging
+
+Decided: the red shard 2 is the temp-dir leak of chat_tab's large-attachment test; it now waits for serve's delivery before returning
+Because: crates/cli/tests/chat_tab.rs:400
+Rejected: leaving it as a staging flake — staging's own head fails the same step, and the rules ask a lane to fix such a break
+Decided: merge origin/staging; cooee actions keep staging's force and this branch's limit, screens.rs keeps staging's counts block and this branch's lane arg
+Because: crates/server/src/screens.rs:1407
+Check: the large-attachment test leaves no fleet-test-* dir over repeated single-test runs; shard 2's temp-dir step is green
+Owner: no behaviour change this round; a flaky test that left temp files behind is fixed and the branch is up to date with staging
+
+Decided: merge origin/staging 3c1ab50; the conflicts keep staging's unpark action and verdict_sheet with this branch's limit action and stats lane arg
+Because: crates/server/src/screens.rs:756
+Decided: no code change for the red sim hunt test; it passes on this host at the old head and the merged head
+Because: crates/cli/tests/sim/main.rs:274
+Rejected: loosening the hunt's random-seed assertion — that would weaken a staging test this issue does not touch
+Check: shard 1's sim test is green at the new head; cooee_screens and shed lane_states pass
+Owner: no behaviour change this round; the branch is brought up to date with staging
