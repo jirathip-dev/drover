@@ -1,0 +1,28 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1057/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.24s
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1057/debug/deps/sim-477a3e0a0c69cb28)
+
+running 1 test
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it ... FAILED
+
+failures:
+
+---- the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it stdout ----
+FAIL hunt round 4: I1 one-lane: #101 impl has 2 live lanes: ["drover-impl-101 on drover-impl-101", "drover-impl-101 on drover-impl-101x"]
+minimised from 12 to 2 faults and scripts, 5000 to 4529 steps; for seeds.rs PLANS:
+    ("seed=9 cfg=2,4 steps=4529 | +1 T 300 check | +16 T 300 drive | +49 T 60 drive --fast | +1034 R queue drover add 101 | +1435 R queue drover add 102", "hunt: I1 one-lane: #101 impl has 2 live lanes: ["drover-impl-101 on drover-impl-101", "),
+replay: DROVER_SIM_PLAN='seed=9 cfg=2,4 steps=4529 | +1 T 300 check | +16 T 300 drive | +49 T 60 drive --fast | +1034 R queue drover add 101 | +1435 R queue drover add 102' cargo test -p drover --test sim
+
+
+thread 'the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it' (4020873) panicked at crates/cli/tests/sim/main.rs:291:9:
+random seed 1003 found it within the hunt's 4 rounds: I1 one-lane: #104 impl has 2 live lanes: ["drover-impl-104 on drover-impl-104", "drover-impl-104 on drover-impl-104x"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 50.41s
+
+error: test failed, to rerun pass `-p drover --test sim`
+exit=101

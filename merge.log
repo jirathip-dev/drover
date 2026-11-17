@@ -1,0 +1,91 @@
+Auto-merging crates/core/src/config.rs
+Auto-merging crates/core/src/orchestrator.rs
+Auto-merging crates/core/src/spawn.rs
+Auto-merging crates/server/src/screens.rs
+Auto-merging crates/server/src/serve.rs
+Auto-merging scripts/test-shards.txt
+Merge made by the 'ort' strategy.
+ .github/workflows/ci.yml                       |  12 +-
+ assets/types/api.d.ts                          |   6 +-
+ ci/cap.d/2026-11-17-53500.toml                 |   2 +
+ cooee-plugin.toml                              |   2 +-
+ crates/cli/tests/autonomy.rs                   | 221 ++++++++++++
+ crates/cli/tests/compaction.rs                 |  13 +
+ crates/cli/tests/cooee_screens.rs              | 149 ++++++--
+ crates/cli/tests/demo_export.rs                |  12 +
+ crates/cli/tests/drive.rs                      |   2 +
+ crates/cli/tests/drive_kicks.rs                |  12 +
+ crates/cli/tests/golden/cooee/herd.json        | 448 +++++++++++++++++++++++++
+ crates/cli/tests/golden/cooee/issue.json       | 209 ++++++++++++
+ crates/cli/tests/golden/cooee/permissions.json |   2 +-
+ crates/cli/tests/golden/cooee/queue.json       |  67 +++-
+ crates/cli/tests/golden/cooee/thread.json      |   2 +-
+ crates/cli/tests/herd.rs                       |  75 +++++
+ crates/cli/tests/host_sync.rs                  | 270 +++++++++++++++
+ crates/cli/tests/hosts.rs                      | 110 +-----
+ crates/cli/tests/issue_sheet_webkit.rs         |  66 ++++
+ crates/cli/tests/land.rs                       |   3 +-
+ crates/cli/tests/m3.rs                         |   2 +-
+ crates/cli/tests/overlap.rs                    |  46 ++-
+ crates/cli/tests/page_drafts.rs                | 119 ++++---
+ crates/cli/tests/parity_webkit.rs              | 156 +++++++++
+ crates/cli/tests/perf.rs                       |  24 ++
+ crates/cli/tests/runner_limits.rs              |  24 ++
+ crates/cli/tests/serve_web.rs                  |   2 +-
+ crates/cli/tests/sim/model.rs                  |   2 +
+ crates/cli/tests/sim/seeds.rs                  |   8 +-
+ crates/cli/tests/slo.rs                        | 302 ++++++++++-------
+ crates/cli/tests/threads_tab.rs                |  87 +++++
+ crates/cli/tests/ui/duo.mjs                    |  97 ++++++
+ crates/cli/tests/ui/repaint.mjs                |  85 +++++
+ crates/cli/tests/waiting.rs                    |   7 +-
+ crates/core/src/autonomy.rs                    | 340 +++++++++++++++++++
+ crates/core/src/cli.rs                         |  16 +-
+ crates/core/src/config.rs                      |   6 +
+ crates/core/src/db.rs                          |  12 +-
+ crates/core/src/drive.rs                       |  88 +----
+ crates/core/src/hosts.rs                       |  70 ++--
+ crates/core/src/land.rs                        |  83 ++++-
+ crates/core/src/lib.rs                         |   1 +
+ crates/core/src/orchestrator.rs                |  10 +
+ crates/core/src/overlap.rs                     |   2 +-
+ crates/core/src/promise.rs                     |   5 +-
+ crates/core/src/runner.rs                      |   9 +-
+ crates/core/src/slo.rs                         | 128 +++++--
+ crates/core/src/spawn.rs                       |   9 +-
+ crates/core/src/starts.rs                      |  10 +
+ crates/server/src/api.rs                       |   7 +-
+ crates/server/src/screens.rs                   | 352 ++++++++++++++-----
+ crates/server/src/serve.rs                     |  59 ++--
+ crates/server/src/serve/chat.rs                |  49 ++-
+ crates/server/src/serve/v1.rs                  |   2 +-
+ docs/cap-history/2026-11-17-1201.md            |  14 +
+ docs/config.md                                 |   1 +
+ docs/design/screens-page/README.md             |   5 +-
+ docs/hosts.md                                  |   5 +
+ docs/lanes.md                                  |  18 +-
+ docs/parity.md                                 |   8 +-
+ docs/pipeline.md                               |  38 +++
+ docs/serve.md                                  |   9 +-
+ docs/workflow.md                               |   1 +
+ fleet.example.toml                             |   1 +
+ scripts/test-shards.txt                        |   3 +
+ web/dist/board.css                             |   2 +-
+ web/dist/board.js                              |   8 +-
+ web/src/blocks.ts                              |  51 ++-
+ web/src/board.css                              |  18 +
+ web/src/herd.ts                                |  41 +++
+ web/src/main.ts                                | 116 +++++--
+ web/src/theme.ts                               |  13 +-
+ 72 files changed, 3616 insertions(+), 638 deletions(-)
+ create mode 100644 ci/cap.d/2026-11-17-53500.toml
+ create mode 100644 crates/cli/tests/autonomy.rs
+ create mode 100644 crates/cli/tests/golden/cooee/herd.json
+ create mode 100644 crates/cli/tests/golden/cooee/issue.json
+ create mode 100644 crates/cli/tests/host_sync.rs
+ create mode 100644 crates/cli/tests/issue_sheet_webkit.rs
+ create mode 100644 crates/cli/tests/ui/duo.mjs
+ create mode 100644 crates/cli/tests/ui/repaint.mjs
+ create mode 100644 crates/core/src/autonomy.rs
+ create mode 100644 docs/cap-history/2026-11-17-1201.md
+ create mode 100644 web/src/herd.ts
