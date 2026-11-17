@@ -180,7 +180,7 @@ fn reply(w: &mut World, me: usize, prog: &str, args: &[String]) -> Out {
                 w.procs[me].starting = Some(pane.clone());
                 let agent = Some(pane.clone());
                 let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
-                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 4;
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 3;
                 if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, &pane);
                 }
@@ -497,7 +497,10 @@ fn git(w: &mut World, a: &[&str]) -> Out {
         | ["fetch" | "rev-list" | "log" | "diff" | "branch" | "ls-files" | "add" | "ls-tree" | "commit" | "push"
         | "stash" | "remote" | "config", ..]
         | ["reset", "-q", ..]
-        | ["worktree", "prune"] => ok(""),
+        | ["worktree", "prune"]
+        | ["sparse-checkout", "set", ..] => ok(""),
+        ["merge-base", "--is-ancestor", a, b] if a == b || m.base.get(*b).is_some_and(|s| s == a) => ok(""),
+        ["merge-base", "--is-ancestor", ..] => err(1, ""),
         ["merge-tree", ..] => ok(format!("{:040x}\n", 7)),
         ["show", _] => err(128, "fatal: path does not exist"),
         ["worktree", "add", .., path, rev] => {

@@ -1,6 +1,40 @@
-frozen = ["ci/cap.toml", "crates/core/src/events/passive.rs"]
-generated = ["assets/types/api.d.ts"]
-generate = "just types"
+frozen = ["ci/cap.toml", "crates/core/src/events/passive.rs", "crates/core/src/events/push.rs"]
+generated = [
+    "assets/types/api.d.ts",
+    "web/dist/board.js",
+    "web/dist/board.css",
+    "docs/workflow.md",
+    "crates/cli/tests/golden/briefs/design.md",
+    "crates/cli/tests/golden/briefs/impl.md",
+    "crates/cli/tests/golden/briefs/impl-fix.md",
+    "crates/cli/tests/golden/briefs/impl-repro.md",
+    "crates/cli/tests/golden/briefs/impl-update.md",
+    "crates/cli/tests/golden/briefs/rev.md",
+    "crates/cli/tests/golden/briefs/rev-repro.md",
+]
+generate = "just gen"
+shared = [
+    "crates/core/src/check.rs",
+    "crates/core/src/cli.rs",
+    "crates/core/src/cloud.rs",
+    "crates/core/src/config.rs",
+    "crates/core/src/doctor.rs",
+    "crates/core/src/drive.rs",
+    "crates/core/src/events.rs",
+    "crates/core/src/gate.rs",
+    "crates/core/src/hook.rs",
+    "crates/core/src/hosts.rs",
+    "crates/core/src/lib.rs",
+    "crates/core/src/queue.rs",
+    "crates/core/src/spawn.rs",
+    "crates/core/src/timer.rs",
+    "crates/core/src/waiting.rs",
+    "crates/server/src/api.rs",
+    "crates/server/src/serve.rs",
+    "crates/server/src/serve/chat.rs",
+    "crates/server/src/serve/v1.rs",
+    "crates/*/tests/**",
+]
 
 [[collect]]
 dir = "ci/cap.d"
@@ -23,7 +57,7 @@ except = [
 paths = ["docs/**/*.md", "README.md"]
 watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/server/src/api.rs"]
 cli = true
-skip = [".drover/**"]
+skip = [".drover/**", "roles/usage-tail.md"]
 
 [[ban]]
 pattern = "claude"
@@ -161,6 +195,15 @@ pattern = "Instant::now"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/clock.rs"]
 reason = "#809: time is read and waited on only in core's clock (crate::clock::instant)"
+
+[[size]]
+paths = ["crates/*/src/**/*.rs"]
+max_file_lines = 2000
+max_fn_lines = 150
+
+[[size]]
+paths = ["crates/*/tests/**/*.rs"]
+max_file_lines = 1500
 
 [[ban]]
 pattern = "pane_id"

@@ -1,0 +1,1 @@
+- DESIGN_MAIN_ONLY: spawn: a design or architect lane runs on the main host only; `--host` or a role `host` pin named another

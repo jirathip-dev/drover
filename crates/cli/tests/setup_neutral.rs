@@ -122,8 +122,18 @@ fn shipped_files_name_no_install() {
 fn role_texts_name_no_harness() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../roles");
     let mut bad = vec![];
-    for e in std::fs::read_dir(&root).unwrap() {
-        let f = e.unwrap().path();
+    let (mut dirs, mut files) = (vec![root], vec![]);
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else {
+                files.push(p);
+            }
+        }
+    }
+    for f in files {
         let text = std::fs::read_to_string(&f).unwrap();
         for (n, line) in text.lines().enumerate() {
             let prose: String = line.split('`').step_by(2).collect::<Vec<_>>().join(" ").to_lowercase();
