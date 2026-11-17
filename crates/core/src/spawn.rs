@@ -1403,9 +1403,6 @@ pub fn spawn(
             };
             let mut d = lane_data(&p, &pane);
             d.put("runtime", json!(if bt.0.acp.is_some() { "shed-acp" } else { "shed" }));
-            if p.lane_key.is_some() {
-                d.put("proxy", json!(true));
-            }
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d.put("confirmed", json!(confirmed))
                 .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))));
@@ -1662,7 +1659,7 @@ fn iso(t: u64) -> String {
 
 fn lane_data(p: &Plan, pane: &str) -> Value {
     json!({"role": p.role, "stage": p.stage, "check": p.family == "rev", "harness": p.harness, "profile": p.profile, "model": p.model, "effort": p.effort, "agent": p.agent,
-        "pane": pane, "worktree": p.worktree, "branch": p.branch, "port": p.port, "qos": p.qos()})
+        "pane": pane, "worktree": p.worktree, "branch": p.branch, "port": p.port, "qos": p.qos(), "proxy": p.lane_key.is_some()})
 }
 
 pub fn adopt(
