@@ -1,0 +1,10 @@
+Decided: refuse NO_PROXY_TOKEN in cloud::start, before any boat recipe call, for shed-acp hosts
+Because: "refuses or warns `NO_PROXY_TOKEN` **before** making a VM, not at the first lane spawn"
+Decided: expiry estimate is the token file's mtime plus 365 days, labelled as an estimate
+Because: "The age comes from the file's mtime; the token has no readable expiry"
+Decided: the 30 d / 7 d alert is raised from proxy::ensure, not check, as check.rs sits at its size baseline
+Rejected: phone secret card — optional in the issue, left out to keep the diff small
+Decided: cap overrun settled by the queue-wide raise, no lane edit of ci/cap.toml
+Because: q1806
+Check: bootstrap test with the fake boat sees zero boat calls when the token file is missing
+Owner: Doctor and the Hosts screen now show the remote-host token, and a missing token stops a VM before it is billed.
