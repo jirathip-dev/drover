@@ -1187,7 +1187,7 @@ pub fn spawn(
         );
     }
 
-    lane_admit(ctx, (cfg, r), &events, fleet, issue, role)?;
+    lane_admit(ctx, (cfg, r), &events, (fleet, issue, role), o.force)?;
     respawn_guard(ctx, cfg, &events, (fleet, issue, role))?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
     if o.update && updates >= f.flow().update_limit() {
@@ -1543,9 +1543,8 @@ pub(crate) fn lane_admit(
     ctx: &Ctx,
     (cfg, r): (&Config, &dyn Runner),
     events: &[Event],
-    fleet: &str,
-    issue: u64,
-    role: &str,
+    (fleet, issue, role): (&str, u64, &str),
+    force: bool,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
     let events = &[events, &crate::drive::pending(ctx, cfg, r)].concat();
@@ -1573,7 +1572,20 @@ pub(crate) fn lane_admit(
     if let Some(cap) = cap.filter(|&c| n >= c) {
         return refused("CAP", format!("{n} {role} lane(s) open in {fleet}, max_{fam} = {cap}"));
     }
-    Ok(())
+    let Some((v, cap)) = crate::queue::flight_full(ctx, &st, f, fleet, issue).filter(|_| fam == "impl") else {
+        return Ok(());
+    };
+    let why = format!(
+        "{}/{cap} PRs in flight in {fleet} ({})",
+        v.len(),
+        crate::queue::hashes(&v)
+    );
+    if !force {
+        return refused("IN_FLIGHT_CAP", format!("{why}; they land first, or pass --force"));
+    }
+    let by = crate::orchestrator::acting().map_or_else(|| "owner".into(), |id| format!("orchestrator-{id}"));
+    let d = json!({"code": "IN_FLIGHT_CAP", "reason": why, "role": role, "by": by});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "override", d))
 }
 
 fn starts<'a>(

@@ -1204,7 +1204,7 @@ pub(crate) fn forward(r: &dyn Runner, args: &[String]) -> Option<Result<runner::
     }))
 }
 
-pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<String> {
+pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event], fleets: &[&str]) -> Option<String> {
     let cli = Cli::try_parse_from(std::iter::once("drover").chain(args.iter().map(String::as_str)));
     let is = |e: &&Event, f: &str, id: &str| e.kind == "needs-decision" && e.fleet == f && e.str("id") == Some(id);
     let asked = |f: &str, id: &str| events.iter().rfind(|e| is(e, f, id))?.issue;
@@ -1227,7 +1227,9 @@ pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<S
             ))
         }
     };
-    (!lane.starts_with(&format!("{f}:{n}:"))).then(|| format!("names {f}#{n}, not the lane's {lane}"))
+    let unknown = (!fleets.contains(&f.as_str())).then(|| format!("fleet {f} is not configured"));
+    unknown
+        .or_else(|| (!lane.starts_with(&format!("{f}:{n}:"))).then(|| format!("names {f}#{n}, not the lane's {lane}")))
 }
 
 pub(crate) fn run(args: &[&str], ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
@@ -1333,16 +1335,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 writeln!(out, "no tracked issues")?;
             } else {
                 let (events, cfg) = (working(&ctx.state)?, Config::load(&ctx.config).ok());
-                let serial = |f: &str| queue::serial_use(&events, &all, f, cfg.as_ref()).map(|s| format!("{f}: {s}\n"));
-                let mut serial: Vec<_> = rows.iter().filter_map(|s| serial(&s.fleet)).collect();
-                serial.dedup();
+                let serial = queue::fleets_use(ctx, &events, cfg.as_ref(), fleet.as_deref());
                 let off = cfg.as_ref().map(|c| crate::hosts::idle_off(c, &events));
                 let spared = crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), None);
                 let look = crate::snapshot::Snap::read(ctx, &spared);
                 let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
                     let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
-                    let skip = queue::skipped(&events, &all, f, &s.fleet, (s.issue, ctx.now), &slots);
+                    let skip = queue::skipped(&events, &all, f, &s.fleet, (s.issue, ctx), &slots);
                     skip.map(|s| format!("skipped this pass: {}", s.1))
                 };
                 let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
@@ -1405,7 +1405,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         .unwrap_or_else(|| "-".into());
                     writeln!(out, "{:<pad$}{} {w}{}", status_line(s, ctx.now), host(s), root(s))?;
                 }
-                write!(out, "{}", serial.concat())?;
+                write!(out, "{serial}")?;
                 if let Some(c) = &cfg {
                     let agents = crate::session::all(c, &look).running();
                     write!(out, "{}", crate::hosts::slots_line(c, &events, &agents))?;
@@ -1892,7 +1892,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))
-                                .or_else(|| queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx.now), &slots))
+                                .or_else(|| queue::skipped(&events, &st, Some(f), &s.fleet, (s.issue, ctx), &slots))
                             {
                                 Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
                                 None => ("drive", format!("next in the queue: drive starts it{note}")),
@@ -1946,6 +1946,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                     if json {
                         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
+                    } else {
+                        write!(out, "{}", queue::fleets_use(ctx, &events, Some(&cfg), fleet.as_deref()))?;
                     }
                     for w in rows.iter().filter(|_| !json) {
                         let place = at

@@ -104,6 +104,12 @@ left out. It keeps the list in the state folder as
 is open, and queues it `--architect`. `drover tick` stores each fleet's list daily and files its issue weekly; `hotspots = "off"` in `[fleet.<n>]` opts
 out.
 
+## In-flight cap (#1129)
+
+`max_in_flight = N` in `[fleet.<n>]` caps the fleet's PRs in flight (an issue in impl, fix, review, verify or ready,
+or one held with an open PR); unset is 8, `0` is off. At the cap drive starts no new issue but keeps reviewing, fixing
+and merging; `drover spawn` of a new issue is refused `IN_FLIGHT_CAP` unless `--force`.
+
 ## Hygiene (#1101)
 
 One history and issue convention is on for every fleet with no config. `[hygiene]` sets it for all fleets,

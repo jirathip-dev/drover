@@ -217,6 +217,13 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     assert_eq!(find(&q, "done-today-sendmeter")["value"], "1");
     assert_eq!(find(&q, "stats")["items"][0]["value"], "1");
     assert_eq!(find(&q, "stats")["items"][0]["spark"], json!([0, 0, 0, 0, 0, 0, 1]));
+    let flight = json!({"label": "sendmeter in flight", "value": "1/8"});
+    assert_eq!(find(&q, "stats")["items"][6], flight);
+    let one = get("/screens/queue?repo=sendmeter");
+    assert_eq!(
+        find(&one, "stats")["items"][6],
+        json!({"label": "in flight", "value": "1/8"})
+    );
     let labels: Vec<&Value> = find(&q, "repo")["options"]
         .as_array()
         .unwrap()

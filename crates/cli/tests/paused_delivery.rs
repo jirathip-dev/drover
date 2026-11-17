@@ -54,8 +54,8 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
     std::env::set_current_dir(&wt).unwrap();
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
-    std::env::set_var("DROVER_OUTBOX", "1");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_OUTBOX", "1");
     let ask = ["ask", "sendmeter", "12", "Which way?", "--option", "a", "--option", "b"];
     assert_eq!(run(&lane, &Fake::default(), &ask).0, 0);
     assert_eq!(run(&lane, &Fake::default(), &["turn", "need-input"]).0, 0);

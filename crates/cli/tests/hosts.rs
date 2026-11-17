@@ -1027,6 +1027,26 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
 }
 
 #[test]
+fn a_lanes_outbox_env_never_reaches_the_remote_lane_test() {
+    let wt = tmpdir("hosts-lane-env");
+    std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
+    let ob = wt.join(".drover/outbox.jsonl");
+    std::fs::create_dir_all(ob.parent().unwrap()).unwrap();
+    std::fs::write(&ob, "").unwrap();
+    let o = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "a_remote_lane_knows_the_main_host_and_answers_reach_it"])
+        .current_dir(&wt)
+        .env("DROVER_OUTBOX", &ob)
+        .env("DROVER_LANE", "drover:1131:impl")
+        .env("DROVER_HOST", "boat-dev-4")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stdout));
+    assert_eq!(std::fs::read_to_string(&ob).unwrap(), "");
+    assert!(!wt.join(".drover/outbox.jsonl.draining").exists());
+}
+
+#[test]
 fn a_remote_lane_gets_the_service_url_and_its_own_token() {
     let c = setup(
         "hosts-service",

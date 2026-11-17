@@ -776,8 +776,8 @@ fn verdict_sheet(ev: &[Event], q: &Q) -> Option<Value> {
     )
 }
 
-fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&str>, lanes: &[Lane]) -> Value {
-    let day = |e: &Event| usize::try_from(now.saturating_sub(e.ts) / 86_400).unwrap_or(usize::MAX);
+fn stats(ctx: &Ctx, ev: &[Event], states: &crate::events::States, only: Option<&str>, lanes: &[Lane]) -> Value {
+    let day = |e: &Event| usize::try_from(ctx.now.saturating_sub(e.ts) / 86_400).unwrap_or(usize::MAX);
     let merged: Vec<&Event> = ev
         .iter()
         .filter(|e| e.kind == "merged" && day(e) < 7 && only.is_none_or(|f| e.fleet == f))
@@ -799,13 +799,21 @@ fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&s
     };
     let (n, r) = per.iter().fold((0, 0), |a, p| (a.0 + p.0, a.1 + p.1));
     let c = super::v1::counts(lanes, only);
-    json!({"type": "stat", "id": "stats", "items": [
-        {"label": "merged · 7d", "value": n.to_string(), "spark": per.map(|p| p.0)},
-        {"label": "busy", "value": c.busy.to_string()},
-        {"label": "approval", "value": c.waiting_approval.to_string()},
-        {"label": "owner", "value": c.waiting_owner.to_string()},
-        {"label": "rate-limited", "value": c.rate_limited.to_string()},
-        {"label": "rounds / issue", "value": format!("{:.1}", avg(n, r)), "spark": per.map(|p| avg(p.0, p.1))}]})
+    let mut items = vec![
+        json!({"label": "merged · 7d", "value": n.to_string(), "spark": per.map(|p| p.0)}),
+        json!({"label": "busy", "value": c.busy.to_string()}),
+        json!({"label": "approval", "value": c.waiting_approval.to_string()}),
+        json!({"label": "owner", "value": c.waiting_owner.to_string()}),
+        json!({"label": "rate-limited", "value": c.rate_limited.to_string()}),
+        json!({"label": "rounds / issue", "value": format!("{:.1}", avg(n, r)), "spark": per.map(|p| avg(p.0, p.1))}),
+    ];
+    let fleets = Config::kept(ctx).into_iter().flat_map(|c| c.fleet);
+    for (f, fc) in fleets.filter(|f| only.is_none_or(|o| o == f.0)) {
+        let label = only.map_or_else(|| format!("{f} in flight"), |_| "in flight".into());
+        let flight = crate::queue::flight(ctx, states, &fc, &f);
+        items.extend(flight.map(|(v, cap)| json!({"label": label, "value": format!("{}/{cap}", v.len())})));
+    }
+    json!({"type": "stat", "id": "stats", "items": items})
 }
 
 fn counts(shown: &[&QueueCard]) -> Value {
@@ -1587,7 +1595,7 @@ impl Server<'_> {
         shown.sort_by_key(|c| c.need == 0);
         let mut blocks = vec![
             json!({"type": "chips", "id": "repo", "name": "repo", "selected": [sel.unwrap_or("all")], "action": "filter", "options": opts}),
-            stats(ctx.now, &ev, &ev.states, sel, &lanes),
+            stats(ctx, &ev, &ev.states, sel, &lanes),
             counts(&shown),
         ];
         if let Some(e) = &tab.error {

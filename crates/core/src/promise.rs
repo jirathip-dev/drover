@@ -30,6 +30,7 @@ pub enum Say {
     ReviewsAhead(usize),
     Pass(String),
     Starts(String),
+    InFlightCap(usize, usize),
 }
 
 /// The spawn-slot wait phrase; the board matches on it.
@@ -63,6 +64,7 @@ impl Say {
             ),
             Say::Pass(r) => format!("drive's next pass{r}"),
             Say::Starts(r) => format!("{r}; starts next pass"),
+            Say::InFlightCap(n, cap) => format!("waits: in-flight cap {n}/{cap}"),
         }
     }
 }

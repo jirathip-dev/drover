@@ -141,7 +141,7 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
         .count();
     assert_eq!(starts, 0);
 
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     let (code, _) = ask(&c, &r, None);
     std::env::remove_var("DROVER_LANE");
     assert_eq!(code, 0);
