@@ -1610,7 +1610,7 @@ impl Server<'_> {
         Value::Array(cards)
     }
 
-    fn plugin(ctx: &Ctx, head: &str) -> bool {
+    pub(super) fn plugin(ctx: &Ctx, head: &str) -> bool {
         let file = std::fs::read_to_string(ctx.config.with_file_name("cooee-token")).unwrap_or_default();
         let bearer = header(head, "authorization")
             .and_then(|h| h.strip_prefix("Bearer "))

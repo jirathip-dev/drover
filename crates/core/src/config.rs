@@ -1178,6 +1178,25 @@ impl Notify {
     }
 }
 
+fn orchestrator_ids(c: &Config) -> Result<()> {
+    if let Some((id, f)) = (c.orchestrator.more.iter())
+        .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
+    {
+        bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
+    }
+    let named = |id: &String| {
+        id != "default"
+            && !id.is_empty()
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    };
+    if let Some(id) = c.orchestrator.more.keys().find(|id| !named(id)) {
+        bail!("orchestrator.{id}: an id is lowercase letters, digits and `-`, and not `default`");
+    }
+    Ok(())
+}
+
 impl Config {
     /// #1101: fleet `name`'s hygiene, every key set: its own, else `[hygiene]`'s, else the default.
     pub fn hygiene(&self, name: &str) -> Hygiene {
@@ -1285,11 +1304,7 @@ impl Config {
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
         }
-        if let Some((id, f)) = (c.orchestrator.more.iter())
-            .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
-        {
-            bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
-        }
+        orchestrator_ids(&c)?;
         if let Some(g) = c
             .orchestrator
             .groups()
