@@ -1,0 +1,10 @@
+Decided: staging build fix: the sim hunt starts from seeds 2, 9, 4, 5 instead of 2, 3, 4, 5
+Because: crates/cli/tests/sim/main.rs:279
+Check: staging CI fails the same way since c3d24d5d (runs 43992168048, 43993931220, 43994225027) and on other open PRs
+Check: seed 3 no longer trips the planted bug since #1183 dropped the missed-promise respawn; seed 1003's run is unchanged
+Rejected: planted bug on a lane's 4th start — the hunt then finds nothing within 40 rounds
+Rejected: reverting c3d24d5d's drive one-slot line — the test still fails without it
+Decided: each fleet-test-* dir is fed over a pipe to a reaper process that removes it once the test process is gone
+Because: "a path skipped on early return/panic in a child"
+Rejected: a shutdown for serve and service — production code added only for tests
+Owner: the leak fix is unchanged; one test seed swap fixes the staging-wide sim failure
