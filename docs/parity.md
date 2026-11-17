@@ -88,14 +88,14 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 69 | Design review: PNGs inline, approve/revise/reject | parity_69 | kept |
 | 70 | Verify screenshots on cards (lane-folder images only) | parity_70 | kept |
 | 71 | Alert when an answer doesn't reach its lane | parity_71 | kept |
-| 72 | Host cards: gauges, status dots, aligned rows, top memory | — | open #1091 |
-| 73 | 24 h sparklines; tap for a 1h/6h/24h chart | — | open #1091 |
-| 74 | Host health and services: herdr, ssh, logins, version, drift, timers | — | open #1091 |
-| 75 | Turn a host on or off | — | open #1091 |
-| 76 | Host tags; cloud host spend and budget | — | open #1091 |
-| 77 | Fleet disk: budget, orphan folders, leftovers, [reap] | — | open #1091 |
-| 78 | Agent providers: account 5h/7d meters, caps, DeepSeek balance | — | open #1091 |
-| 79 | Provider sign-in terminal, add key, [use] to switch | — | open #1091 |
+| 72 | Host cards: gauges, status dots, aligned rows, top memory | — | dropped q1784 |
+| 73 | 24 h sparklines; tap for a 1h/6h/24h chart | — | dropped q1784 |
+| 74 | Host health and services: herdr, ssh, logins, version, drift, timers | — | dropped q1784 |
+| 75 | Turn a host on or off | parity_75 | page-only |
+| 76 | Host tags; cloud host spend and budget | — | dropped q1784 |
+| 77 | Fleet disk: budget, orphan folders, leftovers, [reap] | — | open |
+| 78 | Agent providers: account 5h/7d meters, caps, DeepSeek balance | — | dropped q1784 |
+| 79 | Provider sign-in terminal, add key, [use] to switch | — | open |
 | 80 | Fleets: per-repo config sheet with pipeline graph | parity_80 | kept |
 | 81 | Role model/effort pickers | parity_81 | kept |
 | 82 | Conductor role and new-thread chat defaults | — | open |

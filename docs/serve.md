@@ -310,6 +310,9 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   plugin token only), the lane sheet: its facts (issue, role, state, host, branch, port, PR), Stop/Kill/Clean (Close pane
   for an Others agent), a Send line and the transcript (`/api/v1/lane/<agent>`'s blocks as text and row blocks). Each
   action runs the board's `act` (the CLI verb, `confirm`ed) or `send`, logged `act`/`prompt` with `device: cooee`;
+- #1091: `GET /screens/hosts`, the page's Hosts sheet (a [⚙] row, not cooee's): one row per host, main first, then
+  A→Z, with its kind, on/off and live lane count; a remote host's [Off]/[On] runs `host` (`host-off`/`host-on`) and
+  the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed. No gauges or charts (Beacon's);
 - #1092: `GET /screens/herd`, the page's Herd (page-only, [⚙] → Herd; cooee draws its own scene): one `scene` block
   with `weather` (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `line`)
   and `repos`, each a fleet (then `others`) with its queued issues at the gate and its lanes in bands (working, idle,
