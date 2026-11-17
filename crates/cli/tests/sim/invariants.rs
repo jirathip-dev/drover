@@ -8,7 +8,6 @@ pub enum Sabotage {
     DoubleLane,
     RedMerge,
     Planted,
-    /// #959: the model's GitHub ignores `--match-head-commit`, so a head pushed after the PASS gets merged.
     HeadSha,
 }
 

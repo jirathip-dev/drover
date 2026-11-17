@@ -139,7 +139,6 @@ pub fn on_append(w: &mut World) {
     }
 }
 
-/// The impl's late push to issue `n`'s PR: a new head, its CI green.
 fn push(w: &mut World, n: u64) {
     let branch = format!("issue-{n}");
     let sha = w.model.sha();

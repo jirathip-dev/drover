@@ -26,7 +26,6 @@ pub enum Script {
         secs: u64,
     },
     Hang,
-    /// #959: a PASS verdict.md cut off mid-write, or (`stale`) whole but for an older head than the PR's.
     Bad {
         secs: u64,
         stale: bool,
@@ -432,7 +431,6 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
     }
 }
 
-/// GitHub's merge of PR `n`: integration moves on; I4 checks it.
 fn merge(w: &mut World, n: u64) -> Out {
     let m = &mut w.model;
     let Some((b, p)) = m.prs.iter_mut().find(|(_, p)| p.number == n) else {
