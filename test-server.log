@@ -1,0 +1,17 @@
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: doctest failed, to rerun pass `-p drover-server --doc`
+
+Caused by:
+  could not execute process `rustdoc --edition=2021 --crate-type lib --color auto --crate-name drover_server --test crates/server/src/lib.rs --test-run-directory /home/user/.local/share/drover/work/drover/issue-1185/crates/server -L native=/home/user/.local/share/drover/work/.build/herdsman-impl-1185/debug/build/libsqlite3-sys-d20c0d3e7e96655e/out --test-args --quiet '--warn=clippy::pedantic' '--deny=clippy::unwrap_used' --forbid=unsafe_code '--deny=clippy::unimplemented' '--allow=clippy::too_many_lines' '--allow=clippy::too_many_arguments' '--deny=clippy::todo' '--allow=clippy::struct_excessive_bools' '--deny=clippy::print_stdout' '--deny=clippy::print_stderr' '--deny=clippy::panic' '--allow=clippy::must_use_candidate' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::many_single_char_names' '--deny=clippy::let_underscore_must_use' '--deny=clippy::indexing_slicing' '--allow=clippy::format_push_string' '--allow=clippy::format_collect' '--deny=clippy::expect_used' '--deny=clippy::dbg_macro' '--allow=clippy::cast_precision_loss' '--deny=clippy::as_conversions' '--deny=clippy::allow_attributes_without_reason' --extern anyhow=/home/user/.local/share/drover/work/.build/herdsman-impl-1185/debug/deps/libanyhow-9d504ed04d9eda62.rlib --extern base64=/home/user/.local/share/drover/work/.build/herdsman-impl-1185/debug/deps/libbase64-4bab00af78c7b10d.rlib --extern drover_core=/home/user/.local/share/drover/work/.build/herdsman-impl-1185/debug/deps/libdrover_core-5764b548692434bb.rlib --extern drover_server=/home/user/.local/share/drover/work/.build/herdsman-impl-1185/debug/deps/libdrover_server-e0f86d2c872536cc.rlib --extern drover_sys=/home/user/.local/share/drover/work/.build/herdsman-impl-1185/debug/deps/libdrover_sys-0c0581363e2c4c0b.rlib --extern serde=/home/user/.local/share/drover/work/.build/herdsman-impl-1185/debug/deps/libserde-9134ab2fa4f7654b.rlib --extern serde_json=/home/user/.local/share/drover/work/.build/herdsman-impl-1185/debug/deps/libserde_json-44c553481343c3bb.rlib --extern toml=/home/user/.local/share/drover/work/.build/herdsman-impl-1185/debug/deps/libtoml-40fbbc5520321d73.rlib -L dependency=/home/user/.local/share/drover/work/.build/herdsman-impl-1185/debug/deps -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("ts"))' --error-format human` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
