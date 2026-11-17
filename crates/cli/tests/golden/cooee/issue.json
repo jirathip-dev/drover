@@ -1,0 +1,209 @@
+{
+ "blocks": [
+  {
+   "blocks": [
+    {
+     "id": "stage",
+     "name": "stage",
+     "options": [
+      {
+       "label": "▲ impl · fix",
+       "value": "impl · fix"
+      },
+      {
+       "label": "◆ rev",
+       "value": "rev"
+      },
+      {
+       "label": "◫ gates",
+       "value": "gates"
+      }
+     ],
+     "selected": [
+      "impl · fix"
+     ],
+     "type": "chips"
+    },
+    {
+     "id": "status-list",
+     "rows": [
+      {
+       "id": "now",
+       "title": "fix(1)",
+       "type": "row",
+       "value": {
+        "since": "2026-11-09T09:35:00Z"
+       }
+      },
+      {
+       "id": "at",
+       "subtitle": "local",
+       "title": "lane sendmeter-impl-12",
+       "type": "row"
+      }
+     ],
+     "type": "list"
+    }
+   ],
+   "header": "status",
+   "id": "status",
+   "type": "section"
+  },
+  {
+   "blocks": [
+    {
+     "action": "answer",
+     "id": "q8",
+     "options": [
+      {
+       "label": "keep",
+       "value": "keep"
+      },
+      {
+       "label": "split",
+       "value": "split"
+      }
+     ],
+     "other": {
+      "placeholder": "other…"
+     },
+     "recommended": "keep",
+     "type": "choice"
+    }
+   ],
+   "header": "asks: Split the PR?",
+   "id": "asks",
+   "type": "section"
+  },
+  {
+   "blocks": [
+    {
+     "id": "links-list",
+     "rows": [
+      {
+       "id": "issue",
+       "style": "link",
+       "tap": {
+        "url": "https://github.com/jirathip-dev/sendmeter/issues/12"
+       },
+       "title": "issue #12",
+       "type": "row"
+      },
+      {
+       "id": "lane",
+       "style": "link",
+       "tap": {
+        "sheet": "/screens/lanes/sendmeter-impl-12"
+       },
+       "title": "lane sendmeter-impl-12",
+       "type": "row"
+      },
+      {
+       "id": "asked",
+       "style": "link",
+       "tap": {
+        "thread": "t9"
+       },
+       "title": "asked in sendmeter #12",
+       "type": "row"
+      }
+     ],
+     "type": "list"
+    }
+   ],
+   "header": "links",
+   "id": "links",
+   "type": "section"
+  },
+  {
+   "blocks": [
+    {
+     "id": "lanes-list",
+     "rows": [
+      {
+       "id": "l-sendmeter-impl-12",
+       "subtitle": "working",
+       "tap": {
+        "sheet": "/screens/lanes/sendmeter-impl-12"
+       },
+       "title": "sendmeter-impl-12",
+       "type": "row",
+       "value": "50m"
+      },
+      {
+       "id": "l-sendmeter-rev-12-r1",
+       "subtitle": "gone",
+       "tap": {
+        "sheet": "/screens/lanes/sendmeter-rev-12-r1"
+       },
+       "title": "sendmeter-rev-12-r1",
+       "type": "row",
+       "value": "66m"
+      }
+     ],
+     "type": "list"
+    }
+   ],
+   "header": "lanes",
+   "id": "lanes",
+   "type": "section"
+  },
+  {
+   "blocks": [
+    {
+     "id": "history-list",
+     "rows": [
+      {
+       "id": "h-0",
+       "title": "fix 1",
+       "type": "row"
+      },
+      {
+       "id": "h-1",
+       "title": "review 1 ✗",
+       "type": "row"
+      },
+      {
+       "id": "h-2",
+       "title": "impl ✓",
+       "type": "row"
+      }
+     ],
+     "type": "list"
+    }
+   ],
+   "header": "history",
+   "id": "history",
+   "type": "section"
+  },
+  {
+   "action": "top",
+   "id": "Top",
+   "label": "Top",
+   "type": "button",
+   "values": {
+    "fleet": "sendmeter",
+    "issue": 17
+   }
+  },
+  {
+   "action": "drop",
+   "confirm": {
+    "ok": "Drop",
+    "title": "Drop #17 from the queue?"
+   },
+   "id": "Drop",
+   "label": "Drop",
+   "style": "destructive",
+   "type": "button",
+   "values": {
+    "fleet": "sendmeter",
+    "issue": 17
+   }
+  }
+ ],
+ "cancel": "Done",
+ "id": "issue-sendmeter-12",
+ "title": "#12",
+ "type": "sheet"
+}

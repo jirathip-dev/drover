@@ -148,6 +148,44 @@ Queue card.
 `spawn` events carry `stage` and `check`, and `verdict` events carry `stage` (the stage that gave it) and `loop` (the
 check whose rounds it counts). Events from before #173 fold as before: `rev` is the check and `impl` the build.
 
+## Autonomy numbers (#962)
+
+`drover stats autonomy <fleet> [--since YYYY-MM-DD] [--weeks N] [--json]` reads the whole event log, archived
+events included, in one pass. It prints one row per week (weeks start on Monday) and a total over the window.
+`--since` starts the window at that date, and `--weeks N` keeps the last N weeks, this one included. Given both,
+the later start wins. `--json` prints the same numbers. `--explain` prints the owner-action table.
+
+- **Owner action.** One row of the table in `crates/core/src/autonomy.rs` (`OWNER`):
+  - an ask answered by the owner;
+  - every `needs-human`;
+  - a run card approved;
+  - a manual `spawn`, `verdict` or `kill`;
+  - an extra round;
+  - a park or an unpark;
+  - a `--force` override;
+  - an `--owner-override` merge.
+
+  "By the owner" means the event's `by` is set and is not `orchestrator-*`, `default`, `drive`, `lane` or
+  `external`, and no orchestrator lane logged the event. Since #962, `spawn` (from the CLI), `verdict` and
+  `lane-killed` events carry `by`: `drive` inside a drive pass, `orchestrator-<id>`, `lane`, else `owner`. Older
+  spawns and verdicts carry no `by` and never count. An older `lane-killed` always counts, because only
+  `drover kill` logs one.
+- **Merged with no owner action.** An issue whose `merged` falls in the week and whose events up to that merge hold
+  no owner action. Run-card approvals belong to a thread, not an issue, so they count in the week's owner actions
+  but never break one issue's autonomy.
+- **Owner actions per merge.** Every owner action logged in the week, by kind, divided by the week's merges.
+- **Asks.** The `needs-decision` events of the week, by who answered them: `owner`, `orchestrator` (an
+  `orchestrator-*` answer), `default` (a routine ask's timeout) or `open`.
+- **Rounds.** Per merged issue, the highest `round` of its verdicts. The row gives the median and the count that
+  reached round 3. A pushback is a `fix-done` (`drover done --no-change`) on a merged issue.
+- **Respawns and restarts.** `respawn` events (drive restarts a lane that ended) and `supersede` events (a live
+  lane replaced) on merged issues.
+- **Queue to merge.** From the first `queue add` naming the issue (else its first event) to its merge, as a median
+  and p90. Owner wait is the part of it spent on an owner-answered ask (ask to answer), on `needs-human`, or
+  parked (until the next extend, unpark, spawn, decision, merge or close). It shows as a total and as a share of
+  the summed queue-to-merge time.
+- **Closed unmerged, parked.** `closed` and `parked` events of issues that never merged, in the week they happened.
+
 ## The board
 
 The Pipeline group of the fleet's `[config]` sheet draws the pipeline as a node graph. `serve` sends the pipeline as

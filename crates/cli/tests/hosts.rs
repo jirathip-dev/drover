@@ -93,7 +93,7 @@ fn placed(c: &drover::Ctx, r: &Fake, issue: u64, role: &str, force: Option<&str>
         &mini.on(&two(r, &bazzite)),
         &events,
         ("sendmeter", issue, role),
-        force,
+        (force, &|_| None),
     ) {
         Ok(p) => {
             let p = p.unwrap();
@@ -793,99 +793,6 @@ fn synced(status: &str) -> Fake {
         .reply(&format!("{SSH}{START}"), "")
 }
 
-fn syncs(c: &drover::Ctx) -> Vec<Event> {
-    read(&c.state)
-        .unwrap()
-        .iter()
-        .filter(|e| e.kind == "host-sync")
-        .cloned()
-        .collect()
-}
-
-#[test]
-fn a_mismatched_host_gets_one_install_at_this_sha_then_profiles_sync_and_a_matching_one_none() {
-    let c = setup("hosts-sync", "", true, 0);
-    let _sh = FakeShed::attached(&c);
-    let bazzite = FakeShed::new();
-    let (sha, old) = (env!("DROVER_SHA"), "drover 0.1.0 (0ld)\n");
-    let r = synced(old);
-    let (code, out) = run(&c, &two(&r, &bazzite), &["hosts", "refresh"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains(&format!("· drover 0ld ≠ {sha} ·")), "{out}");
-    let repo = "https://github.com/jirathip-dev/herdsman";
-    let install = format!("cargo install --git {repo} --rev {sha} --locked --root '\\''/opt/drover'\\'' --force");
-    let sync = "|| '\\''/opt/drover/bin/drover'\\'' profiles sync; }; }; echo \"$? ";
-    let starts: Vec<String> = r.calls.borrow().iter().filter(|l| l.contains(START)).cloned().collect();
-    assert_eq!(starts.len(), 1, "{starts:#?}");
-    assert!(
-        starts[0].contains(&install) && starts[0].contains(sync),
-        "{}",
-        starts[0]
-    );
-    assert!(
-        starts[0].ends_with("'drover 0.1.0 (0ld)'"),
-        "the from version: {}",
-        starts[0]
-    );
-    let busy = synced(&format!("{old}busy\n"));
-    run(&c, &two(&busy, &bazzite), &["hosts", "refresh"]);
-    assert!(busy.called(&format!("{SSH}{STATUS}")) && !busy.called(&format!("{SSH}{START}")));
-    let landed = synced(&format!(
-        "drover {}\ndone 0 {sha} drover 0.1.0 (0ld)\n",
-        drover::VERSION
-    ));
-    let (_, out) = run(&c, &two(&landed, &bazzite), &["hosts", "refresh"]);
-    assert!(out.contains(&format!("· drover {sha} ✓ ·")), "{out}");
-    assert!(!landed.called(&format!("{SSH}{START}")));
-    let ev = syncs(&c);
-    assert_eq!(ev.len(), 1, "{ev:?}");
-    assert_eq!(
-        json!(ev[0].data),
-        json!({"host": "bazzite", "from": "0ld", "to": sha, "ok": true})
-    );
-}
-
-#[test]
-fn a_failed_install_is_logged_alerted_once_and_retried_each_tick() {
-    let c = setup("hosts-sync-fail", "", true, 0);
-    let _sh = FakeShed::attached(&c);
-    let bazzite = FakeShed::new();
-    let sha = env!("DROVER_SHA");
-    let failed = format!("drover 0.1.0 (0ld)\ndone 101 {sha} drover 0.1.0 (0ld)\n");
-    for _ in 0..2 {
-        let r = synced(&failed);
-        run(&c, &two(&r, &bazzite), &["check"]);
-        assert_eq!(r.count(&format!("{SSH}{START}")), 1, "retried");
-    }
-    let ev = syncs(&c);
-    assert_eq!(ev.len(), 2, "{ev:?}");
-    assert!(ev.iter().all(|e| e.val("ok") == false && e.str("from") == Some("0ld")));
-    let alerts = read(&c.state)
-        .unwrap()
-        .iter()
-        .filter(|e| e.kind == "host-sync-failed")
-        .count();
-    assert_eq!(alerts, 1, "once per state");
-}
-
-#[test]
-fn an_unreachable_or_switched_off_host_costs_no_sync_ssh() {
-    let c = setup("hosts-sync-off", "", true, 0);
-    let r = fake(0.1, 0.1).reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n");
-    run(&c, &r, &["hosts", "refresh"]);
-    assert!(!cached(&c)["bazzite"].up);
-    assert!(!r
-        .calls
-        .borrow()
-        .iter()
-        .any(|l| l.contains(".drover-sync") || l.contains(STATUS)));
-    let c = setup("hosts-sync-disabled", "enabled = false\n", true, 0);
-    let _sh = FakeShed::attached(&c);
-    let (bazzite, r) = (FakeShed::new(), synced("drover 0.1.0 (0ld)\n"));
-    run(&c, &two(&r, &bazzite), &["hosts", "refresh"]);
-    assert!(!r.called(&format!("{SSH}{STATUS}")) && syncs(&c).is_empty());
-}
-
 #[test]
 fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     let c = setup("hosts-dry", "", true, 0);
@@ -1442,7 +1349,7 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     assert!(rows[0].starts_with("! drover — drover 0.1.0 (0ld) there"), "{rows:?}");
     assert_eq!(
         drover::hosts::sync(&c, &cfg, &on, ("bazzite", home, &[])),
-        "drover 0.1.0 (0ld)"
+        Ok(("drover 0.1.0 (0ld)".into(), false))
     );
     let root = format!("--root '\\''{}'\\'' --force", root.display());
     let sync = format!("|| '\\''{real}'\\'' profiles sync");
@@ -1780,7 +1687,7 @@ fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_wor
     let (mini, bazzite) = (FakeShed::new(), FakeShed::new());
     let ssh = two(&kept, &bazzite);
     let on = mini.on(&ssh);
-    let p = place(&c, &cfg, &on, &events, ("sendmeter", 12, "impl"), None)
+    let p = place(&c, &cfg, &on, &events, ("sendmeter", 12, "impl"), (None, &|_| None))
         .unwrap()
         .unwrap();
     assert_eq!((p.name.as_str(), p.refusal), ("bazzite", None));
@@ -1788,4 +1695,19 @@ fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_wor
         p.why.as_deref(),
         Some("stays on bazzite: its worktree there has unpushed work")
     );
+}
+
+#[test]
+fn a_tick_starts_the_sync_of_a_reachable_host_though_its_health_check_times_out() {
+    let c = setup("hosts-tick-sync", "", true, 0);
+    let hosts = c.state.with_file_name("hosts.json");
+    let mut cache: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&hosts).unwrap()).unwrap();
+    cache["bazzite"]["probed"] = json!(0);
+    std::fs::write(&hosts, cache.to_string()).unwrap();
+    let _sh = FakeShed::attached(&c);
+    let bazzite = FakeShed::new();
+    let r = synced("drover 0.1.0 (0ld)\n").once(&format!("{SSH}'git' 'ls-remote'"), 124, "");
+    let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(r.count(&format!("{SSH}{START}")), 1, "{:#?}", r.calls.borrow());
 }

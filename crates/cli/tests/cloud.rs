@@ -92,7 +92,7 @@ fn placed(c: &drover::Ctx, r: &Fake, force: Option<&str>) -> Result<String, Stri
         &sh.on(r),
         &read(&c.state).unwrap(),
         ("sendmeter", 12, "impl"),
-        force,
+        (force, &|_| None),
     ) {
         Ok(p) => {
             let p = p.unwrap();
@@ -241,7 +241,7 @@ fn pick(c: &drover::Ctx, r: &Fake) -> (String, Option<&'static str>, Option<Stri
         &sh.on(&on_cloud(r, &cloud)),
         &read(&c.state).unwrap(),
         ("sendmeter", 12, "impl"),
-        None,
+        (None, &|_| None),
     );
     let p = p.unwrap().unwrap();
     (p.name, p.refusal.map(|r| r.0), p.why)

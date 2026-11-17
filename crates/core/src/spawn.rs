@@ -2,6 +2,7 @@ use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event, Json};
 use crate::gate::refused;
+use crate::orchestrator::actor;
 use crate::providers;
 use crate::runner::{argv, ok, Runner};
 use crate::session::{Session, Status};
@@ -938,6 +939,8 @@ pub struct Opts {
     /// Fix round that merges the integration branch into a conflicting or behind PR
     #[arg(long)]
     pub update: bool,
+    #[arg(skip = Some(actor()))]
+    pub by: Option<String>,
 }
 
 fn integration_view(
@@ -1019,7 +1022,8 @@ pub fn spawn(
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
     let ev = working(&ctx.state)?;
-    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), o.host.as_deref())?;
+    let host = o.host.clone().or_else(|| crate::starts::admitted(ctx, fleet, issue));
+    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
         return refused("RUNTIME_DOWN", why);
     }
@@ -1189,8 +1193,7 @@ pub fn spawn(
     }
     match refusal {
         Some(("HOST_BUSY", why)) if o.force => {
-            let by = crate::orchestrator::acting().map_or_else(|| "owner".into(), |id| format!("orchestrator-{id}"));
-            let d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": by});
+            let d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": actor()});
             event("override", d)?;
         }
         Some(("HOST_BUSY", why)) => return refused("HOST_BUSY", format!("{why}; retry later or pass --force")),
@@ -1438,6 +1441,7 @@ pub fn spawn(
         term::ok(r, &home(p.lane_cmd(&pane)))?;
         term::ok(r, &term::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
     }
+    crate::starts::started(ctx, fleet, issue);
     let mut dirs: Vec<String> = f.clone_build.clone();
     dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
     dirs.sort();
@@ -1465,7 +1469,8 @@ pub fn spawn(
             d.put("runtime", json!(if bt.0.acp.is_some() { "shed-acp" } else { "shed" }));
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d.put("confirmed", json!(confirmed))
-                .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))));
+                .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))))
+                .put("by", json!(o.by));
             d.put("update", json!(o.update)).put("handover", json!(note));
             if let Some(pl) = &placed {
                 d.put("host", json!(pl.name))

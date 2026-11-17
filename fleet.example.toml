@@ -163,7 +163,9 @@ effort = "high"      # default for roles without `effort`; dsh accepts only "non
 # `deny_commands` replaces it (`[]` = off), its `deny_commands_add` extends it; see docs/lanes.md.
 fast_secs = 60       # `drover timer install`: the fast job (`drive --fast`: record verdicts, merge PASS + green)
 slow_secs = 300      # and the tick (check + the full pass that starts lanes)
-max_parallel_spawns = 6   # the pass launches each spawn as a detached kick, this many at once (0: spawn in the pass)
+max_parallel_spawns = 6   # the pass launches each spawn as a detached kick, this many at once on the main host (0: spawn in the pass)
+start_max = 2   # lanes starting at once on a remote host that sets no `start_max` of its own
+start_release = "started"   # a start frees its slot once its harness is up ("started") or its prompt is confirmed ("confirmed")
 spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or whose pid is gone) is stale
 # webhook_poll_minutes = 10   # #626: with GitHub webhooks on, the fast step's catch-up PR read runs this often
 # keychain_readers = 3   # #710: more Keychain readers waiting over 60 s alert `keychain-jammed` (troubleshooting §2)
@@ -179,6 +181,7 @@ spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or
 # slo_api_minutes = 10
 # slo_idle_minutes = 20   # #855: no lane working this long with spawnable work queued: `slo-idle`, a heal, then `stuck`
 # slo_tick_minutes = 10   # #855: a tick running longer: `slo-tick`; the next fast step stops it, then `stuck` if it lives
+# slo_pass_minutes = 30  # #1183: no slow drive pass of a fleet this long: the `Drive is stuck` card and one push
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin
