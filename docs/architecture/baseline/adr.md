@@ -19,7 +19,7 @@ previews, update rounds, `drover why`'s blame?
 - Every lane on a host is a worktree of one clone, `[fleet.<f>] local` (`crates/core/src/spawn.rs:651`); on the
   main host that clone is the owner's checkout. drover's own git runs in the same clone: the conflict preview's
   `merge-tree` (`crates/core/src/overlap.rs:28`), the pure-update check (`crates/core/src/overlap.rs:140`), the
-  update and premerge worktrees (`crates/core/src/drive.rs:2154`, `crates/core/src/gate.rs:640`).
+  update and premerge worktrees (`crates/core/src/land.rs:392`, `crates/core/src/gate.rs:640`).
 - `drover why` blames in the lane's own worktree (`crates/core/src/why.rs:412`) and then walks merges up to
   integration to find the issue.
 - PRs land with `gh pr merge --merge` (`crates/core/src/gate.rs:905`): integration has 1,474 merge commits in 2,867.

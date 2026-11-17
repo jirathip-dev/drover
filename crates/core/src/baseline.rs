@@ -121,6 +121,26 @@ pub fn view(r: &dyn Runner, f: &Fleet, wt: &Path, heads: &[&str]) -> View {
     }
 }
 
+/// A lane's `view` over its HEAD and saved `wip/` branch; a failure is logged `baseline-failed`.
+pub fn lane(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (fleet, issue, f): (&str, u64, &Fleet),
+    (agent, wt): (&str, &Path),
+    wip: Option<&str>,
+) -> Result<View> {
+    let saved = wip.map(|w| format!("origin/{w}"));
+    let heads: Vec<&str> = std::iter::once("HEAD").chain(saved.as_deref()).collect();
+    let v = view(r, f, wt, &heads);
+    if let View::Full(Why::Failed(why)) = &v {
+        let d = json!({"agent": agent, "worktree": wt, "why": why});
+        let e = Event::new(ctx.now, fleet, Some(issue), "baseline-failed", d);
+        emit(&ctx.state, cfg, e.passive())?;
+    }
+    Ok(v)
+}
+
 /// `drover baseline <fleet> [<sha>]`: resolve (default the integration tip), check it is on integration, write the key, log `baseline-set`.
 pub fn set(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str, sha: Option<&str>) -> Result<()> {
     let text = std::fs::read_to_string(&ctx.config)?;

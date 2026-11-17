@@ -1330,17 +1330,7 @@ pub fn spawn(
             ok(r, "git", &["-C", &wt, "reset", "--hard", &p.base])?;
             on.remove(&p.worktree.join("verdict.md")).ok();
         }
-        let saved = wip.as_ref().map(|w| format!("origin/{w}"));
-        let heads: Vec<&str> = std::iter::once("HEAD").chain(saved.as_deref()).collect();
-        history = crate::baseline::view(r, f, &p.worktree, &heads);
-        if let crate::baseline::View::Full(crate::baseline::Why::Failed(why)) = &history {
-            let d = json!({"agent": p.agent, "worktree": wt, "why": why});
-            emit(
-                &ctx.state,
-                cfg,
-                Event::new(ctx.now, fleet, Some(issue), "baseline-failed", d).passive(),
-            )?;
-        }
+        history = crate::baseline::lane(ctx, cfg, r, (fleet, issue, f), (&p.agent, &p.worktree), wip.as_deref())?;
         if p.family == "rev" || crate::events::STAGES.contains(&p.family) {
             sha = ok(r, "git", &["-C", &wt, "rev-parse", "HEAD"])
                 .ok()
@@ -1450,9 +1440,7 @@ pub fn spawn(
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
-    if let Some(l) = history.line(&p.branch) {
-        pj.put("history", json!(l));
-    }
+    pj.put("history", json!(history.line(&p.branch)));
     bt.start(ctx, r, &pane, &labels, &wt, &acp)?;
     if bt.0.acp.is_none() {
         term::ok(r, &home(p.lane_cmd(&pane)))?;

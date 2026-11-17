@@ -41,8 +41,7 @@ enum Cmd {
         harness: Option<String>,
         #[arg(long, help = "Model name (ignored where the provider's profile owns the model)")]
         model: Option<String>,
-        #[arg(help = "Profile name (default fleet-<role>)")]
-        #[arg(long)]
+        #[arg(long, help = "Profile name (default fleet-<role>)")]
         profile: Option<String>,
         #[arg(help = "none | low | medium | high | xhigh")]
         #[arg(long)]
@@ -54,9 +53,7 @@ enum Cmd {
     Pause { fleet: String },
     #[command(about = "Resume a paused fleet")]
     Resume { fleet: String },
-    #[command(
-        about = "#1099: Owner only: lanes see history since <sha> (default the integration tip) by a local graft; writes `baseline` in fleet.toml"
-    )]
+    #[command(about = "#1099: Owner only: lanes see history since <sha> (default integration's tip) by a graft")]
     Baseline { fleet: String, sha: Option<String> },
     #[command(
         about = "Create worktree + shed terminal, write .brief.md, launch the role's harness, verify the prompt landed"
