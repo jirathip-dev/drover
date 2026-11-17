@@ -1,0 +1,7 @@
+Decided: fix round 3 is a merge of origin/staging only; the red sim hunt test came from the branch being 15 commits behind staging
+Because: crates/core/src/spawn.rs:998
+Decided: keep one aliased GraphQL query for exactly the tracked numbers
+Because: "one aliased GraphQL query for those numbers"
+Rejected: retuning the hunt test or the planted sabotage — staging's own seeds already hold once merged
+Check: seed 1003's sim trace at this head equals staging's except the closed-issue read line, and seeds 1000-1004 hold under the planted sabotage
+Owner: The failing check came from an out-of-date branch; after catching up with staging the simulator behaves exactly as before apart from the new GitHub query
