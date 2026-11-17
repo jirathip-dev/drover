@@ -397,6 +397,8 @@ pub struct Fleet {
     /// Optional caps on concurrent impl/fix and review lanes (CAP); unset = no cap.
     pub max_impl: Option<usize>,
     pub max_rev: Option<usize>,
+    /// A cap on the fleet's PRs in flight (`IN_FLIGHT_CAP`); unset = 8, `0` = off.
+    pub max_in_flight: Option<usize>,
     #[serde(default)]
     pub role: BTreeMap<String, Role>,
     /// Replace the global `[[notify]]` for this fleet's events; `notify_global` sends to both.
@@ -1564,6 +1566,10 @@ impl Config {
 }
 
 impl Fleet {
+    /// `max_in_flight`, unset 8; `None` when `0` turns it off.
+    pub fn in_flight_cap(&self) -> Option<usize> {
+        Some(self.max_in_flight.unwrap_or(8)).filter(|&n| n > 0)
+    }
     /// The fleet's pipeline (the built-in one unless fleet.toml has its own).
     pub fn flow(&self) -> &crate::pipeline::Pipeline {
         static NONE: crate::pipeline::Pipeline = crate::pipeline::Pipeline {

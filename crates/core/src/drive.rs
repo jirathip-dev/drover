@@ -365,7 +365,7 @@ fn launch(
     if let Some(held) = crate::starts::every_full(cfg, &live, me, start) {
         return crate::gate::refused("SPAWN_PENDING", held + &by().unwrap_or_default());
     }
-    crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
+    crate::spawn::lane_admit(ctx, (cfg, r), ev, (fleet, n, role), false)?;
     let skip = |h: &str| crate::starts::skip(ctx, (cfg, r), ev, (&all, &live), (me, start, n, role), h);
     let placed = crate::hosts::place(ctx, cfg, r, ev, (fleet, n, role), (None, &skip))?;
     if let Some((code, why)) = room(ctx, cfg, r) {

@@ -1999,7 +1999,7 @@ impl<'a> Server<'a> {
             if !lanes.is_empty() {
                 meta.push(format!("{} lane{}", lanes.len(), plural(lanes.len())));
             }
-            meta.extend(queue::serial_use(events, st, f, Some(cfg)));
+            meta.extend(queue::fleet_use(ctx, events, st, f, Some(cfg)));
             card.drive = drive(ctx, events, f, meta);
             if !fc.bad.is_empty() {
                 let n = fc.bad.len();
