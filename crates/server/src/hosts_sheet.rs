@@ -1,4 +1,5 @@
 use super::{working, Config, Ctx, Result, Server};
+use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Value};
 
@@ -96,7 +97,7 @@ impl Server<'_> {
     }
 
     pub(super) fn host_action(&self, ctx: &Ctx, name: &str, a: &Value) -> Result<Value> {
-        let s = |k: &str| a["values"][k].as_str().unwrap_or_default().to_string();
+        let s = |k: &str| a.at("values").at(k).as_str().unwrap_or_default().to_string();
         let line = self.form_op(ctx, name, &[("host", s("host")), ("to", s("to"))])?;
         let sh = self.hosts_sheet(ctx).context("no hosts")?;
         Ok(json!({"ops": [{"op": "screen", "screen": sh}], "toast": line}))
