@@ -277,6 +277,12 @@ export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
 type Att = { name: string; type: string; data: string };
 type Draft = { files: Att[]; picks: Blk; q?: number; st?: string; steer?: boolean; stopping?: boolean };
 const drafts = new Map<string, Draft>();
+const live = new WeakMap<Element, { b: Blk; c: Ctx; to: (b: Blk, c: Ctx) => void }>();
+const around = (keep: Element, before: Node[], after: Node[]) => {
+  [...(keep.parentNode?.childNodes ?? [])].forEach(n => { if (n !== keep) n.remove(); });
+  keep.before(...before);
+  keep.after(...after);
+};
 
 const read = (f: File) => new Promise<Att>(ok => {
   const r = new FileReader();
@@ -285,14 +291,16 @@ const read = (f: File) => new Promise<Att>(ok => {
 });
 
 function composer(b: Blk, c: Ctx): HTMLElement {
-  const key = `draft:${c.screen}:${String(b.id)}:text`, acts = obj(b.acts), base = obj(b.values), act = (k: string) => String(acts[k] ?? '');
+  const key = `draft:${c.screen}:${String(b.id)}:text`, act = (k: string) => String(obj(b.acts)[k] ?? '');
   const d: Draft = drafts.get(key) ?? { files: [], picks: {} };
   drafts.set(key, d);
   if (!b.working) d.stopping = d.steer = false;
   const f = el('div', 'cmp');
   f.dataset.id = String(b.id ?? '');
-  const ta = el('textarea');
-  Object.assign(ta, { name: 'text', rows: 1, value: get(key) ?? '', placeholder: String(b.placeholder ?? '') });
+  const ta = el('textarea'), row = el('div', 'cr');
+  Object.assign(ta, { name: 'text', rows: 1, value: get(key) ?? '' });
+  row.append(ta);
+  f.append(row);
   const grow = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
   ta.oninput = () => { put(key, ta.value || null); d.st = d.st === 'sent' ? '' : d.st; grow(); };
   ta.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } };
@@ -304,7 +312,7 @@ function composer(b: Blk, c: Ctx): HTMLElement {
     d.st = '';
     draw();
   };
-  const post = async (action: string, values: Blk, x?: HTMLElement) => c.act({ action, block: b.id, values: { ...base, ...values } }, x);
+  const post = async (action: string, values: Blk, x?: HTMLElement) => c.act({ action, block: b.id, values: { ...obj(b.values), ...values } }, x);
   const send = async (steer = false) => {
     if (!ta.value.trim() && !d.files.length) return;
     const queue = !steer && (b.working || d.q != null) ? act('queue') : '', action = steer ? act('steer') : queue || String(b.action);
@@ -321,6 +329,7 @@ function composer(b: Blk, c: Ctx): HTMLElement {
     draw();
   };
   function draw() {
+    ta.placeholder = String(b.placeholder ?? '');
     const top: HTMLElement[] = [];
     if (b.working) {
       const p = el('div', 'pill');
@@ -369,7 +378,7 @@ function composer(b: Blk, c: Ctx): HTMLElement {
       }
       top.push(s);
     }
-    const row = el('div', 'cr'), add = btn('+'), go = btn(d.q != null ? 'save' : b.working ? 'queue' : String(b.label ?? ''), 'primary');
+    const add = btn('+'), go = btn(d.q != null ? 'save' : b.working ? 'queue' : String(b.label ?? ''), 'primary');
     add.setAttribute('aria-label', 'attach');
     add.onclick = () => pick.click();
     let held = false, hold = 0;
@@ -378,12 +387,9 @@ function composer(b: Blk, c: Ctx): HTMLElement {
     go.oncontextmenu = e => e.preventDefault();
     go.onclick = () => { if (!held) send(); held = false; };
     if (d.st === 'sending') go.setAttribute('aria-busy', 'true');
-    row.append(add, pick, ta, go);
-    if (d.steer) {
-      const st = btn('steer');
-      st.onclick = () => send(true);
-      row.append(st);
-    }
+    const st = btn('steer');
+    st.onclick = () => send(true);
+    around(ta, [add, pick], d.steer ? [go, st] : [go]);
     const chips = blks(b.chips).map(ch => {
       const s = el('div', 'chips'), n = String(ch.name);
       const cur = String(d.picks[n] ?? ch.cur ?? '');
@@ -395,8 +401,9 @@ function composer(b: Blk, c: Ctx): HTMLElement {
       }
       return s;
     });
-    f.replaceChildren(...top, row, ...chips);
+    around(row, top, chips);
   }
+  live.set(f, { b, c, to: (nb, nc) => { [b, c] = [nb, nc]; draw(); } });
   draw();
   setTimeout(grow);
   return f;
@@ -512,7 +519,11 @@ function same(a: Node, b: Node, trust: boolean): Node {
     if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
     return a;
   }
-  const da = drawn.get(a), db = drawn.get(b);
+  const da = drawn.get(a), db = drawn.get(b), la = live.get(a), lb = live.get(b);
+  if (la && lb && da?.key !== db?.key) {
+    la.to(lb.b, lb.c);
+    return a;
+  }
   if (da || db) {
     if (!da || !db || (!db.box && da.key !== db.key)) return b;
     trust = da.key === db.key;

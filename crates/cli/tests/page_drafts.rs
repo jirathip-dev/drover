@@ -171,5 +171,8 @@ fn a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_c
         out["after"], typed,
         "a turn starting and a reply arriving keep the composer, its focus, caret and text: {out}"
     );
-    assert_eq!(out["typed"], "half! thought", "the next key lands in the composer: {out}");
+    assert_eq!(
+        out["typed"], "half! thought",
+        "the next key lands in the composer: {out}"
+    );
 }
