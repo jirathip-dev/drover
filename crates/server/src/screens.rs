@@ -11,6 +11,9 @@ use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Duration;
 
+#[path = "later.rs"]
+mod later;
+
 const MANIFEST: &str = include_str!("../../../cooee-plugin.toml");
 static STREAMS: AtomicUsize = AtomicUsize::new(0);
 type Res = (&'static str, &'static str, Vec<u8>);
@@ -1582,34 +1585,6 @@ impl Server<'_> {
             "actions": [{"icon": "more", "label": "More", "menu": menu}], "blocks": blocks})
     }
 
-    fn chat_cards(&self, ctx: &Ctx) -> Value {
-        let tab = self.needs_tab(ctx, true);
-        let ev = working(&ctx.state).unwrap_or_default();
-        let mut cards = run_cards(ctx.now, &ev);
-        cards.extend(tab.config.as_ref().map(|e| {
-            json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
-                "title": "fleet.toml is invalid", "blocks": [{"type": "text", "id": "config-why", "markdown": e}]})
-        }));
-        cards.extend(super::v1::slo_open(&ev).map(|e| {
-            json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
-                "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
-        }));
-        cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|(f, es)| {
-            let mut md: Vec<String> = es.iter().map(|e| format!("- {}", crate::events::plain(e))).collect();
-            md.push(format!("`drover waiting {f}`"));
-            let mut buttons = vec![json!({"type": "button", "id": format!("stuck-drive-{f}"), "label": "Drive now", "action": "drive-all"})];
-            buttons.extend(es.iter().filter_map(|e| e.issue).map(|n| {
-                json!({"type": "button", "id": format!("stuck-force-{f}-{n}"), "label": format!("Force #{n}"), "action": "force", "values": {"fleet": f, "issue": n}})
-            }));
-            json!({"type": "card", "id": format!("stuck-{f}"), "kind": "alert", "tone": "warn",
-                "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": md.join("\n")}],
-                "buttons": buttons})
-        }));
-        cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
-        cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
-        Value::Array(cards)
-    }
-
     pub(super) fn plugin(ctx: &Ctx, head: &str) -> bool {
         let file = std::fs::read_to_string(ctx.config.with_file_name("cooee-token")).unwrap_or_default();
         let bearer = header(head, "authorization")
@@ -1656,7 +1631,16 @@ impl Server<'_> {
                         format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
                     return line("403 Forbidden", &why);
                 }
-                match self.action(ctx, name, &a) {
+                let by = match auth {
+                    Ok(d) if !plugin => d.label.clone(),
+                    _ => "cooee".into(),
+                };
+                let res = if name == "later" {
+                    self.hide_card(ctx, &by, a.at("values"))
+                } else {
+                    self.action(ctx, name, &a)
+                };
+                match res {
                     Ok(v) => out("200 OK", &v),
                     Err(e) if e.downcast_ref::<Refusal>().is_some() => line("409 Conflict", &shown(&e)),
                     Err(e) => line("400 Bad Request", &shown(&e)),
