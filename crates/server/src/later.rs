@@ -114,6 +114,12 @@ impl Server<'_> {
     fn owner_cards(&self, ctx: &Ctx, ev: &crate::events::Log, paired: bool) -> Vec<Owned> {
         let tab = self.needs_tab(ctx, true);
         let mut cards = run_cards(ctx.now, ev);
+        cards.retain(|c| {
+            !self.flying(&[
+                ("op", "card"),
+                ("id", c["id"].as_str().unwrap_or_default().trim_start_matches("run-")),
+            ])
+        });
         cards.extend(super::super::chat::owner_cards(ctx, ev, paired));
         cards.extend(tab.config.as_ref().map(|e| {
             json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
@@ -150,12 +156,21 @@ impl Server<'_> {
                 rows,
             }
         }));
-        let asks = tab.asks.iter().map(|a| {
-            let at = a.ask.issue.map(|n| (a.ask.fleet.as_str(), n));
-            Owned::of(ctx, ev, ask_card(ctx.now, ask_minutes(ctx), a), at)
-        });
+        let asks = (tab.asks.iter())
+            .filter(|a| !self.flying(&[("op", "answer"), ("fleet", &a.ask.fleet), ("id", &a.ask.id)]))
+            .map(|a| {
+                let at = a.ask.issue.map(|n| (a.ask.fleet.as_str(), n));
+                Owned::of(ctx, ev, ask_card(ctx.now, ask_minutes(ctx), a), at)
+            });
         out.extend(asks.collect::<Vec<_>>());
-        let needs = (tab.issues.iter()).map(|i| Owned::of(ctx, ev, needs_card(i, ev), Some((&i.fleet, i.issue))));
+        let needs = (tab.issues.iter())
+            .filter(|i| {
+                let n = i.issue.to_string();
+                !["extend", "override", "park"]
+                    .iter()
+                    .any(|op| self.flying(&[("op", op), ("fleet", &i.fleet), ("issue", &n)]))
+            })
+            .map(|i| Owned::of(ctx, ev, needs_card(i, ev), Some((&i.fleet, i.issue))));
         out.extend(needs.collect::<Vec<_>>());
         out
     }
@@ -179,4 +194,14 @@ impl Server<'_> {
         }
         Ok(json!({"ops": [{"op": "remove", "id": id}], "toast": format!("{id}: later, back when it changes")}))
     }
+}
+
+pub(super) fn gone_ops(name: &str, block: &str, fleet: &str, issue: &str) -> Vec<Value> {
+    let gone = match name {
+        "answer" => format!("ask-{block}"),
+        "needs-human" => format!("nhc-{fleet}-{issue}"),
+        "run-card" => format!("run-{block}"),
+        _ => return vec![],
+    };
+    vec![json!({"op": "remove", "id": gone})]
 }

@@ -1850,10 +1850,7 @@ impl Server<'_> {
         };
         let close = ["save-fleets", "remove-fleet", "kill", "clean", "close", "queue"].contains(&name)
             || name == "answer" && a["screen"] != "cards";
-        let ops: Vec<Value> = (name == "answer")
-            .then(|| json!({"op": "remove", "id": format!("ask-{block}")}))
-            .into_iter()
-            .collect();
+        let ops = later::gone_ops(name, block, &s("fleet"), &s("issue"));
         Ok(json!({"ops": ops, "toast": toast, "close": close}))
     }
 

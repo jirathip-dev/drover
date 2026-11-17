@@ -50,6 +50,11 @@ fn host_wait(reason: &str) -> bool {
 }
 
 impl Server<'_> {
+    pub(super) fn flying(&self, kv: &[(&str, &str)]) -> bool {
+        let k = key(&kv.iter().map(|(a, b)| ((*a).into(), (*b).into())).collect());
+        lock(&self.tapped).0.values().any(|(x, j)| *x == k && !ended(j))
+    }
+
     pub(super) fn tap(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Option<Result<Job>> {
         let op = f.get("op").map_or("", String::as_str);
         let tx = self.jobs.as_ref().filter(|_| OPS.contains(&op))?;
