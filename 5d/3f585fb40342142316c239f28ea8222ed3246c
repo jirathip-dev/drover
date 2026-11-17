@@ -1,0 +1,11 @@
+Decided: compact::SAVED is the one (record kind, field) list moves() remaps through; sha-named fields left alone sit in KEPT with why.
+Because: "Compact remaps through one list of every place drover saves a commit SHA"
+Decided: the guard scans crates/*/src for json keys `sha` or `*_sha` and fails on any key in neither list; a planted `base_sha` proves it.
+Rejected: a record-kind scan from source — kinds are often set apart from the json! literal, so it would be guesswork.
+Decided: main moves only through `drover compact <fleet> --main --push <tip>`, its own card, after the line's card (the archive holds main's old tip).
+Because: q1810
+Decided: main that would be deleted aborts the cut with COMPACT_TREE before any push; its tree is checked with the other new tips.
+Because: "Main's new tip tree must equal its old tip tree, else abort before any push"
+Rejected: dispatching on which tip --push names — main and the line can share a new tip, so the card commands would collide.
+Check: crates/cli/tests/compact.rs runs the line card, then main's (refused under the line's card), both undo cards, and refs come back exactly.
+Owner: compact now also rewrites main, but only through a second card you approve on its own; CI fails a change that stores a new commit id compact does not know.
