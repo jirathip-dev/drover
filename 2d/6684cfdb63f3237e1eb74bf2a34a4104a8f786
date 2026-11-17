@@ -1,0 +1,6 @@
+Decided: re-pin the sim golden metrics; the 3 s shift of issue 202's merge is correct behaviour, not a bug
+Because: crates/core/src/drive.rs:1288
+Because: "If the new timing is correct behaviour (from #951), re-pin the golden metrics"
+Rejected: changing drive or the sim model — reverting only #954's done-issue filter restores the old numbers, so no code is wrong
+Check: only to_merge[1], idle and their two summary values moved; spawns, rounds, merges and lock wait did not
+Owner: Staging's red test was two speed-ups meeting; the expected numbers are updated, nothing in drover changes.
