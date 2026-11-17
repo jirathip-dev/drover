@@ -1,0 +1,7 @@
+Decided: lane-state, pulse and exits come only from the terminal on the host its latest spawn names
+Because: "A lane's state comes only from the terminal on the host its latest spawn names"
+Decided: an exited same-name terminal on another host is removed with shed rm when a sweep lists it; a running one is left
+Because: "It never removes a running one; two running copies stay a `lane-dup`"
+Rejected: a flip-back guard in stamp — other-host rows no longer reach stamp, and on old rows with no host it could leave a running lane stuck at gone
+Check: crates/cli/tests/lane_host_move.rs fails at a55e819a and passes at head
+Owner: a moved lane stops flipping gone/working every pass, and its finished copy on the old host is removed
