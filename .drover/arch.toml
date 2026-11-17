@@ -42,16 +42,7 @@ glob = "*.toml"
 
 [comments]
 policy = "strict"
-except = [
-    "assets/types/**",
-    "web/dist/**",
-    "web/src/**",
-    "web/lint-fixtures/**",
-    "crates/server/src/serve.rs",
-    "crates/server/src/serve/chat.rs",
-    "crates/server/src/serve/fresh.rs",
-    "crates/server/src/serve/slo.rs",
-]
+except = ["assets/types/**", "web/dist/**", "web/lint-fixtures/**"]
 
 [docs]
 paths = ["docs/**/*.md", "README.md"]

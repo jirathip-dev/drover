@@ -12,7 +12,7 @@ pub fn civil_month_day(days: u64) -> (u64, u64) {
     ((mp + 2) % 12 + 1, doy - (153 * mp + 2) / 5 + 1)
 }
 
-/// #343: the year of a day number since 1970-01-01 (as `civil_month_day`).
+/// The year of a day number since 1970-01-01 (as `civil_month_day`).
 pub fn civil_year(days: u64) -> u64 {
     let (z, (m, _)) = (days + 719_468, civil_month_day(days));
     let doe = z % 146_097;

@@ -44,7 +44,7 @@ pub fn branch_of(st: Option<&IssueState>, issue: u64) -> String {
         .unwrap_or_else(|| format!("issue-{issue}"))
 }
 
-/// #418: each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call. The `NO_PROOF` text naming each one that doesn't.
+/// Each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call. The `NO_PROOF` text naming each one that doesn't.
 pub fn no_proof(body: &str) -> Option<String> {
     let proofless =
         |(b, ls): (bool, Vec<&str>)| Some(format!("`{}` ({})", ls.first()?.trim(), unproven(&ls).filter(|_| b)?));
@@ -261,7 +261,7 @@ fn passed(events: &[Event], s: &IssueState, head: &str) -> bool {
     }
 }
 
-/// #150: keep the fleet's `merge_label` on the open PR exactly while a PASS stands at its head: add it once (`labelled`), take it off a head that moved past the PASS (`unlabelled`), so a stale PASS never starts the full run.
+/// Keep the fleet's `merge_label` on the open PR exactly while a PASS stands at its head: add it once (`labelled`), take it off a head that moved past the PASS (`unlabelled`), so a stale PASS never starts the full run.
 pub fn sync_label(
     ctx: &Ctx,
     cfg: &Config,
@@ -295,7 +295,7 @@ pub fn sync_label(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))
 }
 
-/// #839: a draft PR with a PASS at its head is marked ready for review (its full CI starts); true while it is a draft.
+/// A draft PR with a PASS at its head is marked ready for review (its full CI starts); true while it is a draft.
 pub fn ready_draft(
     ctx: &Ctx,
     cfg: &Config,
@@ -338,7 +338,7 @@ pub fn ci_green(rollup: &Value, required: &[String]) -> Result<(), String> {
     gh::not_green(&gh::required(rollup, required)).map_or(Ok(()), |m| Err(format!("{prefix}{m}")))
 }
 
-/// #228: every blocking finding (a `blocking` line, not `non-blocking`) is tagged `blocking [<category>]` with one of `cats`; at least one blocker.
+/// Every blocking finding (a `blocking` line, not `non-blocking`) is tagged `blocking [<category>]` with one of `cats`; at least one blocker.
 #[doc(hidden)]
 pub fn form_only(body: &str, cats: &[String]) -> bool {
     let blockers: Vec<String> = findings(body)
@@ -488,7 +488,7 @@ fn tests_changed(diff: &str) -> Option<String> {
     (minus != plus).then(|| files.join(", "))
 }
 
-/// #420: a verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next heading outside a fence.
+/// A verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next heading outside a fence.
 pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
     let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
     let ls: Vec<&str> = body.lines().collect();
@@ -520,7 +520,7 @@ fn unverified(events: &[Event], (fleet, n): (&str, u64), head: &str) -> bool {
         && !here.any(|e| e.str("stage") == Some("verify") && e.str("verdict") == Some("PASS"))
 }
 
-/// #309: a check stage's rounds (unset: no limit) plus the owner's extends, worded `/3` or ` of 9+1 (owner extended)`.
+/// A check stage's rounds (unset: no limit) plus the owner's extends, worded `/3` or ` of 9+1 (owner extended)`.
 pub fn limit(f: &Fleet, stage: &str, st: Option<&IssueState>) -> (u32, String) {
     let base = f.flow().get(stage).and_then(|s| s.rounds).unwrap_or(u32::MAX);
     match st.map_or((0, base), |s| (s.extra, base.saturating_add(s.extra).max(s.granted))) {
@@ -529,7 +529,7 @@ pub fn limit(f: &Fleet, stage: &str, st: Option<&IssueState>) -> (u32, String) {
     }
 }
 
-/// #650: the one rule for "verified enough to merge", shared by `gate`, drive and `waiting`: every check stage's last outcome at `head` is a PASS (a `verify-skipped`/`verify-no-recipe` there is verify's), within its rounds.
+/// The one rule for "verified enough to merge", shared by `gate`, drive and `waiting`: every check stage's last outcome at `head` is a PASS (a `verify-skipped`/`verify-no-recipe` there is verify's), within its rounds.
 pub fn verified(f: &Fleet, st: Option<&IssueState>, head: &str, over: bool) -> Result<(), Refusal> {
     let verdicts = st.map(|s| s.verdicts.as_slice()).unwrap_or_default();
     let at = |x: &&(String, String, String)| x.0.eq_ignore_ascii_case(head);
@@ -589,7 +589,7 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
     Ok(head)
 }
 
-/// #198: the merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines and a facts line. Returns (subject, body, whether the summary was there).
+/// The merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines and a facts line. Returns (subject, body, whether the summary was there).
 pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String, String, bool) {
     let title = pr["title"].as_str().unwrap_or_default().trim();
     let strip = |open: &str, close: char| {
@@ -760,7 +760,7 @@ pub(crate) fn unjoined(
         .collect())
 }
 
-/// `over` (`--owner-override`, #130) lifts only `ROUND_LIMIT`.
+/// `over` (`--owner-override`) lifts only `ROUND_LIMIT`.
 pub fn merge(
     ctx: &Ctx,
     cfg: &Config,
@@ -912,7 +912,7 @@ pub fn merge(
     merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
 }
 
-/// #509: this issue's merge action not yet `failed` and no `merged` logged after it; `merge` logs it, with its head.
+/// This issue's merge action not yet `failed` and no `merged` logged after it; `merge` logs it, with its head.
 pub fn unlogged_merge<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a Event> {
     let logged = |a: &Event| events.iter().any(|e| e.seq > a.seq && e.is("merged", fleet, issue));
     crate::action::last(events, fleet, issue, "merge").filter(|a| a.kind != "failed" && !logged(a))
@@ -1008,7 +1008,7 @@ fn merged(
     Ok(())
 }
 
-/// #130: a needs-human card's `override` / `extend` / `park`; #151: `drover extend|park` (`spawn: false` = `--no-spawn`). #712: `why` is `park --why`, stored on the `parked` event.
+/// A needs-human card's `override` / `extend` / `park`; `drover extend|park` (`spawn: false` = `--no-spawn`). `why` is `park --why`, stored on the `parked` event.
 pub fn needs_human(
     ctx: &Ctx,
     cfg: &Config,
@@ -1094,7 +1094,7 @@ pub fn park(
     Ok(writeln!(out, "#{n}: park")?)
 }
 
-/// #712: `drover unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
+/// `drover unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
 pub fn unpark(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, (fleet, n): (&str, u64), by: &str) -> Result<()> {
     let events = working(&ctx.state)?;
     let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(n);

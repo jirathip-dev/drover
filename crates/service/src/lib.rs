@@ -53,7 +53,7 @@ pub fn main(ctx: &Ctx, api: &str, board: Option<&str>) -> Result<()> {
     run(ctx.clone(), &Real, drover_core::now, api)
 }
 
-/// The service on `api` and the state dir's socket, until the process ends; #529: lane state from shed's stream.
+/// The service on `api` and the state dir's socket, until the process ends; lane state from shed's stream.
 pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::TcpListener) -> Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     rt.block_on(async move {

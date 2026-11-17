@@ -32,7 +32,7 @@ pub fn all(cfg: &Config) -> Vec<(String, String)> {
     v
 }
 
-/// #1101: write fleet `name`'s missing hygiene into its local clone (`[comments]`, `[docs]`, the first baseline); a row for each write.
+/// Write fleet `name`'s missing hygiene into its local clone (`[comments]`, `[docs]`, the first baseline); a row for each write.
 pub fn hygiene(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Vec<String> {
     let (Some(f), h) = (cfg.fleet.get(name), cfg.hygiene(name)) else {
         return vec![];
@@ -89,7 +89,7 @@ pub fn hygiene(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Vec<Strin
     rows
 }
 
-/// #830: the vendor of each setup in `all` that is a provider's login, by its name.
+/// The vendor of each setup in `all` that is a provider's login, by its name.
 pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
     let of = |(n, _): (String, String)| Some((n.clone(), crate::providers::get(&n).vendor()?.into()));
     all(cfg).into_iter().filter_map(of).collect()

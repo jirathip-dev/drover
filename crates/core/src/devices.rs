@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-/// #59: a `code` is a phone's open pairing request (from `ip`, 10 min from `created`): its cookie works once `serve approve` clears it.
+/// A `code` is a phone's open pairing request (from `ip`, 10 min from `created`): its cookie works once `serve approve` clears it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[serde(default)]
 pub struct Device {
@@ -52,7 +52,7 @@ pub(crate) fn tmp_name(p: &Path) -> PathBuf {
     ))
 }
 
-/// #342: hold across a devices.json load → change → store, so concurrent updates don't overwrite each other.
+/// Hold across a devices.json load → change → store, so concurrent updates don't overwrite each other.
 pub fn lock() -> MutexGuard<'static, ()> {
     static L: Mutex<()> = Mutex::new(());
     L.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -64,12 +64,12 @@ pub(crate) fn random(n: usize) -> Result<Vec<u8>> {
     Ok(b)
 }
 
-/// #344: the `devices` rows of the database.
+/// The `devices` rows of the database.
 pub fn load(ctx: &Ctx) -> Vec<Device> {
     crate::db::list(&ctx.state, "devices")
 }
 
-/// #122: a failed write logs `state-write-failed` (notified, path and error kind only), at most once an hour.
+/// A failed write logs `state-write-failed` (notified, path and error kind only), at most once an hour.
 pub fn store(ctx: &Ctx, d: &[Device]) -> Result<()> {
     let fresh = |e: &Event| e.kind == "state-write-failed" && e.ts + 3600 > ctx.now;
     let p = crate::db::file(&ctx.state);
@@ -92,7 +92,7 @@ pub fn pending(ctx: &Ctx) -> Vec<Device> {
         .collect()
 }
 
-/// A pairing request: (its code, unique among the open ones; the `hd=` token for the asking browser alone); None while 4 are open (#199: two phones behind one proxy), 2 from `ip`, or on a code clash.
+/// A pairing request: (its code, unique among the open ones; the `hd=` token for the asking browser alone); None while 4 are open (two phones behind one proxy), 2 from `ip`, or on a code clash.
 pub fn request(ctx: &Ctx, label: &str, ip: &str) -> Result<Option<(String, String)>> {
     let _g = lock();
     let (mut all, b, token) = (
@@ -168,7 +168,7 @@ fn token(cookie: &str) -> Option<String> {
     ))
 }
 
-/// #199: drop this browser's open pairing request (its `hd=` cookie), on a Pair re-tap or `[cancel]`; a paired device stays.
+/// Drop this browser's open pairing request (its `hd=` cookie), on a Pair re-tap or `[cancel]`; a paired device stays.
 pub fn cancel(ctx: &Ctx, cookie: &str) -> Result<()> {
     let _g = lock();
     let (Some(tok), mut all) = (token(cookie), load(ctx)) else {
@@ -183,12 +183,12 @@ pub fn cancel(ctx: &Ctx, cookie: &str) -> Result<()> {
 }
 
 pub const YEAR: u64 = 365 * 86_400;
-/// The paired (approved) device whose token the `Cookie` header carries (`hd=`), used within a `YEAR` (#288); marks it used at most hourly (#122).
+/// The paired (approved) device whose token the `Cookie` header carries (`hd=`), used within a `YEAR`; marks it used at most hourly.
 pub fn find(ctx: &Ctx, cookie: &str) -> Option<Device> {
     check(ctx, cookie).ok()
 }
 
-/// #501: `find`, else why not: `no cookie`, `unknown token`, `expired`, or `db error: <kind>` (no devices read).
+/// `find`, else why not: `no cookie`, `unknown token`, `expired`, or `db error: <kind>` (no devices read).
 pub fn check(ctx: &Ctx, cookie: &str) -> Result<Device, String> {
     let tok = token(cookie).ok_or("no cookie")?;
     let _g = lock();
@@ -207,7 +207,7 @@ pub fn check(ctx: &Ctx, cookie: &str) -> Result<Device, String> {
     Ok(all.swap_remove(i))
 }
 
-/// #501: one `serve.log` line per 401 or 503 the board answers: `auth <unix secs> <status> <method> <route>: <reason>` (the route without its query; never a token).
+/// One `serve.log` line per 401 or 503 the board answers: `auth <unix secs> <status> <method> <route>: <reason>` (the route without its query; never a token).
 pub fn denied(ctx: &Ctx, status: &str, method: &str, route: &str, why: &str) {
     let line = format!("auth {} {status} {method} {route}: {why}\n", ctx.now);
     let mut o = std::fs::OpenOptions::new();
@@ -219,7 +219,7 @@ pub fn denied(ctx: &Ctx, status: &str, method: &str, route: &str, why: &str) {
     f.and_then(|mut f| f.write_all(line.as_bytes())).ok();
 }
 
-/// #501: the board's (401, 503) answers in `serve.log` over the last 24 h.
+/// The board's (401, 503) answers in `serve.log` over the last 24 h.
 pub fn denials(ctx: &Ctx) -> (usize, usize) {
     let log = std::fs::read_to_string(ctx.state.with_file_name("serve.log")).unwrap_or_default();
     let codes: Vec<_> = (log.lines())

@@ -1,5 +1,3 @@
-// #927: a screen is JSON blocks (crates/server/src/screens.rs, the same cooee draws); its stream patches it in place
-// with ops: `screen` (all of it), `badge`, `merge` (fields into a block), `replace`, `remove`, `insert`.
 export type Blk = { [k: string]: unknown };
 export const isList = (v: unknown): v is unknown[] => Array.isArray(v);
 export const isBlk = (v: unknown): v is Blk => typeof v === 'object' && v !== null;

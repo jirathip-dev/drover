@@ -54,7 +54,7 @@ pub fn lanes() -> impl Iterator<Item = Entry> {
     on(Surface::Terminal)
 }
 
-/// #732: providers a role reaches only through its ACP `agent` (no terminal lane, not offered as a `harness`).
+/// Providers a role reaches only through its ACP `agent` (no terminal lane, not offered as a `harness`).
 pub fn acp_only() -> impl Iterator<Item = Entry> {
     on(Surface::Acp)
 }
@@ -64,27 +64,27 @@ pub fn lane_names() -> Vec<&'static str> {
     lanes().map(|p| p.name).collect()
 }
 
-/// #732: every provider name `get` knows, the lanes then the ACP-only ones.
+/// Every provider name `get` knows, the lanes then the ACP-only ones.
 pub fn known() -> impl Iterator<Item = &'static str> {
     lanes().chain(acp_only()).map(|p| p.name)
 }
 
-/// #732: ACP agent `id`'s model vendor, if known; a fleet's `rev` runs on another vendor than its `impl`.
+/// ACP agent `id`'s model vendor, if known; a fleet's `rev` runs on another vendor than its `impl`.
 pub fn vendor_of_agent(id: &str) -> Option<&'static str> {
     all().find(|p| p.acp() == Some(id)).and_then(|p| p.vendor())
 }
 
-/// #732: the provider whose adapter ACP agent `id` is (the one that guards it).
+/// The provider whose adapter ACP agent `id` is (the one that guards it).
 pub fn of_agent(id: &str) -> Option<&'static str> {
     known().find(|h| get(h).acp() == Some(id))
 }
 
-/// #198: the names an AI co-author trailer carries.
+/// The names an AI co-author trailer carries.
 pub fn brands() -> impl Iterator<Item = &'static str> {
     all().flat_map(|p| p.brands().iter().copied())
 }
 
-/// #637: the token proxy's provider: the first that has one.
+/// The token proxy's provider: the first that has one.
 pub fn proxied() -> Option<&'static Proxy> {
     all().find_map(|p| p.proxy())
 }
@@ -92,7 +92,7 @@ pub fn proxied() -> Option<&'static Proxy> {
 /// Effort levels a role may set (`effort = "…"`).
 pub const EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
 
-/// #637: what the token proxy needs from the provider it fronts.
+/// What the token proxy needs from the provider it fronts.
 pub struct Proxy {
     pub upstream: &'static str,
     pub base_url_env: &'static str,
@@ -119,14 +119,14 @@ impl Home {
     }
 }
 
-/// #782: what a harness needs in a lane sandbox: folders it reads, folders it writes, hosts it reaches.
+/// What a harness needs in a lane sandbox: folders it reads, folders it writes, hosts it reaches.
 pub struct Needs {
     pub read: Vec<PathBuf>,
     pub write: Vec<PathBuf>,
     pub hosts: Vec<&'static str>,
 }
 
-/// #782: the variable sandbox-runtime takes a sandboxed command's `TMPDIR` from.
+/// The variable sandbox-runtime takes a sandboxed command's `TMPDIR` from.
 pub const SANDBOX_TMP_ENV: &str = "CLAUDE_CODE_TMPDIR";
 
 /// A `drover doctor` row: passed, its mark when not, its text.
@@ -138,17 +138,17 @@ pub struct Dialect {
     pub input: &'static [&'static str],
     pub shell: &'static str,
     pub edits: &'static [&'static str],
-    /// #508: its `hook_event_name` before a tool call.
+    /// Its `hook_event_name` before a tool call.
     pub pre: &'static str,
     pub post: &'static str,
     pub stop: &'static str,
-    /// #298: its `hook_event_name` while it waits on a person (none: "").
+    /// Its `hook_event_name` while it waits on a person (none: "").
     pub blocked: &'static str,
     pub deny: fn(&str) -> Value,
-    /// #511: its `hook_event_name` when a prompt is submitted, and its answer that ends no turn but goes on with `reason` (none: "", `None`).
+    /// Its `hook_event_name` when a prompt is submitted, and its answer that ends no turn but goes on with `reason` (none: "", `None`).
     pub prompt: &'static str,
     pub again: Option<fn(&str) -> Value>,
-    /// #909: its answer that runs the tool call with this tool input instead (none: it can't).
+    /// Its answer that runs the tool call with this tool input instead (none: it can't).
     pub rewrite: Option<fn(Value) -> Value>,
 }
 
@@ -292,7 +292,7 @@ pub fn get(name: &str) -> &'static dyn Provider {
         .map_or(&Generic, |p| p.provider)
 }
 
-/// #565: a `shed-acp` runtime's default adapter: the first lane provider's that runs its hooks.
+/// A `shed-acp` runtime's default adapter: the first lane provider's that runs its hooks.
 pub fn default_acp() -> Option<&'static str> {
     lanes().find_map(|h| h.acp())
 }
@@ -306,17 +306,17 @@ fn real(path: &str) -> String {
     std::fs::canonicalize(path).map_or(path.into(), |p| p.to_string_lossy().into())
 }
 
-/// #737: the program of a drover hook command (`'<exe>' hook --role <r>`), any role; None for another hook.
+/// The program of a drover hook command (`'<exe>' hook --role <r>`), any role; None for another hook.
 pub fn hook_program(cmd: &str) -> Option<&str> {
     cmd.strip_prefix('\'')?.split_once("' hook --role ").map(|(exe, _)| exe)
 }
 
-/// #737: drover hook command `cmd` runs the running binary, through a symlink or not.
+/// Drover hook command `cmd` runs the running binary, through a symlink or not.
 pub fn runs_this(ctx: &Ctx, cmd: &str) -> bool {
     hook_program(cmd).is_some_and(|exe| real(exe) == real(&ctx.exe))
 }
 
-/// #737: hook command `cmd` is this binary's hook for `role`.
+/// Hook command `cmd` is this binary's hook for `role`.
 pub fn guards(ctx: &Ctx, cmd: &str, role: &str) -> bool {
     runs_this(ctx, cmd) && cmd.ends_with(&format!("' hook --role {role}"))
 }
