@@ -784,35 +784,56 @@ pub fn held_since(events: &[Event], machine: Option<&str>) -> u64 {
     events.iter().rfind(on).map_or(0, |e| e.ts)
 }
 
-/// #923: the alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`.
-pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>) -> Option<&'a str> {
-    let at = |kinds: &[&str]| {
-        events
-            .iter()
-            .rposition(|e| kinds.contains(&e.kind.as_str()) && e.str("machine") == machine)
+/// #923: the alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`; #1212: a proxy lane's sign-out once its retry window passed with no proxy call through since.
+pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>, (now, retry): (u64, u64)) -> Option<&'a str> {
+    let mine = |e: &Event| e.str("machine") == machine;
+    let from = events
+        .iter()
+        .rposition(|e| e.kind == "host-on" && mine(e))
+        .map_or(0, |i| i + 1);
+    let retried = |e: &Event| {
+        e.val("proxy").as_bool() == Some(true) && (now < e.ts + retry || proxy_ok(events, e.str("agent")) >= Some(e.ts))
     };
-    let i = at(&["usage-limit", "signed-out"])?;
-    let e = events.get(i).filter(|_| at(&["host-on"]) < Some(i))?;
-    e.str("reason")
+    let hold = |e: &&Event| ["usage-limit", "signed-out"].contains(&e.kind.as_str()) && mine(e) && !retried(e);
+    events.iter().skip(from).rfind(hold)?.str("reason")
 }
 
-/// #923: the data of the alert that holds new lanes off spawn `sp`'s host because its lane `what` (keyed once per hold).
+/// #1212: when the token proxy last relayed a good answer to lane `agent` after it signed out.
+pub fn proxy_ok(events: &[Event], agent: Option<&str>) -> Option<u64> {
+    events
+        .iter()
+        .rfind(|e| e.kind == "proxy-ok" && e.str("agent") == agent)
+        .map(|e| e.ts)
+}
+
+/// #923: the data of the alert that holds new lanes off spawn `sp`'s host because its lane `what` (keyed once per hold); #1212: a proxy lane's names the proxy, keyed again after each proxy call through.
 pub fn hold_alert(events: &[Event], sp: &Event, what: &str) -> Value {
     let (host, m, lane) = (sp.str("host").unwrap_or("main"), sp.str("machine"), sp.str("agent"));
-    let key = format!("{host}:{}", held_since(events, m));
-    let login = crate::providers::get(sp.str("harness").unwrap_or_default()).login();
-    let login = login.unwrap_or("its CLI login");
+    let proxied = sp.val("proxy").as_bool() == Some(true);
+    let mut key = format!("{host}:{}", held_since(events, m));
+    let fix = if proxied {
+        key += &format!(":{}:{}", lane.unwrap_or_default(), proxy_ok(events, lane).unwrap_or(0));
+        let setup = crate::providers::proxied().map_or("", |p| p.setup);
+        format!("it signs in through the token proxy: check `[proxy] token-file` on the main host (`{setup}` makes a new one)")
+    } else {
+        let login = crate::providers::get(sp.str("harness").unwrap_or_default()).login();
+        format!("run `{}` there", login.unwrap_or("its CLI login"))
+    };
     let why = format!(
-        "{} lane {} {what} on {host}; new lanes there wait: run `{login}` there, then `drover hosts on {host}`",
+        "{} lane {} {what} on {host}; new lanes there wait: {fix}, then `drover hosts on {host}`",
         sp.str("role").unwrap_or_default(),
         lane.unwrap_or_default()
     );
-    json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why})
+    json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why, "proxy": proxied})
 }
 
 /// Admission on one host, in order `LOGIN_NEEDED`, `DISK_LOW`, `MEM_LOW`, `HOST_BUSY`: its sample and the first refusal.
 pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, String)>) {
-    if let Some(why) = login_hold(&working(&ctx.state).unwrap_or_default(), on.machine) {
+    if let Some(why) = login_hold(
+        &working(&ctx.state).unwrap_or_default(),
+        on.machine,
+        (ctx.now, cfg.limits.proxy_retry_secs),
+    ) {
         return (Host::default(), Some(("LOGIN_NEEDED", why.to_string())));
     }
     if let Some(why) = disk_low(ctx, cfg, on) {
@@ -1524,7 +1545,9 @@ pub fn toggle(ctx: &Ctx, out: &mut dyn Write, name: &str, on: bool, by: &str) ->
     let cfg = Config::parse(&text)?;
     let events = working(&ctx.state)?;
     let machine = match cfg.hosts.get(name) {
-        None if on && name == "main" && login_hold(&events, None).is_some() => None,
+        None if on && name == "main" && login_hold(&events, None, (ctx.now, cfg.limits.proxy_retry_secs)).is_some() => {
+            None
+        }
         None => bail!("no [hosts.{name}] in fleet.toml"),
         Some(h) if !on && h.machine.is_none() => return refused("MAIN_HOST", "main host: edit fleet.toml by hand"),
         Some(h) => {

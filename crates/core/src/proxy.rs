@@ -145,13 +145,27 @@ pub fn token(cfg: &Config) -> std::result::Result<String, String> {
     v.ok_or_else(|| format!("[proxy] token-file {} is missing or empty: {setup}", f.display()))
 }
 
-fn authorize(ctx: &Ctx, cfg: &Config, (key, now): (&str, u64)) -> std::result::Result<String, String> {
+fn authorize(ctx: &Ctx, cfg: &Config, (key, now): (&str, u64)) -> std::result::Result<(String, Key), String> {
     let (all, h) = (keys(ctx), sha(key));
-    let k = all.iter().find(|k| k.sha == h).ok_or("unknown lane key")?;
-    match state(now, &working(&ctx.state).unwrap_or_default(), k) {
-        "live" => token(cfg),
+    let k = all.into_iter().find(|k| k.sha == h).ok_or("unknown lane key")?;
+    match state(now, &working(&ctx.state).unwrap_or_default(), &k) {
+        "live" => Ok((token(cfg)?, k)),
         st => Err(format!("lane key {} {st}", k.id)),
     }
+}
+
+fn signed_in(ctx: &Ctx, cfg: &Config, k: &Key, now: u64) -> Result<()> {
+    let events = working(&ctx.state)?;
+    let out = events
+        .iter()
+        .rfind(|e| e.kind == "signed-out" && e.str("agent") == Some(&k.agent))
+        .map(|e| e.ts);
+    if out.is_none() || crate::hosts::proxy_ok(&events, Some(&k.agent)) >= out {
+        return Ok(());
+    }
+    let d = serde_json::json!({"agent": k.agent, "host": k.host});
+    let e = Event::new(now, &k.fleet, Some(k.issue), "proxy-ok", d).passive();
+    crate::events::emit(&ctx.state, cfg, e)
 }
 
 const DROP: [&str; 9] = [
@@ -230,7 +244,7 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         return reply(&mut c, 400, "bad request path");
     }
     let bearer = get("authorization").and_then(|a| a.strip_prefix("Bearer "));
-    let token = match authorize(ctx, cfg, (get("x-api-key").or(bearer).unwrap_or_default(), now)) {
+    let (token, key) = match authorize(ctx, cfg, (get("x-api-key").or(bearer).unwrap_or_default(), now)) {
         Ok(t) => t,
         Err(why) => return reply(&mut c, 401, &why),
     };
@@ -274,13 +288,14 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         .stream("curl", &argv(&["-sS", "-N", "-g", "--http1.1", "-K", "-"]), &conf)
         .and_then(|up| relay(&mut BufReader::new(up), &mut c));
     std::fs::remove_file(&tmp).ok();
-    if res.is_err() {
-        return reply(&mut c, 502, "upstream did not answer");
+    match res {
+        Ok(true) => signed_in(ctx, cfg, &key, now),
+        Ok(false) => Ok(()),
+        Err(_) => reply(&mut c, 502, "upstream did not answer"),
     }
-    Ok(())
 }
 
-fn relay(up: &mut impl BufRead, c: &mut TcpStream) -> Result<()> {
+fn relay(up: &mut impl BufRead, c: &mut TcpStream) -> Result<bool> {
     let (mut status, mut heads) = (String::new(), vec![]);
     loop {
         let mut l = String::new();
@@ -307,7 +322,7 @@ fn relay(up: &mut impl BufRead, c: &mut TcpStream) -> Result<()> {
     let mut buf = [0; 16384];
     loop {
         match up.read(&mut buf)? {
-            0 => return Ok(()),
+            0 => return Ok(status.starts_with('2')),
             n => c.write_all(buf.get(..n).unwrap_or_default())?,
         }
     }

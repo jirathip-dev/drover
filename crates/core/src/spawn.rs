@@ -1403,6 +1403,9 @@ pub fn spawn(
             };
             let mut d = lane_data(&p, &pane);
             d.put("runtime", json!(if bt.0.acp.is_some() { "shed-acp" } else { "shed" }));
+            if p.lane_key.is_some() {
+                d.put("proxy", json!(true));
+            }
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d.put("confirmed", json!(confirmed))
                 .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))));
