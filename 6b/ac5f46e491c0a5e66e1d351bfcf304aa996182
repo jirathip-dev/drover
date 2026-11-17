@@ -1,0 +1,11 @@
+Decided: the tick budget refuses remote calls only in the maintenance steps; check and drive always send to a host that answers
+Because: "The budget cuts maintenance (clean, trim, lesson, hotspots, compact) and repeat reads first, never the core drive steps of a remote host."
+Because: crates/core/src/hosts.rs:340
+Decided: no "run first next pass" queue: drive's remote work is never budget-skipped now, so nothing is left over to reorder
+Rejected: keep the cut and reorder remote work first in the next pass — more state, and the work still waits a whole pass
+Decided: a pass "skipped" hosts when Pass::late() is non-empty; a tick.skipped streak file alerts once at 2 passes running and clears on a clean pass
+Because: crates/core/src/timer.rs:377
+Decided: AC4 is met at the root: the budget no longer refuses drive's calls, so no false host-offline event and no stale row; waiting shows the lane's real next step
+Rejected: a "not sent: tick past its budget" waiting row — no issue step can be refused by the budget any more, so the row would be dead code
+Check: the old test at crates/cli/tests/offline_tick.rs:116 lost its "nothing goes to another host" assertion because the spec changed; it now asserts maintenance stays skipped
+Owner: a slow main host no longer leaves the remote hosts idle; maintenance still yields to the budget, and repeated host skips page you once
