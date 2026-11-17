@@ -22,6 +22,12 @@
       "ts": 900200
     }
   ],
+  "counts": {
+    "busy": 1,
+    "rate_limited": 0,
+    "waiting_approval": 0,
+    "waiting_owner": 0
+  },
   "fleets": [
     {
       "color": "g",
@@ -46,6 +52,7 @@
       "issue": 12,
       "model": null,
       "name": "sendmeter-impl-12",
+      "note": null,
       "role": "impl",
       "runtime": "shed",
       "shown": "working",

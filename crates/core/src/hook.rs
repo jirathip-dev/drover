@@ -47,6 +47,9 @@ pub struct Rules {
     /// #909: its fleet's heavy kinds under its host's slot limits (none: no heavy patterns).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heavy: Option<crate::heavy::Heavy>,
+    /// #1207: a `cap:` issue's lane, frozen at spawn from the main host's title cache.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cap_raise: bool,
 }
 
 impl Rules {
@@ -75,6 +78,7 @@ impl Rules {
             groups: cfg.orchestrator.groups().into_iter().map(String::from).collect(),
             reviewer: family == Some("rev") || role == "triage",
             builds: !matches!(role, "lesson" | "triage") && family == Some("impl"),
+            cap_raise: false,
         }
     }
 }
@@ -82,7 +86,16 @@ impl Rules {
 /// #592: lane spawn `sp` froze rules (a remote lane's) that fleet.toml now resolves otherwise: a respawn takes them.
 pub fn rules_stale(cfg: &Config, fleet: &str, sp: &crate::events::Event) -> bool {
     let (role, host) = (sp.str("role").unwrap_or_default(), sp.str("host").unwrap_or_default());
-    let now = serde_json::to_value(Rules::resolve(cfg, fleet, role, host)).ok();
+    let cap_raise = sp
+        .data
+        .get("rules")
+        .and_then(|r| r.get("cap_raise"))
+        .and_then(serde_json::Value::as_bool);
+    let now = Rules {
+        cap_raise: cap_raise.unwrap_or_default(),
+        ..Rules::resolve(cfg, fleet, role, host)
+    };
+    let now = serde_json::to_value(now).ok();
     sp.data.get("rules").is_some_and(|r| now.as_ref() != Some(r))
 }
 
@@ -674,6 +687,12 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if r.first() == Some(&"wip") && !r.contains(&"--dry-run") {
         return Some("REFUSED OWNER_ONLY: only the owner prunes wip branches (a run card), never a lane (#646)".into());
     }
+    if !orchestrator && r.first() == Some(&"compact") && !r.contains(&"--dry-run") {
+        return Some(
+            "REFUSED OWNER_ONLY: a lane runs only `drover compact … --dry-run`, never the compact itself (#1121)"
+                .into(),
+        );
+    }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `drover setup`, never a lane (#303)".into());
     }
@@ -687,6 +706,9 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
             "REFUSED OWNER_ONLY: `spawn --force` passes HOST_BUSY: the owner's or an orchestrator's, never a lane's (#908)"
                 .into(),
         );
+    }
+    if !orchestrator && r.first() == Some(&"limit") {
+        return Some("REFUSED OWNER_ONLY: only the owner picks for a rate-limited lane, never a lane (#983)".into());
     }
     if !orchestrator && r.first() == Some(&"card") {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator posts run cards (#538)".into());

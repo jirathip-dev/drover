@@ -89,6 +89,7 @@ impl Plan {
                 } => format!("{r} V {secs} {} {} {}", b(*pass), b(*proof), b(*heeds)),
                 Script::Die { secs } => format!("{r} D {secs}"),
                 Script::Hang => format!("{r} H"),
+                Script::Bad { secs, stale } => format!("{r} B {secs} {}", b(*stale)),
             });
         }
         out.join(" | ")
@@ -148,6 +149,10 @@ impl Plan {
                     },
                     "D" => Script::Die { secs: n(2)? },
                     "H" => Script::Hang,
+                    "B" => Script::Bad {
+                        secs: n(2)?,
+                        stale: f(3)?,
+                    },
                     _ => return None,
                 };
                 p.scripts.push((w.first()?.to_string(), s));

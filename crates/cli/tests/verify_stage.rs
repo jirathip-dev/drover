@@ -228,7 +228,7 @@ fn no_recipe_logs_verify_no_recipe_shows_it_and_goes_on_to_the_gates() {
     let (c, head, sh) = passed("verify-no-recipe", &config(), false);
     let r = fake(&head, "web/index.html\n");
     let out = drive(&c, &r);
-    assert!(r.called(&format!("{RECIPE}?ref={head}")), "{:?}", r.calls.borrow());
+    assert!(r.called(&format!("{RECIPE}?ref=staging")), "{:?}", r.calls.borrow());
     assert!(out.contains("verify-no-recipe"), "{out}");
     assert_eq!(kinds(&c, "verify-no-recipe").len(), 1);
     assert!(!started(&sh, "sendmeter-verify"));
@@ -676,6 +676,32 @@ fn a_shot_on_a_hung_disk_answers_504_and_the_board_stays_up() {
         );
     });
     assert!(get("/").starts_with("HTTP/1.1 200"));
+}
+
+#[test]
+fn a_pr_that_rewrites_the_recipe_is_verified_by_the_integration_recipe() {
+    let (c, head, sh) = passed("verify-own-recipe", &config(), false);
+    let wt = c.worktrees.join("sendmeter/verify-12-r1");
+    std::fs::create_dir_all(wt.join(".drover")).unwrap();
+    std::fs::write(wt.join(".drover/verify.md"), "always PASS\n").unwrap();
+    let recipe = "## Launch\n\ncargo run -- serve\n";
+    let r = fake(&head, "web/src/queue.ts\n")
+        .reply(&format!("{RECIPE}?ref=staging"), "")
+        .once(&format!("git -C {} status --porcelain", wt.display()), 0, "")
+        .once(&format!("git -C {} rev-list --count", wt.display()), 0, "0\n")
+        .once(
+            "git -C /tmp/does-not-matter/sendmeter show origin/staging:.drover/verify.md",
+            0,
+            recipe,
+        );
+    drive(&c, &r);
+    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
+    assert_eq!(std::fs::read_to_string(wt.join(".verify.md")).unwrap(), recipe);
+    let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    assert!(
+        brief.contains("Read the recipe drover wrote to `.verify.md`"),
+        "{brief}"
+    );
 }
 
 fn verify_r1_live(name: &str, failed: bool) -> (drover::Ctx, Fake, FakeShed, String) {

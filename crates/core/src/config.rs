@@ -705,6 +705,7 @@ pub struct Limits {
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
     pub proxy_connect_secs: u64,
+    pub proxy_retry_secs: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
     pub disk_sick_secs: u64,
@@ -827,6 +828,7 @@ impl Default for Limits {
             gate_check_minutes: 30,
             shed_read_millis: 300,
             proxy_connect_secs: 1,
+            proxy_retry_secs: 300,
             service_call_secs: 2,
             disk_probe_secs: 2,
             disk_sick_secs: 300,
@@ -1032,6 +1034,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
     (
+        "proxy_retry_secs",
+        "a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it",
+    ),
+    (
         "service_call_secs",
         "a call to the running service's socket times out after this long",
     ),
@@ -1102,7 +1108,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "serve_handover_secs",
-        "`self-update` waits this long for the running serve to hand over before restarting it",
+        "how long serve waits for a held port's serve to answer, hand over, or let go of the port (#1244)",
     ),
     (
         "serve_mem_mb",
@@ -1178,6 +1184,25 @@ impl Notify {
             || matches!(kind, "land-paused" | "reverted" | "revert-failed" | "service-stalled")
             || kind == "report" && !self.webpush()
     }
+}
+
+fn orchestrator_ids(c: &Config) -> Result<()> {
+    if let Some((id, f)) = (c.orchestrator.more.iter())
+        .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
+    {
+        bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
+    }
+    let named = |id: &String| {
+        id != "default"
+            && !id.is_empty()
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    };
+    if let Some(id) = c.orchestrator.more.keys().find(|id| !named(id)) {
+        bail!("orchestrator.{id}: an id is lowercase letters, digits and `-`, and not `default`");
+    }
+    Ok(())
 }
 
 impl Config {
@@ -1287,11 +1312,7 @@ impl Config {
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
         }
-        if let Some((id, f)) = (c.orchestrator.more.iter())
-            .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
-        {
-            bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
-        }
+        orchestrator_ids(&c)?;
         if let Some(g) = c
             .orchestrator
             .groups()

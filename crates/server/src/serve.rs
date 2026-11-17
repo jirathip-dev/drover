@@ -12,7 +12,7 @@ use crate::gate::{gate, refused, Refusal};
 use crate::handover::Handover;
 use crate::host::{self, Host};
 use crate::runner::{Out, Runner};
-use crate::snapshot::Snapshot;
+use crate::snapshot::{key_in, out, Snapshot};
 use crate::{devices, gh, lanes, queue, term, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::json;
@@ -28,6 +28,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+#[path = "cooee.rs"]
+mod cooee;
 mod fresh;
 mod jobs;
 #[path = "screens.rs"]
@@ -311,16 +313,17 @@ impl Runner for Memo<'_> {
         cache().insert(key, (t, out.clone()));
         Ok(crate::snapshot::out(out))
     }
-    /// #298: a call with stdin (`shed connect`, a file write) is never a cached read.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
+        self.run_for(prog, args, input, crate::runner::limit(prog, args))
+    }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
         }
         if self.4.ts > 0 && crate::snapshot::remote(prog) {
-            let read = self.4.reads.get(&crate::snapshot::key_in(prog, args, input));
-            return Ok(crate::snapshot::out(read.cloned().flatten()));
+            return Ok(out(self.4.reads.get(&key_in(prog, args, input)).cloned().flatten()));
         }
-        self.0.run_in(prog, args, input)
+        self.0.run_for(prog, args, input, limit)
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.0.shed()
@@ -628,7 +631,8 @@ fn names(name: &str, v: &str) -> bool {
 /// green = merged/PASS/ready/working, amber = queued/impl/review/fix/idle, red = blocked/dead/FAIL/needs you.
 pub fn tone(state: &str) -> &'static str {
     match state.split('(').next().unwrap_or_default() {
-        "merged" | "ready" | "PASS" | "working" | "done" | "ok" | "normal" => "g",
+        "merged" | "ready" | "PASS" | "working" | "running" | "done" | "ok" | "normal" => "g",
+        s if s.starts_with("waiting-") => "r",
         "blocked"
         | "needs-human"
         | "design-review"
@@ -763,8 +767,9 @@ pub fn act(role: &str, state: &str) -> &'static str {
     };
     match state.split('(').next().unwrap_or_default() {
         "blocked" | "dead" | "needs-human" | "⏸ waiting: decision" => "blocked",
+        s if s.starts_with("waiting-") => "blocked",
         "done" | "ready" | "merged" => "done",
-        "working" => busy(role),
+        "working" | "running" => busy(role),
         "fix" if role == "update" => "update",
         s @ ("impl" | "fix" | "review") => busy(s),
         _ => "idle",
@@ -1184,6 +1189,7 @@ impl<'a> Server<'a> {
         };
         let (status, ctype, body) = match (method, path) {
             (_, p) if p.starts_with("/api/") => self.api(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
+            (_, p) if p.starts_with("/cooee/") => self.cooee(ctx, head, (method, p), body),
             (_, p) if p.starts_with("/screens/") || p == "/action" => self.screens(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
@@ -1792,7 +1798,7 @@ impl<'a> Server<'a> {
         // #517: but one tied to an issue: its card is answerable here too.
         let asks = crate::events::open_asks(ev)
             .into_iter()
-            .filter(|a| a.str("thread").is_none() || a.issue.is_some() || crate::design::is_ask(a))
+            .filter(|a| asked_here(a))
             .map(|a| need_ask(ctx.now, mins, ev, a));
         NeedsTab {
             now: ctx.now,
@@ -1853,12 +1859,18 @@ impl<'a> Server<'a> {
             }
         };
         // #217: a failed extend's card is back; a recorded one with no lane yet is one muted line, no buttons.
-        let pend = |s: &IssueState| match s.last_event.as_str() {
-            "round-extended" if crate::waiting::unspawned(events, s) => Some(card(s, true)),
-            _ if s.state == "needs-human" || s.last_event == "extend-failed" => Some(card(s, false)),
-            _ => None,
-        };
-        st.values().filter_map(pend).collect()
+        st.values()
+            .filter_map(|s| pending(events, s).map(|p| card(s, p)))
+            .collect()
+    }
+
+    /// #1089: the needs-you cards' count (blocked lanes, asks, issues), as the old `[queue·N]` counted them.
+    pub(super) fn needs_count(&self, ctx: &Ctx, events: &crate::events::Log) -> usize {
+        let cfg = Config::kept(ctx).ok();
+        let all = cfg.and_then(|c| self.lanes(ctx.now, &c, events, &events.states));
+        let blocked = all.map_or(0, |l| l.iter().filter(|l| l.state.word() == "blocked").count());
+        let asks = crate::events::open_asks(events).into_iter().filter(|a| asked_here(a));
+        blocked + asks.count() + events.states.values().filter(|s| pending(events, s).is_some()).count()
     }
 
     /// A blocked lane's card: shed's note as its activity; paired, the last 6 masked lines of shed's text as they are.
@@ -2345,15 +2357,12 @@ impl<'a> Server<'a> {
             o(&l.port),
             a,
         ];
-        let busy = l
-            .note()
-            .filter(|_| l.state.is(crate::session::Status::Working))
-            .map(|n| LaneNow {
-                title: n.clone(),
-                w: None,
-                n: Some(n),
-                t: None,
-            });
+        let busy = l.note().filter(|_| l.state.busy()).map(|n| LaneNow {
+            title: n.clone(),
+            w: None,
+            n: Some(n),
+            t: None,
+        });
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
@@ -2394,7 +2403,7 @@ impl<'a> Server<'a> {
             pr: l.issue.zip(l.fleet.as_ref()).map(|(n, f)| pr_data(ctx, fc, f, n, s)),
             repo: fc.map(|c| c.repo.clone()),
             dead: l.state.word() == "dead",
-            blocked: (l.state.is(crate::session::Status::Blocked)).then(|| self.blocked(ctx, l, paired)),
+            blocked: l.state.blocked().then(|| self.blocked(ctx, l, paired)),
             unpark: l.fleet.clone().filter(|_| s.is_some_and(|s| s.state == "parked")),
         }
     }
@@ -3570,4 +3579,16 @@ fn pipe(fleet: &str, fc: &crate::config::Fleet, st: &States) -> serde_json::Valu
     json!({"fleet": fleet, "into": fc.integration, "builtin": p.builtin, "stages": stages, "bad": bad,
         "checks": checks, "required": fc.required_checks, "queued": count(&|s| s.state == "queued"),
         "parked": count(&|s| s.state == "needs-human")})
+}
+
+fn asked_here(a: &Event) -> bool {
+    a.str("thread").is_none() || a.issue.is_some() || crate::design::is_ask(a)
+}
+
+fn pending(events: &[Event], s: &IssueState) -> Option<bool> {
+    match s.last_event.as_str() {
+        "round-extended" if crate::waiting::unspawned(events, s) => Some(true),
+        _ if s.state == "needs-human" || s.last_event == "extend-failed" => Some(false),
+        _ => None,
+    }
 }

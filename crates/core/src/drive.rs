@@ -100,6 +100,7 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
         crate::db::leases(&ctx.state, "kick-"),
     ]
     .concat();
+    let ev = crate::events::working(&ctx.state).unwrap_or_default();
     for l in all {
         let name = l.key.clone();
         let spawn = name.strip_prefix("spawn-").and_then(|n| n.strip_suffix(".pending"));
@@ -107,7 +108,7 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
             continue;
         };
         let age = ctx.now.saturating_sub(l.at);
-        if holds(ctx, cfg, r, &l) {
+        if holds(ctx, cfg, r, &ev, &l) {
             live.push(name);
             continue;
         }
@@ -127,13 +128,17 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
     (live, stale)
 }
 
-fn holds(ctx: &Ctx, cfg: &Config, r: &dyn Runner, l: &crate::db::Lease) -> bool {
-    l.expires_at > ctx.now && ctx.now.saturating_sub(l.at) <= cfg.limits.spawn_pending_max_secs && !gone(r, l, ctx.now)
+fn holds(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], l: &crate::db::Lease) -> bool {
+    l.expires_at > ctx.now
+        && ctx.now.saturating_sub(l.at) <= cfg.limits.spawn_pending_max_secs
+        && !gone(r, l, ctx.now)
+        && !crate::starts::ended(ev, l)
 }
 
 fn starting(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<crate::db::Lease> {
+    let ev = crate::events::working(&ctx.state).unwrap_or_default();
     let mut v: Vec<_> = (crate::db::leases(&ctx.state, "spawn-").into_iter())
-        .filter(|l| l.key.ends_with(".pending") && holds(ctx, cfg, r, l))
+        .filter(|l| l.key.ends_with(".pending") && holds(ctx, cfg, r, &ev, l))
         .collect();
     v.sort_by_key(|l| l.at);
     v
@@ -760,7 +765,7 @@ pub fn drive(
     let live: Vec<&str> = (cfg.fleet.keys().map(String::as_str))
         .filter(|n| only.is_none_or(|o| o == *n))
         .collect();
-    let on = |n: &&str| cfg.fleet.get(*n).is_some_and(|f| !f.paused);
+    let on = |n: &&str| crate::compact::drives(ctx, cfg, r, n, out);
     let fleets: Vec<&str> = live.iter().copied().filter(on).collect();
     let events = (fast && first)
         .then(|| crate::events::working(&ctx.state).ok())
@@ -896,6 +901,13 @@ fn one(
             None => return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?),
         },
     };
+    if KICK.get().is_none() {
+        if let Err(e) =
+            working(&ctx.state).and_then(|ev| crate::check::closed_on_github((ctx, cfg, r, &mut *out), ev, Some(name)))
+        {
+            writeln!(out, "{name} closed issues: {e:#}")?;
+        }
+    }
     ACTS.with_borrow_mut(BTreeMap::clear);
     ROOM.set((false, None));
     let t = crate::clock::instant();
@@ -1111,6 +1123,7 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
             stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), (&lane, None), "LANE_SILENT", &why)?,
         }
     }
+    crate::limit::due(ctx, r, out, &ev, agents, fleet)?;
     let reviews = fold(&ev)
         .into_values()
         .filter(|s| s.fleet == fleet && s.state.starts_with("review"));
@@ -1200,11 +1213,8 @@ fn pass(
         let mut episode = ev.iter().rev().take_while(|e| !e.is("held", fleet, s.issue));
         if outlived && !episode.any(|e| e.is("hold-stale", fleet, s.issue)) {
             let d = json!({"on": on, "merged_at": at});
-            emit(
-                &ctx.state,
-                cfg,
-                Event::new(ctx.now, fleet, Some(s.issue), "hold-stale", d),
-            )?;
+            let e = Event::new(ctx.now, fleet, Some(s.issue), "hold-stale", d);
+            emit(&ctx.state, cfg, e)?;
         }
         let Some((role, lane)) = s.active_lane() else {
             let e = Event::new(ctx.now, fleet, Some(s.issue), "released", json!({"on": on}));
@@ -1250,7 +1260,7 @@ fn pass(
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
     waits.retain(one);
     crate::promise::pass(ctx, cfg, fleet, &events, &waits)?;
-    external(ctx, cfg, r, out, fleet)?;
+    external(ctx, cfg, out, fleet)?;
     ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {
         if let Err(e) = crate::land::watch(ctx, cfg, r, out, fleet) {
@@ -1354,7 +1364,9 @@ fn pass(
             let ends =
                 gone.filter(|g| (w.next_cmd.is_none() || g.1.starts_with("respawning")) && !waiting::resumed(g.0));
             if let Some(g) = ends.filter(|_| !fast) {
-                if crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, g.0)? {
+                if crate::breaker::unlanded(ctx, cfg, r, out, fleet)?
+                    || crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, g.0)?
+                {
                     continue;
                 }
             }
@@ -1485,7 +1497,10 @@ fn pass(
                 &a,
                 stall::Act::Respawn(_, "failed start") | stall::Act::Escalate("START_FAILED", _)
             );
-            if start && crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, "no output after its spawn")? {
+            if start
+                && (crate::breaker::unlanded(ctx, cfg, r, out, fleet)?
+                    || crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, "no output after its spawn")?)
+            {
                 continue;
             }
             match a {
@@ -1825,7 +1840,7 @@ fn no_change(
     Ok(true)
 }
 
-fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+fn external(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let events = working(&ctx.state)?;
     for s in fold(&events)
         .into_values()
@@ -1835,14 +1850,12 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         let num = pr.at("number").to_string();
         let seen = |e: &Event| e.is("blocked", fleet, s.issue) && e.str("pr") == Some(&num);
         let back = |e: &Event| e.issue == Some(s.issue) && e.fleet == fleet && e.str("landed_pr") == Some(&num);
-        let closed = || gh::closed(ctx, r, cfg.fleet(fleet)?, fleet, ctx.now).map(|c| c.contains(&s.issue));
         let (kind, mut d) = match pr.at("state").as_str() {
             Some("MERGED") if crate::gate::unlogged_merge(&events, fleet, s.issue).is_some() => continue,
             Some("MERGED") if !events.iter().any(back) => {
                 let m = json!({"into": pr.at("baseRefName"), "merge_sha": pr.at("mergeCommit").at("oid"), "merged_at": pr.at("mergedAt")});
                 ("merged", m)
             }
-            Some("CLOSED") if closed()? => ("closed", json!({})),
             Some("CLOSED") if !events.iter().any(seen) => (
                 "blocked",
                 json!({"code": "PR_CLOSED", "reason": "PR closed outside drover"}),
