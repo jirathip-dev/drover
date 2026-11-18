@@ -59,7 +59,94 @@ shed --version
 ```
 
 Then install drover from its latest release: [releases](releases.md#a-manual-install). Check it worked: open a new
-shell and run `drover --version`. After that the self-update job keeps it current ([releases](releases.md)).
+shell and run `drover --version`. After that the self-update job keeps it current on every host
+([releases](releases.md)). drover's macOS build is Developer ID signed and notarized in CI; nothing signs it locally.
+
+## 2. Config
+
+One repo as fleet `app`, three roles. Save it as `~/.config/drover/fleet.toml`:
+
+```toml
+models = ["opus", "sonnet"]
+
+[fleet.app]
+repo = "<owner>/<repo>"
+local = "~/src/<repo>"
+integration = "staging"                      # merge target; main never is
+required_checks = ["test"]                   # gate on these checks only; unset = all
+merge_label = "merge-ready"                  # the full CI runs only with this label; drover adds it on a PASS at the head
+
+[[fleet.app.serial]]                         # one-at-a-time paths (docs/config.md); any number of groups
+name = "db"                                  # its Queue mark, 🔒db; ≤ 8 characters
+paths = ["db/migrations/**"]
+max = 1                                      # issues in flight at once; default 1
+
+[fleet.app.role.impl]
+harness = "claude"
+profile = "lane-impl"
+model = "opus"
+effort = "high"                              # none | low | medium | high | xhigh
+mcp = ["<dev-server>"]                       # servers from the repo's .mcp.json; default none
+
+[fleet.app.role.rev]
+harness = "claude"
+profile = "lane-rev"
+model = "sonnet"
+```
+
+Then write the per-role folders and the lane hook:
+
+```sh
+drover profiles sync
+```
+
+Check it worked: `drover status` prints no error. Every other key is in
+[fleet.example.toml](../fleet.example.toml). Lanes run on the host's own CLI login (`claude /login`), and secrets live in
+0600 files, never in fleet.toml: see [accounts.md](accounts.md) and [providers.md](providers.md).
+
+`merge_label` goes with the affected-only CI recipe in [ci.md](ci.md): pull requests run only the checks the change
+can affect, and the full run starts when drover adds the label. `drover setup` creates the label in the repo.
+
+## 3. First lane
+
+```sh
+drover queue app add 12
+drover drive app
+drover status
+```
+
+`drover drive` starts the queue's issues and moves each lane on; the watchdog ([4](#4-watchdog))
+runs it every 5 minutes. Check it worked:
+`drover status` shows #12 moving past `queued`, and `drover board` shows its lane.
+
+## 4. Watchdog
+
+One command, safe to run again: `drover setup`. It writes and loads the tick job and the board
+job ([6](#6-board-on-the-phone-tailscale)), sets up `tailscale serve`, runs `drover profiles sync`,
+plus the self-update and daily clean jobs ([below](#self-update-and-the-daily-clean-557)), makes sure each fleet's
+`merge_label` exists in its repo ([ci.md](ci.md)), then runs
+`drover doctor` and exits with its code. Each step prints `✓ done`, `= already` or
+`✗ <error> → <fix>`; `--no-load` writes the jobs without loading them.
+
+Run it every 5 minutes: `drover timer install`. That is the tick job alone: `drover tick` every
+5 minutes runs `drover check` (alerts once per stall, dead lane or unmerged ready issue), then
+`drover drive` (every fleet's loop, [lanes.md](lanes.md#drive)). No cron and
+no Hermes needed.
+
+- macOS: `~/Library/LaunchAgents/dev.drover.tick.plist` (`--label` picks another label),
+  `StartInterval 300`, `RunAtLoad`, loaded with `launchctl bootstrap gui/$(id -u) <plist>`.
+- Linux: `~/.config/systemd/user/dev.drover.tick.{service,timer}`, loaded with
+  `systemctl --user enable --now dev.drover.tick.timer`.
+- Its PATH is explicit: the directories of the harness binaries, `gh`, `shed` and drover, then
+  `/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin` (`sysctl` and `vm_stat` live in `/usr/sbin`).
+- Both streams go to `~/.local/state/drover/tick.log`; the tick empties it past 1 MB.
+- A refusal (`HOST_BUSY`, …) is logged and the tick exits 0. A real error (config, shed missing)
+  logs `tick-failed`, which notifiers send at most once an hour. A red SERVICES row (`GET /api/v1/host`)
+  sends one `service-red` an hour too.
+
+`drover timer status` prints loaded or not and the last tick. Undo: `drover timer remove`
+(unloads it and deletes its files). Check it worked: `drover doctor` shows `✓ timer` and a
+`watchdog check` that ran under 15 minutes ago.
 
 ### Self-update and the daily clean (#557)
 
