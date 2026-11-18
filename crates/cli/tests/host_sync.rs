@@ -1,7 +1,7 @@
 mod common;
 use common::*;
 use drover::config::Config;
-use drover::events::{read, Event};
+use drover::events::{append, read, Event};
 use drover::hosts::{cached, place};
 use serde_json::json;
 use std::path::Path;
@@ -322,4 +322,29 @@ fn a_changed_build_rereads_the_host_health_in_the_same_pass_so_spawn_places_ther
     );
     assert_eq!(cached(&c)["bazzite"].health, Vec::<String>::new());
     assert_eq!(placed(&c, &fake(2.0, 0.1), 12, "impl", None).as_deref(), Ok("bazzite"));
+}
+
+#[test]
+fn an_external_github_token_never_warns_of_its_expiry() {
+    let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 1970-01-12 23:00:00 UTC\n\n[]";
+    let warn = "! github — token expires in 0d";
+    for (extra, shown) in [("github_token = \"external\"\n", false), ("", true)] {
+        let extra = format!("cloud = \"boat\"\n{extra}");
+        let c = setup("hosts-boat-token", &extra, true, 0);
+        for kind in ["cloud-start", "cloud-up"] {
+            let e = Event::new(NOW - 60, "drover", None, kind, json!({"host": "bazzite"}));
+            append(&c.state, &e).unwrap();
+        }
+        let f = healthy(fake(1.0, 1.0).reply(&format!("{SSH}'gh' 'api' '-i'"), gh)).reply(
+            &format!("{SSH}'sh' '-c' 'uname -s"),
+            "Linux\naarch64\n/home/me\ndocker\n",
+        );
+        let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+        let r = two(&f, &bazzite);
+        run(&c, &r, &["hosts", "refresh"]);
+        let health = cached(&c)["bazzite"].health.clone();
+        assert_eq!(health.iter().any(|w| w.starts_with(warn)), shown, "{extra}: {health:?}");
+        let (_, out) = run(&c, &r, &["doctor"]);
+        assert_eq!(out.contains(warn), shown, "{extra}: {out}");
+    }
 }
