@@ -1,0 +1,8 @@
+Decided: a macOS host's live binary failing the Developer ID codesign check counts as needing the head, so it stages and swaps like a behind host
+Because: "self-update counts a binary that is not signed with Developer ID as not current, even when its sha matches the release"
+Because: crates/core/src/update.rs:148
+Decided: one release::signed helper for doctor and self-update, gated by the host's os:macos tag in self-update
+Because: "Linux hosts are unchanged (no signature check)"
+Rejected: a separate signature-only install path — the spec asks for the normal staged swap
+Check: dry-run on an unsigned mac at head plans "would stage, then swap, last"; a signed one stays up to date
+Owner: Macs running an unsigned drover now get CI's signed build on the next self-update
