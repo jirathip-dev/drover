@@ -779,6 +779,10 @@ pub struct Limits {
     pub slo_tick_minutes: u64,
     pub slo_pass_minutes: u64,
     pub stall_restart_hours: u64,
+    pub self_update_wait_minutes: u64,
+    pub self_update_lag_minutes: u64,
+    pub self_update_stage_secs: u64,
+    pub self_update_swap_secs: u64,
 }
 
 /// A `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -903,6 +907,10 @@ impl Default for Limits {
             slo_tick_minutes: 10,
             slo_pass_minutes: 30,
             stall_restart_hours: 2,
+            self_update_wait_minutes: 45,
+            self_update_lag_minutes: 30,
+            self_update_stage_secs: 300,
+            self_update_swap_secs: 120,
         }
     }
 }
@@ -1186,6 +1194,19 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "stall_restart_hours",
         "an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own)",
+    ),
+    (
+        "self_update_wait_minutes",
+        "a head with no release build this long alerts `self-update-waiting`",
+    ),
+    (
+        "self_update_lag_minutes",
+        "how long a rollout waits for an enabled host that is not staged before the rest swap",
+    ),
+    ("self_update_stage_secs", "one host's download and gate of a release build"),
+    (
+        "self_update_swap_secs",
+        "how long a `self-update-swapping` mark holds remote placement when no `self-updated` follows",
     ),
 ];
 

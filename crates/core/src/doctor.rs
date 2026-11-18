@@ -229,10 +229,11 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     };
     row(rows, on, '!', &format!("webhook — {why}{bad} → {fix}"));
     if cfg!(target_os = "macos") {
-        let req = ["-v", "-R", "=certificate leaf[subject.CN] = \"drover-local\"", &ctx.exe];
+        let dev = "=anchor apple generic and identifier \"drover\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists";
+        let req = ["-v", "-R", dev, &ctx.exe];
         let line = format!(
-            "signature — {} signed by \"drover-local\" → sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/install-gate.sh {} {}",
-            ctx.exe, ctx.exe, ctx.exe
+            "signature — {} signed by a Developer ID Application certificate as drover → the next self-update installs CI's signed build (docs/releases.md)",
+            ctx.exe
         );
         row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
     }
