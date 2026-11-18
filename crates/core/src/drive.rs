@@ -1185,6 +1185,30 @@ fn escalate(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))
 }
 
+fn turn_prompt(what: &str) -> Option<(&'static str, &'static str)> {
+    if what == waiting::TURN_NUDGE {
+        Some((
+            "done",
+            "drover: you reported `done`, but nothing new is pushed at the PR head (or there is no \
+            PR). Push and open the PR, then `drover turn done`; or `drover turn blocked --why <reason>`.",
+        ))
+    } else if what.ends_with(waiting::TURN_ASK) {
+        Some((
+            "need-input",
+            "drover: you reported `need-input`, but filed no `drover ask`: no card reaches the owner. \
+            Ask with `drover ask <fleet> <issue> …`, then `drover turn need-input`; or `drover turn blocked \
+            --why <reason>`.",
+        ))
+    } else if what == waiting::TURN_GO_ON {
+        Some((
+            "working",
+            "drover: continue the task; end the turn with `drover turn …`.",
+        ))
+    } else {
+        None
+    }
+}
+
 fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -1331,17 +1355,7 @@ fn pass(
                 &ctx.state,
                 &Event::new(ctx.now, fleet, Some(s.issue), "lesson-prompted", d),
             )?;
-        } else if w.who == "drive" && matches!(w.what.as_str(), waiting::TURN_NUDGE | waiting::TURN_GO_ON) && !fast {
-            let (state, text) = if w.what == waiting::TURN_NUDGE {
-                let text = "drover: you reported `done`, but nothing new is pushed at the PR head (or there is no \
-                    PR). Push and open the PR, then `drover turn done`; or `drover turn blocked --why <reason>`.";
-                ("done", text)
-            } else {
-                (
-                    "working",
-                    "drover: continue the task; end the turn with `drover turn …`.",
-                )
-            };
+        } else if let Some((state, text)) = turn_prompt(&w.what).filter(|_| w.who == "drive" && !fast) {
             let Some(sent) = tell(r, &events, &w.lane, text) else {
                 continue;
             };

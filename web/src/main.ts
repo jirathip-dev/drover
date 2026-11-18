@@ -2,6 +2,7 @@ import { type Act, type Ctx, el, kids, morph, render, sent, values } from './blo
 import './herd';
 import { apply, type Blk, blks, isBlk, isList, obj } from './ops';
 import { R, colours, esc, get, nodes, put, schemes, theme, themes } from './theme';
+import { type Kind, type Span, flush, painted, read, span } from './timing';
 
 type Place = { type: string; id?: string; label?: string; subtitle?: string; screen?: string };
 declare const PL: Place[];
@@ -42,10 +43,10 @@ function sync() {
 const cached = (p: string): { t: number; v: Blk } | null => {
   try { const c: unknown = JSON.parse(get('scr:' + p) ?? 'null'); return isBlk(c) && isBlk(c.v) ? { t: Number(c.t), v: c.v } : null; } catch { return null; }
 };
-async function fetchScreen(p: string): Promise<Blk> {
-  const get = () => fetch(url(p), { cache: 'no-store' });
+async function fetchScreen(p: string, s?: Span): Promise<Blk> {
+  const t0 = performance.now(), get = () => fetch(url(p), { cache: 'no-store' });
   const r = await get().catch(() => new Promise<Response>(ok => setTimeout(() => ok(get()), 300)));
-  const j = obj(await r.json().catch(() => ({ line: `${r.status}` })));
+  const j = obj(await read(r, s, t0).catch(() => ({ line: `${r.status}` })));
   if (!r.ok) throw Object.assign(new Error(String(j.line ?? r.status)), { status: r.status });
   return j;
 }
@@ -136,18 +137,19 @@ function badges() {
   });
 }
 
-async function load(v: View, quiet = false) {
+async function load(v: View, quiet = false, s?: Span) {
   if (duo() && v === th?.v && v.path === th.screen) return blank(v);
   const c = cached(v.path);
   if (!v.model && c) [v.model, v.at, v.live] = [c.v, c.t, false];
   if (!v.model || !quiet) paint(v);
   const slow = setTimeout(() => ($('#ld').hidden = false), 300);
   try {
-    const p = v.path, m = await fetchScreen(p), before = v.model === c?.v ? null : v.model;
+    const p = v.path, m = await fetchScreen(p, s), before = v.model === c?.v ? null : v.model;
     if (v.path !== p) return;
     [v.model, v.at] = [m, Date.now()];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: m }));
     paint(v, before);
+    painted(s);
     if (!v.es) stream(v);
   } catch (e) {
     if (isBlk(e) && e.status === 401) unpaired();
@@ -166,12 +168,14 @@ function stream(v: View) {
   es.onopen = () => { v.live = true; sync(); };
   es.onerror = () => { v.live = false; sync(); };
   es.onmessage = e => {
-    const d = obj(JSON.parse(e.data)), was = JSON.stringify(v.model), before = v.model && obj(JSON.parse(was));
+    const s = span('delta'), d = obj(JSON.parse(e.data)), was = JSON.stringify(v.model), before = v.model && obj(JSON.parse(was));
     v.model = apply(v.model ?? {}, blks(d.ops));
+    s.parse = performance.now() - s.t0;
     [v.at, v.live] = [Date.now(), true];
     if (JSON.stringify(v.model) === was) return sync();
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
     paint(v, before);
+    painted(s);
     dot.classList.add('p');
     setTimeout(() => dot.classList.remove('p'), 600);
   };
@@ -179,7 +183,7 @@ function stream(v: View) {
 const close = (v: View) => { v.es?.close(); v.es = undefined; v.live = false; };
 
 const ys = new Map<string, number>();
-function go(v: View, path: string, push = true) {
+function go(v: View, path: string, push = true, k?: Span) {
   if (v === cur.v) ys.set(v.path, scrollY);
   if (push) v.back.push(v.path);
   if (push && v === cur.v) history.pushState(null, '', hashOf(cur, path));
@@ -187,11 +191,11 @@ function go(v: View, path: string, push = true) {
   if (s) spots.set(v.path, s);
   close(v);
   [v.path, v.model] = [path, null];
-  load(v);
+  load(v, false, k);
   if (!push && v === cur.v) scrollTo(0, ys.get(path) ?? 0);
 }
 
-function show(t: Tab, path = t.v.path) {
+function show(t: Tab, path = t.v.path, s?: Span) {
   if (cur !== t) close(cur.v);
   if (lst) close(lst);
   if (path !== t.v.path) {
@@ -206,7 +210,7 @@ function show(t: Tab, path = t.v.path) {
   if (lst) lst.root.hidden = !duo();
   sync();
   if (lst && duo()) load(lst, !!lst.model);
-  load(t.v, !!t.v.model);
+  load(t.v, !!t.v.model, s);
   scrollTo(0, 0);
 }
 
@@ -226,12 +230,12 @@ function toast(text: string, bad = false, retry?: () => void) {
 
 const sh = $('#sheet'), shv = view('', $('#sheet .sb'));
 function closeSheet() { sh.hidden = true; H.classList.remove('sheet'); shv.model = null; shv.back = []; }
-async function sheet(path: string, push = true) {
+async function sheet(path: string, push = true, s = span('sheet')) {
   if (push && !sh.hidden && shv.model) shv.back.push(shv.path);
   shv.path = path;
   shv.open.clear();
   try {
-    shv.model = await fetchScreen(path);
+    shv.model = await fetchScreen(path, s);
   } catch (e) {
     if (isBlk(e) && e.status === 401) return unpaired();
     return toast(msg(e), true);
@@ -239,6 +243,7 @@ async function sheet(path: string, push = true) {
   drawSheet();
   sh.hidden = false;
   H.classList.add('sheet');
+  painted(s);
 }
 function drawSheet() {
   const m = shv.model;
@@ -269,16 +274,16 @@ addEventListener('keydown', e => { if (e.key === 'Escape' && !sh.hidden) closeSh
 function tap(x: unknown) {
   const t = obj(x);
   if (t.sheet) sheet(String(t.sheet));
-  else if (t.open) go(cur.v, String(t.open), !t.keep);
+  else if (t.open) go(cur.v, String(t.open), !t.keep, span('tap'));
   else if (t.copy != null) void copy(String(t.copy));
   else if (t.thread) /^t\d+$/.test(String(t.thread)) ? thread(String(t.thread)) : sheet(`/screens/lanes/${String(t.thread)}`);
 }
-function thread(id: string) {
+function thread(id: string, s = span('tap')) {
   const t = tabs.find(x => x.id === 'threads');
   if (!t) return toast('no Threads tab on this page', true);
   closeSheet();
   history.pushState(null, '', hashOf(t, `${t.screen}/${id}`));
-  show(t, `${t.screen}/${id}`);
+  show(t, `${t.screen}/${id}`, s);
 }
 
 function confirmed(c: Blk): Promise<boolean> {
@@ -303,11 +308,11 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<bo
     return false;
   }
   if (isBlk(a.confirm) && !(await confirmed(a.confirm))) return false;
-  const retry = b && (() => b.click());
+  const retry = b && (() => b.click()), k: Kind = a.action === 'answer' ? 'answer' : /say|send|queue|steer/.test(String(a.action)) ? 'send' : 'tap', s = span(k);
   b?.setAttribute('aria-busy', 'true');
   try {
     const r = await fetch(url('action'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...a, confirm: undefined, screen }) });
-    const j = obj(await r.json().catch(() => ({ line: `${r.status}` })));
+    const j = obj(await read(r, s, s.t0).catch(() => ({ line: `${r.status}` })));
     if (r.status === 401) return (unpaired(), false);
     if (!r.ok) return (toast(String(j.line ?? r.status), true, retry), false);
     const ops = blks(j.ops);
@@ -327,6 +332,7 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<bo
     }
     if (j.close && v === shv) closeSheet();
     if (j.toast) toast(String(j.toast));
+    painted(s);
     if (!whole) setTimeout(() => { if (cards) load(cards, true); load(cur.v, true); }, 300);
     return true;
   } catch (e) {
@@ -418,7 +424,7 @@ function reload() {
 const nav = $('nav'), main = $('main');
 for (const t of tabs) {
   t.a.href = '#' + t.id;
-  t.a.onclick = e => { e.preventDefault(); show(t); };
+  t.a.onclick = e => { e.preventDefault(); show(t, t.v.path, span('tab', e.timeStamp)); };
   nav.append(t.a);
   main.append(t.v.root);
   t.v.root.addEventListener('redraw', () => paint(t.v));
@@ -536,4 +542,6 @@ if (at && at[1] !== cur.screen) {
   history.pushState(null, '', hashOf(cur, at[1]));
 }
 show(cur, at?.[1]);
+const report = (leaving = false) => flush(body => void fetch(url('api/v1/timings'), { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: true }).catch(() => {}), leaving);
+if (!demo && !ro && !exported) { setInterval(report, 5_000); addEventListener('pagehide', () => report(true)); }
 if ('serviceWorker' in navigator && !demo) navigator.serviceWorker.register(url('sw.js')).catch(() => {});

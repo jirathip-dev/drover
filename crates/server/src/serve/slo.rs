@@ -84,11 +84,17 @@ impl Timing {
         v
     }
 
-    /// Each of the last `minutes` minutes' `/api/v1` p95 over `limit` ms: the slowest route and its p95.
-    pub fn breach(&self, now: u64, limit: u64, minutes: u64) -> Option<(String, u64)> {
+    /// The last minute's routes, by name.
+    pub fn last(&self, now: u64) -> Vec<RouteTime> {
+        let m = self.by_route((now + 1).saturating_sub(60), now + 1);
+        m.into_iter().map(|(r, ms)| time(r, ms)).collect()
+    }
+
+    /// Each of the last `minutes` minutes' p95 of the routes `pick` takes over `limit` ms: the slowest and its p95.
+    pub fn breach(&self, now: u64, limit: u64, minutes: u64, pick: impl Fn(&str) -> bool) -> Option<(String, u64)> {
         let api = |from, to| -> Vec<(String, Vec<u64>)> {
             (self.by_route(from, to).into_iter())
-                .filter(|(r, _)| r.starts_with("/api/v1/"))
+                .filter(|(r, _)| pick(r))
                 .map(|(r, ms)| (r.to_string(), ms))
                 .collect()
         };
