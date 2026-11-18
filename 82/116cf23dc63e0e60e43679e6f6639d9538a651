@@ -1,0 +1,48 @@
+Decided: an insert op drops any block with its id first, so a stream insert after the post-send reload never adds a second bubble.
+Because: web/src/main.ts:333 reloads the screen 300 ms after an action while the stream (crates/server/src/screens.rs:1773) inserts the same m-<seq> card.
+Because: "A sent message shows once, from tap to delivery"
+Rejected: a client nonce on a pending bubble — the page draws no pending bubble; both copies are the logged card with one id.
+Rejected: dropping the post-action reload — other screens rely on it for actions whose stream lags.
+Check: the WebKit test fails at 54d7c0f7 (most = 2) and passes at head.
+Owner: a message you send now shows once, photo and tick included.
+
+Decided: an insert drops an existing block with its id only once its target list is found, then inserts the new copy.
+Because: web/src/main.ts:333 reloads the screen 300 ms after an action while the stream (crates/server/src/screens.rs:1773) inserts the same m-<seq> card.
+Because: "A sent message shows once, from tap to delivery"
+Rejected: a client nonce on a pending bubble — the page draws no pending bubble; both copies are the logged card with one id.
+Rejected: dropping before the target lookup — an insert into a missing target would delete the block (round-1 review).
+Check: the WebKit test fails at 54d7c0f7 (most = 2) and passes at head; the reviewer's node command keeps m1.
+Owner: a message you send now shows once, photo and tick included.
+
+Decided: merge current staging to clear CI red that came from staging, not from this PR's three files.
+Because: crates/server/src/serve.rs:1 is untouched by this PR; the arch-check size violation came from the staging merge CI ran against.
+Rejected: trimming serve.rs here — it is outside the issue's scope and staging's own CI is green now.
+Check: CI is green at the merged head; the WebKit test still passes in ui-webkit.
+Owner: no behaviour change this round; only the branch was brought up to date.
+
+Decided: an insert drops an earlier copy only when the inserted block has an id.
+Because: web/src/ops.ts:55 dropped by `x.id === undefined`, which removed id-less siblings (round-3 review)
+Because: "A sent message shows once, from tap to delivery"
+Rejected: running WebKit in the lane — lanes may not install a browser; CI ui-webkit ran the test at head
+Check: the ui-webkit log at a34b663e shows the shows_once test ok, not skipped; verify shows base vs head
+Owner: no visible change this round; a rare edge case in screen updates is guarded.
+
+Decided: merge origin/staging and rebuild the generated web/dist/board.js from the merged web/src instead of hand-merging it
+Because: .drover/rules.md:16
+Rejected: none
+Check: web/dist/board.js equals `npm --prefix web run build` output at this head
+Owner: Brought the fix up to date with staging; nothing in the fix changed.
+
+Decided: add a ## Parity section naming row 21 (Instant send) as kept, and merge current staging.
+Because: roles/rev.md:25
+Because: docs/parity.md:40
+Rejected: chasing the ui-webkit red in this PR — it was the first-paint perf timing test, and this PR's WebKit test passed in the same job.
+Check: CI at 631ae17f; ui-webkit logs the shows_once test as ok.
+Owner: no behaviour change this round; the PR description now lists the affected parity row.
+
+Decided: an insert op drops any block with the same id before inserting, so a stream echo replaces the bubble already shown
+Because: web/src/ops.ts:48
+Rejected: a client nonce — both copies already share the logged id m-<seq>, so matching on it is enough and the composer stays unchanged
+Check: CI ui-webkit run 44294361260 at 50bd5365 (base plus test) shows the test red with left [2.0, 2.0, 0.0, 0.0]
+Check: ui-webkit at the head runs the same test green
+Owner: a sent message now shows once from tap to its tick, photo included
