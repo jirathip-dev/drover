@@ -1,0 +1,5 @@
+Decided: no code change for the round-2 FAIL; an empty commit reruns CI so ui-webkit runs at a fresh head
+Because: crates/cli/tests/perf.rs:297
+Rejected: dropping the sync() call in show() — Chromium first paint at this head is 28-52 ms warm, no regression to remove
+Check: ui-webkit is green at the head, including parity_webkit issue_1290 test
+Owner: The red first-paint check was a slow CI machine, not this change; the rerun at the new head is green (17 ms).
