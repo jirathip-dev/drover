@@ -385,7 +385,8 @@ fn serve_is_read_only_html() {
     std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, true));
     let get = |req: &str| {
         let mut s = std::net::TcpStream::connect(addr).unwrap();
-        s.write_all(req.as_bytes()).unwrap();
+        s.write_all(req.replacen("\r\n", "\r\nConnection: close\r\n", 1).as_bytes())
+            .unwrap();
         let mut b = String::new();
         s.read_to_string(&mut b).unwrap();
         b

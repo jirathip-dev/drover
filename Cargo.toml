@@ -45,6 +45,8 @@ aes-gcm = "0.11.1"
 anyhow = "1"
 base64 = "0.23.1"
 clap = { version = "4", features = ["derive"] }
+# #1314: gzip for serve's responses and SSE streams (owner-approved, q2018); the pure-Rust miniz_oxide backend.
+flate2 = "1"
 hkdf = "0.13.0"
 # #441: secrets in the main host's OS store (Keychain, Secret Service, Credential Manager); owner-approved.
 # #344: drover's state in one SQLite file (WAL); bundled, so no system libsqlite3.

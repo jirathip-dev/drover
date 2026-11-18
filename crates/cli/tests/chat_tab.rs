@@ -387,7 +387,7 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     write!(
         s,
-        "POST /thread HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
+        "POST /thread HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
         body.len()
     )
     .unwrap();
@@ -511,7 +511,7 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     write!(
         s,
-        "POST /thread HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
+        "POST /thread HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
         body.len()
     )
     .unwrap();
@@ -1001,7 +1001,7 @@ fn post_to(addr: &std::net::SocketAddr, cookie: &str, body: &str) -> String {
     use std::io::{Read, Write};
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     let head = format!(
-        "POST /thread HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\n\r\n",
+        "POST /thread HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n{cookie}Content-Length: {}\r\n\r\n",
         body.len()
     );
     s.write_all((head + body).as_bytes()).unwrap();

@@ -158,7 +158,7 @@ push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no
 client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
 shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), and rusqlite (bundled SQLite)
 for the state database (#344, docs/architecture.md), keyring for the main host's secret store
-(#441, owner-approved; docs/providers.md), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
+(#441, owner-approved; docs/providers.md), flate2 for serve's gzip (#1314, owner-approved), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
 fails on any other direct dependency.
 
 ## GitHub webhooks (#626)

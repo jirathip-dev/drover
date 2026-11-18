@@ -1948,8 +1948,9 @@ impl Server<'_> {
         let mut msg = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\nid: {seq}\ndata: {}\n\n", json!({"seq": seq, "ops": start}));
         let (mut log, mut ping) = (crate::db::last_seq(&self.ctx.state), drover_core::clock::instant());
         let mut built = drover_core::clock::instant();
+        let mut z = super::wire::Stream::new(head);
         let res = loop {
-            if let Err(e) = s.write_all(msg.as_bytes()) {
+            if let Err(e) = z.frame(&msg).and_then(|b| s.write_all(&b)) {
                 break Err(e);
             }
             msg.clear();

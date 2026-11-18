@@ -14,6 +14,7 @@ anyhow.workspace = true
 base64.workspace = true
 drover-core.workspace = true
 drover-sys.workspace = true
+flate2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
