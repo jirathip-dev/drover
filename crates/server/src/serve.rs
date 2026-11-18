@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+mod conn;
 #[path = "cooee.rs"]
 mod cooee;
 mod fresh;
@@ -153,10 +154,6 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
     serve_with(ctx, r, l, read_only, None)
 }
 
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "public API: the handed-over listener lives as long as the server"
-)]
 pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho: Option<&Handover>) -> Result<()> {
     devices::cooee_token(ctx)?;
     let addr = (!read_only)
@@ -196,7 +193,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             ..Server::new(ctx, r, s.addr.clone())
         },
     );
-    let (s, busy, open) = (&s, &AtomicUsize::new(0), &AtomicUsize::new(0));
+    let s = &s;
     std::thread::scope(|sc| {
         let limits = || Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
         sc.spawn(move || loop {
@@ -233,29 +230,34 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         if let Some((h, sock)) = ho.zip(sock) {
             sc.spawn(move || h.control(&sock));
         }
-        for mut st in l.incoming().flatten() {
-            if busy.fetch_add(1, Relaxed) < 256 {
-                open.fetch_add(1, Relaxed);
+        let (jobs, todo) = channel::<conn::Job>();
+        sc.spawn(move || {
+            for j in todo {
                 sc.spawn(move || {
-                    drop(s.handle(st));
-                    busy.fetch_sub(1, Relaxed);
-                    s.deliver();
-                    open.fetch_sub(1, Relaxed);
+                    j.answer(|st, req, over| {
+                        let keep = s.one(st, req, over).unwrap_or(false);
+                        s.deliver();
+                        keep
+                    });
                 });
-            } else {
-                busy.fetch_sub(1, Relaxed);
-                lock(&s.timing).busy(crate::now());
-                drop(st.write_all(BUSY));
             }
-            if let Some(h) = ho.filter(|h| h.stopping()) {
-                h.left();
-                lock(&s.clients)
-                    .drain(..)
-                    .for_each(|c| drop(c.0.send("retry: 250\n\n".into())));
-                h.finish(|| open.load(Relaxed) == 0 && !lock(&s.tapped).busy());
-            }
-        }
-    });
+        });
+        conn::accept(
+            l,
+            jobs,
+            BUSY,
+            || lock(&s.timing).busy(crate::now()),
+            |idle| {
+                if let Some(h) = ho.filter(|h| h.stopping()) {
+                    h.left();
+                    lock(&s.clients)
+                        .drain(..)
+                        .for_each(|c| drop(c.0.send("retry: 250\n\n".into())));
+                    h.finish(|| idle() && !lock(&s.tapped).busy());
+                }
+            },
+        )
+    })?;
     Ok(())
 }
 
@@ -784,21 +786,6 @@ impl<'a> Server<'a> {
         let l = Config::kept(self.ctx).map(|c| c.limits).unwrap_or_default();
         for src in fresh::Source::ALL {
             self.r.refresh(src, src.every(&l), now);
-        }
-    }
-
-    fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
-        s.set_read_timeout(Some(Duration::from_secs(5)))?;
-        let mut rest = vec![];
-        loop {
-            let (buf, over) = wire::request(&mut s, &mut rest)?;
-            if buf.is_empty() {
-                return Ok(());
-            }
-            if !self.one(&mut s, &buf, over)? {
-                return Ok(());
-            }
-            self.deliver();
         }
     }
 
