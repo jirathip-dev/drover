@@ -148,7 +148,7 @@ impl Real {
         use std::io::Write;
         use std::process::Stdio;
         let mut c = Command::new(prog)
-            .args(args)
+            .args(plain(prog, args))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -162,6 +162,7 @@ impl Real {
         use std::io::Write;
         use std::process::Stdio;
         debug_assert!(!in_request(), "#859: `{prog}` started on a board request");
+        let args = &plain(prog, args)[..];
         let dir = args.iter().position(|a| a == "-C").and_then(|i| args.get(i + 1));
         let fail = |why: String| {
             let stderr = format!("{prog} {}: {why}", args.join(" "));
@@ -215,6 +216,13 @@ impl Real {
             Ended::Busy => fail(format!("an earlier call on {} has not ended", dir.map_or("", |d| d))),
         }
     }
+}
+
+/// The argv a `git` really gets (graft-blind: drover never sees a lane's baseline view); every other program's is unchanged.
+pub fn plain(prog: &str, args: &[String]) -> Vec<String> {
+    let git = std::path::Path::new(prog).file_name().is_some_and(|n| n == "git");
+    let flag = (git && args.first().is_none_or(|a| a != "--no-replace-objects")).then(|| "--no-replace-objects".into());
+    flag.into_iter().chain(args.iter().cloned()).collect()
 }
 
 /// Every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is killed and exits 124. - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08). - `git clone|fetch|pull|push`: 10 min; a large repo over the network. - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB. - `cargo`: 30 min; self-update's release build. - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`. - anything else: 60 s.

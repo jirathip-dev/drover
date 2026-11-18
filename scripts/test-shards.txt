@@ -13,6 +13,7 @@
 1 asks
 2 autonomy
 4 backlog
+1 baseline
 4 blocked_respawn
 1 board_errors
 4 board_fresh
@@ -145,6 +146,7 @@
 1 remote_verdict
 3 report
 2 repro
+3 repro_host
 3 respawn_loop
 2 respawn_pace
 2 retired_keys

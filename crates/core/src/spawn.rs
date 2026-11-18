@@ -645,15 +645,24 @@ fn remote_acp(
             &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
         )?;
     }
-    if let Some(why) = crate::hosts::acp_guard(ctx, on, home, (&p.profile, p.family, id)) {
-        crate::hosts::sick(ctx, &pl.name, &format!("✗ acp guard {} — {why}", p.profile));
-        return refused(
-            "ACP_UNGUARDED",
-            format!(
-                "{}: {why}; the lane does not start, the next placement skips the host",
-                pl.name
-            ),
-        );
+    match crate::hosts::acp_guard(ctx, on, home, (&p.profile, p.family, id)) {
+        Ok(()) => {}
+        Err(why @ crate::hosts::Unguarded::Build { .. }) => {
+            return refused(
+                "HOST_UPDATING",
+                format!("{}: {why}; the next self-update catches it up", pl.name),
+            )
+        }
+        Err(why) => {
+            crate::hosts::sick(ctx, &pl.name, &format!("✗ acp guard {} — {why}", p.profile));
+            return refused(
+                "ACP_UNGUARDED",
+                format!(
+                    "{}: {why}; the lane does not start, the next placement skips the host",
+                    pl.name
+                ),
+            );
+        }
     }
     if let Err(why) = crate::proxy::token(cfg) {
         return refused("NO_PROXY_TOKEN", why);
@@ -1282,7 +1291,7 @@ pub fn spawn(
     }
 
     let mut sha = None;
-    let note;
+    let (note, history);
     let brief_text = {
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
@@ -1341,15 +1350,13 @@ pub fn spawn(
             ok(r, "git", &["-C", &wt, "reset", "--hard", &p.base])?;
             on.remove(&p.worktree.join("verdict.md")).ok();
         }
+        history = crate::baseline::lane(ctx, cfg, r, (fleet, issue, f), (&p.agent, &p.worktree), wip.as_deref())?;
         if p.family == "rev" || crate::events::STAGES.contains(&p.family) {
             sha = ok(r, "git", &["-C", &wt, "rev-parse", "HEAD"])
                 .ok()
                 .map(|h| h.trim().to_string());
         }
-        let (title, body) = (
-            iss.at("title").as_str().unwrap_or(""),
-            iss.at("body").as_str().unwrap_or(""),
-        );
+        let title = iss.at("title").as_str().unwrap_or("");
         p.title = lane_title(&p.head, title);
         note = prior
             .filter(|_| o.supersede && !dup.is_empty())
@@ -1390,6 +1397,7 @@ pub fn spawn(
                 crate::why::brief(r, f, &events, (fleet, issue), rev, body)
             }).flatten())
             .chain(note.clone())
+            .chain(history.brief())
             .chain(resume)
             .chain(wip.as_ref().map(|w| {
                 format!("Saved work: the last lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
@@ -1454,6 +1462,7 @@ pub fn spawn(
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
+    pj.put("history", json!(history.line(&p.branch)));
     bt.start(ctx, r, &pane, &labels, &wt, &acp)?;
     if bt.0.acp.is_none() {
         term::ok(r, &home(p.lane_cmd(&pane)))?;
@@ -1896,6 +1905,9 @@ fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool, placed: Option<&cr
         for c in pj["commands"].as_array().into_iter().flatten() {
             let words: Vec<&str> = c.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             writeln!(out, "  $ {}", words.join(" "))?;
+        }
+        if let Some(h) = pj["history"].as_str() {
+            writeln!(out, "{h}")?;
         }
         if pj.get("confirmed") == Some(&json!(false)) {
             writeln!(out, "WARNING: prompt not confirmed landed; check the pane")?;

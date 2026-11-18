@@ -385,18 +385,16 @@ function composer(b: Blk, c: Ctx): HTMLElement {
     const st = btn('steer');
     st.onclick = () => send(true);
     around(ta, [add, pick], d.steer ? [go, st] : [go]);
-    const chips = blks(b.chips).map(ch => {
-      const s = el('div', 'chips'), n = String(ch.name);
-      const cur = String(d.picks[n] ?? ch.cur ?? '');
-      for (const o of isList(ch.all) ? ch.all.map(String) : []) {
-        const x = btn(`${n} ${o}`, o === cur ? 'on' : '');
-        x.setAttribute('aria-pressed', String(o === cur));
-        x.onclick = () => (act('model') ? post(act('model'), { [n]: o }, x) : ((d.picks[n] = o), draw()));
-        s.append(x);
-      }
-      return s;
-    });
-    around(row, top, chips);
+    const picks = el('div', 'pk');
+    for (const ch of blks(b.chips)) {
+      const n = String(ch.name), s = el('select'), cur = String(d.picks[n] ?? ch.cur ?? '');
+      s.setAttribute('aria-label', n);
+      if (!cur) s.append(new Option(n, '', true, true));
+      for (const o of isList(ch.all) ? ch.all.map(String) : []) s.append(new Option(o, o, o === cur, o === cur));
+      s.onchange = () => (act('model') ? post(act('model'), { [n]: s.value }, s) : ((d.picks[n] = s.value), draw()));
+      picks.append(s);
+    }
+    around(row, top, picks.childElementCount ? [picks] : []);
   }
   live.set(f, { b, c, to: (nb, nc) => { [b, c] = [nb, nc]; draw(); } });
   draw();

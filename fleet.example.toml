@@ -15,6 +15,7 @@ repo = "acme/api"
 local = "~/Projects/api"
 integration = "staging"          # drover merge target; main is never a target
 # paused = true                  # `drover pause|resume api`: no next, impl/rev spawns refuse PAUSED
+# baseline = "<40-hex sha>"      # `drover baseline api`: lanes see history since it only (docs/workflow.md); remove to undo
 
 [fleet.api.role.impl]
 harness = "claude"

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 pub const FLEET: &str = "drover";
 pub const REPO: &str = "jirathip-dev/herdsman";
+pub const BASELINE: &str = "6e618cd22a43225e18a773b2dc5bd9ab24a9088b";
 
 /// What a lane's agent does once its prompt lands.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -390,7 +391,7 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
             ok(open.map(|(b, p)| format!("{}\n", m.pr_json(b, p))).collect::<String>())
         }
         ["api", "graphql", "--paginate", "--jq", jq, ..] if jq.contains("issues") => ok(""),
-        ["api", "graphql", "-f", _, "-f", _, "-f", q] if q.contains(":issue(number:") => {
+        ["api", "graphql", "-f", _, "-f", _, "-f", q] if q.contains(":issueOrPullRequest(number:") => {
             let repo: serde_json::Map<String, Value> = m
                 .closed
                 .iter()
@@ -554,9 +555,10 @@ fn git(w: &mut World, a: &[&str]) -> Out {
         }
         ["status", "--porcelain", ..]
         | ["fetch" | "rev-list" | "log" | "diff" | "branch" | "ls-files" | "add" | "ls-tree" | "commit" | "push"
-        | "stash" | "remote" | "config", ..]
+        | "stash" | "remote" | "config" | "replace", ..]
         | ["reset", "-q", ..]
         | ["worktree", "prune"]
+        | ["merge-base", "--is-ancestor", BASELINE, _]
         | ["sparse-checkout", "set", ..] => ok(""),
         ["merge-base", "--is-ancestor", a, b] if a == b || m.base.get(*b).is_some_and(|s| s == a) => ok(""),
         ["merge-base", "--is-ancestor", ..] => err(1, ""),

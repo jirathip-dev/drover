@@ -40,7 +40,7 @@ fn remote_fake() -> Fake {
             "",
         )
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
-        .reply(&format!("{SSH}'git' "), "")
+        .reply(&format!("{SSH}'git' '--no-replace-objects' "), "")
         .reply(&format!("{SSH}'sh' '-c' 'git clone"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")

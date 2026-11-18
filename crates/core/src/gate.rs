@@ -52,6 +52,17 @@ pub fn no_proof(body: &str) -> Option<String> {
     (!bad.is_empty()).then(|| bad.join("; "))
 }
 
+fn pr_diff(r: &dyn Runner, f: &Fleet, branch: &str, head: &str) -> Result<String> {
+    match ok(r, "gh", &["pr", "diff", branch, "-R", &f.repo]) {
+        Err(e) if format!("{e:#}").contains("too_large") => {
+            let (dir, range) = (f.local_path(), format!("origin/{}...{head}", f.integration));
+            git(r, &dir, &["fetch", "-q", "origin"])?;
+            git(r, &dir, &["diff", &range])
+        }
+        d => d,
+    }
+}
+
 pub fn verdict(
     ctx: &Ctx,
     cfg: &Config,
@@ -97,7 +108,7 @@ pub fn verdict(
     };
     let lp = p.loop_of(stage);
     let prose = pass && stage != "verify" && crate::lesson::is_lesson(ctx, st.as_ref(), (fleet, issue)) && {
-        crate::lesson::prose_only(&ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo])?)
+        crate::lesson::prose_only(&pr_diff(r, f, &branch, &head)?)
     };
     let (pass, body) = if prose {
         writeln!(out, "prose-only lesson PR: recorded as a FAIL")?;
@@ -109,7 +120,7 @@ pub fn verdict(
     let repro = if pass && stage != "verify" && crate::queue::repro(&evs, fleet, issue) {
         let view = ["pr", "view", &branch, "-R", &f.repo, "--json", "body", "--jq", ".body"];
         let section = || ok(r, "gh", &view).ok().and_then(|b| repro_section(&b));
-        Some(reproduced(&body, section).or_else(|why| refused("NO_REPRO", why))?)
+        Some(reproduced(&body, verify_role(f), section).or_else(|why| refused("NO_REPRO", why))?)
     } else {
         None
     };
@@ -135,7 +146,7 @@ pub fn verdict(
             }
         }
         Some("refactor") => {
-            let diff = ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo])?;
+            let diff = pr_diff(r, f, &branch, &head)?;
             if let Some(files) = tests_changed(&diff) {
                 return refused(
                     "TESTS_CHANGED",
@@ -411,7 +422,22 @@ fn unproven(ls: &[&str]) -> Option<&'static str> {
     }
 }
 
-fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'static str, String> {
+const NO_VERIFY_ROLE: &str =
+    "this fleet has no verify role, so no verify stage runs; rev must give `Repro: run`, on a host that can run the test";
+
+fn verify_role(f: &Fleet) -> bool {
+    f.flow().of_role("verify").is_some()
+}
+
+fn no_verify_pass(f: &Fleet, head: &str) -> String {
+    if verify_role(f) {
+        format!("rev's `Repro: verify` PASS has no verify PASS at {head:.7}")
+    } else {
+        format!("rev's `Repro: verify` PASS at {head:.7}: {NO_VERIFY_ROLE}")
+    }
+}
+
+fn reproduced(body: &str, verify: bool, section: impl FnOnce() -> Option<String>) -> Result<&'static str, String> {
     let (kind, block) = repro_block(body).ok_or("no `Repro: run` or `Repro: verify` block")?;
     let flat = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
     match kind.trim_start_matches(['*', '_', '`', ' ']) {
@@ -442,6 +468,7 @@ fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'
                 )),
             }
         }
+        k if k.starts_with("verify") && !verify => Err(NO_VERIFY_ROLE.into()),
         k if k.starts_with("verify") => {
             let quote = block.iter().filter_map(|l| l.trim_start().strip_prefix('>'));
             let quote = flat(&quote.collect::<Vec<_>>().join(" "));
@@ -513,11 +540,25 @@ fn repro_section(pr_body: &str) -> Option<String> {
     Some(ls.take_while(|l| !l.starts_with('#')).collect::<Vec<_>>().join("\n"))
 }
 
-fn unverified(events: &[Event], (fleet, n): (&str, u64), head: &str) -> bool {
-    let at = |e: &&Event| e.is("verdict", fleet, n) && e.str("sha").is_some_and(|s| s.eq_ignore_ascii_case(head));
-    let mut here = events.iter().filter(at);
-    here.clone().any(|e| e.str("repro") == Some("verify"))
-        && !here.any(|e| e.str("stage") == Some("verify") && e.str("verdict") == Some("PASS"))
+fn at_head<'a>(
+    events: &'a [Event],
+    (fleet, n): (&'a str, u64),
+    head: &'a str,
+) -> impl DoubleEndedIterator<Item = &'a Event> {
+    let at = move |e: &&Event| e.is("verdict", fleet, n) && e.str("sha").is_some_and(|s| s.eq_ignore_ascii_case(head));
+    events.iter().filter(at)
+}
+
+/// Whether the latest rev PASS at `head` asked for `Repro: verify`: `unverified`'s and `verify::why`'s one rule.
+pub fn repro_verify(events: &[Event], issue: (&str, u64), head: &str) -> bool {
+    at_head(events, issue, head)
+        .rfind(|e| e.str("stage") != Some("verify") && e.str("verdict") == Some("PASS"))
+        .is_some_and(|e| e.str("repro") == Some("verify"))
+}
+
+fn unverified(events: &[Event], issue: (&str, u64), head: &str) -> bool {
+    repro_verify(events, issue, head)
+        && !at_head(events, issue, head).any(|e| e.str("stage") == Some("verify") && e.str("verdict") == Some("PASS"))
 }
 
 /// A check stage's rounds (unset: no limit) plus the owner's extends, worded `/3` or ` of 9+1 (owner extended)`.
@@ -619,6 +660,9 @@ pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String,
     };
     (format!("{title} (#{num})"), body, !human.is_empty())
 }
+
+/// Merge refusals at a head with a PASS a new review cannot change: the owner decides, never another rev run.
+pub const NO_REVIEW_FIXES: [&str; 4] = ["NO_REPRO", "TESTS_CHANGED", "NO_BASELINE", "SERIAL_UNMARKED"];
 
 fn premerge_file(ctx: &Ctx, fleet: &str, issue: u64) -> std::path::PathBuf {
     ctx.state.with_file_name(format!("premerge-{fleet}-{issue}.md"))
@@ -842,10 +886,7 @@ pub fn merge(
                 )
             }) {
             Some((code, why)) => Err(refuse(code, why)),
-            None if unverified(&events, (fleet, issue), &head) => Err(refuse(
-                "NO_REPRO",
-                format!("rev's `Repro: verify` PASS has no verify PASS at {head:.7}"),
-            )),
+            None if unverified(&events, (fleet, issue), &head) => Err(refuse("NO_REPRO", no_verify_pass(f, &head))),
             None => Ok(head),
         },
         res => res,
@@ -876,13 +917,8 @@ pub fn merge(
             return Err(rf.into());
         }
         Err(rf) => {
-            let kind = if rf.code == "ROUND_LIMIT" {
-                "needs-human"
-            } else {
-                "blocked"
-            };
-            let d = json!({"code": rf.code, "reason": rf.msg});
-            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d))?;
+            let at = pr.at("headRefOid").as_str().unwrap_or_default();
+            refusal(ctx, cfg, &events, (fleet, issue, at), &rf)?;
             return Err(rf.into());
         }
     };
@@ -910,6 +946,32 @@ pub fn merge(
     ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
     intent.done(json!({"pr": num, "head": head}))?;
     merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
+}
+
+fn refusal(
+    ctx: &Ctx,
+    cfg: &Config,
+    events: &[Event],
+    (fleet, issue, at): (&str, u64, &str),
+    rf: &Refusal,
+) -> Result<()> {
+    let unreviewable = NO_REVIEW_FIXES.contains(&rf.code);
+    let kind = if rf.code == "ROUND_LIMIT" || unreviewable {
+        "needs-human"
+    } else {
+        "blocked"
+    };
+    let told = |e: &Event| e.is(kind, fleet, issue) && e.str("code") == Some(rf.code) && e.str("sha") == Some(at);
+    if unreviewable && events.iter().any(told) {
+        return Ok(());
+    }
+    let reason = if unreviewable {
+        format!("merge refused {}: {}", rf.code, rf.msg)
+    } else {
+        rf.msg.clone()
+    };
+    let d = json!({"code": rf.code, "reason": reason, "sha": at});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d))
 }
 
 /// This issue's merge action not yet `failed` and no `merged` logged after it; `merge` logs it, with its head.
@@ -993,17 +1055,6 @@ fn merged(
     .ok();
     if let Err(e) = crate::check::teardown(ctx, cfg, r, out, fleet, issue) {
         writeln!(out, "teardown: {e:#}")?;
-    }
-    if crate::update::ours(f) {
-        let exe = std::path::Path::new(&ctx.exe);
-        let root = exe.parent().and_then(|b| b.parent()).unwrap_or(exe);
-        let src = f.local_path();
-        writeln!(
-            out,
-            "cargo build --release --locked -p drover --manifest-path {s}/Cargo.toml && sh {s}/scripts/install-gate.sh {s}/target/release/drover {r}/bin/drover && ln -sf drover {r}/bin/herdsman",
-            s = src.display(),
-            r = root.display()
-        )?;
     }
     Ok(())
 }

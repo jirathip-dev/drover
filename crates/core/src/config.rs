@@ -480,6 +480,8 @@ pub struct Fleet {
     pub hygiene: Hygiene,
     /// `srt` starts every lane's agent inside sandbox-runtime with the rules `sandbox::settings` writes; unset = off.
     pub sandbox: Option<Sandbox>,
+    /// lanes see history since this commit only (`drover baseline`); unset = all of it.
+    pub baseline: Option<Baseline>,
 }
 
 /// One key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
@@ -566,6 +568,31 @@ impl MergeMode {
             Self::Squash => &["--squash", "--delete-branch"],
             Self::Merge => &["--merge"],
         }
+    }
+}
+
+/// a full commit id; only 40 lowercase hex chars build one, so a bad key fails at load.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Baseline(String);
+
+impl TryFrom<String> for Baseline {
+    type Error = String;
+    fn try_from(s: String) -> std::result::Result<Self, String> {
+        let hex = s.len() == 40 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        hex.then_some(Baseline(s))
+            .ok_or_else(|| "baseline must be a full 40-hex commit sha".into())
+    }
+}
+
+impl Baseline {
+    /// The full sha.
+    pub fn sha(&self) -> &str {
+        &self.0
+    }
+    /// The first 12 chars, for lines people read.
+    pub fn short(&self) -> &str {
+        &self.0[..12]
     }
 }
 
@@ -736,6 +763,10 @@ pub struct Limits {
     pub slo_tick_minutes: u64,
     pub slo_pass_minutes: u64,
     pub stall_restart_hours: u64,
+    pub self_update_wait_minutes: u64,
+    pub self_update_lag_minutes: u64,
+    pub self_update_stage_secs: u64,
+    pub self_update_swap_secs: u64,
 }
 
 /// A `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -860,6 +891,10 @@ impl Default for Limits {
             slo_tick_minutes: 10,
             slo_pass_minutes: 30,
             stall_restart_hours: 2,
+            self_update_wait_minutes: 45,
+            self_update_lag_minutes: 30,
+            self_update_stage_secs: 300,
+            self_update_swap_secs: 120,
         }
     }
 }
@@ -1144,6 +1179,19 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "stall_restart_hours",
         "an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own)",
     ),
+    (
+        "self_update_wait_minutes",
+        "a head with no release build this long alerts `self-update-waiting`",
+    ),
+    (
+        "self_update_lag_minutes",
+        "how long a rollout waits for an enabled host that is not staged before the rest swap",
+    ),
+    ("self_update_stage_secs", "one host's download and gate of a release build"),
+    (
+        "self_update_swap_secs",
+        "how long a `self-update-swapping` mark holds remote placement when no `self-updated` follows",
+    ),
 ];
 
 static ACTIVE: std::sync::RwLock<Option<std::sync::Arc<Limits>>> = std::sync::RwLock::new(None);
@@ -1291,7 +1339,7 @@ impl Config {
         let raw: toml::Table = toml::from_str(text)?;
         if let Some((k, _)) = strings("", &toml::Value::Table(raw.clone()))
             .into_iter()
-            .find(|(_, v)| secret_like(v))
+            .find(|(k, v)| secret_like(v) && !(k.ends_with(".baseline") && Baseline::try_from(v.clone()).is_ok()))
         {
             return crate::gate::refused(
                 "SECRET_IN_CONFIG",

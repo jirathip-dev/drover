@@ -235,20 +235,10 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
 
 ## Auto-update
 
-Each `check` (every tick) reads `drover --version` on every enabled, reachable remote host. When it differs from the
-main host's, and no install already runs there, it installs the main host's sha the way `hosts bootstrap` does:
-`cargo install --git <repo> --rev <sha> --locked --root <root> --force`, then `drover profiles sync` if a fleet.toml
-is there. The install runs in the background (output in `~/.drover-sync.log` on the host), so the tick never waits
-on it. An offline or switched-off host gets no ssh for it.
-
-The next tick logs the result as `host-sync` (host, from, to, ok). A failure alerts `host-sync-failed` once until an
-install there succeeds, and the tick after retries it. Until the versions match, a shed-acp host takes no lanes
-(`acp guard`). `drover hosts` shows each remote host's drover sha, with `✓` when it matches the main host's.
-
-The version read comes first in a host's look, before its health checks, so a slow health check cannot hold it
-back. A tick that reaches the host but cannot read it (the host offline for the pass, or the tick past its budget)
-logs `host-sync-skipped` with the reason, once per streak. The pass that reads a finished install checks the host's
-health again at once, so its `acp guard` row clears and lanes can be placed there.
+Every enabled remote host gets the main host's build from the self-update job, staged first and swapped together with
+the main host: [releases](releases.md). Each `check` only reads a host's `drover --version`; when it changed, the host's
+health is looked at again so its `acp guard` row clears. `drover hosts` shows each remote host's drover sha, with `✓`
+when it matches the main host's.
 
 ## When the main host is down
 

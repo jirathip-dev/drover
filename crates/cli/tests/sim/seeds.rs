@@ -121,7 +121,7 @@ pub fn known() -> (Model, String) {
     let mut rev = vec![bad];
     rev.extend(std::iter::repeat_n(pass, 6));
     m.scripts.insert("rev".into(), rev);
-    (m, config(4, 3))
+    (m, crate::scenario::unbaselined(&config(4, 3)))
 }
 
 /// The known-answer fleet's seed (its scheduler's choices and timer offsets).

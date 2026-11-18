@@ -347,7 +347,7 @@ pub struct ThreadPage {
     pub dir: String,
 }
 
-/// A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`, `signin` on `host`; a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question; `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; `open` unless stale), `secret` (why, `from` its name), `resumed` (the session), `sleep`, `fold` (a finished turn's run of commands, `cmds`); `link` the thread it links to; `run` (a run card, `from` its id).
+/// A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`, `signin` on `host`; a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question; `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; `open` unless stale; once applied, `answer` by whom, when and its backup as `choice`), `secret` (why, `from` its name), `resumed` (the session), `sleep`, `fold` (a finished turn's run of commands, `cmds`); `link` the thread it links to; `run` (a run card, `from` its id).
 pub struct Msg {
     pub seq: u64,
     pub ts: u64,
