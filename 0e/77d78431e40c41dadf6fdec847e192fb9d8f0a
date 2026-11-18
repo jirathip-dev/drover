@@ -1,0 +1,5 @@
+Decided: serve_wire's gzip test checks one paged Events response instead of the whole log
+Because: "GET /screens/events returns at most 100 rows and a cursor"
+Rejected: keep the >1,000-row assertion — the spec caps a page at 100 rows
+Check: crates/cli/tests/serve_wire.rs:96 still demands a body over 10 KB that gzip shrinks over 5x
+Owner: A test from staging expected the full Events list; it now checks the first page.
