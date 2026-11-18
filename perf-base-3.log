@@ -1,0 +1,22 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-949/crates/cli)
+    Finished `release` profile [optimized] target(s) in 56.06s
+     Running tests/perf.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-949/release/deps/perf-826e89b722cf86dd)
+
+running 1 test
+#949 perf (50,000 worktree files): drive --fast 116 ms, 50100 entries walked · drive 395 ms, 50100 walked
+
+thread 'a_fast_step_over_50k_worktree_files_walks_none_of_them' (2909139) panicked at crates/cli/tests/perf.rs:1020:5:
+assertion `left == right` failed: drive --fast walked 50100 entries: 
+  left: 50100
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test a_fast_step_over_50k_worktree_files_walks_none_of_them ... FAILED
+
+failures:
+
+failures:
+    a_fast_step_over_50k_worktree_files_walks_none_of_them
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 16 filtered out; finished in 3.13s
+
+error: test failed, to rerun pass `-p drover --test perf`

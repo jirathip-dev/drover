@@ -1,0 +1,56 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-949/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-949/crates/cli)
+warning: function `lstat` is never used
+  --> crates/core/src/sim.rs:39:15
+   |
+39 | pub(crate) fn lstat(p: &std::path::Path) -> std::io::Result<std::fs::Metadata> {
+   |               ^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-949/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-949/crates/service)
+warning: `drover-core` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.40s
+     Running tests/disk.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-949/debug/deps/disk-a87ace3353d172ac)
+
+running 12 tests
+test a_builder_with_a_pass_frees_its_build_folders ... FAILED
+test a_reviewer_verdict_frees_its_build_folders ... FAILED
+cp: failed to clone '/tmp/fleet-test-disk-links-2925289-9/worktrees/sendmeter/issue-7/c' from '/tmp/fleet-test-disk-links-2925289-9/worktrees/sendmeter/issue-7/a': Operation not supported
+test orphans_are_removed_for_a_paired_device_only ... ok
+test orphans_are_listed_and_removed_only_with_the_flag ... ok
+test the_budget_counts_a_hard_link_and_a_clone_once ... ok
+test a_missing_root_counts_zero ... ok
+test over_budget_frees_waiting_lanes_longest_waiting_first ... ok
+test parity_r24_over_budget_frees_the_idlest_lane_first_then_disk_budget ... ok
+test drive_refuses_starts_over_budget ... ok
+test leftovers_are_saved_to_wip_or_kept_on_a_secret ... ok
+test the_hourly_sweep_runs_once_per_hour ... ok
+test two_hosts_saving_one_lane_in_the_same_second_get_two_branches ... ok
+
+failures:
+
+---- a_builder_with_a_pass_frees_its_build_folders stdout ----
+drover: queued in /home/user/.local/share/drover/work/drover/issue-949/.drover/outbox.jsonl
+
+thread 'a_builder_with_a_pass_frees_its_build_folders' (2925290) panicked at crates/cli/tests/disk.rs:92:9:
+assertion `left == right` failed: idle
+  left: false
+ right: true
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a_reviewer_verdict_frees_its_build_folders stdout ----
+drover: queued in /home/user/.local/share/drover/work/drover/issue-949/.drover/outbox.jsonl
+
+thread 'a_reviewer_verdict_frees_its_build_folders' (2925292) panicked at crates/cli/tests/disk.rs:71:5:
+the reviewer's target goes, its dirty worktree stays
+
+
+failures:
+    a_builder_with_a_pass_frees_its_build_folders
+    a_reviewer_verdict_frees_its_build_folders
+
+test result: FAILED. 10 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.37s
+
+error: test failed, to rerun pass `-p drover --test disk`
