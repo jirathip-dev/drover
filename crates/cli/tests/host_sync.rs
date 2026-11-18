@@ -255,6 +255,39 @@ fn a_lagging_host_holds_the_swap_30_minutes_then_the_rest_swap_and_placement_pas
 }
 
 #[test]
+fn a_linux_only_release_swaps_the_boats_and_leaves_the_mac_on_its_build() {
+    let mut c = setup("rollout-linux-only", "", true, 0);
+    let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
+    c.exe = dir.join("bin/drover").display().to_string();
+    version_bin(Path::new(&c.exe), &ver(OLD));
+    let tag = drover::release::tag("main", NEW);
+    let linux = format!("{}  drover-x86_64-unknown-linux-gnu\n", "b".repeat(64));
+    let boats = [("bazzite", OLD, None), ("boat2", OLD, None), ("boat3", OLD, None)];
+    let f = rollout(&c, &boats).once(&format!("gh release download {tag} "), 0, &linux);
+    let (code, out) = run(&c, &Disk(&f), &["self-update"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("✗ mini: 1111111 not staged: no release asset for os:macos,arch:arm64"),
+        "{out}"
+    );
+    assert!(
+        out.contains("✓ caught up bazzite, boat2, boat3 to 1111111; left behind: mini"),
+        "{out}"
+    );
+    for m in ["bazzite", "boat2", "boat3"] {
+        assert!(swapped(&f, m).is_some(), "{m} installs the Linux build");
+    }
+    assert!(
+        std::fs::read_to_string(&c.exe).unwrap().contains(OLD),
+        "the Mac keeps its build"
+    );
+    assert!(!f.called(&format!("{} profiles sync", c.exe)));
+    let failed = kinds(&c, "self-update-failed");
+    assert_eq!(failed.len(), 1, "{failed:?}");
+    assert_eq!(failed[0].str("host"), Some("mini"));
+}
+
+#[test]
 fn hosts_refresh_reads_each_hosts_build_and_never_installs() {
     let c = setup("hosts-build-read", "", true, 0);
     let _sh = FakeShed::attached(&c);

@@ -155,6 +155,47 @@ fn no_release_builds_nothing_waits_and_alerts_once_after_the_wait_limit() {
 }
 
 #[test]
+fn a_release_missing_past_the_wait_alerts_once_with_the_failed_job_and_its_first_error() {
+    let (c, live) = setup("upd-norel-why");
+    let repo = "jirathip-dev/herdsman";
+    let runs = format!("gh run list -R {repo} -w release.yml -c {SHA} ");
+    let annotations = |id: u64| format!("gh api repos/{repo}/check-runs/{id}/annotations");
+    let error = "the macOS signing failed: Developer ID Application: no identity found";
+    let r = || {
+        base(&c, &live)
+            .reply("git -C /x/drover rev-parse origin/main", &format!("{SHA}\n"))
+            .reply(&runs, r#"[{"databaseId":44263734602}]"#)
+            .reply(
+                &format!("gh run view 44263734602 -R {repo} --json jobs"),
+                r#"{"jobs":[{"databaseId":7,"name":"linux"},{"databaseId":8,"name":"macos"}]}"#,
+            )
+            .reply(&annotations(7), "[]")
+            .reply(
+                &annotations(8),
+                &json!([
+                    {"annotation_level": "warning", "message": "a warning"},
+                    {"annotation_level": "failure", "message": error},
+                    {"annotation_level": "failure", "message": "a later error"}
+                ])
+                .to_string(),
+            )
+    };
+    let mut asked = vec![];
+    for mins in [0, 46, 50] {
+        let r = r();
+        let (code, out) = run(&at(&c, c.now + mins * 60), &Disk(&r), &["self-update"]);
+        assert_eq!(code, 0, "{out}");
+        asked.push(r.called(&runs));
+    }
+    assert_eq!(asked, [false, true, false], "the run is read only for the alert");
+    let w = kinds(&c, "self-update-waiting");
+    assert_eq!(w.len(), 1, "once per head");
+    assert_eq!((w[0].str("job"), w[0].str("error")), (Some("macos"), Some(error)));
+    let reason = w[0].str("reason").unwrap();
+    assert!(reason.contains("the macos job") && reason.contains(error), "{reason}");
+}
+
+#[test]
 fn a_bad_checksum_or_a_wrong_version_keeps_the_live_binary_and_alerts_once() {
     let other = "9999999999999999999999999999999999999999";
     for (name, code, said, why) in [
