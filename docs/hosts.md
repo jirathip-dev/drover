@@ -389,7 +389,8 @@ over ssh). The brief is the first prompt, and every later prompt goes through th
   `drover hosts keys revoke <id>` (owner only) ends one at once and logs `proxy-key-revoked`. A refused key gets a
   401 and nothing goes upstream.
 - **Bootstrap.** `hosts bootstrap <name>` on a `shed-acp` host: git, gh, Claude Code,
-  rust, shed at drover's pin (`cargo install --git …/shed --rev <shed::REV>`, read back as `shed <proto version>`),
+  rust, shed once from its latest main (`cargo install --git …/shed --branch main`, skipped when `shed --version` answers;
+  shed updates itself after that),
   shed's job (`shed install`, then systemd `enable --now` or launchd `bootstrap`; `shed doctor` is the read-back),
   node and npx, `shed agents add claude-acp`, and drover. No Claude login is opened there. gh is the only login,
   and it must be done by hand over ssh until the git relay lands. `hosts snapshot` saves that state as before.

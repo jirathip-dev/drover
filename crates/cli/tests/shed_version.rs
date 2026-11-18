@@ -2,6 +2,7 @@ mod common;
 use common::*;
 use drover::events::{read, Event};
 use drover::shed::proto::{Response, BUILD, PROTOCOL, VERSION};
+use drover::shed::{MIN_PROTOCOL, UPDATE};
 
 const FLEET: &str = "[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/x/drover\"\nintegration = \"staging\"\n\n[fleet.drover.role.impl]\nharness = \"claude\"\n";
 const SHA: &str = "abcdef1234567890abcdef1234567890abcdef12";
@@ -62,7 +63,9 @@ fn doctor_shows_the_local_shed_against_drovers_and_fails_on_another_protocol() {
     let ours = format!("{VERSION} ({BUILD}) protocol {PROTOCOL}");
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains(&format!("✓ shed — server {ours}, drover speaks {ours}")),
+        out.contains(&format!(
+            "✓ shed — server {ours}, drover needs protocol {MIN_PROTOCOL} or newer"
+        )),
         "{out}"
     );
 
@@ -71,9 +74,7 @@ fn doctor_shows_the_local_shed_against_drovers_and_fails_on_another_protocol() {
     let (code, out) = run(&c, &Fake::default(), &["doctor", "--config-only"]);
     assert_eq!(code, 1, "{out}");
     let want = format!(
-        "✗ shed — SHED_VERSION: drover speaks shed {ours}, the server is 0.0.0 (unknown) protocol 0 → cargo install --git {} --rev {} --locked --force shed, then restart shed serve",
-        drover::shed::git(),
-        drover::shed::REV
+        "✗ shed — SHED_VERSION: shed serve is 0.0.0 (unknown) protocol 0, drover needs shed protocol {MIN_PROTOCOL} or newer → {UPDATE}"
     );
     assert!(out.lines().any(|l| l == want), "{out}");
 }
@@ -102,9 +103,8 @@ fn doctor_gives_each_enabled_remote_host_a_shed_line_or_unreachable() {
         .lines()
         .filter(|l| l.contains(" shed —") && !l.contains("PATH"))
         .collect();
-    let ours = format!("{VERSION} ({BUILD}) protocol {PROTOCOL}");
     let far = format!(
-        "✗ host far shed — SHED_VERSION: drover speaks shed {ours}, the server is 0.0.0 (unknown) protocol 0 → "
+        "✗ host far shed — SHED_VERSION: shed serve is 0.0.0 (unknown) protocol 0, drover needs shed protocol {MIN_PROTOCOL} or newer → "
     );
     assert_eq!(lines.len(), 3, "{out}");
     assert!(lines[0].starts_with("✓ shed — server "), "{out}");
@@ -136,7 +136,7 @@ fn a_protocol_0_server_keeps_the_old_drover_and_alerts_once_naming_the_shed_need
     assert_eq!(failed.len(), 1, "{failed:?}");
     let reason = failed[0].str("reason").unwrap();
     assert!(
-        reason.contains(&format!("drover speaks shed {VERSION} ({BUILD}) protocol {PROTOCOL}")),
+        reason.contains(&format!("drover needs shed protocol {MIN_PROTOCOL} or newer")),
         "{reason}"
     );
 }
@@ -158,7 +158,7 @@ fn a_shed_version_refusal_alerts_once_per_state_not_a_line_per_pass() {
     assert!(alerts[0]
         .str("reason")
         .unwrap()
-        .starts_with("SHED_VERSION: drover speaks shed"));
+        .starts_with("SHED_VERSION: shed serve is 0.0.0"));
 
     old.lock().hello.as_mut().unwrap().protocol = PROTOCOL;
     old.lock().hello.as_mut().unwrap().build = BUILD.into();
