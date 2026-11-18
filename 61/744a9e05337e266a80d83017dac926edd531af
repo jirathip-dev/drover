@@ -1,0 +1,9 @@
+Decided: an extend ask's one more round on an impl or fix(n) issue logs round-extended for the lane it has, not a needs-human extend
+Because: "[one more round] resumes the lane (or the issue is first moved to needs-human so extend and park work), and the ask closes"
+Rejected: moving the issue back to needs-human first — its extend requeues and restarts a lane that is already running
+Decided: a refused sync tap is kept with the tapped jobs; ask and needs-human cards show their tap's latest refusal
+Because: "A tap that drover refuses shows the `REFUSED <CODE>` text on the card."
+Decided: the new extend_ask test target goes in CI test shard 1, the smallest shard
+Because: scripts/test-shards.txt:52
+Check: crates/core/src/gate.rs extend_ask keeps refusing parked or merged issues; scripts/test-shards.sh check passes
+Owner: one more round on a stuck lane's question now works and clears the card; refused taps say why on the card
