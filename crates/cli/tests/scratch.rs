@@ -484,8 +484,11 @@ fn air_off_hosts(c: &drover::Ctx) -> (Fake, FakeShed, FakeShed) {
     let f = Fake::default()
         .reply("gh api graphql -f", r#"{"data": {"repository": {}}}"#)
         .reply(&format!("{ssh}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{ssh}'git' '-C' '{wt}' 'status'"), "")
-        .reply(&format!("{ssh}'git' '-C' '{wt}' 'rev-list'"), "0\n")
+        .reply(&format!("{ssh}'git' '--no-replace-objects' '-C' '{wt}' 'status'"), "")
+        .reply(
+            &format!("{ssh}'git' '--no-replace-objects' '-C' '{wt}' 'rev-list'"),
+            "0\n",
+        )
         .reply(ssh, "");
     let here = FakeShed::attached(c);
     here.lane("sendmeter-impl-13", "working", "/x");

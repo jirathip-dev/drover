@@ -1,5 +1,3 @@
-// #927: the theme pack (docs/themes.md: `/themes/<name>/theme.json`, resolved, and `sprites.svg`) and the colour
-// schemes. A block's `figure` ({state, tool, coat}) is the theme's sprite: a lane's avatar (with a coat) or a row's.
 import { type Blk, blks, isBlk, obj } from './ops';
 import { block, choose } from './schemes';
 
@@ -68,7 +66,7 @@ export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => `&#$
 export const nodes = (h: string) => new DOMParser().parseFromString('<body>' + h, 'text/html').body.childNodes;
 const got = (u: string, j: boolean): Promise<unknown> => fetch(u).then(r => (r.ok ? (j ? r.json() : r.text()) : Promise.reject())).catch(() => (j ? {} : ''));
 
-/** Loads theme `name` (farm filling what it lacks, as herd.js did) and builds the `ha-*` and `hr-*` symbols. */
+/** Loads theme `name` (farm filling what it lacks) and builds the `ha-*` and `hr-*` symbols. */
 export async function theme(name: string): Promise<void> {
   const d = (n: string) => `${R}themes/${n}/`;
   const [fs, fj, ts, tj] = await Promise.all([got(d('farm') + 'sprites.svg', false), got(d('farm') + 'theme.json', true), got(d(name) + 'sprites.svg', false), got(d(name) + 'theme.json', true)]);

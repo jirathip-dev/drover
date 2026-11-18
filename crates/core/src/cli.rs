@@ -10,11 +10,11 @@ use serde_json::json;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-/// #264: (`serve`, `serve --export`), set by the binary: the server crate depends on this one, never the reverse.
+/// (`serve`, `serve --export`), set by the binary: the server crate depends on this one, never the reverse.
 pub static SERVE: std::sync::OnceLock<(Serve, Export)> = std::sync::OnceLock::new();
 type Serve = fn(&Ctx, &dyn Runner, &str, bool) -> Result<()>;
 type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
-/// #345: `drover service` (api addr, board addr), set by the binary from the service crate.
+/// `drover service` (api addr, board addr), set by the binary from the service crate.
 pub static SERVICE: std::sync::OnceLock<Service> = std::sync::OnceLock::new();
 type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
 
@@ -41,8 +41,7 @@ enum Cmd {
         harness: Option<String>,
         #[arg(long, help = "Model name (ignored where the provider's profile owns the model)")]
         model: Option<String>,
-        #[arg(help = "Profile name (default fleet-<role>)")]
-        #[arg(long)]
+        #[arg(long, help = "Profile name (default fleet-<role>)")]
         profile: Option<String>,
         #[arg(help = "none | low | medium | high | xhigh")]
         #[arg(long)]
@@ -54,6 +53,8 @@ enum Cmd {
     Pause { fleet: String },
     #[command(about = "Resume a paused fleet")]
     Resume { fleet: String },
+    #[command(about = "#1099: Owner only: lanes see history since <sha> (default integration's tip) by a graft")]
+    Baseline { fleet: String, sha: Option<String> },
     #[command(
         about = "Create worktree + shed terminal, write .brief.md, launch the role's harness, verify the prompt landed"
     )]
@@ -1075,6 +1076,7 @@ pub fn usage_doc() -> String {
     cmd.build();
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     let owner = [
+        "baseline",
         "doctor",
         "drive",
         "fleet",
@@ -1444,6 +1446,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Pause { fleet } => pause(ctx, out, &fleet, true, None)?,
         Cmd::Resume { fleet } => pause(ctx, out, &fleet, false, None)?,
+        Cmd::Baseline { fleet, sha } => crate::baseline::set(ctx, r, out, &fleet, sha.as_deref())?,
         Cmd::Next { fleet } => {
             if Config::load(&ctx.config).is_ok_and(|c| c.fleet.get(&fleet).is_some_and(|f| f.paused)) {
                 writeln!(out, "{fleet}: paused")?;

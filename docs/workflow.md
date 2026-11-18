@@ -136,6 +136,27 @@ flowchart TD
     other -.- k_stall_restart_hours(["stall_restart_hours = 2"])
 ```
 
+## History baseline
+
+`drover baseline <fleet> [<sha>]` (the owner's; default: the integration tip) sets `[fleet.<f>] baseline`. A lane worktree whose branch contains it sees `git log`, `blame` and `shortlog` stop there: the baseline and the fork point of each older branch merged since are grafted parentless (`git replace --graft`). Nothing is rewritten: old shas still open with `git show`, GitHub, pushes and `refs/notes/why` are untouched, and drover's own git (gate, merge preview, `drover why`) runs with `--no-replace-objects`. The owner's checkout and a branch cut before the baseline keep full history; spawn prints `history: full (…)` for the latter.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Full: worktree add
+    Full --> Since: spawn, every head contains the baseline
+    Full --> Full: spawn, no baseline, a head cut before it, or git failed (baseline-failed)
+    Since --> Full: spawn, a head cut before it
+    Since --> Full: the clone's baseline changed or was removed
+    Since --> Full: by hand, git config --worktree core.useReplaceRefs false
+```
+
+Undo, at four sizes:
+
+- one command: `git --no-replace-objects log`;
+- one worktree, until its lane's next spawn: `git config --worktree core.useReplaceRefs false`;
+- one clone, until drover's next spawn there: `git replace -d $(git replace -l)`;
+- the fleet: remove `baseline` from `[fleet.<f>]`; each clone drops its grafts at its next spawn or preview.
+
 ## Compact: a repo's fresh start
 
 Compact is a feature for any fleet: the repo, its integration branch, `main` and the archive

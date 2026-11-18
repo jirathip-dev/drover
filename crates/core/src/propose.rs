@@ -90,13 +90,13 @@ pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     settled.into_iter().find(|e| e.str("id") == Some(id))
 }
 
-/// #460: proposal `p` was made over a fleet.toml that has changed since: it can no longer apply.
+/// Proposal `p` was made over a fleet.toml that has changed since: it can no longer apply.
 pub fn stale(ctx: &Ctx, p: &Event) -> bool {
     let cur = std::fs::read(&ctx.config).unwrap_or_default();
     p.str("base") != Some(&sha256(&cur))
 }
 
-/// #460: thread `thread`'s proposals that wait for the owner (neither settled nor stale), oldest first.
+/// Thread `thread`'s proposals that wait for the owner (neither settled nor stale), oldest first.
 pub fn waiting<'a>(ctx: &'a Ctx, events: &'a [Event], thread: &'a str) -> impl Iterator<Item = &'a Event> {
     crate::orchestrator::of(events, thread).filter(move |e| {
         e.kind == "config-propose" && settled(events, e.str("id").unwrap_or_default()).is_none() && !stale(ctx, e)
@@ -173,7 +173,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
     Ok(line)
 }
 
-/// #786: `GET /api/v1/config`: fleet.toml as cooee's config screens read it.
+/// `GET /api/v1/config`: fleet.toml as cooee's config screens read it.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -185,7 +185,7 @@ pub struct ConfigView {
     pub fields: Vec<ConfigField>,
 }
 
-/// #786: one setting: its dotted path, TOML kind, allowed values, doc line and `secret:NAME`'s name.
+/// One setting: its dotted path, TOML kind, allowed values, doc line and `secret:NAME`'s name.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -198,7 +198,7 @@ pub struct ConfigField {
     pub secret: Option<String>,
 }
 
-/// #786: `config-check` and `config-edit`'s body: raw TOML, field edits, a fleet added or removed, at `hash`.
+/// `config-check` and `config-edit`'s body: raw TOML, field edits, a fleet added or removed, at `hash`.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -219,7 +219,7 @@ pub struct ConfigSet {
     pub value: Value,
 }
 
-/// #786: a fleet from a GitHub repo; its roles copied from the first fleet's.
+/// A fleet from a GitHub repo; its roles copied from the first fleet's.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -230,7 +230,7 @@ pub struct NewFleet {
     pub integration: String,
 }
 
-/// #786: `POST /api/v1/config-check`'s answer: the change's diff and its errors; nothing written.
+/// `POST /api/v1/config-check`'s answer: the change's diff and its errors; nothing written.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -239,7 +239,7 @@ pub struct ConfigCheck {
     pub errors: Vec<String>,
 }
 
-/// #786: every setting of fleet.toml, its raw text and hash.
+/// Every setting of fleet.toml, its raw text and hash.
 pub fn view(ctx: &Ctx) -> Result<ConfigView> {
     let text = std::fs::read_to_string(&ctx.config)?;
     let cfg = Config::parse(&text)?;
@@ -348,7 +348,7 @@ fn table(l: &str) -> Option<&str> {
     Some(t.split(']').next()?.trim())
 }
 
-/// #786: `c`'s diff and errors over the current fleet.toml, writing nothing.
+/// `c`'s diff and errors over the current fleet.toml, writing nothing.
 pub fn check(ctx: &Ctx, cfg: &Config, c: &ConfigChange) -> Result<ConfigCheck> {
     let cur = std::fs::read_to_string(&ctx.config)?;
     let (err, text) = match changed(cfg, &cur, c) {
@@ -361,7 +361,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, c: &ConfigChange) -> Result<ConfigCheck> {
     })
 }
 
-/// #786: the owner's manual edit: refused `STALE` if fleet.toml moved since `c.hash`, logged `config-edit` `by`.
+/// The owner's manual edit: refused `STALE` if fleet.toml moved since `c.hash`, logged `config-edit` `by`.
 pub fn edit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &ConfigChange, by: &str) -> Result<String> {
     let cur = std::fs::read_to_string(&ctx.config)?;
     if sha256(cur.as_bytes()) != c.hash {

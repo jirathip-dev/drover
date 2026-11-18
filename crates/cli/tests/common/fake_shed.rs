@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 /// The server's state, shared with its connection threads.
 #[derive(Default)]
@@ -23,11 +23,14 @@ pub struct State {
     pub waits: BTreeMap<String, String>,
     /// What it answers `hello` with.
     pub hello: Option<Hello>,
+    /// A `send`, `keys` or `kill` naming this terminal waits until the test clears it and notifies `FakeShed::moved`.
+    pub held: Option<String>,
 }
 
 pub struct FakeShed {
     pub sock: PathBuf,
     pub state: Arc<Mutex<State>>,
+    pub moved: Arc<Condvar>,
 }
 
 impl Drop for FakeShed {
@@ -59,14 +62,15 @@ impl FakeShed {
             }),
             ..State::default()
         }));
-        let s = state.clone();
+        let (s, moved) = (state.clone(), Arc::new(Condvar::new()));
+        let m = moved.clone();
         std::thread::spawn(move || {
             for c in l.incoming().flatten() {
-                let s = s.clone();
-                std::thread::spawn(move || conn(c, &s));
+                let (s, m) = (s.clone(), m.clone());
+                std::thread::spawn(move || conn(c, &s, &m));
             }
         });
-        FakeShed { sock, state }
+        FakeShed { sock, state, moved }
     }
     /// The runtime on this server, as `[runtime] kind = "shed"` makes it.
     pub fn shed(&self) -> Shed {
@@ -201,10 +205,13 @@ fn answer(st: &Mutex<State>, q: &Request) -> String {
     serde_json::to_string(&resp).unwrap()
 }
 
-fn conn(c: UnixStream, st: &Mutex<State>) {
+fn conn(c: UnixStream, st: &Mutex<State>, moved: &Condvar) {
     let mut w = c.try_clone().unwrap();
     for line in BufReader::new(c).lines().map_while(Result::ok) {
         let q: Request = serde_json::from_str(&line).unwrap();
+        let writes = matches!(q.method.as_str(), "send" | "keys" | "kill");
+        let held = |s: &mut State| writes && s.held.is_some() && s.held.as_deref() == q.params["name"].as_str();
+        drop(moved.wait_while(st.lock().unwrap(), held).unwrap());
         writeln!(w, "{}", answer(st, &q)).unwrap();
         if q.method == "events" {
             let since = q.params["since"].as_u64().unwrap_or(0);

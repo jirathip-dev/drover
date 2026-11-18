@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// #162: the accent tokens a fleet card's bar takes (`--l` blue … `--a` amber); red means "needs you", so it is left out.
+/// The accent tokens a fleet card's bar takes (`--l` blue … `--a` amber); red means "needs you", so it is left out.
 pub const COLORS: [&str; 5] = ["l", "p", "c", "g", "a"];
 
 #[derive(Debug, Default, Deserialize)]
@@ -19,37 +19,37 @@ pub struct Config {
     pub models: Vec<String>,
     pub serve: Serve,
     pub providers: Providers,
-    /// #157: `[hosts.<name>]` lanes may run on (docs/hosts.md); none = this host only, as before.
+    /// `[hosts.<name>]` lanes may run on (docs/hosts.md); none = this host only, as before.
     pub hosts: BTreeMap<String, HostCfg>,
-    /// #303: `[[setup]]` logins a host card's [sign in] runs (`crate::setup`).
+    /// `[[setup]]` logins a host card's [sign in] runs (`crate::setup`).
     pub setup: Vec<SetupCfg>,
     pub runtime: Option<Runtime>,
-    /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
+    /// `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     #[serde(alias = "conductor")]
     pub orchestrator: OrchestratorCfg,
-    /// #923: the retired account keys still set (`Config::warnings`).
+    /// The retired account keys still set (`Config::warnings`).
     #[serde(skip)]
     pub retired: Vec<String>,
-    /// #780: fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line).
+    /// Fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line).
     #[serde(skip)]
     pub old_names: bool,
-    /// #557: the Telegram bridge (#387) is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
+    /// The Telegram bridge is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
     pub telegram: Option<toml::Value>,
-    /// #345: `[service] url`, where lanes on other hosts reach `drover service`'s API (docs/service.md).
+    /// `[service] url`, where lanes on other hosts reach `drover service`'s API (docs/service.md).
     pub service: ServiceCfg,
-    /// #404: `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
+    /// `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
-    /// #537: `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
+    /// `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
     pub ci_runners: Option<CiRunners>,
-    /// #637: `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
+    /// `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
     pub proxy: ProxyCfg,
-    /// #894: `[self_update]`, the release branch the live install follows and the optional staging serve.
+    /// `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,
-    /// #1101: `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
+    /// `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
     pub hygiene: Hygiene,
 }
 
-/// #894: `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
+/// `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct SelfUpdate {
@@ -68,7 +68,7 @@ impl Default for SelfUpdate {
     }
 }
 
-/// #637: the proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, how long a lane key lives; #923: `token-file`, the one 0600 token it signs with (`Proxy::setup`'s).
+/// The proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, how long a lane key lives; `token-file`, the one 0600 token it signs with (`Proxy::setup`'s).
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct ProxyCfg {
@@ -90,7 +90,7 @@ impl Default for ProxyCfg {
     }
 }
 
-/// #537: the repo's runner VMs: their recipe (`provider`), spec, slots per VM, label, and the `max_vms` / `usd_day` cap; `vms` are the ones made by hand (`runners add|remove` change the set in the log); `local_*` the mini's runners.
+/// The repo's runner VMs: their recipe (`provider`), spec, slots per VM, label, and the `max_vms` / `usd_day` cap; `vms` are the ones made by hand (`runners add|remove` change the set in the log); `local_*` the mini's runners.
 #[derive(Debug, Deserialize)]
 pub struct CiRunners {
     pub provider: String,
@@ -122,7 +122,7 @@ pub struct ServiceCfg {
     pub url: Option<String>,
 }
 
-/// #404: the harness, model and effort a new thread's orchestrator starts on; each unset one is the role's.
+/// The harness, model and effort a new thread's orchestrator starts on; each unset one is the role's.
 #[derive(Debug, Default, Deserialize)]
 pub struct Chat {
     pub harness: Option<String>,
@@ -130,7 +130,7 @@ pub struct Chat {
     pub effort: Option<String>,
 }
 
-/// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the root of the per-thread working folders (default `<state dir>/conductor`); #538: `allow`, its capability groups.
+/// The conductor's instructions file, skills folder and memory notes folder (`~/` expands); `dir`, the root of the per-thread working folders (default `<state dir>/conductor`); `allow`, its capability groups.
 #[derive(Debug, Default, Deserialize)]
 pub struct OrchestratorCfg {
     pub dir: Option<String>,
@@ -138,14 +138,14 @@ pub struct OrchestratorCfg {
     pub skills: Option<String>,
     pub memory: Option<String>,
     pub allow: Option<Vec<String>>,
-    /// #780: the default orchestrator's name: free text the owner calls it, shown on its labels, never read by code.
+    /// The default orchestrator's name: free text the owner calls it, shown on its labels, never read by code.
     pub name: Option<String>,
-    /// #780: `[orchestrator.<id>]`, more orchestrators: each its own `name` and `fleets` (overlap allowed).
+    /// `[orchestrator.<id>]`, more orchestrators: each its own `name` and `fleets` (overlap allowed).
     #[serde(flatten)]
     pub more: BTreeMap<String, Orchestrator>,
 }
 
-/// #780: one `[orchestrator.<id>]`: what the owner calls it and the fleets its threads may be on.
+/// One `[orchestrator.<id>]`: what the owner calls it and the fleets its threads may be on.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Orchestrator {
@@ -153,7 +153,7 @@ pub struct Orchestrator {
     pub fleets: Vec<String>,
 }
 
-/// #538: each capability group an orchestrator may be allowed and its drover verbs (the hook's `group`).
+/// Each capability group an orchestrator may be allowed and its drover verbs (the hook's `group`).
 pub const GROUPS: &[(&str, &str)] = &[
     ("design", "`spawn … design` or `… architect`"),
     ("clean", "`clean --yes`, `--orphans`, `--lane`"),
@@ -165,7 +165,7 @@ pub const GROUPS: &[(&str, &str)] = &[
 ];
 
 impl OrchestratorCfg {
-    /// #538: the groups on: `allow`, else every group but `pause` and `set`.
+    /// The groups on: `allow`, else every group but `pause` and `set`.
     pub fn groups(&self) -> Vec<&str> {
         let default = || {
             GROUPS
@@ -189,7 +189,7 @@ pub enum RuntimeKind {
     Berth,
 }
 
-/// #721: the load error for the retired runtime, with its migration.
+/// The load error for the retired runtime, with its migration.
 pub const NO_RUNTIME: &str = "no shed runtime: set [runtime] kind = \"shed-acp\" or \"shed\" (docs/runtimes.md)";
 
 pub const RETIRED_RUNTIME: &str = "runtime \"herdr\" is retired (#721): set kind = \"shed-acp\" (each lane an ACP \
@@ -253,37 +253,37 @@ pub struct HostCfg {
     pub roots: Vec<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
-    /// #254: a cloud host's recipe (`boat`, or `<config>/recipes/<name>.toml`), size, limits and idle stop (20 min).
+    /// A cloud host's recipe (`boat`, or `<config>/recipes/<name>.toml`), size, limits and idle stop (20 min).
     pub cloud: Option<String>,
     pub size: Option<String>,
     pub budget_usd_month: Option<f64>,
     pub max_hours_day: Option<f64>,
     pub idle_stop_minutes: Option<u64>,
-    /// #256: its lanes' command rules: `deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops entries (unset: a cloud host allows `CLOUD_ALLOW`, a Mac nothing).
+    /// Its lanes' command rules: `deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops entries (unset: a cloud host allows `CLOUD_ALLOW`, a Mac nothing).
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
     pub allow_commands: Option<Vec<String>>,
-    /// #637: `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
+    /// `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
     pub runtime: Option<RuntimeKind>,
-    /// #984: lanes running a turn at once on this host, all fleets (unset: no cap).
+    /// Lanes running a turn at once on this host, all fleets (unset: no cap).
     pub max_working: Option<usize>,
-    /// #1186: lanes starting at once on this host (unset: `[limits] start_max`; the main host: `max_parallel_spawns`).
+    /// Lanes starting at once on this host (unset: `[limits] start_max`; the main host: `max_parallel_spawns`).
     pub start_max: Option<usize>,
-    /// #1186: when a start here frees its slot (unset: `[limits] start_release`).
+    /// When a start here frees its slot (unset: `[limits] start_release`).
     pub start_release: Option<StartRelease>,
-    /// #984: live lanes that need `sim` on this host at once (unset: no cap).
+    /// Live lanes that need `sim` on this host at once (unset: no cap).
     pub max_simulators: Option<usize>,
-    /// #909: heavy checks its lanes run at once, of every fleet (unset: 3).
+    /// Heavy checks its lanes run at once, of every fleet (unset: 3).
     pub heavy_max: Option<usize>,
-    /// #909: a smaller limit per heavy kind, e.g. `{ swiftlint = 1 }`.
+    /// A smaller limit per heavy kind, e.g. `{ swiftlint = 1 }`.
     #[serde(default)]
     pub heavy_kind_max: BTreeMap<String, usize>,
-    /// #909: minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
+    /// Minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
     pub heavy_wait_minutes: Option<u64>,
 }
 
-/// #1186: the point a starting lane frees its start slot.
+/// The point a starting lane frees its start slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StartRelease {
@@ -291,11 +291,11 @@ pub enum StartRelease {
     Confirmed,
 }
 
-/// #256: a cloud host is a disposable machine: its lanes may start containers.
+/// A cloud host is a disposable machine: its lanes may start containers.
 pub const CLOUD_ALLOW: [&str; 3] = ["docker", "docker compose", "supabase start"];
 
 impl HostCfg {
-    /// #630: its workspace roots in order, as written (none set: empty).
+    /// Its workspace roots in order, as written (none set: empty).
     pub fn roots(&self) -> Vec<String> {
         let mut v = self.roots.clone();
         v.extend(self.root.clone().filter(|_| v.is_empty()));
@@ -311,7 +311,7 @@ impl HostCfg {
         };
         self.allow_commands.clone().unwrap_or_else(def)
     }
-    /// #256: the lane hook's deny list on this host, from the fleet's (`fleet`).
+    /// The lane hook's deny list on this host, from the fleet's (`fleet`).
     pub fn deny(&self, fleet: Vec<Deny>) -> Vec<Deny> {
         let (allow, mut d) = (self.allow(), self.deny_commands.clone().unwrap_or(fleet));
         d.extend(self.deny_commands_add.iter().cloned());
@@ -330,7 +330,7 @@ pub struct Providers {
     pub deepseek: Option<Provider>,
 }
 
-/// The key is read from `env_file` (#707: 0600, refused if looser; else the environment), never from fleet.toml.
+/// The key is read from `env_file` (0600, refused if looser; else the environment), never from fleet.toml.
 #[derive(Debug, Deserialize)]
 pub struct Provider {
     pub key_env: String,
@@ -353,15 +353,15 @@ pub struct Serve {
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
     pub approve_hint: Option<String>,
-    /// #98 `drover setup`: the board job's label (default `dev.drover.serve`), address, `tailscale serve` port.
+    /// `drover setup`: the board job's label (default `dev.drover.serve`), address, `tailscale serve` port.
     pub launchd_label: Option<String>,
     pub addr: Option<String>,
     pub tailscale_https_port: Option<u16>,
-    /// #626: the Funnel listener, `POST /hooks/github` only (default `127.0.0.1:7778`; `""`: off).
+    /// The Funnel listener, `POST /hooks/github` only (default `127.0.0.1:7778`; `""`: off).
     pub hooks_addr: Option<String>,
-    /// #172: the Herd's theme, `<config dir>/themes/<name>/` or built-in (default `farm`).
+    /// The Herd's theme, `<config dir>/themes/<name>/` or built-in (default `farm`).
     pub theme: Option<String>,
-    /// #707: the 0600 file holding `GITHUB_WEBHOOK_SECRET` (unset: webhooks off).
+    /// The 0600 file holding `GITHUB_WEBHOOK_SECRET` (unset: webhooks off).
     pub webhook_secret_file: Option<String>,
 }
 
@@ -379,7 +379,7 @@ pub struct Fleet {
     pub repo: String,
     pub local: String,
     pub integration: String,
-    /// #294: `[[fleet.<n>.serial]]` groups: globs only `max` issues at a time may touch (`SERIAL_BUSY`, `SERIAL_UNMARKED`).
+    /// `[[fleet.<n>.serial]]` groups: globs only `max` issues at a time may touch (`SERIAL_BUSY`, `SERIAL_UNMARKED`).
     #[serde(default)]
     pub serial: Vec<Serial>,
     /// The old form of one group named `serial_label` (unset = `db`); `Config::parse` reads it into `serial`.
@@ -390,14 +390,14 @@ pub struct Fleet {
     /// The only checks merge, `check` and `wait` look at (latest run of each); empty = all.
     #[serde(default)]
     pub required_checks: Vec<String>,
-    /// #150: a label the PR needs for its full CI (e.g. `merge-ready`), kept on it exactly while a PASS stands at its head; unset = none.
+    /// A label the PR needs for its full CI (e.g. `merge-ready`), kept on it exactly while a PASS stands at its head; unset = none.
     pub merge_label: Option<String>,
-    /// #285: `always` catches every behind ready PR up with integration; unset/`needed`: only on a conflict or a strict rule.
+    /// `always` catches every behind ready PR up with integration; unset/`needed`: only on a conflict or a strict rule.
     pub update_ready: Option<String>,
     /// Optional caps on concurrent impl/fix and review lanes (CAP); unset = no cap.
     pub max_impl: Option<usize>,
     pub max_rev: Option<usize>,
-    /// #1129: a cap on the fleet's PRs in flight (`IN_FLIGHT_CAP`); unset = 8, `0` = off.
+    /// A cap on the fleet's PRs in flight (`IN_FLIGHT_CAP`); unset = 8, `0` = off.
     pub max_in_flight: Option<usize>,
     #[serde(default)]
     pub role: BTreeMap<String, Role>,
@@ -409,80 +409,82 @@ pub struct Fleet {
     /// `drover pause`: `next` offers nothing and impl/rev spawns refuse PAUSED.
     #[serde(default)]
     pub paused: bool,
-    /// #638: this fleet's share of the spawn slots against the others' (default 1).
+    /// This fleet's share of the spawn slots against the others' (default 1).
     pub weight: Option<usize>,
-    /// #103: exported into every lane (`~/` expands).
+    /// Exported into every lane (`~/` expands).
     #[serde(default)]
     pub env: BTreeMap<String, String>,
-    /// #361: build caches shared by the fleet's lanes, exported like `env`; opt-in.
+    /// Build caches shared by the fleet's lanes, exported like `env`; opt-in.
     #[serde(default)]
     pub shared_cache: BTreeMap<String, String>,
-    /// #185: build folders a new lane APFS-clones from `local` on a lockfile match; `clone_node_modules` is its alias for one release.
+    /// Build folders a new lane APFS-clones from `local` on a lockfile match; `clone_node_modules` is its alias for one release.
     #[serde(default)]
     pub clone_build: Vec<String>,
     #[serde(default)]
     pub clone_node_modules: bool,
-    /// #187: lanes' `DROVER_PORT` range, `lo-hi`; unset = `41000-41999`.
+    /// Lanes' `DROVER_PORT` range, `lo-hi`; unset = `41000-41999`.
     pub port_range: Option<String>,
-    /// #164: build folders freed besides `target`, `node_modules`, `.next` and `dist` (paths in the worktree).
+    /// Build folders freed besides `target`, `node_modules`, `.next` and `dist` (paths in the worktree).
     #[serde(default)]
     pub build_dirs: Vec<String>,
-    /// #173: `[fleet.<n>.pipeline]`; `Config::parse` fills in the built-in one when absent.
+    /// `[fleet.<n>.pipeline]`; `Config::parse` fills in the built-in one when absent.
     pub pipeline: Option<crate::pipeline::Pipeline>,
-    /// #173: the pipeline's broken rules: every command but `serve`/`doctor`/`status` refuses `BAD_PIPELINE`.
+    /// The pipeline's broken rules: every command but `serve`/`doctor`/`status` refuses `BAD_PIPELINE`.
     #[serde(skip)]
     pub bad: Vec<crate::pipeline::Problem>,
-    /// #162: the Queue card's colour, one of `COLORS`; unset = a stable hash of the fleet name.
+    /// The Queue card's colour, one of `COLORS`; unset = a stable hash of the fleet name.
     pub color: Option<String>,
-    /// #157: host tags every lane of this fleet needs (e.g. `xcode`).
+    /// Host tags every lane of this fleet needs (e.g. `xcode`).
     #[serde(default)]
     pub needs: Vec<String>,
-    /// #228: this fleet's form categories and form rounds; `Config::parse` fills in `[limits]`'s when absent.
+    /// This fleet's form categories and form rounds; `Config::parse` fills in `[limits]`'s when absent.
     pub form_categories: Option<Vec<String>>,
     pub form_rounds: Option<u32>,
-    /// #908: this fleet's `respawn_per_pass`; `Config::parse` fills in `[limits]`'s when absent.
+    /// This fleet's `respawn_per_pass`; `Config::parse` fills in `[limits]`'s when absent.
     pub respawn_per_pass: Option<usize>,
-    /// #1216: this fleet's `stall_restart_hours`; unset = `[limits]`'s.
+    /// This fleet's `stall_restart_hours`; unset = `[limits]`'s.
     pub stall_restart_hours: Option<u64>,
-    /// #216: replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
+    /// Replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
-    /// #272: fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
+    /// Fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<Premerge>>,
-    /// #754: the repo's own line-cap script `drover cap` reads `N / cap M` lines from; unset = the first `premerge` check naming a cap, else the built-in Rust count.
+    /// The repo's own line-cap script `drover cap` reads `N / cap M` lines from; unset = the first `premerge` check naming a cap, else the built-in Rust count.
     pub cap_script: Option<String>,
-    /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
+    /// `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
-    /// #1097: how `merge` lands a PR: `squash` (default) or `merge`.
+    /// How `merge` lands a PR: `squash` (default) or `merge`.
     #[serde(default)]
     pub merge: MergeMode,
-    /// #419: `weekly` (unset) has `tick` run `drover lesson` every 7 days; `off` opts out.
+    /// `weekly` (unset) has `tick` run `drover lesson` every 7 days; `off` opts out.
     pub lessons: Option<String>,
-    /// #889: `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
+    /// `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
     pub hotspots: Option<String>,
-    /// #1100: `weekly` has `tick` run `drover triage` every 7 days; unset or `off`: only on demand.
+    /// `weekly` has `tick` run `drover triage` every 7 days; unset or `off`: only on demand.
     pub triage: Option<String>,
-    /// #909: `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
+    /// `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
     #[serde(default)]
     pub heavy: BTreeMap<String, Vec<String>>,
-    /// #417: globs of UI files: a PR touching one goes through the verify stage.
+    /// Globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
-    /// #541: the orchestrator thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
+    /// The orchestrator thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
     pub ask_thread: Option<String>,
-    /// #565: `[fleet.<n>.runtime]`, this fleet's new lanes' runtime over the global `[runtime]` (a pilot on one fleet).
+    /// `[fleet.<n>.runtime]`, this fleet's new lanes' runtime over the global `[runtime]` (a pilot on one fleet).
     pub runtime: Option<Runtime>,
-    /// #732: lets `rev` share `impl`'s provider; its line needs a `#` reason comment.
+    /// Lets `rev` share `impl`'s provider; its line needs a `#` reason comment.
     pub rev_same_provider: Option<bool>,
-    /// #1101: `[fleet.<n>.hygiene]`, this fleet's keys over `[hygiene]`'s.
+    /// `[fleet.<n>.hygiene]`, this fleet's keys over `[hygiene]`'s.
     #[serde(default)]
     pub hygiene: Hygiene,
-    /// #782: `srt` starts every lane's agent inside sandbox-runtime with the rules `sandbox::settings` writes; unset = off.
+    /// `srt` starts every lane's agent inside sandbox-runtime with the rules `sandbox::settings` writes; unset = off.
     pub sandbox: Option<Sandbox>,
+    /// lanes see history since this commit only (`drover baseline`); unset = all of it.
+    pub baseline: Option<Baseline>,
 }
 
-/// #1101: one key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
+/// One key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
 #[derive(Debug, Default, Deserialize, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Hygiene {
@@ -495,7 +497,7 @@ pub struct Hygiene {
     pub docs: Option<String>,
 }
 
-/// #1101: the defaults: squash merges, strict comments, a setup baseline, weekly triage, `docs/archive/` unread, specs folded by triage, a `[docs]` check.
+/// The defaults: squash merges, strict comments, a setup baseline, weekly triage, `docs/archive/` unread, specs folded by triage, a `[docs]` check.
 pub fn hygiene_default() -> Hygiene {
     let s = |v: &str| Some(v.to_string());
     Hygiene {
@@ -543,14 +545,14 @@ impl Hygiene {
     }
 }
 
-/// #782: the kernel sandbox a lane's agent runs in.
+/// The kernel sandbox a lane's agent runs in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Sandbox {
     Srt,
 }
 
-/// #1097: `squash` lands a PR as one commit carrying its why notes and deletes its branch; `merge` keeps every commit.
+/// `squash` lands a PR as one commit carrying its why notes and deletes its branch; `merge` keeps every commit.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MergeMode {
@@ -569,7 +571,32 @@ impl MergeMode {
     }
 }
 
-/// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits for the full set); integration's own CI then runs the full suite, and `land::watch` reverts a red landing.
+/// a full commit id; only 40 lowercase hex chars build one, so a bad key fails at load.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Baseline(String);
+
+impl TryFrom<String> for Baseline {
+    type Error = String;
+    fn try_from(s: String) -> std::result::Result<Self, String> {
+        let hex = s.len() == 40 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        hex.then_some(Baseline(s))
+            .ok_or_else(|| "baseline must be a full 40-hex commit sha".into())
+    }
+}
+
+impl Baseline {
+    /// The full sha.
+    pub fn sha(&self) -> &str {
+        &self.0
+    }
+    /// The first 12 chars, for lines people read.
+    pub fn short(&self) -> &str {
+        &self.0[..12]
+    }
+}
+
+/// `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits for the full set); integration's own CI then runs the full suite, and `land::watch` reverts a red landing.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Land {
@@ -578,7 +605,7 @@ pub struct Land {
     pub full_first_paths: Vec<String>,
 }
 
-/// #373: a plain command, or a named check: runs if the PR changes `when` paths, refuses with `code`, briefs `fix`.
+/// A plain command, or a named check: runs if the PR changes `when` paths, refuses with `code`, briefs `fix`.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum Premerge {
@@ -596,7 +623,7 @@ pub struct Check {
     pub fix: Option<String>,
 }
 
-/// #294: a serial group; `name` (≤ 8 chars) is also its Queue mark.
+/// A serial group; `name` (≤ 8 chars) is also its Queue mark.
 #[derive(Debug, Deserialize, Clone)]
 pub struct Serial {
     pub name: String,
@@ -619,10 +646,10 @@ impl Serial {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Role {
-    /// #732: unset with `agent` set, the harness whose adapter that agent is.
+    /// Unset with `agent` set, the harness whose adapter that agent is.
     #[serde(default)]
     pub harness: String,
-    /// #732: the ACP agent id its shed-acp lanes run (one `shed agents` lists) over the runtime's `acp`.
+    /// The ACP agent id its shed-acp lanes run (one `shed agents` lists) over the runtime's `acp`.
     pub agent: Option<String>,
     pub profile: Option<String>,
     pub model: Option<String>,
@@ -631,14 +658,14 @@ pub struct Role {
     /// MCP servers (by `.mcp.json` name) the lane gets; none by default.
     #[serde(default)]
     pub mcp: Vec<String>,
-    /// #173: a file appended to the role's kind prompt (`roles/impl.md` for a build, `roles/rev.md` for a check).
+    /// A file appended to the role's kind prompt (`roles/impl.md` for a build, `roles/rev.md` for a check).
     pub prompt: Option<String>,
-    /// #157: host tags this role's lanes need besides the fleet's.
+    /// Host tags this role's lanes need besides the fleet's.
     #[serde(default)]
     pub needs: Vec<String>,
-    /// #236: the host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
+    /// The host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
     pub host: Option<String>,
-    /// #401: the default orchestrator `Config::parse` adds for a fleet without one: its impl role on `lane-orchestrator`.
+    /// The default orchestrator `Config::parse` adds for a fleet without one: its impl role on `lane-orchestrator`.
     #[serde(skip)]
     pub default: bool,
 }
@@ -738,7 +765,7 @@ pub struct Limits {
     pub stall_restart_hours: u64,
 }
 
-/// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
+/// A `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
 #[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Deny {
@@ -864,7 +891,7 @@ impl Default for Limits {
     }
 }
 
-/// #844: every `[limits]` key and what it sets, in docs/config.md's order; `drover config show` prints them.
+/// Every `[limits]` key and what it sets, in docs/config.md's order; `drover config show` prints them.
 pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "review_rounds",
@@ -1148,14 +1175,14 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
 
 static ACTIVE: std::sync::RwLock<Option<std::sync::Arc<Limits>>> = std::sync::RwLock::new(None);
 
-/// #844: the last loaded fleet.toml's `[limits]` (defaults before one loads), for code that holds no `Config`.
+/// The last loaded fleet.toml's `[limits]` (defaults before one loads), for code that holds no `Config`.
 pub fn limits() -> std::sync::Arc<Limits> {
     static DEFAULT: std::sync::OnceLock<std::sync::Arc<Limits>> = std::sync::OnceLock::new();
     let active = ACTIVE.read().ok().and_then(|a| a.clone());
     active.unwrap_or_else(|| DEFAULT.get_or_init(Default::default).clone())
 }
 
-/// #844: `drover config show`: each `[limits]` key, its value and its doc line.
+/// `drover config show`: each `[limits]` key, its value and its doc line.
 pub fn show(cfg: &Config, out: &mut dyn std::io::Write) -> Result<()> {
     let vals = toml::Table::try_from(&cfg.limits)?;
     for (k, doc) in LIMIT_DOCS {
@@ -1186,7 +1213,7 @@ impl Notify {
     pub fn webpush(&self) -> bool {
         self.kind.as_deref() == Some("webpush")
     }
-    /// #350: every landing pause and revert (or failed revert), and #345's stalled service, goes to each notifier, whatever its `on` says; #363: so does a board report, to each notifier but the phones'.
+    /// Every landing pause and revert (or failed revert), and a stalled service, goes to each notifier, whatever its `on` says; so does a board report, to each notifier but the phones'.
     pub fn wants(&self, e: &crate::events::Event) -> bool {
         let kind = e.kind.as_str();
         self.on.iter().any(|k| k == kind)
@@ -1216,13 +1243,13 @@ fn orchestrator_ids(c: &Config) -> Result<()> {
 }
 
 impl Config {
-    /// #1101: fleet `name`'s hygiene, every key set: its own, else `[hygiene]`'s, else the default.
+    /// Fleet `name`'s hygiene, every key set: its own, else `[hygiene]`'s, else the default.
     pub fn hygiene(&self, name: &str) -> Hygiene {
         let own = self.fleet.get(name).map(|f| f.hygiene.clone()).unwrap_or_default();
         own.or(&self.hygiene).or(&hygiene_default())
     }
 
-    /// #539: each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error.
+    /// Each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
         let gone = "removed (#923): lanes run on the host's own CLI login; delete";
         let acct = (!self.retired.is_empty()).then(|| ("[accounts]", format!("{gone} {}", self.retired.join(", "))));
@@ -1266,7 +1293,7 @@ impl Config {
         }
     }
 
-    /// #709: the config, else (it fails to load) the error and the last good one, which each load keeps beside the state log (`fleet.good.toml`): serve reads from it and `check` alerts through its notifiers.
+    /// The config, else (it fails to load) the error and the last good one, which each load keeps beside the state log (`fleet.good.toml`): serve reads from it and `check` alerts through its notifiers.
     pub fn loaded(ctx: &crate::Ctx) -> std::result::Result<Config, (anyhow::Error, Option<Box<Config>>)> {
         let good = ctx.state.with_file_name("fleet.good.toml");
         match Self::load_text(&ctx.config) {
@@ -1281,7 +1308,7 @@ impl Config {
         }
     }
 
-    /// #709: serve's reads: the config, else the last good one; Err only with none kept.
+    /// Serve's reads: the config, else the last good one; Err only with none kept.
     pub fn kept(ctx: &crate::Ctx) -> Result<Config> {
         Self::loaded(ctx).or_else(|(e, good)| good.map(|g| *g).ok_or(e))
     }
@@ -1291,7 +1318,7 @@ impl Config {
         let raw: toml::Table = toml::from_str(text)?;
         if let Some((k, _)) = strings("", &toml::Value::Table(raw.clone()))
             .into_iter()
-            .find(|(_, v)| secret_like(v))
+            .find(|(k, v)| secret_like(v) && !(k.ends_with(".baseline") && Baseline::try_from(v.clone()).is_ok()))
         {
             return crate::gate::refused(
                 "SECRET_IN_CONFIG",
@@ -1495,13 +1522,13 @@ impl Config {
         }
     }
 
-    /// The first webpush notifier's VAPID `sub`: `None` means the page's alerts are saved but never sent (#87).
+    /// The first webpush notifier's VAPID `sub`: `None` means the page's alerts are saved but never sent.
     pub fn webpush_sub(&self) -> Option<&str> {
         let all = self.notify.iter().chain(self.fleet.values().flat_map(|f| &f.notify));
         all.filter(|n| n.webpush()).find_map(|n| n.sub.as_deref())
     }
 
-    /// #565: the shed runtime fleet `name`'s new lanes start on: its own `[fleet.<n>.runtime]`, else `[runtime]`'s.
+    /// The shed runtime fleet `name`'s new lanes start on: its own `[fleet.<n>.runtime]`, else `[runtime]`'s.
     pub fn shed_for(&self, name: &str) -> Option<crate::shed::Shed> {
         let own = self.fleet.get(name).and_then(|f| f.runtime.as_ref());
         own.or(self.runtime.as_ref()).map(Runtime::shed)
@@ -1513,7 +1540,7 @@ impl Config {
         self.runtime.as_ref().or_else(first).map(Runtime::shed).or_else(host)
     }
 
-    /// #1186: lanes that may start at once on host `name` (a name no `[hosts]` entry has, or a machine-less one, is the main host).
+    /// Lanes that may start at once on host `name` (a name no `[hosts]` entry has, or a machine-less one, is the main host).
     pub fn start_max(&self, name: &str) -> usize {
         let mps = self.limits.max_parallel_spawns;
         match self.hosts.get(name) {
@@ -1522,13 +1549,13 @@ impl Config {
         }
     }
 
-    /// #1186: when a start on host `name` frees its slot.
+    /// When a start on host `name` frees its slot.
     pub fn start_release(&self, name: &str) -> StartRelease {
         let h = self.hosts.get(name).and_then(|h| h.start_release);
         h.unwrap_or(self.limits.start_release)
     }
 
-    /// #637: host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
+    /// Host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
     pub fn host_acp(&self, name: &str) -> Option<crate::shed::Shed> {
         self.hosts
             .get(name)
@@ -1542,12 +1569,12 @@ impl Config {
         )
     }
 
-    /// #637: the runtime fleet `fleet`'s new lanes start in on host `host`: the host's own, else the fleet's.
+    /// The runtime fleet `fleet`'s new lanes start in on host `host`: the host's own, else the fleet's.
     pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> Option<crate::shed::Shed> {
         host.and_then(|h| self.host_acp(h)).or_else(|| self.shed_for(fleet))
     }
 
-    /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (#173: that fleet stops, the others run).
+    /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (that fleet stops, the others run).
     pub fn fleet(&self, name: &str) -> Result<&Fleet> {
         let f = self.fleet.get(name).ok_or_else(|| anyhow!("unknown fleet '{name}'"))?;
         match f.bad.as_slice() {
@@ -1566,11 +1593,11 @@ impl Config {
 }
 
 impl Fleet {
-    /// #1129: `max_in_flight`, unset 8; `None` when `0` turns it off.
+    /// `max_in_flight`, unset 8; `None` when `0` turns it off.
     pub fn in_flight_cap(&self) -> Option<usize> {
         Some(self.max_in_flight.unwrap_or(8)).filter(|&n| n > 0)
     }
-    /// #173: the fleet's pipeline (the built-in one unless fleet.toml has its own).
+    /// The fleet's pipeline (the built-in one unless fleet.toml has its own).
     pub fn flow(&self) -> &crate::pipeline::Pipeline {
         static NONE: crate::pipeline::Pipeline = crate::pipeline::Pipeline {
             stage: Vec::new(),
@@ -1588,7 +1615,7 @@ impl Fleet {
             _ => "impl",
         }
     }
-    /// #162: the card colour: `color`, else `sha256(name)[0] % 5` over `COLORS` (the horse coats' hash).
+    /// The card colour: `color`, else `sha256(name)[0] % 5` over `COLORS` (the horse coats' hash).
     pub fn color(&self, name: &str) -> &str {
         self.color.as_deref().unwrap_or_else(|| {
             let h = crate::devices::sha256(name.as_bytes());
@@ -1596,7 +1623,7 @@ impl Fleet {
             COLORS.get(i).copied().unwrap_or_default()
         })
     }
-    /// #216: the lane hook's deny list: `deny_commands`, else `[limits]`'s, plus `deny_commands_add`.
+    /// The lane hook's deny list: `deny_commands`, else `[limits]`'s, plus `deny_commands_add`.
     pub fn deny(&self, limits: &Limits) -> Vec<Deny> {
         let mut d = self
             .deny_commands
@@ -1605,11 +1632,11 @@ impl Fleet {
         d.extend(self.deny_commands_add.iter().cloned());
         d
     }
-    /// #350: the `[land]` table when this fleet lands fast-first.
+    /// The `[land]` table when this fleet lands fast-first.
     pub fn fast_first(&self) -> Option<&Land> {
         self.land.as_ref().filter(|l| l.mode == "fast-first")
     }
-    /// #350: the checks `pr` lands on: the `fast` ones once `land::mark` marked it fast-first, else `required_checks`.
+    /// The checks `pr` lands on: the `fast` ones once `land::mark` marked it fast-first, else `required_checks`.
     pub fn checks(&self, pr: &serde_json::Value) -> &[String] {
         match self.fast_first() {
             Some(l) if pr["landing"] == "fast-first" => &l.fast,
@@ -1624,7 +1651,7 @@ impl Fleet {
             .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
     }
-    /// #419: the configured role a lane runs as: a lesson (#1100: triage) lane is impl's unless its own role is set.
+    /// The configured role a lane runs as: a lesson or triage lane is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
         if matches!(role, "lesson" | "triage") && !self.role.contains_key(role) {
             "impl"

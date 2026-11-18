@@ -99,3 +99,27 @@ fn an_unmarked_issues_pass_reads_neither_commits_nor_diff() {
         .iter()
         .any(|c| c.contains("commits") || c.contains("pr diff")));
 }
+
+#[test]
+fn a_refactor_pass_over_githubs_diff_limit_reads_the_local_diff() {
+    let (c, d) = setup("refactor-large", "--refactor");
+    let sha = "a".repeat(40);
+    let too_large = "could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number of files (300). (https://api.github.com/repos/jirathip-dev/sendmeter/pulls/12)\nPullRequest.diff too_large";
+    let local = "git -C /tmp/does-not-matter/sendmeter diff";
+    let fake = |diff: &str| {
+        Fake::default()
+            .reply(BRANCH, &sha)
+            .once_err(DIFF, 1, too_large)
+            .reply("git -C /tmp/does-not-matter/sendmeter fetch", "")
+            .reply(local, diff)
+    };
+    let edited = MOVED.replace("+        assert_eq!(total(), 3);", "+        assert_eq!(total(), 4);");
+    let (code, out, n) = pass(&c, &d, &fake(&edited), "");
+    assert_eq!((code, n), (3, 0), "{out}");
+    let want = "REFUSED TESTS_CHANGED: a `--refactor` PR edits tests beyond moves and renames: tests/a.rs, tests/b.rs";
+    assert!(out.contains(want), "{out}");
+    let r = fake(MOVED);
+    let (code, out, n) = pass(&c, &d, &r, "");
+    assert_eq!((code, n), (0, 1), "{out}");
+    assert!(r.called(&format!("{local} origin/")), "{:?}", r.calls.borrow());
+}

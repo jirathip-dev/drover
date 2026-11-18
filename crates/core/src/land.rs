@@ -368,7 +368,7 @@ pub fn stats(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Resul
     Ok(())
 }
 
-/// #129: after a merge, merge integration into every other open ready PR whose lane isn't working, oldest PR first, in a scratch worktree (#207: never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`) only when needed (#285: `update_ready`), else the PR merges as it is; a ready PR's conflict gets an `--update` lane.
+/// After a merge, merge integration into every other open ready PR whose lane isn't working, oldest PR first, in a scratch worktree (never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`) only when needed (`update_ready`), else the PR merges as it is; a ready PR's conflict gets an `--update` lane.
 pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let (f, events, ag) = (
         cfg.fleet(fleet)?,

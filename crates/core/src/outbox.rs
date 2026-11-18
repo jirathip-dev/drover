@@ -40,7 +40,7 @@ fn take(r: &dyn Runner, sp: &Event, p: &str) -> Result<String> {
     crate::runner::ok(&On::of(r, Some(sp)), "sh", &crate::runner::argv(&["-c", sh, "sh", p]))
 }
 
-/// #337: the step's look reads every outbox in its one call per host.
+/// The step's look reads every outbox in its one call per host.
 pub fn look(r: &dyn Runner, events: &[Event]) {
     for (sp, _, p) in boxes(events) {
         drop(take(r, sp, &p));

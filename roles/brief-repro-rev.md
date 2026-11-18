@@ -16,5 +16,6 @@
         ```
         test result: ok. 1 passed; 0 failed
         ```
-  - `Repro: verify`, only when the PR body has a `## Repro` section: quote its reason on a `>` line.
+  - `Repro: verify`, only when the PR body has a `## Repro` section and the fleet has a verify role: quote its reason
+    on a `>` line.
 - A repro test that passes on the base plus commit 1, or a fix that changes the test without a spec change, is a FAIL.

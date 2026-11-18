@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 pub const FLEET: &str = "drover";
 pub const REPO: &str = "jirathip-dev/herdsman";
+pub const BASELINE: &str = "6e618cd22a43225e18a773b2dc5bd9ab24a9088b";
 
 /// What a lane's agent does once its prompt lands.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -96,18 +97,18 @@ pub struct Model {
     pub died: Vec<String>,
     /// Test-only break switches (AC 3).
     pub sabotage: Option<crate::invariants::Sabotage>,
-    /// #685: every head's CI takes this long (else 1–15 min, drawn).
+    /// Every head's CI takes this long (else 1–15 min, drawn).
     pub ci_secs: Option<u64>,
-    /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed a head or wrote a verdict drover takes.
+    /// Ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed a head or wrote a verdict drover takes.
     pub ci_since: BTreeMap<String, u64>,
     pub ci_wait: u64,
     pub idle: u64,
     pub polled: u64,
     pub produced: Vec<String>,
-    /// #959 faults: what happens to an issue's head once rev's PASS lands, and a `drive`/`merge` that dies right after GitHub's merge call.
+    /// Faults: what happens to an issue's head once rev's PASS lands, and a `drive`/`merge` that dies right after GitHub's merge call.
     pub after_pass: Vec<(u64, crate::gates::AfterPass)>,
     pub crash_on_merge: bool,
-    /// #959: the "sometimes" states this run reached (`gates::SOMETIMES`).
+    /// The "sometimes" states this run reached (`gates::SOMETIMES`).
     pub reached: std::collections::BTreeSet<&'static str>,
 }
 
@@ -554,9 +555,10 @@ fn git(w: &mut World, a: &[&str]) -> Out {
         }
         ["status", "--porcelain", ..]
         | ["fetch" | "rev-list" | "log" | "diff" | "branch" | "ls-files" | "add" | "ls-tree" | "commit" | "push"
-        | "stash" | "remote" | "config", ..]
+        | "stash" | "remote" | "config" | "replace", ..]
         | ["reset", "-q", ..]
         | ["worktree", "prune"]
+        | ["merge-base", "--is-ancestor", BASELINE, _]
         | ["sparse-checkout", "set", ..] => ok(""),
         ["merge-base", "--is-ancestor", a, b] if a == b || m.base.get(*b).is_some_and(|s| s == a) => ok(""),
         ["merge-base", "--is-ancestor", ..] => err(1, ""),

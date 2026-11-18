@@ -58,7 +58,7 @@ pub(crate) fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)>
     all.filter(|p| done.insert(p.4.clone())).collect()
 }
 
-/// Write every harness's files for every role's profile, so `drover set` alone can switch a role's harness; a generated profile no role names any more (#155: a retired role's) is removed.
+/// Write every harness's files for every role's profile, so `drover set` alone can switch a role's harness; a generated profile no role names any more (a retired role's) is removed.
 pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) -> Result<()> {
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
@@ -91,7 +91,7 @@ pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Wri
     Ok(good)
 }
 
-/// #737: each synced profile's drover hook whose program is not the running binary: `<profile> hook runs <exe>`.
+/// Each synced profile's drover hook whose program is not the running binary: `<profile> hook runs <exe>`.
 pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
     let mut stray = vec![];
     for (_, _, _, _, profile) in profiles(cfg) {
@@ -114,7 +114,7 @@ pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
 pub struct Plan {
     pub agent: String,
     pub role: String,
-    /// #173: the pipeline stage it runs and the role's kind (`impl`, `rev` for a check, `design`).
+    /// The pipeline stage it runs and the role's kind (`impl`, `rev` for a check, `design`).
     pub stage: String,
     pub family: &'static str,
     pub harness: String,
@@ -136,24 +136,24 @@ pub struct Plan {
     /// Display title head (`<fleet> · <role> #<issue>`) and the full lane title built from it.
     pub head: String,
     pub title: String,
-    /// #355: an orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
+    /// An orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
     pub session: Option<(String, bool)>,
-    /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
+    /// A remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
     pub lane_key: Option<String>,
-    /// #782: the fleet's `sandbox`; `start_cmd` runs the harness inside it.
+    /// The fleet's `sandbox`; `start_cmd` runs the harness inside it.
     pub sandbox: Option<crate::config::Sandbox>,
 }
 
-/// #979: a build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
+/// A build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
 pub const BACKGROUND: &str = "&& if [ -x /usr/sbin/taskpolicy ]; then /usr/sbin/taskpolicy -b -p $$; else renice -n 10 -p $$ >/dev/null; ionice -c3 -p $$ 2>/dev/null; true; fi";
 
 impl Plan {
-    /// #979: build and check lanes run in the background; design, architect and orchestrator lanes do not.
+    /// Build and check lanes run in the background; design, architect and orchestrator lanes do not.
     pub fn qos(&self) -> Option<&'static str> {
         matches!(self.family, "impl" | "rev").then_some("background")
     }
 
-    /// Exports `DROVER_LANE`, `DROVER_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
+    /// Exports `DROVER_LANE`, `DROVER_PORT` and the fleet's `env`; sources the secrets `deliver` wrote.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
         let (lane, port) = (format!("DROVER_LANE='{}'", self.lane), self.port.to_string());
         let mut c = term::run_argv(pane, &["export", &lane, &format!("DROVER_PORT={port}")]);
@@ -192,7 +192,7 @@ impl Plan {
         PathBuf::from(format!("{}.env", self.worktree.display()))
     }
 
-    /// #592: a remote lane's hook rules, beside its worktree on its host.
+    /// A remote lane's hook rules, beside its worktree on its host.
     pub fn rules_file(&self) -> PathBuf {
         PathBuf::from(format!("{}.rules.json", self.worktree.display()))
     }
@@ -214,7 +214,7 @@ impl Plan {
     }
 }
 
-/// #707: the lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`) and
+/// The lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`) and
 pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<Delivered<'a>> {
     let mut text = String::new();
     for (var, _, name) in p.secrets() {
@@ -283,7 +283,7 @@ pub fn lane_title(head: &str, issue_title: &str) -> String {
     }
 }
 
-/// #187: `<fleet>/<branch>` hashed (FNV-1a) into `range` (default 41000-41999); a `taken` port takes the next free one.
+/// `<fleet>/<branch>` hashed (FNV-1a) into `range` (default 41000-41999); a `taken` port takes the next free one.
 pub fn lane_port(range: Option<&str>, key: &str, taken: &[u16]) -> u16 {
     let r = range.and_then(|r| r.split_once('-'));
     let r = r.and_then(|(a, b)| Some((a.trim().parse::<u16>().ok()?, b.trim().parse::<u16>().ok()?)));
@@ -397,7 +397,7 @@ fn shared_target<'a>(root: &Path, f: &'a Fleet, agent: &str) -> impl Iterator<It
         .filter(|v| !f.env.contains_key(&v.0) && !f.shared_cache.contains_key(&v.0))
 }
 
-/// #536: the folder under a root's `.build` holding each lane's scratch.
+/// The folder under a root's `.build` holding each lane's scratch.
 pub const SCRATCH: &str = ".scratch";
 
 const PUSHBACK: &str = "If a finding is wrong or out of scope, say so in your report with file:line proof; \
@@ -549,7 +549,7 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
     k.filter(|_| p.family == "rev").unwrap_or(n)
 }
 
-/// #565: why drover's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (#637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee conductor's `guarded` too.
+/// Why drover's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (on a remote host, its profile checked there instead); empty when it would. an attached cooee conductor's `guarded` too.
 pub fn unguarded(ctx: &Ctx, (profile, family, h): (&str, &str, &str), id: &str, remote: bool) -> String {
     let settings: Value = std::fs::read_to_string(providers::profiles_root(ctx).join(profile).join("settings.json"))
         .ok()
@@ -601,16 +601,16 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     })
 }
 
-/// #941: what `shed_meta` lacking means, for doctor's row and spawn's refusal.
+/// What `shed_meta` lacking means, for doctor's row and spawn's refusal.
 pub const SHED_OLD: &str =
     "this host's shed predates shed#94 (no `shed run --meta`): an ACP lane would load the owner's own setup";
 
-/// #941: the host's shed takes `run --meta`.
+/// The host's shed takes `run --meta`.
 pub fn shed_meta(r: &dyn Runner) -> bool {
     crate::shed::cli(r, &["help", "run"]).is_ok_and(|o| o.stdout.contains("--meta"))
 }
 
-/// #941: an ACP lane's `--mcp` file: the role's servers as ACP's list (stdio, `http`, `sse`).
+/// An ACP lane's `--mcp` file: the role's servers as ACP's list (stdio, `http`, `sse`).
 pub fn write_acp_mcp(on: &crate::hosts::On, p: &Plan, acp: &term::Acp) -> Result<()> {
     let Some(file) = &acp.mcp else { return Ok(()) };
     let pairs = |v: &Value| -> Vec<Value> {
@@ -754,15 +754,15 @@ const OWN_REPO: [&str; 8] = [
     ".herdsman/arch.toml",
 ];
 
-/// #770: `OWN_FILES` and the harness files spawn copies in (`providers::LOCAL_FILES`).
+/// `OWN_FILES` and the harness files spawn copies in (`providers::LOCAL_FILES`).
 pub fn own_files() -> impl Iterator<Item = &'static str> {
     OWN_FILES.iter().chain(&providers::LOCAL_FILES).copied()
 }
 
-/// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
+/// Screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/", "shots/"];
 
-/// #646: a drover-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
+/// A drover-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
 pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
     let all = "'+refs/heads/*:refs/remotes/origin/*'";
     format!(
@@ -771,7 +771,7 @@ pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
     )
 }
 
-/// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
+/// `git status --porcelain` lines that are not lane scratch or generated (screenshots, packages).
 pub fn changes(st: &str) -> usize {
     let own = |l: &&str| {
         (own_files()
@@ -782,13 +782,13 @@ pub fn changes(st: &str) -> usize {
     st.lines().filter(|l| !own(l)).count()
 }
 
-/// #103: some lockfile exists, and each one reads the same in the local checkout and the new lane.
+/// Some lockfile exists, and each one reads the same in the local checkout and the new lane.
 pub fn lockfiles_match(locks: &[&str], local: &Path, wt: &Path) -> bool {
     let read = |dir: &Path, l: &str| std::fs::read(dir.join(l)).ok();
     locks.iter().any(|l| read(local, l).is_some()) && locks.iter().all(|l| read(local, l) == read(wt, l))
 }
 
-/// #185: clone each `clone_build` folder whose lockfile matches (`Cargo.lock` for `target`, the package ones for `node_modules`); the `build-cloned` data, if any. Never a full copy: macOS `cp -c` copies across volumes, so it clones within one; elsewhere `--reflink=always` fails instead. Never over a folder the lane's agent made: the clone lands beside it and renames in only while the name is free.
+/// Clone each `clone_build` folder whose lockfile matches (`Cargo.lock` for `target`, the package ones for `node_modules`); the `build-cloned` data, if any. Never a full copy: macOS `cp -c` copies across volumes, so it clones within one; elsewhere `--reflink=always` fails instead. Never over a folder the lane's agent made: the clone lands beside it and renames in only while the name is free.
 pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> Option<Value> {
     use std::os::unix::fs::MetadataExt;
     let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
@@ -850,7 +850,7 @@ fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Session])
     (!moved.is_empty()).then(|| json!({"dirs": moved, "from": prev}))
 }
 
-/// #630: a new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there: one volume, so copy-on-write, never a full copy. The `build-cloned` data, if any.
+/// A new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there: one volume, so copy-on-write, never a full copy. The `build-cloned` data, if any.
 pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     let b = t.parent().filter(|b| b.ends_with(crate::roots::BUILD) && !t.exists())?;
     let mine = |e: &std::fs::DirEntry| {
@@ -875,7 +875,7 @@ pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     Some(json!({"dirs": dirs, "from": src, "secs": at.elapsed().as_secs(), "errors": errs}))
 }
 
-/// #630: the ignored files `.drover/worktree-include` lists (one path per line, `#` comments), copied from the main checkout into a new lane's worktree when missing there. Never secrets: those stay in `secret:` env.
+/// The ignored files `.drover/worktree-include` lists (one path per line, `#` comments), copied from the main checkout into a new lane's worktree when missing there. Never secrets: those stay in `secret:` env.
 pub fn copy_included(local: &Path, wt: &Path) -> Result<()> {
     let list = std::fs::read_to_string(crate::repo_path(&local.join(".drover/worktree-include"))).unwrap_or_default();
     for l in list
@@ -893,7 +893,7 @@ pub fn copy_included(local: &Path, wt: &Path) -> Result<()> {
     Ok(())
 }
 
-/// #630: worktree `wt`'s unsaved work, readable: its uncommitted files (`OWN_FILES` aside) and unpushed commits.
+/// Worktree `wt`'s unsaved work, readable: its uncommitted files (`OWN_FILES` aside) and unpushed commits.
 pub fn unsaved(r: &dyn Runner, wt: &Path) -> Option<(u64, u64)> {
     let wt = wt.to_string_lossy();
     let st = ok(r, "git", &["-C", &wt, "status", "--porcelain"]).ok()?;
@@ -906,7 +906,7 @@ pub fn unsaved(r: &dyn Runner, wt: &Path) -> Option<(u64, u64)> {
     Some((u64::try_from(changes(&st)).unwrap_or(u64::MAX), n.trim().parse().ok()?))
 }
 
-/// #630: `+<files> ⇡<commits>` of unsaved work `u`, none when there is none.
+/// `+<files> ⇡<commits>` of unsaved work `u`, none when there is none.
 pub fn unsaved_text(u: Option<(u64, u64)>) -> Option<String> {
     let (f, c) = u.filter(|u| *u != (0, 0))?;
     Some(format!("+{f} ⇡{c}"))
@@ -1282,7 +1282,7 @@ pub fn spawn(
     }
 
     let mut sha = None;
-    let note;
+    let (note, history);
     let brief_text = {
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
@@ -1341,15 +1341,13 @@ pub fn spawn(
             ok(r, "git", &["-C", &wt, "reset", "--hard", &p.base])?;
             on.remove(&p.worktree.join("verdict.md")).ok();
         }
+        history = crate::baseline::lane(ctx, cfg, r, (fleet, issue, f), (&p.agent, &p.worktree), wip.as_deref())?;
         if p.family == "rev" || crate::events::STAGES.contains(&p.family) {
             sha = ok(r, "git", &["-C", &wt, "rev-parse", "HEAD"])
                 .ok()
                 .map(|h| h.trim().to_string());
         }
-        let (title, body) = (
-            iss.at("title").as_str().unwrap_or(""),
-            iss.at("body").as_str().unwrap_or(""),
-        );
+        let title = iss.at("title").as_str().unwrap_or("");
         p.title = lane_title(&p.head, title);
         note = prior
             .filter(|_| o.supersede && !dup.is_empty())
@@ -1390,6 +1388,7 @@ pub fn spawn(
                 crate::why::brief(r, f, &events, (fleet, issue), rev, body)
             }).flatten())
             .chain(note.clone())
+            .chain(history.brief())
             .chain(resume)
             .chain(wip.as_ref().map(|w| {
                 format!("Saved work: the last lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
@@ -1454,6 +1453,7 @@ pub fn spawn(
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
+    pj.put("history", json!(history.line(&p.branch)));
     bt.start(ctx, r, &pane, &labels, &wt, &acp)?;
     if bt.0.acp.is_none() {
         term::ok(r, &home(p.lane_cmd(&pane)))?;
@@ -1896,6 +1896,9 @@ fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool, placed: Option<&cr
         for c in pj["commands"].as_array().into_iter().flatten() {
             let words: Vec<&str> = c.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             writeln!(out, "  $ {}", words.join(" "))?;
+        }
+        if let Some(h) = pj["history"].as_str() {
+            writeln!(out, "{h}")?;
         }
         if pj.get("confirmed") == Some(&json!(false)) {
             writeln!(out, "WARNING: prompt not confirmed landed; check the pane")?;

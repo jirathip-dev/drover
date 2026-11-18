@@ -118,7 +118,7 @@ fn a_run_block_needs_two_outputs_and_a_failing_base() {
 
 #[test]
 fn a_verify_block_needs_the_pr_bodys_repro_section_and_its_quote() {
-    let (c, d) = setup("repro-verify", CONFIG, true);
+    let (c, d) = setup("repro-verify", &(CONFIG.to_string() + VERIFY), true);
     let cases = [
         ("Closes #12\n", VERIFY_BLOCK, "the PR body has no `## Repro` section"),
         (SECTION, "Repro: verify\nno quote here\n", "has no `>` quoted reason"),
@@ -226,4 +226,62 @@ fn help_agent_documents_repro_and_no_repro() {
     let (code, out) = run(&c, &Fake::default(), &["help", "--agent"]);
     assert_eq!(code, 0);
     assert!(out.contains("--repro") && out.contains("NO_REPRO"), "{out}");
+}
+
+#[test]
+fn a_verify_block_on_a_fleet_without_a_verify_role_is_no_repro_and_a_run_block_records() {
+    let (c, d) = setup("repro-no-verify-role", CONFIG, true);
+    let (code, out) = pass(&c, &d, SECTION, VERIFY_BLOCK);
+    assert_eq!((code, verdicts(&c).len()), (3, 0), "{out}");
+    assert!(
+        out.contains("REFUSED NO_REPRO") && out.contains("has no verify role") && out.contains("`Repro: run`"),
+        "{out}"
+    );
+    let (code, out) = pass(&c, &d, SECTION, &format!("{BASE_RUN}{HEAD_RUN}"));
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(verdicts(&c)[0].str("repro"), Some("run"));
+}
+
+#[test]
+fn a_merge_no_repro_on_a_fleet_without_verify_is_needs_human_not_a_rerun() {
+    let (c, _d) = setup("repro-no-verify-merge", CONFIG, true);
+    let v = json!({"verdict": "PASS", "sha": sha(), "stage": "rev", "loop": "rev", "body": "PASS", "repro": "verify"});
+    append(&c.state, &Event::new(3, "sendmeter", Some(12), "verdict", v)).unwrap();
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = drive_fake();
+    for _ in 0..3 {
+        let (code, out) = run(&c, &r, &["drive"]);
+        assert_eq!(code, 0, "{out}");
+    }
+    assert_eq!(state(&c), "needs-human");
+    assert!(
+        !sh.called("run", "sendmeter-rev-12-r2"),
+        "rev respawned at the same head"
+    );
+    assert!(!r.called("gh pr merge"));
+    let ev = read(&c.state).unwrap();
+    let nh = ev.iter().find(|e| e.kind == "needs-human").unwrap();
+    assert_eq!(nh.str("code"), Some("NO_REPRO"));
+    assert!(
+        nh.str("reason").unwrap().contains("has no verify role"),
+        "{:?}",
+        nh.str("reason")
+    );
+}
+
+#[test]
+fn a_later_run_pass_at_the_head_clears_earlier_verify_passes() {
+    let (c, _d) = setup("repro-latest-pass", CONFIG, true);
+    for (ts, repro) in [(3, "verify"), (4, "verify"), (5, "run"), (6, "run")] {
+        let v = json!({"verdict": "PASS", "sha": sha(), "stage": "rev", "loop": "rev", "body": "PASS", "repro": repro});
+        append(&c.state, &Event::new(ts, "sendmeter", Some(12), "verdict", v)).unwrap();
+    }
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = drive_fake();
+    run(&c, &r, &["drive"]);
+    let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(r.called("gh pr merge 100"));
 }
