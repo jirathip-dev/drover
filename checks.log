@@ -1,0 +1,9 @@
+src lines (formatted): 48528 / cap 53500
+cap raised by ci/cap.d/2026-11-17-53500.toml
+web lines (TypeScript, soft budget, not capped): 1372
+cap exit=0
+crates/core/src/doctor.rs:110: `crates/core/src/doctor.rs:checks` is 266 lines, over 150 (baseline Some(264))
+`just gen` exited 127: sh: 1: just: not found
+arch-check: 989 files, 2 violations
+arch exit=1
+lesson exit=0

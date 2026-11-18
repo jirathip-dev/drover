@@ -1,0 +1,22 @@
+fmt exit=0
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/core)
+    Checking drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/sys)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/cli)
+    Checking drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/server)
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/service)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.23s
+clippy-lib exit=0
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/core)
+    Checking drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/sys)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/cli)
+    Checking drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/server)
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/service)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.03s
+clippy-tests exit=0
+src lines (formatted): 48532 / cap 53500
+cap raised by ci/cap.d/2026-11-17-53500.toml
+web lines (TypeScript, soft budget, not capped): 1372
+cap exit=0
+`just gen` exited 127: sh: 1: just: not found
+arch-check: 989 files, 1 violations
+arch exit=1

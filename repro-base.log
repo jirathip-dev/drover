@@ -1,0 +1,92 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1243/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.46s
+     Running tests/self_update.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1243/debug/deps/self_update-776d573b86ff6d45)
+
+running 1 test
+test a_job_launchd_refuses_is_rebootstrapped_after_the_swap ... FAILED
+
+failures:
+
+---- a_job_launchd_refuses_is_rebootstrapped_after_the_swap stdout ----
+
+thread 'a_job_launchd_refuses_is_rebootstrapped_after_the_swap' (3970465) panicked at crates/cli/tests/self_update.rs:516:32:
+systemctl --user disable --now dev.drover.clean.timer not called: ["git -C /x/drover fetch -q origin main", "git -C /x/drover rev-parse origin/main", "gh api repos/jirathip-dev/herdsman/commits/abcdef1234567890abcdef1234567890abcdef12/check-runs?per_page=100 --jq [.check_runs[] | {__typename: \"CheckRun\", name, status: (.status | ascii_upcase), conclusion: ((.conclusion // \"\") | ascii_upcase), databaseId: .id, startedAt: .started_at, completedAt: .completed_at, detailsUrl: .details_url}]", "git -C /x/drover worktree add -q --detach /tmp/fleet-test-upd-refused-3970464-0/state/update/src abcdef1234567890abcdef1234567890abcdef12", "cargo build --release --locked -p drover --manifest-path /tmp/fleet-test-upd-refused-3970464-0/state/update/src/Cargo.toml --target-dir /tmp/fleet-test-upd-refused-3970464-0/state/update/target", "which codesign", "sh /tmp/fleet-test-upd-refused-3970464-0/state/update/src/scripts/signing-identity.sh sign /tmp/fleet-test-upd-refused-3970464-0/bin/drover.new", "/tmp/fleet-test-upd-refused-3970464-0/bin/drover.new doctor --config-only", "/tmp/fleet-test-upd-refused-3970464-0/bin/drover profiles sync", "systemctl --user restart dev.drover.serve.service"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_job_launchd_refuses_is_rebootstrapped_after_the_swap
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p drover --test self_update`
+     Running tests/timer.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1243/debug/deps/timer-245ab8004e1308fa)
+
+running 2 tests
+test install_run_by_the_local_bin_symlink_names_the_install_roots_binary ... FAILED
+test doctor_marks_a_job_launchd_refuses_red ... FAILED
+
+failures:
+
+---- install_run_by_the_local_bin_symlink_names_the_install_roots_binary stdout ----
+
+thread 'install_run_by_the_local_bin_symlink_names_the_install_roots_binary' (3970471) panicked at crates/cli/tests/timer.rs:627:5:
+[Unit]
+Description=drover dev.drover.clean
+
+[Service]
+Environment=PATH=/opt/hermes/bin:/opt/homebrew/bin:/tmp/fleet-test-timer-canonical-3970468-1/local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+ExecStart=/tmp/fleet-test-timer-canonical-3970468-1/local/bin/drover clean --scheduled
+StandardOutput=append:/tmp/fleet-test-timer-canonical-3970468-1/state/tick.log
+StandardError=append:/tmp/fleet-test-timer-canonical-3970468-1/state/tick.log
+Type=oneshot
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- doctor_marks_a_job_launchd_refuses_red stdout ----
+
+thread 'doctor_marks_a_job_launchd_refuses_red' (3970470) panicked at crates/cli/tests/timer.rs:647:5:
+✓ host — sysctl + vm_stat
+✗ gh — auth status → gh auth login
+✓ config — /tmp/fleet-test-timer-refused-3970468-0/config/fleet.toml
+✓ shed — server 0.0.0 (9b88eb5) protocol 1, drover speaks 0.0.0 (9b88eb5) protocol 1
+✓ spawns starting 0/0
+✓ board auth — 24 h: 0 × 401, 0 × 503
+✗ worktrees — /tmp/fleet-test-timer-refused-3970468-0/worktrees → mkdir -p /tmp/fleet-test-timer-refused-3970468-0/worktrees
+✗ gh sendmeter — read jirathip-dev/sendmeter → gh auth refresh
+✗ local sendmeter — /tmp/does-not-matter/sendmeter has origin/staging → git -C /tmp/does-not-matter/sendmeter fetch origin staging || git clone https://github.com/jirathip-dev/sendmeter.git /tmp/does-not-matter/sendmeter
+✓ hygiene sendmeter — merge squash · comments strict · baseline setup · triage weekly · docs_trust deny docs/archive/ · issue_spec triage · docs on
+✓ pipeline sendmeter — valid (built-in)
+! webhook — no secret → put the secret in a file, chmod 600, and name it in [serve] webhook_secret_file (docs/serve.md)
+✓ keychain readers — 0 waiting over 60 s: 
+✓ harness — hermes on PATH
+✗ hermes fleet-impl — profile → hermes profile create fleet-impl
+✗ hermes fleet-rev — profile → hermes profile create fleet-rev
+✗ hermes lane-orchestrator — profile → hermes profile create lane-orchestrator
+✓ hermes hooks — profiles sync --check
+✓ profile hooks — run this binary
+✗ serve hosts — [] → set [serve] allowed_hosts = ["<name>.ts.net"]
+✗ serve — listening on 127.0.0.1:7777 → drover serve --addr 127.0.0.1:7777
+✗ tailscale — serve maps to 127.0.0.1:7777 → tailscale serve --bg --https=8443 http://127.0.0.1:7777
+! phone — 0 paired → open the page, then drover serve approve <code>
+✗ vapid.key — missing → drover push test && chmod 600 /tmp/fleet-test-timer-refused-3970468-0/state/webpush/vapid.key
+! push — 0 subscriptions, notifier false → turn alerts on; add a webpush [[notify]]
+✗ watchdog check — ran never → drover timer install
+✗ watchdog drive — ran never → drover timer install
+✓ tick step — advancing
+✗ timer — dev.drover.tick missing → drover timer install (the owner or an orchestrator)
+✗ timer — dev.drover.fast missing → drover timer install (the owner or an orchestrator)
+✓ shed — /usr/local/bin/shed on the timer's PATH
+
+
+
+failures:
+    doctor_marks_a_job_launchd_refuses_red
+    install_run_by_the_local_bin_symlink_names_the_install_roots_binary
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p drover --test timer`
+error: 2 targets failed:
+    `-p drover --test self_update`
+    `-p drover --test timer`
