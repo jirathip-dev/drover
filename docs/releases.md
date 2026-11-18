@@ -48,7 +48,8 @@ fetches `[self_update] branch` (default `main`) of the drover fleet and reads th
 1. **No release yet:** nothing changes and nothing is built. The pass prints that it waits, and logs
    `self-update-waiting` once per head when the release is still missing `[limits] self_update_wait_minutes` (45)
    after the head was first seen (`self-update-seen`).
-2. **Stage:** each reachable host that is not on the head downloads its asset to `drover.new` beside its live binary,
+2. **Stage:** each reachable host that is not on the head (#1296: or, on macOS, whose binary is not Developer ID signed,
+   as `drover doctor`'s signature row shows) downloads its asset to `drover.new` beside its live binary,
    checks it against `SHA256SUMS`, checks that `drover.new --version` names the head's sha and, where a fleet.toml is,
    runs `drover.new doctor --config-only`. Any failure removes `drover.new`, keeps the live binary and alerts
    `self-update-failed` once per host and head. A host needs `curl` and `sha256sum` or `shasum`.

@@ -27,6 +27,7 @@ pub struct Asset {
 pub struct Builds {
     pub live: Option<String>,
     pub staged: Option<String>,
+    pub unsigned: bool,
 }
 
 /// Why a host's stage failed; its `drover.new` is removed and the live binary is untouched.
@@ -159,7 +160,17 @@ pub fn builds(on: &dyn Runner, exe: &str) -> Result<Builds> {
     Ok(Builds {
         live: l.next().and_then(sha_of),
         staged: l.next().and_then(sha_of),
+        unsigned: false,
     })
+}
+
+const DEVELOPER_ID: &str =
+    "=anchor apple generic and identifier \"drover\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists";
+
+/// Whether `exe` on a host is signed by a Developer ID Application certificate as drover.
+pub fn signed(on: &dyn Runner, exe: &str) -> bool {
+    on.run("codesign", &argv(&["-v", "-R", DEVELOPER_ID, exe]))
+        .is_ok_and(|o| o.code == 0)
 }
 
 /// The shell line that downloads `a` to `exe.new`, checks its sha256 and prints its `--version` (exit 3: download, 4: checksum).
