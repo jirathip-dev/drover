@@ -1,0 +1,47 @@
+
+running 14 tests
+. 1/14
+a_start_that_never_runs_leaves_the_running_lanes_key_live --- FAILED
+..... 7/14
+an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane --- FAILED
+... 11/14
+a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane --- FAILED
+a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login --- FAILED
+.
+failures:
+
+---- a_start_that_never_runs_leaves_the_running_lanes_key_live stdout ----
+
+thread 'a_start_that_never_runs_leaves_the_running_lanes_key_live' (2130182) panicked at crates/cli/tests/remote_acp.rs:713:5:
+712d8968  live    sendmeter-impl-12 on boat1 · sendmeter#12 · 720 min left
+4f7ce3cd  revoked sendmeter-impl-12 on boat1 · sendmeter#12 · 720 min left
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane stdout ----
+
+thread 'an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane' (2130185) panicked at crates/cli/tests/remote_acp.rs:748:5:
+no host sign-out: drover signed-out: impl lane sendmeter-impl-12 is signed out on boat1; new lanes there wait: run `claude /login` there, then `drover hosts on boat1`
+
+
+---- a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane stdout ----
+
+thread 'a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane' (2130178) panicked at crates/cli/tests/remote_acp.rs:748:5:
+no host sign-out: drover signed-out: impl lane sendmeter-impl-12 is signed out on boat1; new lanes there wait: run `claude /login` there, then `drover hosts on boat1`
+
+
+---- a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login stdout ----
+
+thread 'a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login' (2130181) panicked at crates/cli/tests/remote_acp.rs:783:5:
+impl lane sendmeter-impl-12 is signed out on boat1; new lanes there wait: run `claude /login` there, then `drover hosts on boat1`
+
+
+failures:
+    a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane
+    a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login
+    a_start_that_never_runs_leaves_the_running_lanes_key_live
+    an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane
+
+test result: FAILED. 10 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p drover --test remote_acp`

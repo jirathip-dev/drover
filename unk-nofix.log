@@ -1,0 +1,20 @@
+
+running 1 test
+an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane --- FAILED
+
+failures:
+
+---- an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane stdout ----
+
+thread 'an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane' (1320423) panicked at crates/cli/tests/remote_acp.rs:747:5:
+no host sign-out: drover signed-out: impl lane sendmeter-impl-12 is signed out on boat1; new lanes there wait: check the token proxy's `[proxy] token-file` on the main host, then `drover hosts on boat1`
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.14s
+
+error: test failed, to rerun pass `-p drover --test remote_acp`

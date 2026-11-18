@@ -1,0 +1,50 @@
+
+running 14 tests
+....... 7/14
+a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login --- FAILED
+... 11/14
+an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane --- FAILED
+a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane --- FAILED
+.
+failures:
+
+---- a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login stdout ----
+drover check: the agent list failed (no shed server on /nonexistent/shed.sock: No such file or directory (os error 2)); skipping lane checks
+
+thread 'a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login' (2119909) panicked at crates/cli/tests/remote_acp.rs:779:5:
+assertion `left == right` failed: 
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane stdout ----
+drover check: the agent list failed (no shed server on /nonexistent/shed.sock: No such file or directory (os error 2)); skipping lane checks
+drover: no shed server on /nonexistent/shed.sock: No such file or directory (os error 2)
+
+thread 'an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane' (2119936) panicked at crates/cli/tests/remote_acp.rs:754:5:
+assertion `left == right` failed: shed events: no shed server on /nonexistent/shed.sock: No such file or directory (os error 2)
+orphans: no shed server on /nonexistent/shed.sock: No such file or directory (os error 2)
+
+  left: 1
+ right: 0
+
+---- a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane stdout ----
+drover check: the agent list failed (no shed server on /nonexistent/shed.sock: No such file or directory (os error 2)); skipping lane checks
+drover: no shed server on /nonexistent/shed.sock: No such file or directory (os error 2)
+
+thread 'a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane' (2119907) panicked at crates/cli/tests/remote_acp.rs:754:5:
+assertion `left == right` failed: shed events: no shed server on /nonexistent/shed.sock: No such file or directory (os error 2)
+orphans: no shed server on /nonexistent/shed.sock: No such file or directory (os error 2)
+
+  left: 1
+ right: 0
+
+
+failures:
+    a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane
+    a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login
+    an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane
+
+test result: FAILED. 11 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+error: test failed, to rerun pass `-p drover --test remote_acp`
