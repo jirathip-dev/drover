@@ -1,0 +1,14 @@
+Decided: the page times each interaction itself (web/src/timing.ts) and posts batches to a paired-only POST /api/v1/timings; serve keeps them in a second slo::Timing beside the route timings
+Because: "Serve keeps per-kind p50/p95/max per minute in serve-health.json, beside the route timings"
+Decided: a sample ends one animation frame plus a task after the DOM update (requestAnimationFrame then setTimeout), the first point after the paint
+Because: "from the input event to the frame after the DOM is updated, split into network / parse / render"
+Decided: the batch posts at most every 30 s on a 5 s check, plus once on pagehide, since a page that is going away never posts again; offline drops the buffer
+Because: "a small POST, at most one every 30 s, dropped while offline"
+Decided: phone-slow comes from serve's own phone_slow field, the same way serve-slow does, so check reuses its once-per-state alerting
+Because: crates/core/src/check.rs:644
+Decided: the health arm's body moved into Server::health so that api() stays within its 243-line arch-check baseline
+Rejected: raising the api() size baseline — arch-check freezes it
+Decided: the gate reads its medians back from serve's /api/v1/health, so the page's samples are checked after the real POST path
+Check: run the gate with a 200 ms busy loop added to paint(). On Chromium locally it failed with tab at 233 ms, thread open at 417 ms and answer at 221 ms
+Check: send ends when the act reply is handled and the composer clears. Its echo is a stream delta, timed as delta
+Owner: the phone now reports how long taps take to show, serve-health.json lists them, and CI fails a PR that makes them slow
