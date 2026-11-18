@@ -696,3 +696,38 @@ impl Board {
         }
     }
 }
+
+/// An executable at `p` whose `--version` prints `line`, as a drover build there would.
+pub fn version_bin(p: &Path, line: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, format!("#!/bin/sh\necho '{line}'\n")).unwrap();
+    std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// The main host's drover files for real: its `--version` reads and `rm` run here; a stage line answered 0 by the fake writes `drover.new` printing the fake's stdout; the rest goes to the fake.
+pub struct Disk<'a>(pub &'a Fake);
+
+impl Runner for Disk<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        let script = args.get(1).map_or("", String::as_str);
+        if prog == "rm" || prog == "sh" && script.starts_with("for x in") {
+            self.0.calls.borrow_mut().push(format!("{prog} {}", args.join(" ")));
+            let o = std::process::Command::new(prog).args(args).output()?;
+            return Ok(Out {
+                code: o.status.code().unwrap_or(1),
+                stdout: String::from_utf8_lossy(&o.stdout).into(),
+                stderr: String::from_utf8_lossy(&o.stderr).into(),
+            });
+        }
+        let o = self.0.run(prog, args)?;
+        let new = script.strip_prefix("( n='").and_then(|s| s.split('\'').next());
+        if let Some(new) = new.filter(|_| prog == "sh" && o.code == 0) {
+            version_bin(Path::new(new), o.stdout.trim());
+        }
+        Ok(o)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+}

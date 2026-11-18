@@ -645,15 +645,24 @@ fn remote_acp(
             &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
         )?;
     }
-    if let Some(why) = crate::hosts::acp_guard(ctx, on, home, (&p.profile, p.family, id)) {
-        crate::hosts::sick(ctx, &pl.name, &format!("✗ acp guard {} — {why}", p.profile));
-        return refused(
-            "ACP_UNGUARDED",
-            format!(
-                "{}: {why}; the lane does not start, the next placement skips the host",
-                pl.name
-            ),
-        );
+    match crate::hosts::acp_guard(ctx, on, home, (&p.profile, p.family, id)) {
+        Ok(()) => {}
+        Err(why @ crate::hosts::Unguarded::Build { .. }) => {
+            return refused(
+                "HOST_UPDATING",
+                format!("{}: {why}; the next self-update catches it up", pl.name),
+            )
+        }
+        Err(why) => {
+            crate::hosts::sick(ctx, &pl.name, &format!("✗ acp guard {} — {why}", p.profile));
+            return refused(
+                "ACP_UNGUARDED",
+                format!(
+                    "{}: {why}; the lane does not start, the next placement skips the host",
+                    pl.name
+                ),
+            );
+        }
     }
     if let Err(why) = crate::proxy::token(cfg) {
         return refused("NO_PROXY_TOKEN", why);
