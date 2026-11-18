@@ -1,0 +1,14 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1165/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.87s
+     Running tests/host_sync.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1165/debug/deps/host_sync-c2e81c4d93ded518)
+
+running 6 tests
+test an_unreachable_or_switched_off_host_costs_no_sync_ssh ... ok
+test a_mismatched_host_gets_one_install_at_this_sha_then_profiles_sync_and_a_matching_one_none ... ok
+test a_linux_x86_64_host_installs_main_cis_checked_binary_and_falls_back_to_cargo ... ok
+test a_failed_install_is_logged_alerted_once_and_retried_each_tick ... ok
+test a_landed_sync_rereads_the_host_health_in_the_same_pass_so_spawn_places_there ... ok
+test a_skipped_sync_logs_why_once_per_streak ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
