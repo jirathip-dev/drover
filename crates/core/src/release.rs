@@ -88,6 +88,39 @@ pub fn find(r: &dyn Runner, repo: &str, branch: &str, sha: &str) -> Found {
     })
 }
 
+/// The release workflow's first error annotation on `sha` in `repo`: the job that logged it and its message.
+pub fn failure(r: &dyn Runner, repo: &str, sha: &str) -> Option<(String, String)> {
+    let gh = |args: &[&str]| -> Option<serde_json::Value> {
+        let o = r.run("gh", &argv(args)).ok().filter(|o| o.code == 0)?;
+        serde_json::from_str(&o.stdout).ok()
+    };
+    let runs = gh(&[
+        "run",
+        "list",
+        "-R",
+        repo,
+        "-w",
+        "release.yml",
+        "-c",
+        sha,
+        "--json",
+        "databaseId",
+        "-L",
+        "1",
+    ])?;
+    let id = runs.get(0)?.get("databaseId")?.as_u64()?.to_string();
+    let jobs = gh(&["run", "view", &id, "-R", repo, "--json", "jobs"])?;
+    jobs.get("jobs")?.as_array()?.iter().find_map(|j| {
+        let job = j.get("databaseId")?.as_u64()?;
+        let notes = gh(&["api", &format!("repos/{repo}/check-runs/{job}/annotations")])?;
+        let first = notes.as_array()?.iter().find(|a| a["annotation_level"] == "failure")?;
+        Some((
+            j.get("name")?.as_str()?.to_string(),
+            first.get("message")?.as_str()?.to_string(),
+        ))
+    })
+}
+
 impl Release {
     /// The asset for a host with probed `tags` (`os:macos` + `arch:arm64`, or `os:linux` + `arch:x86_64`).
     pub fn asset(&self, repo: &str, tags: &[String]) -> Option<Asset> {
