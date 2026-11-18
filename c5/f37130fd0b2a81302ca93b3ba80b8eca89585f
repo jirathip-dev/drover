@@ -1,0 +1,10 @@
+Decided: memoize placement's host reads once per fleet pass in launch and probe hosts in parallel; per-host ssh call counts and seconds go into drive-pass and drive-slow.
+Because: "`drive-slow` names the sub-step and the remote-call count and time per host."
+Decided: the pass's step timer and the probe memo live in drive/remote.rs so drive.rs stays at its size baseline.
+Because: crates/core/src/drive/remote.rs:13
+Decided: each signed webhook delivery appends a line to tick.log and bumps webhook.accepted; doctor shows it next to the refused count.
+Because: q2010
+Rejected: one remote JSON script per host and a per-process-tree ControlPath — the snapshot already batches reads per host; the measured cost was serial placement probes.
+Check: arch-check size rule: crates/core/src/drive.rs is 2185 lines, at its baseline.
+Check: crates/cli/tests/perf.rs 30 lanes on 4 boats at 700 ms a call: base 95.8 s, head 5.4 s.
+Owner: drive passes read boats side by side and the slow-pass alert names each boat's cost; the real Mini tick still needs checking.
