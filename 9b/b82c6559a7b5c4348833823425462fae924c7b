@@ -1,0 +1,6 @@
+Decided: gh pr diff first, then git diff origin/<integration>...<head> in the fleet's local checkout when gh says too_large
+Because: "or fall back to it when `gh pr diff` returns 406 too_large"
+Because: crates/core/src/gh.rs:347
+Rejected: always the local git diff — every small PR would need a fetch of the local checkout, and today's mocked gh path stays unchanged
+Check: both gh pr diff calls in verdict go through pr_diff; the test drives a 406 then the git diff for both a refused and a recorded PASS
+Owner: Big refactor PRs (over 300 files) now get their review recorded instead of failing on every pass.
