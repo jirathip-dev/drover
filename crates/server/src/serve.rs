@@ -18,7 +18,7 @@ use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::io::ErrorKind::{TimedOut, WouldBlock};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
@@ -34,6 +34,7 @@ mod jobs;
 mod screens;
 mod slo;
 mod v1;
+mod wire;
 
 const SW: &str = include_str!("../assets/sw.js");
 macro_rules! th {
@@ -777,35 +778,25 @@ impl<'a> Server<'a> {
 
     fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
         s.set_read_timeout(Some(Duration::from_secs(5)))?;
-        let (mut buf, mut chunk, mut want, mut over) = (vec![], vec![0u8; 1 << 16], None, false);
+        let mut rest = vec![];
         loop {
-            let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
-            if let Some(i) = end.filter(|_| want.is_none()) {
-                let h = String::from_utf8_lossy(buf.get(..i).unwrap_or_default());
-                let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
-                let most = if h.starts_with("POST /thread ") || h.starts_with("POST /action ") {
-                    140 << 20
-                } else if h.starts_with("POST /report ") {
-                    3 << 20
-                } else {
-                    32_768
-                };
-                over = i + 4 + n > most;
-                want = Some((i + 4 + n).min(most));
+            let (buf, over) = wire::request(&mut s, &mut rest)?;
+            if buf.is_empty() {
+                return Ok(());
             }
-            if want.map_or(buf.len() >= 32_768, |w| buf.len() >= w) {
-                break;
+            if !self.one(&mut s, &buf, over)? {
+                return Ok(());
             }
-            match s.read(&mut chunk)? {
-                0 => break,
-                n => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
-            }
+            self.deliver();
         }
+    }
+
+    fn one(&self, s: &mut TcpStream, buf: &[u8], over: bool) -> std::io::Result<bool> {
         if over {
-            return s.write_all(TOO_LARGE);
+            return s.write_all(TOO_LARGE).map(|()| false);
         }
         let peer = s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default();
-        let req = String::from_utf8_lossy(&buf).replacen("\r\n", &format!("\r\nX-Peer: {peer}\r\n"), 1);
+        let req = String::from_utf8_lossy(buf).replacen("\r\n", &format!("\r\nX-Peer: {peer}\r\n"), 1);
         let (t0, target) = (
             drover_core::clock::instant(),
             req.split_whitespace().nth(1).unwrap_or_default(),
@@ -820,6 +811,7 @@ impl<'a> Server<'a> {
         };
         let dev = live.then(|| devices::check(&ctx, header(&req, "cookie").unwrap_or_default()));
         if let Some(dev) = dev.filter(|d| !busy(d)) {
+            let mut s = s.try_clone()?;
             let beat = Duration::from_secs(
                 Config::kept(self.ctx)
                     .map_or(15, |c| c.limits.serve_heartbeat_secs)
@@ -861,9 +853,13 @@ impl<'a> Server<'a> {
             }
             let ms = t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
             lock(&self.timing).add(crate::now(), "/live", false, ms);
+            let mut z = wire::Stream::new(&req);
             std::thread::spawn(move || {
                 let mut missed = 0;
-                while sent(&mut s, msg.as_bytes(), drover_core::clock::instant() + 2 * beat) {
+                while z
+                    .frame(&msg)
+                    .is_ok_and(|b| sent(&mut s, &b, drover_core::clock::instant() + 2 * beat))
+                {
                     let _ = host.then(|| std::fs::write(st.with_file_name("host-watch.at"), crate::now().to_string()));
                     let t = drover_core::clock::instant();
                     msg = loop {
@@ -897,22 +893,25 @@ impl<'a> Server<'a> {
                     };
                 }
             });
-            return Ok(());
+            return Ok(false);
         }
         drop(clients);
         if req.starts_with("GET ") && path.starts_with("/screens/") && path.ends_with("/stream") {
-            return self.stream(&mut s, &req, path, query);
+            return self.stream(s, &req, path, query).map(|()| false);
         }
         let write = !req.starts_with("GET ");
         if write && self.writes.fetch_add(1, Relaxed) >= 16 {
             self.writes.fetch_sub(1, Relaxed);
-            return s.write_all(BUSY);
+            return s.write_all(BUSY).map(|()| false);
         }
         let out = self.reply(&req, crate::now());
         if write {
             self.writes.fetch_sub(1, Relaxed);
         }
-        s.write_all(&out)
+        let head = req.split("\r\n\r\n").next().unwrap_or_default();
+        let keep = wire::keep(head);
+        s.write_all(&wire::finish(out, path, wire::gzip(head), keep))
+            .map(|()| keep)
     }
 
     pub(crate) fn later(&self, ctx: &Ctx, jobs: impl IntoIterator<Item = (Event, String)>) {

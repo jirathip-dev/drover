@@ -165,6 +165,7 @@
 2 serve_health
 3 serve_load
 1 serve_web
+1 serve_wire
 2 serve_workers
 4 serve_working_set
 1 service
