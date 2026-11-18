@@ -1331,11 +1331,20 @@ fn pass(
                 &ctx.state,
                 &Event::new(ctx.now, fleet, Some(s.issue), "lesson-prompted", d),
             )?;
-        } else if w.who == "drive" && matches!(w.what.as_str(), waiting::TURN_NUDGE | waiting::TURN_GO_ON) && !fast {
+        } else if w.who == "drive"
+            && (matches!(w.what.as_str(), waiting::TURN_NUDGE | waiting::TURN_GO_ON)
+                || w.what.ends_with(waiting::TURN_ASK))
+            && !fast
+        {
             let (state, text) = if w.what == waiting::TURN_NUDGE {
                 let text = "drover: you reported `done`, but nothing new is pushed at the PR head (or there is no \
                     PR). Push and open the PR, then `drover turn done`; or `drover turn blocked --why <reason>`.";
                 ("done", text)
+            } else if w.what.ends_with(waiting::TURN_ASK) {
+                let text = "drover: you reported `need-input`, but filed no `drover ask`: no card reaches the owner. \
+                    Ask with `drover ask <fleet> <issue> …`, then `drover turn need-input`; or `drover turn blocked \
+                    --why <reason>`.";
+                ("need-input", text)
             } else {
                 (
                     "working",
