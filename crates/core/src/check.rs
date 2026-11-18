@@ -43,7 +43,7 @@ fn amendment(ctx: &Ctx, on: &On, cfg: &Config, s: &IssueState, wt: &str) -> Opti
     Some((url.to_string(), line))
 }
 
-/// #709: the config for `check` and `tick`; failing to load, `config-invalid` alerts once per distinct error (to the last good config's notifiers) and the error stands; loading again after one logs `config-ok`.
+/// The config for `check` and `tick`; failing to load, `config-invalid` alerts once per distinct error (to the last good config's notifiers) and the error stands; loading again after one logs `config-ok`.
 pub fn config(ctx: &Ctx) -> Result<Config> {
     let (loaded, events) = (Config::loaded(ctx), working(&ctx.state)?);
     let kinds = ["config-invalid", "config-ok"];
@@ -123,8 +123,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         };
         let since = tries.find(|e| e.val("ok") == true).map_or(0, |e| e.ts);
         let (from, to) = (e.str("from").unwrap_or("?"), e.str("to").unwrap_or("?"));
-        let why =
-            format!("{name}: drover install {from} → {to} failed (~/.drover-sync.log there); the next tick retries");
+        let why = format!("{name}: drover swap {from} → {to} failed there; the next self-update retries");
         let d = json!({"key": format!("{name}@{since}"), "host": name, "reason": why});
         fire(ctx, cfg, out, &synced, ("drover", None), "host-sync-failed", d)?;
     }
@@ -854,7 +853,7 @@ pub fn clean(
     clean_all(ctx, cfg, r, out, fleet, (issue, lane, sched, false), yes)
 }
 
-/// `clean`; #678: `all` (an explicit `drover clean`) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch.
+/// `clean`; `all` (an explicit `drover clean`) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch.
 pub fn clean_all(
     ctx: &Ctx,
     cfg: &Config,
@@ -1141,7 +1140,7 @@ pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -
     Err(e)
 }
 
-/// #186: TERM, then KILL, the processes inside `wt` (#1081: TERM those run from its build folders); logs `lane-reaped` when any were signalled.
+/// TERM, then KILL, the processes inside `wt` (TERM those run from its build folders); logs `lane-reaped` when any were signalled.
 pub fn reap(
     ctx: &Ctx,
     cfg: &Config,
@@ -1202,7 +1201,7 @@ pub fn leftovers(
 
 const BUILD_DIRS: &[&str] = &["target", "node_modules", ".next", "dist", ".cache"];
 const BUILDERS: &[&str] = &["cargo", "rustc", "node", "npm", "npx", "pnpm", "yarn", "bun"];
-/// #103: delete a lane's build folders (#164: plus the fleet's `build_dirs`), even when the worktree stays; the bytes freed (#361: with `dry`, listed and counted, none removed). One git does not ignore stays.
+/// Delete a lane's build folders (plus the fleet's `build_dirs`), even when the worktree stays; the bytes freed (with `dry`, listed and counted, none removed). One git does not ignore stays.
 pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt: &Path, dry: bool) -> Result<u64> {
     let mut freed = 0;
     let more = cfg.fleet.get(fleet).map_or(&[][..], |f| &f.build_dirs);
@@ -1255,7 +1254,7 @@ fn save(
     Ok(None)
 }
 
-/// #164: the worktree total by a full walk (drive's pass, never a request), stamped for spawn's `DISK_BUDGET` and the Host tab. Over `worktree_budget_gb`, the idlest lanes' build folders go first (`budget-freed`), never a working one's.
+/// The worktree total by a full walk (drive's pass, never a request), stamped for spawn's `DISK_BUDGET` and the Host tab. Over `worktree_budget_gb`, the idlest lanes' build folders go first (`budget-freed`), never a working one's.
 pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let usage = measure(ctx, cfg);
     let mut total = usage.total;
@@ -1322,7 +1321,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
     stamp(ctx, &if total == usage.total { usage } else { measure(ctx, cfg) })
 }
 
-/// #842: this host's worktrees (build folders aside) by one walk: a hard link or clone counts once across all roots.
+/// This host's worktrees (build folders aside) by one walk: a hard link or clone counts once across all roots.
 pub struct Usage {
     pub total: u64,
     pub roots: Vec<(std::path::PathBuf, u64)>,
@@ -1374,7 +1373,7 @@ pub fn worktree_why(ctx: &Ctx) -> String {
     format!("measured {} (build folders aside); largest: {}", of("root"), of("top"))
 }
 
-/// #438: each enabled remote host's shared build folder trimmed to `build_budget_gb`; #485: after the tick's drive, one quick ssh per host (a disabled or offline one never holds the pass up). #651: then its scratch swept there.
+/// Each enabled remote host's finished lanes swept, then its shared build folders trimmed to `build_budget_gb` past its live lanes: one `builds: <host>:` line each, its error included.
 pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let mut tried = std::collections::BTreeSet::new();
     let hosts = cfg.hosts.iter().filter(|h| h.1.enabled);
@@ -1383,15 +1382,20 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
             continue;
         }
         let on = On::quick(r, Some(m));
-        if let Err(e) = trim_on(ctx, &on, cfg, cfg.limits.build_budget_gb, &Live::new(), out) {
+        if cfg.limits.sweep_remote {
+            if let Err(e) = sweep(ctx, cfg, &on, name, out, Sweep::Tick) {
+                writeln!(out, "scratch: {name}: {e:#}")?;
+            }
+        }
+        let budget = cfg.limits.build_budget_gb;
+        let trim = |out: &mut dyn Write| -> Result<u64> {
+            let live = live_lanes(ctx, cfg, &on)?;
+            (build_dirs(ctx, cfg, &on).iter())
+                .map(|b| trim_remote(&on, name, b, budget, &live, &mut *out))
+                .sum()
+        };
+        if let Err(e) = trim(out) {
             writeln!(out, "builds: {name}: {e:#}")?;
-            continue;
-        }
-        if !cfg.limits.sweep_remote {
-            continue;
-        }
-        if let Err(e) = sweep(ctx, cfg, &on, name, out, Sweep::Tick) {
-            writeln!(out, "scratch: {name}: {e:#}")?;
         }
     }
     Ok(())
@@ -1415,7 +1419,7 @@ fn building(d: &Path, depth: u8) -> bool {
             .any(|e| e.file_type().is_ok_and(|t| t.is_dir()) && building(&e.path(), depth - 1))
 }
 
-/// #536: the newest mtime of `d` and its entries.
+/// The newest mtime of `d` and its entries.
 pub fn mtime(d: &Path) -> u64 {
     let m = |p: &Path| {
         p.metadata()
@@ -1492,7 +1496,7 @@ fn stray_roots(cfg: &Config) -> Vec<std::path::PathBuf> {
     v
 }
 
-/// #536: Cargo build folders (holding `CACHEDIR.TAG` or `.rustc_info.json`) lanes left in `/tmp` and `$TMPDIR`, untouched a day and not building; listed, removed with `yes`.
+/// Cargo build folders (holding `CACHEDIR.TAG` or `.rustc_info.json`) lanes left in `/tmp` and `$TMPDIR`, untouched a day and not building; listed, removed with `yes`.
 pub fn strays(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, yes: bool) -> Result<()> {
     for root in stray_roots(cfg) {
         for d in std::fs::read_dir(&root)
@@ -1516,17 +1520,20 @@ pub fn strays(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, yes: bool) -> Result
     Ok(())
 }
 
-const TRIM: &str = r#"r=$1; case $r in "~/"*) r=$HOME/${r#"~/"};; esac
-cd "$r" 2>/dev/null && command -v lsof >/dev/null || { echo "freed 0"; exit 0; }
+const TRIM: &str = r#"o=$1 b=$2; shift 2; r=$o; case $r in "~/"*) r=$HOME/${r#"~/"};; esac
+cd "$r" 2>/dev/null || { echo "total 0 freed 0"; exit 0; }
 t=$(du -sk . | cut -f1); f=0
 for d in */*/; do
-  [ "$t" -le "$2" ] && break
+  [ "$t" -le "$b" ] && break
   [ -f "$d.cargo-lock" ] || continue
-  if lsof "$d.cargo-lock" >/dev/null 2>&1; then echo "keep $r/$d: cargo is building"; continue; fi
+  n=${d%%/*}; k=
+  for l in "$@"; do [ "$l" = "$n" ] && k=1; done
+  if [ -n "$k" ]; then echo "keep $o/$d: a live lane"; continue; fi
+  if command -v lsof >/dev/null && lsof "$d.cargo-lock" >/dev/null 2>&1; then echo "keep $o/$d: cargo is building"; continue; fi
   s=$(du -sk "$d" | cut -f1)
-  rm -rf "./${d:?}" && t=$((t - s)) && f=$((f + s)) && echo "builds: trimmed $r/$d ($s KB)"
+  rm -rf "./${d:?}" && t=$((t - s)) && f=$((f + s)) && echo "trimmed $o/$d ($s KB)"
 done
-echo "freed $f""#;
+echo "total $t freed $f""#;
 
 fn build_dirs(ctx: &Ctx, cfg: &Config, on: &On) -> Vec<String> {
     let Some(h) = (cfg.hosts.values()).find(|h| h.machine.as_deref() == on.machine && on.machine.is_some()) else {
@@ -1537,33 +1544,40 @@ fn build_dirs(ctx: &Ctx, cfg: &Config, on: &On) -> Vec<String> {
     roots.iter().map(|r| format!("{r}/{}", crate::roots::BUILD)).collect()
 }
 
-/// The shared build folders on `on`'s host trimmed to `budget` GB each; bytes freed.
+/// The shared build folders on `on`'s host trimmed to `budget` GB each, past `live`'s; bytes freed.
 pub fn trim_on(ctx: &Ctx, on: &On, cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write) -> Result<u64> {
-    if on.machine.is_none() {
+    let Some(m) = on.machine else {
         return trim_builds(ctx, cfg, budget, live, out, false);
-    }
+    };
     let dirs = build_dirs(ctx, cfg, on);
-    dirs.iter().map(|b| trim_remote(on, b, budget, out)).sum()
+    dirs.iter().map(|b| trim_remote(on, m, b, budget, live, out)).sum()
 }
 
-fn trim_remote(on: &On, root: &str, budget: f64, out: &mut dyn Write) -> Result<u64> {
+fn trim_remote(on: &On, host: &str, root: &str, budget: f64, live: &Live, out: &mut dyn Write) -> Result<u64> {
     let kb = format!("{:.0}", budget * 1_048_576.0);
-    let o = on.run("sh", &crate::runner::argv(&["-c", TRIM, "sh", root, &kb]))?;
-    anyhow::ensure!(o.code == 0, "trim failed ({}): {}", o.code, o.stderr.trim());
-    let s = o.stdout;
-    let (log, last) = s.trim_end().rsplit_once('\n').unwrap_or(("", s.trim()));
-    if !log.is_empty() {
-        writeln!(out, "{log}")?;
+    let args = crate::runner::argv(&["-c", TRIM, "sh", root, &kb]);
+    let o = on.run("sh", &[args, live.iter().cloned().collect()].concat())?;
+    anyhow::ensure!(o.code != 124, "trim of {root} timed out");
+    anyhow::ensure!(o.code == 0, "trim of {root} failed ({}): {}", o.code, o.stderr.trim());
+    let (mut total, mut freed) = (0, 0);
+    for l in o.stdout.lines() {
+        let sum = (l.strip_prefix("total ").and_then(|t| t.split_once(" freed ")))
+            .and_then(|(t, f)| Some((t.parse::<u64>().ok()?, f.parse::<u64>().ok()?)));
+        match sum {
+            Some((t, f)) => (total, freed) = (t * 1024, f * 1024),
+            None => writeln!(out, "builds: {host}: {l}")?,
+        }
     }
-    Ok(last
-        .strip_prefix("freed ")
-        .and_then(|k| k.parse::<u64>().ok())
-        .unwrap_or(0)
-        * 1024)
+    let (t, f) = (gb(total), gb(freed));
+    writeln!(
+        out,
+        "builds: {host}: {root} at {t:.2} GB of {budget} GB; freed {f:.2} GB"
+    )?;
+    Ok(freed)
 }
 
 const NOTE: &str = "(logical sizes; APFS clones may free less)";
-/// #361: build folders of worktrees idle 7 days, previewed; removed with `yes`, or on a `y` (rechecked, then removed).
+/// Build folders of worktrees idle 7 days, previewed; removed with `yes`, or on a `y` (rechecked, then removed).
 pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &mut dyn Read, yes: bool) -> Result<()> {
     let (events, agents, ps) = (working(&ctx.state)?, crate::session::live_on(r)?, host::cwds(r));
     let live = live_lanes(ctx, cfg, r)?;
@@ -1640,7 +1654,7 @@ pub fn worktree_gb(ctx: &Ctx) -> Option<f64> {
     worktree_du(ctx).map(|d| d.0)
 }
 
-/// #164: folders under the worktree root that no configured fleet's repo owns.
+/// Folders under the worktree root that no configured fleet's repo owns.
 pub fn orphan_dirs(ctx: &Ctx, cfg: &Config) -> Vec<std::path::PathBuf> {
     let ours: Vec<&str> = cfg.fleet.values().map(crate::config::Fleet::repo_name).collect();
     let all = std::fs::read_dir(&ctx.worktrees).into_iter().flatten().flatten();
@@ -1668,7 +1682,7 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, remove: bool) -> Re
     Ok(found.len())
 }
 
-/// #416: `orphan <host>:<path> <size>` per orphan folder under each enabled remote host's root; gone with `remove`.
+/// `orphan <host>:<path> <size>` per orphan folder under each enabled remote host's root; gone with `remove`.
 pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove: bool) -> Result<usize> {
     let (ours, mut found): (Vec<&str>, _) = (cfg.fleet.values().map(crate::config::Fleet::repo_name).collect(), 0);
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled && h.1.machine.is_some()) {
@@ -1741,9 +1755,14 @@ pub(crate) fn closed_on_github(
         let Ok(closed) = gh::closed(ctx, r, f, name, &open, ctx.now) else {
             continue;
         };
-        for n in open.into_iter().filter(|n| closed.contains(n)) {
-            writeln!(out, "{name} #{n} closed on GitHub")?;
-            let d = json!({"by": "external", "why": "issue closed on GitHub"});
+        for (n, pr) in closed {
+            let (said, why) = if pr {
+                ("is a pull request, not an issue", "a pull request, not an issue")
+            } else {
+                ("closed on GitHub", "issue closed on GitHub")
+            };
+            writeln!(out, "{name} #{n} {said}")?;
+            let d = json!({"by": "external", "why": why});
             emit(&ctx.state, cfg, Event::new(ctx.now, name, Some(n), "closed-other", d))?;
             any = true;
         }
@@ -1764,15 +1783,17 @@ fn closed_in<'a>(
         let mine = states.values().filter(|s| s.fleet == fleet && s.state != "merged");
         let ids: Vec<u64> = mine.map(|s| s.issue).collect();
         let f = cfg.fleet(fleet);
-        f.and_then(|f| gh::closed(ctx, r, f, fleet, &ids, ctx.now))
-            .unwrap_or_else(|e| {
+        f.and_then(|f| gh::closed(ctx, r, f, fleet, &ids, ctx.now)).map_or_else(
+            |e| {
                 writeln!(
                     out,
                     "cannot list closed issues of {fleet} ({e:#}); only merged lanes are candidates"
                 )
                 .ok();
                 vec![]
-            })
+            },
+            |c| c.into_iter().map(|c| c.0).collect(),
+        )
     })
 }
 
@@ -1819,7 +1840,7 @@ fn spawned<'a>(events: &'a [Event], agent: &str, host: Option<&str>) -> Result<&
     }
 }
 
-/// `drover stop`: Esc to the agent's pane (it pauses), or #946: a thread's orchestrator ended; logs `stop`.
+/// `drover stop`: Esc to the agent's pane (it pauses), or a thread's orchestrator ended; logs `stop`.
 pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent: &str) -> Result<()> {
     let events = working(&ctx.state)?;
     let thread = agent.strip_prefix("orchestrator-").unwrap_or(agent);
@@ -1868,7 +1889,7 @@ pub fn close(
     Ok(writeln!(out, "closed {name}'s pane; its worktree and files stay")?)
 }
 
-/// `drover kill`: the dry-run line (what is lost); with `yes`, unpushed or dirty work goes to `wip/<agent>-<stamp>` first (refused `SECRET_IN_WIP`, naming `file:line`, on a real secret), then the pane closes. The worktree is kept. #478: `host` kills the agent's newest lane there; one an other host's lane superseded logs `stale-pane-killed`.
+/// `drover kill`: the dry-run line (what is lost); with `yes`, unpushed or dirty work goes to `wip/<agent>-<stamp>` first (refused `SECRET_IN_WIP`, naming `file:line`, on a real secret), then the pane closes. The worktree is kept. `host` kills the agent's newest lane there; one an other host's lane superseded logs `stale-pane-killed`.
 pub fn kill(
     ctx: &Ctx,
     cfg: &Config,
@@ -1939,7 +1960,7 @@ fn kill_as(
     )?)
 }
 
-/// #478: each pane a supersede left on a host it could not reach (`stale_host`), killed as `kill --host` does once that host answers; a pane already gone there is only logged.
+/// Each pane a supersede left on a host it could not reach (`stale_host`), killed as `kill --host` does once that host answers; a pane already gone there is only logged.
 pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = working(&ctx.state)?;
     let events = lanes(&events);
@@ -1971,7 +1992,7 @@ pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     Ok(())
 }
 
-/// #899: each lane key (fleet, issue, role) its newest spawns give two or more live agents, oldest first.
+/// Each lane key (fleet, issue, role) its newest spawns give two or more live agents, oldest first.
 pub fn dups(events: &[Event], agents: &[Session]) -> Vec<((String, u64, String), Vec<String>)> {
     let mut by: BTreeMap<(String, u64, String), BTreeMap<u64, String>> = BTreeMap::new();
     for name in agents.iter().map(|a| a.name.as_str()) {
@@ -1987,7 +2008,7 @@ pub fn dups(events: &[Event], agents: &[Session]) -> Vec<((String, u64, String),
     many.map(|(k, v)| (k, v.into_values().collect())).collect()
 }
 
-/// #899: stop each live agent of lane `(fleet, issue, role)` but `keep` as `kill --yes` does; the agents stopped.
+/// Stop each live agent of lane `(fleet, issue, role)` but `keep` as `kill --yes` does; the agents stopped.
 pub fn stop_rounds(
     ctx: &Ctx,
     cfg: &Config,
@@ -2018,7 +2039,7 @@ pub fn stop_rounds(
     Ok(stopped)
 }
 
-/// #899: drive's pass: each lane key two or more live agents carry keeps only its newest.
+/// Drive's pass: each lane key two or more live agents carry keeps only its newest.
 pub fn dedup(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let (events, mut by) = (working(&ctx.state)?, BTreeMap::new());
     let on = |f: &str| cfg.fleet.get(f).is_some_and(|f| !f.paused);
@@ -2038,7 +2059,7 @@ pub fn dedup(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     Ok(())
 }
 
-/// #966: on a host over its load limit, a lane over half its CPUs 3 passes running: one `lane-hog`, paused, an ask.
+/// On a host over its load limit, a lane over half its CPUs 3 passes running: one `lane-hog`, paused, an ask.
 pub fn hogs(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let (events, file) = (crate::events::read(&ctx.state)?, ctx.state.with_file_name("lane-hogs"));
     let old = std::fs::read_to_string(&file).unwrap_or_default();
@@ -2096,7 +2117,7 @@ pub fn hogs(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
     Ok(())
 }
 
-/// #966: a `lane-hog` ask's [kill its processes]: those in the lane's folders, but its worktree's shell and agent.
+/// A `lane-hog` ask's [kill its processes]: those in the lane's folders, but its worktree's shell and agent.
 pub fn unhog(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, agent: &str) -> Result<()> {
     let events = crate::events::read(&ctx.state)?;
     let sp = spawned(&events, agent, None)?;
@@ -2160,7 +2181,7 @@ fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<(String
     }
 }
 
-/// #649: a superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any.
+/// A superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any.
 pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<String>> {
     if !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
         return Ok(None);
@@ -2187,7 +2208,7 @@ fn tag(seed: &str) -> String {
     format!("{:04x}", h.finish() & 0xffff)
 }
 
-/// #254: push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first); the branch it went to.
+/// Push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first); the branch it went to.
 pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<String> {
     snapshot(r, wt, w, msg).map(|(w, _)| w).map_err(|e| match e {
         Snap::Secret(hit) => anyhow::anyhow!("a secret in the diff ({hit})"),
@@ -2207,7 +2228,7 @@ fn build(p: &str) -> bool {
     (p.split('/').rev().skip(1)).any(|c| c.starts_with("target") || NO_WIP[1..].contains(&c))
 }
 
-/// #646 `wip prune`: origin's `wip/*` branches of `fleet`'s repo, each with the size it adds over the integration branch, its issue's state and whether it carries build output, after the counts per issue. Unless `dry`, deleted on origin (a branch delete: never a history rewrite or force-push): #779 those of a merged or closed issue but its newest per role, and that one too if it carries build output. An open issue's are kept.
+/// `wip prune`: origin's `wip/*` branches of `fleet`'s repo, each with the size it adds over the integration branch, its issue's state and whether it carries build output, after the counts per issue. Unless `dry`, deleted on origin (a branch delete: never a history rewrite or force-push): those of a merged or closed issue but its newest per role, and that one too if it carries build output. An open issue's are kept.
 pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, dry: bool) -> Result<()> {
     let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();

@@ -1,6 +1,3 @@
-// #927: one renderer per block type, the set cooee draws (screen, section, list, row, card, text, stat, chips, choice,
-// button, run, images, form and its fields and `submit`, sheet). A block that acts calls `ctx.act`; a tap that goes somewhere
-// calls `ctx.tap`. No block knows which screen it is on.
 import { type Blk, blks, isBlk, isList, obj } from './ops';
 import { esc, figure, get, nodes, put, word } from './theme';
 
@@ -40,8 +37,6 @@ export const sent = (box: Element) => box.querySelectorAll<HTMLInputElement>('[d
   document.querySelectorAll<HTMLInputElement>(`[data-draft="${CSS.escape(k)}"]`).forEach(x => { x.value = x.dataset.was ?? ''; });
 });
 
-/** Minimal markdown: code fences with [copy], `code`, **bold**, [links](url) and plain URLs; with `refs`, `t<n>` opens
- * that thread; everything else escaped. */
 export function md(s: unknown, refs = false): string {
   const link = new RegExp(String.raw`\[([^\]]+)\]\((https?:[^)\s]+)\)|(https?:\/\/[^\s<]*[^\s<.,;:!?)])|\b(${refs ? 't\\d+' : '(?!)'})\b`, 'g');
   const a = (_: string, t: string, u: string, bare: string, ref: string) => ref ? `<a href="#" data-thread="${ref}">${ref}</a>` :
@@ -235,7 +230,7 @@ export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
   images(b) {
     const s = el('div', 'imgs');
     for (const i of blks(b.items)) {
-      const a = href(el('a'), new URL(String(i.src).replace(/^\//, ''), document.baseURI).href);
+      const a = href(el('a'), new URL(String(i.src).replace(/^[/]/, ''), document.baseURI).href);
       a.onclick = e => {
         e.preventDefault();
         const all = [...document.querySelectorAll<HTMLAnchorElement>('main .imgs a')];
@@ -384,25 +379,23 @@ function composer(b: Blk, c: Ctx): HTMLElement {
       st.onclick = () => send(true);
       row.append(st);
     }
-    const chips = blks(b.chips).map(ch => {
-      const s = el('div', 'chips'), n = String(ch.name);
-      const cur = String(d.picks[n] ?? ch.cur ?? '');
-      for (const o of isList(ch.all) ? ch.all.map(String) : []) {
-        const x = btn(`${n} ${o}`, o === cur ? 'on' : '');
-        x.setAttribute('aria-pressed', String(o === cur));
-        x.onclick = () => (act('model') ? post(act('model'), { [n]: o }, x) : ((d.picks[n] = o), draw()));
-        s.append(x);
-      }
-      return s;
-    });
-    f.replaceChildren(...top, row, ...chips);
+    const picks = el('div', 'pk');
+    for (const ch of blks(b.chips)) {
+      const n = String(ch.name), s = el('select'), cur = String(d.picks[n] ?? ch.cur ?? '');
+      s.setAttribute('aria-label', n);
+      if (!cur) s.append(new Option(n, '', true, true));
+      for (const o of isList(ch.all) ? ch.all.map(String) : []) s.append(new Option(o, o, o === cur, o === cur));
+      s.onchange = () => (act('model') ? post(act('model'), { [n]: s.value }, s) : ((d.picks[n] = s.value), draw()));
+      picks.append(s);
+    }
+    f.replaceChildren(...top, row, ...(picks.childElementCount ? [picks] : []));
   }
   draw();
   setTimeout(grow);
   return f;
 }
 
-/** #1086: the image viewer over the page: fitted; a double tap or a pinch zooms, a swipe goes to the next, [save]. */
+/** The image viewer over the page: fitted; a double tap or a pinch zooms, a swipe goes to the next, [save]. */
 export function viewer(list: [string, string][], at: number) {
   const v = el('div', 'iv'), im = el('img'), bar = el('div', 'bar'), save = el('a', '', '<span>save</span>');
   v.id = 'iv';
@@ -455,7 +448,6 @@ function toggle(e: HTMLElement, id: unknown, c: Ctx, card = false) {
   else if (e.nextElementSibling instanceof HTMLElement) e.nextElementSibling.hidden = !c.open.has(k);
 }
 
-/** A form field (toggle, text, picker, secret) as a labelled control named by the field's `name`. */
 function field(x: Blk, key: string): HTMLElement {
   const l = el('label', 'fd');
   l.append(el('span', 'fk', esc(x.label ?? x.name)));
@@ -522,7 +514,7 @@ function same(a: Node, b: Node, trust: boolean): Node {
   morph(a, [...b.childNodes], trust);
   return a;
 }
-/** #1169: `box`'s children become `want` in place: a node whose block is unchanged stays (its field, focus, scroll, image). */
+/** `box`'s children become `want` in place: a node whose block is unchanged stays (its field, focus, scroll, image). */
 export function morph(box: Element, want: Node[], trust = false) {
   const old = [...box.childNodes], byId = new Map<string, Node>(), plain: Node[] = [];
   old.forEach(n => (idOf(n) ? byId.set(idOf(n), n) : plain.push(n)));

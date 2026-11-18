@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
 
-/// Host `name`'s recipe (`<config>/recipes/<cloud>.toml`, else the built-in `boat`) and size: #635's old `medium` is `default` where the recipe prices no `medium`.
+/// Host `name`'s recipe (`<config>/recipes/<cloud>.toml`, else the built-in `boat`) and size: the old `medium` is `default` where the recipe prices no `medium`.
 pub fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, String)> {
     let h = cfg.hosts.get(name).context("no such host")?;
     let (c, size) = (&h.cloud, h.size.clone().unwrap_or_default());
@@ -17,7 +17,7 @@ pub fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, Strin
     Ok((rc, if old { "default".into() } else { size }))
 }
 
-/// #707: the recipe's provider key `var` (`key_env`) and where it was found: the environment, else the 0600 file `<config>/secrets/<var>`. None: the provider's own CLI holds its login (boat's does).
+/// The recipe's provider key `var` (`key_env`) and where it was found: the environment, else the 0600 file `<config>/secrets/<var>`. None: the provider's own CLI holds its login (boat's does).
 pub fn key(ctx: &Ctx, var: &str) -> Result<Option<(String, String)>> {
     if var.is_empty() {
         return Ok(None);
@@ -68,7 +68,7 @@ fn cmd(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str) -> Resul
     run(ctx, r, &rc, &format!("{name} {verb}"), &line, None)
 }
 
-/// Run recipe `rc`'s filled-in `line`: its provider key (#707: when it has `key_env` and the key is set), then #537's `token` (as `RT`), exported from stdin.
+/// Run recipe `rc`'s filled-in `line`: its provider key (when it has `key_env` and the key is set), then the runner `token` (as `RT`), exported from stdin.
 pub fn run(ctx: &Ctx, r: &dyn Runner, rc: &toml::Table, what: &str, line: &str, token: Option<&str>) -> Result<String> {
     let var = rc.get("key_env").and_then(|v| v.as_str()).unwrap_or_default();
     let key = key(ctx, var)?.map(|k| k.0);
@@ -181,8 +181,10 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
                 if new && rc.contains_key("ready") {
                     cmd(ctx, cfg, r, name, "ready")?;
                 }
-                return refresh(ctx, cfg, r, name, (true, true))
-                    .map(|()| drop(crate::hosts::survey(ctx, cfg, r, true)));
+                refresh(ctx, cfg, r, name, (true, true))?;
+                catch_up(ctx, cfg, r, name);
+                drop(crate::hosts::survey(ctx, cfg, r, true));
+                return Ok(());
             }
             r.sleep(10);
         }
@@ -196,7 +198,26 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
     up
 }
 
-/// #1123, #1145: `status` printed nothing (`gone`) or not `running` (`stopped outside drover`): logs that `cloud-stop` and returns its why. A failing `status` is neither.
+fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) {
+    let Some(m) = cfg.hosts.get(name).and_then(|h| h.machine.as_deref()) else {
+        return;
+    };
+    let on = crate::hosts::On::new(r, Some(m));
+    let Some((tags, home)) = crate::hosts::probe(&on) else {
+        return;
+    };
+    let exe = crate::hosts::real_exe(ctx, &home);
+    let (check, install) = crate::release::install_lines(r, &exe, &tags);
+    if ok(&on, "sh", &["-c", &check]).is_ok() {
+        return;
+    }
+    let line = format!("{SH}{install} && {}", crate::hosts::link_line(&exe));
+    let res = ok(&on, "sh", &["-c", &line]);
+    let d = json!({"host": name, "to": crate::SHA, "ok": res.is_ok(), "error": res.err().map(|e| format!("{e:#}"))});
+    crate::events::append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
+}
+
+/// `status` printed nothing (`gone`) or not `running` (`stopped outside drover`): logs that `cloud-stop` and returns its why. A failing `status` is neither.
 pub fn outside(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<Option<&'static str>> {
     let why = match cmd(ctx, cfg, r, name, "status").as_deref().map(str::trim) {
         Ok("") => "gone",
@@ -211,7 +232,7 @@ fn pin(ctx: &Ctx, name: &str) -> std::path::PathBuf {
     ctx.home.join(format!(".ssh/herdsman/{name}.known"))
 }
 
-/// #635 D: when cloud host `name`'s `status` says running, its block rewritten if `address` moved (bootstrap: `repin`).
+/// D: when cloud host `name`'s `status` says running, its block rewritten if `address` moved (bootstrap: `repin`).
 pub fn moved(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, repin: bool) -> Result<()> {
     if !cmd(ctx, cfg, r, name, "status").is_ok_and(|s| s.trim() == "running") {
         return Ok(());
@@ -356,7 +377,7 @@ pub fn card(ctx: &Ctx, cfg: &Config, ev: &[Event], (name, n): (&str, usize)) -> 
     Some([head, tone, format!("{text} · last stop {t}{}", gh.unwrap_or_default())])
 }
 
-/// #255: host `on`'s gh token as its card says it (`github: token · 2 repos · expires in 80d`) and a health row from 14 days before it expires, from one `gh api -i` there (the expiry header and the repos it reaches, never the token).
+/// Host `on`'s gh token as its card says it (`github: token · 2 repos · expires in 80d`) and a health row from 14 days before it expires, from one `gh api -i` there (the expiry header and the repos it reaches, never the token).
 pub fn github(on: &dyn Runner, now: u64) -> (String, Option<String>) {
     let o = ok(on, "gh", &["api", "-i", "user/repos?per_page=100"]);
     token(&o.unwrap_or_default(), now)
@@ -419,7 +440,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         crate::hosts::real_exe(ctx, &home),
         ctx.config.display().to_string().replace(&mine, &home),
     );
-    let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("DROVER_SHA"));
     let run = |s: &str, l: u64| {
         on.run_for(
             "sh",
@@ -447,7 +467,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         ensure!(o.code == 0, "{}", fail(what, cmd, &o));
         Ok(writeln!(out, "✓ {what} — installed")?)
     };
-    let (version, build) = (crate::VERSION, crate::hosts::install_line(root, sha));
     let mut steps = format!("{TOOLS}\n");
     for (n, i) in crate::providers::lanes().filter_map(|h| Some((h.name, h.install()?))) {
         steps += &format!("{n}\tcommand -v {n}\t{i}\n");
@@ -464,7 +483,8 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         steps += &ACP.replace("{acp}", crate::providers::default_acp().unwrap_or_default());
         steps += "\n";
     }
-    steps += &format!("drover\t[ \"$('{exe}' --version)\" = 'drover {version}' ]\t{build}\n");
+    let (check, build) = crate::release::install_lines(r, &exe, &tags);
+    steps += &format!("drover\t{check}\t{build}\n");
     let link = crate::hosts::link_line(&exe);
     steps += &format!("drover on PATH\t[ \"$HOME/.local/bin/drover\" -ef '{exe}' ] && {{ [ ! -e /usr/local/bin/drover ] || [ /usr/local/bin/drover -ef '{exe}' ]; }}\t{link}");
     steps.lines().try_for_each(&mut step)?;
@@ -520,12 +540,12 @@ command -v drover >/dev/null || { echo \"drover not on PATH $PATH\"; exit 1; }";
         ensure!(o.code == 0, "{}", fail("shed and drover on ssh's PATH", check, &o));
         writeln!(out, "✓ shed and drover — on ssh's PATH")?;
     }
-    log(ctx, cfg, "host-bootstrap", name, json!({"sha": sha}))?;
+    log(ctx, cfg, "host-bootstrap", name, json!({"sha": crate::SHA}))?;
     crate::hosts::survey(ctx, cfg, r, true);
     Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)
 }
 
-/// #255 `hosts snapshot <name>`: after a fresh health look, up with no `✗`, the recipe's `snapshot`; logs `cloud-snapshot`. #1127: then a shed there that does not answer is restarted once, else the error.
+/// `hosts snapshot <name>`: after a fresh health look, up with no `✗`, the recipe's `snapshot`; logs `cloud-snapshot`. Then a shed there that does not answer is restarted once, else the error.
 pub fn snapshot(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     crate::hosts::survey(ctx, cfg, r, true);
     let s = crate::hosts::cached(ctx).remove(name).unwrap_or_default();
@@ -545,7 +565,7 @@ pub fn snapshot(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<(
     })
 }
 
-/// #635 doctor rows for cloud host `name`: an old size, where its provider key is, and each recipe subcommand of its CLI (the recipe's name, e.g. `boat`) in that CLI's `--help`.
+/// Doctor rows for cloud host `name`: an old size, where its provider key is, and each recipe subcommand of its CLI (the recipe's name, e.g. `boat`) in that CLI's `--help`.
 pub fn doctor(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, rows: &mut Vec<String>) -> Result<()> {
     let (rc, size) = recipe(ctx, cfg, name)?;
     let h = cfg.hosts.get(name).context("no such host")?;
@@ -625,7 +645,7 @@ pub fn doctor(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, rows: &mut Ve
     Ok(())
 }
 
-/// #635: an `Include` in `~/.ssh/config` that reads a host-key file under `config.d` (ssh parses it as config).
+/// An `Include` in `~/.ssh/config` that reads a host-key file under `config.d` (ssh parses it as config).
 pub fn includes(ctx: &Ctx, rows: &mut Vec<String>) {
     let ssh = ctx.home.join(".ssh");
     let conf = std::fs::read_to_string(ssh.join("config")).unwrap_or_default();

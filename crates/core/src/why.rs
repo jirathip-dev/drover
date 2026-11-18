@@ -216,7 +216,7 @@ pub fn turn(
     Ok(None)
 }
 
-/// #925: `body` has `## For humans`, no "Generated with" line, and names `head` as `scripts/evidence-check.sh` does.
+/// `body` has `## For humans`, no "Generated with" line, and names `head` as `scripts/evidence-check.sh` does.
 pub fn body(
     body: &str,
     head: &str,
@@ -329,7 +329,7 @@ fn section(body: &str, round: u32, text: &str, head: &str) -> String {
     }
 }
 
-/// #1097: put the issue's lane notes, joined in round order, on its squash commit `sha`.
+/// Put the issue's lane notes, joined in round order, on its squash commit `sha`.
 pub fn squash(
     ctx: &Ctx,
     r: &dyn Runner,

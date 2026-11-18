@@ -142,7 +142,7 @@ fn crashed_on_air(c: &drover::Ctx) -> String {
         &Event::new(NOW - 600, "sendmeter", Some(20), "lane-state", gone),
     )
     .unwrap();
-    format!("'git' '-C' '{wt}' 'push' 'origin' 'HEAD:refs/heads/issue-20'")
+    format!("'git' '--no-replace-objects' '-C' '{wt}' 'push' 'origin' 'HEAD:refs/heads/issue-20'")
 }
 
 #[test]

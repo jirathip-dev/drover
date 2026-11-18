@@ -1,4 +1,4 @@
-// #58 amendment B control audit, run in the page (tests/ui_audit.rs, WebKit at 390 px): every visible
+// Amendment B control audit, run in the page (tests/ui_audit.rs, WebKit at 390 px): every visible
 // control under `root` is 28 px tall, 11 or 13 px type, unfilled, and its 44 px tap target (an 8 px
 // ring) answers elementFromPoint 7 px outside each edge; inputs are 16 px. Throws with every outlier.
 function audit(root) {
@@ -7,7 +7,7 @@ function audit(root) {
   const ctl = [...R.querySelectorAll('button:not(.lr,.hh,.hqh), .pk')].filter(seen);
   for (const e of ctl) {
     const cs = getComputedStyle(e), name = (e.getAttribute('aria-label') || e.textContent).trim().slice(0, 24);
-    // #63 amendment A: a choice wraps (≤ 4 lines) and its ring is 4 px tall, so stacked choices 8 px apart never overlap.
+    // Amendment A: a choice wraps (≤ 4 lines) and its ring is 4 px tall, so stacked choices 8 px apart never overlap.
     const choice = e.matches('button[name=choice], .pick'), v = choice ? 3 : 7;
     if (!choice && cs.height !== '28px') bad.push(`${name}: height ${cs.height}`);
     if (!['11px', '13px'].includes(cs.fontSize)) bad.push(`${name}: font ${cs.fontSize}`);

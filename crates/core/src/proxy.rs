@@ -141,7 +141,7 @@ pub fn revoke(ctx: &Ctx, cfg: &Config, id: &str, out: &mut dyn Write) -> Result<
     Ok(writeln!(out, "revoked {id}")?)
 }
 
-/// #923: the token the proxy signs with, `[proxy] token-file` (0600), or why there is none and how to make it.
+/// The token the proxy signs with, `[proxy] token-file` (0600), or why there is none and how to make it.
 pub fn token(cfg: &Config) -> std::result::Result<String, String> {
     let (path, _) = token_file(cfg);
     let f = cfg.proxy.token_file.as_deref().map(crate::config::expand);
@@ -151,14 +151,14 @@ pub fn token(cfg: &Config) -> std::result::Result<String, String> {
         .ok_or_else(|| format!("proxy token missing: {}", fix(cfg, &path)))
 }
 
-/// #1131: the token file's state: missing (or `[proxy] token-file` unset), readable by others, or saved at its mtime.
+/// The token file's state: missing (or `[proxy] token-file` unset), readable by others, or saved at its mtime.
 pub enum Token {
     Missing,
     Open,
     Saved(u64),
 }
 
-/// #1131: `[proxy] token-file` as written (else the docs' path) and its state.
+/// `[proxy] token-file` as written (else the docs' path) and its state.
 pub fn token_file(cfg: &Config) -> (String, Token) {
     let raw = cfg.proxy.token_file.clone();
     let shown = raw.clone().unwrap_or_else(|| "~/.config/drover/tokens/proxy".into());
@@ -182,7 +182,7 @@ fn fix(cfg: &Config, path: &str) -> String {
     format!("run {setup}, save it 0600 at {path}{}", set.unwrap_or_default())
 }
 
-/// #1131: with a `shed-acp` host, doctor's and the Hosts card's proxy facts: the token's `✓`/`!`/`✗` line, the proxy's port, each host's tunnel, the live lane keys.
+/// With a `shed-acp` host, doctor's and the Hosts card's proxy facts: the token's `✓`/`!`/`✗` line, the proxy's port, each host's tunnel, the live lane keys.
 pub fn status(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Vec<String>> {
     let acp: Vec<&String> = cfg.hosts.keys().filter(|h| cfg.host_acp(h).is_some()).collect();
     acp.first()?;
@@ -424,7 +424,7 @@ fn write_private(p: &std::path::Path, b: &[u8]) -> Result<()> {
     Ok(f.write_all(b)?)
 }
 
-/// Before a remote ACP lane starts (and each survey of a `shed-acp` host): #1131's `proxy-token-expiring` once at 30 d and 7 d left, the proxy answering here (else started detached) and host `name`'s tunnel (`ssh -R`, the proxy's port there to here) alive (else started, its pid kept).
+/// Before a remote ACP lane starts (and each survey of a `shed-acp` host): `proxy-token-expiring` once at 30 d and 7 d left, the proxy answering here (else started detached) and host `name`'s tunnel (`ssh -R`, the proxy's port there to here) alive (else started, its pid kept).
 pub fn ensure(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, machine): (&str, &str)) -> Result<()> {
     if let (path, Token::Saved(at)) = token_file(cfg) {
         let left = days_left(ctx.now, at);

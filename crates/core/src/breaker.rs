@@ -115,7 +115,7 @@ pub fn probe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
 
 const UNLANDED: &str = "PROMPTS_UNLANDED";
 
-/// #937: true while drive holds every respawn: `runtime_down_failures` lanes' prompts never landed in `runtime_down_minutes` (trips it once: one `needs-human` naming the shed builds); a landed spawn or `shed-installed` clears it.
+/// True while drive holds every respawn: `runtime_down_failures` lanes' prompts never landed in `runtime_down_minutes` (trips it once: one `needs-human` naming the shed builds); a landed spawn or `shed-installed` clears it.
 pub fn unlanded(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<bool> {
     let ev = working(&ctx.state)?;
     let unconfirmed = |e: &Event| e.kind == "spawn" && e.data.get("confirmed") == Some(&json!(false));

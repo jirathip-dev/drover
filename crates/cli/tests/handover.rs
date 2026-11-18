@@ -366,14 +366,18 @@ fn serve_on(c: &drover::Ctx, addr: &str, path: &str) -> std::process::Child {
 }
 
 fn lines(p: &mut std::process::Child) -> Arc<Mutex<String>> {
+    piped(p).0
+}
+
+fn piped(p: &mut std::process::Child) -> (Arc<Mutex<String>>, std::thread::JoinHandle<()>) {
     let (log, err) = (Arc::new(Mutex::new(String::new())), p.stderr.take().unwrap());
     let l2 = log.clone();
-    std::thread::spawn(move || {
+    let reader = std::thread::spawn(move || {
         for l in BufReader::new(err).lines().map_while(Result::ok) {
             l2.lock().unwrap().push_str(&(l + "\n"));
         }
     });
-    log
+    (log, reader)
 }
 
 fn exited(p: &mut std::process::Child, secs: u64) -> Option<std::process::ExitStatus> {
@@ -502,7 +506,7 @@ fn a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit() {
     let c = ctx(&tmpdir("ho-mem-again"), &cfg(100_000));
     append(&c.state, &Event::new(c.now, "drover", None, "note", json!({}))).unwrap();
     let mut p = serve(&c, "127.0.0.1:0");
-    let log = lines(&mut p);
+    let (log, reader) = piped(&mut p);
     let addr = addr_of(&log);
     let port = addr.rsplit_once(':').unwrap().1.parse().unwrap();
     let sock = drover::update::serve_sock(&c, port);
@@ -539,12 +543,21 @@ fn a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit() {
     }
     std::fs::write(&c.config, cfg(100_000)).unwrap();
     let t = Instant::now();
-    while log.lock().unwrap().matches("phone page on").count() < 4 && t.elapsed() < Duration::from_secs(60) {
+    while log.lock().unwrap().matches("phone page on").count() < 5 && t.elapsed() < Duration::from_secs(60) {
         std::thread::sleep(Duration::from_millis(50));
     }
     std::thread::sleep(Duration::from_millis(1_000));
     let still = p.try_wait().unwrap();
     let _ = (p.kill(), p.wait());
+    let t = Instant::now();
+    while !reader.is_finished() && t.elapsed() < Duration::from_secs(60) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        reader.is_finished(),
+        "every bridge exited with the test: {}",
+        log.lock().unwrap()
+    );
     let (log, high, starts) = (log.lock().unwrap().clone(), high(), starts());
     assert!(!alive(&pid), "the first handover finished: {log}");
     assert!(
@@ -557,7 +570,7 @@ fn a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit() {
         "{high:?}"
     );
     let pages = log.matches("phone page on").count();
-    assert!(pages >= 4, "a bridge and an exec'd copy per handover: {log}");
+    assert!(pages >= 5, "a bridge and an exec'd copy per handover: {log}");
     assert!(still.is_none(), "the supervised pid serves on\n{log}");
 }
 

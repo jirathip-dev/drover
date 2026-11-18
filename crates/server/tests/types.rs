@@ -129,7 +129,7 @@ macro_rules! each {
 
 fn bindings() -> String {
     let cfg = ts_rs::Config::new().with_large_int("number");
-    let mut out = "// Generated from the Rust payload types by `just types` (#375); never edit by hand.\n".to_string();
+    let mut out = "// Generated from the Rust payload types by `just types`; never edit by hand.\n".to_string();
     macro_rules! decl {
         ($($t:ty),*) => {$(
             let docs = <$t as TS>::docs();

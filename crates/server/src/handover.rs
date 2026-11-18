@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 use std::time::Duration;
 
-/// #894: one serve's side of the socket handover (docs/setup.md): its listeners, control socket and drain state.
+/// One serve's side of the socket handover (docs/setup.md): its listeners, control socket and drain state.
 pub struct Handover {
     sock: PathBuf,
     listeners: Vec<(RawFd, SocketAddr)>,
@@ -37,7 +37,7 @@ impl Handover {
         })
     }
 
-    /// #898: a predecessor handed its listeners down: this start is no restart.
+    /// A predecessor handed its listeners down: this start is no restart.
     pub fn inherited(&self) -> bool {
         self.inherited
     }
@@ -96,7 +96,7 @@ impl Handover {
         }
     }
 
-    /// #895: frees heap to the OS; past `serve_mem_mb` of RSS logs `serve-mem-high` once and hands over (docs/serve.md).
+    /// Frees heap to the OS; past `serve_mem_mb` of RSS logs `serve-mem-high` once and hands over (docs/serve.md).
     pub fn watch_mem(&self, ctx: &Ctx, r: &dyn Runner) {
         let (pid, mut first, mut logged) = (drover_core::runner::pid().to_string(), None, false);
         while !self.stopping() {

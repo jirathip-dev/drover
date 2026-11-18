@@ -4,14 +4,17 @@ use drover::config::Config;
 use drover::events::{read, Event};
 use drover::hosts::{cached, place};
 use serde_json::json;
+use std::path::Path;
 
 const NOW: u64 = 1_000_000;
 
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
 
+const DROVER: &str = "[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/x/drover\"\nintegration = \"staging\"\n\n[fleet.drover.role.impl]\nharness = \"hermes\"\n";
+
 fn config(extra: &str) -> String {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
-    format!("{base}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n{extra}")
+    format!("{base}\n{DROVER}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.boat2]\nmachine = \"boat2\"\n\n[hosts.boat3]\nmachine = \"boat3\"\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n{extra}")
 }
 
 fn setup(name: &str, extra: &str, bazzite_up: bool, seen: u64) -> drover::Ctx {
@@ -22,6 +25,8 @@ fn setup(name: &str, extra: &str, bazzite_up: bool, seen: u64) -> drover::Ctx {
         "mini": {"tags": ["os:macos", "arch:arm64", "xcode"], "home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
         "bazzite": {"tags": ["os:linux", "arch:x86_64", "docker"], "home": "/home/me", "probed": NOW,
                     "seen": NOW - seen, "up": bazzite_up, "load": 0.1, "mem": 12.0, "disk": 200.0},
+        "boat2": {"tags": ["os:linux", "arch:x86_64"], "home": "/home/me", "probed": NOW, "seen": NOW, "up": true},
+        "boat3": {"tags": ["os:linux", "arch:x86_64"], "home": "/home/me", "probed": NOW, "seen": NOW, "up": true},
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     c
@@ -51,7 +56,7 @@ fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
 }
 
 fn healthy(f: Fake) -> Fake {
-    f.reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
+    f.reply(&format!("{SSH}'git' '--no-replace-objects' 'ls-remote'"), "abc\tHEAD\n")
         .reply(&format!("{SSH}'sh' '-lc'"), "")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' '--version'"),
@@ -80,23 +85,35 @@ fn placed(c: &drover::Ctx, r: &Fake, issue: u64, role: &str, force: Option<&str>
     }
 }
 
-const STATUS: &str = "'sh' '-c' '\"$1\" --version";
+const STATUS: &str = "'sh' '-c' 'for x in";
+const NEW: &str = "1111111111111111111111111111111111111111";
+const OLD: &str = "0000000000000000000000000000000000000000";
 
-const START: &str = "'sh' '-c' 'V=";
+fn ver(sha: &str) -> String {
+    format!("drover 0.1.0 ({sha})")
+}
+
+fn ssh(m: &str) -> String {
+    SSH.replace("bazzite", m)
+}
+
+fn status(f: Fake, m: &str, live: &str, staged: Option<&str>) -> Fake {
+    let staged = staged.map_or("-".into(), ver);
+    f.reply(&format!("{}{STATUS}", ssh(m)), &format!("{}\n{staged}\n", ver(live)))
+}
 
 fn synced(status: &str) -> Fake {
     healthy(fake(0.1, 0.1))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
         .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
         .reply(&format!("{SSH}{STATUS}"), status)
-        .reply(&format!("{SSH}{START}"), "")
 }
 
-fn syncs(c: &drover::Ctx) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .iter()
-        .filter(|e| e.kind == "host-sync")
+        .filter(|e| e.kind == kind)
         .cloned()
         .collect()
 }
@@ -113,92 +130,166 @@ fn reprobe(c: &drover::Ctx, health: &[&str]) {
     .unwrap();
 }
 
-#[test]
-fn a_mismatched_host_gets_one_install_at_this_sha_then_profiles_sync_and_a_matching_one_none() {
-    let c = setup("hosts-sync", "", true, 0);
-    let _sh = FakeShed::attached(&c);
-    let bazzite = FakeShed::new();
-    let (sha, old) = (env!("DROVER_SHA"), "drover 0.1.0 (0ld)\n");
-    let r = synced(old);
-    let (code, out) = run(&c, &two(&r, &bazzite), &["hosts", "refresh"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains(&format!("· drover 0ld ≠ {sha} ·")), "{out}");
-    let repo = "https://github.com/jirathip-dev/herdsman";
-    let install = format!("cargo install --git {repo} --rev {sha} --locked --root '\\''/opt/drover'\\'' --force");
-    let sync = "|| '\\''/opt/drover/bin/drover'\\'' profiles sync; }; }; echo \"$? ";
-    let starts: Vec<String> = r.calls.borrow().iter().filter(|l| l.contains(START)).cloned().collect();
-    assert_eq!(starts.len(), 1, "{starts:#?}");
-    assert!(
-        starts[0].contains(&install) && starts[0].contains(sync),
-        "{}",
-        starts[0]
+fn rollout(c: &drover::Ctx, boats: &[(&str, &str, Option<&str>)]) -> Fake {
+    let tag = drover::release::tag("main", NEW);
+    let sums = format!(
+        "{}  drover-x86_64-unknown-linux-gnu\n{}  drover-aarch64-apple-darwin\n",
+        "b".repeat(64),
+        "a".repeat(64)
     );
-    assert!(
-        starts[0].ends_with("'drover 0.1.0 (0ld)'"),
-        "the from version: {}",
-        starts[0]
-    );
-    let busy = synced(&format!("{old}busy\n"));
-    run(&c, &two(&busy, &bazzite), &["hosts", "refresh"]);
-    assert!(busy.called(&format!("{SSH}{STATUS}")) && !busy.called(&format!("{SSH}{START}")));
-    let landed = synced(&format!(
-        "drover {}\ndone 0 {sha} drover 0.1.0 (0ld)\n",
-        drover::VERSION
-    ));
-    let (_, out) = run(&c, &two(&landed, &bazzite), &["hosts", "refresh"]);
-    assert!(out.contains(&format!("· drover {sha} ✓ ·")), "{out}");
-    assert!(!landed.called(&format!("{SSH}{START}")));
-    let ev = syncs(&c);
-    assert_eq!(ev.len(), 1, "{ev:?}");
-    assert_eq!(
-        json!(ev[0].data),
-        json!({"host": "bazzite", "from": "0ld", "to": sha, "ok": true})
-    );
+    let f = Fake::default()
+        .reply("git -C /x/drover rev-parse origin/main", &format!("{NEW}\n"))
+        .reply("git -C /x/drover fetch", "")
+        .reply(&format!("gh release download {tag} "), &sums)
+        .reply(&format!("sh -c ( n='{}.new'", c.exe), &ver(NEW))
+        .reply(&format!("{}.new doctor --config-only", c.exe), "")
+        .reply(&format!("{} profiles sync", c.exe), "")
+        .reply("launchctl", "")
+        .reply("systemctl", "");
+    boats.iter().fold(f, |f, (m, live, staged)| {
+        status(f, m, live, *staged)
+            .reply(&format!("{}'sh' '-c' '( n=", ssh(m)), &ver(NEW))
+            .reply(&format!("{}'sh' '-c' 'export PATH", ssh(m)), "")
+    })
+}
+
+fn swapped(f: &Fake, m: &str) -> Option<usize> {
+    f.calls
+        .borrow()
+        .iter()
+        .position(|l| l.starts_with(&format!("{}'sh' '-c' 'export PATH", ssh(m))) && l.contains("mv -f"))
 }
 
 #[test]
-fn a_failed_install_is_logged_alerted_once_and_retried_each_tick() {
-    let c = setup("hosts-sync-fail", "", true, 0);
-    let _sh = FakeShed::attached(&c);
-    let bazzite = FakeShed::new();
-    let sha = env!("DROVER_SHA");
-    let failed = format!("drover 0.1.0 (0ld)\ndone 101 {sha} drover 0.1.0 (0ld)\n");
-    for _ in 0..2 {
-        let r = synced(&failed);
-        run(&c, &two(&r, &bazzite), &["check"]);
-        assert_eq!(r.count(&format!("{SSH}{START}")), 1, "retried");
+fn a_lagging_host_holds_the_swap_30_minutes_then_the_rest_swap_and_placement_passes_it_over() {
+    let mut c = setup("rollout-lag", "", true, 0);
+    let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
+    c.exe = dir.join("bin/drover").display().to_string();
+    version_bin(Path::new(&c.exe), &ver(OLD));
+    run(
+        &c,
+        &fake(2.0, 0.1),
+        &["queue", "sendmeter", "add", "12", "--needs", "docker"],
+    );
+    let at = |mins: u64| drover::Ctx {
+        now: NOW + mins * 60,
+        ..c.clone()
+    };
+    let pass = |mins: u64, boats: &[(&str, &str, Option<&str>)]| {
+        let f = rollout(&c, boats);
+        let (code, out) = run(&at(mins), &Disk(&f), &["self-update"]);
+        (f, code, out)
+    };
+    let up = [("boat2", OLD, None), ("boat3", OLD, None)];
+    let (f, code, out) = pass(0, &up);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("waiting up to 30 min for bazzite"), "{out}");
+    assert!(
+        f.called(&format!("{}'sh' '-c' '( n=", ssh("boat2"))) && f.called(&format!("{}'sh' '-c' '( n=", ssh("boat3")))
+    );
+    let staged = [("boat2", OLD, Some(NEW)), ("boat3", OLD, Some(NEW))];
+    let (f, code, out) = pass(29, &staged);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("waiting up to 1 min for bazzite"), "{out}");
+    for (f, m) in [(&f, "boat2"), (&f, "boat3")] {
+        assert_eq!(swapped(f, m), None, "no swap before the lag limit");
     }
-    let ev = syncs(&c);
-    assert_eq!(ev.len(), 2, "{ev:?}");
-    assert!(ev.iter().all(|e| e.val("ok") == false && e.str("from") == Some("0ld")));
-    let alerts = read(&c.state)
+    assert!(Path::new(&format!("{}.new", c.exe)).exists() && std::fs::read_to_string(&c.exe).unwrap().contains(OLD));
+
+    let (f, code, out) = pass(31, &staged);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("✓ installed 1111111") && out.contains("left behind: bazzite"),
+        "{out}"
+    );
+    let (b2, b3) = (swapped(&f, "boat2").unwrap(), swapped(&f, "boat3").unwrap());
+    let mini = f.index(&format!("{} profiles sync", c.exe)).unwrap();
+    assert!(b2 < mini && b3 < mini, "the main host swaps last");
+    assert!(std::fs::read_to_string(&c.exe).unwrap().contains(NEW));
+    let order: Vec<String> = read(&c.state)
         .unwrap()
         .iter()
-        .filter(|e| e.kind == "host-sync-failed")
-        .count();
-    assert_eq!(alerts, 1, "once per state");
+        .map(|e| e.kind.clone())
+        .filter(|k| k.starts_with("self-update") || k.starts_with("host-"))
+        .collect();
+    let i = |k: &str| order.iter().position(|o| o == k).unwrap();
+    assert!(
+        i("self-update-staging") < i("self-update-swapping") && i("self-update-swapping") < i("self-updated"),
+        "{order:?}"
+    );
+    let ok: Vec<_> = kinds(&c, "host-sync")
+        .iter()
+        .filter(|e| e.val("ok") == true)
+        .map(|e| e.str("host").unwrap().to_string())
+        .collect();
+    assert_eq!(ok, ["boat2", "boat3"]);
+    let behind = kinds(&c, "host-behind");
+    assert_eq!(behind.len(), 1, "{behind:?}");
+    assert_eq!(
+        (behind[0].str("host"), behind[0].str("wants")),
+        (Some("bazzite"), Some(NEW))
+    );
+
+    let c40 = at(40);
+    let e = placed(&c40, &fake(2.0, 0.1), 12, "impl", None).unwrap_err();
+    assert!(e.starts_with("HOST_UPDATING: bazzite: drover there is ?"), "{e}");
+    let (_, code, out) = pass(40, &[("boat2", NEW, None), ("boat3", NEW, None)]);
+    assert_eq!((code, out.as_str()), (0, "= up to date @ 1111111\n"));
+    assert_eq!(kinds(&c, "host-behind").len(), 1, "logged once");
+    let log = serde_json::to_string(&read(&c.state).unwrap().to_vec()).unwrap();
+    assert!(!log.contains("ACP_UNGUARDED") && !log.contains("NO_HOST"), "{log}");
+
+    let back = [("boat2", NEW, None), ("boat3", NEW, None), ("bazzite", OLD, None)];
+    let (f, code, out) = pass(45, &back);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("✓ caught up bazzite to 1111111"), "{out}");
+    assert!(swapped(&f, "bazzite").is_some() && swapped(&f, "boat2").is_none());
+    assert!(
+        f.count(&format!("{} profiles sync", c.exe)) == 0,
+        "the main host is left alone"
+    );
+    assert_eq!(
+        placed(&at(46), &fake(2.0, 0.1), 12, "impl", None).as_deref(),
+        Ok("bazzite")
+    );
 }
 
 #[test]
-fn an_unreachable_or_switched_off_host_costs_no_sync_ssh() {
+fn hosts_refresh_reads_each_hosts_build_and_never_installs() {
+    let c = setup("hosts-build-read", "", true, 0);
+    let _sh = FakeShed::attached(&c);
+    let bazzite = FakeShed::new();
+    let r = synced(&format!("{}\n-\n", ver(OLD)));
+    let (code, out) = run(&c, &two(&r, &bazzite), &["hosts", "refresh"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("· drover {OLD} ≠ {} ·", env!("DROVER_SHA"))),
+        "{out}"
+    );
+    let calls = r.calls.borrow().join("\n");
+    assert!(
+        !calls.contains("cargo install") && !calls.contains("drover.new") && !calls.contains("mv -f"),
+        "{calls}"
+    );
+    assert!(kinds(&c, "host-sync").is_empty());
+}
+
+#[test]
+fn an_unreachable_or_switched_off_host_costs_no_build_read() {
     let c = setup("hosts-sync-off", "", true, 0);
     let r = fake(0.1, 0.1).reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n");
     run(&c, &r, &["hosts", "refresh"]);
     assert!(!cached(&c)["bazzite"].up);
-    assert!(!r
-        .calls
-        .borrow()
-        .iter()
-        .any(|l| l.contains(".drover-sync") || l.contains(STATUS)));
+    assert!(!r.calls.borrow().iter().any(|l| l.contains(STATUS)));
     let c = setup("hosts-sync-disabled", "enabled = false\n", true, 0);
     let _sh = FakeShed::attached(&c);
-    let (bazzite, r) = (FakeShed::new(), synced("drover 0.1.0 (0ld)\n"));
+    let (bazzite, r) = (FakeShed::new(), synced(&format!("{}\n-\n", ver(OLD))));
     run(&c, &two(&r, &bazzite), &["hosts", "refresh"]);
-    assert!(!r.called(&format!("{SSH}{STATUS}")) && syncs(&c).is_empty());
+    assert!(!r.called(&format!("{SSH}{STATUS}")));
 }
 
 #[test]
-fn a_landed_sync_rereads_the_host_health_in_the_same_pass_so_spawn_places_there() {
+fn a_changed_build_rereads_the_host_health_in_the_same_pass_so_spawn_places_there() {
     let c = setup("hosts-sync-landed", "", true, 0);
     let _sh = FakeShed::attached(&c);
     let stale = format!(
@@ -207,7 +298,8 @@ fn a_landed_sync_rereads_the_host_health_in_the_same_pass_so_spawn_places_there(
     );
     reprobe(&c, &[&stale]);
     let mut all = cached(&c);
-    all.get_mut("bazzite").unwrap().probed = NOW;
+    let b = all.get_mut("bazzite").unwrap();
+    (b.probed, b.drover) = (NOW, OLD.into());
     std::fs::write(
         c.state.with_file_name("hosts.json"),
         serde_json::to_string(&all).unwrap(),
@@ -220,51 +312,14 @@ fn a_landed_sync_rereads_the_host_health_in_the_same_pass_so_spawn_places_there(
     );
     let e = placed(&c, &fake(2.0, 0.1), 12, "impl", None).unwrap_err();
     assert!(e.starts_with("NO_HOST: bazzite: unhealthy: ✗ acp guard"), "{e}");
-    let sha = env!("DROVER_SHA");
     let bazzite = FakeShed::new();
-    let landed = synced(&format!(
-        "drover {}\ndone 0 {sha} drover 0.1.0 (0ld)\n",
-        drover::VERSION
-    ));
+    let landed = synced(&format!("{}\n-\n", ver(env!("DROVER_SHA"))));
     let (code, out) = run(&c, &two(&landed, &bazzite), &["check"]);
     assert_eq!(code, 0, "{out}");
-    assert!(landed.called(&format!("{SSH}'git' 'ls-remote'")), "health ran again");
+    assert!(
+        landed.called(&format!("{SSH}'git' '--no-replace-objects' 'ls-remote'")),
+        "health ran again"
+    );
     assert_eq!(cached(&c)["bazzite"].health, Vec::<String>::new());
     assert_eq!(placed(&c, &fake(2.0, 0.1), 12, "impl", None).as_deref(), Ok("bazzite"));
-}
-
-#[test]
-fn a_skipped_sync_logs_why_once_per_streak() {
-    let c = setup("hosts-sync-skipped", "", true, 0);
-    let _sh = FakeShed::attached(&c);
-    let bazzite = FakeShed::new();
-    let skipped = |c: &drover::Ctx| {
-        let all = read(&c.state).unwrap();
-        all.iter()
-            .filter(|e| e.kind == "host-sync-skipped")
-            .cloned()
-            .collect::<Vec<_>>()
-    };
-    let probe = format!("{SSH}'sh' '-c' 'uname");
-    for want in [1, 1] {
-        reprobe(&c, &[]);
-        let r = synced("drover 0.1.0 (0ld)\n").once(&probe, 124, "");
-        run(&c, &two(&r, &bazzite), &["check"]);
-        assert!(!r.called(&format!("{SSH}{START}")));
-        assert_eq!(skipped(&c).len(), want);
-    }
-    assert!(
-        skipped(&c)[0]
-            .str("reason")
-            .is_some_and(|w| w.contains("not sent (host offline this pass)")),
-        "{:?}",
-        skipped(&c)[0]
-    );
-    let r = synced("drover 0.1.0 (0ld)\n");
-    run(&c, &two(&r, &bazzite), &["check"]);
-    assert_eq!(r.count(&format!("{SSH}{START}")), 1);
-    reprobe(&c, &[]);
-    let r = synced("drover 0.1.0 (0ld)\n").once(&probe, 124, "");
-    run(&c, &two(&r, &bazzite), &["check"]);
-    assert_eq!(skipped(&c).len(), 2, "a new streak logs again");
 }

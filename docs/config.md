@@ -104,6 +104,14 @@ left out. It keeps the list in the state folder as
 is open, and queues it `--architect`. `drover tick` stores each fleet's list daily and files its issue weekly; `hotspots = "off"` in `[fleet.<n>]` opts
 out.
 
+## History baseline (#1099)
+
+`drover baseline <fleet> [<sha>]` (the owner's; default the integration tip) writes `baseline = "<sha>"` in
+`[fleet.<n>]` and logs `baseline-set`; a sha not on the integration branch is `REFUSED BASELINE_OFF_INTEGRATION`.
+Lanes whose branch contains it see `git log` and `git blame` only since it, by local grafts; nothing is rewritten.
+Remove the key to undo it. How it works and the other undos: `docs/workflow.md`, "History baseline"; the design:
+`docs/architecture/baseline/`.
+
 ## In-flight cap (#1129)
 
 `max_in_flight = N` in `[fleet.<n>]` caps the fleet's PRs in flight (an issue in impl, fix, review, verify or ready,
@@ -220,3 +228,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `slo_tick_minutes` | `10` | a tick running longer than this breaches `slo-tick`; the next fast step stops it |
 | `slo_pass_minutes` | `30` | no slow drive pass of a fleet for this long shows the owner's `Drive is stuck` card |
 | `stall_restart_hours` | `2` | an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own) |
+| `self_update_wait_minutes` | `45` | a head with no release build this long alerts `self-update-waiting` |
+| `self_update_lag_minutes` | `30` | how long a rollout waits for an enabled host that is not staged before the rest swap |
+| `self_update_stage_secs` | `300` | one host's download and gate of a release build |
+| `self_update_swap_secs` | `120` | how long a `self-update-swapping` mark holds remote placement when no `self-updated` follows |

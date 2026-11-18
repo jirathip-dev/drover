@@ -150,7 +150,7 @@ impl Session {
     pub fn signed_out(&self) -> bool {
         self.auth().is_some_and(|n| !n.contains("lane key"))
     }
-    /// #1223: the token proxy refused this lane's own key (`401 lane key <id> revoked`): the lane's fault, not the host's login.
+    /// The token proxy refused this lane's own key (`401 lane key <id> revoked`): the lane's fault, not the host's login.
     pub fn key_refused(&self) -> bool {
         self.auth().is_some_and(|n| n.contains("lane key"))
     }
@@ -198,7 +198,7 @@ impl Cause {
             .into_iter()
             .find(|c| c.word() == w)
     }
-    /// #662: drover resumes the lane in its worktree.
+    /// Drover resumes the lane in its worktree.
     pub fn resumable(self) -> bool {
         matches!(self, Cause::Limit | Cause::Crash)
     }

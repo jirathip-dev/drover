@@ -42,16 +42,7 @@ glob = "*.toml"
 
 [comments]
 policy = "strict"
-except = [
-    "assets/types/**",
-    "web/dist/**",
-    "web/src/**",
-    "web/lint-fixtures/**",
-    "crates/server/src/serve.rs",
-    "crates/server/src/serve/chat.rs",
-    "crates/server/src/serve/fresh.rs",
-    "crates/server/src/serve/slo.rs",
-]
+except = ["assets/types/**", "web/dist/**", "web/lint-fixtures/**"]
 
 [docs]
 paths = ["docs/**/*.md", "README.md"]
@@ -223,6 +214,40 @@ except = ["crates/core/src/term.rs", "crates/core/src/setup.rs", "crates/core/sr
 reason = "#1053: no lane fact is read off a screen; a transcript is session::transcript"
 
 [[ban]]
+pattern = "useReplaceRefs"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/baseline.rs"]
+reason = "#1099: only core::baseline switches a worktree's history view"
+
+[[ban]]
+pattern = "refs/replace"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/baseline.rs"]
+reason = "#1099: only core::baseline makes or deletes a graft"
+
+[[ban]]
+pattern = "no-replace-objects"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/runner.rs", "crates/core/src/baseline.rs"]
+reason = "#1099: the runner makes every git call graft-blind; no call site adds or drops the flag (baseline.rs names it in the brief line)"
+
+[[ban]]
 pattern = "Shas"
 paths = ["crates/core/src/gate.rs", "crates/core/src/events.rs", "crates/core/src/db.rs"]
 reason = "#1121: a verdict is pinned to the exact commit reviewed; the gate, the fold and the log never read a compact map"
+
+[[ban]]
+pattern = "drover-local"
+paths = ["crates/*/src/**"]
+reason = "#1275: drover installs only CI's signed release build; nothing signs it on a host"
+
+[[ban]]
+pattern = "install-gate"
+paths = ["crates/*/src/**"]
+reason = "#1275: one install path: core::release stages and swaps a published build; drover is never built on a host"
+
+[[ban]]
+pattern = "releases/download"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/release.rs"]
+reason = "#1275: only core::release knows where a build is published"
