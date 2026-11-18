@@ -1,0 +1,31 @@
+Decided: refuse a Repro: verify PASS at verdict time when the fleet has no verify role, reusing NO_REPRO
+Because: "`drover verdict` refuses it at record time with a clear code (rev must give `Repro: run`)"
+Rejected: a new refusal code — NO_REPRO is already documented and drive re-prompts rev on it
+Decided: a merge NO_REPRO on a fleet with no verify role is logged needs-human, not blocked
+Because: "drive shows a needs-human reason that names it, never a silent re-review loop"
+Decided: a --repro rev needs os:X when the PR diff adds cfg(target_os = "X")
+Because: "the rev is placed on a host that can run it (e.g. one with the needed OS tag)"
+Rejected: following the impl lane's host OS — a role pin or busy host still moved rev off it in berth#134
+Check: crates/core/src/hosts.rs repro_os only reads the diff for a rev lane of a --repro issue
+Owner: Bug-fix reviews on fleets without a verify step now get a real test run on the right OS, or come to you with the reason.
+
+Decided: staging build fix: the sim's planted bug fires on rev panes only, the same line open PR #1231 makes
+Because: crates/cli/tests/sim/model.rs:179
+Rejected: raising the planted threshold to 4 starts — the hunt then missed it within 40 rounds
+Check: the_hunt test fails on staging d0cba316 and on c3d24d5d, passes on c3d24d5d^ and at this head
+Owner: Staging's simulation test broke after #1183; this PR carries the same one-line test fix as #1231.
+
+Decided: merge's NO_REPRO check reads only the latest non-verify PASS at the head
+Because: q1876
+Rejected: any Repro: verify PASS at the head blocks — berth#134's 7 old verify PASSes would block 16 later run PASSes forever
+Decided: the rev placement test lives in its own file crates/cli/tests/repro_host.rs
+Because: crates/cli/tests/repro_host.rs:59
+Rejected: keeping it in hosts.rs — its arch baseline (1791 lines) may only shrink, CI's arch-check failed on growth
+Check: a_later_run_pass_at_the_head_clears_earlier_verify_passes fails on the test-only commit, passes at the head
+Owner: An issue whose newest review gave a real test run now merges even if older reviews asked for a verify step.
+
+Decided: add the new repro_host test target to shard 3 of scripts/test-shards.txt
+Because: scripts/test-shards.txt:148
+Rejected: folding the test back into hosts.rs — arch-check caps that file's size baseline
+Check: scripts/test-shards.sh check exits 0 and CI's rust job is green
+Owner: CI failed only because the new test file was not assigned to a test shard; now it is.
