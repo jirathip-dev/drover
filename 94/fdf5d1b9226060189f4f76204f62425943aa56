@@ -1,0 +1,23 @@
+Decided: one installer: self-update stages CI's release build on every enabled host, then swaps them together with the main host last; hosts::sync and both cargo builds are deleted
+Because: "until then every host runs the old build, so the guard always matches"
+Decided: a build difference is Unguarded::Build, which spawn refuses as HOST_UPDATING without marking the host sick; ACP_UNGUARDED stays for a missing hook or adapter
+Because: docs/architecture/self-update-prebuilt/adr.md:65
+Decided: a host left behind after the 30 min lag gets one host-behind; placement passes over it from the log alone until an ok host-sync, and a later pass catches it up
+Because: q1950
+Decided: if the main host's own stage fails nobody swaps, and each failure alerts once per host and head (a shed mismatch once per mismatch)
+Because: docs/architecture/self-update-prebuilt/adr.md:87
+Decided: the release workflow runs on workflow_run of ci and ends green on a failed step, publishing nothing, so staging is never turned red
+Because: docs/architecture/self-update-prebuilt/adr.md:99
+Rejected: a publish job inside ci.yml — its needs list goes stale and a notarization hiccup would turn staging CI red
+Decided: self-update-waiting alerts after self_update_wait_minutes (45), the ADR's open question 2 default
+Because: docs/architecture/self-update-prebuilt/adr.md:127
+Check: crates/cli/tests/host_sync.rs drives the real self-update over four hosts at 0, 29, 31, 40 and 45 minutes, then placement
+Owner: Before merging, create the `release` environment with the five signing secrets; the first promotion after this is the last source build.
+
+Decided: the staging merge keeps this PR's deletion of hosts::sync and install_line; #1165's prebuilt-else-cargo install_line and its tests are dropped
+Because: "the remote source install in `hosts::sync` (`install_line`)"
+Decided: #1165's ci.yml step that publishes an unsigned Linux binary under a bare-sha release is removed; release.yml is the one publisher
+Because: "One install path everywhere: prebuilt, signed release builds"
+Rejected: keeping #1165's step beside release.yml — a second, unsigned release nothing reads
+Check: staging's other hosts.rs hunks (held_slots busy for ACP, disk_low live lanes) survive the merge; host_slots, scratch and cloud tests pass
+Owner: The update path from #1165 is superseded by the signed releases; nothing to do beyond the release-environment secrets already named.
