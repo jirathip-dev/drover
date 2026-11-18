@@ -1,0 +1,7 @@
+Decided: a per-host github_token = "managed" | "external" setting; external skips the token look in hosts refresh and doctor
+Because: q1952
+Decided: both paths gate on HostCfg::watches_token, a cloud host whose token is managed
+Because: crates/core/src/config.rs:317
+Rejected: the token look on non-cloud hosts too — staging never probed them, and the reviewer asked for one gate
+Check: crates/cli/tests/host_sync.rs an_external_github_token_never_warns_of_its_expiry fails with the setting ignored
+Owner: Mark a host github_token = "external" when something outside drover issues its GitHub token.
