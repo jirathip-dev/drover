@@ -120,7 +120,7 @@ pub fn verdict(
     let repro = if pass && stage != "verify" && crate::queue::repro(&evs, fleet, issue) {
         let view = ["pr", "view", &branch, "-R", &f.repo, "--json", "body", "--jq", ".body"];
         let section = || ok(r, "gh", &view).ok().and_then(|b| repro_section(&b));
-        Some(reproduced(&body, section).or_else(|why| refused("NO_REPRO", why))?)
+        Some(reproduced(&body, verify_role(f), section).or_else(|why| refused("NO_REPRO", why))?)
     } else {
         None
     };
@@ -422,7 +422,22 @@ fn unproven(ls: &[&str]) -> Option<&'static str> {
     }
 }
 
-fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'static str, String> {
+const NO_VERIFY_ROLE: &str =
+    "this fleet has no verify role, so no verify stage runs; rev must give `Repro: run`, on a host that can run the test";
+
+fn verify_role(f: &Fleet) -> bool {
+    f.flow().of_role("verify").is_some()
+}
+
+fn no_verify_pass(f: &Fleet, head: &str) -> String {
+    if verify_role(f) {
+        format!("rev's `Repro: verify` PASS has no verify PASS at {head:.7}")
+    } else {
+        format!("rev's `Repro: verify` PASS at {head:.7}: {NO_VERIFY_ROLE}")
+    }
+}
+
+fn reproduced(body: &str, verify: bool, section: impl FnOnce() -> Option<String>) -> Result<&'static str, String> {
     let (kind, block) = repro_block(body).ok_or("no `Repro: run` or `Repro: verify` block")?;
     let flat = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
     match kind.trim_start_matches(['*', '_', '`', ' ']) {
@@ -453,6 +468,7 @@ fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'
                 )),
             }
         }
+        k if k.starts_with("verify") && !verify => Err(NO_VERIFY_ROLE.into()),
         k if k.starts_with("verify") => {
             let quote = block.iter().filter_map(|l| l.trim_start().strip_prefix('>'));
             let quote = flat(&quote.collect::<Vec<_>>().join(" "));
@@ -527,7 +543,9 @@ fn repro_section(pr_body: &str) -> Option<String> {
 fn unverified(events: &[Event], (fleet, n): (&str, u64), head: &str) -> bool {
     let at = |e: &&Event| e.is("verdict", fleet, n) && e.str("sha").is_some_and(|s| s.eq_ignore_ascii_case(head));
     let mut here = events.iter().filter(at);
-    here.clone().any(|e| e.str("repro") == Some("verify"))
+    let mut rev = here.clone().rev();
+    rev.find(|e| e.str("stage") != Some("verify") && e.str("verdict") == Some("PASS"))
+        .is_some_and(|e| e.str("repro") == Some("verify"))
         && !here.any(|e| e.str("stage") == Some("verify") && e.str("verdict") == Some("PASS"))
 }
 
@@ -853,10 +871,7 @@ pub fn merge(
                 )
             }) {
             Some((code, why)) => Err(refuse(code, why)),
-            None if unverified(&events, (fleet, issue), &head) => Err(refuse(
-                "NO_REPRO",
-                format!("rev's `Repro: verify` PASS has no verify PASS at {head:.7}"),
-            )),
+            None if unverified(&events, (fleet, issue), &head) => Err(refuse("NO_REPRO", no_verify_pass(f, &head))),
             None => Ok(head),
         },
         res => res,
@@ -887,7 +902,7 @@ pub fn merge(
             return Err(rf.into());
         }
         Err(rf) => {
-            let kind = if rf.code == "ROUND_LIMIT" {
+            let kind = if rf.code == "ROUND_LIMIT" || rf.code == "NO_REPRO" && !verify_role(f) {
                 "needs-human"
             } else {
                 "blocked"
