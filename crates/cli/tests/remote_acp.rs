@@ -334,6 +334,11 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
         .iter()
         .position(|l| l.starts_with("ssh boat1 'shed' 'run' '--acp' 'claude-acp'"))
         .unwrap();
+    assert!(
+        calls[run_at].contains("'--no-hibernate'"),
+        "its start sources the key file spawn removes, so shed never restarts it: {}",
+        calls[run_at]
+    );
     let wt = PathBuf::from(sp[0].str("worktree").unwrap());
     assert!(wt.starts_with(&home), "under its $HOME there: {}", wt.display());
     let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();

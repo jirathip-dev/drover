@@ -812,11 +812,12 @@ fn stats(ctx: &Ctx, ev: &[Event], states: &crate::events::States, only: Option<&
         json!({"label": "rounds / issue", "value": format!("{:.1}", avg(n, r)), "spark": per.map(|p| avg(p.0, p.1))}),
     ];
     let fleets = Config::kept(ctx).into_iter().flat_map(|c| c.fleet);
-    for (f, fc) in fleets.filter(|f| only.is_none_or(|o| o == f.0)) {
-        let label = only.map_or_else(|| format!("{f} in flight"), |_| "in flight".into());
-        let flight = crate::queue::flight(ctx, states, &fc, &f);
-        items.extend(flight.map(|(v, cap)| json!({"label": label, "value": format!("{}/{cap}", v.len())})));
-    }
+    let flights = fleets
+        .filter(|f| only.is_none_or(|o| o == f.0))
+        .filter_map(|(f, fc)| crate::queue::flight(ctx, states, &fc, &f))
+        .map(|(v, cap)| (v.len(), cap))
+        .reduce(|a, b| (a.0 + b.0, a.1 + b.1));
+    items.extend(flights.map(|(v, cap)| json!({"label": "in flight", "value": format!("{v}/{cap}")})));
     json!({"type": "stat", "id": "stats", "items": items})
 }
 

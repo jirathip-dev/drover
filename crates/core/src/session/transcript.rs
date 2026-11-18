@@ -100,6 +100,78 @@ pub fn forget(ctx: &Ctx, agent: &str) {
     }
 }
 
+const LAST_LINES: usize = 3;
+const LAST_EVENTS: usize = 20;
+
+fn last_event(e: &EventKind) -> String {
+    let one = |s: &str| {
+        s.lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(120)
+            .collect::<String>()
+    };
+    match e {
+        EventKind::ToolCall { title, status, .. } => format!("tool call {} ({status})", one(title)),
+        EventKind::Turn { prompt } => format!("turn {}", one(prompt)),
+        EventKind::Text { text } => format!("text {}", one(text)),
+        EventKind::Reply { stop_reason, .. } => format!("reply ({stop_reason})"),
+        k => serde_json::to_value(k)
+            .ok()
+            .and_then(|v| v.get("event").and_then(serde_json::Value::as_str).map(String::from))
+            .unwrap_or_default(),
+    }
+}
+
+/// Session `name`'s last words on wire `w`, masked: its screen's last lines (where the bridge echoes the adapter's stderr) and its last ACP event.
+pub fn last_words(r: &dyn Runner, w: &crate::shed::Wire, name: &str) -> Option<String> {
+    let read = |p: ReadParams| -> Option<ReadResult> {
+        serde_json::from_value(crate::shed::call(r, w, Method::Read, json!(p)).ok()?).ok()
+    };
+    let p = ReadParams {
+        name: name.into(),
+        lines: Some(LINES),
+        history: false,
+        events: false,
+        before: None,
+        n: None,
+    };
+    let screen = read(p.clone()).map(|g| {
+        let mut lines: Vec<&str> = g
+            .text
+            .lines()
+            .rev()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .take(LAST_LINES)
+            .collect();
+        lines.reverse();
+        lines.join(" | ")
+    });
+    let acp = read(ReadParams {
+        lines: None,
+        events: true,
+        n: Some(LAST_EVENTS),
+        ..p
+    });
+    let said = |e: &&Logged| {
+        !matches!(
+            e.kind,
+            EventKind::Usage(_) | EventKind::Session(_) | EventKind::Resources(_)
+        )
+    };
+    let last = acp.and_then(|g| g.events.iter().rfind(said).map(|e| last_event(&e.kind)));
+    let parts: Vec<String> = [
+        screen.filter(|s| !s.is_empty()).map(|s| format!("last output: {s}")),
+        last.filter(|s| !s.is_empty()).map(|s| format!("last ACP: {s}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| crate::lanes::mask(&parts.join("; ")))
+}
+
 /// A transcript's last reply line (ACP) or last text line (PTY), trimmed.
 pub fn last_line(t: &Transcript) -> String {
     let reply = |e: &Logged| match &e.kind {
