@@ -132,7 +132,9 @@ fn a_refused_tap_shows_the_refusal_on_the_card() {
     assert!(open(&c, &r), "a refused tap decides nothing");
     let k = card(&s, &c, &cookie).expect("the card stays");
     assert!(
-        k["blocks"].to_string().contains("REFUSED NOT_NEEDS_HUMAN: #12 is parked"),
+        k["blocks"]
+            .to_string()
+            .contains("REFUSED NOT_NEEDS_HUMAN: #12 is parked"),
         "{k}"
     );
 }
