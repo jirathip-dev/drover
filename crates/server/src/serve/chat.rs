@@ -612,7 +612,7 @@ fn figure(state: &str) -> Value {
     json!({"state": match state { "choose" => "needs", "working" => "working", _ => "idle" }})
 }
 
-fn row_block(r: &ThreadRow, repo: Option<&str>) -> Value {
+fn row_block((at, r): &(u64, ThreadRow), repo: Option<&str>) -> Value {
     let (word, tone) = match r.state.as_str() {
         "choose" => ("! choose · ", "warn"),
         "working" => ("✻ working · ", ""),
@@ -622,7 +622,7 @@ fn row_block(r: &ThreadRow, repo: Option<&str>) -> Value {
     let sub = repo.map_or(format!("{word}{}", r.line), |f| format!("{f} · {}", r.line));
     let act = or(repo.is_some(), "restore", "archive");
     let mut v = json!({"type": "row", "id": r.id, "figure": figure(&r.state), "title": r.title,
-        "subtitle": {"text": sub, "tone": tone}, "value": r.age, "tap": {"open": format!("/screens/threads/{}", r.id)},
+        "subtitle": {"text": sub, "tone": tone}, "value": super::screens::ticking(*at, "{}"), "tap": {"open": format!("/screens/threads/{}", r.id)},
         "swipe": [{"label": act, "action": format!("thread-{act}"), "values": {"thread": r.id}}]});
     if r.unread {
         v.put("badge", json!({"text": "new", "tone": "done"}));
@@ -639,9 +639,9 @@ pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]
             let on = conductor::archived(events, t.str("thread").unwrap_or_default());
             let r = row(ctx, events, t, agents);
             if on {
-                arch.push((r.0, row_block(&r.1, Some(or(repo == "all", "all repos", repo)))));
+                arch.push((r.0, row_block(&r, Some(or(repo == "all", "all repos", repo)))));
             } else {
-                rows.push((r.0, row_block(&r.1, None)));
+                rows.push((r.0, row_block(&r, None)));
             }
         }
         rows.sort_by_key(|r| std::cmp::Reverse(r.0));
@@ -806,13 +806,13 @@ fn run_body(now: u64, key: &str, r: &RunCard) -> (Vec<Value>, Vec<Value>, &'stat
 }
 
 fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> Value {
-    let (key, age) = (format!("m-{}", m.seq), crate::events::age(now.saturating_sub(m.ts)));
+    let (key, age) = (format!("m-{}", m.seq), super::screens::ticking(m.ts, "{}"));
     let text = |k: &str, t: &str| json!({"type": "text", "id": format!("{key}-{k}"), "markdown": t});
     let sys = |t: &str| json!({"type": "card", "id": key, "kind": "sys", "blocks": [text("t", t)]});
     let button = |label: &str, style: &str, action: &str, values: Value| json!({"type": "button", "id": format!("{key}-{}", label.replace(' ', "-")), "label": label, "style": style, "action": action, "values": values});
     match m.kind.as_str() {
         "msg" if m.from == "owner" => {
-            json!({"type": "card", "id": key, "kind": "you", "title": "you", "meta": format!("✓ {age}"), "blocks": [text("t", &m.text)]})
+            json!({"type": "card", "id": key, "kind": "you", "title": "you", "meta": super::screens::ticking(m.ts, "✓ {}"), "blocks": [text("t", &m.text)]})
         }
         "msg" => {
             let who = m

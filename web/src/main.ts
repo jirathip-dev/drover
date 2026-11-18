@@ -166,9 +166,10 @@ function stream(v: View) {
   es.onopen = () => { v.live = true; sync(); };
   es.onerror = () => { v.live = false; sync(); };
   es.onmessage = e => {
-    const d = obj(JSON.parse(e.data)), before = v.model && obj(JSON.parse(JSON.stringify(v.model)));
+    const d = obj(JSON.parse(e.data)), was = JSON.stringify(v.model), before = v.model && obj(JSON.parse(was));
     v.model = apply(v.model ?? {}, blks(d.ops));
     [v.at, v.live] = [Date.now(), true];
+    if (JSON.stringify(v.model) === was) return sync();
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
     paint(v, before);
     dot.classList.add('p');
@@ -521,7 +522,7 @@ const release = (e: TouchEvent) => {
 addEventListener('touchend', release, { passive: true });
 addEventListener('touchcancel', release, { passive: true });
 addEventListener('hashchange', () => slide(0));
-setInterval(() => { if (!document.hidden) { paint(cur.v); if (lst && duo()) paint(lst); sync(); } }, 30_000);
+setInterval(() => { if (!document.hidden) sync(); }, 30_000);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && !cur.v.live) load(cur.v, true);
   if (!document.hidden && lst && duo() && !lst.live) load(lst, true);

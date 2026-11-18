@@ -47,11 +47,12 @@ fn get(s: &Server, now: u64, path: &str) -> Value {
 #[test]
 fn a_screen_built_a_minute_later_is_the_same_screen_its_ages_tick_on_the_page() {
     let (c, now) = threads("quiet-clock");
+    let hour = now / 3_600 * 3_600;
     let snap = drover::snapshot::Snapshot {
-        ts: now,
+        ts: hour,
         ..Default::default()
     };
-    drover::db::put(&c.state, "board", now, &snap).unwrap();
+    drover::db::put(&c.state, "board", hour, &snap).unwrap();
     let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     for path in [
@@ -60,12 +61,12 @@ fn a_screen_built_a_minute_later_is_the_same_screen_its_ages_tick_on_the_page() 
         "/screens/threads",
         "/screens/threads/t2",
     ] {
-        for at in [now + 100, now + 300, now + 3_000] {
+        for at in [hour + 100, hour + 300, hour + 3_000] {
             assert_eq!(
                 get(&s, at, path),
                 get(&s, at + 60, path),
                 "{path}: nothing it shows changed in the minute after {}s",
-                at - now
+                at - hour
             );
         }
     }

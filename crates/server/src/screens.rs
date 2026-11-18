@@ -68,6 +68,10 @@ const THREAD_ACTIONS: [&str; 11] = [
     "thread-signin",
 ];
 
+pub(super) fn ticking(t: u64, label: &str) -> Value {
+    json!({"since": iso(t), "label": label})
+}
+
 pub(super) fn iso(t: u64) -> String {
     let (d, s) = (t / 86_400, t % 86_400);
     let (m, day) = civil_month_day(d);
@@ -1120,7 +1124,7 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
         {"type": "chips", "id": "kind", "name": "kind", "multi": true, "selected": sel, "action": "filter", "options": opts},
         {"type": "section", "id": "today", "header": header, "blocks": [{"type": "list", "id": "ev", "rows": rows}]},
         {"type": "list", "id": "older-list", "rows": [{"type": "row", "id": "older", "title": "earlier days", "style": "link",
-            "tap": {"open": format!("/screens/events?{kq}before={}", before.saturating_sub(86_400))}}]}]});
+            "tap": {"open": format!("/screens/events?{kq}before={}", before.saturating_sub(86_400).div_ceil(3_600) * 3_600)}}]}]});
     if !stream.is_empty() {
         s.put("stream", json!(stream.trim_end_matches(['?', '&'])));
     }
@@ -1474,9 +1478,7 @@ impl Server<'_> {
         let age = snap.map(|t| ctx.now.saturating_sub(t));
         let page = v.at("type") == "screen";
         if let Some(b) = v.get_mut("blocks").and_then(Value::as_array_mut).filter(|_| page) {
-            let line = age.map_or("as of: not yet known".into(), |a| {
-                format!("as of {} ago", crate::events::age(a))
-            });
+            let line = snap.map_or(json!("as of: not yet known"), |t| ticking(t, "as of {} ago"));
             let tone = if age.is_some_and(|a| a <= 600) { "mute" } else { "warn" };
             let row =
                 json!({"type": "row", "id": "age", "title": "Snapshot", "subtitle": {"text": line, "tone": tone}});
