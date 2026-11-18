@@ -1135,3 +1135,121 @@ fn a_pass_over_20_open_prs_reads_the_pr_cache_file_once() {
         );
     }
 }
+
+struct Boats {
+    o: OverSsh<'static>,
+    local: &'static FakeShed,
+    calls: Mutex<Vec<String>>,
+    slow: std::sync::atomic::AtomicBool,
+}
+impl Boats {
+    fn boat(&self, prog: &str, args: &[String]) {
+        if let Some(end) = args.iter().position(|a| a == "--").filter(|_| prog == "ssh") {
+            if self.slow.load(Relaxed) {
+                std::thread::sleep(Duration::from_millis(700));
+            }
+            self.calls.lock().unwrap().push(args[end - 1].clone());
+        }
+    }
+}
+impl Runner for Boats {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        self.boat(prog, args);
+        self.o.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        self.boat(prog, args);
+        self.o.run_in(prog, args, input)
+    }
+    fn sleep(&self, _: u64) {}
+    fn shed(&self) -> Option<drover::shed::Shed> {
+        Some(self.local.shed())
+    }
+}
+
+fn boats() -> (drover::Ctx, Boats) {
+    let base = (CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""))
+        .replace("max_parallel_spawns = 0", "max_parallel_spawns = 6\npass_max_secs = 1")
+        .replace(
+            "integration = \"staging\"",
+            "integration = \"staging\"\nmax_in_flight = 0",
+        );
+    let hosts: String = (1..=4)
+        .map(|b| format!("\n[hosts.b{b}]\nmachine = \"b{b}\"\n"))
+        .collect();
+    let local = shed();
+    let c = ctx(
+        &tmpdir("boats"),
+        &local.config(&format!("{base}\n[hosts.mini]\n{hosts}")),
+    );
+    let add: Vec<String> = (31..=40).map(|n| n.to_string()).collect();
+    let add: Vec<&str> = ["queue", "sendmeter", "add"]
+        .into_iter()
+        .chain(add.iter().map(String::as_str))
+        .collect();
+    assert_eq!(run(&c, &Fake::default(), &add).0, 0);
+    let mut seen = json!({"mini": {"home": "/Users/me", "probed": NOW, "seen": NOW, "up": true}});
+    let mut sheds = vec![];
+    for b in 1..=4 {
+        seen[format!("b{b}")] = json!({"home": "/home/me", "probed": NOW, "seen": NOW, "up": true});
+        sheds.push((&*Box::leak(format!("b{b}").into_boxed_str()), shed()));
+    }
+    std::fs::write(c.state.parent().unwrap().join("hosts.json"), seen.to_string()).unwrap();
+    for n in 1..=30u64 {
+        let (b, sh) = sheds[(n % 4) as usize];
+        let wt = format!("/home/me/.herdr/worktrees/sendmeter/issue-{n}");
+        let agent = format!("sendmeter-impl-{n}");
+        let d = json!({"role": "impl", "agent": agent, "harness": "claude", "pane": agent, "runtime": "shed",
+                       "worktree": wt, "branch": format!("issue-{n}"), "host": b, "machine": b});
+        append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(n), "spawn", d)).unwrap();
+        sh.lane(&agent, "working", &wt);
+    }
+    let f = Fake::default()
+        .reply("sh -c nohup", "4242\n")
+        .reply("ssh", &format!("{} {}\n", "a".repeat(40), NOW - 600));
+    let o = OverSsh {
+        f: Box::leak(Box::new(f)),
+        hosts: sheds,
+    };
+    (
+        c,
+        Boats {
+            o,
+            local,
+            calls: Mutex::default(),
+            slow: true.into(),
+        },
+    )
+}
+
+#[test]
+fn a_pass_over_30_lanes_on_4_boats_at_700ms_a_call_is_under_20s_and_drive_slow_names_each_host() {
+    let (c, r) = boats();
+    let t = Instant::now();
+    let (code, out) = run(&c, &r, &["drive"]);
+    let secs = t.elapsed().as_secs_f64();
+    assert_eq!(code, 0, "{out}");
+    let calls = r.calls.lock().unwrap().len();
+    report(&format!(
+        "#1308 perf (30 lanes on 4 boats, 10 starts, +700 ms per remote call): drive {secs:.1} s, {calls} remote calls"
+    ));
+    assert_eq!(out.matches(" start: ").count(), 10, "{out}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let p = ev.iter().rfind(|e| e.kind == "drive-pass").unwrap();
+    for b in ["b1", "b2", "b3", "b4"] {
+        assert!(p.val("remote")[b]["calls"].as_u64() > Some(0), "{:?}", p.data);
+    }
+    assert!(p.val("steps")["spawns"].as_f64().is_some(), "{:?}", p.data);
+    assert!(secs < 20.0, "a drive pass took {secs:.1} s (target < 20)");
+    r.slow.store(false, Relaxed);
+    assert_eq!(run(&c, &r, &["check"]).0, 0);
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let why = ev
+        .iter()
+        .find(|e| e.kind == "drive-slow")
+        .and_then(|e| e.str("reason"))
+        .unwrap_or_default();
+    assert!(why.contains("slowest step: ") && why.contains("; remote: b"), "{why}");
+    report(&format!("#1308 drive-slow: {why}"));
+    assert_eq!(why.matches(" calls ").count(), 4, "{why}");
+}
