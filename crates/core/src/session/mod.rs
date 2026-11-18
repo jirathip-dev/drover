@@ -210,6 +210,20 @@ pub struct Exit {
     pub code: Option<i32>,
     pub cause: Cause,
     pub note: Option<String>,
+    pub said: Option<String>,
+}
+
+impl Exit {
+    /// The cause, how it exited (shed's 128 + N is signal N) and its last words: what `lane-dead` and its card say.
+    pub fn line(&self) -> String {
+        let how = match self.code {
+            Some(c) if c > 128 => format!(", signal {}", c - 128),
+            Some(c) if c != 0 => format!(", exit {c}"),
+            _ => String::new(),
+        };
+        let said = self.said.as_ref().map_or(String::new(), |s| format!("; {s}"));
+        format!("{}{how}{said}", self.cause.word())
+    }
 }
 
 /// Where a session stands on the host its spawn named.
