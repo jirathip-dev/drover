@@ -1,0 +1,14 @@
+Decided: a lane prompt is logged, replied to, then handed to shed through serve's existing after-reply queue, now an enum of thread lines and lane prompts.
+Because: "A lane-sheet send replies as soon as the prompt is logged. The shed/ssh delivery runs after the response, and a failure reaches the sheet."
+Decided: pending sends are merged in at paint and dropped once the screen holds their text; answered ask ids go in a page-wide hidden set a failed answer clears.
+Because: "An answered ask card goes at once and never comes back, unless the answer failed (then it returns with the error)."
+Decided: stream slots are counted per server, not per process, so one test's streams never refuse another's.
+Because: crates/server/src/serve.rs:402
+Decided: after an action the page re-reads at once only a view whose stream is missing or closed (a 503 closes it); a reconnecting stream delivers the result.
+Because: web/src/main.ts:379
+Decided: navigating inside a view keeps its live state until its new stream fails, so the stale strip does not flash above a restored list and shift it.
+Because: "No reload after an action: the stream delivers the result."
+Rejected: a setTimeout reload after every action — the AC bans it ("`act()` does no setTimeout reload").
+Rejected: moving the sticky stale strip out of flow — a visual change the issue does not ask for.
+Check: parity_24 holds the list's scroll after the swipe back; parity_26 and the model pick land; optimistic.mjs releases only the POST its route caught.
+Owner: Sends and answers show on the phone at once with no reload; a lane message is accepted before delivery, and the list no longer jumps after swiping back.
