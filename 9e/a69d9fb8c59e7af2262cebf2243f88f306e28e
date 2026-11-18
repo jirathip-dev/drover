@@ -1,0 +1,10 @@
+Decided: comment and blank +/- lines in test files are dropped before the moved-lines multiset compare; the refusal lists only test files with a changed code line
+Because: "A test-file hunk whose removed and added lines are all comments or blank lines"
+Because: crates/core/src/gate.rs:487
+Decided: `#` counts as a comment only in .sh, .bash and .py files, so Rust's `#[test]` and `#[ignore]` stay code
+Because: "`#` in shell or Python"
+Decided: `queue set <n> playbook refactor|perf|off` replaces the mark; off clears it
+Because: "Add `queue set <n> playbook refactor|perf|off`"
+Rejected: per-file compare instead of the global pool — it would refuse tests moved between files, which the gate allows today
+Check: a mixed hunk (comment plus `#[ignore]`) is refused naming tests/a.rs only; a comment-only diff over .rs, .sh and .py passes
+Owner: comment-only cleanups of test files now pass the refactor check, and the refactor or perf mark can be changed or removed in place
