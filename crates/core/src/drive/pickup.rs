@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::events::{append, Event, IssueState, Json};
 use crate::runner::Runner;
 use crate::waiting::{self, Waiting};
@@ -14,6 +15,7 @@ pub(super) enum Picked {
 
 pub(super) fn fetch(
     ctx: &Ctx,
+    cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
     ev: &[Event],
@@ -24,7 +26,9 @@ pub(super) fn fetch(
     let sp = s.check_lane().and_then(|l| crate::events::last_spawn(ev, l));
     let sp = sp.filter(|e| e.str("machine").is_some() && stuck.iter().any(|p| w.what.starts_with(p)));
     let (Some(sp), Some(head)) = (sp, pr.at("headRefOid").as_str()) else {
-        return Ok(Picked::No);
+        let spawn = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover spawn "));
+        let held = spawn && ingest(ctx, cfg, r, out, ev, (s, &w.lane), pr)?;
+        return Ok(if held { Picked::Held } else { Picked::No });
     };
     let path = format!("{}/verdict.md", sp.str("worktree").unwrap_or_default());
     let text = match crate::hosts::On::of(r, Some(sp)).run("cat", &crate::runner::argv(&[&path])) {
@@ -74,4 +78,56 @@ pub(super) fn failed(
         &ctx.state,
         &Event::new(ctx.now, fleet, Some(n), "verdict-pickup-failed", d).passive(),
     )
+}
+
+fn ingest(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    events: &[Event],
+    (s, lane): (&IssueState, &str),
+    pr: &Value,
+) -> Result<bool> {
+    let (fleet, f) = (s.fleet.as_str(), cfg.fleet(&s.fleet)?);
+    let sp = crate::events::last_spawn(events, lane);
+    let role = sp.and_then(|e| e.str("role")).unwrap_or_default();
+    let Some(sp) = sp.filter(|_| s.check_lane().map(String::as_str) == Some(lane) && f.flow().is_check(role)) else {
+        return Ok(false);
+    };
+    let recorded = events.iter().any(|e| e.seq > sp.seq && e.is("verdict", fleet, s.issue));
+    let Some(path) = sp
+        .str("worktree")
+        .filter(|_| !recorded)
+        .map(|w| std::path::Path::new(w).join("verdict.md"))
+    else {
+        return Ok(false);
+    };
+    let on = crate::hosts::On::of(r, Some(sp));
+    let written = |m: std::fs::Metadata| m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok();
+    let fresh = on.machine.is_some()
+        || std::fs::metadata(&path)
+            .ok()
+            .and_then(written)
+            .is_some_and(|t| t.as_secs() >= sp.ts);
+    let Some(text) = on.read(&path).filter(|_| fresh) else {
+        return Ok(false);
+    };
+    let v = match text.lines().next().map(str::trim) {
+        Some("PASS") => "PASS",
+        Some(l) if l.starts_with("FAIL") => "FAIL",
+        _ => return Ok(false),
+    };
+    let head = pr.at("headRefOid").as_str().unwrap_or_default();
+    let sha = crate::waiting::reviewed_head(&text).or(sp.str("sha"));
+    if head.is_empty() || !sha.is_some_and(|x| x.eq_ignore_ascii_case(head)) {
+        return Ok(false);
+    }
+    let (n, file) = (s.issue.to_string(), path.to_string_lossy());
+    let args = ["verdict", fleet, &n, v, "--sha", head, "--file", &file];
+    writeln!(
+        out,
+        "{fleet} #{n} {role} lane's verdict.md recorded before drive acts on it"
+    )?;
+    Ok(super::act(ctx, cfg, r, out, events, (fleet, Some(s.issue), "verdict"), &args)?.is_none())
 }
