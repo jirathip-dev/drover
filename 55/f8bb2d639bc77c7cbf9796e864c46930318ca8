@@ -1,0 +1,11 @@
+Decided: ACP lanes whose start sources the secrets file run `shed run --no-hibernate`; the file still goes once the lane runs
+Because: crates/core/src/spawn.rs:253 removes the secrets file on drop, and shed's wake re-runs the start command that sources it
+Rejected: keeping the secrets file on disk for the lane's life — a secret at rest beside the worktree is an owner call
+Decided: a crash stamp keeps the terminal's last three lines and last ACP event as `said`; lane-dead's reason shows code or signal plus `said`
+Because: "The real exit reason on every adapter death: the exit code or signal, the adapter's last stderr lines and the last ACP message"
+Decided: 3+ crash stamps of one host within crash_wave_minutes are a wave: its respawns skip respawn_per_pass, admission still applies
+Because: "the lanes are restarted together as soon as the host is fine, not 2 per pass. Alert once with the reason."
+Decided: a wave lane's lane-dead is logged but not pushed; one lane-wave push stands for all of them
+Rejected: a hard-coded 5 minute window — rules ban a Duration in core, so it is a [limits] key
+Check: crates/core/src/breaker.rs waves() only counts a lane whose latest stamp since its last spawn is the crash, so a respawned lane leaves the wave
+Owner: Boat lanes no longer die when they wake up from sleep; a crash says why, and a host-wide crash comes back in one go with one alert.
