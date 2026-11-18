@@ -58,7 +58,7 @@ fn ev(c: &drover::Ctx, ts: u64, kind: &str) {
 fn healthy(f: Fake) -> Fake {
     let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
     f.reply(&format!("{SSH}'gh' 'api' '-i'"), gh)
-        .reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
+        .reply(&format!("{SSH}'git' '--no-replace-objects' 'ls-remote'"), "abc\tHEAD\n")
         .reply(&format!("{SSH}'sh' '-lc'"), "")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' '--version'"),
@@ -110,7 +110,7 @@ fn spawn_fake_at(mini: f64) -> Fake {
             &format!("{SSH}'sh' '-c' 'git clone --single-branch --branch '\\''staging'\\'' https://github.com/jirathip-dev/sendmeter.git"),
             "",
         )
-        .reply(&format!("{SSH}'git' '-C'"), "")
+        .reply(&format!("{SSH}'git' '--no-replace-objects' '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
         .reply(&format!("{SSH}'rm' '-f'"), "")
@@ -331,7 +331,7 @@ fn running(name: &str) -> (drover::Ctx, Config) {
 }
 
 fn lane_fake() -> Fake {
-    let git = format!("{SSH}'git' '-C' '{WT}'");
+    let git = format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}'");
     fake(0.1)
         .reply(&format!("{SSH}'test' '-e'"), "")
         .reply(&format!("{git} 'rev-list'"), "1\n")
@@ -360,7 +360,9 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
     let out = tick(&c, &cfg, &r, &idle());
     assert_eq!(out.len(), 1, "{out:?}");
     assert!(out[0].contains("stopped (idle 20 min)"), "{out:?}");
-    let push = format!("{SSH}'git' '-C' '{WT}' 'push' 'origin' 'HEAD:refs/heads/wip/cloud1-sendmeter-impl-12'");
+    let push = format!(
+        "{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'push' 'origin' 'HEAD:refs/heads/wip/cloud1-sendmeter-impl-12'"
+    );
     assert!(
         r.index(&push).unwrap() < r.index(&rc("stop")).unwrap(),
         "{:?}",
@@ -385,7 +387,7 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
 #[test]
 fn a_failed_wip_push_aborts_the_stop() {
     let (c, cfg) = running("cloud-abort");
-    let push = format!("{SSH}'git' '-C' '{WT}' 'push'");
+    let push = format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'push'");
     let r = lane_fake().once_err(&push, 1, "rejected");
     let out = tick(&c, &cfg, &r, &idle());
     assert!(
@@ -425,7 +427,9 @@ fn an_unreachable_host_aborts_the_stop_and_destroy_saves_first() {
         out.contains("cloud1: destroyed; wip wip/cloud1-sendmeter-impl-12"),
         "{out}"
     );
-    let push = format!("{SSH}'git' '-C' '{WT}' 'push' 'origin' 'HEAD:refs/heads/wip/cloud1-sendmeter-impl-12'");
+    let push = format!(
+        "{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'push' 'origin' 'HEAD:refs/heads/wip/cloud1-sendmeter-impl-12'"
+    );
     assert!(r.index(&push).unwrap() < r.index(&rc("destroy")).unwrap());
 }
 
@@ -621,9 +625,10 @@ fn boot_fake(gh_in: bool) -> Fake {
         .reply(&step("command -v"), "")
         .reply(&step("apt_ gh"), "")
         .reply(
-            &step("cargo install --git https://github.com/jirathip-dev/herdsman --rev"),
-            "",
+            "gh release download",
+            &format!("{}  drover-x86_64-unknown-linux-gnu\n", "a".repeat(64)),
         )
+        .reply(&step("( n='"), "")
         .reply(&step(&mine), "")
         .reply(&step("[ \"$HOME/.local/bin/drover\" -ef"), "")
         .reply(&step("claude auth status"), "")
@@ -667,11 +672,22 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
     let at: Vec<_> = order.iter().map(|s| r.index(&step(s)).unwrap()).collect();
     assert!(at.windows(2).all(|w| w[0] < w[1]), "{at:?}");
     assert!(!r.called(&step("apt_ git")));
-    let sha = env!("DROVER_SHA");
-    let build = format!(
-        "cargo install --git https://github.com/jirathip-dev/herdsman --rev {sha} --locked --root '/opt/drover'"
+    let tag = drover::release::tag("main", env!("DROVER_SHA"));
+    let asset = format!("releases/download/{tag}/drover-x86_64-unknown-linux-gnu");
+    assert!(
+        r.called(&step("( n='/opt/drover/bin/drover.new'")),
+        "{:?}",
+        r.calls.borrow()
     );
-    assert!(r.called(&step(&build)), "{:?}", r.calls.borrow());
+    assert!(
+        r.calls.borrow().iter().any(|l| l.contains(&asset)),
+        "the release asset, never a build"
+    );
+    assert!(!r
+        .calls
+        .borrow()
+        .iter()
+        .any(|l| l.contains("--rev") && l.contains("herdsman")));
     assert!(here.methods().is_empty(), "nothing on this host: {:?}", here.methods());
     let runs: Vec<String> = cloud
         .all("send")
@@ -1024,12 +1040,16 @@ fn bootstrap_installs_and_checks_the_real_exe_the_guard_runs_not_its_symlink() {
     let res = drover::cloud::bootstrap(&c, &cfg, &f, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();
     assert!(res.is_ok() && out.contains("✓ drover — installed"), "{res:?} {out}");
-    let root = home.join(".local/share/drover").display().to_string();
+    let sum = "a".repeat(64);
+    let staged = format!("( n='{exe}.new'; p=\"$n.part\"; mkdir -p");
+    let swap = format!("[ \"${{s%% *}}\" = '{sum}' ] || {{ rm -f \"$p\"; exit 4; }}; chmod 755 \"$p\" && mv -f \"$p\" \"$n\" && \"$n\" --version ) && mv -f '{exe}.new' '{exe}'");
+    let swap = swap.replace('\'', "'\\''");
+    let calls = f.calls.borrow();
     assert!(
-        f.called(&step(&drover::hosts::install_line(&root, env!("DROVER_SHA")))),
-        "{:?}",
-        f.calls.borrow()
+        calls.iter().any(|c| c.starts_with(&step(&staged)) && c.contains(&swap)),
+        "{calls:?}"
     );
+    drop(calls);
     let on = drover::hosts::On::new(&f, Some("cloud1"));
     let _ = drover::hosts::acp_guard(&c, &on, "/home/me", ("fleet-impl", "claude", "x"));
     assert!(f.called(&format!("{SSH}'{exe}' '--version'")), "{:?}", f.calls.borrow());

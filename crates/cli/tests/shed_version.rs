@@ -28,28 +28,29 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
 fn setup(name: &str, b: &FakeShed) -> (drover::Ctx, std::path::PathBuf) {
     let d = tmpdir(name);
     let mut c = ctx(&d, &b.config(FLEET));
-    std::fs::create_dir_all(d.join("bin")).unwrap();
-    std::fs::write(d.join("bin/drover"), "OLD").unwrap();
+    version_bin(
+        &d.join("bin/drover"),
+        "drover 0.1.0 (0000000000000000000000000000000000000000)",
+    );
     c.exe = d.join("bin/drover").to_string_lossy().into();
-    let built = c.state.with_file_name("update/target/release/drover");
-    std::fs::create_dir_all(built.parent().unwrap()).unwrap();
-    std::fs::write(&built, "NEW").unwrap();
     let live = std::fs::canonicalize(&c.exe).unwrap();
     (c, live)
 }
 
 fn host(sha: &str, new: &str, gate: (i32, &str)) -> Fake {
-    let checks = r#"[{"__typename": "CheckRun", "name": "rust", "status": "COMPLETED", "conclusion": "SUCCESS"}]"#;
+    let sums = format!(
+        "{}  drover-x86_64-unknown-linux-gnu\n{}  drover-aarch64-apple-darwin\n",
+        "b".repeat(64),
+        "a".repeat(64)
+    );
     Fake::default()
         .reply("git -C /x/drover rev-parse origin/main", &format!("{sha}\n"))
-        .reply("git -C", "")
+        .reply("git -C /x/drover fetch", "")
         .reply(
-            &format!("gh api repos/jirathip-dev/herdsman/commits/{sha}/check-runs"),
-            checks,
+            &format!("gh release download {} ", drover::release::tag("main", sha)),
+            &sums,
         )
-        .reply("cargo build --release --locked -p drover", "")
-        .reply("which codesign", "/usr/bin/codesign\n")
-        .reply("sh ", "")
+        .reply(&format!("sh -c ( n='{new}'"), &format!("drover 0.1.0 ({sha})"))
         .once(&format!("{new} doctor --config-only"), gate.0, gate.1)
 }
 
@@ -119,12 +120,17 @@ fn a_protocol_0_server_keeps_the_old_drover_and_alerts_once_naming_the_shed_need
     let (code, gate) = run(&c, &Fake::default(), &["doctor", "--config-only"]);
     assert_eq!(code, 1, "{gate}");
 
-    let (code, out) = run(&c, &host(SHA, &new, (code, &gate)), &["self-update"]);
+    let (code, out) = run(&c, &Disk(&host(SHA, &new, (code, &gate))), &["self-update"]);
     assert_eq!(code, 1, "{out}");
-    assert_eq!(std::fs::read_to_string(&live).unwrap(), "OLD", "{out}");
+    assert!(std::fs::read_to_string(&live).unwrap().contains("(0000000"), "{out}");
+    assert!(!std::path::Path::new(&new).exists(), "{out}");
     assert!(out.contains("✗ shed — SHED_VERSION"), "{out}");
     let r = host(SHA2, &new, (code, &gate));
-    assert_eq!(run(&c, &r, &["self-update"]).0, 1, "the next head, the same shed");
+    assert_eq!(
+        run(&c, &Disk(&r), &["self-update"]).0,
+        1,
+        "the next head, the same shed"
+    );
     assert!(!r.called("profiles sync"));
     let failed = kinds(&c, "self-update-failed");
     assert_eq!(failed.len(), 1, "{failed:?}");

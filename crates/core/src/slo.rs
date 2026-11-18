@@ -39,7 +39,7 @@ struct Breach {
     since: u64,
 }
 
-/// #855: each fleet SLO: its known heal first; #1183: `stuck` a pass later only when drive itself is broken.
+/// Each fleet SLO: its known heal first; `stuck` a pass later only when drive itself is broken.
 pub fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -84,7 +84,7 @@ pub fn pass(
     Ok(())
 }
 
-/// #855: the `stuck` alerts whose breach still holds, by fleet: one owner's card each (#1093); an issue's goes once its lane starts.
+/// The `stuck` alerts whose breach still holds, by fleet: one owner's card each; an issue's goes once its lane starts.
 pub fn open_stuck(events: &[Event]) -> BTreeMap<&str, Vec<&Event>> {
     let mut m: BTreeMap<&str, Vec<&Event>> = BTreeMap::new();
     let started = |e: &Event| {
@@ -471,7 +471,7 @@ fn errors(ctx: &Ctx, events: &[Event], fleet: &str) -> Vec<Breach> {
     out
 }
 
-/// #1183: a stuck card's [force]: the issue's `drover waiting` next command, once, with `--force`.
+/// A stuck card's [force]: the issue's `drover waiting` next command, once, with `--force`.
 pub fn force(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, (fleet, n): (&str, u64)) -> Result<String> {
     let events = crate::events::working(&ctx.state)?;
     let agents = crate::session::all(cfg, r).checked()?.running();

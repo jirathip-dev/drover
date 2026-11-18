@@ -325,18 +325,18 @@ fn a_tick_over_five_tracked_issues_asks_github_once_for_just_their_state() {
     let calls = r.calls.borrow();
     let asks: Vec<&String> = calls
         .iter()
-        .filter(|l| l.contains("issue(number:") || l.starts_with("gh issue list"))
+        .filter(|l| l.contains("issueOrPullRequest(number:") || l.starts_with("gh issue list"))
         .collect();
     assert_eq!(asks.len(), 1, "{calls:?}");
     let each = [
-        "i3:issue(number:3)",
-        "i7:issue(number:7)",
-        "i12:issue(number:12)",
-        "i40:issue(number:40)",
-        "i1400:issue(number:1400)",
+        "i3:issueOrPullRequest(number:3)",
+        "i7:issueOrPullRequest(number:7)",
+        "i12:issueOrPullRequest(number:12)",
+        "i40:issueOrPullRequest(number:40)",
+        "i1400:issueOrPullRequest(number:1400)",
     ];
     assert!(each.iter().all(|i| asks[0].contains(i)), "{}", asks[0]);
-    assert_eq!(asks[0].matches("issue(number:").count(), 5, "{}", asks[0]);
+    assert_eq!(asks[0].matches("issueOrPullRequest(number:").count(), 5, "{}", asks[0]);
     drop(calls);
     let closed: Vec<u64> = kinds(&c, "closed-other").iter().filter_map(|e| e.issue).collect();
     assert_eq!(closed, [7]);
@@ -360,4 +360,45 @@ fn an_issue_closed_past_the_first_thousand_closed_issues_is_seen_closed() {
         "closed"
     );
     assert_eq!(kinds(&c, "closed-other").len(), 1);
+}
+
+fn ghost(name: &str, prefix: &str, reply: &str, why: &str) {
+    let (c, r, sh) = lane(name, "t");
+    let r = r.reply(prefix, reply);
+    lane_ends(&c, 20);
+    ev(&c, 30, 12, "parked", json!({"by": "owner"}));
+    ev(&c, 40, 12, "unparked", json!({"by": "owner", "state": "impl"}));
+    assert_eq!(state(&c), "impl");
+    let (out, steps) = drive(&at(&c, 7200), &r);
+    assert!(steps.is_empty(), "{out}");
+    assert!(!started(&sh), "{out}");
+    let dropped = kinds(&c, "closed-other");
+    assert_eq!(dropped.len(), 1, "{out}");
+    assert_eq!(dropped[0].str("why"), Some(why));
+    assert_eq!(state(&c), "closed");
+    let waiting = ok(&at(&c, 7300), &r, &["waiting", "sendmeter"]);
+    assert!(!waiting.contains("#12"), "{waiting}");
+    for cmd in ["status", "board"] {
+        let shown = ok(&at(&c, 7300), &r, &[cmd, "sendmeter"]);
+        let row = shown.lines().find(|l| l.contains("#12")).unwrap_or_default();
+        assert!(row.contains("closed") && !row.contains("impl "), "{cmd}: {shown}");
+    }
+    let (out, steps) = drive(&at(&c, 7400), &r);
+    assert!(steps.is_empty() && !started(&sh), "{out}");
+    assert_eq!(kinds(&c, "closed-other").len(), 1, "logged once: {out}");
+}
+
+const ASK_STATE: &str = "gh api graphql -f owner=jirathip-dev -f name=sendmeter -f query=";
+
+#[test]
+fn drive_drops_an_unparked_row_whose_number_is_a_merged_pr_and_never_restarts_it() {
+    let prefix = format!("{ASK_STATE}query($owner:String!,$name:String!){{repository(owner:$owner,name:$name){{i12:issueOrPullRequest(number:12)");
+    let reply = r#"{"data": {"repository": {"i12": {"__typename": "PullRequest", "state": "MERGED"}}}}"#;
+    ghost("ghost-pr", &prefix, reply, "a pull request, not an issue");
+}
+
+#[test]
+fn drive_drops_an_unparked_row_whose_issue_was_closed_unmerged_and_never_restarts_it() {
+    let reply = r#"{"data": {"repository": {"i12": {"__typename": "Issue", "state": "CLOSED"}}}}"#;
+    ghost("ghost-closed", ASK_STATE, reply, "issue closed on GitHub");
 }

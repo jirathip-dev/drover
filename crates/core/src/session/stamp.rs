@@ -29,7 +29,7 @@ pub fn status(events: &[Event], agent: &str) -> Option<Status> {
         .map(Status::word_of)
 }
 
-/// #662: how lane `agent`'s latest session ended, as its `gone` stamp after its last spawn says.
+/// How lane `agent`'s latest session ended, as its `gone` stamp after its last spawn says.
 pub fn exit(events: &[Event], agent: &str) -> Option<Exit> {
     let e = latest(events, agent).filter(|e| e.str("state") == Some("gone"))?;
     Some(Exit {
@@ -105,7 +105,7 @@ fn gone(ctx: &Ctx, cfg: &Config, (fleet, issue): (&str, u64), agent: &str, exit:
     Ok(true)
 }
 
-/// One shed event into the log: its pulse, and its lane's `lane-state` stamp (#529: an exit or kill is `gone`, #662: with its cause); whether it stamped.
+/// One shed event into the log: its pulse, and its lane's `lane-state` stamp (an exit or kill is `gone`, with its cause); whether it stamped.
 pub fn on_event(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     let Some((fleet, issue)) = whose(cfg, &e.labels) else {
         return Ok(false);
@@ -210,7 +210,7 @@ fn look(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], m: Option<&st
     }
 }
 
-/// A pass's look at every lane session on its spawn's host: a changed status or an exit stamped into the log as `lane-state`; how many. #1225: an exited one of the same name on another host is removed.
+/// A pass's look at every lane session on its spawn's host: a changed status or an exit stamped into the log as `lane-state`; how many. An exited one of the same name on another host is removed.
 pub fn observe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, sessions: &Sessions) -> Result<usize> {
     let mut n = 0;
     for (m, got) in &sessions.0 {
@@ -222,7 +222,7 @@ pub fn observe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, sessions: &Sessions) -> 
     Ok(n)
 }
 
-/// #298: drive's intake of shed's events since the last pass (`shed.seq` beside the log), each through `on_event`; how many stamped. #529: a running service follows the stream and keeps `shed.seq`.
+/// Drive's intake of shed's events since the last pass (`shed.seq` beside the log), each through `on_event`; how many stamped. a running service follows the stream and keeps `shed.seq`.
 pub fn intake(ctx: &Ctx, cfg: &Config, w: &crate::shed::Wire) -> Result<usize> {
     let got = crate::shed::events(
         w,

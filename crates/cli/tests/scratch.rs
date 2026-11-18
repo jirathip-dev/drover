@@ -287,6 +287,7 @@ struct Air<'a> {
     over: OverSsh<'a>,
     free_kb: u64,
     home: PathBuf,
+    hang: Option<&'static str>,
 }
 
 const AIR_ROOT: &str = "~/.cache/hs-651-air";
@@ -310,6 +311,12 @@ impl drover::runner::Runner for Air<'_> {
         }
         if !line.contains(AIR_ROOT) {
             return self.over.run(prog, args);
+        }
+        if self.hang.is_some_and(|h| line.contains(h)) {
+            return Ok(drover::runner::Out {
+                code: 124,
+                ..Default::default()
+            });
         }
         let o = std::process::Command::new("sh")
             .args(["-c", &line])
@@ -345,6 +352,16 @@ fn air_setup(name: &str) -> (drover::Ctx, PathBuf, PathBuf) {
 }
 
 fn tick(c: &drover::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Vec<String>, String) {
+    tick_hanging(c, home, air, free_kb, None)
+}
+
+fn tick_hanging(
+    c: &drover::Ctx,
+    home: &Path,
+    air: &[(&str, &str)],
+    free_kb: u64,
+    hang: Option<&'static str>,
+) -> (Vec<String>, String) {
     let sh = FakeShed::new();
     sh.attach(c);
     let air_sh = FakeShed::new();
@@ -365,6 +382,7 @@ fn tick(c: &drover::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Ve
         },
         free_kb,
         home: home.into(),
+        hang,
     };
     let (code, out) = run(c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
@@ -475,6 +493,7 @@ fn air_off_runner<'a>(home: &Path, f: &'a Fake, air: &'a FakeShed) -> Air<'a> {
         },
         free_kb: 200 * 1_048_576,
         home: home.into(),
+        hang: None,
     }
 }
 
@@ -484,8 +503,11 @@ fn air_off_hosts(c: &drover::Ctx) -> (Fake, FakeShed, FakeShed) {
     let f = Fake::default()
         .reply("gh api graphql -f", r#"{"data": {"repository": {}}}"#)
         .reply(&format!("{ssh}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{ssh}'git' '-C' '{wt}' 'status'"), "")
-        .reply(&format!("{ssh}'git' '-C' '{wt}' 'rev-list'"), "0\n")
+        .reply(&format!("{ssh}'git' '--no-replace-objects' '-C' '{wt}' 'status'"), "")
+        .reply(
+            &format!("{ssh}'git' '--no-replace-objects' '-C' '{wt}' 'rev-list'"),
+            "0\n",
+        )
         .reply(ssh, "");
     let here = FakeShed::attached(c);
     here.lane("sendmeter-impl-13", "working", "/x");
@@ -662,5 +684,84 @@ fn a_lane_no_longer_running_in_shed_is_swept_without_a_verdict() {
             "scratch: air: removed {AIR_ROOT}/.build/.scratch/sendmeter-rev-12-r1 "
         )),
         "{out}"
+    );
+}
+
+fn locked(b: &Path, agent: &str, kb: usize) -> PathBuf {
+    let p = b.join(agent).join("debug");
+    std::fs::create_dir_all(&p).unwrap();
+    std::fs::write(p.join(".cargo-lock"), "").unwrap();
+    std::fs::write(p.join("blob"), vec![1u8; kb * 1024]).unwrap();
+    p
+}
+
+#[test]
+fn a_tick_trims_a_remote_build_folder_over_budget_but_never_a_live_lanes() {
+    let (c, home, s) = air_setup("build-remote-trim");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        text.replace("build_budget_gb = 1000", "build_budget_gb = 0.0005"),
+    )
+    .unwrap();
+    let b = s.parent().unwrap();
+    air_spawn(&c, 13, "impl", "sendmeter-impl-13");
+    let old = locked(b, "sendmeter-impl-1099", 512);
+    let live = locked(b, "sendmeter-impl-13", 1024);
+    let (_, out) = tick(&c, &home, &[("sendmeter-impl-13", "idle")], 200 * 1_048_576);
+    assert!(!old.exists(), "an old lane's build goes over budget: {out}");
+    assert!(live.exists(), "a live lane's build is never trimmed: {out}");
+    assert!(
+        out.contains(&format!(
+            "builds: air: trimmed {AIR_ROOT}/.build/sendmeter-impl-1099/debug"
+        )),
+        "{out}"
+    );
+    assert!(
+        out.contains(&format!(
+            "builds: air: keep {AIR_ROOT}/.build/sendmeter-impl-13/debug/: a live lane"
+        )),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_lane_ending_on_a_remote_host_loses_its_build_folder_in_that_pass() {
+    let (c, home, s) = air_setup("build-remote-ended");
+    let b = s.parent().unwrap();
+    air_spawn(&c, 12, "impl", "sendmeter-impl-12");
+    ev(&c, 12, "closed", json!({}));
+    air_spawn(&c, 13, "impl", "sendmeter-impl-13");
+    let ended = locked(b, "sendmeter-impl-12", 64);
+    let live = locked(b, "sendmeter-impl-13", 64);
+    let air = [("sendmeter-impl-12", "idle"), ("sendmeter-impl-13", "idle")];
+    let (_, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    assert!(!ended.parent().unwrap().exists(), "{out}");
+    assert!(live.exists(), "{out}");
+    assert!(
+        out.contains(&format!("builds: air: removed {AIR_ROOT}/.build/sendmeter-impl-12 ")),
+        "{out}"
+    );
+    assert!(
+        out.contains(&format!("builds: air: {AIR_ROOT}/.build at ")),
+        "an under-budget host still logs: {out}"
+    );
+}
+
+#[test]
+fn a_remote_trim_that_times_out_says_so_and_the_ended_lane_still_goes() {
+    let (c, home, s) = air_setup("build-remote-hang");
+    let b = s.parent().unwrap();
+    air_spawn(&c, 12, "impl", "sendmeter-impl-12");
+    merged(&c, 12);
+    let ended = locked(b, "sendmeter-impl-12", 64);
+    let (_, out) = tick_hanging(&c, &home, &[], 200 * 1_048_576, Some("cargo is building"));
+    assert!(
+        out.contains(&format!("builds: air: trim of {AIR_ROOT}/.build timed out")),
+        "{out}"
+    );
+    assert!(
+        !ended.parent().unwrap().exists(),
+        "the sweep runs before the trim: {out}"
     );
 }

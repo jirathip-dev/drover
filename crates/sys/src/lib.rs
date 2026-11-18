@@ -155,7 +155,7 @@ pub fn release_freed() {
 #[cfg(not(any(target_os = "macos", all(target_os = "linux", target_env = "gnu"))))]
 pub fn release_freed() {}
 
-/// #944: an append-only buffer whose clones share one allocation and append to it in place; each sees only its own `len`.
+/// An append-only buffer whose clones share one allocation and append to it in place; each sees only its own `len`.
 pub struct Append<T> {
     buf: Arc<Cells<T>>,
     len: usize,

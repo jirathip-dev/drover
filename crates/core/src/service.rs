@@ -88,7 +88,7 @@ pub fn grant(ctx: &Ctx, g: &Grant) -> Result<String> {
     Ok(t)
 }
 
-/// The `DROVER_LANE` `args` run as, if the token may run them: its own lane's command (#389's `foreign`; a verdict only from a check role), while its spawn is the issue's latest for its role, not closed, and the issue is open.
+/// The `DROVER_LANE` `args` run as, if the token may run them: its own lane's command (`foreign`; a verdict only from a check role), while its spawn is the issue's latest for its role, not closed, and the issue is open.
 pub fn authorize(ctx: &Ctx, cfg: &Config, token: &str, args: &[String]) -> Result<String> {
     let Some((_, g)) = crate::db::get::<Grant>(&ctx.state, &key(token)) else {
         return refused("TOKEN", "unknown token");

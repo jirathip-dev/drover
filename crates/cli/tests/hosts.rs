@@ -8,6 +8,7 @@ use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
+const GIT: &str = "'git' '--no-replace-objects'";
 const WT: &str = "/home/me/.local/share/drover/work/sendmeter/issue-12";
 const ADDR: &str = "127.0.0.1:7777";
 const TOKEN: &str = concat!("sk", "-ant-oat01-AAAA-secret");
@@ -65,7 +66,7 @@ fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
 const IMPL: &str = "sendmeter-impl-12";
 
 fn healthy(f: Fake) -> Fake {
-    f.reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
+    f.reply(&format!("{SSH}{GIT} 'ls-remote'"), "abc\tHEAD\n")
         .reply(&format!("{SSH}'sh' '-lc'"), "")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' '--version'"),
@@ -247,7 +248,7 @@ fn remote_fake() -> Fake {
     fake(0.1, 0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(&format!("{SSH}'sh' '-c' 'git clone --single-branch"), "")
-        .reply(&format!("{SSH}'git' '-C'"), "")
+        .reply(&format!("{SSH}{GIT} '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
         .reply(&format!("{SSH}'rm' '-f'"), "")
@@ -342,9 +343,9 @@ fn clean_removes_a_remote_worktree_over_its_host() {
     let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     let r = fake(1.0, 1.0)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "0\n")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'worktree' 'remove'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'worktree' 'remove'"), "")
         .reply(&format!("{SSH}'rm'"), "");
     let (code, out) = run(&c, &two(&r, &bazzite), &["clean", "sendmeter", "--yes"]);
     assert_eq!(code, 0, "{out}");
@@ -352,7 +353,7 @@ fn clean_removes_a_remote_worktree_over_its_host() {
         out.contains(&format!("removed bazzite:{WT} (sendmeter#12 merged)")),
         "{out}"
     );
-    assert!(r.called(&format!("{SSH}'git' '-C' '{WT}' 'worktree' 'remove' '{WT}'")));
+    assert!(r.called(&format!("{SSH}{GIT} '-C' '{WT}' 'worktree' 'remove' '{WT}'")));
     assert!(
         bazzite.called("kill", IMPL) && !sh.called("kill", IMPL),
         "its pane closes on bazzite"
@@ -380,11 +381,11 @@ fn clean_lists_and_removes_a_second_hosts_lane_and_orphan() {
     let r = fake(1.0, 1.0)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{SSH}'sh' '-c' 'cd && cd"), &dirs)
-        .reply(&format!("{SSH}'git' '-C' '{wt}' 'rev-list'"), "0\n")
-        .reply(&format!("{SSH}'git' '-C' '{wt}' 'status'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{wt}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}{GIT} '-C' '{wt}' 'status'"), "")
         .reply(&format!("{SSH}'rm' '-rf' '--' '{old}'"), "")
         .reply(&format!("{SSH}'df' '-k' '/'"), df)
-        .reply(&format!("{SSH}'git' '-C' '{wt}' 'worktree' 'remove'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{wt}' 'worktree' 'remove'"), "")
         .reply(&format!("{SSH}'rm' '-f'"), "")
         .reply(&format!("{SSH}'rm' '-rf' '{wt}/"), "");
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
@@ -403,7 +404,7 @@ fn clean_lists_and_removes_a_second_hosts_lane_and_orphan() {
         !dry.contains("worktrees/sendmeter "),
         "a fleet's own folder is no orphan: {dry}"
     );
-    let remove = format!("{SSH}'git' '-C' '{wt}' 'worktree' 'remove'");
+    let remove = format!("{SSH}{GIT} '-C' '{wt}' 'worktree' 'remove'");
     assert!(r.called(&format!("{SSH}'sh' '-c' 'cd && cd \"$1\"")) && !r.called(&remove));
     let (code, out) = run(&c, &o, &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
@@ -526,8 +527,8 @@ fn a_sticky_host_refusing_disk_low_yields_unless_its_worktree_has_unpushed_work(
     assert_eq!(placed(&c, &low(), 12, "impl", None).as_deref(), Ok("mini"));
     let kept = low()
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "2\n");
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "2\n");
     let e = placed(&c, &kept, 12, "impl", None).unwrap_err();
     assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
     assert!(
@@ -552,8 +553,8 @@ fn a_signed_out_sticky_host_yields_unless_its_worktree_has_unpushed_work() {
     assert_eq!(placed(&c, &fake(2.0, 0.1), 12, "rev", None).as_deref(), Ok("mini"));
     let kept = fake(2.0, 0.1)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "2\n");
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "2\n");
     let e = placed(&c, &kept, 12, "impl", None).unwrap_err();
     assert_eq!(
         e,
@@ -656,7 +657,7 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
     let c = setup("hosts-health", "", true, 0);
     assert!(health_with(&c, "nothing").is_empty(), "all ✓");
     let cases = [
-        (format!("{SSH}'git' 'ls-remote'"), "✗ git sendmeter — can't reach jirathip-dev/sendmeter: no stderr → add the host's SSH key to GitHub and set `git config --global url.git@github.com:.insteadOf https://github.com/`"),
+        (format!("{SSH}{GIT} 'ls-remote'"), "✗ git sendmeter — can't reach jirathip-dev/sendmeter: no stderr → add the host's SSH key to GitHub and set `git config --global url.git@github.com:.insteadOf https://github.com/`"),
         (format!("{SSH}'sh' '-lc' 'gh auth status'"), "✗ gh — logged out → ssh bazzite gh auth login"),
         (format!("{SSH}'/opt/drover/bin/drover'"), "! drover — missing there, drover 0.1.0"),
     ];
@@ -681,7 +682,7 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     let r = healthy(fake(0.1, 0.1))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
-        .once(&format!("{SSH}'git' 'ls-remote'"), 128, "");
+        .once(&format!("{SSH}{GIT} 'ls-remote'"), 128, "");
     let (code, out) = run(&c, &two(&r, &bazzite), &["doctor"]);
     assert_eq!(code, 1, "{out}");
     assert!(
@@ -764,7 +765,7 @@ fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
 fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
     let c = setup("hosts-reach", "", true, 0);
     let r = healthy(fake(0.1, 0.1)).once_err(
-        &format!("{SSH}'git' 'ls-remote'"),
+        &format!("{SSH}{GIT} 'ls-remote'"),
         128,
         "remote: Repository not found.\nfatal: repository not found\n",
     );
@@ -806,15 +807,13 @@ fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
     );
 }
 
-const STATUS: &str = "'sh' '-c' '\"$1\" --version";
-const START: &str = "'sh' '-c' 'V=";
+const STATUS: &str = "'sh' '-c' 'for x in";
 
 fn synced(status: &str) -> Fake {
     healthy(fake(0.1, 0.1))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
         .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
         .reply(&format!("{SSH}{STATUS}"), status)
-        .reply(&format!("{SSH}{START}"), "")
 }
 
 #[test]
@@ -849,7 +848,7 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     assert!(pj.get("account").is_none() && pj["machine"] == "bazzite", "{pj}");
     assert!(!all.contains(&format!("{mine}/")), "main host's home: {all}");
     assert!(
-        all.contains("'git' '-C' '/home/me/src/sendmeter' 'worktree' 'add' '-b' 'issue-12'"),
+        all.contains("'git' '--no-replace-objects' '-C' '/home/me/src/sendmeter' 'worktree' 'add' '-b' 'issue-12'"),
         "{all}"
     );
     let typed = all.replace("'\\''", "'");
@@ -858,7 +857,7 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
         "{all}"
     );
     assert!(
-        cmds[0].starts_with(&format!("{SSH}'git' '-C' '/home/me/src/sendmeter' 'fetch'")),
+        cmds[0].starts_with(&format!("{SSH}{GIT} '-C' '/home/me/src/sendmeter' 'fetch'")),
         "{all}"
     );
     assert!(cmds[1..].iter().all(|c| c.starts_with(SSH)), "{all}");
@@ -866,7 +865,7 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
         cmds.iter().any(|c| c.starts_with(&format!("{SSH}'shed' 'run' "))),
         "{all}"
     );
-    let verify = format!("{SSH}'git' '-C' '/home/me/src/sendmeter' 'rev-parse' '--verify'");
+    let verify = format!("{SSH}{GIT} '-C' '/home/me/src/sendmeter' 'rev-parse' '--verify'");
     let new = drover::runner::Out {
         code: 1,
         ..Default::default()
@@ -951,11 +950,11 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
             &format!("{SSH}'cat' '{rev}/verdict.md'"),
             "FAIL\n- blocking [code] a.rs:1\n  Proof: spec\n  > AC 1\n",
         )
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'log'"), &format!("{head} 20"))
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'log'"), &format!("{head} 20"))
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C' '{rev}' 'rev-list'"), "0\n")
-        .reply(&format!("{SSH}'git' '-C' '{rev}' 'status'"), "")
-        .reply(&format!("{SSH}'git' '-C' '{rev}' 'worktree' 'remove'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{rev}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}{GIT} '-C' '{rev}' 'status'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{rev}' 'worktree' 'remove'"), "")
         .reply(&format!("{SSH}'rm'"), "");
     let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     let r = two(&r, &bazzite);
@@ -1161,7 +1160,7 @@ fn a_remote_supersede_stays_on_its_host() {
     let (sh, bazzite) = (FakeShed::attached(&c), live_on());
     let f = live_fake()
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C'"), "")
+        .reply(&format!("{SSH}{GIT} '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "");
     let (code, out) = run(
         &c,
@@ -1220,7 +1219,7 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
         .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "1\n")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "1\n")
         .reply(&format!("{SSH}'git'"), "")
         .reply("git ", "");
     let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
@@ -1236,7 +1235,7 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
     assert!(
         calls
             .iter()
-            .any(|l| l.starts_with(&format!("{SSH}'git' '-C' '{WT}' 'push'"))),
+            .any(|l| l.starts_with(&format!("{SSH}{GIT} '-C' '{WT}' 'push'"))),
         "{calls:?}"
     );
     let e = read(&c.state)
@@ -1254,28 +1253,27 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
 fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
     let c = setup("hosts-trim", "", true, 0);
     let df = |kb: u64| format!("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 {kb} 90% /\n");
-    let trim = format!("{SSH}'sh' '-c' 'r=$1;");
+    let trim = format!("{SSH}'sh' '-c' 'o=$1 b=$2;");
     let low = |freed: &str| {
         fake(1.0, 0.1)
             .once(&format!("{SSH}'df' '-k' '/'"), 0, &df(1_048_576))
             .reply(&format!("{SSH}'df' '-k' '/'"), &df(30 * 1_048_576))
-            .reply(
-                &trim,
-                &format!("builds: trimmed /home/me/.cache/drover/target/synergy/debug/ (9 KB)\n{freed}\n"),
-            )
+            .reply(&trim, &format!("{TRIMMED}\n{freed}\n"))
     };
-    let r = low("freed 20971520");
+    let r = low("total 0 freed 20971520");
     assert_eq!(placed(&c, &r, 12, "impl", Some("bazzite")).as_deref(), Ok("bazzite"));
     let call = r.calls.borrow().iter().find(|l| l.starts_with(&trim)).cloned().unwrap();
     assert!(
         call.ends_with("'sh' '~/.local/share/drover/work/.build' '0'"),
         "every idle profile goes: {call}"
     );
-    let e = placed(&c, &low("freed 0"), 12, "impl", Some("bazzite")).unwrap_err();
+    let e = placed(&c, &low("total 0 freed 0"), 12, "impl", Some("bazzite")).unwrap_err();
     assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
 }
 
-const QUICK: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'r=$1;";
+const QUICK_HOST: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
+const QUICK: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'o=$1 b=$2;";
+const SWEEP: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'b=$1;";
 
 fn trim_setup(name: &str, extra: &str) -> drover::Ctx {
     let c = setup(name, &format!("root = \"/srv/drover-485\"\n{extra}"), true, 0);
@@ -1285,25 +1283,28 @@ fn trim_setup(name: &str, extra: &str) -> drover::Ctx {
     c
 }
 
-const TRIMMED: &str = "builds: trimmed /home/me/.cache/drover/target/synergy/debug/ (9 KB)";
+const TRIMMED: &str = "trimmed /home/me/.cache/drover/target/synergy/debug/ (9 KB)";
 
 #[test]
 fn remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pass() {
     let c = trim_setup("hosts-budget-trim", "");
     let cfg = Config::load(&c.config).unwrap();
-    let r = fake(1.0, 0.1).reply(QUICK, &format!("{TRIMMED}\nfreed 9\n"));
+    let r = fake(1.0, 0.1)
+        .reply(SWEEP, "")
+        .reply(QUICK, &format!("{TRIMMED}\ntotal 9 freed 9\n"));
     let mut out = Vec::new();
     drover::check::budget(&c, &cfg, &FakeShed::new().on(&r), &mut out).unwrap();
     assert!(
-        !r.calls.borrow().iter().any(|l| l.contains("'r=$1;")),
+        !r.calls.borrow().iter().any(|l| l.contains("'o=$1 b=$2;")),
         "{:?}",
         r.calls.borrow()
     );
-    drover::check::trim_hosts(&c, &cfg, &r, &mut out).unwrap();
+    let bazzite = FakeShed::new();
+    drover::check::trim_hosts(&c, &cfg, &FakeShed::new().on(&two(&r, &bazzite)), &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
-    assert!(out.contains(TRIMMED), "{out}");
+    assert!(out.contains(&format!("builds: bazzite: {TRIMMED}")), "{out}");
     let calls = r.calls.borrow();
-    let trims: Vec<_> = calls.iter().filter(|l| l.contains("'r=$1;")).collect();
+    let trims: Vec<_> = calls.iter().filter(|l| l.contains("'o=$1 b=$2;")).collect();
     assert_eq!(trims.len(), 1, "{trims:?}");
     assert!(
         trims[0].starts_with(QUICK) && trims[0].ends_with("'sh' '/srv/drover-485/.build' '2097152'"),
@@ -1330,18 +1331,15 @@ fn an_unreachable_host_costs_one_short_attempt_per_pass() {
     let c = trim_setup("hosts-trim-down", "");
     let cfg = Config::load(&c.config).unwrap();
     let down = "ssh: connect to host bazzite port 22: Operation timed out";
-    let r = fake(1.0, 0.1).once_err(QUICK, 255, down);
+    let r = fake(1.0, 0.1).once_err(QUICK_HOST, 255, down);
     let mut out = Vec::new();
     drover::check::trim_hosts(&c, &cfg, &r, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
-    assert_eq!(out, format!("builds: bazzite: trim failed (255): {down}\n"));
+    let lines: Vec<_> = out.lines().map(|l| l.split(": ").next().unwrap()).collect();
+    assert!(lines == ["scratch", "builds"] && out.contains(down), "{out}");
     let calls = r.calls.borrow();
-    let ssh: Vec<_> = calls
-        .iter()
-        .filter(|l| l.contains("bazzite -- 'sh' '-c' 'r=$1;"))
-        .collect();
-    assert_eq!(ssh, [&calls[0]], "one attempt, the quick one: {calls:?}");
-    assert!(ssh[0].starts_with(QUICK));
+    let quick = |l: &&String| !l.contains(" bazzite -- ") || l.starts_with(QUICK_HOST);
+    assert!(calls.iter().all(|l| quick(&l)), "quick ones only: {calls:?}");
 }
 
 #[test]
@@ -1356,15 +1354,17 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
         )
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "4\n")
         .reply("git -C", "")
-        .reply(QUICK, &format!("{TRIMMED}\nfreed 9\n"));
-    let (code, out) = run(&c, &r, &["tick"]);
+        .reply(QUICK, &format!("{TRIMMED}\ntotal 9 freed 9\n"));
+    let r = r.reply(SWEEP, "");
+    let bazzite = FakeShed::new();
+    let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
     assert_eq!(code, 0, "{out}");
     let (driven, trimmed) = (out.find("sendmeter #12 start:"), out.find(TRIMMED));
     assert!(driven.is_some() && trimmed.is_some() && driven < trimmed, "{out}");
 }
 
 #[test]
-fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
+fn a_symlinked_drover_reads_back_its_real_install_root() {
     let mut c = setup("hosts-symlink", "", true, 0);
     let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
     let root = dir.join("share/drover");
@@ -1376,8 +1376,6 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     let (real, link) = (root.join("bin/drover").display().to_string(), c.exe.clone());
     let cfg = Config::load(&c.config).unwrap();
     let r = healthy(fake(0.1, 0.1))
-        .reply(&format!("{SSH}{STATUS}"), "drover 0.1.0 (0ld)\n")
-        .reply(&format!("{SSH}{START}"), "")
         .reply(
             &format!("{SSH}'{link}' '--version'"),
             &format!("drover {}\n", drover::VERSION),
@@ -1391,22 +1389,11 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     let rows = drover::hosts::health(&c, &cfg, &on, &[], home);
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert!(rows[0].starts_with("! drover — drover 0.1.0 (0ld) there"), "{rows:?}");
-    assert_eq!(
-        drover::hosts::sync(&c, &cfg, &on, ("bazzite", home, &[])),
-        Ok(("drover 0.1.0 (0ld)".into(), false))
-    );
-    let root = format!("--root '\\''{}'\\'' --force", root.display());
-    let sync = format!("|| '\\''{real}'\\'' profiles sync");
-    let calls = r.calls.borrow();
-    assert!(
-        calls.iter().any(|c| c.contains(&root) && c.contains(&sync)),
-        "{calls:#?}"
-    );
-    let asked = format!("'sh' '{real}'");
-    assert!(
-        calls.iter().any(|c| c.contains(STATUS) && c.ends_with(&asked)),
-        "{calls:#?}"
-    );
+    assert!(r
+        .calls
+        .borrow()
+        .iter()
+        .any(|c| c.contains(&real) && c.ends_with("'--version'")));
 }
 
 #[test]
@@ -1437,7 +1424,7 @@ fn health_is_clean_only_when_drover_on_ssh_path_is_this_version() {
 }
 
 fn dirty_remote(f: Fake, push: Option<i32>) -> (Fake, String) {
-    let g = format!("{SSH}'git' '-C' '{WT}' ");
+    let g = format!("{SSH}{GIT} '-C' '{WT}' ");
     let f = match push {
         Some(code) => f.once_err(
             &format!("{g}'push'"),
@@ -1452,7 +1439,7 @@ fn dirty_remote(f: Fake, push: Option<i32>) -> (Fake, String) {
         .reply(&format!("{g}'rev-list' '--count'"), "0\n")
         .reply(&format!("{g}'diff' '--cached' '--name-only'"), "")
         .reply(&format!("{g}'diff' '--cached'"), "+fn a() {}\n")
-        .reply(&format!("{SSH}'git' '-C'"), "")
+        .reply(&format!("{SSH}{GIT} '-C'"), "")
         .reply("date -r", "20261107-120000\n");
     (f, g)
 }
@@ -1533,9 +1520,9 @@ fn kill_closes_a_remote_lanes_live_pane_and_clean_then_removes_it() {
     );
     let f = fake(1.0, 1.0)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "0\n")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'worktree' 'remove'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'worktree' 'remove'"), "")
         .reply(&format!("{SSH}'rm'"), "");
     let (sh, bazzite) = (FakeShed::attached(&c), live_on());
     let r = two(&f, &bazzite);
@@ -1560,7 +1547,7 @@ fn kill_closes_a_remote_lanes_live_pane_and_clean_then_removes_it() {
         out.contains(&format!("removed bazzite:{WT} (sendmeter#12 merged)")),
         "{out}"
     );
-    assert!(f.called(&format!("{SSH}'git' '-C' '{WT}' 'worktree' 'remove'")));
+    assert!(f.called(&format!("{SSH}{GIT} '-C' '{WT}' 'worktree' 'remove'")));
 }
 
 #[test]
@@ -1608,9 +1595,9 @@ fn a_worktree_whose_gitfile_points_at_another_host_is_reported_not_removed() {
         .reply(&format!("{SSH}'cat' '{WT}/.git'"), &format!("gitdir: {gitdir}\n"))
         .once(&format!("{SSH}'sh' '-c' 'test -e \"$1\"' 'sh' '{gitdir}'"), 1, "")
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "0\n")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'worktree'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'worktree'"), "")
         .reply(&format!("{SSH}'rm'"), "");
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     let (code, out) = run(&c, &two(&r, &bazzite), &["clean", "sendmeter", "--yes"]);
@@ -1618,7 +1605,7 @@ fn a_worktree_whose_gitfile_points_at_another_host_is_reported_not_removed() {
     assert_eq!(code, 0, "{out}");
     assert!(out.contains(&format!("orphan (wrong host) bazzite:{WT}")), "{out}");
     assert!(out.contains(gitdir) && out.contains("fix:"), "{out}");
-    assert!(!r.called(&format!("{SSH}'git' '-C' '{WT}' 'worktree'")), "{calls:?}");
+    assert!(!r.called(&format!("{SSH}{GIT} '-C' '{WT}' 'worktree'")), "{calls:?}");
     assert!(!r.called(&format!("{SSH}'rm'")), "{calls:?}");
     assert!(!out.contains("removed"), "{out}");
 }
@@ -1645,9 +1632,9 @@ fn clean_closes_a_killed_lanes_leftover_shell_pane_then_removes_the_worktree() {
     let r = || {
         Fake::default()
             .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-            .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "0\n")
-            .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
-            .reply(&format!("{SSH}'git' '-C' '{WT}' 'worktree' 'remove'"), "")
+            .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "0\n")
+            .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
+            .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'worktree' 'remove'"), "")
             .reply(&format!("{SSH}'rm'"), "")
     };
     let r0 = r();
@@ -1667,7 +1654,7 @@ fn clean_closes_a_killed_lanes_leftover_shell_pane_then_removes_the_worktree() {
     let (code, out) = run(&later, &two(&r1, &bazzite), &["clean", "sendmeter", "--yes"]);
     assert_eq!(code, 0, "{out} {:?}", r1.calls.borrow());
     let close = shed_call_at(&r1, "kill").expect("the lane's terminal closes");
-    let remove = r1.index(&format!("{SSH}'git' '-C' '{WT}' 'worktree' 'remove'"));
+    let remove = r1.index(&format!("{SSH}{GIT} '-C' '{WT}' 'worktree' 'remove'"));
     assert!(close < remove.expect("removed"), "{:?}", r1.calls.borrow());
     assert!(!bazzite.has(IMPL));
     assert!(
@@ -1724,8 +1711,8 @@ fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_wor
     );
     let kept = fake(2.0, 0.1)
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "2\n");
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'rev-list'"), "2\n");
     let cfg = Config::load(&c.config).unwrap();
     let events = read(&c.state).unwrap();
     let (mini, bazzite) = (FakeShed::new(), FakeShed::new());
@@ -1742,7 +1729,7 @@ fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_wor
 }
 
 #[test]
-fn a_tick_starts_the_sync_of_a_reachable_host_though_its_health_check_times_out() {
+fn a_tick_reads_the_version_of_a_reachable_host_though_its_health_check_times_out() {
     let c = setup("hosts-tick-sync", "", true, 0);
     let hosts = c.state.with_file_name("hosts.json");
     let mut cache: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&hosts).unwrap()).unwrap();
@@ -1750,10 +1737,11 @@ fn a_tick_starts_the_sync_of_a_reachable_host_though_its_health_check_times_out(
     std::fs::write(&hosts, cache.to_string()).unwrap();
     let _sh = FakeShed::attached(&c);
     let bazzite = FakeShed::new();
-    let r = synced("drover 0.1.0 (0ld)\n").once(&format!("{SSH}'git' 'ls-remote'"), 124, "");
+    let r = synced("drover 0.1.0 (0ld)\n-\n").once(&format!("{SSH}{GIT} 'ls-remote'"), 124, "");
     let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(r.count(&format!("{SSH}{START}")), 1, "{:#?}", r.calls.borrow());
+    assert_eq!(r.count(&format!("{SSH}{STATUS}")), 1, "{:#?}", r.calls.borrow());
+    assert!(!r.called(&format!("{SSH}'sh' '-c' 'V=")), "a tick never installs");
 }
 
 #[test]

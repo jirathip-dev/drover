@@ -298,7 +298,7 @@ pub fn check(
     Ok(i32::from(!bad.is_empty()))
 }
 
-/// #1147: the globs `text`, an arch.toml, lists as frozen, generated or shared: decided, so never a hotspot.
+/// The globs `text`, an arch.toml, lists as frozen, generated or shared: decided, so never a hotspot.
 pub fn decided(text: &str) -> Result<Vec<String>> {
     let a: Arch = toml::from_str(text).context("parsing .drover/arch.toml")?;
     Ok(a.frozen.into_iter().chain(a.generated).chain(a.shared).collect())

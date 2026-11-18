@@ -68,12 +68,12 @@ each other's cargo lock. A fleet's own `CARGO_TARGET_DIR` in `env`
 or `shared_cache` (#361) replaces it. Over `[limits] build_budget_gb` (default 20), drive's pass removes the
 build folders' profiles (`<agent>/debug`, ...), oldest first, whose `.cargo-lock` no cargo holds, never one
 building nor a live lane's: on the main host
-(and in `reclaim`) directly, on each `[hosts]` machine over ssh (there `lsof` tells a building one). A host short
+(and in `reclaim`) directly, on each `[hosts]` machine over ssh in every tick (there `lsof` tells a building one and its shed the live ones), one `builds: <host>:` line each with its total and what it freed, or its error. A host short
 of disk (`DISK_LOW`) first loses every such profile, then its disk is read again. #536: each lane also gets a private scratch
 dir, `DROVER_SCRATCH_TARGET=<root>/.build/.scratch/<agent>`, for second builds and checkouts (base, staging, head);
 the hook refuses a `CARGO_TARGET_DIR` or `--target-dir` outside `<root>/.build` (`REFUSED SCRATCH_TARGET`). Scratch dirs
 count toward `build_budget_gb` (oldest go first); drive deletes a lane's once it ended. #651: on every enabled host
-(remote ones in the tick, after their trim, even past its budget; `[limits] sweep_remote = false` keeps it to this one) a scratch dir stays only
+(remote ones in the tick, before their trim, even past its budget; `[limits] sweep_remote = false` keeps it to this one) a scratch dir stays only
 while its agent is working, or its agent still runs in shed and it is an open issue's latest lane of its role or no spawn names it yet;
 a lane no longer running in shed counts as finished, verdict or not (#1215), so its build folder goes too.
 Under `min_free_gb` every non-working lane's goes, largest first; each removal is logged with host, size and reason. `drover clean` lists the Cargo folders lanes left in `[limits] stray_roots`

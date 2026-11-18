@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// #859: where a read goes: shed, another host (ssh), the rest (git, gh, date).
+/// Where a read goes: shed, another host (ssh), the rest (git, gh, date).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Source {
     Shed,

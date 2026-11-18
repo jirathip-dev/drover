@@ -40,7 +40,7 @@ pub fn places() -> Value {
     serde_json::to_value(m.get("places")).unwrap_or_default()
 }
 
-/// #1072: the standalone page's places: the manifest's, then the Threads tab and #1091's Hosts row (never the plugin's).
+/// The standalone page's places: the manifest's, then the Threads tab and the Hosts row (never the plugin's).
 pub fn page_places() -> Value {
     let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
     let hosts = json!({"type": "menu-row", "label": "Hosts", "subtitle": "on/off and reap, per host", "screen": "/screens/hosts"});
@@ -1850,10 +1850,7 @@ impl Server<'_> {
         };
         let close = ["save-fleets", "remove-fleet", "kill", "clean", "close", "queue"].contains(&name)
             || name == "answer" && a["screen"] != "cards";
-        let ops: Vec<Value> = (name == "answer")
-            .then(|| json!({"op": "remove", "id": format!("ask-{block}")}))
-            .into_iter()
-            .collect();
+        let ops = later::gone_ops(name, block, &s("fleet"), &s("issue"));
         Ok(json!({"ops": ops, "toast": toast, "close": close}))
     }
 
