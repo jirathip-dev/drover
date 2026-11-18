@@ -217,7 +217,7 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     assert_eq!(find(&q, "done-today-sendmeter")["value"], "1");
     assert_eq!(find(&q, "stats")["items"][0]["value"], "1");
     assert_eq!(find(&q, "stats")["items"][0]["spark"], json!([0, 0, 0, 0, 0, 0, 1]));
-    let flight = json!({"label": "sendmeter in flight", "value": "1/8"});
+    let flight = json!({"label": "in flight", "value": "1/8"});
     assert_eq!(find(&q, "stats")["items"][6], flight);
     let one = get("/screens/queue?repo=sendmeter");
     assert_eq!(
@@ -337,6 +337,38 @@ fn done_today_opens_todays_merged_events_and_a_row_opens_its_issue_card() {
     let card = get(rows[0]["tap"]["sheet"].as_str().unwrap());
     assert_eq!((&card["type"], &card["title"]), (&json!("sheet"), &json!("#11")));
     assert_eq!(rows_of(&card, "links-list"), ["issue", "pr", "checks"]);
+}
+
+#[test]
+fn all_fleets_show_one_in_flight_tile_summed_and_each_fleet_its_own() {
+    let extra = "[fleet.cooee]\nrepo = \"jirathip-dev/cooee\"\nlocal = \"/tmp/does-not-matter/cooee\"\nintegration = \"staging\"\nmax_in_flight = 4\n";
+    let c = ctx(&tmpdir("cooee-flight"), &format!("{CONFIG}{extra}"));
+    for (f, n) in [("sendmeter", 3), ("cooee", 5), ("cooee", 6)] {
+        let d = json!({"role": "impl", "agent": format!("{f}-impl-{n}"), "harness": "claude"});
+        append(&c.state, &Event::new(T - 100, f, Some(n), "spawn", d)).unwrap();
+    }
+    let r = OnShed::new(Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let flight = |p: &str| -> Vec<Value> {
+        let items = find(&req(&s, T, "GET", p, "", "").1, "stats")["items"].clone();
+        let items = items.as_array().unwrap().clone();
+        items
+            .into_iter()
+            .filter(|i| i["label"].as_str().unwrap().contains("in flight"))
+            .collect()
+    };
+    assert_eq!(
+        flight("/screens/queue"),
+        [json!({"label": "in flight", "value": "3/12"})]
+    );
+    assert_eq!(
+        flight("/screens/queue?repo=cooee"),
+        [json!({"label": "in flight", "value": "2/4"})]
+    );
+    assert_eq!(
+        flight("/screens/queue?repo=sendmeter"),
+        [json!({"label": "in flight", "value": "1/8"})]
+    );
 }
 
 #[test]

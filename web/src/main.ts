@@ -207,6 +207,7 @@ function show(t: Tab, path = t.v.path, s?: Span) {
   tabs.forEach(x => { x.a.classList.toggle('on', x === t); x.v.root.hidden = x !== t; });
   H.dataset.tab = t.id;
   if (lst) lst.root.hidden = !duo();
+  sync();
   if (lst && duo()) load(lst, !!lst.model);
   load(t.v, !!t.v.model, s);
   scrollTo(0, 0);

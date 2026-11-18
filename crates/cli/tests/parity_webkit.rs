@@ -156,6 +156,28 @@ fn parity_2_a_live_update_never_moves_the_scroll_or_replaces_a_kept_node() {
 }
 
 #[test]
+fn issue_1290_a_slow_queue_after_a_thread_keeps_the_strip_off_its_header_and_tiles_unbroken() {
+    if no_webkit() {
+        return;
+    }
+    let (_, url) = page("issue-1290", |c| thread(c, 4, &json!([])));
+    let js = r#"await until(() => $('.tab:not([hidden]) .st')); location.hash = '#threads';
+        await until(() => $('.row[data-id^="t"]')); $('.row[data-id^="t"]').click();
+        await until(() => $('.cmp')); await w(300);
+        const f = window.fetch; window.fetch = (u, o) => w(1500).then(() => f(u, o));
+        location.hash = '#queue'; await w(500);
+        const ld = +!$('#ld').hidden, strip = $('#strip').getBoundingClientRect(), head = $('.tab:not([hidden]) .tabh').getBoundingClientRect();
+        const words = $$('.tab:not([hidden]) .st .m').flatMap(m => [...m.firstChild.data.matchAll(/\S+/g)].map(x => {
+          const r = document.createRange(); r.setStart(m.firstChild, x.index); r.setEnd(m.firstChild, x.index + x[0].length); return r.getClientRects().length; }));
+        return [ld, +(strip.bottom <= head.top + 1), +(words.length > 0 && words.every(n => n === 1))];"#;
+    assert_eq!(
+        late(&url, "issue-1290-png", js),
+        [1.0, 1.0, 1.0],
+        "the loading strip shows, it sits above the queue header, and no tile label breaks inside a word"
+    );
+}
+
+#[test]
 fn parity_24_opening_a_thread_pushes_history_and_back_returns_to_the_list() {
     if no_webkit() {
         return;
