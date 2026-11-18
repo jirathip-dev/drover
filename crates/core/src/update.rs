@@ -112,14 +112,23 @@ struct Member<'a> {
 
 impl Member<'_> {
     fn needs(&self, head: &str) -> bool {
-        self.builds.as_ref().is_none_or(|b| b.live.as_deref() != Some(head))
+        self.builds
+            .as_ref()
+            .is_none_or(|b| b.live.as_deref() != Some(head) || b.unsigned)
     }
     fn staged(&self, head: &str) -> bool {
         self.builds.as_ref().is_some_and(|b| b.staged.as_deref() == Some(head))
     }
     fn has(&self) -> String {
-        let b = self.builds.as_ref().and_then(|b| b.live.as_deref());
-        b.map_or("?".into(), |s| s.chars().take(7).collect())
+        let b = self.builds.as_ref();
+        let sha = b
+            .and_then(|b| b.live.as_deref())
+            .map_or("?".into(), |s| s.chars().take(7).collect());
+        if b.is_some_and(|b| b.unsigned) {
+            format!("{sha} unsigned")
+        } else {
+            sha
+        }
     }
 }
 
@@ -136,6 +145,12 @@ enum Step {
     Hold { missing: Vec<String>, until: u64 },
     Stuck,
     Swap { ready: Vec<String>, behind: Vec<String> },
+}
+
+fn builds(on: &On, exe: &str, tags: &[String]) -> Result<Builds> {
+    let mut b = crate::release::builds(on, exe)?;
+    b.unsigned = b.live.is_some() && tags.iter().any(|t| t == "os:macos") && !crate::release::signed(on, exe);
+    Ok(b)
 }
 
 fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], t: &Target) -> Vec<Member<'a>> {
@@ -155,7 +170,7 @@ fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], 
     );
     let mut v = vec![Member {
         name: main.into(),
-        builds: Some(crate::release::builds(&here, &exe).unwrap_or_default()),
+        builds: Some(builds(&here, &exe, &tags).unwrap_or_default()),
         on: here,
         exe,
         conf: ctx.config.display().to_string(),
@@ -174,13 +189,14 @@ fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], 
         let (on, exe) = (On::new(r, Some(m)), crate::hosts::real_exe(ctx, &s.home));
         let read = up && h.enabled && !s.home.is_empty();
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&s.home)).remove(0);
+        let tags = crate::hosts::tags(h, Some(&s));
         v.push(Member {
             name: name.clone(),
-            builds: read.then(|| crate::release::builds(&on, &exe).ok()).flatten(),
+            builds: read.then(|| builds(&on, &exe, &tags).ok()).flatten(),
             on,
             exe,
             conf,
-            tags: crate::hosts::tags(h, Some(&s)),
+            tags,
             main: false,
             waited: h.enabled && up,
             failed: None,
