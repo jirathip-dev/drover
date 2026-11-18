@@ -1,0 +1,6 @@
+Decided: an insert op drops any block with the same id before inserting, so a stream echo replaces the bubble already shown
+Because: web/src/ops.ts:48
+Rejected: a client nonce — both copies already share the logged id m-<seq>, so matching on it is enough and the composer stays unchanged
+Check: CI ui-webkit run 44294361260 at 50bd5365 (base plus test) shows the test red with left [2.0, 2.0, 0.0, 0.0]
+Check: ui-webkit at the head runs the same test green
+Owner: a sent message now shows once from tap to its tick, photo included
