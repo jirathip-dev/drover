@@ -313,7 +313,7 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
 - `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
   `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues, run
   cards and #1066 config proposals and secret requests as chat cards); #977: each full screen (not a sheet) shows the step's snapshot age, `as of 3m ago` (`as of: not yet known` before
-  one), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age` section's row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
+  one; #1310: sent as `{since, label}`, the label's `{}` the age the client ticks, as are a thread's message ages and the threads list's), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age` section's row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
   and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
   shows until a tap opens the full card; a second tap folds it again;
 - #1172: `GET /screens/queue/done?repo=<fleet>`, opened from the Queue's `done today` row (its value: the list's length): the fleet's merges of the last 24 h, newest first, each `#N title`, `merged HH:MM UTC · <sha>`, its `title`, `t` and `sha` from `done`; a row opens `/screens/issue` for it.
