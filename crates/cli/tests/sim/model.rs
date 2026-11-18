@@ -390,7 +390,7 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
             ok(open.map(|(b, p)| format!("{}\n", m.pr_json(b, p))).collect::<String>())
         }
         ["api", "graphql", "--paginate", "--jq", jq, ..] if jq.contains("issues") => ok(""),
-        ["api", "graphql", "-f", _, "-f", _, "-f", q] if q.contains(":issue(number:") => {
+        ["api", "graphql", "-f", _, "-f", _, "-f", q] if q.contains(":issueOrPullRequest(number:") => {
             let repo: serde_json::Map<String, Value> = m
                 .closed
                 .iter()

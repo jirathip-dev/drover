@@ -325,18 +325,18 @@ fn a_tick_over_five_tracked_issues_asks_github_once_for_just_their_state() {
     let calls = r.calls.borrow();
     let asks: Vec<&String> = calls
         .iter()
-        .filter(|l| l.contains("issue(number:") || l.starts_with("gh issue list"))
+        .filter(|l| l.contains("issueOrPullRequest(number:") || l.starts_with("gh issue list"))
         .collect();
     assert_eq!(asks.len(), 1, "{calls:?}");
     let each = [
-        "i3:issue(number:3)",
-        "i7:issue(number:7)",
-        "i12:issue(number:12)",
-        "i40:issue(number:40)",
-        "i1400:issue(number:1400)",
+        "i3:issueOrPullRequest(number:3)",
+        "i7:issueOrPullRequest(number:7)",
+        "i12:issueOrPullRequest(number:12)",
+        "i40:issueOrPullRequest(number:40)",
+        "i1400:issueOrPullRequest(number:1400)",
     ];
     assert!(each.iter().all(|i| asks[0].contains(i)), "{}", asks[0]);
-    assert_eq!(asks[0].matches("issue(number:").count(), 5, "{}", asks[0]);
+    assert_eq!(asks[0].matches("issueOrPullRequest(number:").count(), 5, "{}", asks[0]);
     drop(calls);
     let closed: Vec<u64> = kinds(&c, "closed-other").iter().filter_map(|e| e.issue).collect();
     assert_eq!(closed, [7]);
