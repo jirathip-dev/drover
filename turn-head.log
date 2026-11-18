@@ -1,0 +1,28 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1292/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.39s
+     Running tests/turn.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1292/debug/deps/turn-a77fb2a89f5f8cd9)
+
+running 14 tests
+test blocked_is_an_owner_card_with_its_reason ... ok
+test a_reported_lane_whose_pane_is_gone_takes_the_respawn_path ... ok
+test a_working_lane_that_hibernated_and_died_is_respawned_after_a_false_failed_start ... ok
+test done_at_a_pushed_head_spawns_review_at_once_without_waiting_for_ci ... ok
+test the_stop_hook_leaves_check_lanes_alone ... ok
+error: the following required arguments were not provided:
+  --why <WHY>
+
+Usage: drover turn --why <WHY> <STATE>
+
+For more information, try '--help'.
+test the_verb_logs_turn_end_with_the_lanes_role_and_is_no_issue_activity ... ok
+test no_state_reads_idle_without_pushing_as_before ... ok
+test the_stop_hook_asks_for_the_turn_once_per_prompt_and_never_loops ... ok
+test need_input_without_an_ask_says_so ... ok
+test need_input_with_an_open_ask_waits_on_the_owner_unchanged ... ok
+test a_nudged_done_left_unanswered_is_blocked_after_10_min ... ok
+test need_input_without_an_ask_is_nudged_once_then_a_parkable_owner_card ... ok
+test done_with_nothing_pushed_is_nudged_once_then_blocked ... ok
+test working_gets_one_continue_prompt_after_the_idle_threshold_never_a_respawn ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.50s
+
