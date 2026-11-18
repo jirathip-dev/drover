@@ -145,7 +145,8 @@ fn rollout(c: &drover::Ctx, boats: &[(&str, &str, Option<&str>)]) -> Fake {
         .reply(&format!("{}.new doctor --config-only", c.exe), "")
         .reply(&format!("{} profiles sync", c.exe), "")
         .reply("launchctl", "")
-        .reply("systemctl", "");
+        .reply("systemctl", "")
+        .reply("codesign -v -R", "");
     boats.iter().fold(f, |f, (m, live, staged)| {
         status(f, m, live, *staged)
             .reply(&format!("{}'sh' '-c' '( n=", ssh(m)), &ver(NEW))
@@ -383,4 +384,46 @@ fn an_external_github_token_never_warns_of_its_expiry() {
         let (_, out) = run(&c, &r, &["doctor"]);
         assert_eq!(out.contains(warn), shown, "{extra}: {out}");
     }
+}
+
+#[test]
+fn an_unsigned_mac_binary_at_the_release_sha_installs_the_signed_build_then_is_up_to_date() {
+    let mut c = setup("rollout-unsigned", "", true, 0);
+    let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
+    c.exe = dir.join("bin/drover").display().to_string();
+    version_bin(Path::new(&c.exe), &ver(NEW));
+    let boats = [("bazzite", NEW, None), ("boat2", NEW, None), ("boat3", NEW, None)];
+    let unsigned = || rollout(&c, &boats).once("codesign -v -R", 1, "");
+
+    let (code, out) = run(&c, &Disk(&unsigned()), &["self-update", "--dry-run"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("up to date"), "{out}");
+    let mini = out.lines().find(|l| l.trim_start().starts_with("mini ")).unwrap();
+    assert!(
+        mini.contains("1111111 unsigned") && mini.ends_with("would stage, then swap, last"),
+        "{out}"
+    );
+
+    let f = unsigned();
+    let (code, out) = run(&c, &Disk(&f), &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.starts_with(&format!("✓ installed 1111111 at {}", c.exe)), "{out}");
+    assert!(f.called(&format!("sh -c ( n='{}.new'", c.exe)), "the release is staged");
+    assert!(f.called(&format!("{} profiles sync", c.exe)));
+    for m in ["bazzite", "boat2", "boat3"] {
+        assert!(swapped(&f, m).is_none(), "{m} is current and signature-free");
+    }
+
+    let f = rollout(&c, &boats);
+    let (code, out) = run(&c, &Disk(&f), &["self-update"]);
+    assert_eq!((code, out.as_str()), (0, "= up to date @ 1111111\n"));
+    assert!(
+        !f.called(&format!("sh -c ( n='{}.new'", c.exe)),
+        "a signed binary is left alone"
+    );
+    assert!(!f
+        .calls
+        .borrow()
+        .iter()
+        .any(|l| l.starts_with(&ssh("bazzite")) && l.contains("codesign")));
 }
