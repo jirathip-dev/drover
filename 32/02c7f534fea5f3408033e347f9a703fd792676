@@ -1,0 +1,11 @@
+Decided: ages go out as {since, label} and tick on the page, so a rebuilt screen equals the last one and the stream sends nothing
+Because: "A ticking value (`as of Ns ago`, `working 12s`) is computed on the client from a timestamp, not re-sent by the server."
+Decided: the composer registers a patch; morph calls it instead of replacing the node, and draw never detaches the textarea
+Because: "The composer element and its textarea are never replaced while they exist"
+Decided: no rebuild filter per event kind; the stream already diffs and sends nothing on an empty diff
+Rejected: per-screen event routing — the shared screen cache is the separate architect issue
+Decided: the events screen's earlier-days link rounds up to the hour so it stops changing every second
+Rejected: keeping the 30 s repaint for ages — the 1 s ticker updates only the age spans
+Check: crates/cli/tests/keyboard_webkit.rs runs in its own binary: serve allows 4 streams per process and page_drafts' browsers fill them
+Check: cooee's native renderer must draw the {since, label} shape in row value, subtitle text, card meta and stat value
+Owner: the phone page stops refreshing when nothing changed, and typing in a thread no longer drops the keyboard
