@@ -188,6 +188,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `respawn_max` | `3` | failed starts of an issue's role in the window before spawn refuses RESPAWN_LOOP |
 | `respawn_window_minutes` | `60` | the window `respawn_max` counts failed starts in |
 | `respawn_per_pass` | `2` | respawns a drive pass starts, each through admission (a fleet may set its own) |
+| `crash_wave_minutes` | `5` | 3+ lanes of one host dying by an adapter crash within it are one `lane-wave`: respawned together, one alert |
 | `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
 | `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
 | `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock |

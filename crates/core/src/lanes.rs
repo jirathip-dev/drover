@@ -183,8 +183,9 @@ fn ended(events: &[Event], sessions: &Sessions, sp: &Event) -> Option<Exit> {
         Seen::Here(s) => match s.life {
             Life::Exited { code, last } => Some(Exit {
                 code,
-                cause: logged.map_or(Cause::of(code, last), |x| x.cause),
+                cause: logged.as_ref().map_or(Cause::of(code, last), |x| x.cause),
                 note: s.note.clone(),
+                said: logged.and_then(|x| x.said),
             }),
             Life::Running(_) => None,
         },
