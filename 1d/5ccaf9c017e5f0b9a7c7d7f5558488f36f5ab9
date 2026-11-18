@@ -1,0 +1,12 @@
+Decided: the tunnel is up only while its local ssh lives and a curl to 127.0.0.1:<port> run on the host answers; else it is restarted after the listener there on that port is killed (ss -p, then sudo -n ss/kill).
+Because: "Either it frees the stale remote listener, or it avoids the stale-holder case"
+Rejected: per-attempt port — every lane's ANTHROPIC_BASE_URL would have to follow a moving port per host.
+Rejected: sshd ClientAliveInterval — a host config change a lane may not make, and drover does not own the boats' sshd.
+Decided: survey keeps a `✗ tunnel down` health row, so placement's existing unhealthy check (NO_HOST) skips the host and the board shows it.
+Because: "A host whose tunnel is down is not picked for a new remote lane"
+Decided: a respawn now leaves an unhealthy last host (NO_HOST joins the busy codes) unless its worktree there has unpushed work.
+Because: "respawns them onto the same dead host"
+Decided: a crash whose note or last words name ECONNREFUSED is the new resumable cause `ECONNREFUSED: proxy tunnel down`, and it is not counted in adapter crash waves.
+Because: "The lane-dead reason shows `ECONNREFUSED` (proxy tunnel down), not `adapter crash`"
+Check: ensure probes again right after a restart, so a fresh tunnel that answers is up at once and a fresh host is not held back for a pass.
+Owner: Lanes no longer go to a boat whose model-call tunnel is dead. Drover now clears the stale port itself, and a lane that died that way says so.
