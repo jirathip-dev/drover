@@ -1741,9 +1741,14 @@ pub(crate) fn closed_on_github(
         let Ok(closed) = gh::closed(ctx, r, f, name, &open, ctx.now) else {
             continue;
         };
-        for n in open.into_iter().filter(|n| closed.contains(n)) {
-            writeln!(out, "{name} #{n} closed on GitHub")?;
-            let d = json!({"by": "external", "why": "issue closed on GitHub"});
+        for (n, pr) in closed {
+            let (said, why) = if pr {
+                ("is a pull request, not an issue", "a pull request, not an issue")
+            } else {
+                ("closed on GitHub", "issue closed on GitHub")
+            };
+            writeln!(out, "{name} #{n} {said}")?;
+            let d = json!({"by": "external", "why": why});
             emit(&ctx.state, cfg, Event::new(ctx.now, name, Some(n), "closed-other", d))?;
             any = true;
         }
@@ -1764,15 +1769,17 @@ fn closed_in<'a>(
         let mine = states.values().filter(|s| s.fleet == fleet && s.state != "merged");
         let ids: Vec<u64> = mine.map(|s| s.issue).collect();
         let f = cfg.fleet(fleet);
-        f.and_then(|f| gh::closed(ctx, r, f, fleet, &ids, ctx.now))
-            .unwrap_or_else(|e| {
+        f.and_then(|f| gh::closed(ctx, r, f, fleet, &ids, ctx.now)).map_or_else(
+            |e| {
                 writeln!(
                     out,
                     "cannot list closed issues of {fleet} ({e:#}); only merged lanes are candidates"
                 )
                 .ok();
                 vec![]
-            })
+            },
+            |c| c.into_iter().map(|c| c.0).collect(),
+        )
     })
 }
 
