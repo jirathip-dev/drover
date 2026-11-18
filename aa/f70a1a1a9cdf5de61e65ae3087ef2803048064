@@ -1,0 +1,7 @@
+Decided: a start whose marker went stale is tried after the other queued starts, so a stuck start cannot take the freed slot right back.
+Because: "A start that has not finished within a set time limit stops counting toward the host's starting cap (logged)."
+Because: crates/core/src/drive.rs:1948
+Rejected: a second start timeout key — spawn_pending_max_secs already frees the slot and logs stale-marker; the same issue simply re-took it at once.
+Rejected: a backoff via spawn-error — backoff waits only from the second identical error, so the first re-take would still block the queue.
+Check: the repro test fails on base plus commit 1 (#3 SPAWN_PENDING, markers 0s old) and passes at head.
+Owner: Stuck lane starts now let the next queued lanes onto the host instead of retrying in place.
