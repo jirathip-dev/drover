@@ -698,9 +698,19 @@ fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
         ..Msg::default()
     };
     match e.kind.as_str() {
-        "config-propose" if crate::propose::settled(events, &s("id")).is_none() => {
-            Some(m("config", s("id"), s("diff"), !crate::propose::stale(ctx, e)))
-        }
+        "config-propose" => match crate::propose::settled(events, &s("id")) {
+            None => Some(m("config", s("id"), s("diff"), !crate::propose::stale(ctx, e))),
+            Some(d) if d.val("applied") == true => Some(Msg {
+                answer: Some(Answered {
+                    n: None,
+                    choice: d.str("backup").unwrap_or_default().into(),
+                    by: Some("owner".into()),
+                    ts: d.ts,
+                }),
+                ..m("config", s("id"), s("diff"), false)
+            }),
+            Some(_) => None,
+        },
         "secret-request" => {
             let open = crate::secret::open(events, e.str("thread")?, &s("name"));
             open.is_some_and(|o| std::ptr::eq(o, e))
@@ -713,13 +723,8 @@ fn owner_card(ctx: &Ctx, events: &[Event], e: &Event) -> Option<Msg> {
 pub(super) fn owner_cards(ctx: &Ctx, events: &[Event], paired: bool) -> Vec<Value> {
     let all = crate::events::of_kind(events, &["config-propose", "secret-request"]);
     let card = |e: &Event| {
-        Some(msg_body(
-            ctx.now,
-            e.str("thread")?,
-            &owner_card(ctx, events, e)?,
-            paired,
-            None,
-        ))
+        let m = owner_card(ctx, events, e).filter(|m| m.answer.is_none())?;
+        Some(msg_body(ctx.now, e.str("thread")?, &m, paired, None))
     };
     all.into_iter().filter_map(card).collect()
 }
@@ -885,6 +890,14 @@ fn msg_body(now: u64, id: &str, m: &Msg, paired: bool, h: Option<&Handoff>) -> V
                 json!({"thread": id, "host": m.host, "name": name}),
             );
             json!({"type": "card", "id": key, "kind": "sys", "blocks": [text("t", &m.text)], "buttons": [b]})
+        }
+        "config" if m.answer.is_some() => {
+            let Some(d) = &m.answer else { return sys(&m.text) };
+            let by = d.by.as_deref().unwrap_or("owner");
+            let when = crate::events::age(now.saturating_sub(d.ts));
+            let sub = format!("applied by {by} · {when} · backup {}", d.choice);
+            json!({"type": "card", "id": key, "kind": "config", "title": format!("config proposal {}", m.from),
+                "subtitle": sub, "meta": age, "blocks": [text("d", &format!("```diff\n{}\n```", m.text.trim_end()))]})
         }
         "config" => {
             let v = |act: &str| json!({"thread": id, "id": m.from, "act": act});
