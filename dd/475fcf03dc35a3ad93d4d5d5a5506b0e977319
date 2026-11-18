@@ -1,0 +1,11 @@
+Decided: a need-input turn with no open ask reuses done's nudge-once-then-LANE_BLOCKED path, carrying the lane's why
+Because: "A `need-input` turn with no open ask (after the one nudge) becomes `needs-human`, carrying the lane's `--why` as the card reason"
+Rejected: a new needs-human code for need-input — LANE_BLOCKED already gives an owner card that park accepts
+Check: an open ask still wins in waiting, so the nudge never fires for a lane that asked (test need_input_with_an_open_ask_waits_on_the_owner_unchanged)
+Owner: a lane that says it needs input but never asks is reminded once, then becomes a card you can park
+
+Decided: the three turn prompts' text moves out of drive::pass into fn turn_prompt, so pass is back under its size baseline
+Because: crates/core/src/drive.rs:1188
+Rejected: raising the size baseline in .drover/arch.toml — the fix is a small extract, not a new budget
+Check: drover arch-check reports no size violation for drive.rs:pass; tests turn, drive and waiting stay green
+Owner: no behaviour change; this round only fixes the code-size check that failed CI
