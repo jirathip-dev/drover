@@ -1,0 +1,17 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1182/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.55s
+     Running tests/chat_pick.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1182/debug/deps/chat_pick-32ff36375f4a0739)
+
+running 9 tests
+test chat_defaults_come_from_the_chat_table_else_the_conductor_role ... ok
+test a_hermes_thread_starts_its_orchestrator_on_hermes ... ok
+test the_model_chip_offers_the_models_list_and_a_pick_from_it_is_taken ... ok
+test an_old_thread_without_a_harness_renders_and_starts_on_the_default ... ok
+test a_pick_dropped_from_the_models_list_is_refused_on_send_and_the_message_stays ... ok
+test thread_new_harness_is_recorded_and_its_conductor_starts_on_it ... ok
+test a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it ... ok
+test a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it ... ok
+test the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+

@@ -1,0 +1,21 @@
+
+> build
+> esbuild src/main.ts --bundle --minify --format=esm --target=es2020 --outfile=dist/board.js && esbuild src/board.css --bundle --minify --outfile=dist/board.css
+
+
+  dist/board.js  41.5kb
+
+⚡ Done in 19ms
+
+  dist/board.css  13.6kb
+
+⚡ Done in 7ms
+
+> check
+> tsc --noEmit
+
+
+> lint
+> node --no-warnings lint.mjs src
+
+ts-lint: 0 violations
