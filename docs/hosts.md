@@ -112,7 +112,9 @@ host at admission, passing over hosts whose start or working slots are full, and
 fitting host is full it is skipped with `SPAWN_PENDING: boat-dev-2 2/2 starting`. A host's start slots are split
 between the fleets with something to start, by fleet weight. `start_release = "started"` (the default, also in
 `[limits]`) frees a start's slot once its harness is up on the host; `"confirmed"` holds it until its first prompt is
-confirmed. `spawn_pending_max_secs` stays the stale backstop. Every pass, the fast step too, runs the start step
+confirmed. `spawn_pending_max_secs` stays the stale backstop: a start that has not finished by then stops counting (logged
+`stale-marker`), and its issue is tried again behind the other queued starts, so a start that never finishes cannot
+hold a host's slots pass after pass (#1269). Every pass, the fast step too, runs the start step
 before its PR reads, while some host has a free start slot; a full pass tries once more at its end for the issues its
 own steps just released. With `max_parallel_spawns = 0` (spawns in the pass) only that end-of-pass step runs.
 `max_working` and the heavy-slot gate still bound the running load.

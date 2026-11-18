@@ -229,13 +229,13 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     };
     row(rows, on, '!', &format!("webhook — {why}{bad} → {fix}"));
     if cfg!(target_os = "macos") {
-        let dev = "=anchor apple generic and identifier \"drover\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists";
-        let req = ["-v", "-R", dev, &ctx.exe];
+        let signed = crate::release::signed(r, &ctx.exe);
+        let not = if signed { "" } else { "not " };
         let line = format!(
-            "signature — {} signed by a Developer ID Application certificate as drover → the next self-update installs CI's signed build (docs/releases.md)",
+            "signature — {} is {not}Developer ID signed → drover self-update installs CI's signed build (docs/releases.md)",
             ctx.exe
         );
-        row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
+        row(rows, signed, '✗', &line);
     }
     let jam = crate::host::keychain_jam(r);
     let line = format!("keychain readers — {}", crate::host::jam_line(&jam));
