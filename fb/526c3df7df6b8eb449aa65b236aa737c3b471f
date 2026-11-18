@@ -1,0 +1,5 @@
+Decided: the three turn prompts' text moves out of drive::pass into fn turn_prompt, so pass is back under its size baseline
+Because: crates/core/src/drive.rs:1188
+Rejected: raising the size baseline in .drover/arch.toml — the fix is a small extract, not a new budget
+Check: drover arch-check reports no size violation for drive.rs:pass; tests turn, drive and waiting stay green
+Owner: no behaviour change; this round only fixes the code-size check that failed CI
