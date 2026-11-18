@@ -641,6 +641,8 @@ fn health(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Res
         ));
         let slow = h.at("slow").as_str().map(|s| format!("serve {s}"));
         now.push(("drover", "serve-slow", slow));
+        let phone = h.at("phone_slow").as_str().map(|s| format!("phone {s}"));
+        now.push(("drover", "phone-slow", phone));
         let sha = h.at("sha").as_str().unwrap_or("?");
         let why = format!(
             "the serve on the port runs {sha:.7}, not the installed {:.7} → drover self-update",

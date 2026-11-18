@@ -222,7 +222,7 @@ jobs:
         env:
           FLAKY: ${{ needs.ui.outputs.flaky }}
 
-  # #862: ui-webkit runs only when the diff touches the page (#927: web/, assets/, serve.rs, screens.rs) or its own tests.
+  # #862: ui-webkit runs only when the diff touches the page (#927: web/, assets/; #1312: crates/server/) or its own tests.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -241,7 +241,7 @@ jobs:
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
           webkit=false
-          grep -qE '^(web/|assets/|crates/server/src/(serve\.rs|screens\.rs|serve/chat\.rs)|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|ui/(drafts|repaint)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs))' changed.txt && webkit=true
+          grep -qE '^(web/|assets/|crates/server/|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|ui/(drafts|repaint|timings)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs|phone_timings\.rs|common/large\.rs))' changed.txt && webkit=true
           echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
 
   # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.
@@ -266,6 +266,8 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/pw/node_modules" node -e "require('playwright')"
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
+      - name: "phone timings on the large board (#1312, hard gate: tab, lane sheet, thread open, send and answer each a median <= 150 ms)"
+        run: cargo test --locked --test phone_timings -- --nocapture
       - name: a thread tap and a thread push open the thread; back returns (#1088)
         run: cargo test --locked --test cooee_screens parity_46 -- --nocapture
       - name: "parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)"
