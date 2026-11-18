@@ -181,8 +181,10 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
                 if new && rc.contains_key("ready") {
                     cmd(ctx, cfg, r, name, "ready")?;
                 }
-                return refresh(ctx, cfg, r, name, (true, true))
-                    .map(|()| drop(crate::hosts::survey(ctx, cfg, r, true)));
+                refresh(ctx, cfg, r, name, (true, true))?;
+                catch_up(ctx, cfg, r, name);
+                drop(crate::hosts::survey(ctx, cfg, r, true));
+                return Ok(());
             }
             r.sleep(10);
         }
@@ -194,6 +196,25 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
         log(ctx, cfg, "cloud-stop", name, d)?;
     }
     up
+}
+
+fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) {
+    let Some(m) = cfg.hosts.get(name).and_then(|h| h.machine.as_deref()) else {
+        return;
+    };
+    let on = crate::hosts::On::new(r, Some(m));
+    let Some((tags, home)) = crate::hosts::probe(&on) else {
+        return;
+    };
+    let exe = crate::hosts::real_exe(ctx, &home);
+    let (check, install) = crate::release::install_lines(r, &exe, &tags);
+    if ok(&on, "sh", &["-c", &check]).is_ok() {
+        return;
+    }
+    let line = format!("{SH}{install} && {}", crate::hosts::link_line(&exe));
+    let res = ok(&on, "sh", &["-c", &line]);
+    let d = json!({"host": name, "to": crate::SHA, "ok": res.is_ok(), "error": res.err().map(|e| format!("{e:#}"))});
+    crate::events::append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
 }
 
 /// `status` printed nothing (`gone`) or not `running` (`stopped outside drover`): logs that `cloud-stop` and returns its why. A failing `status` is neither.
@@ -419,7 +440,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         crate::hosts::real_exe(ctx, &home),
         ctx.config.display().to_string().replace(&mine, &home),
     );
-    let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("DROVER_SHA"));
     let run = |s: &str, l: u64| {
         on.run_for(
             "sh",
@@ -447,7 +467,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         ensure!(o.code == 0, "{}", fail(what, cmd, &o));
         Ok(writeln!(out, "✓ {what} — installed")?)
     };
-    let (version, build) = (crate::VERSION, crate::hosts::install_line(root, sha));
     let mut steps = format!("{TOOLS}\n");
     for (n, i) in crate::providers::lanes().filter_map(|h| Some((h.name, h.install()?))) {
         steps += &format!("{n}\tcommand -v {n}\t{i}\n");
@@ -464,7 +483,8 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         steps += &ACP.replace("{acp}", crate::providers::default_acp().unwrap_or_default());
         steps += "\n";
     }
-    steps += &format!("drover\t[ \"$('{exe}' --version)\" = 'drover {version}' ]\t{build}\n");
+    let (check, build) = crate::release::install_lines(r, &exe, &tags);
+    steps += &format!("drover\t{check}\t{build}\n");
     let link = crate::hosts::link_line(&exe);
     steps += &format!("drover on PATH\t[ \"$HOME/.local/bin/drover\" -ef '{exe}' ] && {{ [ ! -e /usr/local/bin/drover ] || [ /usr/local/bin/drover -ef '{exe}' ]; }}\t{link}");
     steps.lines().try_for_each(&mut step)?;
@@ -520,7 +540,7 @@ command -v drover >/dev/null || { echo \"drover not on PATH $PATH\"; exit 1; }";
         ensure!(o.code == 0, "{}", fail("shed and drover on ssh's PATH", check, &o));
         writeln!(out, "✓ shed and drover — on ssh's PATH")?;
     }
-    log(ctx, cfg, "host-bootstrap", name, json!({"sha": sha}))?;
+    log(ctx, cfg, "host-bootstrap", name, json!({"sha": crate::SHA}))?;
     crate::hosts::survey(ctx, cfg, r, true);
     Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)
 }

@@ -880,9 +880,12 @@ fn parity_32_the_owner_settles_each_card_from_inside_its_thread() {
         .iter()
         .filter_map(|b| b["kind"].as_str())
         .collect();
+    assert!(!kinds.contains(&"secret"), "a settled secret card leaves: {t}");
+    let applied = t["blocks"].as_array().unwrap().iter().find(|b| b["kind"] == "config");
+    let applied = applied.unwrap_or_else(|| panic!("an applied config card stays: {t}"));
     assert!(
-        !kinds.contains(&"config") && !kinds.contains(&"secret"),
-        "settled cards leave: {t}"
+        applied["subtitle"].as_str().unwrap().starts_with("applied by owner") && applied.get("buttons").is_none(),
+        "{applied}"
     );
     assert!(!t.to_string().contains(r#""type":"choice""#), "{t}");
 }

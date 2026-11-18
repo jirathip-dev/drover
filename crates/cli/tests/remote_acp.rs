@@ -439,6 +439,41 @@ fn a_host_missing_the_adapter_or_the_hook_refuses_acp_unguarded_and_the_lane_goe
     assert!(b.runs.borrow().is_empty());
 }
 
+struct OldBuild<'a>(&'a Boat<'a>);
+
+impl Runner for OldBuild<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        self.run_in(prog, args, "")
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        if prog == "ssh" && args.last().is_some_and(|a| a.ends_with("'--version'")) {
+            return Ok(out(0, "drover 0.1.0 (0ld)\n"));
+        }
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+#[test]
+fn a_boat_on_another_build_refuses_host_updating_and_is_not_marked_sick() {
+    let (c, _) = setup("racp-skew", &["boat1"]);
+    let f = spawn_fake();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(
+        &c,
+        &OldBuild(&b),
+        &["spawn", "sendmeter", "12", "impl", "--host", "boat1"],
+    );
+    assert_eq!(code, 3, "{o}");
+    assert!(
+        o.contains("REFUSED HOST_UPDATING: boat1: drover there is drover 0.1.0 (0ld)") && !o.contains("ACP_UNGUARDED"),
+        "{o}"
+    );
+    assert!(b.runs.borrow().is_empty(), "nothing started");
+    let health = drover::hosts::cached(&c)["boat1"].health.clone();
+    assert!(!health.iter().any(|r| r.starts_with('✗')), "{health:?}");
+}
+
 #[test]
 fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     let (c, _) = setup("racp-boot", &["boat1"]);
@@ -562,10 +597,9 @@ fn bootstrap_with_no_config_there_prints_no_bare_sync_and_skips_a_main_pinned_ro
     assert!(!o.contains("fleet-verify"), "{o}");
     let calls = f.calls.borrow().clone();
     assert!(!calls.iter().any(|l| l.contains("'fleet-verify'")), "{calls:?}");
-    let job = calls.iter().find(|l| l.starts_with("@boat1 sh -c V=")).unwrap();
     assert!(
-        job.contains("profiles sync --profile 'fleet-impl' --role impl"),
-        "{job}"
+        !calls.iter().any(|l| l.starts_with("@boat1 sh -c V=")),
+        "a survey never installs: {calls:?}"
     );
     let health = drover::hosts::cached(&c).remove("boat1").unwrap().health;
     assert!(!health.iter().any(|r| r.starts_with("✗ acp guard")), "{health:?}");

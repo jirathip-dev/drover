@@ -1,0 +1,1 @@
+- HOST_UPDATING: spawn: the host runs another drover build than this one (a self-update rollout, or a host left behind); its running lanes finish, placement passes over it and the next `self-update` catches it up

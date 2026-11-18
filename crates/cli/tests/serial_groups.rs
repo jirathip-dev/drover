@@ -253,7 +253,7 @@ fn merge_refuses_a_pr_touching_a_group_it_never_joined() {
     assert!(!r.called("gh pr merge"));
     assert_eq!(
         fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].state,
-        "blocked"
+        "needs-human"
     );
 }
 

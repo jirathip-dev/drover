@@ -1307,7 +1307,7 @@ fn pass(
         if crate::gate::ready_draft(ctx, cfg, r, out, s, &pr)? && merge(w) {
             continue;
         }
-        let fetched = match pickup::fetch(ctx, r, out, &events, (s, w), &pr)? {
+        let fetched = match pickup::fetch(ctx, cfg, r, out, &events, (s, w), &pr)? {
             pickup::Picked::Held => continue,
             pickup::Picked::Fetched(x) => Some(x),
             pickup::Picked::No => None,

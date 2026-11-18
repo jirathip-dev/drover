@@ -1,5 +1,7 @@
-use crate::config::Config;
+use crate::config::{Config, Limits};
 use crate::events::{emit, working, Event};
+use crate::hosts::On;
+use crate::release::{Builds, Found, Unstaged};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::{bail, Context, Result};
@@ -40,16 +42,23 @@ pub fn self_update(
         writeln!(out, "= self-update: no fleet for the drover repo")?;
         return Ok(0);
     };
-    let su = &cfg.self_update;
     let live = std::fs::canonicalize(&ctx.exe).unwrap_or_else(|_| ctx.exe.clone().into());
-    let home = ctx.state.with_file_name("update");
-    let code = install(ctx, cfg, r, out, f, &events, (&su.branch, home, live, dry, false))?;
-    if !su.staging_serve {
+    let t = Target {
+        branch: &cfg.self_update.branch,
+        kind: Kind::Live,
+        live,
+    };
+    let code = install(ctx, cfg, r, out, (f, &events), &t, dry)?;
+    if !cfg.self_update.staging_serve {
         return Ok(code);
     }
-    let home = ctx.state.with_file_name("update-staging");
-    let t = ("staging", home.clone(), home.join("bin/drover"), dry, true);
-    Ok(code.max(install(ctx, cfg, r, out, f, &events, t)?))
+    let live = ctx.state.with_file_name("update-staging").join("bin/drover");
+    let t = Target {
+        branch: "staging",
+        kind: Kind::StagingServe,
+        live,
+    };
+    Ok(code.max(install(ctx, cfg, r, out, (f, &events), &t, dry)?))
 }
 
 /// The control socket of the serve listening on `port` (`drover_server::handover`).
@@ -62,100 +71,415 @@ pub fn ours(f: &crate::config::Fleet) -> bool {
     ["drover", "herdsman"].contains(&f.repo_name())
 }
 
-type Target<'a> = (&'a str, PathBuf, PathBuf, bool, bool);
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Live,
+    StagingServe,
+}
+
+struct Target<'a> {
+    branch: &'a str,
+    kind: Kind,
+    live: PathBuf,
+}
+
+impl Target<'_> {
+    fn word(&self) -> &'static str {
+        match self.kind {
+            Kind::Live => "live",
+            Kind::StagingServe => "staging-serve",
+        }
+    }
+    fn what(&self) -> &'static str {
+        match self.kind {
+            Kind::Live => "",
+            Kind::StagingServe => "staging serve: ",
+        }
+    }
+}
+
+struct Member<'a> {
+    name: String,
+    on: On<'a>,
+    exe: String,
+    conf: String,
+    tags: Vec<String>,
+    main: bool,
+    waited: bool,
+    builds: Option<Builds>,
+    failed: Option<Unstaged>,
+}
+
+impl Member<'_> {
+    fn needs(&self, head: &str) -> bool {
+        self.builds.as_ref().is_none_or(|b| b.live.as_deref() != Some(head))
+    }
+    fn staged(&self, head: &str) -> bool {
+        self.builds.as_ref().is_some_and(|b| b.staged.as_deref() == Some(head))
+    }
+    fn has(&self) -> String {
+        let b = self.builds.as_ref().and_then(|b| b.live.as_deref());
+        b.map_or("?".into(), |s| s.chars().take(7).collect())
+    }
+}
+
+struct Marks {
+    seen: Option<u64>,
+    staging: Option<u64>,
+    waiting: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    Current,
+    Wait { alert: bool },
+    Hold { missing: Vec<String>, until: u64 },
+    Stuck,
+    Swap { ready: Vec<String>, behind: Vec<String> },
+}
+
+fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], t: &Target) -> Vec<Member<'a>> {
+    let here = On::new(r, None);
+    let exe = t.live.to_string_lossy().to_string();
+    let arch = std::env::consts::ARCH.replace("aarch64", "arm64");
+    let main = cfg
+        .hosts
+        .iter()
+        .find(|h| h.1.machine.is_none())
+        .map_or("local", |h| h.0.as_str());
+    let mut v = vec![Member {
+        name: main.into(),
+        builds: Some(crate::release::builds(&here, &exe).unwrap_or_default()),
+        on: here,
+        exe,
+        conf: ctx.config.display().to_string(),
+        tags: vec![format!("os:{}", std::env::consts::OS), format!("arch:{arch}")],
+        main: true,
+        waited: true,
+        failed: None,
+    }];
+    if t.kind == Kind::StagingServe {
+        return v;
+    }
+    let seen = crate::hosts::cached(ctx);
+    for (name, h) in &cfg.hosts {
+        let Some(m) = h.machine.as_deref() else { continue };
+        let s = seen.get(name).cloned().unwrap_or_default();
+        let up = h.cloud.is_none() || crate::cloud::state(events, name) == "running";
+        let (on, exe) = (On::new(r, Some(m)), crate::hosts::real_exe(ctx, &s.home));
+        let read = up && h.enabled && !s.home.is_empty();
+        let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&s.home)).remove(0);
+        v.push(Member {
+            name: name.clone(),
+            builds: read.then(|| crate::release::builds(&on, &exe).ok()).flatten(),
+            on,
+            exe,
+            conf,
+            tags: crate::hosts::tags(h, Some(&s)),
+            main: false,
+            waited: h.enabled && up,
+            failed: None,
+        });
+    }
+    v
+}
+
+fn step(now: u64, head: &str, found: &Found, ms: &[Member], marks: &Marks, l: &Limits) -> Step {
+    if ms.iter().filter(|m| m.builds.is_some()).all(|m| !m.needs(head)) {
+        return Step::Current;
+    }
+    if let Found::Missing(_) = found {
+        let due = marks
+            .seen
+            .is_some_and(|s| now >= s.saturating_add(l.self_update_wait_minutes * 60));
+        return Step::Wait {
+            alert: due && !marks.waiting,
+        };
+    }
+    let Some(mini) = ms.iter().find(|m| m.main).filter(|m| !m.needs(head) || m.staged(head)) else {
+        return Step::Stuck;
+    };
+    let names = |f: &dyn Fn(&Member) -> bool| ms.iter().filter(|m| f(m)).map(|m| m.name.clone()).collect::<Vec<_>>();
+    let mut ready = names(&|m| !m.main && m.needs(head) && m.staged(head));
+    if !mini.needs(head) {
+        return Step::Swap { ready, behind: vec![] };
+    }
+    ready.push(mini.name.clone());
+    let behind = names(&|m| m.needs(head) && !m.staged(head));
+    let missing = names(&|m| m.waited && m.needs(head) && !m.staged(head));
+    let until = marks
+        .staging
+        .unwrap_or(now)
+        .saturating_add(l.self_update_lag_minutes * 60);
+    if missing.is_empty() || now >= until {
+        return Step::Swap { ready, behind };
+    }
+    Step::Hold { missing, until }
+}
 
 fn install(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
-    f: &crate::config::Fleet,
-    events: &[Event],
-    (branch, home, live, dry, staging): Target,
+    (f, events): (&crate::config::Fleet, &[Event]),
+    t: &Target,
+    dry: bool,
 ) -> Result<i32> {
-    let local = f.local_path();
-    let l = local.to_string_lossy();
-    let git = |a: &[&str]| ok(r, "git", &[&["-C", &*l], a].concat());
-    let what = if staging { "staging serve: " } else { "" };
-    git(&["fetch", "-q", "origin", branch])?;
-    let sha = git(&["rev-parse", &format!("origin/{branch}")])?;
-    let sha = sha.trim();
-    if std::fs::read_to_string(home.join("sha")).is_ok_and(|s| s.trim() == sha) {
-        writeln!(out, "= {what}up to date @ {sha:.7}")?;
+    let l = f.local_path();
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", &*l.to_string_lossy()], a].concat());
+    let what = t.what();
+    git(&["fetch", "-q", "origin", t.branch])?;
+    let head = git(&["rev-parse", &format!("origin/{}", t.branch)])?;
+    let head = head.trim();
+    let found = crate::release::find(r, &f.repo, t.branch, head);
+    let mut ms = members(ctx, cfg, r, events, t);
+    if ms.iter().filter(|m| m.builds.is_some()).all(|m| !m.needs(head)) {
+        writeln!(out, "= {what}up to date @ {head:.7}")?;
         return Ok(0);
     }
-    let (ci, checks) = crate::land::suite(r, f, sha);
-    if ci != "green" {
-        let first = crate::gh::not_green(&checks).map_or(String::new(), |c| format!(": {c}"));
-        writeln!(out, "= {what}{branch} @ {sha:.7}: CI {ci}{first}; not installed")?;
-        return Ok(0);
-    }
-    let new = PathBuf::from(format!("{}.new", live.display()));
     if dry {
-        let then = if staging {
-            format!(
-                "would (re)start the read-only staging serve on {}",
-                cfg.self_update.staging_addr
-            )
-        } else {
-            "would run profiles sync and restart the serve job".into()
-        };
-        let plan = [
-            format!(
-                "would build {sha:.7} ({branch}) in {} (CI green)",
-                home.join("src").display()
-            ),
-            format!(
-                "would sign it \"drover-local\", run its doctor --config-only and --tokens, then swap it in at {}",
-                live.display()
-            ),
-            then,
-        ];
-        writeln!(out, "{}", plan.join("\n"))?;
-        return Ok(0);
+        return plan(out, t, head, &found, &ms);
     }
-    std::fs::create_dir_all(live.parent().unwrap_or(&live))?;
-    let staged = stage(r, &local, &home, sha, &new).and_then(|()| gate(r, &home.join("src"), &new));
-    let res = staged.and_then(|()| {
-        std::fs::rename(&new, &live).with_context(|| format!("swap into {}", live.display()))?;
-        std::fs::write(home.join("sha"), sha)?;
-        if staging {
-            return staging_serve(ctx, cfg, r, &live).context("installed, then the staging serve");
+    let (word, d) = (t.word(), json!({"sha": head, "branch": t.branch, "target": t.word()}));
+    let mark = |kind: &str| {
+        let at = |e: &&Event| e.kind == kind && e.str("sha") == Some(head) && e.str("target") == Some(word);
+        events.iter().find(at).map(|e| e.ts)
+    };
+    let marks = Marks {
+        seen: mark("self-update-seen"),
+        staging: mark("self-update-staging"),
+        waiting: mark("self-update-waiting").is_some(),
+    };
+    let log = |kind: &str, d: serde_json::Value| {
+        emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d).passive())
+    };
+    if marks.seen.is_none() {
+        log("self-update-seen", d.clone())?;
+    }
+    if let Found::Release(rel) = &found {
+        if marks.staging.is_none() {
+            log("self-update-staging", d.clone())?;
         }
-        let synced = ok(r, &live.to_string_lossy(), &["profiles", "sync"]).context("installed, then profiles sync");
-        let served = synced.and_then(|_| restart_serve(ctx, cfg, r).context("installed, then the serve restart"));
-        served.map(|s| [vec![s], crate::timer::heal(ctx, r)].concat().join("; "))
-    });
-    let Err(e) = res else {
-        let d = json!({"sha": sha, "branch": branch});
-        emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "self-updated", d))?;
-        let synced = if staging { "" } else { "profiles synced, " };
-        let done = res.unwrap_or_default();
-        writeln!(out, "✓ {what}installed {sha:.7} at {}; {synced}{done}", live.display())?;
-        return Ok(0);
-    };
-    std::fs::remove_file(&new).ok();
-    let why = format!("{sha:.7}: {e:#}");
-    let kept = if format!("{e:#}").starts_with("installed, then") {
-        "now live at"
-    } else {
-        "kept"
-    };
-    writeln!(out, "✗ self-update {why}; {kept} {}", live.display())?;
-    let shed = why.lines().find(|l| l.starts_with("✗ shed"));
-    let key = shed.unwrap_or(sha);
-    if !events
+        let limit = std::time::Duration::from_secs(cfg.limits.self_update_stage_secs);
+        for m in ms
+            .iter_mut()
+            .filter(|m| m.builds.is_some() && m.needs(head) && !m.staged(head))
+        {
+            let staged = rel
+                .asset(&f.repo, &m.tags)
+                .ok_or_else(|| Unstaged::NoAsset(m.tags.join(",")));
+            let gate = m.on.exists(Path::new(&m.conf));
+            match staged.and_then(|a| crate::release::stage(&m.on, &m.exe, rel, &a, gate, limit)) {
+                Ok(()) => m.builds.get_or_insert_default().staged = Some(head.into()),
+                Err(u) => m.failed = Some(u),
+            }
+        }
+    }
+    for (m, u) in ms.iter().filter_map(|m| Some((m, m.failed.as_ref()?))) {
+        writeln!(out, "✗ {what}{}: {head:.7} not staged: {u}; kept {}", m.name, m.exe)?;
+        let why = u.to_string();
+        let shed = why
+            .lines()
+            .find_map(|l| l.split_once("✗ shed"))
+            .map(|(_, rest)| format!("✗ shed{rest}"));
+        let key = shed.unwrap_or_else(|| format!("{} {head:.7}", m.name));
+        let d = json!({"host": m.name, "sha": head, "reason": format!("self-update {head:.7}: {why}")});
+        failed(ctx, cfg, events, &key, d)?;
+    }
+    match step(ctx.now, head, &found, &ms, &marks, &cfg.limits) {
+        Step::Current => writeln!(out, "= {what}up to date @ {head:.7}")?,
+        Step::Wait { alert } => {
+            let why = match &found {
+                Found::Missing(w) => w.as_str(),
+                Found::Release(_) => "",
+            };
+            writeln!(
+                out,
+                "= {what}{} @ {head:.7}: waiting for its release ({why}); nothing is built",
+                t.branch
+            )?;
+            if alert {
+                let d = json!({"key": head, "sha": head, "branch": t.branch, "target": word, "reason": format!("no release build of {} {head:.7}: {why}", t.branch)});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, "drover", None, "self-update-waiting", d).push(),
+                )?;
+            }
+        }
+        Step::Hold { missing, until } => {
+            let left = until.saturating_sub(ctx.now).div_ceil(60);
+            let m = missing.join(", ");
+            writeln!(
+                out,
+                "= {what}{head:.7} staged; waiting up to {left} min for {m}, then the rest swap"
+            )?;
+        }
+        Step::Stuck => return Ok(1),
+        Step::Swap { ready, behind } => return swap(ctx, cfg, r, out, (t, events, head), &ms, (ready, behind)),
+    }
+    Ok(0)
+}
+
+fn failed(ctx: &Ctx, cfg: &Config, events: &[Event], key: &str, mut d: serde_json::Value) -> Result<()> {
+    if events
         .iter()
         .any(|e| e.kind == "self-update-failed" && e.str("key") == Some(key))
     {
-        let d = json!({"key": key, "reason": format!("self-update {why}")});
+        return Ok(());
+    }
+    if let Some(o) = d.as_object_mut() {
+        o.insert("key".into(), key.into());
+    }
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, "drover", None, "self-update-failed", d),
+    )
+}
+
+fn plan(out: &mut dyn Write, t: &Target, head: &str, found: &Found, ms: &[Member]) -> Result<i32> {
+    let have = match found {
+        Found::Release(rel) => format!("{} found", rel.tag),
+        Found::Missing(w) => format!("waiting: {w}"),
+    };
+    writeln!(out, "{}{} @ {head:.7}: {have}", t.what(), t.branch)?;
+    for m in ms {
+        let (has, will) = match &m.builds {
+            None if m.waited => (
+                "unreachable".to_string(),
+                "waited for up to the lag limit, then left behind",
+            ),
+            None => ("stopped or off".into(), "not waited for; caught up when it starts"),
+            Some(_) if !m.needs(head) => (m.has(), "current"),
+            Some(_) if m.staged(head) => (format!("{}, staged {head:.7}", m.has()), "would swap"),
+            Some(_) => (m.has(), "would stage, then swap"),
+        };
+        let last = if m.main && m.needs(head) { ", last" } else { "" };
+        writeln!(out, "  {:<12} {has:<24} {will}{last}", m.name)?;
+    }
+    let then = match t.kind {
+        Kind::Live => "then: profiles sync, serve handed over",
+        Kind::StagingServe => "then: the read-only staging serve restarts",
+    };
+    writeln!(out, "{then}")?;
+    Ok(0)
+}
+
+fn swap(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (t, events, head): (&Target, &[Event], &str),
+    ms: &[Member],
+    (ready, mut behind): (Vec<String>, Vec<String>),
+) -> Result<i32> {
+    let what = t.what();
+    let by = |n: &String| ms.iter().find(|m| m.name == *n);
+    let main = ready.iter().filter_map(by).any(|m| m.main);
+    let remote: Vec<&Member> = ready.iter().filter_map(by).filter(|m| !m.main).collect();
+    if main && !remote.is_empty() {
+        let d = json!({"sha": head, "target": t.word(), "hosts": ready});
         emit(
             &ctx.state,
             cfg,
-            Event::new(ctx.now, "drover", None, "self-update-failed", d),
+            Event::new(ctx.now, "drover", None, "self-update-swapping", d).passive(),
         )?;
     }
-    Ok(1)
+    let mut hosts = vec![];
+    for m in remote {
+        let res = remote_swap(cfg, m);
+        let d = json!({"host": m.name, "from": m.has(), "to": head, "ok": res.is_ok()});
+        crate::events::append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d))?;
+        match res {
+            Ok(_) => hosts.push(m.name.clone()),
+            Err(e) => {
+                writeln!(out, "✗ {}: swap to {head:.7} failed: {e:#}", m.name)?;
+                behind.push(m.name.clone());
+            }
+        }
+    }
+    for m in behind.iter().filter_map(by) {
+        let logged =
+            |e: &Event| e.kind == "host-behind" && e.str("host") == Some(&m.name) && e.str("wants") == Some(head);
+        if !events.iter().any(logged) {
+            let why = m
+                .failed
+                .as_ref()
+                .map_or_else(|| "unreachable or stopped".into(), ToString::to_string);
+            let d = json!({"host": m.name, "has": m.has(), "wants": head, "reason": why});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, "drover", None, "host-behind", d).passive(),
+            )?;
+        }
+    }
+    let left = if behind.is_empty() {
+        String::new()
+    } else {
+        format!("; left behind: {}", behind.join(", "))
+    };
+    if !main {
+        let late = ms.iter().any(|m| m.failed.is_some()) || !behind.is_empty();
+        if hosts.is_empty() {
+            writeln!(out, "= {what}live @ {head:.7} here; another host is not caught up yet")?;
+        } else {
+            writeln!(out, "✓ {what}caught up {} to {head:.7}{left}", hosts.join(", "))?;
+        }
+        return Ok(i32::from(late));
+    }
+    let new = PathBuf::from(format!("{}.new", t.live.display()));
+    std::fs::rename(&new, &t.live).with_context(|| format!("swap into {}", t.live.display()))?;
+    hosts.extend(ms.iter().find(|m| m.main).map(|m| m.name.clone()));
+    let d = json!({"sha": head, "branch": t.branch, "target": t.word(), "hosts": hosts, "behind": behind});
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "self-updated", d))?;
+    let then = match t.kind {
+        Kind::StagingServe => staging_serve(ctx, cfg, r, &t.live).context("installed, then the staging serve"),
+        Kind::Live => {
+            let synced =
+                ok(r, &t.live.to_string_lossy(), &["profiles", "sync"]).context("installed, then profiles sync");
+            let served = synced.and_then(|_| restart_serve(ctx, cfg, r).context("installed, then the serve restart"));
+            served.map(|s| {
+                format!(
+                    "profiles synced, {}",
+                    [vec![s], crate::timer::heal(ctx, r)].concat().join("; ")
+                )
+            })
+        }
+    };
+    match then {
+        Ok(done) => {
+            writeln!(out, "✓ {what}installed {head:.7} at {}; {done}{left}", t.live.display())?;
+            Ok(0)
+        }
+        Err(e) => {
+            let why = format!("{head:.7}: {e:#}");
+            writeln!(out, "✗ self-update {why}; now live at {}", t.live.display())?;
+            let key = why.lines().find(|l| l.starts_with("✗ shed")).unwrap_or(head);
+            failed(ctx, cfg, events, key, json!({"reason": format!("self-update {why}")}))?;
+            Ok(1)
+        }
+    }
+}
+
+fn remote_swap(cfg: &Config, m: &Member) -> Result<String> {
+    let (exe, conf) = (&m.exe, &m.conf);
+    let acp = cfg
+        .host_acp(&m.name)
+        .map(|_| crate::hosts::acp_profiles(cfg, &m.name, &m.tags));
+    let acp: String = (acp.unwrap_or_default().iter())
+        .map(|(p, family, _)| format!(" && '{exe}' profiles sync --profile '{p}' --role {family}"))
+        .collect();
+    let line = format!(
+        "{}{} && {} && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}{acp}",
+        crate::cloud::SH,
+        crate::release::swap_line(exe),
+        crate::hosts::link_line(exe)
+    );
+    ok(&m.on, "sh", &["-c", &line])
 }
 
 fn restart_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
@@ -216,44 +540,4 @@ pub fn paused_line(r: &dyn Runner, events: &[Event]) -> Option<String> {
     Some(format!(
         "! self-update — paused since {at} → drover self-update --resume"
     ))
-}
-
-fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Result<()> {
-    let (src, target) = (home.join("src"), home.join("target"));
-    let (s, t) = (src.to_string_lossy(), target.to_string_lossy());
-    std::fs::create_dir_all(home)?;
-    if src.join(".git").exists() {
-        ok(r, "git", &["-C", &s, "checkout", "-q", "--detach", sha]).context("checkout")?;
-    } else {
-        let l = local.to_string_lossy();
-        ok(r, "git", &["-C", &l, "worktree", "add", "-q", "--detach", &s, sha]).context("checkout")?;
-    }
-    let manifest = src.join("Cargo.toml");
-    let build = ["build", "--release", "--locked", "-p", "drover", "--manifest-path"];
-    ok(
-        r,
-        "cargo",
-        &[&build[..], &[&manifest.to_string_lossy(), "--target-dir", &t]].concat(),
-    )
-    .context("build")?;
-    std::fs::copy(target.join("release/drover"), new).context("copy the build")?;
-    Ok(())
-}
-
-fn gate(r: &dyn Runner, src: &Path, new: &Path) -> Result<()> {
-    let n = new.to_string_lossy();
-    if ok(r, "which", &["codesign"]).is_ok() {
-        let script = src.join("scripts/signing-identity.sh");
-        let o = r.run("sh", &crate::runner::argv(&[&script.to_string_lossy(), "sign", &n]))?;
-        match o.code {
-            0 => {}
-            2 => bail!("sign: no \"drover-local\" identity → sh scripts/signing-identity.sh, once"),
-            _ => bail!("sign: {}", format!("{}{}", o.stdout, o.stderr).trim()),
-        }
-    }
-    let o = r.run(&n, &crate::runner::argv(&["doctor", "--config-only"]))?;
-    if o.code != 0 {
-        bail!("doctor --config-only on the live config: {}", o.stdout.trim());
-    }
-    Ok(())
 }

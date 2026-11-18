@@ -1,6 +1,6 @@
 #!/bin/sh
 # signing-identity [KEYCHAIN] (#556, #781): create the self-signed code-signing identity "drover-local" once, in the
-# login keychain. Every installed drover (self-update, install-gate.sh, the manual install) is signed with it, so its
+# login keychain. shed and cooee installs are signed with it (#1275: drover itself is Developer ID signed in CI), so its
 # designated requirement (identifier drover, this certificate) stays the same across builds: a Keychain item whose
 # access list names one signed build opens to the next with no prompt, and refuses an unsigned one.
 # It also sets the key's partition list (asks the login password here), so codesign never waits on a dialog.

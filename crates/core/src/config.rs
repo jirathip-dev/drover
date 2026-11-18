@@ -281,6 +281,18 @@ pub struct HostCfg {
     pub heavy_kind_max: BTreeMap<String, usize>,
     /// Minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
     pub heavy_wait_minutes: Option<u64>,
+    /// Who issues gh's token here: `managed` (default) warns before it expires, `external` never does.
+    #[serde(default)]
+    pub github_token: GithubToken,
+}
+
+/// Who issues a host's GitHub token.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GithubToken {
+    #[default]
+    Managed,
+    External,
 }
 
 /// The point a starting lane frees its start slot.
@@ -300,6 +312,10 @@ impl HostCfg {
         let mut v = self.roots.clone();
         v.extend(self.root.clone().filter(|_| v.is_empty()));
         v
+    }
+    /// Whether health looks at gh's token here: a cloud host whose token drover manages.
+    pub fn watches_token(&self) -> bool {
+        self.cloud.is_some() && self.github_token == GithubToken::Managed
     }
     pub fn allow(&self) -> Vec<String> {
         let def = || {
@@ -763,6 +779,10 @@ pub struct Limits {
     pub slo_tick_minutes: u64,
     pub slo_pass_minutes: u64,
     pub stall_restart_hours: u64,
+    pub self_update_wait_minutes: u64,
+    pub self_update_lag_minutes: u64,
+    pub self_update_stage_secs: u64,
+    pub self_update_swap_secs: u64,
 }
 
 /// A `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -887,6 +907,10 @@ impl Default for Limits {
             slo_tick_minutes: 10,
             slo_pass_minutes: 30,
             stall_restart_hours: 2,
+            self_update_wait_minutes: 45,
+            self_update_lag_minutes: 30,
+            self_update_stage_secs: 300,
+            self_update_swap_secs: 120,
         }
     }
 }
@@ -1170,6 +1194,19 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "stall_restart_hours",
         "an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own)",
+    ),
+    (
+        "self_update_wait_minutes",
+        "a head with no release build this long alerts `self-update-waiting`",
+    ),
+    (
+        "self_update_lag_minutes",
+        "how long a rollout waits for an enabled host that is not staged before the rest swap",
+    ),
+    ("self_update_stage_secs", "one host's download and gate of a release build"),
+    (
+        "self_update_swap_secs",
+        "how long a `self-update-swapping` mark holds remote placement when no `self-updated` follows",
     ),
 ];
 

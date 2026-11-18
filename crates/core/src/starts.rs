@@ -156,7 +156,16 @@ pub fn others(ctx: &Ctx, cfg: &Config, ev: &[Event], fleet: &str) -> usize {
 pub fn stops(code: Option<&str>) -> bool {
     matches!(
         code,
-        Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "LOGIN_NEEDED" | "CAP" | "IN_FLIGHT_CAP")
+        Some(
+            "HOST_BUSY"
+                | "HOST_UPDATING"
+                | "DISK_LOW"
+                | "DISK_BUDGET"
+                | "MEM_LOW"
+                | "LOGIN_NEEDED"
+                | "CAP"
+                | "IN_FLIGHT_CAP"
+        )
     )
 }
 
