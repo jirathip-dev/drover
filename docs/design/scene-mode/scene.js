@@ -1,9 +1,9 @@
 // Design-only (#1305): the old Herd (c34235855^ assets/herd.js: scene, clouds, night sky, tiles, cards, gate, bands and the
 // one-clock frame loop) drawn from fixture.json, the shape of the `/screens/scene` JSON. The art is swag's legacy-board farm
 // at the pinned commit (here read from the repo's vendored copy of that commit; impl fetches it and checks SHA256SUMS).
-// Query: old=1 (the old Herd chrome), style=pixel|ascii, light=auto|day|night, mode=scene|screens, sheet=look,
+// Query: old=1 (the old Herd chrome), light=auto|day|night, mode=scene|screens,
 // loading=1 (first paint), t=<s> (one frozen frame at that clock time, for the shots and the clip).
-const Q = new URLSearchParams(location.search), OLD = Q.has('old'), STYLE = Q.get('style') || 'pixel';
+const Q = new URLSearchParams(location.search), OLD = Q.has('old');
 const LIGHT = Q.get('light') || 'auto', MODE = Q.get('mode') || 'scene', T0 = Q.has('t') ? +Q.get('t') : null;
 const NS = 'http://www.w3.org/2000/svg', M64 = (1n << 64n) - 1n;
 const noise = (i, s = 0) => { const n = (BigInt(i) * 1664525n + BigInt(s) * 1013904223n) & M64; return Number(((n ^ (n >> 13n)) * 1274126177n) % 65536n) / 65535; };
@@ -110,11 +110,6 @@ function sym(src, id, want) {
 const lightNow = () => LIGHT === 'night' || (LIGHT === 'auto' && (h => h < 7 || h >= 19)(new Date().getHours()));
 const ICON = { auto: 'A', day: '☀', night: '☾' };
 const figure = (f, small) => {
-  if (STYLE === 'ascii') {
-    const t = small ? (TH.ascii_rows || {}).idle && '[#]' : (TH.ascii || {})[f.act] || '';
-    const two = f.state === 'working' ? t.replace(/[^\n]*$/, l => l.replace(/[/\\]/g, c => (c === '/' ? '\\' : '/'))) : null;
-    return `<i class="asc${two ? ' run' : ''}" aria-hidden=true><b>${hx(t)}</b>${two ? `<b hidden>${hx(two)}</b>` : ''}</i>`;
-  }
   return small ? `<svg viewBox="0 0 132 100"><use href="#hrail"/></svg>` : `<svg viewBox="0 0 132 100" style="${coat(f.coat || 0)}"><use href="#ha-${hx(f.act)}"/></svg>`;
 };
 const card = r => `<button type=button class="hh ${hx(r.figure.state)}">${figure(r.figure)}<span class=hl><b>${hx(r.title)}</b><span><i class=${hx(r.tone || 'm')}>${hx([(TH.glyphs || {})[r.figure.state], r.subtitle].filter(Boolean).join(' '))}</i>${r.value ? ' · ' + hx(r.value) : ''}${r.host ? ' · ' + hx(r.host) : ''}</span></span></button>`;
@@ -130,7 +125,7 @@ function pageOf(repo, all, i) {
   const dots = all.map((r, k) => `<button type=button aria-label="${hx(r.title)}"${k === i ? ' aria-current=true' : ''}></button>`).join('');
   const needs = (repo.needs || []).map(n => `<div class="card bad"><div class=fold><span class=fl>${hx(n.line)}</span><button type=button class=main><span>${hx(n.button)}</span></button></div></div>`).join('');
   const lanes = repo.blocks.filter(b => b.header !== 'queued').reduce((n, b) => n + b.rows.length, 0);
-  const body = Q.has('loading') ? `<div class=ldg>${STYLE === 'ascii' ? `<i class="asc run"><b>${hx((TH.ascii_loading || '').split('\n')[0])}</b><b hidden>${hx((TH.ascii_loading || '').split('\n')[1] || '')}</b></i>` : `<svg viewBox="0 0 132 100" style="${coat(4)}"><use href="#hload"/></svg>`}<span>${hx(word('loading'))}…</span></div>` : repo.blocks.map(band).join('');
+  const body = Q.has('loading') ? `<div class=ldg><svg viewBox="0 0 132 100" style="${coat(4)}"><use href="#hload"/></svg><span>${hx(word('loading'))}…</span></div>` : repo.blocks.map(band).join('');
   return `<section class=hp><div class=hs><p><b>${hx(repo.title)}</b> <span class=n>· ${lanes} here</span></p><p class=sum>${hx(repo.subtitle)}</p></div><div class=hn>${needs}</div>` +
     `<div class=hr><div class=hc>${clouds()}</div><button type=button class="hnv hpv" aria-label="previous repo"><span>‹</span></button><button type=button class="hnv hnx" aria-label="next repo"><span>›</span></button></div><p class=hdt>${dots}</p><div class=hb>${body}</div></section>`;
 }
@@ -149,7 +144,7 @@ function tiles(p) {
   p._trees = [...r.querySelectorAll('.cn')].map(g => [g, +g.dataset.a, +g.dataset.l]);
   p._cel = [...r.querySelectorAll('.cel')];
   p._grass = [...r.querySelectorAll('.gt')].map(g => [g, +g.dataset.x, +g.dataset.y]);
-  p._walk = [...p.querySelectorAll('.hh.working > svg, .hh.working > .asc, .ldg > svg, .ldg > .asc')];
+  p._walk = [...p.querySelectorAll('.hh.working > svg, .ldg > svg')];
   p.querySelector('.hb').style.setProperty('--cw', Math.min(520, Math.max(320, ...[...p.querySelectorAll('.hl>*')].map(x => x.scrollWidth + 20))) + 'px');
 }
 
@@ -162,8 +157,7 @@ function frame(t) {
   P.querySelector('.hc').style.transform = `translateX(${((drift - 780) / 1560 * P._cw).toFixed(1)}px)`;
   P._walk.forEach((s, i) => {
     const g = Math.sin(t * Math.PI / 0.4 + i * 1.3);
-    if (s.tagName === 'svg') s.style.setProperty('--gait', (g * 16).toFixed(1) + 'deg');
-    else s.querySelectorAll('b').forEach((b, k) => (b.hidden = k !== Math.floor(t / 0.25) % 2));
+    s.style.setProperty('--gait', (g * 16).toFixed(1) + 'deg');
     s.style.transform = `translate(${(Math.sin(t * 0.5 + i * 2.1) * 10).toFixed(1)}px, ${(-Math.abs(g) * 1.5).toFixed(1)}px)`;
   });
 }
@@ -184,18 +178,6 @@ function header() {
     `<button type=button aria-label=refresh><span>↻</span></button><button type=button aria-label=settings><span>⚙</span></button></header>`;
 }
 
-function lookSheet() {
-  const row = (on, label, art = '', sub = '') => `<div class="row tap${on ? ' on' : ''}">${art}<span class=rm><span class=rt>${on ? '✓ ' : ''}${hx(label)}</span>${sub ? `<span class=rs>${hx(sub)}</span>` : ''}</span></div>`;
-  const sec = (h, rows) => `<section class=sec><h3 class=sh>${hx(h)}</h3><div class=list>${rows.join('')}</div></section>`;
-  const px = `<i class=lka><svg viewBox="0 0 132 100" style="${coat(4)}"><use href="#ha-impl"/></svg></i>`, as = `<i class=lka><b>${hx((TH.ascii_rows || {}).impl || '')}</b></i>`;
-  return `<div id=sheet><div class=sp><p class=sh><b>settings</b><button type=button><span>close</span></button></p><div class=sb>` +
-    sec('screens', [row(false, 'Hosts', '', 'on/off and reap, per host')]) +
-    sec('theme', ['farm', 'kitchen', 'garden', 'terminal'].map(n => row(n === 'farm', n))) +
-    sec('style', [row(STYLE !== 'ascii', 'pixel', px, 'sprites in Scene, rows, lanes, host and loading'), row(STYLE === 'ascii', 'ascii', as, 'the theme’s ascii figures, same places')]) +
-    sec('colours', ['farm', 'github-dark', 'nord', 'paper'].map(n => row(n === 'farm', n))) +
-    `<p class="m foot">this phone only · the home-screen icon keeps its install-time look</p></div></div></div>`;
-}
-
 Promise.all([fetch(SWAG + 'sprites.svg').then(r => r.text()), fetch(SWAG + 'theme.json').then(r => r.json()), fetch('fixture.json').then(r => r.json())]).then(([sv, th, fx]) => {
   TH = th;
   const src = document.createElementNS(NS, 'svg');
@@ -206,8 +188,7 @@ Promise.all([fetch(SWAG + 'sprites.svg').then(r => r.text()), fetch(SWAG + 'them
   const blk = fx.blocks[0], repos = blk.repos.map(r => ({ ...r, blocks: r.blocks.map(b => ({ ...b, rows: b.rows || [] })) }));
   const B = document.body;
   if (MODE === 'screens') {
-    B.insertAdjacentHTML('beforeend', header() + BOARD + (Q.get('sheet') === 'look' ? lookSheet() : ''));
-    document.documentElement.classList.toggle('sheet', Q.get('sheet') === 'look');
+    B.insertAdjacentHTML('beforeend', header() + BOARD);
     return;
   }
   document.documentElement.classList.add('scening');

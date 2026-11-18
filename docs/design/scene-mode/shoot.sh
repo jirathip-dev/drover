@@ -17,15 +17,15 @@ shot() { # name, query, width, height, dpr
 }
 for w in 390 1440; do
   h=$([ $w = 390 ] && echo 844 || echo 900) d=$([ $w = 390 ] && echo 2 || echo 1)
-  shot "scene-pixel-$w" "style=pixel&light=day&t=1.3" $w $h $d
-  shot "scene-ascii-$w" "style=ascii&light=night&t=1.3" $w $h $d
-  shot "look-sheet-$w" "mode=screens&sheet=look&style=pixel" $w $h $d
-  shot "old-herd-pixel-$w" "old=1&style=pixel&light=day&t=1.3" $w $h $d
-  shot "old-herd-ascii-$w" "old=1&style=pixel&light=night&t=1.3" $w $h $d
+  shot "scene-day-$w" "light=day&t=1.3" $w $h $d
+  shot "scene-night-$w" "light=night&t=1.3" $w $h $d
+  shot "screens-$w" "mode=screens" $w $h $d
+  shot "old-herd-day-$w" "old=1&light=day&t=1.3" $w $h $d
+  shot "old-herd-night-$w" "old=1&light=night&t=1.3" $w $h $d
 done
 mkdir -p "$here/.frames" && rm -f "$here/.frames"/*.png
 n=0
-for q in "style=pixel&light=day&loading=1" "style=pixel&light=day" "style=ascii&light=night&loading=1" "style=ascii&light=night"; do
+for q in "light=day&loading=1" "light=day" "light=night"; do
   k=$([[ $q == *loading* ]] && echo 8 || echo 30)
   for i in $(seq 0 $((k - 1))); do
     t=$(python3 -c "print(round($i/12,3))")

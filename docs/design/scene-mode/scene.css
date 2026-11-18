@@ -1,5 +1,5 @@
 /* Design-only (#1305): the old Herd's herd.css at c34235855^, #herd renamed #scene, farm only. New here: the page header
-   stays over Scene (.page), the header toggle, [A]/[☀]/[☾] in the header, ascii figures, the look sheet's style rows. */
+   stays over Scene (.page), the header toggle, [A]/[☀]/[☾] in the header. */
 html.scening,html.scening body{overflow:hidden}
 #scene{position:fixed;inset:0;z-index:2;overflow:hidden;background:#485e3b;--sky1:#388fc4;--sky2:#8ebbc6;color:#f4ecd8}
 .page #scene{top:calc(var(--hit) + var(--s1))}
@@ -72,29 +72,15 @@ html.scening,html.scening body{overflow:hidden}
 /* #1305 new: the header toggle (pressed while Scene shows) and the light button share the header's bracket style. */
 header .on{background:var(--l);color:var(--bg)}
 header .hlt{min-width:3ch}
-/* #1305 ascii style: the theme's `ascii` figure in the sprite's 132 × 100 box; two frames (the legs' / and \ swapped) for a
-   working lane, one still frame otherwise. The queued bale is the theme's `ascii_rows` mark in the 53 × 40 box. */
-.asc{display:grid;place-items:end center;width:132px;height:100px;margin:0;font:15px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;font-style:normal;color:#f4ecd8;text-shadow:0 1px 0 #0009,0 0 3px #0006}
-.asc b{grid-area:1/1;font-weight:600;text-align:left}
-.asc b[hidden]{display:block;visibility:hidden}
-.hqh .asc{width:53px;height:40px;font-size:13px}
-.hh.done .asc{opacity:.75}
-.b-blocked .asc{color:#ffd9d3}
-/* #337 loading: the theme's loading sprite (pixel) or its ascii_loading frames, centred on the empty pasture. */
+/* #337 loading: the theme's loading sprite, centred on the empty pasture. */
 .ldg{display:flex;flex-direction:column;align-items:center;padding:calc(3 * var(--s4)) 0;color:#f4ecd8;text-shadow:0 1px 2px #0008}
 .ldg svg{width:132px}
-/* The board behind the look sheet (static, from the demo's queue tab). */
+/* The board in screens mode (static, from the demo's queue tab). */
 .board .card .ch{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit)}
 .board .card .ch .fl{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lka{flex:none;display:inline-grid;place-items:center;width:calc(2 * var(--ctl));height:var(--ctl)}
-.lka svg{width:44px;height:auto}
-.lka b{font:11px/1 ui-monospace,Menlo,monospace;font-weight:400;white-space:pre;color:var(--fg)}
-#sheet .row .rm{align-items:center}
 .cmp{display:grid;grid-template-columns:1fr 1fr;gap:0;height:100vh}
 .cmp iframe{width:100%;height:100%;border:0}
 #scene .hh,#scene .hqh{display:flex;height:auto;max-width:none;text-transform:none;white-space:normal;line-height:inherit}
 #scene .hqh{display:block}
 #scene .hh::before,#scene .hh::after,#scene .hqh::before,#scene .hqh::after{content:none}
 #scene .hh:active,#scene .hqh:active{background:none;color:inherit}
-.asc{box-sizing:border-box;padding-bottom:var(--s3)}
-.hqh .asc{padding-bottom:var(--s2)}
