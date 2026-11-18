@@ -155,6 +155,8 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                 it.verify = onoff(d.at("verify"));
             } else if d.get("repro").is_some() {
                 it.repro = strs(d.at("repro")) == ["on"];
+            } else if d.get("playbook").is_some() {
+                it.playbook = strs(d.at("playbook")).into_iter().find(|p| p != "off");
             } else {
                 it.needs = strs(d.at("needs"));
             }
