@@ -1,0 +1,22 @@
+
+running 47 tests
+drover hook: config invalid: invalid table header; expected `.`, `]` (fleet.toml:1)
+............drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+.drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+....................drover hook: config invalid: invalid table header; expected `.`, `]` (fleet.toml:38)
+..drover hook: config invalid: invalid table header; expected `.`, `]` (fleet.toml:38)
+drover hook: config invalid: invalid table header; expected `.`, `]` (fleet.toml:38)
+.drover hook: config invalid: invalid table header; expected `.`, `]` (fleet.toml:38)
+.......drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+drover: fleet.other.deny_commands is empty: the lane hook denies no commands
+....
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.18s
+
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+

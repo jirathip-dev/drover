@@ -1,0 +1,22 @@
+
+running 1 test
+a_remote_cap_lane_may_write_the_cap_file_and_no_other_lane_may --- FAILED
+
+failures:
+
+---- a_remote_cap_lane_may_write_the_cap_file_and_no_other_lane_may stdout ----
+
+thread 'a_remote_cap_lane_may_write_the_cap_file_and_no_other_lane_may' (132309) panicked at crates/cli/tests/remote_rules.rs:309:9:
+assertion `left == right` failed: cap: raise the src/ line cap to 53,500: {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"drover: REFUSED CAP_FILE: a lane never edits ci/cap.toml or ci/cap.d/; when your PR would cross the cap, run `drover cap <fleet>` and ask with its view (#668)"}}
+
+  left: true
+ right: false
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_remote_cap_lane_may_write_the_cap_file_and_no_other_lane_may
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p drover --test remote_rules`
