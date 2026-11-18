@@ -271,3 +271,93 @@ fn a_skipped_sync_logs_why_once_per_streak() {
     run(&c, &two(&r, &bazzite), &["check"]);
     assert_eq!(skipped(&c).len(), 2, "a new streak logs again");
 }
+
+fn install_on(name: &str, os: &str, asset: Option<(&str, &str)>) -> (String, String, String) {
+    let d = tmpdir(name);
+    let (bin, rel, root, tmp) = (d.join("bin"), d.join("rel"), d.join("root"), d.join("tmp"));
+    for p in [&bin, &rel, &tmp] {
+        std::fs::create_dir_all(p).unwrap();
+    }
+    let a = "drover-x86_64-unknown-linux-gnu";
+    if let Some((body, sum)) = asset {
+        std::fs::write(rel.join(a), body).unwrap();
+        std::fs::write(rel.join(format!("{a}.sha256")), format!("{sum}  {a}\n")).unwrap();
+    }
+    let (s, m) = os.split_once('/').unwrap();
+    let stubs = [
+        ("uname", format!("[ \"$1\" = -s ] && echo {s} || echo {m}")),
+        (
+            "curl",
+            format!(
+                "echo \"$@\" >> '{0}/curl.log'; f='{1}'/\"${{4##*/}}\"; [ -f \"$f\" ] || exit 22; cp \"$f\" \"$3\"",
+                d.display(),
+                rel.display()
+            ),
+        ),
+        (
+            "cargo",
+            format!(
+                "echo \"$@\" > '{0}/cargo.log'; mkdir -p '{1}/bin' && echo cargo-built > '{1}/bin/drover'",
+                d.display(),
+                root.display()
+            ),
+        ),
+    ];
+    for (n, body) in stubs {
+        std::fs::write(bin.join(n), format!("#!/bin/sh\n{body}\n")).unwrap();
+        let mut perm = std::fs::metadata(bin.join(n)).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+        std::fs::set_permissions(bin.join(n), perm).unwrap();
+    }
+    let line = drover::hosts::install_line(&root.display().to_string(), "c0ffee");
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let o = std::process::Command::new("sh")
+        .args(["-c", &line])
+        .env("PATH", path)
+        .env("TMPDIR", &tmp)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(root.join("bin/herdsman").symlink_metadata().is_ok());
+    assert_eq!(
+        std::fs::read_dir(&tmp).unwrap().count(),
+        0,
+        "the download dir is removed"
+    );
+    let read = |p: std::path::PathBuf| std::fs::read_to_string(p).unwrap_or_default();
+    (
+        read(root.join("bin/drover")),
+        read(d.join("curl.log")) + &read(d.join("cargo.log")),
+        String::from_utf8_lossy(&o.stderr).into(),
+    )
+}
+
+#[test]
+fn a_linux_x86_64_host_installs_main_cis_checked_binary_and_falls_back_to_cargo() {
+    let body = "prebuilt\n";
+    let real = "fa5571ee502fead0fb341637a5b80546c10f4604d1aa3e770d9de0cea669c21b";
+    let bad = "0".repeat(64);
+    let url = "https://github.com/jirathip-dev/herdsman/releases/download/c0ffee/drover-x86_64-unknown-linux-gnu";
+    let (installed, calls, _) = install_on("install-prebuilt", "Linux/x86_64", Some((body, real)));
+    assert_eq!(installed, body, "{calls}");
+    assert!(
+        calls.contains(url) && calls.contains(&format!("{url}.sha256")) && !calls.contains("install --git"),
+        "{calls}"
+    );
+    let (installed, calls, why) = install_on("install-bad-sum", "Linux/x86_64", Some((body, &bad)));
+    assert_eq!(installed, "cargo-built\n", "a bad checksum never installs: {calls}");
+    assert!(
+        why.contains("checksum mismatch")
+            && calls.contains("install --git https://github.com/jirathip-dev/herdsman --rev c0ffee"),
+        "{why} {calls}"
+    );
+    let (installed, calls, why) = install_on("install-no-asset", "Linux/x86_64", None);
+    assert_eq!(installed, "cargo-built\n");
+    assert!(why.contains("no release asset") && calls.contains(url), "{why} {calls}");
+    let (installed, calls, why) = install_on("install-mac", "Darwin/arm64", Some((body, real)));
+    assert_eq!(installed, "cargo-built\n");
+    assert!(
+        why.contains("no prebuilt binary for Darwin/arm64") && !calls.contains(url),
+        "{why} {calls}"
+    );
+}

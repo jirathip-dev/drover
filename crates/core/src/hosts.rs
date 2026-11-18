@@ -1227,11 +1227,18 @@ pub fn link_line(exe: &str) -> String {
     )
 }
 
-/// `cargo install` of drover at `sha` into `root`, with its `herdsman` link: `hosts bootstrap`'s and `sync`'s.
+/// Drover at `sha` into `root` with its `herdsman` link, main CI's checked Linux `x86_64` binary else `cargo install`: `hosts bootstrap`'s and `sync`'s.
 pub fn install_line(root: &str, sha: &str) -> String {
-    let repo = env!("CARGO_PKG_REPOSITORY");
+    let (repo, a) = (env!("CARGO_PKG_REPOSITORY"), "drover-x86_64-unknown-linux-gnu");
+    let url = format!("{repo}/releases/download/{sha}/{a}");
     format!(
-        "cargo install --git {repo} --rev {sha} --locked --root '{root}' --force && ln -sf drover '{root}/bin/herdsman'"
+        "w=; d=; if [ \"$(uname -s)/$(uname -m)\" != Linux/x86_64 ]; then w=\"no prebuilt binary for $(uname -s)/$(uname -m)\"; \
+elif ! d=$(mktemp -d); then w='mktemp failed'; \
+elif ! curl -fsSL -o \"$d/{a}\" {url} || ! curl -fsSL -o \"$d/{a}.sha256\" {url}.sha256; then w='no release asset {url}'; \
+elif ! (cd \"$d\" && sha256sum -c --status {a}.sha256); then w='checksum mismatch on {url}'; \
+elif ! {{ mkdir -p '{root}/bin' && install -m 755 \"$d/{a}\" '{root}/bin/.drover.new' && mv -f '{root}/bin/.drover.new' '{root}/bin/drover'; }}; then w='prebuilt install failed'; fi; \
+[ -z \"$d\" ] || rm -rf \"${{d:?}}\"; if [ -n \"$w\" ]; then echo \"drover: $w; cargo install instead\" >&2; \
+cargo install --git {repo} --rev {sha} --locked --root '{root}' --force; fi && ln -sf drover '{root}/bin/herdsman'"
     )
 }
 
