@@ -944,10 +944,7 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     let (min, events) = (cfg.limits.min_free_gb, working(&ctx.state).unwrap_or_default());
     let low = || host::free_gb(on).filter(|g| *g < min);
     let mut gb = low()?;
-    let live = match on.machine {
-        None => crate::check::live_lanes(ctx, cfg, on).ok(),
-        Some(_) => Some(crate::check::Live::new()),
-    };
+    let live = crate::check::live_lanes(ctx, cfg, on).ok();
     let trim = |l| crate::check::trim_on(ctx, on, cfg, 0.0, l, &mut std::io::sink()).unwrap_or(0);
     if live.as_ref().is_some_and(|l| trim(l) > 0) {
         gb = low()?;

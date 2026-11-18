@@ -1255,28 +1255,27 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
 fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
     let c = setup("hosts-trim", "", true, 0);
     let df = |kb: u64| format!("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 {kb} 90% /\n");
-    let trim = format!("{SSH}'sh' '-c' 'r=$1;");
+    let trim = format!("{SSH}'sh' '-c' 'o=$1 b=$2;");
     let low = |freed: &str| {
         fake(1.0, 0.1)
             .once(&format!("{SSH}'df' '-k' '/'"), 0, &df(1_048_576))
             .reply(&format!("{SSH}'df' '-k' '/'"), &df(30 * 1_048_576))
-            .reply(
-                &trim,
-                &format!("builds: trimmed /home/me/.cache/drover/target/synergy/debug/ (9 KB)\n{freed}\n"),
-            )
+            .reply(&trim, &format!("{TRIMMED}\n{freed}\n"))
     };
-    let r = low("freed 20971520");
+    let r = low("total 0 freed 20971520");
     assert_eq!(placed(&c, &r, 12, "impl", Some("bazzite")).as_deref(), Ok("bazzite"));
     let call = r.calls.borrow().iter().find(|l| l.starts_with(&trim)).cloned().unwrap();
     assert!(
         call.ends_with("'sh' '~/.local/share/drover/work/.build' '0'"),
         "every idle profile goes: {call}"
     );
-    let e = placed(&c, &low("freed 0"), 12, "impl", Some("bazzite")).unwrap_err();
+    let e = placed(&c, &low("total 0 freed 0"), 12, "impl", Some("bazzite")).unwrap_err();
     assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
 }
 
-const QUICK: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'r=$1;";
+const QUICK_HOST: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
+const QUICK: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'o=$1 b=$2;";
+const SWEEP: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'b=$1;";
 
 fn trim_setup(name: &str, extra: &str) -> drover::Ctx {
     let c = setup(name, &format!("root = \"/srv/drover-485\"\n{extra}"), true, 0);
@@ -1286,25 +1285,28 @@ fn trim_setup(name: &str, extra: &str) -> drover::Ctx {
     c
 }
 
-const TRIMMED: &str = "builds: trimmed /home/me/.cache/drover/target/synergy/debug/ (9 KB)";
+const TRIMMED: &str = "trimmed /home/me/.cache/drover/target/synergy/debug/ (9 KB)";
 
 #[test]
 fn remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pass() {
     let c = trim_setup("hosts-budget-trim", "");
     let cfg = Config::load(&c.config).unwrap();
-    let r = fake(1.0, 0.1).reply(QUICK, &format!("{TRIMMED}\nfreed 9\n"));
+    let r = fake(1.0, 0.1)
+        .reply(SWEEP, "")
+        .reply(QUICK, &format!("{TRIMMED}\ntotal 9 freed 9\n"));
     let mut out = Vec::new();
     drover::check::budget(&c, &cfg, &FakeShed::new().on(&r), &mut out).unwrap();
     assert!(
-        !r.calls.borrow().iter().any(|l| l.contains("'r=$1;")),
+        !r.calls.borrow().iter().any(|l| l.contains("'o=$1 b=$2;")),
         "{:?}",
         r.calls.borrow()
     );
-    drover::check::trim_hosts(&c, &cfg, &r, &mut out).unwrap();
+    let bazzite = FakeShed::new();
+    drover::check::trim_hosts(&c, &cfg, &FakeShed::new().on(&two(&r, &bazzite)), &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
-    assert!(out.contains(TRIMMED), "{out}");
+    assert!(out.contains(&format!("builds: bazzite: {TRIMMED}")), "{out}");
     let calls = r.calls.borrow();
-    let trims: Vec<_> = calls.iter().filter(|l| l.contains("'r=$1;")).collect();
+    let trims: Vec<_> = calls.iter().filter(|l| l.contains("'o=$1 b=$2;")).collect();
     assert_eq!(trims.len(), 1, "{trims:?}");
     assert!(
         trims[0].starts_with(QUICK) && trims[0].ends_with("'sh' '/srv/drover-485/.build' '2097152'"),
@@ -1331,18 +1333,15 @@ fn an_unreachable_host_costs_one_short_attempt_per_pass() {
     let c = trim_setup("hosts-trim-down", "");
     let cfg = Config::load(&c.config).unwrap();
     let down = "ssh: connect to host bazzite port 22: Operation timed out";
-    let r = fake(1.0, 0.1).once_err(QUICK, 255, down);
+    let r = fake(1.0, 0.1).once_err(QUICK_HOST, 255, down);
     let mut out = Vec::new();
     drover::check::trim_hosts(&c, &cfg, &r, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
-    assert_eq!(out, format!("builds: bazzite: trim failed (255): {down}\n"));
+    let lines: Vec<_> = out.lines().map(|l| l.split(": ").next().unwrap()).collect();
+    assert!(lines == ["scratch", "builds"] && out.contains(down), "{out}");
     let calls = r.calls.borrow();
-    let ssh: Vec<_> = calls
-        .iter()
-        .filter(|l| l.contains("bazzite -- 'sh' '-c' 'r=$1;"))
-        .collect();
-    assert_eq!(ssh, [&calls[0]], "one attempt, the quick one: {calls:?}");
-    assert!(ssh[0].starts_with(QUICK));
+    let quick = |l: &&String| !l.contains(" bazzite -- ") || l.starts_with(QUICK_HOST);
+    assert!(calls.iter().all(|l| quick(&l)), "quick ones only: {calls:?}");
 }
 
 #[test]
@@ -1357,8 +1356,10 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
         )
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "4\n")
         .reply("git -C", "")
-        .reply(QUICK, &format!("{TRIMMED}\nfreed 9\n"));
-    let (code, out) = run(&c, &r, &["tick"]);
+        .reply(QUICK, &format!("{TRIMMED}\ntotal 9 freed 9\n"));
+    let r = r.reply(SWEEP, "");
+    let bazzite = FakeShed::new();
+    let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
     assert_eq!(code, 0, "{out}");
     let (driven, trimmed) = (out.find("sendmeter #12 start:"), out.find(TRIMMED));
     assert!(driven.is_some() && trimmed.is_some() && driven < trimmed, "{out}");
