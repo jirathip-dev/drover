@@ -1,0 +1,7 @@
+Decided: the composer keeps its node and patches in place; ticking ages are {since,label} drawn on the client; an unchanged delta does not repaint; no 30 s whole-screen repaint.
+Because: "The composer element and its textarea are never replaced while they exist"
+Because: "A ticking value (`as of Ns ago`, `working 12s`) is computed on the client from a timestamp"
+Because: web/src/blocks.ts:522
+Rejected: per-screen event routing in screens.rs — the shared screen cache is the separate architect issue
+Check: the red at e799151 was two timing flakes outside the diff (drive pass 0.1 s, WebKit warm paint 1308 ms vs 15-18 ms on earlier runs); CI at ef8f5f5 should be green.
+Owner: typing on the phone no longer drops the keyboard, and an idle page stops refreshing.
