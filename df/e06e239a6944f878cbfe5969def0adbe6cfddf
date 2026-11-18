@@ -1,0 +1,5 @@
+Decided: this round merges origin/staging (#1314) and leaves the shard 1 service test alone
+Because: crates/cli/tests/service.rs:290
+Rejected: editing the service kill-timing test — it is outside this issue and passes on staging and here when run alone
+Check: CI run 44358107252 at dfe06e2 is green, test (shard 1/4) included
+Owner: The typing fix is unchanged; this round only caught up with staging and got a clean test run.
