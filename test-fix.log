@@ -1,0 +1,194 @@
+   Compiling subtle v2.6.1
+   Compiling libc v0.2.191
+   Compiling zeroize v1.9.1
+   Compiling typenum v1.20.1
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling cfg-if v1.0.5
+   Compiling cmov v0.5.4
+   Compiling ctutils v0.4.7
+   Compiling hybrid-array v0.4.15
+   Compiling proc-macro2 v1.0.107
+   Compiling const-oid v0.10.2
+   Compiling quote v1.0.47
+   Compiling cpubits v0.1.1
+   Compiling unicode-ident v1.0.27
+   Compiling autocfg v1.5.1
+   Compiling block-buffer v0.12.1
+   Compiling serde_core v1.0.229
+   Compiling num-traits v0.2.19
+   Compiling syn v3.0.9
+   Compiling crypto-common v0.2.2
+   Compiling crypto-bigint v0.7.10
+   Compiling digest v0.11.3
+   Compiling ff v0.14.0
+   Compiling serde v1.0.229
+   Compiling hmac v0.13.0
+   Compiling der v0.8.3
+   Compiling foldhash v0.2.0
+   Compiling cpufeatures v0.3.1
+   Compiling hashbrown v0.17.1
+   Compiling group v0.14.0
+   Compiling inout v0.2.5
+   Compiling shlex v2.0.1
+   Compiling base16ct v1.0.0
+   Compiling find-msvc-tools v0.1.15
+   Compiling cc v1.11.0
+   Compiling sec1 v0.8.1
+   Compiling hkdf v0.13.0
+   Compiling zmij v1.0.23
+   Compiling utf8parse v0.2.2
+   Compiling pkg-config v0.3.34
+   Compiling vcpkg v0.2.15
+   Compiling anstyle-parse v1.0.0
+   Compiling elliptic-curve v0.14.3
+   Compiling primefield v0.14.0
+   Compiling cipher v0.5.2
+   Compiling serde_derive v1.0.229
+   Compiling universal-hash v0.6.1
+   Compiling colorchoice v1.0.5
+   Compiling anstyle-query v1.1.5
+   Compiling equivalent v1.0.3
+   Compiling serde_json v1.0.154
+   Compiling anstyle v1.0.14
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling anstream v1.0.0
+   Compiling indexmap v2.14.2
+   Compiling libsqlite3-sys v0.39.1
+   Compiling polyval v0.7.3
+   Compiling wnaf v0.14.1
+   Compiling rfc6979 v0.6.0
+   Compiling spki v0.8.1
+   Compiling signature v3.0.0
+   Compiling strsim v0.11.1
+   Compiling shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=9b88eb5be5bc9ba8c5c75480483b9861ddc6e993#9b88eb5b)
+   Compiling winnow v0.7.15
+   Compiling clap_lex v1.1.1
+   Compiling toml_write v0.1.2
+   Compiling heck v0.5.0
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling anyhow v1.0.104
+   Compiling clap_derive v4.6.7
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling toml_edit v0.22.27
+   Compiling clap_builder v4.6.7
+   Compiling ecdsa v0.17.0
+   Compiling primeorder v0.14.0
+   Compiling ghash v0.6.0
+   Compiling ctr v0.10.1
+   Compiling aes v0.9.3
+   Compiling aead v0.6.1
+   Compiling hashlink v0.12.2
+   Compiling sha2 v0.11.1
+   Compiling bitflags v2.13.2
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling fallible-iterator v0.3.0
+   Compiling smallvec v1.16.4
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1099/crates/core)
+   Compiling p256 v0.14.0
+   Compiling clap v4.6.7
+   Compiling aes-gcm v0.11.1
+   Compiling toml v0.8.23
+   Compiling base64 v0.23.1
+   Compiling drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1099/crates/sys)
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
+   Compiling bytes v1.12.1
+   Compiling pin-project-lite v0.2.17
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1099/crates/cli)
+   Compiling tokio v1.54.1
+   Compiling rusqlite v0.41.1
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1099/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1099/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 41.11s
+     Running tests/host_deadline.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1099/debug/deps/host_deadline-22ca05e991607b24)
+
+running 2 tests
+kill: (292950): No such process
+test an_ssh_that_never_returns_costs_one_deadline_and_drive_still_starts ... ok
+test a_hung_shed_connect_on_one_remote_host_costs_one_deadline_and_another_remote_host_still_spawns ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.09s
+
+     Running tests/hosts.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1099/debug/deps/hosts-5429b8a4ec2b04ea)
+
+running 47 tests
+test a_disabled_host_gets_no_trim_call ... ok
+test a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_work ... ok
+test a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only ... ok
+test a_remote_dry_run_prints_the_argv_the_spawn_sends ... ok
+test a_remote_lane_gets_the_service_url_and_its_own_token ... ok
+test a_lanes_outbox_env_never_reaches_the_remote_lane_test ... ok
+test a_lane_of_the_same_name_on_another_host_keeps_no_worktree_live ... ok
+test a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip ... ok
+test a_remote_lane_knows_the_main_host_and_answers_reach_it ... ok
+test a_symlinked_drover_updates_and_reads_back_its_real_install_root ... ok
+test a_signed_out_sticky_host_yields_unless_its_worktree_has_unpushed_work ... ok
+test a_sticky_host_refusing_disk_low_yields_unless_its_worktree_has_unpushed_work ... ok
+test a_remote_supersede_stays_on_its_host ... ok
+test a_remote_lane_runs_every_command_on_its_host ... ok
+test a_remote_review_is_read_over_ssh_and_recorded ... ok
+test a_wip_push_whose_ref_exists_retries_under_a_new_name ... ok
+test a_supersede_onto_another_host_closes_the_old_lane_on_its_own ... ok
+test a_worktree_whose_gitfile_points_at_another_host_is_reported_not_removed ... ok
+test an_unreachable_host_costs_one_short_attempt_per_pass ... ok
+test admission_runs_per_host ... ok
+test after_hosts_off_the_issue_leaves_its_last_host ... ok
+test a_supersede_saves_a_remote_lanes_dirty_work_first ... ok
+test an_unhealthy_host_takes_no_lanes_and_shows_red ... ok
+test an_off_host_is_never_chosen_but_drains_its_lanes ... ok
+test an_offline_host_never_pages_and_shows_grey ... ok
+test clean_closes_a_killed_lanes_leftover_shell_pane_then_removes_the_worktree ... ok
+test disk_low_on_a_remote_host_trims_its_shared_build_folder_first ... ok
+test disk_low_on_a_remote_host_sweeps_its_finished_lanes_scratch_before_refusing ... ok
+test asks_stranded_on_a_remote_host_are_imported_once ... ok
+test design_runs_on_the_main_host_only_and_a_role_pin_holds ... ok
+test clean_removes_a_remote_worktree_over_its_host ... ok
+test clean_lists_and_removes_a_second_hosts_lane_and_orphan ... ok
+test health_is_clean_only_when_drover_on_ssh_path_is_this_version ... ok
+test doctor_flags_a_stale_remote_fleet_toml_and_leaves_it ... ok
+test host_busy_names_the_lane_holding_the_cpu ... ok
+test doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh ... ok
+test kill_saves_a_remote_lanes_work_on_its_own_host ... ok
+test each_health_check_says_what_failed_and_how_to_fix_it ... ok
+test remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pass ... ok
+test cli_and_board_toggles_both_log ... ok
+test the_least_busy_host_wins ... ok
+test the_lanes_screen_and_the_herd_name_the_host ... ok
+test kill_closes_a_remote_lanes_live_pane_and_clean_then_removes_it ... ok
+test tags_are_detected_cached_and_refreshed_hourly ... ok
+test needs_pick_the_host_whose_tags_cover_them_else_no_host ... ok
+test a_tick_starts_the_sync_of_a_reachable_host_though_its_health_check_times_out ... ok
+test the_tick_drives_before_it_trims_remote_hosts ... ok
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+
+     Running tests/offline_tick.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1099/debug/deps/offline_tick-189513a25301bc42)
+
+running 4 tests
+test a_tick_past_its_budget_skips_the_rest_says_so_and_ends ... ok
+test waiting_after_a_tick_past_its_budget_shows_the_remote_lanes_next_step_not_host_offline ... ok
+test a_tick_past_its_budget_still_pushes_a_remote_lanes_commits_every_pass ... ok
+test a_host_that_drops_after_its_probe_costs_one_timeout_and_drive_still_starts ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
+
+     Running tests/remote_verdict.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1099/debug/deps/remote_verdict-35bfa34cc80ce8dd)
+
+running 2 tests
+test a_verdict_md_the_look_missed_is_fetched_and_recorded_in_the_same_pass ... ok
+test a_remote_reviewer_that_exited_leaving_verdict_md_is_recorded_next_pass_after_a_failed_pickup ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.71s
+
+     Running tests/stall_move.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1099/debug/deps/stall_move-857c283ae8fa85a0)
+
+running 3 tests
+test a_busy_last_host_whose_worktree_holds_only_untracked_scratch_yields_to_a_free_host ... ok
+test a_load_wait_past_the_stall_window_with_no_free_host_is_a_stuck_card_never_the_busy_host ... ok
+test a_fix_spawn_held_on_its_busy_pinned_host_past_the_stall_window_moves_with_its_wip_saved ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+

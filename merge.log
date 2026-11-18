@@ -1,0 +1,24 @@
+Auto-merging .drover/arch.toml
+Auto-merging crates/cli/tests/hosts.rs
+Auto-merging crates/cli/tests/scratch.rs
+Auto-merging crates/cli/tests/sim/main.rs
+Auto-merging crates/cli/tests/sim/model.rs
+Auto-merging crates/cli/tests/sim/scenario.rs
+Auto-merging crates/cli/tests/sim/seeds.rs
+Auto-merging crates/core/src/cli.rs
+Auto-merging crates/core/src/config.rs
+CONFLICT (content): Merge conflict in crates/core/src/config.rs
+Auto-merging crates/core/src/diagram.rs
+Auto-merging crates/core/src/hook.rs
+Auto-merging crates/core/src/hosts.rs
+Auto-merging crates/core/src/lib.rs
+Auto-merging crates/core/src/overlap.rs
+Auto-merging crates/core/src/runner.rs
+CONFLICT (content): Merge conflict in crates/core/src/runner.rs
+Auto-merging crates/core/src/spawn.rs
+Auto-merging docs/config.md
+CONFLICT (content): Merge conflict in docs/config.md
+Auto-merging docs/workflow.md
+Auto-merging fleet.example.toml
+Auto-merging scripts/test-shards.txt
+Automatic merge failed; fix conflicts and then commit the result.
