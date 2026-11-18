@@ -86,6 +86,7 @@ input[type=checkbox]{width:var(--s4);height:var(--s4);accent-color:var(--l)}
 .card.accent{border-top:3px solid var(--g)}
 .card.warn,.card.bad{border-color:var(--r);background:color-mix(in srgb,var(--r) 15%,transparent)}
 .card.warn{border-color:var(--a)}
+.card.pending{opacity:.55}
 .ch{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2)}
 .ch>b{color:var(--g)}
 .card.warn .ch>b,.card.bad .ch>b{color:var(--fg)}
