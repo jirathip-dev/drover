@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang=en data-theme=garden data-scheme=garden-light>
+<head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>#1306 board style: the old board next to the proposal</title>
+<link rel=stylesheet href="../../../web/src/board.css">
+<link rel=stylesheet href="proposed.css">
+</head>
+<body>
+<div class=mock>
+<h1>#1306 · the old board (c34235855~1) next to today's and the proposal · same demo data, garden, 390 wide</h1>
+<p class=note>Old: the board #927 deleted, built from c34235855~1 and exported with <code>serve --export --demo</code>, shot by
+<code>shoot.mjs</code> with localStorage <code>mode</code> = scene (pixel) or ascii. Today: the JSON-screens board in garden:
+the plant sprites are there but still (no frame loop), Lanes has no keeper over the plant, Hosts no miniature, no moments.</p>
+<div class=tabt>old board</div>
+<div class=shots>
+<figure><img src="old/queue-scene-390.png" alt="old Queue, pixel"><figcaption>Queue · pixel: the stage's plant per issue, looping</figcaption></figure>
+<figure><img src="old/queue-ascii-390.png" alt="old Queue, ascii"><figcaption>Queue · ascii: <code>ascii_rows</code></figcaption></figure>
+<figure><img src="old/lanes-scene-390.png" alt="old Lanes, pixel"><figcaption>Lanes · pixel: keeper in its look over the plant</figcaption></figure>
+<figure><img src="old/lanes-ascii-390.png" alt="old Lanes, ascii"><figcaption>Lanes · ascii: <code>ascii</code> figures, two-frame gallop</figcaption></figure>
+</div>
+<div class=tabt>today and the proposal</div>
+<div class=shots>
+<figure><img src="old/today-queue-garden-390.png" alt="today's Queue in garden"><figcaption>today · Queue in garden: still sprites; the terminal style keeps today's terminal-theme look</figcaption></figure>
+<figure><img src="tabs-390.png" alt="proposal, three styles stacked"><figcaption>proposal · Queue, Events, Lanes in terminal, ascii, pixel (stacked at 390)</figcaption></figure>
+<figure><img src="look-390.png" alt="proposal, look sheet"><figcaption>proposal · look sheet, Hosts, loading, moments</figcaption></figure>
+<figure><img src="old/queue-scene-1440.png" alt="old Queue at 1440"><figcaption>old · Queue at 1440, pixel</figcaption></figure>
+</div>
+</div>
+</body>
+</html>

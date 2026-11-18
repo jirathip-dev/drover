@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang=en data-theme=garden data-scheme=garden-light>
+<head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>#1306 board style: Queue, Events, Lanes in terminal | ascii | pixel</title>
+<link rel=stylesheet href="../../../web/src/board.css">
+<link rel=stylesheet href="proposed.css">
+</head>
+<body>
+<div class=mock>
+<h1>#1306 · the tabs in each style · garden theme, garden-light colours, the demo's data</h1>
+<p class=note>One board, three looks. The rows, words and badges are today's JSON screens; only the figure slot changes.
+The art is the pinned swag commit's garden sprites; each pixel sprite loops its two frames every 0.6 s (frozen here).</p>
+<div class=cols id=cols></div>
+</div>
+<script type=module>
+import { load, rowFig, laneFig, loadingFig, row, word, head } from './art.js';
+await load();
+const Q = [
+  { f: { state: 'needs', grow: 'blocked', n: 21 }, t: '#21 Rate-limit the public search endpoint', s: 'asks: Return 429 with Retry-After only, or als…', v: '4m' },
+  { f: { state: 'needs', grow: 'blocked', n: 22 }, t: '#22 OpenAPI spec served at /v1/openapi.json', s: 'review 1 ✗ · review 2 ✗ · review 3 ✗ · review 4 …', v: '59m' },
+  { f: { state: 'working', tool: 'read', grow: 'review', n: 15 }, t: '#15 Cursor pagination for /v1/orders', s: 'impl ✓ · review 1 · PR #33 · CI ✓', v: '1h 9m' },
+  { f: { state: 'working', tool: 'run', grow: 'impl', n: 17 }, t: '#17 Idempotency keys on POST /v1/payments', s: 'impl ▸ working · acme-api-impl-17', v: '1h 26m' },
+  { f: { state: 'fail', grow: 'blocked', n: 19 }, t: '#19 Webhook retries with backoff', s: 'impl · dead', v: '2h 33m' },
+];
+const C = [
+  { f: { state: 'idle', grow: 'queued', n: 45 }, t: '#45 Image lazy-loading on the product grid', s: 'queued #1' },
+  { f: { state: 'idle', grow: 'queued', n: 46 }, t: '#46 Locale switcher in the header', s: 'queued #2' },
+];
+const E = [
+  { f: { state: 'merged', kind: 'merged' }, t: 'merged · #33', s: 'Cursor pagination for /v1/orders', v: '2m', mo: 'merged' },
+  { f: { state: 'fail', kind: 'fail' }, t: 'review FAIL · round 3', s: 'OpenAPI spec served at /v1/openapi.json', v: '1h' },
+  { f: { state: 'needs', kind: 'needs' }, t: 'asks you (q33) · Return 429 with Retry-After only…', s: 'Rate-limit the public search endpoint', v: '4m' },
+  { f: { state: 'done', kind: 'done' }, t: 'review PASS · round 4', s: 'OpenAPI spec served at /v1/openapi.json', v: '1h' },
+  { f: { state: 'working', kind: 'rev' }, t: 'lane started · rev', s: 'acme-web-rev-38 · Search page: debounce the query box', v: '43m' },
+  { f: { state: 'working', kind: 'impl' }, t: 'lane started · impl', s: 'acme-api-impl-17 · Idempotency keys on POST', v: '86m' },
+];
+const L = [
+  ['needs', [{ f: { state: 'needs', grow: 'blocked', n: 44, agent: 'acme-web-impl-44' }, t: 'acme-web #44', s: 'impl · local · now: running pnpm e2e', v: '33m' }]],
+  ['working', [
+    { f: { state: 'working', tool: 'run', grow: 'impl', n: 17, agent: 'acme-api-impl-17' }, t: 'acme-api #17', s: 'impl · local · step 4/6: wire the middleware', v: '86m' },
+    { f: { state: 'working', tool: 'read', grow: 'review', n: 38, agent: 'acme-web-rev-38' }, t: 'acme-web #38', s: 'rev · local · now: running pnpm test search', v: '43m' },
+    { f: { state: 'working', tool: 'edit', grow: 'fix', n: 41, agent: 'acme-web-impl-41' }, t: 'acme-web #41', s: 'fix · local · now: running pnpm test settings', v: '53m' }]],
+  ['idle', [
+    { f: { state: 'idle', agent: 'orchestrator-t4' }, t: 'Rate limits for /v1/search · t4', s: 'orchestrator · local', v: '40m' },
+    { f: { state: 'done', grow: 'merged', n: 9, agent: 'docs-impl-9' }, t: 'docs #9', s: 'impl · local · done', v: '78m' }]],
+];
+const P = { needs: 'needs you', working: 'working', idle: 'idle' };
+document.getElementById('cols').innerHTML = ['terminal', 'ascii', 'pixel'].map(y => `<section class=col data-style=${y}>${head(y)}
+<div id=strip>${y === 'terminal' ? '<span class=m>last update 07:24</span>' : ''}</div>
+${y === 'pixel' ? `<div class=frames>frame 1 <svg viewBox="0 0 24 24" style="--o1:1;--o2:0"><use href="#hs-row-water"/></svg> frame 2 <svg viewBox="0 0 24 24" style="--o1:0;--o2:1"><use href="#hs-row-water"/></svg> · kfr 1.2 s</div>` : ''}
+<div class=tabt>${word('tab-queue', 'queue')}</div>
+<div class=sh>${word('working', 'in progress')} (5)</div>
+<div class=list>${Q.map(r => row(rowFig(y, r.f), r.t, r.s, r.v)).join('')}</div>
+<div class=sh>${word('queued', 'queued')} (2)</div>
+<div class=list>${C.map(r => row(rowFig(y, r.f), r.t, r.s)).join('')}</div>
+<div class=tabt>${word('tab-events', 'events')}</div>
+<div class=list>${E.map(r => row(rowFig(y, r.f), r.t, r.s, r.v)).join('')}</div>
+<div class=tabt>${word('tab-lanes', 'lanes')}</div>
+${L.map(([k, rs]) => `<div class=sh>${word(k, P[k])} (${rs.length})</div><div class=list>${rs.map(r => row(laneFig(y, r.f), r.t, r.s, r.v)).join('')}</div>`).join('')}
+</section>`).join('');
+</script>
+</body>
+</html>

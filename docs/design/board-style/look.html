@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang=en data-theme=garden data-scheme=garden-light>
+<head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>#1306 board style: the look sheet, Hosts, loading, moments</title>
+<link rel=stylesheet href="../../../web/src/board.css">
+<link rel=stylesheet href="proposed.css">
+<style>.anim-still *{animation-play-state:paused!important}.col .sp{border:1px solid var(--edge);border-radius:12px 12px 0 0;padding:0 var(--s3) var(--s3);margin:var(--s2) 0}</style>
+</head>
+<body>
+<div class="mock anim-still">
+<h1>#1306 · the [⚙] look sheet, Hosts, loading and moments · one column per pick</h1>
+<p class=note>The settings sheet gains a <b>style</b> group under theme and colours: terminal | ascii | pixel, each row with its own
+preview. A tap repaints every open tab and sheet in place and is kept on this phone (localStorage <code>style</code>). Below each
+sheet: what that pick draws in the Hosts sheet, the loading strip and the three moments (frozen mid-play here).</p>
+<div class=cols id=cols></div>
+</div>
+<script type=module>
+import { load, T, rowFig, loadFig, loadingFig, row, word, head } from './art.js';
+await load();
+const Y = ['terminal', 'ascii', 'pixel'];
+const prev = y => y === 'terminal' ? '<i class="gl g">●</i>' : y === 'ascii' ? `<i class=rsa>${T.ascii_rows.impl}</i>` : '<svg viewBox="0 0 24 24"><use href="#hs-row-water"/></svg>';
+const H = [['mini', 'main host · 10 lanes', 'calm', 'on'], ['studio', 'm2 · 4 lanes · load 7.4', 'busy', 'on'], ['cloud-1', 'held: memory pressure', 'held', 'off']];
+const tone = { calm: 'ok', busy: 'warn', held: 'bad' };
+document.getElementById('cols').innerHTML = Y.map(y => `<section class=col data-style=${y}>${head(y)}
+<div id=strip>${loadingFig(y)}</div>
+<div class="sp lk"><div class=sh><b>settings</b><button><span>close</span></button></div>
+<div class=sec><div class=sh>theme</div><div class=list>${['farm', 'garden', 'kitchen', 'terminal'].map(n => `<div class="row${n === 'garden' ? ' on' : ''}"><span class=rm><span class=rt>${n}</span></span><span class=rv></span></div>`).join('')}</div></div>
+<div class=sec><div class=sh>colours</div><div class=list><div class="row on"><span class=rm><span class=rt>garden-light</span><span class=rs>the theme's default</span></span><span class=rv></span></div><div class=row><span class=rm><span class=rt>garden-dark</span></span></div></div></div>
+<div class=sec><div class=sh>style <span class=m>· rows, lanes, hosts, loading</span></div><div class=list>${Y.map(n => `<div class="row${n === y ? ' on' : ''}"><span class=prev>${prev(n)}</span><span class=rm><span class=rt>${n}</span><span class=rs>${{ terminal: 'plain glyphs', ascii: 'the theme’s ascii figures', pixel: 'animated sprites' }[n]}</span></span><span class=rv></span></div>`).join('')}</div></div>
+<p class="m foot">this phone only · reduced motion: still frames</p></div>
+<div class=tabt>hosts <span class=m>· the Hosts sheet, a load miniature per host</span></div>
+<div class=list>${H.map(([n, s, l, b]) => `<div class=row>${loadFig(y, l)}<span class=rm><span class=rt>${n}</span><span class=rs>${s}</span></span><span class="tag ${tone[l]}">${y === 'terminal' ? b : word('x', T.load_scene.levels[l])}</span></div>`).join('')}</div>
+<div class=tabt>moments <span class=m>· on the event's row, 2.4 s, once</span></div>
+<div class=list>
+${row(rowFig(y, { state: 'merged', kind: 'merged' }), 'merged · #33', 'Cursor pagination for /v1/orders', '', y === 'terminal' ? '' : ' data-mo=merged').replace('</div>', y === 'terminal' ? '</div>' : `<i class=mot>${T.words.merged}!</i></div>`)}
+${row(rowFig(y, { state: 'fail', kind: 'fail' }), 'review FAIL · round 3', 'OpenAPI spec served at /v1/openapi.json', '', y === 'terminal' ? '' : ' data-mo=fail').replace('</div>', y === 'terminal' ? '</div>' : `<i class=mot>${T.words.fail}</i></div>`)}
+${row(rowFig(y, { state: 'needs', kind: 'needs' }), 'asks you (q33)', 'Rate-limit the public search endpoint', '', y === 'terminal' ? '' : ' data-mo=needs').replace('</div>', y === 'terminal' ? '</div>' : `<i class=mot>${T.words.needs}</i></div>`)}
+</div>
+${y === 'pixel' ? `<p class="m foot">off-screen issue: the #mo mark hops in the corner</p><div style="position:relative;height:56px"><i id=mo style="top:0"><svg viewBox="0 0 132 100"><use href="#hs-${T.moments.merged.sprite}"/></svg></i></div>` : ''}
+</section>`).join('');
+</script>
+</body>
+</html>
