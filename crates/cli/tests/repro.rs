@@ -285,3 +285,87 @@ fn a_later_run_pass_at_the_head_clears_earlier_verify_passes() {
     assert_eq!(code, 0, "{out}");
     assert!(r.called("gh pr merge 100"));
 }
+
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
+}
+
+#[test]
+fn a_merge_gate_refusal_at_a_passed_head_is_needs_human_once_and_no_rev_rerun() {
+    let (c, _d) = setup("repro-gate-once", &(CONFIG.to_string() + VERIFY), true);
+    let v = json!({"verdict": "PASS", "sha": sha(), "stage": "rev", "loop": "rev", "body": "PASS", "repro": "verify"});
+    append(&c.state, &Event::new(3, "sendmeter", Some(12), "verdict", v)).unwrap();
+    let skip = json!({"sha": sha(), "stage": "verify", "reason": "r"});
+    append(&c.state, &Event::new(4, "sendmeter", Some(12), "verify-skipped", skip)).unwrap();
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = drive_fake();
+    for _ in 0..3 {
+        let (code, out) = run(&c, &r, &["drive"]);
+        assert_eq!(code, 0, "{out}");
+    }
+    let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert!(code == 3 && out.contains("REFUSED NO_REPRO"), "{out}");
+    assert_eq!(state(&c), "needs-human");
+    assert!(
+        !sh.called("run", "sendmeter-rev-12-r2"),
+        "rev respawned at the same head"
+    );
+    assert!(!r.called("gh pr merge"));
+    let nh = kinds(&c, "needs-human");
+    assert_eq!(nh.len(), 1, "{nh:?}");
+    assert_eq!(nh[0].str("code"), Some("NO_REPRO"));
+    assert!(
+        nh[0].str("reason").unwrap().contains("NO_REPRO"),
+        "{:?}",
+        nh[0].str("reason")
+    );
+}
+
+#[test]
+fn a_finished_rev_lanes_verdict_is_recorded_before_drive_supersedes_it() {
+    let (c, d) = setup("repro-ingest", CONFIG, false);
+    let wt = d.join("rev-wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join("verdict.md"), "PASS\n\nAll ACs hold.\n").unwrap();
+    let sp = json!({"role": "rev", "stage": "rev", "check": true, "agent": "sendmeter-rev-12", "branch": "issue-12",
+        "worktree": wt.to_string_lossy(), "sha": sha()});
+    append(&c.state, &Event::new(3, "sendmeter", Some(12), "spawn", sp)).unwrap();
+    let b = json!({"code": "STALE_VERDICT", "reason": "no verdict for the head"});
+    append(&c.state, &Event::new(4, "sendmeter", Some(12), "blocked", b)).unwrap();
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let (code, out) = run(&c, &drive_fake(), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let v = verdicts(&c);
+    assert_eq!(v.len(), 1, "{out}");
+    assert_eq!(
+        (v[0].str("verdict"), v[0].str("sha")),
+        (Some("PASS"), Some(sha().as_str()))
+    );
+    let before = |e: &Event| e.kind == "supersede" && e.seq < v[0].seq;
+    assert!(!read(&c.state).unwrap().iter().any(before), "{out}");
+}
+
+#[test]
+fn a_later_run_pass_at_the_head_does_not_force_the_verify_stage() {
+    let (c, _d) = setup("repro-why-latest", &(CONFIG.to_string() + VERIFY), true);
+    for (ts, repro) in [(3, "verify"), (4, "run")] {
+        let v = json!({"verdict": "PASS", "sha": sha(), "stage": "rev", "loop": "rev", "body": "PASS", "repro": repro});
+        append(&c.state, &Event::new(ts, "sendmeter", Some(12), "verdict", v)).unwrap();
+    }
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = drive_fake().reply(RECIPE, "");
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!sh.called("run", "sendmeter-verify-12-r1"), "{out}");
+    let skip = kinds(&c, "verify-skipped");
+    assert_eq!(skip.len(), 1, "{out}");
+    assert!(!skip[0].str("reason").unwrap().contains("Repro: verify"), "{skip:?}");
+}
