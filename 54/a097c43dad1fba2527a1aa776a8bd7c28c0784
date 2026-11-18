@@ -1,0 +1,9 @@
+Decided: drover checks a shed protocol minimum (MIN_PROTOCOL) and never installs or updates shed; drover shed install is gone.
+Because: "Any shed whose protocol is at or above that minimum passes."
+Because: "drover and cooee only check compatibility; they never install or update shed."
+Decided: a shed on PATH of another build than serve is shown in doctor's line as info, never refused.
+Because: "no longer a `SHED_VERSION` refusal (shed hands serve over itself)"
+Decided: cloud bootstrap installs shed from its main branch once, only when shed --version does not answer.
+Rejected: a release-asset download — drover does not know shed's release asset names; cargo from main is shed's latest main.
+Check: a serve under MIN_PROTOCOL is refused naming both protocols; builds 9b88eb5/f026a4d pass spawn and doctor (crates/cli/tests/shed_pin.rs).
+Owner: drover now accepts any new-enough shed and leaves updating shed to shed itself.
