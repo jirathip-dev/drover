@@ -405,6 +405,7 @@ pub struct Server<'a> {
     later: Mutex<Vec<(Ctx, (Event, String))>>,
     chat: Mutex<[(serde_json::Value, serde_json::Value); 2]>,
     timing: Mutex<slo::Timing>,
+    phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
     hosts_read: Mutex<(usize, Option<Vec<String>>)>,
 }
@@ -764,6 +765,7 @@ impl<'a> Server<'a> {
             later: Mutex::default(),
             chat: Mutex::default(),
             timing: Mutex::default(),
+            phone: Mutex::default(),
             rss: std::sync::atomic::AtomicU64::default(),
             hosts_read: Mutex::default(),
         }
