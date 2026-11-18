@@ -1,0 +1,6 @@
+Decided: serial_groups' SERIAL_UNMARKED test now expects needs-human, not blocked; no product code changed in this round
+Because: "Others (`NO_REPRO`, `TESTS_CHANGED`, `NO_BASELINE`, `SERIAL_UNMARKED`) make the issue needs-human with the refusal as the card's reason, once per head"
+Rejected: keeping SERIAL_UNMARKED as blocked — blocked is what read as review again and fed the rev loop
+Decided: dropped the previous lane's wip snapshot commit, which held only logs/ files, so no logs land in git
+Check: crates/cli/tests/serial_groups.rs merge_refuses_a_pr_touching_a_group_it_never_joined passes and still asserts the SERIAL_UNMARKED refusal text
+Owner: the one red CI test asserted the old behaviour the issue changes; it now checks the new one
