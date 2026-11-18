@@ -1,0 +1,9 @@
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-937/crates/service)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-937/crates/cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.68s
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-937/crates/core)
+    Checking drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-937/crates/sys)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-937/crates/cli)
+    Checking drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-937/crates/server)
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-937/crates/service)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 24.58s
