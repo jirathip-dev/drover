@@ -133,7 +133,7 @@ fn serve_starts_and_serves_the_board_in_10_s() {
         std::thread::spawn(move || drover::serve::serve_on(c, r, l, false));
         let get = |path: &str| {
             let mut s = std::net::TcpStream::connect(addr).unwrap();
-            s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
+            s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes())
                 .unwrap();
             let mut res = String::new();
             s.read_to_string(&mut res).unwrap();

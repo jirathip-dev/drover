@@ -78,7 +78,7 @@ fn call(addr: SocketAddr, method: &str, path: &str, cookie: &str, body: &str) ->
     let mut s = TcpStream::connect(addr).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
+        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
         body.len()
     );
     s.write_all(req.as_bytes()).unwrap();
