@@ -674,9 +674,20 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
     assert!(!r.called(&step("apt_ git")));
     let tag = drover::release::tag("main", env!("DROVER_SHA"));
     let asset = format!("releases/download/{tag}/drover-x86_64-unknown-linux-gnu");
-    assert!(r.called(&step("( n='/opt/drover/bin/drover.new'")), "{:?}", r.calls.borrow());
-    assert!(r.calls.borrow().iter().any(|l| l.contains(&asset)), "the release asset, never a build");
-    assert!(!r.calls.borrow().iter().any(|l| l.contains("--rev") && l.contains("herdsman")));
+    assert!(
+        r.called(&step("( n='/opt/drover/bin/drover.new'")),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert!(
+        r.calls.borrow().iter().any(|l| l.contains(&asset)),
+        "the release asset, never a build"
+    );
+    assert!(!r
+        .calls
+        .borrow()
+        .iter()
+        .any(|l| l.contains("--rev") && l.contains("herdsman")));
     assert!(here.methods().is_empty(), "nothing on this host: {:?}", here.methods());
     let runs: Vec<String> = cloud
         .all("send")
