@@ -1,0 +1,9 @@
+Decided: staging's remote-git test fixtures (offline_tick, host_deadline, remote_verdict, stall_move) expect --no-replace-objects, the flag this PR's runner adds to every git
+Because: crates/core/src/runner.rs:222
+Decided: the known fleet's exact metrics re-pinned on staging's new numbers (to_merge 1253->1250, idle 987->984, p90 and idle summary) for the baseline probe's yield on a no-baseline fleet
+Because: q1779
+Decided: merged origin/staging; doc comments lose their #1099 prefix to match staging's strict comment policy, and docs/config.md keeps both the baseline and in-flight cap sections
+Because: crates/core/src/baseline.rs:11
+Rejected: exempting ssh-carried git from the flag — one rule for every git keeps gate and why on full history on remote hosts too
+Check: cargo test --locked -p drover --test sim and --test offline_tick --test host_deadline --test remote_verdict --test stall_move --test hosts exit 0
+Owner: CI was red because tests from staging expected the old git command line and old simulator timings; they now match, and the branch is up to date with staging.
