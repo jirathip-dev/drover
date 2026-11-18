@@ -1,0 +1,13 @@
+Decided: one cursor helper (crates/server/src/screens_pages.rs) pages Events, done today and the backlog by a descending (u64, u64) key: event seq, (merge time, issue), issue number
+Because: "Events, queue done and backlog send their first 100 rows plus a cursor."
+Decided: the paged block carries `more`, the next page's full path with the screen's own filters and after=<cursor>, so the page never rebuilds a filter
+Because: "Filters work across pages."
+Decided: a stream pins its window to the first page's cursor (to=<cursor>), so a delta inserts new rows on top and never removes a row that only slid past row 100
+Because: "A stream delta only adds or changes rows in the loaded window, and new rows go on top."
+Decided: Events filters kinds and pages before feed() and title lookups, so only the 100 shown rows are worded
+Because: "Events first paint is under 150 ms p95 on the large fixture."
+Rejected: dropping the 24 h window and the earlier-days link for one endless list — not asked; the cursor pages within the window
+Rejected: a bare cursor field the page joins to its path — a sheet's path does not carry the filter an action applied
+Check: crates/cli/tests/screen_pages.rs follows every `more` to the end and asserts no duplicate, the full count and newest-first order, with filters
+Check: the WebKit test (ui/pages.mjs) scrolls Events to the end and asserts scroll y and a row's top unchanged after the append; it ran here in Chromium only (WebKit lacks host libs)
+Owner: Events, done today and the backlog now load 100 rows at a time and fetch more as you scroll.
