@@ -22,9 +22,10 @@ pub fn gzip(head: &str) -> bool {
     names(head, "accept-encoding", "gzip")
 }
 
-/// Whether the request asks to keep its connection open (`Connection: keep-alive`).
+/// Whether the connection stays open: HTTP/1.1 unless `Connection: close`, HTTP/1.0 only with `Connection: keep-alive`.
 pub fn keep(head: &str) -> bool {
-    names(head, "connection", "keep-alive")
+    let v11 = head.lines().next().is_some_and(|l| l.ends_with(" HTTP/1.1"));
+    !names(head, "connection", "close") && (v11 || names(head, "connection", "keep-alive"))
 }
 
 /// One request off the socket: its bytes, and whether its body was over the limit; what follows stays in `buf`.

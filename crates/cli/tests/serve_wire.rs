@@ -206,19 +206,19 @@ fn response(s: &mut TcpStream) -> String {
 }
 
 #[test]
-fn two_requests_over_one_kept_connection_both_succeed_then_close_ends_it() {
+fn two_plain_http11_requests_over_one_connection_both_succeed_then_close_ends_it() {
     let (_, _, addr) = large();
     let mut s = TcpStream::connect(addr).unwrap();
-    let req = |c: &str| format!("GET /screens/lanes HTTP/1.1\r\nHost: {addr}\r\nConnection: {c}\r\n\r\n");
+    let req = |c: &str| format!("GET /screens/lanes HTTP/1.1\r\nHost: {addr}\r\n{c}\r\n");
     for _ in 0..2 {
-        s.write_all(req("keep-alive").as_bytes()).unwrap();
+        s.write_all(req("").as_bytes()).unwrap();
         let head = response(&mut s);
         assert!(
             head.starts_with("HTTP/1.1 200") && head.contains("Connection: keep-alive"),
             "{head}"
         );
     }
-    s.write_all(req("close").as_bytes()).unwrap();
+    s.write_all(req("Connection: close\r\n").as_bytes()).unwrap();
     assert!(response(&mut s).contains("Connection: close"));
     assert_eq!(s.read(&mut [0u8; 1]).unwrap(), 0);
 }

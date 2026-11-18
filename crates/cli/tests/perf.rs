@@ -111,7 +111,7 @@ fn get(addr: std::net::SocketAddr, path: &str) -> (u128, usize) {
 fn fetch(addr: std::net::SocketAddr, path: &str) -> (u128, String) {
     let t = Instant::now();
     let mut s = std::net::TcpStream::connect(addr).unwrap();
-    s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
+    s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes())
         .unwrap();
     let mut res = vec![];
     s.read_to_end(&mut res).unwrap();
@@ -605,7 +605,8 @@ fn huge_with(total: u64, old: u64) -> (drover::Ctx, Fake) {
 
 fn send(addr: std::net::SocketAddr, req: &str) -> String {
     let mut s = std::net::TcpStream::connect(addr).unwrap();
-    s.write_all(req.as_bytes()).unwrap();
+    s.write_all(req.replacen("\r\n", "\r\nConnection: close\r\n", 1).as_bytes())
+        .unwrap();
     let mut res = vec![];
     drop(s.read_to_end(&mut res));
     String::from_utf8_lossy(&res).into_owned()
