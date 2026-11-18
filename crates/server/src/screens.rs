@@ -456,9 +456,45 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q, lanes: &[Lane], lat
     v
 }
 
-fn done_screen(c: &QueueCard) -> Value {
+const PAGE: usize = 100;
+
+/// The rows of a paged list, newest key first: the first page, the one `after` a cursor, or all down `to` one (a stream's window); and the next page's path.
+fn page<T>(path: &str, q: &Q, mut rows: Vec<((u64, u64), T)>) -> (Vec<T>, Option<String>) {
+    let key = |k: &str| {
+        let (a, b) = q.get(k)?.split_once('.')?;
+        Some((a.parse().ok()?, b.parse().ok()?))
+    };
+    let (after, to) = (key("after"), key("to"));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
+    rows.retain(|r| after.is_none_or(|c| r.0 < c));
+    let n = to.map_or(PAGE, |c| rows.iter().take_while(|r| r.0 >= c).count());
+    let left = rows.len() > n;
+    rows.truncate(n);
+    let next = to.or_else(|| rows.last().map(|r| r.0)).filter(|_| left).map(|(a, b)| {
+        let mut q = q.clone();
+        q.remove("to");
+        q.insert("after".into(), format!("{a}.{b}"));
+        let q: Vec<String> = q.iter().map(|(k, v)| format!("{k}={}", super::enc(v))).collect();
+        format!("{path}?{}", q.join("&"))
+    });
+    (rows.into_iter().map(|r| r.1).collect(), next)
+}
+
+fn paged(mut block: Value, more: Option<String>) -> Value {
+    if let Some(m) = more {
+        block.put("more", json!(m));
+    }
+    block
+}
+
+fn done_screen(c: &QueueCard, q: &Q) -> Value {
     let f = &c.name;
-    let rows: Vec<Value> = (c.done.iter())
+    let (done, more) = page(
+        "/screens/queue/done",
+        q,
+        c.done.iter().map(|d| ((d.t, d.issue), d)).collect(),
+    );
+    let rows: Vec<Value> = (done.into_iter())
         .map(|d| {
             let sha: String = d.sha.as_deref().unwrap_or("?").chars().take(7).collect();
             let at = format!("{:02}:{:02} UTC", d.t % 86_400 / 3600, d.t % 3600 / 60);
@@ -469,7 +505,7 @@ fn done_screen(c: &QueueCard) -> Value {
         })
         .collect();
     json!({"type": "screen", "id": format!("done-{f}"), "title": format!("{f} · done today"),
-        "blocks": [{"type": "list", "id": "done-list", "rows": rows}]})
+        "blocks": [paged(rows_list("done-list", &rows), more)]})
 }
 
 const LEGEND: [(&str, &str); 17] = [
@@ -516,11 +552,8 @@ fn backlog(now: u64, c: &QueueCard, q: &Q) -> Option<Value> {
     let mut fields = vec![
         json!({"type": "text", "name": format!("{f}.q"), "label": "Search", "value": words, "placeholder": "search #, title, label"}),
     ];
-    let mut is: Vec<(u64, &super::BacklogIssue)> = (b.issues.iter())
-        .filter_map(|(n, i)| Some((n.parse().ok()?, i)))
-        .collect();
-    is.sort_by_key(|x| std::cmp::Reverse(x.0));
-    for (n, i) in is {
+    let mut is = vec![];
+    for (n, i) in b.issues.iter().filter_map(|(n, i)| Some((n.parse::<u64>().ok()?, i))) {
         let age = now.saturating_sub(crate::usage::epoch(&i.created).unwrap_or(now)) / 86_400;
         let pass = |k: &&str| match *k {
             "new" => age < 7,
@@ -532,9 +565,11 @@ fn backlog(now: u64, c: &QueueCard, q: &Q) -> Option<Value> {
         let text = format!("#{n} {} {}", i.title, i.labels.join(" ")).to_lowercase();
         if on.iter().all(pass) && words.split_whitespace().all(|w| text.contains(w)) {
             let label = [format!("#{n} {}", i.title), i.labels.join(", ")].join(" · ");
-            fields.push(json!({"type": "toggle", "name": format!("{f}.pick.{n}"), "label": label.trim_end_matches(" · "), "value": false}));
+            is.push(((n, 0), json!({"type": "toggle", "name": format!("{f}.pick.{n}"), "label": label.trim_end_matches(" · "), "value": false})));
         }
     }
+    let (picks, more) = page("/screens/backlog", q, is);
+    fields.extend(picks);
     let opts: Vec<Value> = FILTERS.iter().map(|(v, l)| json!({"value": v, "label": l})).collect();
     let read = format!(
         "read {} ago · Drive now reads it again; ticked ones queue as needs-check",
@@ -545,7 +580,7 @@ fn backlog(now: u64, c: &QueueCard, q: &Q) -> Option<Value> {
         "cancel": "Cancel", "done": {"label": "Queue ticked", "action": "queue"}, "blocks": [
         {"type": "chips", "id": "on", "name": format!("{f}.on"), "multi": true, "selected": on, "action": "filter", "options": opts},
         {"type": "section", "id": "issues", "header": "open, not queued", "footer": read,
-            "blocks": [{"type": "form", "id": format!("bl-{f}"), "fields": fields}]}]}),
+            "blocks": [paged(json!({"type": "form", "id": format!("bl-{f}"), "fields": fields}), more)]}]}),
     )
 }
 
@@ -1055,13 +1090,19 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
     let all = picked.contains(&"all") || picked.iter().all(|k| !KINDS.iter().any(|(v, _)| v == k));
     let kinds = ["merged", "verdict", "needs-human", "spawn", "needs-decision"];
     let window = crate::events::since(&ctx.state, &kinds, before.saturating_sub(86_400)).unwrap_or_default();
+    let shown = window
+        .into_iter()
+        .filter(|e| e.ts < before && kind_of(&e.kind).is_some_and(|k| all || picked.contains(&k)))
+        .map(|e| ((e.seq, 0), e));
+    let (mut shown, more) = page("/screens/events", q, shown.collect());
+    shown.reverse();
     let repos: BTreeMap<String, String> = Config::kept(ctx)
         .map(|c| c.fleet.into_iter().map(|(f, fc)| (f, fc.repo)).collect())
         .unwrap_or_default();
-    let list = super::v1::feed(ctx, &window, usize::MAX).list;
+    let list = super::v1::feed(ctx, &shown, usize::MAX).list;
     let (mut rows, mut asks) = (vec![], None);
-    for e in list.iter().rev().filter(|e| e.ts < before) {
-        let Some(k) = kind_of(&e.kind).filter(|k| all || picked.contains(k)) else {
+    for e in list.iter().rev() {
+        let Some(k) = kind_of(&e.kind) else {
             continue;
         };
         let fig = match (k, e.tone.as_str()) {
@@ -1119,7 +1160,7 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
     };
     let mut s = json!({"type": "screen", "id": "events", "title": "Events", "blocks": [
         {"type": "chips", "id": "kind", "name": "kind", "multi": true, "selected": sel, "action": "filter", "options": opts},
-        {"type": "section", "id": "today", "header": header, "blocks": [{"type": "list", "id": "ev", "rows": rows}]},
+        {"type": "section", "id": "today", "header": header, "blocks": [paged(rows_list("ev", &rows), more)]},
         {"type": "list", "id": "older-list", "rows": [{"type": "row", "id": "older", "title": "earlier days", "style": "link",
             "tap": {"open": format!("/screens/events?{kq}before={}", before.saturating_sub(86_400))}}]}]});
     if !stream.is_empty() {
@@ -1462,7 +1503,7 @@ impl Server<'_> {
                 let tab = self.queue_tab(ctx);
                 backlog(ctx.now, tab.fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?, q)?
             }
-            "/screens/queue/done" => done_screen(self.queue_tab(ctx).fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?),
+            "/screens/queue/done" => done_screen(self.queue_tab(ctx).fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?, q),
             "/screens/ask" => ask_sheet(ctx, q)?,
             "/screens/hosts" => self.hosts_sheet(ctx)?,
             "/screens/proxy-token" => Self::proxy_how(ctx)?,
@@ -1919,8 +1960,9 @@ impl Server<'_> {
         let (q, open) = (form(query), STREAMS.fetch_add(1, Relaxed) < 4);
         let paired = Self::plugin(self.ctx, head)
             || devices::check(self.ctx, header(head, "cookie").unwrap_or_default()).is_ok();
-        let screen = |c: &Ctx| crate::runner::request(|| self.screen(c, base, &q, paired));
-        let first = screen(&ctx()).filter(|_| open && (Self::plugin(self.ctx, head) || self.allowed(self.ctx, head)));
+        let screen = |c: &Ctx, q: &Q| crate::runner::request(|| self.screen(c, base, q, paired));
+        let first =
+            screen(&ctx(), &q).filter(|_| open && (Self::plugin(self.ctx, head) || self.allowed(self.ctx, head)));
         let Some(mut cur) = first else {
             STREAMS.fetch_sub(1, Relaxed);
             let r = line(
@@ -1938,6 +1980,10 @@ impl Server<'_> {
             );
             return s.write_all(&[h.as_bytes(), &r.2].concat());
         };
+        let mut q = q;
+        if let Some(c) = cursor(&cur) {
+            q.insert("to".into(), c);
+        }
         let mut seq = header(head, "last-event-id")
             .and_then(|n| n.parse::<u64>().ok())
             .unwrap_or(0)
@@ -1957,7 +2003,7 @@ impl Server<'_> {
                 let now = crate::db::last_seq(&self.ctx.state);
                 if now != log || built.elapsed() >= Duration::from_secs(30) {
                     (log, built) = (now, drover_core::clock::instant());
-                    let new = screen(&ctx()).unwrap_or_else(|| cur.clone());
+                    let new = screen(&ctx(), &q).unwrap_or_else(|| cur.clone());
                     let mut change = ops(&cur, &new);
                     change.extend(
                         count(&new)
@@ -1977,6 +2023,17 @@ impl Server<'_> {
         };
         STREAMS.fetch_sub(1, Relaxed);
         res
+    }
+}
+
+fn cursor(v: &Value) -> Option<String> {
+    match v {
+        Value::Object(m) => match m.get("more").and_then(Value::as_str) {
+            Some(p) => form(p.split_once('?')?.1).remove("after"),
+            None => m.values().find_map(cursor),
+        },
+        Value::Array(a) => a.iter().find_map(cursor),
+        _ => None,
     }
 }
 
