@@ -1,0 +1,9 @@
+Decided: an applied proposal stays in its thread as a closed card naming who, when and the backup, with no buttons
+Because: "Once a proposal is applied, its card shows it as applied (who and when, plus the backup), with no buttons."
+Decided: a proposal is not stale while fleet.toml holds its own content (the apply job writes it before logging config-settled)
+Because: crates/core/src/propose.rs:94
+Decided: the PR body's Parity section names row 32 as changed, still kept
+Because: crates/cli/tests/threads_tab.rs:842
+Rejected: logging config-settled before the doctor run — the event carries the doctor result, so it must come after
+Check: the cards screen mid-apply (fleet.toml already new, no config-settled yet) shows no stale line
+Owner: applied config proposals now read applied in their thread instead of stale
