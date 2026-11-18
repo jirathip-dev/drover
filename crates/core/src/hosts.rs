@@ -33,6 +33,17 @@ const CM: [&str; 3] = [
     "-oControlPersist=10m",
 ];
 
+/// `f` over `items`, one thread each (a host's remote calls never wait on another host's), results in order.
+pub fn each<T: Send, U: Send>(items: impl IntoIterator<Item = T>, f: impl Fn(T) -> U + Sync) -> Vec<U> {
+    let f = &f;
+    std::thread::scope(|s| {
+        let hs: Vec<_> = items.into_iter().map(|x| s.spawn(move || f(x))).collect();
+        hs.into_iter()
+            .map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+            .collect()
+    })
+}
+
 /// `On::existing`'s script: the paths on stdin, a line each.
 pub const EXISTS: &str = "while IFS= read -r p; do test -e \"$p\" && echo y || echo n; done";
 
@@ -292,7 +303,7 @@ impl<'a> Pass<'a> {
             std::fs::write(p, m.to_string()).ok();
         }
     }
-    fn host<'b>(prog: &str, args: &'b [String]) -> Option<&'b str> {
+    pub(crate) fn host<'b>(prog: &str, args: &'b [String]) -> Option<&'b str> {
         let end = args.iter().position(|a| a == "--").filter(|_| prog == "ssh")?;
         let last = args.get(end.checked_sub(1)?)?;
         Some(last.as_str()).filter(|m| !m.starts_with('-'))
@@ -1355,9 +1366,7 @@ pub fn place(
         let whys: Vec<String> = full.into_iter().map(|w| w.1).collect();
         return refused(code, whys.join(", "));
     }
-    let mut on: Vec<Placed> = (open.into_iter())
-        .map(|(n, h)| at(ctx, cfg, f, r, (n, h.machine.as_deref()), pre))
-        .collect();
+    let mut on: Vec<Placed> = each(open, |(n, h)| at(ctx, cfg, f, r, (n, h.machine.as_deref()), pre));
     if on
         .iter()
         .all(|p| p.refusal.as_ref().is_some_and(|r| r.0 == "CLOUD_BUDGET"))

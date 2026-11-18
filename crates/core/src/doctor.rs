@@ -214,10 +214,10 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 .map(|p| format!("  {} — {} (fleet.toml:{})", p.rule, p.msg, p.line)),
         );
     }
-    let n = crate::webhook::rejected(ctx);
-    let bad = match n {
-        0 => String::new(),
-        n => format!(" · {n} refused (bad signature)"),
+    let bad = match (crate::webhook::accepted(ctx), crate::webhook::rejected(ctx)) {
+        (0, 0) => String::new(),
+        (a, 0) => format!(" · {a} accepted"),
+        (a, n) => format!(" · {a} accepted · {n} refused (bad signature)"),
     };
     let fix = "put the secret in a file, chmod 600, and name it in [serve] webhook_secret_file (docs/serve.md)";
     let (on, why) = match crate::webhook::secrets(cfg) {
