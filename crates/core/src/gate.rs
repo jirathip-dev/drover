@@ -540,13 +540,25 @@ fn repro_section(pr_body: &str) -> Option<String> {
     Some(ls.take_while(|l| !l.starts_with('#')).collect::<Vec<_>>().join("\n"))
 }
 
-fn unverified(events: &[Event], (fleet, n): (&str, u64), head: &str) -> bool {
-    let at = |e: &&Event| e.is("verdict", fleet, n) && e.str("sha").is_some_and(|s| s.eq_ignore_ascii_case(head));
-    let mut here = events.iter().filter(at);
-    let mut rev = here.clone().rev();
-    rev.find(|e| e.str("stage") != Some("verify") && e.str("verdict") == Some("PASS"))
+fn at_head<'a>(
+    events: &'a [Event],
+    (fleet, n): (&'a str, u64),
+    head: &'a str,
+) -> impl DoubleEndedIterator<Item = &'a Event> {
+    let at = move |e: &&Event| e.is("verdict", fleet, n) && e.str("sha").is_some_and(|s| s.eq_ignore_ascii_case(head));
+    events.iter().filter(at)
+}
+
+/// Whether the latest rev PASS at `head` asked for `Repro: verify`: `unverified`'s and `verify::why`'s one rule.
+pub fn repro_verify(events: &[Event], issue: (&str, u64), head: &str) -> bool {
+    at_head(events, issue, head)
+        .rfind(|e| e.str("stage") != Some("verify") && e.str("verdict") == Some("PASS"))
         .is_some_and(|e| e.str("repro") == Some("verify"))
-        && !here.any(|e| e.str("stage") == Some("verify") && e.str("verdict") == Some("PASS"))
+}
+
+fn unverified(events: &[Event], issue: (&str, u64), head: &str) -> bool {
+    repro_verify(events, issue, head)
+        && !at_head(events, issue, head).any(|e| e.str("stage") == Some("verify") && e.str("verdict") == Some("PASS"))
 }
 
 /// A check stage's rounds (unset: no limit) plus the owner's extends, worded `/3` or ` of 9+1 (owner extended)`.
@@ -648,6 +660,9 @@ pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String,
     };
     (format!("{title} (#{num})"), body, !human.is_empty())
 }
+
+/// Merge refusals at a head with a PASS a new review cannot change: the owner decides, never another rev run.
+pub const NO_REVIEW_FIXES: [&str; 4] = ["NO_REPRO", "TESTS_CHANGED", "NO_BASELINE", "SERIAL_UNMARKED"];
 
 fn premerge_file(ctx: &Ctx, fleet: &str, issue: u64) -> std::path::PathBuf {
     ctx.state.with_file_name(format!("premerge-{fleet}-{issue}.md"))
@@ -902,13 +917,8 @@ pub fn merge(
             return Err(rf.into());
         }
         Err(rf) => {
-            let kind = if rf.code == "ROUND_LIMIT" || rf.code == "NO_REPRO" && !verify_role(f) {
-                "needs-human"
-            } else {
-                "blocked"
-            };
-            let d = json!({"code": rf.code, "reason": rf.msg});
-            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d))?;
+            let at = pr.at("headRefOid").as_str().unwrap_or_default();
+            refusal(ctx, cfg, &events, (fleet, issue, at), &rf)?;
             return Err(rf.into());
         }
     };
@@ -936,6 +946,32 @@ pub fn merge(
     ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
     intent.done(json!({"pr": num, "head": head}))?;
     merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
+}
+
+fn refusal(
+    ctx: &Ctx,
+    cfg: &Config,
+    events: &[Event],
+    (fleet, issue, at): (&str, u64, &str),
+    rf: &Refusal,
+) -> Result<()> {
+    let unreviewable = NO_REVIEW_FIXES.contains(&rf.code);
+    let kind = if rf.code == "ROUND_LIMIT" || unreviewable {
+        "needs-human"
+    } else {
+        "blocked"
+    };
+    let told = |e: &Event| e.is(kind, fleet, issue) && e.str("code") == Some(rf.code) && e.str("sha") == Some(at);
+    if unreviewable && events.iter().any(told) {
+        return Ok(());
+    }
+    let reason = if unreviewable {
+        format!("merge refused {}: {}", rf.code, rf.msg)
+    } else {
+        rf.msg.clone()
+    };
+    let d = json!({"code": rf.code, "reason": reason, "sha": at});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d))
 }
 
 /// This issue's merge action not yet `failed` and no `merged` logged after it; `merge` logs it, with its head.

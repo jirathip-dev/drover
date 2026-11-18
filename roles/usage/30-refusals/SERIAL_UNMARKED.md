@@ -1,1 +1,1 @@
-- SERIAL_UNMARKED: merge: the PR touches the fleet's serial_paths but the issue was not queued `--serial`
+- SERIAL_UNMARKED: merge: the PR touches the fleet's serial_paths but the issue was not queued `--serial` (needs-human, once per head: never another rev run there)
