@@ -161,7 +161,7 @@ fn swapped(f: &Fake, m: &str) -> Option<usize> {
 }
 
 #[test]
-fn a_lagging_host_holds_the_swap_30_minutes_then_the_rest_swap_and_placement_passes_it_over() {
+fn a_lagging_host_holds_the_swap_30_minutes_then_the_rest_swap_and_it_still_takes_lanes() {
     let mut c = setup("rollout-lag", "", true, 0);
     let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
     c.exe = dir.join("bin/drover").display().to_string();
@@ -231,8 +231,11 @@ fn a_lagging_host_holds_the_swap_30_minutes_then_the_rest_swap_and_placement_pas
     );
 
     let c40 = at(40);
-    let e = placed(&c40, &fake(2.0, 0.1), 12, "impl", None).unwrap_err();
-    assert!(e.starts_with("HOST_UPDATING: bazzite: drover there is ?"), "{e}");
+    assert_eq!(
+        placed(&c40, &fake(2.0, 0.1), 12, "impl", None).as_deref(),
+        Ok("bazzite"),
+        "a host left behind takes lanes; only a swap holds them"
+    );
     let (_, code, out) = pass(40, &[("boat2", NEW, None), ("boat3", NEW, None)]);
     assert_eq!((code, out.as_str()), (0, "= up to date @ 1111111\n"));
     assert_eq!(kinds(&c, "host-behind").len(), 1, "logged once");

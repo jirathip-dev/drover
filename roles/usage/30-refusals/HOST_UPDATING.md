@@ -1,1 +1,1 @@
-- HOST_UPDATING: spawn: the host runs another drover build than this one (a self-update rollout, or a host left behind); its running lanes finish, placement passes over it and the next `self-update` catches it up
+- HOST_UPDATING: spawn: a staged release swaps on every host (`[limits] self_update_swap_secs`); its running lanes finish, placement passes over remote hosts until the swap ends. A host on another build otherwise takes lanes

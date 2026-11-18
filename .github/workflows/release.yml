@@ -1,7 +1,8 @@
 name: release
 # #1275: after ci ends green on a push to main or staging, build drover for macOS (signed, notarized) and Linux and
 # publish a GitHub release: build-<sha7> on main (kept), build-staging-<sha7> on staging (a prerelease, pruned after 14
-# days). A failed step ends its job green with an ::error:: annotation and publishes nothing (docs/releases.md).
+# days). A failed step ends its job green with an ::error:: annotation; a failed macOS job leaves a Linux-only release
+# (#1288), a failed Linux job publishes nothing (docs/releases.md).
 on:
   workflow_run:
     workflows: [ci]
@@ -63,7 +64,7 @@ jobs:
             cp "target/$t/release/drover" "drover-$t"
             echo ok=true >> "$GITHUB_OUTPUT"
           else
-            echo "::error::the macOS build failed; nothing is published"
+            echo "::error::the macOS build failed; the Linux build publishes alone"
           fi
       - id: sign
         if: steps.build.outputs.ok == 'true'
@@ -74,10 +75,11 @@ jobs:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: |
-          if sh scripts/release-sign.sh drover-aarch64-apple-darwin; then
+          if sh scripts/release-sign.sh drover-aarch64-apple-darwin 2> sign.err; then
             echo ok=true >> "$GITHUB_OUTPUT"
           else
-            echo "::error::signing, notarization or its check failed; nothing is published"
+            cat sign.err >&2
+            echo "::error::the macOS signing failed: $(tail -n 1 sign.err); the Linux build publishes alone"
           fi
       - if: steps.sign.outputs.ok == 'true'
         uses: actions/upload-artifact@v4
@@ -87,7 +89,7 @@ jobs:
 
   publish:
     needs: [linux, macos]
-    if: needs.linux.outputs.ok == 'true' && needs.macos.outputs.ok == 'true'
+    if: ${{ !cancelled() && needs.linux.outputs.ok == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -102,9 +104,10 @@ jobs:
         run: |
           s=$(printf %.7s "$SHA")
           if [ "$BRANCH" = main ]; then tag="build-$s" pre=""; else tag="build-$BRANCH-$s" pre=1; fi
-          sha256sum drover-aarch64-apple-darwin drover-x86_64-unknown-linux-gnu > SHA256SUMS
+          set -- drover-*
+          sha256sum "$@" > SHA256SUMS
           if ! gh release create "$tag" -R "$REPO" --target "$SHA" --title "$tag" --notes "drover $BRANCH @ $SHA" \
-            ${pre:+"--prerelease"} drover-aarch64-apple-darwin drover-x86_64-unknown-linux-gnu SHA256SUMS; then
+            ${pre:+"--prerelease"} "$@" SHA256SUMS; then
             echo "::error::publishing $tag failed"
           fi
       - name: prune staging prereleases over 14 days old

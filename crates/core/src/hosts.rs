@@ -1019,7 +1019,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     let reach = format!("can't reach {}:", f.repo);
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
     let swap = cfg.limits.self_update_swap_secs;
-    let behind = machine.and_then(|_| updating(pre.0, name, (ctx.now, swap)));
+    let behind = machine.and_then(|_| updating(pre.0, (ctx.now, swap)));
     let mut full = false;
     let (hs, refusal) = match cloud.map_or_else(|| crate::session::live_on(&on).map_err(|_| None), |c| Err(Some(c))) {
         Err(Some(c)) => (Host::default(), Some(c)),
@@ -1166,7 +1166,7 @@ pub fn acp_profiles(cfg: &Config, name: &str, tags: &[String]) -> Vec<(String, &
         .collect()
 }
 
-/// Why a remote ACP lane would run unguarded: another drover build there (a rollout), or no hook or adapter.
+/// Why a remote ACP lane would run unguarded: no hook or adapter, or (a warning only) another drover build there.
 #[derive(Debug)]
 pub enum Unguarded {
     Build { theirs: String, mine: String },
@@ -1183,15 +1183,11 @@ impl std::fmt::Display for Unguarded {
     }
 }
 
-/// Why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: its drover is this one's version, `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, and its shed lists the hooked adapter `id`.
+/// Why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, its shed lists the hooked adapter `id`, then its drover is this one's version.
 pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &str, &str)) -> Result<(), Unguarded> {
     let exe = real_exe(ctx, home);
     let root = ok(on, &exe, &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
     let theirs = with_path(on, &exe, root).0;
-    let mine = format!("drover {}", crate::VERSION);
-    if theirs != mine {
-        return Err(Unguarded::Build { theirs, mine });
-    }
     let dir = rehome(
         vec![providers::profiles_root(ctx).join(profile).display().to_string()],
         Some(home),
@@ -1222,32 +1218,25 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
             "shed there lists no {id} (`shed agents add {id}` there)"
         )));
     }
+    let mine = format!("drover {}", crate::VERSION);
+    if theirs != mine {
+        return Err(Unguarded::Build { theirs, mine });
+    }
     Ok(())
 }
 
-/// Why placement passes over remote host `name` in a rollout, from the log alone: every remote host while a swap is in flight, or `name` while it is left behind.
-pub fn updating(events: &[Event], name: &str, (now, swap_secs): (u64, u64)) -> Option<String> {
+/// Why placement passes over every remote host, from the log alone: a staged release swaps there.
+pub fn updating(events: &[Event], (now, swap_secs): (u64, u64)) -> Option<String> {
     let rollout = |e: &&Event| {
         e.str("target") == Some("live") && matches!(e.kind.as_str(), "self-update-swapping" | "self-updated")
     };
-    let last = events
+    let e = events
         .iter()
         .rfind(rollout)
-        .filter(|e| e.kind == "self-update-swapping");
-    if let Some(e) = last.filter(|e| now < e.ts.saturating_add(swap_secs)) {
-        return Some(format!(
-            "drover swaps to {:.7} on every host",
-            e.str("sha").unwrap_or_default()
-        ));
-    }
-    let mine = |e: &&Event| {
-        e.str("host") == Some(name)
-            && (e.kind == "host-behind" || e.kind == "host-sync" && e.val("ok") == &Value::Bool(true))
-    };
-    let e = events.iter().rfind(mine).filter(|e| e.kind == "host-behind")?;
-    let (has, wants) = (e.str("has").unwrap_or("?"), e.str("wants").unwrap_or_default());
+        .filter(|e| e.kind == "self-update-swapping" && now < e.ts.saturating_add(swap_secs))?;
     Some(format!(
-        "drover there is {has:.7}, not {wants:.7}; the next self-update catches it up"
+        "drover swaps to {:.7} on every host",
+        e.str("sha").unwrap_or_default()
     ))
 }
 
