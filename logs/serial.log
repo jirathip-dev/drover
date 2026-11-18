@@ -1,0 +1,22 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1276/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.69s
+     Running tests/serial_groups.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1276/debug/deps/serial_groups-b79f941690cd5343)
+
+running 14 tests
+test a_mark_joins_its_group_plain_serial_the_first ... ok
+test a_pushed_diff_joins_a_free_group_and_carries_on ... ok
+test both_forms_parse_and_together_are_an_error ... ok
+test doctor_suggests_the_new_form ... ok
+test a_queued_issue_on_a_held_hot_file_names_its_holder_in_status_and_waiting ... ok
+test a_blocked_issue_holds_no_hot_lock ... ok
+test a_hot_file_arch_toml_freezes_is_no_group_anymore ... ok
+test a_marked_issue_logs_its_join_by_mark ... ok
+test a_queued_issue_on_a_held_group_still_waits_and_names_its_holder ... ok
+test merge_refuses_a_pr_touching_a_group_it_never_joined ... ok
+test a_pr_touching_no_hot_file_is_never_held ... ok
+test a_pushed_head_on_a_held_hot_file_is_reviewed_and_its_fix_round_may_start ... ok
+test landing_a_pr_on_a_hot_file_another_issue_holds_is_not_refused ... ok
+test work_over_the_limit_when_a_group_lands_keeps_going_and_only_new_impl_waits ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.11s
+

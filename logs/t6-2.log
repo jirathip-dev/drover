@@ -1,0 +1,22 @@
+
+running 85 tests
+........................................................... 59/85
+drive_now_on_the_board_is_paired_only_and_toasts_its_line --- FAILED
+.........................
+failures:
+
+---- drive_now_on_the_board_is_paired_only_and_toasts_its_line stdout ----
+
+thread 'drive_now_on_the_board_is_paired_only_and_toasts_its_line' (2765817) panicked at crates/cli/tests/drive.rs:781:5:
+assertion `left == right` failed: {"acts":[{"code":"ok","who":"#12","words":"started"}],"line":"drive · 0s ago · started 1 · merged 0 · 0.1 s","meta":["stall check: #12 in 30m","1 lane","in flight 1/8"],"pass":true,"tone":"g"}
+  left: (String("g"), String("drive · 0s ago · started 1 · merged 0 · 0.1 s"))
+ right: (String("g"), String("drive · 0s ago · started 1 · merged 0 · 0 s"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    drive_now_on_the_board_is_paired_only_and_toasts_its_line
+
+test result: FAILED. 84 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.02s
+
+error: test failed, to rerun pass `-p drover --test drive`

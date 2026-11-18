@@ -1,0 +1,193 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1276/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.27s
+     Running tests/drive.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1276/debug/deps/drive-826bcfa82224c8b2)
+
+running 85 tests
+test a_behind_pr_after_pass_is_updated_the_same_way ... ok
+test a_conflicting_pass_with_an_idle_impl_lane_gets_its_update_in_one_pass ... ok
+test a_done_reviewer_in_the_way_is_superseded_and_the_review_spawns ... ok
+test a_blocked_ci_not_green_item_merges_once_ci_turns_green ... ok
+test a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected ... ok
+test a_code_fail_with_no_change_is_reviewed_again_at_the_same_head ... ok
+test a_draft_pr_that_cannot_be_marked_ready_says_so_in_status ... ok
+test a_gone_lesson_lane_is_closed_not_respawned ... ok
+test a_ci_only_fail_green_again_at_the_same_head_merges_without_a_review ... ok
+test a_fail_starts_a_fix_round_with_the_findings_verbatim ... ok
+test a_draft_pr_with_a_pass_is_marked_ready_once_then_merged ... ok
+test a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges ... ok
+test a_hold_whose_blocker_merged_is_released_and_its_conflicting_pr_updated ... ok
+test a_held_lane_is_prompted_once_when_its_blocker_merges ... ok
+test a_head_moved_during_review_gets_a_fresh_reviewer_not_the_old_verdict ... ok
+test a_lesson_issue_parked_lane_ends_is_closed_on_install ... ok
+test a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once ... ok
+test a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human ... ok
+test a_merge_that_fails_on_a_conflict_gets_the_update_lane ... ok
+test a_lane_held_on_two_blockers_waits_for_both ... ok
+test a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions ... ok
+test a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent ... ok
+test a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip ... ok
+test a_pass_recorded_with_green_ci_merges_in_the_same_pass ... ok
+test a_no_repro_pass_tells_a_live_reviewer_once_and_waiting_names_the_refusal ... ok
+test a_pr_off_serial_paths_is_not_marked ... ok
+test a_pr_head_moved_without_a_handoff_is_handed_off_by_the_pr_once_ci_is_done ... ok
+test a_proofless_fail_from_an_ended_reviewer_gets_one_fresh_review_of_the_same_head ... ok
+test a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned ... ok
+test a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_update ... ok
+test a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it ... ok
+test a_lesson_lane_ending_without_a_push_is_prompted_once_then_closed_never_lane_ends ... ok
+test a_ready_conflicting_pr_gets_its_update_lane_and_no_merge_attempt ... ok
+test a_serial_busy_skip_shows_the_live_holders ... ok
+test a_refused_review_start_shows_waiting_for_a_reviewer_slot ... ok
+test a_refused_update_round_shows_its_reason_not_catching_up ... ok
+test a_pr_closed_outside_drover_closes_or_blocks_the_issue_once ... ok
+test a_workflow_that_never_started_is_ci_broken_and_gets_a_fix_round ... ok
+test a_spawn_whose_prompt_never_landed_is_retried_by_the_next_pass ... ok
+test a_released_lanes_respawn_waits_for_room ... ok
+test an_extend_during_a_pass_only_requeues_it ... ok
+test a_serial_busy_item_is_skipped_and_keeps_its_place ... ok
+test a_working_reviewer_in_the_way_still_waits ... ok
+test an_old_skip_shows_its_age_until_the_issue_moves ... ok
+test a_told_reviewers_corrected_fail_is_recorded ... ok
+test a_secret_in_a_merged_lanes_wip_keeps_its_pane_reported_once_and_clean_dry_run_names_the_close ... ok
+test an_exited_reviewer_without_a_verdict_gets_a_new_review_round ... ok
+test an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane ... ok
+test a_written_verdict_is_recorded_at_the_head_then_pending_ci_waits ... ok
+test an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing ... ok
+test a_working_lane_of_a_merged_issue_is_never_closed ... ok
+test an_idle_reviewer_is_told_once_then_the_unchanged_file_is_not_retried_but_re_reviewed ... ok
+test auto_update_runs_in_a_pass_with_no_merge ... ok
+test an_unmarked_pr_touching_a_serial_path_is_auto_marked_and_merges ... ok
+test an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it ... ok
+test auto_update_rechecks_premerge_before_its_push ... ok
+test disk_low_stops_the_pass ... ok
+test an_open_issues_idle_lane_is_kept ... ok
+test no_checks_after_the_grace_is_ci_missing_not_running ... ok
+test drive_now_on_the_board_is_paired_only_and_toasts_its_line ... ok
+test clean_reclaims_merged_lanes ... ok
+test no_merge_label_parses_to_none_and_a_pass_adds_no_label ... ok
+test extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix ... ok
+test every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_repeat_too ... ok
+test one_pass_starts_every_free_item_in_order_with_a_fresh_host_sample_each ... ok
+test blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action ... ok
+test pass_and_green_ci_merges ... ok
+test status_says_a_ready_pr_lacks_the_merge_label ... ok
+test red_ci_after_pass_is_a_fail_with_the_log_tail ... ok
+test the_drive_summary_groups_per_action ... ok
+test the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane ... ok
+test the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it ... ok
+test host_busy_stops_the_pass_and_cap_stops_starting ... ok
+test passes_follow_a_fleet_added_then_removed_in_fleet_toml ... ok
+test the_result_line_is_red_on_an_error_green_on_a_start_or_merge_amber_when_all_held_back ... ok
+test paused_fleets_and_host_busy_are_no_ops ... ok
+test the_replayed_cooee_1_log_recovers_in_one_pass ... ok
+test review_spawns_rev_at_the_pushed_head ... ok
+test start_spawns_the_next_queued_issue ... ok
+test the_363_sequence_replayed_respawns_impl_once_per_30_min ... ok
+test the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over ... ok
+test under_limited_admission_a_review_goes_before_the_fleets_new_start ... ok
+test the_third_fail_stops_at_needs_human_with_the_findings ... ok
+test two_respawns_without_a_push_go_to_needs_human ... ok
+test drive_now_runs_in_the_background_and_the_board_keeps_answering ... ok
+
+test result: ok. 85 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.60s
+
+     Running tests/drive_kicks.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1276/debug/deps/drive_kicks-dedb5123954f6c15)
+
+running 47 tests
+test a_fast_pass_starts_a_queued_issue_once_a_slot_frees ... ok
+test a_dead_kicks_marker_counts_nowhere_and_the_hold_names_the_live_one ... ok
+test a_due_fix_round_takes_the_reserved_slot ... ok
+test a_fleet_with_one_start_gets_a_slot_beside_one_with_six ... ok
+test a_full_hosts_pending_spawn_holds_no_slot_for_another_host ... ok
+test a_fleet_whose_gh_hangs_never_holds_another_fleets_pass_or_its_spawn ... ok
+test a_busy_host_holds_every_spawn_and_stops_the_starts ... ok
+test a_failed_kick_clears_its_marker_and_the_next_pass_retries ... ok
+test a_kick_refused_disk_low_leaves_no_driven_ok ... ok
+test a_kick_refused_host_busy_is_logged_refused_not_launched ... ok
+test a_hook_kick_never_clears_a_launched_kicks_marker ... ok
+test a_kick_refused_host_busy_releases_its_slot_in_the_same_pass ... ok
+test a_kick_running_past_its_pass_is_pending_then_updated ... ok
+test a_kick_that_spawns_inside_its_pass_counts_as_launched ... ok
+test a_manual_spawn_and_drives_launch_agree_on_the_slots ... ok
+test a_kicks_spawn_marks_its_slot_started_once_its_harness_is_up ... ok
+test a_laneless_marker_past_the_limit_is_dropped_and_logged_once ... ok
+test a_panicking_kick_leaves_no_marker_or_lock ... ok
+test a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness ... ok
+test a_shared_host_splits_its_start_slots_by_fleet_weight ... ok
+test a_stale_marker_does_not_hold_the_issue_forever ... ok
+test a_marker_carries_its_kicks_pid_and_goes_when_that_pid_dies ... ok
+test every_start_refused_by_one_host_gate_for_30_min_alerts_once ... ok
+test a_pass_counts_starting_spawns_against_serial_and_cap ... ok
+test each_host_fills_its_own_start_slots_in_one_pass ... ok
+test a_start_whose_harness_is_up_frees_its_slot_before_its_prompt_is_confirmed ... ok
+test an_old_or_reused_pid_marker_is_stale ... ok
+test one_fleets_stale_markers_never_hold_another_fleets_start ... ok
+test spawn_pending_for_15_minutes_alerts_once ... ok
+test one_slot_and_nothing_in_flight_still_starts ... ok
+test a_start_whose_spawn_ended_frees_its_slot_while_its_holder_lives ... ok
+test six_dead_markers_never_hold_a_new_spawn ... ok
+test starts_run_before_the_pr_reads_and_keep_one_slot_for_a_fix_round ... ok
+test one_free_slot_goes_to_the_fix_round_and_over_the_load_limit_neither_spawns ... ok
+test kicks_respect_max_parallel_spawns_and_admission ... ok
+test the_kept_slot_goes_to_the_review_before_a_fix_round ... ok
+test waiting_names_the_marker_that_holds_the_slot ... ok
+test two_fleets_passes_at_once_never_admit_a_spawn_past_the_host_limit ... ok
+test waiting_names_a_slot_wait_not_a_stuck_tick ... ok
+test a_failing_spawn_backs_off_and_a_kick_retries_it_at_once ... ok
+test waiting_names_the_reviews_ahead ... ok
+test two_quick_passes_launch_each_spawn_once ... ok
+test waiting_names_the_slot_holders ... ok
+test waiting_shows_no_starting_count_once_the_slot_is_free ... ok
+test starts_share_slots_across_fleets_passing_at_once ... ok
+test three_identical_spawn_failures_alert_once ... ok
+test failing_retries_never_starve_another_fleets_start ... ok
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.00s
+
+     Running tests/repro.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1276/debug/deps/repro-6aa92ed2a90bf484)
+
+running 15 tests
+test a_full_run_block_is_recorded_and_a_missing_or_half_one_is_no_repro ... ok
+test a_run_block_needs_two_outputs_and_a_failing_base ... ok
+test a_verify_block_needs_the_pr_bodys_repro_section_and_its_quote ... ok
+test a_verify_block_on_a_fleet_without_a_verify_role_is_no_repro_and_a_run_block_records ... ok
+test an_unmarked_issues_pass_is_never_parsed_for_a_repro_block ... ok
+test help_agent_documents_repro_and_no_repro ... ok
+test one_command_fence_with_both_outputs_is_recorded ... ok
+test queue_set_turns_the_mark_off_and_on ... ok
+test a_finished_rev_lanes_verdict_is_recorded_before_drive_supersedes_it ... ok
+test a_later_run_pass_at_the_head_does_not_force_the_verify_stage ... ok
+test a_repro_verify_pass_goes_to_verify_outside_ui_paths ... ok
+test a_later_run_pass_at_the_head_clears_earlier_verify_passes ... ok
+test a_repro_verify_pass_merges_only_after_a_verify_pass_at_the_head ... ok
+test a_merge_no_repro_on_a_fleet_without_verify_is_needs_human_not_a_rerun ... ok
+test a_merge_gate_refusal_at_a_passed_head_is_needs_human_once_and_no_rev_rerun ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+
+     Running tests/verify_stage.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1276/debug/deps/verify_stage-5d36b168d1c4fb35)
+
+running 20 tests
+test a_rev_pass_and_verify_no_recipe_at_the_head_merge_in_one_drive_pass ... ok
+test a_design_stage_issue_always_verifies ... ok
+test a_pr_that_rewrites_the_recipe_is_verified_by_the_integration_recipe ... ok
+test a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane ... ok
+test a_rev_pass_refused_for_want_of_verify_waits_on_verify_not_review_again ... ok
+test a_verified_head_a_gate_refused_names_the_gate_not_review_again ... ok
+test a_same_name_verify_lane_without_a_verdict_is_still_lane_live ... ok
+test a_shot_on_a_hung_disk_answers_504_and_the_board_stays_up ... ok
+test a_verify_pass_at_an_older_sha_does_not_let_the_new_head_merge ... ok
+test parity_70_shots_are_only_a_verify_verdicts_files_inside_its_lane_folder ... ok
+test verify_fails_count_in_revs_rounds_and_the_third_fail_parks ... ok
+test a_pr_outside_ui_paths_skips_verify_and_goes_to_the_gates ... ok
+test without_a_verify_role_the_builtin_pipeline_is_unchanged ... ok
+test a_rev_pass_and_verify_skipped_at_the_head_merge_in_one_drive_pass ... ok
+test a_verify_lane_that_recorded_its_verdict_is_superseded_by_the_next_verify ... ok
+test a_pass_drive_records_on_a_ui_pr_with_a_recipe_spawns_verify_not_rev ... ok
+test a_pass_drive_records_on_a_ui_pr_without_a_recipe_logs_verify_no_recipe_and_merges ... ok
+test a_pass_drive_records_outside_ui_paths_logs_verify_skipped_and_merges ... ok
+test no_recipe_logs_verify_no_recipe_shows_it_and_goes_on_to_the_gates ... ok
+test verify_off_skips_the_stage_and_verify_on_forces_it ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.44s
+
