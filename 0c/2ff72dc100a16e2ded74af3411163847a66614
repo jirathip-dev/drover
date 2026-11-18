@@ -1,0 +1,9 @@
+Decided: on [all] the per-fleet in-flight tiles fold into one tile, the sum over the sum of caps
+Because: "On [all], the per-fleet in-flight numbers collapse into one tile"
+Decided: stat tiles wrap onto more rows and never shrink below their label's width
+Because: "The stat row never shrinks a tile below a readable width"
+Decided: a tab switch syncs the focus state at once, so the loading strip leaves a thread's float before the fetch returns
+Because: "The loading/last-update line takes its own space and never overlaps the header"
+Rejected: a non-sticky loading strip — the overlap came from a stale thread focus, not from the strip's position
+Check: the parity_webkit issue_1290 test passes in CI's WebKit job
+Owner: phone tiles wrap instead of squashing, [all] shows one in-flight tile, and the loading line stays off the header
