@@ -229,20 +229,40 @@ function toast(text: string, bad = false, retry?: () => void) {
 
 const sh = $('#sheet'), shv = view('', $('#sheet .sb'));
 function closeSheet() { sh.hidden = true; H.classList.remove('sheet'); shv.model = null; shv.back = []; }
+let opening = false;
 async function sheet(path: string, push = true, s = span('sheet')) {
-  if (push && !sh.hidden && shv.model) shv.back.push(shv.path);
-  shv.path = path;
-  shv.open.clear();
+  if (opening) return;
+  opening = true;
+  const spin = setTimeout(() => ($('#ld').hidden = false), 100);
   try {
-    shv.model = await fetchScreen(path, s);
+    const m = await fetchScreen(path, s);
+    if (push && !sh.hidden && shv.model) shv.back.push(shv.path);
+    [shv.path, shv.model] = [path, m];
+    shv.open.clear();
   } catch (e) {
     if (isBlk(e) && e.status === 401) return unpaired();
     return toast(msg(e), true);
+  } finally {
+    opening = false;
+    clearTimeout(spin);
+    $('#ld').hidden = true;
   }
   drawSheet();
   sh.hidden = false;
   H.classList.add('sheet');
   painted(s);
+  fill(path);
+}
+function fill(path: string) {
+  if (rows(shv.model).has('loading')) setTimeout(() => {
+    if (sh.hidden || shv.path !== path) return;
+    void fetchScreen(path).then(m => {
+      if (sh.hidden || shv.path !== path) return;
+      shv.model = m;
+      drawSheet();
+      fill(path);
+    }, () => {});
+  }, 1000);
 }
 function drawSheet() {
   const m = shv.model;

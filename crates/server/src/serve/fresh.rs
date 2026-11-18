@@ -44,6 +44,9 @@ impl Source {
 
 type Key = (String, Vec<String>, String);
 
+/// The words a read the background has not done yet fails with.
+pub const NOT_READ: &str = "not read yet";
+
 struct Read {
     out: Option<Out>,
     at: u64,
@@ -86,7 +89,7 @@ impl<'a> Fresh<'a> {
         r.asked = crate::now();
         r.out.clone().unwrap_or_else(|| Out {
             code: 1,
-            stderr: format!("{prog}: not read yet (the board reads it in the background)"),
+            stderr: format!("{prog}: {NOT_READ} (the board reads it in the background)"),
             ..Out::default()
         })
     }
