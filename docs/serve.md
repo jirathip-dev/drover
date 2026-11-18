@@ -17,9 +17,13 @@ lifeboat ([lifeboat.md](lifeboat.md)) stays the last resort when this page is br
 The page fetches a screen (`GET /screens/<x>`), draws it block by block, one renderer per block type (`screen`,
 `section`, `list`, `row`, `card`, `text`, `stat`, `chips`, `choice`, `button`, `run`, `images`, `form` with its
 `toggle`, `text`, `picker` and `secret` fields, `sheet`), follows its `stream` (`GET /screens/<x>/stream`: the open
-tab's and the cards', at most two at once) and applies each `{seq, ops}` patch in place, flashing the rows that
-changed. A block's `action` POSTs `/action` `{screen, block, action, values}` (a `confirm` asks first in the page's
-own dialog); the reply's `toast` shows under the header, its `ops` patch the screen, `close` closes the sheet. A
+tab's and the cards', and an open sheet's once an action ran in it) and applies each `{seq, ops}` patch in
+place, flashing the rows that changed. A block's `action` POSTs `/action` `{screen, block, action, values}` (a
+`confirm` asks first in the page's own dialog); the reply's `toast` shows under the header, its `ops` patch the
+screen, `close` closes the sheet. #1315: nothing is read again after an action: the stream brings the result (a stream whose client left frees its
+slot of serve's 4 within a second). A sent
+thread message or lane line shows at once, grey until serve's reply, then until the stream brings it (once); a failed
+one keeps its text with [retry]. An answered ask leaves at once and stays gone unless the answer fails. A
 row's `tap` opens a sheet (`sheet`), another screen in the tab with `[‹ back]` (`open`) or a link (`url`). A sheet's
 `done` posts its fields' values. A row's `figure` (`state`, `tool`, `coat`) is the theme's sprite, as before: a
 lane's avatar in its coat, else the 24 px row sprite, else the state glyph (terminal).
@@ -319,6 +323,8 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   plugin token only), the lane sheet: its facts (issue, role, state, host, branch, port, PR), Stop/Kill/Clean (Close pane
   for an Others agent), a Send line and the transcript (`/api/v1/lane/<agent>`'s blocks as text and row blocks). Each
   action runs the board's `act` (the CLI verb, `confirm`ed) or `send`, logged `act`/`prompt` with `device: cooee`;
+  #1315: `send` replies once the `prompt` is logged and hands the line to shed after the reply; a failed delivery is
+  logged `prompt-failed` (`agent`, `error`) and the sheet's transcript ends in a `✗ not delivered` row until the next prompt;
 - #1091: `GET /screens/hosts`, the page's Hosts sheet (a [⚙] row, not cooee's): one row per host, main first, then
   A→Z, with its kind, on/off and live lane count; a remote host's [Off]/[On] runs `host` (`host-off`/`host-on`) and
   the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token

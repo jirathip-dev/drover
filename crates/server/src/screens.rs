@@ -1528,7 +1528,7 @@ impl Server<'_> {
         let chat = self
             .transcript(ctx, &q)
             .and_then(|t| serde_json::from_str::<Chat>(&t).ok());
-        let said: Vec<Value> = chat.map_or_else(Vec::new, |c| {
+        let mut said: Vec<Value> = chat.map_or_else(Vec::new, |c| {
             let lc = self.blocks(ctx, &q, c);
             lc.blocks
                 .iter()
@@ -1536,6 +1536,7 @@ impl Server<'_> {
                 .map(|(i, b)| said(i, b, &lc.chat.lines))
                 .collect()
         });
+        said.extend(later::undelivered(&ev, agent));
         let values = json!({ "agent": agent });
         let other = l.role == "other";
         let acts: &[(&str, &str)] = if other {
@@ -1970,7 +1971,7 @@ impl Server<'_> {
                     }
                     cur = new;
                 }
-                if msg.is_empty() && ping.elapsed() >= Duration::from_secs(15) {
+                if msg.is_empty() && (ping.elapsed() >= Duration::from_secs(15) || super::hung_up(s)) {
                     (msg, ping) = (": ping\n\n".into(), drover_core::clock::instant());
                 }
             }
