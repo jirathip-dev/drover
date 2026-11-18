@@ -172,7 +172,7 @@ function stream(v: View) {
     v.model = apply(v.model ?? {}, blks(d.ops));
     s.parse = performance.now() - s.t0;
     [v.at, v.live] = [Date.now(), true];
-    if (JSON.stringify(v.model) === was) return sync();
+    if (JSON.stringify(v.model) === was) { painted(s); return sync(); }
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
     paint(v, before);
     painted(s);
