@@ -1,0 +1,8 @@
+Decided: an extend ask's one more round on an impl or fix(n) issue logs round-extended for the lane it has, not a needs-human extend
+Because: "[one more round] resumes the lane (or the issue is first moved to needs-human so extend and park work), and the ask closes"
+Rejected: moving the issue back to needs-human first — its extend requeues and restarts a lane that is already running
+Rejected: closing extend asks when the issue leaves needs-human — the spec wants the tap to work, not the card to vanish
+Decided: a refused sync tap is kept with the tapped jobs; ask and needs-human cards show their tap's latest refusal
+Because: "A tap that drover refuses shows the `REFUSED <CODE>` text on the card."
+Check: crates/core/src/gate.rs extend_ask keeps refusing parked or merged issues; crates/server/src/serve/jobs.rs refusal reads only kept jobs
+Owner: one more round on a stuck lane's question now works and clears the card; refused taps say why on the card
