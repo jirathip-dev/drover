@@ -1,0 +1,42 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>#1297 form picker</title>
+<link rel=stylesheet href=../../../web/src/board.css>
+<link rel=stylesheet href=tokens.css>
+<link rel=stylesheet href=dd.css>
+<style>
+/* Mockup only: the Fleets sheet at its full detent, in the page flow; at 1440 the sheet is centred at 760 px. */
+#sheet{position:static;display:block;background:none}
+#sheet>.sp{max-width:760px;margin:0 auto;max-height:none;border:0;padding:0}
+#sheet .sh{position:static}
+</style></head><body>
+<div id=sheet><div class=sp>
+ <div class=sh><button><span>cancel</span></button><b>Fleets</b><button class=primary><span>save</span></button></div>
+ <div class=sec><p class=sh>herdsman</p>
+  <form class=form onsubmit="return false">
+   <label class=fd><span class=fk>Drive</span><input type=checkbox checked></label>
+   <div class=fd><span class=fk id=k-host>Host</span>
+    <div class=dd><button type=button aria-haspopup=listbox aria-expanded=false aria-labelledby="k-host v-host"><span id=v-host>mini</span><i class=cv></i></button></div></div>
+   <div class=fd><span class=fk id=k-impl>Impl</span>
+    <div class=dd><button type=button aria-haspopup=listbox aria-expanded=true aria-controls=l-impl aria-labelledby="k-impl v-impl"><span id=v-impl>Claude Code · opus 5.5 · high</span><i class=cv></i></button>
+     <div class=ddp><b class=ddh>Impl</b>
+      <ul class=ddl id=l-impl role=listbox aria-labelledby=k-impl aria-activedescendant=o-i2 tabindex=-1>
+       <li role=option id=o-i1 aria-selected=true><span>Claude Code · opus 5.5 · high</span></li>
+       <li role=option id=o-i2 aria-selected=false class=on><span>Claude Code · sonnet 5.5</span></li>
+       <li role=option id=o-i3 aria-selected=false><span>Codex · gpt-5.6-luna</span></li>
+      </ul></div></div></div>
+   <div class=fd><span class=fk id=k-rev>Review</span>
+    <div class=dd><button type=button aria-haspopup=listbox aria-expanded=false><span>Codex · gpt-5.6-luna</span><i class=cv></i></button></div></div>
+   <div class=fd><span class=fk>Rounds</span>
+    <div class=dd><button type=button aria-haspopup=listbox aria-expanded=false><span>3</span><i class=cv></i></button></div></div>
+  </form>
+  <p class="foot m">Drive runs every 5 minutes on mini. Pause stops new lanes; live ones finish.</p></div>
+ <div class=sec><p class=sh>drover</p>
+  <form class=form onsubmit="return false">
+   <label class=fd><span class=fk>Drive</span><input type=checkbox></label>
+   <div class=fd><span class=fk>Host</span>
+    <div class=dd><button type=button aria-haspopup=listbox aria-expanded=false><span>mini</span><i class=cv></i></button></div></div>
+   <label class=fd><span class=fk>Branch</span><input value=staging></label>
+  </form></div>
+</div></div>
+</body></html>

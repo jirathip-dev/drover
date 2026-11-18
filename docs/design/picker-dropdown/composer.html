@@ -1,0 +1,36 @@
+<!doctype html><html lang=en data-focus-mock><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>#1297 composer model picker</title>
+<link rel=stylesheet href=../../../web/src/board.css>
+<link rel=stylesheet href=tokens.css>
+<link rel=stylesheet href=dd.css>
+<style>
+.scr{display:flex;flex-direction:column;min-height:calc(100vh - 38px)}.msgs{flex:1}
+</style></head><body>
+<header><i id=dot class=g></i><b>drover · design 1297</b><button><span>threads</span></button></header>
+<main><div class=tab><div class=scr>
+ <div class="row sticky"><div class=rm><span class=rt>drover · claude · sonnet-5-5 · idle</span></div></div>
+ <div class=msgs>
+  <div class="card k-you"><div class=ch><b>you</b><span class=m>14:02</span></div><p class=txt>switch this thread to opus for the ADR review</p></div>
+  <div class="card k-orch"><div class=ch><b>orchestrator</b><span class=m>14:02</span></div><p class=txt>Use the model chip under the box: it applies to my next turn. sonnet-5-5 is set now.</p></div>
+  <div class="card k-sys"><p class=txt>config: drover.orchestrator model sonnet-5-5 (by owner)</p></div>
+ </div>
+ <form class=cmp onsubmit="return false">
+  <div class=cr><button type=button aria-label=attach><span>+</span></button><textarea rows=1 placeholder="message"></textarea><button type=button class=primary><span>send</span></button></div>
+  <div class=pk>
+   <div class="dd up">
+    <button type=button aria-haspopup=listbox aria-expanded=true aria-controls=l-model><span><i class=k>model</i> sonnet-5-5</span><i class=cv></i></button>
+    <div class=ddp><b class=ddh>model</b>
+     <ul class=ddl id=l-model role=listbox aria-label=model aria-activedescendant=o-m2 tabindex=-1>
+      <li role=option id=o-m1 aria-selected=false><span>opus-5-5</span></li>
+      <li role=option id=o-m2 aria-selected=true class=on><span>sonnet-5-5</span></li>
+      <li role=option id=o-m3 aria-selected=false><span>haiku-5-5</span></li>
+      <li role=option id=o-m4 aria-selected=false><span>fable-5-1</span></li>
+     </ul></div>
+   </div>
+   <div class="dd up"><button type=button aria-haspopup=listbox aria-expanded=false><span><i class=k>effort</i> high</span><i class=cv></i></button></div>
+  </div>
+ </form>
+</div></div></main>
+<nav><a href=#><span>queue</span></a><a href=# class=on><span>threads</span></a><a href=#><span>hosts</span></a><a href=#><span>lanes</span></a></nav>
+</body></html>
