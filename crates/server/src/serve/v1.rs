@@ -393,10 +393,8 @@ impl Server<'_> {
 
     pub(super) fn sheet_transcript(&self, ctx: &Ctx, l: &crate::lanes::Lane) -> Vec<Value> {
         use crate::session::transcript::{archived, of, Transcript};
-        const SHOWN: usize = 200;
-        let read = l.session.as_ref().map(|s| of(&l.on(&self.r), s, None, Some(SHOWN)));
-        let t = match read {
-            Some(Err(e)) if format!("{e:#}").contains(super::fresh::NOT_READ) => {
+        let t = match l.session.as_ref().map(|s| of(&l.on(&self.r), s, None, Some(200))) {
+            Some(Err(e)) if format!("{e:#}").contains("not read yet") => {
                 return vec![json!({"type": "row", "id": "loading", "title": "transcript loading…"})];
             }
             Some(t) => t.ok(),
@@ -405,21 +403,18 @@ impl Server<'_> {
         let (blocks, lines) = match t {
             None if l.session.is_none() => return vec![],
             Some(Transcript::Events(ev)) if self.export.is_none() => (
-                acp_blocks(ev.get(ev.len().saturating_sub(SHOWN)..).unwrap_or_default()),
+                acp_blocks(ev.get(ev.len().saturating_sub(200)..).unwrap_or_default()),
                 vec![],
             ),
             Some(Transcript::Screen(text)) => {
-                let mut tail: Vec<String> = text.lines().rev().take(SHOWN).map(crate::lanes::mask).collect();
+                let mut tail: Vec<String> = text.lines().rev().take(200).map(crate::lanes::mask).collect();
                 tail.reverse();
-                (vec![Block::Screen], super::window(&tail, SHOWN, 32).to_vec())
+                (vec![Block::Screen], super::window(&tail, 200, 32).to_vec())
             }
             _ => (vec![Block::Screen], vec![]),
         };
-        blocks
-            .iter()
-            .enumerate()
-            .map(|(i, b)| super::screens::said(i, b, &lines))
-            .collect()
+        let said = |(i, b)| super::screens::said(i, b, &lines);
+        blocks.iter().enumerate().map(said).collect()
     }
 
     pub(super) fn shed_rows(&self, ctx: &Ctx, cfg: &Config, events: &[Event]) -> Vec<crate::api::ShedRow> {
