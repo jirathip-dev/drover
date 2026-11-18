@@ -1,0 +1,28 @@
+Decided: keep-alive only when the request sends `Connection: keep-alive` (every browser does); otherwise `Connection: close` as today.
+Because: "Without it, responses are byte-identical to today's."
+Rejected: HTTP/1.1 implicit keep-alive — clients that read to EOF without a Connection header (172 test requests, health probes) would hang until the idle timeout.
+Decided: the idle timeout is the existing 5 s socket read timeout; an idle kept connection holds its slot in the same 256-thread cap.
+Because: "HTTP/1.1 keep-alive for normal requests, with an idle timeout, within the existing connection-thread cap."
+Decided: gzip is applied in one place after the response is built (serve/wire.rs finish), so every route gets it and the uncompressed bytes stay those route builds.
+Decided: hashed assets (the `immutable` ones) are gzipped once per path and kept in a static map; only ASSETS paths answer immutable, so it stays bounded.
+Because: "Hashed assets are compressed once and the result kept."
+Decided: SSE streams use one gzip encoder per connection with a sync flush after each message.
+Because: "SSE streams are gzip-compressed and flushed after each message."
+Check: crates/cli/tests/serve_wire.rs drives the real socket: 15.8x smaller events screen, plain bytes equal Server::respond, stream message decodes whole in under 100 ms, two kept requests on one connection.
+Owner: The phone page downloads about 16x less for big screens and reuses its connections.
+
+Decided: an HTTP/1.1 request keeps its connection unless it sends Connection: close; HTTP/1.0 keeps it only with Connection: keep-alive.
+Because: "HTTP/1.1 keep-alive for normal requests, with an idle timeout, within the existing connection-thread cap."
+Rejected: keep-alive only on an explicit Connection: keep-alive header — HTTP/1.1 browsers and curl never send it, so every request still opened a new connection.
+Decided: socket tests that read a response to EOF send Connection: close, as an HTTP/1.1 client must for a close-delimited read.
+Because: crates/server/src/serve/wire.rs:27
+Decided: the idle timeout stays the existing 5 s socket read timeout inside the same 256-thread cap.
+Because: crates/server/src/serve.rs:778
+Check: crates/cli/tests/serve_wire.rs sends two plain HTTP/1.1 requests with no Connection header over one socket; both get 200 and keep-alive.
+Owner: Browsers now reuse one connection for several requests; the gzip savings from round 1 are unchanged.
+
+Decided: the new serve_wire test target goes in shard 1 of scripts/test-shards.txt.
+Because: scripts/test-shards.txt:167
+Rejected: a new shard 5 for serve_wire — CI runs a fixed 4-shard matrix and shard 1 has the fewest targets.
+Check: scripts/test-shards.sh check exits 0 and CI's rust and test shard jobs are green.
+Owner: A CI bookkeeping fix so the new connection tests run; no behaviour change.
