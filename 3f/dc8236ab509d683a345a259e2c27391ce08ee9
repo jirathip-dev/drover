@@ -1,0 +1,9 @@
+Decided: an HTTP/1.1 request keeps its connection unless it sends Connection: close; HTTP/1.0 keeps it only with Connection: keep-alive.
+Because: "HTTP/1.1 keep-alive for normal requests, with an idle timeout, within the existing connection-thread cap."
+Rejected: keep-alive only on an explicit Connection: keep-alive header — HTTP/1.1 browsers and curl never send it, so every request still opened a new connection.
+Decided: socket tests that read a response to EOF send Connection: close, as an HTTP/1.1 client must for a close-delimited read.
+Because: crates/server/src/serve/wire.rs:27
+Decided: the idle timeout stays the existing 5 s socket read timeout inside the same 256-thread cap.
+Because: crates/server/src/serve.rs:778
+Check: crates/cli/tests/serve_wire.rs sends two plain HTTP/1.1 requests with no Connection header over one socket; both get 200 and keep-alive.
+Owner: Browsers now reuse one connection for several requests; the gzip savings from round 1 are unchanged.
