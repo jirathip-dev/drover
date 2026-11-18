@@ -222,6 +222,12 @@ fn acp_lanes(c: &drover::Ctx, sh: &FakeShed, states: &[&str]) {
 #[test]
 fn acp_panes_between_turns_hold_no_slot_and_a_new_start_is_placed() {
     let (c, sh) = fleet("slots-acp-idle", "max_working = 4", "0", &["20"], &[]);
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        cfg.replace("[fleet.sendmeter]\n", "[fleet.sendmeter]\nmax_in_flight = 0\n"),
+    )
+    .unwrap();
     let ended = [
         "idle",
         "hibernated",
