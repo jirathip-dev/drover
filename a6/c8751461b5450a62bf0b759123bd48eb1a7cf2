@@ -1,0 +1,8 @@
+Decided: the thread composer is patched in place (same textarea), and ticking ages go to the page as a timestamp it counts up itself
+Because: "The composer element and its textarea are never replaced while they exist"
+Because: "A ticking value (`as of Ns ago`, `working 12s`) is computed on the client from a timestamp"
+Rejected: a server-side diff of every row — the shared screen cache is the separate architect issue
+Decided: the staging merge keeps both the delta timing span and the skip of a delta that changes nothing
+Because: web/src/main.ts:171
+Check: the CI rust job's shard check and the ui-webkit keyboard_webkit step are green at the head
+Owner: typing on the phone no longer loses the keyboard, and an idle page stops refreshing
