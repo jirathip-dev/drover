@@ -1,0 +1,6 @@
+Decided: add a ## Parity section naming row 21 (Instant send) as kept, and merge current staging.
+Because: roles/rev.md:25
+Because: docs/parity.md:40
+Rejected: chasing the ui-webkit red in this PR — it was the first-paint perf timing test, and this PR's WebKit test passed in the same job.
+Check: CI at 631ae17f; ui-webkit logs the shows_once test as ok.
+Owner: no behaviour change this round; the PR description now lists the affected parity row.
