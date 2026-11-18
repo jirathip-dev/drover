@@ -673,10 +673,11 @@ pub fn held_slots(cfg: &Config, events: &[Event], agents: &[Session], skip: Opti
         };
         let s = st.get(&(sp.fleet.clone(), i));
         if s.is_some_and(|s| !IDLE.contains(&s.state.as_str())) && skip != Some((sp.fleet.as_str(), i)) {
-            n[0] += usize::from(!matches!(
-                a.status().map(Status::word),
-                Some("idle" | "done" | "blocked")
-            ));
+            n[0] += usize::from(if a.acp {
+                a.busy()
+            } else {
+                !matches!(a.status().map(Status::word), Some("idle" | "done" | "blocked"))
+            });
             n[1] += usize::from(sim(cfg, events, sp));
         }
     }
