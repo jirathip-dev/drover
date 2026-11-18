@@ -82,7 +82,7 @@ Download the asset for the machine from the release of the sha you want, check i
 
 ```sh
 t=build-<sha7>; a=drover-aarch64-apple-darwin   # or drover-x86_64-unknown-linux-gnu
-gh release download "$t" -R jirathip-dev/herdsman -p "$a" -p SHA256SUMS
+gh release download "$t" -R <owner>/<repo> -p "$a" -p SHA256SUMS
 grep " $a\$" SHA256SUMS | shasum -a 256 -c -
 b=~/.local/share/drover/bin; mkdir -p "$b"; chmod 755 "$a" && mv "$a" "$b/drover.new" && mv "$b/drover.new" "$b/drover"
 ```
