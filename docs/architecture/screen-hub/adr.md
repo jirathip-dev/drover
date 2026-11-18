@@ -3,17 +3,20 @@
 ## Summary
 
 Decision: build each screen whole, once per change, into one shared cache, and send each phone only the rows that
-changed, moved, came or went. Row-by-row builds would save 8 ms of the 150 (a whole Queue build is 9 ms on the large
-fixture). The block rules, the row diff and the stream protocol are one small crate of their own; serve moves to tokio.
-Slices: the crate; serve on tokio; the shared cache; one stream per device; patching in place on the phone (one patch
-per 100 ms, reading position kept); lane tails; the speed, load and memory gates.
-Open questions: raise the line cap by about 1,000 (414 left)? Tighten #1313's Queue build bar from 150 ms to 70 ms?
+changed, moved, came or went (row-by-row builds would save 8 ms of the 150). The renderer core (typed blocks, row
+diff, stream protocol, generated schema, TS and Swift types) is built in the new blocks repo; drover pins one commit.
+Slices: in blocks, the crate, then the generated types and the page's stream and patch code. In drover: serve on
+tokio, the shared cache, one stream per device, patching in place (one patch per 100 ms), lane tails, the gates.
+Open questions: the HTML renderer and the theme move after #1318, not in it? Line cap +700? #1313's Queue bar 70 ms?
 
 ## Status
 
-Revised 2026-11-18 for the owner's amendments q2039 (row ops required, one patch per frame, reading position kept),
-q2040 (the renderer core is its own crate) and q2044 (serve on tokio). First version: `e7bf23a0f`, on staging
-`9ea69d9fb`. Read `usage.md` first, then this, `shapes.md`, `boundaries.md`; `facts.md` holds the measurements.
+Revised 2026-11-18, three times, for the owner's amendments: q2039 (row ops required, one patch per frame, reading
+position kept), q2044 (serve on tokio) and q2049 (the renderer core is built in the new shared repo
+`jirathip-dev/blocks` from day one, replacing q2040's crate inside drover; q2047 and q2051 stand behind it). Earlier
+versions: `e7bf23a0f`, `354e1f49f`. Read `usage.md` first, then this, `shapes.md`, `boundaries.md`; `facts.md` holds
+the measurements. Only the place and the typing of the renderer core changed in this revision: the hub, the stream,
+the tokio order and the numbers are as they were.
 
 ## Question
 
@@ -72,11 +75,12 @@ live data after #1313, and that sets a bar this design depends on: see the open 
 
 Option 2, in six parts (`shapes.md` has the types and the protocol).
 
-1. **The renderer core is a crate** (q2040): `drover-blocks`, in a new `blocks` folder beside the other crates.
-   It holds the block rules (what a screen must be for a row to be addressed), the row diff and its ops, a
-   reference patcher, the stream's wire types and both ends' bookkeeping (the server's revs and ring, a client's
-   revs). It depends on serde and serde_json, on no drover crate, no tokio, no clock and no socket. It draws
-   nothing: not a UI framework.
+1. **The renderer core is the blocks repo** (q2049): `jirathip-dev/blocks`, public, MIT. Its crate `blocks` holds
+   the typed blocks (a Rust type per kind), the row diff and its ops, a reference patcher, the stream's wire types
+   and both ends' bookkeeping (the server's revs and ring, a client's revs). It depends on serde and serde_json, on
+   no drover crate, no tokio, no clock and no socket. Its generator writes the JSON Schema, the TS types and the
+   Swift types from the Rust types. Its TS package holds those types and the two new modules of the page: the
+   stream client and the patcher. drover pins one commit of it. More in the next section.
 2. **The hub.** A cache of built screens by `Key` (canonical path and query, paired or not). A key is stale when
    one of 7 signals it depends on moved: the log's last seq, the snapshot's stamp, the background reads, the
    config, the gh cache folder, a 30 s clock, a lane's tail. One publisher checks the signals every 25 ms, at once
@@ -101,14 +105,49 @@ Option 2, in six parts (`shapes.md` has the types and the protocol).
    sheet paints the phone's last copy, opens its key, and new lines arrive as `insert` ops. `[older]` pages back
    200 lines at a time out of the kept lines. A request never reads shed.
 
-serve moves onto tokio under all of it (q2044): next section.
+serve moves onto tokio under all of it (q2044): the section after next.
+
+## The blocks repo: what #1318 builds there, and what waits
+
+`shapes.md` has the layout and the types. The choices:
+
+- **Typed blocks, from what both apps send today.** One Rust type per kind: the 21 kinds of cooee's schema (its
+  40 definitions, read at cooee staging `9c0987c9a`) and the 3 that only drover writes (`composer`,
+  `header-strip`, `menu-row`). Reading is lenient, as cooee's schema is: an unknown kind passes through and a
+  client skips it; an unknown field is kept. Writing is strict: a server's screen with an unknown kind, an unknown
+  field or a missing one has a fault, and a fault fails a test.
+- **One generator path.** Rust types → JSON Schema (schemars, behind a feature only the generator turns on) → the
+  TS and the Swift types, written from the schema by the repo's own `blocks-gen`. `just gen` writes all three; CI
+  fails when one is stale. Not ts-rs for TS and a second tool for Swift: three tools drift three ways. The crate
+  drover links keeps two dependencies, serde and serde_json.
+- **The diff stays on JSON, by id.** The typed model says which fields hold children and checks a screen; the diff
+  compares fields as JSON. A typed diff would need a compare per kind and gives the phone the same ops.
+- **drover's builders keep writing JSON in #1318.** The hub reads each built screen into the typed model after it
+  is published, so no phone waits for the check; health lists the faults and `no_fixture_screen_has_a_fault` fails
+  on one. Moving about 170 hand-written blocks onto typed constructors is a refactor (behaviour unchanged, the
+  goldens hold it) and is not on the 150 ms path.
+- **Everything #1318 writes new is born in blocks; nothing old moves in #1318.** The stream client and the patcher
+  are new, so they are written there. The patcher draws through the `render` it is given, so drover's `blocks.ts`
+  stays where it is for now.
+- **One pin.** drover names one blocks commit twice: for the crate in `Cargo.toml` (a git `rev`, as `shed-proto`)
+  and for the TS package in `web/package.json`. A test fails when the two differ. The commit is one merged on
+  blocks' `staging`; version tags start when the owner promotes blocks to `main`.
+
+What waits for its own issue, after #1318 (open question 1):
+
+| What | Where | Why not now |
+|---|---|---|
+| the one HTML renderer (q2047): drover's `blocks.ts` and its CSS, moved | blocks | it draws the theme's figures and words, so it moves with the theme; not on the 150 ms path |
+| the shared theme package (q2047) | blocks | #1318 changes no theme |
+| cooee adopts: its schema file generated, the Swift types, `/stream`, the embedded renderer | cooee | cooee's own queue; until then its stream keeps today's ops (below) |
+| drover's builders onto the typed constructors | drover, `--refactor` | the check already holds them to the model |
 
 ## serve on tokio: what moves, in what order
 
 After the move: accepting, reading a request, every stream's writer and the hub's bookkeeping are tasks on the
 runtime. Anything that blocks (SQLite, shed, a subprocess, a file, a build) runs in `spawn_blocking`, or on a
-thread of its own when the work never stops (the background readers, the tail feeder). core and the new crate stay
-synchronous; tokio is in `crates/server` and `crates/service` only. No new tokio feature and no HTTP crate: the
+thread of its own when the work never stops (the background readers, the tail feeder). core and the `blocks` crate
+stay synchronous; tokio is in `crates/server` and `crates/service` only. No new tokio feature and no HTTP crate: the
 request reader stays hand-written, and waits are `timeout(…, notified())` as in `drover service` (no `select!`).
 
 1. **The transport only (slice 2).** serve builds a runtime (2 workers), or runs on its caller's (`drover
@@ -158,6 +197,7 @@ Not taken:
   definition of every screen. A JSON diff is by field (one new ask: 14 ops, 2 KB), where a fragment is its region
   whole and the client must morph it to find the change. The phone keeps its last copy as data and paints it
   before the network answers. And the repo already bans HTML built in the server and `innerHTML` in the page.
+  The one HTML renderer of q2047 does not change this: it is a client that draws the JSON blocks in a web view.
 
 ## Smaller choices
 
@@ -170,8 +210,8 @@ Not taken:
 - **cooee's `GET /screens/<x>/stream` stays**, served from the hub in its old framing and old ops (a `move` goes
   out as today's `replace` of the card, a changed card list as a whole `screen`). cooee moves to `/stream` in its
   own repo, and then the route and that translation go.
-- **The block kinds are not typed per field.** The builders keep writing JSON; the crate checks structure only
-  (ids, kinds). Typing every kind's fields is cooee's vocabulary and a rewrite of every builder: not this issue.
+- **A git pin, not a registry.** drover already pins `shed-proto` this way; a registry adds a publish step to every
+  change while the protocol is still moving.
 - **No new config key.** The bounds are constants in their modules.
 
 ## Consequences
@@ -184,8 +224,14 @@ Not taken:
 - No 503 from a stream cap. A phone past its own limit loses its oldest stream and is told why.
 - A row that changes place is one `move`, and the cards update live for the first time.
 - `serve_on`'s signature changes (an owned `Ctx`, a `'static` runner): about 25 test call sites, mechanically.
-- `docs/serve.md`'s dependency list and CI's deps gate gain `drover-blocks` and tokio in `crates/server`; CI's
-  layers step checks that `drover-blocks` pulls in no drover crate; ui-webkit's path filter gains the new files.
+- `docs/serve.md`'s dependency list and CI's deps gate gain `blocks` and tokio in `crates/server`; `deny.toml`'s
+  `allow-git` gains the blocks repo; one CI line checks that `blocks` brings in nothing but serde and serde_json.
+- A change to an op, a block or the protocol is two PRs: one in blocks, then the pin in drover (the lock files and
+  `web/dist` with it). That is the price of q2049 while the protocol still moves; slices 1 and 4 each start with it.
+- drover's page takes its first npm dependency that ends up in the bundle. `web/dist` stays committed, so building
+  the binary still needs no Node.
+- cooee is not touched. Its goldens in drover's tests and its schema's fixtures are parsed by the crate's tests, so
+  the typed model accepts what cooee draws today.
 - A thread is marked read by the hub after it builds a thread key that a paired stream holds, not inside the build.
 - One publisher: a slow build delays the keys behind it. `/api/v1/health` lists each key's build p50 and p95, its
   size, rev, holders and faults, so a slow or unaddressable screen is visible on the live instance.
@@ -193,26 +239,43 @@ Not taken:
   other; its socket tests are the check. If #1314 is still open when slice 2 starts, block it on #1318.
 - `screens.rs` is at 1,995 of its 2,000 lines and `serve.rs` at 3,378. The diff, the stream loop and the
   connection handler leave them; all new code is in new files.
-- Estimate: Rust `src/` net about +1,100 lines (the crate 500, the hub 260, the stream 230, the tails 220, the
-  connection code 60, less 155 that leave `screens.rs`); `web/src` about +350. The cap's headroom is 414.
+- Estimate, drover: Rust `src/` net about +620 lines (the hub 260, the stream 230, the tails 220, the connection
+  code 60, less 155 that leave `screens.rs`); `web/src` about level (`ops.ts` and the per-screen streams go, the
+  mounts come). The cap's headroom is 414, and 4 once the open PRs land. Estimate, blocks (no cap there): the crate
+  about 900 lines, the generator 300, the TS package 450.
 - RSS after 24 h cannot be a CI test. CI keeps the 60 s soak, moved to device streams; the 24 h number is read on
   the live instance (`/api/v1/health`'s RSS, and no `serve-mem-high` in that day).
 
 ## Slices
 
-In this order; each carries its tests from `usage.md`.
+Two repos. A blocks slice is an issue in `jirathip-dev/blocks` (fleet `blocks`), filed by the orchestrator with a
+link to this folder. The drover slice that needs it is blocked on it (`drover queue herdsman block --on blocks#N`)
+and starts by moving the pin. Each slice carries its tests from `usage.md`.
 
-1. **The crate.** `drover-blocks`: the block rules, the diff (moved out of `screens.rs`, with `move` and the list
-   root), the patcher, the wire types, `Shelf` and `Mirror`. `api.rs` re-exports the wire types; `just types`
-   writes them. serve's old streams call the crate's diff through the old-ops translation. One change shows:
-   cooee's cards stream sends the list when it changes (today it sends nothing).
-2. **serve on tokio.** `serve/conn.rs`: accept, the request reader, the routes' split. As step 1 above.
+In blocks:
+
+- **B1. The crate.** The workspace and its CI: fmt, clippy with drover's lint table, tests, deny, and a line that
+  the crate's dependencies are serde and serde_json. `blocks`: the typed blocks, `Built` and its faults, the diff
+  (with `move` and the list root), the patcher, the wire types, `Shelf`, `Mirror`, `wire::old`. `fixtures/`:
+  cooee's and drover's goldens, each parsed with no fault.
+- **B2. The generated types and the page's two modules.** `blocks-gen` and `just gen` (the schema, `types.ts`,
+  `Blocks.swift`) with the stale check; the Swift file builds and decodes the fixtures. The TS package:
+  `stream.ts` and `patch.ts` with their tests (the protocol cases `Mirror` runs too; WebKit for the patcher).
+
+In drover, in this order (slice 2 needs nothing from blocks and can start at once):
+
+1. **The pin** (needs B1). `Cargo.toml`, `deny.toml`, the deps gate, `docs/serve.md`. The diff leaves `screens.rs`:
+   serve's old streams call the crate's through `wire::old`. One change shows: cooee's cards stream sends the list
+   when it changes (today it sends nothing).
+2. **serve on tokio.** `serve/conn.rs`: accept, the request reader, the routes' split. As step 1 of its section.
 3. **The hub.** `serve/hub.rs`, `Server::screen` renamed `build_screen` with `deps`. `GET /screens/<x>` and the old
-   per-screen streams read the hub (ETag, 304); the cap of 4 and the per-stream build loop go. Health's key table.
-4. **The device stream.** `serve/stream.rs`, the page's `stream.ts`. Tabs, cards, sheets and threads mount and
-   unmount keys; a sheet paints its last copy first. The page's per-screen streams go; `/live` joins the writer.
-5. **Patch in place.** The page's `patch.ts`: the id index, one node per op, the 100 ms queue, the anchor, `log`
-   containers, the debounced save. `paint` stays for a whole `screen` only.
+   per-screen streams read the hub (ETag, 304); the cap of 4 and the per-stream build loop go. Health's key table,
+   with each key's faults from the typed check.
+4. **The device stream** (needs B2). `serve/stream.rs`; the pin gains the TS package. Tabs, cards, sheets and
+   threads mount and unmount keys on the package's stream; a sheet paints its last copy first. The page's
+   per-screen streams go; `/live` joins the writer.
+5. **Patch in place.** The page hands its `render` to the package's patcher: one node per op, the 100 ms queue, the
+   anchor, `log` containers, the debounced save. `ops.ts` goes; `paint` stays for a whole `screen` only.
 6. **Lane tails.** `serve/tails.rs` and its feeder; the lane sheet built from it with stable block ids; `older`.
 7. **Gates and docs.** The fixture gates, 10 screens on 3 devices, the soak on device streams; `docs/serve.md` and
    `docs/performance.md`. It uses #1312's fixture (phone timings) if that has merged, else a builder of the same
@@ -220,9 +283,14 @@ In this order; each carries its tests from `usage.md`.
 
 ## Open questions
 
-1. **The line cap.** This issue adds about 1,100 lines of Rust; the cap has 414 left, 187 once the open PRs land.
-   Recommended: one raise of about 1,000, filed by the orchestrator, before slice 1 starts.
-2. **#1313's bar for the Queue.** An event must be painted within 150 ms: 25 ms to notice it, the build, 5 ms to
+1. **What waits.** The amendment puts the HTML renderer and the theme package in the blocks repo; it does not say
+   #1318 builds them. Recommended: their own issues after #1318, with cooee's switch and the builders' move to
+   typed constructors (the table above). #1318 then builds in blocks only what its gates need. If the renderer
+   should move inside #1318 instead, it goes between B2 and slice 4 and takes the theme's figures and words with it.
+2. **The line cap.** drover gains about 620 lines of Rust; the cap has 414 left, 4 once the open PRs land.
+   Recommended: one raise of about 700, filed by the orchestrator, before slice 1 starts. (It was about 1,000
+   before q2049: the crate's lines are now in blocks.)
+3. **#1313's bar for the Queue.** An event must be painted within 150 ms: 25 ms to notice it, the build, 5 ms to
    diff and write, and about 50 ms for the network and the phone. That leaves a held screen's build 70 ms p95.
    #1313's own gate is 150 ms a build, on the live copy and the live-shaped fixture. Recommended: #1313 holds the
    Queue (and each screen a tab keeps open) to 70 ms p95 there. If it lands between 70 and 150 ms, this issue's
@@ -231,19 +299,14 @@ In this order; each carries its tests from `usage.md`.
 
 ## `.drover/arch.toml` lines
 
-No hot file is converted. The impl lane adds these bans: the first two with slice 1, the third with slice 3 and
-the last with slice 4.
+No hot file is converted. In drover the impl lane adds these bans: the first with slice 2, the second with slice 3
+and the last with slice 4.
 
 ```toml
 [[ban]]
-pattern = "drover_"
-paths = ["crates/blocks/src/**"]
-reason = "#1318 (q2040): the renderer core imports nothing from drover's crates, so it can be extracted"
-
-[[ban]]
 pattern = "tokio"
-paths = ["crates/blocks/src/**", "crates/core/src/**", "crates/sys/src/**"]
-reason = "#1318 (q2044): tokio is serve's and service's transport; core, sys and the renderer core stay synchronous"
+paths = ["crates/core/src/**", "crates/sys/src/**"]
+reason = "#1318 (q2044): tokio is serve's and service's transport; core and sys stay synchronous"
 
 [[ban]]
 pattern = ".build_screen("
@@ -254,6 +317,12 @@ reason = "#1318: a screen is built once per change by the hub (serve/hub.rs); a 
 [[ban]]
 pattern = "new EventSource"
 paths = ["web/src/**"]
-except = ["web/src/stream.ts"]
-reason = "#1318: the page holds one stream per device (web/src/stream.ts); a view opens a key on it"
+reason = "#1318: the page holds one stream per device, opened by the blocks package's stream.ts; a view opens a key on it"
+```
+
+In blocks, B2 adds its generated files, so they are regenerated and never hand-merged:
+
+```toml
+generated = ["schema/blocks.schema.json", "ts/src/types.ts", "swift/Sources/Blocks/Blocks.swift"]
+generate = "just gen"
 ```

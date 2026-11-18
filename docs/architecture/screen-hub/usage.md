@@ -4,16 +4,26 @@ Sketches, not code to copy. The names are the ones `shapes.md` and `boundaries.m
 
 ## The crate, from serve
 
-The crate knows nothing of serve. serve hands it screens and gets ops, frames and key states back.
+The crate lives in the blocks repo and knows nothing of serve. drover names one commit of it, twice:
+
+```toml
+blocks = { git = "https://github.com/jirathip-dev/blocks", rev = "<40 hex>" }      # Cargo.toml
+```
+```json
+"@jirathip-dev/blocks": "github:jirathip-dev/blocks#<the same 40 hex>"
+```
+
+serve hands the crate screens and gets ops, frames and key states back.
 
 ```rust
-use drover_blocks::{diff::ops, patch::apply, Screen, Shelf, wire::{Frame, Sync, Synced}};
+use blocks::{diff::ops, patch::apply, Built, Shelf, wire::{Frame, Sync, Synced}};
 
-let new = Screen::new(self.build_screen(ctx, &key)?);          // never fails; `new.faults()` goes to health
+let new = Built::new(self.build_screen(ctx, &key)?);           // never fails: the builders still write JSON
 match shelf.put(&key, &key.path, &new) {
     Put::Changed(delta) => holders.for_each(|q| q.push(&delta.frame)),   // one serialized frame for every stream
     Put::First | Put::Same => {}
 }
+meta.faults = new.check();                                     // after publishing: read into the typed blocks, for health
 let state = shelf.state(&key, &key.path, have.rev);            // current, the missed ops, or the whole screen
 ```
 
@@ -128,21 +138,27 @@ pub fn serve_with(ctx: Ctx, r: &'static dyn Runner, l: TcpListener, read_only: b
 ## The page
 
 One stream for the page. A view (a tab, the cards, a sheet, a thread) opens its key when it mounts and closes it
-when it goes.
+when it goes. The stream and the patcher come from the blocks package; the page hands the patcher its own `render`.
 
 ```ts
-const live = stream({ state: sync });                        // the one EventSource; the sync dot follows it
+import { patcher } from '@jirathip-dev/blocks/patch';
+import { stream } from '@jirathip-dev/blocks/stream';
+import type { Frame, Op } from '@jirathip-dev/blocks/types';
+import { render } from './blocks';
+
+const live = stream({ url: R + 'stream', state: sync });     // the one EventSource; the sync dot follows it
 
 function mount(v: View) {
   const c = cached(v.path);                                  // the phone's last copy, painted at once
   if (c) show(v, c.v);
-  live.open(v.path, c?.rev, f => (f.screen ? show(v, f.screen) : queue(v, f.ops)));
+  v.patch = patcher({ root: v.root, model: () => v.model, draw: b => render(b, v.ctx), saved: () => save(v) });
+  live.open(v.path, c?.rev, f => (f.screen ? show(v, f.screen) : v.patch.queue(f.ops)));
 }
-function unmount(v: View) { live.close(v.path); }
+function unmount(v: View) { live.close(v.path); v.patch.drop(); }
 ```
 
-Ops are queued and patched at most once per 100 ms, on an animation frame (q2039). A lone frame waits for nothing
-but the next animation frame.
+The rest of this section is the inside of the package's `patch.ts` (`v` is one patcher's state). Ops are queued and patched at most once per
+100 ms, on an animation frame (q2039). A lone frame waits for nothing but the next animation frame.
 
 ```ts
 const FRAME = 100;
@@ -162,14 +178,14 @@ function flush(v: View): void {
   const hold = anchor(v, ops);                 // the first row in view these ops neither move nor remove, and its top
   for (const op of ops) {
     if (op.op === 'merge') redraw(v, op.id, Object.assign(v.byId(op.id), op.fields));    // one node
-    else if (op.op === 'insert') place(v, op.into, op.before, render(op.block, v.ctx));  // one new node
+    else if (op.op === 'insert') place(v, op.into, op.before, v.draw(op.block));         // one new node
     else if (op.op === 'move') place(v, op.into, op.before, v.node(op.id));              // the same node, elsewhere
     else if (op.op === 'remove') v.node(op.id)?.remove();
     …
   }
   settle(v, hold);                             // scrollTop += how far that row shifted; a log at its end stays there
   [v.due, v.last] = [0, performance.now()];
-  save(v);                                     // localStorage, at most once every 2 s and on pagehide
+  v.saved?.();                                 // the page saves: localStorage, at most once every 2 s and on pagehide
 }
 ```
 
@@ -180,27 +196,47 @@ A lane sheet's `[older]` asks for the page before its first block and puts it on
 
 ```ts
 const page = await get(`${v.path}/older?before=${first(v, 'transcript')}`);
-queue(v, page.blocks.map(block => ({ op: 'insert', into: 'transcript', before: first(v, 'transcript'), block })));
+v.patch.queue(page.blocks.map(block => ({ op: 'insert', into: 'transcript', before: first(v, 'transcript'), block })));
 ```
 
 ## The tests
 
-The crate's (slice 1, in its own `tests` folder, no server):
+In the blocks repo, the crate's (B1; no server):
 
 | Test | Asserts |
 |---|---|
-| `ops_then_apply_gives_the_new_screen` | for each pair of screens in its cases, and each reorder of a list: `apply(a, ops(a, b)) == b` |
+| `ops_then_apply_gives_the_new_screen` | for each pair of screens in `fixtures/`, and each reorder of a list: `apply(a, ops(a, b)) == b` |
 | `a_changed_row_is_one_merge_of_its_changed_fields` | no `replace`, no whole screen |
 | `a_row_that_changes_place_is_a_move` | one row to the top of 45: one `move`; two lists swapped: the fewest moves |
 | `a_log_never_loses_its_head` | lines that left the window: no `remove` |
 | `a_bare_list_diffs_under_its_root` | a new card is an `insert` into `root` |
-| `a_mirror_drops_an_old_frame_and_asks_again_on_a_gap` | the order rules; a new epoch forgets every rev |
+| `a_mirror_drops_an_old_frame_and_asks_again_on_a_gap` | `fixtures/protocol/`: the order rules; a new epoch forgets every rev |
 | `a_shelf_answers_current_ops_or_screen` | by the rev sent and the ring's bounds |
+| `every_fixture_reads_into_the_typed_blocks` | cooee's and drover's goldens: no fault; written back, the same JSON |
+| `an_unknown_kind_or_field_is_kept_and_is_a_fault_for_its_server` | read and written back unchanged; `check` names it |
 
-serve on tokio (slice 2): every existing socket test, unchanged but for its `serve_on` call, plus:
+In the blocks repo, the generator's and the package's (B2; the patcher's run in WebKit at 390 px on a stand-in
+`draw`):
 
 | Test | Asserts |
 |---|---|
+| `the_generated_files_are_current` | `just gen` changes nothing; `Blocks.swift` builds and decodes every fixture |
+| `the_stream_follows_the_mirrors_cases` | `stream.ts` on `fixtures/protocol/`: the same answers as `Mirror` |
+| `a_burst_of_frames_is_one_patch_per_100ms` | 10 frames in 50 ms: at most 2 patches; the page equals the newest screen |
+| `a_lone_frame_paints_on_the_next_animation_frame` | no 100 ms wait after a quiet spell |
+| `a_patch_touches_only_the_nodes_its_ops_name` | a mutation observer: every other row keeps its node, untouched |
+| `an_insert_above_the_viewport_keeps_the_reading_position` | scrolled to a row; 3 rows arrive above it: its top moves under 1 px |
+| `a_move_across_the_viewport_keeps_the_reading_position` | a row from below to above, and from above to below |
+| `a_removed_anchor_falls_to_the_next_row_in_view` | the first row in view is removed: the next one holds |
+| `at_the_top_a_new_row_shows_at_the_top` | no scroll is added when nothing is above the viewport |
+| `a_log_at_its_end_stays_at_its_end_and_older_lines_keep_the_place` | new lines at the end; a page of older ones on top |
+
+In drover, the pin (slice 1) and serve on tokio (slice 2): every existing socket test, unchanged but for its
+`serve_on` call, plus:
+
+| Test | Asserts |
+|---|---|
+| `the_page_and_the_server_pin_one_blocks_commit` | the rev in `Cargo.lock` is the one in `web/package-lock.json` |
 | `a_slow_request_does_not_hold_up_a_fast_one` | one handler held in its blocking thread; a screen GET still answers |
 | `the_65th_request_waits_and_gets_its_answer` | 80 at once: 80 answers, no 503 |
 | `a_client_that_sends_half_a_request_is_dropped_after_5s` | and holds no blocking thread meanwhile |
@@ -213,7 +249,7 @@ release, with `blocks::Mirror` as the phone (slices 3 to 7):
 | `fresh_data_is_under_150ms_p95_on_every_screen_and_sheet` | a GET and a stream `open` of each screen and sheet |
 | `an_event_reaches_every_subscribed_phone_within_100ms_p95` | append an event, read each key's frame on 3 streams; one build per key, counted |
 | `ten_screens_across_three_devices_get_no_503` | 3 streams, 10 keys, 200 events: every frame arrives, in order, no 503; each mirror equals the newest build |
-| `no_fixture_screen_has_a_fault` | every row and card of every screen and sheet has an id, no id twice, every kind known |
+| `no_fixture_screen_has_a_fault` | every screen and sheet: every row and card has an id, no id twice, and `check` finds no unknown kind, field or shape |
 | `a_row_change_travels_as_row_ops` | a new ask, a merge, a queue move: no whole screen, no `replace` of a block that has children |
 | `a_dropped_stream_catches_up_from_its_revs` | close the socket, append, reconnect: ops for a small gap, a whole screen past the ring |
 | `a_fifth_stream_of_a_device_closes_its_oldest` | `bye evicted` on the oldest; other devices untouched |
@@ -222,19 +258,15 @@ release, with `blocks::Mirror` as the phone (slices 3 to 7):
 | `a_lane_sheet_opens_without_a_shed_call_and_its_tail_streams_in` | the call-count probe; new lines arrive as `insert` ops |
 | `serve_holds_its_budget_and_stops_growing_under_load` (`soak.rs`, changed) | 3 device streams with 10 keys each in place of 8 `/live` streams; the same 300 MB bound |
 
-The page's (slice 5; WebKit at 390 px through `crates/cli/tests/support/webview.mjs`, in the ui-webkit job):
+In drover, the real page (slice 5; WebKit at 390 px through `crates/cli/tests/support/webview.mjs`, in the ui-webkit
+job). The patcher's own cases are the package's; these check it with drover's renderer and data:
 
 | Test | Asserts |
 |---|---|
-| `a_burst_of_frames_is_one_patch_per_100ms` | 10 frames in 50 ms: at most 2 patches; the page equals the newest screen |
-| `a_lone_frame_paints_on_the_next_animation_frame` | no 100 ms wait after a quiet spell |
-| `a_patch_touches_only_the_nodes_its_ops_name` | a mutation observer: every other row keeps its node, untouched |
-| `an_insert_above_the_viewport_keeps_the_reading_position` | scrolled to a row; 3 rows arrive above it: its top moves under 1 px |
-| `a_move_across_the_viewport_keeps_the_reading_position` | a row from below to above, and from above to below |
-| `a_removed_anchor_falls_to_the_next_row_in_view` | the first row in view is removed: the next one holds |
-| `at_the_top_a_new_row_shows_at_the_top` | no scroll is added when nothing is above the viewport |
-| `a_log_at_its_end_stays_at_its_end_and_older_lines_keep_the_place` | a lane sheet's new lines; `[older]` on top |
+| `the_queue_keeps_its_place_when_a_row_arrives_above` | scrolled into the Queue, a new ask on top: the row being read moves under 1 px |
+| `a_queue_row_that_moves_keeps_its_node` | a queue move: one node moved, every other row's node untouched |
+| `a_lane_sheet_at_its_end_follows_new_lines_and_older_keeps_the_place` | the tail streaming in; `[older]` on top |
 | `a_typed_draft_survives_a_patch` | a Send line with text in it, its row merged |
 
 The event-to-painted number itself is #1312's (phone timings): this issue's gate reads it on the fixture, under
-150 ms p95, and on live data once #1313 has landed (`adr.md`, open question 2).
+150 ms p95, and on live data once #1313 has landed (`adr.md`, open question 3).

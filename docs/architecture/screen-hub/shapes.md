@@ -1,16 +1,43 @@
 # screen-hub: the data shapes (#1318)
 
-Two homes. The renderer core, the new crate `drover-blocks` (folder `blocks`), holds everything a second server or a
-second client would need: the block rules, the ops, the diff, the wire types and both ends' bookkeeping. serve
-holds what is drover's: the key, the signals, the hub, the streams' queues, the lane tails.
+Two homes. The renderer core is the repo `jirathip-dev/blocks` (q2049): everything a second server or a second
+client needs. serve holds what is drover's: the key, the signals, the hub, the streams' queues, the lane tails.
 
-## The crate: `drover-blocks`
+## The blocks repo
 
-Depends on serde and serde_json (ts-rs behind its `ts` feature). No drover crate, no tokio, no clock, no socket.
+```
+Cargo.toml                             a workspace: crates/blocks, crates/gen
+crates/blocks/                         the crate `blocks`: serde and serde_json, nothing else
+crates/gen/                            `blocks-gen`: writes the three generated files; nothing depends on it
+schema/blocks.schema.json              generated from the crate's types
+package.json, ts/src/                  the TS package: types.ts (generated), stream.ts, patch.ts
+Package.swift, swift/Sources/Blocks/   Blocks.swift (generated): cooee's, when it adopts
+fixtures/                              screens, op streams and protocol cases; the Rust and the TS tests run the same ones
+theme/, ts/src/render.ts               later, their own issues: the shared theme package, the one HTML renderer
+```
+
+`just gen` runs `blocks-gen`: the Rust types → the schema (schemars, behind the crate's `schema` feature, which only
+the generator turns on) → `types.ts` and `Blocks.swift`, written from the schema. CI fails when one is stale.
+
+**The pin.** One commit, merged on blocks' `staging`, named twice in drover; a test fails when the two differ.
+
+```toml
+blocks = { git = "https://github.com/jirathip-dev/blocks", rev = "<40 hex>" }     # Cargo.toml; deny.toml allows the source
+```
+```json
+"@jirathip-dev/blocks": "github:jirathip-dev/blocks#<the same 40 hex>"
+```
+
+The package ships its TypeScript as it is; drover's esbuild bundles it into `web/dist`, and its `tsc --strict` reads it.
+
+### The crate: `blocks`
+
+No drover crate, no tokio, no clock, no socket.
 
 | Module | Holds |
 |---|---|
-| `block` | `Screen`, `Kind`, `Fault`: what a screen must be for a row to be addressed |
+| `kind` | `Block` and a struct per kind, with the shared parts (`Tap`, `Act`, `Badge`, `Field`, `Toned`) |
+| `built` | `Built`, `Fault`: a built screen as the diff reads it, and what is wrong with it |
 | `wire` | `Op`, `Frame`, `Hello`, `Bye`, `Sync`, `Have`, `Synced`, `KeyState`; a frame's SSE text; `old` (cooee's ops) |
 | `diff` | `ops(a, b)`: the row ops that turn screen `a` into `b` |
 | `patch` | `apply(screen, ops)`: the reference patcher; `apply(a, ops(a, b)) == b` is the crate's main test |
@@ -19,30 +46,54 @@ Depends on serde and serde_json (ts-rs behind its `ts` feature). No drover crate
 
 ### Blocks
 
-A block is a JSON object, as cooee draws it. The crate reads four of its fields and leaves the rest to the builder
-and the renderers.
+A block is a JSON object, as cooee draws it. Each kind has a Rust type; the wire does not change.
 
 ```rust
-/// A built screen. Always constructible; its faults say what cannot be addressed by row.
-pub struct Screen { v: Value, faults: Vec<Fault> }
-pub enum Fault {
-    Twice { id: String },                 // two blocks with one id: an op would be ambiguous
-    Unnamed { kind: Kind, under: String }, // a row or card without an id: its change would replace its parent
-    Unknown { kind: String },             // a `type` outside `Kind`
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum Block {
+    Screen(Screen), Sheet(Sheet), Section(Section), List(List), Row(Row), Card(Card), Choice(Choice), Form(Form),
+    Config(Form), Secret(Secret), Run(Run), Button(Button), Chips(Chips), Stat(Stat), Text(Text), Images(Images),
+    Web(Web), Diff(Diff), Editor(Editor), Scene(Scene), Diagram(Diagram),     // cooee's schema: 21 kinds
+    Composer(Composer), HeaderStrip(HeaderStrip), MenuRow(MenuRow),           // drover's: not in that schema today
 }
-pub enum Kind { Screen, Sheet, Section, Card, List, Row, Text, Stat, Chips, Button, Form, Choice, Picker, Toggle,
-                MenuRow, HeaderStrip, Images, Diagram, Run, Scene, Composer, Secret }
+pub struct Row {
+    pub id: Option<String>,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub badge: Option<Toned>,
+    pub tap: Option<Tap>,                              // … the rest of cooee's 16 row fields
+    #[serde(flatten)]
+    pub more: Map<String, Value>,                      // a field the model lacks: kept on the wire
+}
+/// A built screen as the diff reads it. Always constructible; its faults say what is wrong with it.
+pub struct Built { v: Value, faults: Vec<Fault> }
+pub enum Fault {
+    Twice { id: String },                  // two blocks with one id: an op would be ambiguous
+    Unnamed { kind: String, under: String }, // a row or card without an id: its change would replace its parent
+    Unknown { kind: String },              // a kind the model lacks
+    Shape { id: String, why: String },     // a known kind that does not read: a field missing or of another type
+    Extra { id: String, field: String },   // a field the model lacks
+}
+impl Built {
+    pub fn new(v: Value) -> Built;         // the first two faults: one walk, on every build
+    pub fn check(&self) -> Vec<Fault>;     // the last three: reads the screen into `Block`
+}
 ```
 
+- The fields are those of cooee's `screens.schema.json` (40 definitions) plus what drover's three kinds carry.
+  `toggle` and `picker` are fields of a form, not blocks.
+- **Reading is lenient, writing is strict.** A client keeps an unknown kind as JSON and skips it, and keeps an
+  unknown field in `more`: a newer server works with an older app, as cooee's schema promises. A server's own
+  screen with either is a fault from `check`.
 - `id`: stable for the block's life, unique in its screen. Transcript blocks are `t<gen>-<first line number>`.
-- `type`: one of `Kind` (the 22 the server writes today).
-- `blocks` or `rows`: its children, in order.
+- `blocks` or `rows`: the children the diff walks, in order.
 - `log: true`: a window that slides (a transcript): the diff never removes a child that left its head.
 - A screen that is a bare list (the cards) gets the root `{"id": "root", "blocks": [...]}` on both ends. Its JSON on
   the wire stays the bare list. Today its diff is always empty (`facts.md`).
 
-A screen with a `Twice` fault is sent whole on every change; the others still diff. Health lists each key's faults,
-and `no_fixture_screen_has_a_fault` keeps the builders honest: that is how "row ops are required" is enforced.
+A screen with a `Twice` fault is sent whole on every change; the others still diff. The hub runs `check` after a
+build is published; health lists each key's faults, and `no_fixture_screen_has_a_fault` keeps the builders honest:
+that is how "row ops are required" and "no drift from the typed model" are enforced while the builders write JSON.
 
 ### Ops
 
@@ -55,6 +106,7 @@ pub enum Op {
     Remove { id: String },
     Replace { id: String, block: Value },                         // a block lost a field, or has unnamed children
     Badge { count: u64 },                                         // the tab's count
+    Dot { on: bool },                                             // cooee's unread dot; the diff never writes it
 }
 ```
 
@@ -97,7 +149,8 @@ pub struct Synced { keys: Vec<KeyState> }
 pub struct KeyState { k: String, rev: Option<u64>, ops: Option<Vec<Op>>, screen: Option<Value>, gone: Option<u16> }
 ```
 
-`api.rs` re-exports these, so `just types` writes them to `assets/types/api.d.ts` and the page imports them.
+The page imports these from the package's generated `types.ts`. `api.rs` holds no copy of them and `just types`
+does not write them.
 
 **Resume.** The server keeps nothing about a stream once its socket closes, so a reconnect, a serve restart and a
 handover are one case:
@@ -125,13 +178,13 @@ pub struct Kept { pub rev: u64, pub json: Arc<[u8]>, ring: VecDeque<Delta> }
 pub struct Delta { pub from: u64, pub rev: u64, pub frame: Arc<str> }   // serialized once, for every stream
 pub enum Put { Same, First, Changed(Delta) }
 impl<K: Ord + Clone> Shelf<K> {
-    pub fn put(&mut self, k: &K, wire: &str, new: &Screen) -> Put;       // parses the kept JSON (0.06 to 0.4 ms), diffs
+    pub fn put(&mut self, k: &K, wire: &str, new: &Built) -> Put;        // parses the kept JSON (0.06 to 0.4 ms), diffs
     pub fn state(&self, k: &K, wire: &str, have: Option<u64>) -> KeyState; // current, the ring's ops, or the screen
     pub fn forget(&mut self, k: &K);
 }
 
-/// A client's half: the page's `stream.ts` follows the same rules; a Rust client and the tests use this one.
-pub struct Mirror { epoch: String, held: BTreeMap<String, (u64, Screen)> }
+/// A client's half: the package's `stream.ts` follows the same rules; a Rust client and the tests use this one.
+pub struct Mirror { epoch: String, held: BTreeMap<String, (u64, Built)> }
 pub enum Took { Patched, Replaced, Old, Gap }                     // Gap: open the key again with the rev held
 impl Mirror {
     pub fn hello(&mut self, h: &Hello);                           // a new epoch forgets every rev
@@ -140,6 +193,27 @@ impl Mirror {
     pub fn synced(&mut self, sent: &[Have], s: Synced);
 }
 ```
+
+### The TS package's two modules
+
+```ts
+export type State = 'off' | 'connecting' | 'syncing' | 'live' | 'waiting' | 'parked';
+export function stream(o: { url: string; state?: (s: State) => void }): {
+  open(k: string, rev: number | undefined, on: (f: Frame) => void): void;
+  close(k: string): void;
+};
+export type Draw = (block: Block) => HTMLElement | null;
+export function patcher(o: { root: HTMLElement; model: () => Block; draw: Draw; saved?: () => void }): {
+  queue(ops: Op[]): void;      // patched at most once per 100 ms, on an animation frame
+  flush(): void;               // now: on `pagehide`
+  drop(): void;                // a whole screen arrived, or the view went
+};
+```
+
+`stream.ts` follows `Mirror`'s rules, and both run `fixtures/protocol/`. The patcher draws nothing itself: `draw`
+gives one node for one block, the patcher stamps its `data-id`, and a container's child nodes sit in its element
+marked `data-kids` (else in the node itself). That is the whole contract with a renderer, drover's `blocks.ts`
+today and the shared HTML renderer later.
 
 ## serve: the cache key
 
@@ -194,6 +268,7 @@ struct Meta {
     read_at: u64,
     building: Option<watch::Receiver<()>>,   // single flight: other readers await it
     ms: [u32; 32],             // its last build times (health)
+    faults: Vec<Fault>,        // from `Built::new` and, after publishing, `Built::check` (health)
 }
 /// One stream's outbound frames; the hub pushes, the stream's task writes.
 struct Queue { q: Mutex<Out>, wake: Notify }
