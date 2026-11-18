@@ -235,3 +235,19 @@ reason = "#1099: the runner makes every git call graft-blind; no call site adds 
 pattern = "Shas"
 paths = ["crates/core/src/gate.rs", "crates/core/src/events.rs", "crates/core/src/db.rs"]
 reason = "#1121: a verdict is pinned to the exact commit reviewed; the gate, the fold and the log never read a compact map"
+
+[[ban]]
+pattern = "drover-local"
+paths = ["crates/*/src/**"]
+reason = "#1275: drover installs only CI's signed release build; nothing signs it on a host"
+
+[[ban]]
+pattern = "install-gate"
+paths = ["crates/*/src/**"]
+reason = "#1275: one install path: core::release stages and swaps a published build; drover is never built on a host"
+
+[[ban]]
+pattern = "releases/download"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/release.rs"]
+reason = "#1275: only core::release knows where a build is published"

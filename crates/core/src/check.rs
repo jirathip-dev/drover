@@ -123,8 +123,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         };
         let since = tries.find(|e| e.val("ok") == true).map_or(0, |e| e.ts);
         let (from, to) = (e.str("from").unwrap_or("?"), e.str("to").unwrap_or("?"));
-        let why =
-            format!("{name}: drover install {from} → {to} failed (~/.drover-sync.log there); the next tick retries");
+        let why = format!("{name}: drover swap {from} → {to} failed there; the next self-update retries");
         let d = json!({"key": format!("{name}@{since}"), "host": name, "reason": why});
         fire(ctx, cfg, out, &synced, ("drover", None), "host-sync-failed", d)?;
     }

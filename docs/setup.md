@@ -33,7 +33,7 @@ drover timer install                # the drive loop, every 5 minutes
 drover serve --addr 127.0.0.1:7777  # /api/v1, cooee's screens and the phone page
 ```
 
-Self-update installs the green head of `[self_update] branch` (default `main`); serve hands its sockets to the new binary without dropping a request; `staging_serve = true` adds a read-only staging serve on `staging_addr` (default `127.0.0.1:7787`) ([below](#self-update-and-the-daily-clean-557)).
+Self-update installs CI's signed release build of the `[self_update] branch` head (default `main`) on every host ([releases](releases.md)); serve hands its sockets to the new binary without dropping a request; `staging_serve = true` adds a read-only staging serve on `staging_addr` (default `127.0.0.1:7787`) ([below](#self-update-and-the-daily-clean-557)).
 
 | Command | What it does |
 |---|---|
@@ -56,152 +56,17 @@ one adapter.
 ```sh
 gh auth status
 shed --version
-cargo build --release --locked -p drover
-# macOS (#781): sign with one local identity, so a Keychain item's access list trusts every build, not one.
-sh scripts/signing-identity.sh   # once: creates "drover-local", lets codesign use it (asks the login password)
-# #968: sign a copy beside the installed file, then rename it over: a running serve keeps its old file.
-b=~/.local/share/drover/bin; mkdir -p "$b"; n=target/release/drover; cp "$n" "$b/drover.new"
-sh scripts/signing-identity.sh sign "$b/drover.new" && mv "$b/drover.new" "$b/drover"   # fails, never hangs
-echo 'export PATH="$HOME/.local/share/drover/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
 ```
 
-Check it worked: open a new shell and run `drover --version`. Once the config exists (step 2 on), reinstall with
-`sh scripts/install-gate.sh target/release/drover ~/.local/share/drover/bin/drover`: it also refuses a build that
-can't load the live config.
-
-### Signed builds (#781)
-
-macOS trusts a Keychain item's reader by its designated requirement. `cargo install` signs ad hoc (`cdhash H"…"`, new
-every build), so each build was a new app and "Always Allow" came back. Signed with "drover-local" the requirement is
-`identifier drover and certificate leaf = H"<the cert's SHA-1>"`, the same for every build. The self-update job, the
-install gate and the reinstall line `drover merge` prints all sign; with no identity (or a codesign stuck on a
-dialog, killed after 10 s) they keep the installed binary. `doctor`'s `signature` row names the identity and is ✗ (exit
-1) for an unsigned build. drover itself keeps no Keychain item (#707); shed and cooee sign with the same identity.
-
-The check, run on the Mini at #781 (b1 the installed staging build, b2 this branch's, u b2 unsigned; a scratch keychain
-holds an item created with `security add-generic-password -T b1`):
-
-```text
-b1 designated => identifier drover and certificate leaf = H"412eb86c9f99cd0f5277ec9c2c0400e59534cc7c"
-b2 designated => identifier drover and certificate leaf = H"412eb86c9f99cd0f5277ec9c2c0400e59534cc7c"
-u # designated => cdhash H"4835b3c6a0856e5f722d045f7a9454a76e793c51"
-stored requirement: identifier drover and certificate leaf = H"412eb86c9f99cd0f5277ec9c2c0400e59534cc7c"
-codesign -v -R="$REQ" b1 → exit 0;  b2 → exit 0;  u → exit 3
-✓ signature — b2 signed by "drover-local"
-✗ signature — u signed by "drover-local" → sh scripts/signing-identity.sh … sign u
-```
-
-A program reading that item with Keychain dialogs off (`SecKeychainSetUserInteractionAllowed(false)`,
-`SecKeychainFindGenericPassword`), built twice and signed the same way, read it both times with no prompt; the ad hoc
-build was refused (`-25293`, errSecAuthFailed).
-
-## 2. Config
-
-One repo as fleet `app`, three roles. Save it as `~/.config/drover/fleet.toml`:
-
-```toml
-models = ["opus", "sonnet"]
-
-[fleet.app]
-repo = "<owner>/<repo>"
-local = "~/src/<repo>"
-integration = "staging"                      # merge target; main never is
-required_checks = ["test"]                   # gate on these checks only; unset = all
-merge_label = "merge-ready"                  # the full CI runs only with this label; drover adds it on a PASS at the head
-
-[[fleet.app.serial]]                         # one-at-a-time paths (docs/config.md); any number of groups
-name = "db"                                  # its Queue mark, 🔒db; ≤ 8 characters
-paths = ["db/migrations/**"]
-max = 1                                      # issues in flight at once; default 1
-
-[fleet.app.role.impl]
-harness = "claude"
-profile = "lane-impl"
-model = "opus"
-effort = "high"                              # none | low | medium | high | xhigh
-mcp = ["<dev-server>"]                       # servers from the repo's .mcp.json; default none
-
-[fleet.app.role.rev]
-harness = "claude"
-profile = "lane-rev"
-model = "sonnet"
-```
-
-Then write the per-role folders and the lane hook:
-
-```sh
-drover profiles sync
-```
-
-Check it worked: `drover status` prints no error. Every other key is in
-[fleet.example.toml](../fleet.example.toml). Lanes run on the host's own CLI login (`claude /login`), and secrets live in
-0600 files, never in fleet.toml: see [accounts.md](accounts.md) and [providers.md](providers.md).
-
-`merge_label` goes with the affected-only CI recipe in [ci.md](ci.md): pull requests run only the checks the change
-can affect, and the full run starts when drover adds the label. `drover setup` creates the label in the repo.
-
-## 3. First lane
-
-```sh
-drover queue app add 12
-drover drive app
-drover status
-```
-
-`drover drive` starts the queue's issues and moves each lane on; the watchdog ([4](#4-watchdog))
-runs it every 5 minutes. Check it worked:
-`drover status` shows #12 moving past `queued`, and `drover board` shows its lane.
-
-## 4. Watchdog
-
-One command, safe to run again: `drover setup`. It writes and loads the tick job and the board
-job ([6](#6-board-on-the-phone-tailscale)), sets up `tailscale serve`, runs `drover profiles sync`,
-plus the self-update and daily clean jobs ([below](#self-update-and-the-daily-clean-557)), makes sure each fleet's
-`merge_label` exists in its repo ([ci.md](ci.md)), then runs
-`drover doctor` and exits with its code. Each step prints `✓ done`, `= already` or
-`✗ <error> → <fix>`; `--no-load` writes the jobs without loading them.
-
-Run it every 5 minutes: `drover timer install`. That is the tick job alone: `drover tick` every
-5 minutes runs `drover check` (alerts once per stall, dead lane or unmerged ready issue), then
-`drover drive` (every fleet's loop, [lanes.md](lanes.md#drive)). No cron and
-no Hermes needed.
-
-- macOS: `~/Library/LaunchAgents/dev.drover.tick.plist` (`--label` picks another label),
-  `StartInterval 300`, `RunAtLoad`, loaded with `launchctl bootstrap gui/$(id -u) <plist>`.
-- Linux: `~/.config/systemd/user/dev.drover.tick.{service,timer}`, loaded with
-  `systemctl --user enable --now dev.drover.tick.timer`.
-- Its PATH is explicit: the directories of the harness binaries, `gh`, `shed` and drover, then
-  `/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin` (`sysctl` and `vm_stat` live in `/usr/sbin`).
-- Both streams go to `~/.local/state/drover/tick.log`; the tick empties it past 1 MB.
-- A refusal (`HOST_BUSY`, …) is logged and the tick exits 0. A real error (config, shed missing)
-  logs `tick-failed`, which notifiers send at most once an hour. A red SERVICES row (`GET /api/v1/host`)
-  sends one `service-red` an hour too.
-
-`drover timer status` prints loaded or not and the last tick. Undo: `drover timer remove`
-(unloads it and deletes its files). Check it worked: `drover doctor` shows `✓ timer` and a
-`watchdog check` that ran under 15 minutes ago.
+Then install drover from its latest release: [releases](releases.md#a-manual-install). Check it worked: open a new
+shell and run `drover --version`. After that the self-update job keeps it current ([releases](releases.md)).
 
 ### Self-update and the daily clean (#557)
 
 drover needs no Hermes: `drover setup` (or `timer install`) also writes two jobs of its own.
 
-- `dev.drover.update` runs `drover self-update` every 5 minutes. It fetches `[self_update] branch` (default
-  `main`, #894; `"staging"` for a dev box) of the drover fleet (the fleet whose repo is `…/drover`) and installs a
-  new head only once its CI is all green: it builds in `<state dir>/update/src` (a worktree of the fleet's `local`),
-  never over the live binary, runs the new binary's `doctor --config-only` against the live fleet.toml (#539), swaps
-  it in atomically, then runs `profiles sync` and hands serve over: the running serve starts the new binary on its
-  listening sockets (the board's and the webhook port), stops accepting once that one is warm, closes each `/live`
-  stream (the page reconnects with `?since=<seq>` and misses no event), drains its requests and execs the new binary
-  in place, so launchd keeps its pid. A serve that does not answer on `<state dir>/serve-<port>.sock` (an older
-  build) is restarted instead. Any failed step keeps the old binary and alerts `self-update-failed` once per head,
-  with the exact failure. #1031: that doctor also says `hello` to the local `shed serve`; a server on another shed
-  protocol fails it (`✗ shed — SHED_VERSION: …` naming the shed the new drover needs), so the old drover stays and
-  the alert goes out once per mismatch, not once per head; install that shed and restart `shed serve`. `drover self-update --dry-run` prints what it would do; `--pause` / `--resume` toggle it
-  (logged). The job's PATH includes `cargo`'s directory.
-- `[self_update] staging_serve = true` (off by default) also installs the green staging head into
-  `<state dir>/update-staging/bin/drover` and runs it as `dev.drover.serve-staging`: `serve --read-only` on
-  `staging_addr` (default `127.0.0.1:7787`) against the live config and state, every write refused, to try a change
-  before promoting it.
+- `dev.drover.update` runs `drover self-update` every 5 minutes: it installs CI's signed release build of the
+  `[self_update] branch` head on every host, staged first and swapped together. See [releases](releases.md).
 - `dev.drover.clean` runs `drover clean --scheduled` daily at 03:30: worktrees of merged or closed issues idle
   3 days or more, at most 10 a run, never a live one; unsaved work goes to `wip/` first, as `clean --yes`. A refusal or failure alerts `clean-failed` once; a clean
   no-op is silent.
@@ -214,7 +79,7 @@ hermes -p orchestrator cron remove d8bbecd490d7   # fleet-check (auto-install)
 hermes -p orchestrator cron remove 064cdd00dc56   # the old worktree-prune job
 ```
 
-Other Hermes cron jobs (a one-off reminder) stay. `scripts/install-gate.sh` stays for a manual install.
+Other Hermes cron jobs (a one-off reminder) stay.
 
 ## 5. Alerts
 

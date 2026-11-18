@@ -625,9 +625,10 @@ fn boot_fake(gh_in: bool) -> Fake {
         .reply(&step("command -v"), "")
         .reply(&step("apt_ gh"), "")
         .reply(
-            &step("cargo install --git https://github.com/jirathip-dev/herdsman --rev"),
-            "",
+            "gh release download",
+            &format!("{}  drover-x86_64-unknown-linux-gnu\n", "a".repeat(64)),
         )
+        .reply(&step("( n='"), "")
         .reply(&step(&mine), "")
         .reply(&step("[ \"$HOME/.local/bin/drover\" -ef"), "")
         .reply(&step("claude auth status"), "")
@@ -1028,12 +1029,16 @@ fn bootstrap_installs_and_checks_the_real_exe_the_guard_runs_not_its_symlink() {
     let res = drover::cloud::bootstrap(&c, &cfg, &f, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();
     assert!(res.is_ok() && out.contains("✓ drover — installed"), "{res:?} {out}");
-    let root = home.join(".local/share/drover").display().to_string();
+    let sum = "a".repeat(64);
+    let staged = format!("( n='{exe}.new'; p=\"$n.part\"; mkdir -p");
+    let swap = format!("[ \"${{s%% *}}\" = '{sum}' ] || {{ rm -f \"$p\"; exit 4; }}; chmod 755 \"$p\" && mv -f \"$p\" \"$n\" && \"$n\" --version ) && mv -f '{exe}.new' '{exe}'");
+    let swap = swap.replace('\'', "'\\''");
+    let calls = f.calls.borrow();
     assert!(
-        f.called(&step(&drover::hosts::install_line(&root, env!("DROVER_SHA")))),
-        "{:?}",
-        f.calls.borrow()
+        calls.iter().any(|c| c.starts_with(&step(&staged)) && c.contains(&swap)),
+        "{calls:?}"
     );
+    drop(calls);
     let on = drover::hosts::On::new(&f, Some("cloud1"));
     let _ = drover::hosts::acp_guard(&c, &on, "/home/me", ("fleet-impl", "claude", "x"));
     assert!(f.called(&format!("{SSH}'{exe}' '--version'")), "{:?}", f.calls.borrow());
