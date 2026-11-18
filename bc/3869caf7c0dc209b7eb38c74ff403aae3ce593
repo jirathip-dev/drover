@@ -1,0 +1,5 @@
+Decided: merge origin/staging ec8bb43e; sheet() keeps the double-tap guard and spinner plus staging's pending reset; the lane sheet appends the undelivered row to the one-call transcript
+Because: "a second tap while loading does nothing"
+Rejected: none
+Check: crates/server/src/screens.rs:1529 still makes one shed call and shows the undelivered row
+Owner: Update onto staging, no behaviour change beyond both sides combined.
