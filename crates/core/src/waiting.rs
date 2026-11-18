@@ -95,6 +95,7 @@ const DRAFT: &str = "PR is a draft";
 pub const TURN_NUDGE: &str = "reported done, nothing new pushed: nudging it once";
 pub const TURN_GO_ON: &str = "reported working, idle: prompting it to continue";
 pub const TURN_BLOCKED: &str = "reported blocked: ";
+pub const TURN_ASK: &str = "with no open ask: nudging it once to ask";
 /// A reviewer's verdict.md drive could not fetch or record; drive tries again each pass.
 pub const PICKUP: &str = "verdict pickup failed: ";
 const NUDGE_SECS: u64 = 600;
@@ -163,7 +164,23 @@ fn turned(events: &[Event], t: &Event, lane: &str, now: u64, stall: u64) -> (Who
             "drive",
             format!("{TURN_BLOCKED}{}", t.str("why").unwrap_or("no reason given")),
         ),
-        "need-input" => ("none", format!("reported need-input{why} with no open ask")),
+        "need-input" => match events.iter().rfind(since(sp)) {
+            None => ("drive", format!("reported need-input{why} {TURN_ASK}")),
+            Some(p) if t.ts > p.ts || now >= p.ts + NUDGE_SECS => (
+                "drive",
+                format!(
+                    "{TURN_BLOCKED}need-input with no ask: {}",
+                    t.str("why").unwrap_or("no reason given")
+                ),
+            ),
+            Some(p) => (
+                "none",
+                format!(
+                    "reported need-input{why} with no open ask: nudged {} ago",
+                    age(now - p.ts)
+                ),
+            ),
+        },
         _ => match events.iter().rfind(since(t.ts)) {
             Some(p) => (
                 "none",
