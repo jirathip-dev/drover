@@ -1,0 +1,123 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1219/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.13s
+     Running tests/page_drafts.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1219/debug/deps/page_drafts-47d76586c3291e91)
+
+running 4 tests
+test an_answered_card_leaves_the_cards_at_once_and_stays_gone_while_its_answer_runs ... FAILED
+test a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node ... FAILED
+test a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text ... FAILED
+test typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent ... FAILED
+
+failures:
+
+---- an_answered_card_leaves_the_cards_at_once_and_stays_gone_while_its_answer_runs stdout ----
+
+thread 'an_answered_card_leaves_the_cards_at_once_and_stays_gone_while_its_answer_runs' (196611) panicked at crates/cli/tests/page_drafts.rs:235:62:
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+browserType.launch: Executable doesn't exist at /home/user/.cache/ms-playwright/webkit-2359/pw_run.sh
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+    at /home/user/.local/share/drover/work/drover/issue-1219/crates/cli/tests/ui/answered.mjs:10:30
+    at async node:internal/modules/esm/loader:647:26 {
+  log: [],
+  name: 'Error'
+}
+
+Node.js v24.22.1
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node stdout ----
+
+thread 'a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node' (196609) panicked at crates/cli/tests/page_drafts.rs:131:62:
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+browserType.launch: Executable doesn't exist at /home/user/.cache/ms-playwright/webkit-2359/pw_run.sh
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+    at /home/user/.local/share/drover/work/drover/issue-1219/crates/cli/tests/ui/repaint.mjs:11:30
+    at async node:internal/modules/esm/loader:647:26 {
+  log: [],
+  name: 'Error'
+}
+
+Node.js v24.22.1
+
+
+---- a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text stdout ----
+
+thread 'a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text' (196610) panicked at crates/cli/tests/page_drafts.rs:166:62:
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+browserType.launch: Executable doesn't exist at /home/user/.cache/ms-playwright/webkit-2359/pw_run.sh
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+    at /home/user/.local/share/drover/work/drover/issue-1219/crates/cli/tests/ui/compose.mjs:10:30
+    at async node:internal/modules/esm/loader:647:26 {
+  log: [],
+  name: 'Error'
+}
+
+Node.js v24.22.1
+
+
+---- typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent stdout ----
+
+thread 'typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent' (196612) panicked at crates/cli/tests/page_drafts.rs:14:62:
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+browserType.launch: Executable doesn't exist at /home/user/.cache/ms-playwright/webkit-2359/pw_run.sh
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+    at /home/user/.local/share/drover/work/drover/issue-1219/crates/cli/tests/ui/drafts.mjs:10:30
+    at async node:internal/modules/esm/loader:647:26 {
+  log: [],
+  name: 'Error'
+}
+
+Node.js v24.22.1
+
+
+
+failures:
+    a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node
+    a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text
+    an_answered_card_leaves_the_cards_at_once_and_stays_gone_while_its_answer_runs
+    typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.83s
+
+error: test failed, to rerun pass `-p drover --test page_drafts`

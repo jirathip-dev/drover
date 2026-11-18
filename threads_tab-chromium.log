@@ -1,0 +1,23 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1219/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.58s
+     Running tests/threads_tab.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1219/debug/deps/threads_tab-87a3a7fe5bf7021c)
+
+running 15 tests
+test a_composer_send_with_a_photo_over_32_kb_reaches_the_say_op_over_the_socket_and_an_over_limit_body_is_413 ... ok
+test a_long_thread_opens_on_its_last_30_and_its_marker_loads_the_30_before_with_the_later_ones ... ok
+test a_thread_opens_at_its_end_in_webkit_with_its_bar_on_top_and_the_page_still ... ok
+test an_image_opens_in_the_viewer_in_webkit_and_close_and_escape_shut_it ... ok
+test every_card_kind_in_a_thread_is_its_golden_json ... ok
+test older_messages_load_above_in_webkit_and_the_card_in_view_stays_in_place ... ok
+test parity_15_the_owner_reads_a_thread_sends_and_answers_from_the_tab ... ok
+test parity_21_two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webkit ... ok
+test parity_26_a_message_sent_while_working_queues_and_send_now_steers_it_in_webkit ... ok
+test parity_32_the_owner_settles_each_card_from_inside_its_thread ... ok
+test parity_34_each_composer_op_reaches_its_thread_op_and_the_screen_shows_it ... ok
+test the_composer_docks_below_the_messages_in_webkit_empty_and_with_4_lines_at_390_and_1440 ... ok
+test the_keyboard_keeps_the_composer_flush_on_it_in_webkit_and_the_page_still ... ok
+test the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only ... ok
+test two_panes_in_webkit_at_1440_scroll_on_their_own_and_a_list_update_keeps_the_thread ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.57s
+

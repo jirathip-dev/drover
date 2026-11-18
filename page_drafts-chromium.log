@@ -1,0 +1,11 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1219/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.74s
+     Running tests/page_drafts.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1219/debug/deps/page_drafts-47d76586c3291e91)
+
+running 3 tests
+test a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text ... ok
+test a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node ... ok
+test typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.91s
+

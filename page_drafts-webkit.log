@@ -1,0 +1,105 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1219/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.45s
+     Running tests/page_drafts.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1219/debug/deps/page_drafts-47d76586c3291e91)
+
+running 3 tests
+test a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text ... FAILED
+test typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent ... FAILED
+test a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node ... FAILED
+
+failures:
+
+---- a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text stdout ----
+
+thread 'a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text' (22602) panicked at crates/cli/tests/page_drafts.rs:166:62:
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+browserType.launch: 
+╔════════════════════════════════════════════════════════╗
+║ Host system is missing dependencies to run browsers.   ║
+║ Please install them with the following command:        ║
+║                                                        ║
+║     sudo npx playwright install-deps                   ║
+║                                                        ║
+║ Alternatively, use apt:                                ║
+║     sudo apt-get install libgstreamer-plugins-bad1.0-0 ║
+║                                                        ║
+║ <3 Playwright Team                                     ║
+╚════════════════════════════════════════════════════════╝
+    at /home/user/.local/share/drover/work/drover/issue-1219/crates/cli/tests/ui/compose.mjs:10:30
+    at async node:internal/modules/esm/loader:647:26 {
+  log: [],
+  name: 'Error'
+}
+
+Node.js v24.22.1
+
+
+---- typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent stdout ----
+
+thread 'typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent' (22603) panicked at crates/cli/tests/page_drafts.rs:14:62:
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+browserType.launch: 
+╔════════════════════════════════════════════════════════╗
+║ Host system is missing dependencies to run browsers.   ║
+║ Please install them with the following command:        ║
+║                                                        ║
+║     sudo npx playwright install-deps                   ║
+║                                                        ║
+║ Alternatively, use apt:                                ║
+║     sudo apt-get install libgstreamer-plugins-bad1.0-0 ║
+║                                                        ║
+║ <3 Playwright Team                                     ║
+╚════════════════════════════════════════════════════════╝
+    at /home/user/.local/share/drover/work/drover/issue-1219/crates/cli/tests/ui/drafts.mjs:10:30
+    at async node:internal/modules/esm/loader:647:26 {
+  log: [],
+  name: 'Error'
+}
+
+Node.js v24.22.1
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node stdout ----
+
+thread 'a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node' (22601) panicked at crates/cli/tests/page_drafts.rs:131:62:
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+browserType.launch: 
+╔════════════════════════════════════════════════════════╗
+║ Host system is missing dependencies to run browsers.   ║
+║ Please install them with the following command:        ║
+║                                                        ║
+║     sudo npx playwright install-deps                   ║
+║                                                        ║
+║ Alternatively, use apt:                                ║
+║     sudo apt-get install libgstreamer-plugins-bad1.0-0 ║
+║                                                        ║
+║ <3 Playwright Team                                     ║
+╚════════════════════════════════════════════════════════╝
+    at /home/user/.local/share/drover/work/drover/issue-1219/crates/cli/tests/ui/repaint.mjs:11:30
+    at async node:internal/modules/esm/loader:647:26 {
+  log: [],
+  name: 'Error'
+}
+
+Node.js v24.22.1
+
+
+
+failures:
+    a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node
+    a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text
+    typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
+
+error: test failed, to rerun pass `-p drover --test page_drafts`
