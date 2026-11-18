@@ -4,7 +4,8 @@ use serde_json::{json, Value};
 
 const PAGE: usize = 100;
 
-pub(super) fn page<T>(path: &str, q: &Q, mut rows: Vec<((u64, u64), T)>) -> (Vec<T>, Option<String>) {
+pub(super) fn page<T>(path: &str, q: &Q, rows: impl IntoIterator<Item = ((u64, u64), T)>) -> (Vec<T>, Option<String>) {
+    let mut rows: Vec<_> = rows.into_iter().collect();
     let key = |k: &str| {
         let (a, b) = q.get(k)?.split_once('.')?;
         Some((a.parse().ok()?, b.parse().ok()?))
@@ -32,7 +33,14 @@ pub(super) fn paged(mut block: Value, more: Option<String>) -> Value {
     block
 }
 
-pub(super) fn cursor(v: &Value) -> Option<String> {
+pub(super) fn window(mut q: Q, first: &Value) -> Q {
+    if let Some(c) = cursor(first) {
+        q.insert("to".into(), c);
+    }
+    q
+}
+
+fn cursor(v: &Value) -> Option<String> {
     match v {
         Value::Object(m) => match m.get("more").and_then(Value::as_str) {
             Some(p) => form(p.split_once('?')?.1).remove("after"),
