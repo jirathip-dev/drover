@@ -33,6 +33,10 @@ struct World {
     trace: Shared<Vec<String>>,
     ticks: Shared<Vec<(u64, i32)>>,
     hung: (Mutex<Option<u32>>, Condvar),
+    slow: Shared<Option<&'static str>>,
+    fast: Shared<bool>,
+    mark: Shared<std::path::PathBuf>,
+    main: std::thread::ThreadId,
 }
 
 thread_local!(static PID: std::cell::Cell<u32> = const { std::cell::Cell::new(0) });
@@ -70,6 +74,10 @@ impl World {
             trace: Shared::default(),
             ticks: Shared::default(),
             hung: (Mutex::new(None), Condvar::new()),
+            slow: Shared::default(),
+            fast: Shared::default(),
+            mark: Shared::default(),
+            main: std::thread::current().id(),
         })
     }
 
@@ -123,7 +131,31 @@ impl World {
         }
     }
 
+    fn busy(&self, args: &[String]) {
+        let mine = self.slow.get().is_some_and(|f| args.iter().any(|a| a.contains(f)));
+        if !mine || self.fast.get() || std::thread::current().id() == self.main {
+            return;
+        }
+        let mark = std::fs::read_to_string(&*self.mark.borrow()).unwrap_or_default();
+        if !mark.contains(r#""step":"drive""#) {
+            return;
+        }
+        let until = self.now() + 180;
+        let (lock, cv) = &self.hung;
+        let mut g = lock.lock().unwrap();
+        while self.now() < until && self.procs.borrow().contains_key(&TICK_PID) {
+            *g = Some(TICK_PID);
+            cv.notify_all();
+            g = cv.wait(g).unwrap();
+        }
+        drop(g);
+        if !self.procs.borrow().contains_key(&TICK_PID) {
+            std::panic::resume_unwind(Box::new("killed"));
+        }
+    }
+
     fn call(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        self.busy(args);
         let a: Vec<&str> = args.iter().map(String::as_str).collect();
         let host = match (prog, &a[..]) {
             ("ssh", _) => a.iter().position(|x| *x == "--").and_then(|i| a[..i].last().copied()),
@@ -276,7 +308,7 @@ impl Sim {
             }));
             let (code, o) = run(&c, &*w, args);
             w.trace.borrow_mut().push(format!("{} {args:?} {code}: {o}", c.now));
-            w.ticks.borrow_mut().push((c.now, code));
+            w.ticks.borrow_mut().push((w.now(), code));
             w.procs.borrow_mut().remove(&pid);
             let _g = w.hung.0.lock().unwrap();
             w.hung.1.notify_all();
@@ -305,6 +337,15 @@ impl Sim {
     fn minutes(&mut self, mins: u64, mut lane: impl FnMut(&Sim)) {
         for _ in 0..mins {
             self.w.now.set(self.w.now() + 60);
+            if self.w.slow.get().is_some() {
+                let (lock, cv) = &self.w.hung;
+                let mut g = lock.lock().unwrap();
+                *g = None;
+                cv.notify_all();
+                while g.is_none() && self.w.procs.borrow().contains_key(&TICK_PID) {
+                    g = cv.wait_timeout(g, Duration::from_millis(50)).unwrap().0;
+                }
+            }
             let running = self.w.procs.borrow().contains_key(&TICK_PID);
             if (self.w.now() - T0).is_multiple_of(300) && !running {
                 if let Some(h) = self.tick.take() {
@@ -312,7 +353,9 @@ impl Sim {
                 }
                 self.start(&["tick"], TICK_PID);
             }
+            self.w.fast.set(true);
             let (code, o) = run(&self.at(), &*self.w, &["drive", "--fast"]);
+            self.w.fast.set(false);
             assert_eq!(code, 0, "{o}");
             self.w.trace.borrow_mut().push(format!("{} fast: {o}", self.w.now()));
             self.started();
@@ -493,4 +536,45 @@ fn an_offline_hosts_lanes_restart_on_the_main_host_after_15_minutes() {
     );
     let sp = s.events("spawn");
     assert_eq!(sp.last().unwrap().str("host"), Some("mini"));
+}
+
+const SLOW: &str = "\n[fleet.slowfleet]\nrepo = \"jirathip-dev/slowfleet\"\nlocal = \"/tmp/does-not-matter/slowfleet\"\nintegration = \"staging\"\n\n[fleet.slowfleet.role.impl]\nharness = \"claude\"\nprofile = \"fleet-impl\"\n\n[fleet.slowfleet.role.rev]\nharness = \"claude\"\nprofile = \"fleet-rev\"\n";
+
+#[test]
+fn a_busy_tick_past_the_tick_slo_is_never_stopped_and_every_fleet_finishes_its_pass() {
+    let mut s = Sim::new("sim-busy-tick", SLOW);
+    s.w.slow.set(Some("slowfleet"));
+    *s.w.mark.borrow_mut() = s.c.state.with_file_name("tick.step");
+    let last = |s: &Sim, f: &str| std::fs::read_to_string(s.c.state.with_file_name(format!("drive-{f}.last"))).ok();
+    let quick = Shared::<Option<u64>>::default();
+    s.minutes(40, |s| {
+        if quick.get().is_none() && last(s, "sendmeter").is_some() && last(s, "slowfleet").is_none() {
+            quick.set(Some(s.w.now()));
+        }
+    });
+    let started = T0 + 300;
+    let ended = s.w.ticks.borrow().first().copied();
+    let (end, code) = ended.unwrap_or_else(|| panic!("the busy tick never ended: {}", s.story()));
+    assert_eq!(code, 0, "{}", s.story());
+    let limits = drover::config::Limits::default();
+    assert!(
+        end - started >= 3 * limits.pass_max_secs && end - started > limits.slo_tick_minutes * 60,
+        "the tick ran {} s",
+        end - started
+    );
+    assert!(s.events("slo-tick").is_empty(), "{}", s.story());
+    assert!(s.events("self-heal").is_empty(), "{}", s.story());
+    assert!(s.events("stuck").is_empty(), "{}", s.story());
+    for f in ["sendmeter", "slowfleet"] {
+        let at = last(&s, f).and_then(|t| t.parse::<u64>().ok());
+        assert!(at >= Some(started), "{f}: {at:?} {}", s.story());
+    }
+    let at = quick
+        .get()
+        .unwrap_or_else(|| panic!("sendmeter never finished before slowfleet: {}", s.story()));
+    assert!(
+        at <= started + limits.slo_pass_minutes * 60,
+        "sendmeter's pass ended {} s in",
+        at - started
+    );
 }
