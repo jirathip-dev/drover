@@ -1,0 +1,31 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 28.26s
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/sim-477a3e0a0c69cb28)
+
+running 1 test
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it has been running for over 60 seconds
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it ... FAILED
+
+failures:
+
+---- the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it stdout ----
+FAIL hunt round 5: I1 one-lane: #104 rev has 2 live lanes: ["drover-rev-104-r1 on drover-rev-104-r1", "drover-rev-104-r1 on drover-rev-104-r1x"]
+minimised from 17 to 6 faults and scripts, 5000 to 2950 steps; for seeds.rs PLANS:
+    ("seed=4 cfg=2,2 steps=2950 | +18 T 60 drive --fast | +136 T 300 drive | +242 T 300 check | +1269 R queue drover add 103 | +1596 R queue drover add 104 | +2218 R queue drover add 102 | +2529 R queue drover add 101 | +3175 R queue drover add 105 | impl P 752 1", "hunt: I1 one-lane: #104 rev has 2 live lanes: ["drover-rev-104-r1 on drover-rev-104-r1"),
+replay: DROVER_SIM_PLAN='seed=4 cfg=2,2 steps=2950 | +18 T 60 drive --fast | +136 T 300 drive | +242 T 300 check | +1269 R queue drover add 103 | +1596 R queue drover add 104 | +2218 R queue drover add 102 | +2529 R queue drover add 101 | +3175 R queue drover add 105 | impl P 752 1' cargo test -p drover --test sim
+
+
+thread 'the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it' (3942443) panicked at crates/cli/tests/sim/main.rs:291:9:
+random seed 1003 found it within the hunt's 5 rounds: I1 one-lane: #104 impl has 2 live lanes: ["drover-impl-104 on drover-impl-104", "drover-impl-104 on drover-impl-104x"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 91.47s
+
+error: test failed, to rerun pass `-p drover --test sim`

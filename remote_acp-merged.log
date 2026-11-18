@@ -1,0 +1,9 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.27s
+     Running tests/remote_acp.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/remote_acp-843663b709850140)
+
+running 1 test
+test a_proxy_lanes_auth_error_names_the_proxy_and_holds_its_host_unless_a_proxy_call_clears_it ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.35s
+

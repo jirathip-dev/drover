@@ -1,0 +1,54 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.77s
+     Running tests/brief_golden.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/brief_golden-065bfb65367687cf)
+
+running 3 tests
+test briefs_carry_the_test_antipatterns ... ok
+test only_a_repro_issues_briefs_carry_the_repro_steps ... ok
+test lane_briefs_match_staging ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/remote_acp.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/remote_acp-8eb9a97daa22f65e)
+
+running 15 tests
+test a_host_whose_herdr_answers_but_whose_shed_does_not_is_offline ... ok
+test a_start_that_never_runs_leaves_the_running_lanes_key_live ... ok
+test a_remote_acp_lane_without_the_proxy_token_file_is_refused_with_the_setup_command ... ok
+test a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_key_is_refused ... ok
+test bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr ... ok
+test a_host_missing_the_adapter_or_the_hook_refuses_acp_unguarded_and_the_lane_goes_elsewhere ... ok
+test a_signed_out_lane_on_a_proxy_host_names_the_proxy_token_not_login ... ok
+test bootstrap_syncs_each_fitting_fleets_acp_profile_there_so_the_next_survey_passes_the_guard ... ok
+test a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_with_no_token_there ... ok
+test bootstrap_puts_shed_and_drover_on_a_hosts_non_login_ssh_path_so_the_survey_finds_it_up ... ok
+test bootstrap_with_no_config_there_prints_no_bare_sync_and_skips_a_main_pinned_role ... ok
+test doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does ... ok
+test a_proxy_lanes_auth_error_names_the_proxy_and_holds_its_host_unless_a_proxy_call_clears_it ... ok
+test a_revoked_lane_key_401_is_no_sign_out_and_respawns_the_lane ... ok
+test an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/sim-c3cda2000c8699bc)
+
+running 16 tests
+test hunt ... ignored, long: `just sim --hunt`
+test metrics_batch ... ignored, long: `just sim --metrics`
+test parked_seeds ... ignored, parked: each seed's cause is its own issue
+test random_seeds ... ignored, long: `just sim`
+test replay_db ... ignored, long: `just sim --replay`
+test a_busy_window_blocks_spawns_only_while_it_takes_every_host ... ok
+test a_broken_invariant_fails_with_seed_and_trace ... ok
+test the_incident_seed_records_the_verdict_with_one_supersede ... ok
+test what_if ... ignored, long: `just sim --what-if`
+test a_metric_over_20_percent_worse_is_a_warning ... ok
+test the_known_fleet_gives_exact_metrics ... ok
+test a_seed_replays_to_the_same_trace ... ok
+test a_fixture_db_replays_to_its_merge_order_and_counts ... ok
+test fixed_seeds_hold_every_invariant ... ok
+test raising_a_serial_max_cuts_waits_without_a_new_invariant_failure ... ok
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it ... ok
+
+test result: ok. 10 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 47.55s
+

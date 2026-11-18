@@ -1,0 +1,44 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/cli)
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.47s
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/drover-ccec82429d56c823)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/sim-c3cda2000c8699bc)
+
+running 16 tests
+test hunt ... ignored, long: `just sim --hunt`
+test metrics_batch ... ignored, long: `just sim --metrics`
+test a_busy_window_blocks_spawns_only_while_it_takes_every_host ... ok
+test parked_seeds ... ignored, parked: each seed's cause is its own issue
+test random_seeds ... ignored, long: `just sim`
+test replay_db ... ignored, long: `just sim --replay`
+test a_broken_invariant_fails_with_seed_and_trace ... ok
+test the_incident_seed_records_the_verdict_with_one_supersede ... ok
+test what_if ... ignored, long: `just sim --what-if`
+test a_metric_over_20_percent_worse_is_a_warning ... ok
+test the_known_fleet_gives_exact_metrics ... ok
+test a_seed_replays_to_the_same_trace ... ok
+test a_fixture_db_replays_to_its_merge_order_and_counts ... ok
+test fixed_seeds_hold_every_invariant ... ok
+test raising_a_serial_max_cuts_waits_without_a_new_invariant_failure ... ok
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it has been running for over 60 seconds
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it ... ok
+
+test result: ok. 10 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 64.56s
+
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/drover_core-21f64276280e4599)
+
+running 6 tests
+test providers::fake::tests::a_lane_launches_with_its_command_and_env ... ok
+test providers::fake::tests::a_role_may_name_the_registered_provider_and_no_unregistered_one ... ok
+test providers::fake::tests::setup_offers_its_login_with_its_vendor ... ok
+test promise::tests::a_promise_the_issue_moved_past_is_never_missed ... ok
+test promise::tests::a_promise_past_its_deadline_with_its_wait_unchanged_is_missed_exactly_once ... ok
+test promise::tests::a_promise_a_known_hold_superseded_is_void_not_missed ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+

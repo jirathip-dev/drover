@@ -1,0 +1,17 @@
+Auto-merging docs/workflow.md
+Merge made by the 'ort' strategy.
+ crates/cli/tests/compact.rs         | 142 +++++++++++++++++++++++++++--
+ crates/cli/tests/sim/gates.rs       | 177 ++++++++++++++++++++++++++++++++++++
+ crates/cli/tests/sim/hunt.rs        |   5 +
+ crates/cli/tests/sim/invariants.rs  |  33 +++++--
+ crates/cli/tests/sim/main.rs        |  62 ++++++++++++-
+ crates/cli/tests/sim/model.rs       |  79 ++++++++++++----
+ crates/cli/tests/sim/scenario.rs    |  38 +++++---
+ crates/cli/tests/sim/sched.rs       |   4 +
+ crates/core/src/compact.rs          | 138 +++++++++++++++++++++++-----
+ crates/core/src/compact/push.rs     |  47 ++++++++--
+ crates/core/src/compact/shas.rs     |  17 ++++
+ crates/core/src/compact/workflow.md |  26 ++++--
+ docs/workflow.md                    |  26 ++++--
+ 13 files changed, 706 insertions(+), 88 deletions(-)
+ create mode 100644 crates/cli/tests/sim/gates.rs

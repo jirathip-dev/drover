@@ -1,0 +1,19 @@
+
+running 1 test
+the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it --- FAILED
+
+failures:
+
+---- the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it stdout ----
+
+thread 'the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it' (2559326) panicked at crates/cli/tests/sim/main.rs:286:10:
+the hunt finds it within 40 rounds
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 45.39s
+
+error: test failed, to rerun pass `-p drover --test sim`

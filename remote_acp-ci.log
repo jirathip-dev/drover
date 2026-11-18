@@ -1,0 +1,19 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.43s
+     Running tests/remote_acp.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/remote_acp-843663b709850140)
+
+running 11 tests
+test a_host_whose_herdr_answers_but_whose_shed_does_not_is_offline ... ok
+test a_remote_acp_lane_without_the_proxy_token_file_is_refused_with_the_setup_command ... ok
+test a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_key_is_refused ... ok
+test bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr ... ok
+test bootstrap_with_no_config_there_prints_no_bare_sync_and_skips_a_main_pinned_role ... ok
+test bootstrap_syncs_each_fitting_fleets_acp_profile_there_so_the_next_survey_passes_the_guard ... ok
+test bootstrap_puts_shed_and_drover_on_a_hosts_non_login_ssh_path_so_the_survey_finds_it_up ... ok
+test a_host_missing_the_adapter_or_the_hook_refuses_acp_unguarded_and_the_lane_goes_elsewhere ... ok
+test a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_with_no_token_there ... ok
+test doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does ... ok
+test a_proxy_lanes_auth_error_names_the_proxy_and_holds_its_host_unless_a_proxy_call_clears_it ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+

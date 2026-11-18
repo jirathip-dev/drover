@@ -1,0 +1,122 @@
+   Compiling subtle v2.6.1
+   Compiling zeroize v1.9.1
+   Compiling libc v0.2.191
+   Compiling typenum v1.20.1
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling cfg-if v1.0.5
+   Compiling cmov v0.5.4
+   Compiling ctutils v0.4.7
+   Compiling const-oid v0.10.2
+   Compiling hybrid-array v0.4.15
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling cpubits v0.1.1
+   Compiling autocfg v1.5.1
+   Compiling block-buffer v0.12.1
+   Compiling serde_core v1.0.229
+   Compiling num-traits v0.2.19
+   Compiling syn v3.0.9
+   Compiling crypto-common v0.2.2
+   Compiling crypto-bigint v0.7.10
+   Compiling digest v0.11.3
+   Compiling ff v0.14.0
+   Compiling serde v1.0.229
+   Compiling hmac v0.13.0
+   Compiling der v0.8.3
+   Compiling cpufeatures v0.3.1
+   Compiling foldhash v0.2.0
+   Compiling hashbrown v0.17.1
+   Compiling group v0.14.0
+   Compiling inout v0.2.5
+   Compiling serde_derive v1.0.229
+   Compiling base16ct v1.0.0
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.15
+   Compiling sec1 v0.8.1
+   Compiling cc v1.11.0
+   Compiling hkdf v0.13.0
+   Compiling pkg-config v0.3.34
+   Compiling vcpkg v0.2.15
+   Compiling zmij v1.0.23
+   Compiling utf8parse v0.2.2
+   Compiling elliptic-curve v0.14.3
+   Compiling anstyle-parse v1.0.0
+   Compiling cipher v0.5.2
+   Compiling primefield v0.14.0
+   Compiling universal-hash v0.6.1
+   Compiling serde_json v1.0.154
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling equivalent v1.0.3
+   Compiling anstream v1.0.0
+   Compiling indexmap v2.14.2
+   Compiling libsqlite3-sys v0.39.1
+   Compiling wnaf v0.14.1
+   Compiling polyval v0.7.3
+   Compiling spki v0.8.1
+   Compiling rfc6979 v0.6.0
+   Compiling signature v3.0.0
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling anyhow v1.0.104
+   Compiling strsim v0.11.1
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling winnow v0.7.15
+   Compiling clap_lex v1.1.1
+   Compiling toml_write v0.1.2
+   Compiling heck v0.5.0
+   Compiling shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=9b88eb5be5bc9ba8c5c75480483b9861ddc6e993#9b88eb5b)
+   Compiling clap_derive v4.6.7
+   Compiling clap_builder v4.6.7
+   Compiling toml_edit v0.22.27
+   Compiling ecdsa v0.17.0
+   Compiling ghash v0.6.0
+   Compiling primeorder v0.14.0
+   Compiling ctr v0.10.1
+   Compiling aes v0.9.3
+   Compiling aead v0.6.1
+   Compiling hashlink v0.12.2
+   Compiling sha2 v0.11.1
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/core)
+   Compiling smallvec v1.16.4
+   Compiling bitflags v2.13.2
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling fallible-iterator v0.3.0
+   Compiling p256 v0.14.0
+   Compiling aes-gcm v0.11.1
+   Compiling toml v0.8.23
+   Compiling clap v4.6.7
+   Compiling drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/sys)
+   Compiling base64 v0.23.1
+   Compiling mio v1.2.4
+   Compiling socket2 v0.6.5
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.12.1
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/cli)
+   Compiling tokio v1.54.1
+   Compiling rusqlite v0.41.1
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 34.40s
+     Running tests/remote_acp.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/remote_acp-843663b709850140)
+
+running 11 tests
+test a_remote_acp_lane_without_the_proxy_token_file_is_refused_with_the_setup_command ... ok
+test a_host_whose_herdr_answers_but_whose_shed_does_not_is_offline ... ok
+test bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr ... ok
+test bootstrap_with_no_config_there_prints_no_bare_sync_and_skips_a_main_pinned_role ... ok
+test bootstrap_puts_shed_and_drover_on_a_hosts_non_login_ssh_path_so_the_survey_finds_it_up ... ok
+test bootstrap_syncs_each_fitting_fleets_acp_profile_there_so_the_next_survey_passes_the_guard ... ok
+test a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_key_is_refused ... ok
+test a_host_missing_the_adapter_or_the_hook_refuses_acp_unguarded_and_the_lane_goes_elsewhere ... ok
+test a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_with_no_token_there ... ok
+test doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does ... ok
+test a_proxy_lanes_auth_error_names_the_proxy_and_holds_its_host_unless_a_proxy_call_clears_it ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+

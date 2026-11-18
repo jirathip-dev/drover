@@ -1,0 +1,22 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1212/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1212/debug/deps/sim-477a3e0a0c69cb28)
+
+running 1 test
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it ... FAILED
+
+failures:
+
+---- the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it stdout ----
+
+thread 'the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it' (3962717) panicked at crates/cli/tests/sim/main.rs:286:10:
+the hunt finds it within 40 rounds
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 47.05s
+
+error: test failed, to rerun pass `-p drover --test sim`
