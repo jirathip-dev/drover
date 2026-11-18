@@ -1,0 +1,13 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.17s
+     Running tests/autonomy.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-962/debug/deps/autonomy-242d340728b7170e)
+
+running 5 tests
+test an_owner_answer_breaks_autonomy_and_an_orchestrator_answer_does_not ... ok
+test explain_prints_the_owner_action_table ... ok
+test json_matches_the_table ... ok
+test since_and_weeks_cut_where_they_say ... ok
+test the_owners_verdict_and_spawn_count_and_a_lanes_do_not ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+

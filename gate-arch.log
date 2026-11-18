@@ -1,0 +1,3 @@
+`just gen` exited 127: sh: 1: just: not found
+crates/core/src/cli.rs:608: `cmd` removed, but no changed doc line names it (or `no doc: <why>` in the PR body)
+arch-check: 978 files, 2 violations

@@ -1,0 +1,35 @@
+    Checking libc v0.2.191
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/core)
+    Checking drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/sys)
+    Checking bytes v1.12.1
+    Checking pin-project-lite v0.2.17
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/cli)
+    Checking getrandom v0.4.3
+    Checking socket2 v0.6.5
+    Checking mio v1.2.4
+    Checking crypto-common v0.2.2
+    Checking crypto-bigint v0.7.10
+    Checking tokio v1.54.1
+    Checking digest v0.11.3
+    Checking cipher v0.5.2
+    Checking hmac v0.13.0
+    Checking universal-hash v0.6.1
+    Checking hkdf v0.13.0
+    Checking polyval v0.7.3
+    Checking signature v3.0.0
+    Checking ctr v0.10.1
+    Checking ghash v0.6.0
+    Checking aes v0.9.3
+    Checking sha2 v0.11.1
+    Checking aead v0.6.1
+    Checking aes-gcm v0.11.1
+    Checking elliptic-curve v0.14.3
+    Checking primefield v0.14.0
+    Checking rfc6979 v0.6.0
+    Checking wnaf v0.14.1
+    Checking primeorder v0.14.0
+    Checking ecdsa v0.17.0
+    Checking p256 v0.14.0
+    Checking drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/server)
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/service)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 27.55s

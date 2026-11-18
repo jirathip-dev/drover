@@ -1,0 +1,5 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/service)
+    Finished `release` profile [optimized] target(s) in 2m 02s

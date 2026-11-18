@@ -1,0 +1,10 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-962/crates/cli)
+    Finished `release` profile [optimized] target(s) in 51.64s
+     Running tests/perf.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-962/release/deps/perf-826e89b722cf86dd)
+
+running 1 test
+#962 perf (150,000 events): stats autonomy first 2176 ms (with the import), then 183 ms
+test stats_autonomy_on_a_150k_event_log_stays_under_its_budget ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 2.47s
+
