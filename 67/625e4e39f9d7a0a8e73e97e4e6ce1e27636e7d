@@ -1,0 +1,12 @@
+Decided: publish needs only the Linux job; SHA256SUMS lists the assets that exist, so a failed macOS signing leaves a Linux-only release
+Because: "the Linux binary publishes on its own"
+Decided: HOST_UPDATING comes only from a self-update-swapping event inside self_update_swap_secs; host-behind and the ACP guard's build skew no longer hold a spawn
+Because: "HOST_UPDATING holds a spawn only while a staged release is actually swapping"
+Decided: when the main host's release has no asset for it, the staged remote hosts swap and the main host is left behind (self-update-failed alerts once)
+Because: crates/core/src/update.rs:209
+Decided: the main host's asset is picked from its probed tags when the hosts cache has them, the same tags remote hosts use
+Rejected: falling back to the #1165 source install on boats — a second install path; the Linux-only release covers it
+Decided: the waiting alert reads the release run's first failure annotation (gh run list, run view, check-run annotations) only when it fires
+Because: "alerts the owner once, naming the failed job and its first error line"
+Check: the three new tests in host_sync.rs, remote_acp.rs and self_update.rs fail on staging and pass at head
+Owner: a failed Mac signing no longer freezes the Linux machines; they update alone and keep taking work, and the alert says which job failed and why.
