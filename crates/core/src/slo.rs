@@ -323,10 +323,14 @@ fn stalls(ctx: &Ctx, cfg: &Config, events: &[Event], fleet: &str) -> Vec<Breach>
 fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
     let text = std::fs::read_to_string(ctx.state.with_file_name("tick.step")).ok()?;
     let m: Value = serde_json::from_str(&text).unwrap_or_default();
-    let since = m
-        .at("since")
-        .as_u64()
-        .filter(|t| ctx.now >= t + cfg.limits.slo_tick_minutes * 60)?;
+    let since = m.at("since").as_u64()?;
+    let (seen, key) = (ctx.state.with_file_name("tick.seen"), format!("{since} {}", m.at("n")));
+    let still = match std::fs::read_to_string(&seen).unwrap_or_default().rsplit_once(' ') {
+        Some((k, at)) if k == key => at.parse().unwrap_or(ctx.now),
+        _ => m.at("n").as_u64().map_or(since, |_| ctx.now),
+    };
+    std::fs::write(&seen, format!("{key} {still}")).ok();
+    (ctx.now >= still + cfg.limits.slo_tick_minutes * 60).then_some(())?;
     let pid = m
         .at("pid")
         .as_u64()
@@ -339,14 +343,16 @@ fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
         |c: &str| (c.contains("drover") || c.contains("herdsman")) && [" tick", " drive"].iter().any(|w| c.contains(w));
     let named = pid.filter(|p| ok(r, "ps", &["-o", "command=", "-p", p]).is_ok_and(|c| ours(&c)));
     let child = m.at("child").as_str().filter(|c| !c.is_empty()).unwrap_or("none");
-    let step = m.at("step").as_str().unwrap_or("?");
+    let mut step = vec![m.at("step").as_str().unwrap_or("?")];
+    let busy = |f: &&String| !crate::db::leases(&ctx.state, &format!("drive-{f}.lock")).is_empty();
+    step.extend(cfg.fleet.keys().filter(busy).map(String::as_str));
     let mins = (ctx.now - since) / 60;
     Some(Breach {
         key: format!("slo-tick:{since}"),
         fleet: "drover".into(),
         issue: None,
         slo: Some("slo-tick"),
-        reason: format!("tick running {mins} min, in {step}; waiting on: {child}"),
+        reason: format!("tick running {mins} min, in {}; waiting on: {child}", step.join(" · ")),
         heal: named.map(Heal::StopTick),
         since,
     })
