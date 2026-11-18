@@ -1,0 +1,935 @@
+   Compiling subtle v2.6.1
+   Compiling libc v0.2.191
+   Compiling zeroize v1.9.1
+   Compiling typenum v1.20.1
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling cfg-if v1.0.5
+   Compiling cmov v0.5.4
+   Compiling const-oid v0.10.2
+   Compiling ctutils v0.4.7
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling hybrid-array v0.4.15
+   Compiling quote v1.0.47
+   Compiling cpubits v0.1.1
+   Compiling autocfg v1.5.1
+   Compiling block-buffer v0.12.1
+   Compiling num-traits v0.2.19
+   Compiling serde_core v1.0.229
+   Compiling syn v3.0.9
+   Compiling crypto-common v0.2.2
+   Compiling crypto-bigint v0.7.10
+   Compiling digest v0.11.3
+   Compiling ff v0.14.0
+   Compiling serde v1.0.229
+   Compiling hmac v0.13.0
+   Compiling der v0.8.3
+   Compiling cpufeatures v0.3.1
+   Compiling foldhash v0.2.0
+   Compiling hashbrown v0.17.1
+   Compiling group v0.14.0
+   Compiling inout v0.2.5
+   Compiling base16ct v1.0.0
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.15
+   Compiling sec1 v0.8.1
+   Compiling cc v1.11.0
+   Compiling hkdf v0.13.0
+   Compiling serde_derive v1.0.229
+   Compiling pkg-config v0.3.34
+   Compiling utf8parse v0.2.2
+   Compiling vcpkg v0.2.15
+   Compiling zmij v1.0.23
+   Compiling anstyle-parse v1.0.0
+   Compiling elliptic-curve v0.14.3
+   Compiling cipher v0.5.2
+   Compiling primefield v0.14.0
+   Compiling universal-hash v0.6.1
+   Compiling serde_json v1.0.154
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling anstyle-query v1.1.5
+   Compiling equivalent v1.0.3
+   Compiling anstyle v1.0.14
+   Compiling indexmap v2.14.2
+   Compiling anstream v1.0.0
+   Compiling libsqlite3-sys v0.39.1
+   Compiling wnaf v0.14.1
+   Compiling polyval v0.7.3
+   Compiling rfc6979 v0.6.0
+   Compiling spki v0.8.1
+   Compiling signature v3.0.0
+   Compiling heck v0.5.0
+   Compiling itoa v1.0.18
+   Compiling clap_lex v1.1.1
+   Compiling memchr v2.8.3
+   Compiling anyhow v1.0.104
+   Compiling winnow v0.7.15
+   Compiling toml_write v0.1.2
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling strsim v0.11.1
+   Compiling shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=9b88eb5be5bc9ba8c5c75480483b9861ddc6e993#9b88eb5b)
+   Compiling clap_builder v4.6.7
+   Compiling toml_edit v0.22.27
+   Compiling clap_derive v4.6.7
+   Compiling ecdsa v0.17.0
+   Compiling ghash v0.6.0
+   Compiling primeorder v0.14.0
+   Compiling ctr v0.10.1
+   Compiling aes v0.9.3
+   Compiling aead v0.6.1
+   Compiling hashlink v0.12.2
+   Compiling sha2 v0.11.1
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1098/crates/core)
+   Compiling smallvec v1.16.4
+   Compiling bitflags v2.13.2
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling fallible-iterator v0.3.0
+   Compiling p256 v0.14.0
+   Compiling aes-gcm v0.11.1
+   Compiling clap v4.6.7
+   Compiling toml v0.8.23
+   Compiling drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1098/crates/sys)
+   Compiling base64 v0.23.1
+   Compiling mio v1.2.4
+   Compiling socket2 v0.6.5
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.12.1
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1098/crates/cli)
+   Compiling tokio v1.54.1
+   Compiling rusqlite v0.41.1
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1098/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1098/crates/service)
+    Finished `test` profile [unoptimized] target(s) in 1m 14s
+     Running tests/service.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/service-e222d93d569d56bc)
+
+running 2 tests
+test the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other ... ok
+test a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
+
+     Running tests/set_notify.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/set_notify-8b318fa26940b061)
+
+running 7 tests
+test set_finds_a_header_with_an_inline_comment_spaces_or_quotes ... ok
+test set_unknown_role_table_fails_without_writing ... ok
+test set_inserts_missing_key_in_place ... ok
+test notifier_skips_unlisted_types ... ok
+test notifier_gets_event_json_on_stdin ... ok
+test failing_notifier_does_not_change_exit_code ... ok
+test set_round_trip_is_byte_identical ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/setup_neutral.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/setup_neutral-caa4ef40b18bf145)
+
+running 2 tests
+test role_texts_name_no_harness ... ok
+test shipped_files_name_no_install ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/setup_terminal.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/setup_terminal-35b37c3251e9bcbf)
+
+running 3 tests
+test a_setup_closes_on_its_timeout ... ok
+test only_configured_names_run_and_a_remote_terminal_runs_there ... ok
+test the_board_starts_by_name_types_unlogged_and_shows_the_screen ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.97s
+
+     Running tests/shed.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/shed-2285124c07883fd4)
+
+running 60 tests
+test a_host_with_the_shed_job_starts_it_and_never_autostarts_a_server_outside_it ... ok
+test a_hook_naming_another_binary_refuses_acp_unguarded ... ok
+test a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path ... ok
+test a_lane_spawns_on_shed ... ok
+test a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it ... FAILED
+test a_guarded_command_is_refused_inside_an_acp_lane ... ok
+test a_live_agent_in_the_herdr_era_worktree_refuses_lane_live ... ok
+test a_rev_on_the_impls_provider_refuses_to_load ... ok
+test a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login ... ok
+test a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves ... ok
+test a_pty_lane_still_returns_its_screen ... ok
+test a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root ... ok
+test a_shed_without_run_meta_is_a_doctor_cross_and_refuses_acp_lanes ... ok
+test a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_first_prompt ... ok
+test a_wait_that_times_out_answers_as_herdr ... ok
+test a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_and_restarts ... ok
+test an_acp_lane_gets_only_its_roles_mcp_servers_in_acps_shape ... ok
+test acp_transcripts_from_different_agents_give_the_same_blocks ... ok
+test a_lane_keeps_its_spawn_runtime_after_the_config_changes ... ok
+test a_skipped_fix_round_spawn_shows_its_refusal_in_waiting ... ok
+test an_acp_lane_with_no_account_starts_guarded_on_the_hosts_own_login ... ok
+test a_pending_tool_call_whose_process_died_is_silent ... ok
+test a_silent_design_lane_is_nudged ... ok
+test an_acp_lane_silent_after_its_first_turn_is_a_failed_start ... ok
+test an_acp_orchestrator_runs_under_the_orchestrator_guard ... ok
+test an_unguardable_acp_lane_refuses_to_start ... ok
+test an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_back_to_herdr ... ok
+test another_build_of_the_same_protocol_is_accepted ... ok
+test another_host_is_reached_through_shed_connect_over_ssh ... ok
+test another_product_at_the_same_version_is_refused ... ok
+test another_shed_protocol_is_refused_naming_both_sides ... ok
+test an_acp_transcript_pages_by_event_seq ... ok
+test an_acp_lanes_state_follows_its_turn_events ... ok
+test an_auth_failure_alerts_signed_out_once_and_holds_the_host ... ok
+test check_alerts_stall_once_for_a_hung_acp_orchestrator ... ok
+test clean_removes_exited_shed_terminals_of_merged_lanes_only ... ok
+test every_adapter_call_is_a_shed_request ... ok
+test an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once ... ok
+test drive_logs_sheds_state_changes_since_its_last_pass ... ok
+test lane_dead_and_waiting_carry_an_acp_lanes_exit_cause ... ok
+test drive_reads_berths_seq_file_once_when_sheds_is_missing ... ok
+test lane_states::each_shed_state_reaches_api_v1_and_the_plugin_unchanged ... ok
+test lane_states::a_lane_ending_its_turn_on_an_ask_waits_on_the_owner_until_it_is_answered ... ok
+test no_runtime_is_no_shed_and_herdr_fails_to_load ... ok
+test a_silent_lanes_respawn_waits_under_host_busy_and_mem_low ... ok
+test spawning_verify_round_two_stops_round_ones_live_terminal_first ... ok
+test lane_states::a_running_lane_is_never_nudged ... ok
+test stop_ends_a_hung_acp_orchestrator_by_its_thread ... ok
+test the_lane_hook_reports_its_state_to_shed ... ok
+test the_build_trim_keeps_a_running_shed_lanes_scratch ... ok
+test the_old_kind_and_env_still_work_with_a_warning ... ok
+test every_lane_says_where_it_runs ... ok
+test the_lanes_tab_lists_a_running_shed_acp_lane_live ... ok
+test lane_states::a_pending_tool_call_in_a_live_session_is_not_silent ... ok
+test a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated ... ok
+test an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_once_it_is_on ... ok
+test thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one ... ok
+test two_live_processes_of_one_lane_alert_once_and_the_next_drive_pass_keeps_the_newest ... ok
+test lane_states::wait_sends_continue_at_the_reset_only_on_the_owners_pick ... ok
+test the_service_follows_sheds_events_and_says_when_the_stream_drops ... ok
+
+failures:
+
+---- a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it stdout ----
+
+thread 'a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it' (1450555) panicked at crates/cli/tests/shed.rs:565:5:
+✗ host — sysctl + vm_stat → put /usr/sbin on PATH
+✗ gh — auth status → gh auth login
+✓ config — /tmp/fleet-test-shed-missing-1450468-10/config/fleet.toml
+✓ shed — server 0.0.0 (9b88eb5) protocol 1, drover speaks 0.0.0 (9b88eb5) protocol 1
+✓ spawns starting 0/0
+✓ board auth — 24 h: 0 × 401, 0 × 503
+✗ worktrees — /tmp/fleet-test-shed-missing-1450468-10/worktrees → mkdir -p /tmp/fleet-test-shed-missing-1450468-10/worktrees
+✗ gh sendmeter — read jirathip-dev/sendmeter → gh auth refresh
+✗ local sendmeter — /tmp/does-not-matter/sendmeter has origin/staging → git -C /tmp/does-not-matter/sendmeter fetch origin staging || git clone https://github.com/jirathip-dev/sendmeter.git /tmp/does-not-matter/sendmeter
+✓ hygiene sendmeter — merge squash · comments strict · baseline setup · triage weekly · docs_trust deny docs/archive/ · issue_spec triage · docs on
+✓ pipeline sendmeter — valid (built-in)
+! webhook — no secret → put the secret in a file, chmod 600, and name it in [serve] webhook_secret_file (docs/serve.md)
+✓ keychain readers — 0 waiting over 60 s: 
+✗ harness — claude on PATH → install claude
+✗ harness — hermes on PATH → install hermes
+✗ hermes fleet-rev — profile → hermes profile create fleet-rev
+✓ hermes hooks — profiles sync --check
+✓ profile hooks — run this binary
+✗ serve hosts — [] → set [serve] allowed_hosts = ["<name>.ts.net"]
+✗ serve — listening on 127.0.0.1:7777 → drover serve --addr 127.0.0.1:7777
+✗ tailscale — serve maps to 127.0.0.1:7777 → tailscale serve --bg --https=8443 http://127.0.0.1:7777
+! phone — 0 paired → open the page, then drover serve approve <code>
+✗ vapid.key — missing → drover push test && chmod 600 /tmp/fleet-test-shed-missing-1450468-10/state/webpush/vapid.key
+! push — 0 subscriptions, notifier false → turn alerts on; add a webpush [[notify]]
+✗ watchdog check — ran never → drover timer install
+✗ watchdog drive — ran never → drover timer install
+✓ tick step — advancing
+✗ timer — dev.drover.tick missing → drover timer install (the owner or an orchestrator)
+✗ timer — dev.drover.fast missing → drover timer install (the owner or an orchestrator)
+✓ shed — /usr/local/bin/shed on the timer's PATH
+✗ shed run --meta — this host's shed predates shed#94 (no `shed run --meta`): an ACP lane would load the owner's own setup → cargo install --git https://github.com/jirathip-dev/shed --rev 9b88eb5be5bc9ba8c5c75480483b9861ddc6e993 --locked --force shed
+✗ shed agent claude-acp — no-such-adapter-600 not on the timer's PATH → install no-such-adapter-600 in a folder on it (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin)
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it
+
+test result: FAILED. 59 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.20s
+
+error: test failed, to rerun pass `-p drover --test shed`
+     Running tests/shed_native.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/shed_native-82b5617309290e3f)
+
+running 2 tests
+test a_session_no_spawn_names_is_an_orphan_and_an_unreachable_host_is_never_dead ... ok
+test a_shed_session_goes_running_idle_exited_on_every_surface ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+     Running tests/shed_others.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/shed_others-fee4dbb0c733001c)
+
+running 4 tests
+test an_unpaired_request_gets_401 ... ok
+test the_lanes_screen_ends_with_the_other_in_shed_section ... ok
+test api_v1_shed_lists_each_hosts_other_sessions_not_the_lanes ... ok
+test a_host_whose_shed_fails_is_one_error_entry_and_stays_up ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/shed_pin.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/shed_pin-680d51515cc30bcf)
+
+running 4 tests
+test a_serve_build_other_than_the_shed_on_path_refuses_the_spawn_and_says_restart_serve ... ok
+test a_shed_on_path_or_a_serve_off_the_pin_refuses_the_spawn_and_runs_nothing ... ok
+test shed_install_puts_the_binary_and_serve_on_the_pin_and_doctor_reads_it_back ... ok
+test five_lanes_whose_prompt_never_landed_stop_every_respawn_with_one_needs_human_and_one_push ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.75s
+
+     Running tests/shed_version.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/shed_version-47bf715f7515a387)
+
+running 5 tests
+test doctor_shows_the_local_shed_against_drovers_and_fails_on_another_protocol ... ok
+test a_live_socket_beside_a_failed_shed_unit_shows_the_server_outside_its_service ... ok
+test doctor_gives_each_enabled_remote_host_a_shed_line_or_unreachable ... ok
+test a_protocol_0_server_keeps_the_old_drover_and_alerts_once_naming_the_shed_needed ... ok
+test a_shed_version_refusal_alerts_once_per_state_not_a_line_per_pass ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.72s
+
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/sim-36b214e434d0ece5)
+
+running 19 tests
+test a_busy_window_blocks_spawns_only_while_it_takes_every_host ... ok
+test breaking_the_head_sha_check_fails_always ... ok
+test hunt ... ignored, long: `just sim --hunt`
+test metrics_batch ... ignored, long: `just sim --metrics`
+test parked_seeds ... ignored, parked: each seed's cause is its own issue
+test a_sometimes_state_never_reached_fails_the_run ... ok
+test random_seeds ... ignored, long: `just sim`
+test replay_db ... ignored, long: `just sim --replay`
+test a_metric_over_20_percent_worse_is_a_warning ... ok
+test a_broken_invariant_fails_with_seed_and_trace ... ok
+test a_fixture_db_replays_to_its_merge_order_and_counts has been running for over 60 seconds
+test a_seed_replays_to_the_same_trace has been running for over 60 seconds
+test fixed_seeds_hold_every_invariant has been running for over 60 seconds
+test gate_scenarios_hold_always_and_reach_every_sometimes has been running for over 60 seconds
+test gate_scenarios_hold_always_and_reach_every_sometimes ... ok
+test what_if ... ignored, long: `just sim --what-if`
+test a_fixture_db_replays_to_its_merge_order_and_counts ... ok
+test the_incident_seed_records_the_verdict_with_one_supersede ... ok
+test a_seed_replays_to_the_same_trace ... ok
+test raising_a_serial_max_cuts_waits_without_a_new_invariant_failure has been running for over 60 seconds
+test raising_a_serial_max_cuts_waits_without_a_new_invariant_failure ... ok
+test the_known_fleet_gives_exact_metrics ... ok
+test fixed_seeds_hold_every_invariant ... ok
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it has been running for over 60 seconds
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it ... ok
+
+test result: ok. 13 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 315.37s
+
+     Running tests/slo.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/slo-c885ca12c0cfc91f)
+
+running 9 tests
+test a_missed_promise_with_its_lane_gone_makes_no_card_and_a_live_one_clears ... ok
+test a_missed_promise_a_hold_took_over_shows_no_stuck_card ... ok
+test idle_held_by_host_busy_is_a_wait_not_a_card ... ok
+test no_drive_pass_for_30_minutes_is_one_card_and_push_until_the_next_pass ... ok
+test force_on_a_stuck_issue_spawns_it_past_the_load_limit_by_the_owner_and_its_line_clears ... ok
+test a_lane_silent_for_the_stall_window_restarts_once_and_a_second_stall_is_a_stuck_card ... ok
+test idle_21_minutes_with_spawnable_work_heals_and_never_makes_a_card ... ok
+test three_issues_drive_cannot_retry_push_once_and_show_one_card_with_a_force_each ... ok
+test named_waits_never_restart_or_move_a_quiet_lane ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.40s
+
+     Running tests/soak.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/soak-b1f126eb02b67cc7)
+
+running 3 tests
+test serve_holds_its_budget_and_stops_growing_under_load ... ignored, a minute of load: CI's soak step runs it in release
+test soak_child ... ignored, the soak's served copy, started by the soak tests
+test the_soak_fails_on_a_planted_leak ... ignored, a minute of load: CI's soak step runs it in release
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/spawn.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/spawn-09391d5f4cd17a49)
+
+running 28 tests
+test clone_build_clones_on_a_lockfile_match_and_logs_failures ... ok
+test claude_role_dry_run_uses_synced_profile ... ok
+test cap_asks_only_when_your_own_pr_crosses ... ok
+test conflict_predicted_is_not_a_hold ... ok
+test fleet_env_expands_drover_port ... ok
+test each_lane_gets_a_private_scratch_dir_under_its_roots_build_folder ... ok
+test help_agent_doc_is_complete ... ok
+test claude_dry_run_names_every_role ... ok
+test each_lane_gets_its_own_cargo_target_under_its_root ... ok
+test fleet_env_is_exported_into_the_lane ... ok
+test hermes_role_dry_run_kicks_prompt_after_boot ... ok
+test a_spawned_lanes_build_command_runs_in_the_background_but_a_design_lanes_does_not ... ok
+test lane_title_strips_prefixes_and_cuts_at_words ... ok
+test effort_maps_to_each_harness_flag ... ok
+test lockfiles_match_needs_an_identical_lockfile ... ok
+test invalid_effort_is_refused_at_config_load ... ok
+test lane_port_is_stable_per_fleet_and_branch ... ok
+test profiles_sync_gives_a_verify_profile_its_own_prompt ... ok
+test profiles_sync_removes_a_stale_generated_profile ... ok
+test rev_role_flags_new_commit_trailers_only ... ok
+test profiles_turn_attribution_off_and_role_md_has_the_rule ... ok
+test shared_cache_is_exported_into_the_lane ... ok
+test lane_port_collision_takes_the_next_free_one ... ok
+test failed_clone_is_logged_and_the_spawn_succeeds ... ok
+test reopen_spawn_clones_no_build_folder ... ok
+test real_claude_spawn_writes_brief_and_logs_event ... ok
+test unconfirmed_hermes_kick_presses_enter_then_exits_4 ... ok
+test a_new_lane_worktree_leaves_out_docs_archive_unless_opted_out ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
+
+     Running tests/spawn_force.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/spawn_force-f4cf037ac8d4844c)
+
+running 1 test
+test a_forced_spawn_logs_its_override_by_the_owner_or_the_orchestrator ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+     Running tests/spawn_guard.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/spawn_guard-2426b171c9c6bdd7)
+
+running 22 tests
+test an_orch_spawn_is_refused_and_every_lane_takes_an_issue ... ok
+test host_busy_creates_no_worktree_dir ... ok
+test host_busy_on_load_per_cpu ... ok
+test host_busy_on_memory_pressure ... ok
+test adopt_records_running_lane ... ok
+test disk_low_under_min_free_gb ... ok
+test hermes_kick_retries_after_dropped_first_prompt ... ok
+test dirty_unknown_worktree_is_worktree_dirty ... ok
+test live_agent_in_worktree_is_lane_live ... ok
+test host_under_every_threshold_admits ... ok
+test force_admits_busy_host_and_logs_override ... ok
+test fix_round_brief_carries_fail_findings ... ok
+test a_new_lane_brief_carries_the_issue_decisions ... ok
+test named_orphan_in_worktree_is_adopted_not_lane_live ... ok
+test many_live_agents_with_normal_signals_admit ... ok
+test parity_r11_kick_failure_after_start_still_logs_unconfirmed_spawn ... ok
+test load_from_drovers_own_processes_admits_and_an_outside_one_is_named ... ok
+test mem_low_under_the_floor ... ok
+test supersede_kills_old_agent_then_spawns ... ok
+test swap_refuses_on_sustained_median_with_pressure_not_one_spike ... ok
+test unfinished_lane_in_log_is_lane_live ... ok
+test supersede_closes_old_pane_after_confirm_unless_working ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.44s
+
+     Running tests/ssh_deadline.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/ssh_deadline-f344d3039ac37cde)
+
+running 1 test
+test every_ssh_drover_starts_is_bounded_by_a_deadline ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/stale_rev.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/stale_rev-2a8a9e6e1800a25a)
+
+running 3 tests
+test a_reviewer_mid_tool_call_is_not_replaced ... ok
+test a_live_reviewer_quiet_two_hours_without_a_verdict_is_replaced_in_the_same_round ... ok
+test a_reviewer_whose_shed_status_changed_is_not_replaced ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.78s
+
+     Running tests/stall_move.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/stall_move-fd468742cbad3898)
+
+running 3 tests
+test a_busy_last_host_whose_worktree_holds_only_untracked_scratch_yields_to_a_free_host ... ok
+test a_load_wait_past_the_stall_window_with_no_free_host_is_a_stuck_card_never_the_busy_host ... ok
+test a_fix_spawn_held_on_its_busy_pinned_host_past_the_stall_window_moves_with_its_wip_saved ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running tests/stalled_host.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/stalled_host-5c443af16b8cd2cc)
+
+running 3 tests
+test a_configured_host_whose_muxed_call_stalls_after_its_probe_is_skipped_for_the_rest_of_the_pass ... ok
+test a_lane_on_a_machine_outside_hosts_gets_no_ssh_and_shows_host_offline_not_configured ... ok
+test hosts_skipped_two_passes_running_raise_one_alert_with_the_calls_not_sent ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.35s
+
+     Running tests/stalled_lanes.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/stalled_lanes-0651cee68a72e0e9)
+
+running 3 tests
+test repeated_hook_refusals_end_the_lane_with_an_escalation_that_carries_the_refusal ... ok
+test parity_r15_a_lane_shed_never_heard_from_after_the_start_window_is_retried_once_then_escalated ... ok
+test a_verify_lane_that_ends_without_a_verdict_is_respawned_once_then_needs_a_human ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.49s
+
+     Running tests/state_db.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/state_db-4704e8fe8ddc6cd4)
+
+running 8 tests
+test hot_db_calls_on_a_20k_claim_log ... ignored, perf: cargo test --release -p drover --test state_db hot_db_calls -- --ignored --nocapture
+test the_claim_lookup_is_an_index_search ... ok
+test a_log_written_after_the_import_is_imported_after_it ... ok
+test a_thousand_last_seq_calls_list_the_state_directory_once ... ok
+test a_kind_flagged_passive_where_it_is_emitted_is_not_activity ... ok
+test the_database_is_owner_only ... ok
+test a_lease_is_held_until_it_expires_then_taken_over_with_no_stale_row_left ... ok
+test migration_imports_once_with_an_equal_fold_and_the_export_is_the_old_format ... ok
+
+test result: ok. 7 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.55s
+
+     Running tests/state_write.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/state_write-c321c0cb1d6a5f6b)
+
+running 4 tests
+test an_existing_vapid_key_is_never_rewritten ... ok
+test last_seen_is_written_at_most_hourly ... ok
+test a_failed_write_keeps_the_old_devices_and_logs_once_an_hour ... ok
+test parity_r18_concurrent_device_updates_all_land_without_a_write_failure ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.99s
+
+     Running tests/store.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/store-e14bc1f10cb27d56)
+
+running 3 tests
+test serve_starts_with_no_secret_store ... ok
+test migrate_leaves_the_keychain_alone_and_prints_how_to_delete_its_items ... ok
+test secret_rm_deletes_the_secret_file ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running tests/synergy.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/synergy-b381040df1cd6733)
+
+running 15 tests
+test a_rename_out_of_a_serial_path_reports_both_names ... ok
+test above_the_apis_3000_files_the_checkout_lists_them ... ok
+test a_2011_file_pr_is_listed_whole_and_its_last_page_serial_path_refuses ... ok
+test marked_pr_touching_serial_path_merges ... ok
+test a_cached_head_is_not_listed_again ... ok
+test serial_globs ... ok
+test design_lane_spawns_but_never_moves_the_issue ... ok
+test owner_override_still_refuses_an_unmarked_serial_pr ... ok
+test max_impl_refuses_the_third_impl ... ok
+test pr_outside_serial_globs_merges_unmarked ... ok
+test in_flight_serial_issue_keeps_its_lanes_when_over_full ... ok
+test unmarked_pr_touching_serial_path_is_refused ... ok
+test serial_max_two_admits_a_second_serial_and_refuses_a_third ... ok
+test second_serial_impl_waits_until_first_merges ... ok
+test no_cap_by_default_even_with_50_lanes ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.84s
+
+     Running tests/term_adapter.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/term_adapter-c97473aadc81444b)
+
+running 2 tests
+test no_src_line_names_herdr_but_its_load_error ... ok
+test only_term_rs_builds_pane_words ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/themes.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/themes-f1cbc3c1cd15d108)
+
+running 18 tests
+test every_fallback_step ... ok
+test farm_fills_the_whole_contract ... ok
+test kitchen_draws_every_action_itself ... ok
+test per_role_action_resolution ... ok
+test parity_r17_path_traversal_is_refused ... ok
+test stages_species_and_a_light_dark_scheme_are_checked ... ok
+test schema_validation_names_the_problem ... ok
+test the_growth_stage_follows_the_issue ... ok
+test loading_is_the_themes_own_or_the_spinning_glyph ... ok
+test terminal_has_no_sprites ... ok
+test the_theme_icon_route_and_its_fallback ... ok
+test theme_words_are_the_themes_own_and_fall_back_to_plain ... ok
+test garden_draws_every_stage_and_species_itself ... ok
+test pinned_packs_load_and_a_custom_theme_overrides_them ... ok
+test default_theme_is_farm ... ok
+test the_picker_default_is_serve_theme_and_lists_your_own ... ok
+test parity_10_lookup_is_user_then_built_in_then_farm ... ok
+test invalid_theme_json_falls_back_to_farm_with_a_host_warning ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/thread_handoff.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/thread_handoff-009a3b19b8698c5b)
+
+running 16 tests
+test a_handoff_to_a_repo_without_a_orchestrator_logs_nothing ... ok
+test a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orchestrator ... ok
+test a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_orchestrator_with_the_text ... ok
+test a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one ... ok
+test a_failed_first_try_of_a_handoff_tap_is_retried_and_delivered_once ... ok
+test a_failed_handoff_tap_shows_its_error_and_its_retry_is_the_one_delivery ... ok
+test a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not ... ok
+test a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_the_shells_line_limit ... ok
+test a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_before_the_tap ... ok
+test a_orchestrators_thread_new_is_refused_naming_handoff_and_the_owners_still_works ... ok
+test a_repos_threads_list_newest_active_first_with_newest_on_the_first ... ok
+test a_pending_repo_handoff_is_one_item_with_choices_and_its_pick_delivers_it_in_both_threads ... ok
+test three_taps_on_one_handoff_deliver_it_once_and_each_gets_the_first_result ... ok
+test the_chat_api_links_each_linked_row_and_thread_row ... ok
+test an_issue_filed_and_an_ask_answered_in_the_target_each_add_one_row_to_the_source ... ok
+test a_tap_on_a_thread_delivers_there_and_a_tap_on_new_starts_a_thread ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.60s
+
+     Running tests/thread_refs.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/thread_refs-ec39d277f85e320d)
+
+running 1 test
+test only_the_archived_thread_reads_archived_in_the_chat_api ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
+
+     Running tests/threads_tab.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/threads_tab-b6b8e238534e4c2e)
+
+running 15 tests
+test a_thread_opens_at_its_end_in_webkit_with_its_bar_on_top_and_the_page_still ... ok
+test an_image_opens_in_the_viewer_in_webkit_and_close_and_escape_shut_it ... ok
+test parity_21_two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webkit ... ok
+test older_messages_load_above_in_webkit_and_the_card_in_view_stays_in_place ... ok
+test parity_26_a_message_sent_while_working_queues_and_send_now_steers_it_in_webkit ... ok
+test the_composer_docks_below_the_messages_in_webkit_empty_and_with_4_lines_at_390_and_1440 ... ok
+test the_keyboard_keeps_the_composer_flush_on_it_in_webkit_and_the_page_still ... ok
+test two_panes_in_webkit_at_1440_scroll_on_their_own_and_a_list_update_keeps_the_thread ... ok
+test the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only ... ok
+test every_card_kind_in_a_thread_is_its_golden_json ... ok
+test a_composer_send_with_a_photo_over_32_kb_reaches_the_say_op_over_the_socket_and_an_over_limit_body_is_413 ... ok
+test parity_15_the_owner_reads_a_thread_sends_and_answers_from_the_tab ... ok
+test parity_32_the_owner_settles_each_card_from_inside_its_thread ... ok
+test parity_34_each_composer_op_reaches_its_thread_op_and_the_screen_shows_it ... ok
+test a_long_thread_opens_on_its_last_30_and_its_marker_loads_the_30_before_with_the_later_ones ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.28s
+
+     Running tests/tick_dead_host.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/tick_dead_host-2e42e0e69edcf009)
+
+running 2 tests
+test a_reachable_off_host_is_still_cleaned_and_killed_when_asked_directly ... ok
+test a_host_whose_ssh_never_connects_with_50_worktrees_costs_the_tick_under_a_minute ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.52s
+
+     Running tests/tick_stuck.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/tick_stuck-eda819d60c420abf)
+
+running 8 tests
+test clean_reports_a_silent_disabled_host_offline_after_one_probe ... ok
+test a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it ... ok
+test a_tick_that_ignores_sigterm_is_killed_after_10_s ... ok
+test a_process_that_is_no_drover_tick_is_never_killed ... ok
+test a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self_heal ... ok
+test a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once ... ok
+test a_host_that_never_answers_costs_one_probe_and_drive_still_starts ... ok
+test the_ticks_clean_never_probes_a_disabled_hosts_worktrees ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.81s
+
+     Running tests/timer.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/timer-08b82834adc0e8bb)
+
+running 16 tests
+test job_files_match_their_goldens ... ok
+test doctor_marks_a_job_launchd_refuses_red ... ok
+test setup_adopts_a_serve_job_under_another_label ... ok
+test setup_makes_a_missing_merge_label_once_then_says_already ... ok
+test setup_twice_is_all_already_and_tailscale_absent_is_skipped ... ok
+test install_beside_an_old_job_prints_the_swap_and_runs_none_of_it ... ok
+test drift_is_missing_outdated_or_loaded ... ok
+test install_run_by_the_local_bin_symlink_names_the_install_roots_binary ... ok
+test install_loads_and_prints_the_command ... ok
+test setup_writes_a_fleets_missing_hygiene_once ... ok
+test install_no_load_writes_without_loading_and_remove_deletes ... ok
+test slow_du_never_blocks_the_board ... ok
+test services_rows_go_green_amber_and_red ... ok
+test tick_failed_is_logged_at_most_once_an_hour ... ok
+test tick_runs_check_then_drive_and_exits_zero_on_refusals ... ok
+test tick_repairs_only_the_missing_job ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.84s
+
+     Running tests/timer_install.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/timer_install-5ad6d7b18938f321)
+
+running 1 test
+test timer_install_logs_who_ran_it ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/tmpdir.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/tmpdir-7e334e78b834a5b2)
+
+running 3 tests
+test writer_outliving_its_test_child ... ok
+test a_tests_dirs_go_when_it_passes_or_panics ... ok
+test a_dir_a_background_thread_still_writes_after_its_test_is_gone_once_the_process_ends ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running tests/top.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/top-45a90cfa158d9bde)
+
+running 3 tests
+test top_lists_each_live_lane_with_its_process_tree_and_heavy_waits_in_text_and_json ... ok
+test overload_minutes_comes_from_the_config ... ok
+test ten_minutes_over_the_limit_alerts_once_with_the_top_five_and_again_after_load_drops ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+     Running tests/triage.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/triage-aca11a5667db4ff8)
+
+running 4 tests
+test the_docs_pass_files_one_docs_issue_with_each_finding_and_none_when_clean ... ok
+test a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo ... ok
+test a_triage_lane_changes_issues_only_through_its_verbs_and_never_code ... ok
+test tick_runs_triage_weekly_only_where_the_fleet_turns_it_on ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.59s
+
+     Running tests/turn.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/turn-7d8a17b68515ce3e)
+
+running 12 tests
+test no_state_reads_idle_without_pushing_as_before ... ok
+test need_input_without_an_ask_says_so ... ok
+test the_stop_hook_leaves_check_lanes_alone ... ok
+test the_stop_hook_asks_for_the_turn_once_per_prompt_and_never_loops ... ok
+error: the following required arguments were not provided:
+  --why <WHY>
+
+Usage: drover turn --why <WHY> <STATE>
+
+For more information, try '--help'.
+test the_verb_logs_turn_end_with_the_lanes_role_and_is_no_issue_activity ... ok
+test blocked_is_an_owner_card_with_its_reason ... ok
+test a_reported_lane_whose_pane_is_gone_takes_the_respawn_path ... ok
+test done_at_a_pushed_head_spawns_review_at_once_without_waiting_for_ci ... ok
+test a_working_lane_that_hibernated_and_died_is_respawned_after_a_false_failed_start ... ok
+test a_nudged_done_left_unanswered_is_blocked_after_10_min ... ok
+test done_with_nothing_pushed_is_nudged_once_then_blocked ... ok
+test working_gets_one_continue_prompt_after_the_idle_threshold_never_a_respawn ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.52s
+
+     Running tests/typed_choice.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/typed_choice-cd45560880fb97e4)
+
+running 5 tests
+test an_ask_answered_by_the_owner_typed_is_an_amend_basis ... ok
+test a_typed_approve_with_a_note_approves_and_writes_the_note_under_amendments ... ok
+test a_typed_reject_with_a_note_rejects_and_keeps_the_note ... ok
+test a_typed_revise_takes_its_note_and_free_text_alone_stays_revise ... ok
+test a_typed_issue_approve_on_its_own_design_ask_approves_and_another_issue_number_revises ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.70s
+
+     Running tests/ui_audit_hang.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/ui_audit_hang-be86f3635c7a1b41)
+
+running 2 tests
+test a_view_that_never_settles_is_retried_twice_then_flaky_and_ui_stays_green ... ok
+test a_real_outlier_still_fails_ui_beside_a_hung_view ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.14s
+
+     Running tests/ui_lock.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/ui_lock-d9a6333b2b4251cf)
+
+running 4 tests
+test a_lock_held_ten_minutes_is_run_past ... ok
+test the_audits_run_under_the_lock ... ok
+test a_dead_holder_lets_go_at_once ... ok
+test a_second_lanes_audit_waits_on_the_lock_until_the_first_ends ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+
+     Running tests/ui_tokens.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/ui_tokens-339eee08f845f404)
+
+running 3 tests
+test the_lint_bites ... ok
+test css_uses_only_the_tokens ... ok
+test rendered_page_has_no_inline_px ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
+
+     Running tests/update_worktree.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/update_worktree-cf53c06e798f0e5e)
+
+running 2 tests
+test a_missing_but_locked_update_worktree_no_longer_stops_the_auto_update ... ok
+test an_auto_update_failing_every_pass_raises_one_alert ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.45s
+
+     Running tests/url_links.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/url_links-6598cd1111c635b6)
+
+running 1 test
+test an_events_row_with_a_pr_is_a_real_link_in_webkit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/usage.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/usage-2feb48353215b327)
+
+running 5 tests
+test balance_and_usage_fixtures_parse ... ok
+test a_deepseek_env_file_others_can_read_is_refused ... ok
+test secret_in_config_is_refused ... ok
+test deepseek_hints_when_the_env_file_lacks_the_key ... ok
+test balance_shows_without_leaking_secrets ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running tests/verify_browser.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/verify_browser-0b6d1409f05143e6)
+
+running 2 tests
+test a_console_error_fails_unless_known_noise_and_a_500_fails ... ok
+test a_shot_over_the_threshold_from_its_approved_png_fails_with_its_diff_image ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/verify_stage.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/verify_stage-ecb6a332b35f1ada)
+
+running 20 tests
+test a_design_stage_issue_always_verifies ... ok
+test a_rev_pass_and_verify_no_recipe_at_the_head_merge_in_one_drive_pass ... ok
+test a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane ... ok
+test a_pr_that_rewrites_the_recipe_is_verified_by_the_integration_recipe ... ok
+test a_rev_pass_refused_for_want_of_verify_waits_on_verify_not_review_again ... ok
+test a_verified_head_a_gate_refused_names_the_gate_not_review_again ... ok
+test a_same_name_verify_lane_without_a_verdict_is_still_lane_live ... ok
+test a_verify_pass_at_an_older_sha_does_not_let_the_new_head_merge ... ok
+test a_shot_on_a_hung_disk_answers_504_and_the_board_stays_up ... ok
+test a_pr_outside_ui_paths_skips_verify_and_goes_to_the_gates ... ok
+test a_rev_pass_and_verify_skipped_at_the_head_merge_in_one_drive_pass ... ok
+test parity_70_shots_are_only_a_verify_verdicts_files_inside_its_lane_folder ... ok
+test without_a_verify_role_the_builtin_pipeline_is_unchanged ... ok
+test a_pass_drive_records_on_a_ui_pr_without_a_recipe_logs_verify_no_recipe_and_merges ... ok
+test verify_fails_count_in_revs_rounds_and_the_third_fail_parks ... ok
+test a_pass_drive_records_on_a_ui_pr_with_a_recipe_spawns_verify_not_rev ... ok
+test a_verify_lane_that_recorded_its_verdict_is_superseded_by_the_next_verify ... ok
+test a_pass_drive_records_outside_ui_paths_logs_verify_skipped_and_merges ... ok
+test no_recipe_logs_verify_no_recipe_shows_it_and_goes_on_to_the_gates ... ok
+test verify_off_skips_the_stage_and_verify_on_forces_it ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.87s
+
+     Running tests/waiting.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/waiting-3db4037c74b689f3)
+
+running 11 tests
+test a_killed_lane_waits_on_drive_to_respawn_it ... ok
+test a_long_reason_stays_whole_and_only_on_its_lane ... ok
+test a_dead_fix_lane_is_respawned_not_parked ... ok
+test every_case_has_its_who_what_and_next_command ... ok
+test a_pass_left_unmerged_for_three_passes_shows_the_missed_promise_with_the_real_reason ... ok
+test a_promise_missed_after_the_disk_recovers_names_the_current_hold_not_disk_low_and_makes_no_card ... ok
+test a_pass_a_draft_pr_holds_voids_the_merge_promise_and_shows_the_hold ... ok
+test every_idle_lane_of_an_issue_gets_a_reason ... ok
+test idle_lanes_render_their_reason ... ok
+test waiting_lists_every_open_item_with_its_next_command ... ok
+test a_green_pass_on_a_draft_or_unlabelled_pr_names_the_cause ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.10s
+
+     Running tests/webhook.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/webhook-02b24644f16eb2b7)
+
+running 9 tests
+test the_signature_check_matches_githubs_documented_example ... ok
+test a_webhook_secret_inline_in_fleet_toml_is_still_refused ... ok
+test with_no_secret_the_endpoint_is_503_and_doctor_warns ... ok
+test an_unknown_repo_or_branch_is_202_and_ignored_ping_is_200 ... ok
+test a_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing ... ok
+test a_webhook_secret_file_others_can_read_is_refused ... ok
+test the_funnel_listener_answers_no_path_but_hooks_github ... ok
+test a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive ... ok
+test with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.28s
+
+     Running tests/webpush.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/webpush-41fe9040b7cbb250)
+
+running 12 tests
+test needs_human_push_names_the_issue_the_reason_and_the_finding ... ok
+test rfc8291_vector_encrypts_and_decrypts_back ... ok
+test check_warns_once_when_devices_are_subscribed_but_no_notifier_is ... ok
+test vapid_jwt_verifies_with_the_public_key ... ok
+test webpush_notifier_needs_sub ... ok
+test parity_8_subscribe_needs_a_paired_device_and_unsubscribe_removes_it ... ok
+test delivery_201_sent_410_pruned_500_notify_failed ... ok
+test parity_9_no_push_for_the_thread_open_on_a_board ... ok
+test a_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named ... ok
+test push_titles_use_each_devices_theme_words ... ok
+test phones_hear_owner_asks_and_defaults_never_a_waiting_routine_ask ... ok
+test subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.30s
+
+     Running tests/wedged.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/wedged-098c08afb9ddb2cd)
+
+running 4 tests
+test doctor_finishes_in_10_s ... ok
+test check_finishes_in_10_s ... ok
+test serve_starts_and_serves_the_board_in_10_s ... ok
+test tick_finishes_in_10_s ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.83s
+
+     Running tests/why_briefs.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/why_briefs-472c61d84d3700f0)
+
+running 5 tests
+test an_update_brief_carries_its_branchs_notes ... ok
+test a_new_impl_brief_carries_the_notes_on_the_files_its_spec_names ... ok
+test a_fix_brief_carries_its_branchs_notes ... ok
+test a_respawned_lanes_brief_carries_its_branchs_notes ... ok
+test a_rev_brief_carries_the_rounds_note_or_why_there_is_none ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.23s
+
+     Running tests/why_notes.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/why_notes-ad07b476f49e5c7d)
+
+running 9 tests
+test why_note_written_on_origin_pr_body_and_log ... ok
+test an_update_rounds_short_note_is_accepted ... ok
+test a_pr_body_without_the_heads_evidence_is_refused_before_review ... ok
+test two_lanes_finishing_at_once_both_keep_their_notes ... ok
+test a_note_pushed_between_fetch_and_push_is_kept ... ok
+test a_refused_note_is_nudged_once_then_review_goes_ahead ... ok
+test a_squash_merge_lands_one_commit_carrying_every_lane_note ... ok
+test why_reads_a_merged_line_back ... ok
+test an_invalid_note_is_refused_with_its_reason_and_nothing_is_pushed ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.13s
+
+     Running tests/working_set.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/working_set-709ce76efb8c3f2c)
+
+running 1 test
+test working_set_drops_quiet_history_and_the_fold_is_saved_on_append ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 50.67s
+
+error: 1 target failed:
+    `-p drover --test shed`
+cli=101
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1098/crates/core)
+   Compiling drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1098/crates/sys)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1098/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1098/crates/service)
+    Finished `test` profile [unoptimized] target(s) in 26.69s
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/drover_core-cfc3a6eb2c7577bc)
+
+running 6 tests
+test providers::fake::tests::a_lane_launches_with_its_command_and_env ... ok
+test providers::fake::tests::a_role_may_name_the_registered_provider_and_no_unregistered_one ... ok
+test providers::fake::tests::setup_offers_its_login_with_its_vendor ... ok
+test promise::tests::a_promise_the_issue_moved_past_is_never_missed ... ok
+test promise::tests::a_promise_past_its_deadline_with_its_wait_unchanged_is_missed_exactly_once ... ok
+test promise::tests::a_promise_a_known_hold_superseded_is_void_not_missed ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/drover_server-7f0dc40a45d9b68c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/types.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/types-8e0489cf0700f9b0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/drover_service-b437eeaad8564422)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1098/target/debug/deps/drover_sys-b639d55accd606fb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+libs=0
