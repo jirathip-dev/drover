@@ -1,0 +1,10 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1291/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.98s
+     Running tests/serve_load.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1291/debug/deps/serve_load-13f78538431ff718)
+
+running 2 tests
+test api_v1_reads_and_live_answer_within_200ms_with_the_db_write_locked_and_gh_slow ... ok
+test eight_silent_live_streams_are_dropped_after_two_missed_heartbeats_and_a_ninth_connects ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.89s
+

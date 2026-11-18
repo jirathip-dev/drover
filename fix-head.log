@@ -1,0 +1,17 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1291/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1291/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1291/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1291/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.81s
+     Running tests/playbooks.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1291/debug/deps/playbooks-3d8236b1af0f4f97)
+
+running 6 tests
+test an_unmarked_issues_pass_reads_neither_commits_nor_diff ... ok
+test a_refactor_pass_needs_tests_only_moved_or_renamed ... ok
+test a_refactor_pass_over_githubs_diff_limit_reads_the_local_diff ... ok
+test a_refactor_pass_ignores_comment_only_test_edits ... ok
+test a_perf_pass_needs_a_baseline_commit_and_a_perf_block ... ok
+test queue_set_playbook_marks_and_unmarks_an_issue ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
