@@ -1,0 +1,10 @@
+
+running 1 test
+PROBE seed 2: None
+PROBE seed 3: None
+PROBE seed 4: None
+PROBE seed 5: None
+PROBE seed 1003: Some("I1 one-lane: #104 impl has 2 live lanes: [\"drover-impl-104 on drover-impl-104\", \"drover-impl-104 on drover-impl-104x\"]")
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 19 filtered out; finished in 15.51s
+

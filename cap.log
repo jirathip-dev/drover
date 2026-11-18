@@ -1,0 +1,3 @@
+src lines (formatted): 47723 / cap 53500
+cap raised by ci/cap.d/2026-11-17-53500.toml
+web lines (TypeScript, soft budget, not capped): 1372

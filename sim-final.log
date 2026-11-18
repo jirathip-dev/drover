@@ -1,0 +1,16 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-959/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-959/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-959/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-959/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.92s
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-959/debug/deps/sim-477a3e0a0c69cb28)
+
+running 5 tests
+test breaking_the_head_sha_check_fails_always ... ok
+test a_broken_invariant_fails_with_seed_and_trace ... ok
+test a_sometimes_state_never_reached_fails_the_run ... ok
+test gate_scenarios_hold_always_and_reach_every_sometimes ... ok
+test fixed_seeds_hold_every_invariant ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 34.18s
+
