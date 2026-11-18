@@ -1,0 +1,11 @@
+Decided: the PR body's Parity section names rows 39 (done today) and 47 (backlog) as changed, their statuses kept, no row dropped
+Because: docs/parity.md:58
+Because: docs/parity.md:66
+Decided: ci.yml conflicts with staging resolved as the union of both sides' WebKit path lists, keeping this PR's screen_pages gate
+Because: .github/workflows/ci.yml:244
+Because: .github/workflows/ci.yml:272
+Decided: web/dist/board.js rebuilt from the merged web/src with npm run build, never hand-merged
+Because: web/package.json:7
+Rejected: taking either side's ci.yml line alone — it would drop staging's new WebKit tests or this PR's pages tests from the WebKit trigger
+Check: ci.yml:244 lists answered, optimistic, keyboard and pages; ui-webkit and all shards green at the head
+Owner: This round only merged the latest staging in; the paged Events, done-today and backlog lists are unchanged.
