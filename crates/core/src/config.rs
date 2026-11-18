@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 /// The accent tokens a fleet card's bar takes (`--l` blue … `--a` amber); red means "needs you", so it is left out.
 pub const COLORS: [&str; 5] = ["l", "p", "c", "g", "a"];
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub fleet: BTreeMap<String, Fleet>,
@@ -50,7 +50,7 @@ pub struct Config {
 }
 
 /// `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
 pub struct SelfUpdate {
     pub branch: String,
@@ -69,7 +69,7 @@ impl Default for SelfUpdate {
 }
 
 /// The proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, how long a lane key lives; `token-file`, the one 0600 token it signs with (`Proxy::setup`'s).
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
 pub struct ProxyCfg {
     pub port: u16,
@@ -91,7 +91,7 @@ impl Default for ProxyCfg {
 }
 
 /// The repo's runner VMs: their recipe (`provider`), spec, slots per VM, label, and the `max_vms` / `usd_day` cap; `vms` are the ones made by hand (`runners add|remove` change the set in the log); `local_*` the mini's runners.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct CiRunners {
     pub provider: String,
     pub repo: String,
@@ -117,13 +117,13 @@ fn ci_service() -> String {
     "ci-runner".into()
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct ServiceCfg {
     pub url: Option<String>,
 }
 
 /// The harness, model and effort a new thread's orchestrator starts on; each unset one is the role's.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Chat {
     pub harness: Option<String>,
     pub model: Option<String>,
@@ -131,7 +131,7 @@ pub struct Chat {
 }
 
 /// The conductor's instructions file, skills folder and memory notes folder (`~/` expands); `dir`, the root of the per-thread working folders (default `<state dir>/conductor`); `allow`, its capability groups.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct OrchestratorCfg {
     pub dir: Option<String>,
     pub instructions: Option<String>,
@@ -146,7 +146,7 @@ pub struct OrchestratorCfg {
 }
 
 /// One `[orchestrator.<id>]`: what the owner calls it and the fleets its threads may be on.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Orchestrator {
     pub name: Option<String>,
@@ -180,7 +180,7 @@ impl OrchestratorCfg {
     }
 }
 
-#[derive(Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(try_from = "String")]
 pub enum RuntimeKind {
     #[default]
@@ -208,7 +208,7 @@ impl TryFrom<String> for RuntimeKind {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Runtime {
     pub kind: RuntimeKind,
@@ -235,7 +235,7 @@ impl Runtime {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct SetupCfg {
     pub name: String,
     pub cmd: String,
@@ -243,7 +243,7 @@ pub struct SetupCfg {
     pub env: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct HostCfg {
     pub machine: Option<String>,
     #[serde(default)]
@@ -341,13 +341,13 @@ fn yes() -> bool {
 }
 
 /// `[providers]`: API providers whose balance the Host tab shows (docs/providers.md).
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Providers {
     pub deepseek: Option<Provider>,
 }
 
 /// The key is read from `env_file` (0600, refused if looser; else the environment), never from fleet.toml.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Provider {
     pub key_env: String,
     pub env_file: Option<String>,
@@ -364,7 +364,7 @@ fn mcp_deny() -> Vec<String> {
 }
 
 /// `[serve]`: extra `Host` names (e.g. the `*.ts.net` name of `tailscale serve`) a POST may come from, and `approve_hint`, appended to the pairing panel's Mac line (`{code}` substituted).
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Serve {
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
@@ -390,7 +390,7 @@ impl Serve {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Fleet {
     pub repo: String,
     pub local: String,
@@ -613,7 +613,7 @@ impl Baseline {
 }
 
 /// `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits for the full set); integration's own CI then runs the full suite, and `land::watch` reverts a red landing.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Land {
     pub mode: String,
@@ -1235,7 +1235,7 @@ pub fn show(cfg: &Config, out: &mut dyn std::io::Write) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Notify {
     #[serde(default)]
     pub cmd: String,
@@ -1351,9 +1351,29 @@ impl Config {
         }
     }
 
-    /// Serve's reads: the config, else the last good one; Err only with none kept.
+    /// Serve's reads: the config, else the last good one; Err only with none kept. Parsed once until fleet.toml changes.
     pub fn kept(ctx: &crate::Ctx) -> Result<Config> {
-        Self::loaded(ctx).or_else(|(e, good)| good.map(|g| *g).ok_or(e))
+        type Stamp = (Option<std::time::SystemTime>, u64, u64);
+        static KEPT: std::sync::Mutex<BTreeMap<PathBuf, (Stamp, Config)>> = std::sync::Mutex::new(BTreeMap::new());
+        let kept = || KEPT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let stamp = std::fs::metadata(&ctx.config)
+            .ok()
+            .map(|m| (m.modified().ok(), m.len(), std::os::unix::fs::MetadataExt::ino(&m)));
+        let hit = kept()
+            .get(&ctx.config)
+            .filter(|k| Some(k.0) == stamp)
+            .map(|k| k.1.clone());
+        if let Some(c) = hit {
+            if let Ok(mut a) = ACTIVE.write() {
+                *a = Some(std::sync::Arc::new(c.limits.clone()));
+            }
+            return Ok(c);
+        }
+        let c = Self::loaded(ctx).map_err(|(e, good)| good.map(|g| *g).ok_or(e));
+        if let (Ok(c), Some(stamp)) = (&c, stamp) {
+            kept().insert(ctx.config.clone(), (stamp, c.clone()));
+        }
+        c.or_else(|g| g)
     }
 
     pub fn parse(text: &str) -> Result<Config> {

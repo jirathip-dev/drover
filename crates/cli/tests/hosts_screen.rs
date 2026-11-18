@@ -74,6 +74,7 @@ fn the_hosts_sheet_lists_main_first_then_a_to_z_with_state_and_lanes() {
     let r = runner(&wt);
     let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
+    s.refresh(NOW);
     let (status, v) = get(&s, "/screens/hosts");
     assert_eq!(status, 200, "{v}");
     let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/page/hosts.json");

@@ -45,9 +45,11 @@ fn host_row(name: &str, kind: &str, on: bool, lanes: usize, left: usize) -> Valu
 impl Server<'_> {
     pub(super) fn hosts_sheet(&self, ctx: &Ctx) -> Option<Value> {
         let (cfg, ev) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
-        let left = crate::session::live_on(&self.r).map_or(0, |a| {
-            crate::check::leftovers(ctx, &cfg, &self.r, &a, false).map_or(0, |l| l.len())
-        });
+        let (left, proxy) = self
+            .hosts_read
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let rows: Vec<Value> = crate::hosts::cards(&cfg, &self.r)
             .into_iter()
             .map(|(name, h)| {
@@ -72,7 +74,7 @@ impl Server<'_> {
             "footer": "Tap a host for its buttons. Host history and charts live in Beacon.",
             "blocks": [{"type": "list", "id": "hosts-list", "rows": rows}]}),
         ];
-        if let Some(facts) = crate::proxy::status(ctx, &cfg, &self.r) {
+        if let Some(facts) = proxy {
             let mut rows: Vec<Value> = (facts.iter().enumerate())
                 .map(|(i, f)| json!({"type": "row", "id": format!("px-{i}"), "title": f}))
                 .collect();
@@ -82,6 +84,22 @@ impl Server<'_> {
                 "blocks": [{"type": "list", "id": "proxy-list", "rows": rows}]}));
         }
         Some(json!({"type": "sheet", "id": "hosts", "title": "Hosts", "cancel": "Close", "blocks": blocks}))
+    }
+
+    /// Count the main host's leftovers and read the token proxy for the hosts sheet, off the request.
+    pub(crate) fn read_hosts(&self, now: u64) {
+        let Ok(cfg) = Config::kept(self.ctx) else { return };
+        let ctx = &Ctx {
+            now,
+            ..self.ctx.clone()
+        };
+        let left = crate::session::live_on(&self.r).map_or(0, |a| {
+            crate::check::leftovers(ctx, &cfg, &self.r, &a, false).map_or(0, |l| l.len())
+        });
+        *self
+            .hosts_read
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (left, crate::proxy::status(ctx, &cfg, &self.r));
     }
 
     pub(super) fn proxy_how(ctx: &Ctx) -> Option<Value> {
@@ -98,6 +116,7 @@ impl Server<'_> {
     pub(super) fn host_op(&self, ctx: &Ctx, op: &str, v: &Value) -> Result<Value> {
         let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
         let line = self.form_op(ctx, op, &[("host", s("host")), ("to", s("to"))])?;
+        self.read_hosts(ctx.now);
         let sh = self.hosts_sheet(ctx).context("no hosts")?;
         Ok(json!({"ops": [{"op": "screen", "screen": sh}], "toast": line}))
     }

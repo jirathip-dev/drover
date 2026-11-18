@@ -1268,6 +1268,7 @@ fn screens_on_a_live_shaped_fixture() {
     let mb = files.iter().map(|e| e.metadata().unwrap().len()).sum::<u64>() >> 20;
     let (c, _, addr) = serve(c, sh.on(Box::leak(Box::new(Live(f)))));
     let cookie = pair_on(addr, c);
+    let mut p95 = vec![];
     let mut line = format!(
         "#1313 perf ({} gh cache files, {mb} MB, 3,000 events, 150 issues, 10 lanes): p95 of 20",
         files.len()
@@ -1279,6 +1280,42 @@ fn screens_on_a_live_shaped_fixture() {
         let ls = (sh.methods().iter().filter(|m| *m == "ls").count() - ls) / 20;
         t.sort_unstable();
         line += &format!(" · {path} {} ms ({ls} shed ls)", t[18]);
+        p95.push((path, t[18]));
     }
     report(&line);
+    if cfg!(debug_assertions) {
+        return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
+    }
+    for (path, t) in p95 {
+        let budget = if path == "/screens/hosts" { 50 } else { 150 };
+        assert!(t < budget, "{path} p95 {t} ms (budget {budget})");
+    }
+}
+
+#[test]
+fn a_queue_build_lists_shed_once_and_neither_it_nor_the_hosts_sheet_starts_a_process() {
+    let (c, f, sh) = big_with(10);
+    let r = NoSpawn(
+        Slow(f, Mutex::default(), AtomicUsize::new(0), Some(sh), shed()),
+        Mutex::default(),
+    );
+    let s = drover::serve::Server::new(&c, &r, Some(ADDR.into())).deferring();
+    s.refresh(NOW);
+    let ls = || sh.methods().iter().filter(|m| *m == "ls").count();
+    for (path, most) in [("/screens/queue", 1), ("/screens/queue", 1), ("/screens/hosts", 0)] {
+        let before = ls();
+        let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW);
+        let res = String::from_utf8_lossy(&res);
+        assert!(
+            res.starts_with("HTTP/1.1 200"),
+            "{path}: {}",
+            &res[..res.len().min(300)]
+        );
+        assert!(ls() - before <= most, "{path} listed shed {} times", ls() - before);
+    }
+    assert_eq!(
+        *r.1.lock().unwrap(),
+        Vec::<String>::new(),
+        "processes started on a request"
+    );
 }
