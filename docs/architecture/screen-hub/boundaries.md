@@ -3,20 +3,18 @@
 ## The repos and the crates
 
 ```
-jirathip-dev/blocks                 its own repo (q2049); it names nothing of drover's
-  crate `blocks`  (serde, serde_json)      no tokio, no clock, no socket
-  TS package      types.ts (generated), stream.ts, patch.ts
-  blocks-gen      the crate's types → the schema → the TS and Swift types; never a dependency
-        ▲ one commit: a git rev in Cargo.toml, the same in web/package.json
+jirathip-dev/blocks                 its own repo, built by its own issues (q2071); it names nothing of drover's
+  its crate       the diff, the ops, the frames, both ends' bookkeeping    no tokio, no clock, no socket
+  its TS package  the generated types, the stream client, the patcher
+        ▲ one commit: a git rev in Cargo.toml (slice 4), the same in web/package.json (slice 6)
 drover-server ──> drover-core ──> drover-sys          tokio: server and service only
       ▲               web/ (the page) imports the TS package
 drover-service ──> the `drover` binary
 ```
 
 Only `drover-server` depends on the crate, and re-exports it as `drover_server::blocks` for the tests. core does not
-see it and does not see tokio. Enforced in drover by the deps gate, one CI line (`blocks` brings in serde and
-serde_json only), the pin test and a ban in `.drover/arch.toml` (`adr.md`); in blocks by its own CI. cooee comes to
-depend on the same repo, never on drover.
+see it and does not see tokio. Enforced in drover by the deps gate, the pin test and the bans in `.drover/arch.toml`
+(`adr.md`). #1318 opens no PR in blocks: what it needs from there is `adr.md`'s table N1 and N2.
 
 ## Who may call whom
 
@@ -25,23 +23,28 @@ socket ──> conn (accept, read, route) ──> stream ──> hub ──> scr
                  │         │                          │  └──> blocks (Shelf, diff)     └────> core (events, config, gh cache)
                  │         └── GET /screens/<x> ──────┘
                  └── every other route ──> spawn_blocking ──> serve.rs `respond` (today's handler)
-page:  main.ts ──> the package's stream.ts and patch.ts ──> blocks.ts (`render`, handed to the patcher by main.ts)
+page:  main.ts ──> the package's stream client and patcher ──> blocks.ts (`render`, handed to the patcher by main.ts)
 ```
 
 | Module | Owns | May call | Must not |
 |---|---|---|---|
-| `blocks` (the crate, in the blocks repo) | the typed blocks, `Built` and its faults, `Op`, `ops`, `apply`, the wire types, `Shelf`, `Mirror` | serde, serde_json | name a drover type, a path or a screen; read time, files or config; do I/O; render |
 | `serve/conn.rs` (new) | the runtime, the accept loops, the request reader and its limits, the split of routes, the two semaphores | `stream`, `Hub::read`, `Server::respond` in `spawn_blocking` | build a response body itself; block the runtime (no SQLite, shed, file or subprocess outside `spawn_blocking`) |
-| `serve/hub.rs` (new) | `Hub`, `Key`, `Signals`, `Deps`, single flight, the publisher's task and its pass, per-key build times and faults for `/api/v1/health` | `blocks::Shelf`, `Built::check` once a build is published; in `spawn_blocking`: `screens::build_screen`, `screens::deps`, `db::last_seq`, `db::stamp`, `Fresh` (its counter), `Tails` (a lane's generation), `conductor::mark_read` after building a thread key a paired stream holds | write to a socket; know a device; diff or keep revs itself (the `Shelf` does); build outside `runner::request` (a build never starts a process) |
-| `serve/stream.rs` (new) | sessions, the per-device limit, a stream's `Queue` and writer task, the `POST` sync, cooee's one-key stream in the old ops, `/live`'s writer | `Hub::open`, `Hub::close`, `Hub::read`; `devices::check` in `spawn_blocking`; `Tails::watch` when a lane sheet key opens | build or diff a screen; keep anything after its socket closes |
+| `serve/hub.rs` (new) | `Hub`, `Key`, `Signals`, `Deps`, single flight, the publisher's task and its pass, per-key build times and faults for `/api/v1/health` | from slice 4 `blocks::Shelf`, and `Built::check` once a build is published (before it: `screens.rs`'s diff); in `spawn_blocking`: `screens::build_screen`, `screens::deps`, `db::last_seq`, `db::stamp`, `Fresh` (its counter), `Tails` (a lane's generation), `conductor::mark_read` after building a thread key a paired stream holds | write to a socket; know a device; from slice 4, diff or keep revs itself (the `Shelf` does); build outside `runner::request` (a build never starts a process) |
+| `serve/stream.rs` (new; the per-screen stream's task in slice 2, the rest in slice 5) | sessions, the per-device limit, a stream's `Queue` and writer task, the `POST` sync, the one-key stream in the old ops, `/live`'s writer | `Hub::open`, `Hub::close`, `Hub::read`; `devices::check` in `spawn_blocking`; `Tails::watch` when a lane sheet key opens | build or diff a screen; keep anything after its socket closes |
 | `serve/tails.rs` (new) | `Tails`, the feeder thread, line numbers, `page` | `session::transcript` through `hosts::On` and the runner (off the request path), `lanes::mask`, `Hub::kick` | be read from shed on a request; render blocks |
-| `screens.rs` | the builders, `deps`, the actions | `Tails::tail`, the rest as today | hold a stream, a counter of streams or a diff (`stream`, `STREAMS`, `ops` leave); mark a thread read inside a build |
+| `screens.rs` | the builders, `deps`, the actions; its diff until slice 4 | `Tails::tail`, the rest as today | hold a stream or a counter of streams (`stream`, `STREAMS` leave in slice 2), or a diff after slice 4 (`ops` leaves); mark a thread read inside a build |
 | `serve.rs` | `Server`, `respond` and its routes, the background threads | `Hub::kick` after a write | accept or read a socket (`handle` leaves for `conn.rs`); call `build_screen` (the static export, in `screens.rs`, is the one caller besides the hub) |
 | `api.rs` | serve's own payload types | | define an `Op`, a `Frame` or a block type (they are the crate's, and the page's come from the package) |
-| `stream.ts` (new, in the blocks package) | the one `EventSource`, `hello`, the sync `POST`, revs, gaps, backoff | `fetch` | touch the DOM; know a path or a screen |
-| `patch.ts` (new, in the blocks package) | the op queue and its 100 ms pacing, ops onto a view (its model by id, its nodes by `data-id`), the anchor | the `draw` it is given, for one block | draw a block itself; clone a model; touch a node no op names; read storage |
 | `blocks.ts` (drover's, as today) | one block as DOM: `render` | the theme | know the stream or an op |
 | `main.ts` | views, tabs, sheets: `mount`, `unmount`; the debounced save | the package's `stream` and `patcher`, `blocks.ts` | open an `EventSource`; fetch a screen while the stream is live; apply an op itself (`ops.ts` goes) |
+
+Taken from blocks, not built here: what drover relies on each to own, and to leave alone.
+
+| From blocks | Owns | drover relies on it never to |
+|---|---|---|
+| the crate | `Built` and its faults, `Op`, the diff, the frames, `Shelf`, `Mirror`, `wire::old` | name a drover type, a path or a screen; read time, files or config; do I/O |
+| the stream client | the one `EventSource`, `hello`, the sync `POST`, revs, gaps, backoff | touch the DOM; know a path or a screen |
+| the patcher | the op queue and its 100 ms pacing, ops onto a view, the anchor | draw a block itself (it calls the `draw` it is given); touch a node no op names; read storage |
 
 ## What runs where, after the change
 
@@ -74,6 +77,10 @@ A second reader of a key that is `Building` awaits that build. Signals that move
 
 ## The device stream, on the page
 
+The protocol's client side. The blocks stream client implements it and the crate's `Mirror` follows the same
+rules; it is drawn here because serve's half below is written against it. blocks#2's draft adds one state,
+`Outdated`, for a `hello` whose schema version is above the client's.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Off
@@ -97,6 +104,8 @@ The sync dot: green in `Live`, amber in `Connecting`, `Syncing` and `Waiting`, r
 the owner has opened stays mounted while the page is visible, so its badge is live and switching to it needs no read.
 
 ## A view's patches, on the page (q2039)
+
+The blocks patcher's, as #1318 needs it to behave; drover's WebKit tests hold it on the real page.
 
 ```mermaid
 stateDiagram-v2

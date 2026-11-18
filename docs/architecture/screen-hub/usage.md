@@ -1,41 +1,9 @@
 # screen-hub: how the callers read (#1318)
 
-Sketches, not code to copy. The names are the ones `shapes.md` and `boundaries.md` use.
+Sketches, not code to copy. The names are the ones `shapes.md` and `boundaries.md` use. Everything here is drover's
+code; where it calls the blocks crate or package, the call is marked with the slice that brings the pin.
 
-## The crate, from serve
-
-The crate lives in the blocks repo and knows nothing of serve. drover names one commit of it, twice:
-
-```toml
-blocks = { git = "https://github.com/jirathip-dev/blocks", rev = "<40 hex>" }      # Cargo.toml
-```
-```json
-"@jirathip-dev/blocks": "github:jirathip-dev/blocks#<the same 40 hex>"
-```
-
-serve hands the crate screens and gets ops, frames and key states back.
-
-```rust
-use blocks::{diff::ops, patch::apply, Built, Shelf, wire::{Frame, Sync, Synced}};
-
-let new = Built::new(self.build_screen(ctx, &key)?);           // never fails: the builders still write JSON
-match shelf.put(&key, &key.path, &new) {
-    Put::Changed(delta) => holders.for_each(|q| q.push(&delta.frame)),   // one serialized frame for every stream
-    Put::First | Put::Same => {}
-}
-meta.faults = new.check();                                     // after publishing: read into the typed blocks, for health
-let state = shelf.state(&key, &key.path, have.rev);            // current, the missed ops, or the whole screen
-```
-
-Its main test needs no server at all:
-
-```rust
-let mut phone = a.clone();
-apply(&mut phone, &ops(&a, &b));
-assert_eq!(phone, b);                                          // for every pair of fixture screens, and each reorder
-```
-
-## The server, on the runtime
+## The server, on the runtime (slice 1)
 
 One task per connection. It takes a blocking thread only for today's handler or a build.
 
@@ -44,9 +12,9 @@ async fn conn(self: Arc<Self>, mut c: TcpStream) {
     let Ok(_conn) = self.conns.clone().try_acquire_owned() else { return busy(&mut c).await };   // 256: 503, as today
     let Ok(Ok(req)) = timeout(READ, request(&mut c)).await else { return };                      // 5 s, today's size limits
     match route(&req) {
-        Route::Stream => self.streams.attach(&self, &req, c).await,                 // a task until the socket ends
-        Route::Sync(sid) => reply(c, self.streams.sync(&self.hub, sid, &req).await).await,
-        Route::Screen(key) => reply(c, cached(self.hub.read(&self, &key).await, &req)).await,   // 200 with ETag, or 304
+        Route::Stream => self.streams.attach(&self, &req, c).await,                 // slice 5: a task until the socket ends
+        Route::Sync(sid) => reply(c, self.streams.sync(&self.hub, sid, &req).await).await,      // slice 5
+        Route::Screen(key) => reply(c, cached(self.hub.read(&self, &key).await, &req)).await,   // slice 2: 200 with ETag, or 304
         Route::Other => {
             let _slot = self.reqs.acquire().await;                                  // 64 at a time; the rest wait here
             let me = self.clone();
@@ -55,6 +23,16 @@ async fn conn(self: Arc<Self>, mut c: TcpStream) {
     }
 }
 ```
+
+Two entries with the same arguments, owned as `service::run`'s are. `drover service` awaits the first on its own
+runtime; `drover serve` and the tests call the second, which builds a runtime (2 workers) and blocks on the first.
+
+```rust
+pub async fn run(ctx: Ctx, r: &'static dyn Runner, l: TcpListener, read_only: bool, ho: Option<Arc<Handover>>) -> Result<()>
+pub fn serve_with(ctx: Ctx, r: &'static dyn Runner, l: TcpListener, read_only: bool, ho: Option<Arc<Handover>>) -> Result<()>
+```
+
+## The hub (slice 2)
 
 A read builds only when the key is stale and nobody else is building it.
 
@@ -91,6 +69,51 @@ let res = self.action(ctx, name, &a);
 self.hub.kick();
 ```
 
+A screen builder is what `Server::screen` is today, renamed, plus what it depends on. It stays synchronous.
+
+```rust
+pub(super) fn build_screen(&self, ctx: &Ctx, k: &Key) -> Option<Value>     // pure: no socket, no mark-read
+pub(super) fn deps(path: &str) -> Deps                                      // when in doubt: Deps::ALL
+```
+
+Today's per-screen stream stays, as a task with one fixed key, in its `{seq, ops}` framing. In slices 2 and 3 its
+ops come from the diff `screens.rs` has today.
+
+```rust
+Route::Old(key) => self.streams.single(&self.hub, key, c).await,
+```
+
+## The lane sheet (slice 3)
+
+It reads its transcript from the tail cache and never from shed.
+
+```rust
+let tail = self.tails.tail(agent, 200);           // the last 200 lines, each with its number
+let said = blocks(&tail).map(|b| said(&b));       // a block's id is `t<gen>-<its first line's number>`
+json!({"type": "section", "id": "transcript", "log": true, "blocks": said})
+```
+
+## The crate, from the hub (slice 4)
+
+The pin lands and the publisher's pass hands the crate screens and gets frames and key states back. drover's own
+diff and the hub's own rev bookkeeping are deleted in the same PR.
+
+```rust
+use blocks::{Built, Shelf, wire::{Frame, Sync, Synced}};
+
+let new = Built::new(self.build_screen(ctx, &key)?);           // never fails: the builders still write JSON
+match shelf.put(&key, &key.path, &new) {
+    Put::Changed(delta) => holders.for_each(|q| q.push(&delta.frame)),   // one serialized frame for every stream
+    Put::First | Put::Same => {}
+}
+meta.faults = new.check();                                     // after publishing, for health
+let state = shelf.state(&key, &key.path, have.rev);            // current, the missed ops, or the whole screen
+```
+
+The per-screen stream now sends each delta through `wire::old`: the crate's ops as today's.
+
+## The device stream (slice 5)
+
 A stream's writer is a task: it waits on its queue, not on a poll.
 
 ```rust
@@ -106,44 +129,24 @@ async fn run(self: Arc<Stream>, mut c: TcpStream) -> io::Result<()> {
 }
 ```
 
-cooee's per-screen stream stays, as a stream with one fixed key, in the old `{seq, ops}` framing and the old ops.
+Its tests need no page: the crate's `Mirror` is the phone.
 
 ```rust
-Route::Old(key) => self.streams.single(&self.hub, key, c).await,       // each delta through `wire::old`
+let mut phone = Mirror::default();
+phone.hello(&hello);
+phone.synced(&sent, post(sid, &Sync { open: phone.have(), close: vec![] }));
+assert_eq!(phone.frame(next_frame(&mut sse)), Took::Patched);
 ```
 
-A screen builder is what `Server::screen` is today, renamed, plus what it depends on. It stays synchronous.
-
-```rust
-pub(super) fn build_screen(&self, ctx: &Ctx, k: &Key) -> Option<Value>     // pure: no socket, no mark-read
-pub(super) fn deps(path: &str) -> Deps                                      // when in doubt: Deps::ALL
-```
-
-The lane sheet reads its transcript from the tail cache and never from shed.
-
-```rust
-let tail = self.tails.tail(agent, 200);           // the last 200 lines, each with its number
-let said = blocks(&tail).map(|b| said(&b));       // a block's id is `t<gen>-<its first line's number>`
-json!({"type": "section", "id": "transcript", "log": true, "blocks": said})
-```
-
-Two entries with the same arguments, owned as `service::run`'s are. `drover service` awaits the first on its own
-runtime; `drover serve` and the tests call the second, which builds a runtime (2 workers) and blocks on the first.
-
-```rust
-pub async fn run(ctx: Ctx, r: &'static dyn Runner, l: TcpListener, read_only: bool, ho: Option<Arc<Handover>>) -> Result<()>
-pub fn serve_with(ctx: Ctx, r: &'static dyn Runner, l: TcpListener, read_only: bool, ho: Option<Arc<Handover>>) -> Result<()>
-```
-
-## The page
+## The page (slice 6)
 
 One stream for the page. A view (a tab, the cards, a sheet, a thread) opens its key when it mounts and closes it
-when it goes. The stream and the patcher come from the blocks package; the page hands the patcher its own `render`.
+when it goes. The stream client and the patcher come from the blocks package; the page hands the patcher its own
+`render`.
 
 ```ts
 import { patcher } from '@jirathip-dev/blocks/patch';
 import { stream } from '@jirathip-dev/blocks/stream';
-import type { Frame, Op } from '@jirathip-dev/blocks/types';
 import { render } from './blocks';
 
 const live = stream({ url: R + 'stream', state: sync });     // the one EventSource; the sync dot follows it
@@ -157,42 +160,13 @@ function mount(v: View) {
 function unmount(v: View) { live.close(v.path); v.patch.drop(); }
 ```
 
-The rest of this section is the inside of the package's `patch.ts` (`v` is one patcher's state). Ops are queued and patched at most once per
-100 ms, on an animation frame (q2039). A lone frame waits for nothing but the next animation frame.
+The patcher queues the ops, patches at most once per 100 ms and keeps the reading position (q2039; `shapes.md` lists
+what the page relies on). The page saves after a patch: localStorage, at most once every 2 s and on `pagehide`,
+where it also calls `flush`, so the saved copy and its rev agree. A whole screen (`show`) drops the view's queued
+ops: it is newer than all of them.
 
-```ts
-const FRAME = 100;
-export function queue(v: View, ops: Op[]): void {
-  v.todo.push(...ops);
-  if (v.due) return;                                              // a patch is already planned
-  const wait = Math.max(0, v.last + FRAME - performance.now());
-  v.due = setTimeout(() => requestAnimationFrame(() => flush(v)), wait);
-}
-```
-
-A patch touches the nodes its ops name and keeps the reading position (q2039).
-
-```ts
-function flush(v: View): void {
-  const ops = v.todo.splice(0);
-  const hold = anchor(v, ops);                 // the first row in view these ops neither move nor remove, and its top
-  for (const op of ops) {
-    if (op.op === 'merge') redraw(v, op.id, Object.assign(v.byId(op.id), op.fields));    // one node
-    else if (op.op === 'insert') place(v, op.into, op.before, v.draw(op.block));         // one new node
-    else if (op.op === 'move') place(v, op.into, op.before, v.node(op.id));              // the same node, elsewhere
-    else if (op.op === 'remove') v.node(op.id)?.remove();
-    …
-  }
-  settle(v, hold);                             // scrollTop += how far that row shifted; a log at its end stays there
-  [v.due, v.last] = [0, performance.now()];
-  v.saved?.();                                 // the page saves: localStorage, at most once every 2 s and on pagehide
-}
-```
-
-A whole screen (`show`) drops the view's queued ops: it is newer than all of them. `pagehide` patches at once, so
-the saved copy and its rev agree.
-
-A lane sheet's `[older]` asks for the page before its first block and puts it on top; the anchor keeps the place.
+A lane sheet's `[older]` asks for the page before its first block and puts it on top; the patcher's anchor keeps
+the place.
 
 ```ts
 const page = await get(`${v.path}/older?before=${first(v, 'transcript')}`);
@@ -201,72 +175,41 @@ v.patch.queue(page.blocks.map(block => ({ op: 'insert', into: 'transcript', befo
 
 ## The tests
 
-In the blocks repo, the crate's (B1; no server):
+All in drover. Each drives `serve_on` on a socket; from slice 2 on, on #1312's large board (`common::large`: at
+least 1,500 events, 150 issues, 10 lanes) in release. The diff's, the protocol's and the patcher's own cases
+(`apply(a, ops(a, b)) == b`, the order rules, the anchor on a stand-in page) are tests in blocks, not here.
 
-| Test | Asserts |
-|---|---|
-| `ops_then_apply_gives_the_new_screen` | for each pair of screens in `fixtures/`, and each reorder of a list: `apply(a, ops(a, b)) == b` |
-| `a_changed_row_is_one_merge_of_its_changed_fields` | no `replace`, no whole screen |
-| `a_row_that_changes_place_is_a_move` | one row to the top of 45: one `move`; two lists swapped: the fewest moves |
-| `a_log_never_loses_its_head` | lines that left the window: no `remove` |
-| `a_bare_list_diffs_under_its_root` | a new card is an `insert` into `root` |
-| `a_mirror_drops_an_old_frame_and_asks_again_on_a_gap` | `fixtures/protocol/`: the order rules; a new epoch forgets every rev |
-| `a_shelf_answers_current_ops_or_screen` | by the rev sent and the ring's bounds |
-| `every_fixture_reads_into_the_typed_blocks` | cooee's and drover's goldens: no fault; written back, the same JSON |
-| `an_unknown_kind_or_field_is_kept_and_is_a_fault_for_its_server` | read and written back unchanged; `check` names it |
+| Slice | Test | Asserts |
+|---|---|---|
+| 1 | every existing socket test | unchanged but for its `serve_on` call |
+| 1 | `a_slow_request_does_not_hold_up_a_fast_one` | one handler held in its blocking thread; a screen GET still answers |
+| 1 | `the_65th_request_waits_and_gets_its_answer` | 80 at once: 80 answers, no 503 |
+| 1 | `a_client_that_sends_half_a_request_is_dropped_after_5s` | and holds no blocking thread meanwhile |
+| 2 | `one_change_is_one_build_for_every_reader` | 30 streams and 30 GETs of one key, one event: the build count goes up by 1 |
+| 2 | `fresh_data_is_under_150ms_p95_on_every_screen_and_sheet` | a GET of each screen and sheet; from slice 5 a stream `open` of each too |
+| 2 | `ten_screens_across_three_devices_get_no_503` | 30 per-screen streams, 200 events: every delta arrives, no 503; from slice 5 on 3 device streams, each mirror equal to the newest build |
+| 2 | `a_screen_get_answers_304_to_its_etag` | and 200 with a new ETag after a change |
+| 3 | `a_lane_sheet_opens_without_a_shed_call` | the call-count probe, a local and a remote lane; block ids keep when a line arrives |
+| 3 | `older_pages_back_200_lines_out_of_the_kept_tail` | no shed call; `more` is false at the first line |
+| 3 | `the_tails_stay_under_their_bound` | 10 lanes at 5,000 lines: 16 MB at most, unwatched lanes shrink first |
+| 4 | `no_fixture_screen_has_a_fault` | every screen and sheet: every row and card has an id, no id twice, no unknown kind, field or shape |
+| 4 | `a_row_change_travels_as_row_ops` | a new ask, a merge, a queue move: no whole screen, no `replace` of a block that has children |
+| 4 | `the_cards_get_a_change` | a new ask is an `insert` on the cards key (today: no op at all) |
+| 4 | `cooees_stream_keeps_its_old_ops` | the golden cooee fixtures: no `move`, a reorder is a `replace` |
+| 5 | `an_event_reaches_every_subscribed_phone_within_100ms_p95` | append an event, read each key's frame on 3 streams; one build per key, counted |
+| 5 | `a_dropped_stream_catches_up_from_its_revs` | close the socket, append, reconnect: ops for a small gap, a whole screen past the ring |
+| 5 | `a_fifth_stream_of_a_device_closes_its_oldest` | `bye evicted` on the oldest; other devices untouched |
+| 5 | `a_lane_tail_streams_in_as_inserts` | new lines on an open lane sheet key: `insert` ops, no `remove` of the head |
+| 5 | `serve_holds_its_budget_and_stops_growing_under_load` (`soak.rs`, changed) | 3 device streams with 10 keys each in place of 8 `/live` streams; the same 300 MB bound |
+| 6 | `the_page_and_the_server_pin_one_blocks_commit` | the rev in `Cargo.lock` is the one in `web/package-lock.json` |
+| 6 | `the_page_opens_one_event_source` | 3 tabs, a sheet and a thread open: one `/stream`, no per-screen stream |
+| 6 | `the_queue_keeps_its_place_when_a_row_arrives_above` | scrolled into the Queue, a new ask on top: the row being read moves under 1 px |
+| 6 | `a_queue_row_that_moves_keeps_its_node` | a queue move: one node moved, every other row's node untouched |
+| 6 | `a_burst_of_events_is_at_most_one_patch_per_100ms` | 10 events in 50 ms: at most 2 patches; the page equals the newest screen |
+| 6 | `a_lane_sheet_at_its_end_follows_new_lines_and_older_keeps_the_place` | the tail streaming in; `[older]` on top |
+| 6 | `a_typed_draft_survives_a_patch` | a Send line with text in it, its row merged |
+| 7 | `phone_timings.rs` (#1312's, extended) | event to painted under 150 ms p95 on the large board, as the page times it |
+| 7 | `a_held_screen_builds_within_70ms_p95_on_the_live_shaped_fixture` | the Queue and each screen a tab keeps open, on #1313's fixture (`perf.rs`) |
 
-In the blocks repo, the generator's and the package's (B2; the patcher's run in WebKit at 390 px on a stand-in
-`draw`):
-
-| Test | Asserts |
-|---|---|
-| `the_generated_files_are_current` | `just gen` changes nothing; `Blocks.swift` builds and decodes every fixture |
-| `the_stream_follows_the_mirrors_cases` | `stream.ts` on `fixtures/protocol/`: the same answers as `Mirror` |
-| `a_burst_of_frames_is_one_patch_per_100ms` | 10 frames in 50 ms: at most 2 patches; the page equals the newest screen |
-| `a_lone_frame_paints_on_the_next_animation_frame` | no 100 ms wait after a quiet spell |
-| `a_patch_touches_only_the_nodes_its_ops_name` | a mutation observer: every other row keeps its node, untouched |
-| `an_insert_above_the_viewport_keeps_the_reading_position` | scrolled to a row; 3 rows arrive above it: its top moves under 1 px |
-| `a_move_across_the_viewport_keeps_the_reading_position` | a row from below to above, and from above to below |
-| `a_removed_anchor_falls_to_the_next_row_in_view` | the first row in view is removed: the next one holds |
-| `at_the_top_a_new_row_shows_at_the_top` | no scroll is added when nothing is above the viewport |
-| `a_log_at_its_end_stays_at_its_end_and_older_lines_keep_the_place` | new lines at the end; a page of older ones on top |
-
-In drover, the pin (slice 1) and serve on tokio (slice 2): every existing socket test, unchanged but for its
-`serve_on` call, plus:
-
-| Test | Asserts |
-|---|---|
-| `the_page_and_the_server_pin_one_blocks_commit` | the rev in `Cargo.lock` is the one in `web/package-lock.json` |
-| `a_slow_request_does_not_hold_up_a_fast_one` | one handler held in its blocking thread; a screen GET still answers |
-| `the_65th_request_waits_and_gets_its_answer` | 80 at once: 80 answers, no 503 |
-| `a_client_that_sends_half_a_request_is_dropped_after_5s` | and holds no blocking thread meanwhile |
-
-Each of these drives `serve_on` on a socket, on the large fixture (at least 1,500 events, 150 issues, 10 lanes), in
-release, with `blocks::Mirror` as the phone (slices 3 to 7):
-
-| Test | Asserts |
-|---|---|
-| `fresh_data_is_under_150ms_p95_on_every_screen_and_sheet` | a GET and a stream `open` of each screen and sheet |
-| `an_event_reaches_every_subscribed_phone_within_100ms_p95` | append an event, read each key's frame on 3 streams; one build per key, counted |
-| `ten_screens_across_three_devices_get_no_503` | 3 streams, 10 keys, 200 events: every frame arrives, in order, no 503; each mirror equals the newest build |
-| `no_fixture_screen_has_a_fault` | every screen and sheet: every row and card has an id, no id twice, and `check` finds no unknown kind, field or shape |
-| `a_row_change_travels_as_row_ops` | a new ask, a merge, a queue move: no whole screen, no `replace` of a block that has children |
-| `a_dropped_stream_catches_up_from_its_revs` | close the socket, append, reconnect: ops for a small gap, a whole screen past the ring |
-| `a_fifth_stream_of_a_device_closes_its_oldest` | `bye evicted` on the oldest; other devices untouched |
-| `the_cards_get_a_change` | a new ask is an `insert` on the cards key (today: no op at all) |
-| `cooees_stream_keeps_its_old_ops` | the golden cooee fixtures: no `move`, a reorder is a `replace` |
-| `a_lane_sheet_opens_without_a_shed_call_and_its_tail_streams_in` | the call-count probe; new lines arrive as `insert` ops |
-| `serve_holds_its_budget_and_stops_growing_under_load` (`soak.rs`, changed) | 3 device streams with 10 keys each in place of 8 `/live` streams; the same 300 MB bound |
-
-In drover, the real page (slice 5; WebKit at 390 px through `crates/cli/tests/support/webview.mjs`, in the ui-webkit
-job). The patcher's own cases are the package's; these check it with drover's renderer and data:
-
-| Test | Asserts |
-|---|---|
-| `the_queue_keeps_its_place_when_a_row_arrives_above` | scrolled into the Queue, a new ask on top: the row being read moves under 1 px |
-| `a_queue_row_that_moves_keeps_its_node` | a queue move: one node moved, every other row's node untouched |
-| `a_lane_sheet_at_its_end_follows_new_lines_and_older_keeps_the_place` | the tail streaming in; `[older]` on top |
-| `a_typed_draft_survives_a_patch` | a Send line with text in it, its row merged |
-
-The event-to-painted number itself is #1312's (phone timings): this issue's gate reads it on the fixture, under
-150 ms p95, and on live data once #1313 has landed (`adr.md`, open question 3).
+Slice 6's run in WebKit at 390 px through `crates/cli/tests/support/webview.mjs`, in the ui-webkit job, on the real
+page with drover's renderer and data.
