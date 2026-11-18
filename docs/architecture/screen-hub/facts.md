@@ -4,13 +4,13 @@
 
 A throwaway test (not committed: an architect writes no product code) built a fixture, served it with
 `Server::respond` and timed each screen in release, on staging `9ea69d9fb`. It added timers around the Queue's row
-loops and a counting allocator; both were reverted. Slice 5 commits the gates that replace it.
+loops and a counting allocator; both were reverted. Slice 7 commits the gates that replace it.
 
 ```
 cargo test --release -p drover --test adr1318 -- --nocapture --test-threads 1
 ```
 
-The phone-timings issue defines the large fixture, and it is not on staging yet. The stand-in: 1,656 events, 201
+The phone-timings issue (#1312) defines the large fixture, and it is not on staging yet. The stand-in: 1,656 events, 201
 issues over 3 fleets (90 queued, 90 merged, 11 in review or ready, 10 with a live lane), 10 lanes with 400-line screens, 6 open
 asks, 3 threads of 40 messages, an issue and a PR cache file per issue. The host was busy (load average 14 to 40,
 other lanes building), so each p95 includes waiting for a CPU.
@@ -77,5 +77,27 @@ host, not the build.
 Read-only counts from the live database: 448,066 events (376,597 not archived), 1,502 issues (117 open), a 518 KB
 board snapshot, 4,963 cache files (141 MB, 28 KB a file on average). The issue reports about 360 ms for its Queue
 build. The fixture's is 9 to 11 ms, 30 to 40 times less. Copying the live state to measure where that time goes was
-refused by the lane hook, so it is not measured here; the hub's per-key build times in `/api/v1/health` (slice 1)
-will show it.
+refused by the lane hook, so it is not measured here. #1313 (in impl, amendment q2042) finds and fixes the live
+cause on an owner-approved copy and on a fixture shaped like live; the hub's per-key build times in
+`/api/v1/health` (slice 3) then show it on the instance itself.
+
+## Read for the amendments (q2039, q2040, q2044): not measured
+
+- **A row that changes place.** The diff gives up on a container whose shared children changed order and emits a
+  `replace` of that container (`screens.rs`, `children` and `walk`). A Queue row that moves replaces its card.
+- **The reading position.** The page keeps an anchor only for a chat's scroller (`main.ts`, `spot` and `land`);
+  a tab is morphed whole and the window's scroll offset is put back as a number.
+- **Blocks.** Every builder writes `json!` by hand; there is no Rust type for a block. 22 kinds are in use.
+- **serve's threads.** One scoped thread per connection, up to 256, then a 503 (`serve.rs`, `serve_with`); `Server`
+  borrows its `Ctx` and runner for the scope. `/live` spawns a thread per client. The background loops (the host
+  sampler, one per background read, the SLO pass, the tick, the tap jobs) are scoped threads too.
+- **tokio in the repo.** `drover service` runs on it with `Arc<Service>`, an owned `Ctx`, a `&'static dyn Runner`,
+  `spawn_blocking` around every SQLite read and a hand-written request reader. The workspace's tokio features
+  (`rt-multi-thread`, `net`, `io-util`, `time`, `sync`) have no `macros`, so no `select!`.
+- **topcoat.** cooee pins 0.11.0. Its runtime guide and `browser/src/render/shard.ts` were read; nothing was run.
+- **The line cap.** `drover cap`: 53,086 of 53,500 at staging `486f415`, headroom 414; 187 with the open PRs.
+- **Neighbours.** #1312 (phone timings, in impl) defines the fixture and the tap-to-painted numbers. #1313 (in
+  impl) gates each build at 150 ms p95. #1314 (queued) adds gzip and keep-alive to the connection code.
+
+Nothing was run on an async serve: an architect writes no product code. Slice 2's gate is the existing socket
+tests, and every later gate is measured on the async serve because it lands first.
