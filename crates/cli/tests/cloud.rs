@@ -624,10 +624,7 @@ fn boot_fake(gh_in: bool) -> Fake {
         .once(&step(&mine), 1, "")
         .reply(&step("command -v"), "")
         .reply(&step("apt_ gh"), "")
-        .reply(
-            &step("cargo install --git https://github.com/jirathip-dev/herdsman --rev"),
-            "",
-        )
+        .reply(&step("w=; d=; if [ \"$(uname -s)/$(uname -m)\" != Linux/x86_64 ]"), "")
         .reply(&step(&mine), "")
         .reply(&step("[ \"$HOME/.local/bin/drover\" -ef"), "")
         .reply(&step("claude auth status"), "")
@@ -672,9 +669,7 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
     assert!(at.windows(2).all(|w| w[0] < w[1]), "{at:?}");
     assert!(!r.called(&step("apt_ git")));
     let sha = env!("DROVER_SHA");
-    let build = format!(
-        "cargo install --git https://github.com/jirathip-dev/herdsman --rev {sha} --locked --root '/opt/drover'"
-    );
+    let build = drover::hosts::install_line("/opt/drover", sha);
     assert!(r.called(&step(&build)), "{:?}", r.calls.borrow());
     assert!(here.methods().is_empty(), "nothing on this host: {:?}", here.methods());
     let runs: Vec<String> = cloud
