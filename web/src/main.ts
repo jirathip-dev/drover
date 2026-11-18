@@ -158,7 +158,7 @@ function badges() {
 async function load(v: View, quiet = false, s?: Span) {
   if (duo() && v === th?.v && v.path === th.screen) return blank(v);
   const c = cached(v.path);
-  if (!v.model && c) [v.model, v.at, v.live] = [c.v, c.t, false];
+  if (!v.model && c) [v.model, v.at] = [c.v, c.t];
   if (!v.model || !quiet) paint(v);
   const slow = setTimeout(() => ($('#ld').hidden = false), 300);
   try {
@@ -172,6 +172,7 @@ async function load(v: View, quiet = false, s?: Span) {
   } catch (e) {
     if (isBlk(e) && e.status === 401) unpaired();
     else if (!v.model) v.root.replaceChildren(el('p', 'msg r', esc(msg(e))));
+    v.live = false;
     sync();
   } finally {
     clearTimeout(slow);
@@ -181,7 +182,7 @@ async function load(v: View, quiet = false, s?: Span) {
 
 function stream(v: View) {
   const s = v.model && !isList(v.model) && v.model.stream ? v.model.stream : v === cards || v === shv ? v.path + '/stream' : null;
-  if (!s || exported || !('EventSource' in window)) return;
+  if (!s || exported || !('EventSource' in window)) return void (v.live = false);
   const es = (v.es = new EventSource(url(String(s))));
   es.onopen = () => { v.live = true; sync(); };
   es.onerror = () => { v.live = false; sync(); };
@@ -209,7 +210,8 @@ function go(v: View, path: string, push = true, k?: Span) {
   if (push && v === cur.v) history.pushState(null, '', hashOf(cur, path));
   const s = spot(scroller(v));
   if (s) spots.set(v.path, s);
-  close(v);
+  v.es?.close();
+  v.es = undefined;
   [v.path, v.model] = [path, null];
   load(v, false, k);
   if (!push && v === cur.v) scrollTo(0, ys.get(path) ?? 0);
