@@ -1,0 +1,7 @@
+Decided: skip the gh token look only where cloud is boat; every other remote host gets it in hosts refresh and doctor
+Because: "On a `cloud = "boat"` host, the GitHub token's expiry gives no warning and no bootstrap step"
+Because: "The same host without `cloud` shows it."
+Rejected: keeping the look on cloud hosts only — a host without cloud would then show no line, against the AC
+Check: crates/cli/tests/hosts.rs a_boat_host_never_warns_of_its_github_token_expiry fails on base at the boat case
+Check: shed::a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it fails on base too, unrelated
+Owner: boat hosts stop asking for a new GitHub token; other remote hosts now show the token's expiry in doctor too.
