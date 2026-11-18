@@ -1,0 +1,10 @@
+Decided: memoize placement's host reads (shed ls, host sample, df) once per fleet pass in launch, and probe hosts in parallel (placement, snapshot batch, session listing).
+Because: "A pass that runs remote reads one after another (lane state, outbox drains per lane and role, worktree reads, git fetches, spawns) over ~30 boat lanes adds up to minutes."
+Because: crates/core/src/drive.rs:345
+Decided: a per-fleet runner wrapper counts each host's ssh calls and seconds; drive-pass logs `steps` and `remote`, drive-slow names them.
+Because: "`drive-slow` names the sub-step and the remote-call count and time per host."
+Rejected: a generic per-pass memo in hosts::Pass — would cache writes and stale reads for in-pass spawns (max_parallel_spawns = 0); the memo is only on launch's estimate, the kick's own spawn re-reads fresh.
+Rejected: one remote JSON script per host and per-process-tree ControlPath — the snapshot already batches reads per host; the measured cost was serial placement probes, so the smallest fix covers it.
+Check: crates/cli/tests/perf.rs a_pass_over_30_lanes_on_4_boats test: base 95.8 s / 136 calls, head 5.3 s / 28 calls at 700 ms a call.
+Check: hosts::each re-raises a thread's panic, so a host listing never silently drops a row.
+Owner: drive passes no longer probe every boat once per queued start, boats are read side by side, and the slow-pass alert says which boat ate the time; the real tick on the Mini still needs checking.
