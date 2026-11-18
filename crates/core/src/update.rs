@@ -278,13 +278,14 @@ fn install(
     }
     for (m, u) in ms.iter().filter_map(|m| Some((m, m.failed.as_ref()?))) {
         writeln!(out, "✗ {what}{}: {head:.7} not staged: {u}; kept {}", m.name, m.exe)?;
-        failed(
-            ctx,
-            cfg,
-            events,
-            &format!("{} {head:.7}", m.name),
-            json!({"host": m.name, "sha": head, "reason": u.to_string()}),
-        )?;
+        let why = u.to_string();
+        let shed = why
+            .lines()
+            .find_map(|l| l.split_once("✗ shed"))
+            .map(|(_, rest)| format!("✗ shed{rest}"));
+        let key = shed.unwrap_or_else(|| format!("{} {head:.7}", m.name));
+        let d = json!({"host": m.name, "sha": head, "reason": format!("self-update {head:.7}: {why}")});
+        failed(ctx, cfg, events, &key, d)?;
     }
     match step(ctx.now, head, &found, &ms, &marks, &cfg.limits) {
         Step::Current => writeln!(out, "= {what}up to date @ {head:.7}")?,
