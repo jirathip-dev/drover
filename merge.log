@@ -1,0 +1,34 @@
+Auto-merging .github/workflows/ci.yml
+Auto-merging crates/server/src/screens.rs
+Merge made by the 'ort' strategy.
+ .github/workflows/ci.yml            |  48 +++++++++++----
+ Cargo.toml                          |   5 ++
+ crates/cli/tests/cloud.rs           |  82 +++++++++++++++++++++----
+ crates/cli/tests/dsh_unit.rs        |   1 +
+ crates/cli/tests/hosts.rs           |  12 ++--
+ crates/cli/tests/lane_sandbox.rs    | 104 ++++++++++++++++++++++++++++++++
+ crates/cli/tests/remote_acp.rs      |  32 +++++++++-
+ crates/cli/tests/slo.rs             |  54 +++++++++++++++++
+ crates/cli/tests/waiting.rs         |  38 +++++++++---
+ crates/core/src/cloud.rs            |  26 +++++---
+ crates/core/src/config.rs           |   9 +++
+ crates/core/src/hosts.rs            |  37 +++++++++---
+ crates/core/src/lib.rs              |   1 +
+ crates/core/src/orchestrator.rs     |   1 +
+ crates/core/src/promise.rs          |  58 +++++++++++++++---
+ crates/core/src/providers/claude.rs |   8 +++
+ crates/core/src/providers/fake.rs   |   1 +
+ crates/core/src/providers/mod.rs    |  22 +++++++
+ crates/core/src/sandbox.rs          | 110 ++++++++++++++++++++++++++++++++++
+ crates/core/src/secret.rs           |   7 ++-
+ crates/core/src/slo.rs              |  30 +++++++---
+ crates/core/src/spawn.rs            |  10 +++-
+ crates/server/src/screens.rs        |  12 +++-
+ docs/hosts.md                       |   9 ++-
+ docs/lanes.md                       |   4 ++
+ docs/spikes/lane-sandbox.md         | 116 ++++++++++++++++++++++++++++++++++++
+ fleet.example.toml                  |   1 +
+ 27 files changed, 760 insertions(+), 78 deletions(-)
+ create mode 100644 crates/cli/tests/lane_sandbox.rs
+ create mode 100644 crates/core/src/sandbox.rs
+ create mode 100644 docs/spikes/lane-sandbox.md

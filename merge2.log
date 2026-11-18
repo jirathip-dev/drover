@@ -1,0 +1,8 @@
+Auto-merging .github/workflows/ci.yml
+Auto-merging crates/server/src/screens.rs
+Auto-merging crates/server/src/serve/chat.rs
+Auto-merging web/dist/board.js
+CONFLICT (content): Merge conflict in web/dist/board.js
+Auto-merging web/src/blocks.ts
+Auto-merging web/src/main.ts
+Automatic merge failed; fix conflicts and then commit the result.

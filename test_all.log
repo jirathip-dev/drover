@@ -1,0 +1,2245 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drover-4b7a6ac2c6d62ba1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drover-1a105bbecbf95534)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/abandoned_child.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/abandoned_child-c6211b641cfc1e40)
+
+running 1 test
+test a_child_that_ignores_sigkill_times_out_at_the_limit_and_is_left_alone ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.60s
+
+     Running tests/access.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/access-0e67e3affe336272)
+
+running 6 tests
+test hermes_profile_gets_only_the_listed_mcp_servers ... ok
+test retired_account_keys_load_warn_once_and_the_lane_runs_on_the_hosts_login ... ok
+test sheds_auth_error_is_reported_as_signed_out_and_holds_the_host ... ok
+test mcp_allowlist_is_the_only_mcp_and_prod_is_refused ... ok
+test a_limit_word_in_sheds_note_is_no_usage_limit ... ok
+test sheds_rate_limited_alerts_once_and_holds_new_lanes_until_hosts_on ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/action_ids.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/action_ids-9051b687af6064d2)
+
+running 4 tests
+test a_timed_out_merge_intent_whose_pr_never_merged_fails_and_merges_once ... ok
+test parity_r14_a_crash_between_merge_and_its_log_is_recovered_from_the_merged_pr_without_merging_again ... ok
+test the_same_kick_id_is_driven_once ... ok
+test two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.72s
+
+     Running tests/amendments.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/amendments-b9196c88b676ea61)
+
+running 3 tests
+test no_trusted_amendment_leaves_the_body_alone ... ok
+test brief_lists_trusted_amendments_in_order ... ok
+test new_amendment_prompts_the_open_lane_exactly_once ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/answer_delivery.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/answer_delivery-5882a4e348475b9f)
+
+running 9 tests
+test a_closed_lane_whose_agent_still_runs_in_its_worktree_gets_the_answer ... ok
+test a_lane_ask_stores_its_agent_and_the_answer_is_typed_into_its_pane ... ok
+test a_remote_lane_is_answered_on_its_machines_shed ... ok
+test an_ask_without_an_agent_is_answered_into_the_issues_current_lane ... ok
+test parity_r9_a_supersede_close_logged_after_the_new_spawn_does_not_close_it ... ok
+test parity_71_an_answer_with_no_lane_alerts_once_from_check ... ok
+test a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane ... ok
+test a_sleeping_lanes_answer_waits_for_room_then_lands ... ok
+test drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/api_v1.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/api_v1-5d91f43503a28971)
+
+running 8 tests
+test an_issue_carries_its_latest_why_owner_line ... ok
+test refusals_are_json_with_a_code ... ok
+test lessons_show_the_last_run_and_the_next_due_date ... ok
+test an_issues_verdicts_come_newest_first_with_repro_and_shots ... ok
+test state_events_and_lane_json_match_the_goldens ... ok
+test queue_rows_carry_their_marks_and_qset_sets_one ... ok
+test a_post_runs_the_boards_op_and_answers_json ... ok
+test over_500_new_events_ask_for_a_refresh ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+     Running tests/api_v1_contract.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/api_v1_contract-9a4464fd49035048)
+
+running 2 tests
+test a_changed_shape_fails_the_contract ... ok
+test every_route_keeps_its_fixtures_shape ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/api_v1_ops.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/api_v1_ops-146e17b3d1b0be97)
+
+running 7 tests
+test herd_and_roles_read_through_api_v1 ... ok
+test setup_starts_a_configured_terminal_and_reads_its_screen ... ok
+test act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns ... ok
+test menu_is_refused_shed_reports_no_menu ... ok
+test a_backlog_issue_gets_a_thread_or_closes ... ok
+test set_takes_json_and_chat_writes_the_new_thread_defaults ... ok
+test send_prompts_a_lane_with_the_boards_refusals_and_rate_limit ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/arch_check.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/arch_check-76c0d35802d08fc3)
+
+running 20 tests
+test a_ban_checks_a_workflow_yml_and_a_test_mjs_and_except_still_passes_a_listed_file ... ok
+test a_banned_call_outside_its_exception_fails ... ok
+test a_cross_layer_use_fails_with_file_and_line_and_an_allowed_one_passes ... ok
+test a_ban_with_comments_matches_a_comment_line_and_without_it_does_not ... ok
+test a_doc_naming_a_missing_path_line_link_or_flag_fails ... ok
+test a_baselined_layer_crossing_passes_and_a_new_one_fails ... ok
+test a_file_or_fn_grown_past_its_baseline_fails_and_an_untouched_offender_passes ... ok
+test a_size_and_a_layer_exclude_skip_a_test_file_and_still_fail_a_source_file ... ok
+test an_ignore_case_ban_fails_a_provider_name_in_core_in_any_case_and_passes_it_in_providers ... ok
+test no_config_has_nothing_to_check ... ok
+test the_pre_rename_folder_is_read_only_while_the_new_one_has_no_such_file ... ok
+test a_generated_file_that_differs_from_its_regenerated_output_fails ... ok
+test strict_fails_an_old_plain_comment_and_a_doc_on_a_private_item_but_not_the_allowed_ones ... ok
+test the_repos_809_bans_fail_each_api_outside_its_one_module ... ok
+test the_repos_provider_ban_fails_a_web_file_naming_a_provider ... ok
+test a_commit_building_a_promise_phrase_outside_the_promise_module_fails_this_repos_arch_check ... ok
+test a_line_added_to_a_frozen_list_fails_but_removed_edited_or_collected_ones_pass ... ok
+test only_an_added_comment_fails_but_safety_over_unsafe_and_one_doc_line_on_a_pub_item ... ok
+test a_changed_flag_needs_a_doc_naming_it_or_no_doc_in_the_pr_body ... ok
+test only_a_freeze_the_base_arch_toml_lists_counts ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/ask_endings.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ask_endings-0dfbc8ba6e269823)
+
+running 7 tests
+test a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it ... ok
+test a_typed_answer_closes_the_ask_only_with_the_owners_exact_line_after_it_in_its_thread ... ok
+test an_ask_whose_lane_was_killed_expires_after_24_h ... ok
+test the_sweep_closes_a_logs_stale_asks_once ... ok
+test a_thread_ask_nobody_waits_on_expires_after_24_h_and_its_choose_goes ... ok
+test a_live_lanes_ask_never_expires_and_re_alerts_once_a_day ... ok
+test a_handoff_ask_closes_when_it_is_delivered_and_when_it_fails ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/ask_ids.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ask_ids-66789278392741a8)
+
+running 7 tests
+test no_ask_id_is_counted_from_the_log_in_core ... ok
+test a_new_ask_takes_the_highest_id_plus_one_even_when_the_count_lags ... ok
+test two_asks_racing_on_one_state_dir_get_distinct_ids ... ok
+test withdraw_on_a_shared_id_closes_the_callers_threads_ask_and_leaves_the_other_alone ... ok
+test two_events_for_one_ask_id_show_one_row_in_the_thread_and_on_the_board ... ok
+test fifty_concurrent_asks_from_different_fleets_get_fifty_distinct_ids ... ok
+test concurrent_full_fast_and_kick_passes_over_one_finished_design_lane_post_one_ask ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+
+     Running tests/ask_scale.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ask_scale-8352cb8a10ee23b1)
+
+running 1 test
+test the_needs_and_chat_views_are_linear_in_the_log_and_one_event_updates_the_index ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.76s
+
+     Running tests/asks.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/asks-c8c297a1db7a59dd)
+
+running 16 tests
+test an_ask_from_outside_a_lane_names_no_agent ... ok
+test an_open_ask_re_alerts_once_as_ask_waiting_after_30_min ... ok
+test a_manual_answer_before_30_min_prevents_the_default ... ok
+test ask_refuses_an_empty_question_or_five_options ... ok
+test an_ask_made_during_its_lanes_startup_stays_open_answerable_and_alerts_once ... ok
+test a_paired_device_answers_from_the_card_and_bad_text_is_refused ... ok
+test an_answer_the_agent_never_picks_up_is_retried_once_then_pushed ... ok
+test an_ask_closes_when_its_issue_merges_or_its_lane_goes ... ok
+test answer_to_a_gone_agent_records_the_decision_and_exits_0 ... ok
+test notifier_gets_the_question_numbered_options_and_answer_command ... ok
+test asks_json_says_why_an_ask_closed ... ok
+test ask_answer_round_trip_prompts_the_asker_once ... ok
+test a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does ... ok
+test the_needs_you_card_is_a_cards_screen_block_and_answer_needs_a_paired_device ... ok
+test ask_waiting_pushes_are_capped_per_pass ... ok
+test routine_needs_a_recommendation_and_no_owner_topic ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+     Running tests/backlog.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/backlog-1ac8001327555680)
+
+running 4 tests
+test queue_n_follows_tick_order_and_marks_needs_check ... ok
+test the_reads_jq_flattens_each_issue ... ok
+test the_queue_api_carries_the_backlog_from_the_last_read_with_no_github_call ... ok
+test the_tick_reads_all_open_issues_then_only_those_updated_since ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.09s
+
+     Running tests/blocked_respawn.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/blocked_respawn-10324c24ef819790)
+
+running 7 tests
+test an_extra_round_for_a_lane_that_never_pushed_is_no_review_fail ... ok
+test a_needs_human_issue_with_an_untrimmed_repair_in_its_history_drives_on ... ok
+test a_lessons_issue_done_with_no_change_and_no_pr_closes ... ok
+test an_issue_closed_on_github_reads_closed_after_one_check_and_drive_leaves_it ... ok
+test two_blocked_turns_in_a_row_are_owner_cards_never_lane_ends ... ok
+test a_blocked_issue_given_an_extra_round_is_never_respawned_and_waits_for_its_blockers ... ok
+test a_lane_ends_after_an_idle_trim_gets_one_respawn ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.14s
+
+     Running tests/board_errors.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/board_errors-1b755a7c1064738b)
+
+running 1 test
+test parity_85_a_tab_names_the_real_read_error ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/board_fresh.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/board_fresh-8c3a31616621f6de)
+
+running 2 tests
+test every_screen_shows_the_snapshot_age_amber_past_10_min_and_reads_run_in_the_background ... ok
+test a_slow_api_for_10_minutes_alerts_once_and_never_after_it_recovers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.85s
+
+     Running tests/boat.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/boat-c0f3007c9f67eed4)
+
+running 8 tests
+test doctor_flags_a_recipe_subcommand_the_boat_cli_lacks_and_an_include_of_a_known_file ... ok
+test the_rates_are_boats_and_medium_is_default ... ok
+test bootstrap_that_cannot_reach_a_host_names_the_recipe_override_in_use ... ok
+test the_ssh_files_are_valid_a_resume_repins_the_host_key_and_a_moved_key_is_refused ... ok
+test bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start ... ok
+test boat_runs_on_its_own_login_with_no_key_and_doctor_finds_a_key_file ... ok
+test bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address ... ok
+test a_sandbox_the_default_list_omits_or_that_is_gone_is_never_acted_on_by_an_empty_id ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/brief_golden.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/brief_golden-51a28a039194e493)
+
+running 3 tests
+test briefs_carry_the_test_antipatterns ... ok
+test only_a_repro_issues_briefs_carry_the_repro_steps ... ok
+test lane_briefs_match_staging ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/chat_index.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/chat_index-1370c7720cab0983)
+
+running 1 test
+test a_quiet_tick_and_a_post_touch_only_new_events ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.63s
+
+     Running tests/chat_pick.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/chat_pick-32ff36375f4a0739)
+
+running 9 tests
+test chat_defaults_come_from_the_chat_table_else_the_conductor_role ... ok
+test a_hermes_thread_starts_its_orchestrator_on_hermes ... ok
+test the_model_chip_offers_the_models_list_and_a_pick_from_it_is_taken ... ok
+test an_old_thread_without_a_harness_renders_and_starts_on_the_default ... ok
+test a_pick_dropped_from_the_models_list_is_refused_on_send_and_the_message_stays ... ok
+test thread_new_harness_is_recorded_and_its_conductor_starts_on_it ... ok
+test the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread ... ok
+test a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it ... ok
+test a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/chat_scale.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/chat_scale-9b3b123713a56d9b)
+
+running 1 test
+test the_chat_tab_is_linear_in_the_log_and_cached_by_its_last_seq ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.54s
+
+     Running tests/chat_tab.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/chat_tab-2734cf9fbbb89fdd)
+
+running 16 tests
+test a_device_that_is_not_paired_reads_the_thread_but_cannot_write ... ok
+test a_failed_delivery_shows_red_with_retry_and_retry_types_it_again ... ok
+test a_finished_turns_commands_fold_and_the_live_turns_stay_open ... ok
+test a_message_with_three_images_delivers_all_three_and_eleven_are_refused ... ok
+test a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_retitles_it ... ok
+test a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time ... ok
+test a_reply_file_from_a_lane_worktree_is_copied_into_the_thread_folder ... ok
+test a_restored_shed_thread_resumes_its_orchestrators_session ... ok
+test a_message_is_answered_once_logged_and_typed_into_the_conductor_after ... ok
+test a_large_attachment_arrives_whole_over_the_socket ... ok
+test a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_the_conductor ... ok
+test the_service_worker_answers_a_thread_file_navigation_with_the_file ... ok
+test archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it ... ok
+test an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline ... ok
+test a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now ... ok
+test a_stream_with_a_thread_open_stamps_its_watch_file ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.57s
+
+     Running tests/check_clean.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/check_clean-57c1b64ec787df42)
+
+running 18 tests
+test ci_missing_fires_once_per_head_after_the_grace ... ok
+test an_unheld_idle_lane_stalls_once_until_it_changes ... ok
+test du_counts_blocks_used_not_apparent_size ... ok
+test a_blocked_live_lane_is_held_shown_held_and_never_stalls ... ok
+test clean_reclaims_lanes_whose_issue_closed_outside_merge ... ok
+test merged_issues_are_never_flagged ... ok
+test plain_lines_for_merged_stall_needs_human ... ok
+test lane_dead_fires_once_and_again_after_state_change ... ok
+test clean_removes_only_merged_clean_idle_lanes ... ok
+test notifier_gets_plain_line_unless_format_json ... ok
+test orphan_lane_fires_once_per_agent ... ok
+test working_lane_is_not_a_stall ... ok
+test stall_fires_once_and_again_after_state_change ... ok
+test ready_unmerged_fires_once_and_again_after_state_change ... ok
+test verdict_closes_the_reviewer_lane_unless_dirty_or_working ... ok
+test clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own ... ok
+test clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going ... ok
+test clean_removes_merged_worktrees_holding_only_lane_artifacts_and_unlogged_rev_trees ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.11s
+
+     Running tests/ci_templates.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ci_templates-0e1de0c5c12fe117)
+
+running 2 tests
+test ci_runs_on_labeled_with_a_run_unique_group_for_other_labels ... ok
+test nightly_red_runs_the_full_ci_and_reports_its_result ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/cloud.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/cloud-16d4a343e332cd52)
+
+running 27 tests
+test a_failed_wip_push_aborts_the_stop ... ok
+test a_cloud_key_file_others_can_read_is_refused ... ok
+test a_recipe_without_key_env_runs_its_command_with_no_key ... ok
+test a_failing_status_is_not_gone ... ok
+test a_failed_bootstrap_step_shows_its_command_exit_code_and_output_and_logs_them ... ok
+test a_lost_end_marker_keeps_later_blocks_and_a_bad_address_is_refused ... ok
+test a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked ... ok
+test a_snapshot_needs_a_green_health_check_first ... ok
+test a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enough ... ok
+test a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns ... ok
+test bootstrap_installs_and_checks_the_real_exe_the_guard_runs_not_its_symlink ... ok
+test an_unreachable_host_aborts_the_stop_and_destroy_saves_first ... ok
+test bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_secrets ... ok
+test an_idle_cloud_host_saves_each_lane_to_wip_then_stops ... ok
+test bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_terminal ... ok
+test a_shed_frozen_by_the_snapshot_is_restarted_once_then_fails_the_snapshot ... ok
+test bootstrap_of_a_vm_deleted_outside_drover_logs_it_gone_and_creates_it ... ok
+test the_token_expiry_parses_and_warns_from_14_days ... ok
+test bootstrap_of_a_vm_stopped_outside_drover_logs_it_stopped_starts_it_and_repins ... ok
+test bootstrap_keeps_a_shed_whose_version_names_the_pinned_rev ... ok
+test bootstrap_installs_over_a_shed_of_another_build ... ok
+test bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there ... ok
+test the_provider_key_never_reaches_argv_or_the_log ... ok
+test tick_logs_a_vm_deleted_outside_drover_gone_once_and_stops_counting_its_spend ... ok
+test tick_logs_a_vm_stopped_outside_drover_once_and_stops_counting_its_spend ... ok
+test the_ssh_include_rewrite_is_idempotent_and_keeps_other_blocks ... ok
+test the_budget_warns_at_80_percent_and_refuses_when_used_up ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+
+     Running tests/compaction.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/compaction-67eed8036ae7d921)
+
+running 5 tests
+test build_cloned_rows_from_before_978_move_their_errors_to_cache ... ok
+test the_shared_read_follows_appends_and_compaction ... ok
+test compaction_archives_old_done_issues_and_deletes_old_heartbeats ... ok
+test a_5mb_build_cloned_is_stored_in_16kb ... ok
+test the_tables_match_the_events_and_a_rebuild_gives_identical_rows ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.78s
+
+     Running tests/config_api.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/config_api-35b13f72b45b1815)
+
+running 4 tests
+test read_gives_every_setting_with_secrets_as_names_and_needs_a_paired_device ... ok
+test a_stale_hash_or_an_invalid_edit_writes_nothing ... ok
+test a_field_edit_keeps_comments_backs_up_and_logs_the_owner ... ok
+test a_fleet_is_added_removed_paused_and_resumed_with_each_logged ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/config_card.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/config_card-6e6966a928b10f07)
+
+running 6 tests
+test a_proposal_stored_truncated_refuses_to_apply_and_asks_for_a_new_one ... ok
+test applying_a_new_fleet_kicks_its_first_queued_issue ... ok
+test applying_a_new_role_syncs_its_profile_and_hook_approval ... ok
+test a_proposal_over_16_kb_applies_byte_for_byte ... ok
+test a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply ... ok
+test a_proposal_reaches_a_thread_open_on_the_phone_live ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.39s
+
+     Running tests/config_invalid.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/config_invalid-b757b5e0bb5611c6)
+
+running 1 test
+test an_invalid_config_shows_a_banner_and_alerts_once_until_it_is_fixed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/cooee_screens.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/cooee_screens-b5a1f271cb0b4625)
+
+running 13 tests
+test cooees_queue_stream_fixture_applies_in_place ... ok
+test parity_46_a_queue_row_with_an_ask_opens_its_thread_in_webkit_and_back_returns ... ok
+test a_queue_row_is_one_short_title_line_without_the_pr_title ... ok
+test a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thread ... ok
+test parity_63_a_folded_cards_main_button_answers_its_ask ... ok
+test parity_50_the_lanes_screen_and_a_lanes_sheet_are_cooees_blocks ... ok
+test parity_47_the_backlog_sheet_filters_searches_and_queues_the_ticked_issues ... ok
+test queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state ... ok
+test parity_38_the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_moves ... ok
+test an_action_outside_the_manifest_is_refused_and_a_listed_one_runs ... ok
+test the_manifest_declares_cooees_places_and_permissions_and_each_screen_is_served ... ok
+test the_workflow_screen_is_two_diagram_blocks_with_live_counts_and_limit_nodes ... ok
+test the_queue_stream_updates_rows_in_place_and_the_strip_count ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.92s
+
+     Running tests/cooee_token.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/cooee_token-3dd9940d91e8fcc4)
+
+running 3 tests
+test the_manifest_attaches_to_the_running_serve_with_its_token_file ... ok
+test cooees_plugin_token_reads_screens_and_posts_actions_without_a_paired_device ... ok
+test serve_makes_the_cooee_token_file_once_and_accepts_it_on_action_and_screens ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running tests/demo_export.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/demo_export-caba8163a49bd510)
+
+running 2 tests
+test demo_export_writes_the_file_set_without_running_anything ... ok
+test demo_page_is_inert_and_relative ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+     Running tests/design_orphan.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/design_orphan-e6feb43b186196b4)
+
+running 4 tests
+test a_pane_adopted_once_is_never_adopted_again ... ok
+test a_respawn_is_named_after_the_build_lane ... ok
+test the_install_repair_unparks_a_lane_ends_a_design_adoption_caused ... ok
+test a_finished_design_lane_is_adopted_once_and_never_hides_the_fix_round ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.87s
+
+     Running tests/design_stage.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/design_stage-9f72adeb9137ccf4)
+
+running 24 tests
+test a_design_stage_lane_that_errors_then_hibernates_without_a_push_is_respawned_by_drive ... ok
+test a_design_lane_whose_only_untracked_file_is_its_claude_local_md_hands_off ... ok
+test a_hotspots_issues_architect_brief_carries_the_hot_files_playbook_and_profiles_sync_writes_it ... ok
+test a_design_brief_takes_the_medium_and_path_the_issue_names ... ok
+test a_design_lane_that_pushed_its_artifact_and_asked_is_not_respawned ... ok
+test a_design_ask_links_the_design_folder_the_issue_names_at_the_sha ... ok
+test a_design_brief_takes_the_repos_recipe_unless_the_issue_names_its_own_path ... ok
+test a_design_pushed_under_the_issues_named_path_raises_the_ask_and_one_elsewhere_stays_idle ... ok
+test a_long_summary_is_cut_at_a_line_end_near_600_characters ... ok
+test a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_to_impl ... ok
+test a_paused_fleet_auto_spawns_no_design_but_the_orchestrator_still_can ... ok
+test a_recipe_tool_the_main_host_lacks_ends_the_design_turn_blocked_before_it_starts ... ok
+test a_recipe_with_a_clip_hands_off_the_images_and_the_clip ... ok
+test a_refused_design_stage_respawn_is_one_owner_ask_and_one_check_alert ... ok
+test a_superseded_design_lane_over_a_pushed_design_hands_it_off_once ... ok
+test revise_redoes_the_design_with_the_note_in_its_brief_five_times_in_a_row ... ok
+test an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_raises_no_ask_and_is_respawned ... ok
+test architect_revise_reruns_it_with_the_note_and_reject_needs_a_human ... ok
+test design_and_architect_run_architect_then_design_then_impl_which_links_the_adr ... ok
+test design_off_on_a_queued_issue_lets_impl_spawn_directly ... ok
+test parity_69_the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins ... ok
+test reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human ... ok
+test an_architect_ask_quotes_the_summary_and_links_the_adr_folder_at_the_sha_and_a_revise_the_new_one ... ok
+test without_a_summary_the_ask_quotes_the_adrs_decision_and_without_either_it_reads_as_before ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 43.57s
+
+     Running tests/diagram.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/diagram-ef315d27c90744e1)
+
+running 3 tests
+test a_fold_state_missing_from_the_table_fails - should panic ... ok
+test the_diagram_is_docs_workflow_md_with_every_state_and_timing_limit ... ok
+test live_counts_issues_per_state_at_the_configs_limits ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/disk.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/disk-a87ace3353d172ac)
+
+running 12 tests
+test a_reviewer_verdict_frees_its_build_folders ... ok
+test a_missing_root_counts_zero ... ok
+test a_builder_with_a_pass_frees_its_build_folders ... ok
+cp: failed to clone '/tmp/fleet-test-disk-links-1331361-10/worktrees/sendmeter/issue-7/c' from '/tmp/fleet-test-disk-links-1331361-10/worktrees/sendmeter/issue-7/a': Operation not supported
+test orphans_are_listed_and_removed_only_with_the_flag ... ok
+test over_budget_frees_waiting_lanes_longest_waiting_first ... ok
+test the_budget_counts_a_hard_link_and_a_clone_once ... ok
+test orphans_are_removed_for_a_paired_device_only ... ok
+test parity_r24_over_budget_frees_the_idlest_lane_first_then_disk_budget ... ok
+test drive_refuses_starts_over_budget ... ok
+test the_hourly_sweep_runs_once_per_hour ... ok
+test leftovers_are_saved_to_wip_or_kept_on_a_secret ... ok
+test two_hosts_saving_one_lane_in_the_same_second_get_two_branches has been running for over 60 seconds
+test two_hosts_saving_one_lane_in_the_same_second_get_two_branches ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 118.05s
+
+     Running tests/doctor.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/doctor-b2f9fdb300989fa1)
+
+running 15 tests
+test a_missing_merge_label_is_red_with_its_create_command_then_green ... ok
+test a_long_tick_with_a_fresh_heartbeat_is_running_not_stuck ... ok
+test an_archived_fleet_repo_is_named_with_its_fix ... ok
+test launchd_row_follows_the_configured_label ... ok
+test a_login_shell_exporting_the_token_warns ... ok
+test all_good_exits_zero_and_never_writes ... ok
+test a_hook_naming_another_binary_is_named ... ok
+test a_paused_self_update_shows_in_doctor_and_the_board ... ok
+test retired_account_keys_warn_until_they_are_dropped ... ok
+test warnings_do_not_fail ... ok
+test tailscale_missing_is_a_warning ... ok
+test bad_config_and_hermes_profiles ... ok
+test secrets_never_echo ... ok
+test spawns_row_dedupes_stale_names ... ok
+test each_check_fails_with_its_fix_and_exit_one ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.09s
+
+     Running tests/done_close.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/done_close-892f28edfb331009)
+
+running 4 tests
+test a_lane_without_a_logged_handoff_stays_open ... ok
+test a_spawn_whose_prompt_never_landed_is_not_closed_as_done ... ok
+test a_done_pushed_lane_closes_after_the_delay ... ok
+test a_dirty_or_unpushed_lane_stays_open_with_an_event ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.07s
+
+     Running tests/drive.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drive-826bcfa82224c8b2)
+
+running 85 tests
+test a_blocked_ci_not_green_item_merges_once_ci_turns_green ... ok
+test a_behind_pr_after_pass_is_updated_the_same_way ... ok
+test a_conflicting_pass_with_an_idle_impl_lane_gets_its_update_in_one_pass ... ok
+test a_done_reviewer_in_the_way_is_superseded_and_the_review_spawns ... ok
+test a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected ... ok
+test a_code_fail_with_no_change_is_reviewed_again_at_the_same_head ... ok
+test a_draft_pr_that_cannot_be_marked_ready_says_so_in_status ... ok
+test a_gone_lesson_lane_is_closed_not_respawned ... ok
+test a_ci_only_fail_green_again_at_the_same_head_merges_without_a_review ... ok
+test a_draft_pr_with_a_pass_is_marked_ready_once_then_merged ... ok
+test a_fail_starts_a_fix_round_with_the_findings_verbatim ... ok
+test a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges ... ok
+test a_held_lane_is_prompted_once_when_its_blocker_merges ... ok
+test a_head_moved_during_review_gets_a_fresh_reviewer_not_the_old_verdict ... ok
+test a_hold_whose_blocker_merged_is_released_and_its_conflicting_pr_updated ... ok
+test a_lesson_issue_parked_lane_ends_is_closed_on_install ... ok
+test a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once ... ok
+test a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human ... ok
+test a_lane_held_on_two_blockers_waits_for_both ... ok
+test a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions ... ok
+test a_merge_that_fails_on_a_conflict_gets_the_update_lane ... ok
+test a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip ... ok
+test a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent ... ok
+test a_pass_recorded_with_green_ci_merges_in_the_same_pass ... ok
+test a_no_repro_pass_tells_a_live_reviewer_once_and_waiting_names_the_refusal ... ok
+test a_pr_off_serial_paths_is_not_marked ... ok
+test a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it ... ok
+test a_pr_head_moved_without_a_handoff_is_handed_off_by_the_pr_once_ci_is_done ... ok
+test a_lesson_lane_ending_without_a_push_is_prompted_once_then_closed_never_lane_ends ... ok
+test a_proofless_fail_from_an_ended_reviewer_gets_one_fresh_review_of_the_same_head ... ok
+test a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned ... ok
+test a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_update ... ok
+test a_refused_review_start_shows_waiting_for_a_reviewer_slot ... ok
+test a_refused_update_round_shows_its_reason_not_catching_up ... ok
+test a_pr_closed_outside_drover_closes_or_blocks_the_issue_once ... ok
+test a_serial_busy_skip_shows_the_live_holders ... ok
+test a_ready_conflicting_pr_gets_its_update_lane_and_no_merge_attempt ... ok
+test a_released_lanes_respawn_waits_for_room ... ok
+test a_workflow_that_never_started_is_ci_broken_and_gets_a_fix_round ... ok
+test a_spawn_whose_prompt_never_landed_is_retried_by_the_next_pass ... ok
+test a_working_reviewer_in_the_way_still_waits ... ok
+test a_serial_busy_item_is_skipped_and_keeps_its_place ... ok
+test a_secret_in_a_merged_lanes_wip_keeps_its_pane_reported_once_and_clean_dry_run_names_the_close ... ok
+test an_extend_during_a_pass_only_requeues_it ... ok
+test an_old_skip_shows_its_age_until_the_issue_moves ... ok
+test a_told_reviewers_corrected_fail_is_recorded ... ok
+test an_exited_reviewer_without_a_verdict_gets_a_new_review_round ... ok
+test a_working_lane_of_a_merged_issue_is_never_closed ... ok
+test an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane ... ok
+test a_written_verdict_is_recorded_at_the_head_then_pending_ci_waits ... ok
+test an_idle_reviewer_is_told_once_then_the_unchanged_file_is_not_retried_but_re_reviewed ... ok
+test an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing ... ok
+test auto_update_runs_in_a_pass_with_no_merge ... ok
+test an_open_issues_idle_lane_is_kept ... ok
+test an_unmarked_pr_touching_a_serial_path_is_auto_marked_and_merges ... ok
+test auto_update_rechecks_premerge_before_its_push ... ok
+test an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it ... ok
+test disk_low_stops_the_pass ... ok
+test drive_now_on_the_board_is_paired_only_and_toasts_its_line ... FAILED
+test no_checks_after_the_grace_is_ci_missing_not_running ... ok
+test clean_reclaims_merged_lanes ... ok
+test no_merge_label_parses_to_none_and_a_pass_adds_no_label ... ok
+test every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_repeat_too ... ok
+test extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix ... ok
+test red_ci_after_pass_is_a_fail_with_the_log_tail ... ok
+test pass_and_green_ci_merges ... ok
+test one_pass_starts_every_free_item_in_order_with_a_fresh_host_sample_each ... ok
+test blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action ... ok
+test status_says_a_ready_pr_lacks_the_merge_label ... ok
+test the_drive_summary_groups_per_action ... ok
+test host_busy_stops_the_pass_and_cap_stops_starting ... ok
+test the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it ... ok
+test passes_follow_a_fleet_added_then_removed_in_fleet_toml ... ok
+test paused_fleets_and_host_busy_are_no_ops ... ok
+test the_result_line_is_red_on_an_error_green_on_a_start_or_merge_amber_when_all_held_back ... ok
+test review_spawns_rev_at_the_pushed_head ... ok
+test start_spawns_the_next_queued_issue ... ok
+test the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane ... ok
+test the_363_sequence_replayed_respawns_impl_once_per_30_min ... ok
+test the_replayed_cooee_1_log_recovers_in_one_pass ... ok
+test the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over ... ok
+test the_third_fail_stops_at_needs_human_with_the_findings ... ok
+test under_limited_admission_a_review_goes_before_the_fleets_new_start ... ok
+test drive_now_runs_in_the_background_and_the_board_keeps_answering ... ok
+test two_respawns_without_a_push_go_to_needs_human ... ok
+
+failures:
+
+---- drive_now_on_the_board_is_paired_only_and_toasts_its_line stdout ----
+
+thread 'drive_now_on_the_board_is_paired_only_and_toasts_its_line' (1344753) panicked at crates/cli/tests/drive.rs:783:5:
+assertion `left == right` failed: {"acts":[{"code":"ok","who":"#12","words":"started"}],"line":"drive · 0s ago · started 1 · merged 0 · 0.2 s","meta":["stall check: #12 in 30m","1 lane"],"pass":true,"tone":"g"}
+  left: (String("g"), String("drive · 0s ago · started 1 · merged 0 · 0.2 s"))
+ right: (String("g"), String("drive · 0s ago · started 1 · merged 0 · 0 s"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    drive_now_on_the_board_is_paired_only_and_toasts_its_line
+
+test result: FAILED. 84 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.16s
+
+error: test failed, to rerun pass `-p drover --test drive`
+     Running tests/drive_kicks.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drive_kicks-dedb5123954f6c15)
+
+running 37 tests
+test a_full_hosts_pending_spawn_holds_no_slot_for_another_host ... ok
+test a_dead_kicks_marker_counts_nowhere_and_the_hold_names_the_live_one ... ok
+test a_due_fix_round_takes_the_reserved_slot ... ok
+test a_fleet_whose_gh_hangs_never_holds_another_fleets_pass_or_its_spawn ... ok
+test a_fleet_with_one_start_gets_a_slot_beside_one_with_six ... ok
+test a_busy_host_holds_every_spawn_behind_the_review ... ok
+test a_failed_kick_clears_its_marker_and_the_next_pass_retries ... ok
+test a_kick_refused_host_busy_is_logged_refused_not_launched ... ok
+test a_kick_refused_disk_low_leaves_no_driven_ok ... ok
+test a_kick_refused_host_busy_releases_its_slot_in_the_same_pass ... ok
+test a_kick_running_past_its_pass_is_pending_then_updated ... ok
+test a_hook_kick_never_clears_a_launched_kicks_marker ... ok
+test a_kick_that_spawns_inside_its_pass_counts_as_launched ... ok
+test a_manual_spawn_and_drives_launch_agree_on_the_slots ... ok
+test a_stale_marker_does_not_hold_the_issue_forever ... ok
+test a_panicking_kick_leaves_no_marker_or_lock ... ok
+test a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness ... ok
+test a_marker_carries_its_kicks_pid_and_goes_when_that_pid_dies ... ok
+test every_start_refused_by_one_host_gate_for_30_min_alerts_once ... ok
+test a_pass_counts_starting_spawns_against_serial_and_cap ... ok
+test an_old_or_reused_pid_marker_is_stale ... ok
+test one_slot_and_nothing_in_flight_still_starts ... ok
+test room_for_one_spawn_goes_to_the_review ... ok
+test fix_rounds_launch_before_starts_and_starts_keep_one_slot_free ... ok
+test spawn_pending_for_15_minutes_alerts_once ... ok
+test six_dead_markers_never_hold_a_new_spawn ... ok
+test kicks_respect_max_parallel_spawns_and_admission ... ok
+test a_failing_spawn_backs_off_and_a_kick_retries_it_at_once ... ok
+test waiting_names_a_slot_wait_not_a_stuck_tick ... ok
+test waiting_names_the_marker_that_holds_the_slot ... ok
+test two_quick_passes_launch_each_spawn_once ... ok
+test waiting_names_the_reviews_ahead ... ok
+test waiting_names_the_slot_holders ... ok
+test three_identical_spawn_failures_alert_once ... ok
+test two_fleets_passes_at_once_never_admit_a_spawn_past_the_host_limit ... ok
+test starts_share_slots_across_fleets_passing_at_once ... ok
+test failing_retries_never_starve_another_fleets_start ... ok
+
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.64s
+
+     Running tests/drive_sim.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drive_sim-93208eb18b848da3)
+
+running 5 tests
+test worktrees_sharing_files_count_once_and_hold_no_spawn ... ok
+test a_tick_hung_on_ssh_is_stopped_within_the_slo_and_the_next_tick_runs ... ok
+test a_passed_draft_pr_is_marked_ready_and_merged ... ok
+test an_offline_hosts_lanes_restart_on_the_main_host_after_15_minutes ... ok
+test a_silent_reviewer_is_superseded_and_the_review_completes ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 51.77s
+
+     Running tests/dsh.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/dsh-881466d151bf69ff)
+error: test failed, to rerun pass `-p drover --test dsh`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/dsh-881466d151bf69ff` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/dsh_unit.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/dsh_unit-14db371613bc5ceb)
+error: test failed, to rerun pass `-p drover --test dsh_unit`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/dsh_unit-14db371613bc5ceb` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/empty_env.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/empty_env-b617f4c1338dc07a)
+error: test failed, to rerun pass `-p drover --test empty_env`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/empty_env-b617f4c1338dc07a` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/events_log.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/events_log-433758e584a103d6)
+error: test failed, to rerun pass `-p drover --test events_log`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/events_log-433758e584a103d6` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/events_tab.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/events_tab-1e74391793383c0e)
+error: test failed, to rerun pass `-p drover --test events_tab`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/events_tab-1e74391793383c0e` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/fleet_cards.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/fleet_cards-c510a729e9fb9d54)
+error: test failed, to rerun pass `-p drover --test fleet_cards`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/fleet_cards-c510a729e9fb9d54` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/fleet_notify.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/fleet_notify-be520d134847aca8)
+error: test failed, to rerun pass `-p drover --test fleet_notify`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/fleet_notify-be520d134847aca8` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/fleet_rename.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/fleet_rename-ef0af23c4f9fa943)
+error: test failed, to rerun pass `-p drover --test fleet_rename`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/fleet_rename-ef0af23c4f9fa943` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/form_only.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/form_only-6229b8a561919106)
+error: test failed, to rerun pass `-p drover --test form_only`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/form_only-6229b8a561919106` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/gate_unit.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/gate_unit-7684dc653c3fa4e4)
+error: test failed, to rerun pass `-p drover --test gate_unit`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/gate_unit-7684dc653c3fa4e4` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/generic_harness.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/generic_harness-2f2d5be1b95c1919)
+error: test failed, to rerun pass `-p drover --test generic_harness`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/generic_harness-2f2d5be1b95c1919` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/gh_links.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/gh_links-8dcf715bf755c41a)
+error: test failed, to rerun pass `-p drover --test gh_links`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/gh_links-8dcf715bf755c41a` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/handover.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/handover-23e65540b16d4c8a)
+error: test failed, to rerun pass `-p drover --test handover`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/handover-23e65540b16d4c8a` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/heavy.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/heavy-a021f4aeafa215b9)
+error: test failed, to rerun pass `-p drover --test heavy`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/heavy-a021f4aeafa215b9` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/herd.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/herd-cc61e7da6608b48d)
+error: test failed, to rerun pass `-p drover --test herd`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/herd-cc61e7da6608b48d` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/hermes_hooks.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hermes_hooks-8af1b88ca054a502)
+error: test failed, to rerun pass `-p drover --test hermes_hooks`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hermes_hooks-8af1b88ca054a502` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/history.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/history-639b75eee6cfbaa6)
+error: test failed, to rerun pass `-p drover --test history`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/history-639b75eee6cfbaa6` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/hook.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hook-8c85c98ca1c22693)
+error: test failed, to rerun pass `-p drover --test hook`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hook-8c85c98ca1c22693` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/host_deadline.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_deadline-22ca05e991607b24)
+error: test failed, to rerun pass `-p drover --test host_deadline`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_deadline-22ca05e991607b24` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/host_history.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_history-2749e2b6a6d7de5e)
+error: test failed, to rerun pass `-p drover --test host_history`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_history-2749e2b6a6d7de5e` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/host_offline.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_offline-d941166c3c5aeacf)
+error: test failed, to rerun pass `-p drover --test host_offline`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_offline-d941166c3c5aeacf` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/host_slots.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_slots-587aafe3215fc20c)
+error: test failed, to rerun pass `-p drover --test host_slots`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_slots-587aafe3215fc20c` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/host_spared.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_spared-8428b1f6443dd2c8)
+error: test failed, to rerun pass `-p drover --test host_spared`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_spared-8428b1f6443dd2c8` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/host_tab.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_tab-4e45a91211aeaeeb)
+error: test failed, to rerun pass `-p drover --test host_tab`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_tab-4e45a91211aeaeeb` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/host_words.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_words-a7ca65ecb603f6bf)
+error: test failed, to rerun pass `-p drover --test host_words`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/host_words-a7ca65ecb603f6bf` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/hosts.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hosts-5429b8a4ec2b04ea)
+error: test failed, to rerun pass `-p drover --test hosts`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hosts-5429b8a4ec2b04ea` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/hotspots.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hotspots-272606f21fc1d13d)
+error: test failed, to rerun pass `-p drover --test hotspots`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hotspots-272606f21fc1d13d` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/hung_read.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hung_read-b4a385aff7fb3430)
+error: test failed, to rerun pass `-p drover --test hung_read`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hung_read-b4a385aff7fb3430` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/hung_root.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hung_root-40460c31aef92a2b)
+error: test failed, to rerun pass `-p drover --test hung_root`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/hung_root-40460c31aef92a2b` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/keychain_jam.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/keychain_jam-42d31108aadb4926)
+error: test failed, to rerun pass `-p drover --test keychain_jam`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/keychain_jam-42d31108aadb4926` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/kick.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/kick-a52b09312d6de200)
+error: test failed, to rerun pass `-p drover --test kick`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/kick-a52b09312d6de200` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/land.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/land-5c4f484434c65cb6)
+error: test failed, to rerun pass `-p drover --test land`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/land-5c4f484434c65cb6` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/lane_actions.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lane_actions-e43b2fd50688ac6e)
+error: test failed, to rerun pass `-p drover --test lane_actions`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lane_actions-e43b2fd50688ac6e` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/lane_asks.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lane_asks-7972b120110ded76)
+error: test failed, to rerun pass `-p drover --test lane_asks`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lane_asks-7972b120110ded76` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/lane_fold.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lane_fold-bf629992667a4954)
+error: test failed, to rerun pass `-p drover --test lane_fold`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lane_fold-bf629992667a4954` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/lane_hog.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lane_hog-e72f688192eab2d6)
+error: test failed, to rerun pass `-p drover --test lane_hog`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lane_hog-e72f688192eab2d6` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/lane_sandbox.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lane_sandbox-5b2983b1dfdcd184)
+error: test failed, to rerun pass `-p drover --test lane_sandbox`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lane_sandbox-5b2983b1dfdcd184` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/lanes_sheet.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lanes_sheet-b2269cd6e3d705bf)
+error: test failed, to rerun pass `-p drover --test lanes_sheet`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lanes_sheet-b2269cd6e3d705bf` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/lesson.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lesson-367f078327289914)
+error: test failed, to rerun pass `-p drover --test lesson`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lesson-367f078327289914` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/lifeboat.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lifeboat-2f0c0c346ca76b0d)
+error: test failed, to rerun pass `-p drover --test lifeboat`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/lifeboat-2f0c0c346ca76b0d` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/limits.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/limits-918c788d7e38c9f5)
+error: test failed, to rerun pass `-p drover --test limits`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/limits-918c788d7e38c9f5` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/live.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/live-a1032735bf97aa79)
+error: test failed, to rerun pass `-p drover --test live`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/live-a1032735bf97aa79` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/log_share.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/log_share-cf006c0c6370bf16)
+error: test failed, to rerun pass `-p drover --test log_share`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/log_share-cf006c0c6370bf16` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/m3.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/m3-8cf23bd5ea66eb49)
+error: test failed, to rerun pass `-p drover --test m3`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/m3-8cf23bd5ea66eb49` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/m3_fixes.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/m3_fixes-0efc70d9119b491d)
+error: test failed, to rerun pass `-p drover --test m3_fixes`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/m3_fixes-0efc70d9119b491d` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/merge.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/merge-12e3cad11cfcf0aa)
+error: test failed, to rerun pass `-p drover --test merge`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/merge-12e3cad11cfcf0aa` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/migrate.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/migrate-42338759b9c08b82)
+error: test failed, to rerun pass `-p drover --test migrate`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/migrate-42338759b9c08b82` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/needs_human.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/needs_human-ee7f784c11ed9422)
+error: test failed, to rerun pass `-p drover --test needs_human`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/needs_human-ee7f784c11ed9422` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/never_started.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/never_started-a0f69c1c21a2d60f)
+error: test failed, to rerun pass `-p drover --test never_started`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/never_started-a0f69c1c21a2d60f` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/offline_tick.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/offline_tick-189513a25301bc42)
+error: test failed, to rerun pass `-p drover --test offline_tick`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/offline_tick-189513a25301bc42` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orchestrator.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator-f7f7f6bf14042a32)
+error: test failed, to rerun pass `-p drover --test orchestrator`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator-f7f7f6bf14042a32` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orchestrator_adopt.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_adopt-549e2b188fdbb65f)
+error: test failed, to rerun pass `-p drover --test orchestrator_adopt`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_adopt-549e2b188fdbb65f` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orchestrator_attach.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_attach-47e558529a3a7f54)
+error: test failed, to rerun pass `-p drover --test orchestrator_attach`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_attach-47e558529a3a7f54` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orchestrator_cards.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_cards-bb176421d1149afa)
+error: test failed, to rerun pass `-p drover --test orchestrator_cards`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_cards-bb176421d1149afa` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orchestrator_cold_start.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_cold_start-d392cdbab8444fc8)
+error: test failed, to rerun pass `-p drover --test orchestrator_cold_start`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_cold_start-d392cdbab8444fc8` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orchestrator_default.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_default-93016b68dac76737)
+error: test failed, to rerun pass `-p drover --test orchestrator_default`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_default-93016b68dac76737` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orchestrator_lanes.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_lanes-ae7c50b99d94f2de)
+error: test failed, to rerun pass `-p drover --test orchestrator_lanes`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_lanes-ae7c50b99d94f2de` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orchestrator_names.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_names-ffdb3aea8b098f8a)
+error: test failed, to rerun pass `-p drover --test orchestrator_names`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_names-ffdb3aea8b098f8a` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orchestrator_reviews.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_reviews-611ec289f2c8f3e2)
+error: test failed, to rerun pass `-p drover --test orchestrator_reviews`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orchestrator_reviews-611ec289f2c8f3e2` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orphan_issue.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orphan_issue-d2db13aa5e07f209)
+error: test failed, to rerun pass `-p drover --test orphan_issue`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orphan_issue-d2db13aa5e07f209` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/orphans.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orphans-02ee06be3e7c8267)
+error: test failed, to rerun pass `-p drover --test orphans`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/orphans-02ee06be3e7c8267` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/outbox.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/outbox-43059ef89a5549a2)
+error: test failed, to rerun pass `-p drover --test outbox`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/outbox-43059ef89a5549a2` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/overlap.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/overlap-aba637521a37cc9e)
+error: test failed, to rerun pass `-p drover --test overlap`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/overlap-aba637521a37cc9e` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/owner_extend.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/owner_extend-d8c3f3a40ab99a6a)
+error: test failed, to rerun pass `-p drover --test owner_extend`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/owner_extend-d8c3f3a40ab99a6a` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/page.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/page-756dc3d1d710b671)
+error: test failed, to rerun pass `-p drover --test page`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/page-756dc3d1d710b671` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/page_drafts.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/page_drafts-47d76586c3291e91)
+error: test failed, to rerun pass `-p drover --test page_drafts`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/page_drafts-47d76586c3291e91` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/pair_status.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pair_status-32dc1eac1c600f7e)
+error: test failed, to rerun pass `-p drover --test pair_status`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pair_status-32dc1eac1c600f7e` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/parity_check.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/parity_check-be552fae983311ac)
+error: test failed, to rerun pass `-p drover --test parity_check`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/parity_check-be552fae983311ac` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/parity_webkit.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/parity_webkit-ae15b2b31f70f207)
+error: test failed, to rerun pass `-p drover --test parity_webkit`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/parity_webkit-ae15b2b31f70f207` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/parked.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/parked-20988abb5a9ca2c3)
+error: test failed, to rerun pass `-p drover --test parked`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/parked-20988abb5a9ca2c3` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/pass_budget.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pass_budget-f11b17e5483271f5)
+error: test failed, to rerun pass `-p drover --test pass_budget`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pass_budget-f11b17e5483271f5` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/pass_profile.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pass_profile-ff69c22e50fe362b)
+error: test failed, to rerun pass `-p drover --test pass_profile`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pass_profile-ff69c22e50fe362b` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/paused_delivery.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/paused_delivery-96be2b418d4a08b7)
+error: test failed, to rerun pass `-p drover --test paused_delivery`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/paused_delivery-96be2b418d4a08b7` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/pending_actions.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pending_actions-334c94e5edda56a2)
+error: test failed, to rerun pass `-p drover --test pending_actions`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pending_actions-334c94e5edda56a2` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/perf.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/perf-1e5437345f3e1134)
+error: test failed, to rerun pass `-p drover --test perf`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/perf-1e5437345f3e1134` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/pipeline.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pipeline-01678890f040d4e4)
+error: test failed, to rerun pass `-p drover --test pipeline`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pipeline-01678890f040d4e4` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/playbooks.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/playbooks-3d8236b1af0f4f97)
+error: test failed, to rerun pass `-p drover --test playbooks`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/playbooks-3d8236b1af0f4f97` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/pr_snapshot.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pr_snapshot-6ddbf3572af754c6)
+error: test failed, to rerun pass `-p drover --test pr_snapshot`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/pr_snapshot-6ddbf3572af754c6` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/proof.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/proof-81f6132ea99a6ddd)
+error: test failed, to rerun pass `-p drover --test proof`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/proof-81f6132ea99a6ddd` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/protection.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/protection-40fe871e13ea9652)
+error: test failed, to rerun pass `-p drover --test protection`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/protection-40fe871e13ea9652` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_blockers.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_blockers-a46ca7c1d2db095c)
+error: test failed, to rerun pass `-p drover --test queue_blockers`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_blockers-a46ca7c1d2db095c` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_board.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_board-ba744eb02cfaa116)
+error: test failed, to rerun pass `-p drover --test queue_board`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_board-ba744eb02cfaa116` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_cross_repo.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_cross_repo-4f35460c6d89afbb)
+error: test failed, to rerun pass `-p drover --test queue_cross_repo`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_cross_repo-4f35460c6d89afbb` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_graph.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_graph-820f9d9e003a4db7)
+error: test failed, to rerun pass `-p drover --test queue_graph`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_graph-820f9d9e003a4db7` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_lanes.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_lanes-35f8edac96bca77f)
+error: test failed, to rerun pass `-p drover --test queue_lanes`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_lanes-35f8edac96bca77f` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_titles.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_titles-7496ad02fbb626b2)
+error: test failed, to rerun pass `-p drover --test queue_titles`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/queue_titles-7496ad02fbb626b2` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/readme.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/readme-78083982c6cb29f0)
+error: test failed, to rerun pass `-p drover --test readme`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/readme-78083982c6cb29f0` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/reap.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/reap-ee554c6036782f5e)
+error: test failed, to rerun pass `-p drover --test reap`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/reap-ee554c6036782f5e` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/reclaim.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/reclaim-d21b22ea797429bc)
+error: test failed, to rerun pass `-p drover --test reclaim`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/reclaim-d21b22ea797429bc` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/remote_acp.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/remote_acp-843663b709850140)
+error: test failed, to rerun pass `-p drover --test remote_acp`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/remote_acp-843663b709850140` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/remote_exists.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/remote_exists-dce44a40e7b56cee)
+error: test failed, to rerun pass `-p drover --test remote_exists`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/remote_exists-dce44a40e7b56cee` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/remote_rules.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/remote_rules-dd0914d53933e2a9)
+error: test failed, to rerun pass `-p drover --test remote_rules`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/remote_rules-dd0914d53933e2a9` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/report.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/report-a6d237801796f145)
+error: test failed, to rerun pass `-p drover --test report`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/report-a6d237801796f145` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/repro.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/repro-6aa92ed2a90bf484)
+error: test failed, to rerun pass `-p drover --test repro`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/repro-6aa92ed2a90bf484` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/respawn_loop.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/respawn_loop-6ed847924374f89a)
+error: test failed, to rerun pass `-p drover --test respawn_loop`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/respawn_loop-6ed847924374f89a` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/respawn_pace.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/respawn_pace-47b0ef5f5c053f1a)
+error: test failed, to rerun pass `-p drover --test respawn_pace`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/respawn_pace-47b0ef5f5c053f1a` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/retired_keys.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/retired_keys-eb553727a712a35d)
+error: test failed, to rerun pass `-p drover --test retired_keys`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/retired_keys-eb553727a712a35d` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/roots.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/roots-b4e9e69d368462d2)
+error: test failed, to rerun pass `-p drover --test roots`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/roots-b4e9e69d368462d2` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/round_images.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/round_images-3ce8514b9900e293)
+error: test failed, to rerun pass `-p drover --test round_images`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/round_images-3ce8514b9900e293` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/run_card.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/run_card-eb833f9efc974cf3)
+error: test failed, to rerun pass `-p drover --test run_card`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/run_card-eb833f9efc974cf3` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/runner_limits.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/runner_limits-618a2e0ec2d8f446)
+error: test failed, to rerun pass `-p drover --test runner_limits`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/runner_limits-618a2e0ec2d8f446` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/runners.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/runners-fc4c0442055588f9)
+error: test failed, to rerun pass `-p drover --test runners`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/runners-fc4c0442055588f9` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/runtime_breaker.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/runtime_breaker-39f1a1e3b643c583)
+error: test failed, to rerun pass `-p drover --test runtime_breaker`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/runtime_breaker-39f1a1e3b643c583` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/schemes.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/schemes-119dd96960ceee49)
+error: test failed, to rerun pass `-p drover --test schemes`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/schemes-119dd96960ceee49` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/scratch.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/scratch-deb187c9e1e0c7af)
+error: test failed, to rerun pass `-p drover --test scratch`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/scratch-deb187c9e1e0c7af` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/self_update.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/self_update-776d573b86ff6d45)
+error: test failed, to rerun pass `-p drover --test self_update`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/self_update-776d573b86ff6d45` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/serial_groups.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serial_groups-b79f941690cd5343)
+error: test failed, to rerun pass `-p drover --test serial_groups`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serial_groups-b79f941690cd5343` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/serve_health.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serve_health-8702906f2598cd59)
+error: test failed, to rerun pass `-p drover --test serve_health`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serve_health-8702906f2598cd59` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/serve_load.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serve_load-5fadb9974b7fcc94)
+error: test failed, to rerun pass `-p drover --test serve_load`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serve_load-5fadb9974b7fcc94` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/serve_web.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serve_web-f6a54d46b4ac1235)
+error: test failed, to rerun pass `-p drover --test serve_web`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serve_web-f6a54d46b4ac1235` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/serve_workers.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serve_workers-0d86a1b2fa39a810)
+error: test failed, to rerun pass `-p drover --test serve_workers`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serve_workers-0d86a1b2fa39a810` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/serve_working_set.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serve_working_set-06a88abe45b8d070)
+error: test failed, to rerun pass `-p drover --test serve_working_set`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/serve_working_set-06a88abe45b8d070` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/service.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/service-d7d8018b8488d7f3)
+error: test failed, to rerun pass `-p drover --test service`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/service-d7d8018b8488d7f3` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/set_notify.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/set_notify-70235665455664fe)
+error: test failed, to rerun pass `-p drover --test set_notify`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/set_notify-70235665455664fe` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/setup_neutral.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/setup_neutral-3071bae54407c521)
+error: test failed, to rerun pass `-p drover --test setup_neutral`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/setup_neutral-3071bae54407c521` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/setup_terminal.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/setup_terminal-fdc27383b86ef006)
+error: test failed, to rerun pass `-p drover --test setup_terminal`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/setup_terminal-fdc27383b86ef006` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/shed.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/shed-10bafdf7b00bc8b1)
+error: test failed, to rerun pass `-p drover --test shed`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/shed-10bafdf7b00bc8b1` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/shed_native.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/shed_native-ef13cc59888ba5f4)
+error: test failed, to rerun pass `-p drover --test shed_native`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/shed_native-ef13cc59888ba5f4` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/shed_others.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/shed_others-3ce69f684b311723)
+error: test failed, to rerun pass `-p drover --test shed_others`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/shed_others-3ce69f684b311723` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/shed_version.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/shed_version-ad00fc31b94e2fe2)
+error: test failed, to rerun pass `-p drover --test shed_version`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/shed_version-ad00fc31b94e2fe2` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/sim/main.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/sim-477a3e0a0c69cb28)
+error: test failed, to rerun pass `-p drover --test sim`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/sim-477a3e0a0c69cb28` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/slo.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/slo-f7b1a466b8e4326c)
+error: test failed, to rerun pass `-p drover --test slo`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/slo-f7b1a466b8e4326c` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/soak.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/soak-40b4b07ad40e47d8)
+error: test failed, to rerun pass `-p drover --test soak`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/soak-40b4b07ad40e47d8` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/spawn.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/spawn-074358a3f8422620)
+error: test failed, to rerun pass `-p drover --test spawn`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/spawn-074358a3f8422620` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/spawn_force.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/spawn_force-b8ea85cf2ad95644)
+error: test failed, to rerun pass `-p drover --test spawn_force`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/spawn_force-b8ea85cf2ad95644` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/spawn_guard.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/spawn_guard-6789c1a56c1319a7)
+error: test failed, to rerun pass `-p drover --test spawn_guard`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/spawn_guard-6789c1a56c1319a7` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/ssh_deadline.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ssh_deadline-5ac1dd1a187b8958)
+error: test failed, to rerun pass `-p drover --test ssh_deadline`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ssh_deadline-5ac1dd1a187b8958` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/stale_rev.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/stale_rev-5095b01df0241656)
+error: test failed, to rerun pass `-p drover --test stale_rev`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/stale_rev-5095b01df0241656` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/stalled_host.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/stalled_host-27cef03c189ca55d)
+error: test failed, to rerun pass `-p drover --test stalled_host`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/stalled_host-27cef03c189ca55d` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/stalled_lanes.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/stalled_lanes-122634e8965a2a68)
+error: test failed, to rerun pass `-p drover --test stalled_lanes`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/stalled_lanes-122634e8965a2a68` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/state_db.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/state_db-81d8e9b020dbe5cf)
+error: test failed, to rerun pass `-p drover --test state_db`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/state_db-81d8e9b020dbe5cf` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/state_write.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/state_write-d9085a455459c68e)
+error: test failed, to rerun pass `-p drover --test state_write`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/state_write-d9085a455459c68e` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/store.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/store-ee3b111e904d0433)
+error: test failed, to rerun pass `-p drover --test store`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/store-ee3b111e904d0433` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/synergy.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/synergy-ce2c78b568c8b5ed)
+error: test failed, to rerun pass `-p drover --test synergy`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/synergy-ce2c78b568c8b5ed` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/term_adapter.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/term_adapter-a110f8a8e0613d65)
+error: test failed, to rerun pass `-p drover --test term_adapter`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/term_adapter-a110f8a8e0613d65` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/themes.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/themes-b8819d3fb3c0ab7f)
+error: test failed, to rerun pass `-p drover --test themes`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/themes-b8819d3fb3c0ab7f` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/thread_handoff.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/thread_handoff-11efde3b34298866)
+error: test failed, to rerun pass `-p drover --test thread_handoff`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/thread_handoff-11efde3b34298866` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/thread_refs.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/thread_refs-84b183ad9f5c2ff2)
+error: test failed, to rerun pass `-p drover --test thread_refs`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/thread_refs-84b183ad9f5c2ff2` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/threads_tab.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/threads_tab-87a3a7fe5bf7021c)
+error: test failed, to rerun pass `-p drover --test threads_tab`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/threads_tab-87a3a7fe5bf7021c` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/tick_dead_host.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/tick_dead_host-a24c01b946c648c4)
+error: test failed, to rerun pass `-p drover --test tick_dead_host`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/tick_dead_host-a24c01b946c648c4` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/tick_stuck.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/tick_stuck-1ba01cb1b4d33bdf)
+error: test failed, to rerun pass `-p drover --test tick_stuck`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/tick_stuck-1ba01cb1b4d33bdf` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/timer.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/timer-245ab8004e1308fa)
+error: test failed, to rerun pass `-p drover --test timer`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/timer-245ab8004e1308fa` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/timer_install.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/timer_install-c83e7c23ba25f0c4)
+error: test failed, to rerun pass `-p drover --test timer_install`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/timer_install-c83e7c23ba25f0c4` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/tmpdir.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/tmpdir-7672611102cca091)
+error: test failed, to rerun pass `-p drover --test tmpdir`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/tmpdir-7672611102cca091` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/top.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/top-edde604cc103a0ef)
+error: test failed, to rerun pass `-p drover --test top`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/top-edde604cc103a0ef` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/turn.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/turn-a77fb2a89f5f8cd9)
+error: test failed, to rerun pass `-p drover --test turn`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/turn-a77fb2a89f5f8cd9` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/typed_choice.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/typed_choice-34b78fb2c00083f3)
+error: test failed, to rerun pass `-p drover --test typed_choice`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/typed_choice-34b78fb2c00083f3` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/ui_audit_hang.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ui_audit_hang-f76dbf2549bc2fd1)
+error: test failed, to rerun pass `-p drover --test ui_audit_hang`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ui_audit_hang-f76dbf2549bc2fd1` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/ui_lock.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ui_lock-5a04b3e449550b6b)
+error: test failed, to rerun pass `-p drover --test ui_lock`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ui_lock-5a04b3e449550b6b` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/ui_tokens.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ui_tokens-c379081e29a5e6cb)
+error: test failed, to rerun pass `-p drover --test ui_tokens`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/ui_tokens-c379081e29a5e6cb` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/update_worktree.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/update_worktree-86bc37c0d7229399)
+error: test failed, to rerun pass `-p drover --test update_worktree`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/update_worktree-86bc37c0d7229399` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/url_links.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/url_links-058b14cfd0d35218)
+error: test failed, to rerun pass `-p drover --test url_links`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/url_links-058b14cfd0d35218` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/usage.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/usage-e6e685dc12554de6)
+error: test failed, to rerun pass `-p drover --test usage`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/usage-e6e685dc12554de6` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/verify_browser.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/verify_browser-7192d333314c8b10)
+error: test failed, to rerun pass `-p drover --test verify_browser`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/verify_browser-7192d333314c8b10` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/verify_stage.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/verify_stage-5d36b168d1c4fb35)
+error: test failed, to rerun pass `-p drover --test verify_stage`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/verify_stage-5d36b168d1c4fb35` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/waiting.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/waiting-aaa0fbafe2acd4b3)
+error: test failed, to rerun pass `-p drover --test waiting`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/waiting-aaa0fbafe2acd4b3` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/webhook.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/webhook-c5c8536631bc07e2)
+error: test failed, to rerun pass `-p drover --test webhook`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/webhook-c5c8536631bc07e2` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/webpush.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/webpush-8c326a0c9c29d043)
+error: test failed, to rerun pass `-p drover --test webpush`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/webpush-8c326a0c9c29d043` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/wedged.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/wedged-0710790f3ad18cf8)
+error: test failed, to rerun pass `-p drover --test wedged`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/wedged-0710790f3ad18cf8` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/why_briefs.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/why_briefs-1739d064d9ef1ed8)
+error: test failed, to rerun pass `-p drover --test why_briefs`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/why_briefs-1739d064d9ef1ed8` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/why_notes.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/why_notes-31b0d0b47175a8c8)
+error: test failed, to rerun pass `-p drover --test why_notes`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/why_notes-31b0d0b47175a8c8` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/working_set.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/working_set-36c598d343dd85f5)
+error: test failed, to rerun pass `-p drover --test working_set`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/working_set-36c598d343dd85f5` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drover_core-f60aa139aabcaf3d)
+error: test failed, to rerun pass `-p drover-core --lib`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drover_core-f60aa139aabcaf3d` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drover_server-53d6110f26722879)
+error: test failed, to rerun pass `-p drover-server --lib`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drover_server-53d6110f26722879` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/types.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/types-52fe4cfade934137)
+error: test failed, to rerun pass `-p drover-server --test types`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/types-52fe4cfade934137` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drover_service-eec028d2af3c80d6)
+error: test failed, to rerun pass `-p drover-service --lib`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drover_service-eec028d2af3c80d6` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drover_sys-54f5ed46dd175e4e)
+error: test failed, to rerun pass `-p drover-sys --lib`
+
+Caused by:
+  could not execute process `/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/drover_sys-54f5ed46dd175e4e` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+   Doc-tests drover
+error: doctest failed, to rerun pass `-p drover --doc`
+
+Caused by:
+  could not execute process `rustdoc --edition=2021 --crate-type lib --color auto --crate-name drover --test crates/cli/src/lib.rs --test-run-directory /home/user/.local/share/drover/work/drover/issue-1087/crates/cli -L native=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/build/libsqlite3-sys-d20c0d3e7e96655e/out '--warn=clippy::pedantic' '--deny=clippy::unwrap_used' --forbid=unsafe_code '--deny=clippy::unimplemented' '--allow=clippy::too_many_lines' '--allow=clippy::too_many_arguments' '--deny=clippy::todo' '--allow=clippy::struct_excessive_bools' '--deny=clippy::print_stdout' '--deny=clippy::print_stderr' '--deny=clippy::panic' '--allow=clippy::must_use_candidate' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::many_single_char_names' '--deny=clippy::let_underscore_must_use' '--deny=clippy::indexing_slicing' '--allow=clippy::format_push_string' '--allow=clippy::format_collect' '--deny=clippy::expect_used' '--deny=clippy::dbg_macro' '--allow=clippy::cast_precision_loss' '--deny=clippy::as_conversions' '--deny=clippy::allow_attributes_without_reason' --extern aes_gcm=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libaes_gcm-6cde08471ad16775.rlib --extern anyhow=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libanyhow-9d504ed04d9eda62.rlib --extern base64=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libbase64-4bab00af78c7b10d.rlib --extern drover=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover-e707754b29049fbb.rlib --extern drover_core=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_core-4c9469b041562f4b.rlib --extern drover_server=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_server-6cbdb17fbedb1be1.rlib --extern drover_service=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_service-81ad32a6d39246ed.rlib --extern drover_sys=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_sys-0c0581363e2c4c0b.rlib --extern hkdf=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libhkdf-df7142c2ca656c96.rlib --extern p256=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libp256-6a8d3e53474bdbfe.rlib --extern rusqlite=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/librusqlite-b685837510712938.rlib --extern serde=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libserde-9134ab2fa4f7654b.rlib --extern serde_json=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libserde_json-44c553481343c3bb.rlib --extern sha2=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libsha2-93d1d78eb732174b.rlib --extern toml=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libtoml-40fbbc5520321d73.rlib -L dependency=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' --error-format human` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+   Doc-tests drover_core
+error: doctest failed, to rerun pass `-p drover-core --doc`
+
+Caused by:
+  could not execute process `rustdoc --edition=2021 --crate-type lib --color auto --crate-name drover_core --test crates/core/src/lib.rs --test-run-directory /home/user/.local/share/drover/work/drover/issue-1087/crates/core -L native=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/build/libsqlite3-sys-d20c0d3e7e96655e/out '--warn=clippy::pedantic' '--deny=clippy::unwrap_used' --forbid=unsafe_code '--deny=clippy::unimplemented' '--allow=clippy::too_many_lines' '--allow=clippy::too_many_arguments' '--deny=clippy::todo' '--allow=clippy::struct_excessive_bools' '--deny=clippy::print_stdout' '--deny=clippy::print_stderr' '--deny=clippy::panic' '--allow=clippy::must_use_candidate' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::many_single_char_names' '--deny=clippy::let_underscore_must_use' '--deny=clippy::indexing_slicing' '--allow=clippy::format_push_string' '--allow=clippy::format_collect' '--deny=clippy::expect_used' '--deny=clippy::dbg_macro' '--allow=clippy::cast_precision_loss' '--deny=clippy::as_conversions' '--deny=clippy::allow_attributes_without_reason' --extern aes_gcm=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libaes_gcm-6cde08471ad16775.rlib --extern anyhow=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libanyhow-9d504ed04d9eda62.rlib --extern base64=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libbase64-4bab00af78c7b10d.rlib --extern clap=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libclap-f25664c828809355.rlib --extern drover_core=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_core-4c9469b041562f4b.rlib --extern drover_sys=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_sys-0c0581363e2c4c0b.rlib --extern hkdf=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libhkdf-df7142c2ca656c96.rlib --extern p256=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libp256-6a8d3e53474bdbfe.rlib --extern rusqlite=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/librusqlite-b685837510712938.rlib --extern serde=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libserde-9134ab2fa4f7654b.rlib --extern serde_json=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libserde_json-44c553481343c3bb.rlib --extern sha2=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libsha2-93d1d78eb732174b.rlib --extern shed_proto=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libshed_proto-2a34e796a8c61d62.rlib --extern toml=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libtoml-40fbbc5520321d73.rlib -L dependency=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("ts"))' --error-format human` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+   Doc-tests drover_server
+error: doctest failed, to rerun pass `-p drover-server --doc`
+
+Caused by:
+  could not execute process `rustdoc --edition=2021 --crate-type lib --color auto --crate-name drover_server --test crates/server/src/lib.rs --test-run-directory /home/user/.local/share/drover/work/drover/issue-1087/crates/server -L native=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/build/libsqlite3-sys-d20c0d3e7e96655e/out '--warn=clippy::pedantic' '--deny=clippy::unwrap_used' --forbid=unsafe_code '--deny=clippy::unimplemented' '--allow=clippy::too_many_lines' '--allow=clippy::too_many_arguments' '--deny=clippy::todo' '--allow=clippy::struct_excessive_bools' '--deny=clippy::print_stdout' '--deny=clippy::print_stderr' '--deny=clippy::panic' '--allow=clippy::must_use_candidate' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::many_single_char_names' '--deny=clippy::let_underscore_must_use' '--deny=clippy::indexing_slicing' '--allow=clippy::format_push_string' '--allow=clippy::format_collect' '--deny=clippy::expect_used' '--deny=clippy::dbg_macro' '--allow=clippy::cast_precision_loss' '--deny=clippy::as_conversions' '--deny=clippy::allow_attributes_without_reason' --extern anyhow=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libanyhow-9d504ed04d9eda62.rlib --extern base64=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libbase64-4bab00af78c7b10d.rlib --extern drover_core=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_core-4c9469b041562f4b.rlib --extern drover_server=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_server-6cbdb17fbedb1be1.rlib --extern drover_sys=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_sys-0c0581363e2c4c0b.rlib --extern serde=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libserde-9134ab2fa4f7654b.rlib --extern serde_json=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libserde_json-44c553481343c3bb.rlib --extern toml=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libtoml-40fbbc5520321d73.rlib -L dependency=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("ts"))' --error-format human` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+   Doc-tests drover_service
+error: doctest failed, to rerun pass `-p drover-service --doc`
+
+Caused by:
+  could not execute process `rustdoc --edition=2021 --crate-type lib --color auto --crate-name drover_service --test crates/service/src/lib.rs --test-run-directory /home/user/.local/share/drover/work/drover/issue-1087/crates/service -L native=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/build/libsqlite3-sys-d20c0d3e7e96655e/out '--warn=clippy::pedantic' '--deny=clippy::unwrap_used' --forbid=unsafe_code '--deny=clippy::unimplemented' '--allow=clippy::too_many_lines' '--allow=clippy::too_many_arguments' '--deny=clippy::todo' '--allow=clippy::struct_excessive_bools' '--deny=clippy::print_stdout' '--deny=clippy::print_stderr' '--deny=clippy::panic' '--allow=clippy::must_use_candidate' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::many_single_char_names' '--deny=clippy::let_underscore_must_use' '--deny=clippy::indexing_slicing' '--allow=clippy::format_push_string' '--allow=clippy::format_collect' '--deny=clippy::expect_used' '--deny=clippy::dbg_macro' '--allow=clippy::cast_precision_loss' '--deny=clippy::as_conversions' '--deny=clippy::allow_attributes_without_reason' --extern anyhow=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libanyhow-9d504ed04d9eda62.rlib --extern drover_core=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_core-4c9469b041562f4b.rlib --extern drover_server=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_server-6cbdb17fbedb1be1.rlib --extern drover_service=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_service-81ad32a6d39246ed.rlib --extern serde_json=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libserde_json-44c553481343c3bb.rlib --extern tokio=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libtokio-8895e71beda881f8.rlib -L dependency=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' --error-format human` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+   Doc-tests drover_sys
+error: doctest failed, to rerun pass `-p drover-sys --doc`
+
+Caused by:
+  could not execute process `rustdoc --edition=2021 --crate-type lib --color auto --crate-name drover_sys --test crates/sys/src/lib.rs --test-run-directory /home/user/.local/share/drover/work/drover/issue-1087/crates/sys -L native=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/build/libsqlite3-sys-d20c0d3e7e96655e/out '--warn=clippy::pedantic' '--deny=clippy::unwrap_used' --deny=unsafe_op_in_unsafe_fn '--deny=clippy::unimplemented' '--deny=clippy::undocumented_unsafe_blocks' '--deny=clippy::todo' '--deny=clippy::print_stdout' '--deny=clippy::print_stderr' '--deny=clippy::panic' '--allow=clippy::must_use_candidate' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--deny=clippy::let_underscore_must_use' '--deny=clippy::indexing_slicing' '--deny=clippy::expect_used' '--deny=clippy::dbg_macro' '--deny=clippy::as_conversions' '--deny=clippy::allow_attributes_without_reason' --extern drover_sys=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/libdrover_sys-0c0581363e2c4c0b.rlib -L dependency=/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' --error-format human` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+error: 173 targets failed:
+    `-p drover --test drive`
+    `-p drover --test dsh`
+    `-p drover --test dsh_unit`
+    `-p drover --test empty_env`
+    `-p drover --test events_log`
+    `-p drover --test events_tab`
+    `-p drover --test fleet_cards`
+    `-p drover --test fleet_notify`
+    `-p drover --test fleet_rename`
+    `-p drover --test form_only`
+    `-p drover --test gate_unit`
+    `-p drover --test generic_harness`
+    `-p drover --test gh_links`
+    `-p drover --test handover`
+    `-p drover --test heavy`
+    `-p drover --test herd`
+    `-p drover --test hermes_hooks`
+    `-p drover --test history`
+    `-p drover --test hook`
+    `-p drover --test host_deadline`
+    `-p drover --test host_history`
+    `-p drover --test host_offline`
+    `-p drover --test host_slots`
+    `-p drover --test host_spared`
+    `-p drover --test host_tab`
+    `-p drover --test host_words`
+    `-p drover --test hosts`
+    `-p drover --test hotspots`
+    `-p drover --test hung_read`
+    `-p drover --test hung_root`
+    `-p drover --test keychain_jam`
+    `-p drover --test kick`
+    `-p drover --test land`
+    `-p drover --test lane_actions`
+    `-p drover --test lane_asks`
+    `-p drover --test lane_fold`
+    `-p drover --test lane_hog`
+    `-p drover --test lane_sandbox`
+    `-p drover --test lanes_sheet`
+    `-p drover --test lesson`
+    `-p drover --test lifeboat`
+    `-p drover --test limits`
+    `-p drover --test live`
+    `-p drover --test log_share`
+    `-p drover --test m3`
+    `-p drover --test m3_fixes`
+    `-p drover --test merge`
+    `-p drover --test migrate`
+    `-p drover --test needs_human`
+    `-p drover --test never_started`
+    `-p drover --test offline_tick`
+    `-p drover --test orchestrator`
+    `-p drover --test orchestrator_adopt`
+    `-p drover --test orchestrator_attach`
+    `-p drover --test orchestrator_cards`
+    `-p drover --test orchestrator_cold_start`
+    `-p drover --test orchestrator_default`
+    `-p drover --test orchestrator_lanes`
+    `-p drover --test orchestrator_names`
+    `-p drover --test orchestrator_reviews`
+    `-p drover --test orphan_issue`
+    `-p drover --test orphans`
+    `-p drover --test outbox`
+    `-p drover --test overlap`
+    `-p drover --test owner_extend`
+    `-p drover --test page`
+    `-p drover --test page_drafts`
+    `-p drover --test pair_status`
+    `-p drover --test parity_check`
+    `-p drover --test parity_webkit`
+    `-p drover --test parked`
+    `-p drover --test pass_budget`
+    `-p drover --test pass_profile`
+    `-p drover --test paused_delivery`
+    `-p drover --test pending_actions`
+    `-p drover --test perf`
+    `-p drover --test pipeline`
+    `-p drover --test playbooks`
+    `-p drover --test pr_snapshot`
+    `-p drover --test proof`
+    `-p drover --test protection`
+    `-p drover --test queue_blockers`
+    `-p drover --test queue_board`
+    `-p drover --test queue_cross_repo`
+    `-p drover --test queue_graph`
+    `-p drover --test queue_lanes`
+    `-p drover --test queue_titles`
+    `-p drover --test readme`
+    `-p drover --test reap`
+    `-p drover --test reclaim`
+    `-p drover --test remote_acp`
+    `-p drover --test remote_exists`
+    `-p drover --test remote_rules`
+    `-p drover --test report`
+    `-p drover --test repro`
+    `-p drover --test respawn_loop`
+    `-p drover --test respawn_pace`
+    `-p drover --test retired_keys`
+    `-p drover --test roots`
+    `-p drover --test round_images`
+    `-p drover --test run_card`
+    `-p drover --test runner_limits`
+    `-p drover --test runners`
+    `-p drover --test runtime_breaker`
+    `-p drover --test schemes`
+    `-p drover --test scratch`
+    `-p drover --test self_update`
+    `-p drover --test serial_groups`
+    `-p drover --test serve_health`
+    `-p drover --test serve_load`
+    `-p drover --test serve_web`
+    `-p drover --test serve_workers`
+    `-p drover --test serve_working_set`
+    `-p drover --test service`
+    `-p drover --test set_notify`
+    `-p drover --test setup_neutral`
+    `-p drover --test setup_terminal`
+    `-p drover --test shed`
+    `-p drover --test shed_native`
+    `-p drover --test shed_others`
+    `-p drover --test shed_version`
+    `-p drover --test sim`
+    `-p drover --test slo`
+    `-p drover --test soak`
+    `-p drover --test spawn`
+    `-p drover --test spawn_force`
+    `-p drover --test spawn_guard`
+    `-p drover --test ssh_deadline`
+    `-p drover --test stale_rev`
+    `-p drover --test stalled_host`
+    `-p drover --test stalled_lanes`
+    `-p drover --test state_db`
+    `-p drover --test state_write`
+    `-p drover --test store`
+    `-p drover --test synergy`
+    `-p drover --test term_adapter`
+    `-p drover --test themes`
+    `-p drover --test thread_handoff`
+    `-p drover --test thread_refs`
+    `-p drover --test threads_tab`
+    `-p drover --test tick_dead_host`
+    `-p drover --test tick_stuck`
+    `-p drover --test timer`
+    `-p drover --test timer_install`
+    `-p drover --test tmpdir`
+    `-p drover --test top`
+    `-p drover --test turn`
+    `-p drover --test typed_choice`
+    `-p drover --test ui_audit_hang`
+    `-p drover --test ui_lock`
+    `-p drover --test ui_tokens`
+    `-p drover --test update_worktree`
+    `-p drover --test url_links`
+    `-p drover --test usage`
+    `-p drover --test verify_browser`
+    `-p drover --test verify_stage`
+    `-p drover --test waiting`
+    `-p drover --test webhook`
+    `-p drover --test webpush`
+    `-p drover --test wedged`
+    `-p drover --test why_briefs`
+    `-p drover --test why_notes`
+    `-p drover --test working_set`
+    `-p drover-core --lib`
+    `-p drover-server --lib`
+    `-p drover-server --test types`
+    `-p drover-service --lib`
+    `-p drover-sys --lib`
+    `-p drover --doc`
+    `-p drover-core --doc`
+    `-p drover-server --doc`
+    `-p drover-service --doc`
+    `-p drover-sys --doc`

@@ -1,0 +1,1017 @@
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* issue-1087 ci jirathip-dev/drover#1116 · 43854346732
+Triggered via pull_request less than a minute ago
+
+JOBS
+* ui (ID 133254644259)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  * build (debug, the profile its tests build; the release build is the rust job's only)
+  * demo export
+  * chrome-headless-shell
+  * the lifeboat page for the audit (#725)
+  * ui audit at 390 px (and 1440,
+  * Chrome hangs
+  * the page in Chrome on the real server (#927: answer, run cards, pause/resume, stop, Fleets, offline)
+  * the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
+  * Run actions/upload-artifact@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+* rust (ID 133254644527)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  * Run actions/setup-node@v4
+  * build
+  * fmt
+  * clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/; #809: banned APIs in non-test code)
+  * banned-API fixtures (#809: each ci/lint-fixtures/rust/<lint>.rs fails clippy under the workspace [lints])
+  * test shards (#1162: every test target is in exactly one shard of scripts/test-shards.txt)
+  * perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)
+  * soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)
+  * demo export (#39, synthetic data in demo/)
+  * leak gate (no ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the exported demo)
+  * deps gate (direct deps ⊆ the allow-list in docs/serve.md)
+  * layers (#264; core never depends on server or cli, server never on cli;
+  * release has no ts-rs (#375: the TS bindings' dep is behind the `ts` feature)
+  * Run taiki-e/install-action@v2
+  * deny (#808: licences, advisories, duplicate versions, sources; deny.toml)
+  * TS types (#375): serde's JSON type-checks with tsc, no hand-written copies (#973: arch-check's `generated` catches drift)
+  * no Rust HTML (#269): crates/server builds the page shell only; the TypeScript board draws every tab
+  * timing check (#844): every core timing is a [limits] key; no hard-coded Duration in crates/core/src
+  * parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`
+  * workflow diagram (#845): docs/workflow.md is `drover diagram`'s output
+  * line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
+  * arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)
+  * lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)
+  * assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+✓ changes in 7s (ID 133254644651)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run if [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* test (shard 1/4) (ID 133254644673)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  * test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  * no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+* test (shard 2/4) (ID 133254644676)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  * test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  * no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+✓ actionlint in 6s (ID 133254644697)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ actionlint (.github/workflows/**)
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* test (shard 3/4) (ID 133254644836)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  * Run dtolnay/rust-toolchain@1.99.1
+  * Run Swatinem/rust-cache@v2
+  * Run actions/setup-node@v4
+  * Run taiki-e/install-action@v2
+  * test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  * no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  * Post Run actions/checkout@v4
+✓ web in 10s (ID 133254644842)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run actions/setup-node@v4
+  ✓ install (pinned typescript + esbuild, package-lock.json)
+  ✓ typecheck (tsc --strict --noEmit)
+  ✓ banned TypeScript (#809: lint.mjs on src, and each lint-fixtures/<name>.ts fails it)
+  ✓ build, and the committed dist is that build
+  ✓ web TypeScript lines (soft budget, reported only;
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* test (shard 4/4) (ID 133254645052)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  * Run dtolnay/rust-toolchain@1.99.1
+  * Run Swatinem/rust-cache@v2
+  * Run actions/setup-node@v4
+  * Run taiki-e/install-action@v2
+  * test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  * no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  * Post Run actions/checkout@v4
+* ui-webkit (ID 133254718072)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  * Run dtolnay/rust-toolchain@1.99.1
+  * Run Swatinem/rust-cache@v2
+  * Run actions/setup-node@v4
+  * playwright webkit
+  * first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
+  * a thread tap and a thread push open the thread; back returns (#1088)
+  * parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)
+  * parity rows red until their fix (#1094: each #[ignore] names its issue; soft)
+  * url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)
+  * typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65)
+  * the thread view in WebKit (#1086,
+  * Post Run actions/checkout@v4
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+changes: .github#4
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+changes: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+actionlint: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+actionlint: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+web: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+web: .github#1
+
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* issue-1087 ci jirathip-dev/drover#1116 · 43854346732
+Triggered via pull_request about 1 minute ago
+
+JOBS
+* ui (ID 133254644259)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ build (debug, the profile its tests build; the release build is the rust job's only)
+  ✓ demo export
+  ✓ chrome-headless-shell
+  ✓ the lifeboat page for the audit (#725)
+  * ui audit at 390 px (and 1440,
+  * Chrome hangs
+  * the page in Chrome on the real server (#927: answer, run cards, pause/resume, stop, Fleets, offline)
+  * the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
+  * Run actions/upload-artifact@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+* rust (ID 133254644527)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  * build
+  * fmt
+  * clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/; #809: banned APIs in non-test code)
+  * banned-API fixtures (#809: each ci/lint-fixtures/rust/<lint>.rs fails clippy under the workspace [lints])
+  * test shards (#1162: every test target is in exactly one shard of scripts/test-shards.txt)
+  * perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)
+  * soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)
+  * demo export (#39, synthetic data in demo/)
+  * leak gate (no ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the exported demo)
+  * deps gate (direct deps ⊆ the allow-list in docs/serve.md)
+  * layers (#264; core never depends on server or cli, server never on cli;
+  * release has no ts-rs (#375: the TS bindings' dep is behind the `ts` feature)
+  * Run taiki-e/install-action@v2
+  * deny (#808: licences, advisories, duplicate versions, sources; deny.toml)
+  * TS types (#375): serde's JSON type-checks with tsc, no hand-written copies (#973: arch-check's `generated` catches drift)
+  * no Rust HTML (#269): crates/server builds the page shell only; the TypeScript board draws every tab
+  * timing check (#844): every core timing is a [limits] key; no hard-coded Duration in crates/core/src
+  * parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`
+  * workflow diagram (#845): docs/workflow.md is `drover diagram`'s output
+  * line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
+  * arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)
+  * lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)
+  * assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+✓ changes in 7s (ID 133254644651)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run if [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* test (shard 1/4) (ID 133254644673)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  * test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  * no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+* test (shard 2/4) (ID 133254644676)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  * test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  * no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+✓ actionlint in 6s (ID 133254644697)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ actionlint (.github/workflows/**)
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* test (shard 3/4) (ID 133254644836)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  * test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  * no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+✓ web in 10s (ID 133254644842)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run actions/setup-node@v4
+  ✓ install (pinned typescript + esbuild, package-lock.json)
+  ✓ typecheck (tsc --strict --noEmit)
+  ✓ banned TypeScript (#809: lint.mjs on src, and each lint-fixtures/<name>.ts fails it)
+  ✓ build, and the committed dist is that build
+  ✓ web TypeScript lines (soft budget, reported only;
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* test (shard 4/4) (ID 133254645052)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  * test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  * no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+* ui-webkit (ID 133254718072)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ playwright webkit
+  * first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
+  * a thread tap and a thread push open the thread; back returns (#1088)
+  * parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)
+  * parity rows red until their fix (#1094: each #[ignore] names its issue; soft)
+  * url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)
+  * typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65)
+  * the thread view in WebKit (#1086,
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+changes: .github#4
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+changes: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+actionlint: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+actionlint: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+web: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+web: .github#1
+
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* issue-1087 ci jirathip-dev/drover#1116 · 43854346732
+Triggered via pull_request about 2 minutes ago
+
+JOBS
+✓ ui in 1m52s (ID 133254644259)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ build (debug, the profile its tests build; the release build is the rust job's only)
+  ✓ demo export
+  ✓ chrome-headless-shell
+  ✓ the lifeboat page for the audit (#725)
+  ✓ ui audit at 390 px (and 1440,
+  ✓ Chrome hangs
+  ✓ the page in Chrome on the real server (#927: answer, run cards, pause/resume, stop, Fleets, offline)
+  ✓ the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
+  ✓ Run actions/upload-artifact@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* rust (ID 133254644527)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  * build
+  * fmt
+  * clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/; #809: banned APIs in non-test code)
+  * banned-API fixtures (#809: each ci/lint-fixtures/rust/<lint>.rs fails clippy under the workspace [lints])
+  * test shards (#1162: every test target is in exactly one shard of scripts/test-shards.txt)
+  * perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)
+  * soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)
+  * demo export (#39, synthetic data in demo/)
+  * leak gate (no ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the exported demo)
+  * deps gate (direct deps ⊆ the allow-list in docs/serve.md)
+  * layers (#264; core never depends on server or cli, server never on cli;
+  * release has no ts-rs (#375: the TS bindings' dep is behind the `ts` feature)
+  * Run taiki-e/install-action@v2
+  * deny (#808: licences, advisories, duplicate versions, sources; deny.toml)
+  * TS types (#375): serde's JSON type-checks with tsc, no hand-written copies (#973: arch-check's `generated` catches drift)
+  * no Rust HTML (#269): crates/server builds the page shell only; the TypeScript board draws every tab
+  * timing check (#844): every core timing is a [limits] key; no hard-coded Duration in crates/core/src
+  * parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`
+  * workflow diagram (#845): docs/workflow.md is `drover diagram`'s output
+  * line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
+  * arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)
+  * lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)
+  * assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+✓ changes in 7s (ID 133254644651)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run if [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* test (shard 1/4) (ID 133254644673)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  * test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  * no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+✓ test (shard 2/4) in 1m59s (ID 133254644676)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ actionlint in 6s (ID 133254644697)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ actionlint (.github/workflows/**)
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 3/4) in 1m53s (ID 133254644836)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ web in 10s (ID 133254644842)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run actions/setup-node@v4
+  ✓ install (pinned typescript + esbuild, package-lock.json)
+  ✓ typecheck (tsc --strict --noEmit)
+  ✓ banned TypeScript (#809: lint.mjs on src, and each lint-fixtures/<name>.ts fails it)
+  ✓ build, and the committed dist is that build
+  ✓ web TypeScript lines (soft budget, reported only;
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* test (shard 4/4) (ID 133254645052)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  * test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  * no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+* ui-webkit (ID 133254718072)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ playwright webkit
+  ✓ first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
+  ✓ a thread tap and a thread push open the thread; back returns (#1088)
+  ✓ parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)
+  ✓ parity rows red until their fix (#1094: each #[ignore] names its issue; soft)
+  ✓ url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)
+  ✓ typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65)
+  * the thread view in WebKit (#1086,
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+- ui-flaky in 0s (ID 133255755305)
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+changes: .github#4
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+changes: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+actionlint: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+actionlint: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+web: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+web: .github#1
+
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* issue-1087 ci jirathip-dev/drover#1116 · 43854346732
+Triggered via pull_request about 3 minutes ago
+
+JOBS
+✓ ui in 1m52s (ID 133254644259)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ build (debug, the profile its tests build; the release build is the rust job's only)
+  ✓ demo export
+  ✓ chrome-headless-shell
+  ✓ the lifeboat page for the audit (#725)
+  ✓ ui audit at 390 px (and 1440,
+  ✓ Chrome hangs
+  ✓ the page in Chrome on the real server (#927: answer, run cards, pause/resume, stop, Fleets, offline)
+  ✓ the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
+  ✓ Run actions/upload-artifact@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* rust (ID 133254644527)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ build
+  ✓ fmt
+  ✓ clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/; #809: banned APIs in non-test code)
+  ✓ banned-API fixtures (#809: each ci/lint-fixtures/rust/<lint>.rs fails clippy under the workspace [lints])
+  ✓ test shards (#1162: every test target is in exactly one shard of scripts/test-shards.txt)
+  * perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)
+  * soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)
+  * demo export (#39, synthetic data in demo/)
+  * leak gate (no ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the exported demo)
+  * deps gate (direct deps ⊆ the allow-list in docs/serve.md)
+  * layers (#264; core never depends on server or cli, server never on cli;
+  * release has no ts-rs (#375: the TS bindings' dep is behind the `ts` feature)
+  * Run taiki-e/install-action@v2
+  * deny (#808: licences, advisories, duplicate versions, sources; deny.toml)
+  * TS types (#375): serde's JSON type-checks with tsc, no hand-written copies (#973: arch-check's `generated` catches drift)
+  * no Rust HTML (#269): crates/server builds the page shell only; the TypeScript board draws every tab
+  * timing check (#844): every core timing is a [limits] key; no hard-coded Duration in crates/core/src
+  * parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`
+  * workflow diagram (#845): docs/workflow.md is `drover diagram`'s output
+  * line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
+  * arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)
+  * lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)
+  * assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+✓ changes in 7s (ID 133254644651)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run if [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 1/4) in 3m22s (ID 133254644673)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 2/4) in 1m59s (ID 133254644676)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ actionlint in 6s (ID 133254644697)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ actionlint (.github/workflows/**)
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 3/4) in 1m53s (ID 133254644836)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ web in 10s (ID 133254644842)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run actions/setup-node@v4
+  ✓ install (pinned typescript + esbuild, package-lock.json)
+  ✓ typecheck (tsc --strict --noEmit)
+  ✓ banned TypeScript (#809: lint.mjs on src, and each lint-fixtures/<name>.ts fails it)
+  ✓ build, and the committed dist is that build
+  ✓ web TypeScript lines (soft budget, reported only;
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 4/4) in 2m27s (ID 133254645052)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ ui-webkit in 2m25s (ID 133254718072)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ playwright webkit
+  ✓ first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
+  ✓ a thread tap and a thread push open the thread; back returns (#1088)
+  ✓ parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)
+  ✓ parity rows red until their fix (#1094: each #[ignore] names its issue; soft)
+  ✓ url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)
+  ✓ typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65)
+  ✓ the thread view in WebKit (#1086,
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+- ui-flaky in 0s (ID 133255755305)
+✓ test in 3s (ID 133256389277)
+  ✓ Set up job
+  ✓ Run test "success" = success
+  ✓ Complete job
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+changes: .github#4
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+changes: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+actionlint: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+actionlint: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+web: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+web: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+test: .github#1
+
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* issue-1087 ci jirathip-dev/drover#1116 · 43854346732
+Triggered via pull_request about 4 minutes ago
+
+JOBS
+✓ ui in 1m52s (ID 133254644259)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ build (debug, the profile its tests build; the release build is the rust job's only)
+  ✓ demo export
+  ✓ chrome-headless-shell
+  ✓ the lifeboat page for the audit (#725)
+  ✓ ui audit at 390 px (and 1440,
+  ✓ Chrome hangs
+  ✓ the page in Chrome on the real server (#927: answer, run cards, pause/resume, stop, Fleets, offline)
+  ✓ the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
+  ✓ Run actions/upload-artifact@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+* rust (ID 133254644527)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ build
+  ✓ fmt
+  ✓ clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/; #809: banned APIs in non-test code)
+  ✓ banned-API fixtures (#809: each ci/lint-fixtures/rust/<lint>.rs fails clippy under the workspace [lints])
+  ✓ test shards (#1162: every test target is in exactly one shard of scripts/test-shards.txt)
+  ✓ perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)
+  - soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)
+  ✓ demo export (#39, synthetic data in demo/)
+  ✓ leak gate (no ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the exported demo)
+  ✓ deps gate (direct deps ⊆ the allow-list in docs/serve.md)
+  ✓ layers (#264; core never depends on server or cli, server never on cli;
+  ✓ release has no ts-rs (#375: the TS bindings' dep is behind the `ts` feature)
+  ✓ Run taiki-e/install-action@v2
+  ✓ deny (#808: licences, advisories, duplicate versions, sources; deny.toml)
+  * TS types (#375): serde's JSON type-checks with tsc, no hand-written copies (#973: arch-check's `generated` catches drift)
+  * no Rust HTML (#269): crates/server builds the page shell only; the TypeScript board draws every tab
+  * timing check (#844): every core timing is a [limits] key; no hard-coded Duration in crates/core/src
+  * parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`
+  * workflow diagram (#845): docs/workflow.md is `drover diagram`'s output
+  * line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
+  * arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)
+  * lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)
+  * assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
+  * Post Run actions/setup-node@v4
+  * Post Run Swatinem/rust-cache@v2
+  * Post Run actions/checkout@v4
+✓ changes in 7s (ID 133254644651)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run if [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 1/4) in 3m22s (ID 133254644673)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 2/4) in 1m59s (ID 133254644676)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ actionlint in 6s (ID 133254644697)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ actionlint (.github/workflows/**)
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 3/4) in 1m53s (ID 133254644836)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ web in 10s (ID 133254644842)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run actions/setup-node@v4
+  ✓ install (pinned typescript + esbuild, package-lock.json)
+  ✓ typecheck (tsc --strict --noEmit)
+  ✓ banned TypeScript (#809: lint.mjs on src, and each lint-fixtures/<name>.ts fails it)
+  ✓ build, and the committed dist is that build
+  ✓ web TypeScript lines (soft budget, reported only;
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 4/4) in 2m27s (ID 133254645052)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ ui-webkit in 2m25s (ID 133254718072)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ playwright webkit
+  ✓ first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
+  ✓ a thread tap and a thread push open the thread; back returns (#1088)
+  ✓ parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)
+  ✓ parity rows red until their fix (#1094: each #[ignore] names its issue; soft)
+  ✓ url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)
+  ✓ typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65)
+  ✓ the thread view in WebKit (#1086,
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+- ui-flaky in 0s (ID 133255755305)
+✓ test in 3s (ID 133256389277)
+  ✓ Set up job
+  ✓ Run test "success" = success
+  ✓ Complete job
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+changes: .github#4
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+changes: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+actionlint: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+actionlint: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+web: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+web: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+test: .github#1
+
+✓ issue-1087 ci jirathip-dev/drover#1116 · 43854346732
+Triggered via pull_request about 5 minutes ago
+
+JOBS
+✓ ui in 1m52s (ID 133254644259)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ build (debug, the profile its tests build; the release build is the rust job's only)
+  ✓ demo export
+  ✓ chrome-headless-shell
+  ✓ the lifeboat page for the audit (#725)
+  ✓ ui audit at 390 px (and 1440,
+  ✓ Chrome hangs
+  ✓ the page in Chrome on the real server (#927: answer, run cards, pause/resume, stop, Fleets, offline)
+  ✓ the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
+  ✓ Run actions/upload-artifact@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ rust in 5m13s (ID 133254644527)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ build
+  ✓ fmt
+  ✓ clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/; #809: banned APIs in non-test code)
+  ✓ banned-API fixtures (#809: each ci/lint-fixtures/rust/<lint>.rs fails clippy under the workspace [lints])
+  ✓ test shards (#1162: every test target is in exactly one shard of scripts/test-shards.txt)
+  ✓ perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)
+  - soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)
+  ✓ demo export (#39, synthetic data in demo/)
+  ✓ leak gate (no ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the exported demo)
+  ✓ deps gate (direct deps ⊆ the allow-list in docs/serve.md)
+  ✓ layers (#264; core never depends on server or cli, server never on cli;
+  ✓ release has no ts-rs (#375: the TS bindings' dep is behind the `ts` feature)
+  ✓ Run taiki-e/install-action@v2
+  ✓ deny (#808: licences, advisories, duplicate versions, sources; deny.toml)
+  ✓ TS types (#375): serde's JSON type-checks with tsc, no hand-written copies (#973: arch-check's `generated` catches drift)
+  ✓ no Rust HTML (#269): crates/server builds the page shell only; the TypeScript board draws every tab
+  ✓ timing check (#844): every core timing is a [limits] key; no hard-coded Duration in crates/core/src
+  ✓ parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`
+  ✓ workflow diagram (#845): docs/workflow.md is `drover diagram`'s output
+  ✓ line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
+  ✓ arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)
+  ✓ lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)
+  ✓ assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ changes in 7s (ID 133254644651)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run if [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 1/4) in 3m22s (ID 133254644673)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 2/4) in 1m59s (ID 133254644676)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ actionlint in 6s (ID 133254644697)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ actionlint (.github/workflows/**)
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 3/4) in 1m53s (ID 133254644836)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ web in 10s (ID 133254644842)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run actions/setup-node@v4
+  ✓ install (pinned typescript + esbuild, package-lock.json)
+  ✓ typecheck (tsc --strict --noEmit)
+  ✓ banned TypeScript (#809: lint.mjs on src, and each lint-fixtures/<name>.ts fails it)
+  ✓ build, and the committed dist is that build
+  ✓ web TypeScript lines (soft budget, reported only;
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ test (shard 4/4) in 2m27s (ID 133254645052)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ Run taiki-e/install-action@v2
+  ✓ test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary; #957: nextest runs the test binaries side by side)
+  ✓ no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+✓ ui-webkit in 2m25s (ID 133254718072)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Run dtolnay/rust-toolchain@1.99.1
+  ✓ Run Swatinem/rust-cache@v2
+  ✓ Run actions/setup-node@v4
+  ✓ playwright webkit
+  ✓ first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
+  ✓ a thread tap and a thread push open the thread; back returns (#1088)
+  ✓ parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)
+  ✓ parity rows red until their fix (#1094: each #[ignore] names its issue; soft)
+  ✓ url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)
+  ✓ typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65)
+  ✓ the thread view in WebKit (#1086,
+  ✓ Post Run actions/setup-node@v4
+  ✓ Post Run Swatinem/rust-cache@v2
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+- ui-flaky in 0s (ID 133255755305)
+✓ test in 3s (ID 133256389277)
+  ✓ Set up job
+  ✓ Run test "success" = success
+  ✓ Complete job
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+changes: .github#4
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+changes: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+actionlint: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+actionlint: .github#1
+
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+web: .github#2
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+web: .github#1
+
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748"
+test: .github#1
+

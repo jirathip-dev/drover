@@ -1,0 +1,166 @@
+   Compiling subtle v2.6.1
+   Compiling libc v0.2.191
+   Compiling zeroize v1.9.1
+   Compiling typenum v1.20.1
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling cfg-if v1.0.5
+   Compiling cmov v0.5.4
+   Compiling proc-macro2 v1.0.107
+   Compiling ctutils v0.4.7
+   Compiling const-oid v0.10.2
+   Compiling hybrid-array v0.4.15
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling cpubits v0.1.1
+   Compiling autocfg v1.5.1
+   Compiling block-buffer v0.12.1
+   Compiling num-traits v0.2.19
+   Compiling serde_core v1.0.229
+   Compiling syn v3.0.9
+   Compiling crypto-common v0.2.2
+   Compiling crypto-bigint v0.7.10
+   Compiling digest v0.11.3
+   Compiling ff v0.14.0
+   Compiling serde v1.0.229
+   Compiling hmac v0.13.0
+   Compiling der v0.8.3
+   Compiling cpufeatures v0.3.1
+   Compiling foldhash v0.2.0
+   Compiling hashbrown v0.17.1
+   Compiling group v0.14.0
+   Compiling inout v0.2.5
+   Compiling shlex v2.0.1
+   Compiling base16ct v1.0.0
+   Compiling find-msvc-tools v0.1.15
+   Compiling hkdf v0.13.0
+   Compiling sec1 v0.8.1
+   Compiling utf8parse v0.2.2
+   Compiling cc v1.11.0
+   Compiling pkg-config v0.3.34
+   Compiling vcpkg v0.2.15
+   Compiling serde_derive v1.0.229
+   Compiling zmij v1.0.23
+   Compiling elliptic-curve v0.14.3
+   Compiling anstyle-parse v1.0.0
+   Compiling cipher v0.5.2
+   Compiling primefield v0.14.0
+   Compiling universal-hash v0.6.1
+   Compiling equivalent v1.0.3
+   Compiling serde_json v1.0.154
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling wnaf v0.14.1
+   Compiling anstream v1.0.0
+   Compiling indexmap v2.14.2
+   Compiling polyval v0.7.3
+   Compiling libsqlite3-sys v0.39.1
+   Compiling rfc6979 v0.6.0
+   Compiling spki v0.8.1
+   Compiling signature v3.0.0
+   Compiling toml_write v0.1.2
+   Compiling heck v0.5.0
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling anyhow v1.0.104
+   Compiling strsim v0.11.1
+   Compiling shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=9b88eb5be5bc9ba8c5c75480483b9861ddc6e993#9b88eb5b)
+   Compiling winnow v0.7.15
+   Compiling clap_lex v1.1.1
+   Compiling clap_builder v4.6.7
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling toml_edit v0.22.27
+   Compiling clap_derive v4.6.7
+   Compiling ecdsa v0.17.0
+   Compiling ghash v0.6.0
+   Compiling primeorder v0.14.0
+   Compiling ctr v0.10.1
+   Compiling aes v0.9.3
+   Compiling aead v0.6.1
+   Compiling hashlink v0.12.2
+   Compiling sha2 v0.11.1
+   Compiling smallvec v1.16.4
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1087/crates/core)
+   Compiling bitflags v2.13.2
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling fallible-iterator v0.3.0
+   Compiling aes-gcm v0.11.1
+   Compiling clap v4.6.7
+   Compiling p256 v0.14.0
+   Compiling toml v0.8.23
+   Compiling base64 v0.23.1
+   Compiling drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1087/crates/sys)
+   Compiling mio v1.2.4
+   Compiling socket2 v0.6.5
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.12.1
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1087/crates/cli)
+   Compiling tokio v1.54.1
+   Compiling rusqlite v0.41.1
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1087/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1087/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 37.95s
+     Running tests/cooee_screens.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/cooee_screens-b5a1f271cb0b4625)
+
+running 13 tests
+test cooees_queue_stream_fixture_applies_in_place ... ok
+test parity_46_a_queue_row_with_an_ask_opens_its_thread_in_webkit_and_back_returns ... ok
+test a_queue_row_is_one_short_title_line_without_the_pr_title ... ok
+test parity_63_a_folded_cards_main_button_answers_its_ask ... ok
+test a_row_opens_its_issue_sheet_with_lit_stage_links_and_its_asking_thread ... ok
+test parity_50_the_lanes_screen_and_a_lanes_sheet_are_cooees_blocks ... ok
+test parity_47_the_backlog_sheet_filters_searches_and_queues_the_ticked_issues ... ok
+test the_manifest_declares_cooees_places_and_permissions_and_each_screen_is_served ... ok
+test queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state ... ok
+test parity_38_the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_moves ... ok
+test an_action_outside_the_manifest_is_refused_and_a_listed_one_runs ... ok
+test the_workflow_screen_is_two_diagram_blocks_with_live_counts_and_limit_nodes ... ok
+test the_queue_stream_updates_rows_in_place_and_the_strip_count ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.77s
+
+     Running tests/page_drafts.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/page_drafts-47d76586c3291e91)
+
+running 1 test
+test typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/parity_webkit.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/parity_webkit-ae15b2b31f70f207)
+
+running 10 tests
+test parity_2_a_live_update_never_moves_the_scroll_or_replaces_a_kept_node ... ignored, red until #1084: a live update repaints every node
+test parity_19_a_fenced_block_copies_its_exact_text ... ok
+test parity_24_opening_a_thread_pushes_history_and_back_returns_to_the_list ... ok
+test parity_18_a_message_links_its_urls_and_thread_refs_and_keeps_its_markdown ... ok
+test parity_20_a_tapped_image_opens_fitted_in_the_viewer ... ok
+test parity_29_a_long_thread_shows_its_last_30_and_older_ones_load_on_scroll ... ok
+test parity_28_a_long_press_offers_copy_copy_as_markdown_and_quote ... ok
+test parity_r25_a_sheet_closes_without_a_flash ... ok
+test parity_r4_in_a_thread_only_the_messages_scroll_and_the_composer_sits_at_the_bottom ... ok
+test parity_r5_a_slow_load_shows_the_strip_after_300ms_and_the_page_stays_tappable ... ok
+
+test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/threads_tab.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1087/debug/deps/threads_tab-87a3a7fe5bf7021c)
+
+running 13 tests
+test a_thread_opens_at_its_end_in_webkit_with_its_bar_on_top_and_the_page_still ... ok
+test an_image_opens_in_the_viewer_in_webkit_and_close_and_escape_shut_it ... ok
+test older_messages_load_above_in_webkit_and_the_card_in_view_stays_in_place ... ok
+test parity_21_two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webkit ... ok
+test parity_26_a_message_sent_while_working_queues_and_send_now_steers_it_in_webkit ... ok
+test the_composer_docks_below_the_messages_in_webkit_empty_and_with_4_lines_at_390_and_1440 ... ok
+test the_keyboard_keeps_the_composer_flush_on_it_in_webkit_and_the_page_still ... ok
+test every_card_kind_in_a_thread_is_its_golden_json ... ok
+test the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only ... ok
+test a_long_thread_opens_on_its_last_30_and_its_marker_loads_the_30_before_with_the_later_ones ... ok
+test parity_15_the_owner_reads_a_thread_sends_and_answers_from_the_tab ... ok
+test parity_32_the_owner_settles_each_card_from_inside_its_thread ... ok
+test parity_34_each_composer_op_reaches_its_thread_op_and_the_screen_shows_it ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+

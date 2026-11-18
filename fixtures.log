@@ -1,0 +1,14 @@
+ok: any is refused
+ok: as-cast is refused
+ok: clean passes
+ok: console-log is refused
+ok: default-export is refused
+ok: enum is refused
+ok: eval is refused
+ok: inner-html is refused
+ok: insert-adjacent-html is refused
+ok: new-function is refused
+ok: non-null is refused
+ok: outer-html is refused
+ok: ts-expect-error is refused
+ok: ts-ignore is refused

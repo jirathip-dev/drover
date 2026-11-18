@@ -1,0 +1,56 @@
+ui	ui audit at 390 px (and 1440,	﻿2026-11-16T09:02:18.7506136Z ##[group]Run scripts/ui-audit.sh site ui-390
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:18.7506358Z ^[[36;1mscripts/ui-audit.sh site ui-390^[[0m
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:18.7544901Z shell: /usr/bin/bash -e {0}
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:18.7545050Z env:
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:18.7545167Z   CARGO_HOME: /home/runner/.cargo
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:18.7545304Z   CARGO_INCREMENTAL: 0
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:18.7545436Z   CARGO_TERM_COLOR: always
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:18.7545727Z   CHROME: /home/runner/work/_temp/chs/chrome-headless-shell/linux-156.0.8078.80/chrome-headless-shell-linux64/chrome-headless-shell
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:18.7546031Z ##[endgroup]
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:20.1059230Z lifeboat: 9 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:20.6217140Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:21.1288039Z lanes: 6 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:24.1747384Z events: 2 row sprites, 0 smoothed pixels
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:24.1747793Z events: 11 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:27.3763618Z threads: 3 row sprites, 0 smoothed pixels
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:27.3764103Z threads: 11 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:28.0386701Z fleets: 6 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:28.6536217Z lane: 6 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:29.2337370Z card: 24 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:29.8187022Z thread: 0 controls, 1 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:29.8187365Z   no audit output
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:35.6433371Z queue-1440: 3 row sprites, 0 smoothed pixels
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:35.6433935Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:36.3262037Z lanes: 6 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:42.1989292Z events-1440: 4 row sprites, 0 smoothed pixels
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:42.1989636Z events: 11 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:48.3167288Z threads-1440: 3 row sprites, 0 smoothed pixels
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:48.3167667Z threads: 11 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:51.6226190Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:52.3196942Z lanes: 6 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:55.3533162Z events-kitchen: 2 row sprites, 0 smoothed pixels
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:55.3533544Z events: 11 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:58.3797695Z threads-kitchen: 3 row sprites, 0 smoothed pixels
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:58.3798067Z threads: 11 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:58.9766379Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:02:59.5119512Z lanes: 6 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:02.4940715Z events-garden: 2 row sprites, 0 smoothed pixels
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:02.4941611Z events: 11 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:05.5320928Z threads-garden: 3 row sprites, 0 smoothed pixels
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:05.5322660Z threads: 11 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:06.1263809Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:06.6115934Z lanes: 6 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:07.1138953Z events: 11 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:07.5802202Z threads: 11 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:08.0933938Z lanes: 6 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:08.6270197Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:09.1440225Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:09.6803074Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:10.2146179Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:10.7326591Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:11.2428054Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:11.7709642Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:12.3059925Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:12.8375325Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:13.3699799Z queue: 21 controls, 0 outliers
+ui	ui audit at 390 px (and 1440,	2026-11-16T09:03:13.3754801Z ##[error]Process completed with exit code 1.

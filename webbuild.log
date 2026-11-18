@@ -1,0 +1,12 @@
+
+> build
+> esbuild src/main.ts --bundle --minify --format=esm --target=es2020 --outfile=dist/board.js && esbuild src/board.css --bundle --minify --outfile=dist/board.css
+
+
+  dist/board.js  37.0kb
+
+⚡ Done in 7ms
+
+  dist/board.css  12.2kb
+
+⚡ Done in 3ms

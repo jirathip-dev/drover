@@ -1,0 +1,14 @@
+Auto-merging .github/workflows/ci.yml
+Auto-merging crates/cli/tests/threads_tab.rs
+CONFLICT (content): Merge conflict in crates/cli/tests/threads_tab.rs
+Auto-merging crates/cli/tests/ui/drafts.mjs
+CONFLICT (content): Merge conflict in crates/cli/tests/ui/drafts.mjs
+Auto-merging web/dist/board.css
+CONFLICT (content): Merge conflict in web/dist/board.css
+Auto-merging web/dist/board.js
+CONFLICT (content): Merge conflict in web/dist/board.js
+Auto-merging web/src/blocks.ts
+Auto-merging web/src/board.css
+CONFLICT (content): Merge conflict in web/src/board.css
+Auto-merging web/src/main.ts
+Automatic merge failed; fix conflicts and then commit the result.
