@@ -84,8 +84,14 @@ fn placed(c: &drover::Ctx, r: &Fake, issue: u64, role: &str, force: Option<&str>
 
 fn busy_wt(f: Fake, status: &str, ahead: &str) -> Fake {
     f.reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'status'"), status)
-        .reply(&format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'rev-list'"), ahead)
+        .reply(
+            &format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'status'"),
+            status,
+        )
+        .reply(
+            &format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'rev-list'"),
+            ahead,
+        )
 }
 
 #[test]

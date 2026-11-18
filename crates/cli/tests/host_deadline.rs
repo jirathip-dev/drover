@@ -206,7 +206,10 @@ fn boat2_side() -> Fake {
             &format!("{SSH2}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile'"),
             "",
         )
-        .reply(&format!("{SSH2}'git' '--no-replace-objects' 'ls-remote'"), "abc\tHEAD\n")
+        .reply(
+            &format!("{SSH2}'git' '--no-replace-objects' 'ls-remote'"),
+            "abc\tHEAD\n",
+        )
         .reply(&format!("{SSH2}'sh' '-lc'"), "")
         .reply(
             &format!("{SSH2}'/opt/drover/bin/drover' '--version'"),
