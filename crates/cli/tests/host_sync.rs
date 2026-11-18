@@ -51,9 +51,7 @@ fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
 }
 
 fn healthy(f: Fake) -> Fake {
-    let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
-    f.reply(&format!("{SSH}'gh' 'api' '-i'"), gh)
-        .reply(&format!("{SSH}'git' '--no-replace-objects' 'ls-remote'"), "abc\tHEAD\n")
+    f.reply(&format!("{SSH}'git' '--no-replace-objects' 'ls-remote'"), "abc\tHEAD\n")
         .reply(&format!("{SSH}'sh' '-lc'"), "")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' '--version'"),

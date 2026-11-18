@@ -281,6 +281,18 @@ pub struct HostCfg {
     pub heavy_kind_max: BTreeMap<String, usize>,
     /// Minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
     pub heavy_wait_minutes: Option<u64>,
+    /// Who issues gh's token here: `managed` (default) warns before it expires, `external` never does.
+    #[serde(default)]
+    pub github_token: GithubToken,
+}
+
+/// Who issues a host's GitHub token.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GithubToken {
+    #[default]
+    Managed,
+    External,
 }
 
 /// The point a starting lane frees its start slot.
@@ -301,9 +313,9 @@ impl HostCfg {
         v.extend(self.root.clone().filter(|_| v.is_empty()));
         v
     }
-    /// Whether the owner renews gh's token here: a `boat` host's comes from boat, outside the VM.
-    pub fn owner_token(&self) -> bool {
-        self.cloud.as_deref() != Some("boat")
+    /// Whether health looks at gh's token here: a cloud host whose token drover manages.
+    pub fn watches_token(&self) -> bool {
+        self.cloud.is_some() && self.github_token == GithubToken::Managed
     }
     pub fn allow(&self) -> Vec<String> {
         let def = || {

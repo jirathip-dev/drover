@@ -66,9 +66,7 @@ fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
 const IMPL: &str = "sendmeter-impl-12";
 
 fn healthy(f: Fake) -> Fake {
-    let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
-    f.reply(&format!("{SSH}'gh' 'api' '-i'"), gh)
-        .reply(&format!("{SSH}{GIT} 'ls-remote'"), "abc\tHEAD\n")
+    f.reply(&format!("{SSH}{GIT} 'ls-remote'"), "abc\tHEAD\n")
         .reply(&format!("{SSH}'sh' '-lc'"), "")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' '--version'"),
@@ -108,11 +106,12 @@ fn placed(c: &drover::Ctx, r: &Fake, issue: u64, role: &str, force: Option<&str>
 }
 
 #[test]
-fn a_boat_host_never_warns_of_its_github_token_expiry() {
+fn an_external_github_token_never_warns_of_its_expiry() {
     let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 1970-01-12 23:00:00 UTC\n\n[]";
     let warn = "! github — token expires in 0d";
-    for (extra, shown) in [("cloud = \"boat\"\n", false), ("", true)] {
-        let c = setup("hosts-boat-token", extra, true, 0);
+    for (extra, shown) in [("github_token = \"external\"\n", false), ("", true)] {
+        let extra = format!("cloud = \"boat\"\n{extra}");
+        let c = setup("hosts-boat-token", &extra, true, 0);
         for kind in ["cloud-start", "cloud-up"] {
             let e = Event::new(NOW - 60, "drover", None, kind, json!({"host": "bazzite"}));
             append(&c.state, &e).unwrap();

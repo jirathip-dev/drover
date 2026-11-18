@@ -351,7 +351,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             rows.extend(on.shed().map(|_| format!("✗ host {name} shed — unreachable")));
             continue;
         };
-        let (tags, own) = ([tags, h.tags.clone()].concat(), h.owner_token());
+        let (tags, own) = ([tags, h.tags.clone()].concat(), h.watches_token());
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
