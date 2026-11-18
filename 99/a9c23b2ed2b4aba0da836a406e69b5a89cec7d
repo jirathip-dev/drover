@@ -1,0 +1,5 @@
+Decided: one new ci/cap.d file raising line_cap to 55500, shaped like the 2026-11-17 one
+Because: "One raise, 53500 → 55500 (owner decision q2078, t135, 2026-11-19)"
+Rejected: editing ci/cap.toml — the spec asks for a ci/cap.d file and nothing else
+Check: cap-check passes and the commit carries the Cap: trailer
+Owner: The line cap is now 55,500 so the queued PRs can merge.
