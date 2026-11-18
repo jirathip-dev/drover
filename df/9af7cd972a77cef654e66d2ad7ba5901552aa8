@@ -1,0 +1,11 @@
+Decided: install_line picks the prebuilt binary by `uname` on the host at run time, so bootstrap and sync share one line with no host-tag plumbing
+Because: "Other OS/arch hosts (the Air) keep `cargo install`."
+Decided: any failure (no asset, curl, checksum, install) echoes why to the sync log and runs the unchanged cargo install
+Because: "it falls back to today's `cargo install` and logs why"
+Decided: the download goes to a mktemp dir and only a verified file is moved into root/bin, via install then mv
+Because: "A bad checksum never installs."
+Decided: the release step sits in the rust job after its gates, on push to main only, tagged with the sha via gh
+Because: "use curl/sha256sum on the host, and existing actions or the `gh` CLI in CI"
+Rejected: a separate release job that rebuilds — a second release build for the same binary
+Check: crates/cli/tests/host_sync.rs runs the real line under sh; the bad-checksum case must end with cargo's binary
+Owner: Linux boats update by download in seconds; the 1-minute host-sync timing shows only after the first main push
