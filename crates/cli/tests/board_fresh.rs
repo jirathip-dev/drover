@@ -74,15 +74,10 @@ fn every_screen_shows_the_snapshot_age_amber_past_10_min_and_reads_run_in_the_ba
         ..Default::default()
     };
     drover::db::put(&c.state, "board", NOW, &snap).unwrap();
+    let at = json!({"since": "1970-01-12T13:46:40Z", "label": "as of {} ago"});
     for screen in ["/screens/queue", "/screens/events"] {
-        assert_eq!(
-            age(NOW + 180, screen),
-            Some(json!({"text": "as of 3m ago", "tone": "mute"}))
-        );
-        assert_eq!(
-            age(NOW + 601, screen),
-            Some(json!({"text": "as of 10m ago", "tone": "warn"}))
-        );
+        assert_eq!(age(NOW + 180, screen), Some(json!({"text": at, "tone": "mute"})));
+        assert_eq!(age(NOW + 601, screen), Some(json!({"text": at, "tone": "warn"})));
     }
 }
 

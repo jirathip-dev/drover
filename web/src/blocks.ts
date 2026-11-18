@@ -45,14 +45,21 @@ export function md(s: unknown, refs = false): string {
     esc(part).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(link, a).replace(/\n/g, '<br>')).join('');
 }
 
-/** `{since: iso}` as an age (`4m`, `1h 9m`), else the value as written. */
+/** `{since: iso}` as an age (`4m`, `1h 9m`), `{since, label}` its label with `{}` the server's age (`45s`, `4m`, `2h`), `{until, label}` with `{rel}` the minutes left, else the value as written. */
 export function value(v: unknown): string {
+  if (isBlk(v) && 'until' in v) return String(v.label ?? '').replace('{rel}', `${Math.max(0, Math.round((Date.parse(String(v.until)) - Date.now()) / 60000))}m`);
   if (isBlk(v) && 'since' in v) {
     const s = Math.max(0, (Date.now() - Date.parse(String(v.since))) / 1000);
+    if (v.label != null) return String(v.label).replace('{}', s < 120 ? `${Math.floor(s)}s` : s < 7200 ? `${Math.floor(s / 60)}m` : s < 172800 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`);
     return s < 60 ? 'now' : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m` : `${Math.floor(s / 86400)}d`;
   }
   return String(v ?? '');
 }
+const ticks = (v: unknown) => (isBlk(v) && ('since' in v || 'until' in v) ? `<span data-tick="${esc(JSON.stringify(v))}">${esc(value(v))}</span>` : esc(value(v)));
+setInterval(() => document.querySelectorAll<HTMLElement>('[data-tick]').forEach(e => {
+  const t = value(JSON.parse(e.dataset.tick ?? 'null'));
+  if (e.textContent !== t) e.textContent = t;
+}), 1000);
 
 export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
   screen(b, c) {
@@ -67,7 +74,7 @@ export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     s.append(head, ...kids(b.blocks, c));
     if (b.focus) {
       const m = el('div', 'msgs');
-      drawn.set(m, { key: JSON.stringify(b), box: true });
+      drawn.set(m, { key: JSON.stringify(b), box: true, b });
       m.append(...[...s.children].filter(e => !e.matches('.row.sticky, .cmp')));
       s.insertBefore(m, s.querySelector(':scope > .cmp'));
     }
@@ -94,8 +101,8 @@ export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     const sub = b.subtitle == null ? null : tone(b.subtitle), badge = b.badge == null ? null : tone(b.badge);
     r.replaceChildren(...nodes((isBlk(b.figure) ? figure(b.figure) : '') + `<span class=rm><span class=rt>${esc(b.title)}</span>` +
       (badge ? ` <span class="tag ${esc(badge.tone ?? '')}">${esc(badge.text)}</span>` : '') +
-      (sub ? `<span class="rs ${esc(sub.tone ?? '')}">${esc(sub.text)}</span>` : '') + '</span>' +
-      (b.value != null ? `<span class=rv>${esc(value(b.value))}</span>` : '')));
+      (sub ? `<span class="rs ${esc(sub.tone ?? '')}">${ticks(sub.text)}</span>` : '') + '</span>' +
+      (b.value != null ? `<span class=rv>${ticks(b.value)}</span>` : '')));
     const swipe = blks(b.swipe);
     if (url) r.classList.add('tap');
     else if (b.tap || swipe.length) {
@@ -140,7 +147,7 @@ export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
       if (shut) return k;
     }
     const head = el('div', 'ch', `<b>${esc(b.title)}</b>` + (b.badge ? ` <span class="tag ${esc(tone(b.badge).tone ?? '')}">${esc(tone(b.badge).text)}</span>` : '') +
-      (b.meta ? ` <span class=m>${esc(b.meta)}</span>` : ''));
+      (b.meta ? ` <span class=m>${ticks(b.meta)}</span>` : ''));
     if (b.title || b.badge) k.append(head);
     if (b.subtitle) k.append(el('p', 'm', esc(tone(b.subtitle).text)));
     k.append(...kids(b.blocks, c));
@@ -162,7 +169,7 @@ export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     for (const i of blks(b.items)) {
       const sp = isList(i.spark) ? i.spark.map(Number) : [], hi = Math.max(1, ...sp);
       const line = sp.length > 1 ? `<svg class=spark viewBox="0 0 ${sp.length - 1} 10" preserveAspectRatio=none aria-hidden=true><polyline points="${sp.map((v, x) => `${x},${10 - (v / hi) * 10}`).join(' ')}"/></svg>` : '';
-      s.append(el('div', `st ${esc(i.tone ?? '')}`, `<b>${esc(i.value)}</b>${i.unit ? ` <small>${esc(i.unit)}</small>` : ''}<span class=m>${esc(i.label)}</span>${line}`));
+      s.append(el('div', `st ${esc(i.tone ?? '')}`, `<b>${ticks(i.value)}</b>${i.unit ? ` <small>${esc(i.unit)}</small>` : ''}<span class=m>${esc(i.label)}</span>${line}`));
     }
     return s;
   },
@@ -191,8 +198,7 @@ export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     }
     const dflt = b.default, other = b.other;
     if (isBlk(dflt)) {
-      const until = Date.parse(String(dflt.until)), m = Math.max(0, Math.round((until - Date.now()) / 60000));
-      s.append(el('p', 'm', esc(String(dflt.label ?? '').replace('{rel}', `${m}m`))));
+      s.append(el('p', 'm', ticks({ until: dflt.until, label: dflt.label })));
     }
     if (isBlk(other)) {
       const f = el('form', 'other');
@@ -279,11 +285,11 @@ const read = (f: File) => new Promise<Att>(ok => {
   r.readAsDataURL(f);
 });
 
-function composer(b: Blk, c: Ctx): HTMLElement {
-  const key = `draft:${c.screen}:${String(b.id)}:text`, acts = obj(b.acts), base = obj(b.values), act = (k: string) => String(acts[k] ?? '');
+function composer(blk: Blk, c: Ctx): HTMLElement {
+  let b = blk;
+  const key = `draft:${c.screen}:${String(b.id)}:text`, act = (k: string) => String(obj(b.acts)[k] ?? '');
   const d: Draft = drafts.get(key) ?? { files: [], picks: {} };
   drafts.set(key, d);
-  if (!b.working) d.stopping = d.steer = false;
   const f = el('div', 'cmp');
   f.dataset.id = String(b.id ?? '');
   const ta = el('textarea');
@@ -299,7 +305,7 @@ function composer(b: Blk, c: Ctx): HTMLElement {
     d.st = '';
     draw();
   };
-  const post = async (action: string, values: Blk, x?: HTMLElement) => c.act({ action, block: b.id, values: { ...base, ...values } }, x);
+  const post = async (action: string, values: Blk, x?: HTMLElement) => c.act({ action, block: b.id, values: { ...obj(b.values), ...values } }, x);
   const send = async (steer = false) => {
     if (!ta.value.trim() && !d.files.length) return;
     const queue = !steer && (b.working || d.q != null) ? act('queue') : '', action = steer ? act('steer') : queue || String(b.action);
@@ -307,7 +313,7 @@ function composer(b: Blk, c: Ctx): HTMLElement {
     if (queue && d.q != null) v.q = d.q;
     [d.st, d.steer] = ['sending', false];
     draw();
-    if (await post(action, v, steer ? undefined : f.querySelector<HTMLElement>('.cr button.primary') ?? undefined)) {
+    if (await post(action, v, steer ? undefined : go)) {
       Object.assign(d, { files: [], q: undefined, st: 'sent' });
       ta.value = '';
       put(key, null);
@@ -315,7 +321,18 @@ function composer(b: Blk, c: Ctx): HTMLElement {
     } else d.st = 'failed';
     draw();
   };
+  const row = el('div', 'cr'), add = btn('+'), go = btn('', 'primary'), st = btn('steer');
+  add.setAttribute('aria-label', 'attach');
+  add.onclick = () => pick.click();
+  let held = false, hold = 0;
+  go.onpointerdown = () => { held = false; hold = window.setTimeout(() => { held = true; if (b.working && act('steer')) { d.steer = true; draw(); } }, 500); };
+  go.onpointerup = go.onpointerleave = () => clearTimeout(hold);
+  go.oncontextmenu = e => e.preventDefault();
+  go.onclick = () => { if (!held) send(); held = false; };
+  st.onclick = () => send(true);
+  row.append(add, pick, ta, go);
   function draw() {
+    if (!b.working) d.stopping = d.steer = false;
     const top: HTMLElement[] = [];
     if (b.working) {
       const p = el('div', 'pill');
@@ -364,21 +381,12 @@ function composer(b: Blk, c: Ctx): HTMLElement {
       }
       top.push(s);
     }
-    const row = el('div', 'cr'), add = btn('+'), go = btn(d.q != null ? 'save' : b.working ? 'queue' : String(b.label ?? ''), 'primary');
-    add.setAttribute('aria-label', 'attach');
-    add.onclick = () => pick.click();
-    let held = false, hold = 0;
-    go.onpointerdown = () => { held = false; hold = window.setTimeout(() => { held = true; if (b.working && act('steer')) { d.steer = true; draw(); } }, 500); };
-    go.onpointerup = go.onpointerleave = () => clearTimeout(hold);
-    go.oncontextmenu = e => e.preventDefault();
-    go.onclick = () => { if (!held) send(); held = false; };
+    ta.placeholder = String(b.placeholder ?? '');
+    (go.firstElementChild ?? go).textContent = d.q != null ? 'save' : b.working ? 'queue' : String(b.label ?? '');
     if (d.st === 'sending') go.setAttribute('aria-busy', 'true');
-    row.append(add, pick, ta, go);
-    if (d.steer) {
-      const st = btn('steer');
-      st.onclick = () => send(true);
-      row.append(st);
-    }
+    else go.removeAttribute('aria-busy');
+    if (d.steer) row.append(st);
+    else st.remove();
     const picks = el('div', 'pk');
     for (const ch of blks(b.chips)) {
       const n = String(ch.name), s = el('select'), cur = String(d.picks[n] ?? ch.cur ?? '');
@@ -388,9 +396,13 @@ function composer(b: Blk, c: Ctx): HTMLElement {
       s.onchange = () => (act('model') ? post(act('model'), { [n]: s.value }, s) : ((d.picks[n] = s.value), draw()));
       picks.append(s);
     }
-    f.replaceChildren(...top, row, ...(picks.childElementCount ? [picks] : []));
+    for (const k of [...f.children]) if (k !== row) k.remove();
+    if (row.parentNode !== f) f.append(row);
+    row.before(...top);
+    if (picks.childElementCount) row.after(picks);
   }
   draw();
+  patch.set(f, nb => { b = nb; draw(); });
   setTimeout(grow);
   return f;
 }
@@ -484,7 +496,8 @@ export function kids(bs: unknown, c: Ctx): HTMLElement[] {
   return blks(bs).map(b => render(b, c)).filter((e): e is HTMLElement => !!e);
 }
 
-const drawn = new WeakMap<Element, { key: string; box: boolean }>();
+const drawn = new WeakMap<Element, { key: string; box: boolean; b: Blk }>();
+const patch = new WeakMap<Element, (b: Blk) => void>();
 const BOX = new Set(['screen', 'section', 'list', 'sheet']);
 
 /** A block as DOM; a type this page has no renderer for draws its children, else nothing. */
@@ -493,7 +506,7 @@ export function render(b: Blk, c: Ctx): HTMLElement | null {
   const e = f ? f(b, c) : b.blocks ? el('div') : null;
   if (!e) return null;
   if (!f) e.append(...kids(b.blocks, c));
-  drawn.set(e, { key: `${c.open.has(String(b.id))}${c.open.has(`sw:${b.id}`)}${JSON.stringify(b)}`, box: !f || BOX.has(String(b.type)) });
+  drawn.set(e, { key: `${c.open.has(String(b.id))}${c.open.has(`sw:${b.id}`)}${JSON.stringify(b)}`, box: !f || BOX.has(String(b.type)), b });
   return e;
 }
 
@@ -506,6 +519,14 @@ function same(a: Node, b: Node, trust: boolean): Node {
   }
   const da = drawn.get(a), db = drawn.get(b);
   if (da || db) {
+    const p = patch.get(a);
+    if (p && da && db && da.b.type === db.b.type) {
+      if (da.key !== db.key) {
+        p(db.b);
+        drawn.set(a, db);
+      }
+      return a;
+    }
     if (!da || !db || (!db.box && da.key !== db.key)) return b;
     trust = da.key === db.key;
   } else if (!trust) return a.isEqualNode(b) ? a : b;

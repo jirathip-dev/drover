@@ -58,7 +58,10 @@
       ],
       "id": "m-16",
       "kind": "config",
-      "meta": "0s",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:46:40Z"
+      },
       "subtitle": "a fleet.toml change for you to apply",
       "title": "config proposal c1",
       "tone": "warn",
@@ -80,7 +83,10 @@
       "buttons": [],
       "id": "m-17",
       "kind": "secret",
-      "meta": "0s",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:46:40Z"
+      },
       "title": "secret API_KEY",
       "tone": "warn",
       "type": "card"
@@ -105,7 +111,10 @@
       "buttons": [],
       "id": "m-18",
       "kind": "run",
-      "meta": "0s",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:46:40Z"
+      },
       "title": "owner asked",
       "tone": "warn",
       "type": "card"
@@ -140,7 +149,10 @@
       ],
       "id": "m-19",
       "kind": "run",
-      "meta": "0s",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:46:40Z"
+      },
       "title": "owner asked",
       "tone": "bad",
       "type": "card"
@@ -179,7 +191,10 @@
       ],
       "id": "m-24",
       "kind": "ask",
-      "meta": "30s",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:46:10Z"
+      },
       "title": "q9 · answered by the orchestrator",
       "type": "card"
     },
