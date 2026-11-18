@@ -455,23 +455,34 @@ impl Runner for OldBuild<'_> {
 }
 
 #[test]
-fn a_boat_on_another_build_refuses_host_updating_and_is_not_marked_sick() {
+fn a_boat_on_the_previous_build_takes_lanes_while_no_release_swaps_and_is_held_only_during_a_swap() {
     let (c, _) = setup("racp-skew", &["boat1"]);
+    let behind = json!({"host": "boat1", "has": "bd6ba01", "wants": "8e7536e", "reason": "no release"});
+    let e = drover::events::Event::new(c.now - 3600, "drover", None, "host-behind", behind);
+    drover::events::append(&c.state, &e).unwrap();
     let f = spawn_fake();
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
-    let (code, o) = run(
-        &c,
-        &OldBuild(&b),
-        &["spawn", "sendmeter", "12", "impl", "--host", "boat1"],
-    );
+    let spawn = ["spawn", "sendmeter", "12", "impl", "--host", "boat1"];
+    let (code, o) = run(&c, &OldBuild(&b), &spawn);
+    assert_eq!(code, 0, "{o}");
+    assert!(!o.contains("HOST_UPDATING"), "{o}");
+    assert_eq!(spawned(&c)[0].str("host"), Some("boat1"));
+    let health = drover::hosts::cached(&c)["boat1"].health.clone();
+    assert!(!health.iter().any(|r| r.starts_with('✗')), "{health:?}");
+
+    let (c, _) = setup("racp-swap", &["boat1"]);
+    let d = json!({"sha": "8e7536e000000000000000000000000000000000", "target": "live", "hosts": ["boat1", "mini"]});
+    let e = drover::events::Event::new(c.now, "drover", None, "self-update-swapping", d);
+    drover::events::append(&c.state, &e).unwrap();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &OldBuild(&b), &spawn);
     assert_eq!(code, 3, "{o}");
     assert!(
-        o.contains("REFUSED HOST_UPDATING: boat1: drover there is drover 0.1.0 (0ld)") && !o.contains("ACP_UNGUARDED"),
+        o.contains("REFUSED HOST_UPDATING: boat1: drover swaps to 8e7536e on every host")
+            && !o.contains("ACP_UNGUARDED"),
         "{o}"
     );
     assert!(b.runs.borrow().is_empty(), "nothing started");
-    let health = drover::hosts::cached(&c)["boat1"].health.clone();
-    assert!(!health.iter().any(|r| r.starts_with('✗')), "{health:?}");
 }
 
 #[test]
@@ -484,7 +495,7 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     let checks = [
         "command -v git",
         "command -v gh",
-        "v=$(shed --version)",
+        "shed --version",
         "shed doctor",
         "command -v node",
         "shed agents --json",
@@ -510,10 +521,9 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     };
     assert!(!calls.iter().any(|l| herdr(&l)), "no herdr: {calls:?}");
     let has = |s: &str| calls.iter().any(|l| l.contains(s));
-    assert!(has(&format!(
-        "cargo install --git https://github.com/jirathip-dev/shed --rev {}",
-        drover::shed::REV
-    )));
+    assert!(has(
+        "cargo install --git https://github.com/jirathip-dev/shed --branch main --locked shed"
+    ));
     assert!(
         has("shed install --force") && has("shed agents add claude-acp"),
         "{calls:?}"

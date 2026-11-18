@@ -229,13 +229,13 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     };
     row(rows, on, '!', &format!("webhook — {why}{bad} → {fix}"));
     if cfg!(target_os = "macos") {
-        let dev = "=anchor apple generic and identifier \"drover\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists";
-        let req = ["-v", "-R", dev, &ctx.exe];
+        let signed = crate::release::signed(r, &ctx.exe);
+        let not = if signed { "" } else { "not " };
         let line = format!(
-            "signature — {} signed by a Developer ID Application certificate as drover → the next self-update installs CI's signed build (docs/releases.md)",
+            "signature — {} is {not}Developer ID signed → drover self-update installs CI's signed build (docs/releases.md)",
             ctx.exe
         );
-        row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
+        row(rows, signed, '✗', &line);
     }
     let jam = crate::host::keychain_jam(r);
     let line = format!("keychain readers — {}", crate::host::jam_line(&jam));
@@ -352,7 +352,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             rows.extend(on.shed().map(|_| format!("✗ host {name} shed — unreachable")));
             continue;
         };
-        let tags = [tags, h.tags.clone()].concat();
+        let (tags, own) = ([tags, h.tags.clone()].concat(), h.watches_token());
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
@@ -364,6 +364,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         rows.extend(bad.is_empty().then_some(ok));
         rows.extend(shed.map(|b| at(&crate::shed::line(&on, &b.wire))));
         rows.extend(login_token(&on, Some(name)));
+        rows.extend(own.then(|| crate::cloud::github(&on, ctx.now).1).flatten());
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {
             rows.push(format!("! stale fleet.toml on {name}: no longer read → rm {conf}"));
@@ -442,15 +443,14 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     ));
     let ids: BTreeSet<String> = cfg.fleet.keys().filter_map(|n| cfg.shed_for(n)?.acp).collect();
     if !ids.is_empty() {
-        let fix = format!(
-            "cargo install --git {} --rev {} --locked --force shed",
-            crate::shed::git(),
-            crate::shed::REV
-        );
         rows.push(if crate::spawn::shed_meta(r) {
             "✓ shed run --meta — ACP lanes get their provider's session options".into()
         } else {
-            format!("✗ shed run --meta — {} → {fix}", crate::spawn::SHED_OLD)
+            format!(
+                "✗ shed run --meta — {} → {}",
+                crate::spawn::SHED_OLD,
+                crate::shed::UPDATE
+            )
         });
     }
     let agents = ids

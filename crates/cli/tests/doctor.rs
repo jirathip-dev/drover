@@ -132,7 +132,7 @@ fn all_good_exits_zero_and_never_writes() {
     );
     if cfg!(target_os = "macos") {
         assert!(
-            line(&out, "signature").contains(&format!("{} signed by a Developer ID Application certificate", c.exe)),
+            line(&out, "signature") == format!("✓ signature — {} is Developer ID signed", c.exe),
             "{out}"
         );
         assert!(r.called(&format!(
@@ -269,7 +269,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         (
             |_, _, r| r.once("codesign -v -R", 3, ""),
             "signature",
-            "→ the next self-update installs CI's signed build (docs/releases.md)",
+            "is not Developer ID signed → drover self-update installs CI's signed build (docs/releases.md)",
         ),
         (
             |c, _, r| {

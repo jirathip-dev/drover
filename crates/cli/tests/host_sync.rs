@@ -1,7 +1,7 @@
 mod common;
 use common::*;
 use drover::config::Config;
-use drover::events::{read, Event};
+use drover::events::{append, read, Event};
 use drover::hosts::{cached, place};
 use serde_json::json;
 use std::path::Path;
@@ -145,7 +145,8 @@ fn rollout(c: &drover::Ctx, boats: &[(&str, &str, Option<&str>)]) -> Fake {
         .reply(&format!("{}.new doctor --config-only", c.exe), "")
         .reply(&format!("{} profiles sync", c.exe), "")
         .reply("launchctl", "")
-        .reply("systemctl", "");
+        .reply("systemctl", "")
+        .reply("codesign -v -R", "");
     boats.iter().fold(f, |f, (m, live, staged)| {
         status(f, m, live, *staged)
             .reply(&format!("{}'sh' '-c' '( n=", ssh(m)), &ver(NEW))
@@ -161,7 +162,7 @@ fn swapped(f: &Fake, m: &str) -> Option<usize> {
 }
 
 #[test]
-fn a_lagging_host_holds_the_swap_30_minutes_then_the_rest_swap_and_placement_passes_it_over() {
+fn a_lagging_host_holds_the_swap_30_minutes_then_the_rest_swap_and_it_still_takes_lanes() {
     let mut c = setup("rollout-lag", "", true, 0);
     let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
     c.exe = dir.join("bin/drover").display().to_string();
@@ -231,8 +232,11 @@ fn a_lagging_host_holds_the_swap_30_minutes_then_the_rest_swap_and_placement_pas
     );
 
     let c40 = at(40);
-    let e = placed(&c40, &fake(2.0, 0.1), 12, "impl", None).unwrap_err();
-    assert!(e.starts_with("HOST_UPDATING: bazzite: drover there is ?"), "{e}");
+    assert_eq!(
+        placed(&c40, &fake(2.0, 0.1), 12, "impl", None).as_deref(),
+        Ok("bazzite"),
+        "a host left behind takes lanes; only a swap holds them"
+    );
     let (_, code, out) = pass(40, &[("boat2", NEW, None), ("boat3", NEW, None)]);
     assert_eq!((code, out.as_str()), (0, "= up to date @ 1111111\n"));
     assert_eq!(kinds(&c, "host-behind").len(), 1, "logged once");
@@ -252,6 +256,39 @@ fn a_lagging_host_holds_the_swap_30_minutes_then_the_rest_swap_and_placement_pas
         placed(&at(46), &fake(2.0, 0.1), 12, "impl", None).as_deref(),
         Ok("bazzite")
     );
+}
+
+#[test]
+fn a_linux_only_release_swaps_the_boats_and_leaves_the_mac_on_its_build() {
+    let mut c = setup("rollout-linux-only", "", true, 0);
+    let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
+    c.exe = dir.join("bin/drover").display().to_string();
+    version_bin(Path::new(&c.exe), &ver(OLD));
+    let tag = drover::release::tag("main", NEW);
+    let linux = format!("{}  drover-x86_64-unknown-linux-gnu\n", "b".repeat(64));
+    let boats = [("bazzite", OLD, None), ("boat2", OLD, None), ("boat3", OLD, None)];
+    let f = rollout(&c, &boats).once(&format!("gh release download {tag} "), 0, &linux);
+    let (code, out) = run(&c, &Disk(&f), &["self-update"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("✗ mini: 1111111 not staged: no release asset for os:macos,arch:arm64"),
+        "{out}"
+    );
+    assert!(
+        out.contains("✓ caught up bazzite, boat2, boat3 to 1111111; left behind: mini"),
+        "{out}"
+    );
+    for m in ["bazzite", "boat2", "boat3"] {
+        assert!(swapped(&f, m).is_some(), "{m} installs the Linux build");
+    }
+    assert!(
+        std::fs::read_to_string(&c.exe).unwrap().contains(OLD),
+        "the Mac keeps its build"
+    );
+    assert!(!f.called(&format!("{} profiles sync", c.exe)));
+    let failed = kinds(&c, "self-update-failed");
+    assert_eq!(failed.len(), 1, "{failed:?}");
+    assert_eq!(failed[0].str("host"), Some("mini"));
 }
 
 #[test]
@@ -322,4 +359,71 @@ fn a_changed_build_rereads_the_host_health_in_the_same_pass_so_spawn_places_ther
     );
     assert_eq!(cached(&c)["bazzite"].health, Vec::<String>::new());
     assert_eq!(placed(&c, &fake(2.0, 0.1), 12, "impl", None).as_deref(), Ok("bazzite"));
+}
+
+#[test]
+fn an_external_github_token_never_warns_of_its_expiry() {
+    let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 1970-01-12 23:00:00 UTC\n\n[]";
+    let warn = "! github — token expires in 0d";
+    for (extra, shown) in [("github_token = \"external\"\n", false), ("", true)] {
+        let extra = format!("cloud = \"boat\"\n{extra}");
+        let c = setup("hosts-boat-token", &extra, true, 0);
+        for kind in ["cloud-start", "cloud-up"] {
+            let e = Event::new(NOW - 60, "drover", None, kind, json!({"host": "bazzite"}));
+            append(&c.state, &e).unwrap();
+        }
+        let f = healthy(fake(1.0, 1.0).reply(&format!("{SSH}'gh' 'api' '-i'"), gh)).reply(
+            &format!("{SSH}'sh' '-c' 'uname -s"),
+            "Linux\naarch64\n/home/me\ndocker\n",
+        );
+        let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+        let r = two(&f, &bazzite);
+        run(&c, &r, &["hosts", "refresh"]);
+        let health = cached(&c)["bazzite"].health.clone();
+        assert_eq!(health.iter().any(|w| w.starts_with(warn)), shown, "{extra}: {health:?}");
+        let (_, out) = run(&c, &r, &["doctor"]);
+        assert_eq!(out.contains(warn), shown, "{extra}: {out}");
+    }
+}
+
+#[test]
+fn an_unsigned_mac_binary_at_the_release_sha_installs_the_signed_build_then_is_up_to_date() {
+    let mut c = setup("rollout-unsigned", "", true, 0);
+    let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
+    c.exe = dir.join("bin/drover").display().to_string();
+    version_bin(Path::new(&c.exe), &ver(NEW));
+    let boats = [("bazzite", NEW, None), ("boat2", NEW, None), ("boat3", NEW, None)];
+    let unsigned = || rollout(&c, &boats).once("codesign -v -R", 1, "");
+
+    let (code, out) = run(&c, &Disk(&unsigned()), &["self-update", "--dry-run"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("up to date"), "{out}");
+    let mini = out.lines().find(|l| l.trim_start().starts_with("mini ")).unwrap();
+    assert!(
+        mini.contains("1111111 unsigned") && mini.ends_with("would stage, then swap, last"),
+        "{out}"
+    );
+
+    let f = unsigned();
+    let (code, out) = run(&c, &Disk(&f), &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.starts_with(&format!("✓ installed 1111111 at {}", c.exe)), "{out}");
+    assert!(f.called(&format!("sh -c ( n='{}.new'", c.exe)), "the release is staged");
+    assert!(f.called(&format!("{} profiles sync", c.exe)));
+    for m in ["bazzite", "boat2", "boat3"] {
+        assert!(swapped(&f, m).is_none(), "{m} is current and signature-free");
+    }
+
+    let f = rollout(&c, &boats);
+    let (code, out) = run(&c, &Disk(&f), &["self-update"]);
+    assert_eq!((code, out.as_str()), (0, "= up to date @ 1111111\n"));
+    assert!(
+        !f.called(&format!("sh -c ( n='{}.new'", c.exe)),
+        "a signed binary is left alone"
+    );
+    assert!(!f
+        .calls
+        .borrow()
+        .iter()
+        .any(|l| l.starts_with(&ssh("bazzite")) && l.contains("codesign")));
 }

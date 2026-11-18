@@ -115,13 +115,13 @@ pub fn probe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
 
 const UNLANDED: &str = "PROMPTS_UNLANDED";
 
-/// True while drive holds every respawn: `runtime_down_failures` lanes' prompts never landed in `runtime_down_minutes` (trips it once: one `needs-human` naming the shed builds); a landed spawn or `shed-installed` clears it.
+/// True while drive holds every respawn: `runtime_down_failures` lanes' prompts never landed in `runtime_down_minutes` (trips it once: one `needs-human` naming the shed builds); a landed spawn clears it.
 pub fn unlanded(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<bool> {
     let ev = working(&ctx.state)?;
     let unconfirmed = |e: &Event| e.kind == "spawn" && e.data.get("confirmed") == Some(&json!(false));
     let last = |k: &dyn Fn(&Event) -> bool| ev.iter().enumerate().rfind(|(_, e)| k(e));
     let trip = last(&|e| e.kind == "needs-human" && e.str("code") == Some(UNLANDED));
-    let clear = last(&|e| e.kind == "shed-installed" || e.kind == "spawn" && !unconfirmed(e));
+    let clear = last(&|e| e.kind == "spawn" && !unconfirmed(e));
     if trip.is_some_and(|t| clear.is_none_or(|c| c.0 < t.0)) {
         return Ok(true);
     }
@@ -136,10 +136,11 @@ pub fn unlanded(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
         return Ok(false);
     }
     let reason = format!(
-        "{} lanes' prompts never landed in {} min ({}); drive respawns none until a prompt lands or `drover shed install --yes`",
+        "{} lanes' prompts never landed in {} min ({}); drive respawns none until a prompt lands; if shed is at fault, {}",
         lanes.len(),
         l.runtime_down_minutes,
-        crate::shed::builds(r)
+        crate::shed::builds(r),
+        crate::shed::UPDATE
     );
     writeln!(out, "{fleet} needs-human: {reason}")?;
     let d = json!({"code": UNLANDED, "reason": reason, "lanes": lanes});

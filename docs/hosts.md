@@ -112,7 +112,9 @@ host at admission, passing over hosts whose start or working slots are full, and
 fitting host is full it is skipped with `SPAWN_PENDING: boat-dev-2 2/2 starting`. A host's start slots are split
 between the fleets with something to start, by fleet weight. `start_release = "started"` (the default, also in
 `[limits]`) frees a start's slot once its harness is up on the host; `"confirmed"` holds it until its first prompt is
-confirmed. `spawn_pending_max_secs` stays the stale backstop. Every pass, the fast step too, runs the start step
+confirmed. `spawn_pending_max_secs` stays the stale backstop: a start that has not finished by then stops counting (logged
+`stale-marker`), and its issue is tried again behind the other queued starts, so a start that never finishes cannot
+hold a host's slots pass after pass (#1269). Every pass, the fast step too, runs the start step
 before its PR reads, while some host has a free start slot; a full pass tries once more at its end for the issues its
 own steps just released. With `max_parallel_spawns = 0` (spawns in the pass) only that end-of-pass step runs.
 `max_working` and the heavy-slot gate still bound the running load.
@@ -332,7 +334,10 @@ again. In order:
 requests write and nothing else (no admin). It lives only on that host. Each health look reads it with one
 `gh api -i` there: the Host card shows `github: token · 2 repos · expires in 80d`, and from 14 days before the
 expiry the host turns amber (`! github — token expires in 12d`). When gh there can't use its token (expired, revoked
-or not logged in yet) the card says `github: unreadable` and the host turns red, so placement skips it.
+or not logged in yet) the card says `github: unreadable` and the host turns red, so placement skips it. `drover doctor`
+shows the same row. `github_token = "external"` in `[hosts.<name>]` turns the look off for a host whose token is issued
+outside drover (boat issues its VMs' from outside): no expiry warning and no bootstrap step. The default, `"managed"`,
+keeps it.
 
 **Health on every start.** After a cloud host starts and its address is refreshed, drover runs the health checks
 above (and the token look) before placement uses it, so an unhealthy host never takes the lane.
@@ -386,7 +391,8 @@ over ssh). The brief is the first prompt, and every later prompt goes through th
   `drover hosts keys revoke <id>` (owner only) ends one at once and logs `proxy-key-revoked`. A refused key gets a
   401 and nothing goes upstream.
 - **Bootstrap.** `hosts bootstrap <name>` on a `shed-acp` host: git, gh, Claude Code,
-  rust, shed at drover's pin (`cargo install --git …/shed --rev <shed::REV>`, read back as `shed <proto version>`),
+  rust, shed once from its latest main (`cargo install --git …/shed --branch main`, skipped when `shed --version` answers;
+  shed updates itself after that),
   shed's job (`shed install`, then systemd `enable --now` or launchd `bootstrap`; `shed doctor` is the read-back),
   node and npx, `shed agents add claude-acp`, and drover. No Claude login is opened there. gh is the only login,
   and it must be done by hand over ssh until the git relay lands. `hosts snapshot` saves that state as before.

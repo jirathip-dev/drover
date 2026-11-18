@@ -646,13 +646,7 @@ fn remote_acp(
         )?;
     }
     match crate::hosts::acp_guard(ctx, on, home, (&p.profile, p.family, id)) {
-        Ok(()) => {}
-        Err(why @ crate::hosts::Unguarded::Build { .. }) => {
-            return refused(
-                "HOST_UPDATING",
-                format!("{}: {why}; the next self-update catches it up", pl.name),
-            )
-        }
+        Ok(()) | Err(crate::hosts::Unguarded::Build { .. }) => {}
         Err(why) => {
             crate::hosts::sick(ctx, &pl.name, &format!("✗ acp guard {} — {why}", p.profile));
             return refused(

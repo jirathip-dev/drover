@@ -112,14 +112,23 @@ struct Member<'a> {
 
 impl Member<'_> {
     fn needs(&self, head: &str) -> bool {
-        self.builds.as_ref().is_none_or(|b| b.live.as_deref() != Some(head))
+        self.builds
+            .as_ref()
+            .is_none_or(|b| b.live.as_deref() != Some(head) || b.unsigned)
     }
     fn staged(&self, head: &str) -> bool {
         self.builds.as_ref().is_some_and(|b| b.staged.as_deref() == Some(head))
     }
     fn has(&self) -> String {
-        let b = self.builds.as_ref().and_then(|b| b.live.as_deref());
-        b.map_or("?".into(), |s| s.chars().take(7).collect())
+        let b = self.builds.as_ref();
+        let sha = b
+            .and_then(|b| b.live.as_deref())
+            .map_or("?".into(), |s| s.chars().take(7).collect());
+        if b.is_some_and(|b| b.unsigned) {
+            format!("{sha} unsigned")
+        } else {
+            sha
+        }
     }
 }
 
@@ -138,6 +147,12 @@ enum Step {
     Swap { ready: Vec<String>, behind: Vec<String> },
 }
 
+fn builds(on: &On, exe: &str, tags: &[String]) -> Result<Builds> {
+    let mut b = crate::release::builds(on, exe)?;
+    b.unsigned = b.live.is_some() && tags.iter().any(|t| t == "os:macos") && !crate::release::signed(on, exe);
+    Ok(b)
+}
+
 fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], t: &Target) -> Vec<Member<'a>> {
     let here = On::new(r, None);
     let exe = t.live.to_string_lossy().to_string();
@@ -147,13 +162,19 @@ fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], 
         .iter()
         .find(|h| h.1.machine.is_none())
         .map_or("local", |h| h.0.as_str());
+    let seen = crate::hosts::cached(ctx);
+    let probed = cfg.hosts.get(main).zip(seen.get(main).filter(|s| !s.tags.is_empty()));
+    let tags = probed.map_or_else(
+        || vec![format!("os:{}", std::env::consts::OS), format!("arch:{arch}")],
+        |(h, s)| crate::hosts::tags(h, Some(s)),
+    );
     let mut v = vec![Member {
         name: main.into(),
-        builds: Some(crate::release::builds(&here, &exe).unwrap_or_default()),
+        builds: Some(builds(&here, &exe, &tags).unwrap_or_default()),
         on: here,
         exe,
         conf: ctx.config.display().to_string(),
-        tags: vec![format!("os:{}", std::env::consts::OS), format!("arch:{arch}")],
+        tags,
         main: true,
         waited: true,
         failed: None,
@@ -161,7 +182,6 @@ fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], 
     if t.kind == Kind::StagingServe {
         return v;
     }
-    let seen = crate::hosts::cached(ctx);
     for (name, h) in &cfg.hosts {
         let Some(m) = h.machine.as_deref() else { continue };
         let s = seen.get(name).cloned().unwrap_or_default();
@@ -169,13 +189,14 @@ fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], 
         let (on, exe) = (On::new(r, Some(m)), crate::hosts::real_exe(ctx, &s.home));
         let read = up && h.enabled && !s.home.is_empty();
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&s.home)).remove(0);
+        let tags = crate::hosts::tags(h, Some(&s));
         v.push(Member {
             name: name.clone(),
-            builds: read.then(|| crate::release::builds(&on, &exe).ok()).flatten(),
+            builds: read.then(|| builds(&on, &exe, &tags).ok()).flatten(),
             on,
             exe,
             conf,
-            tags: crate::hosts::tags(h, Some(&s)),
+            tags,
             main: false,
             waited: h.enabled && up,
             failed: None,
@@ -196,13 +217,18 @@ fn step(now: u64, head: &str, found: &Found, ms: &[Member], marks: &Marks, l: &L
             alert: due && !marks.waiting,
         };
     }
-    let Some(mini) = ms.iter().find(|m| m.main).filter(|m| !m.needs(head) || m.staged(head)) else {
-        return Step::Stuck;
-    };
     let names = |f: &dyn Fn(&Member) -> bool| ms.iter().filter(|m| f(m)).map(|m| m.name.clone()).collect::<Vec<_>>();
     let mut ready = names(&|m| !m.main && m.needs(head) && m.staged(head));
-    if !mini.needs(head) {
-        return Step::Swap { ready, behind: vec![] };
+    let Some(mini) = ms.iter().find(|m| m.main) else {
+        return Step::Stuck;
+    };
+    let bare = matches!(mini.failed, Some(Unstaged::NoAsset(_)));
+    if mini.needs(head) && !mini.staged(head) && (!bare || ready.is_empty()) {
+        return Step::Stuck;
+    }
+    if !mini.needs(head) || bare {
+        let behind = names(&|m| m.main && bare);
+        return Step::Swap { ready, behind };
     }
     ready.push(mini.name.clone());
     let behind = names(&|m| m.needs(head) && !m.staged(head));
@@ -300,7 +326,11 @@ fn install(
                 t.branch
             )?;
             if alert {
-                let d = json!({"key": head, "sha": head, "branch": t.branch, "target": word, "reason": format!("no release build of {} {head:.7}: {why}", t.branch)});
+                let (job, error) = crate::release::failure(r, &f.repo, head).unzip();
+                let at =
+                    (job.as_ref().zip(error.as_ref())).map_or(String::new(), |(j, e)| format!("; the {j} job: {e}"));
+                let reason = format!("no release build of {} {head:.7}: {why}{at}", t.branch);
+                let d = json!({"key": head, "sha": head, "branch": t.branch, "target": word, "job": job, "error": error, "reason": reason});
                 emit(
                     &ctx.state,
                     cfg,
