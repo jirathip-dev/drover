@@ -1,0 +1,38 @@
+   Compiling libc v0.2.191
+   Compiling getrandom v0.4.3
+   Compiling crypto-common v0.2.2
+   Compiling crypto-bigint v0.7.10
+   Compiling digest v0.11.3
+   Compiling universal-hash v0.6.1
+   Compiling cipher v0.5.2
+   Compiling hmac v0.13.0
+   Compiling signature v3.0.0
+   Compiling hkdf v0.13.0
+   Compiling polyval v0.7.3
+   Compiling aes v0.9.3
+   Compiling ctr v0.10.1
+   Compiling sha2 v0.11.1
+   Compiling ghash v0.6.0
+   Compiling aead v0.6.1
+   Compiling aes-gcm v0.11.1
+   Compiling elliptic-curve v0.14.3
+   Compiling primefield v0.14.0
+   Compiling rfc6979 v0.6.0
+   Compiling wnaf v0.14.1
+   Compiling primeorder v0.14.0
+   Compiling ecdsa v0.17.0
+   Compiling p256 v0.14.0
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-955/crates/core)
+    Finished `release` profile [optimized] target(s) in 1m 20s
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-955/release/deps/drover_core-453ed6046eec03bf)
+
+running 6 tests
+test providers::fake::tests::setup_offers_its_login_with_its_vendor ... ok
+test providers::fake::tests::a_role_may_name_the_registered_provider_and_no_unregistered_one ... ok
+test providers::fake::tests::a_lane_launches_with_its_command_and_env ... ok
+test promise::tests::a_promise_the_issue_moved_past_is_never_missed ... ok
+test promise::tests::a_promise_past_its_deadline_with_its_wait_unchanged_is_missed_exactly_once ... ok
+test promise::tests::a_promise_a_known_hold_superseded_is_void_not_missed ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+

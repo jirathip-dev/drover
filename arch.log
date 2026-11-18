@@ -1,0 +1,3 @@
+crates/server/src/serve.rs:1: `crates/server/src/serve.rs` is 3591 lines, over 2000 (baseline Some(3575))
+`just gen` exited 127: sh: 1: just: not found
+arch-check: 981 files, 2 violations

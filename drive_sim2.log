@@ -1,0 +1,289 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-955/crates/cli)
+    Finished `release` profile [optimized] target(s) in 44.19s
+     Running tests/drive_sim.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-955/release/deps/drive_sim-10f48b10ab4970cd)
+
+running 1 test
+test a_silent_reviewer_is_superseded_and_the_review_completes ... FAILED
+
+failures:
+
+---- a_silent_reviewer_is_superseded_and_the_review_completes stdout ----
+drover: queued in /home/user/.local/share/drover/work/drover/issue-955/.drover/outbox.jsonl
+
+thread 'a_silent_reviewer_is_superseded_and_the_review_completes' (3869134) panicked at crates/cli/tests/drive_sim.rs:471:5:
+assertion `left == right` failed: 1000060 fast: 
+1000120 fast: 
+1000180 fast: 
+1000240 fast: 
+1000300 ["tick"] 0: sendmeter #12 review: "sendmeter-rev-12-r1" ["hermes" "fleet-rev"] "rev-12-r1" @ "/tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1"
+cannot list closed issues of sendmeter (gh issue list -R jirathip-dev/sendmeter --state closed --limit 1000 --json number: not JSON: EOF while parsing a value at line 1 column 0); only merged lanes are candidates
+sendmeter lesson skipped: fleet under a week old
+compact: 0 heartbeats deleted, 0 events archived
+
+1000300 fast: 
+1000360 fast: 
+1000420 fast: 
+1000480 fast: 
+1000540 fast: 
+1000600 ["tick"] 0: 
+1000600 fast: 
+1000660 fast: 
+1000720 fast: 
+1000780 fast: 
+1000840 fast: 
+1000900 ["tick"] 0: 
+1000900 fast: 
+1000960 fast: 
+1001020 fast: 
+1001080 fast: 
+1001140 fast: 
+1001200 ["tick"] 0: 
+1001200 fast: 
+1001260 fast: 
+1001320 fast: 
+1001380 fast: 
+1001440 fast: 
+1001500 ["tick"] 0: 
+1001500 fast: 
+1001560 fast: 
+1001620 fast: 
+1001680 fast: 
+1001740 fast: 
+1001800 ["tick"] 0: 
+1001800 fast: 
+1001860 fast: 
+1001920 fast: 
+1001980 fast: 
+1002040 fast: 
+1002100 ["tick"] 0: 
+1002100 fast: 
+1002160 fast: 
+1002220 fast: 
+1002280 fast: 
+1002340 fast: 
+1002400 ["tick"] 0: 
+1002400 fast: 
+1002460 fast: 
+1002520 fast: 
+1002580 fast: 
+1002640 fast: 
+1002700 ["tick"] 0: 
+1002700 fast: 
+1002760 fast: 
+1002820 fast: 
+1002880 fast: 
+1002940 fast: 
+1003000 ["tick"] 0: 
+1003000 fast: 
+1003060 fast: 
+1003120 fast: 
+1003180 fast: 
+1003240 fast: 
+1003300 ["tick"] 0: 
+1003300 fast: 
+1003360 fast: 
+1003420 fast: 
+1003480 fast: 
+1003540 fast: 
+1003600 ["tick"] 0: 
+1003600 fast: 
+1003660 fast: 
+1003720 fast: 
+1003780 fast: 
+1003840 fast: 
+1003900 ["tick"] 0: cannot list closed issues of sendmeter (gh issue list -R jirathip-dev/sendmeter --state closed --limit 1000 --json number: not JSON: EOF while parsing a value at line 1 column 0); only merged lanes are candidates
+
+1003900 fast: 
+1003960 fast: 
+1004020 fast: 
+1004080 fast: 
+1004140 fast: 
+1004200 ["tick"] 0: 
+1004200 fast: 
+1004260 fast: 
+1004320 fast: 
+1004380 fast: 
+1004440 fast: 
+1004500 ["tick"] 0: 
+1004500 fast: 
+1004560 fast: 
+1004620 fast: 
+1004680 fast: 
+1004740 fast: 
+1004800 ["tick"] 0: 
+1004800 fast: 
+1004860 fast: 
+1004920 fast: 
+1004980 fast: 
+1005040 fast: 
+1005100 ["tick"] 0: 
+1005100 fast: 
+1005160 fast: 
+1005220 fast: 
+1005280 fast: 
+1005340 fast: 
+1005400 ["tick"] 0: 
+1005400 fast: 
+1005460 fast: 
+1005520 fast: 
+1005580 fast: 
+1005640 fast: 
+1005700 ["tick"] 0: 
+1005700 fast: 
+1005760 fast: 
+1005820 fast: 
+1005880 fast: 
+1005940 fast: 
+1006000 ["tick"] 0: 
+1006000 fast: 
+1006060 fast: 
+1006120 fast: 
+1006180 fast: 
+1006240 fast: 
+1006300 ["tick"] 0: 
+1006300 fast: 
+1006360 fast: 
+1006420 fast: 
+1006480 fast: 
+1006540 fast: 
+1006600 ["tick"] 0: 
+1006600 fast: 
+1006660 fast: 
+1006720 fast: 
+1006780 fast: 
+1006840 fast: 
+1006900 ["tick"] 0: 
+1006900 fast: 
+1006960 fast: 
+1007020 fast: 
+1007080 fast: 
+1007140 fast: 
+1007200 ["tick"] 0: 
+1007200 fast: 
+1007260 fast: 
+1007320 fast: 
+1007380 fast: 
+1007440 fast: 
+1007500 ["tick"] 0: cannot list closed issues of sendmeter (gh issue list -R jirathip-dev/sendmeter --state closed --limit 1000 --json number: not JSON: EOF while parsing a value at line 1 column 0); only merged lanes are candidates
+
+1007500 fast: 
+1007560 fast: 
+1007620 fast: 
+1007680 fast: 
+1007740 fast: 
+1007800 ["tick"] 0: sendmeter #12 review: "sendmeter-rev-12-r1" ["hermes" "fleet-rev"] "rev-12-r1" @ "/tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1"
+sendmeter #12 sendmeter-rev-12-r1 quiet 124m with no verdict: replaced by sendmeter-rev-12-r1
+
+1007800 fast: 
+1007860 fast: 
+1007920 fast: 
+1007980 fast: 
+1008040 fast: 
+1008100 ["tick"] 0: 
+1008100 fast: 
+1008160 fast: 
+1008220 fast: 
+1008280 fast: 
+1008340 fast: 
+1008400 ["tick"] 0: 
+1008400 fast: 
+1008460 fast: 
+1008520 fast: 
+1008580 fast: 
+1008640 fast: 
+1008700 ["tick"] 0: 
+1008700 fast: 
+1008760 fast: 
+1008820 fast: 
+1008880 fast: 
+1008940 fast: 
+1009000 ["tick"] 0: 
+1009000 fast: 
+1009060 fast: 
+1009120 fast: 
+1009180 fast: 
+1009240 fast: 
+1009300 ["tick"] 0: 
+1009300 fast: 
+1009360 fast: 
+1009420 fast: 
+1009480 fast: 
+1009540 fast: 
+1009600 ["tick"] 0: 
+1009600 fast: 
+1000000 spawn {"agent": String("sendmeter-impl-12"), "branch": String("issue-12"), "pane": String("sendmeter-impl-12"), "role": String("impl")}
+1000000 pushed {"sha": String("c856000000000000000000000000000000000000")}
+1000060 lane-state {"agent": String("sendmeter-impl-12"), "note": Null, "since": Number(1000060), "state": String("idle")}
+1000060 promise {"deadline": Number(1000660), "head": String("c856000000000000000000000000000000000000"), "kind": String("next-pass"), "reason": String("pushed c856000, waiting for drive (next pass ≤ 5 min) to spawn review"), "state": String("impl")}
+1000300 intent {"action_id": String("sendmeter#12:spawn@rev@1"), "agent": String("sendmeter-rev-12-r1"), "host": String("box-node-55c1a9ba452f0641"), "pid": Number(4242), "role": String("rev"), "step": String("spawn"), "worktree": String("/tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1")}
+1000300 spawn-started {"agent": String("sendmeter-rev-12-r1"), "host": Null, "machine": Null, "pane": String("sendmeter-rev-12-r1"), "role": String("rev"), "worktree": String("/tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1")}
+1000300 done {"action_id": String("sendmeter#12:spawn@rev@1"), "agent": String("sendmeter-rev-12-r1"), "pane": String("sendmeter-rev-12-r1"), "step": String("spawn")}
+1000300 spawn {"agent": String("sendmeter-rev-12-r1"), "branch": String("rev-12-r1"), "by": String("drive"), "check": Bool(true), "confirmed": Bool(true), "effort": Null, "error": Null, "handover": Null, "harness": String("hermes"), "model": Null, "pane": String("sendmeter-rev-12-r1"), "port": Number(41856), "profile": String("fleet-rev"), "qos": String("background"), "role": String("rev"), "runtime": String("shed"), "stage": String("rev"), "update": Bool(false), "worktree": String("/tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1")}
+1000300 driven {"cmd": String("drover spawn sendmeter 12 rev"), "code": Null, "result": String("\"sendmeter-rev-12-r1\" [\"hermes\" \"fleet-rev\"] \"rev-12-r1\" @ \"/tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1\""), "step": String("review")}
+1000300 drive-pass {"actions": Array [Object {"code": Null, "issue": Number(12), "kick": Bool(false), "outcome": String("reviewed"), "step": String("review"), "why": Null, "words": String("reviewed")}], "at": String("13:51 UTC"), "by": String("auto"), "ended": Number(1000300), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1000300), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1000300 lesson-skipped {"fails": Number(0), "why": String("fleet under a week old")}
+1000300 timer-repair-failed {"key": String("dev.drover.fast"), "reason": String("✗ dev.drover.fast: systemctl --user enable --now dev.drover.fast.timer failed (1): unscripted: systemctl --user enable --now dev.drover.fast.timer → systemctl --user enable --now dev.drover.fast.timer")}
+1000300 service-red {"key": String("board"), "reason": String("board: down on 127.0.0.1:7777 → drover setup")}
+1000300 service-red {"key": String("tick"), "reason": String("tick: ran 0s ago · job missing → drover timer install")}
+1000300 service-red {"key": String("fast step"), "reason": String("fast step: fast step 0.0 s · ran 60s ago · job missing → drover timer install")}
+1000360 lane-state {"agent": String("sendmeter-rev-12-r1"), "note": Null, "since": Number(1000360), "state": String("working")}
+1000600 drive-pass {"actions": Array [], "at": String("13:56 UTC"), "by": String("auto"), "ended": Number(1000600), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1000600), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1000900 drive-pass {"actions": Array [], "at": String("14:01 UTC"), "by": String("auto"), "ended": Number(1000900), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1000900), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1001200 drive-pass {"actions": Array [], "at": String("14:06 UTC"), "by": String("auto"), "ended": Number(1001200), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1001200), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1001500 drive-pass {"actions": Array [], "at": String("14:11 UTC"), "by": String("auto"), "ended": Number(1001500), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1001500), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1001800 drive-pass {"actions": Array [], "at": String("14:16 UTC"), "by": String("auto"), "ended": Number(1001800), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1001800), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1002100 drive-pass {"actions": Array [], "at": String("14:21 UTC"), "by": String("auto"), "ended": Number(1002100), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1002100), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1002400 drive-pass {"actions": Array [], "at": String("14:26 UTC"), "by": String("auto"), "ended": Number(1002400), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1002400), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1002700 drive-pass {"actions": Array [], "at": String("14:31 UTC"), "by": String("auto"), "ended": Number(1002700), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1002700), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1003000 drive-pass {"actions": Array [], "at": String("14:36 UTC"), "by": String("auto"), "ended": Number(1003000), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1003000), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1003300 drive-pass {"actions": Array [], "at": String("14:41 UTC"), "by": String("auto"), "ended": Number(1003300), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1003300), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1003600 drive-pass {"actions": Array [], "at": String("14:46 UTC"), "by": String("auto"), "ended": Number(1003600), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1003600), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1003900 drive-pass {"actions": Array [], "at": String("14:51 UTC"), "by": String("auto"), "ended": Number(1003900), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1003900), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1003900 timer-repair-failed {"key": String("dev.drover.fast"), "reason": String("✗ dev.drover.fast: systemctl --user enable --now dev.drover.fast.timer failed (1): unscripted: systemctl --user enable --now dev.drover.fast.timer → systemctl --user enable --now dev.drover.fast.timer")}
+1003900 service-red {"key": String("board"), "reason": String("board: down on 127.0.0.1:7777 → drover setup")}
+1003900 service-red {"key": String("tick"), "reason": String("tick: ran 0s ago · job missing → drover timer install")}
+1003900 service-red {"key": String("fast step"), "reason": String("fast step: fast step 0.0 s · ran 60s ago · job missing → drover timer install")}
+1004200 drive-pass {"actions": Array [], "at": String("14:56 UTC"), "by": String("auto"), "ended": Number(1004200), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1004200), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1004500 drive-pass {"actions": Array [], "at": String("15:01 UTC"), "by": String("auto"), "ended": Number(1004500), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1004500), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1004800 drive-pass {"actions": Array [], "at": String("15:06 UTC"), "by": String("auto"), "ended": Number(1004800), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1004800), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1005100 drive-pass {"actions": Array [], "at": String("15:11 UTC"), "by": String("auto"), "ended": Number(1005100), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1005100), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1005400 drive-pass {"actions": Array [], "at": String("15:16 UTC"), "by": String("auto"), "ended": Number(1005400), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1005400), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1005700 drive-pass {"actions": Array [], "at": String("15:21 UTC"), "by": String("auto"), "ended": Number(1005700), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1005700), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1006000 drive-pass {"actions": Array [], "at": String("15:26 UTC"), "by": String("auto"), "ended": Number(1006000), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1006000), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1006300 drive-pass {"actions": Array [], "at": String("15:31 UTC"), "by": String("auto"), "ended": Number(1006300), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1006300), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1006600 drive-pass {"actions": Array [], "at": String("15:36 UTC"), "by": String("auto"), "ended": Number(1006600), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1006600), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1006900 drive-pass {"actions": Array [], "at": String("15:41 UTC"), "by": String("auto"), "ended": Number(1006900), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1006900), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1007200 drive-pass {"actions": Array [], "at": String("15:46 UTC"), "by": String("auto"), "ended": Number(1007200), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1007200), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1007500 drive-pass {"actions": Array [], "at": String("15:51 UTC"), "by": String("auto"), "ended": Number(1007500), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1007500), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1007500 timer-repair-failed {"key": String("dev.drover.fast"), "reason": String("✗ dev.drover.fast: systemctl --user enable --now dev.drover.fast.timer failed (1): unscripted: systemctl --user enable --now dev.drover.fast.timer → systemctl --user enable --now dev.drover.fast.timer")}
+1007500 service-red {"key": String("board"), "reason": String("board: down on 127.0.0.1:7777 → drover setup")}
+1007500 service-red {"key": String("tick"), "reason": String("tick: ran 0s ago · job missing → drover timer install")}
+1007500 service-red {"key": String("fast step"), "reason": String("fast step: fast step 0.0 s · ran 60s ago · job missing → drover timer install")}
+1007800 intent {"action_id": String("sendmeter#12:supersede@rev@8"), "agent": String("sendmeter-rev-12-r1"), "host": String("box-node-55c1a9ba452f0641"), "pid": Number(4242), "role": String("rev"), "step": String("supersede"), "worktree": String("/tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1")}
+1007800 supersede {"agent": String("sendmeter-rev-12-r1"), "killed": Array [String("sendmeter-rev-12-r1")], "reason": String("live agent(s) [\"sendmeter-rev-12-r1\"] in /tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1; unfinished rev lane Some(\"sendmeter-rev-12-r1\") for #12 (review(1))"), "role": String("rev"), "wip": Null}
+1007800 spawn-started {"agent": String("sendmeter-rev-12-r1"), "host": Null, "machine": Null, "pane": String("sendmeter-rev-12-r1"), "role": String("rev"), "worktree": String("/tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1")}
+1007800 done {"action_id": String("sendmeter#12:supersede@rev@8"), "agent": String("sendmeter-rev-12-r1"), "pane": String("sendmeter-rev-12-r1"), "step": String("supersede")}
+1007800 spawn {"agent": String("sendmeter-rev-12-r1"), "branch": String("rev-12-r1"), "by": String("drive"), "check": Bool(true), "confirmed": Bool(true), "effort": Null, "error": Null, "handover": String("Handover: Summary of the previous lane; its tool state and approvals are not carried over.\nIssue: t\nContinue; don't redo."), "harness": String("hermes"), "model": Null, "pane": String("sendmeter-rev-12-r1"), "port": Number(41856), "profile": String("fleet-rev"), "qos": String("background"), "role": String("rev"), "runtime": String("shed"), "stage": String("rev"), "update": Bool(false), "worktree": String("/tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1")}
+1007800 driven {"cmd": String("drover spawn sendmeter 12 rev --supersede"), "code": Null, "result": String("\"sendmeter-rev-12-r1\" [\"hermes\" \"fleet-rev\"] \"rev-12-r1\" @ \"/tmp/fleet-test-sim-silent-rev-3869133-0/worktrees/sendmeter/rev-12-r1\""), "step": String("review")}
+1007800 rev-stale-replaced {"agent": String("sendmeter-rev-12-r1"), "idle_minutes": Number(124), "new": String("sendmeter-rev-12-r1"), "reason": String("sendmeter-rev-12-r1 quiet 124m with no verdict: replaced by sendmeter-rev-12-r1"), "role": String("rev")}
+1007800 drive-pass {"actions": Array [Object {"code": Null, "issue": Number(12), "kick": Bool(false), "outcome": String("reviewed"), "step": String("review"), "why": Null, "words": String("reviewed")}], "at": String("15:56 UTC"), "by": String("auto"), "ended": Number(1007800), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1007800), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1007860 lane-state {"agent": String("sendmeter-rev-12-r1"), "note": Null, "since": Number(1007860), "state": String("working")}
+1008100 drive-pass {"actions": Array [], "at": String("16:01 UTC"), "by": String("auto"), "ended": Number(1008100), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1008100), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1008400 drive-pass {"actions": Array [], "at": String("16:06 UTC"), "by": String("auto"), "ended": Number(1008400), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1008400), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1008700 drive-pass {"actions": Array [], "at": String("16:11 UTC"), "by": String("auto"), "ended": Number(1008700), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1008700), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1009000 drive-pass {"actions": Array [], "at": String("16:16 UTC"), "by": String("auto"), "ended": Number(1009000), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1009000), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1009300 drive-pass {"actions": Array [], "at": String("16:21 UTC"), "by": String("auto"), "ended": Number(1009300), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1009300), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+1009600 drive-pass {"actions": Array [], "at": String("16:26 UTC"), "by": String("auto"), "ended": Number(1009600), "kick": Null, "secs": Number(0.0), "spawns_launched": Number(0), "started": Number(1009600), "step": String("PR reads, gates, steps"), "step_secs": Number(0.0)}
+sendmeter #12 none: waiting on sendmeter-rev-12-r1 (working) (30m)
+
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_silent_reviewer_is_superseded_and_the_review_completes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 10.88s
+
+error: test failed, to rerun pass `-p drover --test drive_sim`
