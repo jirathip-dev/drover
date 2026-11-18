@@ -1,0 +1,19 @@
+
+running 1 test
+tmp_probe --- FAILED
+
+failures:
+
+---- tmp_probe stdout ----
+
+thread 'tmp_probe' (1214058) panicked at crates/cli/tests/sim/main.rs:682:5:
+hits [1049, 1073, 1074] failures [(1049, Some("I1 one-lane: #103 rev has 2 live lanes: [\"drover-rev-103-r1 on drover-rev-103-r1\", \"drover-rev-103-r1 on drover-rev-103-r1x\"]")), (1073, Some("I1 one-lane: #103 rev has 2 live lanes: [\"drover-rev-103-r1 on drover-rev-103-r1\", \"drover-rev-103-r1 on drover-rev-103-r1x\"]")), (1074, Some("I1 one-lane: #101 rev has 2 live lanes: [\"drover-rev-101-r1 on drover-rev-101-r1\", \"drover-rev-101-r1 on drover-rev-101-r1x\"]"))]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tmp_probe
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 16 filtered out; finished in 16.65s
+
+error: test failed, to rerun pass `-p drover --test sim`

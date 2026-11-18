@@ -1,0 +1,19 @@
+
+running 1 test
+tmp_probe --- FAILED
+
+failures:
+
+---- tmp_probe stdout ----
+
+thread 'tmp_probe' (1196155) panicked at crates/cli/tests/sim/main.rs:680:5:
+hits [1002, 1004, 1015]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tmp_probe
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 16 filtered out; finished in 20.90s
+
+error: test failed, to rerun pass `-p drover --test sim`

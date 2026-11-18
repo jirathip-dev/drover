@@ -1,0 +1,12 @@
+
+running 1 test
+drover: #102 is not queued
+FAIL hunt round 2: I1 one-lane: #102 rev has 2 live lanes: ["drover-rev-102-r1 on drover-rev-102-r1", "drover-rev-102-r1 on drover-rev-102-r1x"]
+minimised from 17 to 6 faults and scripts, 5000 to 4832 steps; for seeds.rs PLANS:
+    ("seed=3 cfg=2,4 steps=4832 | +48 T 60 drive --fast | +235 T 300 drive | +249 T 300 check | +2015 R queue drover add 102 | +2207 R queue drover add 101 | +2219 R queue drover add 104 | +2400 R queue drover add 103 | +2666 R queue drover add 105 | +3601 R queue drover block --on 101 102", "hunt: I1 one-lane: #102 rev has 2 live lanes: ["drover-rev-102-r1 on drover-rev-102-r1"),
+replay: DROVER_SIM_PLAN='seed=3 cfg=2,4 steps=4832 | +48 T 60 drive --fast | +235 T 300 drive | +249 T 300 check | +2015 R queue drover add 102 | +2207 R queue drover add 101 | +2219 R queue drover add 104 | +2400 R queue drover add 103 | +2666 R queue drover add 105 | +3601 R queue drover block --on 101 102' cargo test -p drover --test sim
+
+test the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it has been running for over 60 seconds
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 62.47s
+
