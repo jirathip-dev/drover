@@ -1,0 +1,5 @@
+Decided: the new serve_wire test target goes in shard 1 of scripts/test-shards.txt.
+Because: scripts/test-shards.txt:167
+Rejected: a new shard 5 for serve_wire — CI runs a fixed 4-shard matrix and shard 1 has the fewest targets.
+Check: scripts/test-shards.sh check exits 0 and CI's rust and test shard jobs are green.
+Owner: A CI bookkeeping fix so the new connection tests run; no behaviour change.
