@@ -49,7 +49,8 @@ restart, and runs the user's login shell (`$SHELL -l`, in shed's environment). d
 exports and the harness command (`exec <harness> <args>`) into that shell. So no
 token is ever in the terminal's command line, in `ps` or in shed's state file. `exec` makes the harness the
 terminal's program, so the terminal ends when the harness exits; shed then lists it `exited` with its code until
-drover removes it, and `drover check` alerts `lane-dead` with the cause (#1053).
+drover removes it, and `drover check` alerts `lane-dead` with the cause (#1053), and for a crash the exit code or
+signal (shed's 128 + N), the terminal's last three lines (the adapter's stderr) and the last ACP event (#1311).
 
 `drover spawn --dry-run` shows the shed requests it would send (`shed <method> <params>`).
 
