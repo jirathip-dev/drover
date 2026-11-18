@@ -1,0 +1,11 @@
+Decided: the lane sheet reads its transcript once, through the lane's own session, asking shed for only the 200 lines it shows, and masks only those.
+Because: "One shed call per lane sheet. Read only the 200 lines shown, and mask only those."
+Decided: a read the background has not done yet shows "transcript loading…"; the page fetches the sheet again each second until it fills in.
+Because: "A remote lane's transcript is never empty because of the request cache."
+Rejected: running ssh on the request — the request-path guard forbids it.
+Decided: round 2 puts the new remote_sheet test target in shard 4, so CI's shard check and the test shards run it.
+Because: scripts/test-shards.txt:148
+Decided: the PR body's Parity section names row 45 as kept and row 54 as untouched; none is changed or dropped.
+Check: lanes_sheet.rs counts shed calls per GET on the large board (at most 1) and asserts read lines = 200 and p95 within 150 ms.
+Check: CI test shards and the rust job go green at 686838b1.
+Owner: Opening a lane on another machine now shows "loading" and then its log, instead of a blank box; the sheet opens faster and a double tap opens it once.
