@@ -1,0 +1,21 @@
+Decided: skip the gh token look only where cloud is boat; every other remote host gets it in hosts refresh and doctor
+Because: "On a `cloud = "boat"` host, the GitHub token's expiry gives no warning and no bootstrap step"
+Because: "The same host without `cloud` shows it."
+Rejected: keeping the look on cloud hosts only — a host without cloud would then show no line, against the AC
+Check: crates/cli/tests/hosts.rs a_boat_host_never_warns_of_its_github_token_expiry fails on base at the boat case
+Check: shed::a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it fails on base too, unrelated
+Owner: boat hosts stop asking for a new GitHub token; other remote hosts now show the token's expiry in doctor too.
+
+Decided: a per-host github_token = "managed" | "external" setting; external skips the token look in hosts refresh and doctor
+Because: q1952
+Decided: both paths gate on HostCfg::watches_token, a cloud host whose token is managed
+Because: crates/core/src/config.rs:317
+Rejected: the token look on non-cloud hosts too — staging never probed them, and the reviewer asked for one gate
+Check: crates/cli/tests/host_sync.rs an_external_github_token_never_warns_of_its_expiry fails with the setting ignored
+Owner: Mark a host github_token = "external" when something outside drover issues its GitHub token.
+
+Decided: merge origin/staging; keep staging's host_sync.rs and add the github_token test to it
+Because: q1952
+Rejected: none
+Check: an_external_github_token_never_warns_of_its_expiry still passes after the merge
+Owner: Branch brought up to date with staging; the github_token setting is unchanged.
