@@ -8,14 +8,13 @@ use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Map, Value};
 use std::io::Write;
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 #[path = "later.rs"]
 mod later;
 
 const MANIFEST: &str = include_str!("../../../cooee-plugin.toml");
-static STREAMS: AtomicUsize = AtomicUsize::new(0);
 type Res = (&'static str, &'static str, Vec<u8>);
 type Q = BTreeMap<String, String>;
 
@@ -1919,13 +1918,13 @@ impl Server<'_> {
             now: crate::now(),
             ..self.ctx.clone()
         };
-        let (q, open) = (form(query), STREAMS.fetch_add(1, Relaxed) < 4);
+        let (q, open) = (form(query), self.streams.fetch_add(1, Relaxed) < 4);
         let paired = Self::plugin(self.ctx, head)
             || devices::check(self.ctx, header(head, "cookie").unwrap_or_default()).is_ok();
         let screen = |c: &Ctx| crate::runner::request(|| self.screen(c, base, &q, paired));
         let first = screen(&ctx()).filter(|_| open && (Self::plugin(self.ctx, head) || self.allowed(self.ctx, head)));
         let Some(mut cur) = first else {
-            STREAMS.fetch_sub(1, Relaxed);
+            self.streams.fetch_sub(1, Relaxed);
             let r = line(
                 if open {
                     "503 Service Unavailable"
@@ -1979,7 +1978,7 @@ impl Server<'_> {
                 }
             }
         };
-        STREAMS.fetch_sub(1, Relaxed);
+        self.streams.fetch_sub(1, Relaxed);
         res
     }
 }

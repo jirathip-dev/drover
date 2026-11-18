@@ -376,6 +376,7 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<bo
     if (j.close && v === shv) closeSheet();
     else if (v === shv && !shv.es) stream(shv);
     if (j.toast) toast(String(j.toast));
+    if (!whole) new Set([v, cards]).forEach(x => { if (x && x !== shv && x.model && (!x.es || x.es.readyState === EventSource.CLOSED)) void load(x, true); });
     painted(s);
     return true;
   } catch (e) {

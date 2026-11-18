@@ -28,7 +28,13 @@ try {
   let pushes = 0;
   await relay('cards', () => ++deltas);
   await relay('threads/t2', () => ++pushes);
-  let release = () => {};
+  let release = null;
+  const free = async () => {
+    for (const t = Date.now(); !release && Date.now() - t < 5000; ) await wait(10);
+    const ok = release;
+    release = null;
+    ok?.();
+  };
   await page.route('**/action', async r => { await new Promise(ok => { release = ok; }); posted++; await r.continue(); });
   await page.goto(url + '#threads');
   await until(() => !!document.querySelector('[data-id="t2"]'), 'the threads list');
@@ -50,7 +56,7 @@ try {
       await new Promise(r => setTimeout(r, 5));
     }
   }, [text, shows.toString()]);
-  release();
+  await free();
   await until(([t, f]) => new Function('t', `return (${f})(t)`)(t).some(c => !c.dataset.id.startsWith('pend-')), 'the confirmed message', [text, shows.toString()]);
   await wait(1500);
   out.confirmed = await page.evaluate(([t, f]) => {
@@ -74,7 +80,7 @@ try {
   out.answer.deltas = deltas - d0;
   out.answer.back = back;
   const res = page.waitForResponse(r => r.url().endsWith('/action'));
-  release();
+  await free();
   out.answer.status = (await res).status();
   await wait(1000);
   out.answer.after = await page.evaluate(s => !!document.querySelector(s), card);

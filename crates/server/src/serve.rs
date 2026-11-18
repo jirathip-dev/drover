@@ -399,6 +399,7 @@ pub struct Server<'a> {
     timing: Mutex<slo::Timing>,
     phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
+    streams: AtomicUsize,
 }
 
 fn hung_up(s: &TcpStream) -> bool {
@@ -767,6 +768,7 @@ impl<'a> Server<'a> {
             timing: Mutex::default(),
             phone: Mutex::default(),
             rss: std::sync::atomic::AtomicU64::default(),
+            streams: AtomicUsize::new(0),
         }
     }
 
