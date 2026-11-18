@@ -216,7 +216,7 @@ pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
 
 /// A gone lane's wait (or `respawn` why) that names a resumable exit cause.
 pub fn resumed(why: &str) -> bool {
-    [Cause::Limit, Cause::Crash]
+    [Cause::Limit, Cause::Crash, Cause::Refused]
         .iter()
         .any(|c| why.contains(&format!("({})", c.word())))
 }

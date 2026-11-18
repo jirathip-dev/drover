@@ -202,6 +202,6 @@ fn a_lane_that_died_on_econnrefused_names_the_proxy_tunnel_not_an_adapter_crash(
     assert_eq!(kinds(&got), ["lane-dead"]);
     assert_eq!(got[0].str("cause"), Some("ECONNREFUSED: proxy tunnel down"), "{got:?}");
     let f = Fake::default();
-    let (_, w) = run(&c0, &sh.on(&f), &["waiting", "sendmeter"]);
+    let (_, w) = run(&at(&c, NOW + 120), &sh.on(&f), &["waiting", "sendmeter"]);
     assert!(w.contains("lane gone (ECONNREFUSED: proxy tunnel down)"), "{w}");
 }

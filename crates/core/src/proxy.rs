@@ -201,8 +201,14 @@ pub fn status(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Vec<String>> {
     let wait = std::time::Duration::from_secs(cfg.limits.proxy_connect_secs);
     let up = TcpStream::connect_timeout(&addr, wait).map_or("down", |_| "answering");
     let mut facts = vec![head, format!("proxy {up} on :{}", cfg.proxy.port)];
+    let seen = crate::hosts::cached(ctx);
+    let down = |h: &str| {
+        seen.get(h)
+            .is_some_and(|s| s.health.iter().any(|w| w.starts_with(DOWN)))
+    };
     for h in acp {
-        facts.push(format!("tunnel {h} {}", if tunnel(ctx, r, h) { "up" } else { "down" }));
+        let up = tunnel(ctx, r, h) && !down(h);
+        facts.push(format!("tunnel {h} {}", if up { "up" } else { "down" }));
     }
     let ev = working(&ctx.state).unwrap_or_default();
     let live = keys(ctx).iter().filter(|k| state(ctx.now, &ev, k) == "live").count();
@@ -424,8 +430,8 @@ fn write_private(p: &std::path::Path, b: &[u8]) -> Result<()> {
     Ok(f.write_all(b)?)
 }
 
-/// Before a remote ACP lane starts (and each survey of a `shed-acp` host): `proxy-token-expiring` once at 30 d and 7 d left, the proxy answering here (else started detached) and host `name`'s tunnel (`ssh -R`, the proxy's port there to here) alive (else started, its pid kept).
-pub fn ensure(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, machine): (&str, &str)) -> Result<()> {
+/// Before a remote ACP lane starts (and each survey of a `shed-acp` host): `proxy-token-expiring` once at 30 d and 7 d left, the proxy answering here (else started detached) and host `name`'s tunnel (`ssh -R`) answering through its far end (else restarted on a freed remote port); whether it answers after this look.
+pub fn ensure(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, machine): (&str, &str)) -> Result<bool> {
     if let (path, Token::Saved(at)) = token_file(cfg) {
         let left = days_left(ctx.now, at);
         if let Some(stage) = [7, 30].into_iter().find(|d| left <= *d) {
@@ -441,10 +447,18 @@ pub fn ensure(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, machine): (&str, &
     if TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(cfg.limits.proxy_connect_secs)).is_err() {
         r.detach(&ctx.exe, &argv(&["proxy"]), &ctx.state.with_file_name("proxy.log"))?;
     }
-    if tunnel(ctx, r, name) {
-        return Ok(());
-    }
     let pid = ctx.state.with_file_name(format!("tunnel-{name}.pid"));
+    let on = crate::hosts::On::new(r, Some(machine));
+    let wait = cfg.limits.proxy_connect_secs.to_string();
+    let answers = || ok(&on, "curl", &["-s", "-o", "/dev/null", "-m", &wait, &url(cfg)]).is_ok();
+    if tunnel(ctx, r, name) {
+        if answers() {
+            return Ok(true);
+        }
+        let old = std::fs::read_to_string(&pid).unwrap_or_default();
+        ok(r, "kill", &[old.trim()]).ok();
+    }
+    ok(&on, "sh", &["-c", FREE, "sh", &port.to_string()]).ok();
     let fwd = format!("127.0.0.1:{port}:127.0.0.1:{port}");
     let a = argv(&[
         "-N",
@@ -457,8 +471,15 @@ pub fn ensure(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, machine): (&str, &
         machine,
     ]);
     let n = r.detach("ssh", &a, &ctx.state.with_file_name(format!("tunnel-{name}.log")))?;
-    Ok(std::fs::write(pid, n.to_string())?)
+    std::fs::write(pid, n.to_string())?;
+    Ok(answers())
 }
+
+const FREE: &str = "for p in $({ ss -Htlnp \"sport = :$1\"; sudo -n ss -Htlnp \"sport = :$1\"; } 2>/dev/null | \
+grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do kill \"$p\" 2>/dev/null || sudo -n kill \"$p\"; done";
+
+/// The health row `survey` keeps on a `shed-acp` host whose tunnel did not answer through its far end (a `✗`: no new lane there).
+pub const DOWN: &str = "✗ tunnel down";
 
 fn tunnel(ctx: &Ctx, r: &dyn Runner, name: &str) -> bool {
     let pid = std::fs::read_to_string(ctx.state.with_file_name(format!("tunnel-{name}.pid"))).unwrap_or_default();
