@@ -1,0 +1,13 @@
+Decided: the remote trim gets the host's live lanes (its shed sessions plus recent spawns) and skips their build folders; it no longer needs lsof to run at all.
+Because: "Live lanes' folders are never removed."
+Decided: every enabled remote host prints one `builds: <host>: <root> at X GB of Y GB; freed Z GB` line per tick, its kept and trimmed folders each prefixed the same way.
+Because: "Each host gets a log line per tick saying what was removed and how much was freed"
+Decided: the finished-lane sweep runs before the budget trim, so a trim that fails or times out (and marks the host down for the pass) no longer skips it.
+Because: "A failed trim on a host logs its reason, instead of staying silent."
+Decided: a timed-out trim says "trim of <root> timed out" instead of an empty "trim failed (124):".
+Because: crates/core/src/check.rs:1561
+Decided: disk_low on a remote host passes the host's live lanes too, instead of an empty set that let a 0 GB trim take every live lane's profile.
+Because: crates/core/src/hosts.rs:947
+Rejected: running the remote trim detached past ssh_call_secs — a bigger change; a timeout is now logged and the sweep still runs.
+Check: a remote host whose trim is killed at ssh_call_secs every tick (very large .build) still only gets finished lanes swept, not budget-trimmed; watch tick.log for "timed out".
+Owner: Boats now clean finished lanes' build folders on every tick, never touch running lanes' folders, and log one line per host saying what happened.
