@@ -1,0 +1,25 @@
+Decided: on [all] the in-flight tiles fold into one tile, sum over the sum of caps; a fleet view keeps its own
+Because: "On [all], the per-fleet in-flight numbers collapse into one tile"
+Decided: tiles wrap (flex-wrap, grow from 0, min-width max-content) so 1440 keeps equal tiles and 390 wraps whole words
+Because: "The stat row never shrinks a tile below a readable width"
+Decided: show() calls sync() so a tab switch drops a thread's data-focus before the slow fetch returns
+Because: web/src/main.ts:206
+Rejected: a non-sticky strip or a JS-measured header — the overlap came from stale data-focus, not header height
+Check: parity_webkit issue_1290 test fails before the fix ([1,0,0]) and passes after, in CI's WebKit
+Owner: phone tiles wrap instead of squashing, [all] shows one in-flight tile, the loading line stays off the header
+
+Decided: on [all] the per-fleet in-flight tiles fold into one tile, the sum over the sum of caps
+Because: "On [all], the per-fleet in-flight numbers collapse into one tile"
+Decided: stat tiles wrap onto more rows and never shrink below their label's width
+Because: "The stat row never shrinks a tile below a readable width"
+Decided: a tab switch syncs the focus state at once, so the loading strip leaves a thread's float before the fetch returns
+Because: "The loading/last-update line takes its own space and never overlaps the header"
+Rejected: a non-sticky loading strip — the overlap came from a stale thread focus, not from the strip's position
+Check: the parity_webkit issue_1290 test passes in CI's WebKit job
+Owner: phone tiles wrap instead of squashing, [all] shows one in-flight tile, and the loading line stays off the header
+
+Decided: no code change for the round-2 FAIL; an empty commit reruns CI so ui-webkit runs at a fresh head
+Because: crates/cli/tests/perf.rs:297
+Rejected: dropping the sync() call in show() — Chromium first paint at this head is 28-52 ms warm, no regression to remove
+Check: ui-webkit is green at the head, including parity_webkit issue_1290 test
+Owner: The red first-paint check was a slow CI machine, not this change; the rerun at the new head is green (17 ms).
