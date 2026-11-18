@@ -1,0 +1,7 @@
+Decided: the staging merge keeps this PR's deletion of hosts::sync and install_line; #1165's prebuilt-else-cargo install_line and its tests are dropped
+Because: "the remote source install in `hosts::sync` (`install_line`)"
+Decided: #1165's ci.yml step that publishes an unsigned Linux binary under a bare-sha release is removed; release.yml is the one publisher
+Because: "One install path everywhere: prebuilt, signed release builds"
+Rejected: keeping #1165's step beside release.yml — a second, unsigned release nothing reads
+Check: staging's other hosts.rs hunks (held_slots busy for ACP, disk_low live lanes) survive the merge; host_slots, scratch and cloud tests pass
+Owner: The update path from #1165 is superseded by the signed releases; nothing to do beyond the release-environment secrets already named.
