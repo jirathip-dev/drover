@@ -1,0 +1,8 @@
+{"args":["verdict","sendmeter","12","FAIL","--sha","a000000000000000000000000000000000000000","--file","/tmp/fleet-test-verify-shots-380171-13/lane/verdict.md"],"lane":"herdsman:958:rev","ts":1794904432904}
+{"args":["verdict","sendmeter","12","FAIL","--sha","a000000000000000000000000000000000000000","--file","/tmp/fleet-test-verify-rounds-380171-14/verdict.md"],"lane":"herdsman:958:rev","ts":1794904432919}
+{"args":["verdict","sendmeter","12","FAIL","--sha","a000000000000000000000000000000000000000","--file","/tmp/fleet-test-verify-shots-382165-13/lane/verdict.md"],"lane":"herdsman:958:rev","ts":1794904448291}
+{"args":["verdict","sendmeter","12","FAIL","--sha","a000000000000000000000000000000000000000","--file","/tmp/fleet-test-verify-rounds-382165-14/verdict.md"],"lane":"herdsman:958:rev","ts":1794904448307}
+{"args":["verdict","sendmeter","12","FAIL","--sha","a000000000000000000000000000000000000000","--file","/tmp/fleet-test-verify-shots-386156-13/lane/verdict.md"],"lane":"herdsman:958:rev","ts":1794904494787}
+{"args":["verdict","sendmeter","12","FAIL","--sha","a000000000000000000000000000000000000000","--file","/tmp/fleet-test-verify-rounds-386156-14/verdict.md"],"lane":"herdsman:958:rev","ts":1794904494802}
+{"args":["verdict","sendmeter","12","PASS","--sha","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","--file","/tmp/fleet-test-lesson-prose-388195-5/state/verdict.md"],"lane":"herdsman:958:rev","ts":1794904506236}
+{"args":["done","sendmeter","80","--no-change","no repeated class"],"lane":"herdsman:958:rev","ts":1794904506265}
