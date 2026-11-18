@@ -50,6 +50,7 @@ fn over_max_working_a_start_waits_then_starts_when_a_lane_finishes() {
     assert_eq!(spawned(&sh), ["sendmeter-impl-1", "sendmeter-impl-2"], "{out}");
     assert!(out.contains("waiting for a slot: 2/2 working on mini"), "{out}");
     assert_eq!((state(&c, 2), state(&c, 3)), ("impl".into(), "queued".into()));
+    look(&c, &sh.on(&fake()));
     let (code, st) = run(&c, &fake(), &["status"]);
     assert_eq!(code, 0, "{st}");
     assert!(st.contains("mini: working 2/2"), "{st}");

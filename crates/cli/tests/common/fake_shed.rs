@@ -314,6 +314,11 @@ impl Runner for OverSsh<'_> {
         self.batch(prog, args).unwrap_or_else(|| self.f.run(prog, args))
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        let line = format!("{prog} {}", args.join(" "));
+        if let Some(o) = super::boat(self, prog, args, input).filter(|_| !self.f.scripted(&line)) {
+            self.f.calls.borrow_mut().push(format!("{prog} {}", args.join(" ")));
+            return o;
+        }
         if let Some(o) = self.batch(prog, args).filter(|_| input.is_empty()) {
             return o;
         }

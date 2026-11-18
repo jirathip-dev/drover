@@ -286,8 +286,8 @@ fn a_remote_orphan_is_adopted_on_its_host() {
 struct Racing<'a>(&'a OverSsh<'a>, &'a drover::Ctx, &'a str);
 
 impl Racing<'_> {
-    fn race(&self, line: &str, input: &str) {
-        let listing = line.contains("bazzite") && line.contains("connect") && input.contains("\"ls\"");
+    fn race(&self, line: &str) {
+        let listing = line.contains("bazzite") && line.contains("'hosts' 'report'");
         if listing && kinds(self.1, "spawn-started").is_empty() {
             let d = json!({"agent": "sendmeter-impl-12", "role": "impl", "worktree": self.2,
                 "pane": "sendmeter-impl-12", "host": "bazzite", "machine": "bazzite"});
@@ -302,7 +302,7 @@ impl drover::runner::Runner for Racing<'_> {
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
         let line = format!("{prog} {}", args.join(" "));
-        self.race(&line, &format!("{line}{input}"));
+        self.race(&line);
         self.0.run_in(prog, args, input)
     }
     fn sleep(&self, secs: u64) {

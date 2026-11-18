@@ -2,7 +2,7 @@ use crate::config::{Config, Fleet};
 use crate::events::{age, fold, last_spawn, open_asks, Event, IssueState, Json};
 use crate::promise::Say;
 pub use crate::promise::SLOT;
-use crate::runner::{ok, Runner};
+use crate::runner::Runner;
 use crate::session::{Cause, Session};
 use crate::{gh, Ctx};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -602,6 +602,7 @@ pub fn scan_where(
     keep: impl Fn(&IssueState) -> bool,
 ) -> Vec<(IssueState, Waiting)> {
     let (mut out, log) = (vec![], Log::new(events));
+    let view = crate::link::view::View::load(ctx, cfg).ok();
     let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());
     let hung = crate::roots::hung_now(events);
     let mine = |st: &crate::events::States| {
@@ -675,9 +676,7 @@ pub fn scan_where(
             _ => gh::cached_pr(ctx, &s.fleet, s.issue),
         };
         crate::land::mark(ctx, None, f, (&s.fleet, s.issue), events, &mut pr);
-        let sp = last_spawn(mine, &lane);
-        let wt = sp.and_then(|e| e.str("worktree")).filter(|_| !s.done());
-        let on = crate::hosts::On::of(r, sp);
+        let sp = last_spawn(mine, &lane).filter(|_| !s.done());
         let spawn = s.check_lane().and_then(|l| last_spawn(mine, l));
         let pushed = pr.at("headRefOid").as_str().unwrap_or_default();
         let seen = mine
@@ -688,32 +687,22 @@ pub fn scan_where(
             Some("review") => spawn.and_then(|e| e.str("sha")).is_none(),
             _ => false,
         };
-        let git = (wt.filter(|_| need)).and_then(|wt| ok(&on, "git", &["-C", wt, "log", "-1", "--format=%H %ct"]).ok());
-        let head = git
-            .as_deref()
-            .and_then(|g| g.trim().split_once(' '))
-            .and_then(|(h, t)| Some((h, t.parse().ok()?)));
+        let wt = |sp: Option<&Event>| view.as_ref().zip(sp).and_then(|(v, sp)| v.worktree(sp));
+        let head = wt(sp.filter(|_| need))
+            .and_then(|w| w.head.as_ref())
+            .map(|(h, t)| (h.as_str(), *t));
         let path = spawn
             .and_then(|e| e.str("worktree"))
             .map(|wt| format!("{wt}/verdict.md"));
         let since = spawn.map_or(0, |e| e.data.get("since").and_then(Value::as_u64).unwrap_or(e.ts));
-        let fresh = |p: &String| {
-            std::fs::metadata(p)
-                .and_then(|m| m.modified())
-                .is_ok_and(|t| t > std::time::UNIX_EPOCH + std::time::Duration::from_secs(since))
-        };
-        let there = crate::hosts::On::of(r, spawn);
         let kept = spawn.and_then(|sp| {
             mine.iter()
                 .rfind(|e| e.is("verdict", &s.fleet, s.issue) && e.ts >= sp.ts)
         });
-        let text = path
-            .as_ref()
-            .filter(|_| kept.is_none())
-            .and_then(|p| match there.machine {
-                Some(_) => there.read(std::path::Path::new(p)),
-                None => std::fs::read_to_string(p).ok().filter(|_| fresh(p)),
-            });
+        let text = (wt(spawn.filter(|_| kept.is_none())))
+            .and_then(|w| w.verdict.as_ref())
+            .filter(|v| v.mtime > since)
+            .map(|v| v.text.clone());
         let word = text
             .as_deref()
             .map(|v| v.lines().next().unwrap_or_default().trim().to_string())
@@ -749,7 +738,7 @@ pub fn scan_where(
                 f.integration
             )));
         }
-        if let Some(h) = spawn.filter(|_| there.machine.is_some()).and_then(|e| e.str("host")) {
+        if let Some(h) = spawn.filter(|e| e.str("machine").is_some()).and_then(|e| e.str("host")) {
             w.what = w.what.replace("review done", &format!("review done on {h}"));
         }
         if w.what.starts_with("rev idle without") && !agents.iter().any(|a| a.name == lane) {
@@ -886,7 +875,7 @@ pub fn scan_where(
         if let Some(t) = at.filter(|t| ctx.now > t + 120) {
             w.what += &format!(" · checked {} ago", age(ctx.now - t));
         }
-        let safe = || wt.is_some_and(|wt| crate::spawn::dirty(&on, std::path::Path::new(wt)).is_none());
+        let safe = || wt(sp).is_some_and(|w| w.dirty.is_none());
         if f.paused && !agents.iter().any(|a| a.name == lane) && safe() {
             let pr = pr
                 .at("number")

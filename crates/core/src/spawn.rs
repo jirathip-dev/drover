@@ -1456,8 +1456,7 @@ pub fn spawn(
     if let Some(rl) = &rules {
         on.write(&p.rules_file(), &serde_json::to_string(rl)?)?;
     }
-    let pane = p.agent.clone();
-    let host = placed.as_ref().map(|pl| (&pl.name, &pl.machine));
+    let (pane, host) = (p.agent.clone(), placed.as_ref().map(|pl| (&pl.name, &pl.machine)));
     let d = json!({"agent": p.agent, "role": role, "host": host.map(|h| h.0), "machine": host.and_then(|h| h.1.as_ref()),
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
@@ -1522,6 +1521,7 @@ pub fn spawn(
             }
             intent.done(json!({"agent": p.agent, "pane": pane}))?;
             event("spawn", d)?;
+            crate::link::look_at(ctx, cfg, r, placed.as_ref().and_then(|pl| pl.machine.as_deref())).ok();
             kicked?;
             pj.put("pane", json!(pane)).put("confirmed", json!(confirmed));
             print_plan(out, &pj, o.json, placed.as_ref())?;
@@ -1794,8 +1794,8 @@ pub fn adopt(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "spawn", d))
 }
 
-pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<bool> {
-    let sessions = crate::session::all(cfg, seen).checked()?;
+pub fn orphans(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<bool> {
+    let sessions = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?;
     let events = working(&ctx.state)?;
     let (st, mut any) = (fold(&events), false);
     for a in crate::lanes::orphans(ctx, cfg, &events, &sessions) {
@@ -1880,6 +1880,9 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
             Ok(()) => any = true,
             Err(e) => writeln!(out, "{fleet} #{n} orphan {agent}: {e:#}")?,
         }
+    }
+    if any {
+        crate::link::look(ctx, cfg, r, out, true)?;
     }
     Ok(any)
 }

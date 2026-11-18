@@ -124,6 +124,7 @@ fn its_lanes_show_host_offline_alert_once_and_recover() {
     assert!(!status.contains("host offline"), "{status}");
     let (_, board) = run(&c, &up, &["board", "sendmeter"]);
     assert!(!board.contains("host offline"), "{board}");
+    look(&c, &down);
     assert_eq!(run(&c, &down, &["check"]).0, 0);
     assert_eq!(kinds(&c, "host-offline").len(), 2);
 }
@@ -148,6 +149,7 @@ fn a_pane_a_supersede_left_on_a_down_host_is_killed_once_it_is_back() {
     let (f, bazzite) = (Fake::default(), FakeShed::new());
     bazzite.lane(IMPL, "idle", WT);
     let back = with_bazzite(&f, &bazzite);
+    look(&c, &sh.on(&back));
     for _ in 0..2 {
         drover::check::stale(&c, &cfg, &sh.on(&back), &mut Vec::new()).unwrap();
     }
