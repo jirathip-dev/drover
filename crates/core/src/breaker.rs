@@ -2,9 +2,10 @@ use crate::config::Config;
 use crate::events::{append, emit, last_spawn, working, Event};
 use crate::hosts::On;
 use crate::runner::Runner;
+use crate::session::Exit;
 use crate::Ctx;
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::io::Write;
 
 /// The line a canary types; its output, not the echoed line, holds `CANARY_OUT`.
@@ -14,6 +15,90 @@ pub const CANARY_OUT: &str = "drover-canary-42";
 /// The host spawn `sp`'s lane runs on (`local` without `[hosts]`).
 pub fn host(sp: &Event) -> &str {
     sp.str("host").unwrap_or("local")
+}
+
+const WAVE_LANES: usize = 3;
+
+/// Lanes of one host gone by an adapter crash together: `WAVE_LANES` or more within `[limits] crash_wave_minutes`.
+pub struct Wave {
+    pub host: String,
+    pub at: u64,
+    pub agents: Vec<String>,
+    pub said: String,
+}
+
+impl Wave {
+    /// The one key its alert and its lanes' `lane-dead` rows carry.
+    pub fn key(&self) -> String {
+        format!("{}:{}", self.host, self.at)
+    }
+}
+
+/// Every host's crash waves among the lanes whose latest stamp is an adapter crash.
+pub fn waves(cfg: &Config, ev: &[Event]) -> Vec<Wave> {
+    let crash = crate::session::Cause::Crash.word();
+    let mut dead: Vec<(&str, u64, &str, String)> = crate::events::of_kind(ev, &["lane-state"])
+        .into_iter()
+        .filter(|e| e.str("state") == Some("gone") && e.str("cause") == Some(crash))
+        .filter_map(|e| {
+            let agent = e.str("agent")?;
+            let latest = crate::session::stamp::latest(ev, agent).is_some_and(|l| std::ptr::eq(l, e));
+            let exit = crate::session::stamp::exit(ev, agent).filter(|_| latest)?;
+            Some((host(last_spawn(ev, agent)?), e.ts, agent, exit.line()))
+        })
+        .collect();
+    dead.sort_by_key(|d| (d.0, d.1));
+    let window = cfg.limits.crash_wave_minutes * 60;
+    let mut out: Vec<Wave> = vec![];
+    for (h, ts, agent, said) in dead {
+        match out.last_mut().filter(|w| w.host == h && ts <= w.at + window) {
+            Some(w) => w.agents.push(agent.into()),
+            None => out.push(Wave {
+                host: h.into(),
+                at: ts,
+                agents: vec![agent.into()],
+                said,
+            }),
+        }
+    }
+    out.retain(|w| w.agents.len() >= WAVE_LANES);
+    out
+}
+
+/// The crash wave lane `agent` died in, if any.
+pub fn wave_of(cfg: &Config, ev: &[Event], agent: &str) -> Option<Wave> {
+    waves(cfg, ev).into_iter().find(|w| w.agents.iter().any(|a| a == agent))
+}
+
+/// A dead lane's `lane-dead` fields: its exit's cause, and the crash wave it died in (whose one alert stands for it).
+pub fn dead_tags(cfg: &Config, ev: &[Event], lane: &str, exit: Option<&Exit>) -> Vec<(&'static str, Value)> {
+    let cause = exit.map(|x| ("cause", json!(x.cause.word())));
+    let wave = wave_of(cfg, ev, lane).map(|w| ("wave", json!(w.key())));
+    cause.into_iter().chain(wave).collect()
+}
+
+/// One `lane-wave` alert per wave: its lanes come back together once the host admits them, not `respawn_per_pass` a pass.
+pub fn wave_alert(ctx: &Ctx, cfg: &Config, w: &Wave) -> Result<()> {
+    let key = w.key();
+    if working(&ctx.state)?
+        .iter()
+        .any(|e| e.kind == "lane-wave" && e.str("key") == Some(&key))
+    {
+        return Ok(());
+    }
+    let reason = format!(
+        "{} lanes on {} died within {} min ({}): respawning them together once the host is fine",
+        w.agents.len(),
+        w.host,
+        cfg.limits.crash_wave_minutes,
+        w.said
+    );
+    let d = json!({"key": key, "host": w.host, "agents": w.agents, "reason": reason});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, "drover", None, "lane-wave", d).push(),
+    )
 }
 
 /// Host `h`'s `runtime-down` while its breaker is open.

@@ -25,7 +25,8 @@ token proxy, which signs with the one `[proxy] token-file` ([hosts](hosts.md)).
 
 **Delivery.** At spawn drover reads the lane's `secret:<NAME>` env from its file and writes it to a 0600 file beside
 the worktree on the lane's host: directly on the main host, over the ssh channel's stdin on a remote one. The pane's
-shell sources the file; spawn deletes it once the harness has started. A secret never reaches argv, the pane's
+shell sources the file; spawn deletes it once the harness has started, so an ACP lane that sources it starts
+`--no-hibernate` (#1311: shed's wake would run the start again and die on the missing file). A secret never reaches argv, the pane's
 scrollback, the event log or a file left behind.
 
 **Usage limits.** `drover check` reads each lane's pane. A usage-limit banner or a sign-in prompt raises one

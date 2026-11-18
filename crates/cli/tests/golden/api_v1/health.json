@@ -6,17 +6,10 @@
     "routes": [
       {
         "count": 1,
-        "max": 20,
-        "p50": 20,
-        "p95": 20,
+        "max": 10,
+        "p50": 10,
+        "p95": 10,
         "route": "/api/v1/host"
-      },
-      {
-        "count": 2,
-        "max": 8,
-        "p50": 1,
-        "p95": 8,
-        "route": "/pair"
       },
       {
         "count": 1,
@@ -27,17 +20,24 @@
       },
       {
         "count": 1,
-        "max": 5,
-        "p50": 5,
-        "p95": 5,
+        "max": 6,
+        "p50": 6,
+        "p95": 6,
         "route": "/api/v1/needs"
+      },
+      {
+        "count": 1,
+        "max": 6,
+        "p50": 6,
+        "p95": 6,
+        "route": "/api/v1/state"
       },
       {
         "count": 1,
         "max": 5,
         "p50": 5,
         "p95": 5,
-        "route": "/api/v1/state"
+        "route": "/api/v1/queue"
       },
       {
         "count": 1,
@@ -47,11 +47,18 @@
         "route": "/api/v1/chat-about"
       },
       {
-        "count": 1,
+        "count": 2,
         "max": 4,
-        "p50": 4,
+        "p50": 1,
         "p95": 4,
-        "route": "/api/v1/queue"
+        "route": "/pair"
+      },
+      {
+        "count": 1,
+        "max": 3,
+        "p50": 3,
+        "p95": 3,
+        "route": "/api/v1/setup"
       },
       {
         "count": 1,
@@ -65,13 +72,6 @@
         "max": 2,
         "p50": 2,
         "p95": 2,
-        "route": "/api/v1/setup"
-      },
-      {
-        "count": 1,
-        "max": 1,
-        "p50": 1,
-        "p95": 1,
         "route": "/api/v1/shed"
       }
     ],
@@ -82,22 +82,24 @@
       "groups": [
         {
           "count": 7,
-          "max": 20,
-          "p50": 5,
-          "p95": 20,
+          "max": 10,
+          "p50": 6,
+          "p95": 10,
           "route": "/api/v1 reads"
         },
         {
           "count": 4,
-          "max": 8,
-          "p50": 2,
-          "p95": 8,
+          "max": 4,
+          "p50": 3,
+          "p95": 4,
           "route": "writes"
         }
       ],
+      "phone": [],
+      "phone_slow": null,
       "queued": 0,
       "rss_mb": 0,
-      "sha": "6f6bdff63a14b07f643ff5d4edc909ac9f89426a",
+      "sha": "cec916391d20ec59c5400a4b0cfc217f122d0f36",
       "slow": null,
       "started": 1000000
     },
@@ -114,6 +116,8 @@
       "busy": "number",
       "clients": "number",
       "groups": [],
+      "phone": [],
+      "phone_slow": "null",
       "queued": "number",
       "rss_mb": "number",
       "sha": "string",

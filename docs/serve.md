@@ -190,6 +190,13 @@ them as `serve`: `sha` (the build it runs, #1081), `rss_mb`, `groups` (the last 
 (taps waiting for a worker), `started` and `slow` (set while `/api/v1` p95 has been over 200 ms for 5 min). Each start
 appends `<ts> cold|handover` to `serve-starts` (the last day kept); a start that fails appends `<ts> failed`.
 
+#1312: the page times what the owner feels: each tap, sheet open, tab switch, send and answer from the input event to
+the frame after the DOM changed (split into `network`, `parse` and `render`), and each stream delta from receipt to
+painted. It batches them into one `POST /api/v1/timings` (paired only; `[[kind, ms, network, parse, render], …]`) at
+most every 30 s, dropped while offline. `phone` in the health is the last minute by kind (`tap`, `sheet`, `tab`, `send`,
+`answer`, `delta`, and each `<kind>/network|parse|render`) with `count`, `p50`, `p95` and `max`; `phone_slow` is set
+while a kind's p95 has been over 150 ms for `slo_api_minutes`.
+
 #1081: a `serve` whose port is held asks that port's health which build holds it: its own build, it exits 0 (launchd and
 systemd restart it only after a failed exit); an older one, it asks that serve over its control socket to hand over (its
 bridge runs the installed binary), then exits 0; nothing answers, it fails.
@@ -207,6 +214,7 @@ listener is not the job's pid.
 | `serve-stale` | the serve on the port runs another build than the installed `drover` |
 | `serve-loop` | more than 3 failed serve starts in 1 h (launchd's serve exiting non-zero) |
 | `serve-slow` | `/api/v1` p95 over 200 ms for 5 min |
+| `phone-slow` | a phone kind's p95 (tap, sheet, tab, send, answer, delta) over 150 ms for `slo_api_minutes` |
 | `serve-503` | any read answered 503 in the last minute |
 | `drive-slow` | a fleet's last pass over `pass_max_secs` (120 s); names the fleet, its slowest step (closed issues, spawns, PR reads, settle) and each host's remote-call count and seconds |
 
@@ -251,6 +259,7 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `POST chat` | #555: `{harness, model, effort, mtime}`, `[chat]`'s defaults written into fleet.toml (`BAD_VALUE`, `STALE`, `DOCTOR` as `cond`) |
 | `POST close` | #555: `{fleet, issue}`, a backlog issue's [close]: `gh issue close`, logged `closed`; `NOT_BACKLOG` for a queued issue or one with a lane |
 | `POST qset` | #576 (paired): `fleet`, `issue`, `key` (`design`, `verify`, `repro`), `value` (`on`, `off`): the CLI's `queue <fleet> set <n> <key> <value>` |
+| `POST timings` | #1312 (paired): the page's batch `[[kind, ms, network, parse, render], …]` (500 at most; unknown kinds skipped) into health's `phone`; `BAD_TIMINGS` |
 | `POST lesson` | #576 (paired): `fleet`: the CLI's `lesson <fleet>`, its queue entry logged `by` the device |
 | `POST orchestrator-attach` | #633 (paired): `{fleet, thread}`, a cooee thread as the repo's orchestrator thread (`orchestrator-attached`): `ask --thread` takes it, lane asks route to it, its asks and decisions are `events`; answers `OrchestratorAttach`: `brief`, `settings` (the synced orchestrator Claude settings), `env` (`DROVER_LANE`, `DROVER_THREAD`, `DROVER_PORT`), `guarded` (#565's ACP guard holds) and `why` not |
 | `POST orchestrator-detach` | #633 (paired): `{fleet, thread}`, the link ends (`orchestrator-detached`; archiving the thread ends it too); `NO_SUCH_THREAD` unless attached |

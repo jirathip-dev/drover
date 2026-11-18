@@ -2097,9 +2097,20 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     let back = spawn
         .filter(|_| KICK.get().is_none())
         .and_then(|n| retrying(ctx, ev, fleet, n));
-    let paced = (c.first() == Some(&"spawn") && step == "respawn" && KICK.get().is_none())
-        .then(|| paced(cfg, fleet))
-        .flatten();
+    let respawn = c.first() == Some(&"spawn") && step == "respawn" && KICK.get().is_none();
+    let lane = issue.and_then(|n| {
+        crate::events::of_issue(ev, fleet, n)
+            .into_iter()
+            .rfind(|e| e.kind == "spawn")
+    });
+    let wave = lane
+        .and_then(|e| e.str("agent"))
+        .filter(|_| respawn)
+        .and_then(|a| crate::breaker::wave_of(cfg, ev, a));
+    if let Some(w) = &wave {
+        crate::breaker::wave_alert(ctx, cfg, w)?;
+    }
+    let paced = (respawn && wave.is_none()).then(|| paced(cfg, fleet)).flatten();
     let full = (spawn.filter(|_| KICK.get().is_none() && !kicks).zip(c.get(3)))
         .and_then(|(n, role)| crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &[]));
     let res = match (back, paced, issue.filter(|_| kicks)) {

@@ -1,6 +1,7 @@
 4 abandoned_child
 3 access
 3 action_ids
+2 adapter_death
 3 amendments
 1 answer_delivery
 4 api_v1
@@ -120,6 +121,7 @@
 1 pair_status
 3 parity_check
 3 parity_webkit
+1 phone_timings
 3 parked
 4 pass_budget
 4 pass_profile

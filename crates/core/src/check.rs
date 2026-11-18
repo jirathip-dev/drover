@@ -282,7 +282,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];
-        let mut cause = None;
+        let mut dead = vec![];
         if let (Some(_), Some((role, lane))) = (&agents, s.active_lane()) {
             let spawned = last_spawn(&events, lane);
             let r = &On::of(r, spawned);
@@ -304,8 +304,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 format!("{}:{lane}", s.last_ts)
             };
             if let Health::Dead(exit) = &health {
-                cause = exit.as_ref().map(|x| x.cause.word());
-                let why = cause.map_or(String::new(), |c| format!(": {c}"));
+                dead = crate::breaker::dead_tags(cfg, &events, lane, exit.as_ref());
+                let why = exit.as_ref().map_or(String::new(), |x| format!(": {}", x.line()));
                 hits.push((
                     "lane-dead",
                     key.clone(),
@@ -406,8 +406,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
         for (kind, key, reason) in hits {
             let mut d = json!({"key": key, "reason": reason});
-            if let Some(c) = cause.filter(|_| kind == "lane-dead") {
-                d.put("cause", json!(c));
+            for (k, v) in dead.iter().filter(|_| kind == "lane-dead") {
+                d.put(k, v.clone());
             }
             fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), kind, d)?;
         }
@@ -641,6 +641,8 @@ fn health(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Res
         ));
         let slow = h.at("slow").as_str().map(|s| format!("serve {s}"));
         now.push(("drover", "serve-slow", slow));
+        let phone = h.at("phone_slow").as_str().map(|s| format!("phone {s}"));
+        now.push(("drover", "phone-slow", phone));
         let sha = h.at("sha").as_str().unwrap_or("?");
         let why = format!(
             "the serve on the port runs {sha:.7}, not the installed {:.7} → drover self-update",

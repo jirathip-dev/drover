@@ -739,6 +739,7 @@ pub struct Limits {
     pub respawn_max: u32,
     pub respawn_window_minutes: u64,
     pub respawn_per_pass: usize,
+    pub crash_wave_minutes: u64,
     pub runtime_down_failures: u64,
     pub runtime_down_minutes: u64,
     pub pass_max_secs: u64,
@@ -867,6 +868,7 @@ impl Default for Limits {
             respawn_max: 3,
             respawn_window_minutes: 60,
             respawn_per_pass: 2,
+            crash_wave_minutes: 5,
             runtime_down_failures: 5,
             runtime_down_minutes: 30,
             pass_max_secs: 120,
@@ -1049,6 +1051,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "respawn_per_pass",
         "respawns a drive pass starts, each through admission (a fleet may set its own)",
+    ),
+    (
+        "crash_wave_minutes",
+        "3+ lanes of one host dying by an adapter crash within it are one `lane-wave`: respawned together, one alert",
     ),
     (
         "runtime_down_failures",
