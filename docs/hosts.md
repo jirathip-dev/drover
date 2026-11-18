@@ -342,7 +342,9 @@ again. In order:
 requests write and nothing else (no admin). It lives only on that host. Each health look reads it with one
 `gh api -i` there: the Host card shows `github: token · 2 repos · expires in 80d`, and from 14 days before the
 expiry the host turns amber (`! github — token expires in 12d`). When gh there can't use its token (expired, revoked
-or not logged in yet) the card says `github: unreadable` and the host turns red, so placement skips it.
+or not logged in yet) the card says `github: unreadable` and the host turns red, so placement skips it. `drover doctor`
+shows the same row. Every remote host gets this look but a `cloud = "boat"` one: boat issues its token from outside the
+VM, so there is nothing to renew there.
 
 **Health on every start.** After a cloud host starts and its address is refreshed, drover runs the health checks
 above (and the token look) before placement uses it, so an unhealthy host never takes the lane.

@@ -301,6 +301,10 @@ impl HostCfg {
         v.extend(self.root.clone().filter(|_| v.is_empty()));
         v
     }
+    /// Whether the owner renews gh's token here: a `boat` host's comes from boat, outside the VM.
+    pub fn owner_token(&self) -> bool {
+        self.cloud.as_deref() != Some("boat")
+    }
     pub fn allow(&self) -> Vec<String> {
         let def = || {
             CLOUD_ALLOW

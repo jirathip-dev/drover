@@ -550,7 +550,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             }
             if (due || landed) && h.machine.is_some() && h.enabled {
                 s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
-                if h.cloud.is_some() {
+                if h.owner_token() {
                     let (card, warn) = crate::cloud::github(&on, ctx.now);
                     (s.github, ()) = (card, s.health.extend(warn));
                 }

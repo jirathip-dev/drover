@@ -351,7 +351,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             rows.extend(on.shed().map(|_| format!("✗ host {name} shed — unreachable")));
             continue;
         };
-        let tags = [tags, h.tags.clone()].concat();
+        let (tags, own) = ([tags, h.tags.clone()].concat(), h.owner_token());
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
@@ -363,6 +363,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         rows.extend(bad.is_empty().then_some(ok));
         rows.extend(shed.map(|b| at(&crate::shed::line(&on, &b.wire))));
         rows.extend(login_token(&on, Some(name)));
+        rows.extend(own.then(|| crate::cloud::github(&on, ctx.now).1).flatten());
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {
             rows.push(format!("! stale fleet.toml on {name}: no longer read → rm {conf}"));
