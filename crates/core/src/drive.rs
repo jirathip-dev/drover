@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::events::{append, emit, fold, working, Event, IssueState, Json};
-use crate::runner::{ok, Out, Runner};
+use crate::runner::{ok, Runner};
 use crate::session::Session;
 use crate::waiting::Waiting;
 use crate::{gh, queue, stall, waiting, Ctx};
@@ -13,7 +13,6 @@ use std::path::Path;
 
 mod pickup;
 mod remote;
-use remote::{guard, Memo, Tally};
 
 /// One pass's steps in order (`lap` names each, `pass-slow` the slowest) and the `[limits]` keys that time them.
 pub const STEPS: [(&str, &[&str]); 8] = [
@@ -239,7 +238,6 @@ thread_local! {
     static IN_ACT: Cell<bool> = const { Cell::new(false) };
     static ROOM: RefCell<(bool, Option<(&'static str, String)>)> = const { RefCell::new((false, None)) };
     static SLOT: Cell<bool> = const { Cell::new(false) };
-    static PROBED: std::sync::Arc<std::sync::Mutex<BTreeMap<String, Out>>> = std::sync::Arc::default();
 }
 
 /// A pass's own command runs (its `clean` leaves disabled hosts alone).
@@ -340,13 +338,11 @@ fn launch(
     c: &[&str],
     start: bool,
 ) -> Result<i32> {
-    let probed = PROBED.with(std::sync::Arc::clone);
-    let probe: &dyn Runner = &Memo(r, &probed);
+    let p: &dyn Runner = &remote::Memo::here(r);
     let role = c.get(3).copied().unwrap_or_default();
     markers(ctx, cfg, r, true);
-    let low = |e: &Event| {
-        crate::host::free_gb(&crate::hosts::On::of(probe, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb)
-    };
+    let low =
+        |e: &Event| crate::host::free_gb(&crate::hosts::On::of(p, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
     let bound = |p: &Event| {
         ev.iter()
             .rev()
@@ -375,7 +371,7 @@ fn launch(
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, (fleet, n, role), false)?;
     let skip = |h: &str| crate::starts::skip(ctx, (cfg, r), ev, (&all, &live), (me, start, n, role), h);
-    let placed = crate::hosts::place(ctx, cfg, probe, ev, (fleet, n, role), (None, &skip))?;
+    let placed = crate::hosts::place(ctx, cfg, p, ev, (fleet, n, role), (None, &skip))?;
     if let Some((code, why)) = room(ctx, cfg, r) {
         return crate::gate::refused(code, why);
     }
@@ -899,7 +895,6 @@ fn one(
     name: &str,
     (manual, fast): (bool, bool),
 ) -> Result<()> {
-    let t0 = crate::clock::instant();
     let lock = format!("drive{}-{name}.lock", if fast { "-fast" } else { "" });
     let _held = match KICK.get() {
         Some(_) => None,
@@ -909,9 +904,9 @@ fn one(
             None => return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?),
         },
     };
-    let tally = Tally(r, std::sync::Mutex::default());
+    let mut laps = remote::Laps::new();
+    let tally = remote::Tally(r, std::sync::Mutex::default());
     let r: &dyn Runner = &tally;
-    let t = crate::clock::instant();
     if KICK.get().is_none() {
         if let Err(e) =
             working(&ctx.state).and_then(|ev| crate::check::closed_on_github((ctx, cfg, r, &mut *out), ev, Some(name)))
@@ -919,11 +914,9 @@ fn one(
             writeln!(out, "{name} closed issues: {e:#}")?;
         }
     }
-    let closed = t.elapsed();
+    laps.lap("closed issues");
     ACTS.with_borrow_mut(BTreeMap::clear);
     ROOM.set((false, None));
-    PROBED.with(|m| guard(m).clear());
-    let t = crate::clock::instant();
     let one_slot = cfg.limits.max_parallel_spawns == 1 && crate::starts::fix_due(&working(&ctx.state)?, name);
     let early = cfg.limits.max_parallel_spawns > 0 && KICK.get().is_none() && !one_slot;
     let res = if early {
@@ -931,10 +924,9 @@ fn one(
     } else {
         Ok(())
     };
-    let mut spawns = t.elapsed();
+    laps.lap("spawns");
     let res = res.and(pass(ctx, cfg, (r, seen), out, name, fast));
-    let reads = t.elapsed().saturating_sub(spawns);
-    let t = crate::clock::instant();
+    laps.lap("PR reads, gates, steps");
     let res = res.and_then(|()| {
         if fast {
             Ok(())
@@ -942,20 +934,13 @@ fn one(
             starts(ctx, cfg, r, out, name, false)
         }
     });
-    spawns += t.elapsed();
+    laps.lap("spawns");
     if let Err(e) = &res {
         let a = json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": format!("failed: {e:#}")});
         ACTS.with_borrow_mut(|m| m.entry(name.into()).or_default().push(a));
     }
-    let t = crate::clock::instant();
     settle(ctx, r, out)?;
-    let steps = [
-        ("closed issues", closed),
-        ("spawns", spawns),
-        ("PR reads, gates, steps", reads),
-        ("settle", t.elapsed()),
-    ];
-    let slow = steps.iter().max_by_key(|s| s.1).copied().unwrap_or(("spawns", spawns));
+    laps.lap("settle");
     let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
     if !fast && KICK.get().is_none() {
         std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string()).ok();
@@ -967,12 +952,9 @@ fn one(
             *["auto", "manual", "fast"].get(i).unwrap_or(&"fast"),
             crate::usage::date(r, end, "+%H:%M"),
         );
-        let r1 = |d: std::time::Duration| (d.as_secs_f64() * 10.0).round() / 10.0;
-        let each: serde_json::Map<_, _> = steps.iter().map(|(k, d)| ((*k).to_string(), json!(r1(*d)))).collect();
-        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": r1(t0.elapsed()), "step": slow.0,
-            "step_secs": r1(slow.1), "steps": each, "remote": tally.json(), "spawns_launched": launched(&acts),
-            "actions": acts, "kick": KICK.get()});
-        append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d)).ok();
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "spawns_launched": launched(&acts),
+            "actions": acts, "kick": KICK.get(), "remote": tally.json()});
+        append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", laps.with(d))).ok();
     }
     if !fast && KICK.get().is_none() {
         crate::gh::backlog(ctx, r, cfg.fleet(name)?, name)

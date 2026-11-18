@@ -8,18 +8,64 @@ pub(super) fn guard<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> 
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-pub(super) struct Memo<'a>(
-    pub(super) &'a dyn Runner,
-    pub(super) &'a std::sync::Mutex<BTreeMap<String, Out>>,
+type Probed = std::sync::Arc<std::sync::Mutex<BTreeMap<String, Out>>>;
+
+thread_local! {
+    static PROBED: Probed = Probed::default();
+}
+
+pub(super) struct Laps(
+    std::time::Instant,
+    std::time::Instant,
+    Vec<(&'static str, std::time::Duration)>,
 );
 
-impl Memo<'_> {
+impl Laps {
+    pub(super) fn new() -> Self {
+        PROBED.with(|m| guard(m).clear());
+        Self(crate::clock::instant(), crate::clock::instant(), Vec::new())
+    }
+    pub(super) fn lap(&mut self, step: &'static str) {
+        self.2.push((step, self.1.elapsed()));
+        self.1 = crate::clock::instant();
+    }
+    pub(super) fn with(&self, mut d: Value) -> Value {
+        let r1 = |d: std::time::Duration| (d.as_secs_f64() * 10.0).round() / 10.0;
+        let mut each = BTreeMap::<&str, std::time::Duration>::new();
+        for (k, t) in &self.2 {
+            *each.entry(k).or_default() += *t;
+        }
+        let slow = each
+            .iter()
+            .max_by_key(|s| s.1)
+            .map(|(k, t)| (*k, *t))
+            .unwrap_or_default();
+        let steps: serde_json::Map<_, _> = each.iter().map(|(k, t)| ((*k).to_string(), json!(r1(*t)))).collect();
+        let more = [
+            ("secs", json!(r1(self.0.elapsed()))),
+            ("step", json!(slow.0)),
+            ("step_secs", json!(r1(slow.1))),
+        ];
+        if let Some(o) = d.as_object_mut() {
+            o.extend(more.map(|(k, v)| (k.to_string(), v)));
+            o.insert("steps".into(), steps.into());
+        }
+        d
+    }
+}
+
+pub(super) struct Memo<'a>(&'a dyn Runner, Probed);
+
+impl<'a> Memo<'a> {
+    pub(super) fn here(r: &'a dyn Runner) -> Self {
+        Self(r, PROBED.with(std::sync::Arc::clone))
+    }
     fn once(&self, k: String, call: impl FnOnce() -> Result<Out>) -> Result<Out> {
-        if let Some(o) = guard(self.1).get(&k) {
+        if let Some(o) = guard(&self.1).get(&k) {
             return Ok(o.clone());
         }
         let o = call()?;
-        guard(self.1).insert(k, o.clone());
+        guard(&self.1).insert(k, o.clone());
         Ok(o)
     }
 }
