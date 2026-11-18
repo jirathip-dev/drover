@@ -8,14 +8,13 @@ use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Map, Value};
 use std::io::Write;
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 #[path = "later.rs"]
 mod later;
 
 const MANIFEST: &str = include_str!("../../../cooee-plugin.toml");
-static STREAMS: AtomicUsize = AtomicUsize::new(0);
 type Res = (&'static str, &'static str, Vec<u8>);
 type Q = BTreeMap<String, String>;
 
@@ -1530,7 +1529,7 @@ impl Server<'_> {
         let chat = self
             .transcript(ctx, &q)
             .and_then(|t| serde_json::from_str::<Chat>(&t).ok());
-        let said: Vec<Value> = chat.map_or_else(Vec::new, |c| {
+        let mut said: Vec<Value> = chat.map_or_else(Vec::new, |c| {
             let lc = self.blocks(ctx, &q, c);
             lc.blocks
                 .iter()
@@ -1538,6 +1537,7 @@ impl Server<'_> {
                 .map(|(i, b)| said(i, b, &lc.chat.lines))
                 .collect()
         });
+        said.extend(later::undelivered(&ev, agent));
         let values = json!({ "agent": agent });
         let other = l.role == "other";
         let acts: &[(&str, &str)] = if other {
@@ -1918,13 +1918,13 @@ impl Server<'_> {
             now: crate::now(),
             ..self.ctx.clone()
         };
-        let (q, open) = (form(query), STREAMS.fetch_add(1, Relaxed) < 4);
+        let (q, open) = (form(query), self.streams.fetch_add(1, Relaxed) < 4);
         let paired = Self::plugin(self.ctx, head)
             || devices::check(self.ctx, header(head, "cookie").unwrap_or_default()).is_ok();
         let screen = |c: &Ctx| crate::runner::request(|| self.screen(c, base, &q, paired));
         let first = screen(&ctx()).filter(|_| open && (Self::plugin(self.ctx, head) || self.allowed(self.ctx, head)));
         let Some(mut cur) = first else {
-            STREAMS.fetch_sub(1, Relaxed);
+            self.streams.fetch_sub(1, Relaxed);
             let r = line(
                 if open {
                     "503 Service Unavailable"
@@ -1973,12 +1973,12 @@ impl Server<'_> {
                     }
                     cur = new;
                 }
-                if msg.is_empty() && ping.elapsed() >= Duration::from_secs(15) {
+                if msg.is_empty() && (ping.elapsed() >= Duration::from_secs(15) || super::hung_up(s)) {
                     (msg, ping) = (": ping\n\n".into(), drover_core::clock::instant());
                 }
             }
         };
-        STREAMS.fetch_sub(1, Relaxed);
+        self.streams.fetch_sub(1, Relaxed);
         res
     }
 }
