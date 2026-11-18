@@ -11,8 +11,14 @@ use std::path::{Component, Path, PathBuf};
 /// The repo's recipe the verifier follows.
 pub const RECIPE: &str = ".drover/verify.md";
 
-/// Why `fleet` #`n`'s verify stage runs (`None`: it doesn't): rev's `Repro: verify` PASS, its queue mark, else a design stage or a PR touching `ui_paths`.
-pub fn why(events: &[Event], ui_paths: &[String], (fleet, n): (&str, u64), files: &[String]) -> Option<String> {
+/// Why `fleet` #`n`'s verify stage runs (`None`: it doesn't): the latest rev PASS at `head` asking `Repro: verify`, its queue mark, else a design stage or a PR touching `ui_paths`.
+pub fn why(
+    events: &[Event],
+    ui_paths: &[String],
+    (fleet, n): (&str, u64),
+    head: &str,
+    files: &[String],
+) -> Option<String> {
     let mark = crate::queue::replay(events, fleet)
         .into_iter()
         .find(|i| i.issue == n)
@@ -21,9 +27,8 @@ pub fn why(events: &[Event], ui_paths: &[String], (fleet, n): (&str, u64), files
         let hit = |p: &&String| ui_paths.iter().any(|g| crate::config::glob(g.as_bytes(), p.as_bytes()));
         files.iter().find(hit).map(|p| format!("touches {p}"))
     };
-    let repro = |e: &Event| e.is("verdict", fleet, n) && e.str("repro") == Some("verify");
     match mark {
-        _ if events.iter().any(repro) => Some("Repro: verify".into()),
+        _ if crate::gate::repro_verify(events, (fleet, n), head) => Some("Repro: verify".into()),
         Some(on) => on.then(|| "queued --verify".into()),
         None if events
             .iter()
@@ -45,7 +50,7 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
     let num = pr["number"].to_string();
     let files = crate::gh::diff_names(ctx, r, f, (fleet, n), &num, sha).unwrap_or_default();
     let events = working(&ctx.state)?;
-    let (kind, why) = match why(&events, &f.ui_paths, (fleet, n), &files) {
+    let (kind, why) = match why(&events, &f.ui_paths, (fleet, n), sha, &files) {
         None => (
             "verify-skipped",
             "no design stage, no UI files, not queued --verify".to_string(),

@@ -1172,3 +1172,20 @@ fn waiting_shows_no_starting_count_once_the_slot_is_free() {
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains("starting"), "{out}");
 }
+
+#[test]
+fn a_laneless_marker_past_the_limit_is_dropped_and_logged_once() {
+    let (c, _sh) = fleet("kicks-laneless", 1, 1);
+    mark(&c, 1, 0, 400);
+    let r = fake("1.0");
+    let d = pass(&c, &r);
+    assert!(!codes(&d).iter().any(|c| c == "SPAWN_PENDING"), "{d}");
+    assert_eq!(launched(&r, 1), 1, "{d}");
+    pass(&c, &fake("1.0"));
+    let s = stale(&c);
+    assert_eq!(
+        (s.len(), s[0].str("file")),
+        (1, Some("spawn-sendmeter-1.pending")),
+        "{s:?}"
+    );
+}

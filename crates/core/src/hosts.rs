@@ -665,10 +665,11 @@ pub fn held_slots(cfg: &Config, events: &[Event], agents: &[Session], skip: Opti
         };
         let s = st.get(&(sp.fleet.clone(), i));
         if s.is_some_and(|s| !IDLE.contains(&s.state.as_str())) && skip != Some((sp.fleet.as_str(), i)) {
-            n[0] += usize::from(!matches!(
-                a.status().map(Status::word),
-                Some("idle" | "done" | "blocked")
-            ));
+            n[0] += usize::from(if a.acp {
+                a.busy()
+            } else {
+                !matches!(a.status().map(Status::word), Some("idle" | "done" | "blocked"))
+            });
             n[1] += usize::from(sim(cfg, events, sp));
         }
     }
@@ -935,10 +936,7 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     let (min, events) = (cfg.limits.min_free_gb, working(&ctx.state).unwrap_or_default());
     let low = || host::free_gb(on).filter(|g| *g < min);
     let mut gb = low()?;
-    let live = match on.machine {
-        None => crate::check::live_lanes(ctx, cfg, on).ok(),
-        Some(_) => Some(crate::check::Live::new()),
-    };
+    let live = crate::check::live_lanes(ctx, cfg, on).ok();
     let trim = |l| crate::check::trim_on(ctx, on, cfg, 0.0, l, &mut std::io::sink()).unwrap_or(0);
     if live.as_ref().is_some_and(|l| trim(l) > 0) {
         gb = low()?;

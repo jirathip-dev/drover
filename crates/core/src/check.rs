@@ -1373,7 +1373,7 @@ pub fn worktree_why(ctx: &Ctx) -> String {
     format!("measured {} (build folders aside); largest: {}", of("root"), of("top"))
 }
 
-/// Each enabled remote host's shared build folder trimmed to `build_budget_gb`; after the tick's drive, one quick ssh per host (a disabled or offline one never holds the pass up). then its scratch swept there.
+/// Each enabled remote host's finished lanes swept, then its shared build folders trimmed to `build_budget_gb` past its live lanes: one `builds: <host>:` line each, its error included.
 pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let mut tried = std::collections::BTreeSet::new();
     let hosts = cfg.hosts.iter().filter(|h| h.1.enabled);
@@ -1382,15 +1382,20 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
             continue;
         }
         let on = On::quick(r, Some(m));
-        if let Err(e) = trim_on(ctx, &on, cfg, cfg.limits.build_budget_gb, &Live::new(), out) {
+        if cfg.limits.sweep_remote {
+            if let Err(e) = sweep(ctx, cfg, &on, name, out, Sweep::Tick) {
+                writeln!(out, "scratch: {name}: {e:#}")?;
+            }
+        }
+        let budget = cfg.limits.build_budget_gb;
+        let trim = |out: &mut dyn Write| -> Result<u64> {
+            let live = live_lanes(ctx, cfg, &on)?;
+            (build_dirs(ctx, cfg, &on).iter())
+                .map(|b| trim_remote(&on, name, b, budget, &live, &mut *out))
+                .sum()
+        };
+        if let Err(e) = trim(out) {
             writeln!(out, "builds: {name}: {e:#}")?;
-            continue;
-        }
-        if !cfg.limits.sweep_remote {
-            continue;
-        }
-        if let Err(e) = sweep(ctx, cfg, &on, name, out, Sweep::Tick) {
-            writeln!(out, "scratch: {name}: {e:#}")?;
         }
     }
     Ok(())
@@ -1515,17 +1520,20 @@ pub fn strays(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, yes: bool) -> Result
     Ok(())
 }
 
-const TRIM: &str = r#"r=$1; case $r in "~/"*) r=$HOME/${r#"~/"};; esac
-cd "$r" 2>/dev/null && command -v lsof >/dev/null || { echo "freed 0"; exit 0; }
+const TRIM: &str = r#"o=$1 b=$2; shift 2; r=$o; case $r in "~/"*) r=$HOME/${r#"~/"};; esac
+cd "$r" 2>/dev/null || { echo "total 0 freed 0"; exit 0; }
 t=$(du -sk . | cut -f1); f=0
 for d in */*/; do
-  [ "$t" -le "$2" ] && break
+  [ "$t" -le "$b" ] && break
   [ -f "$d.cargo-lock" ] || continue
-  if lsof "$d.cargo-lock" >/dev/null 2>&1; then echo "keep $r/$d: cargo is building"; continue; fi
+  n=${d%%/*}; k=
+  for l in "$@"; do [ "$l" = "$n" ] && k=1; done
+  if [ -n "$k" ]; then echo "keep $o/$d: a live lane"; continue; fi
+  if command -v lsof >/dev/null && lsof "$d.cargo-lock" >/dev/null 2>&1; then echo "keep $o/$d: cargo is building"; continue; fi
   s=$(du -sk "$d" | cut -f1)
-  rm -rf "./${d:?}" && t=$((t - s)) && f=$((f + s)) && echo "builds: trimmed $r/$d ($s KB)"
+  rm -rf "./${d:?}" && t=$((t - s)) && f=$((f + s)) && echo "trimmed $o/$d ($s KB)"
 done
-echo "freed $f""#;
+echo "total $t freed $f""#;
 
 fn build_dirs(ctx: &Ctx, cfg: &Config, on: &On) -> Vec<String> {
     let Some(h) = (cfg.hosts.values()).find(|h| h.machine.as_deref() == on.machine && on.machine.is_some()) else {
@@ -1536,29 +1544,36 @@ fn build_dirs(ctx: &Ctx, cfg: &Config, on: &On) -> Vec<String> {
     roots.iter().map(|r| format!("{r}/{}", crate::roots::BUILD)).collect()
 }
 
-/// The shared build folders on `on`'s host trimmed to `budget` GB each; bytes freed.
+/// The shared build folders on `on`'s host trimmed to `budget` GB each, past `live`'s; bytes freed.
 pub fn trim_on(ctx: &Ctx, on: &On, cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write) -> Result<u64> {
-    if on.machine.is_none() {
+    let Some(m) = on.machine else {
         return trim_builds(ctx, cfg, budget, live, out, false);
-    }
+    };
     let dirs = build_dirs(ctx, cfg, on);
-    dirs.iter().map(|b| trim_remote(on, b, budget, out)).sum()
+    dirs.iter().map(|b| trim_remote(on, m, b, budget, live, out)).sum()
 }
 
-fn trim_remote(on: &On, root: &str, budget: f64, out: &mut dyn Write) -> Result<u64> {
+fn trim_remote(on: &On, host: &str, root: &str, budget: f64, live: &Live, out: &mut dyn Write) -> Result<u64> {
     let kb = format!("{:.0}", budget * 1_048_576.0);
-    let o = on.run("sh", &crate::runner::argv(&["-c", TRIM, "sh", root, &kb]))?;
-    anyhow::ensure!(o.code == 0, "trim failed ({}): {}", o.code, o.stderr.trim());
-    let s = o.stdout;
-    let (log, last) = s.trim_end().rsplit_once('\n').unwrap_or(("", s.trim()));
-    if !log.is_empty() {
-        writeln!(out, "{log}")?;
+    let args = crate::runner::argv(&["-c", TRIM, "sh", root, &kb]);
+    let o = on.run("sh", &[args, live.iter().cloned().collect()].concat())?;
+    anyhow::ensure!(o.code != 124, "trim of {root} timed out");
+    anyhow::ensure!(o.code == 0, "trim of {root} failed ({}): {}", o.code, o.stderr.trim());
+    let (mut total, mut freed) = (0, 0);
+    for l in o.stdout.lines() {
+        let sum = (l.strip_prefix("total ").and_then(|t| t.split_once(" freed ")))
+            .and_then(|(t, f)| Some((t.parse::<u64>().ok()?, f.parse::<u64>().ok()?)));
+        match sum {
+            Some((t, f)) => (total, freed) = (t * 1024, f * 1024),
+            None => writeln!(out, "builds: {host}: {l}")?,
+        }
     }
-    Ok(last
-        .strip_prefix("freed ")
-        .and_then(|k| k.parse::<u64>().ok())
-        .unwrap_or(0)
-        * 1024)
+    let (t, f) = (gb(total), gb(freed));
+    writeln!(
+        out,
+        "builds: {host}: {root} at {t:.2} GB of {budget} GB; freed {f:.2} GB"
+    )?;
+    Ok(freed)
 }
 
 const NOTE: &str = "(logical sizes; APFS clones may free less)";
