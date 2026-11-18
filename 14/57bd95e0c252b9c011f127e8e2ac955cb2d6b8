@@ -1,0 +1,12 @@
+Decided: the lane sheet reads its transcript once, through the lane's own session, asking shed for only the 200 lines it shows, and masks only those.
+Because: "One shed call per lane sheet. Read only the 200 lines shown, and mask only those."
+Decided: the sheet reuses the shed listing taken in the last serve_shed_secs (the ticker re-lists each second); a write clears it.
+Because: crates/server/src/serve.rs:1789
+Decided: a read the background has not done yet shows "transcript loading…"; the page fetches the sheet again each second until it fills in.
+Because: "A remote lane's transcript is never empty because of the request cache."
+Rejected: reading every lane's transcript in the background — ssh reads for all lanes each 10 s for a sheet rarely opened.
+Rejected: running ssh on the request — the request-path guard forbids it.
+Decided: one sheet fetch at a time; a tap while it loads is ignored and the loader strip shows after 100 ms.
+Check: crates/cli/tests/hosts.rs a_remote_lanes_sheet_shows_its_transcript fails on base (empty block) and passes at head.
+Check: lanes_sheet.rs counts shed calls per GET on the large board (at most 1) and asserts read lines = 200 and p95 within 150 ms.
+Owner: Opening a lane on another machine now shows "loading" and then its log, instead of a blank box; the sheet opens faster and a double tap opens it once.
