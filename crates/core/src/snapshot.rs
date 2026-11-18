@@ -139,13 +139,11 @@ impl<'a> Snap<'a> {
         for (k, (m, line)) in std::mem::take(&mut *lock(&self.want)) {
             by.entry(m).or_default().push((k, line));
         }
-        for (m, cmds) in by {
+        crate::hosts::each(by, |(m, cmds)| {
             let lines: Vec<String> = cmds.iter().map(|c| c.1.clone()).collect();
             let outs = batch(&On::new(self.r, Some(&m)), &lines);
-            for ((k, _), o) in cmds.into_iter().zip(outs) {
-                lock(&self.reads).insert(k, o);
-            }
-        }
+            lock(&self.reads).extend(cmds.into_iter().map(|c| c.0).zip(outs));
+        });
     }
 }
 

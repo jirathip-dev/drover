@@ -208,7 +208,7 @@ listener is not the job's pid.
 | `serve-loop` | more than 3 failed serve starts in 1 h (launchd's serve exiting non-zero) |
 | `serve-slow` | `/api/v1` p95 over 200 ms for 5 min |
 | `serve-503` | any read answered 503 in the last minute |
-| `drive-slow` | a fleet's last pass over `pass_max_secs` (120 s); names the fleet and its slowest step |
+| `drive-slow` | a fleet's last pass over `pass_max_secs` (120 s); names the fleet, its slowest step (closed issues, spawns, PR reads, settle) and each host's remote-call count and seconds |
 
 CI's gates are `crates/cli/tests/serve_health.rs`: the request-path guard (every read answers with the db write-locked,
 and none calls git, gh or ssh) and the bench (each route group's p95 within 50 ms on the fixture state).
