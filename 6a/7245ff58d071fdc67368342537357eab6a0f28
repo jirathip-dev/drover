@@ -1,0 +1,12 @@
+Decided: slo-tick breaches on no progress, not on run time: tick.step carries n (the pass's nanosecond of its last step or call), the fast step keeps when it last saw n move in tick.seen
+Because: "Self-heal stops a tick only when it is stuck (no progress: no beat or log line or pass step for N minutes), never only because it has run long."
+Decided: progress is judged on the fast step's own clock (ctx.now when n moved), so tick and observer never compare two clocks
+Rejected: tick.beat as progress — its heartbeat thread beats even while the pass hangs (crates/core/src/timer.rs:403)
+Rejected: a per-fleet time budget or rotation — fleets already run their passes in parallel threads (crates/core/src/drive.rs:813); the test shows sendmeter finishing while slowfleet still runs
+Decided: local calls (gh, git) count as progress, so a pass that only records verdicts and labels PRs is busy, not stuck
+Because: "recording verdicts and turn-ends and labelling PRs up to the moment it was stopped"
+Decided: the stop line names the fleets whose drive-<fleet>.lock lease is held: "in drive · synergy"
+Because: "A stopped tick logs which fleet and step it was in."
+Check: drive_sim a_busy_tick_past_the_tick_slo_is_never_stopped_and_every_fleet_finishes_its_pass fails at ce35cc69 (the test alone on base) with the production line (tick running 10 min, in drive; waiting on: none → SIGTERM)
+Check: a hung tick is still stopped within slo_tick_minutes (drive_sim a_tick_hung_on_ssh_is_stopped_within_the_slo_and_the_next_tick_runs, and tick_stuck's stop tests)
+Owner: a busy tick now runs to its end; only a tick that stops moving for 10 minutes is stopped, so the slo_tick_minutes = 30 stopgap can go back to the default.
