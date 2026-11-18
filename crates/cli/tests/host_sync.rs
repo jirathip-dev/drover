@@ -51,7 +51,7 @@ fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
 }
 
 fn healthy(f: Fake) -> Fake {
-    f.reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
+    f.reply(&format!("{SSH}'git' '--no-replace-objects' 'ls-remote'"), "abc\tHEAD\n")
         .reply(&format!("{SSH}'sh' '-lc'"), "")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' '--version'"),
@@ -228,7 +228,10 @@ fn a_landed_sync_rereads_the_host_health_in_the_same_pass_so_spawn_places_there(
     ));
     let (code, out) = run(&c, &two(&landed, &bazzite), &["check"]);
     assert_eq!(code, 0, "{out}");
-    assert!(landed.called(&format!("{SSH}'git' 'ls-remote'")), "health ran again");
+    assert!(
+        landed.called(&format!("{SSH}'git' '--no-replace-objects' 'ls-remote'")),
+        "health ran again"
+    );
     assert_eq!(cached(&c)["bazzite"].health, Vec::<String>::new());
     assert_eq!(placed(&c, &fake(2.0, 0.1), 12, "impl", None).as_deref(), Ok("bazzite"));
 }

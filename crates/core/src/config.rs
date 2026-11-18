@@ -480,6 +480,8 @@ pub struct Fleet {
     pub hygiene: Hygiene,
     /// `srt` starts every lane's agent inside sandbox-runtime with the rules `sandbox::settings` writes; unset = off.
     pub sandbox: Option<Sandbox>,
+    /// lanes see history since this commit only (`drover baseline`); unset = all of it.
+    pub baseline: Option<Baseline>,
 }
 
 /// One key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
@@ -566,6 +568,31 @@ impl MergeMode {
             Self::Squash => &["--squash", "--delete-branch"],
             Self::Merge => &["--merge"],
         }
+    }
+}
+
+/// a full commit id; only 40 lowercase hex chars build one, so a bad key fails at load.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Baseline(String);
+
+impl TryFrom<String> for Baseline {
+    type Error = String;
+    fn try_from(s: String) -> std::result::Result<Self, String> {
+        let hex = s.len() == 40 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        hex.then_some(Baseline(s))
+            .ok_or_else(|| "baseline must be a full 40-hex commit sha".into())
+    }
+}
+
+impl Baseline {
+    /// The full sha.
+    pub fn sha(&self) -> &str {
+        &self.0
+    }
+    /// The first 12 chars, for lines people read.
+    pub fn short(&self) -> &str {
+        &self.0[..12]
     }
 }
 
@@ -1291,7 +1318,7 @@ impl Config {
         let raw: toml::Table = toml::from_str(text)?;
         if let Some((k, _)) = strings("", &toml::Value::Table(raw.clone()))
             .into_iter()
-            .find(|(_, v)| secret_like(v))
+            .find(|(k, v)| secret_like(v) && !(k.ends_with(".baseline") && Baseline::try_from(v.clone()).is_ok()))
         {
             return crate::gate::refused(
                 "SECRET_IN_CONFIG",
