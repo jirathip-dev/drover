@@ -484,7 +484,7 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     let checks = [
         "command -v git",
         "command -v gh",
-        "v=$(shed --version)",
+        "shed --version",
         "shed doctor",
         "command -v node",
         "shed agents --json",
@@ -510,10 +510,9 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     };
     assert!(!calls.iter().any(|l| herdr(&l)), "no herdr: {calls:?}");
     let has = |s: &str| calls.iter().any(|l| l.contains(s));
-    assert!(has(&format!(
-        "cargo install --git https://github.com/jirathip-dev/shed --rev {}",
-        drover::shed::REV
-    )));
+    assert!(has(
+        "cargo install --git https://github.com/jirathip-dev/shed --branch main --locked shed"
+    ));
     assert!(
         has("shed install --force") && has("shed agents add claude-acp"),
         "{calls:?}"

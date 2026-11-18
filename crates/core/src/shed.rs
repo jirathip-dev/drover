@@ -10,11 +10,16 @@ use std::time::Duration;
 
 pub use shed_proto as proto;
 
-/// The shed a `shed-acp` host's bootstrap installs: the build proven with drover on the main host. shed's repo, beside drover's own.
+/// shed's repo, beside drover's own: a new host's bootstrap installs its latest main once; shed updates itself after that.
 pub fn git() -> String {
     env!("CARGO_PKG_REPOSITORY").replace("/herdsman", "/shed")
 }
-pub const REV: &str = "9b88eb5be5bc9ba8c5c75480483b9861ddc6e993";
+
+/// The oldest shed protocol drover accepts: any shed at or above it passes, whatever its build.
+pub const MIN_PROTOCOL: u32 = 1;
+
+/// The fix a `SHED_VERSION` refusal names: drover never installs shed.
+pub const UPDATE: &str = "update shed (it updates itself from its own releases and hands serve over)";
 
 /// Where a host's shed server answers.
 #[derive(Clone, Debug, PartialEq)]
@@ -53,6 +58,10 @@ fn side(h: &Hello) -> String {
     format!("{} protocol {}", short(h), h.protocol)
 }
 
+fn accepted(h: &Hello) -> bool {
+    h.product == "shed" && h.protocol >= MIN_PROTOCOL
+}
+
 fn answer(text: &str) -> Result<(Hello, Value)> {
     let mut it = text.lines().map(serde_json::from_str::<Response>);
     let mut next = || -> Result<Response> { Ok(it.next().context("shed: connection closed")??) };
@@ -62,9 +71,8 @@ fn answer(text: &str) -> Result<(Hello, Value)> {
     }
     let theirs = hello.result.and_then(|v| serde_json::from_value::<Hello>(v).ok());
     ensure!(
-        theirs.as_ref().is_some_and(Hello::compatible),
-        "SHED_VERSION: drover speaks shed {}, the server is {}",
-        side(&Hello::ours()),
+        theirs.as_ref().is_some_and(accepted),
+        "SHED_VERSION: shed serve is {}, drover needs shed protocol {MIN_PROTOCOL} or newer → {UPDATE}",
         theirs.as_ref().map_or("?".into(), side)
     );
     match next()? {
@@ -74,7 +82,7 @@ fn answer(text: &str) -> Result<(Hello, Value)> {
     }
 }
 
-/// Doctor's `shed` line for the server on `w`: its version and protocol against drover's, `✗` on a mismatch, `!` when it does not answer.
+/// Doctor's `shed` line for the server on `w`: its version and protocol against drover's minimum, `✗` under it, `!` when it does not answer.
 pub fn line(r: &dyn Runner, w: &Wire) -> String {
     let theirs = exchange(r, w, Method::Ls, json!(proto::LsParams::default())).and_then(|t| answer(&t));
     match theirs {
@@ -83,19 +91,23 @@ pub fn line(r: &dyn Runner, w: &Wire) -> String {
 → stop that shed serve, then systemctl --user reset-failed shed.service && systemctl --user start shed.service"
                 .into()
         }
-        Ok((h, _)) => match pinned(&h, on_path(r)) {
-            Err(e) => format!("✗ shed — {e}"),
-            Ok(b) => format!(
-                "✓ shed — server {}, drover speaks {}{b}",
-                side(&h),
-                side(&Hello::ours())
-            ),
-        },
-        Err(e) if format!("{e:#}").starts_with("SHED_JOB") => format!("✗ shed — {e:#}"),
-        Err(e) if format!("{e:#}").starts_with("SHED_VERSION") => format!(
-            "✗ shed — {e:#} → cargo install --git {} --rev {REV} --locked --force shed, then restart shed serve",
-            git()
-        ),
+        Ok((h, _)) => {
+            let other = on_path(r).filter(|b| b.build != h.build);
+            let path = other.map_or(String::new(), |b| {
+                format!("; shed on PATH {} (serve hands over itself)", short(&b))
+            });
+            format!(
+                "✓ shed — server {}, drover needs protocol {MIN_PROTOCOL} or newer{path}",
+                side(&h)
+            )
+        }
+        Err(e)
+            if ["SHED_JOB", "SHED_VERSION"]
+                .iter()
+                .any(|k| format!("{e:#}").starts_with(k)) =>
+        {
+            format!("✗ shed — {e:#}")
+        }
         Err(e) => format!("! shed: {e:#}"),
     }
 }
@@ -111,38 +123,8 @@ fn on_path(r: &dyn Runner) -> Option<Hello> {
     })
 }
 
-fn pinned(serve: &Hello, bin: Option<Hello>) -> Result<String> {
-    let ok = |h: &Hello| h.version == proto::VERSION || !h.build.is_empty() && REV.starts_with(&h.build);
-    let (rev, fix) = (REV.get(..7).unwrap_or(REV), "drover shed install --yes");
-    if let Some(b) = bin.as_ref().filter(|b| !ok(b)) {
-        bail!("SHED_VERSION: shed on PATH is {}, drover pins {rev} → {fix}", short(b));
-    }
-    ensure!(
-        ok(serve),
-        "SHED_VERSION: shed serve runs {}, drover pins {rev} → {fix}",
-        short(serve)
-    );
-    let Some(b) = bin else { return Ok(String::new()) };
-    ensure!(
-        b.build == serve.build,
-        "SHED_VERSION: shed serve runs {}, shed on PATH is {} → restart shed serve ({fix})",
-        short(serve),
-        short(&b)
-    );
-    Ok(format!("; shed on PATH {}, pin {rev}", short(&b)))
-}
-
 fn hello(r: &dyn Runner, w: &Wire) -> Result<(Hello, Value)> {
     answer(&exchange(r, w, Method::Hello, json!(Hello::ours()))?)
-}
-
-/// Why `r`'s shed on PATH or the serve on `w` is off drover's pin (`SHED_VERSION: …`), else the builds read back.
-pub fn gate(r: &dyn Runner, w: &Wire) -> Result<String> {
-    match hello(r, w) {
-        Ok((h, _)) => pinned(&h, on_path(r)),
-        Err(e) if format!("{e:#}").starts_with("SHED_VERSION") => Err(e),
-        Err(_) => Ok(String::new()),
-    }
 }
 
 /// `shed on PATH <build>, serve <build>` as `r` reads them, `?` for one it cannot.
@@ -152,17 +134,7 @@ pub fn builds(r: &dyn Runner) -> String {
     format!("shed on PATH {}, serve {}", s(on_path(r)), s(serve))
 }
 
-/// `drover shed`'s verbs.
-#[derive(clap::Subcommand)]
-pub enum Cmd {
-    #[command(about = "Install the pinned shed and restart shed serve onto it; dry run unless --yes")]
-    Install {
-        #[arg(long, help = "Actually install and restart serve")]
-        yes: bool,
-    },
-}
-
-/// A local spawn's shed: `SHED_MISSING` without one on PATH, `SHED_VERSION` (unless `dry`) when it or serve is off the pin.
+/// A local spawn's shed: `SHED_MISSING` without one on PATH, `SHED_VERSION` (unless `dry`) when serve's protocol is under drover's minimum.
 pub fn ready(r: &dyn Runner, w: &Wire, dry: bool) -> Result<()> {
     if crate::runner::ok(r, "which", &["shed"]).is_err() {
         let path = crate::config::env("PATH").unwrap_or_default();
@@ -172,48 +144,12 @@ pub fn ready(r: &dyn Runner, w: &Wire, dry: bool) -> Result<()> {
     if dry {
         return Ok(());
     }
-    gate(r, w)
-        .map(drop)
-        .or_else(|e| crate::gate::refused("SHED_VERSION", format!("{e:#}").replacen("SHED_VERSION: ", "", 1)))
-}
-
-/// `drover shed install`: the pinned rev onto PATH, then `shed install --force` restarts serve onto it, read back as doctor's line; unless `yes`, the plan and the terminals on serve.
-pub fn install(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, yes: bool) -> Result<i32> {
-    let w = r.shed().context(crate::config::NO_RUNTIME)?.wire;
-    let cargo = ["install", "--git", &git(), "--rev", REV, "--locked", "--force", "shed"];
-    if !yes {
-        let ls = call(r, &w, Method::Ls, json!(proto::LsParams::default()));
-        let live = ls.ok().and_then(|v| v.as_array().map(Vec::len)).unwrap_or_default();
-        let plan = format!("cargo {}, then shed install --force", cargo.join(" "));
-        writeln!(
-            out,
-            "would run {plan} (restarts shed serve, {live} terminals on it); --yes to run"
-        )?;
-        return Ok(0);
-    }
-    let o = r.run("cargo", &argv(&cargo))?;
-    ensure!(
-        o.code == 0,
-        "cargo install shed failed ({}): {}",
-        o.code,
-        o.stderr.trim()
-    );
-    cli(r, &["install", "--force"])?;
-    let mut back = line(r, &w);
-    for _ in 0..10 {
-        if !back.starts_with('!') {
-            break;
+    match hello(r, w) {
+        Err(e) if format!("{e:#}").starts_with("SHED_VERSION") => {
+            crate::gate::refused("SHED_VERSION", format!("{e:#}").replacen("SHED_VERSION: ", "", 1))
         }
-        r.sleep(1);
-        back = line(r, &w);
+        _ => Ok(()),
     }
-    writeln!(out, "{back}")?;
-    if !back.starts_with('✓') {
-        return Ok(1);
-    }
-    let d = json!({"rev": REV, "line": back});
-    crate::events::append(&ctx.state, &Event::new(ctx.now, "drover", None, "shed-installed", d))?;
-    Ok(0)
 }
 
 /// A `SHED_VERSION` refusal in `res` alerts `shed-version` once per distinct refusal, and `shed-version-ok` once a call gets through again; whether `res` was one.
