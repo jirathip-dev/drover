@@ -1,0 +1,11 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1254/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running tests/host_deadline.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1254/debug/deps/host_deadline-22ca05e991607b24)
+
+running 2 tests
+kill: (2303123): No such process
+test an_ssh_that_never_returns_costs_one_deadline_and_drive_still_starts ... ok
+test a_hung_shed_connect_on_one_remote_host_costs_one_deadline_and_another_remote_host_still_spawns ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.87s
+
