@@ -526,19 +526,11 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             }
             let mut landed = false;
             if h.machine.is_some() && h.enabled && !s.home.is_empty() {
-                match sync(ctx, cfg, &on, (name, &s.home, &tags(h, Some(&*s)))) {
-                    Ok((v, done)) => (s.drover, landed) = (v, done),
-                    Err(why) => {
-                        let first = !events
-                            .iter()
-                            .any(|e| e.kind == "host-sync-skipped" && e.str("host") == Some(name));
-                        if first || !s.drover.is_empty() {
-                            let d = json!({"host": name, "reason": why});
-                            append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync-skipped", d)).ok();
-                        }
-                        s.drover = String::new();
-                    }
-                }
+                let live = crate::release::builds(&on, &real_exe(ctx, &s.home))
+                    .ok()
+                    .and_then(|b| b.live);
+                let live = live.unwrap_or_default();
+                (landed, s.drover) = (!s.drover.is_empty() && live != s.drover, live);
             }
             if let Some(Err(e)) = h
                 .machine
@@ -1026,10 +1018,13 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     };
     let reach = format!("can't reach {}:", f.repo);
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
+    let swap = cfg.limits.self_update_swap_secs;
+    let behind = machine.and_then(|_| updating(pre.0, name, (ctx.now, swap)));
     let mut full = false;
     let (hs, refusal) = match cloud.map_or_else(|| crate::session::live_on(&on).map_err(|_| None), |c| Err(Some(c))) {
         Err(Some(c)) => (Host::default(), Some(c)),
         Err(None) => (Host::default(), Some(("HOST_OFFLINE", "unreachable".to_string()))),
+        Ok(_) if behind.is_some() => (Host::default(), behind.map(|w| ("HOST_UPDATING", w))),
         Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
         Ok(agents) => {
             let cap = cfg.hosts.get(name).and_then(|h| h.max_working);
@@ -1099,7 +1094,8 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     let (theirs, split) = with_path(on, &exe, root);
     let mine = format!("drover {}", crate::VERSION);
     let (glyph, fix) = if split { ('✗', "relinks") } else { ('!', "updates") };
-    let line = format!("{glyph} drover — {theirs} there, {mine} here → the next `check` {fix} it (docs/hosts.md)");
+    let line =
+        format!("{glyph} drover — {theirs} there, {mine} here → the next `self-update` {fix} it (docs/releases.md)");
     fail(theirs == mine, line);
     bad.extend(shed_row(on));
     bad
@@ -1140,8 +1136,12 @@ fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[Str
         }
     }
     for (profile, family, id) in acp_profiles(cfg, name, tags) {
-        if let Some(why) = acp_guard(ctx, on, home, (&profile, family, id)) {
-            bad.push(format!("✗ acp guard {profile} — {why}"));
+        match acp_guard(ctx, on, home, (&profile, family, id)) {
+            Ok(()) => {}
+            Err(why @ Unguarded::Build { .. }) => bad.push(format!(
+                "! acp guard {profile} — {why} → the next self-update catches it up"
+            )),
+            Err(why) => bad.push(format!("✗ acp guard {profile} — {why}")),
         }
     }
     if ok(on, "sh", &["-lc", "gh auth status"]).is_err() {
@@ -1166,14 +1166,31 @@ pub fn acp_profiles(cfg: &Config, name: &str, tags: &[String]) -> Vec<(String, &
         .collect()
 }
 
-/// Why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: its drover is this one's version, `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, and its shed lists the hooked adapter `id`. None: guarded.
-pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &str, &str)) -> Option<String> {
+/// Why a remote ACP lane would run unguarded: another drover build there (a rollout), or no hook or adapter.
+#[derive(Debug)]
+pub enum Unguarded {
+    Build { theirs: String, mine: String },
+    Hook(String),
+    Adapter(String),
+}
+
+impl std::fmt::Display for Unguarded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Unguarded::Build { theirs, mine } => write!(f, "drover there is {theirs}, not {mine}"),
+            Unguarded::Hook(w) | Unguarded::Adapter(w) => f.write_str(w),
+        }
+    }
+}
+
+/// Why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: its drover is this one's version, `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, and its shed lists the hooked adapter `id`.
+pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &str, &str)) -> Result<(), Unguarded> {
     let exe = real_exe(ctx, home);
     let root = ok(on, &exe, &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
     let theirs = with_path(on, &exe, root).0;
     let mine = format!("drover {}", crate::VERSION);
     if theirs != mine {
-        return Some(format!("drover there is {theirs}, not {mine}"));
+        return Err(Unguarded::Build { theirs, mine });
     }
     let dir = rehome(
         vec![providers::profiles_root(ctx).join(profile).display().to_string()],
@@ -1192,18 +1209,46 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
             .as_str()
             .is_some_and(|c| c.starts_with('\'') && c.ends_with(&hook))
     }) {
-        return Some(format!(
+        return Err(Unguarded::Hook(format!(
             "profile {profile} there has no drover PreToolUse hook; `drover profiles sync` there"
-        ));
+        )));
     }
     let agents = crate::shed::cli(on, &["agents", "--json"]).ok();
     let agents: Value = agents
         .and_then(|o| serde_json::from_str(&o.stdout).ok())
         .unwrap_or_default();
     if !agents.as_array().into_iter().flatten().any(|a| a["id"] == id) {
-        return Some(format!("shed there lists no {id} (`shed agents add {id}` there)"));
+        return Err(Unguarded::Adapter(format!(
+            "shed there lists no {id} (`shed agents add {id}` there)"
+        )));
     }
-    None
+    Ok(())
+}
+
+/// Why placement passes over remote host `name` in a rollout, from the log alone: every remote host while a swap is in flight, or `name` while it is left behind.
+pub fn updating(events: &[Event], name: &str, (now, swap_secs): (u64, u64)) -> Option<String> {
+    let rollout = |e: &&Event| {
+        e.str("target") == Some("live") && matches!(e.kind.as_str(), "self-update-swapping" | "self-updated")
+    };
+    let last = events
+        .iter()
+        .rfind(rollout)
+        .filter(|e| e.kind == "self-update-swapping");
+    if let Some(e) = last.filter(|e| now < e.ts.saturating_add(swap_secs)) {
+        return Some(format!(
+            "drover swaps to {:.7} on every host",
+            e.str("sha").unwrap_or_default()
+        ));
+    }
+    let mine = |e: &&Event| {
+        e.str("host") == Some(name)
+            && (e.kind == "host-behind" || e.kind == "host-sync" && e.val("ok") == &Value::Bool(true))
+    };
+    let e = events.iter().rfind(mine).filter(|e| e.kind == "host-behind")?;
+    let (has, wants) = (e.str("has").unwrap_or("?"), e.str("wants").unwrap_or_default());
+    Some(format!(
+        "drover there is {has:.7}, not {wants:.7}; the next self-update catches it up"
+    ))
 }
 
 pub(crate) fn real_exe(ctx: &Ctx, home: &str) -> String {
@@ -1225,84 +1270,6 @@ pub fn link_line(exe: &str) -> String {
         "mkdir -p \"$HOME/.local/bin\" && {{ [ {l} -ef '{exe}' ] || ln -sf '{exe}' {l}; }} && \
 {{ [ ! -e {u} ] || [ {u} -ef '{exe}' ] || sudo -n ln -sf '{exe}' {u}; }}"
     )
-}
-
-/// Drover at `sha` into `root` with its `herdsman` link, main CI's checked Linux `x86_64` binary else `cargo install`: `hosts bootstrap`'s and `sync`'s.
-pub fn install_line(root: &str, sha: &str) -> String {
-    let (repo, a) = (env!("CARGO_PKG_REPOSITORY"), "drover-x86_64-unknown-linux-gnu");
-    let url = format!("{repo}/releases/download/{sha}/{a}");
-    format!(
-        "w=; d=; if [ \"$(uname -s)/$(uname -m)\" != Linux/x86_64 ]; then w=\"no prebuilt binary for $(uname -s)/$(uname -m)\"; \
-elif ! d=$(mktemp -d); then w='mktemp failed'; \
-elif ! curl -fsSL -o \"$d/{a}\" {url} || ! curl -fsSL -o \"$d/{a}.sha256\" {url}.sha256; then w='no release asset {url}'; \
-elif ! (cd \"$d\" && sha256sum -c --status {a}.sha256); then w='checksum mismatch on {url}'; \
-elif ! {{ mkdir -p '{root}/bin' && install -m 755 \"$d/{a}\" '{root}/bin/.drover.new' && mv -f '{root}/bin/.drover.new' '{root}/bin/drover'; }}; then w='prebuilt install failed'; fi; \
-[ -z \"$d\" ] || rm -rf \"${{d:?}}\"; if [ -n \"$w\" ]; then echo \"drover: $w; cargo install instead\" >&2; \
-cargo install --git {repo} --rev {sha} --locked --root '{root}' --force; fi && ln -sf drover '{root}/bin/herdsman'"
-    )
-}
-
-const SYNC_STATUS: &str = "\"$1\" --version 2>/dev/null || echo missing; d=\"$HOME/.drover-sync\"; \
-if [ -f \"$d.done\" ]; then echo \"done $(cat \"$d.done\")\"; rm -f \"$d.done\"; fi; \
-[ -f \"$d.pid\" ] && kill -0 \"$(cat \"$d.pid\")\" 2>/dev/null && echo busy; true";
-const SYNC_START: &str =
-    "V=\"$2\" nohup sh -c \"$1\" </dev/null >\"$HOME/.drover-sync.log\" 2>&1 & echo $! >\"$HOME/.drover-sync.pid\"";
-
-fn sha_of(v: &str) -> &str {
-    v.rsplit_once('(').and_then(|p| p.1.strip_suffix(')')).unwrap_or(v)
-}
-
-/// Host `name`'s drover `--version` and whether an install landed, its last install logged `host-sync`, a mismatch's install started there; Err: why its status went unread.
-pub fn sync(
-    ctx: &Ctx,
-    cfg: &Config,
-    on: &On,
-    (name, home, tags): (&str, &str, &[String]),
-) -> std::result::Result<(String, bool), String> {
-    let (exe, sha) = (real_exe(ctx, home), env!("DROVER_SHA"));
-    let o = on
-        .run("sh", &argv(&["-c", SYNC_STATUS, "sh", &exe]))
-        .map_err(|e| format!("{e:#}"))?;
-    if o.code != 0 {
-        return Err(format!("status exit {}: {}", o.code, o.stderr.trim()));
-    }
-    let (mut lines, mut done) = (o.stdout.lines().map(str::trim), false);
-    let root = lines.next().unwrap_or_default().to_string();
-    let theirs = with_path(on, &exe, root).0;
-    let mut busy = false;
-    for l in lines {
-        busy |= l == "busy";
-        if let Some((code, rest)) = l.strip_prefix("done ").and_then(|l| l.split_once(' ')) {
-            done = true;
-            let (to, from) = rest.split_once(' ').unwrap_or((rest, ""));
-            let d = json!({"host": name, "from": sha_of(from), "to": to, "ok": code == "0"});
-            append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
-        }
-    }
-    if busy || theirs == format!("drover {}", crate::VERSION) {
-        return Ok((theirs, done));
-    }
-    let conf = rehome(vec![ctx.config.display().to_string()], Some(home)).remove(0);
-    let root = Path::new(&exe).parent().and_then(Path::parent).map(Path::display);
-    let install = install_line(&root.map_or(exe.clone(), |r| r.to_string()), sha);
-    let link = link_line(&exe);
-    let acp = cfg
-        .host_acp(name)
-        .map(|_| acp_profiles(cfg, name, tags))
-        .unwrap_or_default();
-    let acp: String = acp
-        .iter()
-        .map(|(p, family, _)| format!(" && '{exe}' profiles sync --profile '{p}' --role {family}"))
-        .collect();
-    let job = format!(
-        "{}{{ {install} && {link} && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}{acp}; }}; echo \"$? {sha} $V\" >\"$HOME/.drover-sync.done\"",
-        crate::cloud::SH
-    );
-    if let Err(e) = ok(on, "sh", &["-c", SYNC_START, "sh", &job, &theirs]) {
-        let d = json!({"host": name, "from": sha_of(&theirs), "to": sha, "ok": false, "error": format!("{e:#}")});
-        append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
-    }
-    Ok((theirs, done))
 }
 
 /// The host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it is enabled, up, admitting and its tags cover the needs, or its worktree there has tracked changes or unpushed commits, else the least-busy enabled host whose tags cover the needs; never one a `stall-move` since its last spawn left.
@@ -1360,7 +1327,10 @@ pub fn place(
         let was = (e.str("host").unwrap_or("local"), e.str("machine"));
         let mut p = at(ctx, cfg, f, r, was, pre);
         let code = p.refusal.as_ref().map(|x| x.0);
-        let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "LOGIN_NEEDED" | "MEM_LOW"));
+        let busy = matches!(
+            code,
+            Some("DISK_LOW" | "HOST_BUSY" | "HOST_UPDATING" | "LOGIN_NEEDED" | "MEM_LOW")
+        );
         let fits = cfg.hosts.get(was.0).map_or(needs.is_empty(), |h| fit(was.0, h));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
         let wt = wt.and_then(|l| l.str("worktree")).map(Path::new);
@@ -1602,7 +1572,7 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
             tags(h, Some(&s)).join(","),
         );
         let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
-        let v = match sha_of(&s.drover) {
+        let v = match s.drover.as_str() {
             "" => String::new(),
             x if x == env!("DROVER_SHA") => format!(" · drover {x} ✓"),
             x => format!(" · drover {x} ≠ {}", env!("DROVER_SHA")),

@@ -7,8 +7,6 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -93,16 +91,6 @@ jobs:
           n=$(cat assets/*.js assets/*.css | wc -l)
           echo "assets JS/CSS lines: $n"
           test "$n" -le 1500 || echo "::warning::assets JS/CSS is $n lines, over the 1500 soft budget"
-      - name: "release binary (#1165: a push to main publishes drover-x86_64-unknown-linux-gnu and its .sha256 under a release tagged with the sha; boats install it)"
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          a=drover-x86_64-unknown-linux-gnu
-          cp target/release/drover "$a"
-          sha256sum "$a" > "$a.sha256"
-          gh release view "$GITHUB_SHA" >/dev/null 2>&1 || gh release create "$GITHUB_SHA" --target "$GITHUB_SHA" --prerelease --title "$GITHUB_SHA" --notes "main at $GITHUB_SHA"
-          gh release upload "$GITHUB_SHA" "$a" "$a.sha256" --clobber
 
   # #957: the debug suite beside the rust job's release half; #1162: in 4 shards side by side (scripts/test-shards.txt).
   test-shard:

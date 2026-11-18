@@ -134,6 +134,10 @@ flowchart TD
     other -.- k_slo_tick_minutes(["slo_tick_minutes = 10"])
     other -.- k_slo_pass_minutes(["slo_pass_minutes = 30"])
     other -.- k_stall_restart_hours(["stall_restart_hours = 2"])
+    other -.- k_self_update_wait_minutes(["self_update_wait_minutes = 45"])
+    other -.- k_self_update_lag_minutes(["self_update_lag_minutes = 30"])
+    other -.- k_self_update_stage_secs(["self_update_stage_secs = 300"])
+    other -.- k_self_update_swap_secs(["self_update_swap_secs = 120"])
 ```
 
 ## History baseline

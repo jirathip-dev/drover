@@ -624,7 +624,11 @@ fn boot_fake(gh_in: bool) -> Fake {
         .once(&step(&mine), 1, "")
         .reply(&step("command -v"), "")
         .reply(&step("apt_ gh"), "")
-        .reply(&step("w=; d=; if [ \"$(uname -s)/$(uname -m)\" != Linux/x86_64 ]"), "")
+        .reply(
+            "gh release download",
+            &format!("{}  drover-x86_64-unknown-linux-gnu\n", "a".repeat(64)),
+        )
+        .reply(&step("( n='"), "")
         .reply(&step(&mine), "")
         .reply(&step("[ \"$HOME/.local/bin/drover\" -ef"), "")
         .reply(&step("claude auth status"), "")
@@ -668,9 +672,22 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
     let at: Vec<_> = order.iter().map(|s| r.index(&step(s)).unwrap()).collect();
     assert!(at.windows(2).all(|w| w[0] < w[1]), "{at:?}");
     assert!(!r.called(&step("apt_ git")));
-    let sha = env!("DROVER_SHA");
-    let build = drover::hosts::install_line("/opt/drover", sha);
-    assert!(r.called(&step(&build)), "{:?}", r.calls.borrow());
+    let tag = drover::release::tag("main", env!("DROVER_SHA"));
+    let asset = format!("releases/download/{tag}/drover-x86_64-unknown-linux-gnu");
+    assert!(
+        r.called(&step("( n='/opt/drover/bin/drover.new'")),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert!(
+        r.calls.borrow().iter().any(|l| l.contains(&asset)),
+        "the release asset, never a build"
+    );
+    assert!(!r
+        .calls
+        .borrow()
+        .iter()
+        .any(|l| l.contains("--rev") && l.contains("herdsman")));
     assert!(here.methods().is_empty(), "nothing on this host: {:?}", here.methods());
     let runs: Vec<String> = cloud
         .all("send")
@@ -1023,12 +1040,16 @@ fn bootstrap_installs_and_checks_the_real_exe_the_guard_runs_not_its_symlink() {
     let res = drover::cloud::bootstrap(&c, &cfg, &f, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();
     assert!(res.is_ok() && out.contains("✓ drover — installed"), "{res:?} {out}");
-    let root = home.join(".local/share/drover").display().to_string();
+    let sum = "a".repeat(64);
+    let staged = format!("( n='{exe}.new'; p=\"$n.part\"; mkdir -p");
+    let swap = format!("[ \"${{s%% *}}\" = '{sum}' ] || {{ rm -f \"$p\"; exit 4; }}; chmod 755 \"$p\" && mv -f \"$p\" \"$n\" && \"$n\" --version ) && mv -f '{exe}.new' '{exe}'");
+    let swap = swap.replace('\'', "'\\''");
+    let calls = f.calls.borrow();
     assert!(
-        f.called(&step(&drover::hosts::install_line(&root, env!("DROVER_SHA")))),
-        "{:?}",
-        f.calls.borrow()
+        calls.iter().any(|c| c.starts_with(&step(&staged)) && c.contains(&swap)),
+        "{calls:?}"
     );
+    drop(calls);
     let on = drover::hosts::On::new(&f, Some("cloud1"));
     let _ = drover::hosts::acp_guard(&c, &on, "/home/me", ("fleet-impl", "claude", "x"));
     assert!(f.called(&format!("{SSH}'{exe}' '--version'")), "{:?}", f.calls.borrow());

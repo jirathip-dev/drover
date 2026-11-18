@@ -807,15 +807,13 @@ fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
     );
 }
 
-const STATUS: &str = "'sh' '-c' '\"$1\" --version";
-const START: &str = "'sh' '-c' 'V=";
+const STATUS: &str = "'sh' '-c' 'for x in";
 
 fn synced(status: &str) -> Fake {
     healthy(fake(0.1, 0.1))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
         .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
         .reply(&format!("{SSH}{STATUS}"), status)
-        .reply(&format!("{SSH}{START}"), "")
 }
 
 #[test]
@@ -1366,7 +1364,7 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
 }
 
 #[test]
-fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
+fn a_symlinked_drover_reads_back_its_real_install_root() {
     let mut c = setup("hosts-symlink", "", true, 0);
     let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
     let root = dir.join("share/drover");
@@ -1378,8 +1376,6 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     let (real, link) = (root.join("bin/drover").display().to_string(), c.exe.clone());
     let cfg = Config::load(&c.config).unwrap();
     let r = healthy(fake(0.1, 0.1))
-        .reply(&format!("{SSH}{STATUS}"), "drover 0.1.0 (0ld)\n")
-        .reply(&format!("{SSH}{START}"), "")
         .reply(
             &format!("{SSH}'{link}' '--version'"),
             &format!("drover {}\n", drover::VERSION),
@@ -1393,22 +1389,11 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     let rows = drover::hosts::health(&c, &cfg, &on, &[], home);
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert!(rows[0].starts_with("! drover — drover 0.1.0 (0ld) there"), "{rows:?}");
-    assert_eq!(
-        drover::hosts::sync(&c, &cfg, &on, ("bazzite", home, &[])),
-        Ok(("drover 0.1.0 (0ld)".into(), false))
-    );
-    let root = format!("--root '\\''{}'\\'' --force", root.display());
-    let sync = format!("|| '\\''{real}'\\'' profiles sync");
-    let calls = r.calls.borrow();
-    assert!(
-        calls.iter().any(|c| c.contains(&root) && c.contains(&sync)),
-        "{calls:#?}"
-    );
-    let asked = format!("'sh' '{real}'");
-    assert!(
-        calls.iter().any(|c| c.contains(STATUS) && c.ends_with(&asked)),
-        "{calls:#?}"
-    );
+    assert!(r
+        .calls
+        .borrow()
+        .iter()
+        .any(|c| c.contains(&real) && c.ends_with("'--version'")));
 }
 
 #[test]
@@ -1744,7 +1729,7 @@ fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_wor
 }
 
 #[test]
-fn a_tick_starts_the_sync_of_a_reachable_host_though_its_health_check_times_out() {
+fn a_tick_reads_the_version_of_a_reachable_host_though_its_health_check_times_out() {
     let c = setup("hosts-tick-sync", "", true, 0);
     let hosts = c.state.with_file_name("hosts.json");
     let mut cache: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&hosts).unwrap()).unwrap();
@@ -1752,10 +1737,11 @@ fn a_tick_starts_the_sync_of_a_reachable_host_though_its_health_check_times_out(
     std::fs::write(&hosts, cache.to_string()).unwrap();
     let _sh = FakeShed::attached(&c);
     let bazzite = FakeShed::new();
-    let r = synced("drover 0.1.0 (0ld)\n").once(&format!("{SSH}{GIT} 'ls-remote'"), 124, "");
+    let r = synced("drover 0.1.0 (0ld)\n-\n").once(&format!("{SSH}{GIT} 'ls-remote'"), 124, "");
     let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(r.count(&format!("{SSH}{START}")), 1, "{:#?}", r.calls.borrow());
+    assert_eq!(r.count(&format!("{SSH}{STATUS}")), 1, "{:#?}", r.calls.borrow());
+    assert!(!r.called(&format!("{SSH}'sh' '-c' 'V=")), "a tick never installs");
 }
 
 #[test]

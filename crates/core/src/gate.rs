@@ -1056,17 +1056,6 @@ fn merged(
     if let Err(e) = crate::check::teardown(ctx, cfg, r, out, fleet, issue) {
         writeln!(out, "teardown: {e:#}")?;
     }
-    if crate::update::ours(f) {
-        let exe = std::path::Path::new(&ctx.exe);
-        let root = exe.parent().and_then(|b| b.parent()).unwrap_or(exe);
-        let src = f.local_path();
-        writeln!(
-            out,
-            "cargo build --release --locked -p drover --manifest-path {s}/Cargo.toml && sh {s}/scripts/install-gate.sh {s}/target/release/drover {r}/bin/drover && ln -sf drover {r}/bin/herdsman",
-            s = src.display(),
-            r = root.display()
-        )?;
-    }
     Ok(())
 }
 

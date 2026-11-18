@@ -132,11 +132,11 @@ fn all_good_exits_zero_and_never_writes() {
     );
     if cfg!(target_os = "macos") {
         assert!(
-            line(&out, "signature").contains(&format!("{} signed by \"drover-local\"", c.exe)),
+            line(&out, "signature").contains(&format!("{} signed by a Developer ID Application certificate", c.exe)),
             "{out}"
         );
         assert!(r.called(&format!(
-            "codesign -v -R =certificate leaf[subject.CN] = \"drover-local\" {}",
+            "codesign -v -R =anchor apple generic and identifier \"drover\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists {}",
             c.exe
         )));
     }
@@ -269,7 +269,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         (
             |_, _, r| r.once("codesign -v -R", 3, ""),
             "signature",
-            "→ sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/install-gate.sh ",
+            "→ the next self-update installs CI's signed build (docs/releases.md)",
         ),
         (
             |c, _, r| {
