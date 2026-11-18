@@ -41,13 +41,27 @@ pub fn signed(secret: &str, body: &[u8], sig: &str) -> bool {
     want.is_some_and(|w| !w.is_empty() && mac.verify_slice(&w).is_ok())
 }
 
-fn counter(ctx: &Ctx) -> PathBuf {
-    ctx.state.with_file_name("webhook.rejected")
+fn counter(ctx: &Ctx, kind: &str) -> PathBuf {
+    ctx.state.with_file_name(format!("webhook.{kind}"))
 }
 
-pub fn rejected(ctx: &Ctx) -> u64 {
-    let n = std::fs::read_to_string(counter(ctx)).unwrap_or_default();
+fn bump(ctx: &Ctx, kind: &str) {
+    std::fs::write(counter(ctx, kind), (count(ctx, kind) + 1).to_string()).ok();
+}
+
+fn count(ctx: &Ctx, kind: &str) -> u64 {
+    let n = std::fs::read_to_string(counter(ctx, kind)).unwrap_or_default();
     n.trim().parse().unwrap_or(0)
+}
+
+/// Deliveries refused for a bad or missing signature.
+pub fn rejected(ctx: &Ctx) -> u64 {
+    count(ctx, "rejected")
+}
+
+/// Signed deliveries accepted, each also a `webhook` line in tick.log.
+pub fn accepted(ctx: &Ctx) -> u64 {
+    count(ctx, "accepted")
 }
 
 fn names(v: &Value) -> (Vec<&str>, Vec<u64>) {
@@ -69,7 +83,7 @@ fn names(v: &Value) -> (Vec<&str>, Vec<u64>) {
     (branches, nums)
 }
 
-/// One delivery as `(status, text)`: 503 with no secret; 401 on a bad or missing signature (counted, nothing else read); 200 for `ping`; 202 for an event no open fleet issue matches; else 200 once each matched issue's PR is re-read and drive kicked for it.
+/// One delivery as `(status, text)`: 503 with no secret; 401 on a bad or missing signature (counted, nothing else read); else accepted (counted, logged to tick.log): 200 for `ping`; 202 for an event no open fleet issue matches; else 200 once each matched issue's PR is re-read and drive kicked for it.
 pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: &[u8]) -> (u16, String) {
     let Ok(cfg) = Config::load(&ctx.config) else {
         return (503, "no fleet.toml".into());
@@ -85,15 +99,29 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: 
         .map(|k| k.0.as_str())
         .collect();
     if ok.is_empty() {
-        std::fs::write(counter(ctx), (rejected(ctx) + 1).to_string()).ok();
+        bump(ctx, "rejected");
         return (401, "bad signature".into());
-    }
-    if event == "ping" {
-        return (200, "pong".into());
     }
     let v: Value = serde_json::from_slice(body).unwrap_or_default();
     let repo = v.at("repository").at("full_name").as_str().unwrap_or_default();
-    let (branches, nums) = names(&v);
+    let (code, text) = if event == "ping" {
+        (200, "pong".into())
+    } else {
+        route(ctx, r, &cfg, &ok, event, repo, &v)
+    };
+    bump(ctx, "accepted");
+    let line = format!("{} webhook {event} {repo}: {text}\n", crate::clock::now());
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(ctx.state.with_file_name("tick.log"));
+    log.and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()))
+        .ok();
+    (code, text)
+}
+
+fn route(ctx: &Ctx, r: &dyn Runner, cfg: &Config, ok: &[&str], event: &str, repo: &str, v: &Value) -> (u16, String) {
+    let (branches, nums) = names(v);
     let states = fold(&working(&ctx.state).unwrap_or_default());
     let mut hit = vec![];
     for s in states

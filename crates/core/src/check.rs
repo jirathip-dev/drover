@@ -660,8 +660,24 @@ fn health(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Res
             p.data.get("secs").and_then(serde_json::Value::as_f64).unwrap_or(0.0),
             p.str("step").unwrap_or("?"),
         );
+        let mut remote: Vec<(&String, &serde_json::Value)> =
+            p.val("remote").as_object().into_iter().flatten().collect();
+        remote.sort_by(|a, b| {
+            b.1.at("secs")
+                .as_f64()
+                .partial_cmp(&a.1.at("secs").as_f64())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let remote: Vec<String> = (remote.iter())
+            .map(|(h, v)| format!("{h} {} calls {} s", v.at("calls"), v.at("secs")))
+            .collect();
+        let remote = if remote.is_empty() {
+            String::new()
+        } else {
+            format!("; remote: {}", remote.join(", "))
+        };
         let why = format!(
-            "{name}'s pass took {secs} s; slowest step: {step} ({} s)",
+            "{name}'s pass took {secs} s; slowest step: {step} ({} s){remote}",
             p.data.get("step_secs").unwrap_or(&json!("?"))
         );
         now.push((

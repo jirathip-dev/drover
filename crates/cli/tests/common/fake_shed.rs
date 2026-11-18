@@ -282,9 +282,10 @@ impl OverSsh<'_> {
         let mut out = String::new();
         for l in script.lines() {
             let l = l.trim_end_matches(super::BATCH);
-            let words = l
-                .strip_prefix("('printf' '%s\\n' '")
-                .and_then(|w| w.strip_suffix("' | 'shed' 'connect' '--autostart')"));
+            let words = l.strip_prefix("('printf' '%s\\n' '").and_then(|w| {
+                (w.strip_suffix("' | 'shed' 'connect' '--autostart')"))
+                    .or_else(|| w.strip_suffix("' | 'shed' 'connect')"))
+            });
             let o = match words {
                 Some(w) => {
                     let input: String = w.split("' '").map(|x| format!("{x}\n")).collect();
