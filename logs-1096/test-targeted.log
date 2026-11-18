@@ -1,0 +1,92 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1096/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.00s
+     Running tests/lesson.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1096/debug/deps/lesson-367f078327289914)
+
+running 13 tests
+test a_rules_file_over_30_lines_fails_the_check ... ok
+test a_failing_shadow_check_passes_ci_and_the_summary_shows_would_fail ... ok
+test a_pr_that_deletes_every_rule_is_reviewed_by_the_integration_rules ... ok
+test a_lesson_pr_is_reviewed_by_its_own_rules_as_before ... ok
+test digest_shows_the_last_week_and_redacts_secrets ... ok
+test lesson_apply_promotes_and_retires_by_history_and_never_touches_hand_written_checks ... ok
+test lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change ... ok
+test briefs_carry_the_shared_pack_before_the_repo_rules ... ok
+test rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine ... ok
+test a_prose_only_lesson_pr_is_a_fail ... ok
+test lessons_missed_fires_once_after_8_days_and_never_when_off ... ok
+test tick_skips_lesson_for_a_young_or_quiet_fleet ... ok
+test tick_runs_lesson_once_a_week_and_never_when_off ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.20s
+
+     Running tests/overlap.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1096/debug/deps/overlap-aba637521a37cc9e)
+
+running 31 tests
+test a_branch_in_review_is_not_updated ... ok
+test a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses ... ok
+test a_second_pass_with_nothing_moved_starts_no_worktree ... ok
+test a_pure_merge_head_keeps_the_label_and_a_new_change_loses_it ... ok
+test cap_check_reads_the_limit_from_config ... ok
+test a_verdict_naming_a_head_a_commit_moved_from_is_stale_and_none_means_the_spawn_head ... ok
+test cap_check_reports_web_lines_without_capping_them ... ok
+test cap_check_refuses_a_cap_edit_without_its_trailer ... ok
+test cap_check_takes_the_highest_raise_in_cap_d ... ok
+test cap_check_warns_within_reach_of_the_cap ... ok
+test cap_log_prints_every_cap_change_from_git ... ok
+test a_verdict_naming_the_current_head_records_there_whatever_the_spawn_head ... ok
+test a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried ... ok
+test a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges ... ok
+test cap_finds_the_repos_own_line_cap_script ... ok
+test cap_prints_the_queue_wide_view ... ok
+test cap_reports_a_script_it_cannot_parse ... ok
+test a_written_verdict_is_recorded_before_the_update_in_the_same_pass ... ok
+test behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is ... ok
+test cap_shows_each_cap_a_script_prints ... ok
+test cap_runs_the_repos_line_cap_script_when_the_fleet_names_none ... ok
+test cap_uses_the_fleets_own_cap_script ... ok
+test conflicting_auto_update_spawns_an_update_lane ... ok
+test clean_auto_update_keeps_the_pass_and_spawns_no_lane ... ok
+test check_emits_cap_near_once_per_integration_sha ... ok
+test heads_up_reaches_a_working_lane_once ... ok
+test merge_tree_finds_the_pair_and_its_files_once ... ok
+test strict_rule_auto_updates_and_puts_the_merge_label_back ... ok
+test drive_merges_the_ready_pr_that_conflicts_with_nothing_first ... ok
+test an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass ... ok
+test gate_refuses_a_merge_head_that_adds_its_own_change ... ok
+
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.95s
+
+     Running tests/spawn.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1096/debug/deps/spawn-074358a3f8422620)
+
+running 28 tests
+test clone_build_clones_on_a_lockfile_match_and_logs_failures ... ok
+test conflict_predicted_is_not_a_hold ... ok
+test cap_asks_only_when_your_own_pr_crosses ... ok
+test claude_role_dry_run_uses_synced_profile ... ok
+test a_spawned_lanes_build_command_runs_in_the_background_but_a_design_lanes_does_not ... ok
+test fleet_env_expands_drover_port ... ok
+test each_lane_gets_a_private_scratch_dir_under_its_roots_build_folder ... ok
+test claude_dry_run_names_every_role ... ok
+test fleet_env_is_exported_into_the_lane ... ok
+test each_lane_gets_its_own_cargo_target_under_its_root ... ok
+test hermes_role_dry_run_kicks_prompt_after_boot ... ok
+test lane_title_strips_prefixes_and_cuts_at_words ... ok
+test help_agent_doc_is_complete ... ok
+test lockfiles_match_needs_an_identical_lockfile ... ok
+test lane_port_is_stable_per_fleet_and_branch ... ok
+test effort_maps_to_each_harness_flag ... ok
+test invalid_effort_is_refused_at_config_load ... ok
+test profiles_turn_attribution_off_and_role_md_has_the_rule ... ok
+test profiles_sync_removes_a_stale_generated_profile ... ok
+test profiles_sync_gives_a_verify_profile_its_own_prompt ... ok
+test rev_role_flags_new_commit_trailers_only ... ok
+test shared_cache_is_exported_into_the_lane ... ok
+test lane_port_collision_takes_the_next_free_one ... ok
+test reopen_spawn_clones_no_build_folder ... ok
+test failed_clone_is_logged_and_the_spawn_succeeds ... ok
+test unconfirmed_hermes_kick_presses_enter_then_exits_4 ... ok
+test real_claude_spawn_writes_brief_and_logs_event ... ok
+test a_new_lane_worktree_leaves_out_docs_archive_unless_opted_out ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+

@@ -408,7 +408,7 @@ fn brief(
     p: &Plan,
     title: &str,
     body: &str,
-    (fix, rules, docs, repro, play): (Option<&str>, Option<&str>, Option<&str>, bool, Option<String>),
+    (fix, (rules, docs), repro, play): (Option<&str>, &RepoFiles, bool, Option<String>),
     recipe: &crate::design::Recipe,
 ) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
@@ -478,10 +478,10 @@ fn brief(
     let contract = contract.trim_end().to_string() + "\n" + steps + play;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
-    let rules = rules.map_or(String::new(), |r| {
+    let rules = rules.as_deref().map_or(String::new(), |r| {
         format!("## Repo rules (.drover/rules.md)\n\n{}\n\n", r.trim_end())
     });
-    let docs = docs.map_or(String::new(), |d| {
+    let docs = docs.as_deref().map_or(String::new(), |d| {
         format!("## Docs you may trust (.drover/docs.md)\n\nAny other doc is not current: don't read it, unless this brief names it.\n\n{}\n\n", d.trim_end())
     });
     let shared = include_str!("../rules/shared.md").trim_end();
@@ -951,6 +951,8 @@ pub struct Opts {
     pub by: Option<String>,
 }
 
+type RepoFiles = (Option<String>, Option<String>);
+
 fn integration_view(
     ctx: &Ctx,
     (r, on): (&dyn Runner, &crate::hosts::On),
@@ -958,8 +960,9 @@ fn integration_view(
     p: &Plan,
     (fleet, issue, update): (&str, u64, bool),
     local: &str,
-) -> Result<(Option<String>, Option<String>)> {
-    let own = || crate::repo_read("rules.md", |x| on.read(&p.worktree.join(x)));
+) -> Result<(RepoFiles, Option<String>)> {
+    let read = |n: &str| crate::repo_read(n, |x| on.read(&p.worktree.join(x)));
+    let own = || (read("rules.md"), read("docs.md"));
     let int = &f.integration;
     if p.family != "rev" {
         return Ok((
@@ -999,7 +1002,8 @@ fn integration_view(
             names.join(", ")
         )
     });
-    Ok((at_int("rules.md").or_else(own), changed))
+    let (rules, docs) = own();
+    Ok(((at_int("rules.md").or(rules), at_int("docs.md").or(docs)), changed))
 }
 
 fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygiene) -> Result<()> {
@@ -1370,7 +1374,7 @@ pub fn spawn(
                 "rev" => format!("Architecture: the owner approved the ADR in `{a}/`; check the diff against it."),
                 _ => format!("Architecture: the owner approved the ADR in `{a}/` on this branch; build to it, and add any `.drover/arch.toml` lines it ends with in this PR."),
             });
-        let (rules, int_note) = integration_view(ctx, (r, &on), f, &p, (fleet, issue, o.update), &local)?;
+        let (repo, int_note) = integration_view(ctx, (r, &on), f, &p, (fleet, issue, o.update), &local)?;
         let decided = events
             .iter()
             .filter(|e| e.is("decision", fleet, issue))
@@ -1395,8 +1399,7 @@ pub fn spawn(
             &decided.fold(body.to_string(), |b, d| b + &d),
             (
                 fix,
-                rules.as_deref(),
-                crate::repo_read("docs.md", |f| on.read(&p.worktree.join(f))).as_deref(),
+                &repo,
                 crate::queue::repro(&events, fleet, issue),
                 crate::queue::playbook(&events, fleet, issue),
             ),

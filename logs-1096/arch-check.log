@@ -1,0 +1,3 @@
+crates/core/src/spawn.rs:1019: `crates/core/src/spawn.rs:spawn` is 502 lines, over 150 (baseline Some(501))
+`just gen` exited 127: sh: 1: just: not found
+arch-check: 855 files, 2 violations
