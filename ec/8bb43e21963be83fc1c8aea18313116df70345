@@ -1,0 +1,29 @@
+Decided: a lane prompt is logged, replied to, then handed to shed through serve's existing after-reply queue (the one thread lines already used), now an enum of thread lines and lane prompts.
+Because: "A lane-sheet send replies as soon as the prompt is logged. The shed/ssh delivery runs after the response, and a failure reaches the sheet."
+Decided: a failed delivery logs `prompt-failed` (agent, error, no text) and the lane sheet ends its transcript in a `✗ not delivered` row; an open sheet streams its own path after an action so that row arrives without a reload.
+Because: crates/server/src/later.rs:209
+Decided: pending sends live beside the model (View.pend) and are merged in at paint; one is dropped once the screen holds its text more often than at send time, so it shows once.
+Because: "Once confirmed it shows once, never twice."
+Decided: answered ask ids go in a page-wide hidden set applied on every paint; a failed answer clears them and reads the screens again so the card comes back with the error toast.
+Because: "An answered ask card goes at once and never comes back, unless the answer failed (then it returns with the error)."
+Decided: a screen stream checks each 500 ms tick whether its client hung up, so a left stream frees its slot of 4 at once, not at the next 15 s ping.
+Because: "No reload after an action: the stream delivers the result."
+Rejected: a reload after the action — the issue bans it; the stream delivers the result.
+Rejected: lane-sheet [retry] on a delivery failure — the reply already said logged; the sheet's row reports it and the Send line is right there.
+Check: page_drafts a_send_shows… fails on the base bundle (no bubble, card not hidden, 4 re-reads) and passes at head; lanes_sheet a_lane_prompt… hangs on base.
+Owner: Sends and answers now show on the phone at once, with no reload after a tap; a lane message is accepted before shed takes it, and a failed delivery shows in the lane sheet.
+
+Decided: a lane prompt is logged, replied to, then handed to shed through serve's existing after-reply queue, now an enum of thread lines and lane prompts.
+Because: "A lane-sheet send replies as soon as the prompt is logged. The shed/ssh delivery runs after the response, and a failure reaches the sheet."
+Decided: pending sends are merged in at paint and dropped once the screen holds their text; answered ask ids go in a page-wide hidden set a failed answer clears.
+Because: "An answered ask card goes at once and never comes back, unless the answer failed (then it returns with the error)."
+Decided: stream slots are counted per server, not per process, so one test's streams never refuse another's.
+Because: crates/server/src/serve.rs:402
+Decided: after an action the page re-reads at once only a view whose stream is missing or closed (a 503 closes it); a reconnecting stream delivers the result.
+Because: web/src/main.ts:379
+Decided: navigating inside a view keeps its live state until its new stream fails, so the stale strip does not flash above a restored list and shift it.
+Because: "No reload after an action: the stream delivers the result."
+Rejected: a setTimeout reload after every action — the AC bans it ("`act()` does no setTimeout reload").
+Rejected: moving the sticky stale strip out of flow — a visual change the issue does not ask for.
+Check: parity_24 holds the list's scroll after the swipe back; parity_26 and the model pick land; optimistic.mjs releases only the POST its route caught.
+Owner: Sends and answers show on the phone at once with no reload; a lane message is accepted before delivery, and the list no longer jumps after swiping back.
