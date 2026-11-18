@@ -1,0 +1,7 @@
+Decided: the closed-issue sweep asks GitHub issueOrPullRequest with __typename, and a PR number leaves as closed-other once
+Because: crates/core/src/gh.rs:314
+Because: "Drive never starts or restarts a lane for a number that is a PR, or for an issue that is closed"
+Rejected: a separate PR sweep or a new event kind — the existing closed-other path already drops the row once and stops drive, waiting and stall alerts
+Rejected: hiding closed rows from status and board — both list every tracked row as history (merged ones too); the ghosts now show there as closed, never as impl
+Check: issue(number:N) on a PR number fails the whole GraphQL query, so one ghost had silenced closed detection for its fleet
+Owner: Numbers that are pull requests, or closed issues, drop out of the active list on the next drive pass and are never restarted.
