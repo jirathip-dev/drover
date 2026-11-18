@@ -1,0 +1,436 @@
+    0 t+0      event Run(["queue", "drover", "add", "201", "202"])
+    4 t+6      event Timer { args: ["drive", "--fast"], every: 60 }
+  110 t+12     event Lane { pane: "drover-impl-202", step: 0 }
+  110 t+12     event Lane { pane: "drover-impl-201", step: 0 }
+  127 t+57     event Timer { args: ["drive", "--fast"], every: 60 }
+  144 t+86     event Timer { args: ["drive"], every: 300 }
+  172 t+116    event Timer { args: ["drive", "--fast"], every: 60 }
+  189 t+137    event Timer { args: ["check"], every: 300 }
+  200 t+167    event Timer { args: ["drive", "--fast"], every: 60 }
+  218 t+223    event Timer { args: ["drive", "--fast"], every: 60 }
+  235 t+281    event Timer { args: ["drive", "--fast"], every: 60 }
+  253 t+351    event Timer { args: ["drive", "--fast"], every: 60 }
+  271 t+380    event Timer { args: ["drive"], every: 300 }
+  298 t+418    event Timer { args: ["drive", "--fast"], every: 60 }
+  316 t+446    event Timer { args: ["check"], every: 300 }
+  327 t+488    event Timer { args: ["drive", "--fast"], every: 60 }
+  345 t+554    event Timer { args: ["drive", "--fast"], every: 60 }
+  363 t+607    event Timer { args: ["drive", "--fast"], every: 60 }
+  380 t+612    event Lane { pane: "drover-impl-202", step: 1 }
+  380 t+612    event Lane { pane: "drover-impl-201", step: 1 }
+  495 t+621    event Lane { pane: "drover-rev-201-r1", step: 0 }
+  495 t+621    event Lane { pane: "drover-rev-202-r1", step: 0 }
+  501 t+658    event Timer { args: ["drive", "--fast"], every: 60 }
+  519 t+678    event Timer { args: ["drive"], every: 300 }
+  544 t+728    event Timer { args: ["drive", "--fast"], every: 60 }
+  562 t+756    event Timer { args: ["check"], every: 300 }
+  573 t+778    event Timer { args: ["drive", "--fast"], every: 60 }
+  590 t+845    event Timer { args: ["drive", "--fast"], every: 60 }
+  608 t+896    event Timer { args: ["drive", "--fast"], every: 60 }
+  625 t+912    event Ci { sha: "00000000000000000000000000000b80f370574c", green: true }
+  625 t+912    event Ci { sha: "00000000000000000000000000000b80f370574d", green: true }
+  625 t+921    event Lane { pane: "drover-rev-201-r1", step: 1 }
+  625 t+921    event Lane { pane: "drover-rev-202-r1", step: 1 }
+  701 t+930    event Lane { pane: "drover-rev-201-r1", step: 1 }
+  798 t+944    event Lane { pane: "drover-rev-201-r1", step: 0 }
+  798 t+950    event Timer { args: ["drive", "--fast"], every: 60 }
+  821 t+978    event Timer { args: ["drive"], every: 300 }
+  847 t+1018   event Timer { args: ["drive", "--fast"], every: 60 }
+  867 t+1062   event Timer { args: ["check"], every: 300 }
+  876 t+1079   event Timer { args: ["drive", "--fast"], every: 60 }
+  896 t+1134   event Timer { args: ["drive", "--fast"], every: 60 }
+  915 t+1193   event Timer { args: ["drive", "--fast"], every: 60 }
+  935 t+1244   event Lane { pane: "drover-rev-201-r1", step: 1 }
+  935 t+1244   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1030 t+1269   event Timer { args: ["drive"], every: 300 }
+ 1057 t+1302   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1078 t+1354   event Timer { args: ["check"], every: 300 }
+ 1085 t+1355   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1106 t+1414   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1127 t+1482   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1148 t+1545   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1169 t+1570   event Timer { args: ["drive"], every: 300 }
+ 1196 t+1612   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1217 t+1659   event Timer { args: ["check"], every: 300 }
+ 1224 t+1669   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1245 t+1727   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1266 t+1781   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1287 t+1841   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1308 t+1869   event Timer { args: ["drive"], every: 300 }
+ 1335 t+1893   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1356 t+1955   event Timer { args: ["check"], every: 300 }
+ 1356 t+1955   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1384 t+2016   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1405 t+2070   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1426 t+2138   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1447 t+2162   event Timer { args: ["drive"], every: 300 }
+ 1474 t+2197   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1495 t+2246   event Timer { args: ["check"], every: 300 }
+ 1502 t+2255   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1523 t+2317   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1544 t+2377   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1565 t+2429   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1586 t+2453   event Timer { args: ["drive"], every: 300 }
+ 1613 t+2495   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1634 t+2556   event Timer { args: ["check"], every: 300 }
+ 1634 t+2556   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1662 t+2622   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1683 t+2673   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1704 t+2731   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1725 t+2762   event Timer { args: ["drive"], every: 300 }
+ 1752 t+2798   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1773 t+2853   event Timer { args: ["check"], every: 300 }
+ 1780 t+2860   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1801 t+2912   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1822 t+2977   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1843 t+3045   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1864 t+3071   event Timer { args: ["drive"], every: 300 }
+ 1891 t+3111   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1912 t+3159   event Timer { args: ["check"], every: 300 }
+ 1919 t+3176   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1940 t+3244   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1961 t+3297   event Timer { args: ["drive", "--fast"], every: 60 }
+ 1982 t+3356   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2003 t+3365   event Timer { args: ["drive"], every: 300 }
+ 2030 t+3411   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2051 t+3455   event Timer { args: ["check"], every: 300 }
+ 2058 t+3461   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2079 t+3513   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2100 t+3563   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2121 t+3618   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2142 t+3660   event Timer { args: ["drive"], every: 300 }
+ 2169 t+3670   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2190 t+3736   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2211 t+3751   event Timer { args: ["check"], every: 300 }
+ 2218 t+3804   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2239 t+3856   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2260 t+3923   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2281 t+3964   event Timer { args: ["drive"], every: 300 }
+ 2308 t+3976   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2329 t+4026   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2350 t+4046   event Timer { args: ["check"], every: 300 }
+ 2357 t+4083   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2378 t+4139   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2399 t+4205   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2420 t+4256   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2441 t+4271   event Timer { args: ["drive"], every: 300 }
+ 2468 t+4309   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2489 t+4342   event Timer { args: ["check"], every: 300 }
+ 2496 t+4379   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2517 t+4441   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2538 t+4506   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2559 t+4559   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2580 t+4565   event Timer { args: ["drive"], every: 300 }
+ 2607 t+4610   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2628 t+4640   event Timer { args: ["check"], every: 300 }
+ 2635 t+4666   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2656 t+4731   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2677 t+4786   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2698 t+4846   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2719 t+4857   event Timer { args: ["drive"], every: 300 }
+ 2746 t+4912   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2767 t+4948   event Timer { args: ["check"], every: 300 }
+ 2774 t+4974   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2795 t+5035   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2816 t+5094   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2837 t+5147   event Timer { args: ["drive"], every: 300 }
+ 2864 t+5163   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2885 t+5223   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2906 t+5251   event Timer { args: ["check"], every: 300 }
+ 2913 t+5277   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2934 t+5330   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2955 t+5399   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2976 t+5452   event Timer { args: ["drive", "--fast"], every: 60 }
+ 2997 t+5456   event Timer { args: ["drive"], every: 300 }
+ 3024 t+5504   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3045 t+5555   event Timer { args: ["check"], every: 300 }
+ 3052 t+5573   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3073 t+5643   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3094 t+5704   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3115 t+5763   event Timer { args: ["drive"], every: 300 }
+ 3142 t+5774   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3163 t+5841   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3184 t+5846   event Timer { args: ["check"], every: 300 }
+ 3191 t+5895   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3212 t+5959   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3233 t+6015   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3254 t+6061   event Timer { args: ["drive"], every: 300 }
+ 3281 t+6079   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3302 t+6139   event Timer { args: ["check"], every: 300 }
+ 3309 t+6144   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3330 t+6209   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3351 t+6274   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3372 t+6331   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3393 t+6352   event Timer { args: ["drive"], every: 300 }
+ 3420 t+6392   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3441 t+6441   event Timer { args: ["check"], every: 300 }
+ 3448 t+6453   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3469 t+6515   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3490 t+6583   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3511 t+6638   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3532 t+6646   event Timer { args: ["drive"], every: 300 }
+ 3559 t+6695   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3580 t+6742   event Timer { args: ["check"], every: 300 }
+ 3587 t+6752   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3608 t+6806   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3629 t+6860   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3650 t+6928   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3671 t+6946   event Timer { args: ["drive"], every: 300 }
+ 3698 t+6978   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3719 t+7042   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3740 t+7044   event Timer { args: ["check"], every: 300 }
+ 3747 t+7102   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3768 t+7172   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3789 t+7241   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3810 t+7252   event Timer { args: ["drive"], every: 300 }
+ 3837 t+7297   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3858 t+7337   event Timer { args: ["check"], every: 300 }
+ 3865 t+7353   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3886 t+7407   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3907 t+7463   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3928 t+7528   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3949 t+7554   event Timer { args: ["drive"], every: 300 }
+ 3976 t+7578   event Timer { args: ["drive", "--fast"], every: 60 }
+ 3997 t+7637   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4018 t+7644   event Timer { args: ["check"], every: 300 }
+ 4025 t+7694   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4046 t+7756   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4067 t+7807   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4088 t+7859   event Timer { args: ["drive"], every: 300 }
+ 4115 t+7873   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4136 t+7938   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4157 t+7951   event Timer { args: ["check"], every: 300 }
+ 4164 t+8000   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4185 t+8056   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4206 t+8112   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4227 t+8158   event Timer { args: ["drive"], every: 300 }
+ 4254 t+8171   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4275 t+8221   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4296 t+8259   event Timer { args: ["check"], every: 300 }
+ 4303 t+8277   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4324 t+8338   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4345 t+8403   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4366 t+8458   event Timer { args: ["drive"], every: 300 }
+ 4393 t+8472   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4414 t+8540   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4435 t+8559   event Timer { args: ["check"], every: 300 }
+ 4442 t+8592   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4463 t+8651   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4484 t+8713   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4505 t+8760   event Timer { args: ["drive"], every: 300 }
+ 4532 t+8763   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4553 t+8820   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4574 t+8869   event Timer { args: ["check"], every: 300 }
+ 4581 t+8875   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4602 t+8937   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4623 t+8988   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4644 t+9040   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4665 t+9052   event Timer { args: ["drive"], every: 300 }
+ 4671 t+9052   drive#228 shed ls {"labels":{}} → 0 []
+ 4672 t+9052   drive#228 shed ls {"labels":{}} → 0 []
+ 4672 t+9052   drive#228 lease drive.lock
+ 4673 t+9052   drive#228 lease drive-drover.lock
+ 4675 t+9052   drive#228 shed ls {"labels":{}} → 0 []
+ 4676 t+9052   drive#228 git -C $D/repo/drover fetch -q origin → 0 
+ 4677 t+9052   drive#228 git -C $D/repo/drover rev-parse origin/staging → 0 00000000000000000000000000000b80f370574f
+ 4677 t+9052   drive#228 lease drive-drover-201.lock
+ 4678 t+9052   drive#228 lease drive-drover-201.lock
+ 4679 t+9052   drive#228 lease drive-drover-202.lock
+ 4680 t+9052   drive#228 lease drive-drover-202.lock
+ 4682 t+9052   drive#228 shed ls {"labels":{}} → 0 []
+ 4683 t+9052   drive#228 date -r 1793814137 +%H:%M → 1 
+ 4683 t+9052   drive#228 append drive-pass #0 ts=1793814137
+ 4685 t+9053   drive#228 gh api graphql --paginate --jq .data.repository.issues.nodes[] | {number, title, state, created: .createdAt, updated: .updatedAt, labels: [.labels.nodes[].name] → 0 
+ 4685 t+9053   drive#228 lease drive-drover.lock
+ 4687 t+9053   drive#228 shed ls {"labels":{}} → 0 []
+ 4688 t+9053   drive#228 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4689 t+9053   drive#228 hostname -s → 0 sim
+ 4690 t+9053   drive#228 shed ls {"labels":{}} → 0 []
+ 4690 t+9053   drive#228 lease drive.lock
+ 4691 t+9053   drive#228 lease drive.lock
+ 4692 t+9053   exit drive#228 0: shed events: shed events: this host's server only
+ 4692 t+9102   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4692 t+9102   spawn drive---fast#229 pid 40230: drover drive --fast
+ 4693 t+9102   drive---fast#229 lease drive-fast.lock
+ 4695 t+9102   drive---fast#229 sh -c 'sysctl' '-n' 'kern.memorystatus_vm_pressure_level' </dev/null 2>/dev/null; printf '\036%s\036' "$?"
+'vm_stat' </dev/null 2>/dev/null; printf '\036%s\036' → 0 1⏎0Mach Virtual Memory Statistics: (page size of 16384 bytes)⏎Pages free: 4000
+ 4696 t+9102   drive---fast#229 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4697 t+9102   drive---fast#229 hostname -s → 0 sim
+ 4698 t+9102   drive---fast#229 shed ls {"labels":{}} → 0 []
+ 4699 t+9102   drive---fast#229 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4700 t+9102   drive---fast#229 hostname -s → 0 sim
+ 4701 t+9102   drive---fast#229 shed ls {"labels":{}} → 0 []
+ 4702 t+9102   drive---fast#229 shed ls {"labels":{}} → 0 []
+ 4702 t+9102   drive---fast#229 lease drive-fast.lock
+ 4703 t+9102   drive---fast#229 lease drive-fast-drover.lock
+ 4705 t+9102   drive---fast#229 shed ls {"labels":{}} → 0 []
+ 4705 t+9102   drive---fast#229 lease drive-drover-201.lock
+ 4706 t+9102   drive---fast#229 lease drive-drover-201.lock
+ 4707 t+9102   drive---fast#229 lease drive-drover-202.lock
+ 4708 t+9102   drive---fast#229 lease drive-drover-202.lock
+ 4709 t+9102   drive---fast#229 lease drive-fast-drover.lock
+ 4710 t+9102   drive---fast#229 lease drive-fast.lock
+ 4712 t+9102   drive---fast#229 shed ls {"labels":{}} → 0 []
+ 4712 t+9102   drive---fast#229 lease drive-fast.lock
+ 4713 t+9102   exit drive---fast#229 0: 
+ 4713 t+9169   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4713 t+9169   spawn drive---fast#230 pid 40231: drover drive --fast
+ 4714 t+9169   drive---fast#230 lease drive-fast.lock
+ 4716 t+9169   drive---fast#230 sh -c 'sysctl' '-n' 'kern.memorystatus_vm_pressure_level' </dev/null 2>/dev/null; printf '\036%s\036' "$?"
+'vm_stat' </dev/null 2>/dev/null; printf '\036%s\036' → 0 1⏎0Mach Virtual Memory Statistics: (page size of 16384 bytes)⏎Pages free: 4000
+ 4717 t+9169   drive---fast#230 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4718 t+9169   drive---fast#230 hostname -s → 0 sim
+ 4719 t+9169   drive---fast#230 shed ls {"labels":{}} → 0 []
+ 4720 t+9169   drive---fast#230 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4721 t+9169   drive---fast#230 hostname -s → 0 sim
+ 4722 t+9169   drive---fast#230 shed ls {"labels":{}} → 0 []
+ 4723 t+9169   drive---fast#230 shed ls {"labels":{}} → 0 []
+ 4723 t+9169   drive---fast#230 lease drive-fast.lock
+ 4724 t+9169   drive---fast#230 lease drive-fast-drover.lock
+ 4726 t+9169   drive---fast#230 shed ls {"labels":{}} → 0 []
+ 4726 t+9169   drive---fast#230 lease drive-drover-201.lock
+ 4727 t+9169   drive---fast#230 lease drive-drover-201.lock
+ 4728 t+9169   drive---fast#230 lease drive-drover-202.lock
+ 4729 t+9169   drive---fast#230 lease drive-drover-202.lock
+ 4730 t+9169   drive---fast#230 lease drive-fast-drover.lock
+ 4731 t+9169   drive---fast#230 lease drive-fast.lock
+ 4733 t+9169   drive---fast#230 shed ls {"labels":{}} → 0 []
+ 4733 t+9169   drive---fast#230 lease drive-fast.lock
+ 4734 t+9169   exit drive---fast#230 0: 
+ 4734 t+9176   event Timer { args: ["check"], every: 300 }
+ 4734 t+9176   spawn check#231 pid 40232: drover check
+ 4736 t+9176   check#231 shed ls {"labels":{}} → 0 []
+ 4737 t+9176   check#231 git -C $D/repo/drover fetch -q origin → 0 
+ 4738 t+9176   check#231 git -C $D/repo/drover rev-parse origin/staging → 0 00000000000000000000000000000b80f370574f
+ 4739 t+9176   check#231 git -C $D/repo/drover rev-parse origin/staging → 0 00000000000000000000000000000b80f370574f
+ 4740 t+9176   check#231 git -C $D/repo/drover show 00000000000000000000000000000b80f370574f:ci/cap.toml → 128 
+ 4740 t+9176   check#231 ps -axo pid=,ppid=,etime=,command= → 0 
+ 4741 t+9176   check#231 lsof -n -d cwd -F pcn → 0 
+ 4741 t+9176   exit check#231 0: 
+ 4741 t+9219   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4741 t+9219   spawn drive---fast#232 pid 40233: drover drive --fast
+ 4742 t+9219   drive---fast#232 lease drive-fast.lock
+ 4744 t+9219   drive---fast#232 sh -c 'sysctl' '-n' 'kern.memorystatus_vm_pressure_level' </dev/null 2>/dev/null; printf '\036%s\036' "$?"
+'vm_stat' </dev/null 2>/dev/null; printf '\036%s\036' → 0 1⏎0Mach Virtual Memory Statistics: (page size of 16384 bytes)⏎Pages free: 4000
+ 4745 t+9219   drive---fast#232 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4746 t+9219   drive---fast#232 hostname -s → 0 sim
+ 4747 t+9219   drive---fast#232 shed ls {"labels":{}} → 0 []
+ 4748 t+9219   drive---fast#232 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4749 t+9219   drive---fast#232 hostname -s → 0 sim
+ 4750 t+9219   drive---fast#232 shed ls {"labels":{}} → 0 []
+ 4751 t+9219   drive---fast#232 shed ls {"labels":{}} → 0 []
+ 4751 t+9219   drive---fast#232 lease drive-fast.lock
+ 4752 t+9219   drive---fast#232 lease drive-fast-drover.lock
+ 4754 t+9219   drive---fast#232 shed ls {"labels":{}} → 0 []
+ 4754 t+9219   drive---fast#232 lease drive-drover-201.lock
+ 4755 t+9219   drive---fast#232 lease drive-drover-201.lock
+ 4756 t+9219   drive---fast#232 lease drive-drover-202.lock
+ 4757 t+9219   drive---fast#232 lease drive-drover-202.lock
+ 4758 t+9219   drive---fast#232 lease drive-fast-drover.lock
+ 4759 t+9219   drive---fast#232 lease drive-fast.lock
+ 4761 t+9219   drive---fast#232 shed ls {"labels":{}} → 0 []
+ 4761 t+9219   drive---fast#232 lease drive-fast.lock
+ 4762 t+9219   exit drive---fast#232 0: 
+ 4762 t+9282   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4762 t+9282   spawn drive---fast#233 pid 40234: drover drive --fast
+ 4763 t+9282   drive---fast#233 lease drive-fast.lock
+ 4765 t+9282   drive---fast#233 sh -c 'sysctl' '-n' 'kern.memorystatus_vm_pressure_level' </dev/null 2>/dev/null; printf '\036%s\036' "$?"
+'vm_stat' </dev/null 2>/dev/null; printf '\036%s\036' → 0 1⏎0Mach Virtual Memory Statistics: (page size of 16384 bytes)⏎Pages free: 4000
+ 4766 t+9282   drive---fast#233 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4767 t+9282   drive---fast#233 hostname -s → 0 sim
+ 4768 t+9282   drive---fast#233 shed ls {"labels":{}} → 0 []
+ 4769 t+9282   drive---fast#233 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4770 t+9282   drive---fast#233 hostname -s → 0 sim
+ 4771 t+9282   drive---fast#233 shed ls {"labels":{}} → 0 []
+ 4772 t+9282   drive---fast#233 shed ls {"labels":{}} → 0 []
+ 4772 t+9282   drive---fast#233 lease drive-fast.lock
+ 4773 t+9282   drive---fast#233 lease drive-fast-drover.lock
+ 4775 t+9282   drive---fast#233 shed ls {"labels":{}} → 0 []
+ 4775 t+9282   drive---fast#233 lease drive-drover-201.lock
+ 4776 t+9282   drive---fast#233 lease drive-drover-201.lock
+ 4777 t+9282   drive---fast#233 lease drive-drover-202.lock
+ 4778 t+9282   drive---fast#233 lease drive-drover-202.lock
+ 4779 t+9282   drive---fast#233 lease drive-fast-drover.lock
+ 4780 t+9282   drive---fast#233 lease drive-fast.lock
+ 4782 t+9282   drive---fast#233 shed ls {"labels":{}} → 0 []
+ 4782 t+9282   drive---fast#233 lease drive-fast.lock
+ 4783 t+9282   exit drive---fast#233 0: 
+ 4783 t+9352   event Timer { args: ["drive"], every: 300 }
+ 4783 t+9352   spawn drive#234 pid 40235: drover drive
+ 4783 t+9352   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4783 t+9352   spawn drive---fast#235 pid 40236: drover drive --fast
+ 4784 t+9352   drive---fast#235 lease drive-fast.lock
+ 4785 t+9352   drive#234 lease drive.lock
+ 4788 t+9352   drive---fast#235 sh -c 'sysctl' '-n' 'kern.memorystatus_vm_pressure_level' </dev/null 2>/dev/null; printf '\036%s\036' "$?"
+'vm_stat' </dev/null 2>/dev/null; printf '\036%s\036' → 0 1⏎0Mach Virtual Memory Statistics: (page size of 16384 bytes)⏎Pages free: 4000
+ 4789 t+9352   drive---fast#235 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4790 t+9352   drive#234 shed ls {"labels":{}} → 0 []
+ 4791 t+9352   drive#234 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4792 t+9352   drive---fast#235 hostname -s → 0 sim
+ 4793 t+9352   drive#234 hostname -s → 0 sim
+ 4794 t+9352   drive---fast#235 shed ls {"labels":{}} → 0 []
+ 4795 t+9352   drive---fast#235 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4796 t+9352   drive#234 shed ls {"labels":{}} → 0 []
+ 4797 t+9352   drive---fast#235 hostname -s → 0 sim
+ 4798 t+9352   drive---fast#235 shed ls {"labels":{}} → 0 []
+ 4799 t+9352   drive#234 shed ls {"labels":{}} → 0 []
+ 4799 t+9352   drive#234 lease drive.lock
+ 4800 t+9352   drive---fast#235 shed ls {"labels":{}} → 0 []
+ 4800 t+9352   drive---fast#235 lease drive-fast.lock
+ 4801 t+9352   drive---fast#235 lease drive-fast-drover.lock
+ 4802 t+9352   drive#234 lease drive-drover.lock
+ 4805 t+9352   drive---fast#235 shed ls {"labels":{}} → 0 []
+ 4805 t+9352   drive---fast#235 lease drive-drover-201.lock
+ 4806 t+9352   drive---fast#235 lease drive-drover-201.lock
+ 4807 t+9352   drive---fast#235 lease drive-drover-202.lock
+ 4808 t+9352   drive---fast#235 lease drive-drover-202.lock
+ 4809 t+9352   drive---fast#235 lease drive-fast-drover.lock
+ 4810 t+9352   drive#234 shed ls {"labels":{}} → 0 []
+ 4811 t+9352   drive#234 git -C $D/repo/drover fetch -q origin → 0 
+ 4812 t+9352   drive---fast#235 lease drive-fast.lock
+ 4814 t+9352   drive#234 git -C $D/repo/drover rev-parse origin/staging → 0 00000000000000000000000000000b80f370574f
+ 4814 t+9352   drive#234 lease drive-drover-201.lock
+ 4815 t+9352   drive#234 lease drive-drover-201.lock
+ 4816 t+9352   drive#234 lease drive-drover-202.lock
+ 4817 t+9352   drive---fast#235 shed ls {"labels":{}} → 0 []
+ 4817 t+9352   drive---fast#235 lease drive-fast.lock
+ 4818 t+9352   exit drive---fast#235 0: 
+ 4819 t+9352   drive#234 lease drive-drover-202.lock
+ 4821 t+9352   drive#234 shed ls {"labels":{}} → 0 []
+ 4822 t+9352   drive#234 date -r 1793814437 +%H:%M → 1 
+ 4822 t+9352   drive#234 append drive-pass #0 ts=1793814437
+ 4824 t+9353   drive#234 gh api graphql --paginate --jq .data.repository.issues.nodes[] | {number, title, state, created: .createdAt, updated: .updatedAt, labels: [.labels.nodes[].name] → 0 
+ 4824 t+9353   drive#234 lease drive-drover.lock
+ 4826 t+9353   drive#234 shed ls {"labels":{}} → 0 []
+ 4827 t+9353   drive#234 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4828 t+9353   drive#234 hostname -s → 0 sim
+ 4829 t+9353   drive#234 shed ls {"labels":{}} → 0 []
+ 4829 t+9353   drive#234 lease drive.lock
+ 4830 t+9353   drive#234 lease drive.lock
+ 4831 t+9353   exit drive#234 0: shed events: shed events: this host's server only
+ 4831 t+9420   event Timer { args: ["drive", "--fast"], every: 60 }
+ 4831 t+9420   spawn drive---fast#236 pid 40237: drover drive --fast
+ 4832 t+9420   drive---fast#236 lease drive-fast.lock
+ 4834 t+9420   drive---fast#236 sh -c 'sysctl' '-n' 'kern.memorystatus_vm_pressure_level' </dev/null 2>/dev/null; printf '\036%s\036' "$?"
+'vm_stat' </dev/null 2>/dev/null; printf '\036%s\036' → 0 1⏎0Mach Virtual Memory Statistics: (page size of 16384 bytes)⏎Pages free: 4000
+ 4835 t+9420   drive---fast#236 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4836 t+9420   drive---fast#236 hostname -s → 0 sim
+ 4837 t+9420   drive---fast#236 shed ls {"labels":{}} → 0 []
+ 4838 t+9420   drive---fast#236 df -k / → 0 Filesystem 1024-blocks Used Available Capacity Mounted on⏎/dev/disk3s5 100000000
+ 4839 t+9420   drive---fast#236 hostname -s → 0 sim
+ 4840 t+9420   drive---fast#236 shed ls {"labels":{}} → 0 []
+ 4841 t+9420   drive---fast#236 shed ls {"labels":{}} → 0 []
+ 4841 t+9420   drive---fast#236 lease drive-fast.lock
+ 4842 t+9420   drive---fast#236 lease drive-fast-drover.lock
+ 4844 t+9420   drive---fast#236 shed ls {"labels":{}} → 0 []
+ 4844 t+9420   drive---fast#236 lease drive-drover-201.lock
+ 4845 t+9420   drive---fast#236 lease drive-drover-201.lock
+ 4846 t+9420   drive---fast#236 lease drive-drover-202.lock
+ 4847 t+9420   drive---fast#236 lease drive-drover-202.lock
+ 4848 t+9420   drive---fast#236 lease drive-fast-drover.lock
+ 4849 t+9420   drive---fast#236 lease drive-fast.lock
+ 4851 t+9420   drive---fast#236 shed ls {"labels":{}} → 0 []
+ 4851 t+9420   drive---fast#236 lease drive-fast.lock
+ 4852 t+9420   exit drive---fast#236 0: 
+FAIL seed=685 (passed)
+replay: DROVER_SIM_SEED=685 cargo test -p drover --test sim
