@@ -54,11 +54,11 @@ fn boat(verdict: Result<&str, &str>) -> Fake {
             "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
             &format!("{}\n", head()),
         )
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'log'"), &format!("{} 20", head()))
+        .reply(&format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'log'"), &format!("{} 20", head()))
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C' '{REV}' 'rev-list'"), "0\n")
-        .reply(&format!("{SSH}'git' '-C' '{REV}' 'status'"), "")
-        .reply(&format!("{SSH}'git' '-C' '{REV}' 'worktree' 'remove'"), "")
+        .reply(&format!("{SSH}'git' '--no-replace-objects' '-C' '{REV}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}'git' '--no-replace-objects' '-C' '{REV}' 'status'"), "")
+        .reply(&format!("{SSH}'git' '--no-replace-objects' '-C' '{REV}' 'worktree' 'remove'"), "")
         .reply(&format!("{SSH}'rm'"), "");
     let out = match verdict {
         Ok(text) => Out {

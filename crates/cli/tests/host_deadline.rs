@@ -206,14 +206,14 @@ fn boat2_side() -> Fake {
             &format!("{SSH2}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile'"),
             "",
         )
-        .reply(&format!("{SSH2}'git' 'ls-remote'"), "abc\tHEAD\n")
+        .reply(&format!("{SSH2}'git' '--no-replace-objects' 'ls-remote'"), "abc\tHEAD\n")
         .reply(&format!("{SSH2}'sh' '-lc'"), "")
         .reply(
             &format!("{SSH2}'/opt/drover/bin/drover' '--version'"),
             &format!("drover {}\n", drover::VERSION),
         )
         .reply(&format!("{SSH2}'sh' '-c' 'git clone --single-branch"), "")
-        .reply(&format!("{SSH2}'git' '-C'"), "")
+        .reply(&format!("{SSH2}'git' '--no-replace-objects' '-C'"), "")
         .reply(&format!("{SSH2}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH2}'sh' '-c' 'umask 077"), "")
         .reply(&format!("{SSH2}'rm' '-f'"), "")
