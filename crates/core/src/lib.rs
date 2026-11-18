@@ -8,6 +8,7 @@ pub mod action;
 pub mod amend;
 pub mod arch;
 pub mod autonomy;
+pub mod baseline;
 pub mod breaker;
 pub mod card;
 pub mod check;

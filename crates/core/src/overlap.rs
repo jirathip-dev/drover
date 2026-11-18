@@ -47,6 +47,7 @@ pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[E
     let rev = |b: &str| git(r, &dir, &["rev-parse", &format!("origin/{b}")]);
     let ev = |n, kind, d| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), kind, d));
     git(r, &dir, &["fetch", "-q", "origin"])?;
+    crate::baseline::grafts(r, f, &dir).ok();
     let st: Vec<IssueState> = fold(events)
         .into_values()
         .filter(|s| s.fleet == fleet && !s.done())

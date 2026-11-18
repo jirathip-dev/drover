@@ -13,6 +13,7 @@
 1 asks
 2 autonomy
 4 backlog
+1 baseline
 4 blocked_respawn
 1 board_errors
 4 board_fresh
