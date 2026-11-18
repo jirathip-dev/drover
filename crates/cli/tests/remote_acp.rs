@@ -1081,3 +1081,63 @@ fn a_proxy_lanes_auth_error_names_the_proxy_and_holds_its_host_unless_a_proxy_ca
         }
     }
 }
+
+fn look(c: &drover::Ctx, b: &Boat) -> String {
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    drover::hosts::survey(c, &cfg, &shed_runner(b, &cfg), false);
+    let (code, o) = run(c, b, &["hosts"]);
+    assert_eq!(code, 0, "{o}");
+    o
+}
+
+fn host_line(o: &str, h: &str) -> String {
+    o.lines()
+        .find(|l| l.starts_with(&format!("{h} ·")))
+        .unwrap_or_else(|| panic!("{o}"))
+        .to_string()
+}
+
+#[test]
+fn a_tunnel_whose_ssh_lives_but_whose_far_end_does_not_answer_is_down_and_takes_no_new_lane() {
+    let (c, _) = setup("racp-far-end", &["boat1", "boat2"]);
+    for h in ["boat1", "boat2"] {
+        std::fs::write(c.state.with_file_name(format!("tunnel-{h}.pid")), "777").unwrap();
+    }
+    let f = spawn_fake().reply("kill -0 777", "").reply("@boat2 curl", "");
+    let b = Boat::new(&c, &f, &[("boat1", true, true), ("boat2", true, true)]);
+    let o = look(&c, &b);
+    assert!(host_line(&o, "boat1").contains("tunnel down"), "{o}");
+    assert!(!host_line(&o, "boat2").contains("tunnel down"), "{o}");
+    let (code, o) = run(&c, &b, &["doctor"]);
+    assert!(
+        o.contains("tunnel boat1 down") && o.contains("tunnel boat2 up"),
+        "{code} {o}"
+    );
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{o}");
+    assert_eq!(spawned(&c)[0].str("host"), Some("boat2"), "{o}");
+}
+
+#[test]
+fn a_forward_that_failed_on_a_held_remote_port_frees_it_and_the_next_look_answers_through_it() {
+    let (c, _) = setup("racp-forward-failed", &["boat1"]);
+    std::fs::write(c.state.with_file_name("tunnel-boat1.pid"), "777").unwrap();
+    let log = "Error: remote port forwarding failed for listen port 9\n";
+    std::fs::write(c.state.with_file_name("tunnel-boat1.log"), log).unwrap();
+    let f = spawn_fake().reply("@boat1 curl", "").reply("kill -0 4242", "");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let o = look(&c, &b);
+    assert!(host_line(&o, "boat1").contains("tunnel down"), "{o}");
+    let calls = f.calls.borrow().clone();
+    let free = calls
+        .iter()
+        .position(|l| l.starts_with("@boat1 sh -c") && l.contains("ss -Htlnp") && l.ends_with(" 9"))
+        .unwrap_or_else(|| panic!("the stale listener on :9 there is freed: {calls:?}"));
+    let ssh = calls.iter().position(|l| l.contains("nohup 'ssh'")).unwrap();
+    assert!(free < ssh, "freed before the new forward: {calls:?}");
+    let pid = std::fs::read_to_string(c.state.with_file_name("tunnel-boat1.pid")).unwrap();
+    assert_eq!(pid.trim(), "4242");
+    let o = look(&c, &b);
+    assert!(!host_line(&o, "boat1").contains("tunnel down"), "{o}");
+    assert_eq!(f.count("sh -c nohup 'ssh'"), 1, "{:?}", f.calls.borrow());
+}

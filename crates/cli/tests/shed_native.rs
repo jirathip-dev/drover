@@ -187,3 +187,21 @@ fn a_session_no_spawn_names_is_an_orphan_and_an_unreachable_host_is_never_dead()
         "box's lane: no judgement"
     );
 }
+
+#[test]
+fn a_lane_that_died_on_econnrefused_names_the_proxy_tunnel_not_an_adapter_crash() {
+    let (c, sh) = setup("shed-econnrefused", CONFIG);
+    sh.lane(LANE, "running", "/x");
+    let c0 = at(&c, NOW);
+    check(&c0);
+    sh.set(LANE, |t| {
+        t["reported"] = json!({"state": "error", "note": "API Error: Connection refused (ECONNREFUSED)"});
+        (t["state"], t["exit"]) = (json!("exited"), json!(1));
+    });
+    let got = check(&c0);
+    assert_eq!(kinds(&got), ["lane-dead"]);
+    assert_eq!(got[0].str("cause"), Some("ECONNREFUSED: proxy tunnel down"), "{got:?}");
+    let f = Fake::default();
+    let (_, w) = run(&c0, &sh.on(&f), &["waiting", "sendmeter"]);
+    assert!(w.contains("lane gone (ECONNREFUSED: proxy tunnel down)"), "{w}");
+}
