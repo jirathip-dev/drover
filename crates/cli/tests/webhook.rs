@@ -71,6 +71,13 @@ fn a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive() {
     let cached = drover::gh::cached_pr(&c, "sendmeter", 7);
     assert_eq!(cached["statusCheckRollup"][0]["conclusion"], "SUCCESS", "{cached}");
     assert_ne!(drover::db::stamp(&c.state, "board"), board, "the board re-renders now");
+    let log = std::fs::read_to_string(c.state.with_file_name("tick.log")).unwrap();
+    assert!(
+        log.contains(" webhook check_suite jirathip-dev/sendmeter: refreshed sendmeter #7\n"),
+        "{log}"
+    );
+    let (_, out) = run(&c, &Fake::default(), &["doctor"]);
+    assert!(out.contains("✓ webhook — secret set · 1 accepted\n"), "{out}");
 
     let now = drover::Ctx {
         now: drover::now(),
@@ -101,10 +108,11 @@ fn a_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing() {
     }
     assert!(r.calls.borrow().is_empty(), "{:?}", r.calls.borrow());
     assert!(drover::gh::cached_pr(&c, "sendmeter", 7).is_null());
+    assert!(!c.state.with_file_name("tick.log").exists());
     assert_eq!(drover::webhook::rejected(&c), sigs.len() as u64);
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(
-        out.contains("✓ webhook — secret set · 6 refused (bad signature)"),
+        out.contains("✓ webhook — secret set · 0 accepted · 6 refused (bad signature)"),
         "{out}"
     );
 }
