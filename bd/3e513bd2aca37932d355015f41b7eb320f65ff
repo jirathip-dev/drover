@@ -1,0 +1,7 @@
+Decided: an ACP pane holds a max_working slot only while shed reports it busy (working or running)
+Because: "A slot is held only by a lane that is actually working: its ACP session is mid-turn"
+Because: crates/core/src/session/mod.rs:75
+Rejected: matching turn-end events to prompts in the log — shed's live status already says mid-turn, with no second source
+Rejected: changing the rule for non-ACP panes — the issue covers ACP panes, and terminal panes report idle reliably
+Check: hibernated and unreported ACP panes no longer count; simulator counting is unchanged
+Owner: idle ACP lanes stop filling boats, so new lanes start where nothing is really running
