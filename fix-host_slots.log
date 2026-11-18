@@ -1,0 +1,18 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1280/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.26s
+     Running tests/host_slots.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1280/debug/deps/host_slots-587aafe3215fc20c)
+
+running 10 tests
+test an_offline_host_and_a_full_one_leave_the_idle_host_free ... ok
+test a_pending_start_counts_only_against_its_own_host ... ok
+test when_every_up_host_is_full_the_hold_never_names_the_offline_one ... ok
+test a_recorded_rev_verdict_closes_the_rev_pane ... ok
+test kicked_starts_count_against_the_cap_before_any_lane_is_up ... ok
+test four_mid_turn_acp_panes_fill_the_host_whatever_idle_ones_sit_there ... ok
+test acp_panes_between_turns_hold_no_slot_and_a_new_start_is_placed ... ok
+test a_ready_or_needs_human_lane_holds_no_slot_even_if_its_agent_works ... ok
+test over_max_working_a_start_waits_then_starts_when_a_lane_finishes ... ok
+test with_max_simulators_one_a_second_sim_lane_waits ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.56s
+
