@@ -123,3 +123,42 @@ fn a_refactor_pass_over_githubs_diff_limit_reads_the_local_diff() {
     assert_eq!((code, n), (0, 1), "{out}");
     assert!(r.called(&format!("{local} origin/")), "{:?}", r.calls.borrow());
 }
+
+const COMMENTS: &str = "diff --git a/tests/a.rs b/tests/a.rs\n--- a/tests/a.rs\n+++ b/tests/a.rs\n@@ -1,9 +1,4 @@\n use x;\n\
+-/// totals add up\n-// old note\n-/* block\n- * continued\n- */\n-\n #[test]\n fn totals() {\n-    // check it\n+    // checked\n \
+assert_eq!(total(), 3);\ndiff --git a/tests/run.sh b/tests/run.sh\n--- a/tests/run.sh\n+++ b/tests/run.sh\n@@ -1,3 +1,2 @@\n \
+set -e\n-# run them all\n cargo test\ndiff --git a/tests/b.py b/tests/b.py\n--- a/tests/b.py\n+++ b/tests/b.py\n@@ -1,2 +1,1 @@\n\
+-# helper\n import x\n";
+
+#[test]
+fn a_refactor_pass_ignores_comment_only_test_edits() {
+    let (c, d) = setup("refactor-comments", "--refactor");
+    let sha = "a".repeat(40);
+    let fake = |diff: &str| Fake::default().reply(BRANCH, &sha).reply(DIFF, diff);
+    let mixed = COMMENTS.replace("-// old note\n", "-// old note\n-#[ignore]\n");
+    let (code, out, n) = pass(&c, &d, &fake(&mixed), "");
+    assert_eq!((code, n), (3, 0), "{out}");
+    let want = "REFUSED TESTS_CHANGED: a `--refactor` PR edits tests beyond moves and renames: tests/a.rs\n";
+    assert!(out.contains(want), "{out}");
+    let (code, out, n) = pass(&c, &d, &fake(COMMENTS), "");
+    assert_eq!((code, n), (0, 1), "{out}");
+}
+
+#[test]
+fn queue_set_playbook_marks_and_unmarks_an_issue() {
+    let (c, d) = setup("refactor-unmark", "--refactor");
+    let sha = "a".repeat(40);
+    let edited = MOVED.replace("+        assert_eq!(total(), 3);", "+        assert_eq!(total(), 4);");
+    let r = Fake::default().reply(BRANCH, &sha).reply(DIFF, &edited);
+    let (code, out) = run(&c, &r, &["queue", "sendmeter", "set", "12", "playbook", "off"]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out, n) = pass(&c, &d, &r, "");
+    assert_eq!((code, n), (0, 1), "{out}");
+    let (code, out) = run(&c, &r, &["queue", "sendmeter", "set", "12", "playbook", "refactor"]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out, n) = pass(&c, &d, &r, "");
+    assert_eq!((code, n), (3, 1), "{out}");
+    assert!(out.contains("REFUSED TESTS_CHANGED"), "{out}");
+    let (code, out) = run(&c, &r, &["queue", "sendmeter", "set", "12", "playbook", "fast"]);
+    assert_ne!(code, 0, "{out}");
+}
