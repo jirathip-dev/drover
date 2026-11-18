@@ -628,3 +628,180 @@ fn a_lane_sheet_is_one_shed_read_of_the_200_lines_it_shows_within_150ms_p95_on_t
     let p95 = ms[(ms.len() * 95).div_ceil(100) - 1];
     assert!(p95 <= std::time::Duration::from_millis(150), "p95 {p95:?}");
 }
+
+static STREAM_SLOTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn http(addr: std::net::SocketAddr, method: &str, path: &str, body: &str, cookie: &str) -> String {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    write!(
+        s,
+        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut r = String::new();
+    s.read_to_string(&mut r).unwrap();
+    r
+}
+
+#[test]
+fn a_lane_prompt_replies_before_shed_takes_it_and_a_failed_delivery_reaches_the_sheet() {
+    let _slots = STREAM_SLOTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (c, r) = fixture("prompt-later");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", drover::now());
+    drop(s);
+    let (shed, moved) = (r.1.state.clone(), r.1.moved.clone());
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let c2 = c.clone();
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
+    let agent = "sendmeter-impl-12";
+    assert!(http(addr, "GET", "/api/v1/lanes", "", &cookie).starts_with("HTTP/1.1 200 "));
+    let sent = || {
+        shed.lock()
+            .unwrap()
+            .seen
+            .iter()
+            .filter(|(m, p)| m == "send" && p["name"] == agent)
+            .count()
+    };
+    let settle = |done: &dyn Fn() -> bool| {
+        for _ in 0..500 {
+            if done() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("the delivery never ran");
+    };
+
+    shed.lock().unwrap().held = Some(agent.into());
+    let t0 = std::time::Instant::now();
+    let res = http(
+        addr,
+        "POST",
+        "/api/v1/send",
+        &format!("agent={agent}&text=hello"),
+        &cookie,
+    );
+    let took = t0.elapsed();
+    assert!(
+        res.starts_with("HTTP/1.1 200 ") && res.contains("sent to sendmeter-impl-12"),
+        "{res}"
+    );
+    assert!(
+        took < std::time::Duration::from_millis(50),
+        "replied in {took:?} while shed held the prompt"
+    );
+    let log = read(&c.state).unwrap().to_vec();
+    assert_eq!(
+        log.last().map(|e| e.kind.as_str()),
+        Some("prompt"),
+        "logged before the reply"
+    );
+    shed.lock().unwrap().held = None;
+    moved.notify_all();
+    settle(&|| sent() == 1);
+
+    shed.lock().unwrap().held = Some(agent.into());
+    let res = http(
+        addr,
+        "POST",
+        "/api/v1/send",
+        &format!("agent={agent}&text=again"),
+        &cookie,
+    );
+    assert!(res.starts_with("HTTP/1.1 200 "), "{res}");
+    let gone = shed.lock().unwrap().terms.remove(agent).unwrap();
+    shed.lock().unwrap().held = None;
+    moved.notify_all();
+    let failed = || {
+        read(&c.state)
+            .unwrap()
+            .to_vec()
+            .into_iter()
+            .rfind(|e| e.kind == "prompt-failed")
+    };
+    settle(&|| failed().is_some());
+    shed.lock().unwrap().terms.insert(agent.into(), gone);
+    let e = failed().unwrap();
+    assert_eq!((e.str("agent"), e.issue), (Some(agent), Some(12)), "{e:?}");
+    let sheet = json_of(&http(addr, "GET", &format!("/screens/lanes/{agent}"), "", &cookie));
+    let said = sheet["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "transcript")
+        .unwrap();
+    let row = said["blocks"].as_array().unwrap().last().unwrap();
+    assert_eq!(
+        (&row["id"], &row["title"], &row["subtitle"]["tone"]),
+        (
+            &json!(format!("undelivered-{}", e.seq)),
+            &json!("✗ not delivered"),
+            &json!("bad")
+        ),
+        "{sheet}"
+    );
+    assert!(row["subtitle"]["text"].as_str().unwrap().contains(agent), "{row}");
+    let first = {
+        use std::io::{BufRead, Write};
+        let mut s = std::net::TcpStream::connect(addr).unwrap();
+        write!(
+            s,
+            "GET /screens/lanes/{agent}/stream HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n"
+        )
+        .unwrap();
+        let line = std::io::BufReader::new(s)
+            .lines()
+            .map_while(Result::ok)
+            .find(|l| l.starts_with("data: "));
+        serde_json::from_str::<serde_json::Value>(&line.unwrap()[6..]).unwrap()
+    };
+    assert_eq!(
+        first["ops"][0]["screen"], sheet,
+        "the sheet's stream carries the row: {first}"
+    );
+}
+
+#[test]
+fn a_stream_the_client_left_frees_its_slot_within_two_seconds() {
+    let _slots = STREAM_SLOTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (c, r) = fixture("stream-slots");
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let c2 = c.clone();
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
+    let open = || {
+        use std::io::{BufRead, Write};
+        let mut s = std::net::TcpStream::connect(addr).unwrap();
+        write!(s, "GET /screens/lanes/stream HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+        let first = std::io::BufReader::new(s.try_clone().unwrap()).lines().next();
+        (first.and_then(Result::ok).unwrap_or_default(), s)
+    };
+    let mut left = vec![];
+    while left.len() < 5 {
+        let (head, s) = open();
+        if !head.starts_with("HTTP/1.1 200 ") {
+            assert!(head.starts_with("HTTP/1.1 404 "), "{head}");
+            break;
+        }
+        left.push(s);
+    }
+    assert!(
+        !left.is_empty() && left.len() <= 4,
+        "at most 4 streams at once: {}",
+        left.len()
+    );
+    drop(left);
+    let t0 = std::time::Instant::now();
+    while !open().0.starts_with("HTTP/1.1 200 ") {
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(2),
+            "the left streams still hold their slots"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
