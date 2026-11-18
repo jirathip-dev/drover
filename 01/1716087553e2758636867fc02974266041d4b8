@@ -1,0 +1,9 @@
+Decided: on [all] the in-flight tiles fold into one tile, sum over the sum of caps; a fleet view keeps its own
+Because: "On [all], the per-fleet in-flight numbers collapse into one tile"
+Decided: tiles wrap (flex-wrap, grow from 0, min-width max-content) so 1440 keeps equal tiles and 390 wraps whole words
+Because: "The stat row never shrinks a tile below a readable width"
+Decided: show() calls sync() so a tab switch drops a thread's data-focus before the slow fetch returns
+Because: web/src/main.ts:206
+Rejected: a non-sticky strip or a JS-measured header — the overlap came from stale data-focus, not header height
+Check: parity_webkit issue_1290 test fails before the fix ([1,0,0]) and passes after, in CI's WebKit
+Owner: phone tiles wrap instead of squashing, [all] shows one in-flight tile, the loading line stays off the header
