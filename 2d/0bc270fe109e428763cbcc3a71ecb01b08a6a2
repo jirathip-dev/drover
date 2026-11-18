@@ -1,0 +1,5 @@
+Decided: merged origin/staging; blocks.ts keeps staging's select picks inside this PR's in-place composer redraw
+Because: "never moves focus out of the composer, nor its caret or selection, nor closes the phone keyboard"
+Rejected: none
+Check: web/src/blocks.ts composer draw() uses around(row, top, picks) so the textarea row stays attached
+Owner: picked up the new model and effort dropdowns while keeping typing uninterrupted
