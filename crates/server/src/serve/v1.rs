@@ -93,24 +93,7 @@ impl Server<'_> {
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |s| out("200 OK", &s),
             ),
-            ("GET", Some("health")) => {
-                let error = Config::loaded(ctx).err().map(|e| format!("{:#}", e.0));
-                let (config, serve) = (
-                    if error.is_some() { "invalid" } else { "ok" },
-                    self.numbers(ctx.now, minutes(ctx)),
-                );
-                out(
-                    "200 OK",
-                    &Health {
-                        ok: error.is_none(),
-                        config: config.into(),
-                        error,
-                        routes: lock(&self.timing).routes(ctx.now),
-                        sources: self.r.refreshed(),
-                        serve,
-                    },
-                )
-            }
+            ("GET", Some("health")) => out("200 OK", &self.health(ctx)),
             ("GET", Some("config" | "shed")) if !paired => {
                 reply("401 Unauthorized", "UNPAIRED", "pair this device first")
             }
@@ -557,6 +540,19 @@ impl Server<'_> {
             drop(self.queue_tab(ctx));
             drop(self.herd(ctx, None));
         });
+    }
+
+    fn health(&self, ctx: &Ctx) -> Health {
+        let error = Config::loaded(ctx).err().map(|e| format!("{:#}", e.0));
+        let (serve, routes) = (self.numbers(ctx.now, minutes(ctx)), lock(&self.timing).routes(ctx.now));
+        Health {
+            ok: error.is_none(),
+            config: if error.is_some() { "invalid" } else { "ok" }.into(),
+            error,
+            routes,
+            sources: self.r.refreshed(),
+            serve,
+        }
     }
 
     fn numbers(&self, now: u64, mins: u64) -> ServeHealth {
