@@ -1,0 +1,12 @@
+Decided: keep-alive only when the request sends `Connection: keep-alive` (every browser does); otherwise `Connection: close` as today.
+Because: "Without it, responses are byte-identical to today's."
+Rejected: HTTP/1.1 implicit keep-alive — clients that read to EOF without a Connection header (172 test requests, health probes) would hang until the idle timeout.
+Decided: the idle timeout is the existing 5 s socket read timeout; an idle kept connection holds its slot in the same 256-thread cap.
+Because: "HTTP/1.1 keep-alive for normal requests, with an idle timeout, within the existing connection-thread cap."
+Decided: gzip is applied in one place after the response is built (serve/wire.rs finish), so every route gets it and the uncompressed bytes stay those route builds.
+Decided: hashed assets (the `immutable` ones) are gzipped once per path and kept in a static map; only ASSETS paths answer immutable, so it stays bounded.
+Because: "Hashed assets are compressed once and the result kept."
+Decided: SSE streams use one gzip encoder per connection with a sync flush after each message.
+Because: "SSE streams are gzip-compressed and flushed after each message."
+Check: crates/cli/tests/serve_wire.rs drives the real socket: 15.8x smaller events screen, plain bytes equal Server::respond, stream message decodes whole in under 100 ms, two kept requests on one connection.
+Owner: The phone page downloads about 16x less for big screens and reuses its connections.
