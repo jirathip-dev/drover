@@ -1,0 +1,2 @@
+{"args":["lane-event","hook-denied","{\"rule\":\"REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with '& echo $! > f', stop with kill \\\"$(cat f)\\\"\"}"],"lane":"sendmeter:12:impl","ts":1794821134496}
+{"args":["lane-event","hook-denied","{\"rule\":\"REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with '& echo $! > f', stop with kill \\\"$(cat f)\\\"\"}"],"lane":"sendmeter:12:impl","ts":1794821169474}
