@@ -1,0 +1,18 @@
+Decided: merge refusals no review can change (NO_REPRO, TESTS_CHANGED, NO_BASELINE, SERIAL_UNMARKED) log needs-human with the code and head sha, once per head, in gate::merge
+Because: "Others (`NO_REPRO`, `TESTS_CHANGED`, `NO_BASELINE`, `SERIAL_UNMARKED`) make the issue needs-human with the refusal as the card's reason, once per head"
+Rejected: a drive-side check in waiting's stale branch — a blocked event from any merge caller would still read as review again; the event kind is the root
+Decided: drive/pickup.rs ingest records a check lane's fresh, unrecorded verdict.md at the PR head before drive runs a spawn, after the remote pickup path
+Because: "Drive ingests a finished lane's verdict.md before it supersedes or cleans that lane"
+Decided: gate::repro_verify is the one latest-rev-PASS-at-head rule; unverified and verify::why both call it
+Because: "`verify::why` reads the repro mode from the latest rev PASS at the head, the same rule as `gate::unverified` (one shared helper)"
+Decided: no code for stale spawn markers: drive::holds already drops one past spawn_pending_max_secs or with a dead pid and logs stale-marker once; a test pins the AC
+Because: crates/core/src/drive.rs:133
+Check: repro.rs's three new tests fail on d86e2c50 and pass at the head
+Owner: drive stops paying for re-reviews of an approved head when merge refuses it for a reason a review cannot fix; you get one card instead
+
+Decided: serial_groups' SERIAL_UNMARKED test now expects needs-human, not blocked; no product code changed in this round
+Because: "Others (`NO_REPRO`, `TESTS_CHANGED`, `NO_BASELINE`, `SERIAL_UNMARKED`) make the issue needs-human with the refusal as the card's reason, once per head"
+Rejected: keeping SERIAL_UNMARKED as blocked — blocked is what read as review again and fed the rev loop
+Decided: dropped the previous lane's wip snapshot commit, which held only logs/ files, so no logs land in git
+Check: crates/cli/tests/serial_groups.rs merge_refuses_a_pr_touching_a_group_it_never_joined passes and still asserts the SERIAL_UNMARKED refusal text
+Owner: the one red CI test asserted the old behaviour the issue changes; it now checks the new one
