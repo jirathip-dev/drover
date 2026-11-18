@@ -1,0 +1,5 @@
+Decided: merge origin/staging; keep staging's host_sync.rs and add the github_token test to it
+Because: q1952
+Rejected: none
+Check: an_external_github_token_never_warns_of_its_expiry still passes after the merge
+Owner: Branch brought up to date with staging; the github_token setting is unchanged.
