@@ -1,0 +1,20 @@
+Decided: each pick is one native select in one flex row under the box; a change posts the same model op
+Because: "Model and effort are each one dropdown (a native `<select>`), side by side in one compact row"
+Decided: a pick with no current value gets a placeholder option named after it, so the first choice is not shown as picked
+Because: crates/server/src/serve/chat.rs:354
+Rejected: option text "model opus" — the name is in aria-label; the bare value keeps the row compact at 390
+Check: the ui-webkit job runs the_model_and_effort_picks_are_one_row_of_dropdowns_and_a_model_pick_reaches_the_bar_in_webkit (skipped locally, no Playwright)
+Owner: the model and effort picks are two small dropdowns under the box; please check on the phone
+
+Decided: model and effort picks render as native select elements in one .pk row under the composer box; a change posts the same model op or sets the new-thread pick.
+Because: "Model and effort are each one dropdown (a native `<select>`), side by side in one compact row under the box"
+Because: web/src/blocks.ts:393
+Decided: the row height is capped at the shared --hit token so it is no taller than the send row.
+Because: "size of the row no taller than the [send] row"
+Because: web/src/board.css:153
+Decided: single-choice picks stay hidden by the existing server filter; no client-side duplicate of that rule.
+Because: crates/server/src/serve/chat.rs:355
+Rejected: a custom popover menu — the issue asks for a native select and the shared design system only.
+Rejected: keeping chip buttons and wrapping them tighter — still several rows on a 390 px phone.
+Check: crates/cli/tests/threads_tab.rs:529 drives WebKit at 390, asserts one row, the options, and that a model pick posts thread-model and updates the bar.
+Owner: On the phone, model and effort are now two small dropdowns in one row under the message box; please check it on your phone.
