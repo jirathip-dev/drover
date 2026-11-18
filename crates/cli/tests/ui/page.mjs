@@ -1,4 +1,4 @@
-// #927: the phone page in headless Chrome (DevTools over --remote-debugging-pipe, no dependency): node page.mjs <chrome>
+// The phone page in headless Chrome (DevTools over --remote-debugging-pipe, no dependency): node page.mjs <chrome>
 // <url> <cookie name=value>. As a paired phone it answers an ask, approves and denies a run card, pauses and resumes a
 // fleet, stops a lane from its sheet and saves the Fleets sheet, each by tapping the page; then, offline, reloads it and
 // reads what the cached screens paint. Prints one JSON object: each step's toast (the server's reply line), the actions the page posted and the page's uncaught errors.

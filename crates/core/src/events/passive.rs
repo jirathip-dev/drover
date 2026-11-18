@@ -1,4 +1,4 @@
-/// #973: frozen: the passive kinds logged before `Event::passive`; a new kind sets the flag where it is emitted.
+/// Frozen: the passive kinds logged before `Event::passive`; a new kind sets the flag where it is emitted.
 pub const LEGACY: &[&str] = &[
     "pending-action",
     "job",

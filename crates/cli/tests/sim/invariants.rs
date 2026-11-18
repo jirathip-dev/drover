@@ -124,7 +124,7 @@ pub fn on_merge(w: &mut World, issue: u64, head: &str, base: &str) {
     }
 }
 
-/// #959's "always" property: `issue`'s latest verdict at exactly `head` is PASS and that head's CI is green; else why not.
+/// The "always" property: `issue`'s latest verdict at exactly `head` is PASS and that head's CI is green; else why not.
 pub fn always(w: &World, issue: u64, head: &str) -> Option<String> {
     let v = (w.wrote.iter().rev())
         .find(|x| x.ev.kind == "verdict" && x.ev.issue == Some(issue) && x.ev.str("sha") == Some(head))

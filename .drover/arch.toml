@@ -42,16 +42,7 @@ glob = "*.toml"
 
 [comments]
 policy = "strict"
-except = [
-    "assets/types/**",
-    "web/dist/**",
-    "web/src/**",
-    "web/lint-fixtures/**",
-    "crates/server/src/serve.rs",
-    "crates/server/src/serve/chat.rs",
-    "crates/server/src/serve/fresh.rs",
-    "crates/server/src/serve/slo.rs",
-]
+except = ["assets/types/**", "web/dist/**", "web/lint-fixtures/**"]
 
 [docs]
 paths = ["docs/**/*.md", "README.md"]
@@ -221,6 +212,24 @@ pattern = "read_argv"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/term.rs", "crates/core/src/setup.rs", "crates/core/src/providers/**"]
 reason = "#1053: no lane fact is read off a screen; a transcript is session::transcript"
+
+[[ban]]
+pattern = "useReplaceRefs"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/baseline.rs"]
+reason = "#1099: only core::baseline switches a worktree's history view"
+
+[[ban]]
+pattern = "refs/replace"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/baseline.rs"]
+reason = "#1099: only core::baseline makes or deletes a graft"
+
+[[ban]]
+pattern = "no-replace-objects"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/runner.rs", "crates/core/src/baseline.rs"]
+reason = "#1099: the runner makes every git call graft-blind; no call site adds or drops the flag (baseline.rs names it in the brief line)"
 
 [[ban]]
 pattern = "Shas"

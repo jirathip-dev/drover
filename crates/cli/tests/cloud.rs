@@ -58,7 +58,7 @@ fn ev(c: &drover::Ctx, ts: u64, kind: &str) {
 fn healthy(f: Fake) -> Fake {
     let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
     f.reply(&format!("{SSH}'gh' 'api' '-i'"), gh)
-        .reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
+        .reply(&format!("{SSH}'git' '--no-replace-objects' 'ls-remote'"), "abc\tHEAD\n")
         .reply(&format!("{SSH}'sh' '-lc'"), "")
         .reply(
             &format!("{SSH}'/opt/drover/bin/drover' '--version'"),
@@ -110,7 +110,7 @@ fn spawn_fake_at(mini: f64) -> Fake {
             &format!("{SSH}'sh' '-c' 'git clone --single-branch --branch '\\''staging'\\'' https://github.com/jirathip-dev/sendmeter.git"),
             "",
         )
-        .reply(&format!("{SSH}'git' '-C'"), "")
+        .reply(&format!("{SSH}'git' '--no-replace-objects' '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
         .reply(&format!("{SSH}'rm' '-f'"), "")
@@ -331,7 +331,7 @@ fn running(name: &str) -> (drover::Ctx, Config) {
 }
 
 fn lane_fake() -> Fake {
-    let git = format!("{SSH}'git' '-C' '{WT}'");
+    let git = format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}'");
     fake(0.1)
         .reply(&format!("{SSH}'test' '-e'"), "")
         .reply(&format!("{git} 'rev-list'"), "1\n")
@@ -360,7 +360,9 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
     let out = tick(&c, &cfg, &r, &idle());
     assert_eq!(out.len(), 1, "{out:?}");
     assert!(out[0].contains("stopped (idle 20 min)"), "{out:?}");
-    let push = format!("{SSH}'git' '-C' '{WT}' 'push' 'origin' 'HEAD:refs/heads/wip/cloud1-sendmeter-impl-12'");
+    let push = format!(
+        "{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'push' 'origin' 'HEAD:refs/heads/wip/cloud1-sendmeter-impl-12'"
+    );
     assert!(
         r.index(&push).unwrap() < r.index(&rc("stop")).unwrap(),
         "{:?}",
@@ -385,7 +387,7 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
 #[test]
 fn a_failed_wip_push_aborts_the_stop() {
     let (c, cfg) = running("cloud-abort");
-    let push = format!("{SSH}'git' '-C' '{WT}' 'push'");
+    let push = format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'push'");
     let r = lane_fake().once_err(&push, 1, "rejected");
     let out = tick(&c, &cfg, &r, &idle());
     assert!(
@@ -425,7 +427,9 @@ fn an_unreachable_host_aborts_the_stop_and_destroy_saves_first() {
         out.contains("cloud1: destroyed; wip wip/cloud1-sendmeter-impl-12"),
         "{out}"
     );
-    let push = format!("{SSH}'git' '-C' '{WT}' 'push' 'origin' 'HEAD:refs/heads/wip/cloud1-sendmeter-impl-12'");
+    let push = format!(
+        "{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'push' 'origin' 'HEAD:refs/heads/wip/cloud1-sendmeter-impl-12'"
+    );
     assert!(r.index(&push).unwrap() < r.index(&rc("destroy")).unwrap());
 }
 

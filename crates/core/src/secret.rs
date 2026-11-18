@@ -131,7 +131,7 @@ pub fn rm(ctx: &Ctx, cfg: &Config, fleet: &str, name: &str) -> Result<()> {
     )
 }
 
-/// #707 `drover migrate`: the old store's Keychain items are left alone; the commands that delete them (each `secret-set` the log `state` names, and a search for the rest), for the owner to run.
+/// `drover migrate`: the old store's Keychain items are left alone; the commands that delete them (each `secret-set` the log `state` names, and a search for the rest), for the owner to run.
 pub fn retired(state: &Path, out: &mut dyn Write) -> Result<()> {
     let set = working(state).unwrap_or_default();
     let svc: std::collections::BTreeSet<String> = (set.iter().filter(|e| e.kind == "secret-set"))

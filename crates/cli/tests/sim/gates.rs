@@ -2,10 +2,10 @@ use crate::model::{Ev, Model, Script, FLEET};
 use crate::scenario::{args, config, timers, T0};
 use crate::sched::{Rng, World};
 
-/// #959's "sometimes" states: the gate scenarios fail the run unless one of them reaches each.
+/// The "sometimes" states: the gate scenarios fail the run unless one of them reaches each.
 pub const SOMETIMES: &[&str] = &["round-limit", "head-moved-after-pass", "merge-after-retried-verdict"];
 
-/// #959: a gate that dies instead of answering, one scenario per seed (`world`).
+/// A gate that dies instead of answering, one scenario per seed (`world`).
 pub const SCENARIOS: &[(u64, &str)] = &[
     (9591, "a rev lane exits before it writes a verdict"),
     (9592, "a rev lane hangs past its limit"),

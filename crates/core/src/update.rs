@@ -52,12 +52,12 @@ pub fn self_update(
     Ok(code.max(install(ctx, cfg, r, out, f, &events, t)?))
 }
 
-/// #894: the control socket of the serve listening on `port` (`drover_server::handover`).
+/// The control socket of the serve listening on `port` (`drover_server::handover`).
 pub fn serve_sock(ctx: &Ctx, port: u16) -> PathBuf {
     ctx.state.with_file_name(format!("serve-{port}.sock"))
 }
 
-/// This repo's own fleet, by either name until the GitHub repo is renamed too (#456).
+/// This repo's own fleet, by either name until the GitHub repo is renamed too.
 pub fn ours(f: &crate::config::Fleet) -> bool {
     ["drover", "herdsman"].contains(&f.repo_name())
 }
@@ -163,7 +163,7 @@ fn restart_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
     crate::timer::restart(ctx, r, label).map(|_| "serve restarted".into())
 }
 
-/// #894: ask the serve on control socket `sock` to hand over; the bridge's pid once it serves.
+/// Ask the serve on control socket `sock` to hand over; the bridge's pid once it serves.
 pub fn ask_handover(sock: &Path, secs: u64) -> Result<String> {
     let mut c = std::os::unix::net::UnixStream::connect(sock)?;
     c.set_read_timeout(Some(std::time::Duration::from_secs(secs.max(1))))?;
@@ -174,7 +174,7 @@ pub fn ask_handover(sock: &Path, secs: u64) -> Result<String> {
     Ok(pid.with_context(|| format!("serve: {}", line.trim()))?.to_string())
 }
 
-/// #1081: the build sha `/api/v1/health` on `addr` reports (`?` from a build before it did); `None` if nothing answers.
+/// The build sha `/api/v1/health` on `addr` reports (`?` from a build before it did); `None` if nothing answers.
 pub fn serving(addr: &str, secs: u64) -> Option<String> {
     use std::io::Read;
     let wait = Some(std::time::Duration::from_secs(secs.max(1)));
@@ -206,7 +206,7 @@ fn staging_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Path) -> Result
     Ok(format!("staging serve on {addr}"))
 }
 
-/// #708: `! self-update — paused since <time> → …` while the last toggle is a pause (doctor and the board).
+/// `! self-update — paused since <time> → …` while the last toggle is a pause (doctor and the board).
 pub fn paused_line(r: &dyn Runner, events: &[Event]) -> Option<String> {
     let e = events
         .iter()

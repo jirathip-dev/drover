@@ -19,11 +19,11 @@ pub const SOFT: [&str; 11] = [
 ];
 const SKIP: [&str; 2] = ["IN_FLIGHT", "ALREADY_DONE"];
 const DISK: [&str; 2] = ["DISK_LOW", "DISK_BUDGET"];
-/// #1058: an extend migrated from #975's pending start back to its queue place.
+/// An extend migrated from the old pending start back to its queue place.
 pub const REQUEUED: &str = "extend-requeued";
 /// A pending action unstarted this long brings its card back.
 pub const BACK_SECS: u64 = 1800;
-/// #825: the reason of a start held by host load alone: it waits, its card never comes back for it.
+/// The reason of a start held by host load alone: it waits, its card never comes back for it.
 pub const LOAD: &str = "HOST_BUSY (load)";
 
 /// An issue's pending action: its latest `pending-action` with no `spawn` of the issue after it.
@@ -38,7 +38,7 @@ pub struct Pending {
 }
 
 impl Pending {
-    /// Its card is back: a hard refusal, or (#1058: never an extend's) still not started after `BACK_SECS`.
+    /// Its card is back: a hard refusal, or (never an extend's) still not started after `BACK_SECS`.
     pub fn back(&self, now: u64) -> bool {
         self.failed || self.action != "extend" && now >= self.since + BACK_SECS && self.reason.as_deref() != Some(LOAD)
     }
@@ -85,12 +85,12 @@ fn since<'a>(events: &'a [Event], fleet: &str, n: u64) -> Option<Vec<&'a Event>>
     (!rest.iter().any(ended)).then_some(rest)
 }
 
-/// #1058: `fleet` #`n` waits in the queue for its extra round's start.
+/// `fleet` #`n` waits in the queue for its extra round's start.
 pub fn requeued(events: &[Event], fleet: &str, n: u64) -> bool {
     since(events, fleet, n).is_some()
 }
 
-/// #1058: its Queue row: `extended · waiting: <gate>`, the fleet's pause or drive's last refused start; `extended · starting` before any.
+/// Its Queue row: `extended · waiting: <gate>`, the fleet's pause or drive's last refused start; `extended · starting` before any.
 pub fn waits(events: &[Event], fleet: &str, n: u64, paused: bool) -> Option<String> {
     let rest = since(events, fleet, n)?;
     let tried = |e: &&&Event| e.kind == "driven" && e.str("step") == Some("start");
@@ -99,7 +99,7 @@ pub fn waits(events: &[Event], fleet: &str, n: u64, paused: bool) -> Option<Stri
     Some(gate.map_or("extended · starting".into(), |g| format!("extended · waiting: {g}")))
 }
 
-/// #1058: each extend still waiting on #975's pending start (unstarted, not refused) goes back to its queue place once.
+/// Each extend still waiting on the old pending start (unstarted, not refused) goes back to its queue place once.
 pub fn requeue_waiting(ctx: &Ctx, cfg: &crate::config::Config) -> Result<()> {
     let ev = crate::events::working(&ctx.state)?;
     let open = |k: &(String, u64)| ev.states.get(k).is_some_and(|s| !s.done() && s.state != "parked");
@@ -125,7 +125,7 @@ pub fn record(ctx: &Ctx, (fleet, n): (&str, u64), action: &str, role: &str, afte
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "pending-action", d))
 }
 
-/// A start of `fleet` #`n` refused `code` (`why`): a pending action logs it, failed unless soft; whether it stays pending. #1058: a hard refusal of a requeued extend's start is a new needs-human.
+/// A start of `fleet` #`n` refused `code` (`why`): a pending action logs it, failed unless soft; whether it stays pending. a hard refusal of a requeued extend's start is a new needs-human.
 pub fn refused(ctx: &Ctx, (fleet, n): (&str, u64), code: &str, why: &str) -> Result<bool> {
     let ev = crate::events::working(&ctx.state)?;
     let wait = SOFT.contains(&code) || SKIP.contains(&code) || DISK.contains(&code);

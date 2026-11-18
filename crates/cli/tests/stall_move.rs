@@ -84,8 +84,14 @@ fn placed(c: &drover::Ctx, r: &Fake, issue: u64, role: &str, force: Option<&str>
 
 fn busy_wt(f: Fake, status: &str, ahead: &str) -> Fake {
     f.reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), status)
-        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), ahead)
+        .reply(
+            &format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'status'"),
+            status,
+        )
+        .reply(
+            &format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'rev-list'"),
+            ahead,
+        )
 }
 
 #[test]
@@ -169,7 +175,7 @@ fn a_fix_spawn_held_on_its_busy_pinned_host_past_the_stall_window_moves_with_its
     assert!(sh.called("run", IMPL), "{:?}", sh.methods());
     let push = calls
         .iter()
-        .position(|l| l.starts_with(&format!("{SSH}'git' '-C' '{WT}' 'push'")));
+        .position(|l| l.starts_with(&format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'push'")));
     let add = calls
         .iter()
         .position(|l| l.starts_with("git -C") && l.contains(" worktree add "));
