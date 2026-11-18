@@ -141,7 +141,7 @@ host for the seconds of `Swapping`) answers `HOST_UPDATING`.
    bootstrap` uses it; `install_line` goes.
 3. **The rollout** (`update`): members, `step`, the swap, the events; `hosts::sync` goes and the survey only reads
    versions; `HOST_UPDATING` in placement and in spawn's guard; four `[limits]` keys.
-4. **Removal and docs**: the cargo build and the "drover-local" gate in `update`, `scripts/install-gate.sh`, the
+4. **Removal and docs**: the cargo build and the "drover-local" gate in `update`, scripts/install-gate.sh, the
    reinstall line `drover merge` prints, doctor's signature row (Developer ID); one new docs page for releases and
    updates, linked from the two sections it replaces in `docs/setup.md` and `docs/hosts.md`.
 

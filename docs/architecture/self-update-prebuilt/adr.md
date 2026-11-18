@@ -117,7 +117,7 @@ the identifier `drover`, then notarizes a zip of it with `notarytool` and the Ap
 Mach-O cannot carry a stapled ticket (`facts.md`), so the notarization is recorded with Apple and checked online.
 The job verifies before it uploads, and only the signed binary is uploaded.
 
-On a host nothing is signed any more. `update`'s "drover-local" step and `scripts/install-gate.sh` go; doctor's
+On a host nothing is signed any more. `update`'s "drover-local" step and scripts/install-gate.sh go; doctor's
 signature row checks for a Developer ID Application signature with the identifier `drover`.
 `scripts/signing-identity.sh` stays: shed and cooee installs still sign with that identity.
 

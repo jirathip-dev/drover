@@ -130,7 +130,6 @@ fn reprobe(c: &drover::Ctx, health: &[&str]) {
     .unwrap();
 }
 
-/// The self-update's fake: main at NEW with its release, the main host staging and swapping, and each boat's builds.
 fn rollout(c: &drover::Ctx, boats: &[(&str, &str, Option<&str>)]) -> Fake {
     let tag = drover::release::tag("main", NEW);
     let sums = format!(

@@ -51,7 +51,6 @@ fn has(p: &Path, sha: &str) -> bool {
     std::fs::read_to_string(p).is_ok_and(|s| s.contains(&ver(sha)))
 }
 
-/// `branch` at `sha` with its release, staged at `exe` (the main host's live or staging binary).
 fn release(f: Fake, branch: &str, sha: &str, exe: &Path) -> Fake {
     let tag = drover::release::tag(branch, sha);
     f.reply(

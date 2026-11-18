@@ -198,7 +198,6 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
     up
 }
 
-/// Put this build on started host `name` before it takes lanes, logged `host-sync`, as a self-update would.
 fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) {
     let Some(m) = cfg.hosts.get(name).and_then(|h| h.machine.as_deref()) else {
         return;
