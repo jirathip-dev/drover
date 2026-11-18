@@ -154,7 +154,7 @@ push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no
 client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
 shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), and rusqlite (bundled SQLite)
 for the state database (#344, docs/architecture.md), keyring for the main host's secret store
-(#441, owner-approved; docs/providers.md), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
+(#441, owner-approved; docs/providers.md), flate2 for serve's gzip (#1314, owner-approved), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
 fails on any other direct dependency.
 
 ## GitHub webhooks (#626)
@@ -216,7 +216,7 @@ listener is not the job's pid.
 | `serve-slow` | `/api/v1` p95 over 200 ms for 5 min |
 | `phone-slow` | a phone kind's p95 (tap, sheet, tab, send, answer, delta) over 150 ms for `slo_api_minutes` |
 | `serve-503` | any read answered 503 in the last minute |
-| `drive-slow` | a fleet's last pass over `pass_max_secs` (120 s); names the fleet and its slowest step |
+| `drive-slow` | a fleet's last pass over `pass_max_secs` (120 s); names the fleet, its slowest step (closed issues, spawns, PR reads, settle) and each host's remote-call count and seconds |
 
 CI's gates are `crates/cli/tests/serve_health.rs`: the request-path guard (every read answers with the db write-locked,
 and none calls git, gh or ssh) and the bench (each route group's p95 within 50 ms on the fixture state).
@@ -309,7 +309,7 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
 - `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
   `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues, run
   cards and #1066 config proposals and secret requests as chat cards); #977: each full screen (not a sheet) shows the step's snapshot age, `as of 3m ago` (`as of: not yet known` before
-  one), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age` section's row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
+  one; #1310: sent as `{since, label}`, the label's `{}` the age the client ticks, as are a thread's message ages and the threads list's), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age` section's row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
   and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
   shows until a tap opens the full card; a second tap folds it again;
 - #1172: `GET /screens/queue/done?repo=<fleet>`, opened from the Queue's `done today` row (its value: the list's length): the fleet's merges of the last 24 h, newest first, each `#N title`, `merged HH:MM UTC · <sha>`, its `title`, `t` and `sha` from `done`; a row opens `/screens/issue` for it.

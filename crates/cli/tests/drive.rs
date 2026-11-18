@@ -829,7 +829,8 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
     std::thread::spawn(move || drover::serve::serve_on(&c2, &Slow(fake(NONE).reply("git -C", "")), l, false));
     let send = |req: String| {
         let mut s = std::net::TcpStream::connect(addr).unwrap();
-        s.write_all(req.as_bytes()).unwrap();
+        s.write_all(req.replacen("\r\n", "\r\nConnection: close\r\n", 1).as_bytes())
+            .unwrap();
         let mut out = String::new();
         s.read_to_string(&mut out).unwrap();
         out

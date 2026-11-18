@@ -305,6 +305,10 @@ fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self
         json!({"since": NOW - 700, "step": "drive", "child": "", "pid": 4242}).to_string(),
     )
     .unwrap();
+    drover::db::take(&c.state, "drive-sendmeter.lock", NOW - 650, 3600, "sendmeter", &|_| {
+        false
+    })
+    .unwrap();
     let r = local()
         .once("kill -0 4242", 0, "")
         .reply("ps -o command= -p 4242", "/Users/me/.local/bin/drover tick\n")
@@ -316,6 +320,8 @@ fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self
     let heal: Vec<&Event> = ev.iter().filter(|e| e.kind == "self-heal").collect();
     assert_eq!(heal.len(), 1, "{heal:?}");
     assert_eq!(heal[0].str("did"), Some("stopped tick pid 4242 (SIGTERM)"));
+    let why = heal[0].str("reason").unwrap();
+    assert!(why.starts_with("tick running 11 min, in drive · sendmeter;"), "{why}");
     assert_eq!(ev.iter().filter(|e| e.kind == "slo-tick").count(), 1);
     let later = drover::Ctx {
         now: NOW + 600,

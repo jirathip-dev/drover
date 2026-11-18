@@ -32,7 +32,10 @@
       ],
       "id": "m-5",
       "kind": "you",
-      "meta": "✓ 118m",
+      "meta": {
+        "label": "✓ {}",
+        "since": "1970-01-12T11:48:20Z"
+      },
       "title": "you",
       "type": "card"
     },
@@ -61,7 +64,10 @@
       ],
       "id": "m-7",
       "kind": "orch",
-      "meta": "115m",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T11:51:40Z"
+      },
       "title": "orchestrator",
       "type": "card"
     },
@@ -110,7 +116,10 @@
       ],
       "id": "m-8",
       "kind": "orch",
-      "meta": "114m",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T11:52:30Z"
+      },
       "title": "from t3",
       "type": "card"
     },
@@ -129,7 +138,10 @@
       ],
       "id": "m-9",
       "kind": "ask",
-      "meta": "113m",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T11:53:20Z"
+      },
       "title": "q31",
       "tone": "",
       "type": "card"
@@ -157,7 +169,10 @@
       ],
       "id": "m-11",
       "kind": "you",
-      "meta": "8m",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:38:20Z"
+      },
       "title": "you",
       "tone": "bad",
       "type": "card"
@@ -194,7 +209,10 @@
       ],
       "id": "m-12",
       "kind": "ask",
-      "meta": "5m",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:41:40Z"
+      },
       "title": "q33",
       "tone": "warn",
       "type": "card"
