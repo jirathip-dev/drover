@@ -90,8 +90,8 @@ fn host() -> Fake {
 
 fn by(c: &drover::Ctx, t: Option<&str>, now: u64, args: &[&str]) -> (i32, String) {
     if let Some(t) = t {
-        std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
-        std::env::set_var("DROVER_THREAD", t);
+        set_env("DROVER_LANE", "sendmeter:-:orchestrator");
+        set_env("DROVER_THREAD", t);
     } else {
         std::env::remove_var("DROVER_LANE");
         std::env::remove_var("DROVER_THREAD");

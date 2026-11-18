@@ -1,4 +1,4 @@
-// #1169: thread t2 in Playwright's WebKit at 390 px on a real serve: node repaint.mjs <url> <cookie name=value>.
+// Thread t2 in Playwright's WebKit at 390 px on a real serve: node repaint.mjs <url> <cookie name=value>.
 // localStorage is full of cached screens (a phone's), the composer is typed into and blurred, its messages scrolled mid-way;
 // the stream sends 5 messages, a replace that changes nothing and a badge; then the 30 s tick, a resume and a reload.
 // Prints one JSON object of what the page showed.

@@ -62,6 +62,7 @@ merge_label = "merge-ready"   # the full CI runs only with this label; drover ad
 # hotspots = "off"   # #889: `drover tick` runs `drover hotspots` weekly per fleet (default "weekly"); "off" opts out
 # hygiene = { merge = "merge", docs_trust = [] }   # #1101: this fleet's keys over [hygiene]'s (docs/config.md#hygiene-1101); "off" opts a key out
 # lessons = "off"   # #419: `drover tick` runs `drover lesson` weekly per fleet (default "weekly"); "off" opts out
+# triage = "weekly"   # #1100: `drover tick` runs `drover triage` weekly per fleet (default off: on demand only)
 # max_impl = 2   # optional caps (CAP); unset = no cap, the host check protects the Mac
 # max_rev = 2
 # notify_global = true   # also send this fleet's events to the global [[notify]]
@@ -183,6 +184,7 @@ spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or
 # slo_idle_minutes = 20   # #855: no lane working this long with spawnable work queued: `slo-idle`, a heal, then `stuck`
 # slo_tick_minutes = 10   # #855: a tick running longer: `slo-tick`; the next fast step stops it, then `stuck` if it lives
 # slo_pass_minutes = 30  # #1183: no slow drive pass of a fleet this long: the `Drive is stuck` card and one push
+# stall_restart_hours = 2  # #1216: no push, verdict or lane event this long: one restart, or a load wait moves host; a fleet may set its own
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin

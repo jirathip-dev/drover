@@ -44,12 +44,23 @@ pub fn branch_of(st: Option<&IssueState>, issue: u64) -> String {
         .unwrap_or_else(|| format!("issue-{issue}"))
 }
 
-/// #418: each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call. The `NO_PROOF` text naming each one that doesn't.
+/// Each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call. The `NO_PROOF` text naming each one that doesn't.
 pub fn no_proof(body: &str) -> Option<String> {
     let proofless =
         |(b, ls): (bool, Vec<&str>)| Some(format!("`{}` ({})", ls.first()?.trim(), unproven(&ls).filter(|_| b)?));
     let bad: Vec<String> = findings(body).into_iter().filter_map(proofless).collect();
     (!bad.is_empty()).then(|| bad.join("; "))
+}
+
+fn pr_diff(r: &dyn Runner, f: &Fleet, branch: &str, head: &str) -> Result<String> {
+    match ok(r, "gh", &["pr", "diff", branch, "-R", &f.repo]) {
+        Err(e) if format!("{e:#}").contains("too_large") => {
+            let (dir, range) = (f.local_path(), format!("origin/{}...{head}", f.integration));
+            git(r, &dir, &["fetch", "-q", "origin"])?;
+            git(r, &dir, &["diff", &range])
+        }
+        d => d,
+    }
 }
 
 pub fn verdict(
@@ -97,7 +108,7 @@ pub fn verdict(
     };
     let lp = p.loop_of(stage);
     let prose = pass && stage != "verify" && crate::lesson::is_lesson(ctx, st.as_ref(), (fleet, issue)) && {
-        crate::lesson::prose_only(&ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo])?)
+        crate::lesson::prose_only(&pr_diff(r, f, &branch, &head)?)
     };
     let (pass, body) = if prose {
         writeln!(out, "prose-only lesson PR: recorded as a FAIL")?;
@@ -109,7 +120,7 @@ pub fn verdict(
     let repro = if pass && stage != "verify" && crate::queue::repro(&evs, fleet, issue) {
         let view = ["pr", "view", &branch, "-R", &f.repo, "--json", "body", "--jq", ".body"];
         let section = || ok(r, "gh", &view).ok().and_then(|b| repro_section(&b));
-        Some(reproduced(&body, section).or_else(|why| refused("NO_REPRO", why))?)
+        Some(reproduced(&body, verify_role(f), section).or_else(|why| refused("NO_REPRO", why))?)
     } else {
         None
     };
@@ -135,7 +146,7 @@ pub fn verdict(
             }
         }
         Some("refactor") => {
-            let diff = ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo])?;
+            let diff = pr_diff(r, f, &branch, &head)?;
             if let Some(files) = tests_changed(&diff) {
                 return refused(
                     "TESTS_CHANGED",
@@ -218,8 +229,8 @@ pub fn verdict(
             check::purge(r, cfg, fleet, out, wt, false)?;
         }
     }
-    let is_rev = |e: &&Event| e.is("spawn", fleet, issue) && crate::events::checks(e);
-    let rev = events.iter().rfind(is_rev);
+    let rev = (events.iter()).rfind(|e| e.is("spawn", fleet, issue) && crate::events::checks(e));
+    rev.map(|e| check::drop_scratch(r, e, out)).transpose()?;
     let on = rev.map(|e| crate::hosts::On::of(r, Some(e)));
     let exists = |w: &&str| on.as_ref().is_some_and(|on| on.exists(Path::new(w)));
     let (Some((e, wt)), Some(r)) = (rev.and_then(|e| Some((e, e.str("worktree").filter(exists)?))), &on) else {
@@ -261,7 +272,7 @@ fn passed(events: &[Event], s: &IssueState, head: &str) -> bool {
     }
 }
 
-/// #150: keep the fleet's `merge_label` on the open PR exactly while a PASS stands at its head: add it once (`labelled`), take it off a head that moved past the PASS (`unlabelled`), so a stale PASS never starts the full run.
+/// Keep the fleet's `merge_label` on the open PR exactly while a PASS stands at its head: add it once (`labelled`), take it off a head that moved past the PASS (`unlabelled`), so a stale PASS never starts the full run.
 pub fn sync_label(
     ctx: &Ctx,
     cfg: &Config,
@@ -295,7 +306,7 @@ pub fn sync_label(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))
 }
 
-/// #839: a draft PR with a PASS at its head is marked ready for review (its full CI starts); true while it is a draft.
+/// A draft PR with a PASS at its head is marked ready for review (its full CI starts); true while it is a draft.
 pub fn ready_draft(
     ctx: &Ctx,
     cfg: &Config,
@@ -338,7 +349,7 @@ pub fn ci_green(rollup: &Value, required: &[String]) -> Result<(), String> {
     gh::not_green(&gh::required(rollup, required)).map_or(Ok(()), |m| Err(format!("{prefix}{m}")))
 }
 
-/// #228: every blocking finding (a `blocking` line, not `non-blocking`) is tagged `blocking [<category>]` with one of `cats`; at least one blocker.
+/// Every blocking finding (a `blocking` line, not `non-blocking`) is tagged `blocking [<category>]` with one of `cats`; at least one blocker.
 #[doc(hidden)]
 pub fn form_only(body: &str, cats: &[String]) -> bool {
     let blockers: Vec<String> = findings(body)
@@ -411,7 +422,22 @@ fn unproven(ls: &[&str]) -> Option<&'static str> {
     }
 }
 
-fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'static str, String> {
+const NO_VERIFY_ROLE: &str =
+    "this fleet has no verify role, so no verify stage runs; rev must give `Repro: run`, on a host that can run the test";
+
+fn verify_role(f: &Fleet) -> bool {
+    f.flow().of_role("verify").is_some()
+}
+
+fn no_verify_pass(f: &Fleet, head: &str) -> String {
+    if verify_role(f) {
+        format!("rev's `Repro: verify` PASS has no verify PASS at {head:.7}")
+    } else {
+        format!("rev's `Repro: verify` PASS at {head:.7}: {NO_VERIFY_ROLE}")
+    }
+}
+
+fn reproduced(body: &str, verify: bool, section: impl FnOnce() -> Option<String>) -> Result<&'static str, String> {
     let (kind, block) = repro_block(body).ok_or("no `Repro: run` or `Repro: verify` block")?;
     let flat = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
     match kind.trim_start_matches(['*', '_', '`', ' ']) {
@@ -442,6 +468,7 @@ fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'
                 )),
             }
         }
+        k if k.starts_with("verify") && !verify => Err(NO_VERIFY_ROLE.into()),
         k if k.starts_with("verify") => {
             let quote = block.iter().filter_map(|l| l.trim_start().strip_prefix('>'));
             let quote = flat(&quote.collect::<Vec<_>>().join(" "));
@@ -488,7 +515,7 @@ fn tests_changed(diff: &str) -> Option<String> {
     (minus != plus).then(|| files.join(", "))
 }
 
-/// #420: a verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next heading outside a fence.
+/// A verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next heading outside a fence.
 pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
     let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
     let ls: Vec<&str> = body.lines().collect();
@@ -516,11 +543,13 @@ fn repro_section(pr_body: &str) -> Option<String> {
 fn unverified(events: &[Event], (fleet, n): (&str, u64), head: &str) -> bool {
     let at = |e: &&Event| e.is("verdict", fleet, n) && e.str("sha").is_some_and(|s| s.eq_ignore_ascii_case(head));
     let mut here = events.iter().filter(at);
-    here.clone().any(|e| e.str("repro") == Some("verify"))
+    let mut rev = here.clone().rev();
+    rev.find(|e| e.str("stage") != Some("verify") && e.str("verdict") == Some("PASS"))
+        .is_some_and(|e| e.str("repro") == Some("verify"))
         && !here.any(|e| e.str("stage") == Some("verify") && e.str("verdict") == Some("PASS"))
 }
 
-/// #309: a check stage's rounds (unset: no limit) plus the owner's extends, worded `/3` or ` of 9+1 (owner extended)`.
+/// A check stage's rounds (unset: no limit) plus the owner's extends, worded `/3` or ` of 9+1 (owner extended)`.
 pub fn limit(f: &Fleet, stage: &str, st: Option<&IssueState>) -> (u32, String) {
     let base = f.flow().get(stage).and_then(|s| s.rounds).unwrap_or(u32::MAX);
     match st.map_or((0, base), |s| (s.extra, base.saturating_add(s.extra).max(s.granted))) {
@@ -529,7 +558,7 @@ pub fn limit(f: &Fleet, stage: &str, st: Option<&IssueState>) -> (u32, String) {
     }
 }
 
-/// #650: the one rule for "verified enough to merge", shared by `gate`, drive and `waiting`: every check stage's last outcome at `head` is a PASS (a `verify-skipped`/`verify-no-recipe` there is verify's), within its rounds.
+/// The one rule for "verified enough to merge", shared by `gate`, drive and `waiting`: every check stage's last outcome at `head` is a PASS (a `verify-skipped`/`verify-no-recipe` there is verify's), within its rounds.
 pub fn verified(f: &Fleet, st: Option<&IssueState>, head: &str, over: bool) -> Result<(), Refusal> {
     let verdicts = st.map(|s| s.verdicts.as_slice()).unwrap_or_default();
     let at = |x: &&(String, String, String)| x.0.eq_ignore_ascii_case(head);
@@ -589,7 +618,7 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
     Ok(head)
 }
 
-/// #198: the merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines and a facts line. Returns (subject, body, whether the summary was there).
+/// The merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines and a facts line. Returns (subject, body, whether the summary was there).
 pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String, String, bool) {
     let title = pr["title"].as_str().unwrap_or_default().trim();
     let strip = |open: &str, close: char| {
@@ -760,7 +789,7 @@ pub(crate) fn unjoined(
         .collect())
 }
 
-/// `over` (`--owner-override`, #130) lifts only `ROUND_LIMIT`.
+/// `over` (`--owner-override`) lifts only `ROUND_LIMIT`.
 pub fn merge(
     ctx: &Ctx,
     cfg: &Config,
@@ -842,10 +871,7 @@ pub fn merge(
                 )
             }) {
             Some((code, why)) => Err(refuse(code, why)),
-            None if unverified(&events, (fleet, issue), &head) => Err(refuse(
-                "NO_REPRO",
-                format!("rev's `Repro: verify` PASS has no verify PASS at {head:.7}"),
-            )),
+            None if unverified(&events, (fleet, issue), &head) => Err(refuse("NO_REPRO", no_verify_pass(f, &head))),
             None => Ok(head),
         },
         res => res,
@@ -876,7 +902,7 @@ pub fn merge(
             return Err(rf.into());
         }
         Err(rf) => {
-            let kind = if rf.code == "ROUND_LIMIT" {
+            let kind = if rf.code == "ROUND_LIMIT" || rf.code == "NO_REPRO" && !verify_role(f) {
                 "needs-human"
             } else {
                 "blocked"
@@ -912,7 +938,7 @@ pub fn merge(
     merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
 }
 
-/// #509: this issue's merge action not yet `failed` and no `merged` logged after it; `merge` logs it, with its head.
+/// This issue's merge action not yet `failed` and no `merged` logged after it; `merge` logs it, with its head.
 pub fn unlogged_merge<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a Event> {
     let logged = |a: &Event| events.iter().any(|e| e.seq > a.seq && e.is("merged", fleet, issue));
     crate::action::last(events, fleet, issue, "merge").filter(|a| a.kind != "failed" && !logged(a))
@@ -1008,7 +1034,7 @@ fn merged(
     Ok(())
 }
 
-/// #130: a needs-human card's `override` / `extend` / `park`; #151: `drover extend|park` (`spawn: false` = `--no-spawn`). #712: `why` is `park --why`, stored on the `parked` event.
+/// A needs-human card's `override` / `extend` / `park`; `drover extend|park` (`spawn: false` = `--no-spawn`). `why` is `park --why`, stored on the `parked` event.
 pub fn needs_human(
     ctx: &Ctx,
     cfg: &Config,
@@ -1094,7 +1120,7 @@ pub fn park(
     Ok(writeln!(out, "#{n}: park")?)
 }
 
-/// #712: `drover unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
+/// `drover unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
 pub fn unpark(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, (fleet, n): (&str, u64), by: &str) -> Result<()> {
     let events = working(&ctx.state)?;
     let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(n);

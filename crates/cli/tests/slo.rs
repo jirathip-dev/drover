@@ -31,14 +31,18 @@ fn at(c: &drover::Ctx, secs: u64) -> drover::Ctx {
     }
 }
 
-fn fast(c: &drover::Ctx, sh: &FakeShed) -> Fake {
+fn pass(c: &drover::Ctx, sh: &FakeShed, args: &[&str]) -> Fake {
     let r = Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git ", "")
         .reply("sh -c nohup", "4321");
-    let (code, out) = run(c, &sh.on(&r), &["drive", "--fast"]);
+    let (code, out) = run(c, &sh.on(&r), args);
     assert_eq!(code, 0, "{out}");
     r
+}
+
+fn fast(c: &drover::Ctx, sh: &FakeShed) -> Fake {
+    pass(c, sh, &["drive", "--fast"])
 }
 
 fn kinds(c: &drover::Ctx) -> Vec<String> {
@@ -64,6 +68,7 @@ fn card(c: &drover::Ctx, sh: &FakeShed, now: u64) -> Option<Value> {
 #[test]
 fn idle_21_minutes_with_spawnable_work_heals_and_never_makes_a_card() {
     let (c, sink, sh) = setup("slo-idle-stuck");
+    pass(&c, &sh, &["check"]);
     fast(&c, &sh);
     assert!(kinds(&c).is_empty(), "idle starts now: no breach yet");
     fast(&at(&c, 19 * 60), &sh);
@@ -289,4 +294,111 @@ fn a_missed_promise_a_hold_took_over_shows_no_stuck_card() {
     assert!(!kinds(&c).contains(&"stuck".to_string()), "{:?}", kinds(&c));
     assert_eq!(card(&c, &sh, NOW + 1020), None);
     assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
+}
+
+const H2: u64 = 2 * 3600;
+
+fn spawner(c: &drover::Ctx, sh: &FakeShed) -> Fake {
+    pass_with(c, sh, None)
+}
+
+fn pass_with(c: &drover::Ctx, sh: &FakeShed, pr: Option<&str>) -> Fake {
+    let r = pr
+        .map_or_else(Fake::default, |p| Fake::default().reply("gh pr view issue-7", p))
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply("sysctl -n vm.loadavg", "{ 1.0 1.0 1.0 }\n")
+        .reply("sysctl -n hw.ncpu", "10\n")
+        .reply("git ", "")
+        .reply("gh issue view 7", r#"{"title":"t","body":"b"}"#)
+        .reply("sh -c nohup", "4321");
+    let (code, out) = run(c, &sh.on(&r), &["drive", "--fast"]);
+    assert_eq!(code, 0, "{out}");
+    r
+}
+
+fn of_kind(c: &drover::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
+}
+
+#[test]
+fn a_lane_silent_for_the_stall_window_restarts_once_and_a_second_stall_is_a_stuck_card() {
+    std::env::remove_var("DROVER_LANE");
+    std::env::remove_var("DROVER_ORCHESTRATOR");
+    let (c, _sink, sh) = quiet("slo-stall-restart");
+    spawned(&c, 7);
+    spawner(&at(&c, H2 - 60), &sh);
+    assert!(of_kind(&c, "stall-restart").is_empty(), "inside the window");
+    spawner(&at(&c, H2 + 60), &sh);
+    let r = of_kind(&c, "stall-restart");
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert_eq!(
+        (r[0].issue, r[0].str("role"), r[0].str("by")),
+        (Some(7), Some("impl"), Some("drover"))
+    );
+    assert!(
+        r[0].str("reason").unwrap().contains("no push, verdict or lane event"),
+        "{r:?}"
+    );
+    let spawns = of_kind(&c, "spawn");
+    assert_eq!(spawns.len(), 2, "the same role respawned: {spawns:?}");
+    assert_eq!((spawns[1].ts, spawns[1].str("role")), (NOW + H2 + 60, Some("impl")));
+    spawner(&at(&c, 2 * H2 + 120), &sh);
+    assert_eq!(of_kind(&c, "stall-restart").len(), 1, "restarted once");
+    assert_eq!(of_kind(&c, "spawn").len(), 2);
+    let shown = card(&c, &sh, NOW + 2 * H2 + 120)
+        .expect("the second stall's card")
+        .to_string();
+    assert!(shown.contains("#7") && shown.contains("stalled"), "{shown}");
+}
+
+#[test]
+fn named_waits_never_restart_or_move_a_quiet_lane() {
+    type Wait = fn(&drover::Ctx);
+    std::env::remove_var("DROVER_LANE");
+    std::env::remove_var("DROVER_ORCHESTRATOR");
+    let waits: [(&str, Wait); 7] = [
+        ("held", |c| {
+            assert_eq!(run(c, &Fake::default(), &["queue", "sendmeter", "add", "7"]).0, 0);
+            assert_eq!(
+                run(c, &Fake::default(), &["queue", "sendmeter", "block", "--on", "8", "7"]).0,
+                0
+            );
+        }),
+        ("ci", |_| {}),
+        ("slot", |c| {
+            let d = json!({"step": "respawn", "result": "REFUSED SPAWN_PENDING: a spawn is starting", "code": "SPAWN_PENDING"});
+            ev(c, 7, 3600, "driven", d);
+        }),
+        ("review-queue", |c| {
+            let p = json!({"kind": "spawn-pending", "reason": "review waits behind 1 earlier review",
+                "deadline": NOW + 9 * H2, "state": "impl", "head": ""});
+            ev(c, 7, 600, "promise", p);
+        }),
+        ("ask", |c| {
+            ev(c, 7, 600, "needs-decision", json!({"id": "q1", "question": "which?"}));
+        }),
+        ("working", |c| {
+            ev(c, 7, 3600, "turn-end", json!({"state": "working", "why": "long build"}));
+        }),
+        ("load-young", |c| {
+            let d = json!({"step": "respawn", "result": "REFUSED HOST_BUSY: mini: load", "code": "HOST_BUSY"});
+            ev(c, 7, 3600, "driven", d);
+        }),
+    ];
+    for (name, wait) in waits {
+        let (c, _sink, sh) = quiet(&format!("slo-stall-wait-{name}"));
+        spawned(&c, 7);
+        wait(&c);
+        let ci = r#"{"number": 34, "state": "OPEN", "headRefOid": "abc", "statusCheckRollup": [{"__typename": "CheckRun", "name": "test", "status": "IN_PROGRESS", "conclusion": ""}]}"#;
+        pass_with(&at(&c, H2 + 60), &sh, (name == "ci").then_some(ci));
+        assert!(of_kind(&c, "stall-restart").is_empty(), "{name}: no restart");
+        assert!(of_kind(&c, "stall-move").is_empty(), "{name}: no move");
+        assert_eq!(of_kind(&c, "spawn").len(), 1, "{name}: no respawn");
+        assert_eq!(card(&c, &sh, NOW + H2 + 60), None, "{name}: no card");
+    }
 }

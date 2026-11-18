@@ -17,7 +17,7 @@ mod push;
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
-    /// #259: the log's monotonic number, set on append (an old row's is its line number); 0 before.
+    /// The log's monotonic number, set on append (an old row's is its line number); 0 before.
     #[serde(default, skip_serializing_if = "is_zero")]
     #[cfg_attr(feature = "ts", ts(as = "Option<u64>", optional))]
     pub seq: u64,
@@ -27,11 +27,11 @@ pub struct Event {
     pub issue: Option<u64>,
     #[serde(rename = "type")]
     pub kind: String,
-    /// #973: not activity (an alert, a note, a prompt): the fold and the idle-pane reader skip it.
+    /// Not activity (an alert, a note, a prompt): the fold and the idle-pane reader skip it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub passive: bool,
-    /// #1147: reaches a phone whose notifier sets no `on`; kinds pushed before the flag are in `push::LEGACY`.
+    /// Reaches a phone whose notifier sets no `on`; kinds pushed before the flag are in `push::LEGACY`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub push: bool,
@@ -56,23 +56,23 @@ impl Event {
             data,
         }
     }
-    /// #973: this event is not activity.
+    /// This event is not activity.
     #[must_use]
     pub fn passive(mut self) -> Event {
         self.passive = true;
         self
     }
-    /// #973: flagged passive, or a kind logged passive before the flag.
+    /// Flagged passive, or a kind logged passive before the flag.
     pub fn is_passive(&self) -> bool {
         self.passive || passive::LEGACY.contains(&self.kind.as_str())
     }
-    /// #1147: this event reaches a phone whose notifier sets no `on`.
+    /// This event reaches a phone whose notifier sets no `on`.
     #[must_use]
     pub fn push(mut self) -> Event {
         self.push = true;
         self
     }
-    /// #1147: flagged push, or a kind pushed before the flag.
+    /// Flagged push, or a kind pushed before the flag.
     pub fn is_push(&self) -> bool {
         self.push || push::LEGACY.contains(&self.kind.as_str())
     }
@@ -131,17 +131,17 @@ fn is_zero(n: &u64) -> bool {
     *n == 0
 }
 
-/// #344: one event, numbered next, into the database beside `path` (`db::append`): every writer goes through here.
+/// One event, numbered next, into the database beside `path` (`db::append`): every writer goes through here.
 pub fn append(path: &Path, ev: &Event) -> Result<()> {
     crate::db::append(path, ev)
 }
 
-/// The live log (#343: without the events a rotation archived), by seq.
+/// The live log (without the events a rotation archived), by seq.
 pub fn read(path: &Path) -> Result<Arc<Log>> {
     shared(path)
 }
 
-/// #344: the log in the JSONL format before #344, one event a line with its seq (`drover events --jsonl`).
+/// The log in the legacy JSONL format, one event a line with its seq (`drover events --jsonl`).
 pub fn jsonl(path: &Path) -> Result<String> {
     history(path)?
         .iter()
@@ -194,7 +194,7 @@ pub(crate) fn archives(path: &Path) -> Result<Vec<Event>> {
     Ok(all)
 }
 
-/// #343: every event, the archived ones too (#978: and the archive files'), by seq.
+/// Every event, the archived ones too (and the archive files'), by seq.
 pub fn history(path: &Path) -> Result<Vec<Event>> {
     let mut all = [crate::db::archived(path)?, crate::db::events(path, "seq > ?1", 0)?].concat();
     all.sort_by_key(|e| e.seq);
@@ -202,15 +202,15 @@ pub fn history(path: &Path) -> Result<Vec<Event>> {
     Ok(all)
 }
 
-/// #978: the current per-issue state: the `issues` table, kept by each append.
+/// The current per-issue state: the `issues` table, kept by each append.
 pub fn states(path: &Path) -> Result<States> {
     crate::db::issues(path)
 }
 
-/// #943: the most bytes of JSON one event is stored in.
+/// The most bytes of JSON one event is stored in.
 pub const EVENT_MAX: usize = 16 << 10;
 
-/// #943: `ev` in at most `EVENT_MAX` bytes: long strings keep a head and a tail, long arrays their first items.
+/// `ev` in at most `EVENT_MAX` bytes: long strings keep a head and a tail, long arrays their first items.
 pub fn capped(ev: &Event) -> Event {
     let size = |e: &Event| serde_json::to_string(e).map_or(0, |s| s.len());
     let mut keep = EVENT_MAX / 2;
@@ -275,7 +275,7 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     notify(state, cfg, &ev)
 }
 
-/// #900: `db::ask`, then notify each event logged: they, the asks numbered, or none when `once` is logged already.
+/// `db::ask`, then notify each event logged: they, the asks numbered, or none when `once` is logged already.
 pub fn ask(state: &Path, cfg: &Config, evs: Vec<Event>, once: Option<&str>) -> Result<Vec<Event>> {
     let evs = crate::db::ask(state, evs, once)?.unwrap_or_default();
     evs.iter().try_for_each(|ev| notify(state, cfg, ev))?;
@@ -331,7 +331,7 @@ fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
     Ok(())
 }
 
-/// One human-readable line, e.g. `api #1037 merged → staging 8ed4a06 (PR #1041)`.
+/// One human-readable line, e.g. `api #N merged → staging 8ed4a06 (PR #M)`.
 pub fn plain(ev: &Event) -> String {
     let who = ev.issue.map_or(ev.fleet.clone(), |n| format!("{} #{n}", ev.fleet));
     let s = |k: &str| ev.str(k).unwrap_or("?");
@@ -416,31 +416,31 @@ pub struct IssueState {
     /// The latest lane's reasoning effort, as spawned.
     pub effort: Option<String>,
     pub rounds: u32,
-    /// Extra rounds the owner allowed (`round-extended`, #130); #309: the latest grants the round after any stage's.
+    /// Extra rounds the owner allowed (`round-extended`); the latest grants the round after any stage's.
     pub extra: u32,
     pub granted: u32,
-    /// #123: passed `--update` rounds, apart from `rounds`; `updating` while one is open (state `fix(n)+uk`).
+    /// Passed `--update` rounds, apart from `rounds`; `updating` while one is open (state `fix(n)+uk`).
     pub updates: u32,
     pub updating: bool,
     pub last_ts: u64,
     pub last_event: String,
     /// Latest agent per role (impl, rev).
     pub lanes: BTreeMap<String, String>,
-    /// (sha, PASS|FAIL, the check stage whose rounds it counts) in log order; logs before #173: `rev`.
+    /// (sha, PASS|FAIL, the check stage whose rounds it counts) in log order; older logs: `rev`.
     pub verdicts: Vec<(String, String, String)>,
-    /// #173: the pipeline stage of the latest spawn, the latest check and build roles, review rounds per check stage.
+    /// The pipeline stage of the latest spawn, the latest check and build roles, review rounds per check stage.
     pub stage: String,
     pub check: Option<String>,
     pub build: Option<String>,
     pub stage_rounds: BTreeMap<String, u32>,
-    /// #228: `FAIL (form-only)` verdicts that did not count toward the rounds.
+    /// `FAIL (form-only)` verdicts that did not count toward the rounds.
     pub form: u32,
 }
 
 /// Per-issue state, keyed by (fleet, issue).
 pub type States = BTreeMap<(String, u64), IssueState>;
 
-/// The newest `spawn` of `agent` (#1023: the lane fold's, for a cached log).
+/// The newest `spawn` of `agent` (the lane fold's, for a cached log).
 pub fn last_spawn<'a>(events: &'a [Event], agent: &str) -> Option<&'a Event> {
     let spawn = |e: &&Event| e.kind == "spawn" && e.str("agent") == Some(agent);
     match cached(events) {
@@ -483,7 +483,7 @@ pub(crate) fn lane_id(e: &Event) -> Option<String> {
         .then(|| format!("{} {:?} {:?}", e.kind, e.issue, at.map(|k| e.str(k))))
 }
 
-/// #1023: the lane fold of `events` (each lane's newest lane event), in log order: the cached log's, else one pass.
+/// The lane fold of `events` (each lane's newest lane event), in log order: the cached log's, else one pass.
 pub fn lanes(events: &[Event]) -> Vec<&Event> {
     if let Some(l) = cached(events) {
         return l.lane_at.iter().filter_map(|i| events.get(*i)).collect();
@@ -497,32 +497,30 @@ pub fn lanes(events: &[Event]) -> Vec<&Event> {
     at.into_iter().filter_map(|i| events.get(i)).collect()
 }
 
-/// #425: the issue `s`'s lane is held on (`held`, no `released` or `spawn` since). #505: the issues it waits on (`on`: one number before #505, a list since); empty when not held.
+/// The issue `s`'s lane is held on (`held`, no `released` or `spawn` since). the issues it waits on (`on`: one number in older logs, else a list); empty when not held.
 pub fn held_on(events: &[Event], s: &IssueState) -> Vec<u64> {
     let kinds = ["held", "released", "spawn"];
-    let e = events
-        .iter()
-        .rev()
-        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind) && !design(e));
+    let pick = |e: &&Event| kinds.contains(&&*e.kind) && !design(e);
+    let e = issue_events(events, &s.fleet, s.issue).into_iter().rfind(pick);
     e.filter(|e| e.kind == "held")
         .map_or(vec![], |e| crate::queue::nums(e.val("on")))
 }
 
-/// #500: a design (#730: or architect) lane's spawn: never the issue's build or check lane.
+/// A design (or architect) lane's spawn: never the issue's build or check lane.
 pub fn design(e: &Event) -> bool {
     e.kind == "spawn" && e.str("role").is_some_and(|r| STAGES.contains(&r))
 }
 
-/// #730: the owner-reviewed pre-impl roles, in the order they run.
+/// The owner-reviewed pre-impl roles, in the order they run.
 pub const STAGES: [&str; 2] = ["architect", "design"];
 
-/// #424: lane end `e` ends spawn `sp` of its agent: only that pane's when `e` names one; a supersede logged without a pane (before #424, after the new spawn) ends none.
+/// Lane end `e` ends spawn `sp` of its agent: only that pane's when `e` names one; a supersede logged without a pane (older logs, after the new spawn) ends none.
 pub fn ends(e: &Event, sp: &Event) -> bool {
     let pane = e.str("pane").map(|p| sp.str("pane") == Some(p));
     e.str("agent") == sp.str("agent") && pane.unwrap_or(e.str("reason") != Some("superseded"))
 }
 
-/// #173: a check stage's spawn (logs before #173: a `rev` one).
+/// A check stage's spawn (older logs: a `rev` one).
 pub fn checks(e: &Event) -> bool {
     e.data
         .get("check")
@@ -530,7 +528,7 @@ pub fn checks(e: &Event) -> bool {
         .unwrap_or(e.str("role") == Some("rev"))
 }
 
-/// #584: an ask's endings, the first that applies naming why it closed.
+/// An ask's endings, the first that applies naming why it closed.
 pub const ORDER: [&str; 9] = [
     "answered",
     "withdrawn",
@@ -543,7 +541,7 @@ pub const ORDER: [&str; 9] = [
     "repeat",
 ];
 
-/// #632: (ask, event) pairs checked: the ask endings' work, counted.
+/// (ask, event) pairs checked: the ask endings' work, counted.
 pub static VISITS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Default, Clone)]
@@ -583,7 +581,7 @@ impl Threads {
     }
 }
 
-/// #701, #944: the `Log` whose events `events` are, the newest or one a reader still holds (none: read some other way).
+/// The `Log` whose events `events` are, the newest or one a reader still holds (none: read some other way).
 pub fn cached(events: &[Event]) -> Option<Arc<Log>> {
     let live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
     live.iter()
@@ -591,7 +589,7 @@ pub fn cached(events: &[Event]) -> Option<Arc<Log>> {
         .find(|l| std::ptr::eq(&raw const *l.events, events))
 }
 
-/// #701: the first `needs-decision` (`ask`) or the last `decision` of `fleet`'s ask `id`: the index's when `events` is a cached log, else one pass.
+/// The first `needs-decision` (`ask`) or the last `decision` of `fleet`'s ask `id`: the index's when `events` is a cached log, else one pass.
 pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> Option<&'a Event> {
     let is = |e: &&Event| e.kind == kind && e.fleet == fleet && e.str("id").unwrap_or_default() == id;
     let Some(l) = cached(events) else {
@@ -606,12 +604,12 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     map.get(&(fleet.into(), id.into())).and_then(|i| events.get(*i))
 }
 
-/// #900: `e` repeats an ask logged before it (two passes raced to post it): every view shows the first alone.
+/// `e` repeats an ask logged before it (two passes raced to post it): every view shows the first alone.
 pub fn repeat(events: &[Event], e: &Event) -> bool {
     closed(events, e) == Some("repeat")
 }
 
-/// #978: an event kind that logs an ask or may end one (`closes`).
+/// An event kind that logs an ask or may end one (`closes`).
 pub fn ends_asks(kind: &str) -> bool {
     matches!(
         kind,
@@ -624,7 +622,7 @@ pub(crate) fn twin(e: &Event) -> Option<String> {
     e.str("id").map(|id| format!("{id} {k:?}"))
 }
 
-/// #859: ask endings projected from a slice that is no cached `Log` (`index`'s fallback): serve's reads build none.
+/// Ask endings projected from a slice that is no cached `Log` (`index`'s fallback): serve's reads build none.
 pub static REBUILDS: AtomicUsize = AtomicUsize::new(0);
 
 fn index<T>(events: &[Event], f: impl FnOnce(&Endings, &dyn Fn(usize) -> u64) -> T) -> T {
@@ -636,7 +634,7 @@ fn index<T>(events: &[Event], f: impl FnOnce(&Endings, &dyn Fn(usize) -> u64) ->
     f(&x, &|i| u64::try_from(i + 1).unwrap_or(u64::MAX))
 }
 
-/// #632: the live log (`read`), its ask index and fold, cached per log by its last seq: a new event is read and folded alone (a rotation or another database file since: all again).
+/// The live log (`read`), its ask index and fold, cached per log by its last seq: a new event is read and folded alone (a rotation or another database file since: all again).
 #[derive(Default, Clone)]
 pub struct Log {
     pub events: Events,
@@ -661,7 +659,7 @@ impl std::ops::Deref for Log {
     }
 }
 
-/// #944: a log's events, in a buffer its later versions share and append to in place.
+/// A log's events, in a buffer its later versions share and append to in place.
 pub type Events = drover_sys::Append<Event>;
 
 type Gated = (Arc<Mutex<()>>, Arc<Log>);
@@ -676,12 +674,12 @@ static LOGS: Mutex<BTreeMap<(PathBuf, bool), Gated>> = Mutex::new(BTreeMap::new(
 
 static LIVE: Mutex<Vec<Weak<Log>>> = Mutex::new(Vec::new());
 
-/// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq: each call reads only the events appended since (serve's requests and watcher).
+/// The cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq: each call reads only the events appended since (serve's requests and watcher).
 pub fn shared(path: &Path) -> Result<Arc<Log>> {
     log(path, false)
 }
 
-/// #948: the `WORKING` events and the saved fold, cached like `shared` (whose log a process holding it reads instead).
+/// The `WORKING` events and the saved fold, cached like `shared` (whose log a process holding it reads instead).
 pub fn working(path: &Path) -> Result<Arc<Log>> {
     let full = (LOGS.lock().unwrap_or_else(PoisonError::into_inner))
         .get(&(crate::db::file(path), false))
@@ -703,7 +701,7 @@ const WORKING: &str = concat!(
     ")))"
 );
 
-/// #948: the live events of `kinds` logged at `ts` or later, by seq: a reader over more history than `working` holds.
+/// The live events of `kinds` logged at `ts` or later, by seq: a reader over more history than `working` holds.
 pub fn since(path: &Path, kinds: &[&str], ts: u64) -> Result<Vec<Event>> {
     let kinds: Vec<String> = kinds.iter().map(|k| format!("'{k}'")).collect();
     crate::db::events(
@@ -713,7 +711,7 @@ pub fn since(path: &Path, kinds: &[&str], ts: u64) -> Result<Vec<Event>> {
     )
 }
 
-/// #1022: at most `limit` live events numbered after `since`, up to `until`, by seq: the board's event feed.
+/// At most `limit` live events numbered after `since`, up to `until`, by seq: the board's event feed.
 pub fn between(path: &Path, (since, until): (u64, u64), limit: usize) -> Result<Vec<Event>> {
     let (until, limit) = (
         i64::try_from(until).unwrap_or(i64::MAX),
@@ -786,7 +784,7 @@ fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<
     Ok(())
 }
 
-/// Why ask `a` closed (#584: every ending): answered, withdrawn, delivered or failed (a handoff card), expired, its issue merged, or its lane killed, cleaned or respawned; `None` while open. The one place that decides "open".
+/// Why ask `a` closed (every ending): answered, withdrawn, delivered or failed (a handoff card), expired, its issue merged, or its lane killed, cleaned or respawned; `None` while open. The one place that decides "open".
 pub fn closed(events: &[Event], a: &Event) -> Option<&'static str> {
     ending(events, a).map(|e| e.0)
 }
@@ -798,7 +796,7 @@ fn ending(events: &[Event], a: &Event) -> Option<(&'static str, String)> {
     Some((*ORDER.get(r)?, row))
 }
 
-/// #584: `closed` as `drover asks` shows it: `withdrawn → q<new>`, `delivered to t<n>`.
+/// `closed` as `drover asks` shows it: `withdrawn → q<new>`, `delivered to t<n>`.
 pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     ending(events, a).map(|e| e.1)
 }
@@ -811,7 +809,7 @@ pub(crate) fn ending_row(why: &str, e: &Event) -> String {
     }
 }
 
-/// #906: decision or `ask-*` ending `e` is about ask `a` (by `ask_seq`, else by id on its issue).
+/// Decision or `ask-*` ending `e` is about ask `a` (by `ask_seq`, else by id on its issue).
 pub fn names(e: &Event, a: &Event) -> bool {
     let seq = e.data.get("ask_seq").and_then(Value::as_u64);
     e.str("id") == a.str("id") && seq.map_or(e.issue.is_none() || e.issue == a.issue, |s| s == a.seq)
@@ -851,7 +849,7 @@ pub fn finding<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a s
     v.str("body")?.lines().skip(1).map(str::trim).find(|l| !l.is_empty())
 }
 
-/// `needs-decision` events not yet closed, oldest first (#978: the `asks` table's, for a cached log).
+/// `needs-decision` events not yet closed, oldest first (the `asks` table's, for a cached log).
 pub fn open_asks(events: &[Event]) -> Vec<&Event> {
     index(events, |x, key| {
         let open =
@@ -860,7 +858,7 @@ pub fn open_asks(events: &[Event]) -> Vec<&Event> {
     })
 }
 
-/// #859: `fleet` #`n`'s events in order: the index's when `events` is a cached log, else one pass.
+/// `fleet` #`n`'s events in order: the index's when `events` is a cached log, else one pass.
 pub fn of_issue<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> {
     let Some(l) = cached(events) else {
         REBUILDS.fetch_add(1, Relaxed);
@@ -873,7 +871,22 @@ pub fn of_issue<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> 
     at.map_or_else(Vec::new, |v| v.iter().filter_map(|i| events.get(*i)).collect())
 }
 
-/// #971: the events of any of `kinds`, in order: the index's when `events` is a cached log, else one pass.
+pub(crate) fn issue_events<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> {
+    match cached(events) {
+        Some(_) => of_issue(events, fleet, n),
+        None => (events.iter())
+            .filter(|e| e.fleet == fleet && e.issue == Some(n))
+            .collect(),
+    }
+}
+
+pub(crate) fn last_at<'a>(events: &'a [Event], kind: &str, (fleet, n): (&str, u64), ts: u64) -> Option<&'a Event> {
+    issue_events(events, fleet, n)
+        .into_iter()
+        .rfind(|e| e.kind == kind && e.ts == ts)
+}
+
+/// The events of any of `kinds`, in order: the index's when `events` is a cached log, else one pass.
 pub fn of_kind<'a>(events: &'a [Event], kinds: &[&str]) -> Vec<&'a Event> {
     let Some(l) = cached(events) else {
         return events.iter().filter(|e| kinds.contains(&e.kind.as_str())).collect();
@@ -888,7 +901,7 @@ pub fn of_kind<'a>(events: &'a [Event], kinds: &[&str]) -> Vec<&'a Event> {
     at.into_iter().filter_map(|i| events.get(i)).collect()
 }
 
-/// #971: `fleet` #`n`'s events as one slice: the cached log's copy, extended by the events since (else copied now).
+/// `fleet` #`n`'s events as one slice: the cached log's copy, extended by the events since (else copied now).
 pub fn issue_log(events: &[Event], fleet: &str, n: u64) -> Events {
     let mut out = Events::default();
     let Some(l) = cached(events) else {
@@ -905,7 +918,7 @@ pub fn issue_log(events: &[Event], fleet: &str, n: u64) -> Events {
     c.prefix(at.len())
 }
 
-/// #971: the events naming `agent`, in order: the index's when `events` is a cached log, else one pass.
+/// The events naming `agent`, in order: the index's when `events` is a cached log, else one pass.
 pub fn of_agent<'a>(events: &'a [Event], agent: &str) -> Vec<&'a Event> {
     let Some(l) = cached(events) else {
         return events.iter().filter(|e| e.str("agent") == Some(agent)).collect();
@@ -914,7 +927,7 @@ pub fn of_agent<'a>(events: &'a [Event], agent: &str) -> Vec<&'a Event> {
     at.map_or_else(Vec::new, |v| v.iter().filter_map(|i| events.get(*i)).collect())
 }
 
-/// Current per-issue state (the states in `roles/usage/20-states.md`); #859: the cached log's fold when `events` is it.
+/// Current per-issue state (the states in `roles/usage/20-states.md`); the cached log's fold when `events` is it.
 pub fn fold(events: &[Event]) -> States {
     if let Some(l) = cached(events) {
         return l.states.clone();
@@ -922,7 +935,7 @@ pub fn fold(events: &[Event]) -> States {
     fold_into(States::new(), events)
 }
 
-/// #971: `f` on the per-issue states: the cached log's, never copied, when `events` is it; else folded now.
+/// `f` on the per-issue states: the cached log's, never copied, when `events` is it; else folded now.
 pub fn with_states<T>(events: &[Event], f: impl FnOnce(&States) -> T) -> T {
     match cached(events) {
         Some(l) => f(&l.states),
@@ -1064,7 +1077,7 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
     m
 }
 
-/// #845: every state `fold` gives an issue (a round's `(n)`, `·f` and `+uN` aside), each with its ways out.
+/// Every state `fold` gives an issue (a round's `(n)`, `·f` and `+uN` aside), each with its ways out.
 pub const STATES: &[(&str, &[(&str, &str)])] = &[
     (
         "queued",
@@ -1137,16 +1150,16 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
     ("closed", &[]),
 ];
 
-/// #845: `state`'s `STATES` entry, matched on its name before any `(` or `+`.
+/// `state`'s `STATES` entry, matched on its name before any `(` or `+`.
 pub fn state(state: &str) -> Option<&'static (&'static str, &'static [(&'static str, &'static str)])> {
     let base = state.split(['(', '+']).next();
     STATES.iter().find(|(name, _)| name.split('(').next() == base)
 }
 
-/// #412: the states a design spawn moves into `design` (before impl).
+/// The states a design spawn moves into `design` (before impl).
 pub const DESIGN: &[&str] = &["queued", "design", "design-review"];
 
-/// #228: a form-only FAIL's suffix in `IssueState::verdicts` (`FAIL (form-only)`).
+/// A form-only FAIL's suffix in `IssueState::verdicts` (`FAIL (form-only)`).
 pub const FORM: &str = " (form-only)";
 
 impl IssueState {
@@ -1158,7 +1171,7 @@ impl IssueState {
         }
     }
 
-    /// #831: a needs-human card's main action: [start lane] when no build lane ever spawned and no round was reviewed.
+    /// A needs-human card's main action: [start lane] when no build lane ever spawned and no round was reviewed.
     pub fn card(&self) -> &'static str {
         if self.build.is_none() && self.verdicts.is_empty() {
             "start lane"
@@ -1198,12 +1211,12 @@ impl IssueState {
         }
     }
 
-    /// #173: the check lane (the latest check role's agent).
+    /// The check lane (the latest check role's agent).
     pub fn check_lane(&self) -> Option<&String> {
         self.lanes.get(self.check.as_deref()?)
     }
 
-    /// #173: the shown state: a check stage other than `rev` shows `<stage>(n)` for `review(n)`.
+    /// The shown state: a check stage other than `rev` shows `<stage>(n)` for `review(n)`.
     pub fn shown(&self) -> String {
         match self.state.strip_prefix("review") {
             Some(n) if self.check.is_some() && self.stage != "rev" => format!("{}{n}", self.stage),

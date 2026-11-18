@@ -23,7 +23,7 @@ fn spawn(c: &drover::Ctx, ts: u64) {
 }
 
 fn lane(name: &str, title: &str) -> (drover::Ctx, Fake, FakeShed) {
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     let c = ctx(&tmpdir(name), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);
@@ -278,6 +278,23 @@ fn a_needs_human_issue_with_an_untrimmed_repair_in_its_history_drives_on() {
     let (out, steps) = drive(&c, &r);
     assert!(out.contains("sendmeter #12 repaired: back to impl"), "{out}");
     assert_eq!(steps, ["respawn"], "{out}");
+}
+
+#[test]
+fn an_issue_closed_on_github_leaves_on_the_next_fast_pass_while_the_full_pass_hangs() {
+    let (c, r, sh) = lane("gh-closed-fast", "t");
+    let r = r.reply(
+        "gh api graphql -f owner=jirathip-dev -f name=sendmeter -f query=",
+        r#"{"data": {"repository": {"i12": {"state": "CLOSED"}}}}"#,
+    );
+    lane_ends(&c, 20);
+    let hung = drover::db::take(&c.state, "drive.lock", c.now, 3600, "", &|_| false);
+    assert!(hung.is_some(), "a full pass holds drive.lock");
+    ok(&at(&c, 60), &r, &["drive", "--fast"]);
+    assert_eq!(state(&c), "closed");
+    let status = ok(&at(&c, 61), &r, &["status", "sendmeter"]);
+    assert!(!status.contains("needs-human"), "{status}");
+    assert!(!started(&sh));
 }
 
 fn tracked(name: &str, issues: &[u64]) -> drover::Ctx {

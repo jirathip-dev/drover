@@ -1,4 +1,4 @@
-/// #1147: frozen: the kinds a phone got by default before `Event::push`; a new kind sets the flag where it is emitted.
+/// Frozen: the kinds a phone got by default before `Event::push`; a new kind sets the flag where it is emitted.
 pub const LEGACY: &[&str] = &[
     "slo-api",
     "stuck",

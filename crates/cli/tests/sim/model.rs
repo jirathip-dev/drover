@@ -27,6 +27,10 @@ pub enum Script {
         secs: u64,
     },
     Hang,
+    Bad {
+        secs: u64,
+        stale: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -93,14 +97,19 @@ pub struct Model {
     pub died: Vec<String>,
     /// Test-only break switches (AC 3).
     pub sabotage: Option<crate::invariants::Sabotage>,
-    /// #685: every head's CI takes this long (else 1–15 min, drawn).
+    /// Every head's CI takes this long (else 1–15 min, drawn).
     pub ci_secs: Option<u64>,
-    /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed a head or wrote a verdict drover takes.
+    /// Ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed a head or wrote a verdict drover takes.
     pub ci_since: BTreeMap<String, u64>,
     pub ci_wait: u64,
     pub idle: u64,
     pub polled: u64,
     pub produced: Vec<String>,
+    /// Faults: what happens to an issue's head once rev's PASS lands, and a `drive`/`merge` that dies right after GitHub's merge call.
+    pub after_pass: Vec<(u64, crate::gates::AfterPass)>,
+    pub crash_on_merge: bool,
+    /// The "sometimes" states this run reached (`gates::SOMETIMES`).
+    pub reached: std::collections::BTreeSet<&'static str>,
 }
 
 impl Model {
@@ -167,6 +176,10 @@ fn err(code: i32, stderr: &str) -> Out {
 
 /// Process `me`'s call `prog args`, answered from (and applied to) the world.
 pub fn answer(_sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[String]) -> Out {
+    reply(w, me, prog, args)
+}
+
+fn reply(w: &mut World, me: usize, prog: &str, args: &[String]) -> Out {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     let o = match prog {
         "shed" => {
@@ -177,15 +190,36 @@ pub fn answer(_sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[Str
                 w.procs[me].starting = Some(pane.clone());
                 let agent = Some(pane.clone());
                 let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
-                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 3 && pane.contains("-rev-");
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 2 && pane.contains("-rev-") && w.model.scripts.contains_key("rev");
                 if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, &pane);
                 }
             }
             o
         }
+        "sh" if a.first() == Some(&"-c") && a.get(1).is_some_and(|s| s.contains("\\036")) => {
+            let mut out = String::new();
+            for l in a[1].lines() {
+                let l = l.trim_end_matches(" </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"");
+                let words: Vec<String> = l.trim_matches('\'').split("' '").map(String::from).collect();
+                let o = reply(w, me, &words[0], &words[1..]);
+                out += &format!("{}\x1e{}\x1e", o.stdout, o.code);
+            }
+            ok(out)
+        }
+        "nproc" => err(1, "nproc"),
+        "cat" | "grep" if a.last().is_some_and(|f| f.starts_with("/proc/")) => err(1, "no /proc"),
         "which" => ok(format!("/usr/local/bin/{}\n", a.first().copied().unwrap_or_default())),
-        "gh" => gh(w, &a),
+        "gh" => {
+            let o = gh(w, &a);
+            if let (["pr", "merge", ..], 0, true) = (&a[..], o.code, w.model.crash_on_merge) {
+                w.model.crash_on_merge = false;
+                w.procs[me].killed = true;
+                let name = w.procs[me].name.clone();
+                w.log(&format!("crash {name} after its merge call"));
+            }
+            o
+        }
         "git" => git(w, &a),
         "kill" => {
             let pid: u32 = a.last().and_then(|p| p.parse().ok()).unwrap_or(0);
@@ -368,6 +402,7 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
         ["api", "-i", ..] => ok(format!("HTTP/2.0 200 OK\netag: \"v{}\"\n\n[]", m.version)),
         ["api", path, "--jq", _] if path.contains("/rules/branches/") => ok("true\n"),
         ["api", path, "--paginate", ..] if path.ends_with("/files") => ok(""),
+        ["api", path, "--silent"] if path.contains("/contents/") => ok(""),
         ["api", path, "--jq", ".commit.sha"] => {
             let b = path.rsplit('/').next().unwrap_or_default();
             match m.origin.get(b) {
@@ -393,21 +428,25 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
             let Some((b, p)) = m.prs.iter_mut().find(|(_, p)| p.number == n) else {
                 return err(1, "no such PR");
             };
-            p.state = "MERGED".into();
-            let (head, base) = (p.head.clone(), p.base.clone());
-            let issue = b.trim_start_matches("issue-").parse().unwrap_or(0);
-            m.merges.push(Merge {
-                issue,
-                head: head.clone(),
-            });
-            let new = m.sha();
-            if let Some(p) = m.prs.values_mut().find(|p| p.number == n) {
-                p.merged = Some(new.clone());
+            let pin = a.windows(2).find(|x| x[0] == "--match-head-commit").map(|x| x[1]);
+            if m.sabotage == Some(crate::invariants::Sabotage::HeadSha) {
+                let (b, old) = (b.clone(), p.head.clone());
+                let moved = format!("{:040x}", 0x0bad_u64 * 1_000_003 + m.merges.len() as u64);
+                m.ci.insert(moved.clone(), Some(true));
+                crate::gates::moved(w, &b, &old);
+                let m = &mut w.model;
+                if let Some(p) = m.prs.get_mut(&b) {
+                    p.head = moved;
+                }
+                return merge(w, n);
             }
-            m.origin.insert(base.clone(), new);
-            m.version += 1;
-            crate::invariants::on_merge(w, issue, &head, &base);
-            ok("")
+            if pin.is_some_and(|h| h != p.head) {
+                return err(1, "GraphQL: Head branch was modified. Review and try the merge again.");
+            }
+            if m.ci.get(&p.head).copied().flatten() != Some(true) {
+                return err(1, "GraphQL: Required status check \"ci\" is not successful.");
+            }
+            merge(w, n)
         }
         ["issue", "close", n, ..] => {
             if let Ok(n) = n.parse() {
@@ -419,6 +458,28 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
         ["run" | "issue", "list", ..] => ok("[]"),
         _ => unmodelled(),
     }
+}
+
+fn merge(w: &mut World, n: u64) -> Out {
+    let m = &mut w.model;
+    let Some((b, p)) = m.prs.iter_mut().find(|(_, p)| p.number == n) else {
+        return err(1, "no such PR");
+    };
+    p.state = "MERGED".into();
+    let (head, base) = (p.head.clone(), p.base.clone());
+    let issue = b.trim_start_matches("issue-").parse().unwrap_or(0);
+    m.merges.push(Merge {
+        issue,
+        head: head.clone(),
+    });
+    let new = m.sha();
+    if let Some(p) = m.prs.values_mut().find(|p| p.number == n) {
+        p.merged = Some(new.clone());
+    }
+    m.origin.insert(base.clone(), new);
+    m.version += 1;
+    crate::invariants::on_merge(w, issue, &head, &base);
+    ok("")
 }
 
 fn git(w: &mut World, a: &[&str]) -> Out {
@@ -467,8 +528,10 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             };
             m.origin.insert(branch.into(), head.clone());
             if let Some(p) = m.prs.get_mut(branch) {
-                p.head.clone_from(&head);
+                let old = std::mem::replace(&mut p.head, head.clone());
+                crate::gates::moved(w, branch, &old);
             }
+            let m = &mut w.model;
             m.version += 1;
             let t = w.model.ci_start(&head, w.now, None, &mut w.rng);
             let green = w.rng.chance(90);

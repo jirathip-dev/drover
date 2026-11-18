@@ -59,8 +59,9 @@ flowchart TD
     t2["clean"] --> t3
     t3["trim"] --> t4
     t4["lesson"] --> t5
-    t5["hotspots"] --> t6
-    t6["compact"]
+    t5["triage"] --> t6
+    t6["hotspots"] --> t7
+    t7["compact"]
     d0["read log, host sample"] --> d1
     d1["disk budget"] --> d2
     d2["roots, redeliver"] --> d3
@@ -113,6 +114,7 @@ flowchart TD
     other -.- k_cloud_idle_stop_minutes(["cloud_idle_stop_minutes = 20"])
     other -.- k_notify_secs(["notify_secs = 15"])
     other -.- k_proxy_connect_secs(["proxy_connect_secs = 1"])
+    other -.- k_proxy_retry_secs(["proxy_retry_secs = 300"])
     other -.- k_service_call_secs(["service_call_secs = 2"])
     other -.- k_disk_probe_secs(["disk_probe_secs = 2"])
     other -.- k_disk_sick_secs(["disk_sick_secs = 300"])
@@ -131,6 +133,7 @@ flowchart TD
     other -.- k_slo_idle_minutes(["slo_idle_minutes = 20"])
     other -.- k_slo_tick_minutes(["slo_tick_minutes = 10"])
     other -.- k_slo_pass_minutes(["slo_pass_minutes = 30"])
+    other -.- k_stall_restart_hours(["stall_restart_hours = 2"])
 ```
 
 ## History baseline

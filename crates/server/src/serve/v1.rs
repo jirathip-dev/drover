@@ -569,7 +569,7 @@ impl Server<'_> {
         }
     }
 
-    /// #859: `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
+    /// `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
     pub fn slo(&self, now: u64) {
         let pid = drover_core::runner::pid().to_string();
         let kb = crate::runner::ok(&self.r, "ps", &["-o", "rss=", "-p", &pid]).map(|s| s.trim().parse::<u64>());

@@ -394,6 +394,10 @@ fn parity_34_each_composer_op_reaches_its_thread_op_and_the_screen_shows_it() {
         .find(|c| c["name"] == "effort")
         .unwrap();
     assert_eq!(effort["cur"], "high", "{chips}");
+    assert!(
+        chips.as_array().unwrap().iter().all(|c| c["name"] != "model"),
+        "claude's one model gets no pick: {chips}"
+    );
 
     let failed = log().into_iter().find(|e| e.str("line").is_some()).unwrap();
     let retry = json!({"thread": "t2", "msg": failed.seq});
@@ -409,7 +413,13 @@ fn parity_34_each_composer_op_reaches_its_thread_op_and_the_screen_shows_it() {
 }
 
 fn composer_in_webkit(name: &str, js: &str) -> Vec<f64> {
+    composer_in_webkit_with(name, "", js)
+}
+
+fn composer_in_webkit_with(name: &str, extra: &str, js: &str) -> Vec<f64> {
     let c = recorded(name);
+    let old = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, format!("{old}{extra}")).unwrap();
     let sh = FakeShed::attached(&c);
     let now = drover::now();
     let start = json!({"thread": "t3", "agent": "orchestrator-t3", "pane": "orchestrator-t3"});
@@ -514,6 +524,32 @@ fn webkit(name: &str, width: &str, js: &str) -> Vec<f64> {
 const CMP: &str = "const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
 const wait = async f => { for (const t = Date.now(); Date.now() - t < 8000; await new Promise(r => setTimeout(r, 50))) { const v = f(); if (v) return v; } return 0; };
 const type = t => { const b = q('.cmp textarea'); b.value = t; b.dispatchEvent(new Event('input')); };";
+
+#[test]
+fn the_model_and_effort_picks_are_one_row_of_dropdowns_and_a_model_pick_reaches_the_bar_in_webkit() {
+    if no_webkit() {
+        return;
+    }
+    let js = format!("window.late = (async () => {{ {CMP}
+(await wait(() => q('.row[data-id=\"t3\"]'))).click();
+const pk = await wait(() => q('.cmp .pk'));
+const sel = all('.cmp .pk select'), m = q('.cmp .pk select[aria-label=model]');
+const one = Number(sel.length === 2 && sel.every(s => s.offsetTop === sel[0].offsetTop) && !q('.cmp .chips'));
+const low = Number(pk.getBoundingClientRect().height <= q('.cmp .cr').getBoundingClientRect().height);
+const opts = [...m.options].map(o => o.value).join(',');
+m.value = 'sonnet';
+m.dispatchEvent(new Event('change'));
+const bar = await wait(() => Number(q('.row.sticky')?.textContent.includes('sonnet') && q('.cmp .pk select[aria-label=model]')?.value === 'sonnet'));
+return [one, low, Number(opts === 'opus,sonnet'), bar];
+}})()");
+    let extra = "\n[fleet.sendmeter.role.lesson]\nharness = \"claude\"\nmodel = \"sonnet\"\n";
+    let v = composer_in_webkit_with("threads-webkit-picks", extra, &js);
+    assert_eq!(
+        v,
+        [1.0, 1.0, 1.0, 1.0],
+        "two dropdowns in one row, no taller than the send row, the harness's models, the pick in the bar"
+    );
+}
 
 #[test]
 fn parity_21_two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webkit() {

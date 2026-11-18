@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
 /// One lane key as kept (`<state dir>/proxy-keys.json`): never the key itself, only its sha256.
@@ -140,23 +141,116 @@ pub fn revoke(ctx: &Ctx, cfg: &Config, id: &str, out: &mut dyn Write) -> Result<
     Ok(writeln!(out, "revoked {id}")?)
 }
 
-/// #923: the token the proxy signs with, `[proxy] token-file` (0600), or why there is none and how to make it.
+/// The token the proxy signs with, `[proxy] token-file` (0600), or why there is none and how to make it.
 pub fn token(cfg: &Config) -> std::result::Result<String, String> {
-    let cmd = crate::providers::proxied().map_or("", |p| p.setup);
-    let setup = format!("run `{cmd}` on this host, save the token 0600 and set `[proxy] token-file` to its path");
+    let (path, _) = token_file(cfg);
     let f = cfg.proxy.token_file.as_deref().map(crate::config::expand);
-    let f = f.ok_or_else(|| format!("no [proxy] token-file: {setup}"))?;
-    let v = crate::secret::file(&f).map_err(|e| format!("{e:#}"))?;
-    v.ok_or_else(|| format!("[proxy] token-file {} is missing or empty: {setup}", f.display()))
+    let v = f.map(|f| crate::secret::file(&f).map_err(|e| format!("{e:#}")));
+    v.transpose()?
+        .flatten()
+        .ok_or_else(|| format!("proxy token missing: {}", fix(cfg, &path)))
 }
 
-fn authorize(ctx: &Ctx, cfg: &Config, (key, now): (&str, u64)) -> std::result::Result<String, String> {
+/// The token file's state: missing (or `[proxy] token-file` unset), readable by others, or saved at its mtime.
+pub enum Token {
+    Missing,
+    Open,
+    Saved(u64),
+}
+
+/// `[proxy] token-file` as written (else the docs' path) and its state.
+pub fn token_file(cfg: &Config) -> (String, Token) {
+    let raw = cfg.proxy.token_file.clone();
+    let shown = raw.clone().unwrap_or_else(|| "~/.config/drover/tokens/proxy".into());
+    let meta = raw.and_then(|f| std::fs::metadata(crate::config::expand(&f)).ok());
+    let t = match meta.filter(|m| m.len() > 0) {
+        None => Token::Missing,
+        Some(m) if m.mode() & 0o077 != 0 => Token::Open,
+        Some(m) => Token::Saved(u64::try_from(m.mtime()).unwrap_or(0)),
+    };
+    (shown, t)
+}
+
+fn days_left(now: u64, at: u64) -> u64 {
+    (at + 365 * 86_400).saturating_sub(now) / 86_400
+}
+
+fn fix(cfg: &Config, path: &str) -> String {
+    let setup = crate::providers::proxied().map_or("", |p| p.setup);
+    let unset = cfg.proxy.token_file.is_none();
+    let set = unset.then_some(" and set [proxy] token-file to it");
+    format!("run {setup}, save it 0600 at {path}{}", set.unwrap_or_default())
+}
+
+/// With a `shed-acp` host, doctor's and the Hosts card's proxy facts: the token's `✓`/`!`/`✗` line, the proxy's port, each host's tunnel, the live lane keys.
+pub fn status(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Vec<String>> {
+    let acp: Vec<&String> = cfg.hosts.keys().filter(|h| cfg.host_acp(h).is_some()).collect();
+    acp.first()?;
+    let (path, t) = token_file(cfg);
+    let head = match t {
+        Token::Missing => format!("✗ proxy token missing: {}", fix(cfg, &path)),
+        Token::Open => format!("✗ proxy token readable by others: chmod 600 {path}"),
+        Token::Saved(at) => {
+            let (left, day) = (days_left(ctx.now, at), crate::lesson::ymd(at / 86_400));
+            let again = format!(": {} again", fix(cfg, &path));
+            let (mark, warn) = if left > 30 { ('✓', "") } else { ('!', &*again) };
+            format!("{mark} proxy token set (saved {day}, ~{left} d left){warn}")
+        }
+    };
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], cfg.proxy.port));
+    let wait = std::time::Duration::from_secs(cfg.limits.proxy_connect_secs);
+    let up = TcpStream::connect_timeout(&addr, wait).map_or("down", |_| "answering");
+    let mut facts = vec![head, format!("proxy {up} on :{}", cfg.proxy.port)];
+    for h in acp {
+        facts.push(format!("tunnel {h} {}", if tunnel(ctx, r, h) { "up" } else { "down" }));
+    }
+    let ev = working(&ctx.state).unwrap_or_default();
+    let live = keys(ctx).iter().filter(|k| state(ctx.now, &ev, k) == "live").count();
+    facts.push(format!("{live} live lane keys"));
+    Some(facts)
+}
+
+static ONCE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn alert(ctx: &Ctx, cfg: &Config, (kind, key, why): (&str, &str, &str)) -> Result<()> {
+    let _once = ONCE.lock();
+    let dup = |e: &Event| e.kind == kind && e.val("key") == key;
+    if working(&ctx.state)?.iter().any(dup) {
+        return Ok(());
+    }
+    let d = serde_json::json!({"key": key, "reason": why});
+    crate::events::emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d).push())
+}
+
+fn rejected(ctx: &Ctx, cfg: &Config) -> Result<()> {
+    let (path, Token::Saved(at)) = token_file(cfg) else {
+        return Ok(());
+    };
+    let why = format!("upstream refused the proxy token (401): {}", fix(cfg, &path));
+    alert(ctx, cfg, ("proxy-token-rejected", &at.to_string(), &why))
+}
+
+fn authorize(ctx: &Ctx, cfg: &Config, (key, now): (&str, u64)) -> std::result::Result<(String, Key), String> {
     let (all, h) = (keys(ctx), sha(key));
-    let k = all.iter().find(|k| k.sha == h).ok_or("unknown lane key")?;
-    match state(now, &working(&ctx.state).unwrap_or_default(), k) {
-        "live" => token(cfg),
+    let k = all.into_iter().find(|k| k.sha == h).ok_or("unknown lane key")?;
+    match state(now, &working(&ctx.state).unwrap_or_default(), &k) {
+        "live" => Ok((token(cfg)?, k)),
         st => Err(format!("lane key {} {st}", k.id)),
     }
+}
+
+fn signed_in(ctx: &Ctx, cfg: &Config, k: &Key, now: u64) -> Result<()> {
+    let events = working(&ctx.state)?;
+    let out = events
+        .iter()
+        .rfind(|e| e.kind == "signed-out" && e.str("agent") == Some(&k.agent))
+        .map(|e| e.ts);
+    if out.is_none() || crate::hosts::proxy_ok(&events, Some(&k.agent)) >= out {
+        return Ok(());
+    }
+    let d = serde_json::json!({"agent": k.agent, "host": k.host});
+    let e = Event::new(now, &k.fleet, Some(k.issue), "proxy-ok", d).passive();
+    crate::events::emit(&ctx.state, cfg, e)
 }
 
 const DROP: [&str; 9] = [
@@ -235,7 +329,7 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         return reply(&mut c, 400, "bad request path");
     }
     let bearer = get("authorization").and_then(|a| a.strip_prefix("Bearer "));
-    let token = match authorize(ctx, cfg, (get("x-api-key").or(bearer).unwrap_or_default(), now)) {
+    let (token, key) = match authorize(ctx, cfg, (get("x-api-key").or(bearer).unwrap_or_default(), now)) {
         Ok(t) => t,
         Err(why) => return reply(&mut c, 401, &why),
     };
@@ -279,13 +373,15 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         .stream("curl", &argv(&["-sS", "-N", "-g", "--http1.1", "-K", "-"]), &conf)
         .and_then(|up| relay(&mut BufReader::new(up), &mut c));
     std::fs::remove_file(&tmp).ok();
-    if res.is_err() {
-        return reply(&mut c, 502, "upstream did not answer");
+    match res {
+        Ok(s) if s.starts_with('2') => signed_in(ctx, cfg, &key, now),
+        Ok(s) if s.starts_with("401") => rejected(ctx, cfg),
+        Ok(_) => Ok(()),
+        Err(_) => reply(&mut c, 502, "upstream did not answer"),
     }
-    Ok(())
 }
 
-fn relay(up: &mut impl BufRead, c: &mut TcpStream) -> Result<()> {
+fn relay(up: &mut impl BufRead, c: &mut TcpStream) -> Result<String> {
     let (mut status, mut heads) = (String::new(), vec![]);
     loop {
         let mut l = String::new();
@@ -312,7 +408,7 @@ fn relay(up: &mut impl BufRead, c: &mut TcpStream) -> Result<()> {
     let mut buf = [0; 16384];
     loop {
         match up.read(&mut buf)? {
-            0 => return Ok(()),
+            0 => return Ok(status),
             n => c.write_all(buf.get(..n).unwrap_or_default())?,
         }
     }
@@ -328,18 +424,27 @@ fn write_private(p: &std::path::Path, b: &[u8]) -> Result<()> {
     Ok(f.write_all(b)?)
 }
 
-/// Before a remote ACP lane starts (and each survey of a `shed-acp` host): the proxy answering here (else started detached) and host `name`'s tunnel (`ssh -R`, the proxy's port there to here) alive (else started, its pid kept).
+/// Before a remote ACP lane starts (and each survey of a `shed-acp` host): `proxy-token-expiring` once at 30 d and 7 d left, the proxy answering here (else started detached) and host `name`'s tunnel (`ssh -R`, the proxy's port there to here) alive (else started, its pid kept).
 pub fn ensure(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, machine): (&str, &str)) -> Result<()> {
+    if let (path, Token::Saved(at)) = token_file(cfg) {
+        let left = days_left(ctx.now, at);
+        if let Some(stage) = [7, 30].into_iter().find(|d| left <= *d) {
+            let why = format!(
+                "the proxy token runs out in ~{left} d (saved + 365 d): {} again",
+                fix(cfg, &path)
+            );
+            alert(ctx, cfg, ("proxy-token-expiring", &format!("{at}:{stage}"), &why)).ok();
+        }
+    }
     let port = cfg.proxy.port;
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     if TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(cfg.limits.proxy_connect_secs)).is_err() {
         r.detach(&ctx.exe, &argv(&["proxy"]), &ctx.state.with_file_name("proxy.log"))?;
     }
-    let pid = ctx.state.with_file_name(format!("tunnel-{name}.pid"));
-    let was = std::fs::read_to_string(&pid).unwrap_or_default();
-    if !was.trim().is_empty() && ok(r, "kill", &["-0", was.trim()]).is_ok() {
+    if tunnel(ctx, r, name) {
         return Ok(());
     }
+    let pid = ctx.state.with_file_name(format!("tunnel-{name}.pid"));
     let fwd = format!("127.0.0.1:{port}:127.0.0.1:{port}");
     let a = argv(&[
         "-N",
@@ -353,6 +458,11 @@ pub fn ensure(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, machine): (&str, &
     ]);
     let n = r.detach("ssh", &a, &ctx.state.with_file_name(format!("tunnel-{name}.log")))?;
     Ok(std::fs::write(pid, n.to_string())?)
+}
+
+fn tunnel(ctx: &Ctx, r: &dyn Runner, name: &str) -> bool {
+    let pid = std::fs::read_to_string(ctx.state.with_file_name(format!("tunnel-{name}.pid"))).unwrap_or_default();
+    !pid.trim().is_empty() && ok(r, "kill", &["-0", pid.trim()]).is_ok()
 }
 
 /// The proxy's URL as a lane on a tunnelled host reaches it.

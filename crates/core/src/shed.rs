@@ -10,7 +10,7 @@ use std::time::Duration;
 
 pub use shed_proto as proto;
 
-/// #637: the shed a `shed-acp` host's bootstrap installs: the build proven with drover on the main host. shed's repo, beside drover's own.
+/// The shed a `shed-acp` host's bootstrap installs: the build proven with drover on the main host. shed's repo, beside drover's own.
 pub fn git() -> String {
     env!("CARGO_PKG_REPOSITORY").replace("/herdsman", "/shed")
 }
@@ -74,7 +74,7 @@ fn answer(text: &str) -> Result<(Hello, Value)> {
     }
 }
 
-/// #1031: doctor's `shed` line for the server on `w`: its version and protocol against drover's, `✗` on a mismatch, `!` when it does not answer.
+/// Doctor's `shed` line for the server on `w`: its version and protocol against drover's, `✗` on a mismatch, `!` when it does not answer.
 pub fn line(r: &dyn Runner, w: &Wire) -> String {
     let theirs = exchange(r, w, Method::Ls, json!(proto::LsParams::default())).and_then(|t| answer(&t));
     match theirs {
@@ -136,7 +136,7 @@ fn hello(r: &dyn Runner, w: &Wire) -> Result<(Hello, Value)> {
     answer(&exchange(r, w, Method::Hello, json!(Hello::ours()))?)
 }
 
-/// #937: why `r`'s shed on PATH or the serve on `w` is off drover's pin (`SHED_VERSION: …`), else the builds read back.
+/// Why `r`'s shed on PATH or the serve on `w` is off drover's pin (`SHED_VERSION: …`), else the builds read back.
 pub fn gate(r: &dyn Runner, w: &Wire) -> Result<String> {
     match hello(r, w) {
         Ok((h, _)) => pinned(&h, on_path(r)),
@@ -145,14 +145,14 @@ pub fn gate(r: &dyn Runner, w: &Wire) -> Result<String> {
     }
 }
 
-/// #937: `shed on PATH <build>, serve <build>` as `r` reads them, `?` for one it cannot.
+/// `shed on PATH <build>, serve <build>` as `r` reads them, `?` for one it cannot.
 pub fn builds(r: &dyn Runner) -> String {
     let serve = r.shed().and_then(|w| hello(r, &w.wire).ok()).map(|h| h.0);
     let s = |h: Option<Hello>| h.as_ref().map_or("?".into(), short);
     format!("shed on PATH {}, serve {}", s(on_path(r)), s(serve))
 }
 
-/// #937: `drover shed`'s verbs.
+/// `drover shed`'s verbs.
 #[derive(clap::Subcommand)]
 pub enum Cmd {
     #[command(about = "Install the pinned shed and restart shed serve onto it; dry run unless --yes")]
@@ -162,7 +162,7 @@ pub enum Cmd {
     },
 }
 
-/// #937: a local spawn's shed: `SHED_MISSING` without one on PATH, `SHED_VERSION` (unless `dry`) when it or serve is off the pin.
+/// A local spawn's shed: `SHED_MISSING` without one on PATH, `SHED_VERSION` (unless `dry`) when it or serve is off the pin.
 pub fn ready(r: &dyn Runner, w: &Wire, dry: bool) -> Result<()> {
     if crate::runner::ok(r, "which", &["shed"]).is_err() {
         let path = crate::config::env("PATH").unwrap_or_default();
@@ -177,7 +177,7 @@ pub fn ready(r: &dyn Runner, w: &Wire, dry: bool) -> Result<()> {
         .or_else(|e| crate::gate::refused("SHED_VERSION", format!("{e:#}").replacen("SHED_VERSION: ", "", 1)))
 }
 
-/// #937: `drover shed install`: the pinned rev onto PATH, then `shed install --force` restarts serve onto it, read back as doctor's line; unless `yes`, the plan and the terminals on serve.
+/// `drover shed install`: the pinned rev onto PATH, then `shed install --force` restarts serve onto it, read back as doctor's line; unless `yes`, the plan and the terminals on serve.
 pub fn install(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, yes: bool) -> Result<i32> {
     let w = r.shed().context(crate::config::NO_RUNTIME)?.wire;
     let cargo = ["install", "--git", &git(), "--rev", REV, "--locked", "--force", "shed"];
@@ -216,7 +216,7 @@ pub fn install(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, yes: bool) -> Res
     Ok(0)
 }
 
-/// #1031: a `SHED_VERSION` refusal in `res` alerts `shed-version` once per distinct refusal, and `shed-version-ok` once a call gets through again; whether `res` was one.
+/// A `SHED_VERSION` refusal in `res` alerts `shed-version` once per distinct refusal, and `shed-version-ok` once a call gets through again; whether `res` was one.
 pub fn version_alert<T>(ctx: &Ctx, cfg: &Config, res: &Result<T>) -> Result<bool> {
     let refused = res.as_ref().err().map(|e| format!("{e:#}"));
     let refused = refused.filter(|e| e.starts_with("SHED_VERSION"));
@@ -331,7 +331,7 @@ pub fn events(w: &Wire, since: u64, quiet: Duration) -> Result<Vec<shed_proto::E
     Ok(out)
 }
 
-/// #529: `events` kept open: `f(None)` once the server took it, then `f(Some(event))` for each kept event after `since` and each new one, until the stream ends (or is quiet for `quiet`).
+/// `events` kept open: `f(None)` once the server took it, then `f(Some(event))` for each kept event after `since` and each new one, until the stream ends (or is quiet for `quiet`).
 pub fn follow(
     w: &Wire,
     since: u64,

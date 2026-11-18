@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 const SPARE: &[&str] = &["shed", "drover", "herdsman", "launchd"];
 
-/// #186: `(pid, command, cwd)` of every process `lsof` sees, but `SPARE`, pid 1, this process and its parent.
+/// `(pid, command, cwd)` of every process `lsof` sees, but `SPARE`, pid 1, this process and its parent.
 pub fn cwds(r: &dyn Runner) -> Vec<(String, String, String)> {
     let me = [1, crate::runner::pid(), std::os::unix::process::parent_id()].map(|p| p.to_string());
     let (mut out, mut p) = (vec![], (String::new(), String::new()));
@@ -27,7 +27,7 @@ pub fn cwds(r: &dyn Runner) -> Vec<(String, String, String)> {
     out
 }
 
-/// #186: the processes of `ps` whose cwd is inside `dir` (an absolute path at least two levels deep).
+/// The processes of `ps` whose cwd is inside `dir` (an absolute path at least two levels deep).
 pub fn inside(ps: &[(String, String, String)], dir: &Path) -> Vec<(String, String, String)> {
     let deep = dir.is_absolute() && dir.components().count() > 2;
     ps.iter()
@@ -36,7 +36,7 @@ pub fn inside(ps: &[(String, String, String)], dir: &Path) -> Vec<(String, Strin
         .collect()
 }
 
-/// #186: TERM every process inside `dir` (#223: with `trim`, all but the pane's shell and the agent, the top two levels there; #679: and never `spare`'s tree, a shed lane's agent), wait 5 s, KILL those still there; the commands signalled and the MB they held.
+/// TERM every process inside `dir` (with `trim`, all but the pane's shell and the agent, the top two levels there; and never `spare`'s tree, a shed lane's agent), wait 5 s, KILL those still there; the commands signalled and the MB they held.
 pub fn reap(r: &dyn Runner, dir: &Path, trim: bool, spare: Option<&str>) -> (Vec<String>, u64) {
     let (mut first, ps) = (inside(&cwds(r), dir), stdout(r, "ps", &["-axo", "pid=,ppid=,rss="]));
     let ps = ps.filter(|_| trim).unwrap_or_default();
@@ -70,7 +70,7 @@ pub fn reap(r: &dyn Runner, dir: &Path, trim: bool, spare: Option<&str>) -> (Vec
     (first.into_iter().map(|p| p.1).collect(), kb / 1024)
 }
 
-/// #1081: TERM the processes run from a binary inside `dirs` (a lane's test builds, a stray `drover serve`); their commands.
+/// TERM the processes run from a binary inside `dirs` (a lane's test builds, a stray `drover serve`); their commands.
 pub fn reap_built(r: &dyn Runner, dirs: &[std::path::PathBuf]) -> Vec<String> {
     let me = crate::runner::pid().to_string();
     let ps = stdout(r, "ps", &["-axo", "pid=,command="]).unwrap_or_default();
@@ -90,10 +90,10 @@ pub fn reap_built(r: &dyn Runner, dirs: &[std::path::PathBuf]) -> Vec<String> {
     built.into_iter().map(|b| b.1.trim().to_string()).collect()
 }
 
-/// #710: a process stuck on the Keychain: pid, seconds up, its parent's name (never an argument).
+/// A process stuck on the Keychain: pid, seconds up, its parent's name (never an argument).
 pub type Stuck = (String, u64, String);
 
-/// #710: `security find-generic-password` readers up over 60 s and a `SecurityAgent` up over 10 min (troubleshooting §2); securityd and every other `security` verb never match.
+/// `security find-generic-password` readers up over 60 s and a `SecurityAgent` up over 10 min (troubleshooting §2); securityd and every other `security` verb never match.
 pub fn keychain_jam(r: &dyn Runner) -> (Vec<Stuck>, Option<Stuck>) {
     let ps = stdout(r, "ps", &["-axo", "pid=,ppid=,etime=,command="]).unwrap_or_default();
     let rows: Vec<Vec<&str>> = ps.lines().map(|l| l.split_whitespace().collect()).collect();
@@ -118,7 +118,7 @@ pub fn etime_secs(etime: &str) -> u64 {
     up.map(|(n, k)| n.parse::<u64>().unwrap_or(0) * k).sum()
 }
 
-/// #710: `keychain_jam`'s readers and agent as one line, with troubleshooting §2's fix for those pids.
+/// `keychain_jam`'s readers and agent as one line, with troubleshooting §2's fix for those pids.
 pub fn jam_line((readers, agent): &(Vec<Stuck>, Option<Stuck>)) -> String {
     let each: Vec<String> = readers.iter().map(|p| format!("{} ({})", p.0, p.2)).collect();
     let pids: Vec<&str> = readers.iter().map(|p| p.0.as_str()).collect();
@@ -135,7 +135,7 @@ pub fn jam_line((readers, agent): &(Vec<Stuck>, Option<Stuck>)) -> String {
     )
 }
 
-/// #248: the MB each agent's processes hold (those whose cwd is inside the agent's cwd).
+/// The MB each agent's processes hold (those whose cwd is inside the agent's cwd).
 pub fn held(r: &dyn Runner, agents: &[&Session]) -> Vec<u64> {
     let (ps, rss) = (cwds(r), stdout(r, "ps", &["-axo", "pid=,rss="]).unwrap_or_default());
     let rss: std::collections::BTreeMap<&str, &str> = rss.lines().filter_map(|l| l.trim().split_once(' ')).collect();
@@ -144,7 +144,7 @@ pub fn held(r: &dyn Runner, agents: &[&Session]) -> Vec<u64> {
     agents.iter().map(mb).collect()
 }
 
-/// #223: the top 3 memory users by footprint (`top`) as `mem command (owner)`: `lane <agent>` when inside a live agent's cwd, else `other`; a virtual machine is `mem VM (colima)` (#234: no nested brackets).
+/// The top 3 memory users by footprint (`top`) as `mem command (owner)`: `lane <agent>` when inside a live agent's cwd, else `other`; a virtual machine is `mem VM (colima)` (no nested brackets).
 pub fn top(r: &dyn Runner, agents: &[Session]) -> Vec<String> {
     let (ps, out) = (cwds(r), stdout(r, "top", &TOP).unwrap_or_default());
     let row = |l: &str| {
@@ -161,7 +161,7 @@ pub fn top(r: &dyn Runner, agents: &[Session]) -> Vec<String> {
     out.split_once("MEM")
         .map_or(vec![], |(_, t)| t.lines().filter_map(row).collect())
 }
-/// #352: the MB `ps` sees per group, never per PID: lanes (a harness's process), CI/Colima, browsers, drover, other.
+/// The MB `ps` sees per group, never per PID: lanes (a harness's process), CI/Colima, browsers, drover, other.
 pub fn groups(r: &dyn Runner) -> [u64; 5] {
     const G: [&str; 3] = ["colima qemu lima virtualiz", "chrom safari firefox", "herd drover"];
     let (ps, mut kb) = (stdout(r, "ps", &["-axo", "rss=,command="]).unwrap_or_default(), [0; 5]);
@@ -181,14 +181,16 @@ pub struct Host {
     /// normal | warn | critical
     pub pressure: Option<String>,
     pub swapout: Option<f64>,
-    /// #168: the median of the last `WINDOW` swap-out samples (`window`); the gate reads this, not one spike.
+    /// `vm_stat`'s swap-out count since boot.
+    pub swap_count: Option<f64>,
+    /// The median of the last `WINDOW` swap-out samples (`window`); the gate reads this, not one spike.
     pub swap_median: Option<f64>,
     pub load_per_cpu: Option<f64>,
-    /// #168: `vm_stat` free + inactive pages, in GB.
+    /// `vm_stat` free + inactive pages, in GB.
     pub free_mem_gb: Option<f64>,
-    /// #234: the memory size in GB.
+    /// The memory size in GB.
     pub mem_total_gb: Option<f64>,
-    /// #825: the 3 busiest processes drover did not start, `name cpu%`.
+    /// The 3 busiest processes drover did not start, `name cpu%`.
     pub top: Vec<String>,
 }
 
@@ -208,7 +210,7 @@ fn procs(ps: &str) -> Vec<(u64, u64, f64, String)> {
 }
 const PS: [&str; 2] = ["-Ao", "pid=,ppid=,pcpu=,comm="];
 
-/// #966: per lane (`dirs` holds its process's or an ancestor's cwd): its % of the host's CPUs and `n × busiest`.
+/// Per lane (`dirs` holds its process's or an ancestor's cwd): its % of the host's CPUs and `n × busiest`.
 pub fn lane_cpu(r: &dyn Runner, dirs: &BTreeMap<PathBuf, String>) -> Vec<(String, f64, String)> {
     let cpus = stdout(r, "sysctl", &["-n", "hw.ncpu"]).or_else(|| stdout(r, "nproc", &[]));
     let Some(cpus) = cpus.and_then(|s| s.trim().parse::<f64>().ok()).filter(|n| *n > 0.0) else {
@@ -276,9 +278,33 @@ fn mem_gb(s: &str) -> Option<f64> {
     Some((field(s, "Pages free:")? + field(s, "Pages inactive:")?) * page / 1_073_741_824.0)
 }
 
-/// Sample the host (macOS: sysctl + two `vm_stat` samples 2 s apart).
+const PROBES: [&[&str]; 10] = [
+    &["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+    &["vm_stat"],
+    &["sysctl", "-n", "vm.loadavg"],
+    &["sysctl", "-n", "hw.ncpu"],
+    &["ps", "-Ao", "pid=,ppid=,pcpu=,comm="],
+    &["sysctl", "-n", "hw.memsize"],
+    &["cat", "/proc/loadavg"],
+    &["nproc"],
+    &["grep", "MemAvailable", "/proc/meminfo"],
+    &["grep", "MemTotal", "/proc/meminfo"],
+];
+
+/// Sample the host in one `sh -c` (no sleep; `pace` turns the swap-out count into a rate).
 pub fn sample(r: &dyn Runner) -> Host {
-    let pressure = stdout(r, "sysctl", &["-n", "kern.memorystatus_vm_pressure_level"]).and_then(|s| {
+    let lines: Vec<String> = (PROBES.iter())
+        .map(|p| {
+            crate::hosts::quote(
+                p.first().copied().unwrap_or_default(),
+                &crate::runner::argv(p.get(1..).unwrap_or_default()),
+            )
+        })
+        .collect();
+    let mut outs = crate::snapshot::batch(r, &lines).into_iter();
+    let mut next = || outs.next().flatten();
+    let (pressure, vm, load, ncpu, ps, size) = (next(), next(), next(), next(), next(), next());
+    let pressure = pressure.and_then(|s| {
         match s.trim() {
             "1" | "normal" => Some("normal"),
             "2" | "warn" => Some("warn"),
@@ -287,37 +313,46 @@ pub fn sample(r: &dyn Runner) -> Host {
         }
         .map(String::from)
     });
-    let a = stdout(r, "vm_stat", &[]);
-    let b = a.as_ref().and_then(|_| {
-        r.sleep(2);
-        stdout(r, "vm_stat", &[])
-    });
-    let (a, b) = (a.unwrap_or_default(), b.unwrap_or_default());
-    let swapout = field(&a, "Swapouts:")
-        .zip(field(&b, "Swapouts:"))
-        .map(|(a, b)| (b - a).max(0.0));
-    let load = stdout(r, "sysctl", &["-n", "vm.loadavg"])
-        .and_then(|s| s.split_whitespace().find_map(|w| w.parse::<f64>().ok()));
-    let ncpu = stdout(r, "sysctl", &["-n", "hw.ncpu"]).and_then(|s| s.trim().parse::<f64>().ok());
-    let linux = |p: &str, a: &[&str]| b.is_empty().then(|| stdout(r, p, a)).flatten().unwrap_or_default();
-    let word = |s: String, n: usize| s.split_whitespace().nth(n)?.parse::<f64>().ok();
-    let load = load.or_else(|| word(linux("cat", &["/proc/loadavg"]), 0));
-    let ncpu = ncpu.or_else(|| word(linux("nproc", &[]), 0));
-    let avail = || Some(word(linux("grep", &["MemAvailable", "/proc/meminfo"]), 1)? / 1_048_576.0);
-    let (own, top) = own_load(&stdout(r, "ps", &PS).unwrap_or_default());
+    let vm = vm.unwrap_or_default();
+    let mut linux = || next().filter(|_| vm.is_empty()).unwrap_or_default();
+    let (cat, nproc, avail, total) = (linux(), linux(), linux(), linux());
+    let word = |s: &str, n: usize| s.split_whitespace().nth(n)?.parse::<f64>().ok();
+    let load = load.and_then(|s| s.split_whitespace().find_map(|w| w.parse::<f64>().ok()));
+    let load = load.or_else(|| word(&cat, 0));
+    let ncpu = ncpu
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .or_else(|| word(&nproc, 0));
+    let (own, top) = own_load(&ps.unwrap_or_default());
     let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| (l - own).max(0.0) / n);
-    let size = stdout(r, "sysctl", &["-n", "hw.memsize"]).and_then(|s| s.trim().parse::<f64>().ok());
-    let size = size.map(|b| b / 1_073_741_824.0);
-    let size = size.or_else(|| Some(word(linux("grep", &["MemTotal", "/proc/meminfo"]), 1)? / 1_048_576.0));
+    let size = size
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .map(|b| b / 1_073_741_824.0);
+    let size = size.or_else(|| Some(word(&total, 1)? / 1_048_576.0));
     Host {
         pressure,
-        swapout,
-        swap_median: None,
+        swap_count: field(&vm, "Swapouts:"),
         load_per_cpu,
-        free_mem_gb: mem_gb(&b).or_else(avail),
+        free_mem_gb: mem_gb(&vm).or_else(|| Some(word(&avail, 1)? / 1_048_576.0)),
         mem_total_gb: size,
         top,
+        ..Host::default()
     }
+}
+
+/// `h.swapout` in pages per 2 s from the swap-out count's change since this host's last kept count beside `state`; none on the first.
+pub fn pace(state: &Path, machine: Option<&str>, h: &mut Host, now: u64) {
+    let name = machine.map_or("swapcount".into(), |m| format!("swapcount-{}", m.replace('/', "_")));
+    let file = state.with_file_name(name);
+    let old = std::fs::read_to_string(&file).unwrap_or_default();
+    let prev = old
+        .split_once(' ')
+        .and_then(|(t, n)| Some((t.parse::<u64>().ok()?, n.trim().parse::<f64>().ok()?)));
+    let Some(n) = h.swap_count.filter(|_| prev.is_none_or(|p| now > p.0)) else {
+        return;
+    };
+    std::fs::write(&file, format!("{now} {n}")).ok();
+    let secs = |t: u64| f64::from(u32::try_from(now - t).unwrap_or(u32::MAX));
+    h.swapout = prev.map(|(t, c)| (n - c).max(0.0) * 2.0 / secs(t));
 }
 
 const WINDOW: usize = 5;
@@ -335,12 +370,12 @@ pub fn window(state: &Path, h: &mut Host) {
     h.swap_median = m.get(m.len() / 2).copied();
 }
 
-/// #103: free GB on `/` (`df -k`, when readable); a disk row is amber within 25 % of `min_free_gb`, red under it (#141).
+/// Free GB on `/` (`df -k`, when readable); a disk row is amber within 25 % of `min_free_gb`, red under it.
 pub fn free_gb(r: &dyn Runner) -> Option<f64> {
     df(r).map(|d| d.0)
 }
 
-/// #234: free and total GB on `/`.
+/// Free and total GB on `/`.
 pub fn df(r: &dyn Runner) -> Option<(f64, f64)> {
     let s = stdout(r, "df", &["-k", "/"])?;
     let w: Vec<&str> = s.lines().nth(1)?.split_whitespace().collect();

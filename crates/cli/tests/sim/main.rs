@@ -1,3 +1,4 @@
+mod gates;
 mod hunt;
 mod invariants;
 mod metrics;
@@ -22,7 +23,7 @@ pub struct Outcome {
     pub seed: u64,
     pub failure: Option<String>,
     pub trace: Vec<String>,
-    /// #686: every event the run appended, in order, and (a replay's `keep_going`) each violation with its step.
+    /// Every event the run appended, in order, and (a replay's `keep_going`) each violation with its step.
     pub events: Vec<drover::events::Event>,
     pub violations: Vec<String>,
     /// Steps taken (the failing step, if it failed), and what the run reached and its peaks (`hunt::coverage`).
@@ -30,6 +31,8 @@ pub struct Outcome {
     pub cov: std::collections::BTreeSet<String>,
     pub peaks: Vec<u64>,
     pub metrics: metrics::Metrics,
+    /// The "sometimes" states it reached.
+    pub reached: std::collections::BTreeSet<&'static str>,
 }
 
 impl Outcome {
@@ -51,12 +54,12 @@ impl Outcome {
     }
 }
 
-/// Run `seed` (seed 1 is the #370 incident, any other a random fleet), `sabotage` breaking one invariant on purpose.
+/// Run `seed` (seed 1 is a replayed incident, any other a random fleet), `sabotage` breaking one invariant on purpose.
 pub fn run(seed: u64, sabotage: Option<Sabotage>) -> Outcome {
     run_plan(&hunt::Plan::of(seed), sabotage)
 }
 
-/// Run `plan` (#688: a seed's scenario, or a hunt's mutant of one).
+/// Run `plan` (a seed's scenario, or a hunt's mutant of one).
 pub fn run_plan(plan: &hunt::Plan, sabotage: Option<Sabotage>) -> Outcome {
     let cfg = scenario::config(plan.cfg.0, plan.cfg.1);
     let cfg = if sabotage.is_some() {
@@ -120,6 +123,7 @@ pub fn play(seed: u64, m: model::Model, cfg: &str, end: u64, run_steps: u64, ste
         cov,
         peaks,
         metrics,
+        reached: std::mem::take(&mut w.model.reached),
     }
 }
 
@@ -215,7 +219,7 @@ fn a_seed_replays_to_the_same_trace() {
 
 #[test]
 fn a_broken_invariant_fails_with_seed_and_trace() {
-    for (s, code) in [(Sabotage::DoubleLane, "I1 "), (Sabotage::RedMerge, "I4 ")] {
+    for (s, code) in [(Sabotage::DoubleLane, "I1 "), (Sabotage::RedMerge, "A1 ")] {
         let o = (2..40)
             .map(|seed| run(seed, Some(s)))
             .find(|o| o.failure.is_some())
@@ -229,6 +233,62 @@ fn a_broken_invariant_fails_with_seed_and_trace() {
         );
         assert!(r.lines().count() > 50, "{r}");
     }
+}
+
+fn gate_runs(seeds: &[u64], sabotage: Option<Sabotage>) -> Vec<Outcome> {
+    let runs: Vec<_> = (seeds.iter())
+        .map(|&s| std::thread::spawn(move || run_world(s, gates::world(s), STEPS, sabotage)))
+        .collect();
+    runs.into_iter().map(|h| h.join().expect("a run")).collect()
+}
+
+#[test]
+fn gate_scenarios_hold_always_and_reach_every_sometimes() {
+    let all: Vec<u64> = gates::SCENARIOS.iter().map(|s| s.0).collect();
+    let one = seeds().into_iter().find(|s| all.contains(s));
+    let picked = one.map_or_else(|| all.clone(), |s| vec![s]);
+    let outs = gate_runs(&picked, None);
+    let again = gate_runs(&picked, None);
+    let mut bad = vec![];
+    for (o, b) in outs.iter().zip(&again) {
+        if let Some(f) = &o.failure {
+            eprintln!("{}", o.report());
+            bad.push(format!("seed {}: {f}", o.seed));
+        }
+        if o.trace != b.trace {
+            bad.push(format!("seed {}: a second run's trace differs", o.seed));
+        }
+    }
+    if one.is_none() {
+        bad.extend(gates::unreached(&outs, gates::SOMETIMES));
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
+#[test]
+fn breaking_the_head_sha_check_fails_always() {
+    let o = gate_runs(&[9591], Some(Sabotage::HeadSha)).remove(0);
+    let f = o.failure.clone().unwrap_or_default();
+    assert!(
+        f.starts_with("A1 always: GitHub merge #959 merged at 0000000"),
+        "{}",
+        o.report()
+    );
+    assert!(f.ends_with("verdict None, CI green true"), "{f}");
+}
+
+#[test]
+fn a_sometimes_state_never_reached_fails_the_run() {
+    let outs = gate_runs(&[9591], None);
+    assert!(outs[0].failure.is_none(), "{}", outs[0].report());
+    assert_eq!(
+        gates::unreached(&outs, &["merge-after-retried-verdict"]),
+        [] as [String; 0]
+    );
+    assert_eq!(
+        gates::unreached(&outs, &["round-limit"]),
+        ["sometimes round-limit: never reached in seeds [9591]"]
+    );
 }
 
 fn env(k: &str, default: u64) -> u64 {
@@ -357,14 +417,14 @@ fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     assert!(o.failure.is_none(), "{}", o.report());
     let want = metrics::Metrics {
-        to_merge: vec![934, 1259],
+        to_merge: vec![927, 1253],
         spawns: 5,
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 992,
+        idle: 987,
         ci_wait: 600,
-        lock_wait: 7,
+        lock_wait: 5,
         serial: 0,
         host_busy: 0,
         caps: 0,
@@ -380,10 +440,10 @@ fn the_known_fleet_gives_exact_metrics() {
             ("caps", 0.0),
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 16.53),
-            ("lock_wait_min", 0.12),
-            ("queue_to_merge_p50_min", 15.57),
-            ("queue_to_merge_p90_min", 20.98),
+            ("idle_lane_min", 16.45),
+            ("lock_wait_min", 0.08),
+            ("queue_to_merge_p50_min", 15.45),
+            ("queue_to_merge_p90_min", 20.88),
             ("review_rounds_per_merge", 1.0),
             ("serial_busy", 0.0),
             ("supersedes_per_lane", 0.25),

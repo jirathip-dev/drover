@@ -5,7 +5,7 @@ use crate::runner::Runner;
 use crate::{queue, Ctx};
 use serde_json::{json, Value};
 
-/// #1186: the asking fleet, its weight and the weight of the other fleets with something to start.
+/// The asking fleet, its weight and the weight of the other fleets with something to start.
 pub type Me<'a> = (&'a str, usize, usize);
 
 fn main_host(cfg: &Config) -> &str {
@@ -47,14 +47,14 @@ fn full(cfg: &Config, live: &[&Event], h: &str, (fleet, weight, others): Me, sta
     full.then(|| format!("{h} {}/{max} starting", on.len()))
 }
 
-/// #1186: every enabled host's start slots are full for `me`: each host's `<host> N/max starting`.
+/// Every enabled host's start slots are full for `me`: each host's `<host> N/max starting`.
 pub fn every_full(cfg: &Config, live: &[&Event], me: Me, start: bool) -> Option<String> {
     let all = hosts(cfg);
     let held: Vec<String> = all.iter().map_while(|h| full(cfg, live, h, me, start)).collect();
     (held.len() == all.len() && !held.is_empty()).then(|| held.join(", "))
 }
 
-/// #1234: the start slots held now, as a refusal names them (`<host> N/max starting: <marker> <age>, …`); empty when none is.
+/// The start slots held now, as a refusal names them (`<host> N/max starting: <marker> <age>, …`); empty when none is.
 pub fn held_now(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     let pending = crate::drive::pending(ctx, cfg, r);
     let on = |h: &str| {
@@ -73,7 +73,7 @@ pub fn held_now(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     format!("{}: {}", full.join(", "), crate::drive::held_by(ctx, cfg, r))
 }
 
-/// #1234: spawn marker `l`'s spawn has ended since it was taken: logged, failed with `spawn-error`, or its intent `failed`.
+/// Spawn marker `l`'s spawn has ended since it was taken: logged, failed with `spawn-error`, or its intent `failed`.
 pub fn ended(ev: &[Event], l: &crate::db::Lease) -> bool {
     let Some(p) = serde_json::from_str::<Event>(&l.data)
         .ok()
@@ -87,7 +87,7 @@ pub fn ended(ev: &[Event], l: &crate::db::Lease) -> bool {
     ev.iter().rev().take_while(|e| e.ts >= l.at).any(|e| end(&e))
 }
 
-/// #1186: some host has a free start slot, the `pending` spawns counted.
+/// Some host has a free start slot, the `pending` spawns counted.
 pub fn free(cfg: &Config, pending: &[Event]) -> bool {
     let live: Vec<&Event> = pending.iter().collect();
     hosts(cfg)
@@ -95,7 +95,7 @@ pub fn free(cfg: &Config, pending: &[Event]) -> bool {
         .any(|h| full(cfg, &live, h, ("", 1, 0), false).is_none())
 }
 
-/// #1186: why placement passes over host `h` for `fleet` #`n`: its start slots (`SPAWN_PENDING`) or its working slots (`HOST_FULL`) are full.
+/// Why placement passes over host `h` for `fleet` #`n`: its start slots (`SPAWN_PENDING`) or its working slots (`HOST_FULL`) are full.
 pub fn skip(
     ctx: &Ctx,
     (cfg, r): (&Config, &dyn Runner),
@@ -118,12 +118,12 @@ fn marker(ctx: &Ctx, fleet: &str, n: u64) -> Option<(crate::db::Lease, Event)> {
     Some((l, e))
 }
 
-/// #1186: the host drive's admission placed this kick's own spawn of `fleet` #`n` on.
+/// The host drive's admission placed this kick's own spawn of `fleet` #`n` on.
 pub fn admitted(ctx: &Ctx, fleet: &str, n: u64) -> Option<String> {
     marker(ctx, fleet, n)?.1.str("host").map(String::from)
 }
 
-/// #1186: this kick's own spawn has its harness up: where the host's `start_release` is `started`, its start slot frees.
+/// This kick's own spawn has its harness up: where the host's `start_release` is `started`, its start slot frees.
 pub fn started(ctx: &Ctx, fleet: &str, n: u64) {
     let Some((l, mut e)) = marker(ctx, fleet, n) else {
         return;
@@ -134,7 +134,7 @@ pub fn started(ctx: &Ctx, fleet: &str, n: u64) {
     }
 }
 
-/// #1186: the summed weight of the other unpaused fleets with something to start, or held for a start slot last pass.
+/// The summed weight of the other unpaused fleets with something to start, or held for a start slot last pass.
 pub fn others(ctx: &Ctx, cfg: &Config, ev: &[Event], fleet: &str) -> usize {
     let others = cfg.fleet.iter().filter(|(g, f)| *g != fleet && !f.paused);
     let waits = |g: &str| {
@@ -152,15 +152,15 @@ pub fn others(ctx: &Ctx, cfg: &Config, ev: &[Event], fleet: &str) -> usize {
         .sum()
 }
 
-/// #1186: a start refused with `code` holds back the fleet's other starts this pass.
+/// A start refused with `code` holds back the fleet's other starts this pass.
 pub fn stops(code: Option<&str>) -> bool {
     matches!(
         code,
-        Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "LOGIN_NEEDED" | "CAP")
+        Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "LOGIN_NEEDED" | "CAP" | "IN_FLIGHT_CAP")
     )
 }
 
-/// #1183: `fleet` has a review FAIL with no spawn after it: a fix round waits for a slot.
+/// `fleet` has a review FAIL with no spawn after it: a fix round waits for a slot.
 pub fn fix_due(ev: &[Event], fleet: &str) -> bool {
     let fail = |e: &Event| e.kind == "verdict" && e.str("verdict") == Some("FAIL");
     let mut last = std::collections::BTreeMap::new();

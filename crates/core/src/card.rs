@@ -96,7 +96,7 @@ pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     settled.into_iter().find(|e| e.str("id") == Some(id))
 }
 
-/// #1121: a card with exactly `cmd` is approved, started and not yet done: the run it is.
+/// A card with exactly `cmd` is approved, started and not yet done: the run it is.
 pub fn running(events: &[Event], cmd: &str) -> bool {
     let id = |k: &str, id: &str| events.iter().any(|e| e.kind == k && e.str("id") == Some(id));
     (events
@@ -113,7 +113,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, approve: bool, 
     settle_via(ctx, cfg, r, id, approve, sha, None)
 }
 
-/// #725: `settle`, its `run-settled` logged `via` the surface the tap came from (the lifeboat's `lifeboat`).
+/// `settle`, its `run-settled` logged `via` the surface the tap came from (the lifeboat's `lifeboat`).
 pub fn settle_via(
     ctx: &Ctx,
     cfg: &Config,
@@ -167,7 +167,7 @@ pub fn settle_via(
     Ok(line)
 }
 
-/// #821: run approved card `id` once, detached, up to its --timeout; log and post its exit code and output tail.
+/// Run approved card `id` once, detached, up to its --timeout; log and post its exit code and output tail.
 pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> {
     let events = working(&ctx.state)?;
     let Some(c) = events.iter().find(|e| e.kind == "run-card" && e.str("id") == Some(id)) else {

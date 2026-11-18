@@ -112,13 +112,13 @@ pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[E
     Ok(out)
 }
 
-/// #129: `h` merges a passed head (or an earlier pure update of one) with integration and adds nothing: its first parent carries the PASS, its second is on integration, and its tree is the one `git merge-tree` makes of the two.
+/// `h` merges a passed head (or an earlier pure update of one) with integration and adds nothing: its first parent carries the PASS, its second is on integration, and its tree is the one `git merge-tree` makes of the two.
 pub fn pure(r: &dyn Runner, f: &Fleet, s: &IssueState, h: &str) -> bool {
     let dir = f.local_path();
     git(r, &dir, &["fetch", "-q", "origin"]).is_ok() && pure_at(r, &dir, &format!("origin/{}", f.integration), s, h)
 }
 
-/// #207: `h` is a pure update of `x`, so a verdict at `x` (whatever it says) carries to `h`.
+/// `h` is a pure update of `x`, so a verdict at `x` (whatever it says) carries to `h`.
 pub fn carries(r: &dyn Runner, f: &Fleet, s: &IssueState, x: &str, h: &str) -> bool {
     let mut s = s.clone();
     s.verdicts.push((x.into(), "PASS".into(), String::new()));
@@ -143,8 +143,41 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
             == git(r, dir, &["rev-parse", &format!("{h}^{{tree}}")]).ok()
 }
 
-/// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`; #429: under `warn_within` lines of headroom it warns and still passes. #270: `web/src/**/*.ts` lines are reported, never capped.
-pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
+/// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` against the first `[fleet.<n>] line_cap` in `config`; under `warn_within` lines of headroom it warns and still passes. `web/src/**/*.ts` lines are reported, never capped. With `base`, every commit since it that edits the cap must carry a `Cap:` trailer.
+pub fn cap_check(
+    r: &dyn Runner,
+    config: &Path,
+    rules: &Path,
+    base: Option<&str>,
+    out: &mut dyn std::io::Write,
+) -> Result<i32> {
+    let mut bad = 0;
+    if let Some(b) = base {
+        let range = format!("{b}..HEAD");
+        let log = git(
+            r,
+            Path::new("."),
+            &[
+                "log",
+                "--no-merges",
+                "--format=%x1e%h%x1f%B",
+                &range,
+                "--",
+                CAP_PATHS[0],
+                CAP_PATHS[1],
+            ],
+        )?;
+        for c in log.split('\x1e').skip(1) {
+            let (sha, body) = c.split_once('\x1f').unwrap_or((c, ""));
+            if !body.lines().any(cap_trailer) {
+                bad += 1;
+                writeln!(
+                    out,
+                    "{sha} edits the line cap without a `Cap: <old> → <new> (#issue, q<N>)` trailer"
+                )?;
+            }
+        }
+    }
     let dir = std::fs::read_dir(config.with_file_name("cap.d"));
     let mut files: Vec<PathBuf> = (dir.into_iter().flatten().flatten())
         .map(|e| e.path())
@@ -187,10 +220,71 @@ pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> R
             rules.display()
         )?;
     }
-    Ok(i32::from(left < 0 || over > 30))
+    Ok(i32::from(left < 0 || over > 30 || bad > 0))
 }
 
-/// #973: the effective line cap: the highest `line_cap` among `ci/cap.toml` and the raises in `ci/cap.d/*.toml`.
+const CAP_PATHS: [&str; 2] = ["ci/cap.toml", "ci/cap.d"];
+
+fn cap_trailer(l: &str) -> bool {
+    let num = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+    let Some((old, rest)) = l.trim().strip_prefix("Cap: ").and_then(|t| t.split_once(" → ")) else {
+        return false;
+    };
+    let Some((new, refs)) = rest.split_once(" (#") else {
+        return false;
+    };
+    let Some((issue, q)) = refs.strip_suffix(')').and_then(|t| t.split_once(", q")) else {
+        return false;
+    };
+    [old, new, issue, q].into_iter().all(num)
+}
+
+/// `drover cap log`: every change of the line cap in the repo's git history, oldest first, with its `Cap:` trailer, else its subject.
+pub fn cap_log(r: &dyn Runner, dir: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
+    let args = [
+        "log",
+        "--reverse",
+        "-p",
+        "-U0",
+        "-G",
+        "line_cap = |line cap \\(≤ ",
+        "--format=%x1e%cs %h%x1f%B%x1f",
+        "--",
+        CAP_PATHS[0],
+        CAP_PATHS[1],
+        ".github/workflows/ci.yml",
+    ];
+    let cap = |l: &str| {
+        let t = l.trim_start();
+        let n = t
+            .strip_prefix("line_cap = ")
+            .or_else(|| t.split("line cap (≤ ").nth(1))?;
+        n.split(|c: char| !c.is_ascii_digit()).next()?.parse::<i64>().ok()
+    };
+    for c in git(r, dir, &args)?.split('\x1e').skip(1) {
+        let mut part = c.splitn(3, '\x1f');
+        let (head, body, diff) = (
+            part.next().unwrap_or_default(),
+            part.next().unwrap_or_default(),
+            part.next().unwrap_or_default(),
+        );
+        let at = |sign: char| diff.lines().filter_map(|l| l.strip_prefix(sign)).find_map(cap);
+        let (Some(new), old) = (at('+'), at('-')) else {
+            continue;
+        };
+        if old == Some(new) {
+            continue;
+        }
+        let why = (body.lines().find(|l| cap_trailer(l)))
+            .or_else(|| body.lines().next())
+            .unwrap_or_default();
+        let old = old.map_or_else(|| "-".to_string(), |o| o.to_string());
+        writeln!(out, "{head} {old} → {new}  {}", why.trim())?;
+    }
+    Ok(0)
+}
+
+/// The effective line cap: the highest `line_cap` among `ci/cap.toml` and the raises in `ci/cap.d/*.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cap {
     pub lines: i64,
@@ -216,7 +310,7 @@ fn highest(name: &str, base: &str, raises: Vec<(String, String)>) -> Option<Cap>
     Some(each.fold(first, |a, b| if b.lines > a.lines { b } else { a }))
 }
 
-/// #973: the cap at `sha` of the repo in `dir`, by git alone: `ci/cap.toml` and `ci/cap.d/*.toml` at that commit.
+/// The cap at `sha` of the repo in `dir`, by git alone: `ci/cap.toml` and `ci/cap.d/*.toml` at that commit.
 pub fn cap_at_sha(r: &dyn Runner, dir: &Path, sha: &str) -> Option<Cap> {
     let show = |p: &str| git(r, dir, &["show", &format!("{sha}:{p}")]).ok();
     let base = show("ci/cap.toml")?;
@@ -239,7 +333,7 @@ fn limits(text: &str) -> Option<(i64, i64)> {
     Some((t["line_cap"].as_integer()?, warn))
 }
 
-/// #429: `(sha, lines, cap, warn_within)` at the fleet's fetched integration head with a `ci/cap.toml`, by git alone; cached per sha (`serve`'s banner reads the cache).
+/// `(sha, lines, cap, warn_within)` at the fleet's fetched integration head with a `ci/cap.toml`, by git alone; cached per sha (`serve`'s banner reads the cache).
 pub fn cap_at(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Option<(String, i64, i64, i64)> {
     let (f, p) = (cfg.fleet(fleet).ok()?, gh::cache_path(ctx, "cap", fleet, 0));
     let dir = f.local_path();
@@ -346,7 +440,7 @@ fn script_caps(
         .ok_or_else(|| format!("printed `{}`", last.trim()))
 }
 
-/// #668: `drover cap <fleet>`: the queue-wide line-cap view, so one conductor-filed issue raises the cap for the whole queue: integration's total against the cap, every open PR's `src/ net` (its body's, else its measured diff), the queued issues with no PR, and the projected total with the ask a crossing lane files. #754: a fleet with its own cap script counts by it, at integration and on each open PR's merge, every cap it prints.
+/// `drover cap <fleet>`: the queue-wide line-cap view, so one conductor-filed issue raises the cap for the whole queue: integration's total against the cap, every open PR's `src/ net` (its body's, else its measured diff), the queued issues with no PR, and the projected total with the ask a crossing lane files. a fleet with its own cap script counts by it, at integration and on each open PR's merge, every cap it prints.
 pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut dyn std::io::Write) -> Result<i32> {
     let f = cfg.fleet(fleet)?;
     let dir = f.local_path();

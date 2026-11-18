@@ -13,7 +13,6 @@
 >    nord's red `#e0707a → #ff6b76` (4.53:1). gruvbox `--mute` `#a89984 → #ad9e88` for the card below.
 > 3. The gate also measures the tinted surfaces: `--fg`, `--mute`, `--l` (option buttons) ≥ 4.5:1 and `--r` ≥ 3:1 on
 >    the needs-you card; `--r`/`--a` ≥ 3:1 on the red/amber group headers.
-> 4. The Host tab's `theme` row names the phone's theme and scheme (serve.js), not the board default.
 
 `index.html` is the contact sheet: **Queue** and **Host** at 390 px for each of the 8 built-in schemes, with the gate
 result, swatches and tightest numbers above each pair. `contact-390.png` (DPR 2) and `contact-1640.png` are the

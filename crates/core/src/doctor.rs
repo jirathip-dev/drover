@@ -21,7 +21,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     let mut rows = vec![];
     if !config_only {
         let sample = crate::host::sample(r);
-        let host = sample.pressure.is_some() && sample.swapout.is_some() && sample.load_per_cpu.is_some();
+        let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.load_per_cpu.is_some();
         row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH");
         let gh = ok(r, "gh", &["auth", "status"]).is_ok();
         row(&mut rows, gh, '✗', "gh — auth status → gh auth login");
@@ -109,6 +109,7 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, r, rows);
+    rows.extend(crate::proxy::status(ctx, cfg, r).map(|f| f.join(" · ")));
     if cfg
         .runtime
         .as_ref()

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use shed_proto::EventKind;
 use std::collections::BTreeMap;
 
-/// An ACP session's pulse from shed's events only (#785, #792, #819, #946), kept in `shed-out.json`.
+/// An ACP session's pulse from shed's events only, kept in `shed-out.json`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Pulse {
@@ -38,7 +38,7 @@ pub fn of(ctx: &Ctx, agent: &str) -> Option<Pulse> {
     load(ctx).remove(agent)
 }
 
-/// #785: the ACP lanes with no event back `mins` after their first turn: (agent, when that turn went in).
+/// The ACP lanes with no event back `mins` after their first turn: (agent, when that turn went in).
 pub fn silent(ctx: &Ctx, mins: u64) -> Vec<(String, u64)> {
     let start = |(a, p): (String, Pulse)| Some((a, p.first_turn?));
     load(ctx)

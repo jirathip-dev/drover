@@ -215,7 +215,7 @@ fn a_started_chat_is_linked_once_and_takes_no_lane_asks() {
     ];
     let (code, out) = run(&c, &r, &[&ask[..], &["--thread", "c-1"]].concat());
     assert_eq!(code, 0, "{out}");
-    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    set_env("DROVER_LANE", "sendmeter:12:impl");
     let (code, _) = run(&c, &r, &ask);
     std::env::remove_var("DROVER_LANE");
     assert_eq!(code, 0);

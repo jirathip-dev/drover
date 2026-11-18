@@ -41,7 +41,7 @@ review or ready).
   like any other, and counts toward the group's use. A conflict at merge gets an update round as usual.
 - Issues already in flight over a limit when a group is added keep going (grandfathered).
 
-Board, status and the Host tab show each group's use: `serial: db 3/10 · ci 1/1`.
+`status` and `board` show each group's use: `serial: db 3/10 · ci 1/1`.
 
 Hot files (#891): each file the last stored hotspots list names is its own one-slot group, `hot <file>`, joined
 only by a PR's diff (never a `--serial` mark). Drive drops a file from it on its next pass once
@@ -111,6 +111,12 @@ out.
 Lanes whose branch contains it see `git log` and `git blame` only since it, by local grafts; nothing is rewritten.
 Remove the key to undo it. How it works and the other undos: `docs/workflow.md`, "History baseline"; the design:
 `docs/architecture/baseline/`.
+
+## In-flight cap (#1129)
+
+`max_in_flight = N` in `[fleet.<n>]` caps the fleet's PRs in flight (an issue in impl, fix, review, verify or ready,
+or one held with an open PR); unset is 8, `0` is off. At the cap drive starts no new issue but keeps reviewing, fixing
+and merging; `drover spawn` of a new issue is refused `IN_FLIGHT_CAP` unless `--force`.
 
 ## Hygiene (#1101)
 
@@ -195,6 +201,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `gate_check_minutes` | `30` | a premerge or gate check (a build or test run) is killed after this long |
 | `shed_read_millis` | `300` | how long drive's intake waits for shed's state changes |
 | `proxy_connect_secs` | `1` | the token proxy's liveness connect timeout |
+| `proxy_retry_secs` | `300` | a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it |
 | `service_call_secs` | `2` | a call to the running service's socket times out after this long |
 | `disk_probe_secs` | `2` | a folder listing slower than this marks its disk as not answering |
 | `disk_sick_secs` | `300` | a disk that let a call run out of time stays hung this long |
@@ -220,3 +227,4 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `slo_idle_minutes` | `20` | no lane working this long while the queue has spawnable work breaches `slo-idle` |
 | `slo_tick_minutes` | `10` | a tick running longer than this breaches `slo-tick`; the next fast step stops it |
 | `slo_pass_minutes` | `30` | no slow drive pass of a fleet for this long shows the owner's `Drive is stuck` card |
+| `stall_restart_hours` | `2` | an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own) |

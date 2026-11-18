@@ -25,7 +25,7 @@ pub struct Scenario {
     pub real: Run,
 }
 
-/// A run's outcome: the merge order, lane deaths, verdicts logged and #685's metrics.
+/// A run's outcome: the merge order, lane deaths, verdicts logged and the metrics.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Run {
     pub merged: Vec<u64>,
@@ -306,7 +306,7 @@ pub fn run(s: &Scenario) -> (crate::Outcome, Run) {
     run_in(s, m, &cfg)
 }
 
-/// #687: replay `s` in world `m` (its `model`, maybe changed) under fleet.toml `cfg`.
+/// Replay `s` in world `m` (its `model`, maybe changed) under fleet.toml `cfg`.
 pub fn run_in(s: &Scenario, m: Model, cfg: &str) -> (crate::Outcome, Run) {
     let o = crate::play(s.from, m, cfg, T0 + (s.to - s.from), u64::MAX / 2, u64::MAX / 2, true);
     let metrics = crate::metrics::summary(std::slice::from_ref(&o.metrics));
@@ -319,7 +319,7 @@ pub fn run_in(s: &Scenario, m: Model, cfg: &str) -> (crate::Outcome, Run) {
     (o, sim)
 }
 
-/// The real-vs-sim table: the merges, then each #685 metric (`-` where the real log has none).
+/// The real-vs-sim table: the merges, then each metric (`-` where the real log has none).
 pub fn table(real: &Run, sim: &Run) -> String {
     let same = (real.merged.iter().zip(&sim.merged))
         .take_while(|(a, b)| a == b)

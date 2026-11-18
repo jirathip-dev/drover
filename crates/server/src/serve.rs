@@ -1,5 +1,3 @@
-//! `drover serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
-//! `/live` SSE clients get a thread each, fed by the 1 s watcher thread.
 use crate::api::{
     body, Backlog, BacklogIssue, Balance, Bar, Blocked, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow, Drive,
     DriveAct, FleetRow, Harness, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, HostCard, HostTab, LaneNow, LaneRepo,
@@ -47,9 +45,7 @@ macro_rules! th {
         )
     };
 }
-/// #57: served under `/a/<VER>/` as immutable (the SW precaches them); the page links them.
 const ASSETS: &[(&str, &str, &[u8])] = &[
-    // #927: the page that draws the screens (web/dist, committed: `cargo install` needs no Node).
     ("board.js", "text/javascript", include_bytes!("../web/dist/board.js")),
     ("board.css", "text/css", include_bytes!("../web/dist/board.css")),
     th!("swag/", "farm/sprites.svg", SVG),
@@ -71,7 +67,6 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("", "terminal/icon-192.png", PNG),
     th!("", "terminal/icon-512.png", PNG),
 ];
-/// #244: the built-in colour schemes, `assets/schemes/<name>.json` (docs/themes.md).
 macro_rules! sc {
     ($($n:literal),*) => { [$(($n, include_bytes!(concat!("../assets/schemes/", $n, ".json")).as_slice())),*] };
 }
@@ -91,7 +86,6 @@ const PNG: &str = "image/png";
 const SVG: &str = "image/svg+xml";
 const I180: &[u8] = include_bytes!("../assets/icon-180.png");
 const I192: &[u8] = include_bytes!("../assets/icon-192.png");
-/// At the root, the fixed paths the manifest and iOS name: cached a day (`/sw.js`, VER filled in, is no-store).
 const FILES: &[(&str, &str, &[u8])] = &[
     (
         "manifest.webmanifest",
@@ -101,12 +95,10 @@ const FILES: &[(&str, &str, &[u8])] = &[
     ("icon-180.png", "image/png", I180),
     ("icon-192.png", "image/png", I192),
     ("icon-512.png", "image/png", include_bytes!("../assets/icon-512.png")),
-    // #195: the root icons Safari probes; a 404 there falls back to another service's icon on the same host.
     ("apple-touch-icon.png", "image/png", I180),
     ("apple-touch-icon-precomposed.png", "image/png", I180),
     ("favicon.ico", "image/png", I192),
 ];
-/// FNV-1a over the assets and root files at build time: their `/a/<hash8>/` path and the icons' `?v=<hash8>`.
 #[expect(
     long_running_const_eval,
     clippy::indexing_slicing,
@@ -120,7 +112,6 @@ const VER: u32 = {
         } else {
             FILES[k - ASSETS.len()].2
         };
-        // #423: four bytes a step (the garden's sprites outgrow the budget a byte at a time)
         while i < b.len() {
             let w = if i + 4 <= b.len() {
                 u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
@@ -135,9 +126,7 @@ const VER: u32 = {
     h
 };
 
-/// #501: the request's paired device, else why not (`devices::check`).
 type Auth = std::result::Result<devices::Device, String>;
-/// #501: the devices could not be read: the board is busy (503), not the device unpaired (401).
 fn busy(a: &Auth) -> bool {
     a.as_ref().is_err_and(|w| w.starts_with("db error: "))
 }
@@ -157,7 +146,6 @@ const PER_DEVICE: usize = 4;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
 const TOO_LARGE: &[u8] = b"HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"line\":\"request body too large\"}";
-/// When this board started (the Services board row's uptime).
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
 pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> Result<()> {
@@ -173,7 +161,6 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
     let addr = (!read_only)
         .then(|| l.local_addr().map(|a| a.to_string()))
         .transpose()?;
-    // #603: shed's lanes (#565: or one fleet's) as the CLI reaches them; `service --board` hands over a bare runner.
     let with = (r.shed().is_none())
         .then(|| Config::kept(ctx).ok()?.shed())
         .flatten()
@@ -211,9 +198,9 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
     let (s, busy, open) = (&s, &AtomicUsize::new(0), &AtomicUsize::new(0));
     std::thread::scope(|sc| {
         let limits = || Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
-        // #57: the host every 10 s (its 2 s vm_stat delta included) here, never on a request.
         sc.spawn(move || loop {
             let mut hs = host::sample(r);
+            host::pace(&ctx.state, None, &mut hs, crate::now());
             host::window(&ctx.state, &mut hs);
             *lock(&h) = hs;
             s.r.sampled(crate::now());
@@ -248,7 +235,6 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         for mut st in l.incoming().flatten() {
             if busy.fetch_add(1, Relaxed) < 256 {
                 open.fetch_add(1, Relaxed);
-                // #715: its deliveries (a conductor start can take minutes) run after it frees its request slot.
                 sc.spawn(move || {
                     drop(s.handle(st));
                     busy.fetch_sub(1, Relaxed);
@@ -272,7 +258,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
     Ok(())
 }
 
-/// #898: this start (`cold`, `handover`; #1081: `failed`) in `serve-starts` (its last day kept) for `drover check`.
+/// This start (`cold`, `handover`; `failed`) in `serve-starts` (its last day kept) for `drover check`.
 pub fn started(ctx: &Ctx, how: &str) {
     let f = ctx.state.with_file_name("serve-starts");
     let was = std::fs::read_to_string(&f).unwrap_or_default();
@@ -288,8 +274,6 @@ pub fn started(ctx: &Ctx, how: &str) {
     drop(std::fs::write(f, keep.join("\n") + "\n"));
 }
 
-/// `Server::cached` as a Runner (runner, cache, now, ttl): also `waiting::scan`'s per-issue `git log` on a request.
-/// A read the step's snapshot (#337) has comes from it; one it lacks on another host fails, never runs on a request.
 struct Memo<'a>(&'a fresh::Fresh<'a>, &'a Cache, u64, u64, Arc<Snapshot>);
 impl Runner for Memo<'_> {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
@@ -336,7 +320,6 @@ impl Runner for Memo<'_> {
     }
 }
 
-/// The mutex's data, even after a thread panicked holding it.
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -347,25 +330,19 @@ fn hash(s: &impl Hash) -> u64 {
     h.finish()
 }
 
-/// A menu as its card shows it (masked question and options): `/answer` refuses a tap on any other.
 #[derive(Default)]
 struct Watch {
     log: Option<(u64, Option<std::time::SystemTime>)>,
     agents: (u64, u64),
-    /// The last `herd` push: (time, hash of the body).
     herd: (u64, u64),
     frags: BTreeMap<(bool, &'static str), u64>,
-    /// #267: the hash of the last Host tab data (its `now` left out).
     host: u64,
-    /// #268: the Queue tab's likewise.
     queue: u64,
-    /// #166: `drive.lock` was there: a pass starting or ending re-renders (`⟳ driving…`).
     driving: bool,
-    /// #241, #259: the log's last seq at the last look (none yet: nothing to play).
     seen: Option<u64>,
 }
 
-/// #241: the theme moment an event plays on the page (an `ev`'s `k` on `/live`): merged, fail or needs-you.
+/// The theme moment an event plays on the page (an `ev`'s `k` on `/live`): merged, fail or needs-you.
 pub fn moment(e: &Event) -> Option<&'static str> {
     match e.kind.as_str() {
         "merged" => Some("merged"),
@@ -375,7 +352,6 @@ pub fn moment(e: &Event) -> Option<&'static str> {
     }
 }
 
-/// #259: an event on `/live` (`ev`, also replayed after `Last-Event-ID` / `?since=`): its seq, time and moment.
 fn sse(e: &Event) -> String {
     format!(
         "id: {}\nevent: ev\ndata: {}\n\n",
@@ -390,7 +366,6 @@ fn sse(e: &Event) -> String {
     )
 }
 
-/// #351: a chat's window: the last at most `n` of `v` within `kb` KB, sized as `{:?}` (no less than JSON; at least one).
 fn window<T: std::fmt::Debug>(v: &[T], n: usize, kb: usize) -> &[T] {
     let (mut size, mut k) = (0, 0);
     for x in v.iter().rev().take(n) {
@@ -403,32 +378,22 @@ fn window<T: std::fmt::Debug>(v: &[T], n: usize, kb: usize) -> &[T] {
 pub struct Server<'a> {
     ctx: &'a Ctx,
     r: fresh::Fresh<'a>,
-    /// The bind address a POST's `Host` must name; None: read-only.
     addr: Option<String>,
-    /// Command stdout by argv, with its time: rate-limited reads, shared with the watcher, which (`fresh`) re-reads at a third of the ttl.
     cache: Cache,
     fresh: bool,
     /// The background sampler's last host read (`serve_on`); a request only reads it.
     pub host: Arc<Mutex<Host>>,
-    /// Reply-box send times per device hash (10 a minute).
     sent: Mutex<BTreeMap<String, Vec<u64>>>,
-    /// `/live` client threads (at most 8; the paired device's hash, shared with the watcher), the
-    /// watcher's state, and `kick`: an answer was tapped, the watcher re-reads panes and pushes now.
     clients: Clients,
     kick: Arc<AtomicBool>,
     watch: Mutex<Watch>,
-    /// #977: `serve_on`'s job runner for taps, and the jobs by id.
     jobs: Option<Sender<jobs::Tap>>,
     tapped: Mutex<jobs::Jobs>,
     running: Mutex<BTreeMap<String, std::collections::VecDeque<jobs::Tap>>>,
     writes: AtomicUsize,
-    /// `serve --export` (#39): Some(demo), static files with relative URLs; `true` is the inert demo.
     export: Option<bool>,
-    /// #337: the step's snapshot as last loaded, by the file's mtime.
     snap: Mutex<(Option<u64>, Arc<Snapshot>)>,
-    /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
     later: Mutex<Vec<(Ctx, (Event, String))>>,
-    /// #620: the [chat] tab's fold, by its key (`chat_tab`).
     chat: Mutex<[(serde_json::Value, serde_json::Value); 2]>,
     timing: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
@@ -437,7 +402,6 @@ pub struct Server<'a> {
 const JSON: &str = "application/json; charset=utf-8";
 const HTML: &str = "text/html; charset=utf-8";
 
-/// A `303 See Other` to `loc`.
 fn see(loc: &str) -> Vec<u8> {
     format!("HTTP/1.1 303 See Other\r\nLocation: {loc}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").into_bytes()
 }
@@ -450,8 +414,6 @@ fn header<'h>(head: &'h str, name: &str) -> Option<&'h str> {
     })
 }
 
-/// #199: the asking client's address. Behind `tailscale serve` every peer is loopback: then the forwarded address (the
-/// proxy appends it last) or the tailnet login; those headers count from a loopback peer only.
 fn client(head: &str) -> &str {
     let peer = header(head, "x-peer").unwrap_or_default();
     let fwd = header(head, "x-forwarded-for")
@@ -467,7 +429,6 @@ fn client(head: &str) -> &str {
         .unwrap_or(peer)
 }
 
-/// `application/x-www-form-urlencoded` (also the query string) into a map.
 fn form(s: &str) -> BTreeMap<String, String> {
     let dec = |v: &str| {
         let (b, mut out, mut i) = (v.as_bytes(), vec![], 0);
@@ -499,9 +460,6 @@ fn enc(s: &str) -> String {
         .collect()
 }
 
-/// #166, #162 A: a fleet card's drive line: `⟳ driving…`, else the last pass's age and result in its colour
-/// (`drive::result`); a tap lists `meta` (stall check, lanes, serial), then each action in plain words, a tap on one
-/// its raw code.
 fn drive(ctx: &Ctx, events: &[Event], fleet: &str, meta: Vec<String>) -> Drive {
     let pass = events.iter().rev().find(|e| e.kind == "drive-pass" && e.fleet == fleet);
     let (tone, line) = match pass {
@@ -535,7 +493,6 @@ fn drive(ctx: &Ctx, events: &[Event], fleet: &str, meta: Vec<String>) -> Drive {
     }
 }
 
-/// #775: a route's file from disk within the runner's limit: 504 for this file alone when its disk does not answer.
 fn disk_file<P: AsRef<std::path::Path>>(
     at: Option<P>,
     ct: &'static str,
@@ -588,7 +545,6 @@ impl Server<'_> {
     }
 }
 
-/// #386: a thread file's type by its extension.
 fn ctype(name: &str) -> &'static str {
     match chat::ext(name).as_str() {
         "png" => PNG,
@@ -608,20 +564,17 @@ fn esc(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// fleet.toml's mtime (ns), rendered into every form: a POST refuses STALE when it moved.
 fn mtime(ctx: &Ctx) -> String {
     let t = std::fs::metadata(&ctx.config).and_then(|m| m.modified()).ok();
     t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(String::new(), |d| d.as_nanos().to_string())
 }
 
-/// An error as the page shows it: `REFUSED <CODE>: …` or `error: …`.
 fn shown(e: &anyhow::Error) -> String {
     e.downcast_ref::<Refusal>()
         .map_or_else(|| format!("error: {e:#}"), std::string::ToString::to_string)
 }
 
-/// `v` is `name`, or `name:<port>`.
 fn names(name: &str, v: &str) -> bool {
     v == name
         || v.rsplit_once(':')
@@ -646,13 +599,11 @@ pub fn tone(state: &str) -> &'static str {
     }
 }
 
-/// Form ops only a paired device may POST.
 const PAIRED_OPS: &[&str] = &[
     "unpair", "answer", "drive", "override", "extend", "park", "unpark", "orphans", "reap", "host", "bqueue", "cond",
     "card", "config",
 ];
 
-/// The non-empty fields, ` · `-joined (no `-` placeholders).
 fn join(parts: &[&str]) -> String {
     parts
         .iter()
@@ -662,8 +613,6 @@ fn join(parts: &[&str]) -> String {
         .join(" · ")
 }
 
-/// An open ask's card (the needs strip's, #517 its issue's queue row's): `who`, its `kind` line, the thread it was
-/// asked in.
 fn need_ask(now: u64, mins: u64, ev: &[Event], a: &Event) -> NeedAsk {
     let s = |k| a.str(k).unwrap_or_default();
     let rec = a.val("recommend").as_u64().filter(|_| s("kind") == "routine");
@@ -684,7 +633,6 @@ fn need_ask(now: u64, mins: u64, ev: &[Event], a: &Event) -> NeedAsk {
     }
 }
 
-/// Corral's 8 coats (HerdArt.swift): body, shade, mane; chestnut, palomino, dun and buckskin carry a blaze.
 const COATS: &[(&str, &str, &str, bool)] = &[
     ("8a5a33", "6f4527", "2e2019", false),
     ("a05c2c", "7d4520", "5d3317", true),
@@ -706,13 +654,11 @@ pub fn coat(name: &str) -> String {
     )
 }
 
-/// The Services board row: this board's uptime and version.
 fn board(ctx: &Ctx) -> String {
     let up = age(ctx.now.saturating_sub(*STARTED.get_or_init(|| ctx.now)));
     format!("up {up} · v{}", env!("CARGO_PKG_VERSION"))
 }
 
-/// `age` since `t`, or nothing when `t` is unknown (0).
 fn ago(now: u64, t: u64) -> String {
     if t > 0 {
         age(now.saturating_sub(t))
@@ -721,8 +667,6 @@ fn ago(now: u64, t: u64) -> String {
     }
 }
 
-/// A lane as the Lanes row, its sheet card and API v1's `herd` show it: (cached title, tone, shown state, age).
-/// #46: an idle lane shows what it waits on, coloured by who; a working one keeps its state.
 type View = (Option<String>, &'static str, String, String);
 fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
     let title = l
@@ -776,7 +720,6 @@ pub fn act(role: &str, state: &str) -> &'static str {
     }
 }
 
-/// The device kind and browser from `User-Agent` ("iPhone Safari"), for the Host tab's device lists.
 fn kind(head: &str) -> String {
     let ua = header(head, "user-agent").unwrap_or_default();
     let k = |l: &[&'static str], d| l.iter().copied().find(|k| ua.contains(k)).unwrap_or(d);
@@ -815,14 +758,14 @@ impl<'a> Server<'a> {
         }
     }
 
-    /// #859: a request reads only what the background read (`refresh`), never starting a process (`serve_on`'s).
+    /// A request reads only what the background read (`refresh`), never starting a process (`serve_on`'s).
     #[must_use]
     pub fn deferring(mut self) -> Self {
         self.r.defer = true;
         self
     }
 
-    /// #859: read again, at `now`, each source's reads due by its `[limits] serve_<source>_secs` (a new one at once).
+    /// Read again, at `now`, each source's reads due by its `[limits] serve_<source>_secs` (a new one at once).
     pub fn refresh(&self, now: u64) {
         let l = Config::kept(self.ctx).map(|c| c.limits).unwrap_or_default();
         for src in fresh::Source::ALL {
@@ -832,7 +775,6 @@ impl<'a> Server<'a> {
 
     fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
         s.set_read_timeout(Some(Duration::from_secs(5)))?;
-        // #386: a thread's message carries attached files (base64, at most 10 MB each): its POST may be that long.
         let (mut buf, mut chunk, mut want, mut over) = (vec![], vec![0u8; 1 << 16], None, false);
         loop {
             let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
@@ -840,9 +782,9 @@ impl<'a> Server<'a> {
                 let h = String::from_utf8_lossy(buf.get(..i).unwrap_or_default());
                 let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
                 let most = if h.starts_with("POST /thread ") || h.starts_with("POST /action ") {
-                    140 << 20 // #405: up to 10 files a message
+                    140 << 20
                 } else if h.starts_with("POST /report ") {
-                    3 << 20 // #363: a report carries its screenshot
+                    3 << 20
                 } else {
                     32_768
                 };
@@ -874,7 +816,6 @@ impl<'a> Server<'a> {
             now: crate::now(),
             ..self.ctx.clone()
         };
-        // #501: a database error is no unpaired stream: the reply below says 503 and the page reconnects.
         let dev = live.then(|| devices::check(&ctx, header(&req, "cookie").unwrap_or_default()));
         if let Some(dev) = dev.filter(|d| !busy(d)) {
             let beat = Duration::from_secs(
@@ -899,10 +840,8 @@ impl<'a> Server<'a> {
             let mut msg = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\nevent: build\ndata: {VER:08x}\n\n"
             );
-            // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
             let q = form(query);
             let (host, st) = (q.get("tab").is_some_and(|t| t == "host"), self.ctx.state.clone());
-            // #407: a stream with a thread open stamps `watch-<thread>.at` each second: no push for it (`events::emit`).
             let t = q
                 .get("thread")
                 .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric()));
@@ -920,8 +859,6 @@ impl<'a> Server<'a> {
             }
             let ms = t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
             lock(&self.timing).add(crate::now(), "/live", false, ms);
-            // Each second: a message (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
-            // the slot), else a ping every 15 s; #352: a `?tab=host` stream stamps `host-watch.at` (`hosts::sample`).
             std::thread::spawn(move || {
                 let mut missed = 0;
                 while sent(&mut s, msg.as_bytes(), drover_core::clock::instant() + 2 * beat) {
@@ -976,12 +913,10 @@ impl<'a> Server<'a> {
         s.write_all(&out)
     }
 
-    /// #715: deliveries to type in once the reply is out (`deliver`).
     pub(crate) fn later(&self, ctx: &Ctx, jobs: impl IntoIterator<Item = (Event, String)>) {
         lock(&self.later).extend(jobs.into_iter().map(|l| (ctx.clone(), l)));
     }
 
-    /// #403: type in the lines `POST /thread` logged (`chat::deliver`).
     fn deliver(&self) {
         let jobs = std::mem::take(&mut *lock(&self.later));
         for (c, job) in jobs {
@@ -990,7 +925,6 @@ impl<'a> Server<'a> {
         }
     }
 
-    /// The watcher's 1 s tick (docs/serve.md): on a change, re-render per audience and push only the changed fragments.
     fn tick(&self) {
         let mut w = lock(&self.watch);
         let now = crate::now();
@@ -1021,8 +955,6 @@ impl<'a> Server<'a> {
             changed |= hash(&out) != w.agents.1;
             w.agents = (now, hash(&out));
         }
-        // #37: Herd's data rides the same stream, re-read every 10 s (host weather) while anyone listens;
-        // pushed only on a change (API v1's `GET herd` reads the same).
         let at = &Ctx {
             now,
             ..self.ctx.clone()
@@ -1039,7 +971,6 @@ impl<'a> Server<'a> {
         for job in agents.map(|a| chat::flush(at, &a.running())).unwrap_or_default() {
             chat::deliver(at, &self.r, &job);
         }
-        // #560: the parts are rendered only for an audience listening (a client that connects reads them afresh).
         let heard = |p: bool| lock(&self.clients).iter().any(|c| c.1.is_some() == p);
         let (anon, owner) = (heard(false), heard(true));
         let unseen = |p: bool| !w.frags.keys().any(|k| k.0 == p);
@@ -1047,8 +978,6 @@ impl<'a> Server<'a> {
         if !changed || !(anon || owner) {
             return;
         }
-        // #267: the Host tab is the TypeScript board's: a change (like a frag's, never the first render) sends its
-        // data (`host`), the same to every device.
         let mut h = self.host_tab(at);
         h.now = 0;
         let j = hash(&json!(h).to_string());
@@ -1057,7 +986,6 @@ impl<'a> Server<'a> {
             let msg = format!("id: {}\nevent: host\ndata: {}\n\n", w.seen.unwrap_or(0), json!(h));
             lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
         }
-        // #268: the Queue tab's likewise (`queue`).
         let mut q = self.queue_tab(at);
         q.now = 0;
         let j = hash(&json!(q).to_string());
@@ -1066,7 +994,6 @@ impl<'a> Server<'a> {
             let msg = format!("id: {}\nevent: queue\ndata: {}\n\n", w.seen.unwrap_or(0), json!(q));
             lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
         }
-        // #269: the needs cards, Lanes and [chat] likewise, per audience (an unpaired device sees no pane text).
         for paired in [false, true].into_iter().filter(|p| if *p { owner } else { anon }) {
             for (id, j) in self.parts(at, paired) {
                 let h = hash(&j.replace(&format!("\"now\":{now},"), ""));
@@ -1078,12 +1005,10 @@ impl<'a> Server<'a> {
         }
     }
 
-    /// Forget cached pane reads: the next render reads each pane afresh.
     fn purge(&self) {
         lock(&self.cache).retain(|k, _| !k.starts_with("pane read"));
     }
 
-    /// The runner whose reads that ran OK within the last `ttl` seconds come from the cache (else run now).
     fn cached(&self, now: u64, ttl: u64) -> Memo<'_> {
         Memo(
             &self.r,
@@ -1094,7 +1019,6 @@ impl<'a> Server<'a> {
         )
     }
 
-    /// #337: the step's snapshot (reloaded when a new one is saved) and its version (#344); none: empty.
     fn snapshot(&self) -> (Option<u64>, Arc<Snapshot>) {
         let at = crate::db::stamp(&self.ctx.state, "board");
         let mut s = lock(&self.snap);
@@ -1152,14 +1076,12 @@ impl<'a> Server<'a> {
             )
         };
         let (mut extra, mut cache) = (String::new(), "no-store");
-        // #67: a fetch-only read never becomes the page; `fetch()` sends neither header.
         let nav = header(head, "sec-fetch-mode") == Some("navigate")
             || header(head, "sec-fetch-dest") == Some("document")
             || header(head, "accept").is_some_and(|a| a.starts_with("text/html"));
         if method == "GET" && nav && path == "/lane" {
             return see("/");
         }
-        // Host/Origin-checked: the live stream, transcripts, Herd's data and every write.
         let guarded = method == "GET"
             && (["/live", "/lane"].contains(&path)
                 || path.starts_with("/thread/")
@@ -1171,7 +1093,6 @@ impl<'a> Server<'a> {
             .is_some_and(|o| PAIRED_OPS.contains(&o.as_str()));
         let loopback =
             header(head, "host").is_some_and(|h| ["127.0.0.1", "localhost", "[::1]"].iter().any(|l| names(l, h)));
-        // #501: the request's paired device, read once: a database error answers 503 ("board busy"), never 401.
         let a = OnceCell::new();
         let dev = || self.auth(ctx, head, &a).as_ref().ok();
         let deny = |msg: &str| {
@@ -1193,7 +1114,6 @@ impl<'a> Server<'a> {
             (_, p) if p.starts_with("/screens/") || p == "/action" => self.screens(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
-            // #501: `/pair/status` asks whether this browser is paired (no secrets): the page asks it on a 401.
             ("GET", "/live" | "/pair/status") if busy(self.auth(ctx, head, &a)) => deny(""),
             ("GET", "/") => self.page(ctx, &form(query), dev().is_some())
                 .map_or_else(fail, |b| ("200 OK", HTML, b.into_bytes())),
@@ -1203,21 +1123,18 @@ impl<'a> Server<'a> {
                 ("404 Not Found", "text/plain", text("no such agent pane\n")),
                 |j| ("200 OK", JSON, j.into_bytes()),
             ),
-            // #241: any theme by name (the phone picks it), theme.json resolved; an unknown name is farm.
             ("GET", p) if p.starts_with("/themes/") => match p[8..].split_once('/').filter(|(n, f)| !n.is_empty() && THEME.contains(f)) {
                 Some((n, f)) => theme(ctx, n, f).0.map_or(("404 Not Found", "text/plain", text("not in this theme\n")), |b| {
                     ("200 OK", match (f.ends_with("json"), f.ends_with("png")) { (_, true) => PNG, (true, _) => JSON, _ => SVG }, b)
                 }),
                 None => ("404 Not Found", "text/plain", text("not a theme file\n")),
             },
-            // #386: a file a thread's message carries.
             ("GET", p) if p.starts_with("/thread/") => {
                 let (t, name) = p[8..].split_once('/').unwrap_or_default();
                 let name = form(&format!("n={name}")).remove("n").unwrap_or_default();
                 let at = working(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
                 disk_file(at, ctype(&name), "no such file in the thread\n")
             }
-            // #412: a PNG of the design waiting for the owner's decision.
             ("GET", p) if p.starts_with("/design/") => {
                 let mut it = p[8..].splitn(4, '/');
                 let (f, n, i, q) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
@@ -1230,7 +1147,6 @@ impl<'a> Server<'a> {
                 let sha = k.filter(|_| q.is_some()).and_then(|k| ev.get(..k)?.iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
                 self.round_file(sha, at, "no such design file\n")
             }
-            // #417: a screenshot the issue's last verdict lists.
             ("GET", p) if p.starts_with("/shot/") => {
                 let mut it = p[6..].splitn(4, '/');
                 let (f, n, i, sha) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
@@ -1250,9 +1166,6 @@ impl<'a> Server<'a> {
                 let msg = self.op(ctx, &form(body.trim())).unwrap_or_else(|e| shown(&e));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
-            // #59: the request's `hd=` token (10 min) works once `serve approve` clears its code; `/pair/claim` then keeps it a year.
-            // #199: a re-tap replaces this browser's own open request, so repeated taps never lock it out. #288: opened on the
-            // host itself (a loopback peer naming localhost, no `tailscale serve` headers), the reply adds the approve line.
             ("POST", "/pair/request") => match devices::cancel(ctx, header(head, "cookie").unwrap_or_default())
                 .and_then(|()| devices::request(ctx, &kind(head), client(head)))
             {
@@ -1294,7 +1207,6 @@ impl<'a> Server<'a> {
             ("POST", _) => ("404 Not Found", "text/plain", text("not found\n")),
             _ => ("405 Method Not Allowed", "text/plain", text("GET or POST only\n")),
         };
-        // #501: the page's sign that this browser is paired after all (serve.js `repaired`).
         if a.get().is_some_and(Result::is_ok) {
             extra += "X-Paired: 1\r\n";
         }
@@ -1319,7 +1231,6 @@ impl<'a> Server<'a> {
         res
     }
 
-    /// `Host` names the bind address or a `[serve].allowed_hosts` name, and any `Origin` is one of those.
     fn allowed(&self, ctx: &Ctx, head: &str) -> bool {
         let mut hosts = vec![self.addr.clone().unwrap_or_default()];
         hosts.extend(Config::kept(ctx).map(|c| c.serve.allowed_hosts).unwrap_or_default());
@@ -1329,7 +1240,6 @@ impl<'a> Server<'a> {
         hosts.iter().any(|h| names(h, host)) && origin.is_none_or(|o| hosts.iter().any(|h| names(h, o)))
     }
 
-    /// The Pair this phone button (#59), on the live, writable page only.
     fn pairb(&self) -> &'static str {
         if self.addr.is_some() && self.export.is_none() {
             " <button type=button class=pairb>Pair this phone</button>"
@@ -1338,13 +1248,11 @@ impl<'a> Server<'a> {
         }
     }
 
-    /// The paired device whose token the request's `Cookie` carries, else why not (`devices::check`), read once into `a`.
     #[expect(clippy::unused_self, reason = "a method so every route reads `self.auth(..)` alike")]
     fn auth<'c>(&self, ctx: &Ctx, head: &str, a: &'c OnceCell<Auth>) -> &'c Auth {
         a.get_or_init(|| devices::check(ctx, header(head, "cookie").unwrap_or_default()))
     }
 
-    /// The reply box (or a blocked menu's option, a sheet action, a report): a paired device (cookie) prompts one agent, at most 10 sends a minute.
     fn send(
         &self,
         ctx: &Ctx,
@@ -1358,7 +1266,6 @@ impl<'a> Server<'a> {
             e if busy(e) => return ("503 Service Unavailable", "board busy, retrying".into()),
             Err(_) => return ("401 Unauthorized", "pair this device: tap Pair this phone".into()),
         };
-        // #715: the lock covers the check and the record only, never the action below.
         {
             let mut sent = lock(&self.sent);
             let times = sent.entry(dev.hash.clone()).or_default();
@@ -1375,7 +1282,6 @@ impl<'a> Server<'a> {
             self.op(ctx, &f.clone().into_iter().chain([mtime]).collect())
         } else if path == "/thread" {
             let mut later = vec![];
-            // #715: an answer's or a card's conductor wake is delivered after the reply too.
             let (res, more) = crate::conductor::deferred(|| chat::post(ctx, &self.r, f, &mut later));
             self.later(ctx, later.into_iter().chain(more));
             res
@@ -1402,7 +1308,6 @@ impl<'a> Server<'a> {
         res.map_or_else(|e| ("409 Conflict", shown(&e)), |msg| ("200 OK", msg))
     }
 
-    /// The live fleet lane `agent` with its fleet and pane; refused PAUSED when its fleet is.
     fn lane(&self, ctx: &Ctx, agent: &str) -> Result<(lanes::Lane, String, String)> {
         let (cfg, events) = (Config::kept(ctx)?, working(&ctx.state)?);
         let all = self
@@ -1444,7 +1349,6 @@ impl<'a> Server<'a> {
         Ok(format!("sent to {agent}"))
     }
 
-    /// A sheet action (`drover stop|kill|clean --lane`, or `close <pane>` for an Others agent; kill and clean dry-run without `confirm=1`); logs `act` unless a dry run.
     fn act(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Act) -> Result<String> {
         let (mut out, cfg) = (vec![], Config::kept(ctx)?);
         let (agent, yes, op) = (f.agent.as_str(), f.confirm == "1", f.op.as_str());
@@ -1474,8 +1378,6 @@ impl<'a> Server<'a> {
         Ok(String::from_utf8_lossy(&out).trim().replace('\n', "; "))
     }
 
-    /// The sheet's transcript: shed's own log of the lane (`session::transcript`): a PTY session's text, up to 200
-    /// masked lines `before` the newest (load more); an ACP session's events go as `blocks` (API v1), as JSON.
     fn transcript(&self, ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
         if let Some(p) = q.get("setup") {
             return crate::setup::screen(ctx, &self.r, p).ok().map(|j| j.to_string());
@@ -1550,10 +1452,8 @@ impl<'a> Server<'a> {
         .ok()
     }
 
-    /// Run one form write; the line shown on the page (CLI output, or `REFUSED <CODE>: …` via `shown`).
     fn write(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
         let g = |k: &str| f.get(k).map_or("", String::as_str);
-        // #66: a short line for the toast, not the CLI's stdout (a queue move prints the whole queue).
         let (fleet, mut out) = (g("fleet"), vec![]);
         Ok(match g("op") {
             "mv" => {
@@ -1607,7 +1507,6 @@ impl<'a> Server<'a> {
                 crate::drive::drive(ctx, &cfg, &self.r, &mut out, Some(fleet), true, false)?;
                 crate::drive::summary(fleet, &String::from_utf8_lossy(&out))
             }
-            // #130: a needs-human card's buttons.
             op @ ("override" | "extend" | "park") => {
                 let n = g("issue").parse().context("no issue")?;
                 let why = (op == "park").then_some(g("why"));
@@ -1623,7 +1522,6 @@ impl<'a> Server<'a> {
                 crate::drive::kick(ctx, &self.r, fleet, n, "board");
                 format!("#{n}: {op}")
             }
-            // #712: a parked row's [unpark]; drive's next pass picks it up.
             "unpark" => {
                 let n = g("issue").parse().context("no issue")?;
                 crate::gate::unpark(ctx, &Config::load(&ctx.config)?, &mut out, (fleet, n), "owner")?;
@@ -1660,7 +1558,6 @@ impl<'a> Server<'a> {
         })
     }
 
-    /// #269: the needs cards, the Lanes tab and the [chat] tab as API v1 sends them (JSON), for a device (`paired`).
     fn parts(&self, ctx: &Ctx, paired: bool) -> [(&'static str, String); 3] {
         let rw = paired && self.addr.is_some();
         [
@@ -1686,7 +1583,6 @@ impl<'a> Server<'a> {
             if root.is_empty() { " data-root=\"\"" } else { "" },
             if demo { " data-demo=1" } else { "" }
         );
-        // #199: iOS keeps Safari's and the home-screen app's cookies apart.
         let msg = if !paired && !self.pairb().is_empty() && devices::load(ctx).iter().any(|d| d.code.is_none()) {
             msg + "<p class=m>Safari and the home-screen app pair separately</p>"
         } else {
@@ -1697,12 +1593,9 @@ impl<'a> Server<'a> {
         } else {
             msg
         };
-        // #241: the phone's theme (localStorage, before the first paint), default `[serve] theme`; [⚙] picks it.
         let name = active(ctx);
         let th = serde_json::to_string(&name)?.replace('<', "\\u003c");
         let names = BUILT.iter().copied().chain([name.as_str()]).collect::<BTreeSet<_>>();
-        // #244: every colour scheme (the page gates them) and each theme's default; the first paint is the phone's last
-        // scheme (the page keeps its block), else the board theme's built-in default.
         let def: BTreeMap<_, serde_json::Value> = names
             .iter()
             .map(|n| (*n, theme(ctx, n, "theme.json").0.unwrap_or_default()))
@@ -1713,7 +1606,6 @@ impl<'a> Server<'a> {
                 )
             })
             .collect();
-        // #423: a `{light, dark}` default paints the phone's own by `prefers-color-scheme`.
         let block = |want: &serde_json::Value| -> Result<String> {
             let b = SCHEMES.iter().find(|s| *want == s.0).unwrap_or(&SCHEMES[0]);
             let b: serde_json::Value = serde_json::from_slice(b.1)?;
@@ -1740,9 +1632,7 @@ impl<'a> Server<'a> {
             d => block(d)?,
         };
         let sd = json!({"t": def, "s": schemes(ctx)}).to_string().replace('<', "\\u003c");
-        // #927: the places cooee-plugin.toml declares: the page's tabs, its [⚙] screens and the cards (web/src/main.ts).
         let pl = screens::page_places().to_string().replace('<', "\\u003c");
-        // #406: the page opened at any other path (the SW's copy) moves to the root before the body.
         let home = if root.is_empty() {
             ""
         } else {
@@ -1785,17 +1675,12 @@ impl<'a> Server<'a> {
         ))
     }
 
-    /// #269: API v1's `needs` for a device (`paired`: pane text and the lane and issue forms), the cards above every
-    /// tab (web/src/needs.ts draws them): the open asks (options recommended first, a free-text box), each blocked
-    /// lane's pending prompt, then the `needs-human` issues.
     fn needs_tab(&self, ctx: &Ctx, paired: bool) -> NeedsTab {
         let events = working(&ctx.state).unwrap_or_default();
         let (cfg, st) = (Config::kept(ctx).ok(), &events.states);
         let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
         let all = cfg.and_then(|c| self.lanes(ctx.now, c, ev, st)).unwrap_or_default();
         let mins = cfg.map_or(Limits::default().ask_default_minutes, |c| c.limits.ask_default_minutes);
-        // #386: a conductor's asks wait in its thread (amber), not in this stack; #412: a design's here too.
-        // #517: but one tied to an issue: its card is answerable here too.
         let asks = crate::events::open_asks(ev)
             .into_iter()
             .filter(|a| asked_here(a))
@@ -1818,8 +1703,6 @@ impl<'a> Server<'a> {
         }
     }
 
-    /// #130: each `needs-human` issue's card: why, the last verdict, then (paired) merge anyway (PASS at head,
-    /// CI green, mergeable), one more round, park.
     fn needs_human(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], st: &States) -> Vec<NeedIssue> {
         let card = |s: &IssueState, pending: bool| {
             let (f, n) = (&s.fleet, s.issue);
@@ -1846,7 +1729,6 @@ impl<'a> Server<'a> {
                 repo: fc.map(|c| c.repo.clone()),
                 mergeable: m.to_lowercase(),
                 merge: fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE",
-                // #417: the last verdict's screenshots (a verify FAIL's), as `/shot/<fleet>/<n>/<i>` serves them.
                 shots: crate::verify::served(events, (f, n), None)
                     .into_iter()
                     .map(|x| x.0)
@@ -1858,13 +1740,11 @@ impl<'a> Server<'a> {
                     .map(String::from),
             }
         };
-        // #217: a failed extend's card is back; a recorded one with no lane yet is one muted line, no buttons.
         st.values()
             .filter_map(|s| pending(events, s).map(|p| card(s, p)))
             .collect()
     }
 
-    /// #1089: the needs-you cards' count (blocked lanes, asks, issues), as the old `[queue·N]` counted them.
     pub(super) fn needs_count(&self, ctx: &Ctx, events: &crate::events::Log) -> usize {
         let cfg = Config::kept(ctx).ok();
         let all = cfg.and_then(|c| self.lanes(ctx.now, &c, events, &events.states));
@@ -1873,7 +1753,6 @@ impl<'a> Server<'a> {
         blocked + asks.count() + events.states.values().filter(|s| pending(events, s).is_some()).count()
     }
 
-    /// A blocked lane's card: shed's note as its activity; paired, the last 6 masked lines of shed's text as they are.
     fn blocked(&self, ctx: &Ctx, l: &lanes::Lane, paired: bool) -> Blocked {
         let memo = self.cached(ctx.now, 2);
         let on = l.on(&memo);
@@ -1899,8 +1778,6 @@ impl<'a> Server<'a> {
         Some(crate::session::all(&cfg, &self.cached(now, 10))).filter(crate::session::Sessions::listed)
     }
 
-    /// #268: API v1's `queue`, the Queue tab's data (web/src/queue.ts draws it): per configured fleet a card (#162),
-    /// open work (needs you, ready, working, queued), `done today`; paused = one line.
     fn queue_tab(&self, ctx: &Ctx) -> QueueTab {
         let (now, rw) = (ctx.now, self.addr.is_some());
         let mut d = QueueTab {
@@ -1910,7 +1787,6 @@ impl<'a> Server<'a> {
             mtime: mtime(ctx),
             ..QueueTab::default()
         };
-        // #483: the error's own text, config or log (e.g. `migrate --live`), not a fixed line.
         let (cfg, events) = match (Config::kept(ctx), working(&ctx.state)) {
             (Ok(c), Ok(e)) => (c, e),
             (Err(e), _) | (_, Err(e)) => {
@@ -1958,7 +1834,6 @@ impl<'a> Server<'a> {
                 let word = s.and_then(gone).map(|l| l.state.word());
                 let state = word.as_deref().unwrap_or(shown);
                 let dead = state == "dead";
-                // #162: needs you, then ready, then working, then queued; serve.js keeps follow-ups under their parent.
                 let rank = match state.split('(').next().unwrap_or_default() {
                     "needs-human" | "⏸ waiting: decision" => 0,
                     "ready" => 1,
@@ -1966,7 +1841,7 @@ impl<'a> Server<'a> {
                     _ => 3,
                 };
                 let lane = s.and_then(|s| s.lane.as_deref()).unwrap_or_default();
-                let on = ls.iter().find(|l| !lane.is_empty() && l.name == lane); // #609
+                let on = ls.iter().find(|l| !lane.is_empty() && l.name == lane);
                 let pr = gh::cached_pr(ctx, f, n);
                 let head = pr.at("headRefOid").as_str().unwrap_or_default();
                 let mut seen = BTreeSet::new();
@@ -1989,21 +1864,17 @@ impl<'a> Server<'a> {
                     })
                     .collect();
                 let mut notes: Vec<String> = crate::land::note(events, f, n).into_iter().collect();
-                // #712: why it was parked (`park --why`).
                 notes.extend(queue::park_why(events, st, f, n).map(|w| format!("parked: {w}")));
-                // #417: a verify stage passed on at this head for want of the repo's recipe.
                 let bare = |e: &&&Event| e.kind == "verify-no-recipe" && e.str("sha") == Some(head);
                 notes.extend(
                     of.iter()
                         .rfind(bare)
                         .map(|_| format!("verify skipped: no {}", crate::verify::RECIPE)),
                 );
-                // #325: an answer that never reached the lane stays red until drive types it in.
                 for u in undelivered.iter().filter(|u| u.issue == Some(n)) {
                     let (id, why) = (u.str("id").unwrap_or("?"), u.str("reason").unwrap_or("?"));
                     notes.push(format!("answer {id} not delivered: {why}"));
                 }
-                // #99: a decision taken by default, with [change]: a new decision on the same ask.
                 let last = of.iter().rev().find(|e| e.kind == "decision").copied();
                 let decided = last.filter(|d| d.str("by") == Some("default"));
                 let asked = |d: &Event| {
@@ -2023,7 +1894,6 @@ impl<'a> Server<'a> {
                         state: state.into(),
                         tone: tone(state).into(),
                         age: ago(now, s.map_or(0, |s| s.last_ts)),
-                        // #367: the time it counts from too (fixed, so /live sends no change a second).
                         t: s.map_or(now, |s| s.last_ts),
                         act: act(if up { "update" } else { "" }, state).into(),
                         grow: stage(state, act(if up { "update" } else { "" }, state)).into(),
@@ -2075,7 +1945,6 @@ impl<'a> Server<'a> {
                 pr: e.str("pr").map(Into::into),
                 sha: e.str("merge_sha").map(Into::into),
             };
-            // #365: open issues not queued, with no lane, from the last read; serve.js draws, filters, ticks (`bqueue`) them.
             let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
             let mut open: BTreeMap<String, BacklogIssue> =
                 serde_json::from_value(bl.at("issues").clone()).unwrap_or_default();
@@ -2090,7 +1959,6 @@ impl<'a> Server<'a> {
                 name: f.clone(),
                 k: fc.color(f).into(),
                 serial: fc.serial.iter().map(|g| g.name.clone()).collect(),
-                // #294: a group's paths (serve.js splits the groups by ` | `).
                 paths: fc.serial.iter().map(|g| g.paths.join(", ")).collect(),
                 need,
                 rows: rows.into_iter().map(|r| r.1).collect(),
@@ -2131,9 +1999,8 @@ impl<'a> Server<'a> {
             if !lanes.is_empty() {
                 meta.push(format!("{} lane{}", lanes.len(), plural(lanes.len())));
             }
-            meta.extend(queue::serial_use(events, st, f, Some(cfg)));
+            meta.extend(queue::fleet_use(ctx, events, st, f, Some(cfg)));
             card.drive = drive(ctx, events, f, meta);
-            // #173: a refused pipeline stops this fleet only; its card says so in red.
             if !fc.bad.is_empty() {
                 let n = fc.bad.len();
                 card.notes.push(format!(
@@ -2141,13 +2008,11 @@ impl<'a> Server<'a> {
                     plural(n)
                 ));
             }
-            // #350: fast-first landings wait while integration is red.
             if let Some(p) = crate::land::paused(events, f) {
                 let at = p.str("at").unwrap_or("?");
                 card.notes
                     .push(format!("landing paused: {} red since {at}", fc.integration));
             }
-            // #429: `check`'s measurement of integration within `warn_within` of its line cap.
             let cap: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "cap", f, 0)).unwrap_or_default();
             let left = cap.at("cap").as_i64().zip(cap.at("lines").as_i64()).map(|(c, n)| c - n);
             if let Some(l) = left.filter(|l| *l < cap.at("warn").as_i64().unwrap_or(500)) {
@@ -2156,7 +2021,6 @@ impl<'a> Server<'a> {
             }
             d.fleets.push(card);
         }
-        // #162: fleets that need you first, then by name.
         d.fleets.sort_by_key(|c| c.need == 0);
         d
     }
@@ -2167,8 +2031,6 @@ impl<'a> Server<'a> {
     }
 
     fn waits(&self, ctx: &Ctx, cfg: &Config, events: &[Event], all: &[lanes::Lane]) -> Vec<crate::waiting::Waiting> {
-        // #560: the waits for this log and these lanes are kept (30 s at most): a log that moved since the step's
-        // snapshot has them worked out once, not per request.
         type Live = Option<(std::path::PathBuf, String, Vec<crate::waiting::Waiting>)>;
         static LIVE: Mutex<Live> = Mutex::new(None);
         let snap = self.snapshot().1;
@@ -2181,8 +2043,6 @@ impl<'a> Server<'a> {
         w
     }
 
-    /// #37: Herd's data (API v1's `GET herd`, the `herd` event; docs/serve.md).
-    /// `weather` (loopback only) forces the host values.
     fn herd(&self, ctx: &Ctx, weather: Option<&str>) -> Result<Herd> {
         let events = working(&ctx.state)?;
         let (cfg, st) = (Config::kept(ctx)?, &events.states);
@@ -2190,10 +2050,9 @@ impl<'a> Server<'a> {
         let waits = self.waits(ctx, &cfg, &events, &all);
         let lanes = |f: Option<&String>| -> Vec<_> {
             all.iter()
-                .filter(|l| l.fleet.as_ref() == f && l.state.word() != "asleep") // #422: no asleep conductor in the herd
+                .filter(|l| l.fleet.as_ref() == f && l.state.word() != "asleep")
                 .map(|l| {
                     let (title, tone, shown, a) = view(ctx, l, &waits);
-                    // #239: a fix round's lane has role impl; the issue's state says it is fixing.
                     let is = l.issue.and_then(|i| st.get(&(f?.clone(), i)));
                     let is = is.map_or("", |s| s.state.as_str());
                     let act = match (act(&l.role, &l.state.word()), act(&l.role, is)) {
@@ -2284,8 +2143,6 @@ impl<'a> Server<'a> {
         })
     }
 
-    /// #269: API v1's `lanes` for a device (`paired`), the Lanes tab (web/src/lanes.ts draws it): state sections, fleet
-    /// subgroups inside; a row opens the bottom sheet (serve.js) with its hidden card.
     fn lanes_tab(&self, ctx: &Ctx, paired: bool) -> LanesTab {
         let mut t = LanesTab {
             now: ctx.now,
@@ -2363,7 +2220,6 @@ impl<'a> Server<'a> {
             n: Some(n),
             t: None,
         });
-        // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
         let (why, why_tone) = match (sup, &w) {
@@ -2395,7 +2251,7 @@ impl<'a> Server<'a> {
             },
             now: busy,
             gone: l.session.is_none(),
-            thread: l.thread.clone(), // #422: a tap opens it
+            thread: l.thread.clone(),
             head: format!("{issue} {}", o(&title)).trim().into(),
             shown,
             facts: join(&facts.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -2412,8 +2268,6 @@ impl<'a> Server<'a> {
         lock(&self.host).clone()
     }
 
-    /// #141: the Host tab as data (API v1's `host`; web/src/host.ts draws it): the host cards, then FLEET DISK, SERVICES,
-    /// FLEETS and ALERTS rows with a status; serve.js ranks them.
     fn host_tab(&self, ctx: &Ctx) -> HostTab {
         let (cfg, events) = (Config::kept(ctx).ok(), working(&ctx.state).unwrap_or_default());
         let (cfg, events) = (cfg.as_ref(), &events);
@@ -2433,8 +2287,6 @@ impl<'a> Server<'a> {
             hosts: self.cards(ctx, cfg.unwrap_or(&dc), r, events, &hs),
             ..HostTab::default()
         };
-        // #164: the worktree total from the last walk (and its age, #160) against the budget, and folders of no
-        // fleet under the worktree root, removed only from here (paired) or `clean --orphans --yes`.
         if let Some(c) = cfg {
             let budget = lim.worktree_budget_gb;
             let (gb, at) = crate::check::worktree_du(ctx).unzip();
@@ -2446,7 +2298,6 @@ impl<'a> Server<'a> {
             });
             d.orphans = crate::check::orphan_dirs(ctx, c).len();
         }
-        // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
         let left = cfg.zip(crate::session::live_on(r).ok()).map_or(vec![], |(c, a)| {
             crate::check::leftovers(ctx, c, r, &a, false).unwrap_or_default()
         });
@@ -2458,7 +2309,6 @@ impl<'a> Server<'a> {
             let mb = format!("{:.0}", kb / 1024.0);
             d.leftovers = Some(Leftovers { n: left.len(), mb });
         }
-        // #333: spawns starting against `max_parallel_spawns`, and the stale markers swept in the last day.
         if let Some(c) = cfg {
             let sl = crate::drive::spawns_line(ctx, c, r, events);
             let (k, v) = sl.split_once(' ').unwrap_or_default();
@@ -2469,7 +2319,6 @@ impl<'a> Server<'a> {
                 ..Row::default()
             });
         }
-        // #98: green, amber or red per service, what clears it otherwise.
         let svc = |s: &crate::timer::Row| ["board", "tick", "fast step"].contains(&s.0.as_str());
         let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board(ctx))));
         let row = |(name, t, detail, fix): crate::timer::Row| Row {
@@ -2479,7 +2328,6 @@ impl<'a> Server<'a> {
             fix,
         };
         d.services = rows.into_iter().filter(svc).map(row).collect();
-        // #172: the board's theme; amber when its theme.json is invalid (farm shows), with the first problem (#241).
         let name = active(ctx);
         let err = theme(ctx, &name, "theme.json").1.err();
         d.theme = Row {
@@ -2501,7 +2349,6 @@ impl<'a> Server<'a> {
                     ..Balance::default()
                 },
             });
-        // Each fleet's last `driven` result in plain words, the raw line on tap; an owner's pause is grey (no problem).
         for (name, fc) in cfg.map(|c| &c.fleet).into_iter().flatten() {
             let last = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);
             let (t, w, x) = match last {
@@ -2519,7 +2366,6 @@ impl<'a> Server<'a> {
                 raw: e.and_then(|e| e.str("result")).map(String::from),
             });
         }
-        // #87: on/off from fleet.toml; the last `push-sent`, unless a webpush `notify-failed` is newer.
         let (t, detail) = crate::timer::phone(ctx, cfg, events);
         d.push = Row {
             name: "push".into(),
@@ -2527,7 +2373,6 @@ impl<'a> Server<'a> {
             detail,
             ..Row::default()
         };
-        // #440: the global notifiers in words, for System's Notifications.
         if let Some(c) = cfg {
             let notifier = |n: &crate::config::Notify| crate::api::Notifier {
                 kind: if n.kind.as_deref() == Some("webpush") {
@@ -2545,7 +2390,6 @@ impl<'a> Server<'a> {
             d.notify = c.notify.iter().map(notifier).collect();
         }
         if live {
-            // #18: the button shows only in the Home Screen app (serve.js); endpoints and keys stay on the Mac.
             let key = crate::webpush::vapid(&ctx.state)
                 .map(|k| crate::webpush::public(&k))
                 .unwrap_or_default();
@@ -2571,9 +2415,6 @@ impl<'a> Server<'a> {
         d
     }
 
-    /// #234: one card per host (main first, then A→Z), each with the same rows: the state, why its dot is amber or red
-    /// and [off]/[on] in its head, then load/cpu, swap-out, memory, disk, top memory, lanes and tags. A row with history
-    /// carries its 24 h sparkline (worst per bucket); a tap loads its chart (`frag?id=hist`, an export inline).
     fn cards(&self, ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], hs: &Host) -> Vec<HostCard> {
         let (lim, seen, hist, now) = (
             &cfg.limits,
@@ -2600,8 +2441,6 @@ impl<'a> Server<'a> {
                 ((s.disk, s.disk_total), s.mem_total) = (host::df(r).unzip(), hs.mem_total_gb);
                 let all = crate::session::live_on(r).unwrap_or_default();
                 s.top = host::top(r, &all);
-                // #248, #316: what each harness's lanes hold (their pane trees), working and done apart, so done-lane
-                // memory shows; an agent is its harness's by `Harness::process_names`, else by its own label.
                 let mut by: BTreeMap<String, Vec<&crate::session::Session>> = BTreeMap::new();
                 for (a, label) in all.iter().filter_map(|a| {
                     Some((
@@ -2653,8 +2492,6 @@ impl<'a> Server<'a> {
                     ..v
                 }
             };
-            // A gauge row's value, one line (an offline host's age is in its head): (status, cell). `used`: (used, size) when the bar shows the used part (free
-            // space, its status from the floor `l`); else the bar is the value against the limit `l`.
             let val = |x: Option<f64>,
                        g: Option<f64>,
                        l: f64,
@@ -2702,14 +2539,12 @@ impl<'a> Server<'a> {
                 None,
                 (2, "", "", of(lim.load_per_cpu), vec![]),
             );
-            // #168: swap-out's status is the window's median (the rule, with pressure warn/critical); `now` is one sample.
             let avg = gate.swap_median.map(|m| format!("· {m:.0} avg"));
             let sw = (0, "", "", of(lim.swapout_rate), avg.into_iter().collect());
             let (st, sv) = val(s.swap, gate.swap_median.or(s.swap), lim.swapout_rate, None, sw);
             let size = |n: Option<f64>, p: usize| n.map(|n| format!("of {n:.p$}"));
             let pw = word(s.pressure).unwrap_or("?");
             let used = |f: Option<f64>, n: Option<f64>| f.zip(n).map(|(f, n)| (n - f, n));
-            // The pressure word only when it is up, so the value stays one line at 390.
             let pr = (pw != "normal").then(|| format!("· {pw}"));
             let mm = (
                 1,
@@ -2751,7 +2586,6 @@ impl<'a> Server<'a> {
                     .map(|(h, gb, ls)| plain(&h, grey("g"), Some(gb), String::new(), vec![ls])),
             );
             rows.push(row("disk", "disk", grey(dt), dv, Some(lim.min_free_gb)));
-            // #223: the top memory users and their owner, so a hog outside the lanes shows at a glance.
             if !s.top.is_empty() {
                 let at = (!main).then(|| format!("· {} ago", age(now.saturating_sub(s.seen))));
                 rows.push(plain(
@@ -2772,7 +2606,6 @@ impl<'a> Server<'a> {
             rows.push(row("lanes", "lanes", grey("g"), ln, None));
             let tags = h.map_or(s.tags.clone(), |h| crate::hosts::tags(h, Some(&s))).join(" ");
             rows.push(plain("tags", "m", None, String::new(), vec![tags]));
-            // Why the dot is amber or red, in words: the rows at the worst status.
             let rank = |t: &str| "gar".find(t).unwrap_or(0);
             let worst = [lt, st, mt, dt].map(rank).into_iter().max().unwrap_or(0);
             let dot = grey("gar".get(worst..=worst).unwrap_or("g"));
@@ -2808,7 +2641,6 @@ impl<'a> Server<'a> {
                     .filter(|_| !(main && on))
                     .map(|_| if on { "off" } else { "on" }.into()),
                 lanes: lanes.len(),
-                // #303: [sign in ▾]: the configured logins by name; the sheet runs one in a pane on this host.
                 setups: crate::setup::all(cfg).into_iter().map(|(s, _)| s).collect(),
                 name,
             });
@@ -2817,8 +2649,6 @@ impl<'a> Server<'a> {
     }
 }
 
-/// #141: a 12-cell text gauge of `x` (value ÷ limit; disk: floor ÷ free): its status, cells full, how far past the limit.
-/// Green under 80 %, amber to 100 %, red past it (the value then leads with `▶`).
 fn gauge(x: f64) -> Bar {
     let i = usize::from(x >= 0.8) + usize::from(x > 1.0);
     let t = "gar".get(i..=i).unwrap_or("g");
@@ -2831,8 +2661,6 @@ fn gauge(x: f64) -> Bar {
     }
 }
 
-/// #141: a `driven` result as the Host tab says it, by code (`ok:<step>` when it ran): status, word, the plain rest with
-/// what clears it. `{why}`/`{then}`: the raw reason's first two `;` parts; `{busy}`: the issues in the way.
 const WORDS: &str = "HOST_BUSY|a|held|the host is busy: {why} · starts again when it drops
 DISK_LOW|a|held|{why} GB floor · `drover clean --yes`
 LOGIN_NEEDED|a|held|{why}
@@ -2853,7 +2681,7 @@ ok:fix|g|started|fix #{n}
 ok:conflict|g|started|update #{n}
 ok:|g|started|#{n}";
 
-/// #141: a `driven` event in plain words (WORDS, else `failed` and the raw `result`); `serial`: the fleet's label.
+/// A `driven` event in plain words (WORDS, else `failed` and the raw `result`); `serial`: the fleet's label.
 pub fn in_words(e: &Event, serial: &str) -> (&'static str, &'static str, String) {
     let (raw, n) = (e.str("result").unwrap_or_default(), e.issue.unwrap_or(0).to_string());
     let body = raw.split_once(": ").map_or(raw, |x| x.1);
@@ -2878,22 +2706,19 @@ pub fn in_words(e: &Event, serial: &str) -> (&'static str, &'static str, String)
     (t, k, x.replace("{raw}", raw))
 }
 
-/// `--demo`'s runner (#39): `runner.json`'s stdout for the longest matching command-line prefix, else exit 1.
 #[derive(Default)]
 struct Canned(BTreeMap<String, String>);
 
 impl Runner for Canned {
     fn run(&self, prog: &str, args: &[String]) -> Result<crate::runner::Out> {
-        let line = format!("{prog} {}", args.join(" "));
-        let out = self
-            .0
-            .iter()
-            .filter(|(k, _)| line.starts_with(k.as_str()))
-            .max_by_key(|(k, _)| k.len());
-        Ok(crate::runner::Out {
-            code: i32::from(out.is_none()),
-            stdout: out.map_or(String::new(), |o| o.1.clone()),
-            stderr: String::new(),
+        crate::snapshot::each_probe(prog, args, &|prog, args| {
+            let line = format!("{prog} {}", args.join(" "));
+            let out = self.0.iter().rev().find(|(k, _)| line.starts_with(k.as_str()));
+            Ok(crate::runner::Out {
+                code: i32::from(out.is_none()),
+                stdout: out.map_or(String::new(), |o| o.1.clone()),
+                stderr: String::new(),
+            })
         })
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<crate::runner::Out> {
@@ -2929,7 +2754,6 @@ impl Runner for Canned {
     }
 }
 
-/// #172: the files a theme folder may hold; `/themes/<name>/<file>` serves nothing else (#241: and its icons).
 const THEME: [&str; 6] = [
     "sprites.svg",
     "theme.json",
@@ -2938,9 +2762,7 @@ const THEME: [&str; 6] = [
     "icon-192.png",
     "icon-512.png",
 ];
-/// #241: the built-in themes, the `[theme]` picker's choices (a `[serve] theme` of your own joins them).
 const BUILT: [&str; 4] = ["farm", "kitchen", "garden", "terminal"];
-/// #241: the actions a theme draws (docs/themes.md), each with the pose it falls back to.
 const ACTS: [(&str, &str); 7] = [
     ("impl", "working"),
     ("fix", "working"),
@@ -2951,11 +2773,8 @@ const ACTS: [(&str, &str); 7] = [
     ("blocked", "blocked"),
 ];
 
-/// #423: an issue's growth stages, a theme's `stages` keys.
 const STAGES: [&str; 7] = ["queued", "impl", "review", "fix", "ready", "merged", "blocked"];
 
-/// #423: the growth stage of an issue in `state` whose lane draws action `act`: its pipeline state, wilted while it is
-/// stuck (blocked, dead, needs you); a lane's action where the state says nothing more.
 pub fn stage(state: &str, act: &str) -> &'static str {
     match (state.split('(').next().unwrap_or_default(), act) {
         ("blocked" | "dead" | "needs-human" | "⏸ waiting: decision", _) | (_, "blocked") => "blocked",
@@ -2968,7 +2787,6 @@ pub fn stage(state: &str, act: &str) -> &'static str {
     }
 }
 
-/// The board's theme: `[serve] theme`, default `farm`.
 fn active(ctx: &Ctx) -> String {
     Config::kept(ctx)
         .ok()
@@ -2976,16 +2794,15 @@ fn active(ctx: &Ctx) -> String {
         .unwrap_or_else(|| "farm".into())
 }
 
-/// #241: a contract rule: does a value pass.
 type Check<'a> = &'a dyn Fn(&serde_json::Value) -> bool;
 
-/// #241: a theme.json against the contract (docs/themes.md); the first problem in words.
+/// A theme.json against the contract (docs/themes.md); the first problem in words.
 pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
     use serde_json::Value;
     let v: Value = serde_json::from_slice(j).map_err(|e| format!("not JSON ({e})"))?;
     let o = v.as_object().ok_or("not a JSON object")?;
     let acts: Vec<&str> = ACTS.iter().map(|a| a.0).collect();
-    let rows = [&acts[..], &["queued", "needs", "merged", "fail"]].concat(); // #370: Queue and Events kinds too
+    let rows = [&acts[..], &["queued", "needs", "merged", "fail"]].concat();
     let id = |x: &Value| x.is_string();
     let moment = |x: &Value| {
         x.as_object().is_some_and(|m| {
@@ -2997,7 +2814,6 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
         })
     };
     let icon = |x: &Value| x.as_str().is_some_and(|f| f.starts_with("icon-") && THEME.contains(&f));
-    // Column-width-safe: at most 3 lines of 8 characters, none of them wide (CJK, emoji) or a control.
     let narrow = |x: &Value| {
         x.as_str().is_some_and(|t| {
             t.lines().count() <= 3
@@ -3008,12 +2824,11 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
                 })
         })
     };
-    // #335: a row figure is one line of 3 (its 24 px box), the Host miniature's load one line of 5.
     let line = |x: &Value, n| narrow(x) && x.as_str().is_some_and(|t| !t.contains('\n') && t.chars().count() <= n);
     let (row, load) = (|x: &Value| line(x, 3), |x: &Value| line(x, 5));
     let maps: [(&str, &[&str], Check, &str); 12] = [
         ("poses", &["working", "idle", "done", "blocked"], &id, "a sprite id"),
-        ("stages", &STAGES, &id, "a sprite id"), // #423
+        ("stages", &STAGES, &id, "a sprite id"),
         ("glyphs", &[], &id, "a string"),
         ("words", &[], &id, "a string"),
         ("actions", &acts, &id, "a sprite id"),
@@ -3069,7 +2884,6 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
                 .all(|(k, y)| ["calm", "busy", "held"].contains(&k.as_str()) && y.is_string())
         })
     };
-    // #423: a species is a look with its sprite suffix, `id`.
     let species = |x: &Value| {
         x["id"].is_string()
             && x.as_object().is_some_and(|m| {
@@ -3135,9 +2949,6 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
     }
 }
 
-/// #241: a valid theme.json with what it lacks filled in (docs/themes.md): an action is the theme's own, else its
-/// pose's sprite, else farm's; a row sprite its action's; the rail item its idle action, the needs variant the item;
-/// `loading` only the theme's own; the rest farm's, key by key.
 pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json::Value {
     use serde_json::Value;
     let mut t = farm.clone();
@@ -3166,15 +2977,13 @@ pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json:
     let needs = pick("rail", "needs").unwrap_or_else(|| item.clone());
     rail.put("item", item).put("needs", needs);
     t.put("actions", acts).put("row_sprites", rows);
-    t.put("words", own.get("words").cloned().unwrap_or_else(|| json!({}))); // #370: a word it lacks is the plain one
+    t.put("words", own.get("words").cloned().unwrap_or_else(|| json!({})));
     t.put("scheme", own.get("scheme").cloned().unwrap_or("github-dark".into()));
-    t.put("loading", own.get("loading").cloned().unwrap_or_default()); // #305: none is the spinning ↻, never farm's
+    t.put("loading", own.get("loading").cloned().unwrap_or_default());
     t.put("rail", rail);
     t
 }
 
-/// #244: every colour scheme by name: the built-ins, then `<config dir>/schemes/<name>.json` (one named like a
-/// built-in wins). Unchecked here: the page gates each one (serve.js) before it offers it; unreadable JSON is `null`.
 fn schemes(ctx: &Ctx) -> BTreeMap<String, serde_json::Value> {
     let own = std::fs::read_dir(ctx.config.with_file_name("schemes"))
         .into_iter()
@@ -3190,8 +2999,6 @@ fn schemes(ctx: &Ctx) -> BTreeMap<String, serde_json::Value> {
         .collect()
 }
 
-/// Theme `name`'s `file` (`<config dir>/themes/<name>/`, then the built-in `<name>`, then farm's; an icon then the
-/// board's), and its theme.json checked: an invalid or missing one means farm's files. `theme.json` comes resolved.
 fn theme(ctx: &Ctx, name: &str, file: &str) -> (Option<Vec<u8>>, Result<(), String>) {
     let get = |n: &str, f: &str| {
         let own = ctx.config.with_file_name("themes").join(n).join(f);
@@ -3218,7 +3025,7 @@ fn theme(ctx: &Ctx, name: &str, file: &str) -> (Option<Vec<u8>>, Result<(), Stri
     (body, own.map(|_| ()))
 }
 
-/// `serve --export <dir> [--demo]` (#39, docs/serve.md): the page and its files as static files with relative URLs.
+/// `serve --export <dir> [--demo]` (docs/serve.md): the page and its files as static files with relative URLs.
 pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> Result<()> {
     let canned = if demo {
         Canned(serde_json::from_str(&std::fs::read_to_string(
@@ -3227,7 +3034,6 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     } else {
         Canned::default()
     };
-    // #344: the demo's log goes into a scratch database, so `demo/` stays as committed.
     let _scratch = demo.then(crate::db::Scratch::start);
     let (r, events): (&dyn Runner, _) = (if demo { &canned } else { r }, working(&ctx.state)?);
     let ctx = &Ctx {
@@ -3246,7 +3052,6 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     let page = s.page(ctx, &BTreeMap::new(), demo)?;
     let sw = SW.replace("@V", &format!("{VER:08x}"));
     let v = format!("a/{VER:08x}/");
-    // #63: the demo-only `?audit=<view>` UI gate (scripts/ui-audit.sh); never in the live page.
     let page = if demo {
         page.replace(
             "</body>",
@@ -3255,7 +3060,6 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     } else {
         page
     };
-    // #927: the screens the page draws, as files (each lane's sheet too).
     let mut files = vec![
         ("index.html".to_string(), page.into_bytes()),
         ("sw.js".into(), sw.into_bytes()),
@@ -3270,7 +3074,6 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         std::fs::create_dir_all(dir.join(&name).with_file_name(""))?;
         std::fs::write(dir.join(name), body)?;
     }
-    // #241: every theme the picker offers, as `/themes/<name>/<file>` serves it.
     let name = active(ctx);
     for n in BUILT
         .iter()
@@ -3288,8 +3091,6 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     Ok(())
 }
 
-/// #268: an issue's PR line as data (web/src/queue.ts draws it), from the cached `drover pr` read only (never calls
-/// `gh`); #269: `fc` none, a lane's fleet not configured (no links, no required checks).
 fn pr_data(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64, s: Option<&IssueState>) -> PrLine {
     let pr = gh::cached_pr(ctx, fleet, issue);
     let n = pr.at("number").as_u64();
@@ -3310,7 +3111,6 @@ fn pr_data(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
     }
 }
 
-/// The queue row's dim line from the caches only: the issue title, then the PR's when it differs (#331: CSS ellipsises it).
 fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     let spec = gh::cached_title(ctx, fleet, issue);
     let pr = gh::cached_pr(ctx, fleet, issue);
@@ -3324,9 +3124,6 @@ fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     (!t.is_empty()).then_some(t)
 }
 
-/// #162: a fleet's [config] sheet's data: GENERAL, LIMITS, ROLES (the `set` pickers), ALERTS, HOSTS / NEEDS
-/// (web/src/queue.ts draws it). Only the role pickers (through `set`) and #401's Conductor choices write; the rest is
-/// read-only, edited in the config file named on top.
 fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet, st: &States) -> ConfigSheet {
     let path = ctx.config.display().to_string();
     let home = crate::config::home().display().to_string();
@@ -3354,7 +3151,6 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         model: r.model.clone(),
         effort: r.effort.clone(),
         efforts: strs(crate::providers::get(&r.harness).efforts()),
-        // Unset: what the lane actually gets (the profile's/harness's model, `[limits].effort`).
         model_default: crate::providers::get(&r.harness)
             .model_default()
             .unwrap_or(&r.harness)
@@ -3389,7 +3185,6 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         color_set: fc.color.is_some(),
         env: fc.env.keys().cloned().collect(),
         node_modules: fc.clone_node_modules,
-        // #173: the built-in pipeline's defaults; a fleet with its own pipeline sets them per stage.
         builtin: fc.flow().builtin,
         review_rounds: l.review_rounds,
         update_rounds: l.update_rounds,
@@ -3416,8 +3211,6 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
 
 type Words = (&'static str, &'static str, String, bool);
 
-/// #170: an event as the Events tab says it: (glyph, tone, plain words, shown under `[important]`). `blocked` and
-/// `driven` take #141's WORDS; the capacity holds stay out of `[important]` (drover waiting for room).
 pub fn words(e: &Event, serial: &str) -> Words {
     let s = |k: &str| e.str(k).unwrap_or_default();
     let (r, round) = (
@@ -3427,7 +3220,6 @@ pub fn words(e: &Event, serial: &str) -> Words {
     let round = round.map_or(String::new(), |n| format!(" · round {n}"));
     match e.kind.as_str() {
         "merged" => ("✓", "g", format!("merged into {} · PR #{}", s("into"), s("pr")), true),
-        // #417: the verify stage's verdicts say so.
         "verdict" if s("verdict") == "PASS" => ("✓", "g", format!("{} PASS{round}", check(s("stage"))), true),
         "verdict" => ("✗", "r", format!("{} FAIL{round}", check(s("stage"))), true),
         "needs-human" => ("!", "r", format!("needs you{r}"), true),
@@ -3483,7 +3275,6 @@ pub fn words(e: &Event, serial: &str) -> Words {
     }
 }
 
-/// #417: a verdict's word for its stage: `verify`, else `review`.
 fn check(stage: &str) -> &'static str {
     if stage == "verify" {
         "verify"
@@ -3492,13 +3283,11 @@ fn check(stage: &str) -> &'static str {
     }
 }
 
-/// A check role's lane (`rev`, or #173 any check stage's): read-only from the page.
 fn reviewer(ctx: &Ctx, fleet: &str, role: &str) -> bool {
     let cfg = Config::kept(ctx).ok();
     role == "rev" || cfg.and_then(|c| Some(c.fleet.get(fleet)?.family(role) == "rev")) == Some(true)
 }
 
-/// #173: where an issue is in its fleet's pipeline: (stage, the mode or round its chip shows); `None` off the graph.
 fn stage_at<'a>(fc: &'a crate::config::Fleet, s: &'a IssueState) -> Option<(&'a str, String)> {
     let p = fc.flow();
     let build = p.stage_of(s.build.as_deref().unwrap_or(p.start()));
@@ -3513,7 +3302,6 @@ fn stage_at<'a>(fc: &'a crate::config::Fleet, s: &'a IssueState) -> Option<(&'a 
     }
 }
 
-/// Kind → (glyph class, glyph): ▲ build, ◆ check, ◫ gate, ✓ merge, ! park.
 fn glyph(kind: &str) -> (&'static str, &'static str) {
     match kind {
         "build" => ("b", "▲"),
@@ -3524,8 +3312,6 @@ fn glyph(kind: &str) -> (&'static str, &'static str) {
     }
 }
 
-/// #173: the card's "where it is now": `○ ─ ▲ impl ─ ◆ rev ─ ◫ gates ─ ✓ merge`, the current stage lit, the stages
-/// before it plain, a check with a PASS at the PR head ticked (web/src/queue.ts draws it); none off the graph.
 fn stages(fc: &crate::config::Fleet, s: &IssueState, head: &str) -> Vec<Stage> {
     let Some((at, mode)) = stage_at(fc, s) else {
         return vec![];
@@ -3555,8 +3341,6 @@ fn stages(fc: &crate::config::Fleet, s: &IssueState, head: &str) -> Vec<Stage> {
     p.stage.iter().enumerate().map(chip).collect()
 }
 
-/// #173: the fleet's Pipeline group's data; serve.js draws it to docs/design/pipeline: the validity line or the broken
-/// rules, the graph with `n here` per stage, the legend, the pipeline as fleet.toml text.
 fn pipe(fleet: &str, fc: &crate::config::Fleet, st: &States) -> serde_json::Value {
     let p = fc.flow();
     let mine: Vec<&IssueState> = st.values().filter(|s| s.fleet == fleet && !s.done()).collect();

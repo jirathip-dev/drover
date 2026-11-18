@@ -64,7 +64,9 @@
 3 hook
 3 host_deadline
 1 host_history
+2 host_sample
 4 host_offline
+1 hosts_screen
 2 host_slots
 2 host_spared
 3 host_sync
@@ -74,6 +76,7 @@
 1 hotspots
 4 hung_read
 1 hung_root
+2 in_flight
 3 issue_sheet_webkit
 4 keychain_jam
 3 kick
@@ -140,8 +143,10 @@
 3 remote_acp
 3 remote_exists
 4 remote_rules
+1 remote_verdict
 3 report
 2 repro
+3 repro_host
 3 respawn_loop
 2 respawn_pace
 2 retired_keys
@@ -177,6 +182,7 @@
 3 spawn_guard
 1 ssh_deadline
 4 stale_rev
+2 stall_move
 4 stalled_host
 3 stalled_lanes
 2 state_db
@@ -194,6 +200,7 @@
 2 timer_install
 3 tmpdir
 4 top
+1 triage
 2 turn
 4 typed_choice
 4 types

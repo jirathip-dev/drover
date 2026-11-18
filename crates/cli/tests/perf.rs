@@ -970,3 +970,168 @@ fn idle_serve_on_the_live_log_with_its_trickle_replayed() {
         cpu / (secs as f64 * 10.0)
     ));
 }
+
+fn walked(c: &drover::Ctx, r: &Fake, args: &[&str]) -> (usize, u128, String) {
+    let n = std::rc::Rc::new(std::cell::Cell::new(0));
+    let k = n.clone();
+    let now = c.now;
+    drover::sim::set(Some(drover::sim::Hooks {
+        now: Box::new(move || now),
+        pid: std::process::id(),
+        point: Box::new(move |p| k.set(k.get() + usize::from(matches!(p, drover::sim::Point::Walk(_))))),
+    }));
+    let t = Instant::now();
+    let (code, out) = run(c, r, args);
+    let ms = ms(t);
+    drover::sim::set(None);
+    assert_eq!(code, 0, "{out}");
+    (n.get(), ms, out)
+}
+
+fn disk_fixture(name: &str, budget: &str) -> (drover::Ctx, Fake, FakeShed) {
+    let cfg = CONFIG.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\ndriver = \"drover\"",
+    );
+    let c = ctx(&tmpdir(name), &format!("{cfg}worktree_budget_gb = {budget}\n"));
+    let sh = FakeShed::attached(&c);
+    let r = Fake::default()
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply("git -C", "")
+        .reply("gh issue view", r#"{"title":"t","body":"b"}"#);
+    (c, r, sh)
+}
+
+#[test]
+fn a_fast_step_over_50k_worktree_files_walks_none_of_them() {
+    let (c, r, _sh) = disk_fixture("perf-walk", "1000.0");
+    for w in 0..50 {
+        let d = c.worktrees.join(format!("sendmeter/issue-{w}/src"));
+        std::fs::create_dir_all(&d).unwrap();
+        for f in 0..1000 {
+            std::fs::write(d.join(format!("f{f}.rs")), "x").unwrap();
+        }
+    }
+    let (fast, fast_ms, out) = walked(&c, &r, &["drive", "--fast"]);
+    let (slow, slow_ms, slow_out) = walked(&c, &r, &["drive"]);
+    report(&format!(
+        "#949 perf (50,000 worktree files): drive --fast {fast_ms} ms, {fast} entries walked · drive {slow_ms} ms, {slow} walked"
+    ));
+    assert_eq!(fast, 0, "drive --fast walked {fast} entries: {out}");
+    assert!(slow >= 50_000, "the slow pass walked only {slow} entries: {slow_out}");
+}
+
+#[test]
+fn over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane() {
+    let (c, r, _sh) = disk_fixture("perf-held", "0.000001");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1"]).0, 0);
+    let wt = c.worktrees.join("old");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join("blob"), vec![0u8; 5000]).unwrap();
+    let (_, _, out) = walked(&c, &r, &["drive"]);
+    assert!(
+        out.contains("sendmeter #1 start: REFUSED DISK_BUDGET: worktrees"),
+        "{out}"
+    );
+    std::fs::remove_dir_all(&wt).unwrap();
+    let (walks, _, out) = walked(&c, &r, &["drive", "--fast"]);
+    assert_eq!(walks, 0, "{out}");
+    let (walks, _, out) = walked(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
+    assert_eq!(walks, 0, "{out}");
+    let ev = drover::events::read(&c.state).unwrap();
+    let kicked = ev.iter().rfind(|e| e.kind == "drive-pass").unwrap();
+    assert_eq!(kicked.data["kick"], 1, "{out}");
+    let start = &kicked.data["actions"][0];
+    assert_eq!(
+        (&start["step"], &start["code"]),
+        (&"start".into(), &"DISK_BUDGET".into()),
+        "{start}"
+    );
+    assert_eq!(kicked.data["spawns_launched"], 0, "{start}");
+    assert!(!ev.iter().any(|e| e.kind == "spawn"), "{out}");
+}
+
+fn pass_log(issues: u64, done: u64, prs: u64) -> (drover::Ctx, Fake) {
+    let c = ctx(&tmpdir("perf-pass"), CONFIG);
+    shed().attach(&c);
+    let ev = |ts, n, kind, d| serde_json::to_string(&Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
+    let mut log = vec![];
+    for n in 1..=issues {
+        let (agent, t) = (format!("sendmeter-impl-{n}"), NOW - 9_000 + n);
+        let d = json!({"role": "impl", "agent": agent, "pane": agent, "runtime": "shed", "worktree": format!("/wt/{agent}"), "branch": format!("issue-{n}")});
+        log.push(ev(t, n, "spawn", d));
+        log.push(ev(t + 1, n, "pushed", json!({"sha": "a".repeat(40)})));
+        if n <= done {
+            log.push(ev(t + 2, n, "merged", json!({"pr": n})));
+        }
+    }
+    for i in 0..30_000 - log.len() as u64 {
+        log.push(ev(
+            NOW - 5_000 + i / 10,
+            1 + i % issues,
+            "driven",
+            json!({"step": "review", "code": "EXIT", "result": "exit 1: boom"}),
+        ));
+    }
+    let st = c.state.parent().unwrap();
+    std::fs::create_dir_all(st.join("cache")).unwrap();
+    std::fs::write(&c.state, log.join("\n") + "\n").unwrap();
+    prs_at(&c, NOW, done + 1..=done + prs);
+    (c, Fake::default())
+}
+
+fn prs_at(c: &drover::Ctx, now: u64, open: std::ops::RangeInclusive<u64>) {
+    let open: serde_json::Map<_, _> = open
+        .map(|n| {
+            let pr = json!({"number": n, "state": "OPEN", "headRefName": format!("issue-{n}"), "headRefOid": "a".repeat(40),
+                            "baseRefName": "staging", "mergeable": "MERGEABLE", "statusCheckRollup": [], "isDraft": false});
+            (format!("issue-{n}"), pr)
+        })
+        .collect();
+    let snap = json!({"ts": now, "at": now, "prs": open, "etags": []});
+    std::fs::write(c.state.with_file_name("cache/prs-sendmeter-0.json"), snap.to_string()).unwrap();
+}
+
+#[test]
+fn a_pass_over_30k_events_and_150_done_issues_stays_fast() {
+    let (c, r) = pass_log(200, 150, 50);
+    assert_eq!(drover::events::read(&c.state).unwrap().len(), 30_000);
+    let mut t = vec![];
+    for k in 0..5 {
+        let c = drover::Ctx {
+            now: NOW + k * 120,
+            ..c.clone()
+        };
+        prs_at(&c, c.now, 151..=200);
+        let t0 = cpu_ms();
+        assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+        t.push((cpu_ms() - t0).round());
+    }
+    t.sort_by(f64::total_cmp);
+    let pass = t[2];
+    report(&format!(
+        "#954 perf (30,000 events, 200 issues, 150 done): drive --fast {pass:.0} ms of CPU (median of {t:?})"
+    ));
+    if cfg!(debug_assertions) {
+        return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
+    }
+    assert!(
+        pass < 75.0,
+        "a drive --fast pass took {pass:.0} ms of CPU (target < 75)"
+    );
+}
+
+#[test]
+fn a_pass_over_20_open_prs_reads_the_pr_cache_file_once() {
+    let (c, r) = pass_log(20, 0, 20);
+    let before = drover::gh::READS.get();
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(drover::gh::READS.get() - before, 1);
+    for n in 1..=20 {
+        assert_eq!(
+            drover::gh::cached_pr(&c, "sendmeter", n)["number"],
+            n,
+            "#{n}'s PR came from the snapshot"
+        );
+    }
+}

@@ -30,6 +30,7 @@ pub enum Say {
     ReviewsAhead(usize),
     Pass(String),
     Starts(String),
+    InFlightCap(usize, usize),
 }
 
 /// The spawn-slot wait phrase; the board matches on it.
@@ -63,8 +64,19 @@ impl Say {
             ),
             Say::Pass(r) => format!("drive's next pass{r}"),
             Say::Starts(r) => format!("{r}; starts next pass"),
+            Say::InFlightCap(n, cap) => format!("waits: in-flight cap {n}/{cap}"),
         }
     }
+}
+
+/// A stuck reason whose only wait is the review queue (`Say::ReviewsAhead`): a queue position.
+pub fn reviews_ahead(reason: &str) -> bool {
+    let wait = reason.split("; tried: ").next().unwrap_or(reason);
+    let tail = wait.rsplit(": ").next().unwrap_or(wait);
+    let n = tail
+        .strip_prefix("review waits behind ")
+        .and_then(|r| r.split(' ').next()?.parse().ok());
+    n.is_some_and(|n| Say::ReviewsAhead(n).line() == tail)
 }
 
 /// A line that ends catching up, without that ending.
@@ -155,10 +167,7 @@ pub fn pass(
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
     {
-        let mine: Vec<&Event> = events
-            .iter()
-            .filter(|e| e.fleet == fleet && e.issue == Some(s.issue))
-            .collect();
+        let mine = crate::events::issue_events(events, fleet, s.issue);
         let head = crate::gh::cached_pr(ctx, fleet, s.issue)
             .at("headRefOid")
             .as_str()
@@ -198,7 +207,7 @@ pub fn pass(
     Ok(())
 }
 
-/// #855: the issue's open promise once missed.
+/// The issue's open promise once missed.
 pub fn open_missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>) -> Option<Promise> {
     let mine: Vec<&Event> = events
         .iter()

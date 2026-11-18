@@ -8,14 +8,14 @@ use serde_json::json;
 use std::io::Write;
 use std::path::Path;
 
-/// #1099: what a lane worktree's `git log` and `blame` see.
+/// What a lane worktree's `git log` and `blame` see.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum View {
     Since(Baseline),
     Full(Why),
 }
 
-/// #1099: why a worktree keeps its full history.
+/// Why a worktree keeps its full history.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Why {
     NoBaseline,

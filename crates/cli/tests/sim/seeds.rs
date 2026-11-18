@@ -2,7 +2,7 @@ use crate::model::{Ev, Model, Script, FLEET};
 use crate::scenario::{args, config, timers, T0};
 use crate::sched::Rng;
 
-/// Seed 1 (#370, 2026-11-04 22:11:25): a reviewer's FAIL without Proof blocks, refused `NO_PROOF` while one kick runs pass after pass on its start's `Ctx.now`. The reviewer ignores the prompt; every reviewer after it writes the same FAIL within seconds (and adds the Proof once told). Before #680's fix the kick superseded each new reviewer at once: 25 supersedes stamped with one second.
+/// Seed 1 (issue 370, 2026-11-04 22:11:25): a reviewer's FAIL without Proof blocks, refused `NO_PROOF` while one kick runs pass after pass on its start's `Ctx.now`. The reviewer ignores the prompt; every reviewer after it writes the same FAIL within seconds (and adds the Proof once told). Before the fix the kick superseded each new reviewer at once: 25 supersedes stamped with one second.
 pub const INCIDENT: u64 = 1;
 
 /// Seeds that found a cause of their own, parked `#[ignore]` (`parked_seeds`) until its issue's fix unparks them.
@@ -17,7 +17,7 @@ pub const PARKED: &[(u64, &str)] = &[
     ),
 ];
 
-/// #688: plans a hunt found (`Plan::text`, as its failure printed it), each joining with its fix like a seed.
+/// Plans a hunt found (`Plan::text`, as its failure printed it), each joining with its fix like a seed.
 pub const PLANS: &[(&str, &str)] = &[(
     "seed=84628020866114 cfg=2,2 steps=3817 | +13 T 300 check | +23 T 60 drive --fast | +200 T 300 drive | +956 R queue drover add 106 | +1231 R queue drover add 103 | +1421 R queue drover add 101 | +1622 R queue drover add 105 | +2018 R queue drover add 104 | +2864 R queue drover add 102 | +3601 R queue drover block --on 101 102",
     "hunt: I9 churn: drover-rev-103-r1 spawned 4 times within an hour, nothing new in between (#1178)",
@@ -58,7 +58,7 @@ pub const FIXED: &[(u64, &str)] = &[
     ),
 ];
 
-/// Seed 1's fleet: #370 queued, its impl pushes, its first reviewer writes a FAIL without Proof and ignores the refusal; each reviewer after it writes the same FAIL 5 s in.
+/// Seed 1's fleet: issue 370 queued, its impl pushes, its first reviewer writes a FAIL without Proof and ignores the refusal; each reviewer after it writes the same FAIL 5 s in.
 pub fn incident() -> (Model, (u64, u64)) {
     let mut rng = Rng::new(INCIDENT);
     let mut m = Model::default();
@@ -90,7 +90,7 @@ pub fn incident() -> (Model, (u64, u64)) {
     (m, (4, 3))
 }
 
-/// #685's known-answer fleet: #201 and #202 queued together at t+0; every impl works 600 s and pushes a green head, every head's CI takes 300 s, the host never busy. The first reviewer writes a FAIL without Proof 300 s in and ignores the refusal (a wasted spawn, superseded once); every reviewer after it writes PASS 300 s in.
+/// The known-answer fleet: issues 201 and 202 queued together at t+0; every impl works 600 s and pushes a green head, every head's CI takes 300 s, the host never busy. The first reviewer writes a FAIL without Proof 300 s in and ignores the refusal (a wasted spawn, superseded once); every reviewer after it writes PASS 300 s in.
 pub fn known() -> (Model, String) {
     let mut rng = Rng::new(KNOWN);
     let mut m = Model::default();

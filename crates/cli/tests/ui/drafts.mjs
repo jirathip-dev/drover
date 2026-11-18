@@ -1,4 +1,4 @@
-// #1084: the Threads composer in Playwright's WebKit on a real serve: node drafts.mjs <url> <cookie name=value>.
+// the Threads composer in Playwright's WebKit on a real serve: node drafts.mjs <url> <cookie name=value>.
 // Types into thread t2 with its messages scrolled 400 px down (a message card mid-screen must not move on any change while the stream is live, nor on the tick; the route's stream then ends, and the page's offline strip showing is no repaint), pushes 5 stream ops and a 30 s tick (fake clock), reloads, fails one send (500)
 // and retries it, then sends. Prints one JSON object of what the page showed at each step.
 import { createRequire } from 'node:module';
