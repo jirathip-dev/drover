@@ -49,6 +49,7 @@
 1 empty_env
 1 events_log
 2 events_tab
+1 extend_ask
 4 fleet_cards
 4 fleet_notify
 2 fleet_rename
