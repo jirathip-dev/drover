@@ -149,7 +149,8 @@ html[data-focus] #cards{display:none}
 .cmp .th{display:flex;gap:var(--s2);overflow-x:auto;margin:0 0 var(--s2)}
 .cmp .tb{position:relative;display:flex;align-items:center;gap:var(--s1)}
 .cmp .tb img{height:calc(var(--hit) * 1.5);border-radius:4px}
-.cmp .chips{margin:var(--s4) 0 0}
+.cmp .pk{display:flex;gap:var(--s3);margin:var(--s2) 0 0}
+.cmp .pk select{flex:1;min-width:0;max-height:var(--hit)}
 /* #1086, #1120: a focus screen is a column between the header and the tab bar or keyboard (`fit()`): bar, messages (the one scroller), composer. */
 html[data-focus] body{overflow:hidden}
 html[data-focus] #strip{position:fixed;left:0;right:0}
