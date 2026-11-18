@@ -1,0 +1,5 @@
+Decided: a need-input turn with no open ask reuses done's nudge-once-then-LANE_BLOCKED path, carrying the lane's why
+Because: "A `need-input` turn with no open ask (after the one nudge) becomes `needs-human`, carrying the lane's `--why` as the card reason"
+Rejected: a new needs-human code for need-input — LANE_BLOCKED already gives an owner card that park accepts
+Check: an open ask still wins in waiting, so the nudge never fires for a lane that asked (test need_input_with_an_open_ask_waits_on_the_owner_unchanged)
+Owner: a lane that says it needs input but never asks is reminded once, then becomes a card you can park
