@@ -203,3 +203,62 @@ fn when_every_up_host_is_full_the_hold_never_names_the_offline_one() {
         "{why}"
     );
 }
+
+fn acp_lanes(c: &drover::Ctx, sh: &FakeShed, states: &[&str]) {
+    for (n, st) in (1..).zip(states) {
+        let name = format!("sendmeter-impl-{n}");
+        let d = json!({"role": "impl", "agent": name, "pane": name});
+        append(&c.state, &Event::new(c.now, "sendmeter", Some(n), "spawn", d)).unwrap();
+        sh.lane(&name, st, "/w");
+        sh.set(&name, |t| {
+            t["acp"] = json!("claude-acp");
+            if *st == "unreported" {
+                t["reported"] = json!(null);
+            }
+        });
+    }
+}
+
+#[test]
+fn acp_panes_between_turns_hold_no_slot_and_a_new_start_is_placed() {
+    let (c, sh) = fleet("slots-acp-idle", "max_working = 4", "0", &["20"], &[]);
+    let ended = [
+        "idle",
+        "hibernated",
+        "unreported",
+        "done",
+        "idle",
+        "hibernated",
+        "unreported",
+        "idle",
+        "done",
+        "idle",
+    ];
+    acp_lanes(&c, &sh, &[&ended[..], &["working"]].concat());
+    let (code, st) = run(&c, &fake(), &["status"]);
+    assert_eq!(code, 0, "{st}");
+    assert!(st.contains("mini: working 1/4"), "{st}");
+    let out = drive(&c);
+    assert!(!out.contains("waiting for a slot"), "{out}");
+    assert!(spawned(&sh).contains(&"sendmeter-impl-20".to_string()), "{out}");
+    assert_eq!(state(&c, 20), "impl", "{out}");
+}
+
+#[test]
+fn four_mid_turn_acp_panes_fill_the_host_whatever_idle_ones_sit_there() {
+    let (c, sh) = fleet("slots-acp-full", "max_working = 4", "0", &["20"], &[]);
+    let states = [
+        "working",
+        "idle",
+        "running",
+        "hibernated",
+        "working",
+        "unreported",
+        "working",
+        "idle",
+    ];
+    acp_lanes(&c, &sh, &states);
+    let out = drive(&c);
+    assert!(out.contains("waiting for a slot: 4/4 working on mini"), "{out}");
+    assert!(!spawned(&sh).contains(&"sendmeter-impl-20".to_string()), "{out}");
+}
