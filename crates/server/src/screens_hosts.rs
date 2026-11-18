@@ -86,7 +86,6 @@ impl Server<'_> {
         Some(json!({"type": "sheet", "id": "hosts", "title": "Hosts", "cancel": "Close", "blocks": blocks}))
     }
 
-    /// Count the main host's leftovers and read the token proxy for the hosts sheet, off the request.
     pub(crate) fn read_hosts(&self, now: u64) {
         let Ok(cfg) = Config::kept(self.ctx) else { return };
         let ctx = &Ctx {
