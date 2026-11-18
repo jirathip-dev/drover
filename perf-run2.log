@@ -1,0 +1,11 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-954/crates/cli)
+    Finished `release` profile [optimized] target(s) in 1m 11s
+     Running tests/perf.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-954/release/deps/perf-826e89b722cf86dd)
+
+running 2 tests
+test a_pass_over_20_open_prs_reads_the_pr_cache_file_once ... ok
+test a_pass_over_30k_events_and_150_done_issues_stays_fast ... #954 perf (30,000 events, 200 issues, 150 done): drive --fast 58 ms of CPU (median of [51.0, 52.0, 58.0, 59.0, 85.0])
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 1.45s
+

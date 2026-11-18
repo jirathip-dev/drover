@@ -1,0 +1,20 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-954/crates/cli)
+    Finished `release` profile [optimized] target(s) in 47.34s
+     Running tests/perf.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-954/release/deps/perf-826e89b722cf86dd)
+
+running 6 tests
+test a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget ... #560 perf (30,000 events, 20 lanes): 100 board requests 127 ms of CPU
+ok
+test a_pass_over_20_open_prs_reads_the_pr_cache_file_once ... ok
+test a_pass_over_30k_events_and_150_done_issues_stays_fast ... #954 perf (30,000 events, 200 issues, 150 done): drive --fast 23 ms of CPU (median of [20.0, 22.0, 23.0, 26.0, 45.0])
+ok
+test parity_r6_waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log ... #447 perf (30,000 events, 200 lanes): snapshot::waits 18 ms · GET /api/v1/lanes, /api/v1/herd, /screens/lanes 5 ms
+ok
+test stats_autonomy_on_a_150k_event_log_stays_under_its_budget ... #962 perf (150,000 events): stats autonomy first 1218 ms (with the import), then 147 ms
+ok
+test the_state_read_stays_under_300ms_on_a_150k_event_log ... #859 perf (150000 events): GET /api/v1/state first 5 ms, runs [4, 4, 4, 4, 4] ms, median 4 ms
+#859 perf: GET /api/v1/state right after an answer 5 ms
+ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 5.19s
+

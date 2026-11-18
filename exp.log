@@ -1,0 +1,137 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-954/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-954/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-954/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-954/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.98s
+     Running tests/drive.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-954/debug/deps/drive-826bcfa82224c8b2)
+
+running 85 tests
+test a_blocked_ci_not_green_item_merges_once_ci_turns_green ... ok
+test a_behind_pr_after_pass_is_updated_the_same_way ... ok
+test a_done_reviewer_in_the_way_is_superseded_and_the_review_spawns ... ok
+test a_conflicting_pass_with_an_idle_impl_lane_gets_its_update_in_one_pass ... ok
+test a_code_fail_with_no_change_is_reviewed_again_at_the_same_head ... FAILED
+test a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected ... ok
+test a_draft_pr_that_cannot_be_marked_ready_says_so_in_status ... ok
+test a_gone_lesson_lane_is_closed_not_respawned ... ok
+test a_ci_only_fail_green_again_at_the_same_head_merges_without_a_review ... ok
+test a_draft_pr_with_a_pass_is_marked_ready_once_then_merged ... ok
+test a_fail_starts_a_fix_round_with_the_findings_verbatim ... ok
+test a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges ... ok
+test a_hold_whose_blocker_merged_is_released_and_its_conflicting_pr_updated ... ok
+test a_held_lane_is_prompted_once_when_its_blocker_merges ... ok
+test a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once ... ok
+test a_head_moved_during_review_gets_a_fresh_reviewer_not_the_old_verdict ... ok
+test a_lesson_issue_parked_lane_ends_is_closed_on_install ... ok
+test a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent ... FAILED
+test a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it ... FAILED
+test a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions ... ok
+test a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human ... ok
+test a_lane_held_on_two_blockers_waits_for_both ... ok
+test a_merge_that_fails_on_a_conflict_gets_the_update_lane ... ok
+test a_pass_recorded_with_green_ci_merges_in_the_same_pass ... ok
+test a_no_repro_pass_tells_a_live_reviewer_once_and_waiting_names_the_refusal ... ok
+test a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip ... ok
+test a_pr_off_serial_paths_is_not_marked ... ok
+test a_proofless_fail_from_an_ended_reviewer_gets_one_fresh_review_of_the_same_head ... ok
+test a_pr_head_moved_without_a_handoff_is_handed_off_by_the_pr_once_ci_is_done ... ok
+test a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned ... ok
+test a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_update ... ok
+test a_ready_conflicting_pr_gets_its_update_lane_and_no_merge_attempt ... ok
+test a_serial_busy_skip_shows_the_live_holders ... ok
+test a_refused_review_start_shows_waiting_for_a_reviewer_slot ... ok
+test a_refused_update_round_shows_its_reason_not_catching_up ... ok
+test a_lesson_lane_ending_without_a_push_is_prompted_once_then_closed_never_lane_ends ... ok
+test a_spawn_whose_prompt_never_landed_is_retried_by_the_next_pass ... ok
+test a_workflow_that_never_started_is_ci_broken_and_gets_a_fix_round ... ok
+test a_pr_closed_outside_drover_closes_or_blocks_the_issue_once ... ok
+test a_released_lanes_respawn_waits_for_room ... ok
+test an_extend_during_a_pass_only_requeues_it ... ok
+test a_serial_busy_item_is_skipped_and_keeps_its_place ... ok
+test a_told_reviewers_corrected_fail_is_recorded ... ok
+test an_old_skip_shows_its_age_until_the_issue_moves ... ok
+test a_working_reviewer_in_the_way_still_waits ... ok
+test a_secret_in_a_merged_lanes_wip_keeps_its_pane_reported_once_and_clean_dry_run_names_the_close ... ok
+test an_exited_reviewer_without_a_verdict_gets_a_new_review_round ... ok
+test an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane ... ok
+test a_written_verdict_is_recorded_at_the_head_then_pending_ci_waits ... ok
+test an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing ... ok
+test a_working_lane_of_a_merged_issue_is_never_closed ... ok
+test an_idle_reviewer_is_told_once_then_the_unchanged_file_is_not_retried_but_re_reviewed ... ok
+test auto_update_runs_in_a_pass_with_no_merge ... ok
+test an_unmarked_pr_touching_a_serial_path_is_auto_marked_and_merges ... ok
+test an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it ... ok
+test auto_update_rechecks_premerge_before_its_push ... ok
+test an_open_issues_idle_lane_is_kept ... ok
+test disk_low_stops_the_pass ... ok
+test drive_now_on_the_board_is_paired_only_and_toasts_its_line ... ok
+test no_checks_after_the_grace_is_ci_missing_not_running ... ok
+test clean_reclaims_merged_lanes ... ok
+test extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix ... ok
+test no_merge_label_parses_to_none_and_a_pass_adds_no_label ... FAILED
+test every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_repeat_too ... ok
+test one_pass_starts_every_free_item_in_order_with_a_fresh_host_sample_each ... ok
+test blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action ... ok
+test pass_and_green_ci_merges ... ok
+test status_says_a_ready_pr_lacks_the_merge_label ... ok
+test red_ci_after_pass_is_a_fail_with_the_log_tail ... ok
+test the_drive_summary_groups_per_action ... ok
+test host_busy_stops_the_pass_and_cap_stops_starting ... ok
+test the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane ... ok
+test the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it ... ok
+test passes_follow_a_fleet_added_then_removed_in_fleet_toml ... ok
+test the_result_line_is_red_on_an_error_green_on_a_start_or_merge_amber_when_all_held_back ... ok
+test review_spawns_rev_at_the_pushed_head ... ok
+test paused_fleets_and_host_busy_are_no_ops ... ok
+test the_replayed_cooee_1_log_recovers_in_one_pass ... ok
+test start_spawns_the_next_queued_issue ... ok
+test the_363_sequence_replayed_respawns_impl_once_per_30_min ... ok
+test the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over ... ok
+test under_limited_admission_a_review_goes_before_the_fleets_new_start ... ok
+test the_third_fail_stops_at_needs_human_with_the_findings ... ok
+test two_respawns_without_a_push_go_to_needs_human ... ok
+test drive_now_runs_in_the_background_and_the_board_keeps_answering ... ok
+
+failures:
+
+---- a_code_fail_with_no_change_is_reviewed_again_at_the_same_head stdout ----
+drover: queued in /home/user/.local/share/drover/work/drover/issue-954/.drover/outbox.jsonl
+
+thread 'a_code_fail_with_no_change_is_reviewed_again_at_the_same_head' (4033664) panicked at crates/cli/tests/drive.rs:2093:5:
+assertion `left == right` failed: 
+  left: []
+ right: ["review"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent stdout ----
+drover: queued in /home/user/.local/share/drover/work/drover/issue-954/.drover/outbox.jsonl
+
+thread 'a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent' (4034615) panicked at crates/cli/tests/drive.rs:2137:5:
+sendmeter #12 none: idle without pushing (check the pane) (15m)
+
+
+---- a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it stdout ----
+drover: queued in /home/user/.local/share/drover/work/drover/issue-954/.drover/outbox.jsonl
+
+thread 'a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it' (4034628) panicked at crates/cli/tests/drive.rs:1313:5:
+queued for the main host: drive delivers it within 1 min
+
+
+---- no_merge_label_parses_to_none_and_a_pass_adds_no_label stdout ----
+drover: queued in /home/user/.local/share/drover/work/drover/issue-954/.drover/outbox.jsonl
+
+thread 'no_merge_label_parses_to_none_and_a_pass_adds_no_label' (4035839) panicked at crates/cli/tests/drive.rs:122:5:
+assertion `left == right` failed
+  left: "sendmeter #12 review: \"sendmeter-rev-12-r1\" [\"hermes\" \"fleet-rev\"] \"rev-12-r1\" @ \"/tmp/fleet-test-drive-no-label-4033660-70/worktrees/sendmeter/rev-12-r1\"\n"
+ right: ""
+
+
+failures:
+    a_code_fail_with_no_change_is_reviewed_again_at_the_same_head
+    a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent
+    a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it
+    no_merge_label_parses_to_none_and_a_pass_adds_no_label
+
+test result: FAILED. 81 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.99s
+
+error: test failed, to rerun pass `-p drover --test drive`
