@@ -1,0 +1,5 @@
+Decided: an unchanged stream delta is still timed (painted) before the page skips its repaint
+Because: web/src/main.ts:175
+Rejected: dropping or loosening the #1312 delta gate — the review asked to keep it
+Check: ui-webkit is green at this head, with phone_timings seeing a delta route
+Owner: the phone speed check counts live updates again, even the ones that change nothing on screen
