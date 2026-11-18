@@ -1,0 +1,4 @@
+Decided: merge origin/staging and rebuild the generated web/dist/board.js instead of hand-merging it
+Because: .drover/arch.toml:15
+Rejected: none
+Owner: The branch is up to date with staging and now fits under the raised line cap.
