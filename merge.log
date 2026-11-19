@@ -1,0 +1,53 @@
+Auto-merging crates/core/src/config.rs
+Auto-merging crates/core/src/gh.rs
+Auto-merging scripts/test-shards.txt
+Merge made by the 'ort' strategy.
+ .github/workflows/ci.yml                   |   2 +-
+ Cargo.lock                                 |  16 +++
+ Cargo.toml                                 |   3 +
+ assets/schemes/dracula.json                |  25 ----
+ assets/schemes/farm.json                   |  25 ----
+ assets/schemes/garden-dark.json            |  25 ----
+ assets/schemes/garden-light.json           |  25 ----
+ assets/schemes/github-dark.json            |  25 ----
+ assets/schemes/gruvbox.json                |  25 ----
+ assets/schemes/kitchen.json                |  25 ----
+ assets/schemes/nord.json                   |  25 ----
+ assets/schemes/paper.json                  |  25 ----
+ assets/schemes/solarized-dark.json         |  25 ----
+ crates/cli/tests/ci_stuck.rs               |  95 +++++++++++++
+ crates/cli/tests/golden/api_v1/health.json |  62 ++++-----
+ crates/cli/tests/merge.rs                  |  15 +++
+ crates/cli/tests/schemes.rs                | 209 +++++++++++++++--------------
+ crates/core/src/config.rs                  |   6 +
+ crates/core/src/drive.rs                   |   3 +
+ crates/core/src/gh.rs                      |  65 ++++++++-
+ crates/server/Cargo.toml                   |   2 +
+ crates/server/src/api.rs                   |   2 +
+ crates/server/src/serve.rs                 |  65 +++++----
+ crates/server/src/serve/v1.rs              |   1 +
+ deny.toml                                  |   6 +-
+ docs/config.md                             |   1 +
+ docs/design/drover-chat/README.md          |   2 +-
+ docs/design/drover-chat/index.html         |   2 +-
+ docs/design/schemes/README.md              |   2 +-
+ docs/serve.md                              |   4 +-
+ docs/themes.md                             |   8 +-
+ docs/workflow.md                           |   1 +
+ scripts/test-shards.txt                    |   1 +
+ web/dist/board.js                          |   8 +-
+ web/src/schemes.ts                         |  62 ---------
+ web/src/theme.ts                           |  12 +-
+ 36 files changed, 418 insertions(+), 487 deletions(-)
+ delete mode 100644 assets/schemes/dracula.json
+ delete mode 100644 assets/schemes/farm.json
+ delete mode 100644 assets/schemes/garden-dark.json
+ delete mode 100644 assets/schemes/garden-light.json
+ delete mode 100644 assets/schemes/github-dark.json
+ delete mode 100644 assets/schemes/gruvbox.json
+ delete mode 100644 assets/schemes/kitchen.json
+ delete mode 100644 assets/schemes/nord.json
+ delete mode 100644 assets/schemes/paper.json
+ delete mode 100644 assets/schemes/solarized-dark.json
+ create mode 100644 crates/cli/tests/ci_stuck.rs
+ delete mode 100644 web/src/schemes.ts
