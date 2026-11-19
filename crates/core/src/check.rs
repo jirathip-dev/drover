@@ -72,6 +72,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let events = working(&ctx.state)?;
     PUSHES.set((0, 0));
     std::fs::write(ctx.state.with_file_name("check.at"), ctx.now.to_string()).ok();
+    crate::timer::revive(ctx, cfg, r)?;
     let local = crate::session::on(r).map_err(|e| format!("{e:#}"));
     if let Err(e) = &local {
         crate::stderr!("drover check: the agent list failed ({e}); skipping lane checks");

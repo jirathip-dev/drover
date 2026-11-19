@@ -112,10 +112,47 @@ fn refused(ctx: &Ctx, r: &dyn Runner, label: &str, every: bool) -> bool {
         .any(|w| said.contains(w))
 }
 
-fn rebootstrap(ctx: &Ctx, r: &dyn Runner, label: &str, every: bool) -> Result<String> {
-    let [_, up, down] = ctl(ctx, label, every);
+/// Unload job `label`, wait up to 10 s until it is gone, then load it, 3 tries with backoff.
+pub fn rebootstrap(ctx: &Ctx, r: &dyn Runner, label: &str, every: bool) -> Result<String> {
+    let [probe, up, down] = ctl(ctx, label, every);
     exec(r, &down).ok();
-    exec(r, &up)
+    for _ in 0..10 {
+        if exec(r, &probe).is_err() {
+            break;
+        }
+        r.sleep(1);
+    }
+    let mut res = exec(r, &up);
+    for secs in [1, 2] {
+        if res.is_ok() {
+            break;
+        }
+        r.sleep(secs);
+        res = exec(r, &up);
+    }
+    res
+}
+
+/// Whether job `label` runs with a pid and `addr` accepts a connection, waiting up to 10 s.
+pub fn serving(ctx: &Ctx, r: &dyn Runner, label: &str, addr: &str) -> bool {
+    (0..10).any(|i| {
+        if i > 0 {
+            r.sleep(1);
+        }
+        matches!(job_pid(ctx, r, label), Ok(Some(_))) && std::net::TcpStream::connect(addr).is_ok()
+    })
+}
+
+/// Load the installed board job when it is not loaded; logs `serve-revived`.
+pub fn revive(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<()> {
+    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
+    let installed = files(ctx, label, &[], "", 0, MAC).first().is_some_and(|f| f.0.exists());
+    let down = || job_pid(ctx, r, label).is_err();
+    if !installed || !down() || rebootstrap(ctx, r, label, false).is_err() || down() {
+        return Ok(());
+    }
+    let d = serde_json::json!({"label": label});
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "serve-revived", d))
 }
 
 /// Restart job `label` on the binary just installed: `launchctl kickstart -k`, else `systemctl --user restart`; a job launchd refuses is re-bootstrapped.
