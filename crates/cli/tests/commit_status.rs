@@ -184,3 +184,49 @@ fn drovers_own_statuses_leave_ci_and_the_check_count_alone() {
     }
     assert_eq!(lines[0], lines[1]);
 }
+
+fn hook(cmd: &str) -> String {
+    use std::io::Write;
+    let d = tmpdir("status-hook");
+    std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["hook", "--role", "impl"])
+        .env_remove("FLEET_LANE")
+        .env_remove("DROVER_SCRATCH_TARGET")
+        .env("DROVER_LANE", "sendmeter:12:impl")
+        .env("FLEET_CONFIG", d.join("fleet.toml"))
+        .env("FLEET_STATE", d.join("state/events.jsonl"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": d, "tool_input": {"command": cmd}});
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.to_string().as_bytes())
+        .unwrap();
+    String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+}
+
+#[test]
+fn a_lane_posting_a_commit_status_is_refused() {
+    for cmd in [
+        "gh api -X POST repos/o/r/statuses/abc -f state=success -f context=drover/review",
+        "gh api repos/o/r/statuses/abc -f state=success",
+        "gh api repos/o/r/statuses/abc",
+        "cd /x && gh api --method POST repos/o/r/commits/abc/statuses -f state=success",
+    ] {
+        let out = hook(cmd);
+        assert!(
+            out.contains("\"deny\"") && out.contains("only drover posts commit statuses"),
+            "{cmd}: {out}"
+        );
+    }
+    assert_eq!(
+        hook("gh api repos/o/r/commits/abc/statuses"),
+        "",
+        "reading statuses is allowed"
+    );
+}

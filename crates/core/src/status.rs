@@ -86,8 +86,40 @@ pub fn post(
     store(&p, &all)
 }
 
+/// Log verdict event `ev`, then show it at its sha: `drover/verify` for verify's, else `drover/review`, with its round and blocking count.
+pub fn verdict(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: Event) -> Result<()> {
+    crate::events::emit(&ctx.state, cfg, ev.clone())?;
+    let s = |k: &str| ev.str(k).unwrap_or_default();
+    let (sha, pass) = (s("sha"), s("verdict") == "PASS");
+    let blocking = crate::gate::findings(s("body")).iter().filter(|f| f.0).count();
+    let tail = if pass {
+        String::new()
+    } else {
+        format!(" · {blocking} blocking")
+    };
+    let desc = format!("{} · round {} · {sha:.7}{tail}", s("verdict"), ev.val("round"));
+    let context = if s("stage") == "verify" { VERIFY } else { REVIEW };
+    let outcome = if pass { "success" } else { "failure" };
+    post(
+        ctx,
+        cfg,
+        r,
+        (&ev.fleet, ev.issue.unwrap_or_default()),
+        sha,
+        (context, outcome, &desc),
+    )
+}
+
 /// Drive's step: an open PR head with no verdict gets `drover/review` pending, each failed post is tried again, and a finished issue's posted ones are dropped.
-pub fn sync<'a>(
+pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn std::io::Write, fleet: &str) -> Result<()> {
+    let open = crate::events::fold(&crate::events::working(&ctx.state)?);
+    if let Err(e) = pending(ctx, cfg, r, fleet, open.values()) {
+        writeln!(out, "{fleet} commit status: {e:#}")?;
+    }
+    Ok(())
+}
+
+fn pending<'a>(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,

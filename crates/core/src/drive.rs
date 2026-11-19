@@ -1283,9 +1283,7 @@ fn pass(
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
     waits.retain(one);
     crate::promise::pass(ctx, cfg, fleet, &events, &waits)?;
-    if let Err(e) = crate::status::sync(ctx, cfg, r, fleet, fold(&events).values()) {
-        writeln!(out, "{fleet} commit status: {e:#}")?;
-    }
+    crate::status::sync(ctx, cfg, r, out, fleet)?;
     external(ctx, cfg, out, fleet)?;
     ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {

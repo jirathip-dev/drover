@@ -181,27 +181,7 @@ pub fn verdict(
     let shots = crate::verify::shots(&body, Path::new(file), lane);
     let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
         "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha")), "files": shots, "repro": repro});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, fleet, Some(issue), "verdict", data),
-    )?;
-    let blocking = findings(&body).iter().filter(|f| f.0).count();
-    let desc = format!(
-        "{v} · round {round} · {head:.7}{}",
-        if pass {
-            String::new()
-        } else {
-            format!(" · {blocking} blocking")
-        }
-    );
-    let context = if stage == "verify" {
-        crate::status::VERIFY
-    } else {
-        crate::status::REVIEW
-    };
-    let outcome = if pass { "success" } else { "failure" };
-    crate::status::post(ctx, cfg, r, (fleet, issue), &head, (context, outcome, &desc))?;
+    crate::status::verdict(ctx, cfg, r, Event::new(ctx.now, fleet, Some(issue), "verdict", data))?;
     let (limit, of_limit) = limit(f, cnt, st.as_ref());
     let (v, note) = if form {
         ("FAIL (form-only)", format!(" · not counted · form {}/{of}", used + 1))

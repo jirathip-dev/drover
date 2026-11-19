@@ -186,24 +186,6 @@ fn github_comments_are_denied() {
 }
 
 #[test]
-fn commit_statuses_are_denied() {
-    for cmd in [
-        "gh api -X POST repos/o/r/statuses/abc -f state=success -f context=drover/review",
-        "gh api repos/o/r/statuses/abc -f state=success",
-        "gh api repos/o/r/statuses/abc",
-        "cd /x && gh api --method POST repos/o/r/commits/abc/statuses -f state=success",
-    ] {
-        let out = bash(cmd).unwrap_or_else(|| panic!("{cmd} allowed"));
-        assert!(out.contains("only drover posts commit statuses"), "{cmd}: {out}");
-    }
-    assert_eq!(
-        bash("gh api repos/o/r/commits/abc/statuses"),
-        None,
-        "reading statuses is allowed"
-    );
-}
-
-#[test]
 fn push_to_staging_is_denied() {
     for role in ["impl", "rev"] {
         assert!(bash_as(role, "git push origin staging")
