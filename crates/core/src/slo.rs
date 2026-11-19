@@ -12,6 +12,25 @@ const DRIVE_HEALS: [&str; 3] = ["respawned-silent", "nudged", "marked-ready"];
 const WAITS: [&str; 1] = ["slo-idle:"];
 const PROGRESS: [&str; 5] = ["spawn", "verdict", "pushed", "lane-pushed", "turn-end"];
 const LOAD: [&str; 3] = ["HOST_BUSY", "MEM_LOW", "DISK_LOW"];
+const GONE_CWD: &str = "current directory: No such file or directory";
+
+/// A spawn error from drover's own deleted current directory: healed by one retry, never counted as failing the same way.
+pub fn cwd_gone(error: Option<&str>) -> bool {
+    error.is_some_and(|e| e.contains(GONE_CWD))
+}
+
+/// `start` of `fleet` #`n`'s lane, run once more after one `self-heal` when it failed on a deleted current directory.
+pub fn start_healed(ctx: &Ctx, (fleet, n): (&str, u64), start: impl Fn() -> Result<()>) -> Result<()> {
+    match start() {
+        Err(e) if cwd_gone(Some(&format!("{e:#}"))) => {
+            let did = format!("retried #{n}'s start from an existing directory");
+            let d = json!({"key": format!("error:{fleet}#{n}"), "did": did, "reason": GONE_CWD});
+            append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "self-heal", d))?;
+            start()
+        }
+        s => s,
+    }
+}
 
 enum Heal {
     StopTick(String),
@@ -40,15 +59,9 @@ struct Breach {
 }
 
 /// Each fleet SLO: its known heal first; `stuck` a pass later only when drive itself is broken.
-pub fn pass(
-    ctx: &Ctx,
-    cfg: &Config,
-    (r, seen): (&dyn Runner, &dyn Runner),
-    out: &mut dyn Write,
-    fleets: &[&str],
-) -> Result<()> {
+pub fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleets: &[&str]) -> Result<()> {
     let events = crate::events::working(&ctx.state)?;
-    let agents = crate::session::all(cfg, seen).checked()?.running();
+    let agents = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?.running();
     let mut now: Vec<Breach> = tick(ctx, cfg, r).into_iter().collect();
     for f in fleets {
         now.extend(idle(ctx, cfg, &events, &agents, f));
@@ -480,7 +493,7 @@ fn errors(ctx: &Ctx, events: &[Event], fleet: &str) -> Vec<Breach> {
 /// A stuck card's [force]: the issue's `drover waiting` next command, once, with `--force`.
 pub fn force(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, (fleet, n): (&str, u64)) -> Result<String> {
     let events = crate::events::working(&ctx.state)?;
-    let agents = crate::session::all(cfg, r).checked()?.running();
+    let agents = crate::link::fresh(ctx, cfg, r)?.sessions().checked()?.running();
     let rows = crate::waiting::scan(ctx, cfg, r, &events, &agents, false, Some(fleet));
     let next = rows
         .into_iter()

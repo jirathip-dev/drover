@@ -674,6 +674,24 @@ fn remote_acp(
     Ok(())
 }
 
+fn no_webkit(ctx: &Ctx, cfg: &Config, ev: &[Event], (fleet, issue): (&str, u64), e: &anyhow::Error) {
+    let Some(x) = e.downcast_ref::<crate::gate::Refusal>() else {
+        return;
+    };
+    let carded = fold(ev)
+        .get(&(fleet.to_string(), issue))
+        .is_some_and(|s| s.state == "needs-human");
+    if x.code == "NO_HOST" && x.msg.contains(crate::hosts::WEBKIT) && !carded {
+        let d = json!({"code": x.code, "reason": format!("its repro test needs Playwright WebKit: {}", x.msg)});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, Some(issue), "needs-human", d),
+        )
+        .ok();
+    }
+}
+
 fn checked_out(r: &dyn Runner, local: &str, branch: &str) -> Option<String> {
     let list = ok(r, "git", &["-C", local, "worktree", "list", "--porcelain"]).ok()?;
     let want = format!("branch refs/heads/{branch}");
@@ -1051,7 +1069,8 @@ pub fn spawn(
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
     let ev = crate::compact::on_root(r, working(&ctx.state)?, (fleet, f))?;
     let host = o.host.clone().or_else(|| crate::starts::admitted(ctx, fleet, issue));
-    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))?;
+    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))
+        .inspect_err(|e| no_webkit(ctx, cfg, &ev, (fleet, issue), e))?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
         return refused("RUNTIME_DOWN", why);
     }
@@ -1261,6 +1280,7 @@ pub fn spawn(
         if stale.is_none() && !here && !hung {
             wip = crate::check::save_lane(ctx, &old, &p.agent, owt)?;
         }
+        let mut killed = names.clone();
         for a in listed
             .as_deref()
             .unwrap_or_default()
@@ -1268,12 +1288,15 @@ pub fn spawn(
             .filter(|a| a.in_dir(&p.agent, Path::new(owt)))
         {
             term::close(ctx, &old, &a.name)?;
+            if !killed.contains(&a.name.as_str()) {
+                killed.push(&a.name);
+            }
         }
         if stale.is_none() && !hung {
             crate::check::reap(ctx, cfg, &old, was, (fleet, Some(issue)), owt)?;
         }
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
-        let mut d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; "), "wip": wip});
+        let mut d = json!({"role": role, "agent": p.agent, "killed": killed, "reason": why.join("; "), "wip": wip});
         if let Some(e) = stale {
             d.put("stale_host", json!(e.str("host")))
                 .put("stale_pane", json!(e.str("pane")));
@@ -1453,14 +1476,13 @@ pub fn spawn(
     if let Some(rl) = &rules {
         on.write(&p.rules_file(), &serde_json::to_string(rl)?)?;
     }
-    let pane = p.agent.clone();
-    let host = placed.as_ref().map(|pl| (&pl.name, &pl.machine));
+    let (pane, host) = (p.agent.clone(), placed.as_ref().map(|pl| (&pl.name, &pl.machine)));
     let d = json!({"agent": p.agent, "role": role, "host": host.map(|h| h.0), "machine": host.and_then(|h| h.1.as_ref()),
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
     pj.put("history", json!(history.line(&p.branch)));
-    bt.start(ctx, r, &pane, &labels, &wt, &acp)?;
+    crate::slo::start_healed(ctx, (fleet, issue), || bt.start(ctx, r, &pane, &labels, &wt, &acp))?;
     if bt.0.acp.is_none() {
         term::ok(r, &home(p.lane_cmd(&pane)))?;
         term::ok(r, &term::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
@@ -1519,6 +1541,7 @@ pub fn spawn(
             }
             intent.done(json!({"agent": p.agent, "pane": pane}))?;
             event("spawn", d)?;
+            crate::link::look_at(ctx, cfg, r, placed.as_ref().and_then(|pl| pl.machine.as_deref())).ok();
             kicked?;
             pj.put("pane", json!(pane)).put("confirmed", json!(confirmed));
             print_plan(out, &pj, o.json, placed.as_ref())?;
@@ -1553,7 +1576,9 @@ pub(crate) fn lane_admit(
     force: bool,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let events = &[events, &crate::drive::pending(ctx, cfg, r)].concat();
+    let lanes = fold(events);
+    let pending = crate::drive::pending(ctx, cfg, r);
+    let events = &[events, &pending].concat();
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
@@ -1578,14 +1603,19 @@ pub(crate) fn lane_admit(
     if let Some(cap) = cap.filter(|&c| n >= c) {
         return refused("CAP", format!("{n} {role} lane(s) open in {fleet}, max_{fam} = {cap}"));
     }
-    let Some((v, cap)) = crate::queue::flight_full(ctx, &st, f, fleet, issue).filter(|_| fam == "impl") else {
+    let admitted = crate::drive::own_marker(ctx, fleet, issue).is_some();
+    let full = crate::queue::flight_full(ctx, &lanes, f, fleet, (issue, &pending));
+    let Some((v, starting, cap)) = full.filter(|_| fam == "impl" && !admitted) else {
         return Ok(());
     };
-    let why = format!(
-        "{}/{cap} PRs in flight in {fleet} ({})",
-        v.len(),
-        crate::queue::hashes(&v)
-    );
+    let count = v.len() + starting;
+    let starting = (starting > 0).then(|| format!("{starting} starting"));
+    let named: Vec<String> = (!v.is_empty())
+        .then(|| crate::queue::hashes(&v))
+        .into_iter()
+        .chain(starting)
+        .collect();
+    let why = format!("{count}/{cap} PRs in flight in {fleet} ({})", named.join(", "));
     if !force {
         return refused("IN_FLIGHT_CAP", format!("{why}; they land first, or pass --force"));
     }
@@ -1791,8 +1821,8 @@ pub fn adopt(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "spawn", d))
 }
 
-pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<bool> {
-    let sessions = crate::session::all(cfg, seen).checked()?;
+pub fn orphans(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<bool> {
+    let sessions = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?;
     let events = working(&ctx.state)?;
     let (st, mut any) = (fold(&events), false);
     for a in crate::lanes::orphans(ctx, cfg, &events, &sessions) {
@@ -1877,6 +1907,9 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
             Ok(()) => any = true,
             Err(e) => writeln!(out, "{fleet} #{n} orphan {agent}: {e:#}")?,
         }
+    }
+    if any {
+        crate::link::look(ctx, cfg, r, out, true)?;
     }
     Ok(any)
 }

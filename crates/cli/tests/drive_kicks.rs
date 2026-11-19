@@ -1208,7 +1208,55 @@ fn a_start_that_never_finishes_stops_blocking_the_next_spawn_once_the_limit_pass
     };
     let r = alive("  10:00\n");
     let d = pass(&later, &r);
-    assert_eq!(launched(&r, 3), 1, "the next queued start takes the freed slot: {d}");
+    assert_eq!(
+        (launched(&r, 1), launched(&r, 2), launched(&r, 3)),
+        (1, 1, 0),
+        "the freed slots go to the same issues, in queue order: {d}"
+    );
     let s = stale(&later);
     assert!(s.iter().any(|e| e.issue == Some(1)), "{s:?}");
+}
+
+#[test]
+fn free_in_flight_slots_go_to_the_first_queued_issues_while_their_kicks_run_slowly() {
+    let (c, _sh) = fleet_with("kicks-1371-order", 11, "max_in_flight = 3", 6, &[]);
+    let alive = |at: &str| {
+        fake("1.0")
+            .reply("sh -c nohup", "4242\n")
+            .reply("kill -0 4242", "")
+            .reply("ps -o etime= -p 4242", at)
+    };
+    let r = alive("  00:01\n");
+    let d = pass(&c, &r);
+    let kicked = |r: &Fake| (1..=6).map(|n| launched(r, n)).collect::<Vec<_>>();
+    assert_eq!(kicked(&r), [1, 1, 1, 0, 0, 0], "{d}");
+    let why = act(&d, 4)["why"].as_str().unwrap_or_default().to_string();
+    assert!(why.starts_with("3/3 PRs in flight in sendmeter (3 starting)"), "{d}");
+    let later = drover::Ctx {
+        now: c.now + 400,
+        ..c.clone()
+    };
+    let r = alive("  10:00\n");
+    let d = pass(&later, &r);
+    assert_eq!(kicked(&r), [1, 1, 1, 0, 0, 0], "a stale start keeps its place: {d}");
+    let lane = serde_json::json!({"role": "impl", "agent": "sendmeter-impl-9", "branch": "issue-9"});
+    let e = drover::events::Event::new(later.now, "sendmeter", Some(9), "spawn", lane);
+    drover::events::append(&later.state, &e).unwrap();
+    for n in [4, 5, 6, 1, 2, 3] {
+        let (code, out) = run(
+            &later,
+            &alive("  00:30\n"),
+            &["kick", "sendmeter", &n.to_string(), "--why", "drive", "--now"],
+        );
+        assert_eq!(code, 0, "{out}");
+    }
+    let ev = read(&later.state).unwrap();
+    let lanes: Vec<u64> = (1..=6)
+        .filter(|&n| ev.iter().any(|e| e.is("spawn", "sendmeter", n)))
+        .collect();
+    assert_eq!(lanes, [1, 2, 3], "{d}");
+    pass(&later, &fake("1.0"));
+    let s = stale(&later);
+    let once = |n: u64| s.iter().filter(|e| e.issue == Some(n)).count();
+    assert_eq!((once(1), once(2), once(3)), (1, 1, 1), "{s:?}");
 }

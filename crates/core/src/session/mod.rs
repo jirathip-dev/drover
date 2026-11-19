@@ -3,7 +3,7 @@ pub mod pulse;
 pub mod stamp;
 pub mod transcript;
 
-pub use list::{all, get, live_on, on};
+pub use list::{get, live_on, on};
 pub use pulse::Pulse;
 
 use shed_proto::{Reported, TerminalInfo};

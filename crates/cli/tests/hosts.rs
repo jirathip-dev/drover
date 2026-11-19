@@ -932,7 +932,13 @@ fn design_runs_on_the_main_host_only_and_a_role_pin_holds() {
 fn a_remote_review_is_read_over_ssh_and_recorded() {
     let c = setup("hosts-verdict", "", true, 0);
     remote_spawn(&c, NOW - 900);
-    let rev = "/home/me/.herdr/worktrees/sendmeter/rev-12-r1";
+    let dir = tmpdir("hosts-rev");
+    std::fs::write(
+        dir.join("verdict.md"),
+        "FAIL\n- blocking [code] a.rs:1\n  Proof: spec\n  > AC 1\n",
+    )
+    .unwrap();
+    let rev = dir.to_str().unwrap();
     let lane = "sendmeter-rev-12-r1";
     let head = "a".repeat(40);
     let d = json!({"role": "rev", "agent": lane, "harness": "claude", "pane": lane, "workspace": "",
@@ -946,10 +952,6 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
             "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
             &format!("{head}\n"),
         )
-        .reply(
-            &format!("{SSH}'cat' '{rev}/verdict.md'"),
-            "FAIL\n- blocking [code] a.rs:1\n  Proof: spec\n  > AC 1\n",
-        )
         .reply(&format!("{SSH}{GIT} '-C' '{WT}' 'log'"), &format!("{head} 20"))
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{SSH}{GIT} '-C' '{rev}' 'rev-list'"), "0\n")
@@ -959,6 +961,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     let r = two(&r, &bazzite);
     let cfg = Config::load(&c.config).unwrap();
+    look(&c, &sh.on(&r));
     let w = drover::waiting::scan(&c, &cfg, &sh.on(&r), &read(&c.state).unwrap(), &[], true, None);
     let w = w.iter().find(|(s, _)| s.issue == 12).unwrap();
     assert_eq!(w.1.what, "review done on bazzite · recording within 1 min");

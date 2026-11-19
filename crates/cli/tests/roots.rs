@@ -260,10 +260,16 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let (_, st) = run(&r.c, &Git(&f), &["status"]);
     assert!(st.contains(" · +1 ⇡1"), "{st}");
     let cfg = Config::load(&r.c.config).unwrap();
-    let a = drover::session::all(&cfg, &r.sh.on(&Git(&f)));
+    let a = drover::link::fresh(&r.c, &cfg, &r.sh.on(&Git(&f))).unwrap().sessions();
     assert_eq!(a.live().next().map(|s| s.cwd.clone()), Some(wt.clone()), "{a:?}");
     let st = drover::events::states(&r.c.state).unwrap();
-    let ls = drover::lanes::join(&cfg, &Git(&f), &ev, &st, &a);
+    let ls = drover::lanes::join(
+        &cfg,
+        drover::link::view::View::load(&r.c, &cfg).ok().as_ref(),
+        &ev,
+        &st,
+        &a,
+    );
     let l = ls.iter().find(|l| l.name == AGENT).unwrap();
     let u = l.unsaved(&Git(&f));
     assert_eq!(

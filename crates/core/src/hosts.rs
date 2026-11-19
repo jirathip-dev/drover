@@ -35,6 +35,10 @@ const CM: [&str; 3] = [
 
 /// `f` over `items`, one thread each (a host's remote calls never wait on another host's), results in order.
 pub fn each<T: Send, U: Send>(items: impl IntoIterator<Item = T>, f: impl Fn(T) -> U + Sync) -> Vec<U> {
+    let items: Vec<T> = items.into_iter().collect();
+    if items.len() < 2 {
+        return items.into_iter().map(f).collect();
+    }
     let f = &f;
     std::thread::scope(|s| {
         let hs: Vec<_> = items.into_iter().map(|x| s.spawn(move || f(x))).collect();
@@ -494,9 +498,10 @@ pub fn cached(ctx: &Ctx) -> BTreeMap<String, Seen> {
 }
 
 const PROBE: &str = "uname -s; uname -m; echo \"$HOME\"; xcodebuild -version >/dev/null 2>&1 && echo xcode; \
-docker info >/dev/null 2>&1 && echo docker; true";
+docker info >/dev/null 2>&1 && echo docker; \
+ls -d \"$HOME\"/.cache/ms-playwright/webkit-* \"$HOME\"/Library/Caches/ms-playwright/webkit-* 2>/dev/null | grep -q . && echo webkit; true";
 
-/// The tags a host detects about itself (`os:macos|os:linux`, `arch:arm64|x86_64`, `xcode`, `docker`) and its `$HOME`.
+/// The tags a host detects about itself (`os:macos|os:linux`, `arch:arm64|x86_64`, `xcode`, `docker`, `webkit`) and its `$HOME`.
 pub fn probe(r: &dyn Runner) -> Option<(Vec<String>, String)> {
     let out = ok(r, "sh", &["-c", PROBE]).ok()?;
     let mut l = out.lines().map(str::trim);
@@ -515,6 +520,8 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
     }
     let events = working(&ctx.state).unwrap_or_default();
     let off = idle_off(cfg, &events);
+    let seen = crate::link::look(ctx, cfg, r, &mut std::io::sink(), refresh).map(|v| v.sessions());
+    let seen = seen.unwrap_or_default();
     for (name, h) in &cfg.hosts {
         if h.machine.as_ref().is_some_and(|m| off.contains(m)) {
             continue;
@@ -525,7 +532,10 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         if let Some(Err(e)) = (h.cloud.is_some() && !stopped).then(|| crate::cloud::moved(ctx, cfg, r, name, false)) {
             crate::stderr!("cloud {name}: {e:#}");
         }
-        let a = (!stopped).then(|| crate::session::live_on(&on).ok()).flatten();
+        let listed = seen.0.iter().find(|l| l.0 == h.machine).and_then(|l| l.1.clone().ok());
+        let a = listed
+            .filter(|_| !stopped)
+            .map(|all| all.into_iter().filter(|s| s.running() && s.lane()).collect::<Vec<_>>());
         s.up = a.is_some();
         let live = a.as_ref().is_some_and(|a| !a.is_empty());
         s.busy = if live { ctx.now } else { s.busy };
@@ -650,17 +660,42 @@ pub fn needs(f: &Fleet, role: &str, events: &[Event], (fleet, issue): (&str, u64
     n
 }
 
-fn repro_os(r: &dyn Runner, f: &Fleet, events: &[Event], (fleet, issue, role): (&str, u64, &str)) -> Option<String> {
+/// The probed tag of a host whose Playwright cache holds the webkit browser.
+pub const WEBKIT: &str = "webkit";
+
+struct ReproNeeds {
+    os: Option<String>,
+    webkit: Option<String>,
+}
+
+fn repro_needs(
+    r: &dyn Runner,
+    f: &Fleet,
+    events: &[Event],
+    (fleet, issue, role): (&str, u64, &str),
+) -> Option<ReproNeeds> {
     if f.family(role) != "rev" || !crate::queue::repro(events, fleet, issue) {
         return None;
     }
     let st = crate::events::fold(events).remove(&(fleet.to_string(), issue));
     let branch = crate::gate::branch_of(st.as_ref(), issue);
     let diff = ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo]).ok()?;
-    diff.lines().filter(|l| l.starts_with('+')).find_map(|l| {
+    let added = || diff.lines().filter(|l| l.starts_with('+'));
+    let os = added().find_map(|l| {
         let os = l.split_once("cfg(target_os")?.1.split('"').nth(1)?;
         Some(format!("os:{os}"))
-    })
+    });
+    let ui = |p: &&str| {
+        p.contains("tests/ui/")
+            || f.ui_paths
+                .iter()
+                .any(|g| crate::config::glob(g.as_bytes(), p.as_bytes()))
+    };
+    let webkit = added()
+        .filter_map(|l| l.strip_prefix("+++ b/"))
+        .find(ui)
+        .map(String::from);
+    Some(ReproNeeds { os, webkit })
 }
 
 const IDLE: [&str; 6] = ["ready", "needs-human", "parked", "blocked", "merged", "closed"];
@@ -1326,7 +1361,13 @@ pub fn place(
         return Ok(Some(at(ctx, cfg, f, r, (h, machine), pre)));
     }
     let mut needs = needs(f, role, events, (fleet, issue));
-    needs.extend(repro_os(r, f, events, (fleet, issue, role)));
+    let repro = repro_needs(r, f, events, (fleet, issue, role)).unwrap_or(ReproNeeds { os: None, webkit: None });
+    let webkit = repro.webkit.map(|t| format!("needs {WEBKIT}: its repro test {t}"));
+    if webkit.is_some() {
+        needs.retain(|t| !f.needs.contains(t));
+        needs.push(WEBKIT.into());
+    }
+    needs.extend(repro.os);
     let seen = cached(ctx);
     let fit = |n: &str, h: &HostCfg| needs.iter().all(|t| tags(h, seen.get(n)).contains(t));
     let left = left(events, fleet, issue);
@@ -1409,7 +1450,7 @@ pub fn place(
         (false, ..) if needs.is_empty() => "no local host fits".into(),
         (false, ..) => format!("needs {}: no local host has it", needs.join(", ")),
     };
-    p.why = (!local(&p)).then_some(why);
+    p.why = webkit.or((!local(&p)).then_some(why));
     Ok(Some(p))
 }
 

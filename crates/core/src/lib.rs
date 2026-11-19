@@ -36,6 +36,7 @@ pub mod land;
 pub mod lanes;
 pub mod lesson;
 pub mod limit;
+pub mod link;
 pub mod orchestrator;
 pub mod outbox;
 pub mod overlap;
@@ -502,24 +503,30 @@ pub fn orchestrator_extend(
     if orchestrator::fleet_of(&events, t)? != fleet {
         return gate::refused("OWNER_ASK", format!("#{n} is not on {t}'s repo; ask the owner"));
     }
-    gate::held(ctx, fleet, n)?;
+    let open = |e: &&Event| e.is("needs-decision", fleet, n) && e.data.get("extend").is_some();
+    let ask = events
+        .iter()
+        .rfind(open)
+        .filter(|a| events::closed(&events, a).is_none());
+    if ask.is_none() {
+        gate::held(ctx, fleet, n)?;
+    }
     let card = events.iter().rfind(|e| e.is("needs-human", fleet, n));
     if let Some(line) = typed {
+        let since = card.or(ask).map(|e| e.seq);
         let said = |m: &Event| m.kind == "thread-msg" && m.str("thread") == Some(t) && m.str("from") == Some("owner");
-        let after = |m: &Event| said(m) && m.str("text") == Some(line) && card.is_some_and(|c| m.seq > c.seq);
+        let after = |m: &Event| said(m) && m.str("text") == Some(line) && since.is_some_and(|s| m.seq > s);
         if !events.iter().any(after) {
             return gate::refused(
                 "NOT_TYPED",
                 format!("no owner message in {t} says that line after #{n}'s card"),
             );
         }
-        return gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, TYPED, None));
+        return match ask {
+            Some(a) => answer_with(ctx, cfg, r, out, a, "1", (TYPED, None), (None, None)),
+            None => gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, TYPED, None)),
+        };
     }
-    let open = |e: &&Event| e.is("needs-decision", fleet, n) && e.data.get("extend").is_some();
-    let ask = events
-        .iter()
-        .rfind(open)
-        .filter(|a| events::closed(&events, a).is_none());
     let ask = if let Some(a) = ask {
         a.clone()
     } else {

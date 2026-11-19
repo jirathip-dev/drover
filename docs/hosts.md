@@ -64,7 +64,8 @@ as written on every host.
 
 Each `drover check` (and `drover hosts refresh`) looks at every host. Once an hour it probes the host's tags with
 one shell line: `os:macos` or `os:linux`, `arch:arm64` or `arch:x86_64`, `xcode` (when `xcodebuild -version` works) and
-`docker` (when `docker info` works). The results go to `<state dir>/hosts.json`, along with the host's `$HOME`,
+`docker` (when `docker info` works) and `webkit` (when the Playwright cache under `~/.cache/ms-playwright` or
+`~/Library/Caches/ms-playwright` holds a `webkit-*` browser). The results go to `<state dir>/hosts.json`, along with the host's `$HOME`,
 whether it answered, and its load/cpu, free memory and free disk. A host's tags are the detected ones plus its hand
 `tags`.
 
@@ -87,7 +88,10 @@ A lane needs the union of three lists:
    and `--host` or a pin naming another host is refused `DESIGN_MAIN_ONLY`.
 3. Otherwise, an issue that already had a lane stays on that lane's host, because its worktree is there. This holds
    even when the host has been turned off.
-4. Otherwise, drover takes the enabled hosts whose tags cover the needs, and picks the least busy: lowest load per
+4. A `--repro` review whose diff adds a test under `tests/ui/` or the fleet's `ui_paths` needs `webkit` in place of the
+   fleet's `needs` (#1355), and the spawn event names that test; with no enabled `webkit` host it is refused `NO_HOST`
+   and the issue gets one needs-human card. A `cfg(target_os)` test adds its `os:` tag.
+5. Otherwise, drover takes the enabled hosts whose tags cover the needs, and picks the least busy: lowest load per
    CPU first, then the most free memory.
 
 Admission runs per host: `DISK_LOW`, `MEM_LOW`, then `HOST_BUSY`. A host that fails admission (or is unreachable) is
@@ -113,8 +117,7 @@ fitting host is full it is skipped with `SPAWN_PENDING: boat-dev-2 2/2 starting`
 between the fleets with something to start, by fleet weight. `start_release = "started"` (the default, also in
 `[limits]`) frees a start's slot once its harness is up on the host; `"confirmed"` holds it until its first prompt is
 confirmed. `spawn_pending_max_secs` stays the stale backstop: a start that has not finished by then stops counting (logged
-`stale-marker`), and its issue is tried again behind the other queued starts, so a start that never finishes cannot
-hold a host's slots pass after pass (#1269). Every pass, the fast step too, runs the start step
+`stale-marker`), its slot is free again and its issue keeps its queue place, so the next pass starts it first (#1371). Every pass, the fast step too, runs the start step
 before its PR reads, while some host has a free start slot; a full pass tries once more at its end for the issues its
 own steps just released. With `max_parallel_spawns = 0` (spawns in the pass) only that end-of-pass step runs.
 `max_working` and the heavy-slot gate still bound the running load.
@@ -155,10 +158,13 @@ until a respawn. A fleet.toml left on a remote host is no longer read: `drover d
 A lane on another host never connects to the main host: it holds no key, token or ssh route to it. Spawn exports
 `DROVER_OUTBOX=1`, and its `drover ask`, `answer`, `verdict`, `done` and its own events (`hook-denied`,
 `coauthor-trailer`) are appended to `<worktree>/.drover/outbox.jsonl` (exit 0: `queued for the main host: drive
-delivers it within 1 min`). Each fast drive pass pulls every live remote lane's outbox over main → host ssh and runs
-each line as that lane (from its spawn event, never the line), once per lane and timestamp; a line for another issue
-or role, or a verb a lane doesn't run itself, is refused and logged `outbox`. `check` raises `outbox-stale` once when a
-line sits there over 5 min. So the main host's log is the only one written and only the main host pushes.
+delivers it within 1 min`). #1309: each drive step makes one call per host, `drover hosts report` over main → host
+ssh (the main host's own in this process): its shed sessions and each live lane worktree's head, uncommitted state,
+verdict.md and outbox lines. The main host keeps the last report as the view in `state.db`; drive, check, `waiting`,
+`status` and the board read lane facts from it, never over ssh (docs/architecture/drive-push/). Each outbox line runs
+as that lane (from its spawn event, never the line), once per lane and timestamp; a line for another issue or role, or
+a verb a lane doesn't run itself, is refused and logged `outbox`. `check` raises `outbox-stale` once when a reported
+line has not run for over 5 min. So the main host's log is the only one written and only the main host pushes.
 That host's own log (#344: its own `state.db`) is never written by a lane. Each
 `check` imports the asks a lane left in a remote host's own log (lanes started before this; read through its
 `drover events --jsonl`, or its `events.jsonl` on an older build) under a new id, with `from` naming the old one.

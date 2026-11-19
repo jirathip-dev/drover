@@ -83,8 +83,7 @@ pub fn verdict(
         .iter()
         .rfind(reviewer)
         .filter(|e| e.str("worktree").is_some_and(|w| file.starts_with(w)));
-    let body = (crate::hosts::On::of(r, at).read(Path::new(file)))
-        .with_context(|| format!("cannot read verdict file {file}"))?;
+    let body = crate::link::read(ctx, cfg, r, at, file).with_context(|| format!("cannot read verdict file {file}"))?;
     anyhow::ensure!(!body.trim().is_empty(), "verdict file {file} is empty");
     if let Some(bad) = no_proof(&body).filter(|_| !pass) {
         return refused("NO_PROOF", bad);
