@@ -1,0 +1,419 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "age-list",
+          "rows": [
+            {
+              "id": "age",
+              "subtitle": {
+                "text": "as of: not yet known",
+                "tone": "warn"
+              },
+              "title": "Snapshot",
+              "type": "row"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "snapshot",
+      "id": "age",
+      "type": "section"
+    },
+    {
+      "id": "ranch",
+      "load": "calm",
+      "repos": [
+        {
+          "blocks": [
+            {
+              "header": "queued",
+              "id": "h-acme-api-queued",
+              "rows": [
+                {
+                  "blocked_by": null,
+                  "figure": {
+                    "state": "queued"
+                  },
+                  "id": "h-acme-api-q21",
+                  "subtitle": "Rate-limit the public search endpoint",
+                  "title": "#21"
+                },
+                {
+                  "blocked_by": null,
+                  "figure": {
+                    "state": "needs"
+                  },
+                  "id": "h-acme-api-q22",
+                  "subtitle": "needs you",
+                  "title": "#22"
+                }
+              ],
+              "type": "section"
+            },
+            {
+              "header": "working",
+              "id": "h-acme-api-working",
+              "rows": [
+                {
+                  "figure": {
+                    "act": "impl",
+                    "coat": "--c:#b08d5e;--d:#8e6f45;--m:#41321f;--b:#efe7dc",
+                    "state": "working"
+                  },
+                  "host": null,
+                  "id": "h-acme-api-impl-17",
+                  "needs": null,
+                  "subtitle": "working",
+                  "tap": {
+                    "sheet": "/screens/lanes/acme-api-impl-17"
+                  },
+                  "title": "acme-api-impl-17",
+                  "tone": "g",
+                  "value": "86m"
+                }
+              ],
+              "type": "section"
+            },
+            {
+              "header": "done",
+              "id": "h-acme-api-done",
+              "rows": [
+                {
+                  "figure": {
+                    "act": "done",
+                    "coat": "--c:#b9bcc6;--d:#989ca9;--m:#7d8089;--b:transparent",
+                    "state": "done"
+                  },
+                  "host": null,
+                  "id": "h-acme-api-rev-15",
+                  "needs": null,
+                  "subtitle": "idle · rev idle without a verdict (check the pane) (69m)",
+                  "tap": {
+                    "sheet": "/screens/lanes/acme-api-rev-15"
+                  },
+                  "title": "acme-api-rev-15",
+                  "tone": "a",
+                  "value": "69m"
+                }
+              ],
+              "type": "section"
+            },
+            {
+              "header": "blocked/dead",
+              "id": "h-acme-api-blocked",
+              "rows": [
+                {
+                  "figure": {
+                    "act": "blocked",
+                    "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
+                    "state": "dead"
+                  },
+                  "host": null,
+                  "id": "h-acme-api-impl-19",
+                  "needs": null,
+                  "subtitle": "dead",
+                  "tap": {
+                    "sheet": "/screens/lanes/acme-api-impl-19"
+                  },
+                  "title": "acme-api-impl-19",
+                  "tone": "r",
+                  "value": "2h"
+                }
+              ],
+              "type": "section"
+            }
+          ],
+          "color": "g",
+          "id": "acme-api",
+          "subtitle": "2 queued·1 blocked·1 working·1 done",
+          "title": "acme-api"
+        },
+        {
+          "blocks": [],
+          "color": "l",
+          "id": "acme-ios",
+          "subtitle": "",
+          "title": "acme-ios"
+        },
+        {
+          "blocks": [
+            {
+              "header": "queued",
+              "id": "h-acme-web-queued",
+              "rows": [
+                {
+                  "blocked_by": null,
+                  "figure": {
+                    "state": "queued"
+                  },
+                  "id": "h-acme-web-q45",
+                  "subtitle": "Image lazy-loading on the product grid",
+                  "title": "#45"
+                },
+                {
+                  "blocked_by": null,
+                  "figure": {
+                    "state": "queued"
+                  },
+                  "id": "h-acme-web-q46",
+                  "subtitle": "Locale switcher in the header",
+                  "title": "#46"
+                },
+                {
+                  "blocked_by": 46,
+                  "figure": {
+                    "state": "queued"
+                  },
+                  "id": "h-acme-web-q47",
+                  "subtitle": "blocked by #46",
+                  "title": "#47"
+                },
+                {
+                  "blocked_by": 47,
+                  "figure": {
+                    "state": "queued"
+                  },
+                  "id": "h-acme-web-q49",
+                  "subtitle": "blocked by #47",
+                  "title": "#49"
+                },
+                {
+                  "blocked_by": 49,
+                  "figure": {
+                    "state": "queued"
+                  },
+                  "id": "h-acme-web-q50",
+                  "subtitle": "blocked by #49",
+                  "title": "#50"
+                }
+              ],
+              "type": "section"
+            },
+            {
+              "header": "working",
+              "id": "h-acme-web-working",
+              "rows": [
+                {
+                  "figure": {
+                    "act": "impl",
+                    "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
+                    "state": "working"
+                  },
+                  "host": null,
+                  "id": "h-acme-web-impl-41",
+                  "needs": null,
+                  "subtitle": "working",
+                  "tap": {
+                    "sheet": "/screens/lanes/acme-web-impl-41"
+                  },
+                  "title": "acme-web-impl-41",
+                  "tone": "g",
+                  "value": "53m"
+                },
+                {
+                  "figure": {
+                    "act": "rev",
+                    "coat": "--c:#8a5a33;--d:#6f4527;--m:#2e2019;--b:transparent",
+                    "state": "working"
+                  },
+                  "host": null,
+                  "id": "h-acme-web-rev-38",
+                  "needs": null,
+                  "subtitle": "working",
+                  "tap": {
+                    "sheet": "/screens/lanes/acme-web-rev-38"
+                  },
+                  "title": "acme-web-rev-38",
+                  "tone": "g",
+                  "value": "43m"
+                },
+                {
+                  "figure": {
+                    "act": "impl",
+                    "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
+                    "state": "working"
+                  },
+                  "host": null,
+                  "id": "h-acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx",
+                  "needs": null,
+                  "subtitle": "working",
+                  "tap": {
+                    "sheet": "/screens/lanes/acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx"
+                  },
+                  "title": "acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx",
+                  "tone": "g",
+                  "value": "70s"
+                }
+              ],
+              "type": "section"
+            },
+            {
+              "header": "blocked/dead",
+              "id": "h-acme-web-blocked",
+              "rows": [
+                {
+                  "figure": {
+                    "act": "blocked",
+                    "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
+                    "state": "blocked"
+                  },
+                  "host": null,
+                  "id": "h-acme-web-impl-44",
+                  "needs": null,
+                  "subtitle": "blocked",
+                  "tap": {
+                    "sheet": "/screens/lanes/acme-web-impl-44"
+                  },
+                  "title": "acme-web-impl-44",
+                  "tone": "r",
+                  "value": "33m"
+                }
+              ],
+              "type": "section"
+            }
+          ],
+          "color": "c",
+          "id": "acme-web",
+          "subtitle": "5 queued·1 blocked·3 working",
+          "title": "acme-web"
+        },
+        {
+          "blocks": [
+            {
+              "header": "queued",
+              "id": "h-docs-queued",
+              "rows": [
+                {
+                  "blocked_by": null,
+                  "figure": {
+                    "state": "queued"
+                  },
+                  "id": "h-docs-q10",
+                  "subtitle": "Search across all versions",
+                  "title": "#10"
+                }
+              ],
+              "type": "section"
+            },
+            {
+              "header": "idle",
+              "id": "h-docs-idle",
+              "rows": [
+                {
+                  "figure": {
+                    "act": "idle",
+                    "coat": "--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc",
+                    "state": "idle"
+                  },
+                  "host": null,
+                  "id": "h-docs-impl-8",
+                  "needs": null,
+                  "subtitle": "idle · pushed 0808080, waiting for drive (next pass ≤ 5 min) to spawn review (103m)",
+                  "tap": {
+                    "sheet": "/screens/lanes/docs-impl-8"
+                  },
+                  "title": "docs-impl-8",
+                  "tone": "a",
+                  "value": "103m"
+                },
+                {
+                  "figure": {
+                    "act": "idle",
+                    "coat": "--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc",
+                    "state": "parked"
+                  },
+                  "host": null,
+                  "id": "h-docs-impl-7",
+                  "needs": null,
+                  "subtitle": "parked · work on PR #15",
+                  "tap": {
+                    "sheet": "/screens/lanes/docs-impl-7"
+                  },
+                  "title": "docs-impl-7",
+                  "tone": "m",
+                  "value": "2h"
+                }
+              ],
+              "type": "section"
+            },
+            {
+              "header": "done",
+              "id": "h-docs-done",
+              "rows": [
+                {
+                  "figure": {
+                    "act": "done",
+                    "coat": "--c:#b08d5e;--d:#8e6f45;--m:#41321f;--b:#efe7dc",
+                    "state": "done"
+                  },
+                  "host": null,
+                  "id": "h-docs-impl-9",
+                  "needs": null,
+                  "subtitle": "idle · idle without pushing (check the pane) (78m)",
+                  "tap": {
+                    "sheet": "/screens/lanes/docs-impl-9"
+                  },
+                  "title": "docs-impl-9",
+                  "tone": "a",
+                  "value": "78m"
+                }
+              ],
+              "type": "section"
+            }
+          ],
+          "color": "l",
+          "id": "docs",
+          "subtitle": "1 queued·2 idle·1 done",
+          "title": "docs"
+        },
+        {
+          "blocks": [
+            {
+              "header": "idle",
+              "id": "h-others-idle",
+              "rows": [
+                {
+                  "figure": {
+                    "act": "idle",
+                    "coat": "--c:#3b3b44;--d:#2a2a31;--m:#17161a;--b:transparent",
+                    "state": "idle"
+                  },
+                  "host": null,
+                  "id": "h-scratch",
+                  "needs": null,
+                  "subtitle": "idle",
+                  "tap": {
+                    "sheet": "/screens/lanes/scratch"
+                  },
+                  "title": "scratch",
+                  "tone": "a",
+                  "value": ""
+                }
+              ],
+              "type": "section"
+            }
+          ],
+          "color": "",
+          "id": "others",
+          "subtitle": "1 idle",
+          "title": "others"
+        }
+      ],
+      "type": "scene",
+      "weather": {
+        "fog": 0,
+        "line": "load 1.20 · mem normal · swap ?",
+        "sky": "clear",
+        "storm": false,
+        "wind": 0.48
+      }
+    }
+  ],
+  "id": "scene",
+  "stream": "/screens/scene/stream",
+  "title": "Scene",
+  "type": "screen"
+}

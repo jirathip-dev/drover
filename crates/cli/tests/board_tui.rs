@@ -251,10 +251,12 @@ fn every_screen_the_phone_reaches_draws_every_title_value_badge_and_label_at_40_
         );
     }
     assert!(
-        !paths.iter().any(|p| p.contains("herd") || p.contains("proxy-token")),
+        !paths
+            .iter()
+            .any(|p| p.contains("herd") || p.contains("/screens/scene") || p.contains("proxy-token")),
         "{paths:?}"
     );
-    assert_eq!(door.screen(T, "/screens/herd"), None);
+    assert_eq!(door.screen(T, "/screens/scene"), None);
 }
 
 #[test]

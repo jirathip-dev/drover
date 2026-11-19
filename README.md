@@ -64,7 +64,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
   an edge swipe back (#1170).
 - Queue counts and repo chips (#1089), a row tap always opens the issue sheet (#1090) with PASS/FAIL per round
   (#1238), and done today opens today's merges (#1172).
-- The Herd scene back on the page (#1092).
+- Scene: the old Herd and its animations back as a full-page header toggle, kept per phone (#1305).
 - Every #553 parity row names its test in `docs/parity.md`; CI fails a dropped one without the owner's q-number (#1094).
 - A held port hands over to the installed build; a stale or looping serve alerts (#1081).
 
