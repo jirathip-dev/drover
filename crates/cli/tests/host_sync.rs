@@ -437,3 +437,60 @@ fn an_unsigned_mac_binary_at_the_release_sha_installs_the_signed_build_then_is_u
         .iter()
         .any(|l| l.starts_with(&ssh("bazzite")) && l.contains("codesign")));
 }
+
+fn self_updating(name: &str, mini: &str) -> drover::Ctx {
+    let mut c = setup(name, "", true, 0);
+    let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
+    c.exe = dir.join("bin/drover").display().to_string();
+    version_bin(Path::new(&c.exe), &ver(mini));
+    c
+}
+
+#[test]
+fn a_host_whose_report_fails_but_answers_ssh_is_swapped_to_the_release() {
+    let c = self_updating("rollout-report-fails", NEW);
+    let mut all = cached(&c);
+    let b = all.get_mut("bazzite").unwrap();
+    (b.up, b.home) = (false, String::new());
+    std::fs::write(
+        c.state.with_file_name("hosts.json"),
+        serde_json::to_string(&all).unwrap(),
+    )
+    .unwrap();
+    let boats = [("bazzite", OLD, None), ("boat2", NEW, None), ("boat3", NEW, None)];
+    let f = rollout(&c, &boats).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\n");
+    let (code, out) = run(&c, &Disk(&f), &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("✓ caught up bazzite to 1111111"), "{out}");
+    assert!(swapped(&f, "bazzite").is_some(), "{:#?}", f.calls.borrow());
+    let sync: Vec<_> = kinds(&c, "host-sync")
+        .iter()
+        .map(|e| (e.str("host").unwrap().to_string(), e.val("ok") == true))
+        .collect();
+    assert_eq!(sync, [("bazzite".to_string(), true)]);
+    assert!(kinds(&c, "host-behind").is_empty());
+}
+
+#[test]
+fn a_host_ssh_cannot_reach_is_left_behind_with_the_ssh_error() {
+    let c = self_updating("rollout-ssh-fails", OLD);
+    let refused = "ssh: connect to host bazzite port 22: Connection refused";
+    let pass = |mins: u64, boats: &[(&str, &str, Option<&str>)]| {
+        let f = rollout(&c, boats).once_err(&format!("{SSH}{STATUS}"), 255, refused);
+        let at = drover::Ctx {
+            now: NOW + mins * 60,
+            ..c.clone()
+        };
+        run(&at, &Disk(&f), &["self-update"])
+    };
+    let (code, out) = pass(0, &[("boat2", OLD, None), ("boat3", OLD, None)]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out) = pass(31, &[("boat2", OLD, Some(NEW)), ("boat3", OLD, Some(NEW))]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("left behind: bazzite"), "{out}");
+    let behind = kinds(&c, "host-behind");
+    assert_eq!(behind.len(), 1, "{behind:?}");
+    assert_eq!(behind[0].str("host"), Some("bazzite"));
+    let reason = behind[0].str("reason").unwrap_or_default();
+    assert!(reason.contains(refused), "{reason}");
+}
