@@ -1,0 +1,8 @@
+Decided: fix round 4 only merges origin/staging twice (the cap raise b9878ba5, then swag beside tokio in Cargo.toml and Cargo.lock); no code change.
+Because: q2091
+Decided: serve accepts and reads requests on a 2-worker tokio runtime and answers them on at most 64 blocking handler threads; a kept-alive socket goes back to the runtime.
+Because: q2044
+Rejected: spawn_blocking with Arc<Server> — Server borrows Ctx and the runner, so it would change serve_on and every caller for no gain in slice 1
+Check: rust CI is green with the 60000 cap; the two flaky ui-webkit tests also failed on staging at 290e2299, ea56879d and 20d6583e.
+Check: crates/cli/tests/serve_conn.rs: the 65th request waits while 64 handlers are held, and fails on origin/staging.
+Owner: the phone page's server now runs on async connections; busy moments make requests wait instead of failing.
