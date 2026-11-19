@@ -165,3 +165,26 @@ fn the_herd_screen_of_the_demo_fleet_is_its_golden() {
     let want: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
     assert_eq!(got, want, "`BLESS=1` rewrites tests/golden/cooee/herd.json");
 }
+
+#[test]
+fn every_demo_screen_passes_blocks_check() {
+    let (site, _) = export();
+    let mut all = vec![];
+    let mut dirs = vec![site.join("screens")];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else if p.ends_with("index.html") {
+                let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+                let one = match v { Value::Array(a) => a, v => vec![v] };
+                for s in one {
+                    let f = blocks::Built::new(s).check(&[]);
+                    if !f.is_empty() { all.push(format!("{}: {f:?}", p.display())); }
+                }
+            }
+        }
+    }
+    assert!(all.is_empty(), "{}", all.join("\n"));
+}
