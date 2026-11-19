@@ -212,18 +212,22 @@ fn a_paused_then_busy_extend_waits_hours_with_no_card_and_starts_after_resume_wi
 }
 
 #[test]
-fn a_hard_refusal_of_the_start_brings_the_card_back_naming_the_code() {
-    let (c, sh) = setup("extend-hard");
+fn a_hard_refusal_of_the_start_shows_on_the_row_then_brings_the_card_back_naming_the_code() {
+    let (mut c, sh) = setup("extend-hard");
     let calm = fake("1");
     assert_eq!(run(&c, &calm, &["extend", "sendmeter", "12"]).0, 0);
-    let broken = fake("1").once_err(ADD, 1, "worktree exists");
-    let (code, out) = run(&c, &broken, &["drive"]);
+    let broken = || fake("1").once_err(ADD, 1, "worktree exists");
+    let (code, out) = run(&c, &broken(), &["drive"]);
     assert_eq!(code, 0, "{out}");
+    assert_eq!(status(&c, &calm, c.now), "extended · waiting: ERROR");
+    assert_eq!(cards(&c, &calm, c.now), []);
+    c.now += 30 * 60;
+    assert_eq!(run(&c, &broken(), &["drive"]).0, 0);
     assert_eq!(state(&c), "needs-human");
     let back = cards(&c, &calm, c.now);
     assert_eq!(back.len(), 1, "{back:?}");
     assert!(
-        back[0].1.starts_with("one more round did not start: ERROR: "),
+        back[0].1.starts_with("one more round did not start in 30m: ERROR: "),
         "{back:?}"
     );
 
@@ -231,8 +235,10 @@ fn a_hard_refusal_of_the_start_brings_the_card_back_naming_the_code() {
     assert_eq!(code, 0, "the returned card's tap: {out}");
     assert_eq!(kinds(&c, "round-extended"), 1, "the round was granted already");
     assert_eq!((state(&c), cards(&c, &calm, c.now)), ("queued".into(), vec![]));
-    assert_eq!(run(&c, &calm, &["drive"]).0, 0);
-    assert_eq!(started(&sh), 1);
+    c.now += 300;
+    let (code, out) = run(&c, &calm, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(started(&sh), 1, "{out}");
 }
 
 #[test]

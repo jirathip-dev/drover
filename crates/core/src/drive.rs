@@ -2011,7 +2011,8 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     if fast {
         return res;
     }
-    res.and(clean_merged(ctx, cfg, r, out, &events, fleet))
+    res.and(crate::pending::stalled(ctx, cfg, fleet))
+        .and(clean_merged(ctx, cfg, r, out, &events, fleet))
 }
 
 fn clean_merged(
