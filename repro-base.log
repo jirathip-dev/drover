@@ -1,0 +1,52 @@
+
+running 2 tests
+a_tunnel_whose_ssh_lives_but_whose_far_end_does_not_answer_is_down_and_takes_no_new_lane --- FAILED
+a_forward_that_failed_on_a_held_remote_port_frees_it_and_the_next_look_answers_through_it --- FAILED
+
+failures:
+
+---- a_tunnel_whose_ssh_lives_but_whose_far_end_does_not_answer_is_down_and_takes_no_new_lane stdout ----
+
+thread 'a_tunnel_whose_ssh_lives_but_whose_far_end_does_not_answer_is_down_and_takes_no_new_lane' (912007) panicked at crates/cli/tests/remote_acp.rs:1109:5:
+boat1 · up · tags os:linux · load/cpu ? · mem ? GB · disk ? GB free · 0 lane(s)  · seen 0s ago
+boat2 · up · tags os:linux · load/cpu ? · mem ? GB · disk ? GB free · 0 lane(s)  · seen 0s ago
+mini · off · not used for lanes · tags os:macos · load/cpu ? · mem ? GB · disk ? GB free · 0 lane(s)  · seen 0s ago
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a_forward_that_failed_on_a_held_remote_port_frees_it_and_the_next_look_answers_through_it stdout ----
+
+thread 'a_forward_that_failed_on_a_held_remote_port_frees_it_and_the_next_look_answers_through_it' (912006) panicked at crates/cli/tests/remote_acp.rs:1127:5:
+boat1 · up · tags os:linux · load/cpu ? · mem ? GB · disk ? GB free · 0 lane(s)  · seen 0s ago
+mini · off · not used for lanes · tags os:macos · load/cpu ? · mem ? GB · disk ? GB free · 0 lane(s)  · seen 0s ago
+
+
+
+failures:
+    a_forward_that_failed_on_a_held_remote_port_frees_it_and_the_next_look_answers_through_it
+    a_tunnel_whose_ssh_lives_but_whose_far_end_does_not_answer_is_down_and_takes_no_new_lane
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 19 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p drover --test remote_acp`
+
+running 1 test
+a_lane_that_died_on_econnrefused_names_the_proxy_tunnel_not_an_adapter_crash --- FAILED
+
+failures:
+
+---- a_lane_that_died_on_econnrefused_names_the_proxy_tunnel_not_an_adapter_crash stdout ----
+
+thread 'a_lane_that_died_on_econnrefused_names_the_proxy_tunnel_not_an_adapter_crash' (912218) panicked at crates/cli/tests/shed_native.rs:203:5:
+assertion `left == right` failed: [Event { seq: 4, ts: 1000000, fleet: "sendmeter", issue: Some(12), kind: "lane-dead", passive: false, push: false, data: {"cause": String("adapter crash"), "key": String("999940:sendmeter-impl-12"), "reason": String("impl lane sendmeter-impl-12 is gone (impl): adapter crash, exit 1; last output: screen of sendmeter-impl-12")} }]
+  left: Some("adapter crash")
+ right: Some("ECONNREFUSED: proxy tunnel down")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_lane_that_died_on_econnrefused_names_the_proxy_tunnel_not_an_adapter_crash
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p drover --test shed_native`

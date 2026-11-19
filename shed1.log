@@ -1,0 +1,51 @@
+
+running 1 test
+a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it --- FAILED
+
+failures:
+
+---- a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it stdout ----
+
+thread 'a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it' (1183892) panicked at crates/cli/tests/shed.rs:566:5:
+✗ host — sysctl + vm_stat → put /usr/sbin on PATH
+✗ gh — auth status → gh auth login
+✓ config — /tmp/fleet-test-shed-missing-1183891-0/config/fleet.toml
+✓ shed — server 0.0.0 (9b88eb5) protocol 1, drover needs protocol 1 or newer
+✓ spawns starting 0/0
+✓ board auth — 24 h: 0 × 401, 0 × 503
+✗ worktrees — /tmp/fleet-test-shed-missing-1183891-0/worktrees → mkdir -p /tmp/fleet-test-shed-missing-1183891-0/worktrees
+✗ gh sendmeter — read jirathip-dev/sendmeter → gh auth refresh
+✗ local sendmeter — /tmp/does-not-matter/sendmeter has origin/staging → git -C /tmp/does-not-matter/sendmeter fetch origin staging || git clone https://github.com/jirathip-dev/sendmeter.git /tmp/does-not-matter/sendmeter
+✓ hygiene sendmeter — merge squash · comments strict · baseline setup · triage weekly · docs_trust deny docs/archive/ · issue_spec triage · docs on
+✓ pipeline sendmeter — valid (built-in)
+! webhook — no secret → put the secret in a file, chmod 600, and name it in [serve] webhook_secret_file (docs/serve.md)
+✓ keychain readers — 0 waiting over 60 s: 
+✗ harness — claude on PATH → install claude
+✗ harness — hermes on PATH → install hermes
+✗ hermes fleet-rev — profile → hermes profile create fleet-rev
+✓ hermes hooks — profiles sync --check
+✓ profile hooks — run this binary
+✗ serve hosts — [] → set [serve] allowed_hosts = ["<name>.ts.net"]
+✗ serve — listening on 127.0.0.1:7777 → drover serve --addr 127.0.0.1:7777
+✗ tailscale — serve maps to 127.0.0.1:7777 → tailscale serve --bg --https=8443 http://127.0.0.1:7777
+! phone — 0 paired → open the page, then drover serve approve <code>
+✗ vapid.key — missing → drover push test && chmod 600 /tmp/fleet-test-shed-missing-1183891-0/state/webpush/vapid.key
+! push — 0 subscriptions, notifier false → turn alerts on; add a webpush [[notify]]
+✗ watchdog check — ran never → drover timer install
+✗ watchdog drive — ran never → drover timer install
+✓ tick step — advancing
+✗ timer — dev.drover.tick missing → drover timer install (the owner or an orchestrator)
+✗ timer — dev.drover.fast missing → drover timer install (the owner or an orchestrator)
+✓ shed — /usr/local/bin/shed on the timer's PATH
+✗ shed run --meta — this host's shed predates shed#94 (no `shed run --meta`): an ACP lane would load the owner's own setup → update shed (it updates itself from its own releases and hands serve over)
+✗ shed agent claude-acp — no-such-adapter-600 not on the timer's PATH → install no-such-adapter-600 in a folder on it (/home/user/.local/share/drover/work/.build/herdsman-impl-1335/debug:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin)
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 59 filtered out; finished in 0.05s
+
+error: test failed, to rerun pass `-p drover --test shed`
