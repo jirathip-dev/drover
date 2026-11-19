@@ -1,0 +1,5 @@
+Decided: merged origin/staging and resolved the ci.yml ui-webkit filter conflict by keeping both build (this PR) and compose (staging) in the ui/ group
+Because: .github/workflows/ci.yml:244
+Rejected: taking one side — dropping build stops ui-webkit running for this PR's test, dropping compose breaks staging's filter
+Check: CI ui-webkit runs page_drafts at 9e0c873e; this lane host has no Playwright
+Owner: the branch is up to date with staging again, with no behaviour change
