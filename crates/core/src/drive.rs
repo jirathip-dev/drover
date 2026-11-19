@@ -45,6 +45,7 @@ pub const STEPS: [(&str, &[&str]); 8] = [
             "webhook_poll_minutes",
             "silent_minutes",
             "ci_start_minutes",
+            "ci_stuck_minutes",
             "gate_check_minutes",
             "review_rounds",
             "update_rounds",
@@ -1354,7 +1355,7 @@ fn pass(
                 &Event::new(ctx.now, fleet, Some(s.issue), "lesson-prompted", d),
             )?;
         } else if let Some((state, text)) = turn_prompt(&w.what).filter(|_| w.who == "drive" && !fast) {
-            let Some(sent) = tell(r, &events, &w.lane, text) else {
+            let Some(sent) = tell(r, &events, &w.lane, text).or((state != "working").then_some(false)) else {
                 continue;
             };
             writeln!(
@@ -1564,6 +1565,8 @@ fn pass(
             let file = file.to_string_lossy();
             let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
+        } else if !fast && s.state == "ready" && ci == "pending" {
+            gh::unstick(ctx, cfg, r, out, (fleet, s.issue), &events, &pr)?;
         }
     }
     if !updated && !fast {
@@ -1720,6 +1723,7 @@ pub(crate) fn owner_refusal(code: &str) -> bool {
         "MCP_FORBIDDEN",
         "ACP_UNGUARDED",
         "ACCOUNT_ENV",
+        "SECRET_IN_WIP",
     ];
     owner.contains(&code)
 }

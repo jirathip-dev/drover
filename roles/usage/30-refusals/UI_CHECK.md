@@ -1,0 +1,1 @@
+- UI_CHECK: turn done: the PR touches `ui_paths` (or `.blocks/`, a `screens` folder) in a repo with `.blocks/guard.json`, and its `just guard` (blocks check) found new findings, each listed `rule file at: what` with its fix; told once: a second `done` at the same findings goes to review with them

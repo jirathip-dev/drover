@@ -1022,6 +1022,8 @@ pub struct Health {
     pub routes: Vec<RouteTime>,
     pub sources: BTreeMap<String, u64>,
     pub serve: ServeHealth,
+    /// Each colour scheme the gate refused on load, with why (#1339).
+    pub schemes: Vec<String>,
 }
 
 /// Serve's own numbers (each minute also `serve-health.json`): RSS, the last minute's route groups and read 503s.

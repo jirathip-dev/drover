@@ -582,10 +582,7 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     if !shed_meta(r) {
         return refused("SHED_OLD", format!("{SHED_OLD}; the lane does not start"));
     }
-    let agents: Value = serde_json::from_str(&crate::shed::cli(r, &["agents", "--json"])?.stdout)?;
-    let agent = agents.as_array().into_iter().flatten().find(|a| a["id"] == id);
-    let cmd: Vec<String> = agent
-        .and_then(|a| serde_json::from_value(a.at("cmd").clone()).ok())
+    let cmd = crate::shed::adapter(r, id)?
         .with_context(|| format!("ACP agent {id} is not installed; `shed agents add {id}`"))?;
     let mut words = home(p.lane_cmd("").get(3..).unwrap_or_default().to_vec());
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
@@ -806,7 +803,13 @@ pub fn changes(st: &str) -> usize {
             .chain(["node_modules/", providers::LOCAL_DIR]))
         .any(|f| l.trim_end() == format!("?? {f}"))
     };
-    st.lines().filter(|l| !own(l)).count()
+    st.lines().filter(|l| !own(l) && scratch_log(l).is_none()).count()
+}
+
+/// An untracked `*.log` in a `git status --porcelain` line: lane scratch, never wip.
+pub fn scratch_log(l: &str) -> Option<&str> {
+    let log = |p: &&str| Path::new(p).extension().is_some_and(|e| e.eq_ignore_ascii_case("log"));
+    l.trim_end().strip_prefix("?? ").filter(log)
 }
 
 /// Some lockfile exists, and each one reads the same in the local checkout and the new lane.
@@ -1002,7 +1005,7 @@ fn integration_view(
             update.then(|| format!(include_str!("../roles/brief-update.md"), int)),
         ));
     }
-    ok(r, "git", &["-C", local, "fetch", "origin", int])?;
+    crate::clone::fetch(ctx, r, Path::new(local), &["origin", int])?;
     let at_int = |name: &str| {
         crate::repo_read(name, |x| {
             ok(r, "git", &["-C", local, "show", &format!("origin/{int}:{x}")]).ok()
@@ -1320,18 +1323,15 @@ pub fn spawn(
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
             ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
         }
-        ok(
-            r,
-            "git",
-            &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
-        )?;
+        let from = p.base.trim_start_matches("origin/");
+        crate::clone::fetch(ctx, r, Path::new(&local), &["origin", from])?;
         let body = iss.at("body").as_str().unwrap_or("");
         let recipe = match p.family {
             "design" => crate::design::Recipe::at(r, &local, &p.base, body),
             _ => crate::design::Recipe::of("", body),
         };
         crate::design::tools(ctx, cfg, r, (fleet, issue, &p.agent), &recipe)?;
-        let pushed = || ok(r, "git", &["-C", &local, "fetch", "origin", &p.branch]).is_ok();
+        let pushed = || crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &p.branch]).is_ok();
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
         }

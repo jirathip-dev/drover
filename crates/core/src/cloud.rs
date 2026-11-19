@@ -417,7 +417,7 @@ printf '[Service]\\nOOMPolicy=continue\\n' > \"$HOME/.config/systemd/user/shed.s
 systemctl --user daemon-reload && systemctl --user enable --now shed.service && { sudo loginctl enable-linger \"$USER\" || true; }; } 2>/dev/null || \
 launchctl bootstrap gui/$(id -u) \"$HOME/Library/LaunchAgents/dev.shed.serve.plist\"; }";
 const ACP: &str = "node\tcommand -v node && command -v npx\tapt_ nodejs npm
-{acp}\tshed agents --json | grep -q '\"{acp}\"'\tshed agents add {acp}";
+{acp}\tshed agents --json | tr '{' '\\n' | grep '\"id\": *\"{acp}\"' | grep -q '\"cmd\": *\\['\tshed agents add {acp}";
 const RUST: &str =
     "rust\tcommand -v cargo && command -v cc\tapt_ build-essential && curl -sSf https://sh.rustup.rs | sh -s -- -y";
 

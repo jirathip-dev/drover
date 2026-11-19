@@ -77,11 +77,13 @@ no scene miniature, no moments, the load as text; its icon is a green `>_` on th
 ## Colour schemes (#244)
 
 A scheme is the board's colours: one JSON file of every colour token the tabs use, so nothing else changes. Built in
-(`assets/schemes/`): `github-dark` (the board before schemes, colour for colour), `solarized-dark`, `gruvbox`, `nord`,
+(swag's crate, `swag::schemes()`, #1339): `github-dark` (the board before schemes, colour for colour), `solarized-dark`, `gruvbox`, `nord`,
 `dracula`, `paper` (light, for daylight), `farm` (night green and soil, wheat-gold controls, sky-blue links),
 `kitchen` (charcoal tile, copper controls, brass links, warm cream text), and #423's `garden-light` (linen, terracotta
-controls, sage-teal links) and `garden-dark` (moss and walnut, lamp-amber controls). Your own go in
-`<config dir>/schemes/<name>.json` (letters, digits and `-`); one named like a built-in wins. The Herd scene
+controls, sage-teal links) and `garden-dark` (moss and walnut, lamp-amber controls), and `farm-light` and `kitchen-light`. Your own go in
+`<config dir>/schemes/<name>.json` (letters, digits and `-`); one named like a built-in wins. serve parses each scheme
+as `blocks::theme::Scheme` and runs blocks' contrast gate on load: one that fails is not served (a built-in of that
+name stays) and `GET /api/v1/health`'s `schemes` names it with why. The Herd scene
 (herd.css) is theme art and keeps its own colours. Contact sheet and values: `docs/design/schemes/`.
 
 ```json
