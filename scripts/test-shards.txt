@@ -28,6 +28,7 @@
 3 check_clean
 3 ci_stuck
 2 ci_templates
+1 clone_heal
 2 cloud
 1 compact
 2 compaction

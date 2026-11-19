@@ -135,6 +135,14 @@ type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
 const TOO_LARGE: &[u8] = b"HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"line\":\"request body too large\"}";
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+thread_local!(static LISTED: std::cell::RefCell<Option<std::rc::Rc<OnceCell<Option<crate::session::Sessions>>>>> = const { std::cell::RefCell::new(None) });
+
+fn build<T>(f: impl FnOnce() -> T) -> T {
+    let was = LISTED.replace(Some(std::rc::Rc::default()));
+    let t = gh::memo(f);
+    LISTED.set(was);
+    t
+}
 
 pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> Result<()> {
     serve_with(ctx, r, l, read_only, None)
@@ -188,6 +196,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             host::pace(&ctx.state, None, &mut hs, crate::now());
             host::window(&ctx.state, &mut hs);
             *lock(&h) = hs;
+            s.read_hosts(crate::now());
             s.r.sampled(crate::now());
             drover_core::clock::sleep(Duration::from_secs(limits().serve_host_secs.max(1)));
         });
@@ -386,6 +395,7 @@ pub struct Server<'a> {
     timing: Mutex<slo::Timing>,
     phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
+    hosts_read: Mutex<(usize, Option<Vec<String>>)>,
     streams: AtomicUsize,
 }
 
@@ -756,6 +766,7 @@ impl<'a> Server<'a> {
             timing: Mutex::default(),
             phone: Mutex::default(),
             rss: std::sync::atomic::AtomicU64::default(),
+            hosts_read: Mutex::default(),
             streams: AtomicUsize::new(0),
         }
     }
@@ -773,6 +784,7 @@ impl<'a> Server<'a> {
         for src in fresh::Source::ALL {
             self.r.refresh(src, src.every(&l), now);
         }
+        self.read_hosts(now);
     }
 
     fn one(&self, s: &mut TcpStream, buf: &[u8], over: bool) -> std::io::Result<bool> {
@@ -1045,7 +1057,7 @@ impl<'a> Server<'a> {
     fn reply(&self, req: &str, now: u64) -> Vec<u8> {
         let t = drover_core::clock::instant();
         let res = if req.starts_with("GET ") {
-            crate::runner::request(|| self.route(req, now))
+            crate::runner::request(|| build(|| self.route(req, now)))
         } else {
             self.route(req, now)
         };
@@ -1782,21 +1794,27 @@ impl<'a> Server<'a> {
     }
 
     fn sessions(&self, now: u64) -> Option<crate::session::Sessions> {
-        let cfg = Config::kept(self.ctx).unwrap_or_default();
-        let mut all = crate::link::view::View::load(
-            &Ctx {
-                now,
-                ..self.ctx.clone()
-            },
-            &cfg,
-        )
-        .ok()?
-        .sessions();
-        if let Some(here) = all.0.iter_mut().find(|h| h.0.is_none()) {
-            here.1 = crate::session::on(&self.cached(now, 10)).map_err(|e| format!("{e:#}"));
+        let list = || {
+            let cfg = Config::kept(self.ctx).unwrap_or_default();
+            let mut all = crate::link::view::View::load(
+                &Ctx {
+                    now,
+                    ..self.ctx.clone()
+                },
+                &cfg,
+            )
+            .ok()?
+            .sessions();
+            if let Some(here) = all.0.iter_mut().find(|h| h.0.is_none()) {
+                here.1 = crate::session::on(&self.cached(now, 10)).map_err(|e| format!("{e:#}"));
+            }
+            *lock(&self.listed) = Some((now, all.clone()));
+            Some(all).filter(crate::session::Sessions::listed)
+        };
+        match LISTED.with_borrow(Clone::clone) {
+            Some(once) => once.get_or_init(list).clone(),
+            None => list(),
         }
-        *lock(&self.listed) = Some((now, all.clone()));
-        Some(all).filter(crate::session::Sessions::listed)
     }
 
     fn recent_sessions(&self, now: u64, cfg: &Config) -> Option<crate::session::Sessions> {
@@ -1975,7 +1993,7 @@ impl<'a> Server<'a> {
                 pr: e.str("pr").map(Into::into),
                 sha: e.str("merge_sha").map(Into::into),
             };
-            let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
+            let bl = gh::cached(ctx, "backlog", f, 0).unwrap_or_default();
             let mut open: BTreeMap<String, BacklogIssue> =
                 serde_json::from_value(bl.at("issues").clone()).unwrap_or_default();
             open.retain(|n, _| n.parse().is_ok_and(|n| !queued(n) && !st.contains_key(&(f.clone(), n))));
@@ -2043,7 +2061,7 @@ impl<'a> Server<'a> {
                 card.notes
                     .push(format!("landing paused: {} red since {at}", fc.integration));
             }
-            let cap: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "cap", f, 0)).unwrap_or_default();
+            let cap = gh::cached(ctx, "cap", f, 0).unwrap_or_default();
             let left = cap.at("cap").as_i64().zip(cap.at("lines").as_i64()).map(|(c, n)| c - n);
             if let Some(l) = left.filter(|l| *l < cap.at("warn").as_i64().unwrap_or(500)) {
                 card.notes

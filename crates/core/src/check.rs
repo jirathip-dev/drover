@@ -893,8 +893,7 @@ pub fn clean_all(
         .context("cannot list the live agents; refusing to clean blind")?;
     let off = if all { disabled(cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
-    let mut failed = 0;
-    let (mut freed, mut removed) = (0, 0);
+    let (mut freed, mut removed, mut failed) = (0, 0, 0);
     let mut closed = BTreeMap::new();
     let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
     let mut fresh = std::collections::BTreeSet::new();
@@ -1123,6 +1122,7 @@ pub fn clean_all(
     }
     if lane.is_none() && issue.is_none() {
         sweep_off(ctx, cfg, r, out, &off, !yes)?;
+        crate::clone::sweep(cfg, out, !yes)?;
     }
     if yes {
         idle.retain(|n, _| fresh.contains(n) || agents.live().any(|a| a.name == *n && !a.busy()));
@@ -1412,6 +1412,7 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
         }
         let budget = cfg.limits.build_budget_gb;
         let trim = |out: &mut dyn Write| -> Result<u64> {
+            sweep::reported(ctx, cfg, &on)?;
             let live = live_lanes(ctx, cfg, &on)?;
             (build_dirs(ctx, cfg, &on).iter())
                 .map(|b| trim_remote(&on, name, b, budget, &live, &mut *out))
@@ -1572,6 +1573,7 @@ pub fn trim_on(ctx: &Ctx, on: &On, cfg: &Config, budget: f64, live: &Live, out: 
     let Some(m) = on.machine else {
         return trim_builds(ctx, cfg, budget, live, out, false);
     };
+    sweep::reported(ctx, cfg, on)?;
     let dirs = build_dirs(ctx, cfg, on);
     dirs.iter().map(|b| trim_remote(on, m, b, budget, live, out)).sum()
 }
@@ -2262,7 +2264,7 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
-    git(&["fetch", "-q", "--prune", "origin"])?;
+    crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "--prune", "origin"])?;
     let integ = format!("origin/{}", f.integration);
     let refs = git(&[
         "for-each-ref",

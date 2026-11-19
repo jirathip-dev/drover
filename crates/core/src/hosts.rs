@@ -1605,16 +1605,19 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         survey(ctx, cfg, r, refresh);
     }
     let (seen, events) = (cached(ctx), working(&ctx.state)?);
+    let view = crate::link::view::View::load(ctx, cfg).ok();
     let n = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
     for (name, h) in &cfg.hosts {
         let s = seen.get(name).cloned().unwrap_or_default();
         let lanes = lanes_on(cfg, &events, name);
-        let (words, t) = (
-            shown(h.enabled, &s, lanes.len(), ctx.now).1,
-            tags(h, Some(&s)).join(","),
-        );
+        let there = h.machine.as_deref().filter(|_| view.is_some());
+        let failing = there.and_then(|m| view.as_ref()?.failing(Some(m)));
+        let mut words = shown(h.enabled, &s, lanes.len(), ctx.now).1;
+        words.extend(failing.map(|w| format!(" · report: {w}")));
+        let t = tags(h, Some(&s)).join(",");
+        let built = there.and_then(|m| crate::release::sha_of(view.as_ref()?.build(Some(m))?));
         let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
-        let v = match s.drover.as_str() {
+        let v = match built.as_deref().unwrap_or(&s.drover) {
             "" => String::new(),
             x if x == env!("DROVER_SHA") => format!(" · drover {x} ✓"),
             x => format!(" · drover {x} ≠ {}", env!("DROVER_SHA")),

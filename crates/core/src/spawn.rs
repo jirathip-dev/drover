@@ -1005,7 +1005,7 @@ fn integration_view(
             update.then(|| format!(include_str!("../roles/brief-update.md"), int)),
         ));
     }
-    ok(r, "git", &["-C", local, "fetch", "origin", int])?;
+    crate::clone::fetch(ctx, r, Path::new(local), &["origin", int])?;
     let at_int = |name: &str| {
         crate::repo_read(name, |x| {
             ok(r, "git", &["-C", local, "show", &format!("origin/{int}:{x}")]).ok()
@@ -1323,18 +1323,15 @@ pub fn spawn(
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
             ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
         }
-        ok(
-            r,
-            "git",
-            &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
-        )?;
+        let from = p.base.trim_start_matches("origin/");
+        crate::clone::fetch(ctx, r, Path::new(&local), &["origin", from])?;
         let body = iss.at("body").as_str().unwrap_or("");
         let recipe = match p.family {
             "design" => crate::design::Recipe::at(r, &local, &p.base, body),
             _ => crate::design::Recipe::of("", body),
         };
         crate::design::tools(ctx, cfg, r, (fleet, issue, &p.agent), &recipe)?;
-        let pushed = || ok(r, "git", &["-C", &local, "fetch", "origin", &p.branch]).is_ok();
+        let pushed = || crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &p.branch]).is_ok();
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
         }

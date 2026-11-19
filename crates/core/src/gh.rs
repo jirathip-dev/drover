@@ -37,12 +37,34 @@ pub(crate) fn store(p: &Path, v: &Value) -> Result<()> {
 
 /// When the cached PR read was taken (the fast step refreshes it each minute).
 pub fn cached_at(ctx: &Ctx, fleet: &str, issue: u64) -> Option<u64> {
-    load::<Value>(&cache_path(ctx, "pr", fleet, issue))?.at("ts").as_u64()
+    cached(ctx, "pr", fleet, issue)?.at("ts").as_u64()
+}
+
+type Memo = std::collections::HashMap<PathBuf, Option<Rc<Value>>>;
+thread_local!(static MEMO: std::cell::RefCell<Option<Memo>> = const { std::cell::RefCell::new(None) });
+
+/// `f` with each cache file it reads parsed once (a board build).
+pub fn memo<T>(f: impl FnOnce() -> T) -> T {
+    let was = MEMO.replace(Some(Memo::new()));
+    let t = f();
+    MEMO.set(was);
+    t
+}
+
+/// Cache file `kind-fleet-issue.json`, parsed; never calls GitHub.
+pub fn cached(ctx: &Ctx, kind: &str, fleet: &str, issue: u64) -> Option<Rc<Value>> {
+    let p = cache_path(ctx, kind, fleet, issue);
+    if let Some(v) = MEMO.with_borrow(|m| m.as_ref()?.get(&p).cloned()) {
+        return v;
+    }
+    let v = load::<Value>(&p).map(Rc::new);
+    MEMO.with_borrow_mut(|m| m.as_mut().map(|m| m.insert(p, v.clone())));
+    v
 }
 
 /// The cached spec, if any; never calls GitHub (dry runs).
-pub fn cached_spec(ctx: &Ctx, fleet: &str, issue: u64) -> Option<Value> {
-    load(&cache_path(ctx, "issue", fleet, issue))
+pub fn cached_spec(ctx: &Ctx, fleet: &str, issue: u64) -> Option<Rc<Value>> {
+    cached(ctx, "issue", fleet, issue)
 }
 
 /// Issue `v` (a `spec` read) is a pull request: GitHub's issue view answers for a PR's number too.
@@ -52,9 +74,11 @@ pub fn is_pr(v: &Value) -> bool {
 
 /// The cached issue title, if any (else the last backlog read's, for a row queued from it); never calls GitHub.
 pub fn cached_title(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
-    let b =
-        || load::<Value>(&cache_path(ctx, "backlog", fleet, 0)).map(|b| b.at("issues").at(issue.to_string()).clone());
-    Some(cached_spec(ctx, fleet, issue).or_else(b)?.at("title").as_str()?.into())
+    let t = |v: &Value| v.at("title").as_str().map(String::from);
+    match cached_spec(ctx, fleet, issue) {
+        Some(s) => t(&s),
+        None => t(cached(ctx, "backlog", fleet, 0)?.at("issues").at(issue.to_string())),
+    }
 }
 
 fn amendment(c: &Value) -> Option<(String, String)> {
@@ -275,7 +299,7 @@ pub fn pr(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), bra
 
 /// The last cached PR read, however old; never calls `gh` (Null when none).
 pub fn cached_pr(ctx: &Ctx, fleet: &str, issue: u64) -> Value {
-    load::<Value>(&cache_path(ctx, "pr", fleet, issue)).map_or(Value::Null, |c| c.at("pr").clone())
+    cached(ctx, "pr", fleet, issue).map_or(Value::Null, |c| c.at("pr").clone())
 }
 
 /// The latest Actions run url for an issue branch with no PR: one `gh run list` per 60 s, by the tick only.
@@ -293,7 +317,7 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), br
 
 /// The cached latest run url for the issue, if any; never calls `gh`.
 pub fn cached_run(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
-    load::<Value>(&cache_path(ctx, "run", fleet, issue)).and_then(|c| c.at("url").as_str().map(String::from))
+    cached(ctx, "run", fleet, issue).and_then(|c| c.at("url").as_str().map(String::from))
 }
 
 /// Which of `issues` are closed on GitHub or pull requests (`true`): one aliased `gh api graphql`, fresh for 60 s.
@@ -349,7 +373,7 @@ pub fn diff_names(
         let mut out = ok(r, "gh", &["api", &path, "--paginate", "--jq", jq])?;
         if out.lines().filter(|l| !l.trim().is_empty()).count() >= 3000 {
             let (dir, range) = (f.local_path(), format!("origin/{}...{head}", f.integration));
-            crate::overlap::git(r, &dir, &["fetch", "-q", "origin"])?;
+            crate::clone::fetch(ctx, r, &dir, &["-q", "origin"])?;
             out = crate::overlap::git(r, &dir, &["diff", "--name-only", "--no-renames", &range])?;
         }
         let names = out.lines().flat_map(|l| l.split('\t')).map(str::trim);
