@@ -34,7 +34,7 @@ fn ok(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
     out
 }
 
-fn blocked(name: &str) -> (drover::Ctx, Fake) {
+fn asked(name: &str, went_on: bool) -> (drover::Ctx, Fake, FakeShed) {
     set_env("DROVER_LANE", "sendmeter:12:impl");
     let c = ctx(&tmpdir(name), CONFIG);
     let sh = FakeShed::new();
@@ -53,9 +53,16 @@ fn blocked(name: &str) -> (drover::Ctx, Fake) {
     assert!(out.contains("needs-human: lane blocked: waits on q1938"), "{out}");
     let q = json!({"id": "q5", "question": "One more round for #12? (lane blocked: waits on q1938)",
         "options": ["one more round", "park"], "recommend": 1, "kind": "owner", "extend": true, "spawn": true});
+    if went_on {
+        spawn(&c, c.now);
+        assert_eq!(state(&c), "fix(2)", "the lane went on after q1938's answer");
+    }
     ev(&c, c.now, "needs-decision", q);
-    spawn(&c, c.now + 1);
-    assert_eq!(state(&c), "fix(2)", "the lane went on after q1938's answer");
+    (c, r, sh)
+}
+
+fn blocked(name: &str) -> (drover::Ctx, Fake) {
+    let (c, r, _) = asked(name, true);
     (c, r)
 }
 
@@ -137,4 +144,52 @@ fn a_refused_tap_shows_the_refusal_on_the_card() {
             .contains("REFUSED NOT_NEEDS_HUMAN: #12 is parked"),
         "{k}"
     );
+}
+
+fn says_waiting(c: &drover::Ctx, r: &Fake) -> bool {
+    let status = ok(c, r, &["status", "sendmeter"]);
+    let waiting = ok(c, r, &["waiting", "sendmeter"]);
+    status.contains("waiting on your answer (q5)") || waiting.contains("waiting on your answer (q5)")
+}
+
+fn the_ask_ends_with_a_new_lane(name: &str, how: &[&str]) {
+    let (c, r, _sh) = asked(name, false);
+    assert!(
+        open(&c, &r) && says_waiting(&c, &r),
+        "the ask is open before the new lane"
+    );
+    let c = drover::Ctx {
+        now: c.now + 60,
+        ..c.clone()
+    };
+    ok(&c, &r, &[&["spawn", "sendmeter", "12", "impl"][..], how].concat());
+    assert!(!open(&c, &r), "{how:?}: the ask closes");
+    let all = ok(&c, &r, &["asks", "sendmeter", "--all"]);
+    let row = all.lines().find(|l| l.contains("q5")).unwrap_or_default();
+    assert!(row.contains("closed: lane gone"), "{how:?}: {all}");
+    assert!(!says_waiting(&c, &r), "{how:?}: no lane waits on q5");
+}
+
+#[test]
+fn a_superseding_lane_closes_the_blocked_lanes_extend_ask() {
+    the_ask_ends_with_a_new_lane("extend-ask-supersede", &["--supersede"]);
+}
+
+#[test]
+fn an_update_lane_closes_the_blocked_lanes_extend_ask() {
+    the_ask_ends_with_a_new_lane("extend-ask-update", &["--update", "--supersede"]);
+}
+
+#[test]
+fn an_answered_extend_ask_stays_answered_after_a_new_lane() {
+    let (c, r, _sh) = asked("extend-ask-answered", false);
+    ok(&c, &r, &["answer", "sendmeter", "q5", "1"]);
+    let c = drover::Ctx {
+        now: c.now + 60,
+        ..c.clone()
+    };
+    ok(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    let all = ok(&c, &r, &["asks", "sendmeter", "--all"]);
+    let row = all.lines().find(|l| l.contains("q5")).unwrap_or_default();
+    assert!(row.contains("answered") && !row.contains("lane gone"), "{all}");
 }
