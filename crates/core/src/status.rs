@@ -110,7 +110,7 @@ pub fn verdict(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: Event) -> Result<()>
     )
 }
 
-/// Drive's step: an open PR head with no verdict gets `drover/review` pending, each failed post is tried again, and a finished issue's posted ones are dropped.
+/// The full drive pass: an open PR head with no verdict gets `drover/review` pending, each failed post is tried again, and a finished issue's posted ones are dropped.
 pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn std::io::Write, fleet: &str) -> Result<()> {
     let open = crate::events::fold(&crate::events::working(&ctx.state)?);
     if let Err(e) = pending(ctx, cfg, r, fleet, open.values()) {

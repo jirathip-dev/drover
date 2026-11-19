@@ -399,6 +399,7 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
                 .collect();
             ok(json!({"data": {"repository": repo}}).to_string())
         }
+        ["api", "-X", "POST", path, ..] if path.contains("/statuses/") => ok("{}"),
         ["api", "-i", ..] => ok(format!("HTTP/2.0 200 OK\netag: \"v{}\"\n\n[]", m.version)),
         ["api", path, "--jq", _] if path.contains("/rules/branches/") => ok("true\n"),
         ["api", path, "--paginate", ..] if path.ends_with("/files") => ok(""),

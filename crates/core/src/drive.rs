@@ -1283,7 +1283,6 @@ fn pass(
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
     waits.retain(one);
     crate::promise::pass(ctx, cfg, fleet, &events, &waits)?;
-    crate::status::sync(ctx, cfg, r, out, fleet)?;
     external(ctx, cfg, out, fleet)?;
     ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {
@@ -1803,6 +1802,7 @@ fn handoff(
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
     let mut any = false;
+    crate::status::sync(ctx, cfg, r, out, fleet)?;
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))

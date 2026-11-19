@@ -95,6 +95,7 @@ fn fake<A: AsRef<str>, B: AsRef<str>, C: AsRef<str>>(live: &[(A, B, C)]) -> Fake
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+        .reply("gh api -X POST repos/jirathip-dev/sendmeter/statuses/", "{}")
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 

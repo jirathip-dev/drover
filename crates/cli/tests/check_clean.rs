@@ -689,6 +689,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
         std::fs::write(&f, "FAIL\n1. blocking a.rs:1\nProof: spec\n> AC 1\n").unwrap();
         let r = Fake::default()
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
+            .reply("gh api -X POST repos/jirathip-dev/sendmeter/statuses/", "{}")
             .reply(&format!("git -C {w} status"), status)
             .reply(&format!("git -C {w} rev-list"), "0\n")
             .reply("git -C", "");
