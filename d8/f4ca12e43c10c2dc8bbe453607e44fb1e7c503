@@ -1,0 +1,10 @@
+Decided: run `just guard` in the lane's worktree on its host before turn-end; the Outcome comes back on stdout
+Because: crates/core/src/guard.rs:17
+Rejected: a fleet config key naming the command — the ADR names a guard recipe in the app's justfile, shared with CI
+Decided: new findings refuse UI_CHECK with no turn-end; the same findings a second time go to review
+Because: "A second `done` with the same findings follows what the contract says"
+Because: crates/core/src/guard.rs:121
+Decided: a timeout (guard_secs, 180 s) or an unparseable outcome logs ui-check and ends the turn
+Because: "a check that times out or cannot start does not block the turn"
+Check: no turn-end on a refusal, and the fake just runs only when guard.json exists and ui_paths are touched
+Owner: agents on screen work now get the app's own screen check before their turn ends; nothing changes elsewhere
