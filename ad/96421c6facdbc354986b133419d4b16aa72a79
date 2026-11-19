@@ -1,0 +1,9 @@
+Decided: the owner line is typed in as usual and kept in the orchestrator's conversation; at the reset one `continue` resumes it, never a retyped copy.
+Because: "The message is held and typed into the orchestrator once the limit resets (a single `continue`, as `drover limit` does for lanes), with no second copy."
+Decided: limited is shed's `rate-limited` status and the reset comes from its note through limit::reset_at, the lane path's parser.
+Because: "Reuse the lane usage-limit banner detection; this is a new caller, not a new detector."
+Decided: a no-reply row is excluded from idle-sleep's quiet clock, and a held orchestrator is not idle-closed before its continue.
+Because: crates/core/src/orchestrator.rs:1362
+Rejected: holding the line out of the pane and typing it at reset — a second delivery path and a second copy risk.
+Check: a_rate_limited_orchestrator_tells_the_owner_and_gets_one_continue_at_its_reset drives say, check before and at the reset, and check again.
+Owner: A thread now says when its orchestrator is out of usage, nudges it once at reset, and flags any message left unanswered.
