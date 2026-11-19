@@ -300,3 +300,35 @@ fn a_send_shows_at_once_then_once_and_an_answered_card_goes_at_once_and_stays_go
         "{out}"
     );
 }
+
+#[test]
+fn a_page_of_an_older_build_reloads_once_without_drawing_a_newer_serves_blocks_and_waits_for_a_focused_field() {
+    if no_webkit() {
+        return;
+    }
+    let (_c, o) = thread_t2("page-build", "build.mjs", &[], &[]);
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    assert_eq!(
+        (&out["newer"]["loads"], &out["newer"]["t2"]),
+        (&json!(2), &json!("2")),
+        "a screen marked build b reloads the page, which draws none of it first: {out}"
+    );
+    assert_eq!(out["same"]["loads"], 2, "the same build never reloads: {out}");
+    assert_eq!(
+        (&out["focused"]["loads"], &out["focused"]["new"], &out["focused"]["value"]),
+        (&json!(3), &Value::Null, &json!("half a thought")),
+        "a focused field holds the reload, and the newer event draws nothing: {out}"
+    );
+    assert_eq!(
+        (&out["blurred"]["loads"], &out["blurred"]["new"]),
+        (&json!(4), &Value::Null),
+        "blur reloads once: {out}"
+    );
+    assert_eq!(
+        (&out["blurred"]["value"], &out["blurred"]["draft"]),
+        (&json!("half a thought"), &json!("half a thought")),
+        "the draft survives the reload: {out}"
+    );
+}
