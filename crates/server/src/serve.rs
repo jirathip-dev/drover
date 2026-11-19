@@ -3030,7 +3030,6 @@ pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json:
     t
 }
 
-/// swag's schemes and the owner's `schemes/*.json` that parse and pass blocks' gate (an owner's wins), and each refused one with why.
 pub(crate) fn schemes(ctx: &Ctx) -> (BTreeMap<String, Scheme>, Vec<String>) {
     let own = std::fs::read_dir(ctx.config.with_file_name("schemes"))
         .into_iter()
