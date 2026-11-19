@@ -2344,8 +2344,11 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
             .filter(|p| build(p))
             .map(String::from))
         .collect();
-        let no = NO_WIP.map(|d| format!(":(exclude,glob)**/{d}/**"));
-        git(&[&["add", "-A", "--", "."][..], &no.each_ref().map(String::as_str)].concat())?;
+        let logs = st.lines().filter_map(crate::spawn::scratch_log);
+        let mut no: Vec<String> = NO_WIP.map(|d| format!(":(exclude,glob)**/{d}/**")).into();
+        no.extend(logs.map(|p| format!(":(exclude,literal){p}")));
+        let no: Vec<&str> = no.iter().map(String::as_str).collect();
+        git(&[&["add", "-A", "--", "."][..], &no].concat())?;
         git(&[&["reset", "-q", "--"][..], &own_files().collect::<Vec<_>>(), SHOT_DIRS].concat())?;
         let changed = git(&["diff", "--cached", "--name-only", "--no-renames", "-z"])?;
         let tree = git(&["ls-tree", "-r", "-l", "-z", git(&["write-tree"])?.trim()])?;
