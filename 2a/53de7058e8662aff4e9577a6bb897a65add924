@@ -1,0 +1,8 @@
+Decided: fix round 6 only merges origin/staging again (#1313's serve changes auto-merged cleanly); no code change.
+Because: q2091
+Decided: serve accepts and reads requests on a 2-worker tokio runtime and answers them on at most 64 blocking handler threads; a kept-alive socket goes back to the runtime.
+Because: q2044
+Rejected: a code change for the ui-webkit FAIL — the red run was a 20-minute job timeout in apt, and the next run at 4723949 passed
+Check: CI was green at 4723949 with ui-webkit passing, so the FAIL on 03aa1647 (a job timeout) is cleared.
+Check: serve_conn, serve_health, serve_wire, serve_workers and serve_load pass after the merge with #1313's serve.rs.
+Owner: The earlier red check passed on re-run; this round only brings in the latest staging, including the faster screen builds.
