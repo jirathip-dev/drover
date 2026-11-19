@@ -1,0 +1,5 @@
+Decided: no code change this round; re-ran CI's failed jobs at d462050 instead
+Because: crates/cli/tests/drive.rs:781
+Rejected: editing the drive test's wall-clock line — it is staging's test, this diff does not touch the drive pass
+Check: ui-webkit at e60aeeb and d462050 died in `playwright install --with-deps` (apt mirrors unreachable), no UI test ran
+Owner: CI was red from a network outage and one timing-sensitive test; the code is unchanged
