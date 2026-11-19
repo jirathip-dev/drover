@@ -1646,6 +1646,9 @@ fn starts<'a>(
             "lane-dead" if agent.is_some_and(|a| e.str("key").is_some_and(|k| k.ends_with(&format!(":{a}")))) => {
                 fail(&mut v, "lane died");
             }
+            "supersede"
+                if mine && agent.is_some_and(|a| e.val("killed").as_array().is_some_and(|k| k.contains(&json!(a)))) => {
+            }
             "supersede" | "lane-killed" if mine => fail(&mut v, "killed"),
             "needs-decision" if e.str("respawn_loop") == Some(role) => {
                 asks.extend(e.str("id"));

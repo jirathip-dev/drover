@@ -115,6 +115,7 @@ fn fixture(name: &str) -> (drover::Ctx, Fake) {
         (12, ""),
         (14, ""),
     ] {
+        let t = if n == 12 { NOW - 2400 } else { t };
         spawn(&c, t, n, "impl", &format!("sendmeter-impl-{n}"));
         let file = [
             (6, Some("PASS\nall good\n"), false),
@@ -241,7 +242,7 @@ fn every_case_has_its_who_what_and_next_command() {
             12,
             "drive",
             "reviewer exited without a verdict: reviewing again",
-            t + 10,
+            NOW - 2390,
             s("spawn sendmeter 12 rev --supersede"),
         ),
         (13, "none", "nothing to do (closed): clean me", t, None),
