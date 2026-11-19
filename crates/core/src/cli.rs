@@ -2056,25 +2056,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         bail!("a {role} lane reports no turn: impl, fix and update lanes do");
                     }
                     let done = state == "done" && !matches!(role, "triage" | "lesson");
-                    let gated = if done {
-                        crate::done::gate(ctx, &cfg, r, (f, n), role)?
+                    let head = if done {
+                        crate::done::turn(ctx, &cfg, r, (f, n), role)?
                     } else {
-                        crate::done::Gate::Skip
+                        None
                     };
-                    if let crate::done::Gate::Refused(code, w, head) = gated {
-                        let d = json!({"code": code, "why": w, "sha": head, "role": role});
-                        let e = Event::new(ctx.now, f, Some(n), "done-refused", d).passive();
-                        emit(&ctx.state, &cfg, e)?;
-                        return gate::refused(code, w);
-                    }
                     let ui = done.then(|| crate::guard::turn(ctx, &cfg, r, out, (f, n), role));
                     let ui = ui.transpose()?.flatten();
-                    let mut d = json!({"state": state, "why": why, "role": role});
+                    let mut d = json!({"state": state, "why": why, "role": role, "sha": head});
                     if let Some(u) = ui {
                         d.put("ui_check", u);
-                    }
-                    if let crate::done::Gate::Pass(head) = gated {
-                        d.put("sha", json!(head));
                     }
                     emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
                     writeln!(out, "recorded {f}#{n} turn-end: {state}")?;

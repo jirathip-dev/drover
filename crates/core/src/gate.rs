@@ -44,7 +44,6 @@ pub fn branch_of(st: Option<&IssueState>, issue: u64) -> String {
         .unwrap_or_else(|| format!("issue-{issue}"))
 }
 
-/// Each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call. The `NO_PROOF` text naming each one that doesn't.
 /// A FAIL drover refuses: a blocker in a category the `turn done` gate owns (`PAPERWORK`), else one without its Proof block (`NO_PROOF`).
 pub fn unfit(body: &str) -> Option<(&'static str, String)> {
     let gate = |(b, ls): (bool, Vec<&str>)| {
@@ -60,6 +59,7 @@ pub fn unfit(body: &str) -> Option<(&'static str, String)> {
         .or_else(|| Some(("NO_PROOF", no_proof(body)?)))
 }
 
+/// Each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call. The `NO_PROOF` text naming each one that doesn't.
 pub fn no_proof(body: &str) -> Option<String> {
     let proofless =
         |(b, ls): (bool, Vec<&str>)| Some(format!("`{}` ({})", ls.first()?.trim(), unproven(&ls).filter(|_| b)?));

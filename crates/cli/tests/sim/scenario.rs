@@ -235,7 +235,6 @@ fn write_verdict(cwd: &str, body: &str, now: u64) {
         .and_then(|f| f.set_modified(t));
 }
 
-/// A pushing lane's `drover turn done`; one whose PR body names no head runs it again, 3 times in all, then stops.
 fn done(sim: &Arc<Sim>, w: &mut World, id: &str, i: usize, step: u8) {
     let agent = w.model.panes[i].agent.clone().unwrap_or_default();
     let (n, role) = (issue_of(&agent), agent.split('-').nth(1).unwrap_or("impl").to_string());

@@ -1,38 +1,51 @@
 use crate::config::{Config, Fleet};
-use crate::events::{fold, last_spawn, working, Json};
+use crate::events::{append, emit, fold, last_spawn, working, Event, Json};
 use crate::hosts::On;
 use crate::runner::{argv, json, Runner};
 use crate::Ctx;
 use anyhow::Result;
+use serde_json::json;
+use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
 /// The refusal code of a `turn done` whose head is unpushed or fails a done check.
 pub const CODE: &str = "DONE_CHECK";
 
-/// What `turn done`'s gate found: nothing to gate (no open PR with an unreviewed head), a pass at the head, or a refusal (code, why, head).
-pub enum Gate {
-    Skip,
-    Pass(String),
-    Refused(&'static str, String, String),
+type Checked = Option<(String, Option<(&'static str, String)>)>;
+
+/// `turn done`'s hard gate for `role`'s lane: the head it passed at (None: no open PR with an unreviewed head); a refusal is logged `done-refused` (code, why, head) and returned as `REFUSED <code>`.
+pub fn turn(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role: &str) -> Result<Option<String>> {
+    let Some((head, refused)) = check(ctx, cfg, r, (fleet, n), role)? else {
+        return Ok(None);
+    };
+    let Some((code, why)) = refused else {
+        return Ok(Some(head));
+    };
+    let d = json!({"code": code, "why": why, "sha": head, "role": role});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, Some(n), "done-refused", d).passive(),
+    )?;
+    crate::gate::refused(code, why)
 }
 
-/// `turn done`'s hard gate for `role`'s lane, in its worktree on its host: the worktree at the PR head, the PR body anchored there, then each done check.
-pub fn gate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role: &str) -> Result<Gate> {
+fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role: &str) -> Result<Checked> {
     let f = cfg.fleet(fleet)?;
     let events = working(&ctx.state)?;
     let Some(s) = fold(&events).remove(&(fleet.to_string(), n)) else {
-        return Ok(Gate::Skip);
+        return Ok(None);
     };
     let agent = s.lanes.get(role).cloned().unwrap_or_default();
     let (Some(sp), branch) = (last_spawn(&events, &agent), crate::gate::branch_of(Some(&s), n)) else {
-        return Ok(Gate::Skip);
+        return Ok(None);
     };
     let fields = ["pr", "view", &branch, "-R", &f.repo, "--json", "body,headRefOid,state"];
     let pr = json(r, "gh", &fields).unwrap_or_default();
     let head = pr.at("headRefOid").as_str().unwrap_or_default().to_string();
     if head.is_empty() || pr.at("state") != "OPEN" || s.reviewed(&head) {
-        return Ok(Gate::Skip);
+        return Ok(None);
     }
     let (on, wt) = (On::of(r, Some(sp)), sp.str("worktree").unwrap_or_default());
     let git = |a: &[&str]| {
@@ -41,7 +54,7 @@ pub fn gate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), ro
             .filter(|o| o.code == 0)
             .map(|o| o.stdout.trim().to_string())
     };
-    let refuse = |code: &'static str, why: String| Ok(Gate::Refused(code, why, head.clone()));
+    let refuse = |code: &'static str, why: String| Ok(Some((head.clone(), Some((code, why)))));
     let at = git(&["rev-parse", "HEAD"]).unwrap_or_default();
     if !at.eq_ignore_ascii_case(&head) {
         let why = format!("push first: the worktree is at {at:.7}, the PR head is {head:.7}");
@@ -71,10 +84,9 @@ pub fn gate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), ro
         let tail = lines.get(lines.len().saturating_sub(10)..).unwrap_or_default();
         return refuse(CODE, format!("`{c}` {what}:\n{}", tail.join("\n")));
     }
-    Ok(Gate::Pass(head))
+    Ok(Some((head, None)))
 }
 
-/// The fleet's done checks; unset = arch-check where the worktree has `.drover/arch.toml`, `cargo fmt --check` where it has a `Cargo.toml`.
 fn checks(f: &Fleet, on: &On, wt: &Path) -> Vec<String> {
     if let Some(c) = &f.done_checks {
         return c.clone();
@@ -134,4 +146,51 @@ pub fn body(
         }
     }
     Ok(())
+}
+
+/// A pushed head with no passing `turn done`: the idle lane is told once; 3 refusals at the head, or a quiet lane past the stall threshold since, is one owner card.
+pub(crate) fn ungated(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    ev: &[Event],
+    (lane, head): (&str, &str),
+    idle: bool,
+) -> Result<bool> {
+    let sp = crate::events::last_spawn(ev, lane).map_or(0, |e| e.ts);
+    let at = |k: &'static str| move |e: &&Event| e.is(k, fleet, n) && e.str("sha") == Some(head) && e.ts >= sp;
+    let refused: Vec<&Event> = ev.iter().filter(at("done-refused")).collect();
+    let told = ev.iter().rfind(at("done-nudged"));
+    let why = refused.last().map_or_else(
+        || format!("head {head:.7} is pushed with no passing `drover turn done`"),
+        |e| {
+            format!(
+                "turn done refused {}: {}",
+                e.str("code").unwrap_or_default(),
+                e.str("why").unwrap_or_default()
+            )
+        },
+    );
+    if refused.len() >= 3 || told.is_some_and(|t| ctx.now >= t.ts + cfg.limits.stall_minutes * 60) {
+        writeln!(out, "{fleet} #{n} needs-human: {why}")?;
+        let d = json!({"code": "DONE_REFUSED", "reason": why, "agent": lane, "sha": head});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))?;
+        return Ok(true);
+    }
+    if !idle || told.is_some() {
+        return Ok(false);
+    }
+    let text = format!(
+        "drover: {why}. No review starts until `drover turn done` passes at the pushed head: the PR body names it and has `## For humans`, the format and arch checks pass. Fix what it names, push, then `drover turn done` again."
+    );
+    let sent = crate::drive::tell(r, ev, lane, &text).unwrap_or(false);
+    writeln!(out, "{fleet} #{n} no passing turn done at {head:.7}: told")?;
+    let d = json!({"agent": lane, "sha": head, "sent": sent});
+    append(
+        &ctx.state,
+        &Event::new(ctx.now, fleet, Some(n), "done-nudged", d).passive(),
+    )?;
+    Ok(false)
 }

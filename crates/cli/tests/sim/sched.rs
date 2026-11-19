@@ -405,7 +405,6 @@ impl World {
     }
 }
 
-/// A `turn:<fleet>:<issue>:<role>` process is that lane's: its own `DROVER_LANE`.
 fn lane_env(name: &str) -> Vec<(String, String)> {
     let lane = name.strip_prefix("turn:").and_then(|l| l.split('#').next());
     lane.map(|l| ("DROVER_LANE".to_string(), l.to_string()))

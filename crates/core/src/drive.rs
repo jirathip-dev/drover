@@ -1701,7 +1701,7 @@ fn repro_refused(
     Ok(())
 }
 
-fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool> {
+pub(crate) fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool> {
     let sp = crate::events::last_spawn(events, lane);
     let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
     let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
@@ -1836,7 +1836,7 @@ fn handoff(
         }
         let gated = |e: &Event| e.is("turn-end", fleet, s.issue) && e.str("sha") == Some(head);
         if !ev.iter().any(gated) {
-            any |= ungated(ctx, cfg, r, out, (fleet, s.issue), ev, (&w.lane, head), idle)?;
+            any |= crate::done::ungated(ctx, cfg, r, out, (fleet, s.issue), ev, (&w.lane, head), idle)?;
             continue;
         }
         writeln!(out, "{fleet} #{} pushed: {head:.7} via pr", s.issue)?;
@@ -1845,53 +1845,6 @@ fn handoff(
         any = true;
     }
     Ok(any)
-}
-
-/// A pushed head with no passing `turn done`: the idle lane is told once; 3 refusals at the head, or a quiet lane past the stall threshold since, is one owner card.
-fn ungated(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    (fleet, n): (&str, u64),
-    ev: &[Event],
-    (lane, head): (&str, &str),
-    idle: bool,
-) -> Result<bool> {
-    let sp = crate::events::last_spawn(ev, lane).map_or(0, |e| e.ts);
-    let at = |k: &'static str| move |e: &&Event| e.is(k, fleet, n) && e.str("sha") == Some(head) && e.ts >= sp;
-    let refused: Vec<&Event> = ev.iter().filter(at("done-refused")).collect();
-    let told = ev.iter().rfind(at("done-nudged"));
-    let why = refused.last().map_or_else(
-        || format!("head {head:.7} is pushed with no passing `drover turn done`"),
-        |e| {
-            format!(
-                "turn done refused {}: {}",
-                e.str("code").unwrap_or_default(),
-                e.str("why").unwrap_or_default()
-            )
-        },
-    );
-    if refused.len() >= 3 || told.is_some_and(|t| ctx.now >= t.ts + cfg.limits.stall_minutes * 60) {
-        writeln!(out, "{fleet} #{n} needs-human: {why}")?;
-        let d = json!({"code": "DONE_REFUSED", "reason": why, "agent": lane, "sha": head});
-        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))?;
-        return Ok(true);
-    }
-    if !idle || told.is_some() {
-        return Ok(false);
-    }
-    let text = format!(
-        "drover: {why}. No review starts until `drover turn done` passes at the pushed head: the PR body names it and has `## For humans`, the format and arch checks pass. Fix what it names, push, then `drover turn done` again."
-    );
-    let sent = tell(r, ev, lane, &text).unwrap_or(false);
-    writeln!(out, "{fleet} #{n} no passing turn done at {head:.7}: told")?;
-    let d = json!({"agent": lane, "sha": head, "sent": sent});
-    append(
-        &ctx.state,
-        &Event::new(ctx.now, fleet, Some(n), "done-nudged", d).passive(),
-    )?;
-    Ok(false)
 }
 
 fn no_change(
