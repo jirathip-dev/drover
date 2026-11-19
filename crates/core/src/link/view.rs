@@ -22,6 +22,7 @@ pub struct HostSeen {
 pub struct View {
     now: u64,
     fresh: u64,
+    stale: u64,
     hosts: Vec<(String, Option<String>, Option<HostSeen>)>,
     lanes: Vec<(Option<String>, Seen)>,
 }
@@ -43,6 +44,7 @@ impl View {
         Ok(View {
             now: ctx.now,
             fresh: 2 * cfg.limits.fast_secs,
+            stale: cfg.limits.link_stale_secs,
             hosts,
             lanes,
         })
@@ -67,6 +69,15 @@ impl View {
             Some(why) if why != super::NO_SERVICE => Err(why),
             _ => Ok(()),
         }
+    }
+    /// Host `name`'s row: its link's state, since when and why.
+    pub fn link(&self, name: &str) -> Option<&HostSeen> {
+        self.hosts.iter().find(|h| h.0 == name).and_then(|h| h.2.as_ref())
+    }
+    /// Whether host `name`'s link is held open and its last frame came within `link_stale_secs`.
+    pub fn live(&self, name: &str) -> bool {
+        let fresh = |h: &HostSeen| h.heard.is_some_and(|t| self.now.saturating_sub(t) <= self.stale);
+        self.link(name).is_some_and(|h| h.link == "live" && fresh(h))
     }
     /// The hosts to poll before reading: those with no fresh word.
     pub fn stale(&self) -> Vec<&str> {

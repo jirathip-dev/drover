@@ -195,6 +195,12 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
+| `link_beat_secs` | `5` | a host's watcher with nothing to say writes a beat this often |
+| `link_stale_secs` | `20` | no frame from a host's link for this long: it is cut and dialled again |
+| `link_retry_max_secs` | `30` | the longest wait between a link's dials (1 s, doubling) |
+| `link_poll_millis` | `500` | how often a watcher looks at each outbox, verdict.md and shed session for a change |
+| `link_sample_secs` | `30` | a watcher sends a whole report this often, changed or not |
+| `link_down_minutes` | `5` | a host with lanes whose link is not live this long alerts `link-down` |
 | `db_busy_secs` | `60` | the SQLite busy timeout |
 | `db_retry_millis` | `10` | the pause between a new database's WAL switch retries |
 | `cloud_idle_stop_minutes` | `20` | a cloud host's `idle_stop_minutes` when it sets none |

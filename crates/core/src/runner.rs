@@ -37,6 +37,9 @@ pub trait Runner: Sync {
     fn stream(&self, prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
         Real::stream(prog, args, input)
     }
+    fn pipe(&self, prog: &str, args: &[String]) -> Result<Duplex> {
+        Real::pipe(prog, args)
+    }
     fn secret(&self, svc: &str) -> Result<Option<String>> {
         bail!("drover keeps no secret store (wanted {svc})")
     }
@@ -151,7 +154,39 @@ impl Drop for Streamed {
     }
 }
 
+/// A child's stdin and stdout, both held open; dropping the stdin end kills the child.
+pub type Duplex = (Box<dyn std::io::Write + Send>, Box<dyn std::io::Read + Send>);
+
+struct Fed(std::process::ChildStdin, std::process::Child);
+
+impl std::io::Write for Fed {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl Drop for Fed {
+    fn drop(&mut self) {
+        self.1.kill().ok();
+        self.1.wait().ok();
+    }
+}
+
 impl Real {
+    fn pipe(prog: &str, args: &[String]) -> Result<Duplex> {
+        use std::process::Stdio;
+        let mut c = here(&mut Command::new(prog))
+            .args(plain(prog, args))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("cannot run {prog}"))?;
+        let (i, o) = (c.stdin.take().context("stdin")?, c.stdout.take().context("stdout")?);
+        Ok((Box::new(Fed(i, c)), Box::new(o)))
+    }
     fn stream(prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
         use std::io::Write;
         use std::process::Stdio;

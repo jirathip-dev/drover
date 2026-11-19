@@ -116,6 +116,24 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
+    let linked = crate::service::up(ctx).map_or(vec![], |_| crate::link::hosts(cfg));
+    for name in linked.iter().map(|h| h.0.as_str()) {
+        let h = view.link(name).filter(|_| !view.live(name));
+        let long = h.is_some_and(|h| ctx.now.saturating_sub(h.since) >= cfg.limits.link_down_minutes * 60);
+        let down = long && !crate::hosts::lanes_on(cfg, &events, name).is_empty();
+        let was = |e: &&Event| e.str("host") == Some(name) && matches!(e.kind.as_str(), "link-down" | "link-up");
+        let last = events.iter().rev().find(was);
+        if down != last.is_some_and(|e| e.kind == "link-down") {
+            let (kind, why) = if down {
+                ("link-down", h.and_then(|h| h.why.clone()))
+            } else {
+                ("link-up", None)
+            };
+            let why = format!("{name}: link {}: {}", &kind[5..], why.unwrap_or_else(|| "live".into()));
+            let d = json!({"host": name, "reason": why, "since": h.map(|h| h.since)});
+            crate::events::emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d).push())?;
+        }
+    }
     let synced = working(&ctx.state)?;
     for name in cfg.hosts.keys() {
         let mut tries = (synced.iter().rev()).filter(|e| e.kind == "host-sync" && e.str("host") == Some(name));

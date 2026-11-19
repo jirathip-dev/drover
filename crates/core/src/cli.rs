@@ -949,6 +949,8 @@ enum HostsCmd {
     Refresh,
     #[command(hide = true, about = "#1309: this host's lanes as one frame for the main host")]
     Report,
+    #[command(hide = true, about = "#1319: `report` kept open, a frame a change")]
+    Watch,
     #[command(about = "Let new lanes go to this host again; logs `host-on`")]
     On { name: String },
     #[command(about = "No new lanes on this host (its lanes finish there); still monitored; logs `host-off`")]
@@ -1278,6 +1280,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Hosts {
             cmd: Some(HostsCmd::Report),
         } => crate::link::watch::serve(r, stdin, out)?,
+        Cmd::Hosts {
+            cmd: Some(HostsCmd::Watch),
+        } => crate::link::watch::watch(r, &mut std::io::stdin(), out)?,
         Cmd::Hook {
             role,
             git_pre_push: true,
@@ -1819,7 +1824,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     writeln!(out, "{line}")?;
                 }
                 Cmd::Hosts { cmd } => match cmd {
-                    None | Some(HostsCmd::Report) => crate::hosts::list(ctx, &cfg, r, out, false)?,
+                    None | Some(HostsCmd::Report | HostsCmd::Watch) => crate::hosts::list(ctx, &cfg, r, out, false)?,
                     Some(HostsCmd::Refresh) => crate::hosts::list(ctx, &cfg, r, out, true)?,
                     Some(HostsCmd::On { name }) => crate::hosts::toggle(ctx, out, &name, true, "cli")?,
                     Some(HostsCmd::Off { name }) => crate::hosts::toggle(ctx, out, &name, false, "cli")?,

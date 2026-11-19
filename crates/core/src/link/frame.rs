@@ -19,6 +19,7 @@ pub struct Frame {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Body {
     Report(Report),
+    Beat,
 }
 
 /// The whole truth of one host: it replaces everything the main host knew of it.
@@ -67,9 +68,12 @@ pub struct Line {
 }
 
 /// The main host's side of the call, as the reporting host's stdin: it has no fleet.toml.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Watch {
     pub roots: Vec<String>,
     pub worktrees: Vec<String>,
+    pub beat_secs: u64,
+    pub poll_millis: u64,
+    pub sample_secs: u64,
 }

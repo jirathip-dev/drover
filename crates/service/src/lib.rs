@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::sync::{watch, Semaphore};
 use tokio::time::{interval, timeout};
 
-mod lanes;
+mod links;
 
 const JOBS: usize = 16;
 const CONNS: usize = 64;
@@ -33,7 +33,6 @@ pub struct Service {
     conns: Arc<Semaphore>,
     polling: AtomicBool,
     seq: watch::Sender<u64>,
-    streams: std::sync::Mutex<std::collections::BTreeMap<&'static str, bool>>,
 }
 
 /// `drover service`: refuses a second one, then runs until killed.
@@ -53,7 +52,7 @@ pub fn main(ctx: &Ctx, api: &str, board: Option<&str>) -> Result<()> {
     run(ctx.clone(), &Real, drover_core::now, api)
 }
 
-/// The service on `api` and the state dir's socket, until the process ends; lane state from shed's stream.
+/// The service on `api` and the state dir's socket, until the process ends; a link to every host.
 pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::TcpListener) -> Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     rt.block_on(async move {
@@ -69,7 +68,6 @@ pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::
             conns: Arc::new(Semaphore::new(CONNS)),
             polling: AtomicBool::new(false),
             seq: watch::channel(drover_core::db::last_seq(&ctx.state)).0,
-            streams: std::sync::Mutex::default(),
             ctx,
             r,
             clock,
@@ -80,10 +78,7 @@ pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::
         tokio::spawn(s.clone().watch_log());
         tokio::spawn(s.clone().poll());
         tokio::spawn(s.clone().local(local));
-        if let Some(w) = Config::load(&s.ctx.config).ok().and_then(|c| c.shed()) {
-            let me = s.clone();
-            std::thread::spawn(move || me.shed(&w.wire));
-        }
+        s.links();
         loop {
             if let Ok((c, peer)) = api.accept().await {
                 tokio::spawn(s.clone().api(c, peer));

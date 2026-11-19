@@ -24,11 +24,17 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
     it is logged; this host or a paired device's cookie only.
   - `POST /api/v1/cmd` `{"token", "args", "files"}`: a remote lane's command (below).
 - **The board** runs in the same process with `--board` (the `serve` job's address); it is not grown here.
-- **Lane state** (#529) comes from shed's `events` stream, not from polling: the service follows it (keeping
-  `shed.seq`, so drive's intake finds nothing left). Each lane's change is logged as a passive `lane-state`
-  (`working`, `idle`, `done`, `blocked`; `gone` once its process exits) as it happens. A dropped stream logs
-  `lane-stream` (`state: down`, `why`), `GET /api/v1/host`'s `shed lane events` row turns amber ("down …: why · polling"),
-  and the service reconnects every 5 s.
+- **Links** (#1319, #1309 step 2): one thread per host, this one included, holds `drover hosts watch` open there
+  (over ssh to a boat; a child process here). The watcher sends a whole report first, a new one within
+  `link_poll_millis` of any outbox line, `verdict.md` or shed session change (and every `link_sample_secs`), and a
+  beat every `link_beat_secs`. Each frame goes through the same intake as the fast step's poll: the view, the
+  `lane-state` stamps, and each outbox line run once as its lane (a `turn done` kicks its issue at once), then
+  acked on the watcher's stdin (`<worktree>\t<sent>`) so later reports leave it out. A host whose link is live is
+  not polled. No frame for `link_stale_secs`, a frame out of order or a closed pipe cuts the link; it is dialled
+  again after 1 s, doubling to `link_retry_max_secs`, and its first report brings the view level. `drover check`
+  alerts `link-down` for a host with lanes not live for `link_down_minutes` while the service runs, `link-up` once
+  it is live again; the `links` services row says how many are live. With the service stopped every host is
+  polled, as before.
 
 ## Remote lanes over HTTP
 

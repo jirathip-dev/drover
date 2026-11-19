@@ -35,6 +35,11 @@ fn run(
     (sp, lane): (&Event, &str),
     l: &Line,
 ) -> Result<()> {
+    let lock = std::fs::File::options()
+        .create(true)
+        .append(true)
+        .open(ctx.state.with_file_name("outbox.lock"))?;
+    lock.lock()?;
     let events = working(&ctx.state)?;
     if ran(&events, lane, l.sent) {
         return Ok(());
@@ -61,15 +66,15 @@ fn run(
     append(&ctx.state, &Event::new(ctx.now, &sp.fleet, sp.issue, "outbox", d))
 }
 
-/// Host `host`'s frame applied, or why none came: the view's rows, then each outbox line not yet applied, run once as the lane its worktree's spawn names.
+/// Host `host`'s frame applied, or why none came: the view's rows, then each outbox line not yet applied, run once as the lane its worktree's spawn names; `live` when it came over a kept-open link. The lines the log now holds, as acks: `<worktree>\t<sent>`.
 pub fn apply(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
     (host, m): (&str, Option<&str>),
-    got: Result<Frame>,
-) -> Result<()> {
+    (got, live): (Result<Frame>, bool),
+) -> Result<Vec<String>> {
     let old = (crate::db::view(&ctx.state)?.0.into_iter())
         .find(|h| h.host == host)
         .unwrap_or_default();
@@ -77,35 +82,53 @@ pub fn apply(
         anyhow::ensure!(f.v == V, "it sends frames v{}, this build reads v{V}", f.v);
         Ok(f)
     });
+    let link = if live && f.is_ok() { "live" } else { "down" };
+    let since = if old.link == link { old.since } else { ctx.now };
     let f = match f {
         Ok(f) => f,
         Err(e) => {
             let why = format!("{e:#}").lines().next().unwrap_or_default().to_string();
             let h = HostSeen {
                 host: host.into(),
-                link: "down".into(),
-                since: ctx.now,
+                link: link.into(),
+                since,
                 why: Some(why),
                 ..old
             };
-            return crate::db::view_put(&ctx.state, &h, None);
+            crate::db::view_put(&ctx.state, &h, None)?;
+            return Ok(vec![]);
         }
     };
     if old.boot.as_deref() == Some(f.boot.as_str()) && old.n >= Some(f.n) {
-        return Ok(());
+        return Ok(vec![]);
     }
-    let Body::Report(rep) = f.body;
+    let rep = match f.body {
+        Body::Report(rep) => rep,
+        Body::Beat => {
+            let h = HostSeen {
+                host: host.into(),
+                link: link.into(),
+                since,
+                n: Some(f.n),
+                heard: Some(ctx.now),
+                ..old
+            };
+            crate::db::view_put(&ctx.state, &h, None)?;
+            return Ok(vec![]);
+        }
+    };
     let key = |s: &super::frame::Seen| {
         (s.session.as_ref().map(|t| t.name.clone())).or_else(|| s.worktree.as_ref().map(|w| w.path.clone()))
     };
     let rows: Vec<(String, String)> = (rep.lanes.iter())
         .filter_map(|s| Some((key(s)?, serde_json::to_string(s).ok()?)))
         .collect();
+    let why = rep.shed.or_else(|| (!live).then(|| super::NO_SERVICE.into()));
     let h = HostSeen {
         host: host.into(),
-        link: "down".into(),
-        since: ctx.now,
-        why: Some(rep.shed.unwrap_or_else(|| super::NO_SERVICE.into())),
+        link: link.into(),
+        since,
+        why,
         boot: Some(f.boot),
         n: Some(f.n),
         heard: Some(ctx.now),
@@ -113,7 +136,7 @@ pub fn apply(
     };
     crate::db::view_put(&ctx.state, &h, Some(&rows))?;
     let worktrees = rep.lanes.iter().filter_map(|s| s.worktree.as_ref());
-    let mut events = None;
+    let (mut events, mut acks) = (None, vec![]);
     for w in worktrees.filter(|w| !w.lines.is_empty()) {
         let ev = match &events {
             Some(ev) => ev,
@@ -124,7 +147,8 @@ pub fn apply(
         };
         for l in &w.lines {
             run(ctx, cfg, r, out, (&sp, &lane), l)?;
+            acks.push(format!("{}\t{}", w.path, l.sent));
         }
     }
-    Ok(())
+    Ok(acks)
 }
