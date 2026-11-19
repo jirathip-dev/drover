@@ -1,4 +1,6 @@
 mod common;
+#[path = "hosts/report.rs"]
+mod report;
 use common::*;
 use drover::config::Config;
 use drover::events::{append, read, Event};
@@ -446,8 +448,10 @@ fn an_offline_host_never_pages_and_shows_grey() {
         .collect();
     assert!(!pages.is_empty() && pages.iter().all(|e| e.issue == Some(13)), "{out}");
     let (_, hosts) = run(&c, &r, &["hosts"]);
+    let line = hosts.lines().find(|l| l.starts_with("bazzite · ")).unwrap();
     assert!(
-        hosts.contains("bazzite · offline · last seen 33m · tags os:linux,arch:x86_64,docker"),
+        line.starts_with("bazzite · offline · last seen 33m · report: ")
+            && line.contains(" · tags os:linux,arch:x86_64,docker"),
         "{hosts}"
     );
     assert!(hosts.contains("1 lane(s) sendmeter-impl-12"), "{hosts}");

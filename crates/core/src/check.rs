@@ -1412,6 +1412,7 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
         }
         let budget = cfg.limits.build_budget_gb;
         let trim = |out: &mut dyn Write| -> Result<u64> {
+            sweep::reported(ctx, cfg, &on)?;
             let live = live_lanes(ctx, cfg, &on)?;
             (build_dirs(ctx, cfg, &on).iter())
                 .map(|b| trim_remote(&on, name, b, budget, &live, &mut *out))
@@ -1572,6 +1573,7 @@ pub fn trim_on(ctx: &Ctx, on: &On, cfg: &Config, budget: f64, live: &Live, out: 
     let Some(m) = on.machine else {
         return trim_builds(ctx, cfg, budget, live, out, false);
     };
+    sweep::reported(ctx, cfg, on)?;
     let dirs = build_dirs(ctx, cfg, on);
     dirs.iter().map(|b| trim_remote(on, m, b, budget, live, out)).sum()
 }
