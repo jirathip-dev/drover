@@ -1,0 +1,5 @@
+Decided: no code change this round; merged origin/staging and re-ran CI, which is green at 30658075
+Because: crates/cli/tests/herd.rs:402
+Rejected: patching the herd or phone_timings test here — the herd test is red on staging 3ab9185f too, and phone_timings passed at 18d40c7a with the same web code
+Check: CI run 44612748016 at 30658075 has every job green, ui-webkit included
+Owner: Nothing changed in the dropdown; the earlier red checks were flaky tests that also fail on staging.
