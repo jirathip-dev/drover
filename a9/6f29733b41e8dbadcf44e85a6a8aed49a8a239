@@ -1,0 +1,17 @@
+Decided: an absent lane inside START_SECS of its spawn is Health::Unknown, so check skips it and its key stays live
+Because: "A fresh lane has a grace period after its spawn before it can be judged dead."
+Decided: a lane whose shed note is the proxy's lane-key 401 is restarted at once and logged as a self-heal, not a respawn
+Because: "restarted within one pass, logged as a heal; a second 401 on the same issue within the hour is one owner card"
+Rejected: counting the heal as a respawn — a respawn earlier in the issue's life turned the first 401 into a card
+Rejected: a new [limits] key for the grace — START_SECS already says how long a lane may take to show up
+Check: a timed-out probe was already Unknown on staging (view keeps Err for a failed report); the new test pins it
+Check: hosts keys and the proxy share proxy::state, so a key the proxy refuses never lists as live
+Owner: a lane that just started is no longer judged dead, and a lane cut off by its key is restarted once by itself
+
+Decided: no code change this round; merged origin/staging, which carries the cap raise to 60000
+Because: q2319
+Decided: the red host_deadline is a wall-clock flake, not this diff; it failed at 6.1 s against its 6 s bound
+Because: crates/cli/tests/host_deadline.rs:112
+Rejected: loosening host_deadline's time bound — outside this issue's scope and the test is not this PR's
+Check: CI at the new head is green; host_deadline passed 4/4 local runs
+Owner: the fix is unchanged; staging's cap raise is merged in and CI is rerun
