@@ -6,7 +6,6 @@
     {
       "type": "scene",
       "id": "scene",
-      "art": { "repo": "jirathip-dev/swag", "commit": "68c01f0ebe83bd81e0f056714a23e8f0f95b556d", "dir": "legacy-board/farm", "sums": "SHA256SUMS" },
       "weather": { "sky": "windy", "wind": 0.62, "fog": 0, "storm": false, "line": "load 4.96 · mem normal · swap 0" },
       "repos": [
         {

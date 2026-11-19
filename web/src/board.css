@@ -192,7 +192,7 @@ html[data-focus] .scr>.cmp{position:static}
 .card .form.say{position:static;border:0;padding:0;background:none}
 html.scening,html.scening body{overflow:hidden}
 html.scening :is(main,nav,#cards,#strip){display:none}
-#scene{position:fixed;inset:calc(var(--hit) + var(--s1) + 1px) 0 0;z-index:2;overflow:hidden;background:#485e3b;--sky1:#388fc4;--sky2:#8ebbc6;color:#f4ecd8}
+#scene{position:fixed;inset:calc(var(--hit) + var(--s1)) 0 0;z-index:2;overflow:hidden;background:#485e3b;--sky1:#388fc4;--sky2:#8ebbc6;color:#f4ecd8}
 #scene.storm{--sky1:#1d2530;--sky2:#4f5a63}
 #scene{--h0:#a9c9bf;--h1:#9fb9a5;--h2:#8aab88;--h3:#79966d;--lw:#d2c48c;--sh:#334c2e;--st:#e8e3b3;--bn:#a86e52;--rf:#536456;--dr:#344635;--wn:#e5dfb8;
   --tk:#776745;--l1:#859b5c;--l2:#66874f;--lh:#b0b67b;--fp:#9c916a;--fh:#e2d7ac;--fr:#8b825d;--fl:#d6c99f;--cl:#e3f1e9;--gs:#aeb57a}
@@ -225,7 +225,7 @@ header #hlt{min-width:3ch}
 @media (hover:hover){#scene .hnv:hover,#scene .hdt button:hover{background:#f4ecd833}}
 #scene.drag{cursor:grabbing;user-select:none;-webkit-user-select:none}
 .hn{padding:0 var(--s2)}.hn .card{background:#2a1416ee;color:var(--fg);margin:var(--s2) 0}
-.hr{position:relative;height:min(calc(100vw * var(--ar,.82)),max(120px,22vh));height:min(calc(100vw * var(--ar,.82)),max(120px,22svh));overflow:hidden;background:linear-gradient(var(--sky1),var(--sky2));transition:background .6s}
+.hr{position:relative;height:min(calc(100vw * var(--ar,.82)),max(calc(10 * var(--s3)),22vh));height:min(calc(100vw * var(--ar,.82)),max(calc(10 * var(--s3)),22svh));overflow:hidden;background:linear-gradient(var(--sky1),var(--sky2));transition:background .6s}
 .hc{position:absolute;filter:blur(3px);will-change:transform}
 .hc svg{display:block;width:100%;height:100%}
 .rsn svg:not(.t0) .moon{display:none}
@@ -238,7 +238,7 @@ header #hlt{min-width:3ch}
 .fog2 .hp{background:linear-gradient(#b8bfa8,#8d9a78 40vh,#66775c)}
 #scene.night .hp{background:linear-gradient(#576c62,#3b5750 40vh,#28413f)}
 .night .fog{background:linear-gradient(#5d6977 0,#4f5b68cc 55%,#5d6977 100%)}
-.hrain{position:absolute;inset:-60px 0 0 -60px;pointer-events:none;display:none;opacity:.7;
+.hrain{position:absolute;inset:calc(-5 * var(--s3)) 0 0 calc(-5 * var(--s3));pointer-events:none;display:none;opacity:.7;
   background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cpath d='M10 0l-3 14M40 20l-3 14M25 40l-3 14M52 46l-3 14M3 28l-3 14' stroke='%23d8e6f5' stroke-opacity='.6'/%3E%3C/svg%3E")}
 .storm .hrain{display:block}
 .hflash{position:absolute;inset:0;pointer-events:none;background:#fff;opacity:0}
