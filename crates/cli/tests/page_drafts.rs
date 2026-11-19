@@ -160,6 +160,27 @@ fn a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every
 }
 
 #[test]
+fn a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text() {
+    if no_webkit() {
+        return;
+    }
+    let (_c, o) = thread_t2("page-compose", "compose.mjs", &[], &[]);
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    let typed = json!({"value": "half a thought", "focus": true, "same": true, "caret": [4, 6], "blurs": 0});
+    assert_eq!(out["before"], typed, "{out}");
+    assert_eq!(
+        out["after"], typed,
+        "a turn starting and a reply arriving keep the composer, its focus, caret and text: {out}"
+    );
+    assert_eq!(
+        out["typed"], "half! thought",
+        "the next key lands in the composer: {out}"
+    );
+}
+
+#[test]
 fn an_answered_card_leaves_the_cards_at_once_and_stays_gone_while_its_answer_runs() {
     if no_webkit() {
         return;

@@ -648,7 +648,7 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
     Ok(head)
 }
 
-/// The merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines and a facts line. Returns (subject, body, whether the summary was there).
+/// The merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines, a facts line and the commits' `Cap:` trailers. Returns (subject, body, whether the summary was there).
 pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String, String, bool) {
     let title = pr["title"].as_str().unwrap_or_default().trim();
     let strip = |open: &str, close: char| {
@@ -671,6 +671,13 @@ pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String,
         .sum();
     let s = if rounds == 1 { "" } else { "s" };
     let facts = format!("Closes #{issue} · {rounds} review round{s} · src {src:+} · PASS {sha:.7}");
+    let commits = pr["commits"].as_array().into_iter().flatten();
+    let lines = commits.filter_map(|c| c["messageBody"].as_str()).flat_map(str::lines);
+    let caps: Vec<&str> = lines
+        .map(str::trim)
+        .filter(|l| crate::overlap::cap_trailer(l))
+        .collect();
+    let facts = [&[facts.as_str()][..], &caps].concat().join("\n");
     let body = if human.is_empty() {
         facts
     } else {
@@ -941,7 +948,8 @@ pub fn merge(
         }
     };
     gh::forget_pr(ctx, fleet, issue);
-    let view = ["pr", "view", &num, "-R", &f.repo, "--json", "number,title,body,files"];
+    let fields = "number,title,body,files,commits";
+    let view = ["pr", "view", &num, "-R", &f.repo, "--json", fields];
     let info = json(r, "gh", &view).unwrap_or_else(|_| pr.clone());
     let (subject, body, human) = merge_message(&info, issue, st.as_ref().map_or(0, |s| s.rounds), &head);
     if !human {

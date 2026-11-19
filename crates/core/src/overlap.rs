@@ -226,7 +226,7 @@ pub fn cap_check(
 
 const CAP_PATHS: [&str; 2] = ["ci/cap.toml", "ci/cap.d"];
 
-fn cap_trailer(l: &str) -> bool {
+pub(crate) fn cap_trailer(l: &str) -> bool {
     let num = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
     let Some((old, rest)) = l.trim().strip_prefix("Cap: ").and_then(|t| t.split_once(" → ")) else {
         return false;
