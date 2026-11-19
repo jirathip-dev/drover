@@ -1920,12 +1920,10 @@ impl Server<'_> {
             ..self.ctx.clone()
         };
         let (q, open) = (form(query), self.streams.fetch_add(1, Relaxed) < 4);
-        let paired = Self::plugin(self.ctx, head)
-            || devices::check(self.ctx, header(head, "cookie").unwrap_or_default()).is_ok();
+        let plugin = Self::plugin(self.ctx, head);
+        let paired = plugin || devices::check(self.ctx, header(head, "cookie").unwrap_or_default()).is_ok();
         let screen = |c: &Ctx, q: &Q| crate::runner::request(|| self.screen(c, base, q, paired));
-        let first =
-            screen(&ctx(), &q).filter(|_| open && (Self::plugin(self.ctx, head) || self.allowed(self.ctx, head)));
-        let Some(mut cur) = first else {
+        let Some(mut cur) = screen(&ctx(), &q).filter(|_| open && (plugin || self.allowed(self.ctx, head))) else {
             self.streams.fetch_sub(1, Relaxed);
             let r = line(
                 if open {
