@@ -1,0 +1,6 @@
+Decided: the composer's picker row sits var(--s4) below the attach/send row so no tap areas overlap
+Because: web/src/board.css:39
+Because: "It stays on screen at 390 (opens upward near the bottom, as the composer needs)"
+Rejected: raising the composer row's z-index — the dropdown trigger's own top tap area would then be covered instead
+Check: the ui job's thread view reports 0 tap-area outliers for attach and send
+Owner: The model and effort pickers no longer steal taps meant for the attach and send buttons.
