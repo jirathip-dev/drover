@@ -1,0 +1,16 @@
+[package]
+name = "drover-chat"
+description = "`drover chat`: the orchestrator threads full screen in the terminal (docs/orchestrator.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+drover-core.workspace = true
+ratatui.workspace = true
+serde_json.workspace = true

@@ -199,7 +199,7 @@ fn connect(r: &dyn Runner, q: &str) -> Result<String> {
     if o.stdout.is_empty() && !lost(&o) {
         match start_job(r) {
             None => o = send(&["connect", "--autostart"])?,
-            Some(job) => {
+            Some((_, job)) => {
                 for _ in 0..10 {
                     if !o.stdout.is_empty() || lost(&o) {
                         break;
@@ -236,15 +236,22 @@ fn unit(r: &dyn Runner) -> Option<String> {
     at("ActiveState=")
 }
 
-fn start_job(r: &dyn Runner) -> Option<&'static str> {
+/// Kick shed's own job (systemd `shed.service`, launchd `dev.shed.serve`): its start command and its log command; `None` with no job.
+pub fn start_job(r: &dyn Runner) -> Option<(&'static str, &'static str)> {
     if unit(r).is_some() {
         r.run("systemctl", &argv(&["--user", "start", "shed.service"])).ok();
-        return Some("journalctl --user -u shed.service");
+        return Some((
+            "systemctl --user start shed.service",
+            "journalctl --user -u shed.service",
+        ));
     }
     let plist = "p=\"$HOME/Library/LaunchAgents/dev.shed.serve.plist\"; [ -f \"$p\" ] && \
 launchctl kickstart \"gui/$(id -u)/dev.shed.serve\"";
     let o = r.run("sh", &argv(&["-c", plist])).ok()?;
-    (o.code == 0).then_some("launchctl print gui/$(id -u)/dev.shed.serve")
+    (o.code == 0).then_some((
+        "launchctl kickstart gui/$(id -u)/dev.shed.serve",
+        "launchctl print gui/$(id -u)/dev.shed.serve",
+    ))
 }
 
 /// The `shed` CLI (ACP mode only: its bridge and prompt framing are shed's own); fails on a non-zero exit.

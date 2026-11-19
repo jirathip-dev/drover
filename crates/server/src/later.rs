@@ -160,7 +160,10 @@ impl Server<'_> {
             .filter(|a| !self.flying(&[("op", "answer"), ("fleet", &a.ask.fleet), ("id", &a.ask.id)]))
             .map(|a| {
                 let at = a.ask.issue.map(|n| (a.ask.fleet.as_str(), n));
-                Owned::of(ctx, ev, ask_card(ctx.now, ask_minutes(ctx), a), at)
+                let mut card = ask_card(ctx.now, ask_minutes(ctx), a);
+                let tap = [("op", "answer"), ("fleet", &a.ask.fleet), ("id", &a.ask.id)];
+                refusal(&mut card, self.refusal(&tap));
+                Owned::of(ctx, ev, card, at)
             });
         out.extend(asks.collect::<Vec<_>>());
         let needs = (tab.issues.iter())
@@ -170,7 +173,12 @@ impl Server<'_> {
                     .iter()
                     .any(|op| self.flying(&[("op", op), ("fleet", &i.fleet), ("issue", &n)]))
             })
-            .map(|i| Owned::of(ctx, ev, needs_card(i, ev), Some((&i.fleet, i.issue))));
+            .map(|i| {
+                let (mut card, n) = (needs_card(i, ev), i.issue.to_string());
+                let taps = ["extend", "override", "park"].map(|op| [("op", op), ("fleet", &i.fleet), ("issue", &n)]);
+                refusal(&mut card, taps.iter().find_map(|t| self.refusal(t)));
+                Owned::of(ctx, ev, card, Some((&i.fleet, i.issue)))
+            });
         out.extend(needs.collect::<Vec<_>>());
         out
     }
@@ -193,6 +201,13 @@ impl Server<'_> {
             )?;
         }
         Ok(json!({"ops": [{"op": "remove", "id": id}], "toast": format!("{id}: later, back when it changes")}))
+    }
+}
+
+fn refusal(card: &mut Value, why: Option<String>) {
+    let id = format!("refused-{}", card.at("id").as_str().unwrap_or_default());
+    if let (Some(w), Some(b)) = (why, card.get_mut("blocks").and_then(Value::as_array_mut)) {
+        b.push(json!({"type": "text", "id": id, "markdown": w}));
     }
 }
 
