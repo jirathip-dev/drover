@@ -91,7 +91,7 @@ fn working_lane_is_not_a_stall() {
 fn lane_dead_fires_once_and_again_after_state_change() {
     let d = tmpdir("lane-dead");
     let c = ctx(&d, CONFIG);
-    spawn_ev(&c, NOW - 60, 12, LANE);
+    spawn_ev(&c, NOW - 660, 12, LANE);
     let _sh = shed(&c, &[]);
     let r = Fake::default();
     let out = check(&c, &r);
@@ -102,7 +102,7 @@ fn lane_dead_fires_once_and_again_after_state_change() {
     assert_eq!(check(&c, &r), "");
     assert_eq!(kinds(&c, "lane-dead"), 1);
     assert_eq!(kinds(&c, "stall"), 0, "not stale yet");
-    spawn_ev(&c, NOW - 30, 12, "sendmeter-impl-12b");
+    spawn_ev(&c, NOW - 630, 12, "sendmeter-impl-12b");
     assert!(check(&c, &r).contains("sendmeter-impl-12b is gone"));
     assert_eq!(kinds(&c, "lane-dead"), 2);
 }
