@@ -9,7 +9,7 @@ use std::io::Write;
 
 const SPEC_CHECKS: &[&str] = &["board-freeze"];
 
-/// Append `- **Amendment (<basis>)**: <text>` under the body's `## Amendments` (made once), log `amend`, then re-run the open PR's failed spec checks. `basis` must be an ask on this issue answered by the owner (or by default); else `NO_DECISION`, before any `gh` call.
+/// Append `- **Amendment (<YYYY-MM-DD>)**: <text>` under the body's `## Amendments` (made once), log `amend`, then re-run the open PR's failed spec checks. `basis` must be an ask on this issue answered by the owner (or by default); else `NO_DECISION`, before any `gh` call.
 pub fn amend(
     ctx: &Ctx,
     cfg: &Config,
@@ -33,6 +33,7 @@ pub fn amend(
     if text.is_empty() || text.chars().any(char::is_control) {
         return gate::refused("BAD_VALUE", "an amendment is one line of text");
     }
+    crate::hygiene::text(ctx, r, cfg, fleet, "the amendment", text)?;
     let n = issue.to_string();
     let body = json(r, "gh", &["issue", "view", &n, "-R", &f.repo, "--json", "body"])?;
     let body = body.at("body").as_str().unwrap_or_default().trim_end();
@@ -41,7 +42,8 @@ pub fn amend(
     } else {
         "\n\n## Amendments\n"
     };
-    let body = format!("{body}{head}- **Amendment ({basis})**: {text}\n");
+    let day = crate::lesson::ymd(ctx.now / 86_400);
+    let body = format!("{body}{head}- **Amendment ({day})**: {text}\n");
     ok(r, "gh", &["issue", "edit", &n, "-R", &f.repo, "--body", &body])?;
     let d = json!({"id": basis, "text": text});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "amend", d))?;

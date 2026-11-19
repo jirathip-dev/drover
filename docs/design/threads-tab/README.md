@@ -27,8 +27,9 @@ to `web/src/board.css`.
 ## The blocks
 
 - **List** (`/screens/threads`, `badge` = the number of threads waiting on your choice): one `section` per repo,
-  "all repos" first and then the rest by name. Each holds a `list` of thread rows, its older threads folded in a `card`
-  (`▸ N older threads`), and `[+ thread]`. A row is:
+  "all repos" first and then the rest by name. Each holds a `list` of its 3 newest thread rows (an archived one keeps its
+  place, undrawn) and `[+ thread]`; every repo's other threads fold in one `card` (`▸ N older threads`) above the
+  archived one, newest first, each subtitle naming its repo. A row is:
   `figure` (the orchestrator: `needs` = waiting on your choice, `working`, `idle` = awake or asleep) · title ·
   `badge` "new" if unread · `subtitle` (`! choose` in amber, `✻ working`, `☾ asleep`, then the last message) · `value` the age ·
   `tap: {open: /screens/threads/<id>}` · `swipe: [archive]`. Archived threads fold under `▸ N archived` at the foot.

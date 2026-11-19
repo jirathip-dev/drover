@@ -142,7 +142,7 @@ fn hot_fixture() -> drover::Ctx {
 }
 
 #[test]
-fn a_row_holding_five_hot_files_has_one_hot_chip_and_its_paths_folded() {
+fn parity_48_a_row_holding_five_hot_files_has_one_hot_chip_and_its_paths_folded() {
     let (c, r) = (hot_fixture(), Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let get = |p: &str| {

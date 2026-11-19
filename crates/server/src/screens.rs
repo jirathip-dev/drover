@@ -479,35 +479,6 @@ fn done_screen(c: &QueueCard, q: &Q) -> Value {
         "blocks": [pages::paged(rows_list("done-list", &rows), more)]})
 }
 
-const LEGEND: [(&str, &str); 17] = [
-    ("queued", "waiting its turn"),
-    ("design · architect", "a design or ADR waits for your approval"),
-    ("impl", "being built"),
-    ("review n", "being checked, round n"),
-    ("fix n", "fixing review findings, round n"),
-    ("verify n", "the real app is being checked, round n"),
-    ("update", "merging the integration branch into its PR"),
-    ("ready", "passed, waiting to merge"),
-    ("merged", "merged into the integration branch"),
-    ("waiting: decision", "a lane asked: tap the row to answer in its sheet"),
-    ("needs-human", "out of rounds or stuck: your call"),
-    ("blocked · held until #N", "waits for another issue to merge"),
-    ("parked", "lane closed, its work saved on the PR"),
-    ("dead", "lane gone with unsaved work"),
-    ("▲ [◆ rev] ◫ ✓", "the issue's pipeline, its current stage in brackets"),
-    ("🔒 group", "serial: one lane of the group at a time"),
-    ("🔒 hot ×N", "holds N hot files, one lane at a time: tap to list them"),
-];
-
-fn legend() -> Value {
-    let rows = LEGEND
-        .iter()
-        .enumerate()
-        .map(|(i, (w, m))| json!({"type": "row", "id": format!("lg-{i}"), "title": w, "subtitle": m}));
-    json!({"type": "sheet", "id": "legend", "title": "What the marks mean", "cancel": "Done",
-        "blocks": [{"type": "list", "id": "legend-list", "rows": rows.collect::<Vec<_>>()}]})
-}
-
 const FILTERS: [(&str, &str); 5] = [
     ("new", "new"),
     ("30", ">30 days"),
@@ -1221,12 +1192,12 @@ fn herd_screen(h: &Herd) -> Value {
         .collect();
     repos.extend(herd_repo("others", "", &h.others, None));
     let host = &h.host;
-    let wind = (host.load.unwrap_or_default() / host.limit.max(0.01)).clamp(0.0, 1.0);
-    let sky = match host.pressure.as_deref() {
-        _ if host.gate.is_some() => "storm",
-        Some("warn" | "critical") => "fog",
-        _ if wind >= 0.5 => "windy",
-        _ => "clear",
+    let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
+    let (sky, level) = match host.pressure.as_deref() {
+        _ if host.gate.is_some() => ("storm", "held"),
+        Some("warn" | "critical") => ("fog", "busy"),
+        _ if ratio >= 0.5 => ("windy", "busy"),
+        _ => ("clear", "calm"),
     };
     let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
     let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
@@ -1234,8 +1205,8 @@ fn herd_screen(h: &Herd) -> Value {
         "load {load} · mem {} · swap {swap}",
         host.pressure.as_deref().unwrap_or("?")
     );
-    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene",
-        "weather": {"sky": sky, "wind": (wind * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
+    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene", "load": level,
+        "weather": {"sky": sky, "wind": (ratio.clamp(0.0, 1.0) * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
 }
 
 fn section_word(state: &str) -> &str {
@@ -1325,9 +1296,8 @@ fn own(v: &Value) -> Map<String, Value> {
 }
 
 fn kids(v: &Value) -> &[Value] {
-    v.get("blocks")
-        .or_else(|| v.get("rows"))
-        .and_then(Value::as_array)
+    v.as_array()
+        .or_else(|| v.get("blocks").or_else(|| v.get("rows")).and_then(Value::as_array))
         .map_or(&[], Vec::as_slice)
 }
 
@@ -1462,7 +1432,6 @@ impl Server<'_> {
                 self.on_row(ctx, q, |c, r| issue_sheet(ctx, &ev, fl(c), c, r))?
             }
             "/screens/verdict" => verdict_sheet(&working(&ctx.state).ok()?, q)?,
-            "/screens/legend" => legend(),
             "/screens/backlog" => {
                 let tab = self.queue_tab(ctx);
                 backlog(ctx.now, tab.fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?, q)?
@@ -1603,7 +1572,6 @@ impl Server<'_> {
         let menu = [
             json!({"label": "Fleets…", "tap": {"sheet": "/screens/fleets"}}),
             json!({"label": "Drive all now", "action": "drive-all"}),
-            json!({"label": "Legend [?]", "tap": {"sheet": "/screens/legend"}}),
         ];
         let badge = self.needs_count(ctx, &ev);
         json!({"type": "screen", "id": "queue", "title": "Queue", "stream": stream, "badge": badge,
@@ -1986,3 +1954,7 @@ fn cooee() -> devices::Device {
         ..Default::default()
     }
 }
+
+#[cfg(test)]
+#[path = "herd_tests.rs"]
+mod tests;

@@ -196,11 +196,7 @@ pub fn verdict(
     let shots = crate::verify::shots(&body, Path::new(file), lane);
     let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
         "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha")), "files": shots, "repro": repro});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, fleet, Some(issue), "verdict", data),
-    )?;
+    crate::status::verdict(ctx, cfg, r, Event::new(ctx.now, fleet, Some(issue), "verdict", data))?;
     let (limit, of_limit) = limit(f, cnt, st.as_ref());
     let (v, note) = if form {
         ("FAIL (form-only)", format!(" · not counted · form {}/{of}", used + 1))
@@ -983,9 +979,11 @@ pub fn merge(
     .concat();
     let inputs = json!({"pr": num, "head": head, "over": over, "fast": fast});
     let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
+    let full = [&["pr", "merge", &num, "-R", &f.repo][..], &m].concat();
+    crate::hygiene::args(ctx, r, cfg, fleet, &full)?;
     let at = (fleet, issue, "merge", head.as_str());
     let intent = crate::action::begin(r, &ctx.state, ctx.now, at, inputs, MERGE_SECS, &probe)?.act()?;
-    ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
+    ok(r, "gh", &full)?;
     intent.done(json!({"pr": num, "head": head}))?;
     merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
 }
@@ -1044,6 +1042,17 @@ fn merged(
         d.put("by", json!("owner")).put("override", json!("ROUND_LIMIT"));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
+    if over {
+        let desc = format!("ROUND_LIMIT overridden at {head:.7} · by: owner");
+        crate::status::post(
+            ctx,
+            cfg,
+            r,
+            (fleet, issue),
+            head,
+            (crate::status::OVERRIDE, "success", &desc),
+        )?;
+    }
     if f.land.is_some() {
         let checks = gh::required(&pr["statusCheckRollup"], f.checks(pr));
         let at = |k: &'static str| {
@@ -1069,7 +1078,8 @@ fn merged(
     let n = issue.to_string();
     writeln!(out, "{evidence}")?;
     let comment = ["issue", "comment", &n, "-R", &f.repo, "--body", &evidence];
-    if let Err(e) = ok(r, "gh", &comment).or_else(|_| ok(r, "gh", &comment)) {
+    let sent = crate::hygiene::args(ctx, r, cfg, fleet, &comment);
+    if let Err(e) = sent.and_then(|()| ok(r, "gh", &comment).or_else(|_| ok(r, "gh", &comment))) {
         let reason = format!("PR #{num} merged @ {merge_sha}, but the evidence comment failed twice: {e:#}");
         let e = Event::new(
             ctx.now,

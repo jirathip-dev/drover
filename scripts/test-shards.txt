@@ -31,6 +31,7 @@
 2 ci_templates
 1 clone_heal
 2 cloud
+3 commit_status
 1 compact
 2 compaction
 1 config_api
@@ -81,6 +82,7 @@
 1 host_tab
 1 host_words
 3 hosts
+3 hygiene
 1 hosts_screen
 1 hotspots
 4 hung_read

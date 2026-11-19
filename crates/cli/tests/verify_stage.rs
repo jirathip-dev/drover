@@ -159,6 +159,8 @@ fn a_pr_outside_ui_paths_skips_verify_and_goes_to_the_gates() {
         (Some(head.as_str()), Some("verify"))
     );
     assert!(!started(&sh, "sendmeter-verify"));
+    let post = format!("gh api -X POST repos/jirathip-dev/sendmeter/statuses/{head} -f state=success -f context=drover/verify -f description=verify-skipped: no design stage, no UI files, not queued --verify");
+    assert!(r.called(&post), "{:?}", r.calls.borrow());
     drive(&c, &r);
     assert!(r.called(&format!(
         "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
@@ -232,6 +234,8 @@ fn no_recipe_logs_verify_no_recipe_shows_it_and_goes_on_to_the_gates() {
     assert!(out.contains("verify-no-recipe"), "{out}");
     assert_eq!(kinds(&c, "verify-no-recipe").len(), 1);
     assert!(!started(&sh, "sendmeter-verify"));
+    let post = format!("gh api -X POST repos/jirathip-dev/sendmeter/statuses/{head} -f state=success -f context=drover/verify -f description=verify-no-recipe: ");
+    assert!(r.called(&post), "{:?}", r.calls.borrow());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let res =
         String::from_utf8_lossy(&s.respond(&format!("GET /api/v1/queue HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now))

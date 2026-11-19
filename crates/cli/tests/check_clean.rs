@@ -636,7 +636,11 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
     );
     assert!(!removed(&r1, &unpushed) && !removed(&r1, &open));
     assert!(!sh.called("kill", "impl-22") && !sh.called("kill", "impl-23"));
-    assert_eq!(r1.count("gh "), 0, "the closed-issue read is cached");
+    assert_eq!(
+        r1.count("gh ") - r1.count("gh repo view"),
+        0,
+        "the closed-issue read is cached"
+    );
     assert_eq!(kinds(&c, "clean"), 1);
 }
 
@@ -689,6 +693,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
         std::fs::write(&f, "FAIL\n1. blocking a.rs:1\nProof: spec\n> AC 1\n").unwrap();
         let r = Fake::default()
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
+            .reply("gh api -X POST repos/jirathip-dev/sendmeter/statuses/", "{}")
             .reply(&format!("git -C {w} status"), status)
             .reply(&format!("git -C {w} rev-list"), "0\n")
             .reply("git -C", "");

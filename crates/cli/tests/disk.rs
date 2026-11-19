@@ -509,7 +509,9 @@ fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
     git(&d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
     git(&local, &["commit", "-q", "--allow-empty", "-m", "init"]);
     git(&local, &["push", "-q", "origin", "HEAD"]);
-    let cfg = CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
+    let cfg = CONFIG
+        .replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap())
+        .replace("# never main", "\npublic = false");
     let c = ctx(&d, &format!("{cfg}\n[hosts.air]\nmachine = \"air\"\n"));
     let (_sh, air_shed) = (FakeShed::attached(&c), FakeShed::new());
     let wt = |dir: &str, host: Option<&str>| {

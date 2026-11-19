@@ -1268,3 +1268,116 @@ fn free_in_flight_slots_go_to_the_first_queued_issues_while_their_kicks_run_slow
     let once = |n: u64| s.iter().filter(|e| e.issue == Some(n)).count();
     assert_eq!((once(1), once(2), once(3)), (1, 1, 1), "{s:?}");
 }
+
+type Replies = std::sync::Arc<dyn Fn() -> Fake + Send + Sync>;
+
+struct Kicked(Fake, drover::Ctx, Replies);
+impl drover::runner::Runner for Kicked {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+    fn detach(&self, _: &str, args: &[String], _: &std::path::Path) -> anyhow::Result<u32> {
+        let (c, a, r) = (self.1.clone(), args.to_vec(), self.2.clone());
+        std::thread::spawn(move || {
+            let a: Vec<&str> = a.iter().map(String::as_str).collect();
+            let pid = std::process::id().to_string();
+            let alive = r()
+                .reply(&format!("kill -0 {pid}"), "")
+                .reply(&format!("ps -o etime= -p {pid}"), "  00:01\n");
+            run(&c, &alive, &a)
+        })
+        .join()
+        .unwrap();
+        Ok(0)
+    }
+}
+
+fn ci_red_after_pass(name: &str, live: bool) -> (drover::Ctx, FakeShed, Replies) {
+    let (c, sh) = fleet(name, 6, 1);
+    let wt = c.worktrees.join("sendmeter/issue-1");
+    let rev = c.worktrees.join("sendmeter/rev-1-r1");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::create_dir_all(&rev).unwrap();
+    let head = "a".repeat(40);
+    let at = |ts, kind, d| drover::events::Event::new(ts, "sendmeter", Some(1), kind, d);
+    let spawn = |role: &str, agent: &str, wt: &std::path::Path| {
+        serde_json::json!({"role": role, "agent": agent, "pane": agent, "runtime": "shed", "worktree": wt,
+            "branch": "issue-1"})
+    };
+    for e in [
+        at(10, "spawn", spawn("impl", "sendmeter-impl-1", &wt)),
+        at(20, "pushed", serde_json::json!({"sha": head})),
+        at(30, "spawn", spawn("rev", "sendmeter-rev-1-r1", &rev)),
+        at(
+            40,
+            "verdict",
+            serde_json::json!({"verdict": "PASS", "sha": head, "stage": "rev", "body": "PASS"}),
+        ),
+    ] {
+        drover::events::append(&c.state, &e).unwrap();
+    }
+    sh.lane("sendmeter-rev-1-r1", "idle", &rev.to_string_lossy());
+    if live {
+        sh.lane("sendmeter-impl-1", "idle", &wt.to_string_lossy());
+    }
+    let red = serde_json::json!({"__typename": "CheckRun", "name": "ui-webkit", "status": "COMPLETED",
+        "conclusion": "FAILURE", "detailsUrl": "https://github.com/jirathip-dev/sendmeter/actions/runs/777/job/1"});
+    let pr = serde_json::json!({"number": 101, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "statusCheckRollup": [red]})
+    .to_string();
+    let git = format!("git -C {}", wt.display());
+    let r: Replies = std::sync::Arc::new(move || {
+        fake("1.0")
+            .reply("gh pr view issue-1", &pr)
+            .reply("gh run view 777", "error: ui-webkit sheet close failed\n")
+            .reply(
+                "gh api repos/jirathip-dev/sendmeter/branches/issue-1",
+                &format!("{head}\n"),
+            )
+            .reply(&format!("{git} log"), &format!("{head} 20"))
+    });
+    let (code, out) = run(&c, &r(), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let ev = read(&c.state).unwrap();
+    let v = ev.iter().rfind(|e| e.kind == "verdict").unwrap();
+    assert_eq!(v.str("verdict"), Some("FAIL"), "{out}");
+    (c, sh, r)
+}
+
+fn fix_round_starts(c: &drover::Ctx, sh: &FakeShed, r: &Replies) {
+    let later = drover::Ctx {
+        now: c.now + 300,
+        ..c.clone()
+    };
+    let (code, out) = run(&later, &Kicked(r(), later.clone(), r.clone()), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let runs = sh.all("run");
+    assert!(runs.iter().any(|p| p["name"] == "sendmeter-impl-1"), "{out} {runs:?}");
+    let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-1/.brief.md")).unwrap();
+    assert!(brief.contains("ui-webkit sheet close failed"), "{brief}");
+    let much_later = drover::Ctx {
+        now: c.now + 3600,
+        ..c.clone()
+    };
+    pass(&much_later, &r());
+    let ev = read(&c.state).unwrap();
+    let missed: Vec<_> = ev
+        .iter()
+        .filter(|e| e.kind == "promise-missed")
+        .map(|e| e.data.clone())
+        .collect();
+    assert!(missed.is_empty(), "{missed:?}");
+}
+
+#[test]
+fn a_ci_only_fail_after_a_pass_starts_its_fix_round_on_the_next_pass() {
+    let (c, sh, r) = ci_red_after_pass("kicks-ci-fail-fix", false);
+    fix_round_starts(&c, &sh, &r);
+}
+
+#[test]
+fn a_ci_only_fail_starts_its_fix_round_past_a_live_idle_impl_lane() {
+    let (c, sh, r) = ci_red_after_pass("kicks-ci-fail-live", true);
+    fix_round_starts(&c, &sh, &r);
+}

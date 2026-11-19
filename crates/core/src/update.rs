@@ -107,6 +107,7 @@ struct Member<'a> {
     main: bool,
     waited: bool,
     builds: Option<Builds>,
+    unread: Option<String>,
     failed: Option<Unstaged>,
 }
 
@@ -177,6 +178,7 @@ fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], 
         tags,
         main: true,
         waited: true,
+        unread: None,
         failed: None,
     }];
     if t.kind == Kind::StagingServe {
@@ -184,15 +186,24 @@ fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], 
     }
     for (name, h) in &cfg.hosts {
         let Some(m) = h.machine.as_deref() else { continue };
-        let s = seen.get(name).cloned().unwrap_or_default();
+        let mut s = seen.get(name).cloned().unwrap_or_default();
         let up = h.cloud.is_none() || crate::cloud::state(events, name) == "running";
-        let (on, exe) = (On::new(r, Some(m)), crate::hosts::real_exe(ctx, &s.home));
-        let read = up && h.enabled && !s.home.is_empty();
+        let (on, read) = (On::new(r, Some(m)), up && h.enabled);
+        if let Some((tags, home)) = (read && s.home.is_empty()).then(|| crate::hosts::probe(&on)).flatten() {
+            (s.tags, s.home) = (tags, home);
+        }
+        let exe = crate::hosts::real_exe(ctx, &s.home);
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&s.home)).remove(0);
         let tags = crate::hosts::tags(h, Some(&s));
+        let got = match (read, s.home.is_empty()) {
+            (false, _) => Ok(None),
+            (true, true) => Err("its $HOME probe over ssh failed".to_string()),
+            (true, false) => builds(&on, &exe, &tags).map(Some).map_err(|e| format!("{e:#}")),
+        };
         v.push(Member {
             name: name.clone(),
-            builds: read.then(|| builds(&on, &exe, &tags).ok()).flatten(),
+            builds: got.as_ref().ok().cloned().flatten(),
+            unread: got.err(),
             on,
             exe,
             conf,
@@ -418,7 +429,7 @@ fn swap(
             Event::new(ctx.now, "drover", None, "self-update-swapping", d).passive(),
         )?;
     }
-    let mut hosts = vec![];
+    let (mut hosts, mut unswapped) = (vec![], vec![]);
     for m in remote {
         let res = remote_swap(cfg, m);
         let d = json!({"host": m.name, "from": m.has(), "to": head, "ok": res.is_ok()});
@@ -427,6 +438,7 @@ fn swap(
             Ok(_) => hosts.push(m.name.clone()),
             Err(e) => {
                 writeln!(out, "✗ {}: swap to {head:.7} failed: {e:#}", m.name)?;
+                unswapped.push((m.name.clone(), format!("swap: {e:#}")));
                 behind.push(m.name.clone());
             }
         }
@@ -435,10 +447,11 @@ fn swap(
         let logged =
             |e: &Event| e.kind == "host-behind" && e.str("host") == Some(&m.name) && e.str("wants") == Some(head);
         if !events.iter().any(logged) {
-            let why = m
-                .failed
-                .as_ref()
-                .map_or_else(|| "unreachable or stopped".into(), ToString::to_string);
+            let swap = unswapped.iter().find(|u| u.0 == m.name).map(|u| u.1.clone());
+            let why = (m.failed.as_ref().map(ToString::to_string))
+                .or(swap)
+                .or_else(|| m.unread.clone())
+                .unwrap_or_else(|| "unreachable or stopped".into());
             let d = json!({"host": m.name, "has": m.has(), "wants": head, "reason": why});
             emit(
                 &ctx.state,

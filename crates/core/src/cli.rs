@@ -240,6 +240,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: FleetCmd,
     },
+    #[command(about = "#1376: text bound for a public repo: paths, hosts, session ids, private names")]
+    Hygiene {
+        #[command(subcommand)]
+        cmd: crate::hygiene::Cmd,
+    },
     #[command(about = "#646: the fleet repo's `wip/*` branches")]
     Wip {
         #[command(subcommand)]
@@ -1780,6 +1785,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Wip {
                     cmd: WipCmd::Prune { fleet, dry_run },
                 } => check::prune(ctx, &cfg, r, out, &fleet, dry_run)?,
+                Cmd::Hygiene {
+                    cmd: crate::hygiene::Cmd::Scan { fleet },
+                } => crate::hygiene::scan(ctx, &cfg, r, out, &fleet)?,
                 Cmd::Secret { cmd } => match cmd {
                     SecretCmd::Request { thread, name, why } => {
                         crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
@@ -2285,7 +2293,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             crate::drive::kick_once(ctx, r, (f, n), why, id);
         }
     }
-    let builds = || lane_rules(ctx, &lane).is_ok_and(|r| r.builds);
+    let builds = || hook::lane_rules(ctx, &lane).is_ok_and(|r| r.builds);
     if let Some(v) = hook::turn_end(&input, &hook::turn_mark(&ctx.state, &lane), builds) {
         writeln!(out, "{v}")?;
         return Ok(());
@@ -2305,7 +2313,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         }
         return Ok(());
     }
-    let rules = match lane_rules(ctx, &lane) {
+    let rules = match hook::lane_rules(ctx, &lane) {
         Ok(r) => r,
         Err(cause) => return fail_closed(ctx, out, &input, &cause),
     };
@@ -2352,6 +2360,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         scratch: crate::config::env("DROVER_SCRATCH_TARGET").filter(|s| !s.is_empty()),
         cap,
         design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
+        hygiene: rules.hygiene,
     };
     let cur = |d: &str| {
         runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])
@@ -2380,26 +2389,6 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         lane_event(ctx, "thread-cmd", d);
     }
     Ok(())
-}
-
-fn lane_rules(ctx: &Ctx, lane: &str) -> std::result::Result<hook::Rules, String> {
-    if let Some(p) = crate::config::env_os("DROVER_RULES") {
-        let p = PathBuf::from(p);
-        let bad = |e: &dyn std::fmt::Display| format!("rules file {} is unreadable ({e})", p.display());
-        let text = std::fs::read_to_string(&p).map_err(|e| bad(&e))?;
-        return serde_json::from_str(&text).map_err(|e| bad(&e));
-    }
-    let cfg = Config::load(&ctx.config).map_err(|e| {
-        crate::stderr!("drover hook: {e:#}");
-        "fleet.toml failed to load".to_string()
-    })?;
-    let mut it = lane.split(':');
-    let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
-    if !cfg.fleet.contains_key(fleet) {
-        return Err(format!("fleet `{fleet}` is not in fleet.toml"));
-    }
-    let host = crate::config::env("DROVER_HOST").unwrap_or_default();
-    Ok(hook::Rules::resolve(&cfg, fleet, role, &host))
 }
 
 fn fail_closed(ctx: &Ctx, out: &mut dyn Write, input: &serde_json::Value, cause: &str) -> Result<()> {
@@ -2444,7 +2433,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;
     let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
-    let rules = lane_rules(ctx, &lane).unwrap_or_else(|_| {
+    let rules = hook::lane_rules(ctx, &lane).unwrap_or_else(|_| {
         let (mut it, host) = (lane.split(':'), crate::config::env("DROVER_HOST").unwrap_or_default());
         let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
         hook::Rules::resolve(&Config::load(&ctx.config).unwrap_or_default(), fleet, role, &host)
@@ -2477,6 +2466,11 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         if let Some(d) = hit.find_map(|l| hook::denied(&l[1..], &deny)) {
             lane_event(ctx, "hook-denied", json!({"rule": d.reason()}));
             writeln!(out, "drover: a pushed script runs `{}`: {}", d.cmd(), d.reason())?;
+            return Ok(1);
+        }
+        if let Some(why) = rules.hygiene.as_ref().and_then(|c| crate::hygiene::pushed(r, c, sha)) {
+            lane_event(ctx, "hook-denied", json!({"rule": why}));
+            writeln!(out, "drover: {why}")?;
             return Ok(1);
         }
         coauthor_warn(ctx, r, ".", sha);

@@ -31,7 +31,10 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     }
     match Config::load(&ctx.config) {
         Ok(cfg) if config_only => config_rows(ctx, &cfg, r, &mut rows),
-        Ok(cfg) => checks(ctx, &cfg, r, &mut rows),
+        Ok(cfg) => {
+            checks(ctx, &cfg, r, &mut rows);
+            rows.extend(crate::status::doctor(ctx, &cfg));
+        }
         Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
     }
     if json {
@@ -108,6 +111,7 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
     rows.push(format!("✓ config — {}", ctx.config.display()));
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
     rows.extend(cfg.shed().map(|b| crate::shed::line(r, &b.wire)));
+    rows.extend(crate::hygiene::doctor(ctx, cfg, r));
 }
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {

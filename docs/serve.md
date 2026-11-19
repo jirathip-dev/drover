@@ -338,7 +338,8 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   proxy section under it holds doctor's proxy facts and [How to set], `GET /screens/proxy-token`, the token's steps.
   #1313: the leftover count and the proxy facts are read off the request (the host sampler, `refresh`; never by a host action);
 - #1092: `GET /screens/herd`, the page's Herd (page-only, [⚙] → Herd; cooee draws its own scene): one `scene` block
-  with `weather` (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `line`)
+  with `weather` (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `line`),
+  #1415 `load` (calm, busy or held: a `sign` theme's needle)
   and `repos`, each a fleet (then `others`) with its queued issues at the gate and its lanes in bands (working, idle,
   done, blocked) as rows with figures. The page draws the theme's `scene.svg` (the pinned swag pack; a `<config
   dir>/themes/<name>/scene.svg` overrides it; farm and terminal, with none, get a drawn ranch), [‹] [›] switch repo

@@ -11,6 +11,7 @@ pub fn config(max_spawns: u64, rounds: u64) -> String {
     format!(
         r#"[fleet.{FLEET}]
 repo = "{REPO}"
+public = false
 local = "LOCAL"
 integration = "staging"
 baseline = "{BASELINE}"

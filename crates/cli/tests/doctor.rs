@@ -12,6 +12,7 @@ fn config(d: &Path, harness: &str) -> String {
     format!(
         r#"[fleet.demo]
 repo = "o/demo"
+private_names = ["Initrode"]
 local = "{local}"
 integration = "staging"
 
