@@ -1,0 +1,28 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1308/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.64s
+     Running tests/perf.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1308/debug/deps/perf-1e5437345f3e1134)
+
+running 20 tests
+test a_new_event_costs_the_same_on_a_log_twice_as_long ... ok
+test a_pass_over_20_open_prs_reads_the_pr_cache_file_once ... ok
+test a_fast_step_over_50k_worktree_files_walks_none_of_them ... ok
+test a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget ... ok
+test a_recorded_verdict_and_a_merged_lane_are_never_read ... ok
+test a_pass_over_30k_events_and_150_done_issues_stays_fast ... ok
+test a_big_fold_holds_up_no_other_logs_read ... ok
+test idle_serve_on_the_live_log_with_its_trickle_replayed ... ok
+test a_step_makes_one_remote_call_per_host_and_requests_make_none ... ok
+test over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane ... ok
+test parity_3_the_loader_and_the_age_are_one_strip_under_the_header ... ok
+test a_pass_over_30_lanes_on_4_boats_at_700ms_a_call_is_under_20s_and_drive_slow_names_each_host ... ok
+test serve_cpu_child ... ok
+test parity_r6_waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log ... ok
+test the_first_paint_in_webkit_is_under_300ms ... ok
+test the_page_carries_no_tab_and_each_part_is_its_own_read ... ok
+test a_steady_state_live_change_is_one_part_under_5kb ... ok
+test stats_autonomy_on_a_150k_event_log_stays_under_its_budget ... ok
+test the_state_read_stays_under_300ms_on_a_150k_event_log ... ok
+test parity_r7_no_board_request_starts_a_process ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.58s
+

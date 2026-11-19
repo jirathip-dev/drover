@@ -1,0 +1,17 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1308/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running tests/webhook.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1308/debug/deps/webhook-c5c8536631bc07e2)
+
+running 9 tests
+test the_signature_check_matches_githubs_documented_example ... ok
+test a_webhook_secret_inline_in_fleet_toml_is_still_refused ... ok
+test the_funnel_listener_answers_no_path_but_hooks_github ... ok
+test an_unknown_repo_or_branch_is_202_and_ignored_ping_is_200 ... ok
+test with_no_secret_the_endpoint_is_503_and_doctor_warns ... ok
+test a_webhook_secret_file_others_can_read_is_refused ... ok
+test a_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing ... ok
+test a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive ... ok
+test with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+

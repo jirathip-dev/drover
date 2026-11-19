@@ -1,0 +1,6 @@
+#1308 perf (30 lanes on 4 boats, 10 starts, +700 ms per remote call): drive 5.4 s, 28 remote calls
+#1308 drive-slow: sendmeter's pass took 2.9 s; slowest step: spawns (2.2 s); remote: b1 4 calls 2.8 s, b2 4 calls 2.8 s, b3 4 calls 2.8 s, b4 4 calls 2.8 s
+#1308 perf (30 lanes on 4 boats, 10 starts, +700 ms per remote call): drive 5.4 s, 28 remote calls
+#1308 drive-slow: sendmeter's pass took 2.9 s; slowest step: spawns (2.2 s); remote: b1 4 calls 2.8 s, b2 4 calls 2.8 s, b3 4 calls 2.8 s, b4 4 calls 2.8 s
+#1308 perf (30 lanes on 4 boats, 10 starts, +700 ms per remote call): drive 5.5 s, 28 remote calls
+#1308 drive-slow: sendmeter's pass took 2.9 s; slowest step: spawns (2.2 s); remote: b1 4 calls 2.8 s, b2 4 calls 2.8 s, b3 4 calls 2.8 s, b4 4 calls 2.8 s

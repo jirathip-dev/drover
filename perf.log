@@ -1,0 +1,49 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1308/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1308/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1308/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1308/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.71s
+     Running tests/perf.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1308/debug/deps/perf-1e5437345f3e1134)
+
+running 20 tests
+debug build: budgets apply in release (cargo test --release --test perf)
+test a_new_event_costs_the_same_on_a_log_twice_as_long ... ok
+test a_recorded_verdict_and_a_merged_lane_are_never_read ... ok
+test a_pass_over_20_open_prs_reads_the_pr_cache_file_once ... ok
+test idle_serve_on_the_live_log_with_its_trickle_replayed ... ok
+#949 perf (50,000 worktree files): drive --fast 23 ms, 0 entries walked · drive 418 ms, 50100 walked
+#954 perf (30,000 events, 200 issues, 150 done): drive --fast 578 ms of CPU (median of [518.0, 558.0, 578.0, 666.0, 784.0])
+debug build: budgets apply in release (cargo test --release --test perf)
+#337 perf (30 lanes, 2 hosts, +300 ms per remote call): step 419 ms (drive --fast) · via serve_on's socket: GET / 5 ms (6 KB) · /screens/lanes 6 ms · /api/v1/lanes 12 ms · status 14 ms (the CLI)
+test a_fast_step_over_50k_worktree_files_walks_none_of_them ... ok
+test a_pass_over_30k_events_and_150_done_issues_stays_fast ... ok
+test over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane ... ok
+test a_step_makes_one_remote_call_per_host_and_requests_make_none ... ok
+test serve_cpu_child ... ok
+#560 perf (30,000 events, 20 lanes): 100 board requests 3819 ms of CPU
+debug build: budgets apply in release (cargo test --release --test perf)
+test a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget ... ok
+skipping: no node/Playwright here (NODE_PATH with playwright, see the ui-webkit CI job)
+test the_first_paint_in_webkit_is_under_300ms ... ok
+test parity_3_the_loader_and_the_age_are_one_strip_under_the_header ... ok
+test the_page_carries_no_tab_and_each_part_is_its_own_read ... ok
+#447 perf (30,000 events, 200 lanes): snapshot::waits 49 ms · GET /api/v1/lanes, /api/v1/herd, /screens/lanes 40 ms
+debug build: budgets apply in release (cargo test --release --test perf)
+test parity_r6_waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log ... ok
+test a_big_fold_holds_up_no_other_logs_read ... ok
+#1308 perf (30 lanes on 4 boats, 10 starts, +700 ms per remote call): drive 5.4 s, 28 remote calls
+#1308 drive-slow: sendmeter's pass took 2.9 s; slowest step: spawns (2.2 s); remote: b1 4 calls 2.8 s, b2 4 calls 2.8 s, b3 4 calls 2.8 s, b4 4 calls 2.8 s
+test a_pass_over_30_lanes_on_4_boats_at_700ms_a_call_is_under_20s_and_drive_slow_names_each_host ... ok
+#962 perf (150,000 events): stats autonomy first 5149 ms (with the import), then 731 ms
+debug build: budgets apply in release (cargo test --release --test perf)
+test stats_autonomy_on_a_150k_event_log_stays_under_its_budget ... ok
+#351 perf: a steady-state /live change is 3114 bytes (target < 5 KB)
+test a_steady_state_live_change_is_one_part_under_5kb ... ok
+#859 perf (150000 events): GET /api/v1/state first 33 ms, runs [33, 33, 34, 35, 38] ms, median 34 ms
+#859 perf: GET /api/v1/state right after an answer 35 ms
+debug build: budgets apply in release (cargo test --release --test perf)
+test the_state_read_stays_under_300ms_on_a_150k_event_log ... ok
+test parity_r7_no_board_request_starts_a_process ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.14s
+
