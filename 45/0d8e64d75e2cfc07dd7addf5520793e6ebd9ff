@@ -1,0 +1,12 @@
+Decided: screen streams are capped per device (16), keyed by the paired device's hash, else the plugin, else the peer IP; a slot is a guard dropped when the stream ends.
+Because: "If a cap stays, it is per device or view and much larger, and a stream whose peer is gone is freed quickly."
+Decided: a stream ends at once when the peer hangs up or resets (peek), and after two 5 s pings left unacknowledged (SIOCOUTQ), so a vanished phone frees its slot in about 10 s.
+Because: "A peer that disconnects frees its stream slot within 20 s (test with a dropped socket)."
+Decided: on the page, a stream the browser gave up on (refused, readyState CLOSED) is closed and the view refetched then re-streamed with backoff 1 s doubling to 30 s; leaving the view cancels the retry.
+Because: "when a view's stream is down, it reconnects with backoff and refetches the screen in the meantime"
+Decided: the refused-stream reply is 503 when the cap is hit and 404 when the screen or access is missing; base had the two swapped.
+Because: crates/server/src/screens.rs:1887
+Rejected: evicting the device's oldest stream like /live does — needs a per-stream stop signal; a larger cap plus fast freeing meets the spec.
+Rejected: retrying on every onerror — the browser already reconnects a closed 200 stream itself and the optimistic test relies on that.
+Check: revive.mjs's dot is `r` on a host whose WebKit reports navigator.onLine false; the test expects `g` only when online, as in CI.
+Owner: Thread replies now keep arriving while you stay in a thread, even with other tabs or devices open, and a dropped live connection comes back by itself.
