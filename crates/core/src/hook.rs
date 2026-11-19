@@ -637,6 +637,13 @@ fn gh(t: &[&str]) -> Option<String> {
         );
     }
     let api = rest.first() == Some(&"api");
+    let status = |w: &&str| w.contains("/statuses/") || w.ends_with("/statuses") && api_writes(rest);
+    if api && rest.iter().any(status) {
+        return Some(
+            "only drover posts commit statuses (drover/review, drover/verify, drover/override), from the main host"
+                .into(),
+        );
+    }
     let comment = rest
         .windows(2)
         .any(|w| w == ["issue", "comment"] || w == ["pr", "comment"] || w == ["pr", "review"])

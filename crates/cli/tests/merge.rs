@@ -446,6 +446,11 @@ fn owner_override_merges_past_round_limit_and_says_so() {
     let m = all.iter().find(|e| e.kind == "merged").unwrap();
     assert_eq!((m.str("by"), m.str("override")), (Some("owner"), Some("ROUND_LIMIT")));
     assert!(out.contains("Owner override: ROUND_LIMIT"), "closing comment: {out}");
+    let post = format!("gh api -X POST repos/jirathip-dev/sendmeter/statuses/{HEAD} -f state=success -f context=drover/override -f description=ROUND_LIMIT overridden at 1111111 · by: owner");
+    assert!(r.called(&post), "{:?}", r.calls.borrow());
+    assert!(!r.called(&format!(
+        "gh api -X POST repos/jirathip-dev/sendmeter/statuses/{HEAD} -f state=success -f context=drover/review"
+    )));
 }
 
 #[test]

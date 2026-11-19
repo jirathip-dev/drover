@@ -31,7 +31,10 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     }
     match Config::load(&ctx.config) {
         Ok(cfg) if config_only => config_rows(ctx, &cfg, r, &mut rows),
-        Ok(cfg) => checks(ctx, &cfg, r, &mut rows),
+        Ok(cfg) => {
+            checks(ctx, &cfg, r, &mut rows);
+            rows.extend(crate::status::doctor(ctx, &cfg));
+        }
         Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
     }
     if json {

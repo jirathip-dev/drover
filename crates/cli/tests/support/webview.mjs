@@ -9,6 +9,7 @@
 // `DROVER_TAB` is the stored tab before the page loads; tab `-`: no tab()/mode() and no <details> opened.
 // `<page.html>` may be an http URL instead (a real `serve`), loaded with the `DROVER_COOKIE` (`name=value`) set;
 // `DROVER_WAIT` is the wait (s) before `window.late` is read (default 0.5). `DROVER_PRE`: js run at document start.
+// `DROVER_REDUCE`: the page prefers reduced motion.
 // `DROVER_WARM`: the URL loads twice in one WebKit (its caches and service worker warm).
 // A file's page is served at `DROVER_BASE` (serve's assets beside it). Playwright resolves through NODE_PATH.
 // node webview.mjs <page.html | http URL> <width> <tab> <mode> [out.png] [js] [close]
@@ -72,7 +73,7 @@ function judge(b, f, top, lo = 0) {
 }
 
 const browser = await webkit.launch();
-const ctx = await browser.newContext({ viewport: { width, height: 844 }, bypassCSP: true, serviceWorkers: "block" });
+const ctx = await browser.newContext({ viewport: { width, height: 844 }, bypassCSP: true, serviceWorkers: "block", reducedMotion: env.DROVER_REDUCE ? "reduce" : "no-preference" });
 at = "newPage";
 const page = await ctx.newPage();
 for (const e of ["crash", "dialog", "framenavigated", "pageerror", "requestfailed"])

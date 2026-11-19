@@ -29,6 +29,13 @@ struct Arch {
     shared: Vec<String>,
 }
 
+impl Arch {
+    fn named(&self) -> Vec<&String> {
+        let bans = self.ban.iter().flat_map(|b| &b.paths);
+        bans.chain(self.size.iter().flat_map(|s| &s.paths)).collect()
+    }
+}
+
 #[derive(Deserialize)]
 struct Frozen {
     #[serde(default)]
@@ -172,8 +179,7 @@ pub fn check(
         })
         .collect();
     let mut files = vec![];
-    let ban_paths: Vec<&String> = a.ban.iter().flat_map(|b| &b.paths).collect();
-    walk(Path::new("."), &ban_paths, &mut files);
+    walk(Path::new("."), &a.named(), &mut files);
     files.sort();
     let (mut bad, mut now, mut crossed) = (vec![], BTreeMap::<String, usize>::new(), BTreeSet::new());
     for p in &files {
@@ -190,7 +196,12 @@ pub fn check(
             .iter()
             .filter(|b| any(&b.paths, p) && !any(&b.except, p))
             .collect();
-        let Some(src) = (code || !bans.is_empty())
+        let rules: Vec<&Size> = a
+            .size
+            .iter()
+            .filter(|s| any(&s.paths, p) && !any(&s.exclude, p))
+            .collect();
+        let Some(src) = (code || !bans.is_empty() || !rules.is_empty())
             .then(|| std::fs::read_to_string(p).ok())
             .flatten()
         else {
@@ -223,13 +234,9 @@ pub fn check(
                 }
             }
         }
-        for s in a
-            .size
-            .iter()
-            .filter(|s| code && any(&s.paths, p) && !any(&s.exclude, p))
-        {
+        for s in rules {
             let mut sizes = vec![(p.clone(), 1, lines.len(), s.max_file_lines)];
-            let each = fns(&lines, rust).into_iter();
+            let each = fns(&lines, ext).into_iter();
             sizes.extend(each.map(|(name, at, n)| (format!("{p}:{name}"), at, n, s.max_fn_lines)));
             for (key, at, n, max) in sizes {
                 let Some(max) = max.filter(|&m| n > m) else { continue };
@@ -345,37 +352,54 @@ fn stale_generated(a: &Arch, r: &dyn Runner) -> Result<Vec<String>> {
     let Some(cmd) = a.generate.as_deref().filter(|_| !a.generated.is_empty()) else {
         return Ok(vec![]);
     };
-    let before: Vec<Option<Vec<u8>>> = a.generated.iter().map(|p| std::fs::read(p).ok()).collect();
-    let o = r.run("sh", &argv(&["-c", cmd]))?;
-    if o.code != 0 {
-        return Ok(vec![format!("`{cmd}` exited {}: {}", o.code, o.stderr.trim())]);
+    let globs: Vec<String> = a.generated.iter().filter(|g| g.contains('*')).cloned().collect();
+    let matched = || {
+        let mut f = vec![];
+        walk(Path::new("."), &globs.iter().collect::<Vec<_>>(), &mut f);
+        f.into_iter().filter(|p| any(&globs, p)).collect::<Vec<_>>()
+    };
+    let mut before = BTreeMap::<String, Option<Vec<u8>>>::new();
+    for p in a.generated.iter().filter(|g| !g.contains('*')) {
+        before.insert(p.clone(), std::fs::read(p).ok());
     }
+    for p in matched() {
+        before.insert(p.clone(), std::fs::read(&p).ok());
+        std::fs::remove_file(&p)?;
+    }
+    let o = r.run("sh", &argv(&["-c", cmd]));
+    let mut paths: BTreeSet<String> = before.keys().cloned().collect();
+    paths.extend(matched());
     let mut bad = vec![];
-    for (p, was) in a.generated.iter().zip(before) {
-        if std::fs::read(p).ok() == was {
+    for p in paths {
+        let was = before.get(&p).cloned().flatten();
+        if std::fs::read(&p).ok() == was {
             continue;
         }
         bad.push(format!(
             "{p}: differs from what `{cmd}` writes: run it and commit the output, never hand-merge a generated file"
         ));
         match was {
-            Some(b) => std::fs::write(p, b)?,
-            None => std::fs::remove_file(p)?,
+            Some(b) => std::fs::write(&p, b)?,
+            None => std::fs::remove_file(&p)?,
         }
+    }
+    let o = o?;
+    if o.code != 0 {
+        return Ok(vec![format!("`{cmd}` exited {}: {}", o.code, o.stderr.trim())]);
     }
     Ok(bad)
 }
 
-fn walk(dir: &Path, bans: &[&String], out: &mut Vec<String>) {
+fn walk(dir: &Path, named: &[&String], out: &mut Vec<String>) {
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         let rel: String = e.path().to_string_lossy().trim_start_matches("./").into();
-        let named = bans.iter().any(|b| b.starts_with(&format!("{rel}/")));
-        if (name.starts_with('.') && !named) || name.starts_with("target") || name == "node_modules" {
+        let listed = named.iter().any(|b| b.starts_with(&format!("{rel}/")));
+        if (name.starts_with('.') && !listed) || name.starts_with("target") || name == "node_modules" {
             continue;
         }
         match e.file_type() {
-            Ok(t) if t.is_dir() => walk(&e.path(), bans, out),
+            Ok(t) if t.is_dir() => walk(&e.path(), named, out),
             Ok(_) => out.push(rel),
             Err(_) => {}
         }
@@ -428,12 +452,18 @@ fn targets(p: &str, l: &str, rust: bool) -> Vec<String> {
     vec![parts.join("/")]
 }
 
-fn fns(lines: &[&str], rust: bool) -> Vec<(String, usize, usize)> {
-    let kw = if rust { "fn " } else { "function " };
+fn fns(lines: &[&str], ext: &str) -> Vec<(String, usize, usize)> {
+    let kw = match ext {
+        "rs" => "fn ",
+        "swift" => "func ",
+        "ts" | "tsx" => "function ",
+        _ => return vec![],
+    };
+    let ts = kw == "function ";
     let mut v = vec![];
     for (i, l) in lines.iter().enumerate() {
         let t = l.trim_start();
-        let arrow = || (!rust && t.contains("=> {")).then(|| t.trim_start_matches("export ").strip_prefix("const "));
+        let arrow = || (ts && t.contains("=> {")).then(|| t.trim_start_matches("export ").strip_prefix("const "));
         let after = t
             .split_once(kw)
             .filter(|(pre, _)| pre.is_empty() || pre.ends_with(' '))

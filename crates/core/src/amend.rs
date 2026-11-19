@@ -9,7 +9,7 @@ use std::io::Write;
 
 const SPEC_CHECKS: &[&str] = &["board-freeze"];
 
-/// Append `- **Amendment (<basis>)**: <text>` under the body's `## Amendments` (made once), log `amend`, then re-run the open PR's failed spec checks. `basis` must be an ask on this issue answered by the owner (or by default); else `NO_DECISION`, before any `gh` call.
+/// Append `- **Amendment (<YYYY-MM-DD>)**: <text>` under the body's `## Amendments` (made once), log `amend`, then re-run the open PR's failed spec checks. `basis` must be an ask on this issue answered by the owner (or by default); else `NO_DECISION`, before any `gh` call.
 pub fn amend(
     ctx: &Ctx,
     cfg: &Config,
@@ -42,7 +42,8 @@ pub fn amend(
     } else {
         "\n\n## Amendments\n"
     };
-    let body = format!("{body}{head}- **Amendment ({basis})**: {text}\n");
+    let day = crate::lesson::ymd(ctx.now / 86_400);
+    let body = format!("{body}{head}- **Amendment ({day})**: {text}\n");
     ok(r, "gh", &["issue", "edit", &n, "-R", &f.repo, "--body", &body])?;
     let d = json!({"id": basis, "text": text});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "amend", d))?;

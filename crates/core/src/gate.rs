@@ -196,11 +196,7 @@ pub fn verdict(
     let shots = crate::verify::shots(&body, Path::new(file), lane);
     let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
         "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha")), "files": shots, "repro": repro});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, fleet, Some(issue), "verdict", data),
-    )?;
+    crate::status::verdict(ctx, cfg, r, Event::new(ctx.now, fleet, Some(issue), "verdict", data))?;
     let (limit, of_limit) = limit(f, cnt, st.as_ref());
     let (v, note) = if form {
         ("FAIL (form-only)", format!(" · not counted · form {}/{of}", used + 1))
@@ -1046,6 +1042,17 @@ fn merged(
         d.put("by", json!("owner")).put("override", json!("ROUND_LIMIT"));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
+    if over {
+        let desc = format!("ROUND_LIMIT overridden at {head:.7} · by: owner");
+        crate::status::post(
+            ctx,
+            cfg,
+            r,
+            (fleet, issue),
+            head,
+            (crate::status::OVERRIDE, "success", &desc),
+        )?;
+    }
     if f.land.is_some() {
         let checks = gh::required(&pr["statusCheckRollup"], f.checks(pr));
         let at = |k: &'static str| {

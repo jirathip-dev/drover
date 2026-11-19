@@ -69,6 +69,8 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
     writeln!(out, "{fleet} #{n} {kind} at {sha:.7}: {why}")?;
     let d = json!({"sha": sha, "stage": stage, "reason": why});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), kind, d))?;
+    let desc = format!("{kind}: {why}");
+    crate::status::post(ctx, cfg, r, (fleet, n), sha, (crate::status::VERIFY, "success", &desc))?;
     Ok(false)
 }
 
