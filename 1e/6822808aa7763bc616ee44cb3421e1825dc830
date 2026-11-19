@@ -1,0 +1,8 @@
+Decided: the scene probe also waits for the theme's sa- sprite symbols before reading the level classes
+Because: crates/cli/tests/herd.rs:364
+Rejected: delaying the page's first Scene draw until theme.json loads — a product change to staging's Scene the issue did not ask for; the page already redraws when the theme lands
+Decided: bush is built by scripts/swag-bush.mjs from swag's design/bush/art.mjs at swag#7's merged commit; icons copied byte for byte
+Because: q2409
+Because: "The art is copied from cooee#22's finished pack, never redrawn"
+Check: ui-webkit green; garden busy reads light-busy with its .l-overcast window
+Owner: the bush theme's PR, with a timing fix to one scene test that failed at random
