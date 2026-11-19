@@ -452,6 +452,9 @@ fn a_message_shed_did_not_take_stays_logged_and_goes_once_shed_answers() {
         until(&mut app, |_| f.count("shed run") == 2);
         let shown = screen(&mut t, &mut app);
         assert!(!shown.contains("not delivered"), "{shown}");
-        assert!(shown.contains("you 0s ✓"), "{shown}");
+        assert!(
+            shown.lines().any(|l| l.starts_with("┃ you") && l.contains(" ✓")),
+            "{shown}"
+        );
     });
 }
