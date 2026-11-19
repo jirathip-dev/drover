@@ -10,7 +10,7 @@ fn hook_in(lane: Option<&str>, role: &str, input: &Value) -> String {
 }
 
 fn config() -> String {
-    let fleet = |n: &str| format!("\n[fleet.{n}]\nrepo = \"o/{n}\"\nlocal = \"/tmp/{n}\"\nintegration = \"staging\"\n");
+    let fleet = |n| format!("\n[fleet.{n}]\nrepo='o/{n}'\nlocal='/tmp/{n}'\nintegration='staging'\npublic=false\n");
     CONFIG.to_string() + &["synergy", "x", "fleet"].map(fleet).concat()
 }
 

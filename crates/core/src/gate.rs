@@ -983,9 +983,11 @@ pub fn merge(
     .concat();
     let inputs = json!({"pr": num, "head": head, "over": over, "fast": fast});
     let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
+    let full = [&["pr", "merge", &num, "-R", &f.repo][..], &m].concat();
+    crate::hygiene::args(ctx, r, cfg, fleet, &full)?;
     let at = (fleet, issue, "merge", head.as_str());
     let intent = crate::action::begin(r, &ctx.state, ctx.now, at, inputs, MERGE_SECS, &probe)?.act()?;
-    ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
+    ok(r, "gh", &full)?;
     intent.done(json!({"pr": num, "head": head}))?;
     merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
 }
@@ -1069,7 +1071,8 @@ fn merged(
     let n = issue.to_string();
     writeln!(out, "{evidence}")?;
     let comment = ["issue", "comment", &n, "-R", &f.repo, "--body", &evidence];
-    if let Err(e) = ok(r, "gh", &comment).or_else(|_| ok(r, "gh", &comment)) {
+    let sent = crate::hygiene::args(ctx, r, cfg, fleet, &comment);
+    if let Err(e) = sent.and_then(|()| ok(r, "gh", &comment).or_else(|_| ok(r, "gh", &comment))) {
         let reason = format!("PR #{num} merged @ {merge_sha}, but the evidence comment failed twice: {e:#}");
         let e = Event::new(
             ctx.now,

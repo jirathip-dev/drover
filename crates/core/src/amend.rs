@@ -33,6 +33,7 @@ pub fn amend(
     if text.is_empty() || text.chars().any(char::is_control) {
         return gate::refused("BAD_VALUE", "an amendment is one line of text");
     }
+    crate::hygiene::text(ctx, r, cfg, fleet, "the amendment", text)?;
     let n = issue.to_string();
     let body = json(r, "gh", &["issue", "view", &n, "-R", &f.repo, "--json", "body"])?;
     let body = body.at("body").as_str().unwrap_or_default().trim_end();
