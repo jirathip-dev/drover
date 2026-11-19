@@ -1,0 +1,191 @@
+   Compiling subtle v2.6.1
+   Compiling zeroize v1.9.1
+   Compiling typenum v1.20.1
+   Compiling libc v0.2.191
+   Compiling rand_core v0.10.1
+   Compiling cfg-if v1.0.5
+   Compiling cmov v0.5.4
+   Compiling const-oid v0.10.2
+   Compiling ctutils v0.4.7
+   Compiling cpubits v0.1.1
+   Compiling num-traits v0.2.19
+   Compiling serde_core v1.0.229
+   Compiling hybrid-array v0.4.15
+   Compiling getrandom v0.4.3
+   Compiling ff v0.14.0
+   Compiling der v0.8.3
+   Compiling cpufeatures v0.3.1
+   Compiling foldhash v0.2.0
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling crypto-bigint v0.7.10
+   Compiling digest v0.11.3
+   Compiling hmac v0.13.0
+   Compiling inout v0.2.5
+   Compiling serde v1.0.229
+   Compiling hashbrown v0.17.1
+   Compiling group v0.14.0
+   Compiling base16ct v1.0.0
+   Compiling hkdf v0.13.0
+   Compiling sec1 v0.8.1
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling primefield v0.14.0
+   Compiling elliptic-curve v0.14.3
+   Compiling cipher v0.5.2
+   Compiling universal-hash v0.6.1
+   Compiling anstyle v1.0.14
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling anstyle-query v1.1.5
+   Compiling equivalent v1.0.3
+   Compiling polyval v0.7.3
+   Compiling anstream v1.0.0
+   Compiling indexmap v2.14.2
+   Compiling wnaf v0.14.1
+   Compiling zmij v1.0.23
+   Compiling rfc6979 v0.6.0
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling signature v3.0.0
+   Compiling spki v0.8.1
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling strsim v0.11.1
+   Compiling winnow v0.7.15
+   Compiling clap_lex v1.1.1
+   Compiling toml_write v0.1.2
+   Compiling clap_builder v4.6.7
+   Compiling serde_json v1.0.154
+   Compiling ecdsa v0.17.0
+   Compiling libsqlite3-sys v0.39.1
+   Compiling primeorder v0.14.0
+   Compiling ghash v0.6.0
+   Compiling ctr v0.10.1
+   Compiling toml_edit v0.22.27
+   Compiling aes v0.9.3
+   Compiling hashlink v0.12.2
+   Compiling aead v0.6.1
+   Compiling sha2 v0.11.1
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1310/crates/core)
+   Compiling smallvec v1.16.4
+   Compiling bitflags v2.13.2
+   Compiling simd-adler32 v0.3.10
+   Compiling adler2 v2.0.1
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling fallible-iterator v0.3.0
+   Compiling miniz_oxide v0.9.1
+   Compiling rusqlite v0.41.1
+   Compiling toml v0.8.23
+   Compiling clap v4.6.7
+   Compiling p256 v0.14.0
+   Compiling aes-gcm v0.11.1
+   Compiling shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=9b88eb5be5bc9ba8c5c75480483b9861ddc6e993#9b88eb5b)
+   Compiling crc32fast v1.5.4
+   Compiling anyhow v1.0.104
+   Compiling drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1310/crates/sys)
+   Compiling base64 v0.23.1
+   Compiling flate2 v1.1.10
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.12.1
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1310/crates/cli)
+   Compiling tokio v1.54.1
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1310/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1310/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 54.63s
+     Running tests/board_fresh.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1310/debug/deps/board_fresh-64e561a7d87e33c5)
+
+running 2 tests
+test every_screen_shows_the_snapshot_age_amber_past_10_min_and_reads_run_in_the_background ... ok
+test a_slow_api_for_10_minutes_alerts_once_and_never_after_it_recovers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.83s
+
+     Running tests/keyboard_webkit.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1310/debug/deps/keyboard_webkit-0c01dfeacc58f361)
+
+running 1 test
+test the_focused_composer_stays_the_same_node_with_its_focus_text_and_caret_while_the_stream_changes_it ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/perf.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1310/debug/deps/perf-2fc2d9372e288e54)
+
+running 20 tests
+test a_new_event_costs_the_same_on_a_log_twice_as_long ... ok
+test a_recorded_verdict_and_a_merged_lane_are_never_read ... ok
+test a_pass_over_20_open_prs_reads_the_pr_cache_file_once ... ok
+test idle_serve_on_the_live_log_with_its_trickle_replayed ... ok
+test over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane ... ok
+test a_step_makes_one_remote_call_per_host_and_requests_make_none ... ok
+test a_pass_over_30k_events_and_150_done_issues_stays_fast ... ok
+test parity_3_the_loader_and_the_age_are_one_strip_under_the_header ... ok
+test serve_cpu_child ... ok
+test a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget ... ok
+test a_fast_step_over_50k_worktree_files_walks_none_of_them ... ok
+test the_first_paint_in_webkit_is_under_300ms ... ok
+test a_pass_over_30_lanes_on_4_boats_at_700ms_a_call_is_under_20s_and_drive_slow_names_each_host ... ok
+test the_page_carries_no_tab_and_each_part_is_its_own_read ... ok
+test parity_r6_waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log ... ok
+test a_steady_state_live_change_is_one_part_under_5kb ... ok
+test a_big_fold_holds_up_no_other_logs_read ... ok
+test parity_r7_no_board_request_starts_a_process ... ok
+test stats_autonomy_on_a_150k_event_log_stays_under_its_budget ... ok
+test the_state_read_stays_under_300ms_on_a_150k_event_log ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 35.56s
+
+     Running tests/serve_web.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1310/debug/deps/serve_web-89d57ea17ebc4d07)
+
+running 13 tests
+test page_never_samples_the_host_and_links_immutable_assets ... ok
+test fetch_only_reads_redirect_navigations_to_the_board ... ok
+test page_reads_only_cached_pr_data_and_serves_pwa_assets ... ok
+test secrets_in_shown_text_are_masked ... ok
+test one_lane_per_agent_name ... ok
+test lanes_group_by_fleet_with_others ... ok
+test parity_42_pause_button_matches_cli_and_blocks_next_and_spawn ... ok
+test parity_41_queue_buttons_move_like_queue_mv ... ok
+test foreign_host_or_origin_is_403_and_read_only_is_405 ... ok
+test parity_81_role_dropdowns_set_like_drover_set ... ok
+test set_refuses_toml_injection_on_web_and_cli ... ok
+test stale_mtime_refuses_without_writing ... ok
+test queue_shows_open_work_only_and_folds_paused_retired_and_noise ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.48s
+
+     Running tests/serve_wire.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1310/debug/deps/serve_wire-753d7451547a55c6)
+
+running 5 tests
+test without_gzip_a_response_is_the_bytes_the_server_built ... ok
+test two_plain_http11_requests_over_one_connection_both_succeed_then_close_ends_it ... ok
+test a_gzipped_stream_message_decodes_whole_while_the_stream_stays_open ... ok
+test gzip_shrinks_the_events_screen_over_five_times_and_decodes_to_the_plain_body ... ok
+test wire_report ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
+
+     Running tests/service.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1310/debug/deps/service-6ccabab09c2b1146)
+
+running 2 tests
+test the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other ... ok
+test a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes ... FAILED
+
+failures:
+
+---- a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes stdout ----
+
+thread 'a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes' (87160) panicked at crates/cli/tests/service.rs:310:5:
+assertion `left == right` failed
+  left: None
+ right: Some(87382)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.70s
+
+error: test failed, to rerun pass `-p drover --test service`

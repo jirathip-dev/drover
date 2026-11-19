@@ -1,0 +1,9 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1310/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.69s
+     Running tests/service.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1310/debug/deps/service-d7d8018b8488d7f3)
+
+running 1 test
+test a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.98s
+
