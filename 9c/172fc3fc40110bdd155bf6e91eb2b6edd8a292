@@ -1,0 +1,5 @@
+Decided: no code change for the red shard: the_sampler_thread_fills_the_host is a timing flake on a loaded runner; merged origin/staging to re-run CI
+Because: crates/server/src/serve.rs:203
+Rejected: widening that test's 5 s deadline — the test and serve's sampler are outside this issue's diff
+Check: CI test shards are green at the new head; the failing test passes locally 3 of 3
+Owner: nothing new for you; the earlier CI failure was an unrelated slow test.
