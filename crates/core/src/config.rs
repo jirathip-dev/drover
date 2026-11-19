@@ -1191,7 +1191,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "slo_tick_minutes",
-        "a tick running longer than this breaches `slo-tick`; the next fast step stops it",
+        "a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast step stops it",
     ),
     (
         "slo_pass_minutes",

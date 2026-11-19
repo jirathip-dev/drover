@@ -330,7 +330,7 @@ notifier can subscribe to it) with the reason drive sees then, and `waiting`, `s
 `⚠ missed <age>: <reason>` in place of the stale line.
 
 #855: the fast step also checks two fleet SLOs: `slo-idle` (no lane working for `[limits] slo_idle_minutes` (20)
-while the queue has spawnable work) and `slo-tick` (a tick running past `slo_tick_minutes` (10), replacing
+while the queue has spawnable work) and `slo-tick` (#1307: a tick with no step or call for `slo_tick_minutes` (10), however long it has run; replacing
 `tick-stuck`). On a breach drive first tries the known heal and logs `self-heal`: a drover
 tick or drive pid it can name gets SIGTERM, then SIGKILL after 10 s; a DISK_BUDGET hold is recounted and the
 queue's first spawn retried; drive's own pass already respawns a silent lane and marks a PASSed draft ready.

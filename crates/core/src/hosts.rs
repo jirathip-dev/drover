@@ -213,7 +213,7 @@ impl Runner for On<'_> {
     }
 }
 
-/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step and the child it waits on, for `tick-stuck`.
+/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step, the child it waits on and `n`, the nanosecond of its last step or call (local calls too): the progress `slo-tick` watches.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
     probe: bool,
@@ -297,9 +297,9 @@ impl<'a> Pass<'a> {
     }
     fn note(&self, child: &str) {
         if let Some((p, since)) = &self.mark {
-            let (step, at) = lock(&self.step).clone();
+            let ((step, at), n) = (lock(&self.step).clone(), self.t0.elapsed().as_nanos());
             let at = since + at;
-            let m = json!({"since": since, "at": at, "step": step, "child": child, "pid": crate::sim::pid()});
+            let m = json!({"since": since, "at": at, "step": step, "child": child, "pid": crate::sim::pid(), "n": n});
             std::fs::write(p, m.to_string()).ok();
         }
     }
@@ -330,6 +330,7 @@ impl<'a> Pass<'a> {
         u
     }
     fn call(&self, prog: &str, args: &[String], input: Option<&str>) -> Result<Out> {
+        self.note(&quote(prog, args));
         let Some(m) = Self::host(prog, args) else {
             return input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i));
         };
@@ -347,7 +348,6 @@ impl<'a> Pass<'a> {
                 ..Out::default()
             });
         }
-        self.note(&quote(prog, args));
         let core = matches!(lock(&self.step).0.as_str(), "check" | "drive");
         let over = !core && self.over();
         if over {
