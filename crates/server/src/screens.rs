@@ -1499,7 +1499,7 @@ impl Server<'_> {
     fn lane_sheet(&self, ctx: &Ctx, agent: &str) -> Option<Value> {
         let (cfg, ev) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
         let list = self.recent_sessions(ctx.now, &cfg)?;
-        let all = crate::snapshot::lanes(&cfg, &self.cached(ctx.now, 30), (&ev, &ev.states), &list);
+        let all = crate::snapshot::lanes(ctx, &cfg, (&ev, &ev.states), &list);
         let l = all.into_iter().find(|l| l.name == agent)?;
         let spawn = crate::events::last_spawn(&ev, agent);
         let fc = l.fleet.as_ref().and_then(|f| cfg.fleet.get(f));

@@ -9,9 +9,12 @@ const AIR_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=a
 struct Air(Fake);
 
 impl Runner for Air {
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        boat(self, prog, args, input).unwrap_or_else(|| self.run(prog, args))
+    }
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
-        let Some(sh) = line.strip_prefix(AIR_SSH) else {
+        let Some(sh) = line.strip_prefix(AIR_SSH).filter(|sh| !sh.starts_with("'shed'")) else {
             return self.0.run(prog, args);
         };
         self.0.calls.borrow_mut().push(line.clone());
@@ -126,7 +129,10 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
         ran.len() == 1 && ran[0].data.get("refused").is_none(),
         "its own verdict runs: {ran:?}"
     );
-    assert!(!ob.exists() && !wt.join(".drover/outbox.jsonl.draining").exists());
+    assert!(
+        ob.exists(),
+        "a line stays on the host until it is acked; the log's id drops it"
+    );
     let (_, board) = run(&main, &r, &["board", "sendmeter"]);
     let row = board.lines().find(|l| l.contains("#12")).unwrap_or_default();
     assert!(
@@ -136,15 +142,29 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     let (_, asked) = run(&main, &r, &["asks", "sendmeter"]);
     assert!(asked.contains("q1 #12") && asked.contains("Which way?"), "{asked}");
 
-    std::fs::write(wt.join(".drover/outbox.jsonl.draining"), &lines).unwrap();
     run(&main, &r, &["drive", "--fast"]);
     let ev = read(&main.state).unwrap();
     assert_eq!(ev.iter().filter(|e| e.kind == "needs-decision").count(), 1);
     assert_eq!(ev.iter().filter(|e| e.kind == "outbox").count(), 5);
-    assert!(!wt.join(".drover/outbox.jsonl.draining").exists());
 
     let at = |s: u64| json!({"args": ["ask", "sendmeter", "12", "Late?"], "lane": "sendmeter:12:impl", "ts": s * 1000});
-    std::fs::write(&ob, format!("{}\n", at(1_000_000 - 200))).unwrap();
+    let path = wt.display().to_string();
+    let reported = |lines: Vec<serde_json::Value>| {
+        let lines: Vec<_> = lines
+            .into_iter()
+            .map(|l| json!({"worktree": path, "sent": l["ts"], "lane": l["lane"], "args": l["args"]}))
+            .collect();
+        let seen = json!({"worktree": {"path": path, "lines": lines}}).to_string();
+        let mut h = drover::db::view(&main.state)
+            .unwrap()
+            .0
+            .into_iter()
+            .find(|h| h.host == "air")
+            .unwrap();
+        (h.heard, h.why) = (Some(1_000_000), Some(drover::link::NO_SERVICE.into()));
+        drover::db::view_put(&main.state, &h, Some(&[(path.clone(), seen)])).unwrap();
+    };
+    reported(vec![at(1_000_000 - 200)]);
     run(&main, &r, &["check"]);
     let stale = |c: &drover::Ctx| {
         read(&c.state)
@@ -154,7 +174,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
             .count()
     };
     assert_eq!(stale(&main), 0, "4 min old is not stale yet");
-    std::fs::write(&ob, format!("{}\n{}\n", at(1_000_000 - 400), at(1_000_000 - 200))).unwrap();
+    reported(vec![at(1_000_000 - 400), at(1_000_000 - 200)]);
     run(&main, &r, &["check"]);
     run(&main, &r, &["check"]);
     assert_eq!(stale(&main), 1);

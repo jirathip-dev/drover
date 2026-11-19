@@ -1341,6 +1341,7 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
     assert_eq!((st.len(), st[1].val("resumed").clone()), (2, json!(false)));
 
     b.lock().terms.remove("orchestrator-t1");
+    look(&at(&c, quiet.now + 120), &b.on(&cli));
     assert_eq!(run(&at(&c, quiet.now + 120), &cli, &["check"]).0, 0);
     let sl = thread_events(&c, "orchestrator-sleep");
     assert_eq!(sl.last().and_then(|e| e.str("why")), Some("gone"));
@@ -1423,6 +1424,7 @@ fn an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_ba
 }
 
 fn board_get(c: &drover::Ctx, r: Fake, path: &str) -> Value {
+    look(c, &r);
     let r: &'static Fake = Box::leak(Box::new(r));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
@@ -2164,6 +2166,7 @@ fn an_auth_failure_alerts_signed_out_once_and_holds_the_host() {
     b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["reported"] = json!({"state": "error", "note": err});
     let cli = Push(b.cli(&f), wt.clone());
     for s in [60, 120] {
+        look(&later(&c, s), &b.on(&cli));
         let (code, out) = run(&later(&c, s), &cli, &["check"]);
         assert_eq!(code, 0, "{out}");
     }

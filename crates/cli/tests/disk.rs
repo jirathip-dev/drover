@@ -480,6 +480,9 @@ impl drover::runner::Runner for TwoHosts<'_> {
         }
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        if let Some(o) = boat(self, prog, args, input) {
+            return o;
+        }
         let line = args.last().map_or("", String::as_str);
         if prog == "ssh" && line.starts_with("'shed' 'connect'") {
             self.0.calls.borrow_mut().push(format!("ssh {}", args.join(" ")));

@@ -373,7 +373,9 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     let (f, events, ag) = (
         cfg.fleet(fleet)?,
         working(&ctx.state)?,
-        crate::session::all(cfg, r).checked().unwrap_or_default(),
+        crate::link::fresh(ctx, cfg, r)
+            .map(|v| v.sessions())
+            .unwrap_or_default(),
     );
     let busy = |l: &str| ag.busy(l);
     let open = |s: &IssueState| {

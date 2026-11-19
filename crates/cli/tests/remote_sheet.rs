@@ -23,6 +23,7 @@ fn a_remote_lanes_sheet_shows_its_transcript() {
         hosts: vec![("bazzite", &bazzite)],
     };
     let w = sh.on(&r);
+    look(&c, &w);
     let s = Server::new(&c, &w, Some(ADDR.into())).deferring();
     let cookie = pair(&s, &c, "", NOW);
     let get = |path: &str| {

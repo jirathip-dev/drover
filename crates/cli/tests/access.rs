@@ -229,6 +229,7 @@ fn check_shows(c: &drover::Ctx, sh: &FakeShed, (status, note): (&str, &str)) -> 
     let wt = c.worktrees.join("sendmeter/issue-12");
     sh.lane("sendmeter-impl-12", status, wt.to_str().unwrap());
     sh.set("sendmeter-impl-12", |t| t["reported"]["note"] = serde_json::json!(note));
+    look(c, &Fake::default());
     let (code, out) = run(c, &Fake::default(), &["check"]);
     assert_eq!(code, 0, "{out}");
     out

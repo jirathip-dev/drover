@@ -35,6 +35,7 @@ pub mod land;
 pub mod lanes;
 pub mod lesson;
 pub mod limit;
+pub mod link;
 pub mod orchestrator;
 pub mod outbox;
 pub mod overlap;
