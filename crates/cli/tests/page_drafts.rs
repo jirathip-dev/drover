@@ -114,14 +114,47 @@ fn thread_t2(name: &str, script: &str, args: &[&str], more: &[(&str, Value)]) ->
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
     std::thread::spawn(move || drover::serve::serve_on(&c2, &OnShed::new(Fake::default()), l, false));
-    let o = std::process::Command::new("node")
+    let mut node = std::process::Command::new("node")
         .arg(format!("{}/tests/ui/{script}", env!("CARGO_MANIFEST_DIR")))
         .arg(format!("http://{addr}/"))
         .arg(ck.trim().trim_start_matches("Cookie: "))
         .args(args)
-        .output()
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .unwrap();
-    (c, o)
+    let (mut to, mut stdout) = (node.stdin.take().unwrap(), vec![]);
+    for line in std::io::BufRead::lines(std::io::BufReader::new(node.stdout.take().unwrap())) {
+        let line = line.unwrap();
+        if let Some(text) = line.strip_prefix("log ") {
+            let d = json!({"thread": "t2", "from": "orchestrator", "text": text});
+            append(&c.state, &Event::new(drover::now(), "sendmeter", None, "thread-msg", d)).unwrap();
+            std::io::Write::write_all(&mut to, b"ok\n").unwrap();
+        } else {
+            stdout.extend(line.bytes().chain([b'\n']));
+        }
+    }
+    drop(to);
+    let o = node.wait_with_output().unwrap();
+    (c, std::process::Output { stdout, ..o })
+}
+
+#[test]
+fn a_thread_whose_stream_was_refused_shows_a_new_message_within_5_s() {
+    if no_webkit() {
+        return;
+    }
+    let (_, o) = thread_t2("page-revive", "revive.mjs", &[], &[]);
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    assert_eq!(out["refused"], 1, "the thread's first stream got a 503: {out}");
+    assert!(
+        out["ms"].as_u64().is_some_and(|ms| ms < 5000),
+        "a message logged after the refused stream shows within 5 s: {out}"
+    );
+    assert_eq!(out["dot"], "g", "the live dot is green once the stream is back: {out}");
 }
 
 #[test]
