@@ -294,3 +294,8 @@ reason = "#1309: a lane fact is read from link::view::View; only link lists anot
 pattern = "do sleep"
 paths = ["crates/*/tests/**"]
 reason = "#1364: a test's wait loop has a deadline (for i in $(seq N); do [ ready ] && break; sleep 0.05; done) so an orphaned job ends; its harness kills the job's process group on drop"
+
+[[ban]]
+pattern = "tokio"
+paths = ["crates/core/src/**", "crates/sys/src/**"]
+reason = "#1318 (q2044): tokio is serve's and service's transport; core and sys stay synchronous"

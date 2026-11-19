@@ -1,9 +1,10 @@
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::io::Write;
 use std::sync::Mutex;
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpStream;
 
 const PACKED: [&str; 4] = ["application/json", "text/javascript", "text/css", "image/svg+xml"];
 static ASSETS: Mutex<BTreeMap<String, Vec<u8>>> = Mutex::new(BTreeMap::new());
@@ -29,7 +30,7 @@ pub fn keep(head: &str) -> bool {
 }
 
 /// One request off the socket: its bytes, and whether its body was over the limit; what follows stays in `buf`.
-pub fn request(s: &mut TcpStream, buf: &mut Vec<u8>) -> std::io::Result<(Vec<u8>, bool)> {
+pub async fn request(s: &mut TcpStream, buf: &mut Vec<u8>) -> std::io::Result<(Vec<u8>, bool)> {
     let (mut chunk, mut want, mut over) = (vec![0u8; 1 << 16], None, false);
     loop {
         let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
@@ -51,7 +52,7 @@ pub fn request(s: &mut TcpStream, buf: &mut Vec<u8>) -> std::io::Result<(Vec<u8>
         if want.map_or(buf.len() >= 32_768, |w| buf.len() >= w) {
             break;
         }
-        match s.read(&mut chunk)? {
+        match s.read(&mut chunk).await? {
             0 => break,
             n => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
         }
