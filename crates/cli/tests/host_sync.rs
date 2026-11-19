@@ -18,7 +18,10 @@ fn config(extra: &str) -> String {
 }
 
 fn setup(name: &str, extra: &str, bazzite_up: bool, seen: u64) -> drover::Ctx {
-    let c = ctx(&tmpdir(name), &config(extra));
+    let board = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let serve = format!("{extra}\n[serve]\naddr = \"{}\"\n", board.local_addr().unwrap());
+    std::mem::forget(board);
+    let c = ctx(&tmpdir(name), &config(&serve));
     let st = c.state.parent().unwrap();
     std::fs::create_dir_all(st).unwrap();
     let cache = json!({
@@ -144,6 +147,8 @@ fn rollout(c: &drover::Ctx, boats: &[(&str, &str, Option<&str>)]) -> Fake {
         .reply(&format!("sh -c ( n='{}.new'", c.exe), &ver(NEW))
         .reply(&format!("{}.new doctor --config-only", c.exe), "")
         .reply(&format!("{} profiles sync", c.exe), "")
+        .reply("launchctl print gui/", "pid = 42\n")
+        .reply("systemctl --user show -p MainPID", "LoadState=loaded\nMainPID=42\n")
         .reply("launchctl", "")
         .reply("systemctl", "")
         .reply("codesign -v -R", "");
