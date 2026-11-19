@@ -1136,3 +1136,57 @@ fn a_design_lane_that_pushed_its_artifact_and_asked_is_not_respawned() {
     assert_eq!(spawned(&c, "architect"), 1, "{w}");
     assert!(kinds(&c, "respawn").is_empty() && !w.contains("respawning"), "{w}");
 }
+
+#[test]
+fn a_stale_approve_after_a_revise_starts_no_impl_until_a_new_design_ask_is_approved() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut c, sh) = setup("design-stale-approve", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let r = fake(&c, HEAD);
+    drive(&c, &r);
+    drive(&c, &r);
+    assert_eq!(state(&c, 12), "design-review");
+    let revise = json!({"id": "q1", "choice": "revise: redraw it", "by": "orchestrator-t1"});
+    drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "decision", revise)).unwrap();
+    let d = json!({"id": "q1", "note": "redraw it", "by": "orchestrator-t1", "role": "design"});
+    drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "design-revise", d)).unwrap();
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "approve"]);
+    assert_eq!(code, 0, "{out}");
+    c.now += 1000;
+    drive(&c, &r);
+    assert!(!sh.called("run", "sendmeter-impl-12"), "the stale approve started impl");
+    assert_eq!((state(&c, 12).as_str(), spawned(&c, "design")), ("design", 2));
+    let r2 = fake(&c, &"e".repeat(40));
+    drive(&c, &r2);
+    assert_eq!(state(&c, 12), "design-review");
+    assert_eq!(run(&c, &r2, &["answer", "sendmeter", "q2", "approve"]).0, 0);
+    c.now += 1000;
+    drive(&c, &r2);
+    assert!(
+        sh.called("run", "sendmeter-impl-12"),
+        "the new design's approve starts impl"
+    );
+}
+
+#[test]
+fn a_design_stage_left_with_no_lane_and_its_flag_off_shows_on_waiting() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (c, _sh) = setup("design-orphaned", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let r = fake(&c, HEAD);
+    drive(&c, &r);
+    assert_eq!(state(&c, 12), "design");
+    let off = ["queue", "sendmeter", "set", "12", "design", "off"];
+    assert_eq!(run(&c, &Fake::default(), &off).0, 0);
+    let d = json!({"agent": "sendmeter-design-12", "role": "design", "pane": "sendmeter-design-12"});
+    drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "lane-killed", d)).unwrap();
+    let (code, w) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{w}");
+    assert!(w.contains("#12") && w.contains("drover spawn sendmeter 12 impl"), "{w}");
+}

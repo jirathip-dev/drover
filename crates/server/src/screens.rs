@@ -1887,18 +1887,25 @@ impl Server<'_> {
             now: crate::now(),
             ..self.ctx.clone()
         };
-        let (q, open) = (form(query), self.streams.fetch_add(1, Relaxed) < 4);
+        let q = form(query);
         let plugin = Self::plugin(self.ctx, head);
-        let paired = plugin || devices::check(self.ctx, header(head, "cookie").unwrap_or_default()).is_ok();
+        let dev = devices::check(self.ctx, header(head, "cookie").unwrap_or_default());
+        let paired = plugin || dev.is_ok();
+        let who = match dev {
+            _ if plugin => "cooee".into(),
+            Ok(d) => d.hash,
+            Err(_) => s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default(),
+        };
+        let slot = super::StreamSlot::take(&self.streams, who);
+        let open = slot.is_some();
         let screen = |c: &Ctx, q: &Q| crate::runner::request(|| self.screen(c, base, q, paired));
         let mut log = crate::db::last_seq(&self.ctx.state);
         let Some(mut cur) = screen(&ctx(), &q).filter(|_| open && (plugin || self.allowed(self.ctx, head))) else {
-            self.streams.fetch_sub(1, Relaxed);
             let r = line(
                 if open {
-                    "503 Service Unavailable"
-                } else {
                     "404 Not Found"
+                } else {
+                    "503 Service Unavailable"
                 },
                 "no stream",
             );
@@ -1921,12 +1928,17 @@ impl Server<'_> {
         let mut ping = drover_core::clock::instant();
         let mut built = drover_core::clock::instant();
         let mut z = super::wire::Stream::new(head);
-        let res = loop {
-            if let Err(e) = z.frame(&msg).and_then(|b| s.write_all(&b)) {
-                break Err(e);
+        let mut missed = 0;
+        'out: loop {
+            let end = drover_core::clock::instant() + Duration::from_secs(10);
+            if !z.frame(&msg).is_ok_and(|b| super::sent(s, &b, end)) {
+                break;
             }
             msg.clear();
             while msg.is_empty() {
+                if super::hung_up(s) {
+                    break 'out;
+                }
                 drover_core::clock::sleep(Duration::from_millis(500));
                 let now = crate::db::last_seq(&self.ctx.state);
                 if now != log || built.elapsed() >= Duration::from_secs(30) {
@@ -1947,13 +1959,16 @@ impl Server<'_> {
                     }
                     cur = new;
                 }
-                if msg.is_empty() && (ping.elapsed() >= Duration::from_secs(15) || super::hung_up(s)) {
+                if msg.is_empty() && ping.elapsed() >= Duration::from_secs(5) {
+                    missed = if drover_sys::unsent(s) > 0 { missed + 1 } else { 0 };
+                    if missed >= 2 {
+                        break 'out;
+                    }
                     (msg, ping) = (": ping\n\n".into(), drover_core::clock::instant());
                 }
             }
-        };
-        self.streams.fetch_sub(1, Relaxed);
-        res
+        }
+        Ok(())
     }
 }
 

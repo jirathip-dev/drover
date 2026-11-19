@@ -132,6 +132,7 @@ fn sent(s: &mut TcpStream, mut b: &[u8], end: Instant) -> bool {
 
 type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>, String)>>>;
 const PER_DEVICE: usize = 4;
+const STREAMS_PER_DEVICE: usize = 16;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
 const TOO_LARGE: &[u8] = b"HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"line\":\"request body too large\"}";
@@ -397,11 +398,38 @@ pub struct Server<'a> {
     phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
     hosts_read: Mutex<(usize, Option<Vec<String>>)>,
-    streams: AtomicUsize,
+    streams: Mutex<BTreeMap<String, usize>>,
 }
 
 fn hung_up(s: &TcpStream) -> bool {
-    s.set_read_timeout(Some(Duration::from_millis(1))).is_ok() && matches!(s.peek(&mut [0; 1]), Ok(0))
+    s.set_read_timeout(Some(Duration::from_millis(1))).is_ok()
+        && s.peek(&mut [0; 1])
+            .map_or_else(|e| !matches!(e.kind(), WouldBlock | TimedOut), |n| n == 0)
+}
+
+struct StreamSlot<'a>(&'a Mutex<BTreeMap<String, usize>>, String);
+
+impl<'a> StreamSlot<'a> {
+    fn take(m: &'a Mutex<BTreeMap<String, usize>>, who: String) -> Option<Self> {
+        let mut held = lock(m);
+        let n = held.entry(who.clone()).or_default();
+        (*n < STREAMS_PER_DEVICE).then(|| {
+            *n = n.saturating_add(1);
+            Self(m, who)
+        })
+    }
+}
+
+impl Drop for StreamSlot<'_> {
+    fn drop(&mut self) {
+        let mut held = lock(self.0);
+        if let Some(n) = held.get_mut(&self.1) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                held.remove(&self.1);
+            }
+        }
+    }
 }
 
 enum Later {
@@ -768,7 +796,7 @@ impl<'a> Server<'a> {
             phone: Mutex::default(),
             rss: std::sync::atomic::AtomicU64::default(),
             hosts_read: Mutex::default(),
-            streams: AtomicUsize::new(0),
+            streams: Mutex::default(),
         }
     }
 

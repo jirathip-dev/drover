@@ -488,6 +488,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "base64",
+ "blocks",
  "drover-chat",
  "drover-core",
  "drover-server",
