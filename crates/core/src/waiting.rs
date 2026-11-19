@@ -604,17 +604,8 @@ fn waits(
         "impl" | "fix" if failed_start(events, s) => w("owner", "failed start (no event back)", s.last_ts, None),
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
         "design" => {
-            let role = if s.lane.is_some() && s.lanes.get("architect") == s.lane.as_ref() {
-                "architect"
-            } else {
-                "design"
-            };
-            w(
-                "none",
-                &format!("{role} lane idle without a pushed {role} (check the pane)"),
-                s.last_ts,
-                cmd("spawn", &format!(" {role} --supersede")),
-            )
+            let (who, what, tail) = design_stage(log.all, s, p.start());
+            w(who, &what, s.last_ts, cmd("spawn", &tail))
         }
         "needs-human" => {
             let what = format!("needs-human: your card's [{}]", s.card());
@@ -622,6 +613,21 @@ fn waits(
         }
         st => w("none", &format!("nothing to do ({st})"), s.last_ts, None),
     }
+}
+
+fn design_stage(all: &[Event], s: &IssueState, start: &str) -> (&'static str, String, String) {
+    if s.lane.as_deref().unwrap_or_default().is_empty() {
+        let role = crate::queue::wants_design(all, &s.fleet, s.issue).unwrap_or(start);
+        let what = format!("design stage with no lane and no open ask: spawn {role}");
+        return ("owner", what, format!(" {role}"));
+    }
+    let role = if s.lanes.get("architect") == s.lane.as_ref() {
+        "architect"
+    } else {
+        "design"
+    };
+    let what = format!("{role} lane idle without a pushed {role} (check the pane)");
+    ("none", what, format!(" {role} --supersede"))
 }
 
 pub fn scan(
@@ -665,7 +671,7 @@ pub fn scan_where(
                 .and_then(|b| s.lanes.get(b))
                 .or(s.check_lane())
                 .cloned()
-                .or((s.state == "needs-human").then(String::new))
+                .or(matches!(s.state.as_str(), "needs-human" | "design").then(String::new))
         }) else {
             continue;
         };

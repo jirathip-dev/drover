@@ -222,13 +222,20 @@ pub fn needs_of(events: &[Event], fleet: &str, issue: u64) -> Vec<String> {
     q.map(|i| i.needs).unwrap_or_default()
 }
 
-/// The pre-impl stage issue `n` is queued for that the owner has not approved yet: `architect` first, then `design` (an approval names its stage's `role`; none: `design`).
+/// The pre-impl stage issue `n` is queued for that the owner has not approved yet: `architect` first, then `design` (an approval names its stage's `role`; none: `design`); only the first answer on the stage's latest ask counts.
 pub fn wants_design(events: &[Event], fleet: &str, n: u64) -> Option<&'static str> {
     let q = replay(events, fleet).into_iter().find(|i| i.issue == n)?;
     let approved = |r| {
-        events
+        let of = |e: &&Event| e.fleet == fleet && e.issue == Some(n) && e.str("role").unwrap_or("design") == r;
+        let decided = |e: &&Event| ["design-approved", "design-revise", "design-rejected"].contains(&e.kind.as_str());
+        let Some(ask) = events.iter().filter(of).rfind(|e| crate::design::is_ask(e)) else {
+            return events.iter().filter(of).any(|e| e.kind == "design-approved");
+        };
+        let first = events
             .iter()
-            .any(|e| e.is("design-approved", fleet, n) && e.str("role").unwrap_or("design") == r)
+            .filter(of)
+            .find(|e| decided(e) && e.str("id") == ask.str("id"));
+        first.is_some_and(|e| e.kind == "design-approved")
     };
     [("architect", q.architect), ("design", q.design)]
         .into_iter()
