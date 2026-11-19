@@ -41,7 +41,7 @@ fn pass_profile() {
                 .reply("sysctl -n hw.ncpu", "10\n")
                 .reply("vm_stat", "Pages free: 100000.\nSwapouts: 100.\n"),
         );
-        let args: &[&str] = if fast { &["drive"] } else { &["drive"] };
+        let args: &[&str] = if fast { &["drive"] } else { &["tick"] };
         let (r0, c0, t0) = (drover::db::ROWS.load(Relaxed), cpu(), Instant::now());
         let (code, _) = run(&c, &f, args);
         let (wall, cpu, rows) = (

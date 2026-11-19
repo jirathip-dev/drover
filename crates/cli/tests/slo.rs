@@ -314,7 +314,10 @@ fn pass_with(c: &drover::Ctx, sh: &FakeShed, pr: Option<&str>) -> Fake {
     if pr.is_some() {
         let cfg = drover::config::Config::load(&c.config).unwrap();
         let f = cfg.fleet("sendmeter").unwrap();
-        assert_eq!(drover::gh::pr(c, &r, f, ("sendmeter", 7), "issue-7", c.now).unwrap()["number"], 34);
+        assert_eq!(
+            drover::gh::pr(c, &r, f, ("sendmeter", 7), "issue-7", c.now).unwrap()["number"],
+            34
+        );
     }
     let (code, out) = run_only(c, &sh.on(&r), &["drive"]);
     assert_eq!(code, 0, "{out}");

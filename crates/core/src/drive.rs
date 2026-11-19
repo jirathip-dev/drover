@@ -760,8 +760,14 @@ pub fn chores(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
     Ok(())
 }
 
-/// Ends this process at `pass_max_secs` with `pass-slow` naming the step it was in, unless the returned end is dropped first: `drover drive <fleet>`'s own limit.
-pub fn deadline(ctx: &Ctx, cfg: &Config, fleet: &str) -> std::sync::mpsc::Sender<()> {
+/// `drover drive`: with a fleet, its pass under its own `pass_max_secs` deadline; without, every fleet's pass started.
+pub fn job(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: Option<&str>) -> Result<()> {
+    let Some(f) = fleet else { return start(ctx, cfg, r, out) };
+    let _end = deadline(ctx, cfg, f);
+    drive(ctx, cfg, r, out, f, false)
+}
+
+fn deadline(ctx: &Ctx, cfg: &Config, fleet: &str) -> std::sync::mpsc::Sender<()> {
     let (end, rx) = std::sync::mpsc::channel::<()>();
     let (state, fleet, secs) = (ctx.state.clone(), fleet.to_string(), cfg.limits.pass_max_secs);
     std::thread::spawn(move || {
@@ -794,7 +800,11 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     if !crate::compact::drives(ctx, cfg, r, fleet, out) {
         return Ok(());
     }
-    let catchup = if KICK.get().is_some() { 0 } else { cfg.limits.webhook_poll_minutes * 60 };
+    let catchup = if KICK.get().is_some() {
+        0
+    } else {
+        cfg.limits.webhook_poll_minutes * 60
+    };
     let was = (gh::FORCE.replace(KICK.get().is_some()), gh::CATCHUP.replace(catchup));
     let file = ctx.state.with_file_name(format!("{lock}.step"));
     let mark = |step: &str| {
@@ -817,7 +827,8 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     if crate::db::last_seq(&ctx.state) != grew {
         crate::snapshot::take(ctx, cfg, r);
     }
-    (gh::FORCE.set(was.0), gh::CATCHUP.set(was.1));
+    gh::FORCE.set(was.0);
+    gh::CATCHUP.set(was.1);
     res
 }
 
@@ -853,7 +864,8 @@ fn one(
     let r: &dyn Runner = &tally;
     mark("closed issues");
     if KICK.get().is_none() {
-        let closed = working(&ctx.state).and_then(|ev| crate::check::closed_on_github((ctx, cfg, r, out), ev, Some(name)));
+        let closed =
+            working(&ctx.state).and_then(|ev| crate::check::closed_on_github((ctx, cfg, r, out), ev, Some(name)));
         if let Err(e) = closed {
             writeln!(out, "{name} closed issues: {e:#}")?;
         }

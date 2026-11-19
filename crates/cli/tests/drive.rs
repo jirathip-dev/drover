@@ -793,7 +793,10 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     let drive = get(&s)["fleets"][0]["drive"].clone();
     let line = drive["line"].as_str().unwrap_or_default();
     assert_eq!(
-        (&drive["tone"], line.starts_with("drive · 0s ago · started 1 · merged 0 · ") && line.ends_with(" s")),
+        (
+            &drive["tone"],
+            line.starts_with("drive · 0s ago · started 1 · merged 0 · ") && line.ends_with(" s")
+        ),
         (&json!("g"), true),
         "{drive}"
     );

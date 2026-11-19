@@ -27,7 +27,10 @@ impl Gate {
     }
     fn until_held(&self) {
         let g = self.held.lock().unwrap();
-        let (g, t) = self.moved.wait_timeout_while(g, Duration::from_secs(30), |g| !g.0).unwrap();
+        let (g, t) = self
+            .moved
+            .wait_timeout_while(g, Duration::from_secs(30), |g| !g.0)
+            .unwrap();
         assert!(!t.timed_out() && g.0, "slowfleet's pass never reached a call");
     }
     fn open(&self) {
@@ -77,13 +80,17 @@ fn with_one_fleets_pass_hung_the_others_last_pass_advances_each_fast_step() {
         let step = std::fs::read_to_string(c.state.with_file_name("drive-slowfleet.lock.step")).unwrap();
         let started = |f: &str| {
             let a = format!("'/opt/drover/bin/drover' drive {f} >>");
-            r.f.calls.borrow().iter().filter(|l| l.starts_with("sh -c nohup") && l.contains(&a)).count()
+            r.f.calls
+                .borrow()
+                .iter()
+                .filter(|l| l.starts_with("sh -c nohup") && l.contains(&a))
+                .count()
         };
-        for k in 0..4 {
+        for (i, k) in (0..4).enumerate() {
             let now = at(&c, c.now + k * 30);
             let (code, out) = run_only(&now, &r, &["drive"]);
             assert_eq!(code, 0, "{out}");
-            assert_eq!((started("sendmeter"), started("slowfleet")), (k as usize + 1, 0), "{out}");
+            assert_eq!((started("sendmeter"), started("slowfleet")), (i + 1, 0), "{out}");
             let (code, out) = run_only(&now, &r, &["drive", "sendmeter"]);
             assert_eq!(code, 0, "{out}");
             assert_eq!(drover::drive::last_pass(&now, "sendmeter"), Some(now.now), "{out}");
@@ -153,7 +160,11 @@ fn a_hung_pass_ends_itself_at_pass_max_secs_and_names_its_step() {
         .unwrap();
     let secs = t.elapsed().as_secs_f64();
     let said = String::from_utf8_lossy(&st.stdout).into_owned() + &String::from_utf8_lossy(&st.stderr);
-    assert_eq!(st.status.code(), Some(124), "ended by its deadline after {secs:.1} s: {said}");
+    assert_eq!(
+        st.status.code(),
+        Some(124),
+        "ended by its deadline after {secs:.1} s: {said}"
+    );
     assert!(secs < 4.0, "the pass ran {secs:.1} s past a 1 s limit");
     let ev = read(&c.state).unwrap();
     let slow = ev.iter().find(|e| e.kind == "pass-slow").expect("pass-slow logged");
@@ -175,7 +186,11 @@ fn a_wake_starts_its_fleets_pass_within_a_second() {
     while pass("sendmeter") == 0 && t.elapsed() < Duration::from_secs(30) {
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(pass("sendmeter"), 1, "the service's first fast job woke each fleet's loop");
+    assert_eq!(
+        pass("sendmeter"),
+        1,
+        "the service's first fast job woke each fleet's loop"
+    );
     let before = (pass("sendmeter"), pass("slowfleet"));
     let t = Instant::now();
     assert!(drover::service::wake(&c, "sendmeter"));

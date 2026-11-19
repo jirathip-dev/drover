@@ -10,7 +10,11 @@ use tokio::time::timeout;
 
 pub(crate) fn fleets(ctx: &Ctx) -> BTreeMap<String, Notify> {
     let names = Config::load(&ctx.config).map(|c| c.fleet.into_keys().collect::<Vec<_>>());
-    names.unwrap_or_default().into_iter().map(|f| (f, Notify::new())).collect()
+    names
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| (f, Notify::new()))
+        .collect()
 }
 
 impl Service {
@@ -23,10 +27,14 @@ impl Service {
     async fn fleet(self: Arc<Self>, name: String) {
         let Some(woke) = self.fleets.get(&name) else { return };
         loop {
-            timeout(Duration::from_secs(limits().fast_secs), woke.notified()).await.ok();
+            timeout(Duration::from_secs(limits().fast_secs), woke.notified())
+                .await
+                .ok();
             let (r, exe, a) = (self.r, self.ctx.exe.clone(), argv(&["drive", &name]));
             let most = Duration::from_secs(2 * limits().pass_max_secs);
-            tokio::task::spawn_blocking(move || r.run_for(&exe, &a, "", most)).await.ok();
+            tokio::task::spawn_blocking(move || r.run_for(&exe, &a, "", most))
+                .await
+                .ok();
         }
     }
 }

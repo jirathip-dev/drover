@@ -198,7 +198,10 @@ fn a_lane_whose_reads_block_or_whose_root_was_removed_never_holds_clean_or_the_t
 #[test]
 fn a_pass_stuck_past_twice_pass_max_secs_is_logged_stopped_and_its_lock_taken_over() {
     let r = setup("pass-stuck");
-    let f = host().reply("kill -0", "").reply("kill -KILL 4242", "").reply("ps -o etime=", "01:00:00");
+    let f = host()
+        .reply("kill -0", "")
+        .reply("kill -KILL 4242", "")
+        .reply("ps -o etime=", "01:00:00");
     assert_eq!(run(&r.c, &f, &["drive"]).0, 0);
     lease_as(&r.c, "drive-sendmeter.lock", 4242, NOW - 60, 120);
     let (_, out) = run_only(&r.c, &f, &["drive", "sendmeter"]);

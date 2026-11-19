@@ -217,7 +217,11 @@ pub fn coverage(w: &World) -> (BTreeSet<String>, Vec<u64>) {
     let book = ["promise", "slo-idle", "slo-tick", "self-heal", "stuck", "slo-ok"];
     for x in w.wrote.iter().filter(|x| !book.contains(&x.ev.kind.as_str())) {
         let a = &w.procs[x.proc].args;
-        let pass = if a.len() > 1 && a[0] == "drive" { "drive-pass".into() } else { a[0].clone() };
+        let pass = if a.len() > 1 && a[0] == "drive" {
+            "drive-pass".into()
+        } else {
+            a[0].clone()
+        };
         let (d, k) = (&x.ev.data, &x.ev.kind);
         cov.insert(format!("{pass} {} {k} {}", s(d.get("code")), s(d.get("step"))));
         for act in d.get("actions").and_then(Value::as_array).into_iter().flatten() {

@@ -299,7 +299,11 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         ),
         (
             |c, _, r| {
-                write(&c.state.with_file_name("drive-fast.at"), &(c.now - 3600).to_string(), 0o644);
+                write(
+                    &c.state.with_file_name("drive-fast.at"),
+                    &(c.now - 3600).to_string(),
+                    0o644,
+                );
                 r
             },
             "watchdog drive",

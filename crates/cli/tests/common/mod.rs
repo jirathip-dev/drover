@@ -412,7 +412,11 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
     }
     let cfg = drover::config::Config::load(&ctx.config);
     let fleets = cfg.map(|c| c.fleet.into_keys().collect::<Vec<_>>()).unwrap_or_default();
-    let started = |l: &&str| fleets.iter().any(|f| l.starts_with(&format!("{f}: pass not started: ")));
+    let started = |l: &&str| {
+        fleets
+            .iter()
+            .any(|f| l.starts_with(&format!("{f}: pass not started: ")))
+    };
     let mut out: String = o.lines().filter(|l| !started(l)).map(|l| format!("{l}\n")).collect();
     for f in &fleets {
         let (k, o) = run_only(ctx, r, &["drive", f]);

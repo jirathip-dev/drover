@@ -1046,7 +1046,10 @@ fn a_fast_step_over_50k_worktree_files_walks_none_of_them() {
         "#949 perf (50,000 worktree files): drive {fast_ms} ms, {fast} entries walked · tick {slow_ms} ms, {slow} walked"
     ));
     assert_eq!(fast, 0, "drive walked {fast} entries: {out}");
-    assert!(slow >= 50_000, "the tick's budget walked only {slow} entries: {slow_out}");
+    assert!(
+        slow >= 50_000,
+        "the tick's budget walked only {slow} entries: {slow_out}"
+    );
 }
 
 #[test]

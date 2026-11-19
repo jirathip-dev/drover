@@ -1846,11 +1846,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
-                Cmd::Drive { fleet: None } => crate::drive::start(ctx, &cfg, r, out)?,
-                Cmd::Drive { fleet: Some(f) } => {
-                    let _end = crate::drive::deadline(ctx, &cfg, &f);
-                    crate::drive::drive(ctx, &cfg, r, out, &f, false)?;
-                }
+                Cmd::Drive { fleet } => crate::drive::job(ctx, &cfg, r, out, fleet.as_deref())?,
                 Cmd::Kick {
                     fleet,
                     issue,
