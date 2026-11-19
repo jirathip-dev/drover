@@ -148,7 +148,6 @@ pub fn body(
     Ok(())
 }
 
-/// A pushed head with no passing `turn done`: the idle lane is told once; 3 refusals at the head, or a quiet lane past the stall threshold since, is one owner card.
 pub(crate) fn ungated(
     ctx: &Ctx,
     cfg: &Config,
