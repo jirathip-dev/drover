@@ -1,0 +1,20 @@
+Decided: with no shed runtime set, `hosts report` lists the host's own shed through `shed connect`, as the main host reached it over ssh before #1333
+Because: "what it needs to list the shed sessions comes with the request or from the host's own shed, never from a config file there"
+Rejected: sending the main host's socket path in the Watch — the remote shed's socket is its own, the main host does not know it
+Decided: the test harness's remote report now runs the real CLI with no fleet.toml; it used to inject a shed runtime, which hid this bug
+Because: crates/cli/tests/common/mod.rs:138
+Decided: a failing report is a view row whose why is set and is not `no service`; the hosts line and doctor name it, and remote sweeps and trims refuse while it holds
+Because: "While a host's report fails, tick removes no lane folder on that host."
+Rejected: refusing sweeps on any stale view row too — a host never polled yet would never be cleaned; a failed poll always writes its why
+Decided: a remote host's line takes its build from its last report, falling back to the hourly `--version` read
+Because: "The build shown for a host is the one it reports."
+Decided: the main host's own row stays `down · no service`: the view treats that as an answer (#1309 step 2 holds links open)
+Because: crates/core/src/link/view.rs:67
+Check: crates/cli/tests/hosts.rs's three new tests fail on the base and pass at the head
+Owner: remote hosts come back online once this build is promoted to them; until a host's report works again, nothing is deleted there.
+
+Decided: no code change for the red shard: the_sampler_thread_fills_the_host is a timing flake on a loaded runner; merged origin/staging to re-run CI
+Because: crates/server/src/serve.rs:203
+Rejected: widening that test's 5 s deadline — the test and serve's sampler are outside this issue's diff
+Check: CI test shards are green at the new head; the failing test passes locally 3 of 3
+Owner: nothing new for you; the earlier CI failure was an unrelated slow test.
