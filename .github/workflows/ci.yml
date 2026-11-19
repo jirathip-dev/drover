@@ -241,7 +241,7 @@ jobs:
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
           webkit=false
-          grep -qE '^(web/|assets/|crates/server/|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|keyboard_webkit\.rs|ui/(drafts|repaint|timings|keyboard|answered|optimistic)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs|phone_timings\.rs|common/large\.rs))' changed.txt && webkit=true
+          grep -qE '^(web/|assets/|crates/server/|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|keyboard_webkit\.rs|ui/(drafts|repaint|timings|keyboard|answered|optimistic|pages)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs|phone_timings\.rs|screen_pages\.rs|common/large\.rs))' changed.txt && webkit=true
           echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
 
   # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.
@@ -268,6 +268,8 @@ jobs:
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
       - name: "phone timings on the large board (#1312, hard gate: tab, lane sheet, thread open, send and answer each a median <= 150 ms)"
         run: cargo test --locked --test phone_timings -- --nocapture
+      - name: "Events in pages of 100 (#1316, hard gate: scrolling to the end appends in place; Events first paint p95 <= 150 ms)"
+        run: cargo test --locked --test screen_pages webkit -- --nocapture
       - name: a thread tap and a thread push open the thread; back returns (#1088)
         run: cargo test --locked --test cooee_screens parity_46 -- --nocapture
       - name: "parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)"
