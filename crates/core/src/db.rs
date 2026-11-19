@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS push (n INTEGER PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshot (n INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE NOT NULL, ts INTEGER NOT NULL,
     json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS host_view (host TEXT PRIMARY KEY, link TEXT NOT NULL, since INTEGER NOT NULL, why TEXT,
+    boot TEXT, n INTEGER, heard INTEGER, build TEXT, load TEXT);
+CREATE TABLE IF NOT EXISTS lane_view (host TEXT NOT NULL, key TEXT NOT NULL, heard INTEGER NOT NULL, json TEXT NOT NULL,
+    PRIMARY KEY (host, key));
 CREATE TABLE IF NOT EXISTS states (fleet TEXT NOT NULL, issue INTEGER NOT NULL, done INTEGER NOT NULL, json TEXT NOT NULL,
     PRIMARY KEY (fleet, issue));
 CREATE TABLE IF NOT EXISTS lanes (lane TEXT PRIMARY KEY, seq INTEGER NOT NULL, json TEXT NOT NULL);
@@ -630,6 +634,52 @@ pub fn claim(
 pub fn processed(state: &Path, id: &str, now: u64) -> Result<bool> {
     let q = "INSERT OR IGNORE INTO processed (id, at) VALUES (?1, ?2)";
     with(state, true, 0, |c| Ok(c.execute(q, params![id, now])?)).map(|n| n > 0)
+}
+
+/// Host `h`'s `host_view` row, and with `lanes` (key, json) its `lane_view` rows replaced, in one transaction.
+pub fn view_put(state: &Path, h: &crate::link::view::HostSeen, lanes: Option<&[(String, String)]>) -> Result<()> {
+    with(state, true, (), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let q = "INSERT OR REPLACE INTO host_view (host, link, since, why, boot, n, heard, build) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+        tx.execute(
+            q,
+            params![h.host, h.link, h.since, h.why, h.boot, h.n, h.heard, h.build],
+        )?;
+        if let Some(all) = lanes {
+            tx.execute("DELETE FROM lane_view WHERE host = ?1", [&h.host])?;
+            for (k, json) in all {
+                let q = "INSERT OR REPLACE INTO lane_view (host, key, heard, json) VALUES (?1, ?2, ?3, ?4)";
+                tx.execute(q, params![h.host, k, h.heard, json])?;
+            }
+        }
+        Ok(tx.commit()?)
+    })
+}
+
+/// `lane_view` rows as (host, json).
+pub type Rows = Vec<(String, String)>;
+
+/// Every `host_view` row, and every `lane_view` row as (host, json).
+pub fn view(state: &Path) -> Result<(Vec<crate::link::view::HostSeen>, Rows)> {
+    with(state, false, (vec![], vec![]), |c| {
+        let mut q = c.prepare_cached("SELECT host, link, since, why, boot, n, heard, build FROM host_view")?;
+        let row = |r: &rusqlite::Row| {
+            Ok(crate::link::view::HostSeen {
+                host: r.get(0)?,
+                link: r.get(1)?,
+                since: r.get(2)?,
+                why: r.get(3)?,
+                boot: r.get(4)?,
+                n: r.get(5)?,
+                heard: r.get(6)?,
+                build: r.get(7)?,
+            })
+        };
+        let hosts = q.query_map([], row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut q = c.prepare_cached("SELECT host, json FROM lane_view ORDER BY host, key")?;
+        let lanes = q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok((hosts, lanes.collect::<rusqlite::Result<Vec<_>>>()?))
+    })
 }
 
 /// A snapshot row (`board`'s reads).

@@ -18,8 +18,13 @@ struct Slow(
     Option<&'static FakeShed>,
     &'static FakeShed,
 );
+thread_local!(static SERVING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+
 impl Slow {
     fn remote(&self, prog: &str, args: &[String]) {
+        if SERVING.get() {
+            return;
+        }
         self.2.fetch_add(1, Relaxed);
         if let Some(h) = args.iter().rev().nth(2).filter(|_| prog == "ssh") {
             std::thread::sleep(Duration::from_millis(300));
@@ -33,6 +38,15 @@ impl Runner for Slow {
         self.0.run(prog, args)
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        if prog == "ssh" && args.last().is_some_and(|a| a.ends_with("'hosts' 'report'")) {
+            self.remote(prog, args);
+            SERVING.set(true);
+            let o = boat(self, prog, args, input).unwrap();
+            SERVING.set(false);
+            let line = format!("{prog} {}", args.join(" "));
+            self.0.inputs.borrow_mut().push((line, input.into()));
+            return o;
+        }
         if prog != "ssh" || !args.iter().any(|a| a.contains("'shed' 'connect'")) {
             return self.run(prog, args);
         }
@@ -154,7 +168,13 @@ fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
     assert_eq!(code, 0, "{out}");
     let calls = std::mem::take(&mut *r.1.lock().unwrap());
     assert!(calls.len() <= 1, "remote calls in one step: {calls:?}");
-    assert!(drover::snapshot::load(&c).is_some_and(|s| s.reads.keys().any(|k| k.contains("issue-20"))));
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let sp = drover::events::last_spawn(&drover::events::read(&c.state).unwrap(), "sendmeter-impl-20").cloned();
+    let view = drover::link::view::View::load(&c, &cfg).unwrap();
+    assert!(
+        view.worktree(&sp.unwrap()).is_some_and(|w| w.head.is_some()),
+        "the step's report holds #20's worktree"
+    );
     let before = r.2.load(Relaxed);
     let (c, r, addr) = serve(c, r);
     get(addr, "/");
@@ -182,7 +202,7 @@ fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
 }
 
 #[test]
-fn a_recorded_verdict_and_a_merged_lane_are_never_read() {
+fn a_merged_lane_is_not_in_its_hosts_report() {
     let (c, r) = fixture();
     let rev = "/home/me/.herdr/worktrees/sendmeter/rev-16-r1";
     let d = json!({"role": "rev", "agent": "sendmeter-rev-16-r1", "harness": "claude", "pane": "sendmeter-rev-16-r1",
@@ -196,10 +216,15 @@ fn a_recorded_verdict_and_a_merged_lane_are_never_read() {
     )
     .unwrap();
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
-    let keys: Vec<String> = drover::snapshot::load(&c).unwrap().reads.into_keys().collect();
-    assert!(keys.iter().any(|k| k.contains("issue-18")), "{keys:?}");
-    assert!(!keys.iter().any(|k| k.contains("rev-16-r1/verdict.md")), "{keys:?}");
-    assert!(!keys.iter().any(|k| k.contains("issue-17'")), "{keys:?}");
+    let inputs = r.0.inputs.borrow();
+    let asked = inputs
+        .iter()
+        .find(|(l, _)| l.ends_with("'hosts' 'report'"))
+        .map(|i| i.1.clone());
+    let asked: serde_json::Value = serde_json::from_str(&asked.unwrap_or_default()).unwrap();
+    let wts = asked["worktrees"].to_string();
+    assert!(wts.contains("issue-18\"") && wts.contains("rev-16-r1"), "{wts}");
+    assert!(!wts.contains("issue-17\""), "{wts}");
 }
 
 #[test]
@@ -400,9 +425,9 @@ fn parity_r6_waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     let events = drover::events::read(&c.state).unwrap();
     assert_eq!(events.len(), 30_000);
     let on = sh.on(&r);
-    let list = drover::session::all(&cfg, &on);
+    let list = drover::link::fresh(&c, &cfg, &on).unwrap().sessions();
     let st = drover::events::fold(&events);
-    let all = drover::snapshot::lanes(&cfg, &on, (&events, &st), &list);
+    let all = drover::snapshot::lanes(&c, &cfg, (&events, &st), &list);
     assert_eq!(all.len(), 200);
     let t = Instant::now();
     let w = drover::snapshot::waits(&c, &cfg, &on, &events, &all);
@@ -1342,25 +1367,47 @@ struct Boats {
     local: &'static FakeShed,
     calls: Mutex<Vec<String>>,
     slow: std::sync::atomic::AtomicBool,
+    strict: std::sync::atomic::AtomicBool,
 }
 impl Boats {
-    fn boat(&self, prog: &str, args: &[String]) {
-        if let Some(end) = args.iter().position(|a| a == "--").filter(|_| prog == "ssh") {
-            if self.slow.load(Relaxed) {
-                std::thread::sleep(Duration::from_millis(700));
-            }
-            self.calls.lock().unwrap().push(args[end - 1].clone());
+    fn boat(&self, prog: &str, args: &[String]) -> Option<Out> {
+        let end = args.iter().position(|a| a == "--").filter(|_| prog == "ssh")?;
+        if self.slow.load(Relaxed) {
+            std::thread::sleep(Duration::from_millis(700));
         }
+        let report = args.last().is_some_and(|a| a.ends_with("'hosts' 'report'"));
+        let tag = match args.last().map(String::as_str) {
+            _ if report => "",
+            Some("true") => " probe",
+            _ => " other",
+        };
+        self.calls.lock().unwrap().push(format!("{}{tag}", args[end - 1]));
+        (self.strict.load(Relaxed) && !report).then(|| Out {
+            code: 255,
+            stderr: "a call that is no report".into(),
+            ..Out::default()
+        })
+    }
+    fn per_host(&self) -> std::collections::BTreeMap<String, usize> {
+        let mut by = std::collections::BTreeMap::new();
+        for c in self.calls.lock().unwrap().iter() {
+            *by.entry(c.clone()).or_default() += 1;
+        }
+        by
     }
 }
 impl Runner for Boats {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        self.boat(prog, args);
-        self.o.run(prog, args)
+        match self.boat(prog, args) {
+            Some(o) => Ok(o),
+            None => self.o.run(prog, args),
+        }
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
-        self.boat(prog, args);
-        self.o.run_in(prog, args, input)
+        match self.boat(prog, args) {
+            Some(o) => Ok(o),
+            None => self.o.run_in(prog, args, input),
+        }
     }
     fn sleep(&self, _: u64) {}
     fn shed(&self) -> Option<drover::shed::Shed> {
@@ -1369,6 +1416,10 @@ impl Runner for Boats {
 }
 
 fn boats() -> (drover::Ctx, Boats) {
+    boats_queued(true)
+}
+
+fn boats_queued(queued: bool) -> (drover::Ctx, Boats) {
     let base = (CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""))
         .replace("max_parallel_spawns = 0", "max_parallel_spawns = 6\npass_max_secs = 1")
         .replace(
@@ -1388,13 +1439,16 @@ fn boats() -> (drover::Ctx, Boats) {
         .into_iter()
         .chain(add.iter().map(String::as_str))
         .collect();
-    assert_eq!(run(&c, &Fake::default(), &add).0, 0);
+    if queued {
+        assert_eq!(run(&c, &Fake::default(), &add).0, 0);
+    }
     let mut seen = json!({"mini": {"home": "/Users/me", "probed": NOW, "seen": NOW, "up": true}});
     let mut sheds = vec![];
     for b in 1..=4 {
         seen[format!("b{b}")] = json!({"home": "/home/me", "probed": NOW, "seen": NOW, "up": true});
         sheds.push((&*Box::leak(format!("b{b}").into_boxed_str()), shed()));
     }
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(c.state.parent().unwrap().join("hosts.json"), seen.to_string()).unwrap();
     for n in 1..=30u64 {
         let (b, sh) = sheds[(n % 4) as usize];
@@ -1419,6 +1473,7 @@ fn boats() -> (drover::Ctx, Boats) {
             local,
             calls: Mutex::default(),
             slow: true.into(),
+            strict: (!queued).into(),
         },
     )
 }
@@ -1453,4 +1508,77 @@ fn a_pass_over_30_lanes_on_4_boats_at_700ms_a_call_is_under_20s_and_drive_slow_n
     assert!(why.contains("slowest step: ") && why.contains("; remote: b"), "{why}");
     report(&format!("#1308 drive-slow: {why}"));
     assert_eq!(why.matches(" calls ").count(), 4, "{why}");
+}
+
+#[test]
+fn a_step_over_30_lanes_on_4_boats_makes_one_report_call_per_host_and_reads_none_after() {
+    let (c, r) = boats_queued(false);
+    let t = Instant::now();
+    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let secs = t.elapsed().as_secs_f64();
+    assert_eq!(code, 0, "{out}");
+    let by = r.per_host();
+    report(&format!(
+        "#1309 perf (30 lanes on 4 boats, +700 ms per remote call): drive --fast {secs:.1} s, calls {by:?}"
+    ));
+    let one: std::collections::BTreeMap<String, usize> = ["b1", "b2", "b3", "b4"].map(|b| (b.into(), 1)).into();
+    assert_eq!(by, one, "one report per host, no other call: {out}");
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let view = drover::link::view::View::load(&c, &cfg).unwrap();
+    assert_eq!(view.sessions().live().count(), 30, "{out}");
+    let sp = drover::events::last_spawn(&drover::events::read(&c.state).unwrap(), "sendmeter-impl-5").cloned();
+    let head = view.worktree(&sp.unwrap()).and_then(|w| w.head.clone());
+    assert_eq!(head, Some(("a".repeat(40), NOW - 600)));
+    r.calls.lock().unwrap().clear();
+    let (code, out) = run(&c, &r, &["status"]);
+    assert_eq!(code, 0, "{out}");
+    let calls = r.calls.lock().unwrap().clone();
+    assert!(calls.is_empty(), "status on a fresh view calls no host: {calls:?}");
+    r.strict.store(false, Relaxed);
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let by = r.per_host();
+    assert!(
+        by.keys().all(|k| !k.ends_with(" other")),
+        "the slow pass: a probe and a report a host: {by:?}"
+    );
+    assert_eq!(by.values().sum::<usize>(), 8, "{by:?}");
+    assert!(secs < 5.0, "drive --fast took {secs:.1} s (target < 5)");
+}
+
+#[test]
+fn a_boat_lanes_turn_end_is_acted_on_in_the_next_step_inside_5s() {
+    let (c, r) = boats_queued(false);
+    let wt = tmpdir("boat-wt");
+    std::fs::create_dir_all(wt.join(".drover")).unwrap();
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-41", "harness": "claude", "pane": "sendmeter-impl-41",
+                   "runtime": "shed", "worktree": wt, "branch": "issue-41", "host": "b2", "machine": "b2"});
+    append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(41), "spawn", d)).unwrap();
+    let line = json!({"args": ["turn", "blocked", "--why", "needs a key"], "lane": "sendmeter:41:impl", "ts": NOW * 1000 - 2_000});
+    std::fs::write(wt.join(".drover/outbox.jsonl"), format!("{line}\n")).unwrap();
+    let t = Instant::now();
+    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let secs = t.elapsed().as_secs_f64();
+    assert_eq!(code, 0, "{out}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let turn = ev.iter().find(|e| e.is("turn-end", "sendmeter", 41));
+    assert_eq!(turn.and_then(|e| e.str("state")), Some("blocked"), "{out}");
+    let ran = ev.iter().find(|e| e.is("outbox", "sendmeter", 41)).unwrap();
+    assert_eq!(
+        (ran.val("code"), ran.val("lag_ms")),
+        (&json!(0), &json!(2_000)),
+        "{:?}",
+        ran.data
+    );
+    report(&format!(
+        "#1309 event-to-action: a boat lane's turn end is applied by the next step, which took {secs:.1} s (target < 5)"
+    ));
+    assert!(secs < 5.0, "the step took {secs:.1} s (target < 5)");
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    let again = drover::events::read(&c.state).unwrap();
+    assert_eq!(
+        again.iter().filter(|e| e.is("turn-end", "sendmeter", 41)).count(),
+        1,
+        "a line runs once"
+    );
 }

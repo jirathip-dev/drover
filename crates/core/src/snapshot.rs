@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::events::{Event, IssueState, States};
-use crate::hosts::{quote, On};
 use crate::lanes::{self, Lane};
 use crate::runner::{argv, Out, Runner};
 use crate::session::Sessions;
@@ -49,7 +48,7 @@ pub fn out(v: Option<String>) -> Out {
     }
 }
 
-/// What a read the snapshot lacks does: `Collect` (the step's look: ssh is batched, answered from the last snapshot meanwhile; the rest runs and is kept), `Live` (runs), `Local` (a remote one fails, the rest runs).
+/// What a read the snapshot lacks does: `Collect` (the step's: runs and is kept), `Live` (runs), `Local` (a remote one fails, the rest runs).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Miss {
     Collect,
@@ -102,8 +101,6 @@ pub struct Snap<'a> {
     r: &'a dyn Runner,
     miss: Miss,
     pub reads: Mutex<BTreeMap<String, Option<String>>>,
-    prev: BTreeMap<String, Option<String>>,
-    want: Mutex<BTreeMap<String, (String, String)>>,
     pub ts: Option<u64>,
 }
 
@@ -119,56 +116,31 @@ impl<'a> Snap<'a> {
         Snap::new(r, miss, s.as_ref().map(|s| s.reads.clone()), s.map(|s| s.ts))
     }
     fn new(r: &'a dyn Runner, miss: Miss, reads: Option<BTreeMap<String, Option<String>>>, ts: Option<u64>) -> Self {
-        let reads = reads.unwrap_or_default();
-        let (reads, prev) = if miss == Miss::Collect {
-            (BTreeMap::new(), reads)
-        } else {
-            (reads, BTreeMap::new())
-        };
         Snap {
             r,
             miss,
-            reads: Mutex::new(reads),
-            prev,
-            want: Mutex::default(),
+            reads: Mutex::new(reads.unwrap_or_default()),
             ts,
         }
     }
-    fn fetch(&self) {
-        let mut by: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
-        for (k, (m, line)) in std::mem::take(&mut *lock(&self.want)) {
-            by.entry(m).or_default().push((k, line));
-        }
-        crate::hosts::each(by, |(m, cmds)| {
-            let lines: Vec<String> = cmds.iter().map(|c| c.1.clone()).collect();
-            let outs = batch(&On::new(self.r, Some(&m)), &lines);
-            lock(&self.reads).extend(cmds.into_iter().map(|c| c.0).zip(outs));
-        });
-    }
-}
-
-impl Runner for Snap<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        let k = key(prog, args);
-        let there = match args {
-            [.., m, _, line] if prog == "ssh" => Some((m.clone(), line.clone())),
-            _ => None,
-        };
-        if let Some(t) = there.filter(|_| self.miss == Miss::Collect) {
-            lock(&self.want).insert(k.clone(), t);
-            return Ok(out(self.prev.get(&k).cloned().flatten()));
-        }
+    fn missed(&self, k: String, prog: &str, call: impl FnOnce() -> anyhow::Result<Out>) -> anyhow::Result<Out> {
         if let Some(v) = lock(&self.reads).get(&k) {
             return Ok(out(v.clone()));
         }
         if self.miss == Miss::Local && remote(prog) {
             return Ok(out(None));
         }
-        let o = self.r.run(prog, args)?;
+        let o = call()?;
         if self.miss == Miss::Collect {
             lock(&self.reads).insert(k, (o.code == 0).then(|| o.stdout.clone()));
         }
         Ok(o)
+    }
+}
+
+impl Runner for Snap<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        self.missed(key(prog, args), prog, || self.r.run(prog, args))
     }
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);
@@ -184,21 +156,7 @@ impl Runner for Snap<'_> {
             return self.r.run_for(prog, args, input, limit);
         }
         let k = key_in(prog, args, input);
-        if let ([.., m, _, line], Miss::Collect) = (args, self.miss) {
-            let words: Vec<String> = std::iter::once("%s\\n".into())
-                .chain(input.lines().map(String::from))
-                .collect();
-            let piped = format!("({} | {line})", quote("printf", &words));
-            lock(&self.want).insert(k.clone(), (m.clone(), piped));
-            return Ok(out(self.prev.get(&k).cloned().flatten()));
-        }
-        if let Some(v) = lock(&self.reads).get(&k) {
-            return Ok(out(v.clone()));
-        }
-        if self.miss == Miss::Local {
-            return Ok(out(None));
-        }
-        self.r.run_for(prog, args, input, limit)
+        self.missed(k, prog, || self.r.run_for(prog, args, input, limit))
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()
@@ -206,8 +164,14 @@ impl Runner for Snap<'_> {
 }
 
 /// The board's lanes: every host's shed sessions joined with the log.
-pub fn lanes(cfg: &Config, r: &dyn Runner, (events, st): (&[Event], &States), sessions: &Sessions) -> Vec<Lane> {
-    lanes::join(cfg, r, events, st, sessions)
+pub fn lanes(ctx: &Ctx, cfg: &Config, (events, st): (&[Event], &States), sessions: &Sessions) -> Vec<Lane> {
+    lanes::join(
+        cfg,
+        crate::link::view::View::load(ctx, cfg).ok().as_ref(),
+        events,
+        st,
+        sessions,
+    )
 }
 
 /// What waits are worked out from: the log's length and last row, and each lane's state.
@@ -241,28 +205,18 @@ pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[L
     w.into_iter().map(|x| x.1).collect()
 }
 
-/// The step's look: the reads the board makes (lanes, waits, now-lines, Host rows), remote ones batched; saved, and returned for the step's own scan (a read it lacks runs live).
+/// The step's snapshot: the reads the board makes (lanes, waits, now-lines, Host rows) from the view and this host, saved, and returned for the step's own scan (a read it lacks runs live).
 pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
-    let s = Snap::new(r, Miss::Collect, load(ctx).map(|s| s.reads), Some(ctx.now));
-    let events = crate::events::working(&ctx.state).unwrap_or_default();
-    let sessions = crate::session::all(cfg, &s);
-    if sessions.listed() {
-        let all = lanes(cfg, &s, (&events, &crate::events::fold(&events)), &sessions);
-        waits(ctx, cfg, &s, &events, &all);
-    }
+    let s = Snap::new(r, Miss::Collect, None, Some(ctx.now));
     crate::timer::services(ctx, cfg, &s, Some(String::new()));
     crate::hosts::cards(cfg, &s);
-    crate::outbox::look(&s, &events);
-    s.fetch();
-    let s = Snap { miss: Miss::Live, ..s };
     let (mut key, mut ws) = (String::new(), vec![]);
-    let sessions = crate::session::all(cfg, &s);
+    let sessions = crate::link::view::View::load(ctx, cfg)
+        .map(|v| v.sessions())
+        .unwrap_or_default();
     if sessions.listed() {
-        if let Err(e) = crate::session::stamp::observe(ctx, cfg, &s, &sessions) {
-            crate::stderr!("drover: lane states: {e:#}");
-        }
         let events = crate::events::working(&ctx.state).unwrap_or_default();
-        let all = lanes(cfg, &s, (&events, &crate::events::fold(&events)), &sessions);
+        let all = lanes(ctx, cfg, (&events, &crate::events::fold(&events)), &sessions);
         (key, ws) = (wait_key(&events, &all), waits(ctx, cfg, &s, &events, &all));
     }
     let reads = lock(&s.reads).clone();
@@ -273,5 +227,5 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
         key,
     };
     crate::db::put(&ctx.state, "board", ctx.now, &snap).ok();
-    s
+    Snap { miss: Miss::Live, ..s }
 }

@@ -487,7 +487,7 @@ fn lanes_group_by_fleet_with_others() {
         {"name": "side-project", "status": "idle", "cwd": "/Users/me/Projects/side", "labels": lab("", "codex")},
         {"name": "synergy-impl-7", "status": "waiting-approval", "cwd": "/p/synergy-apps", "labels": lab("synergy", "dsh")},
     ]));
-    let lanes = drover::lanes::join(&cfg, &Fake::default(), &events, &st, &agents);
+    let lanes = drover::lanes::join(&cfg, None, &events, &st, &agents);
     let got: Vec<(Option<&str>, &str, &str, String, bool)> = lanes
         .iter()
         .map(|l| {
@@ -567,8 +567,7 @@ fn one_lane_per_agent_name() {
         {"name": "sendmeter-impl-3061", "status": "idle", "cwd": "/x", "host": "mini", "labels": lab},
     ]));
     let st = drover::events::fold(&events);
-    let fake = Fake::default();
-    let lanes = drover::lanes::join(&cfg, &fake, &events, &st, &agents);
+    let lanes = drover::lanes::join(&cfg, None, &events, &st, &agents);
     let got: Vec<_> = lanes
         .iter()
         .map(|l| (l.name.as_str(), l.state.word(), l.host.as_deref()))

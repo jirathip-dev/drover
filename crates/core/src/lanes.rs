@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::events::{last_spawn, Event, IssueState, States};
-use crate::runner::{ok, Runner};
+use crate::runner::Runner;
 use crate::session::{stamp, Cause, Exit, Life, Seen, Session, Sessions, Status};
 use crate::Ctx;
 use serde_json::{json, Value};
@@ -100,7 +100,13 @@ pub enum Health {
 }
 
 /// Join the shed sessions with the log.
-pub fn join(cfg: &Config, r: &dyn Runner, events: &[Event], st: &States, sessions: &Sessions) -> Vec<Lane> {
+pub fn join(
+    cfg: &Config,
+    view: Option<&crate::link::view::View>,
+    events: &[Event],
+    st: &States,
+    sessions: &Sessions,
+) -> Vec<Lane> {
     let by_name = |n: &str| crate::events::last_spawn(events, n);
     let (mut out, mut seen) = (vec![], BTreeSet::new());
     let starts = crate::events::of_kind(events, &["orchestrator-start"]).into_iter();
@@ -143,11 +149,8 @@ pub fn join(cfg: &Config, r: &dyn Runner, events: &[Event], st: &States, session
             continue;
         };
         if let Some(e) = by_name(agent) {
-            let r = &crate::hosts::On::of(r, Some(e));
-            let wt = e
-                .str("worktree")
-                .filter(|wt| crate::spawn::dirty(r, Path::new(wt)).is_none());
-            let head = wt.map(|wt| ok(r, "git", &["-C", wt, "rev-parse", "--short=7", "HEAD"]).unwrap_or_default());
+            let wt = view.and_then(|v| v.worktree(e)).filter(|w| w.dirty.is_none());
+            let head = wt.map(|w| w.head.as_ref().map_or("", |h| h.0.get(..7).unwrap_or(&h.0)).to_string());
             let on = crate::events::held_on(events, s);
             let state = match head {
                 _ if !on.is_empty() => LaneState::Held(on.clone()),

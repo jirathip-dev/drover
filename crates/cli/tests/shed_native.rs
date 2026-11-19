@@ -22,6 +22,7 @@ fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
 }
 
 fn check(c: &drover::Ctx) -> Vec<Event> {
+    look(c, &Fake::default());
     let before = read(&c.state).unwrap().len();
     let (code, out) = run(c, &Fake::default(), &["check"]);
     assert_eq!(code, 0, "{out}");

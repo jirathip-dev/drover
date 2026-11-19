@@ -1822,7 +1822,18 @@ impl<'a> Server<'a> {
     fn sessions(&self, now: u64) -> Option<crate::session::Sessions> {
         let list = || {
             let cfg = Config::kept(self.ctx).unwrap_or_default();
-            let all = crate::session::all(&cfg, &self.cached(now, 10));
+            let mut all = crate::link::view::View::load(
+                &Ctx {
+                    now,
+                    ..self.ctx.clone()
+                },
+                &cfg,
+            )
+            .ok()?
+            .sessions();
+            if let Some(here) = all.0.iter_mut().find(|h| h.0.is_none()) {
+                here.1 = crate::session::on(&self.cached(now, 10)).map_err(|e| format!("{e:#}"));
+            }
             *lock(&self.listed) = Some((now, all.clone()));
             Some(all).filter(crate::session::Sessions::listed)
         };
@@ -2090,7 +2101,7 @@ impl<'a> Server<'a> {
 
     fn lanes(&self, now: u64, cfg: &Config, events: &[Event], st: &States) -> Option<Vec<lanes::Lane>> {
         let list = self.sessions(now)?;
-        Some(crate::snapshot::lanes(cfg, &self.cached(now, 30), (events, st), &list))
+        Some(crate::snapshot::lanes(self.ctx, cfg, (events, st), &list))
     }
 
     fn waits(&self, ctx: &Ctx, cfg: &Config, events: &[Event], all: &[lanes::Lane]) -> Vec<crate::waiting::Waiting> {
@@ -3107,6 +3118,9 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         },
         ..ctx.clone()
     };
+    if demo {
+        crate::link::look(ctx, &Config::load(&ctx.config)?, r, &mut std::io::sink(), true)?;
+    }
     let s = Server {
         export: Some(demo),
         host: Arc::new(Mutex::new(host::sample(r))),
