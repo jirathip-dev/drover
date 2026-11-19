@@ -58,6 +58,12 @@ pub enum Miss {
 
 /// Run `lines` (quoted command lines) in one `sh -c` on `r`; each one's stdout, None when it failed.
 pub fn batch(r: &dyn Runner, lines: &[String]) -> Vec<Option<String>> {
+    let ran = exits(r, lines).into_iter();
+    ran.map(|(o, code)| o.filter(|_| code == Some(0))).collect()
+}
+
+/// Each line's stdout and exit code, from one `sh -c`.
+pub fn exits(r: &dyn Runner, lines: &[String]) -> Vec<(Option<String>, Option<i32>)> {
     let script: String = (lines.iter())
         .map(|l| format!("{l} </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n"))
         .collect();
@@ -68,7 +74,7 @@ pub fn batch(r: &dyn Runner, lines: &[String]) -> Vec<Option<String>> {
     let mut parts = text.split('\x1e');
     let mut each = || {
         let (o, code) = (parts.next(), parts.next());
-        o.filter(|_| code == Some("0")).map(String::from)
+        (o.map(String::from), code.and_then(|c| c.parse().ok()))
     };
     lines.iter().map(|_| each()).collect()
 }
