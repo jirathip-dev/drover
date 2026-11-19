@@ -1913,6 +1913,7 @@ impl Server<'_> {
         let plugin = Self::plugin(self.ctx, head);
         let paired = plugin || devices::check(self.ctx, header(head, "cookie").unwrap_or_default()).is_ok();
         let screen = |c: &Ctx, q: &Q| crate::runner::request(|| self.screen(c, base, q, paired));
+        let mut log = crate::db::last_seq(&self.ctx.state);
         let Some(mut cur) = screen(&ctx(), &q).filter(|_| open && (plugin || self.allowed(self.ctx, head))) else {
             self.streams.fetch_sub(1, Relaxed);
             let r = line(
@@ -1939,7 +1940,7 @@ impl Server<'_> {
         start.extend(count(&cur).map(|n| json!({"op": "badge", "count": n})));
         let ver = format!("{:08x}", super::VER);
         let mut msg = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\nid: {seq}\ndata: {}\n\n", json!({"seq": seq, "build": ver, "ops": start}));
-        let (mut log, mut ping) = (crate::db::last_seq(&self.ctx.state), drover_core::clock::instant());
+        let mut ping = drover_core::clock::instant();
         let mut built = drover_core::clock::instant();
         let mut z = super::wire::Stream::new(head);
         let res = loop {
