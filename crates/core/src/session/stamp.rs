@@ -40,6 +40,7 @@ pub fn exit(events: &[Event], agent: &str) -> Option<Exit> {
             .and_then(|c| i32::try_from(c).ok()),
         cause: Cause::parse(e.str("cause")?)?,
         note: e.str("note").map(String::from),
+        said: e.str("said").map(String::from),
     })
 }
 
@@ -78,16 +79,37 @@ fn revive(ctx: &Ctx, events: &[Event], (fleet, issue): (&str, u64), sp: &Event) 
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-alive", d))
 }
 
-fn gone(ctx: &Ctx, cfg: &Config, (fleet, issue): (&str, u64), agent: &str, exit: &Exit, mut d: Value) -> Result<bool> {
+fn gone(
+    ctx: &Ctx,
+    cfg: &Config,
+    (fleet, issue): (&str, u64),
+    agent: &str,
+    exit: &Exit,
+    said: impl FnOnce() -> Option<String>,
+    mut d: Value,
+) -> Result<bool> {
     let events = crate::events::working(&ctx.state)?;
     if latest(&events, agent).is_some_and(|e| e.str("state") == Some("gone")) {
         return Ok(false);
     }
+    let said = (exit.cause == Cause::Crash).then(said).flatten();
+    let refused = [&exit.note, &said]
+        .into_iter()
+        .flatten()
+        .any(|w| w.contains("ECONNREFUSED"));
+    let cause = if refused && exit.cause == Cause::Crash {
+        Cause::Refused
+    } else {
+        exit.cause
+    };
     d.put("state", json!("gone"))
         .put("code", json!(exit.code))
-        .put("cause", json!(exit.cause.word()));
+        .put("cause", json!(cause.word()));
     if let Some(n) = &exit.note {
         d.put("note", json!(n));
+    }
+    if let Some(w) = said {
+        d.put("said", json!(w));
     }
     stamp(ctx, &events, (fleet, issue), agent, d)?;
     if exit.cause == Cause::Limit {
@@ -105,8 +127,8 @@ fn gone(ctx: &Ctx, cfg: &Config, (fleet, issue): (&str, u64), agent: &str, exit:
     Ok(true)
 }
 
-/// One shed event into the log: its pulse, and its lane's `lane-state` stamp (an exit or kill is `gone`, with its cause); whether it stamped.
-pub fn on_event(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
+/// One shed event on wire `w` into the log: its pulse, and its lane's `lane-state` stamp (an exit or kill is `gone`, with its cause and a crash's last words); whether it stamped.
+pub fn on_event(ctx: &Ctx, cfg: &Config, w: &crate::shed::Wire, e: &shed_proto::Event) -> Result<bool> {
     let Some((fleet, issue)) = whose(cfg, &e.labels) else {
         return Ok(false);
     };
@@ -137,13 +159,16 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> 
                 code: *code,
                 cause,
                 note: None,
+                said: None,
             };
+            let said = || super::transcript::last_words(&crate::runner::Real, w, &e.name);
             gone(
                 ctx,
                 cfg,
                 at,
                 &e.name,
                 &exit,
+                said,
                 json!({"why": "exited", "shed_seq": e.seq}),
             )
         }
@@ -153,6 +178,7 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> 
                 code: None,
                 cause: Cause::Killed,
                 note: None,
+                said: None,
             };
             gone(
                 ctx,
@@ -160,6 +186,7 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> 
                 at,
                 &e.name,
                 &exit,
+                || None,
                 json!({"why": "killed", "shed_seq": e.seq}),
             )
         }
@@ -204,8 +231,14 @@ fn look(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], m: Option<&st
                 code,
                 cause: Cause::of(code, last),
                 note: s.note.clone(),
+                said: None,
             };
-            gone(ctx, cfg, at, &s.name, &exit, json!({"why": "exited"}))
+            let on = On::new(r, m);
+            let said = || {
+                let b = on.shed()?;
+                super::transcript::last_words(&on, &b.wire, &s.name)
+            };
+            gone(ctx, cfg, at, &s.name, &exit, said, json!({"why": "exited"}))
         }
     }
 }
@@ -231,7 +264,7 @@ pub fn intake(ctx: &Ctx, cfg: &Config, w: &crate::shed::Wire) -> Result<usize> {
     )?;
     let mut n = 0;
     for e in &got {
-        n += usize::from(on_event(ctx, cfg, e)?);
+        n += usize::from(on_event(ctx, cfg, w, e)?);
     }
     if let Some(last) = got.iter().map(|e| e.seq).max() {
         std::fs::write(ctx.state.with_file_name("shed.seq"), last.to_string())?;

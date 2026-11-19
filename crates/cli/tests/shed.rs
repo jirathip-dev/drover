@@ -98,21 +98,22 @@ fn another_build_of_the_same_protocol_is_accepted() {
 }
 
 #[test]
-fn another_shed_protocol_is_refused_naming_both_sides() {
-    use shed::proto::{BUILD, PROTOCOL, VERSION};
-    for protocol in [PROTOCOL - 1, PROTOCOL + 1] {
-        let b = FakeShed::start("9.9.9", vec![]);
-        b.state.lock().unwrap().hello.as_mut().unwrap().build = "0000000".into();
-        b.state.lock().unwrap().hello.as_mut().unwrap().protocol = protocol;
-        let e = shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap_err();
-        assert_eq!(
-            format!("{e:#}"),
-            format!(
-                "SHED_VERSION: drover speaks shed {VERSION} ({BUILD}) protocol {PROTOCOL}, \
-                 the server is 9.9.9 (0000000) protocol {protocol}"
-            )
-        );
-    }
+fn a_shed_protocol_under_drovers_minimum_is_refused_naming_both_and_a_newer_one_passes() {
+    let min = shed::MIN_PROTOCOL;
+    let b = FakeShed::start("9.9.9", vec![]);
+    b.state.lock().unwrap().hello.as_mut().unwrap().build = "0000000".into();
+    b.state.lock().unwrap().hello.as_mut().unwrap().protocol = min - 1;
+    let e = shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap_err();
+    assert_eq!(
+        format!("{e:#}"),
+        format!(
+            "SHED_VERSION: shed serve is 9.9.9 (0000000) protocol {}, drover needs shed protocol {min} or newer → {}",
+            min - 1,
+            shed::UPDATE
+        )
+    );
+    b.state.lock().unwrap().hello.as_mut().unwrap().protocol = min + 1;
+    shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap();
 }
 
 #[test]
@@ -418,7 +419,7 @@ fn a_shed_without_run_meta_is_a_doctor_cross_and_refuses_acp_lanes() {
         out.contains("✗ shed run --meta — this host's shed predates shed#94"),
         "{out}"
     );
-    assert!(out.contains(&format!("--rev {} ", shed::REV)), "{out}");
+    assert!(out.contains(&format!("→ {}", shed::UPDATE)), "{out}");
     let new = acp_fake(&["echo", "claude-agent-acp"]);
     let (_, out) = run(&c, &new, &["doctor"]);
     assert!(out.contains("✓ shed run --meta — "), "{out}");

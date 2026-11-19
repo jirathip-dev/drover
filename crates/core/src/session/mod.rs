@@ -169,6 +169,7 @@ impl Session {
 pub enum Cause {
     Limit,
     Crash,
+    Refused,
     Killed,
     Ended,
 }
@@ -188,19 +189,20 @@ impl Cause {
         match self {
             Cause::Limit => "usage limit",
             Cause::Crash => "adapter crash",
+            Cause::Refused => "ECONNREFUSED: proxy tunnel down",
             Cause::Killed => "killed",
             Cause::Ended => "ended normally",
         }
     }
     /// The cause a logged word names (old rows too).
     pub fn parse(w: &str) -> Option<Cause> {
-        [Cause::Limit, Cause::Crash, Cause::Killed, Cause::Ended]
+        [Cause::Limit, Cause::Crash, Cause::Refused, Cause::Killed, Cause::Ended]
             .into_iter()
             .find(|c| c.word() == w)
     }
     /// Drover resumes the lane in its worktree.
     pub fn resumable(self) -> bool {
-        matches!(self, Cause::Limit | Cause::Crash)
+        matches!(self, Cause::Limit | Cause::Crash | Cause::Refused)
     }
 }
 
@@ -210,6 +212,20 @@ pub struct Exit {
     pub code: Option<i32>,
     pub cause: Cause,
     pub note: Option<String>,
+    pub said: Option<String>,
+}
+
+impl Exit {
+    /// The cause, how it exited (shed's 128 + N is signal N) and its last words: what `lane-dead` and its card say.
+    pub fn line(&self) -> String {
+        let how = match self.code {
+            Some(c) if c > 128 => format!(", signal {}", c - 128),
+            Some(c) if c != 0 => format!(", exit {c}"),
+            _ => String::new(),
+        };
+        let said = self.said.as_ref().map_or(String::new(), |s| format!("; {s}"));
+        format!("{}{how}{said}", self.cause.word())
+    }
 }
 
 /// Where a session stands on the host its spawn named.

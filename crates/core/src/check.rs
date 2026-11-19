@@ -80,6 +80,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         (local.as_ref().ok()).map(|a| a.iter().filter(|s| s.running() && s.lane()).cloned().collect());
     if let Some(a) = &agents {
         crate::orchestrator::sleep_idle(ctx, cfg, r, &events, a)?;
+        crate::orchestrator::silence(ctx, cfg, r, &events, a)?;
         for t in events.iter().filter(|e| e.kind == "thread-new") {
             let id = t.str("thread").unwrap_or_default();
             if let Some((s, quiet)) = crate::orchestrator::hung(ctx, cfg, &events, a, id) {
@@ -282,7 +283,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];
-        let mut cause = None;
+        let mut dead = vec![];
         if let (Some(_), Some((role, lane))) = (&agents, s.active_lane()) {
             let spawned = last_spawn(&events, lane);
             let r = &On::of(r, spawned);
@@ -304,8 +305,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 format!("{}:{lane}", s.last_ts)
             };
             if let Health::Dead(exit) = &health {
-                cause = exit.as_ref().map(|x| x.cause.word());
-                let why = cause.map_or(String::new(), |c| format!(": {c}"));
+                dead = crate::breaker::dead_tags(cfg, &events, lane, exit.as_ref());
+                let why = exit.as_ref().map_or(String::new(), |x| format!(": {}", x.line()));
                 hits.push((
                     "lane-dead",
                     key.clone(),
@@ -406,8 +407,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
         for (kind, key, reason) in hits {
             let mut d = json!({"key": key, "reason": reason});
-            if let Some(c) = cause.filter(|_| kind == "lane-dead") {
-                d.put("cause", json!(c));
+            for (k, v) in dead.iter().filter(|_| kind == "lane-dead") {
+                d.put(k, v.clone());
             }
             fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), kind, d)?;
         }
@@ -641,6 +642,8 @@ fn health(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Res
         ));
         let slow = h.at("slow").as_str().map(|s| format!("serve {s}"));
         now.push(("drover", "serve-slow", slow));
+        let phone = h.at("phone_slow").as_str().map(|s| format!("phone {s}"));
+        now.push(("drover", "phone-slow", phone));
         let sha = h.at("sha").as_str().unwrap_or("?");
         let why = format!(
             "the serve on the port runs {sha:.7}, not the installed {:.7} → drover self-update",
@@ -658,8 +661,24 @@ fn health(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Res
             p.data.get("secs").and_then(serde_json::Value::as_f64).unwrap_or(0.0),
             p.str("step").unwrap_or("?"),
         );
+        let mut remote: Vec<(&String, &serde_json::Value)> =
+            p.val("remote").as_object().into_iter().flatten().collect();
+        remote.sort_by(|a, b| {
+            b.1.at("secs")
+                .as_f64()
+                .partial_cmp(&a.1.at("secs").as_f64())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let remote: Vec<String> = (remote.iter())
+            .map(|(h, v)| format!("{h} {} calls {} s", v.at("calls"), v.at("secs")))
+            .collect();
+        let remote = if remote.is_empty() {
+            String::new()
+        } else {
+            format!("; remote: {}", remote.join(", "))
+        };
         let why = format!(
-            "{name}'s pass took {secs} s; slowest step: {step} ({} s)",
+            "{name}'s pass took {secs} s; slowest step: {step} ({} s){remote}",
             p.data.get("step_secs").unwrap_or(&json!("?"))
         );
         now.push((

@@ -767,6 +767,7 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let (agent, pane) = (s.str("agent").unwrap_or_default(), s.str("pane").unwrap_or_default());
     if acp(s) {
         crate::shed::cli(r, &["send", agent, line])?;
+        held(ctx, cfg, r, t, &events, agents.iter().find(|a| a.name == agent))?;
         return Ok(agent.into());
     }
     term::reply(
@@ -776,6 +777,7 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
         pane,
         &line.replace('\n', " "),
     )?;
+    held(ctx, cfg, r, t, &events, agents.iter().find(|a| a.name == agent))?;
     Ok(agent.into())
 }
 
@@ -1356,11 +1358,14 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         let Some(s) = last.filter(|e| e.kind == "orchestrator-start") else {
             continue;
         };
-        let quiet =
-            of(events, id).map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
+        let heard = of(events, id).filter(|e| e.data.get("noreply").is_none());
+        let quiet = heard.map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
         let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"));
         if a.is_some_and(Session::signed_out) {
             signed_out(ctx, cfg, r, t, s)?;
+            continue;
+        }
+        if a.is_some() && pending(events, id).is_some() {
             continue;
         }
         let gone = a.is_none() && acp(s);
@@ -1394,4 +1399,74 @@ fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> 
     )?;
     let d = json!({"thread": id, "from": "system", "text": format!("{hn} is signed out: sign in"), "signin": hn});
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
+}
+
+fn human(e: &Event) -> bool {
+    e.kind == "thread-msg"
+        && e.str("from")
+            .is_some_and(|f| !matches!(f, "orchestrator" | "system") && !is_id(f))
+}
+
+fn since(events: &[Event], id: &str, seq: u64, flag: &str) -> bool {
+    of(events, id).any(|e| {
+        e.seq > seq && e.kind == "thread-msg" && (e.str("from") == Some("orchestrator") || e.data.get(flag).is_some())
+    })
+}
+
+fn pending<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
+    let h = of(events, id).rfind(|e| e.kind == "thread-msg" && e.data.get("held").is_some())?;
+    let sent = of(events, id).any(|e| e.seq > h.seq && e.kind == "thread-continued");
+    (!sent && !since(events, id, h.seq, "held")).then_some(h)
+}
+
+fn held(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], a: Option<&Session>) -> Result<()> {
+    let id = t.str("thread").unwrap_or_default();
+    let Some(a) = a.filter(|a| a.status() == Some(crate::session::Status::Limited)) else {
+        return Ok(());
+    };
+    let Some(m) = of(events, id)
+        .rfind(|e| human(e))
+        .filter(|m| !since(events, id, m.seq, "held"))
+    else {
+        return Ok(());
+    };
+    let at = crate::limit::reset_at(r, a.note.as_deref().unwrap_or_default(), ctx.now);
+    let until = at.map_or("its reset".into(), |at| crate::usage::date(r, at, "+%a %H:%M"));
+    let text = format!("orchestrator out of usage until {until}; your message is kept");
+    let d = json!({"thread": id, "from": "system", "text": text, "held": m.seq, "at": at});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
+}
+
+/// `check`: per thread, its rate-limited orchestrator's `out of usage` row, one `continue` at that row's reset time, and a `no reply yet` row for an owner message unanswered `orchestrator_reply_minutes`.
+pub fn silence(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents: &[Session]) -> Result<()> {
+    for t in threads(events) {
+        let id = t.str("thread").unwrap_or_default();
+        let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
+        let s = last.filter(|e| e.kind == "orchestrator-start");
+        let a = s.and_then(|s| agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent")));
+        held(ctx, cfg, r, t, events, a)?;
+        let due = pending(events, id).filter(|h| h.val("at").as_u64().is_some_and(|at| ctx.now >= at));
+        if let Some(h) = due {
+            let sent = deliver(ctx, cfg, r, t, crate::limit::CONTINUE).is_ok();
+            let d = json!({"thread": id, "held": h.seq, "sent": sent});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, &t.fleet, None, "thread-continued", d),
+            )?;
+        }
+        let Some(m) = of(events, id).rfind(|e| human(e)) else {
+            continue;
+        };
+        if ctx.now < m.ts + cfg.limits.orchestrator_reply_minutes * 60 || since(events, id, m.seq, "noreply") {
+            continue;
+        }
+        let shows = a.map_or("asleep".into(), |a| {
+            let word = a.status().map_or("gone", crate::session::Status::word);
+            a.note.as_deref().map_or(word.to_string(), |n| format!("{word}: {n}"))
+        });
+        let d = json!({"thread": id, "from": "system", "text": format!("no reply yet: the orchestrator is {shows}"), "noreply": m.seq});
+        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+    }
+    Ok(())
 }

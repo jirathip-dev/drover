@@ -9,7 +9,7 @@ fn typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_rel
     if no_webkit() {
         return;
     }
-    let (c, o) = thread_t2("page-drafts", "drafts.mjs", &[]);
+    let (c, o) = thread_t2("page-drafts", "drafts.mjs", &[], &[]);
     let out: Value =
         serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
     assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
@@ -77,7 +77,7 @@ fn typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_rel
     );
 }
 
-fn thread_t2(name: &str, script: &str, args: &[&str]) -> (drover::Ctx, std::process::Output) {
+fn thread_t2(name: &str, script: &str, args: &[&str], more: &[(&str, Value)]) -> (drover::Ctx, std::process::Output) {
     let c = ctx(
         &tmpdir(name),
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
@@ -100,6 +100,9 @@ fn thread_t2(name: &str, script: &str, args: &[&str]) -> (drover::Ctx, std::proc
             "thread-msg",
             json!({"thread": "t2", "from": from, "text": text}),
         );
+    }
+    for (kind, d) in more {
+        ev(now - 600, kind, d.clone());
     }
     let ck = pair(
         &Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
@@ -126,7 +129,7 @@ fn a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every
     if no_webkit() {
         return;
     }
-    let (_c, o) = thread_t2("page-repaint", "repaint.mjs", &[]);
+    let (_c, o) = thread_t2("page-repaint", "repaint.mjs", &[], &[]);
     let out: Value =
         serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
     assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
@@ -245,7 +248,7 @@ fn an_answered_card_leaves_the_cards_at_once_and_stays_gone_while_its_answer_run
         assert_eq!(
             (&s["at1s"], &s["after"]),
             (&json!(false), &json!(false)),
-            "{id} is gone within 1 s and stays gone after the page reloads the cards while its answer runs: {out}"
+            "{id} is gone within 1 s and stays gone 3 s later while its answer runs: {out}"
         );
         assert_eq!(s["left"], left, "{id}: the other cards stay: {out}");
     }
@@ -271,4 +274,50 @@ fn an_answered_card_leaves_the_cards_at_once_and_stays_gone_while_its_answer_run
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     assert!(decided(), "the held answers land once released: {out}");
+}
+
+#[test]
+fn a_send_shows_at_once_then_once_and_an_answered_card_goes_at_once_and_stays_gone() {
+    if no_webkit() {
+        return;
+    }
+    let ask = json!({"id": "q1", "question": "Ship the slow path?", "options": ["yes", "no"]});
+    let (c, o) = thread_t2("page-optimistic", "optimistic.mjs", &[], &[("needs-decision", ask)]);
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    let send = &out["send"];
+    assert!(
+        send["ms"].as_f64().is_some_and(|ms| ms < 100.0),
+        "the sent message is in the DOM within 100 ms: {out}"
+    );
+    assert_eq!(
+        send["pending"], true,
+        "with the pending style while the POST is held: {out}"
+    );
+    assert_eq!(
+        (&out["confirmed"]["shown"], &out["confirmed"]["pending"]),
+        (&json!(1), &json!(0)),
+        "once confirmed by the stream it shows once: {out}"
+    );
+    let answer = &out["answer"];
+    assert!(
+        answer["ms"].as_f64().is_some_and(|ms| ms < 100.0),
+        "the answered card is gone within 100 ms: {out}"
+    );
+    assert!(
+        answer["deltas"].as_u64().unwrap() >= 3,
+        "3 s of stream screens still carrying the card: {out}"
+    );
+    assert_eq!(
+        (&answer["back"], &answer["status"], &answer["after"]),
+        (&json!(false), &json!(200), &json!(false)),
+        "{out}"
+    );
+    assert_eq!(out["reloads"], 0, "no screen is read again after an action: {out}");
+    let log = read(&c.state).unwrap().to_vec();
+    assert!(
+        log.iter().any(|e| e.kind == "decision" && e.str("id") == Some("q1")),
+        "{out}"
+    );
 }

@@ -170,12 +170,17 @@ impl Plan {
         if let Some(v) = providers::get(&self.harness).token_env() {
             c.push(format!("&& unset {v}"));
         }
-        if !self.secrets().is_empty() || self.lane_key.is_some() {
+        if self.sources_secrets() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
         }
         c.extend(self.qos().map(|_| BACKGROUND.to_string()));
         c
+    }
+
+    /// Its start sources the secrets file `deliver` writes and removes once the lane runs.
+    pub fn sources_secrets(&self) -> bool {
+        !self.secrets().is_empty() || self.lane_key.is_some()
     }
 
     fn secrets(&self) -> Vec<(String, &str, String)> {
@@ -598,6 +603,7 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
         cmd: [argv(&["sh", "-c", &line, "sh"]), cmd].concat(),
         mcp: (meta.is_some() || !p.mcp.is_empty()).then(|| p.mcp_file.clone()),
         meta,
+        awake: p.sources_secrets(),
     })
 }
 
@@ -646,13 +652,7 @@ fn remote_acp(
         )?;
     }
     match crate::hosts::acp_guard(ctx, on, home, (&p.profile, p.family, id)) {
-        Ok(()) => {}
-        Err(why @ crate::hosts::Unguarded::Build { .. }) => {
-            return refused(
-                "HOST_UPDATING",
-                format!("{}: {why}; the next self-update catches it up", pl.name),
-            )
-        }
+        Ok(()) | Err(crate::hosts::Unguarded::Build { .. }) => {}
         Err(why) => {
             crate::hosts::sick(ctx, &pl.name, &format!("✗ acp guard {} — {why}", p.profile));
             return refused(

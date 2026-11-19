@@ -1035,6 +1035,9 @@ pub struct ServeHealth {
     pub clients: u64,
     pub queued: u64,
     pub slow: Option<String>,
+    /// The phone's last minute by kind (`tap`, `sheet`, `tab`, `send`, `answer`, `delta`; `<kind>/network|parse|render`).
+    pub phone: Vec<RouteTime>,
+    pub phone_slow: Option<String>,
 }
 
 /// One route's requests in the window: how many, their median, 95th percentile and slowest in ms.

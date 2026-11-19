@@ -27,7 +27,11 @@ const V1_PAIRED: &[&str] = &[
     "lifeboat",
     "config-check",
     "config-edit",
+    "timings",
 ];
+
+const PHONE: &[&str] = &["tap", "sheet", "tab", "send", "answer", "delta"];
+const PHONE_P95_MS: u64 = 150;
 
 type Res = (&'static str, &'static str, Vec<u8>);
 
@@ -89,21 +93,7 @@ impl Server<'_> {
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |s| out("200 OK", &s),
             ),
-            ("GET", Some("health")) => {
-                let error = Config::loaded(ctx).err().map(|e| format!("{:#}", e.0));
-                let (config, serve) = (if error.is_some() { "invalid" } else { "ok" }, self.numbers(ctx.now));
-                out(
-                    "200 OK",
-                    &Health {
-                        ok: error.is_none(),
-                        config: config.into(),
-                        error,
-                        routes: lock(&self.timing).routes(ctx.now),
-                        sources: self.r.refreshed(),
-                        serve,
-                    },
-                )
-            }
+            ("GET", Some("health")) => out("200 OK", &self.health(ctx)),
             ("GET", Some("config" | "shed")) if !paired => {
                 reply("401 Unauthorized", "UNPAIRED", "pair this device first")
             }
@@ -250,6 +240,7 @@ impl Server<'_> {
                     r => done(r.and_then(|(c, cfg)| crate::propose::edit(ctx, &cfg, &self.r, &c, "owner (cooee)"))),
                 }
             }
+            ("POST", Some("timings")) => self.timings(ctx.now, body),
             ("POST", Some("chat")) => done(self.chat_defaults(ctx, &fields(body))),
             ("POST", Some("close")) => done(self.close(ctx, &fields(body))),
             ("POST", Some("qset")) => done(qset(ctx, &fields(body))),
@@ -551,10 +542,30 @@ impl Server<'_> {
         });
     }
 
-    fn numbers(&self, now: u64) -> ServeHealth {
+    fn health(&self, ctx: &Ctx) -> Health {
+        let error = Config::loaded(ctx).err().map(|e| format!("{:#}", e.0));
+        let (serve, routes) = (self.numbers(ctx.now, minutes(ctx)), lock(&self.timing).routes(ctx.now));
+        Health {
+            ok: error.is_none(),
+            config: if error.is_some() { "invalid" } else { "ok" }.into(),
+            error,
+            routes,
+            sources: self.r.refreshed(),
+            serve,
+        }
+    }
+
+    fn numbers(&self, now: u64, mins: u64) -> ServeHealth {
         let ((groups, busy), slow) = {
             let t = lock(&self.timing);
-            (t.minute(now), t.breach(now, 200, 5))
+            (t.minute(now), t.breach(now, 200, 5, |r| r.starts_with("/api/v1/")))
+        };
+        let (phone, phone_slow) = {
+            let t = lock(&self.phone);
+            let over = PHONE
+                .iter()
+                .filter_map(|k| t.breach(now, PHONE_P95_MS, mins, |r| r == *k));
+            (t.last(now), over.max_by_key(|x| x.1))
         };
         ServeHealth {
             at: now,
@@ -566,7 +577,26 @@ impl Server<'_> {
             clients: u64::try_from(lock(&self.clients).len()).unwrap_or(u64::MAX),
             queued: lock(&self.running).values().flatten().map(|_| 1).sum(),
             slow: slow.map(|(r, p95)| format!("{r} p95 {p95} ms, over 200 ms for 5 min")),
+            phone,
+            phone_slow: phone_slow.map(|(k, p95)| format!("{k} p95 {p95} ms, over {PHONE_P95_MS} ms for {mins} min")),
         }
+    }
+
+    fn timings(&self, now: u64, body: &str) -> Res {
+        let Ok(s) = serde_json::from_str::<Vec<(String, u64, u64, u64, u64)>>(body) else {
+            return reply(
+                "400 Bad Request",
+                "BAD_TIMINGS",
+                "[[kind, ms, network, parse, render], …]",
+            );
+        };
+        let mut t = lock(&self.phone);
+        for (k, ms, net, parse, render) in s.into_iter().filter(|x| PHONE.contains(&x.0.as_str())).take(500) {
+            for (part, v) in [("", ms), ("/network", net), ("/parse", parse), ("/render", render)] {
+                t.add(now, &format!("{k}{part}"), false, v);
+            }
+        }
+        reply("200 OK", "OK", "")
     }
 
     /// `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
@@ -577,13 +607,13 @@ impl Server<'_> {
             kb.ok().and_then(Result::ok).unwrap_or_default() / 1024,
             std::sync::atomic::Ordering::Relaxed,
         );
-        let h = serde_json::to_vec(&self.numbers(now)).unwrap_or_default();
+        let h = serde_json::to_vec(&self.numbers(now, minutes(self.ctx))).unwrap_or_default();
         drop(std::fs::write(self.ctx.state.with_file_name("serve-health.json"), h));
         let (Ok(cfg), Ok(ev)) = (Config::kept(self.ctx), working(&self.ctx.state)) else {
             return;
         };
         let (limit, mins) = (cfg.limits.slo_api_p95_ms, cfg.limits.slo_api_minutes);
-        let broken = lock(&self.timing).breach(now, limit, mins);
+        let broken = lock(&self.timing).breach(now, limit, mins, |r| r.starts_with("/api/v1/"));
         let e = match (broken, slo_open(&ev).is_some()) {
             (Some((route, p95)), false) => {
                 let why = format!("{route} p95 {p95} ms, over {limit} ms for {mins} min");
@@ -595,6 +625,13 @@ impl Server<'_> {
         };
         drop(crate::events::emit(&self.ctx.state, &cfg, e));
     }
+}
+
+fn minutes(ctx: &Ctx) -> u64 {
+    Config::kept(ctx).map_or_else(
+        |_| crate::config::Limits::default().slo_api_minutes,
+        |c| c.limits.slo_api_minutes,
+    )
 }
 
 pub(super) fn slo_open(events: &[Event]) -> Option<&Event> {

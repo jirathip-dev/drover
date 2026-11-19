@@ -6,12 +6,13 @@ use serde_json::{json, Value};
 use shed_proto::{KeysParams, Method, ReadParams, RunParams, SendParams, Target, WaitParams};
 use std::path::PathBuf;
 
-/// An ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`) and the provider's session options (`--meta`).
+/// An ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`), the provider's session options (`--meta`) and whether shed may never hibernate it (`--no-hibernate`).
 #[derive(Clone, Debug, Default)]
 pub struct Acp {
     pub cmd: Vec<String>,
     pub mcp: Option<PathBuf>,
     pub meta: Option<Value>,
+    pub awake: bool,
 }
 
 /// Shed's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
@@ -109,6 +110,7 @@ impl Shed {
                 .flat_map(|f| ["--mcp".into(), f.to_string_lossy().into_owned()]),
         );
         a.extend(acp.meta.iter().flat_map(|m| ["--meta".into(), m.to_string()]));
+        a.extend(acp.awake.then(|| "--no-hibernate".to_string()));
         a.extend(labels.iter().flat_map(|(k, v)| ["--label".into(), format!("{k}={v}")]));
         a.extend(
             (!acp.cmd.is_empty())

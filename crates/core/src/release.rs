@@ -27,6 +27,7 @@ pub struct Asset {
 pub struct Builds {
     pub live: Option<String>,
     pub staged: Option<String>,
+    pub unsigned: bool,
 }
 
 /// Why a host's stage failed; its `drover.new` is removed and the live binary is untouched.
@@ -88,6 +89,39 @@ pub fn find(r: &dyn Runner, repo: &str, branch: &str, sha: &str) -> Found {
     })
 }
 
+/// The release workflow's first error annotation on `sha` in `repo`: the job that logged it and its message.
+pub fn failure(r: &dyn Runner, repo: &str, sha: &str) -> Option<(String, String)> {
+    let gh = |args: &[&str]| -> Option<serde_json::Value> {
+        let o = r.run("gh", &argv(args)).ok().filter(|o| o.code == 0)?;
+        serde_json::from_str(&o.stdout).ok()
+    };
+    let runs = gh(&[
+        "run",
+        "list",
+        "-R",
+        repo,
+        "-w",
+        "release.yml",
+        "-c",
+        sha,
+        "--json",
+        "databaseId",
+        "-L",
+        "1",
+    ])?;
+    let id = runs.get(0)?.get("databaseId")?.as_u64()?.to_string();
+    let jobs = gh(&["run", "view", &id, "-R", repo, "--json", "jobs"])?;
+    jobs.get("jobs")?.as_array()?.iter().find_map(|j| {
+        let job = j.get("databaseId")?.as_u64()?;
+        let notes = gh(&["api", &format!("repos/{repo}/check-runs/{job}/annotations")])?;
+        let first = notes.as_array()?.iter().find(|a| a["annotation_level"] == "failure")?;
+        Some((
+            j.get("name")?.as_str()?.to_string(),
+            first.get("message")?.as_str()?.to_string(),
+        ))
+    })
+}
+
 impl Release {
     /// The asset for a host with probed `tags` (`os:macos` + `arch:arm64`, or `os:linux` + `arch:x86_64`).
     pub fn asset(&self, repo: &str, tags: &[String]) -> Option<Asset> {
@@ -126,7 +160,17 @@ pub fn builds(on: &dyn Runner, exe: &str) -> Result<Builds> {
     Ok(Builds {
         live: l.next().and_then(sha_of),
         staged: l.next().and_then(sha_of),
+        unsigned: false,
     })
+}
+
+const DEVELOPER_ID: &str =
+    "=anchor apple generic and identifier \"drover\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists";
+
+/// Whether `exe` on a host is signed by a Developer ID Application certificate as drover.
+pub fn signed(on: &dyn Runner, exe: &str) -> bool {
+    on.run("codesign", &argv(&["-v", "-R", DEVELOPER_ID, exe]))
+        .is_ok_and(|o| o.code == 0)
 }
 
 /// The shell line that downloads `a` to `exe.new`, checks its sha256 and prints its `--version` (exit 3: download, 4: checksum).

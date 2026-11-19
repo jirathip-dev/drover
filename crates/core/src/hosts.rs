@@ -33,6 +33,17 @@ const CM: [&str; 3] = [
     "-oControlPersist=10m",
 ];
 
+/// `f` over `items`, one thread each (a host's remote calls never wait on another host's), results in order.
+pub fn each<T: Send, U: Send>(items: impl IntoIterator<Item = T>, f: impl Fn(T) -> U + Sync) -> Vec<U> {
+    let f = &f;
+    std::thread::scope(|s| {
+        let hs: Vec<_> = items.into_iter().map(|x| s.spawn(move || f(x))).collect();
+        hs.into_iter()
+            .map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+            .collect()
+    })
+}
+
 /// `On::existing`'s script: the paths on stdin, a line each.
 pub const EXISTS: &str = "while IFS= read -r p; do test -e \"$p\" && echo y || echo n; done";
 
@@ -202,7 +213,7 @@ impl Runner for On<'_> {
     }
 }
 
-/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step and the child it waits on, for `tick-stuck`.
+/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step, the child it waits on and `n`, the nanosecond of its last step or call (local calls too): the progress `slo-tick` watches.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
     probe: bool,
@@ -286,13 +297,13 @@ impl<'a> Pass<'a> {
     }
     fn note(&self, child: &str) {
         if let Some((p, since)) = &self.mark {
-            let (step, at) = lock(&self.step).clone();
+            let ((step, at), n) = (lock(&self.step).clone(), self.t0.elapsed().as_nanos());
             let at = since + at;
-            let m = json!({"since": since, "at": at, "step": step, "child": child, "pid": crate::sim::pid()});
+            let m = json!({"since": since, "at": at, "step": step, "child": child, "pid": crate::sim::pid(), "n": n});
             std::fs::write(p, m.to_string()).ok();
         }
     }
-    fn host<'b>(prog: &str, args: &'b [String]) -> Option<&'b str> {
+    pub(crate) fn host<'b>(prog: &str, args: &'b [String]) -> Option<&'b str> {
         let end = args.iter().position(|a| a == "--").filter(|_| prog == "ssh")?;
         let last = args.get(end.checked_sub(1)?)?;
         Some(last.as_str()).filter(|m| !m.starts_with('-'))
@@ -319,6 +330,7 @@ impl<'a> Pass<'a> {
         u
     }
     fn call(&self, prog: &str, args: &[String], input: Option<&str>) -> Result<Out> {
+        self.note(&quote(prog, args));
         let Some(m) = Self::host(prog, args) else {
             return input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i));
         };
@@ -336,7 +348,6 @@ impl<'a> Pass<'a> {
                 ..Out::default()
             });
         }
-        self.note(&quote(prog, args));
         let core = matches!(lock(&self.step).0.as_str(), "check" | "drive");
         let over = !core && self.over();
         if over {
@@ -532,20 +543,27 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                 let live = live.unwrap_or_default();
                 (landed, s.drover) = (!s.drover.is_empty() && live != s.drover, live);
             }
-            if let Some(Err(e)) = h
+            let tunnel = h
                 .machine
                 .as_deref()
                 .filter(|_| cfg.host_acp(name).is_some())
-                .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)))
-            {
-                crate::stderr!("proxy {name}: {e:#}");
-            }
+                .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)));
             if (due || landed) && h.machine.is_some() && h.enabled {
                 s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
-                if h.cloud.is_some() {
+                if h.watches_token() {
                     let (card, warn) = crate::cloud::github(&on, ctx.now);
                     (s.github, ()) = (card, s.health.extend(warn));
                 }
+            }
+            s.health.retain(|w| !w.starts_with(crate::proxy::DOWN));
+            let down = match tunnel {
+                Some(Ok(false)) => Some("no answer through it there; restarted".to_string()),
+                Some(Err(e)) => Some(format!("{e:#}")),
+                _ => None,
+            };
+            if let Some(why) = down {
+                crate::stderr!("proxy {name}: tunnel down: {why}");
+                s.health.push(format!("{}: {why}", crate::proxy::DOWN));
             }
             let mut hs = host::sample(&on);
             host::pace(&ctx.state, on.machine, &mut hs, ctx.now);
@@ -1019,7 +1037,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     let reach = format!("can't reach {}:", f.repo);
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
     let swap = cfg.limits.self_update_swap_secs;
-    let behind = machine.and_then(|_| updating(pre.0, name, (ctx.now, swap)));
+    let behind = machine.and_then(|_| updating(pre.0, (ctx.now, swap)));
     let mut full = false;
     let (hs, refusal) = match cloud.map_or_else(|| crate::session::live_on(&on).map_err(|_| None), |c| Err(Some(c))) {
         Err(Some(c)) => (Host::default(), Some(c)),
@@ -1166,7 +1184,7 @@ pub fn acp_profiles(cfg: &Config, name: &str, tags: &[String]) -> Vec<(String, &
         .collect()
 }
 
-/// Why a remote ACP lane would run unguarded: another drover build there (a rollout), or no hook or adapter.
+/// Why a remote ACP lane would run unguarded: no hook or adapter, or (a warning only) another drover build there.
 #[derive(Debug)]
 pub enum Unguarded {
     Build { theirs: String, mine: String },
@@ -1183,15 +1201,11 @@ impl std::fmt::Display for Unguarded {
     }
 }
 
-/// Why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: its drover is this one's version, `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, and its shed lists the hooked adapter `id`.
+/// Why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: `profiles sync` gave the profile drover's `PreToolUse` hook for `family`, its shed lists the hooked adapter `id`, then its drover is this one's version.
 pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &str, &str)) -> Result<(), Unguarded> {
     let exe = real_exe(ctx, home);
     let root = ok(on, &exe, &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
     let theirs = with_path(on, &exe, root).0;
-    let mine = format!("drover {}", crate::VERSION);
-    if theirs != mine {
-        return Err(Unguarded::Build { theirs, mine });
-    }
     let dir = rehome(
         vec![providers::profiles_root(ctx).join(profile).display().to_string()],
         Some(home),
@@ -1222,32 +1236,25 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
             "shed there lists no {id} (`shed agents add {id}` there)"
         )));
     }
+    let mine = format!("drover {}", crate::VERSION);
+    if theirs != mine {
+        return Err(Unguarded::Build { theirs, mine });
+    }
     Ok(())
 }
 
-/// Why placement passes over remote host `name` in a rollout, from the log alone: every remote host while a swap is in flight, or `name` while it is left behind.
-pub fn updating(events: &[Event], name: &str, (now, swap_secs): (u64, u64)) -> Option<String> {
+/// Why placement passes over every remote host, from the log alone: a staged release swaps there.
+pub fn updating(events: &[Event], (now, swap_secs): (u64, u64)) -> Option<String> {
     let rollout = |e: &&Event| {
         e.str("target") == Some("live") && matches!(e.kind.as_str(), "self-update-swapping" | "self-updated")
     };
-    let last = events
+    let e = events
         .iter()
         .rfind(rollout)
-        .filter(|e| e.kind == "self-update-swapping");
-    if let Some(e) = last.filter(|e| now < e.ts.saturating_add(swap_secs)) {
-        return Some(format!(
-            "drover swaps to {:.7} on every host",
-            e.str("sha").unwrap_or_default()
-        ));
-    }
-    let mine = |e: &&Event| {
-        e.str("host") == Some(name)
-            && (e.kind == "host-behind" || e.kind == "host-sync" && e.val("ok") == &Value::Bool(true))
-    };
-    let e = events.iter().rfind(mine).filter(|e| e.kind == "host-behind")?;
-    let (has, wants) = (e.str("has").unwrap_or("?"), e.str("wants").unwrap_or_default());
+        .filter(|e| e.kind == "self-update-swapping" && now < e.ts.saturating_add(swap_secs))?;
     Some(format!(
-        "drover there is {has:.7}, not {wants:.7}; the next self-update catches it up"
+        "drover swaps to {:.7} on every host",
+        e.str("sha").unwrap_or_default()
     ))
 }
 
@@ -1329,7 +1336,7 @@ pub fn place(
         let code = p.refusal.as_ref().map(|x| x.0);
         let busy = matches!(
             code,
-            Some("DISK_LOW" | "HOST_BUSY" | "HOST_UPDATING" | "LOGIN_NEEDED" | "MEM_LOW")
+            Some("DISK_LOW" | "HOST_BUSY" | "HOST_UPDATING" | "LOGIN_NEEDED" | "MEM_LOW" | "NO_HOST")
         );
         let fits = cfg.hosts.get(was.0).map_or(needs.is_empty(), |h| fit(was.0, h));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
@@ -1366,9 +1373,7 @@ pub fn place(
         let whys: Vec<String> = full.into_iter().map(|w| w.1).collect();
         return refused(code, whys.join(", "));
     }
-    let mut on: Vec<Placed> = (open.into_iter())
-        .map(|(n, h)| at(ctx, cfg, f, r, (n, h.machine.as_deref()), pre))
-        .collect();
+    let mut on: Vec<Placed> = each(open, |(n, h)| at(ctx, cfg, f, r, (n, h.machine.as_deref()), pre));
     if on
         .iter()
         .all(|p| p.refusal.as_ref().is_some_and(|r| r.0 == "CLOUD_BUDGET"))

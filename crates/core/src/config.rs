@@ -281,6 +281,18 @@ pub struct HostCfg {
     pub heavy_kind_max: BTreeMap<String, usize>,
     /// Minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
     pub heavy_wait_minutes: Option<u64>,
+    /// Who issues gh's token here: `managed` (default) warns before it expires, `external` never does.
+    #[serde(default)]
+    pub github_token: GithubToken,
+}
+
+/// Who issues a host's GitHub token.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GithubToken {
+    #[default]
+    Managed,
+    External,
 }
 
 /// The point a starting lane frees its start slot.
@@ -300,6 +312,10 @@ impl HostCfg {
         let mut v = self.roots.clone();
         v.extend(self.root.clone().filter(|_| v.is_empty()));
         v
+    }
+    /// Whether health looks at gh's token here: a cloud host whose token drover manages.
+    pub fn watches_token(&self) -> bool {
+        self.cloud.is_some() && self.github_token == GithubToken::Managed
     }
     pub fn allow(&self) -> Vec<String> {
         let def = || {
@@ -723,6 +739,7 @@ pub struct Limits {
     pub respawn_max: u32,
     pub respawn_window_minutes: u64,
     pub respawn_per_pass: usize,
+    pub crash_wave_minutes: u64,
     pub runtime_down_failures: u64,
     pub runtime_down_minutes: u64,
     pub pass_max_secs: u64,
@@ -745,6 +762,7 @@ pub struct Limits {
     pub poll_millis: u64,
     pub tick_beat_secs: u64,
     pub orchestrator_idle_minutes: u64,
+    pub orchestrator_reply_minutes: u64,
     pub orchestrator_change_minutes: u64,
     pub token_refresh_minutes: u64,
     pub ask_waiting_minutes: u64,
@@ -851,6 +869,7 @@ impl Default for Limits {
             respawn_max: 3,
             respawn_window_minutes: 60,
             respawn_per_pass: 2,
+            crash_wave_minutes: 5,
             runtime_down_failures: 5,
             runtime_down_minutes: 30,
             pass_max_secs: 120,
@@ -873,6 +892,7 @@ impl Default for Limits {
             poll_millis: 20,
             tick_beat_secs: 60,
             orchestrator_idle_minutes: 30,
+            orchestrator_reply_minutes: 10,
             orchestrator_change_minutes: ORCHESTRATOR_CHANGE_MINUTES,
             token_refresh_minutes: 30,
             ask_waiting_minutes: 30,
@@ -1035,6 +1055,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "respawns a drive pass starts, each through admission (a fleet may set its own)",
     ),
     (
+        "crash_wave_minutes",
+        "3+ lanes of one host dying by an adapter crash within it are one `lane-wave`: respawned together, one alert",
+    ),
+    (
         "runtime_down_failures",
         "lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there",
     ),
@@ -1108,6 +1132,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "an orchestrator whose thread is quiet this long closes on the next `check`",
     ),
     (
+        "orchestrator_reply_minutes",
+        "an owner message with no orchestrator reply this long gets a `no reply yet` row",
+    ),
+    (
         "orchestrator_change_minutes",
         "an orchestrator's answer may not change one this long after it",
     ),
@@ -1169,7 +1197,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "slo_tick_minutes",
-        "a tick running longer than this breaches `slo-tick`; the next fast step stops it",
+        "a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast step stops it",
     ),
     (
         "slo_pass_minutes",

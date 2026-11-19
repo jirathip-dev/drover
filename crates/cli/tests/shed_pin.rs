@@ -1,7 +1,7 @@
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
-use drover::shed::proto::{BUILD, VERSION};
+use drover::shed::proto::{BUILD, PROTOCOL, VERSION};
 use serde_json::json;
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
@@ -40,34 +40,38 @@ fn refused(c: &drover::Ctx, sh: &FakeShed, f: &Fake) -> String {
 }
 
 #[test]
-fn a_shed_on_path_or_a_serve_off_the_pin_refuses_the_spawn_and_runs_nothing() {
-    let c = ctx(&tmpdir("shedpin-path"), CONFIG);
-    let sh = FakeShed::attached(&c);
-    let out = refused(&c, &sh, &fake("shed 9.9.9 (02fcf97)"));
-    assert!(out.contains("shed on PATH is 9.9.9 (02fcf97)"), "{out}");
-    assert!(out.contains(&drover::shed::REV[..7]), "{out}");
-
-    let c = ctx(&tmpdir("shedpin-hello"), CONFIG);
-    let sh = FakeShed::attached(&c);
-    let h = sh.lock().hello.clone().unwrap();
-    sh.lock().hello = Some(drover::shed::proto::Hello {
-        version: "9.9.9".into(),
-        build: "02fcf97".into(),
-        ..h
-    });
-    let out = refused(&c, &sh, &fake("shed: no version"));
-    assert!(out.contains("shed serve runs 9.9.9 (02fcf97)"), "{out}");
+fn shed_builds_9b88eb5_and_f026a4d_both_pass_spawn_and_doctor_whichever_runs_serve() {
+    for (serve, path) in [("9b88eb5", "f026a4d"), ("f026a4d", "9b88eb5")] {
+        let c = ctx(&tmpdir("shedpin-range"), CONFIG);
+        let sh = FakeShed::attached(&c);
+        sh.lock().hello.as_mut().unwrap().build = serve.into();
+        let f = fake(&format!("shed {VERSION} ({path})"));
+        let (code, out) = run(&c, &f, &["spawn", "sendmeter", "12", "impl"]);
+        assert!(!out.contains("SHED_VERSION"), "{serve}: {out}");
+        assert_eq!(code, 0, "{serve}: {out}");
+        assert_eq!(sh.all("run").len(), 1, "{serve}: {out}");
+        let (_, doctor) = run(&c, &f, &["doctor", "--config-only"]);
+        let want = format!(
+            "✓ shed — server {VERSION} ({serve}) protocol {PROTOCOL}, drover needs protocol {} or newer; \
+             shed on PATH {VERSION} ({path}) (serve hands over itself)",
+            drover::shed::MIN_PROTOCOL
+        );
+        assert!(doctor.lines().any(|l| l == want), "{serve}: {doctor}");
+    }
 }
 
 #[test]
-fn a_serve_build_other_than_the_shed_on_path_refuses_the_spawn_and_says_restart_serve() {
-    let c = ctx(&tmpdir("shedpin-serve"), CONFIG);
+fn a_serve_under_drovers_minimum_protocol_refuses_the_spawn_naming_both_protocols() {
+    let c = ctx(&tmpdir("shedpin-old"), CONFIG);
     let sh = FakeShed::attached(&c);
-    sh.lock().hello.as_mut().unwrap().build = "02fcf97".into();
+    sh.lock().hello.as_mut().unwrap().protocol = drover::shed::MIN_PROTOCOL - 1;
     let out = refused(&c, &sh, &fake(&ours()));
-    assert!(out.contains(&format!("shed serve runs {VERSION} (02fcf97)")), "{out}");
-    assert!(out.contains(&format!("shed on PATH is {VERSION} ({BUILD})")), "{out}");
-    assert!(out.contains("restart shed serve"), "{out}");
+    let want = format!(
+        "shed serve is {VERSION} ({BUILD}) protocol 0, drover needs shed protocol {} or newer → {}",
+        drover::shed::MIN_PROTOCOL,
+        drover::shed::UPDATE
+    );
+    assert!(out.contains(&want), "{out}");
 }
 
 #[test]
@@ -115,32 +119,10 @@ fn five_lanes_whose_prompt_never_landed_stop_every_respawn_with_one_needs_human_
 }
 
 #[test]
-fn shed_install_puts_the_binary_and_serve_on_the_pin_and_doctor_reads_it_back() {
-    let c = ctx(&tmpdir("shedpin-install"), CONFIG);
-    let _sh = FakeShed::attached(&c);
-    let rev = drover::shed::REV;
-    let f = fake(&ours())
-        .reply("cargo install --git", "")
-        .reply("shed install --force", "");
-    let (code, out) = run(&c, &f, &["shed", "install"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains(&format!("--rev {rev}")), "{out}");
-    assert!(!f.called("cargo") && !f.called("shed install"), "a dry run: {out}");
-
+fn drover_has_no_shed_install_verb_and_runs_no_cargo() {
+    let c = ctx(&tmpdir("shedpin-noinstall"), CONFIG);
+    let f = fake(&ours()).reply("cargo install --git", "");
     let (code, out) = run(&c, &f, &["shed", "install", "--yes"]);
-    assert_eq!(code, 0, "{out}");
-    let cargo = f.index(&format!(
-        "cargo install --git {} --rev {rev} --locked --force shed",
-        drover::shed::git()
-    ));
-    let serve = f.index("shed install --force");
-    assert!(cargo.is_some() && cargo < serve, "{:?}", f.calls.borrow());
-    let back = format!("shed on PATH {VERSION} ({BUILD}), pin {}", &rev[..7]);
-    assert!(out.contains(&back), "{out}");
-    assert_eq!(kinds(&c, "shed-installed").len(), 1, "{out}");
-    let (_, doctor) = run(&c, &f, &["doctor", "--config-only"]);
-    assert!(
-        doctor.lines().any(|l| l.starts_with("✓ shed — ") && l.ends_with(&back)),
-        "{doctor}"
-    );
+    assert_eq!(code, 2, "{out}");
+    assert!(!f.called("cargo") && !f.called("shed install"), "{out}");
 }

@@ -298,3 +298,72 @@ fn a_serve_that_cannot_take_its_port_logs_each_failure_and_a_fourth_in_an_hour_a
     assert_eq!(run(&at(&c, T + 3_601), &f, &["check"]).0, 0);
     assert_eq!(alerts(&c, "serve-loop"), ["serve-loop", "serve-loop-ok"], "an hour on");
 }
+
+#[test]
+fn the_phones_timings_land_in_serve_health_by_kind_and_a_slow_tap_alerts_phone_slow_once() {
+    let c = ctx(
+        &tmpdir("phone-slow"),
+        &CONFIG.replace("[limits]\n", "[limits]\nslo_api_minutes = 3\n"),
+    );
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let r = OnShed::new(Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let post = |cookie: &str, body: &str, now: u64| {
+        let req = format!(
+            "POST /api/v1/timings HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        String::from_utf8_lossy(&s.respond(&req, now)).into_owned()
+    };
+    let batch = |tap: u64| {
+        json!([
+            ["tap", tap, 90, 5, tap - 95],
+            ["tap", tap + 10, 90, 5, tap - 85],
+            ["sheet", 60, 30, 2, 28],
+            ["send", 80, 50, 1, 29],
+            ["answer", 70, 40, 1, 29],
+            ["delta", 12, 0, 2, 10],
+            ["bogus", 9, 0, 0, 9]
+        ])
+        .to_string()
+    };
+    assert!(
+        post("", &batch(200), T).starts_with("HTTP/1.1 401"),
+        "an unpaired phone posts nothing"
+    );
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    assert!(post(&ck, "{\"tap\": 1}", T).starts_with("HTTP/1.1 400"));
+    let f = Fake::default();
+    for m in 0..3 {
+        assert!(post(&ck, &batch(200), T + 60 * m).starts_with("HTTP/1.1 200"));
+        s.slo(T + 60 * m);
+        assert_eq!(run(&at(&c, T + 60 * m), &f, &["check"]).0, 0);
+        let want: &[&str] = if m < 2 { &[] } else { &["phone-slow"] };
+        assert_eq!(alerts(&c, "phone-slow"), want, "minute {}", m + 1);
+    }
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(c.state.with_file_name("serve-health.json")).unwrap()).unwrap();
+    let kind = |k: &str| {
+        let p = h["phone"].as_array().unwrap().iter().find(|g| g["route"] == k);
+        let p = p.unwrap_or_else(|| panic!("no {k} in {h}"));
+        [&p["count"], &p["p50"], &p["p95"], &p["max"]].map(|v| v.as_u64().unwrap())
+    };
+    assert_eq!(kind("tap"), [2, 200, 210, 210]);
+    assert_eq!(kind("tap/network"), [2, 90, 90, 90]);
+    assert_eq!(kind("sheet"), [1, 60, 60, 60]);
+    assert_eq!(kind("send"), [1, 80, 80, 80]);
+    assert_eq!(kind("answer"), [1, 70, 70, 70]);
+    assert_eq!(kind("delta"), [1, 12, 12, 12]);
+    assert!(!h.to_string().contains("bogus"), "{h}");
+    assert_eq!(h["phone_slow"], "tap p95 210 ms, over 150 ms for 3 min");
+    assert_eq!(run(&at(&c, T + 150), &f, &["check"]).0, 0);
+    assert_eq!(
+        alerts(&c, "phone-slow"),
+        ["phone-slow"],
+        "the same state: no second alert"
+    );
+    assert!(post(&ck, &batch(100), T + 180).starts_with("HTTP/1.1 200"));
+    s.slo(T + 180);
+    assert_eq!(run(&at(&c, T + 180), &f, &["check"]).0, 0);
+    assert_eq!(alerts(&c, "phone-slow"), ["phone-slow", "phone-slow-ok"]);
+}

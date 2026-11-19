@@ -1189,3 +1189,26 @@ fn a_laneless_marker_past_the_limit_is_dropped_and_logged_once() {
         "{s:?}"
     );
 }
+
+#[test]
+fn a_start_that_never_finishes_stops_blocking_the_next_spawn_once_the_limit_passes() {
+    let (c, _sh) = fleet("kicks-1269-timeout", 3, 3);
+    let alive = |at: &str| {
+        fake("1.0")
+            .reply("sh -c nohup", "4242\n")
+            .reply("kill -0 4242", "")
+            .reply("ps -o etime= -p 4242", at)
+    };
+    let r = alive("  00:01\n");
+    let d = pass(&c, &r);
+    assert_eq!((launched(&r, 1), launched(&r, 2), launched(&r, 3)), (1, 1, 0), "{d}");
+    let later = drover::Ctx {
+        now: c.now + 400,
+        ..c.clone()
+    };
+    let r = alive("  10:00\n");
+    let d = pass(&later, &r);
+    assert_eq!(launched(&r, 3), 1, "the next queued start takes the freed slot: {d}");
+    let s = stale(&later);
+    assert!(s.iter().any(|e| e.issue == Some(1)), "{s:?}");
+}

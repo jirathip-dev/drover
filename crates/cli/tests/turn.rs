@@ -270,6 +270,47 @@ fn need_input_without_an_ask_says_so() {
     assert!(w.contains("waiting on your answer"), "{w}");
 }
 
+const ASK: &str = "drover: you reported `need-input`, but filed no `drover ask`";
+
+#[test]
+fn need_input_without_an_ask_is_nudged_once_then_a_parkable_owner_card() {
+    let (c, r, sh) = lane("turn-input-park", true, None);
+    turn(&c, &r, &["need-input", "--why", "the owner's 7 drawings"]);
+    let (out, _) = drive(&c, &r);
+    assert!(out.contains("sendmeter #12 turn need-input: prompted"), "{out}");
+    assert_eq!(typed(&sh, ASK), 1, "{:?}", sh.methods());
+    let (w, _) = texts(&at(&c, 60), &r);
+    assert!(w.contains("with no open ask: nudged 60s ago"), "{w}");
+    drive(&at(&c, 60), &r);
+    assert_eq!((typed(&sh, ASK), state(&c)), (1, "impl".into()));
+    let (out, _) = drive(&at(&c, 601), &r);
+    assert!(
+        out.contains("needs-human: lane blocked: need-input with no ask: the owner's 7 drawings"),
+        "{out}"
+    );
+    assert_eq!(state(&c), "needs-human");
+    let (code, out) = run(
+        &at(&c, 700),
+        &r,
+        &["park", "sendmeter", "12", "--why", "waits on drawings"],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(state(&c), "parked");
+    assert!(!respawned(&sh), "never respawned");
+}
+
+#[test]
+fn need_input_with_an_open_ask_waits_on_the_owner_unchanged() {
+    let (c, r, sh) = lane("turn-input-asked", true, None);
+    let (code, out) = run(&c, &r, &["ask", "sendmeter", "12", "which port?"]);
+    assert_eq!(code, 0, "{out}");
+    turn(&c, &r, &["need-input", "--why", "which port"]);
+    drive(&c, &r);
+    drive(&at(&c, 7200), &r);
+    assert_eq!((typed(&sh, ASK), state(&c)), (0, "impl".into()));
+    assert!(kinds(&c, "needs-human").is_empty());
+}
+
 #[test]
 fn a_reported_lane_whose_pane_is_gone_takes_the_respawn_path() {
     let (c, r, sh) = lane("turn-gone", false, None);

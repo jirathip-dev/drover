@@ -44,7 +44,7 @@ jobs:
         run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/ site/"
       - name: deps gate (direct deps ⊆ the allow-list in docs/serve.md)
         run: |
-          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|shed-proto|rusqlite|keyring|tokio|drover-sys|drover-core|drover-server|drover-service' || true)
+          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|flate2|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|shed-proto|rusqlite|keyring|tokio|drover-sys|drover-core|drover-server|drover-service' || true)
           test -z "$extra" || { echo "not allowed: $extra"; exit 1; }
       - name: layers (#264; core never depends on server or cli, server never on cli; #713 only the runner in core spawns processes, tests/runner_limits.rs checks every crate)
         run: |
@@ -222,7 +222,7 @@ jobs:
         env:
           FLAKY: ${{ needs.ui.outputs.flaky }}
 
-  # #862: ui-webkit runs only when the diff touches the page (#927: web/, assets/, serve.rs, screens.rs) or its own tests.
+  # #862: ui-webkit runs only when the diff touches the page (#927: web/, assets/; #1312: crates/server/) or its own tests.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -241,7 +241,7 @@ jobs:
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
           webkit=false
-          grep -qE '^(web/|assets/|crates/server/src/(serve\.rs|screens\.rs|serve/chat\.rs)|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|ui/(drafts|repaint|compose)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs))' changed.txt && webkit=true
+          grep -qE '^(web/|assets/|crates/server/|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|keyboard_webkit\.rs|ui/(drafts|repaint|compose|timings|keyboard|answered|optimistic)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs|phone_timings\.rs|common/large\.rs))' changed.txt && webkit=true
           echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
 
   # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.
@@ -266,6 +266,8 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/pw/node_modules" node -e "require('playwright')"
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
+      - name: "phone timings on the large board (#1312, hard gate: tab, lane sheet, thread open, send and answer each a median <= 150 ms)"
+        run: cargo test --locked --test phone_timings -- --nocapture
       - name: a thread tap and a thread push open the thread; back returns (#1088)
         run: cargo test --locked --test cooee_screens parity_46 -- --nocapture
       - name: "parity rows in WebKit (#1094: R25 sheet close, R5 loader strip)"
@@ -275,8 +277,11 @@ jobs:
         run: cargo test --locked --test parity_webkit -- --ignored --nocapture
       - name: "url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)"
         run: cargo test --locked --test url_links
-      - name: "typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65)"
+      - name: "typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65); a send shows at once and once, an answered card goes at once (#1315)"
         run: cargo test --locked --test page_drafts
+      - name: "the focused composer keeps its node, focus, text and caret while the stream changes it (#1310)"
+        if: ${{ !cancelled() }}
+        run: cargo test --locked --test keyboard_webkit
       - name: the thread view in WebKit (#1086, #1087: opens at the end, older above in place, image viewer, keyboard; attachments, a failed send, queue and steer)
         if: ${{ !cancelled() }}
         run: cargo test --locked --test threads_tab webkit -- --test-threads=1

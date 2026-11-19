@@ -1,7 +1,8 @@
 import { type Act, type Ctx, el, kids, morph, render, sent, values } from './blocks';
 import './herd';
-import { apply, type Blk, blks, isBlk, isList, obj } from './ops';
+import { apply, type Blk, blks, find, isBlk, isList, obj } from './ops';
 import { R, colours, esc, get, nodes, put, schemes, theme, themes } from './theme';
+import { type Kind, type Span, flush, painted, read, span } from './timing';
 
 type Place = { type: string; id?: string; label?: string; subtitle?: string; screen?: string };
 declare const PL: Place[];
@@ -12,8 +13,9 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const exported = B.dataset.root === '';
 const url = (p: string) => new URL(p.replace(/^[/]/, '') + (exported && /^\/screens\/[^?]*$/.test(p) ? '/index.html' : ''), R).href;
 
-type View = { path: string; model: Blk | null; at: number; live: boolean; es?: EventSource; root: HTMLElement; open: Set<string>; back: string[] };
-const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, root, open: new Set(), back: [] });
+type Pend = { id: string; text: string; n: number; st: 'sending' | 'sent' | 'failed'; a: Act };
+type View = { path: string; model: Blk | null; at: number; live: boolean; es?: EventSource; root: HTMLElement; open: Set<string>; back: string[]; pend: Pend[] };
+const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, root, open: new Set(), back: [], pend: [] });
 const tabs = PL.flatMap(p => (p.type === 'header-strip' && p.screen ? [{ ...p, screen: p.screen, v: view(p.screen, el('section', 'tab')), a: el('a') }] : []));
 const cards = PL.some(p => p.type === 'chat-cards') ? view('/screens/cards', $('#cards')) : null;
 type Tab = (typeof tabs)[number];
@@ -42,10 +44,10 @@ function sync() {
 const cached = (p: string): { t: number; v: Blk } | null => {
   try { const c: unknown = JSON.parse(get('scr:' + p) ?? 'null'); return isBlk(c) && isBlk(c.v) ? { t: Number(c.t), v: c.v } : null; } catch { return null; }
 };
-async function fetchScreen(p: string): Promise<Blk> {
-  const get = () => fetch(url(p), { cache: 'no-store' });
+async function fetchScreen(p: string, s?: Span): Promise<Blk> {
+  const t0 = performance.now(), get = () => fetch(url(p), { cache: 'no-store' });
   const r = await get().catch(() => new Promise<Response>(ok => setTimeout(() => ok(get()), 300)));
-  const j = obj(await r.json().catch(() => ({ line: `${r.status}` })));
+  const j = obj(await read(r, s, t0).catch(() => ({ line: `${r.status}` })));
   if (!r.ok) throw Object.assign(new Error(String(j.line ?? r.status)), { status: r.status });
   return j;
 }
@@ -60,6 +62,23 @@ function rows(m: unknown, out = new Map<string, string>()) {
     Object.values(m).forEach(x => rows(x, out));
   }
   return out;
+}
+const gone = new Set<string>();
+const hits = (all: string, text: string) => all.split(JSON.stringify(text).slice(1, -1)).length - 1;
+const bubble = (p: Pend): Blk => ({
+  type: 'card', id: p.id, kind: 'you', tone: { sending: 'pending', sent: '', failed: 'bad' }[p.st], title: 'you', meta: { sending: 'sending…', sent: '', failed: 'not sent' }[p.st],
+  blocks: [{ type: 'text', id: 't', markdown: p.text }],
+  buttons: p.st === 'failed' ? [{ type: 'button', id: `${p.id}-retry`, label: 'retry', style: 'bad', action: p.a.action, values: p.a.values }] : [],
+});
+function shown(v: View): Blk | null {
+  const m = v.model;
+  gone.forEach(id => { if (find(m, id)) apply({ m }, [{ op: 'remove', id }]); });
+  if (!m || isList(m) || !v.pend.length) return m;
+  const all = JSON.stringify(m);
+  v.pend = v.pend.filter(p => p.st === 'failed' || hits(all, p.text) <= p.n);
+  const add = blks(m.blocks), t = add.findIndex(b => b.id === 'transcript'), at = add.findIndex(b => b.type === 'composer'), more = v.pend.map(bubble);
+  if (t >= 0) return { ...m, blocks: add.map((b, i) => (i === t ? { ...b, blocks: [...blks(b.blocks), ...more] } : b)) };
+  return { ...m, blocks: at < 0 ? [...add, ...more] : [...add.slice(0, at), ...more, ...add.slice(at)] };
 }
 type Spot = { end: boolean; id?: string; dy: number };
 const spots = new Map<string, Spot>();
@@ -77,7 +96,7 @@ const seen = new WeakMap<HTMLElement, Spot | null>();
 const docked = new ResizeObserver(es => es.forEach(({ target: t }) => { if (t instanceof HTMLElement && t.isConnected) land(t, seen.get(t) ?? null); }));
 const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr > .msgs');
 function paint(v: View, before?: Blk | null) {
-  const m = v.model, y = scrollY;
+  const m = shown(v), y = scrollY;
   if (!m) return;
   const focus = !isList(m) && !!m.focus, was = scroller(v), place = focus && was?.parentElement?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
   const c = ctx(v, isList(m) ? 'cards' : String(m.id));
@@ -136,22 +155,24 @@ function badges() {
   });
 }
 
-async function load(v: View, quiet = false) {
+async function load(v: View, quiet = false, s?: Span) {
   if (duo() && v === th?.v && v.path === th.screen) return blank(v);
   const c = cached(v.path);
-  if (!v.model && c) [v.model, v.at, v.live] = [c.v, c.t, false];
+  if (!v.model && c) [v.model, v.at] = [c.v, c.t];
   if (!v.model || !quiet) paint(v);
   const slow = setTimeout(() => ($('#ld').hidden = false), 300);
   try {
-    const p = v.path, m = await fetchScreen(p), before = v.model === c?.v ? null : v.model;
+    const p = v.path, m = await fetchScreen(p, s), before = v.model === c?.v ? null : v.model;
     if (v.path !== p) return;
     [v.model, v.at] = [m, Date.now()];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: m }));
     paint(v, before);
+    painted(s);
     if (!v.es) stream(v);
   } catch (e) {
     if (isBlk(e) && e.status === 401) unpaired();
     else if (!v.model) v.root.replaceChildren(el('p', 'msg r', esc(msg(e))));
+    v.live = false;
     sync();
   } finally {
     clearTimeout(slow);
@@ -160,17 +181,23 @@ async function load(v: View, quiet = false) {
 }
 
 function stream(v: View) {
-  const s = v.model && !isList(v.model) ? v.model.stream : v === cards ? v.path + '/stream' : null;
-  if (!s || exported || !('EventSource' in window)) return;
+  const s = v.model && !isList(v.model) && v.model.stream ? v.model.stream : v === cards || v === shv ? v.path + '/stream' : null;
+  if (!s || exported || !('EventSource' in window)) return void (v.live = false);
   const es = (v.es = new EventSource(url(String(s))));
   es.onopen = () => { v.live = true; sync(); };
   es.onerror = () => { v.live = false; sync(); };
   es.onmessage = e => {
-    const d = obj(JSON.parse(e.data)), before = v.model && obj(JSON.parse(JSON.stringify(v.model)));
+    const s = span('delta'), d = obj(JSON.parse(e.data)), was = JSON.stringify(v.model), before = v.model && obj(JSON.parse(was));
     v.model = apply(v.model ?? {}, blks(d.ops));
+    s.parse = performance.now() - s.t0;
     [v.at, v.live] = [Date.now(), true];
-    put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
-    paint(v, before);
+    if (JSON.stringify(v.model) === was) { painted(s); return sync(); }
+    if (v === shv) drawSheet();
+    else {
+      put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
+      paint(v, before);
+    }
+    painted(s);
     dot.classList.add('p');
     setTimeout(() => dot.classList.remove('p'), 600);
   };
@@ -178,19 +205,20 @@ function stream(v: View) {
 const close = (v: View) => { v.es?.close(); v.es = undefined; v.live = false; };
 
 const ys = new Map<string, number>();
-function go(v: View, path: string, push = true) {
+function go(v: View, path: string, push = true, k?: Span) {
   if (v === cur.v) ys.set(v.path, scrollY);
   if (push) v.back.push(v.path);
   if (push && v === cur.v) history.pushState(null, '', hashOf(cur, path));
   const s = spot(scroller(v));
   if (s) spots.set(v.path, s);
-  close(v);
+  v.es?.close();
+  v.es = undefined;
   [v.path, v.model] = [path, null];
-  load(v);
+  load(v, false, k);
   if (!push && v === cur.v) scrollTo(0, ys.get(path) ?? 0);
 }
 
-function show(t: Tab, path = t.v.path) {
+function show(t: Tab, path = t.v.path, s?: Span) {
   if (cur !== t) close(cur.v);
   if (lst) close(lst);
   if (path !== t.v.path) {
@@ -203,8 +231,9 @@ function show(t: Tab, path = t.v.path) {
   tabs.forEach(x => { x.a.classList.toggle('on', x === t); x.v.root.hidden = x !== t; });
   H.dataset.tab = t.id;
   if (lst) lst.root.hidden = !duo();
+  sync();
   if (lst && duo()) load(lst, !!lst.model);
-  load(t.v, !!t.v.model);
+  load(t.v, !!t.v.model, s);
   scrollTo(0, 0);
 }
 
@@ -223,13 +252,14 @@ function toast(text: string, bad = false, retry?: () => void) {
 }
 
 const sh = $('#sheet'), shv = view('', $('#sheet .sb'));
-function closeSheet() { sh.hidden = true; H.classList.remove('sheet'); shv.model = null; shv.back = []; }
-async function sheet(path: string, push = true) {
+function closeSheet() { sh.hidden = true; H.classList.remove('sheet'); close(shv); shv.model = null; shv.back = []; shv.pend = []; }
+async function sheet(path: string, push = true, s = span('sheet')) {
   if (push && !sh.hidden && shv.model) shv.back.push(shv.path);
-  shv.path = path;
+  close(shv);
+  [shv.path, shv.pend] = [path, []];
   shv.open.clear();
   try {
-    shv.model = await fetchScreen(path);
+    shv.model = await fetchScreen(path, s);
   } catch (e) {
     if (isBlk(e) && e.status === 401) return unpaired();
     return toast(msg(e), true);
@@ -237,9 +267,10 @@ async function sheet(path: string, push = true) {
   drawSheet();
   sh.hidden = false;
   H.classList.add('sheet');
+  painted(s);
 }
 function drawSheet() {
-  const m = shv.model;
+  const m = shown(shv);
   if (!m) return;
   const c = ctx(shv, String(m.id)), head = $('#sheet .sh'), done = m.done;
   head.replaceChildren(el('b', '', esc(m.title)));
@@ -259,7 +290,7 @@ function drawSheet() {
     d.onclick = () => c.act({ action: done.action, block: m.id, values: { ...obj(done.values), ...values(shv.root) } }, d).then(ok => ok && sent(shv.root));
     head.append(d);
   }
-  shv.root.replaceChildren(...kids(m.type === 'sheet' ? m.blocks : [m], c));
+  morph(shv.root, kids(m.type === 'sheet' ? m.blocks : [m], c));
 }
 sh.addEventListener('click', e => { if (e.target === sh) closeSheet(); });
 addEventListener('keydown', e => { if (e.key === 'Escape' && !sh.hidden) closeSheet(); });
@@ -267,16 +298,16 @@ addEventListener('keydown', e => { if (e.key === 'Escape' && !sh.hidden) closeSh
 function tap(x: unknown) {
   const t = obj(x);
   if (t.sheet) sheet(String(t.sheet));
-  else if (t.open) go(cur.v, String(t.open), !t.keep);
+  else if (t.open) go(cur.v, String(t.open), !t.keep, span('tap'));
   else if (t.copy != null) void copy(String(t.copy));
   else if (t.thread) /^t\d+$/.test(String(t.thread)) ? thread(String(t.thread)) : sheet(`/screens/lanes/${String(t.thread)}`);
 }
-function thread(id: string) {
+function thread(id: string, s = span('tap')) {
   const t = tabs.find(x => x.id === 'threads');
   if (!t) return toast('no Threads tab on this page', true);
   closeSheet();
   history.pushState(null, '', hashOf(t, `${t.screen}/${id}`));
-  show(t, `${t.screen}/${id}`);
+  show(t, `${t.screen}/${id}`, s);
 }
 
 function confirmed(c: Blk): Promise<boolean> {
@@ -295,19 +326,38 @@ function confirmed(c: Blk): Promise<boolean> {
   });
 }
 
+let pends = 0;
+const draw = (v: View) => (v === shv ? drawSheet() : paint(v));
 async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<boolean> {
   if (demo || ro) {
     toast(demo ? 'Demo with fake data: install drover to act on your own fleets' : 'read-only page', ro);
     return false;
   }
   if (isBlk(a.confirm) && !(await confirmed(a.confirm))) return false;
-  const retry = b && (() => b.click());
+  const retry = b && (() => b.click()), k: Kind = a.action === 'answer' ? 'answer' : /say|send|queue|steer/.test(String(a.action)) ? 'send' : 'tap', s = span(k);
+  const text = /^(thread-say|thread-steer|send)$/.test(String(a.action)) ? String(obj(a.values).text ?? '').trim() : '';
+  const p: Pend | null = text ? { id: `pend-${++pends}`, text, n: hits(JSON.stringify(v.model), text), st: 'sending', a } : null;
+  const hide = a.action === 'answer' ? [`ask-${String(a.block)}`, String(a.block)] : [];
+  if (p) v.pend = [...v.pend.filter(x => !(x.st === 'failed' && x.text === text)), p];
+  hide.forEach(id => gone.add(id));
+  new Set(hide.length ? [cards, cur.v, v] : p ? [v] : []).forEach(x => { if (x?.model) draw(x); });
+  const fail = () => {
+    if (p) p.st = 'failed';
+    if (hide.length) {
+      hide.forEach(id => gone.delete(id));
+      reload();
+      if (v === shv) void sheet(shv.path, false);
+    }
+    if (p) draw(v);
+    return false;
+  };
   b?.setAttribute('aria-busy', 'true');
   try {
     const r = await fetch(url('action'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...a, confirm: undefined, screen }) });
-    const j = obj(await r.json().catch(() => ({ line: `${r.status}` })));
-    if (r.status === 401) return (unpaired(), false);
-    if (!r.ok) return (toast(String(j.line ?? r.status), true, retry), false);
+    const j = obj(await read(r, s, s.t0).catch(() => ({ line: `${r.status}` })));
+    if (r.status === 401) return (unpaired(), fail());
+    if (!r.ok) return (toast(String(j.line ?? r.status), true, retry), fail());
+    if (p) p.st = 'sent';
     const ops = blks(j.ops);
     const whole = ops.find(o => o.op === 'screen');
     if (whole && v !== shv) {
@@ -319,17 +369,19 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<bo
       put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
       paint(v);
       stream(v);
-    } else if (ops.length && v.model) {
+    } else if (v.model) {
       v.model = apply(v.model, ops);
-      v === shv ? drawSheet() : paint(v);
+      draw(v);
     }
     if (j.close && v === shv) closeSheet();
+    else if (v === shv && !shv.es) stream(shv);
     if (j.toast) toast(String(j.toast));
-    if (!whole) setTimeout(() => { if (cards) load(cards, true); load(cur.v, true); }, 300);
+    if (!whole) new Set([v, cards]).forEach(x => { if (x && x !== shv && x.model && (!x.es || x.es.readyState === EventSource.CLOSED)) void load(x, true); });
+    painted(s);
     return true;
   } catch (e) {
     toast(msg(e), true, retry);
-    return false;
+    return fail();
   } finally {
     b?.removeAttribute('aria-busy');
   }
@@ -416,7 +468,7 @@ function reload() {
 const nav = $('nav'), main = $('main');
 for (const t of tabs) {
   t.a.href = '#' + t.id;
-  t.a.onclick = e => { e.preventDefault(); show(t); };
+  t.a.onclick = e => { e.preventDefault(); show(t, t.v.path, span('tab', e.timeStamp)); };
   nav.append(t.a);
   main.append(t.v.root);
   t.v.root.addEventListener('redraw', () => paint(t.v));
@@ -521,7 +573,7 @@ const release = (e: TouchEvent) => {
 addEventListener('touchend', release, { passive: true });
 addEventListener('touchcancel', release, { passive: true });
 addEventListener('hashchange', () => slide(0));
-setInterval(() => { if (!document.hidden) { paint(cur.v); if (lst && duo()) paint(lst); sync(); } }, 30_000);
+setInterval(() => { if (!document.hidden) sync(); }, 30_000);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && !cur.v.live) load(cur.v, true);
   if (!document.hidden && lst && duo() && !lst.live) load(lst, true);
@@ -534,4 +586,6 @@ if (at && at[1] !== cur.screen) {
   history.pushState(null, '', hashOf(cur, at[1]));
 }
 show(cur, at?.[1]);
+const report = (leaving = false) => flush(body => void fetch(url('api/v1/timings'), { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: true }).catch(() => {}), leaving);
+if (!demo && !ro && !exported) { setInterval(report, 5_000); addEventListener('pagehide', () => report(true)); }
 if ('serviceWorker' in navigator && !demo) navigator.serviceWorker.register(url('sw.js')).catch(() => {});
