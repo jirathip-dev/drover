@@ -1,0 +1,7 @@
+Decided: fix the cards stream's differ so a top-level array's items are its children; a changed card list goes out as a whole screen op
+Because: crates/server/src/screens.rs:1326
+Because: "the card goes within one stream update"
+Rejected: an optimistic hide of config and secret cards in web/src/main.ts act() — it would leave settles from the terminal or another device on screen, and new cards would still never arrive live
+Check: page_drafts a_settled fails at 4c006d2e (cards stay in the strip, ms null) and passes at the head
+Check: typed_text_focus_caret... in page_drafts fails identically on base f41fc841 on this host; it is unrelated
+Owner: settled config, secret and run cards now leave the page by themselves, from a tap or from the terminal
