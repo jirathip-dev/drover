@@ -1,0 +1,213 @@
+{
+ "scheme": {
+  "light": "bush-light",
+  "dark": "bush-dark"
+ },
+ "actions": {
+  "impl": "a-bound",
+  "fix": "a-dig",
+  "rev": "a-peer",
+  "update": "a-run",
+  "idle": "a-sleep",
+  "done": "a-laugh",
+  "blocked": "a-stuck"
+ },
+ "poses": {
+  "working": "a-bound",
+  "idle": "a-sleep",
+  "done": "a-laugh",
+  "blocked": "a-stuck"
+ },
+ "looks": [
+  {
+   "--ro": "#b8643a",
+   "--rs": "#8c4527",
+   "--rb": "#ecd2aa",
+   "--wo": "#7d6a58",
+   "--ws": "#5b4b3e",
+   "--ko": "#9ea3a8",
+   "--ks": "#71777d",
+   "--em": "#5c4a38",
+   "--es": "#3f3226"
+  },
+  {
+   "--ro": "#9b8e82",
+   "--rs": "#76695e",
+   "--rb": "#e3dacb",
+   "--wo": "#80786f",
+   "--ws": "#5f5852",
+   "--ko": "#b3b6b6",
+   "--ks": "#878b8c",
+   "--em": "#3f362e",
+   "--es": "#2a231d"
+  },
+  {
+   "--ro": "#c9935a",
+   "--rs": "#a0703f",
+   "--rb": "#f0dcb8",
+   "--wo": "#9b8166",
+   "--ws": "#78624c",
+   "--ko": "#9a8f86",
+   "--ks": "#71675f",
+   "--em": "#7a6248",
+   "--es": "#584532"
+  },
+  {
+   "--ro": "#a3573f",
+   "--rs": "#7d3e2c",
+   "--rb": "#e8c7a6",
+   "--wo": "#5e5047",
+   "--ws": "#433832",
+   "--ko": "#9ea3a8",
+   "--ks": "#71777d",
+   "--em": "#5c4a38",
+   "--es": "#3f3226"
+  },
+  {
+   "--ro": "#9b8e82",
+   "--rs": "#76695e",
+   "--rb": "#e3dacb",
+   "--wo": "#7d6a58",
+   "--ws": "#5b4b3e",
+   "--ko": "#9a8f86",
+   "--ks": "#71675f",
+   "--em": "#7a6248",
+   "--es": "#584532"
+  },
+  {
+   "--ro": "#b8643a",
+   "--rs": "#8c4527",
+   "--rb": "#ecd2aa",
+   "--wo": "#80786f",
+   "--ws": "#5f5852",
+   "--ko": "#b3b6b6",
+   "--ks": "#878b8c",
+   "--em": "#3f362e",
+   "--es": "#2a231d"
+  },
+  {
+   "--ro": "#c9935a",
+   "--rs": "#a0703f",
+   "--rb": "#f0dcb8",
+   "--wo": "#5e5047",
+   "--ws": "#433832",
+   "--ko": "#9ea3a8",
+   "--ks": "#71777d",
+   "--em": "#5c4a38",
+   "--es": "#3f3226"
+  },
+  {
+   "--ro": "#a3573f",
+   "--rs": "#7d3e2c",
+   "--rb": "#e8c7a6",
+   "--wo": "#9b8166",
+   "--ws": "#78624c",
+   "--ko": "#b3b6b6",
+   "--ks": "#878b8c",
+   "--em": "#7a6248",
+   "--es": "#584532"
+  }
+ ],
+ "scene": {
+  "weather": false
+ },
+ "load_scene": {
+  "kind": "sign",
+  "levels": {
+   "calm": "moderate",
+   "busy": "high",
+   "held": "catastrophic"
+  },
+  "minis": {
+   "calm": "load-calm",
+   "busy": "load-busy",
+   "held": "load-held"
+  }
+ },
+ "rail": {
+  "item": "q-joey",
+  "needs": "q-cocky"
+ },
+ "moments": {
+  "merged": {
+   "sprite": "m-clear",
+   "anim": "hop"
+  },
+  "fail": {
+   "sprite": "m-swoop",
+   "anim": "shake"
+  },
+  "needs-you": {
+   "sprite": "q-cocky",
+   "anim": "pulse"
+  }
+ },
+ "row_sprites": {
+  "impl": "r-bound",
+  "fix": "r-dig",
+  "rev": "r-peer",
+  "update": "r-run",
+  "idle": "r-sleep",
+  "done": "r-laugh",
+  "blocked": "r-stuck",
+  "queued": "r-joey",
+  "needs": "r-needs",
+  "merged": "r-merged",
+  "fail": "r-fail"
+ },
+ "loading": "a-bound",
+ "icons": {
+  "180": "icon-180.png",
+  "192": "icon-192.png",
+  "512": "icon-512.png",
+  "favicon": "icon-192.png"
+ },
+ "modes": [
+  "scene",
+  "ascii"
+ ],
+ "ascii": {
+  "impl": "   //_\n~__( o>\n //  \\\\",
+  "fix": "'. ,\n(___)o^\n '' ''",
+  "rev": "=====||\n (oYo)||\n      ||",
+  "update": "    _o>\n (###)/\n  / >",
+  "idle": " \\ z /\n (-Y-)\n   \\|/",
+  "done": "ha! ha!\n  (o<=\n  |##|",
+  "blocked": "  _..._\n / () \\\n/_/''\\_\\"
+ },
+ "ascii_rows": {
+  "impl": "~R^",
+  "fix": ".W:",
+  "rev": "=K|",
+  "update": "E>>",
+  "idle": "zK.",
+  "done": "ha!",
+  "blocked": "[W]"
+ },
+ "ascii_load": {
+  "calm": "(\\  )",
+  "busy": "( | )",
+  "held": "(  /)"
+ },
+ "ascii_loading": "~R^\n_R_",
+ "words": {
+  "horse": "roo",
+  "horses": "roos",
+  "herd": "mob",
+  "ranch": "outback",
+  "barn": "station",
+  "impl": "bound",
+  "fix": "dig",
+  "rev": "peer",
+  "update": "run",
+  "queued": "in the log",
+  "working": "on the move",
+  "needs": "screech",
+  "done": "home and hosed",
+  "fail": "swooped",
+  "idle": "having a kip",
+  "merged": "over the fence",
+  "loading": "bounding…",
+  "empty-threads": "nobody about"
+ }
+}

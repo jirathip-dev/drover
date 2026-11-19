@@ -318,12 +318,16 @@ fn the_herd_in_webkit_draws_a_figure_per_lane_switches_night_and_repo() {
 }
 
 fn herd_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<String> {
+    herd_at(&format!("theme={theme}"), theme, "", level, reduce, check)
+}
+
+fn herd_at(query: &str, name: &str, pick: &str, level: &str, reduce: bool, check: &str) -> Vec<String> {
     let (pressure, load) = match level {
         "calm" => ("1", "1.00"),
         "busy" => ("1", "15.00"),
         _ => ("2", "3.90"),
     };
-    let (c, r) = fixture_at(&format!("load-{theme}-{level}"), pressure, load);
+    let (c, r) = fixture_at(&format!("load-{name}-{level}"), pressure, load);
     append(
         &c.state,
         &Event::new(
@@ -345,7 +349,7 @@ fn herd_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<String
         const w = f => new Promise(ok => {{ const t = Date.now(), g = () => {{ const v = f(); if (v) ok(v); else if (Date.now() - t > 8000) ok(null); else setTimeout(g, 50); }}; g(); }}); \
         const q = s => document.querySelector(s), on = e => getComputedStyle(e).display !== 'none'; \
         const shown = s => [...document.querySelectorAll('#sheet .hsc ' + s)].filter(on).length; \
-        q('#sysb').click(); \
+        q('#sysb').click(); {pick} \
         (await w(() => [...document.querySelectorAll('#sheet .row')].find(r => r.textContent.toLowerCase().startsWith('herd')))).click(); \
         await w(() => q('#sheet .herd .hsc svg')); \
         const h = q('#sheet .herd'), anim = e => e && getComputedStyle(e).animationName !== 'none' ? 1 : 0; \
@@ -357,8 +361,8 @@ fn herd_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<String
         cmd.env("DROVER_REDUCE", "1");
     }
     let o = cmd
-        .args([&format!("http://{addr}/?theme={theme}"), "390", "-", "-"])
-        .arg(d.join(format!("herd-{theme}-{level}.png")))
+        .args([&format!("http://{addr}/?{query}"), "390", "-", "-"])
+        .arg(d.join(format!("herd-{name}-{level}.png")))
         .arg(js)
         .output()
         .unwrap();
@@ -425,5 +429,47 @@ fn the_herd_in_webkit_stops_the_flames_and_glow_under_reduced_motion() {
         herd_probe("kitchen", "held", true, check),
         ["1", "0", "0"],
         "kitchen held under reduced motion: heat-held, no frame loop, no glow animation"
+    );
+}
+
+const PICK_BUSH: &str = "(await w(() => [...document.querySelectorAll('#sheet .row')].find(r => r.textContent.replace('✓', '').trim() === 'bush'))).click(); \
+    await w(() => document.documentElement.dataset.theme === 'bush' && [...document.querySelectorAll('.hdefs symbol')].some(s => s.id === 'ha-fix' && s.innerHTML.includes('--wo')));";
+
+#[test]
+fn the_herd_in_webkit_draws_bush_picked_from_the_theme_list_its_sign_at_each_level_light_and_dark() {
+    if no_webkit() {
+        return;
+    }
+    for (query, scheme) in [
+        ("theme=farm", "bush-light"),
+        ("theme=farm&scheme=bush-dark", "bush-dark"),
+    ] {
+        for (level, word) in [("calm", "moderate"), ("busy", "high"), ("held", "catastrophic")] {
+            let check = format!(
+                "await w(() => q('#sheet .herd.sign-{level}')); const s = q('#sheet .herd'); \
+                return [document.documentElement.dataset.scheme === '{scheme}' ? 1 : 0, s.classList.contains('sign-{level}') ? 1 : 0, \
+                shown('.fdr') > 0 ? 1 : 0, shown('.s-{word}') > 0 ? 1 : 0, shown(':is(.s-moderate,.s-high,.s-catastrophic):not(.s-{word})'), \
+                s.querySelectorAll('use[href=\"#ha-idle\"]').length > 0 ? 1 : 0, anim(s)];"
+            );
+            assert_eq!(
+                herd_at(query, scheme, PICK_BUSH, level, false, &check),
+                ["1", "1", "1", "1", "0", "1", "1"],
+                "bush {scheme} {level}: picked from the list, sign-{level} on the Herd, the sign reads {word} and no other level, the lane drawn, the loop runs"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_herd_in_webkit_holds_bushs_sign_still_under_reduced_motion() {
+    if no_webkit() {
+        return;
+    }
+    let check = "await w(() => q('#sheet .herd.sign-held')); const s = q('#sheet .herd'); \
+        return [s.classList.contains('sign-held') ? 1 : 0, shown('.s-catastrophic') > 0 ? 1 : 0, shown(':is(.s-moderate,.s-high):not(.s-catastrophic)'), anim(s)];";
+    assert_eq!(
+        herd_at("theme=bush", "bush-still", "", "held", true, check),
+        ["1", "1", "0", "0"],
+        "bush held under reduced motion: catastrophic alone shown, no frame loop"
     );
 }

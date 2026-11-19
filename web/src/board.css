@@ -211,6 +211,11 @@ html[data-focus] .scr>.cmp{position:static}
 .herd.light{animation:kfr 1.2s infinite}
 .hsc :is(.l-sun,.l-overcast,.l-rain){display:none}
 .light-calm .hsc .l-sun,.light-busy .hsc .l-overcast,.light-held .hsc .l-rain{display:inline}
+.herd.sign{animation:kfr 1.2s infinite}
+.hsc :is(.sky-night,.s-moderate,.s-high,.s-catastrophic,.s-up){display:none}
+.herd.night .hsc .sky-night,.sign-calm .hsc .s-moderate,.sign-busy .hsc :is(.s-high,.s-up),.sign-held .hsc :is(.s-catastrophic,.s-up){display:inline}
+.herd.night .hsc .sky-day{display:none}
+.herd.sign.night .hsc svg{filter:none}.herd.sign.night .hsc::after{opacity:0}
 .hbar{display:flex;align-items:center;gap:var(--s2);margin-top:var(--s2)}
 .hbar .hs{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* #1118: from 1000 px the Threads tab is two panes between the header and the tab bar, each its own scroller. */

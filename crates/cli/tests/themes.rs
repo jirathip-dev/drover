@@ -621,19 +621,23 @@ fn pinned_packs_load_and_a_custom_theme_overrides_them() {
     use sha2::Digest;
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/swag");
     let source = std::fs::read_to_string(dir.join("SOURCE")).unwrap();
-    let pin = source
-        .trim()
-        .strip_prefix("jirathip-dev/swag legacy-board at ")
-        .unwrap();
-    assert!(
-        pin.len() == 40 && pin.bytes().all(|b| b.is_ascii_hexdigit()),
-        "{source}"
-    );
+    let pins: Vec<&str> = source.lines().collect();
+    for (line, prefix) in pins.iter().zip([
+        "jirathip-dev/swag legacy-board at ",
+        "jirathip-dev/swag design/bush at ",
+    ]) {
+        let pin = line.strip_prefix(prefix).unwrap();
+        assert!(
+            pin.len() == 40 && pin.bytes().all(|b| b.is_ascii_hexdigit()),
+            "{source}"
+        );
+    }
+    assert_eq!(pins.len(), 2, "{source}");
     let hex = |b: &[u8]| -> String { sha2::Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect() };
     let sums = std::fs::read_to_string(dir.join("SHA256SUMS")).unwrap();
     let pinned: Vec<(&str, &str)> = sums.lines().map(|l| l.split_once("  ").unwrap()).collect();
     let mut on_disk = vec![];
-    for t in ["farm", "kitchen", "garden"] {
+    for t in ["farm", "kitchen", "garden", "bush"] {
         for e in std::fs::read_dir(dir.join(t)).unwrap() {
             on_disk.push(format!("{t}/{}", e.unwrap().file_name().to_string_lossy()));
         }
@@ -663,4 +667,74 @@ fn pinned_packs_load_and_a_custom_theme_overrides_them() {
     let (c, r) = server(Some("garden"), &[("garden", "sprites.svg", "<g id=\"mine\"/>")]);
     assert_eq!(body(&get(&c, &r, "/themes/garden/sprites.svg")), "<g id=\"mine\"/>");
     assert_eq!(body(&get(&c, &r, "/themes/garden/scene.svg")), GARDEN_SCENE);
+}
+
+const BUSH: &str = include_str!("../../../assets/swag/bush/theme.json");
+const BUSH_SPRITES: &str = include_str!("../../../assets/swag/bush/sprites.svg");
+const BUSH_SCENE: &str = include_str!("../../../assets/swag/bush/scene.svg");
+
+#[test]
+fn bush_draws_every_role_its_sign_and_farms_ascii_widths() {
+    let b = resolve(&validate(BUSH.as_bytes()).unwrap(), &farm());
+    let has = |id: &Value| BUSH_SPRITES.contains(&format!("<g id=\"{}\"", id.as_str().unwrap()));
+    let acts = ACTS.map(|a| b["actions"][a].as_str().unwrap().to_string());
+    assert_eq!(
+        acts,
+        ["a-bound", "a-dig", "a-peer", "a-run", "a-sleep", "a-laugh", "a-stuck"]
+    );
+    let mut ids: Vec<Value> = ACTS
+        .iter()
+        .flat_map(|a| [b["actions"][a].clone(), b["row_sprites"][a].clone()])
+        .collect();
+    ids.extend(["queued", "needs", "merged", "fail"].map(|k| b["row_sprites"][k].clone()));
+    ids.extend(["calm", "busy", "held"].map(|l| b["load_scene"]["minis"][l].clone()));
+    ids.extend([&b["rail"]["item"], &b["rail"]["needs"], &b["loading"]].map(Value::clone));
+    ids.extend(["merged", "fail", "needs-you"].map(|m| b["moments"][m]["sprite"].clone()));
+    for id in ids {
+        assert!(has(&id), "{id}");
+    }
+    assert_eq!(b["looks"].as_array().unwrap().len(), 8);
+    assert_eq!(b["modes"], json!(["scene", "ascii"]));
+    assert_eq!(b["scheme"], json!({"light": "bush-light", "dark": "bush-dark"}));
+    assert_eq!(
+        (&b["load_scene"]["kind"], &b["load_scene"]["levels"]),
+        (
+            &json!("sign"),
+            &json!({"calm": "moderate", "busy": "high", "held": "catastrophic"})
+        )
+    );
+    for l in ["s-moderate", "s-high", "s-catastrophic", "s-up", "sky-day", "sky-night"] {
+        assert!(BUSH_SCENE.contains(&format!("class=\"{l}\"")), "{l}");
+    }
+    let f = farm();
+    let width = |t: &Value| {
+        t.as_str()
+            .unwrap()
+            .lines()
+            .map(|l| l.chars().count())
+            .max()
+            .unwrap_or(0)
+    };
+    let widest = ACTS.iter().map(|a| width(&f["ascii"][a])).max().unwrap();
+    for a in ACTS {
+        assert!(
+            width(&b["ascii"][a]) <= widest,
+            "bush ascii {a} within farm's {widest} columns"
+        );
+        assert_eq!(
+            b["ascii_rows"][a].as_str().map(|r| r.chars().count()),
+            f["ascii_rows"][a].as_str().map(|r| r.chars().count()),
+            "bush ascii row {a} at farm's width"
+        );
+    }
+    let (c, r) = server(Some("bush"), &[]);
+    assert_eq!(json(&c, &r, "/themes/bush/theme.json"), b);
+    assert_eq!(body(&get(&c, &r, "/themes/bush/scene.svg")), BUSH_SCENE);
+    assert_eq!(body(&get(&c, &r, "/themes/bush/sprites.svg")), BUSH_SPRITES);
+    assert_eq!(
+        bytes(&c, &r, "/themes/bush/icon-180.png"),
+        include_bytes!("../../../assets/swag/bush/icon-180.png")
+    );
+    assert_eq!(host_theme(&c, &r)["name"], "bush");
+    assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"bush\";"));
 }
