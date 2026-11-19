@@ -1,4 +1,6 @@
 mod common;
+#[path = "drive/remote_unlisted.rs"]
+mod remote_unlisted;
 #[path = "drive/rev_unlisted.rs"]
 mod rev_unlisted;
 #[path = "drive/update_limit.rs"]
