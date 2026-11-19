@@ -59,6 +59,7 @@
 1 gate_unit
 4 generic_harness
 4 gh_links
+3 gone_cwd
 2 handover
 4 heavy
 4 herd
