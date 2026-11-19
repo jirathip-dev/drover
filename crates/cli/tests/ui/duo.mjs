@@ -44,7 +44,7 @@ try {
 
   await page.goto(url + '#threads/t2');
   await until(() => !!document.querySelector('.lst .row[data-id="t60"]') && !!document.querySelector('.scr[data-id=thread-t2] .cmp textarea'), 'both panes');
-  await page.locator('.lst [data-id=older-sendmeter] .fold').click();
+  await page.locator('.lst [data-id=older-threads] .fold').click();
   await until(() => document.querySelectorAll('.lst .row[data-id]').length === 60, 'the older threads unfolded');
   await frame();
   out.open = await look();
