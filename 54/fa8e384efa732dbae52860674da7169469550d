@@ -1,0 +1,8 @@
+Decided: one dropdown() in web/src/blocks.ts replaces both native selects; form pickers keep their name on a hidden input so values() posts unchanged
+Because: "One shared terminal-style dropdown in `web/src`, used by every picker on the page"
+Because: q1992
+Rejected: a styled native select — iOS still opens its own frosted sheet, which is the complaint
+Rejected: a new web/src module file — blocks.ts already owns el/btn/esc and both call sites
+Check: the composer WebKit test at 390 taps the model option and asserts one thread-model post and the list inside the viewport
+Check: keyboard_webkit fails identically with the base web/dist on this host (pre-existing)
+Owner: Pickers on the phone page now open the page's own bracketed list instead of the iPhone menu.
