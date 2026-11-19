@@ -1,0 +1,13 @@
+Decided: rebootstrap polls the job's probe after bootout (10 x 1 s) and loads it up to 3 times with 1 s, 2 s backoff; it serves the interval jobs (heal) too.
+Because: "rebootstrap waits after bootout until `launchctl print gui/<uid>/<label>` says the job is gone (up to 10 s)"
+Decided: the retry covers any load failure, not only exit 5: systemd has no error 5 and a retry of another failure is harmless.
+Decided: after a serve restart self-update polls up to 10 s for a pid and a TCP connect on [serve] addr; else one more rebootstrap, then serve-down.
+Because: "self-update confirms the job is loaded with a pid and the port answers"
+Rejected: lsof for the port check — a Linux host may lack lsof, so a plain connect is the probe.
+Decided: a serve-down failure logs only serve-down (a push), not also self-update-failed, so the phone gets one alert.
+Because: "alerts once with the launchctl error, not only a line in tick.log"
+Decided: check revives the job only when its plist/unit file is installed and the job is not loaded; one serve-revived per revival.
+Because: "if dev.drover.serve is not loaded, bootstrap it and log `serve-revived`"
+Decided: the revive call joins check's first line, keeping check() at its 543-line arch baseline.
+Check: self_update tests now bind a real listener for [serve] addr and reply a pid, since the restart is confirmed.
+Owner: After an update the board is checked to be really back; if it is not, drover retries, then alerts you, and the next check pass brings it back.
