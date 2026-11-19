@@ -1,0 +1,4 @@
+Decided: merge origin/staging 49f95b77; serve.rs sessions() keeps this branch's once-per-build shed memo and fills staging's listed snapshot inside it
+Because: "One shed ls per build, shared by all its parts."
+Rejected: none
+Owner: Brought the speed-up up to date with staging; screens stay under 150 ms on the live-shaped fixture
