@@ -1,0 +1,9 @@
+Decided: serve accepts and reads requests on a 2-worker tokio runtime and answers them on at most 64 blocking handler threads; a kept-alive socket goes back to the runtime.
+Because: q2044
+Because: q2091
+Decided: blocking handlers are scoped threads gated by a semaphore, so serve_on keeps its signature and every test call site.
+Rejected: spawn_blocking with Arc<Server> — Server borrows Ctx and the runner, so it would change serve_on and every caller for no gain in slice 1
+Decided: the ui-webkit model-pick failure gets no code change; it fails on staging too (ci run 44469237497 at 290e2299).
+Check: crates/cli/tests/serve_conn.rs: the 65th request waits while 64 handlers are held, and fails on origin/staging.
+Check: .drover/arch.toml keeps staging's #1309/#1364 bans and adds the tokio ban on core and sys.
+Owner: the phone page's server now runs on async connections; busy moments make requests wait instead of failing.
