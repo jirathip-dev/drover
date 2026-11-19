@@ -1,1 +1,1 @@
-- SNAPSHOT_FAILED: kill: the wip snapshot failed (index restored, nothing pushed, pane stays)
+- SNAPSHOT_FAILED: kill, spawn --supersede: the wip snapshot or its push failed (the worktree as it was: same HEAD, same dirty files, index restored; nothing committed, nothing pushed, pane stays)
