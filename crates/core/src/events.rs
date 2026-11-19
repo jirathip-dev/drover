@@ -531,7 +531,7 @@ pub fn checks(e: &Event) -> bool {
 }
 
 /// An ask's endings, the first that applies naming why it closed.
-pub const ORDER: [&str; 9] = [
+pub const ORDER: [&str; 10] = [
     "answered",
     "withdrawn",
     "delivered",
@@ -540,6 +540,7 @@ pub const ORDER: [&str; 9] = [
     "closed: merged",
     "closed: issue closed",
     "closed: lane gone",
+    "closed: superseded",
     "repeat",
 ];
 
@@ -617,6 +618,12 @@ pub fn ends_asks(kind: &str) -> bool {
         kind,
         "needs-decision" | "decision" | "merged" | "closed" | "closed-other" | "clean" | "spawn" | "lane-killed"
     ) || kind.starts_with("ask-")
+        || went_on(kind)
+}
+
+/// An event kind that takes an issue out of needs-human, ending its extend ask.
+pub fn went_on(kind: &str) -> bool {
+    matches!(kind, "spawn" | "verdict" | "round-extended" | "unparked")
 }
 
 pub(crate) fn twin(e: &Event) -> Option<String> {
@@ -821,7 +828,7 @@ pub(crate) fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option
     VISITS.fetch_add(1, Relaxed);
     let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
     let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
-    let relaunch = on("spawn") && e.str("role") == Some("impl") && a.data.get("extend").is_some();
+    let superseded = a.issue.is_some() && e.issue == a.issue && went_on(&e.kind) && a.data.get("extend").is_some();
     let id = names(e, a);
     if e.fleet != a.fleet {
         None
@@ -839,8 +846,10 @@ pub(crate) fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option
         Some("closed: merged")
     } else if on("closed") || on("closed-other") {
         Some("closed: issue closed")
-    } else if mine && !(e.kind == "spawn" && own()) || on("clean") || relaunch {
+    } else if mine && !(e.kind == "spawn" && own()) || on("clean") {
         Some("closed: lane gone")
+    } else if superseded {
+        Some("closed: superseded")
     } else {
         None
     }
@@ -1108,8 +1117,14 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
     (
         "impl",
         &[
-            ("review(n)", "turn done with a push, review spawned"),
-            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+            (
+                "review(n)",
+                "turn done passes its gate at the pushed head, review spawned",
+            ),
+            (
+                "needs-human",
+                "turn blocked, 3 done refusals at a head, or stalled past stall_minutes",
+            ),
             ("queued", "lane killed, or repaired while blocked"),
         ],
     ),
@@ -1124,8 +1139,11 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
     (
         "fix(n)",
         &[
-            ("review(n)", "fix pushed, next review round"),
-            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+            ("review(n)", "fix pushed and turn done passed, next review round"),
+            (
+                "needs-human",
+                "turn blocked, 3 done refusals at a head, or stalled past stall_minutes",
+            ),
         ],
     ),
     (
@@ -1136,7 +1154,10 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
                 "fix(n)",
                 "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
             ),
-            ("merged", "squash-merge into one commit carrying its why notes, with PASS at head and CI green, no STAGING_WOULD_BREAK"),
+            (
+                "merged",
+                "squash-merge into one commit, with PASS at head and CI green, no STAGING_WOULD_BREAK",
+            ),
             ("blocked", "merge refused, or PR closed outside drover"),
         ],
     ),

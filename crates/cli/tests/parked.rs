@@ -154,6 +154,8 @@ fn parked_lane_alerts_once_and_never_stalls() {
 #[test]
 fn unpaused_fleet_resumes_a_parked_impl_to_review() {
     let (c, r) = fixture("parked-resume", false);
+    let d = json!({"state": "done", "role": "impl", "sha": "6a258db".to_string() + &"0".repeat(33)});
+    append(&c.state, &Event::new(NOW - 3600, "sendmeter", Some(12), "turn-end", d)).unwrap();
     let events = read(&c.state).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let waits = drover::waiting::scan(&c, &cfg, &r, &events, &[], false, None);

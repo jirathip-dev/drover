@@ -4,9 +4,9 @@ use drover::config::Config;
 use drover::events::{append, fold, read, Event, IssueState};
 use serde_json::json;
 
-const FORM: &str = "FAIL (form-only)\n\n- blocking [pr-body] PR body: no `## For humans`\n  Proof: spec\n  \
-> The PR body has a `## For humans` section\n  PR#34:1 has none\n- blocking [format] src/x.rs:3: cargo fmt\n  \
-Proof: run\n  ```\n  cargo fmt --check\n  ```\n  ```\n  Diff in src/x.rs:3\n  ```\n- non-blocking src/y.rs:1: a nit\n";
+const FORM: &str = "FAIL (form-only)\n\n- blocking [trailer] abc1234: `Co-Authored-By: an AI`\n  Proof: spec\n  \
+> No AI co-author trailers in commits\n  abc1234:5\n- blocking [docs-fresh] docs/x.md:3: stale\n  \
+Proof: run\n  ```\n  drover arch-check\n  ```\n  ```\n  docs/x.md:3: stale\n  ```\n- non-blocking src/y.rs:1: a nit\n";
 const SPEC: &str = "  Proof: spec\n  > AC 1: it works\n";
 
 fn fixture(name: &str, extra: &str) -> (drover::Ctx, std::path::PathBuf) {
@@ -51,6 +51,43 @@ fn state(c: &drover::Ctx) -> IssueState {
 
 fn logged(c: &drover::Ctx, kind: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count()
+}
+
+#[test]
+fn a_fail_blocking_on_the_done_gates_paperwork_is_refused_naming_it() {
+    let (c, d) = fixture("form-paperwork", "");
+    let file = d.join("verdict.md");
+    for tag in ["format", "pr-body", "why-note"] {
+        let body = format!(
+            "FAIL\n\n- blocking [{tag}] src/x.rs:3: paperwork\n{SPEC}- blocking [code] src/x.rs:9: wrong\n{SPEC}"
+        );
+        std::fs::write(&file, body).unwrap();
+        let sha = "a".repeat(40);
+        let r = Fake::default().reply("gh api", &sha);
+        let args = [
+            "verdict",
+            "sendmeter",
+            "12",
+            "FAIL",
+            "--sha",
+            &sha,
+            "--file",
+            &file.to_string_lossy(),
+        ];
+        let (code, out) = run(&c, &r, &args);
+        assert_eq!(code, 3, "{tag}: {out}");
+        assert!(
+            out.contains("REFUSED PAPERWORK: `- blocking [")
+                && out.contains(&format!("[{tag}] is `turn done`'s check")),
+            "{tag}: {out}"
+        );
+        assert!(!out.contains("[code]"), "only the paperwork blocker is named: {out}");
+    }
+    assert_eq!(logged(&c, "verdict"), 0);
+    let note =
+        format!("FAIL\n\n- non-blocking [format] src/x.rs:3: a nit\n- blocking [code] src/x.rs:9: wrong\n{SPEC}");
+    let out = verdict(&c, &d, 'b', &note);
+    assert!(out.contains("(round 1/3)"), "a paperwork note is fine: {out}");
 }
 
 #[test]

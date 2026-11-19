@@ -802,8 +802,9 @@ const pill = Number(!!(await wait(() => q('.cmp .pill .pt')))?.textContent.start
 type('after this');
 const go = q('.cmp .cr button.primary'), label = Number(go.textContent === 'queue');
 go.click();
-const queued = await wait(() => all('.cmp .qd').filter(r => r.textContent.includes('after this')).length);
-q('.cmp .qd button.primary').click();
+const now = await wait(() => all('.cmp .qd').find(r => r.textContent.includes('after this'))?.querySelector('button.primary'));
+const queued = Number(!!now);
+now?.click();
 const steered = await wait(() => Number(!q('.cmp .qd') && all('.card.k-you').some(c => c.textContent.includes('after this'))));
 return [pill, label, queued, steered];
 }})()");

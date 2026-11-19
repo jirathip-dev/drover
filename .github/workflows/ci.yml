@@ -222,7 +222,7 @@ jobs:
         env:
           FLAKY: ${{ needs.ui.outputs.flaky }}
 
-  # #862: ui-webkit runs only when the diff touches the page (#927: web/, assets/; #1312: crates/server/) or its own tests.
+  # #862: on a PR, ui-webkit runs only when the diff touches the page (#927: web/, assets/; #1312: crates/server/) or its own tests; #1423: every staging push runs it.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -235,8 +235,9 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF: ${{ github.ref }}
         run: |
-          if [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+          if [ "$REF" = refs/heads/staging ] || [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             echo "webkit=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt

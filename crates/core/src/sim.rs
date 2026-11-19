@@ -16,6 +16,16 @@ pub struct Hooks {
 }
 
 thread_local!(static HOOKS: RefCell<Option<Hooks>> = const { RefCell::new(None) });
+thread_local!(static ENV: RefCell<Vec<(String, String)>> = const { RefCell::new(vec![]) });
+
+/// This thread's simulated process environment: each `(key, value)` over the real one.
+pub fn env(vars: Vec<(String, String)>) {
+    ENV.set(vars);
+}
+
+pub(crate) fn var(k: &str) -> Option<String> {
+    ENV.with_borrow(|e| e.iter().find(|v| v.0 == k).map(|v| v.1.clone()))
+}
 
 /// Install (or, `None`, remove) this thread's hooks.
 pub fn set(h: Option<Hooks>) {

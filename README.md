@@ -19,7 +19,8 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - Serial path groups (#306), the queue-wide line cap `drover cap` (#671), its history `drover cap log` (#1096), and
   arch-check from `.drover/arch.toml` (#758, #772).
 - `--repro`, `--perf` and `--refactor` playbooks (#758); impl lanes end each turn with `drover turn` (#591).
-- Each lane commit carries a why note: `drover why` (#691).
+- `drover turn done` is a hard gate: no review until the PR body names the pushed head and format and arch-check
+  pass (#1362); `drover why` shows a line's commit, issue and the issue's asks and answers (#691).
 - A deterministic simulation of concurrent passes: `just sim` (#695, #697).
 
 **Roles**
@@ -72,7 +73,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
   cards, config proposals and secret requests in a cooee chat (#1066).
 
 **Merge, history and rules**
-- Squash merges carrying their why notes (#1097); one history and issue convention by default (#1101).
+- Squash merges (#1097); one history and issue convention by default (#1101).
 - Design reviews and one more round from the owner's typed words (#828); a typed `#N approve` approves (#1080).
 - SLO promises a known hold supersedes are void, not missed (#1093); one log read per pass (#832).
 - Banned APIs (unwrap, panics, indexing, `as` casts) fail CI (#809).

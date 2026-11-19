@@ -131,3 +131,44 @@ fn unrelated_events_send_no_stream_data_and_a_thread_read_reaches_only_the_threa
         "the threads list drops t3's unread dot: {list:?}"
     );
 }
+
+struct MidBuild(OnShed, std::path::PathBuf, std::sync::atomic::AtomicBool);
+
+impl drover::runner::Runner for MidBuild {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+    fn shed(&self) -> Option<drover::shed::Shed> {
+        let building = std::backtrace::Backtrace::force_capture()
+            .to_string()
+            .contains("threads_screen");
+        if building && !self.2.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let d = json!({"thread": "t3", "from": "orchestrator", "text": "landed mid-build"});
+            append(&self.1, &Event::new(drover::now(), "sendmeter", None, "thread-msg", d)).unwrap();
+        }
+        self.0.shed()
+    }
+}
+
+#[test]
+fn an_event_logged_while_the_stream_builds_its_first_screen_reaches_the_stream() {
+    let (c, _) = threads("stream-mid-build");
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap().to_string();
+    let r = MidBuild(OnShed::new(Fake::default()), c.state.clone(), false.into());
+    std::thread::spawn(move || drover::serve::serve_on(&c, &r, l, false));
+    let mut s = std::net::TcpStream::connect(&addr).unwrap();
+    s.set_read_timeout(Some(std::time::Duration::from_secs(40))).unwrap();
+    write!(s, "GET /screens/threads/t3/stream HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+    let sent = data_until_ping(&mut BufReader::new(s));
+    assert!(
+        sent.iter().any(|d| d.to_string().contains("landed mid-build")),
+        "a reply logged during the first build shows before the next ping, not 30 s later: {sent:?}"
+    );
+}

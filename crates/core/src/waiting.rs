@@ -317,6 +317,10 @@ pub fn waiting_on(
     w
 }
 
+fn holds(ask: &Event, s: &IssueState) -> bool {
+    ask.data.get("extend").is_none() || s.state == "needs-human"
+}
+
 fn waits(
     log: &Log,
     events: &[Event],
@@ -363,7 +367,7 @@ fn waits(
     let cmd = |verb: &str, tail: &str| Some(format!("drover {verb} {f} {n}{tail}"));
     let mine =
         |a: &&Event| a.fleet == *f && (a.issue == Some(n) || s.lanes.values().any(|l| a.str("agent") == Some(l)));
-    if let Some(a) = log.asks.iter().copied().find(mine) {
+    if let Some(a) = log.asks.iter().copied().find(|a| mine(a) && holds(a, s)) {
         let id = a.str("id").unwrap_or("?");
         let next = crate::design::is_ask(a).then(|| format!("drover answer {f} {id} approve|revise|reject"));
         return w("owner", &format!("waiting on your answer ({id})"), a.ts, next);
@@ -407,7 +411,7 @@ fn waits(
     while let Some(e) = update(base) {
         base = e.str("from").unwrap_or_default();
     }
-    let handed = |h: &str| events.iter().any(|e| e.is("pushed", f, n) && e.str("sha") == Some(h));
+    let at = |k: &str| events.iter().any(|e| e.is(k, f, n) && e.str("sha") == Some(pushed));
     let checks = gh::required(&pr["statusCheckRollup"], req);
     let how = match (pr["mergeable"].as_str(), pr["mergeStateStatus"].as_str()) {
         (Some("CONFLICTING"), _) => "conflicts with",
@@ -556,7 +560,7 @@ fn waits(
         "impl" | "fix"
             if !pushed.is_empty()
                 && (!s.reviewed(pushed) || s.last_event == "fix-no-change" || fix_done(events, f, n).is_some())
-                && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
+                && (at("pushed") || (s.reviewed(pushed) || at("turn-end")) && head.is_none_or(|h| h.0 == pushed)) =>
         {
             let how = match s.rounds {
                 _ if s.reviewed(pushed) => "no change at ",

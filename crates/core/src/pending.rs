@@ -125,16 +125,39 @@ pub fn record(ctx: &Ctx, (fleet, n): (&str, u64), action: &str, role: &str, afte
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "pending-action", d))
 }
 
-/// A start of `fleet` #`n` refused `code` (`why`): a pending action logs it, failed unless soft; whether it stays pending. a hard refusal of a requeued extend's start is a new needs-human.
+/// One owner card per extend of `fleet` with no lane `stall_minutes` after it, naming drive's last refused start; a soft wait or the fleet's pause raises none.
+pub fn stalled(ctx: &Ctx, cfg: &crate::config::Config, fleet: &str) -> Result<()> {
+    if cfg.fleet.get(fleet).is_some_and(|f| f.paused) {
+        return Ok(());
+    }
+    let ev = crate::events::working(&ctx.state)?;
+    for n in crate::queue::startable(&ev, fleet)
+        .iter()
+        .filter_map(|n| n.parse().ok())
+    {
+        let Some(from) = since(&ev, fleet, n).and_then(|rest| Some((rest.first()?.ts, rest))) else {
+            continue;
+        };
+        let tried = (from.1.iter()).rfind(|e| e.kind == "driven" && e.str("step") == Some("start"));
+        let code = tried.and_then(|e| e.str("code"));
+        let wait = code.is_some_and(|c| SOFT.contains(&c) || SKIP.contains(&c) || DISK.contains(&c));
+        if wait || ctx.now < from.0 + cfg.limits.stall_minutes * 60 {
+            continue;
+        }
+        let result = tried.and_then(|e| e.str("result")).unwrap_or_default();
+        let why = code.map_or("no start was logged".into(), |c| {
+            format!("{c}: {}", result.split_once(": ").map_or(result, |p| p.1))
+        });
+        let held = age(ctx.now.saturating_sub(from.0));
+        let d = json!({"code": code.unwrap_or("NOT_STARTED"), "reason": format!("one more round did not start in {held}: {why}"), "start": true});
+        crate::events::emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))?;
+    }
+    Ok(())
+}
+
+/// A start of `fleet` #`n` refused `code` (`why`): a pending action logs it, failed unless soft; whether it stays pending.
 pub fn refused(ctx: &Ctx, (fleet, n): (&str, u64), code: &str, why: &str) -> Result<bool> {
     let ev = crate::events::working(&ctx.state)?;
-    let wait = SOFT.contains(&code) || SKIP.contains(&code) || DISK.contains(&code);
-    let queued = ev.states.get(&(fleet.into(), n)).is_some_and(|s| s.state == "queued");
-    if !wait && queued && requeued(&ev, fleet, n) {
-        let d = json!({"code": code, "reason": format!("one more round did not start: {code}: {why}"), "start": true});
-        append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "needs-human", d))?;
-        return Ok(false);
-    }
     let Some(p) = of(&ev, fleet, n).filter(|p| !p.failed) else {
         return Ok(false);
     };

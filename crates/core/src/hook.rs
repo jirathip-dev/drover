@@ -273,8 +273,8 @@ fn notes(t: &[&str]) -> Option<String> {
         (rest.iter().position(|w| *w == "notes")).is_some_and(|i| rest.iter().skip(i).any(|w| writes.contains(w)));
     let push = rest.contains(&"push") && rest.iter().any(|w| w.contains("refs/notes"));
     (write || push).then(|| {
-        "REFUSED NOTES_DROVER_ONLY: only drover writes or pushes why notes: write why.md, then \
-        `drover turn done` (#677)"
+        "REFUSED NOTES_DROVER_ONLY: lanes write and push no git notes; a non-obvious reason goes in the \
+        PR body (#1362)"
             .into()
     })
 }

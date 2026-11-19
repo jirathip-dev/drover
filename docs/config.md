@@ -120,6 +120,14 @@ and merging; `drover spawn` of a new issue is refused `IN_FLIGHT_CAP` unless `--
 slot until its lane comes or `spawn_pending_max_secs` passes; the refusal names the issues with a lane or a PR, and
 counts those starting. Drive gives the free slots to the queue in order; the kicks it launched count no cap again.
 
+## Done checks (#1362)
+
+`turn done` is a hard gate: before any review it checks, in the lane's worktree on its host, that `HEAD` is the pushed PR
+head, that the PR body names it (`PR_BODY`), and runs each `done_checks` command (`[fleet.<n>] done_checks = ["…"]`),
+each killed after `gate_check_minutes`. Unset = `drover arch-check` where the repo has `.drover/arch.toml` and
+`cargo fmt --check` where it has a `Cargo.toml`. A check only checks; one that fails, cannot start or times out
+refuses the `done` (`DONE_CHECK`, with its output tail). CI still runs format and arch-check.
+
 ## Hygiene (#1101)
 
 One history and issue convention is on for every fleet with no config. `[hygiene]` sets it for all fleets,
@@ -175,7 +183,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `deny_commands` | `assets/deny_commands.toml` | commands the lane hook refuses (default: containers) |
 | `fast_secs` | `60` | the fast step (`drive --fast`) runs every this many seconds |
 | `slow_secs` | `300` | the slow tick runs every this many seconds |
-| `form_categories` | `["trailer", "pr-body", "stale-baseline", "format", "docs-fresh", "migration-redate", "infra"]` | the finding tags a `FAIL (form-only)` may carry |
+| `form_categories` | `["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]` | the finding tags a `FAIL (form-only)` may carry |
 | `form_rounds` | `3` | form-only FAILs per issue that don't count as a review round |
 | `overflow_after_minutes` | `10` | every local host refused this long lets placement start a stopped cloud host |
 | `import_max_age_hours` | `24` | a remote host's asks older than this are never imported |
@@ -198,6 +206,12 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
+| `link_beat_secs` | `5` | a host's watcher with nothing to say writes a beat this often |
+| `link_stale_secs` | `20` | no frame from a host's link for this long: it is cut and dialled again |
+| `link_retry_max_secs` | `30` | the longest wait between a link's dials (1 s, doubling) |
+| `link_poll_millis` | `500` | how often a watcher looks at each outbox, verdict.md and shed session for a change |
+| `link_sample_secs` | `30` | a watcher sends a whole report this often, changed or not |
+| `link_down_minutes` | `5` | a host with lanes whose link is not live this long alerts `link-down` |
 | `db_busy_secs` | `60` | the SQLite busy timeout |
 | `db_retry_millis` | `10` | the pause between a new database's WAL switch retries |
 | `cloud_idle_stop_minutes` | `20` | a cloud host's `idle_stop_minutes` when it sets none |

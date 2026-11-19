@@ -49,7 +49,11 @@ fn lane_at(name: &str, live: bool, pr: Option<&str>, head: Option<&str>) -> (dro
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#);
     if let Some(pr) = pr {
-        r = r.reply("gh pr view issue-12", pr);
+        let head: serde_json::Value = serde_json::from_str(pr).unwrap();
+        let at = format!("git -C {} rev-parse HEAD", wt.display());
+        r = r
+            .reply("gh pr view issue-12", pr)
+            .reply(&at, head["headRefOid"].as_str().unwrap());
     }
     if let Some(h) = head {
         r = r.reply(&format!("git -C {} log", wt.display()), &format!("{h} 20"));
@@ -149,15 +153,77 @@ fn done_at_a_pushed_head_spawns_review_at_once_without_waiting_for_ci() {
     let (c, r, sh) = lane_at("turn-done-pushed", true, Some(&pr(&head, "pending")), Some(&sha("def")));
     let (w, _) = texts(&c, &r);
     assert!(w.contains("idle without pushing"), "{w}");
-    ev(&c, 11, "decision", json!({"id": "q1", "choice": "yes", "by": "owner"}));
-    let note = "Decided: d\nBecause: q1\nRejected: r — x\nCheck: c\nOwner: o\n";
-    std::fs::write(c.worktrees.join("sendmeter/issue-12/why.md"), note).unwrap();
     turn(&c, &r, &["done"]);
+    assert_eq!(kinds(&c, "turn-end")[0].str("sha"), Some(head.as_str()));
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["review"], "{out}");
     assert!(out.contains(&format!("pushed: {head:.7} via pr")), "{out}");
     assert_eq!(state(&c), "review(1)");
     assert_eq!(typed(&sh, NUDGE), 0);
+}
+
+const UNGATED: &str = "drover: head abc0000 is pushed with no passing `drover turn done`";
+
+#[test]
+fn a_pushed_head_with_no_done_gets_no_review_the_lane_told_once_then_one_card() {
+    let head = sha("abc");
+    let (c, r, sh) = lane_at("turn-ungated", true, Some(&pr(&head, "green")), Some(&sha("def")));
+    let (out, steps) = drive(&at(&c, 200), &r);
+    assert!(
+        steps.is_empty() && out.contains("no passing turn done at abc0000: told"),
+        "{out}"
+    );
+    assert_eq!(typed(&sh, UNGATED), 1, "{:?}", sh.methods());
+    drive(&at(&c, 600), &r);
+    assert_eq!(typed(&sh, UNGATED), 1, "told once");
+    assert!(kinds(&c, "pushed").is_empty() && state(&c) == "impl", "no review");
+    let (out, _) = drive(&at(&c, 200 + 1800), &r);
+    assert!(
+        out.contains("needs-human: head abc0000 is pushed with no passing `drover turn done`"),
+        "{out}"
+    );
+    let nh = &kinds(&c, "needs-human")[0];
+    assert_eq!(
+        (nh.str("code"), nh.str("sha")),
+        (Some("DONE_REFUSED"), Some(head.as_str()))
+    );
+    drive(&at(&c, 7200), &r);
+    assert_eq!(kinds(&c, "needs-human").len(), 1, "one card, never a loop");
+    assert!(kinds(&c, "pushed").is_empty() && !respawned(&sh));
+}
+
+#[test]
+fn three_refused_dones_at_one_head_are_one_owner_card_with_the_refusal() {
+    let head = sha("abc");
+    let unanchored = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "statusCheckRollup": [], "body": "## For humans\n\nx"})
+    .to_string();
+    let (c, r, sh) = lane_at("turn-refused", true, Some(&unanchored), Some(&sha("def")));
+    for i in 0..3 {
+        let (code, out) = run(&at(&c, i * 10), &r, &["turn", "done"]);
+        assert_eq!(code, 3, "{out}");
+        assert!(
+            out.contains("REFUSED PR_BODY: the PR body's evidence names no sha of head abc0000"),
+            "{out}"
+        );
+    }
+    assert!(kinds(&c, "turn-end").is_empty(), "a refused done ends no turn");
+    let refusals = kinds(&c, "done-refused");
+    assert_eq!(refusals.len(), 3);
+    assert_eq!(
+        (refusals[0].str("code"), refusals[0].str("sha")),
+        (Some("PR_BODY"), Some(head.as_str()))
+    );
+    let (out, steps) = drive(&at(&c, 40), &r);
+    assert!(steps.is_empty(), "{out}");
+    assert!(
+        out.contains("needs-human: turn done refused PR_BODY: the PR body's evidence names no sha"),
+        "{out}"
+    );
+    assert_eq!(state(&c), "needs-human");
+    drive(&at(&c, 7200), &r);
+    assert_eq!(kinds(&c, "needs-human").len(), 1);
+    assert!(kinds(&c, "pushed").is_empty() && !respawned(&sh));
 }
 
 #[test]

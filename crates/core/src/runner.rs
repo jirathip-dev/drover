@@ -37,6 +37,9 @@ pub trait Runner: Sync {
     fn stream(&self, prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
         Real::stream(prog, args, input)
     }
+    fn pipe(&self, prog: &str, args: &[String]) -> Result<Duplex> {
+        Real::pipe(prog, args)
+    }
     fn secret(&self, svc: &str) -> Result<Option<String>> {
         bail!("drover keeps no secret store (wanted {svc})")
     }
@@ -106,7 +109,29 @@ fn here(c: &mut Command) -> &mut Command {
     if !std::env::current_dir().is_ok_and(|d| d.is_dir()) {
         c.current_dir("/");
     }
-    c
+    c.env("PATH", system_path())
+}
+
+fn system_path() -> std::ffi::OsString {
+    let path = crate::config::env_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into());
+    let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
+    for d in ["/usr/sbin", "/sbin"] {
+        if !dirs.iter().any(|p| p.as_os_str() == d) {
+            dirs.push(d.into());
+        }
+    }
+    std::env::join_paths(dirs).unwrap_or(path)
+}
+
+/// True when the program could not be found: the spawn's `NotFound` or a shell's 127.
+pub fn not_found(o: &Result<Out>) -> bool {
+    match o {
+        Ok(o) => o.code == 127,
+        Err(e) => e.chain().any(|c| {
+            c.downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        }),
+    }
 }
 
 pub struct Real;
@@ -151,7 +176,39 @@ impl Drop for Streamed {
     }
 }
 
+/// A child's stdin and stdout, both held open; dropping the stdin end kills the child.
+pub type Duplex = (Box<dyn std::io::Write + Send>, Box<dyn std::io::Read + Send>);
+
+struct Fed(std::process::ChildStdin, std::process::Child);
+
+impl std::io::Write for Fed {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl Drop for Fed {
+    fn drop(&mut self) {
+        self.1.kill().ok();
+        self.1.wait().ok();
+    }
+}
+
 impl Real {
+    fn pipe(prog: &str, args: &[String]) -> Result<Duplex> {
+        use std::process::Stdio;
+        let mut c = here(&mut Command::new(prog))
+            .args(plain(prog, args))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("cannot run {prog}"))?;
+        let (i, o) = (c.stdin.take().context("stdin")?, c.stdout.take().context("stdout")?);
+        Ok((Box::new(Fed(i, c)), Box::new(o)))
+    }
     fn stream(prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
         use std::io::Write;
         use std::process::Stdio;

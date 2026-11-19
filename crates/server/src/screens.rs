@@ -13,6 +13,8 @@ use std::time::Duration;
 
 #[path = "later.rs"]
 mod later;
+#[path = "screens_local.rs"]
+pub(super) mod local;
 #[path = "screens_pages.rs"]
 mod pages;
 
@@ -53,7 +55,6 @@ pub fn page_places() -> Value {
 
 #[path = "screens_hosts.rs"]
 mod hosts;
-use hosts::HOST_ACTIONS;
 
 const THREAD_ACTIONS: [&str; 11] = [
     "thread-new",
@@ -1220,12 +1221,12 @@ fn herd_screen(h: &Herd) -> Value {
         .collect();
     repos.extend(herd_repo("others", "", &h.others, None));
     let host = &h.host;
-    let wind = (host.load.unwrap_or_default() / host.limit.max(0.01)).clamp(0.0, 1.0);
-    let sky = match host.pressure.as_deref() {
-        _ if host.gate.is_some() => "storm",
-        Some("warn" | "critical") => "fog",
-        _ if wind >= 0.5 => "windy",
-        _ => "clear",
+    let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
+    let (sky, level) = match host.pressure.as_deref() {
+        _ if host.gate.is_some() => ("storm", "held"),
+        Some("warn" | "critical") => ("fog", "busy"),
+        _ if ratio >= 0.5 => ("windy", "busy"),
+        _ => ("clear", "calm"),
     };
     let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
     let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
@@ -1233,8 +1234,8 @@ fn herd_screen(h: &Herd) -> Value {
         "load {load} · mem {} · swap {swap}",
         host.pressure.as_deref().unwrap_or("?")
     );
-    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene",
-        "weather": {"sky": sky, "wind": (wind * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
+    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene", "load": level,
+        "weather": {"sky": sky, "wind": (ratio.clamp(0.0, 1.0) * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
 }
 
 fn section_word(state: &str) -> &str {
@@ -1648,25 +1649,17 @@ impl Server<'_> {
                 let Ok(a) = serde_json::from_str::<Value>(body) else {
                     return line("400 Bad Request", "bad request body");
                 };
-                let name = a.at("action").as_str().unwrap_or_default();
-                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name) && !HOST_ACTIONS.contains(&name)) {
-                    let why =
-                        format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
-                    return line("403 Forbidden", &why);
-                }
-                let by = match auth {
-                    Ok(d) if !plugin => d.label.clone(),
-                    _ => "cooee".into(),
+                let who = match auth {
+                    Ok(d) if !plugin => local::Who::Device(&d.label),
+                    _ => local::Who::Plugin,
                 };
-                let res = match name {
-                    "later" => self.hide_card(ctx, &by, a.at("values")),
-                    n if HOST_ACTIONS.contains(&n) => self.host_op(ctx, n, a.at("values")),
-                    _ => self.action(ctx, name, &a),
-                };
-                match res {
+                match self.perform(ctx, &who, &a) {
                     Ok(v) => out("200 OK", &v),
-                    Err(e) if e.downcast_ref::<Refusal>().is_some() => line("409 Conflict", &shown(&e)),
-                    Err(e) => line("400 Bad Request", &shown(&e)),
+                    Err(e) => match e.downcast_ref::<Refusal>().map(|r| r.code) {
+                        Some("NOT_PERMITTED") => line("403 Forbidden", &shown(&e)),
+                        Some(_) => line("409 Conflict", &shown(&e)),
+                        None => line("400 Bad Request", &shown(&e)),
+                    },
                 }
             }
             _ => line("404 Not Found", "no such screen route"),
@@ -1912,6 +1905,7 @@ impl Server<'_> {
         let plugin = Self::plugin(self.ctx, head);
         let paired = plugin || devices::check(self.ctx, header(head, "cookie").unwrap_or_default()).is_ok();
         let screen = |c: &Ctx, q: &Q| crate::runner::request(|| self.screen(c, base, q, paired));
+        let mut log = crate::db::last_seq(&self.ctx.state);
         let Some(mut cur) = screen(&ctx(), &q).filter(|_| open && (plugin || self.allowed(self.ctx, head))) else {
             self.streams.fetch_sub(1, Relaxed);
             let r = line(
@@ -1938,7 +1932,7 @@ impl Server<'_> {
         start.extend(count(&cur).map(|n| json!({"op": "badge", "count": n})));
         let ver = format!("{:08x}", super::VER);
         let mut msg = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\nid: {seq}\ndata: {}\n\n", json!({"seq": seq, "build": ver, "ops": start}));
-        let (mut log, mut ping) = (crate::db::last_seq(&self.ctx.state), drover_core::clock::instant());
+        let mut ping = drover_core::clock::instant();
         let mut built = drover_core::clock::instant();
         let mut z = super::wire::Stream::new(head);
         let res = loop {
@@ -1991,3 +1985,7 @@ fn cooee() -> devices::Device {
         ..Default::default()
     }
 }
+
+#[cfg(test)]
+#[path = "herd_tests.rs"]
+mod tests;

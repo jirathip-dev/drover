@@ -300,11 +300,11 @@ fn compact_keeps_every_tree_answers_why_needs_a_fresh_review_and_undoes_exactly(
         out.contains("a: two (#1) (#11)") && out.contains("PR #11 · merged"),
         "{out}"
     );
-    assert!(out.contains("  Owner: the meter counts two"), "{out}");
+    assert!(!out.contains("Owner:"), "drover why shows no note: {out}");
     let (code, out) = run(&c, &r, &["why", &format!("{}:1", look.join("a.rs").display())]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("a: old line") && out.contains("PR #50 · merged"), "{out}");
-    assert!(out.contains("  Owner: the old note"), "{out}");
+    assert!(!out.contains("Owner:"), "{out}");
 
     let cfg = Config::load(&c.config).unwrap();
     let f = cfg.fleet("sendmeter").unwrap();

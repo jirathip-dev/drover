@@ -68,6 +68,28 @@ pub fn config(ctx: &Ctx) -> Result<Config> {
     }
 }
 
+fn links(ctx: &Ctx, cfg: &Config, view: &crate::link::view::View, events: &[Event]) -> Result<()> {
+    let linked = crate::service::up(ctx).map_or(vec![], |_| crate::link::hosts(cfg));
+    for name in linked.iter().map(|h| h.0.as_str()) {
+        let h = view.link(name).filter(|_| !view.live(name));
+        let long = h.is_some_and(|h| ctx.now.saturating_sub(h.since) >= cfg.limits.link_down_minutes * 60);
+        let down = long && !crate::hosts::lanes_on(cfg, events, name).is_empty();
+        let was = |e: &&Event| e.str("host") == Some(name) && matches!(e.kind.as_str(), "link-down" | "link-up");
+        let last = events.iter().rev().find(was);
+        if down != last.is_some_and(|e| e.kind == "link-down") {
+            let (kind, why) = if down {
+                ("link-down", h.and_then(|h| h.why.clone()))
+            } else {
+                ("link-up", None)
+            };
+            let why = format!("{name}: link {}: {}", &kind[5..], why.unwrap_or_else(|| "live".into()));
+            let d = json!({"host": name, "reason": why, "since": h.map(|h| h.since)});
+            crate::events::emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d).push())?;
+        }
+    }
+    Ok(())
+}
+
 /// Each alert's dedup key is built from the issue's last activity: once per state, again after a change.
 pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = crate::timer::revive(ctx, cfg, r).and_then(|()| working(&ctx.state))?;
@@ -116,7 +138,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
-    let synced = working(&ctx.state)?;
+    let synced = links(ctx, cfg, &view, &events).and_then(|()| working(&ctx.state))?;
     for name in cfg.hosts.keys() {
         let mut tries = (synced.iter().rev()).filter(|e| e.kind == "host-sync" && e.str("host") == Some(name));
         let Some(e) = tries.next().filter(|e| e.val("ok") == false) else {
@@ -2206,7 +2228,7 @@ fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<(String
         ),
         Err(Snap::Push(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
-            format!("{agent}: wip push failed ({e:#}); committed in its worktree, nothing pushed, pane kept"),
+            format!("{agent}: wip push failed ({e:#}); nothing committed, nothing pushed, pane kept"),
         ),
         Ok(ws) => Ok(ws),
     }
@@ -2398,6 +2420,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         git(&["reset", "-q"]).ok();
         return Err(Snap::Secret(hit));
     }
+    let before = git(&["rev-parse", "HEAD"]).map_err(undo)?;
     if !staged.is_empty() {
         let unset = ["user.name", "user.email"].iter().any(|k| git(&["config", k]).is_err());
         let id: &[&str] = if unset {
@@ -2415,5 +2438,8 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         p => p,
     }
     .map(|w| (w, skip))
-    .map_err(Snap::Push)
+    .map_err(|e| {
+        git(&["reset", "-q", before.trim()]).ok();
+        Snap::Push(e)
+    })
 }
