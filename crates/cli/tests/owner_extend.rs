@@ -43,10 +43,13 @@ fn setup(name: &str) -> (drover::Ctx, FakeShed) {
 }
 
 fn fake(level: &str) -> Fake {
+    fake_on(level, Fake::default())
+}
+
+fn fake_on(level: &str, f: Fake) -> Fake {
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": sha("3"),
         "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]});
-    Fake::default()
-        .reply("sysctl -n kern.memorystatus_vm_pressure_level", &format!("{level}\n"))
+    f.reply("sysctl -n kern.memorystatus_vm_pressure_level", &format!("{level}\n"))
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
@@ -291,4 +294,91 @@ fn a_board_tap_logs_and_requeues_at_once_and_never_bounces_on_a_running_drive() 
     let (_, again) = b.post("extend", &format!("fleet=sendmeter&issue=12&mtime={mt}"));
     assert_eq!(again["code"], "NOT_NEEDS_HUMAN", "{again}");
     assert_eq!(kinds(&c, "round-extended"), 1, "a re-tap logs nothing");
+}
+
+fn leftover(name: &str) -> (drover::Ctx, FakeShed, String) {
+    let (c, sh) = setup(name);
+    assert_eq!(run(&c, &fake("1"), &["extend", "sendmeter", "12"]).0, 0);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let w = wt.display().to_string();
+    sh.lane(IMPL, "working", &w);
+    (c, sh, w)
+}
+
+fn secret(w: &str) -> Fake {
+    let f = Fake::default().reply(&format!("git -C {w} rev-list"), "1\n").reply(
+        &format!("git -C {w} log -p"),
+        concat!("+TOKEN = \"gh", "p_abcdefghijklmnopqrstu1234\"\n"),
+    );
+    fake_on("1", f)
+}
+
+#[test]
+fn an_extend_with_the_last_rounds_agent_still_live_ends_it_and_starts_the_new_lane_in_one_pass() {
+    let (c, sh, _) = leftover("extend-leftover");
+    let calm = fake("1");
+    let (code, out) = run(&c, &calm, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(kinds(&c, "supersede"), 1, "{out}");
+    assert_eq!(started(&sh), 1, "{out}");
+    assert_eq!(state(&c), "fix(3)", "{out}");
+    assert_eq!(status(&c, &calm, c.now), Value::Null);
+}
+
+#[test]
+fn a_refused_wip_save_shows_on_the_row_and_the_card_comes_once_after_the_stall_threshold() {
+    let (mut c, sh, w) = leftover("extend-leftover-secret");
+    let calm = fake("1");
+    let (code, out) = run(&c, &secret(&w), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(started(&sh), 0, "{out}");
+    assert_eq!(state(&c), "queued", "{out}");
+    assert_eq!(status(&c, &calm, c.now), "extended · waiting: SECRET_IN_WIP");
+    assert_eq!(cards(&c, &calm, c.now), [], "no card before the stall threshold");
+
+    c.now += 29 * 60;
+    assert_eq!(run(&c, &secret(&w), &["drive"]).0, 0);
+    assert_eq!(cards(&c, &calm, c.now), []);
+    c.now += 60;
+    assert_eq!(run(&c, &secret(&w), &["drive"]).0, 0);
+    let back = cards(&c, &calm, c.now);
+    assert_eq!(back.len(), 1, "{back:?}");
+    assert!(
+        back[0]
+            .1
+            .starts_with("one more round did not start in 30m: SECRET_IN_WIP: "),
+        "{back:?}"
+    );
+    c.now += 3600;
+    assert_eq!(run(&c, &secret(&w), &["drive"]).0, 0);
+    assert_eq!(kinds(&c, "needs-human"), 2, "one card per extension");
+    assert_eq!(started(&sh), 0);
+}
+
+#[test]
+fn an_extend_never_tried_for_the_stall_threshold_raises_one_card() {
+    let (mut c, sh) = setup("extend-never-tried");
+    let calm = fake("1");
+    assert_eq!(run(&c, &calm, &["extend", "sendmeter", "12"]).0, 0);
+    let kick = |c: &drover::Ctx| {
+        let t = std::fs::read_to_string(&c.config).unwrap();
+        std::fs::write(
+            &c.config,
+            t.replace("max_parallel_spawns = 0", "max_parallel_spawns = 6"),
+        )
+        .unwrap();
+    };
+    kick(&c);
+    assert_eq!(run(&c, &calm, &["drive"]).0, 0);
+    assert_eq!(status(&c, &calm, c.now), "extended · starting");
+    c.now += 30 * 60;
+    assert_eq!(run(&c, &calm, &["drive"]).0, 0);
+    let back = cards(&c, &calm, c.now);
+    assert_eq!(back.len(), 1, "{back:?}");
+    assert!(back[0].1.starts_with("one more round did not start in 30m"), "{back:?}");
+    c.now += 3600;
+    assert_eq!(run(&c, &calm, &["drive"]).0, 0);
+    assert_eq!(kinds(&c, "needs-human"), 2, "one card per extension");
+    assert_eq!(started(&sh), 0);
 }
