@@ -759,6 +759,7 @@ pub struct Limits {
     pub disk_sick_secs: u64,
     pub disk_trust_secs: u64,
     pub lane_read_secs: u64,
+    pub guard_secs: u64,
     pub poll_millis: u64,
     pub tick_beat_secs: u64,
     pub orchestrator_idle_minutes: u64,
@@ -889,6 +890,7 @@ impl Default for Limits {
             disk_sick_secs: 300,
             disk_trust_secs: 60,
             lane_read_secs: 5,
+            guard_secs: 180,
             poll_millis: 20,
             tick_beat_secs: 60,
             orchestrator_idle_minutes: 30,
@@ -1121,6 +1123,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "lane_read_secs",
         "a lane worktree read slower than this skips the lane for the pass (`root-hung`)",
+    ),
+    (
+        "guard_secs",
+        "`turn done`'s UI check (`just guard`) runs this long at most; past it the turn ends and `ui-check` logs a timeout",
     ),
     (
         "poll_millis",

@@ -116,7 +116,9 @@ Remove the key to undo it. How it works and the other undos: `docs/workflow.md`,
 
 `max_in_flight = N` in `[fleet.<n>]` caps the fleet's PRs in flight (an issue in impl, fix, review, verify or ready,
 or one held with an open PR); unset is 8, `0` is off. At the cap drive starts no new issue but keeps reviewing, fixing
-and merging; `drover spawn` of a new issue is refused `IN_FLIGHT_CAP` unless `--force`.
+and merging; `drover spawn` of a new issue is refused `IN_FLIGHT_CAP` unless `--force`. A start drive admitted holds a
+slot until its lane comes or `spawn_pending_max_secs` passes; the refusal names the issues with a lane or a PR, and
+counts those starting. Drive gives the free slots to the queue in order; the kicks it launched count no cap again.
 
 ## Hygiene (#1101)
 
@@ -208,6 +210,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `disk_sick_secs` | `300` | a disk that let a call run out of time stays hung this long |
 | `disk_trust_secs` | `60` | a folder that answered is trusted this long before it is probed again |
 | `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |
+| `guard_secs` | `180` | `turn done`'s UI check (`just guard`) runs this long at most; past it the turn ends and `ui-check` logs a timeout |
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
