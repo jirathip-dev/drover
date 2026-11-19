@@ -164,6 +164,7 @@ fn waits(c: &drover::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<Waiting
 
 fn lanes(c: &drover::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<(drover::events::IssueState, Waiting)> {
     let agents: Vec<_> = agents.iter().map(session).collect();
+    look(c, r);
     scan(
         c,
         &Config::load(&c.config).unwrap(),
@@ -672,7 +673,8 @@ fn a_promise_missed_after_the_disk_recovers_names_the_current_hold_not_disk_low_
     let sh = FakeShed::attached(&c);
     let seen = sh.on(&r);
     let mut out = vec![];
-    drover::slo::pass(&c, &cfg, (&seen, &seen), &mut out, &["sendmeter"]).unwrap();
+    look(&c, &seen);
+    drover::slo::pass(&c, &cfg, &seen, &mut out, &["sendmeter"]).unwrap();
     let ev = read(&c.state).unwrap().to_vec();
     assert!(!ev.iter().any(|e| e.kind == "stuck"), "a wait is no stuck card: {ev:?}");
     let missed = ev.iter().find(|e| e.kind == "promise-missed" && e.issue == Some(42));

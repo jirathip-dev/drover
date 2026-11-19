@@ -31,17 +31,19 @@ pub(super) fn fetch(
         return Ok(if held { Picked::Held } else { Picked::No });
     };
     let path = format!("{}/verdict.md", sp.str("worktree").unwrap_or_default());
-    let text = match crate::hosts::On::of(r, Some(sp)).run("cat", &crate::runner::argv(&[&path])) {
-        Ok(o) if o.code == 0 => o.stdout,
-        Ok(o) if o.stderr.contains("No such file") => return Ok(Picked::No),
-        o => {
-            let why = o.map_or_else(
-                |e| format!("{e:#}"),
-                |o| o.stderr.lines().next().map_or(format!("exit {}", o.code), String::from),
-            );
-            failed(ctx, out, ev, (&s.fleet, s.issue, &w.lane), &why)?;
-            return Ok(Picked::Held);
-        }
+    let view = crate::link::view::View::load(ctx, cfg)?;
+    let text = match view.worktree(sp) {
+        Some(w) => match &w.verdict {
+            Some(v) => v.text.clone(),
+            None => return Ok(Picked::No),
+        },
+        None => match view.down(sp.str("machine")) {
+            Some(why) => {
+                failed(ctx, out, ev, (&s.fleet, s.issue, &w.lane), &why)?;
+                return Ok(Picked::Held);
+            }
+            None => return Ok(Picked::No),
+        },
     };
     let v = text.lines().next().unwrap_or_default().trim();
     let v = if v == "FAIL (form-only)" { "FAIL" } else { v };
@@ -103,14 +105,9 @@ fn ingest(
     else {
         return Ok(false);
     };
-    let on = crate::hosts::On::of(r, Some(sp));
-    let written = |m: std::fs::Metadata| m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok();
-    let fresh = on.machine.is_some()
-        || std::fs::metadata(&path)
-            .ok()
-            .and_then(written)
-            .is_some_and(|t| t.as_secs() >= sp.ts);
-    let Some(text) = on.read(&path).filter(|_| fresh) else {
+    let view = crate::link::view::View::load(ctx, cfg)?;
+    let seen = view.worktree(sp).and_then(|w| w.verdict.as_ref());
+    let Some(text) = seen.filter(|v| v.mtime >= sp.ts).map(|v| v.text.clone()) else {
         return Ok(false);
     };
     let v = match text.lines().next().map(str::trim) {

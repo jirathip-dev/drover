@@ -171,6 +171,7 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
     assert!(kinds(&c, "orchestrator-sleep").is_empty());
     assert!(!b.called("kill", "orchestrator-t1"), "{:?}", b.methods());
     b.set("orchestrator-t1", |t| t["reported"] = json!({"state": "idle"}));
+    look(&at(&c, NOW + 60 + 31 * 60), &b.on(&b.cli(&f)));
     assert_eq!(run(&at(&c, NOW + 60 + 31 * 60), &b.cli(&f), &["check"]).0, 0);
     assert!(b.called("kill", "orchestrator-t1"), "{:?}", b.methods());
     assert_eq!(kinds(&c, "orchestrator-sleep")[0].str("why"), Some("idle"));

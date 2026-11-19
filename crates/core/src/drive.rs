@@ -430,7 +430,7 @@ pub(crate) fn failures<'a>(ev: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Even
     let mine = ev.iter().rev().filter(|e| e.fleet == fleet && e.issue == Some(n));
     let mut v: Vec<&Event> = mine
         .take_while(|e| e.kind != "spawn")
-        .filter(|e| e.kind == "spawn-error")
+        .filter(|e| e.kind == "spawn-error" && !crate::slo::cwd_gone(e.str("error")))
         .collect();
     v.reverse();
     v
@@ -785,10 +785,11 @@ pub fn drive(
     let mut seen = if !first || fleets.is_empty() && (!fast || live.is_empty()) {
         crate::snapshot::Snap::read(ctx, r)
     } else {
+        crate::link::look(ctx, cfg, r, out, true).map_or_else(|e| drop(writeln!(out, "look: {e:#}")), drop);
         crate::snapshot::take(ctx, cfg, r)
     };
     if !fleets.is_empty() && lead.is_some() {
-        match crate::spawn::orphans(ctx, cfg, (r, &seen), out) {
+        match crate::spawn::orphans(ctx, cfg, r, out) {
             Ok(true) => seen = crate::snapshot::take(ctx, cfg, r),
             Ok(false) => {}
             Err(e) => writeln!(out, "orphans: {e:#}")?,
@@ -796,7 +797,7 @@ pub fn drive(
     }
     lap("look, orphans");
     if !fast && first {
-        if let Err(e) = repair(ctx, cfg, (r, &seen), out) {
+        if let Err(e) = repair(ctx, cfg, r, out) {
             writeln!(out, "repair: {e:#}")?;
         }
     }
@@ -804,9 +805,6 @@ pub fn drive(
         crate::breaker::probe(ctx, cfg, r, out).unwrap_or_else(|e| drop(writeln!(out, "runtime canary: {e:#}")));
     }
     let grew = log();
-    if fast && first {
-        crate::outbox::drain(ctx, (r, &seen), out, &live).unwrap_or_else(|e| drop(writeln!(out, "outbox: {e:#}")));
-    }
     lap("repair, outbox");
     drop(lead);
     let mut res = Ok(());
@@ -851,7 +849,7 @@ pub fn drive(
     }
     let tail = KICK.get().is_none().then(|| take(ctx, r, lock, max, "")).flatten();
     if fast && only.is_none() && tail.is_some() {
-        crate::slo::pass(ctx, cfg, (r, &seen), out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "slo: {e:#}")));
+        crate::slo::pass(ctx, cfg, r, out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "slo: {e:#}")));
     }
     if !fast && tail.is_some() {
         crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| crate::stderr!("drover: stale panes: {e:#}"));
@@ -963,7 +961,7 @@ fn one(
     res
 }
 
-fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<()> {
+fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = working(&ctx.state)?;
     let log = crate::waiting::Log::new(&events);
     let mut agents: Option<Vec<Session>> = None;
@@ -978,7 +976,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         if s.state == "impl" {
             let live = match &mut agents {
                 Some(a) => a,
-                None => agents.insert(crate::session::all(cfg, seen).checked()?.running()),
+                None => agents.insert(crate::link::view::View::load(ctx, cfg)?.sessions().checked()?.running()),
             };
             let lane = s.active_lane().is_some_and(|(_, l)| live.iter().any(|a| a.name == l));
             if lane
@@ -1218,7 +1216,7 @@ fn pass(
     fast: bool,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let sessions = crate::session::all(cfg, seen).checked()?;
+    let sessions = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?;
     let agents = sessions.running();
     let ev = working(&ctx.state)?;
     let st = fold(&ev);
@@ -1575,7 +1573,7 @@ fn no_proof(
 ) -> Result<Option<Code>> {
     let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
     let on = crate::hosts::On::of(r, sp);
-    let body = on.read(Path::new(args.get(7).unwrap_or(&""))).unwrap_or_default();
+    let body = crate::link::read(ctx, cfg, r, sp, args.get(7).unwrap_or(&"")).unwrap_or_default();
     let Some(why) = crate::gate::no_proof(&body) else {
         return Ok(None);
     };

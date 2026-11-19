@@ -35,6 +35,10 @@ const CM: [&str; 3] = [
 
 /// `f` over `items`, one thread each (a host's remote calls never wait on another host's), results in order.
 pub fn each<T: Send, U: Send>(items: impl IntoIterator<Item = T>, f: impl Fn(T) -> U + Sync) -> Vec<U> {
+    let items: Vec<T> = items.into_iter().collect();
+    if items.len() < 2 {
+        return items.into_iter().map(f).collect();
+    }
     let f = &f;
     std::thread::scope(|s| {
         let hs: Vec<_> = items.into_iter().map(|x| s.spawn(move || f(x))).collect();
@@ -300,7 +304,7 @@ impl<'a> Pass<'a> {
             let ((step, at), n) = (lock(&self.step).clone(), self.t0.elapsed().as_nanos());
             let at = since + at;
             let m = json!({"since": since, "at": at, "step": step, "child": child, "pid": crate::sim::pid(), "n": n});
-            std::fs::write(p, m.to_string()).ok();
+            crate::config::write_atomic(p, &m.to_string()).ok();
         }
     }
     pub(crate) fn host<'b>(prog: &str, args: &'b [String]) -> Option<&'b str> {
@@ -515,6 +519,8 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
     }
     let events = working(&ctx.state).unwrap_or_default();
     let off = idle_off(cfg, &events);
+    let seen = crate::link::look(ctx, cfg, r, &mut std::io::sink(), refresh).map(|v| v.sessions());
+    let seen = seen.unwrap_or_default();
     for (name, h) in &cfg.hosts {
         if h.machine.as_ref().is_some_and(|m| off.contains(m)) {
             continue;
@@ -525,7 +531,10 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         if let Some(Err(e)) = (h.cloud.is_some() && !stopped).then(|| crate::cloud::moved(ctx, cfg, r, name, false)) {
             crate::stderr!("cloud {name}: {e:#}");
         }
-        let a = (!stopped).then(|| crate::session::live_on(&on).ok()).flatten();
+        let listed = seen.0.iter().find(|l| l.0 == h.machine).and_then(|l| l.1.clone().ok());
+        let a = listed
+            .filter(|_| !stopped)
+            .map(|all| all.into_iter().filter(|s| s.running() && s.lane()).collect::<Vec<_>>());
         s.up = a.is_some();
         let live = a.as_ref().is_some_and(|a| !a.is_empty());
         s.busy = if live { ctx.now } else { s.busy };
