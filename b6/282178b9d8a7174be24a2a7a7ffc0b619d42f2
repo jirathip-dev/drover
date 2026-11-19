@@ -1,0 +1,8 @@
+Decided: a tap that changes only the query of the current screen replaces the history entry and pushes no back step
+Because: "Changing a filter chip, a fold or \"more\" on a screen is not a navigation"
+Because: web/src/main.ts:255
+Rejected: a keep flag on each server tap — every fold/more/paging link would need it; the screen path already says it
+Decided: row 48 stays kept for the 🔒 tags, guarded by the tag test renamed parity_48
+Because: "the legend half is marked dropped (owner decision), the serial-group tags half stays kept; its test follows"
+Check: page test home step reads back 0 and menu [Fleets…, Drive all now]; the offline dot step fails on this host also without this change
+Owner: the Queue home has no dead back button and no legend any more
