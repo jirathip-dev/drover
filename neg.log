@@ -1,0 +1,29 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1272/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1272/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1272/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1272/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.75s
+     Running tests/hosts.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1272/debug/deps/hosts-5429b8a4ec2b04ea)
+
+running 1 test
+test an_external_github_token_never_warns_of_its_expiry ... FAILED
+
+failures:
+
+---- an_external_github_token_never_warns_of_its_expiry stdout ----
+
+thread 'an_external_github_token_never_warns_of_its_expiry' (2208671) panicked at crates/cli/tests/hosts.rs:127:9:
+assertion `left == right` failed: cloud = "boat"
+github_token = "external"
+: ["! github — token expires in 0d → a new fine-grained token, then hosts bootstrap"]
+  left: true
+ right: false
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    an_external_github_token_never_warns_of_its_expiry
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 47 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p drover --test hosts`
