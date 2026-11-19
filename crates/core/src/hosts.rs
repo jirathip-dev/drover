@@ -300,7 +300,7 @@ impl<'a> Pass<'a> {
             let ((step, at), n) = (lock(&self.step).clone(), self.t0.elapsed().as_nanos());
             let at = since + at;
             let m = json!({"since": since, "at": at, "step": step, "child": child, "pid": crate::sim::pid(), "n": n});
-            std::fs::write(p, m.to_string()).ok();
+            crate::config::write_atomic(p, &m.to_string()).ok();
         }
     }
     pub(crate) fn host<'b>(prog: &str, args: &'b [String]) -> Option<&'b str> {
