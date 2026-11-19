@@ -1,0 +1,25 @@
+/* #1297 proposed for web/src/board.css: the one terminal-style dropdown (`.dd`) that replaces every native select. Tokens only. */
+.dd{position:relative;display:flex;min-width:0}
+.dd>button{flex:1;min-width:0;justify-content:flex-start;gap:1ch;padding-right:2ch;color:var(--fg);text-transform:none}
+.dd>button>span{flex:1;text-align:left}
+.dd>button .k{color:var(--mute);font-style:normal}
+.dd>button>i.cv{flex:none;font-style:normal;color:var(--l)}
+.dd>button>i.cv::before{content:"▾"}
+.dd>button[aria-expanded=true]{color:var(--l)}
+.dd>button[aria-expanded=true]>i.cv::before{content:"▴"}
+.ddp{position:absolute;z-index:4;left:0;top:calc(100% + var(--s2));display:flex;flex-direction:column;min-width:100%;max-width:calc(100vw - 2 * var(--s3));max-height:var(--room,60vh);box-sizing:border-box;background:var(--bg);border:1px solid var(--edge);border-radius:0;box-shadow:0 0 0 var(--s2) var(--bg)}
+.ddh{position:absolute;top:-.75em;left:1ch;padding:0 .5ch;background:var(--bg);color:var(--mute);font-size:var(--fs-meta);font-weight:400;line-height:1.5}
+.ddl{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0;padding:var(--s2) 0 var(--s1);list-style:none}
+.dd.up .ddp{top:auto;bottom:calc(100% + var(--s2))}
+.dd.end .ddp{left:auto;right:0}
+.ddl>li{display:flex;align-items:center;gap:1ch;min-height:var(--hit);padding:0 1ch;color:var(--fg);white-space:nowrap;cursor:pointer}
+.ddl>li::before{content:" ";flex:none;width:1ch;white-space:pre}
+.ddl>li>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ddl>li[aria-selected=true]{color:var(--g)}
+.ddl>li[aria-selected=true]::before{content:"*"}
+.ddl>li.on{background:var(--l);color:var(--bg)}
+.cmp .pk>.dd{flex:1}
+.fd>.dd{flex:2}
+.fd .ddp{left:auto;right:0;width:max-content}
+.ddl>li{white-space:normal;padding-block:var(--s1)}
+.ddl>li>span{overflow-wrap:anywhere}

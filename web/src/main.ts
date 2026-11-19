@@ -12,7 +12,7 @@ const $ = <T extends Element = HTMLElement>(s: string): T => { const e = documen
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const exported = B.dataset.root === '';
 const build = /\/a\/(\w+)\/board\.js$/.exec(import.meta.url)?.[1];
-const typing = () => !!document.activeElement?.matches('input, textarea, select, [contenteditable]');
+const typing = () => !!document.activeElement?.matches('input, textarea, [role=listbox], [contenteditable]');
 function upgrade(b: string) {
   if (typing()) return void document.addEventListener('focusout', () => setTimeout(() => upgrade(b)), { once: true });
   const k = 'reloads:' + b, n = Number(sessionStorage.getItem(k) ?? 0);
