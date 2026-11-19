@@ -91,7 +91,7 @@ enum Cmd {
         owner_override: bool,
     },
     #[command(
-        about = "Owner only: one more review round for a needs-human issue (its card's [one more round]); logs `round-extended`"
+        about = "Owner only: one more round for a needs-human issue (its card's [one more round]): an update round on an UPDATE_LIMIT card, else a review round; logs `round-extended`"
     )]
     Extend {
         fleet: String,

@@ -1989,7 +1989,7 @@ fn an_extend_during_a_pass_only_requeues_it() {
         "verdict",
         json!({"verdict": "FAIL", "sha": sha("3"), "body": "FAIL"}),
     );
-    ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
+    ev(&c, 14, "needs-human", json!({"code": "ROUND_LIMIT"}));
     lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let r = fake(NONE)
         .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
@@ -3039,9 +3039,11 @@ fn an_extend_on_update_limit_grants_one_update_round() {
     let r = fake(NONE)
         .reply("gh pr view issue-12", &stale_pr(&sha("d4"), "CONFLICTING", "DIRTY"))
         .reply("git -C", "");
-    let (out, _) = drive(&c, &r);
-    assert!(out.contains("REFUSED UPDATE_LIMIT"), "{out}");
+    drive(&c, &r);
     assert_eq!(state(&c), "needs-human");
+    let all = read(&c.state).unwrap();
+    let last = all.iter().rfind(|e| e.kind == "needs-human").unwrap();
+    assert_eq!(last.str("code"), Some("UPDATE_LIMIT"));
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede", "--update"]);
     assert!(code == 3 && out.contains("REFUSED UPDATE_LIMIT"), "{out}");
     assert_eq!(started("sendmeter-impl-12").len(), runs + 1, "no second update lane");

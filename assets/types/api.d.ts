@@ -559,7 +559,11 @@ extra: number, granted: number,
 /**
  * Passed `--update` rounds, apart from `rounds`; `updating` while one is open (state `fix(n)+uk`).
  */
-updates: number, updating: boolean, last_ts: number, last_event: string, 
+updates: number, updating: boolean, 
+/**
+ * Update rounds the owner allowed past `update_rounds` (`round-extended` on an `UPDATE_LIMIT` card).
+ */
+update_extra: number, last_ts: number, last_event: string, 
 /**
  * Latest agent per role (impl, rev).
  */

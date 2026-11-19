@@ -1220,13 +1220,22 @@ pub fn spawn(
 
     lane_admit(ctx, (cfg, r), &events, (fleet, issue, role), o.force)?;
     respawn_guard(ctx, cfg, &events, (fleet, issue, role))?;
-    let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
-    if o.update && updates >= f.flow().update_limit() {
-        let why = format!(
-            "PR still conflicts after {updates}/{} update rounds",
-            f.flow().update_limit()
-        );
-        event("needs-human", json!({"code": "UPDATE_LIMIT", "reason": why}))?;
+    let (updates, extra) = fold(&events)
+        .remove(&(fleet.into(), issue))
+        .map_or((0, 0), |s| (s.updates, s.update_extra));
+    let limit = f.flow().update_limit().saturating_add(extra);
+    if o.update && updates >= limit {
+        let why = format!("PR still conflicts after {updates}/{limit} update rounds");
+        let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(issue);
+        let turn = ["spawn", "needs-human", "round-extended"];
+        let held = events
+            .iter()
+            .rev()
+            .filter(mine)
+            .find(|e| turn.contains(&e.kind.as_str()));
+        if held.is_none_or(|e| e.kind == "spawn") {
+            event("needs-human", json!({"code": "UPDATE_LIMIT", "reason": why}))?;
+        }
         return refused("UPDATE_LIMIT", why);
     }
 

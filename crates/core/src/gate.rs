@@ -1127,8 +1127,17 @@ fn extended(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), (spawn, by): (bool
         .iter()
         .rfind(|e| e.is("needs-human", fleet, n))
         .cloned();
-    let unstarted = nh.is_some_and(|e| e.data.get("start") == Some(&json!(true)));
+    let code = nh.as_ref().and_then(|e| e.str("code"));
+    let unstarted = nh.as_ref().is_some_and(|e| e.data.get("start") == Some(&json!(true)));
+    let update = code == Some("UPDATE_LIMIT");
     let (kind, e) = match state {
+        "needs-human" if update => {
+            let e = json!({"by": by, "spawn": spawn, "queued": false, "update": true});
+            return Ok(crate::events::append(
+                &ctx.state,
+                &Event::new(ctx.now, fleet, Some(n), "round-extended", e),
+            )?);
+        }
         "needs-human" if !unstarted => ("round-extended", json!({"by": by, "spawn": spawn, "queued": spawn})),
         _ if spawn => (crate::pending::REQUEUED, json!({"by": by})),
         _ => return Ok(()),
