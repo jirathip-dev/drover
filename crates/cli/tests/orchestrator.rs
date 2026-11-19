@@ -186,14 +186,15 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
     assert_eq!(*kinds(&c, "orchestrator-start")[1].val("resumed"), json!(false));
     assert_eq!(
         std::fs::read_to_string(&thread).unwrap(),
-        "owner: what should #12 cover?\nOrchestrator: Scope and tests. Which first?\nowner: scope\nowner: tests first\n"
+        "owner: what should #12 cover?\nOrchestrator: Scope and tests. Which first?\nowner: scope\n\
+         system: no reply yet: the orchestrator is unknown\nowner: tests first\n"
     );
 
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert_eq!(
         show,
         "t1 sendmeter: Grill #12\nowner: what should #12 cover?\nOrchestrator: Scope and tests. Which first?\n\
-         owner: scope\nowner: tests first\n"
+         owner: scope\nsystem: no reply yet: the orchestrator is unknown\nowner: tests first\n"
     );
 }
 
@@ -408,4 +409,55 @@ fn a_thread_needs_a_orchestrator_or_impl_role_and_spawn_never_starts_one() {
     assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
     let (code, out) = run(&c, &Fake::default(), &["thread", "new", "nope", "x"]);
     assert_eq!(code, 1, "{out}");
+}
+
+fn system_rows(c: &drover::Ctx) -> Vec<String> {
+    let rows = kinds(c, "thread-msg")
+        .into_iter()
+        .filter(|e| e.str("from") == Some("system"));
+    rows.map(|e| e.str("text").unwrap_or_default().to_string()).collect()
+}
+
+#[test]
+fn a_rate_limited_orchestrator_tells_the_owner_and_gets_one_continue_at_its_reset() {
+    let b = FakeShed::new();
+    let c = acp_setup("orchestrator-limited", &b);
+    assert_eq!(run(&c, &b.cli(&acp(&["env"])), &["thread", "say", "t1", "hello"]).0, 0);
+    b.set("orchestrator-t1", |t| {
+        t["reported"] = json!({"state": "rate-limited", "note": "You've hit your limit · resets 3pm (UTC)"});
+    });
+    let reset = 11 * 86400 + 15 * 3600;
+    let f = acp(&["echo"]).reply(&format!("date -r {reset} +%a %H:%M"), "Mon 15:00");
+    let (code, out) = run(&at(&c, NOW + 60), &b.cli(&f), &["thread", "say", "t1", "scope?"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(shed_calls(&f), ["shed send orchestrator-t1 [t1] owner: scope?"]);
+    assert_eq!(
+        system_rows(&c),
+        ["orchestrator out of usage until Mon 15:00; your message is kept"]
+    );
+
+    let f = acp(&["echo"]);
+    assert_eq!(run(&at(&c, NOW + 60 + 11 * 60), &b.cli(&f), &["check"]).0, 0);
+    assert!(shed_calls(&f).is_empty(), "{:?}", shed_calls(&f));
+    assert_eq!(
+        system_rows(&c)[1..],
+        ["no reply yet: the orchestrator is rate-limited: You've hit your limit · resets 3pm (UTC)"]
+    );
+
+    for now in [reset, reset + 60] {
+        let f = acp(&["echo"]);
+        assert_eq!(run(&at(&c, now), &b.cli(&f), &["check"]).0, 0);
+        let want: &[&str] = if now == reset {
+            &["shed send orchestrator-t1 continue"]
+        } else {
+            &[]
+        };
+        assert_eq!(shed_calls(&f), want);
+    }
+    assert!(kinds(&c, "orchestrator-sleep").is_empty());
+    assert_eq!(system_rows(&c).len(), 2, "{:?}", system_rows(&c));
+    let owner = kinds(&c, "thread-msg")
+        .into_iter()
+        .filter(|e| e.str("text") == Some("scope?"));
+    assert_eq!(owner.count(), 1);
 }

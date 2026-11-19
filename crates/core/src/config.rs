@@ -762,6 +762,7 @@ pub struct Limits {
     pub poll_millis: u64,
     pub tick_beat_secs: u64,
     pub orchestrator_idle_minutes: u64,
+    pub orchestrator_reply_minutes: u64,
     pub orchestrator_change_minutes: u64,
     pub token_refresh_minutes: u64,
     pub ask_waiting_minutes: u64,
@@ -891,6 +892,7 @@ impl Default for Limits {
             poll_millis: 20,
             tick_beat_secs: 60,
             orchestrator_idle_minutes: 30,
+            orchestrator_reply_minutes: 10,
             orchestrator_change_minutes: ORCHESTRATOR_CHANGE_MINUTES,
             token_refresh_minutes: 30,
             ask_waiting_minutes: 30,
@@ -1128,6 +1130,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "orchestrator_idle_minutes",
         "an orchestrator whose thread is quiet this long closes on the next `check`",
+    ),
+    (
+        "orchestrator_reply_minutes",
+        "an owner message with no orchestrator reply this long gets a `no reply yet` row",
     ),
     (
         "orchestrator_change_minutes",
