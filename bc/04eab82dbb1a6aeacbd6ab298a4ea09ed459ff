@@ -1,0 +1,7 @@
+Decided: waiting's `gone` reads the lane's host listing from the view; a remote host whose listing is unreachable makes the lane `lane unknown`, never `lane gone`, with no next command.
+Because: "If the host's listing can't be read, the lane counts as unknown, not gone: no respawn, and no kill on supersede."
+Because: crates/core/src/waiting.rs:799 now needs the listing readable; the flat running list drops an unreachable host's lanes, and lanes::health at crates/core/src/lanes.rs:213 already says Unknown for the same case.
+Rejected: passing `Sessions` instead of `&[Session]` into `waiting::scan` — six callers change; scan_where already loads the view that holds the per-host answer.
+Rejected: treating an unreadable local listing as unknown too — drive's pass bails on it at crates/core/src/drive.rs:1216 (`checked()`), so only remote hosts reach this path.
+Check: an unconfirmed or turned idle lane on an unreadable host gets no respawn and no pane prompt either (the override runs after those branches).
+Owner: a lane on a host drover can't read right now is shown as unknown and left running instead of being restarted.
