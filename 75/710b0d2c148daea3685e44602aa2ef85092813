@@ -1,0 +1,9 @@
+Decided: drop the stale-start sort in drive's starts; a start past spawn_pending_max_secs keeps its queue place
+Because: "if no lane came of it, the slot is free again and the issue keeps its place"
+Decided: the in-flight cap folds lanes from real events only and counts other pending starts as a number
+Because: "`IN_FLIGHT_CAP`'s list names only issues with a lane or an open PR."
+Decided: a kick holding the marker drive admitted it with skips the in-flight cap
+Because: "kicks that run at the same time do not each count the cap on their own"
+Rejected: a new shorter [limits] key for the pending hold — spawn_pending_max_secs already frees the slot and logs stale-marker once
+Check: the #1269 test now expects the timed-out issues started again first, as this issue's spec asks
+Owner: free slots now go to the top of the queue, and a stuck start gives its slot back without losing its place
