@@ -1,0 +1,6 @@
+
+running 1 test
+#337 perf: first contentful paint in WebKit 48 ms warm (32 ms cold)
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 5.25s
+
