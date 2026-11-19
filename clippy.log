@@ -1,0 +1,1670 @@
+    Checking subtle v2.6.1
+    Checking zeroize v1.9.1
+    Checking typenum v1.20.1
+    Checking libc v0.2.191
+    Checking rand_core v0.10.1
+    Checking cfg-if v1.0.5
+    Checking cmov v0.5.4
+    Checking const-oid v0.10.2
+    Checking ctutils v0.4.7
+    Checking cpubits v0.1.1
+    Checking num-traits v0.2.19
+    Checking serde_core v1.0.229
+    Checking ff v0.14.0
+    Checking hybrid-array v0.4.15
+    Checking der v0.8.3
+    Checking getrandom v0.4.3
+    Checking foldhash v0.2.0
+    Checking cpufeatures v0.3.1
+    Checking hashbrown v0.17.1
+    Checking crypto-common v0.2.2
+    Checking block-buffer v0.12.1
+    Checking crypto-bigint v0.7.10
+    Checking inout v0.2.5
+    Checking group v0.14.0
+    Checking digest v0.11.3
+    Checking base16ct v1.0.0
+    Checking hmac v0.13.0
+    Checking sec1 v0.8.1
+    Checking hkdf v0.13.0
+    Checking utf8parse v0.2.2
+    Checking universal-hash v0.6.1
+    Checking anstyle-parse v1.0.0
+    Checking cipher v0.5.2
+    Checking serde v1.0.229
+    Checking equivalent v1.0.3
+    Checking anstyle-query v1.1.5
+    Checking anstyle v1.0.14
+    Checking is_terminal_polyfill v1.70.2
+    Checking colorchoice v1.0.5
+    Checking indexmap v2.14.2
+    Checking anstream v1.0.0
+    Checking polyval v0.7.3
+    Checking toml_datetime v0.6.11
+    Checking serde_spanned v0.6.9
+    Checking zmij v1.0.23
+    Checking signature v3.0.0
+    Checking spki v0.8.1
+    Checking itoa v1.0.18
+    Checking clap_lex v1.1.1
+    Checking winnow v0.7.15
+    Checking toml_write v0.1.2
+    Checking strsim v0.11.1
+    Checking memchr v2.8.3
+    Checking clap_builder v4.6.7
+    Checking serde_json v1.0.154
+    Checking elliptic-curve v0.14.3
+    Checking primefield v0.14.0
+    Checking wnaf v0.14.1
+    Checking rfc6979 v0.6.0
+    Checking primeorder v0.14.0
+    Checking ecdsa v0.17.0
+    Checking toml_edit v0.22.27
+    Checking libsqlite3-sys v0.39.1
+    Checking ghash v0.6.0
+    Checking aes v0.9.3
+    Checking ctr v0.10.1
+    Checking sha2 v0.11.1
+    Checking aead v0.6.1
+    Checking hashlink v0.12.2
+    Checking adler2 v2.0.1
+    Checking smallvec v1.16.4
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1316/crates/core)
+    Checking fallible-iterator v0.3.0
+    Checking simd-adler32 v0.3.10
+    Checking bitflags v2.13.2
+    Checking fallible-streaming-iterator v0.1.9
+    Checking miniz_oxide v0.9.1
+    Checking rusqlite v0.41.1
+    Checking p256 v0.14.0
+    Checking toml v0.8.23
+    Checking aes-gcm v0.11.1
+    Checking clap v4.6.7
+    Checking shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=9b88eb5be5bc9ba8c5c75480483b9861ddc6e993#9b88eb5b)
+    Checking crc32fast v1.5.4
+    Checking anyhow v1.0.104
+    Checking base64 v0.23.1
+    Checking drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1316/crates/sys)
+    Checking flate2 v1.1.10
+    Checking mio v1.2.4
+    Checking socket2 v0.6.5
+    Checking pin-project-lite v0.2.17
+    Checking bytes v1.12.1
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1316/crates/cli)
+    Checking tokio v1.54.1
+    Checking drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1316/crates/server)
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1316/crates/service)
+error: non-binding `let` on an expression with `#[must_use]` type
+  --> crates/cli/tests/common/fake_shed.rs:38:9
+   |
+38 |         let _ = std::fs::remove_file(&self.sock);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider explicitly using expression value
+note: type is `std::result::Result`
+  --> crates/cli/tests/common/fake_shed.rs:38:17
+   |
+38 |         let _ = std::fs::remove_file(&self.sock);
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+   = note: requested on the command line with `-D clippy::let-underscore-must-use`
+
+error: non-binding `let` on an expression with `#[must_use]` type
+  --> crates/cli/tests/common/fake_shed.rs:55:9
+   |
+55 |         let _ = std::fs::remove_file(&sock);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider explicitly using expression value
+note: type is `std::result::Result`
+  --> crates/cli/tests/common/fake_shed.rs:55:17
+   |
+55 |         let _ = std::fs::remove_file(&sock);
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/fake_shed.rs:56:17
+   |
+56 |         let l = UnixListener::bind(&sock).unwrap();
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+   = note: requested on the command line with `-D clippy::unwrap-used`
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/fake_shed.rs:95:20
+   |
+95 |         let base = std::fs::read_to_string(&c.config).unwrap();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/fake_shed.rs:97:9
+   |
+97 |         std::fs::write(&c.config, self.config(base)).unwrap();
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:108:9
+    |
+108 |         std::fs::create_dir_all(&bin).unwrap();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:109:9
+    |
+109 |         std::fs::write(bin.join("shed"), "#!/bin/sh\nexit 0\n").unwrap();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:110:9
+    |
+110 |         std::fs::set_permissions(bin.join("shed"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:114:9
+    |
+114 |         self.state.lock().unwrap()
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:132:21
+    |
+132 |         all.map(|p| p["text"].as_str().unwrap_or_default().to_string())
+    |                     ^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+    = note: requested on the command line with `-D clippy::indexing-slicing`
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:143:9
+    |
+143 |         t["labels"] = labels;
+    |         ^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:148:27
+    |
+148 |         if w.len() > 3 && w[w.len() - 1].starts_with('r') {
+    |                           ^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `expect()` on an `Option` value
+   --> crates/cli/tests/common/fake_shed.rs:161:11
+    |
+161 |         f(self.lock().terms.get_mut(name).expect("no such terminal"));
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#expect_used
+    = note: requested on the command line with `-D clippy::expect-used`
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:189:43
+    |
+189 |             .map(|l| answer(&self.state, &serde_json::from_str(l).unwrap()));
+    |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:195:18
+    |
+195 |     let mut st = st.lock().unwrap();
+    |                  ^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/fake_shed.rs:203:14
+    |
+203 |     let id = q.id.clone().unwrap();
+    |              ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:205:5
+    |
+205 |     serde_json::to_string(&resp).unwrap()
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:209:17
+    |
+209 |     let mut w = c.try_clone().unwrap();
+    |                 ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:211:26
+    |
+211 |         let q: Request = serde_json::from_str(&line).unwrap();
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:213:87
+    |
+213 |         let held = |s: &mut State| writes && s.held.is_some() && s.held.as_deref() == q.params["name"].as_str();
+    |                                                                                       ^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:214:14
+    |
+214 |         drop(moved.wait_while(st.lock().unwrap(), held).unwrap());
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:214:31
+    |
+214 |         drop(moved.wait_while(st.lock().unwrap(), held).unwrap());
+    |                               ^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:215:9
+    |
+215 |         writeln!(w, "{}", answer(st, &q)).unwrap();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:217:25
+    |
+217 |             let since = q.params["since"].as_u64().unwrap_or(0);
+    |                         ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:218:35
+    |
+218 |             let new: Vec<Value> = st.lock().unwrap().events.clone();
+    |                                   ^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:242:42
+    |
+242 |         "read" if p["events"] == true && terms[&name]["acp"].is_string() => {
+    |                                          ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:244:24
+    |
+244 |             let kept = terms[&name]["events"].as_array().cloned().unwrap_or_default();
+    |                        ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:246:59
+    |
+246 |             let n = p["n"].as_u64().map_or(all.len(), |n| usize::try_from(n).unwrap());
+    |                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: slicing may panic
+   --> crates/cli/tests/common/fake_shed.rs:247:45
+    |
+247 |             Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..]}))
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n..)` or .get_mut(n..)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:249:37
+    |
+249 |         "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),
+    |                                     ^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/fake_shed.rs:256:13
+    |
+256 |             terms.get_mut(&name).unwrap()["state"] = json!("exited");
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/fake_shed.rs:259:20
+    |
+259 |         "rm" => Ok(terms.remove(&name).unwrap()),
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/fake_shed.rs:261:13
+    |
+261 |             terms.get_mut(&name).unwrap()["reported"] = json!({"state": p["state"]});
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: slicing may panic
+   --> crates/cli/tests/common/fake_shed.rs:298:51
+    |
+298 |                 None => match self.f.run(prog, &[&args[..args.len() - 1], &[l.to_string()]].concat()) {
+    |                                                   ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(..n)`or `.get_mut(..n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:361:30
+    |
+361 |         if prog == "shed" && args[0] == "run" {
+    |                              ^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:362:33
+    |
+362 |             let at = |k: &str| &args[args.iter().position(|a| a == k).unwrap() + 1];
+    |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/fake_shed.rs:362:38
+    |
+362 |             let at = |k: &str| &args[args.iter().position(|a| a == k).unwrap() + 1];
+    |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: slicing may panic
+   --> crates/cli/tests/common/fake_shed.rs:364:39
+    |
+364 |             let ls = args.iter().zip(&args[1..]).filter(|(k, _)| *k == "--label");
+    |                                       ^^^^^^^^^
+    |
+    = help: consider using `.get(n..)` or .get_mut(n..)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:371:13
+    |
+371 |             self.state.lock().unwrap().terms.insert(name.clone(), t);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:373:25
+    |
+373 |                   let o = std::process::Command::new(&args[i + 1])
+    |  _________________________^
+374 | |                     .current_dir(at("--cwd"))
+375 | |                     .args(&args[i + 2..])
+376 | |                     .env_clear()
+...   |
+379 | |                     .output()
+380 | |                     .unwrap();
+    | |_____________________________^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/cli/tests/common/fake_shed.rs:373:53
+    |
+373 |                 let o = std::process::Command::new(&args[i + 1])
+    |                                                     ^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: slicing may panic
+   --> crates/cli/tests/common/fake_shed.rs:375:28
+    |
+375 |                     .args(&args[i + 2..])
+    |                            ^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n..)` or .get_mut(n..)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:377:34
+    |
+377 |                     .env("PATH", std::env::var("PATH").unwrap())
+    |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/fake_shed.rs:381:44
+    |
+381 |                 self.out.borrow_mut().push(String::from_utf8(o.stdout).unwrap());
+    |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/large.rs:12:5
+   |
+12 |     std::fs::create_dir_all(&profile).unwrap();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/large.rs:13:5
+   |
+13 |     std::fs::write(profile.join("settings.json"), "{}").unwrap();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/large.rs:18:18
+   |
+18 |         log.push(serde_json::to_string(&Event::new(ts, "sendmeter", issue, kind, d)).unwrap());
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/large.rs:28:13
+   |
+28 |             std::fs::create_dir_all(&wt).unwrap();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/large.rs:61:5
+   |
+61 |     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+  --> crates/cli/tests/common/large.rs:61:29
+   |
+61 |     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is `None`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/large.rs:62:5
+   |
+62 |     std::fs::write(&c.state, log.join("\n") + "\n").unwrap();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/large.rs:67:13
+   |
+67 |     assert!(drover::events::read(&c.state).unwrap().len() >= 1_500);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/mod.rs:56:9
+   |
+56 |         self.0.read().unwrap()
+   |         ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/common/mod.rs:59:9
+   |
+59 |         self.0.write().unwrap()
+   |         ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: slicing may panic
+   --> crates/cli/tests/common/mod.rs:137:43
+    |
+137 |                 let o = self.run(prog, &[&args[..args.len() - 1], &[test]].concat())?;
+    |                                           ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(..n)`or `.get_mut(..n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/cli/tests/common/mod.rs:165:34
+    |
+165 |                         let m = &args[args.len() - 3];
+    |                                  ^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: slicing may panic
+   --> crates/cli/tests/common/mod.rs:172:47
+    |
+172 |                     None => self.run(prog, &[&args[..args.len() - 1], &[l.to_string()]].concat())?,
+    |                                               ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(..n)`or `.get_mut(..n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/cli/tests/common/mod.rs:193:42
+    |
+193 |                     let o = self.answer(&words[0], &words[1..])?;
+    |                                          ^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: slicing may panic
+   --> crates/cli/tests/common/mod.rs:193:53
+    |
+193 |                     let o = self.answer(&words[0], &words[1..])?;
+    |                                                     ^^^^^^^^^^
+    |
+    = help: consider using `.get(n..)` or .get_mut(n..)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: indexing may panic
+   --> crates/cli/tests/common/mod.rs:244:9
+    |
+244 |         v["headRefName"] = b.into();
+    |         ^^^^^^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/common/mod.rs:269:13
+    |
+269 |             let _ = std::fs::remove_dir_all(d);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/common/mod.rs:269:21
+    |
+269 |             let _ = std::fs::remove_dir_all(d);
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:281:21
+    |
+281 |           let child = std::process::Command::new("sh")
+    |  _____________________^
+282 | |             .args(["-c", script, "reaper"])
+283 | |             .stdin(std::process::Stdio::piped())
+284 | |             .stdout(std::process::Stdio::null())
+285 | |             .spawn()
+286 | |             .unwrap();
+    | |_____________________^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:289:22
+    |
+289 |     let mut reaper = reaper.lock().unwrap();
+    |                      ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:290:5
+    |
+290 |     writeln!(reaper.stdin.as_mut().unwrap(), "{}", d.display()).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:290:14
+    |
+290 |     writeln!(reaper.stdin.as_mut().unwrap(), "{}", d.display()).unwrap();
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/common/mod.rs:326:5
+    |
+326 |     let _ = std::fs::remove_dir_all(&d);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/common/mod.rs:326:13
+    |
+326 |     let _ = std::fs::remove_dir_all(&d);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:328:5
+    |
+328 |     std::fs::create_dir_all(&d).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:337:5
+    |
+337 |     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:337:29
+    |
+337 |     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    |                             ^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:338:5
+    |
+338 |     std::fs::write(&p, value).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:339:5
+    |
+339 |     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:346:5
+    |
+346 |     std::fs::create_dir_all(&cfgdir).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:347:5
+    |
+347 |     std::fs::write(cfgdir.join("fleet.toml"), config).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:366:12
+    |
+366 |     (code, String::from_utf8(out).unwrap())
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:373:17
+    |
+373 |         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:374:42
+    |
+374 |         let base = format!("http://{}/", l.local_addr().unwrap());
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/common/mod.rs:381:17
+    |
+381 |                 let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), 1));
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/common/mod.rs:381:25
+    |
+381 |                 let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), 1));
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: slicing may panic
+   --> crates/cli/tests/common/mod.rs:381:97
+    |
+381 |                 let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), 1));
+    |                                                                                                 ^^^^^^^^
+    |
+    = help: consider using `.get(..n)`or `.get_mut(..n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: use of `eprintln!`
+   --> crates/cli/tests/common/mod.rs:408:9
+    |
+408 |         eprintln!("skipping: no node/Playwright here (NODE_PATH with playwright, see the ui-webkit CI job)");
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#print_stderr
+    = note: requested on the command line with `-D clippy::print-stderr`
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:415:16
+    |
+415 |     let home = std::process::Command::new("sh").args(sh).output().unwrap();
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:428:5
+    |
+428 |     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:428:29
+    |
+428 |     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    |                             ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:429:17
+    |
+429 |       let mut f = std::fs::OpenOptions::new()
+    |  _________________^
+430 | |         .create(true)
+431 | |         .append(true)
+432 | |         .open(&path)
+433 | |         .unwrap();
+    | |_________________^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: use of `eprintln!`
+   --> crates/cli/tests/common/mod.rs:436:9
+    |
+436 |         eprintln!("waiting for the UI audit lock (held by {})", by.trim());
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#print_stderr
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:437:9
+    |
+437 |         f.lock().unwrap();
+    |         ^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:440:5
+    |
+440 |     f.set_len(0).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:441:5
+    |
+441 |     std::io::Write::write_all(&mut f, format!("{me}\n").as_bytes()).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:463:16
+    |
+463 |     let code = res.rsplit("\r\n\r\n").next().unwrap().trim().to_string();
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:464:15
+    |
+464 |     let set = res.lines().find_map(|l| l.strip_prefix("Set-Cookie: ")).unwrap();
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:465:51
+    |
+465 |     let cookie = format!("Cookie: {}\r\n", &set[..set.find(';').unwrap()]);
+    |                                                   ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:525:13
+    |
+525 |         j = serde_json::to_string(&fx.to_string()).unwrap(),
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: indexing may panic
+   --> crates/cli/tests/common/mod.rs:526:13
+    |
+526 |         l = fx["lines"]
+    |             ^^^^^^^^^^^
+    |
+    = help: consider using `.get(n)` or `.get_mut(n)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:538:7
+    |
+538 |     r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/common/mod.rs:544:9
+    |
+544 |         let _ = std::fs::remove_file(state.with_file_name(f));
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/common/mod.rs:544:17
+    |
+544 |         let _ = std::fs::remove_file(state.with_file_name(f));
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:546:5
+    |
+546 |     std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:546:29
+    |
+546 |     std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:547:5
+    |
+547 |     std::fs::write(state, text).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:552:13
+    |
+552 |     let l = drover::db::take(&c.state, key, at, secs, "", &|_| true).unwrap();
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: slicing may panic
+   --> crates/cli/tests/common/mod.rs:567:57
+    |
+567 |             let line = format!("{}; printf %s \"${}\"", args[i..].join(" "), self.1);
+    |                                                         ^^^^^^^^^
+    |
+    = help: consider using `.get(n..)` or .get_mut(n..)` instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:598:9
+    |
+598 | /         drover::events::append(
+599 | |             &c.state,
+600 | |             &drover::events::Event::new(1_000_000 - 100, "sendmeter", Some(issue), "spawn", d),
+601 | |         )
+602 | |         .unwrap();
+    | |_________________^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:626:43
+    |
+626 |       let mut s: drover::session::Session = serde_json::from_value::<drover::shed::proto::TerminalInfo>(t)
+    |  ___________________________________________^
+627 | |         .unwrap()
+    | |_________________^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:635:35
+    |
+635 |     drover::session::Sessions::of(rows.as_array().unwrap().iter().map(session))
+    |                                   ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:639:17
+    |
+639 |     let mut s = std::net::TcpStream::connect(addr).unwrap();
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:640:5
+    |
+640 |     std::io::Write::write_all(&mut s, req.as_bytes()).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:642:5
+    |
+642 |     std::io::Read::read_to_string(&mut s, &mut res).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:654:19
+    |
+654 |           let now = std::time::SystemTime::now()
+    |  ___________________^
+655 | |             .duration_since(std::time::UNIX_EPOCH)
+656 | |             .unwrap()
+    | |_____________________^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:661:17
+    |
+661 |         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:662:20
+    |
+662 |         let addr = l.local_addr().unwrap().to_string();
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:678:14
+    |
+678 |         (ms, serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap())
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:678:35
+    |
+678 |         (ms, serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap())
+    |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:687:9
+    |
+687 |         serde_json::from_str::<serde_json::Value>(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:687:51
+    |
+687 |         serde_json::from_str::<serde_json::Value>(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+    |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:705:5
+    |
+705 |     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/common/mod.rs:705:29
+    |
+705 |     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    |                             ^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:706:5
+    |
+706 |     std::fs::write(p, format!("#!/bin/sh\necho '{line}'\n")).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/common/mod.rs:707:5
+    |
+707 |     std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/log_share.rs:13:28
+   |
+13 |     let ev = |ts, kind, d| serde_json::to_string(&Event::new(ts, "sendmeter", None, kind, d)).unwrap();
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: using a potentially dangerous silent `as` conversion
+  --> crates/cli/tests/log_share.rs:24:35
+   |
+24 |         log.push(ev(NOW - 7_000 + m as u64 / 20, "thread-msg", d));
+   |                                   ^^^^^^^^
+   |
+   = help: consider using a safe wrapper for this conversion
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#as_conversions
+   = note: requested on the command line with `-D clippy::as-conversions`
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/log_share.rs:32:5
+   |
+32 |     append(&c.state, &Event::new(NOW, "sendmeter", None, "thread-msg", d)).unwrap();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: could not compile `drover` (test "log_share") due to 119 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/readme.rs:14:5
+   |
+14 |     std::fs::read_to_string(root().join("README.md")).unwrap()
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/readme.rs:18:15
+   |
+18 |     let doc = std::fs::read_to_string(root().join("docs/setup.md")).unwrap();
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+  --> crates/cli/tests/readme.rs:19:16
+   |
+19 |     let rest = doc.split("## Quick start\n").nth(1).unwrap().to_string();
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is `None`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+  --> crates/cli/tests/readme.rs:20:5
+   |
+20 |     rest.split("\n## ").next().unwrap().to_string()
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is `None`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/readme.rs:25:14
+   |
+25 |     for e in std::fs::read_dir(root().join("docs")).unwrap() {
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/readme.rs:26:17
+   |
+26 |         let p = e.unwrap().path();
+   |                 ^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/readme.rs:201:5
+    |
+201 |     let _ = child.kill();
+    |     ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/readme.rs:201:13
+    |
+201 |     let _ = child.kill();
+    |             ^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/readme.rs:202:5
+    |
+202 |     let _ = child.wait();
+    |     ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/readme.rs:202:13
+    |
+202 |     let _ = child.wait();
+    |             ^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/readme.rs:207:5
+    |
+207 |     std::fs::read_to_string(root().join("docs/setup.md")).unwrap()
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/readme.rs:214:18
+    |
+214 |         .map(|b| b.split("```").next().unwrap())
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: could not compile `drover` (test "readme") due to 126 previous errors
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/handover.rs:16:5
+   |
+16 |     s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/handover.rs:36:9
+   |
+36 | /         s.write_all(format!("GET /live?since={last} HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
+37 | |             .unwrap();
+   | |_____________________^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/handover.rs:38:9
+   |
+38 |         s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: slicing may panic
+  --> crates/cli/tests/handover.rs:44:65
+   |
+44 |                 Ok(n) => buf.push_str(&String::from_utf8_lossy(&b[..n])),
+   |                                                                 ^^^^^^
+   |
+   = help: consider using `.get(..n)`or `.get_mut(..n)` instead
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#indexing_slicing
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/handover.rs:52:21
+   |
+52 |                     seen.lock().unwrap().push(n);
+   |                     ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:169:5
+    |
+169 |     let _ = p.kill();
+    |     ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/handover.rs:169:13
+    |
+169 |     let _ = p.kill();
+    |             ^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:170:5
+    |
+170 |     let _ = p.wait();
+    |     ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/handover.rs:170:13
+    |
+170 |     let _ = p.wait();
+    |             ^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:274:5
+    |
+274 |     let _ = p.kill();
+    |     ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/handover.rs:274:13
+    |
+274 |     let _ = p.kill();
+    |             ^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:275:5
+    |
+275 |     let _ = p.wait();
+    |     ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/handover.rs:275:13
+    |
+275 |     let _ = p.wait();
+    |             ^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:332:5
+    |
+332 |     let _ = p.kill();
+    |     ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/handover.rs:332:13
+    |
+332 |     let _ = p.kill();
+    |             ^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:333:5
+    |
+333 |     let _ = p.wait();
+    |     ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/handover.rs:333:13
+    |
+333 |     let _ = p.wait();
+    |             ^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/handover.rs:354:5
+    |
+354 | /     std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+355 | |         .args(["serve", "--addr", addr])
+356 | |         .env("FLEET_CONFIG", &c.config)
+357 | |         .env("FLEET_STATE", &c.state)
+...   |
+364 | |         .spawn()
+365 | |         .unwrap()
+    | |_________________^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/handover.rs:373:60
+    |
+373 |     let (log, err) = (Arc::new(Mutex::new(String::new())), p.stderr.take().unwrap());
+    |                                                            ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/handover.rs:377:13
+    |
+377 |             l2.lock().unwrap().push_str(&(l + "\n"));
+    |             ^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/handover.rs:386:26
+    |
+386 |         if let Some(s) = p.try_wait().unwrap() {
+    |                          ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:391:5
+    |
+391 |     let _ = p.kill();
+    |     ^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result`
+   --> crates/cli/tests/handover.rs:391:13
+    |
+391 |     let _ = p.kill();
+    |             ^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/handover.rs:398:17
+    |
+398 |         let l = log.lock().unwrap().clone();
+    |                 ^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:420:5
+    |
+420 |     let _ = (first.kill(), first.wait());
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result` in tuple element 0, `std::result::Result` in tuple element 1
+   --> crates/cli/tests/handover.rs:420:13
+    |
+420 |     let _ = (first.kill(), first.wait());
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:518:9
+    |
+518 |         let _ = (p.kill(), p.wait());
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result` in tuple element 0, `std::result::Result` in tuple element 1
+   --> crates/cli/tests/handover.rs:518:17
+    |
+518 |         let _ = (p.kill(), p.wait());
+    |                 ^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:551:5
+    |
+551 |     let _ = (p.kill(), p.wait());
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result` in tuple element 0, `std::result::Result` in tuple element 1
+   --> crates/cli/tests/handover.rs:551:13
+    |
+551 |     let _ = (p.kill(), p.wait());
+    |             ^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: used `unwrap()` on an `Option` value
+   --> crates/cli/tests/handover.rs:578:36
+    |
+578 |     let port = format!("-iTCP:{}", addr.rsplit_once(':').unwrap().1);
+    |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is `None`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/handover.rs:579:13
+    |
+579 |       let o = std::process::Command::new("lsof")
+    |  _____________^
+580 | |         .args(["-nP", "-t", &port, "-sTCP:LISTEN"])
+581 | |         .output()
+582 | |         .unwrap();
+    | |_________________^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: non-binding `let` on an expression with `#[must_use]` type
+   --> crates/cli/tests/handover.rs:615:5
+    |
+615 |     let _ = (job.kill(), job.wait());
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider explicitly using expression value
+note: type is `std::result::Result` in tuple element 0, `std::result::Result` in tuple element 1
+   --> crates/cli/tests/handover.rs:615:13
+    |
+615 |     let _ = (job.kill(), job.wait());
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_underscore_must_use
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/asks.rs:11:5
+   |
+11 | /     read(&c.state)
+12 | |         .unwrap()
+   | |_________________^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+  --> crates/cli/tests/asks.rs:20:5
+   |
+20 | /     append(
+21 | |         &c.state,
+22 | |         &Event::new(
+23 | |             ts,
+...  |
+30 | |     .unwrap();
+   | |_____________^
+   |
+   = note: if this value is an `Err`, it will panic
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/asks.rs:281:5
+    |
+281 |     append(&c.state, &Event::new(NOW - 90, "sendmeter", Some(36), "spawn", impl36)).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/asks.rs:283:5
+    |
+283 | /     append(
+284 | |         &c.state,
+285 | |         &Event::new(NOW - 60, "sendmeter", Some(36), "needs-decision", q),
+286 | |     )
+287 | |     .unwrap();
+    | |_____________^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/asks.rs:288:5
+    |
+288 |     append(&c.state, then).unwrap();
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: used `unwrap()` on a `Result` value
+   --> crates/cli/tests/asks.rs:289:18
+    |
+289 |     let events = read(&c.state).unwrap();
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: if this value is an `Err`, it will panic
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unwrap_used
+
+error: could not compile `drover` (test "handover") due to 139 previous errors
+error: could not compile `drover` (test "asks") due to 122 previous errors

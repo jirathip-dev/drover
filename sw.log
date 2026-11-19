@@ -1,0 +1,13 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1316/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.37s
+     Running tests/serve_wire.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1316/debug/deps/serve_wire-753d7451547a55c6)
+
+running 5 tests
+test without_gzip_a_response_is_the_bytes_the_server_built ... ok
+test two_plain_http11_requests_over_one_connection_both_succeed_then_close_ends_it ... ok
+test a_gzipped_stream_message_decodes_whole_while_the_stream_stays_open ... ok
+test gzip_shrinks_the_events_screen_over_five_times_and_decodes_to_the_plain_body ... ok
+test wire_report ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
