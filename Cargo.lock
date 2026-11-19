@@ -154,6 +154,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "blocks"
+version = "0.1.0"
+source = "git+https://github.com/jirathip-dev/blocks?rev=f5017c7bf07730ad7b76733110de496d5ab41397#f5017c7bf07730ad7b76733110de496d5ab41397"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "by_address"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -531,6 +540,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "blocks",
  "drover-core",
  "drover-sys",
  "flate2",

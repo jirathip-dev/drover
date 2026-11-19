@@ -156,7 +156,7 @@ logged, printed or served; the page gets only the public key and each device's l
 Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/thiserror, plus, for web
 push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
 client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
-shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), and rusqlite (bundled SQLite)
+shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), blocks (the typed UI blocks the screens are built from, serde only, pinned to a commit; #1342, q2063), and rusqlite (bundled SQLite)
 for the state database (#344, docs/architecture.md), keyring for the main host's secret store
 (#441, owner-approved; docs/providers.md), flate2 for serve's gzip (#1314, owner-approved), ratatui (with its crossterm backend) in `crates/chat` only (#1352, owner-approved, q2151), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
 fails on any other direct dependency.

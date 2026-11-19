@@ -64,6 +64,8 @@ toml = "0.8"
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 # #298, #455: shed's wire types only (serde, no I/O), pinned to shed main until it tags a release.
 shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "9b88eb5be5bc9ba8c5c75480483b9861ddc6e993" }
+# #1342: blocks' typed UI blocks (serde only, no I/O), pinned to a commit of blocks' staging (q2063).
+blocks = { git = "https://github.com/jirathip-dev/blocks", rev = "f5017c7bf07730ad7b76733110de496d5ab41397" }
 drover-sys = { path = "crates/sys" }
 drover-core = { path = "crates/core" }
 drover-server = { path = "crates/server" }

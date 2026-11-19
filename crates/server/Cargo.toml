@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true
+blocks.workspace = true
 drover-core.workspace = true
 drover-sys.workspace = true
 flate2.workspace = true
