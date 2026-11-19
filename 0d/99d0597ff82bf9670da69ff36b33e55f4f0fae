@@ -1,0 +1,9 @@
+Decided: a repo's 3 places go to its 3 most recent threads, archived ones counted; an archived one is just not drawn
+Because: "One way to hold the rule with no new state: a repo's 3 places go to its 3 most recent threads"
+Decided: one older-threads card above archived, rows named by repo, swipe stays archive
+Because: "One `▸ N older threads` card for all repos, drawn like the archived card and right above it"
+Decided: demo gains three old acme-api threads so the ui-390 threads shot draws the older card
+Because: "the 390 screenshot shows the one older card above the archived card"
+Rejected: tracking a per-repo shown set as new state — the ranking rule needs none
+Check: crates/server/src/serve/chat.rs list_screen; threads_tab.rs one_older_card_holds_every_repos_older_threads_and_an_archive_brings_none_up
+Owner: The threads screen has one older fold for all repos; archiving no longer pulls old threads up.
