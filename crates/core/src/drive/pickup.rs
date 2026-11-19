@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::{append, Event, IssueState, Json};
+use crate::events::{append, emit, Event, IssueState, Json};
 use crate::runner::Runner;
 use crate::session::{Session, Status};
 use crate::waiting::{self, Waiting};
@@ -66,8 +66,7 @@ pub(super) fn fetch(
     Ok(Picked::Fetched(x))
 }
 
-/// A review lane that ended its turn (or a pickup that failed already) and left no verdict.md to read.
-pub(super) fn unread(ctx: &Ctx, f: &Fleet, ev: &[Event], agents: &[Session], (s, w): (&IssueState, &Waiting)) -> bool {
+fn unread(ctx: &Ctx, f: &Fleet, ev: &[Event], agents: &[Session], (s, w): (&IssueState, &Waiting)) -> bool {
     let sp = crate::events::last_spawn(ev, &w.lane);
     let ended = || {
         let st = agents.iter().find(|a| a.name == w.lane).and_then(Session::status);
@@ -82,9 +81,46 @@ pub(super) fn unread(ctx: &Ctx, f: &Fleet, ev: &[Event], agents: &[Session], (s,
         && (w.what.starts_with(waiting::PICKUP) || (w.what.starts_with(waiting::IDLE) && ended()))
 }
 
-pub(super) fn no_verdict(ev: &[Event], lane: &str) -> String {
+fn no_verdict(ev: &[Event], lane: &str) -> String {
     let wt = crate::events::last_spawn(ev, lane).and_then(|e| e.str("worktree"));
     format!("{}{}/verdict.md", waiting::NO_VERDICT, wt.unwrap_or_default())
+}
+
+pub(super) fn stuck(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    f: &Fleet,
+    (ev, agents): (&[Event], &[Session]),
+    (s, w): (&IssueState, &Waiting),
+) -> Result<bool> {
+    if w.who == "drive" && w.what.starts_with(waiting::NO_VERDICT_AGAIN) {
+        writeln!(out, "{} #{} needs-human: {}", s.fleet, s.issue, w.what)?;
+        let d = json!({"code": "NO_VERDICT", "reason": w.what, "agent": w.lane});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, &s.fleet, Some(s.issue), "needs-human", d),
+        )?;
+        return Ok(true);
+    }
+    if !unread(ctx, f, ev, agents, (s, w)) {
+        return Ok(false);
+    }
+    failed(ctx, out, (&s.fleet, s.issue, &w.lane), &no_verdict(ev, &w.lane))?;
+    Ok(true)
+}
+
+pub(super) fn healed(ctx: &Ctx, ev: &[Event], w: &Waiting, started: bool) -> Result<()> {
+    if !started || !w.what.ends_with("without a verdict: reviewing again") {
+        return Ok(());
+    }
+    let seq = crate::events::last_spawn(ev, &w.lane).map(|e| e.seq);
+    let d = json!({"agent": w.lane, "why": no_verdict(ev, &w.lane), "spawn": seq});
+    append(
+        &ctx.state,
+        &Event::new(ctx.now, &w.fleet, Some(w.issue), "self-heal", d),
+    )
 }
 
 pub(super) fn failed(ctx: &Ctx, out: &mut dyn Write, (fleet, n, lane): (&str, u64, &str), why: &str) -> Result<()> {
