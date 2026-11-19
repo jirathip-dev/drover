@@ -3,7 +3,7 @@
 > **Approved 2026-11-03 ("Approve all with fixes"), built in phase 2.** The open questions below took their
 > recommendations: these token names, brass links, no tile texture, lifted palettes, `theme-color` from `--bg`, the
 > added gates, and the gate in assets/serve.js (removed in #927) (`src/` only serves the files). The owner's fixes changed the values
-> and the gate, so `assets/schemes/` (copied to `schemes/` here) and the board's gate are the source of truth; the PNGs
+> and the gate, so swag's `schemes/` (copied to `schemes/` here; #1339) and blocks' gate are the source of truth; the PNGs
 > and `report.json` are phase 1's. The CI `ui` job shoots Queue and Host in every scheme from the real CSS
 > (`ui-390/queue-scheme-<name>.png`, `busy-host-ranked-scheme-<name>.png`).
 >

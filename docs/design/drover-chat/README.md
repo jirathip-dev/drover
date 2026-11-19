@@ -7,7 +7,7 @@ Open questions: (1) The 120-column split view: keep it (recommended)? (2) While 
 ## How it is drawn
 
 `index.html` draws every screen as a terminal character grid. It uses the default scheme's tokens
-(`assets/schemes/github-dark.json`) and board.css's monospace font. `screens.js` lays out every grid from one model
+(`swag's schemes/github-dark.json`) and board.css's monospace font. `screens.js` lays out every grid from one model
 (the threads, the t139 story, the keys), with the rules the build follows: text wraps at word breaks and is never
 cut, the bottom rows stay fixed, and the newest message is at the bottom. Any row wider than the grid stops the
 render. A 40-column grid is 390 px wide and a 120-column grid is 1440 px wide, so the issue's 40x18 / 120x40 and the
