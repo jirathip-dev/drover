@@ -463,15 +463,9 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             )
         });
     }
-    let agents = ids
-        .first()
-        .and_then(|_| crate::shed::cli(r, &["agents", "--json"]).ok());
-    let agents: serde_json::Value = agents
-        .and_then(|o| serde_json::from_str(&o.stdout).ok())
-        .unwrap_or_default();
     for id in ids {
-        let a = agents.as_array().into_iter().flatten().find(|a| a["id"] == id.as_str());
-        let Some(cmd) = a.and_then(|a| a.at("cmd").at(0).as_str()) else {
+        let adapter = crate::shed::adapter(r, &id).ok().flatten().unwrap_or_default();
+        let Some(cmd) = adapter.first() else {
             rows.push(format!("✗ shed agent {id} — not installed → shed agents add {id}"));
             continue;
         };
