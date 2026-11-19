@@ -1,7 +1,9 @@
 mod common;
 use common::*;
+use drover::runner::Out;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 fn board() -> SocketAddr {
@@ -50,13 +52,76 @@ fn a_slow_request_does_not_hold_up_a_fast_one() {
     assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
 }
 
+#[derive(Default)]
+struct Gate(Mutex<(usize, bool)>, Condvar);
+
+impl drover::runner::Runner for Gate {
+    fn run(&self, _: &str, _: &[String]) -> anyhow::Result<Out> {
+        Ok(Out::default())
+    }
+    fn stream(&self, _: &str, _: &[String], _: &str) -> anyhow::Result<Box<dyn Read + Send>> {
+        let mut g = self.0.lock().unwrap();
+        g.0 += 1;
+        self.1.notify_all();
+        drop(self.1.wait_while(g, |g| !g.1).unwrap());
+        Ok(Box::new(std::io::empty()))
+    }
+}
+
+impl Gate {
+    fn inside(&self) -> usize {
+        self.0.lock().unwrap().0
+    }
+    fn wait_for(&self, n: usize) {
+        let g = self.0.lock().unwrap();
+        let (g, t) = self
+            .1
+            .wait_timeout_while(g, Duration::from_secs(20), |g| g.0 < n)
+            .unwrap();
+        assert!(!t.timed_out(), "{} of {n} handlers busy", g.0);
+    }
+    fn open(&self) {
+        self.0.lock().unwrap().1 = true;
+        self.1.notify_all();
+    }
+}
+
 #[test]
-fn the_65th_request_waits_and_gets_its_answer() {
-    let addr = board();
-    let all: Vec<_> = (0..80)
-        .map(|_| std::thread::spawn(move || get(addr, "/screens/lanes")))
-        .collect();
-    for h in all {
+fn the_65th_request_waits_until_one_of_64_busy_handlers_is_freed() {
+    let c: &'static drover::Ctx = Box::leak(Box::new(ctx(&tmpdir("conn-cap"), CONFIG)));
+    let png = c.worktrees.join("sendmeter/issue-12/docs/design/meter/1440.png");
+    std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+    std::fs::write(&png, b"png").unwrap();
+    let files = serde_json::json!([{"name": "docs/design/meter/1440.png", "path": png}]);
+    let ev = |kind: &str, d: serde_json::Value| {
+        drover::events::append(
+            &c.state,
+            &drover::events::Event::new(c.now, "sendmeter", Some(12), kind, d),
+        )
+        .unwrap();
+    };
+    ev(
+        "design-review",
+        serde_json::json!({"sha": "abc123", "files": files, "role": "design"}),
+    );
+    ev(
+        "needs-decision",
+        serde_json::json!({"id": "q1", "question": "Design for #12 is ready: approve, revise (type a note) or reject?",
+            "options": ["approve", "revise", "reject"], "recommend": null, "kind": "owner", "design": true, "files": files, "role": "design"}),
+    );
+    let gate: &'static Gate = Box::leak(Box::default());
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    std::thread::spawn(move || drover::serve::serve_on(c, gate, l, false));
+    let call = move || std::thread::spawn(move || get(addr, "/design/sendmeter/12/0/q1"));
+    let first: Vec<_> = (0..64).map(|_| call()).collect();
+    gate.wait_for(64);
+    let last = call();
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(gate.inside(), 64, "the 65th was answered while 64 were busy");
+    assert!(!last.is_finished());
+    gate.open();
+    for h in first.into_iter().chain([last]) {
         let res = h.join().unwrap();
         assert!(
             res.starts_with("HTTP/1.1 200"),
@@ -64,6 +129,7 @@ fn the_65th_request_waits_and_gets_its_answer() {
             res.lines().next().unwrap_or_default()
         );
     }
+    assert_eq!(gate.inside(), 65);
 }
 
 #[test]
