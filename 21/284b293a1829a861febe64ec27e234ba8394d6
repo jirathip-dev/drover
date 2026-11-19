@@ -1,0 +1,7 @@
+Decided: on a failed wip push, snapshot resets the worktree with a mixed reset to the HEAD it read before committing, so the commit goes and the files stay dirty or untracked.
+Because: "A failed wip push leaves the worktree as it was before the snapshot: the same HEAD, the same files dirty or untracked, a clean index."
+Because: crates/core/src/check.rs:2420
+Rejected: committing on a detached or temporary ref — more moving parts; the reset to the read HEAD is one git call.
+Rejected: a hard or soft reset — hard loses the files, soft leaves them staged; the spec wants a clean index.
+Check: one place fixes kill, spawn --supersede and clean's wip save, since all go through snapshot; a successful push still keeps its commit as before.
+Owner: a rejected wip save now leaves the lane's folder exactly as it found it, with nothing extra on the PR branch.
