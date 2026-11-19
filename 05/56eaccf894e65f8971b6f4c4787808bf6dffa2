@@ -1,0 +1,7 @@
+Decided: no code change this round; merged origin/staging, which carries the cap raise to 60000
+Because: q2319
+Decided: the red host_deadline is a wall-clock flake, not this diff; it failed at 6.1 s against its 6 s bound
+Because: crates/cli/tests/host_deadline.rs:112
+Rejected: loosening host_deadline's time bound — outside this issue's scope and the test is not this PR's
+Check: CI at the new head is green; host_deadline passed 4/4 local runs
+Owner: the fix is unchanged; staging's cap raise is merged in and CI is rerun
