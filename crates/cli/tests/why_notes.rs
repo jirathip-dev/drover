@@ -703,7 +703,9 @@ fn a_new_finding_refuses_the_turn_once_then_review_takes_it() {
     let t = kinds(&c, "turn-end").pop().unwrap();
     assert_eq!(t.val("ui_check")["result"], "new");
     let ev = read(&c.state).unwrap().to_vec();
-    let brief = drover::guard::brief(&ev, ("sendmeter", 12)).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let fl = cfg.fleet("sendmeter").unwrap();
+    let brief = drover::why::brief(&Git::new(&f), fl, &ev, ("sendmeter", 12), Some(&repo.head), SPEC).unwrap();
     assert!(brief.contains(line), "rev's brief carries them: {brief}");
 }
 
