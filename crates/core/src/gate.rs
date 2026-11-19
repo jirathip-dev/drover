@@ -1133,10 +1133,7 @@ fn extended(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), (spawn, by): (bool
     let (kind, e) = match state {
         "needs-human" if update => {
             let e = json!({"by": by, "spawn": spawn, "queued": false, "update": true});
-            return Ok(crate::events::append(
-                &ctx.state,
-                &Event::new(ctx.now, fleet, Some(n), "round-extended", e),
-            )?);
+            return crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", e));
         }
         "needs-human" if !unstarted => ("round-extended", json!({"by": by, "spawn": spawn, "queued": spawn})),
         _ if spawn => (crate::pending::REQUEUED, json!({"by": by})),
