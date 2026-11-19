@@ -1,0 +1,5 @@
+Decided: fix round 5 only merges origin/staging again; no code change, since the red ui-webkit was its job timeout, not a test.
+Because: q2091
+Rejected: re-running only the failed job with gh run rerun — a lane's only GitHub write is its PR, and staging had moved anyway
+Check: ui-webkit at 03aa1647 was cancelled at 20 min after apt took 16 min in the playwright webkit step; its hard-gate tests had passed.
+Owner: The red check was a slow package download timing out, not this change; CI is re-running on the new head.
