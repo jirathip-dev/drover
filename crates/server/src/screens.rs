@@ -3,7 +3,7 @@ use super::{
 };
 use super::{LaneRow, LanesTab, NeedAsk, NeedIssue, QueueCard, QueueRow, JSON};
 use crate::access::{civil_month_day, civil_year};
-use crate::api::{Block, Chat, Herd, HerdFleet, HerdLane, Lane};
+use crate::api::{Block, Herd, HerdFleet, HerdLane, Lane};
 use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Map, Value};
@@ -1282,7 +1282,7 @@ fn lanes_screen(t: &LanesTab) -> Value {
     json!({"type": "screen", "id": "lanes", "title": "Lanes", "stream": "/screens/lanes/stream", "blocks": blocks})
 }
 
-fn said(i: usize, b: &Block, lines: &[String]) -> Value {
+pub(super) fn said(i: usize, b: &Block, lines: &[String]) -> Value {
     let id = format!("t-{i}");
     let text = |m: String| json!({"type": "text", "id": id, "markdown": m});
     match b {
@@ -1497,7 +1497,8 @@ impl Server<'_> {
 
     fn lane_sheet(&self, ctx: &Ctx, agent: &str) -> Option<Value> {
         let (cfg, ev) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
-        let all = self.lanes(ctx.now, &cfg, &ev, &ev.states)?;
+        let list = self.recent_sessions(ctx.now, &cfg)?;
+        let all = crate::snapshot::lanes(&cfg, &self.cached(ctx.now, 30), (&ev, &ev.states), &list);
         let l = all.into_iter().find(|l| l.name == agent)?;
         let spawn = crate::events::last_spawn(&ev, agent);
         let fc = l.fleet.as_ref().and_then(|f| cfg.fleet.get(f));
@@ -1525,18 +1526,7 @@ impl Server<'_> {
                 json!({"type": "row", "id": "f-pr", "title": "PR", "value": format!("#{n}"), "tap": {"url": url}}),
             );
         }
-        let q: Q = [("agent".to_string(), agent.to_string())].into();
-        let chat = self
-            .transcript(ctx, &q)
-            .and_then(|t| serde_json::from_str::<Chat>(&t).ok());
-        let mut said: Vec<Value> = chat.map_or_else(Vec::new, |c| {
-            let lc = self.blocks(ctx, &q, c);
-            lc.blocks
-                .iter()
-                .enumerate()
-                .map(|(i, b)| said(i, b, &lc.chat.lines))
-                .collect()
-        });
+        let mut said = self.sheet_transcript(ctx, &l);
         said.extend(later::undelivered(&ev, agent));
         let values = json!({ "agent": agent });
         let other = l.role == "other";

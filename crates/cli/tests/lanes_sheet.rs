@@ -597,6 +597,38 @@ fn vector_horses_keep_a_coat_per_name() {
     );
 }
 
+#[test]
+fn a_lane_sheet_is_one_shed_read_of_the_200_lines_it_shows_within_150ms_p95_on_the_large_board() {
+    let (c, sh) = large::large("sheet-p95");
+    let tall: String = (0..5000).map(|i| format!("line {i} sk-ant-oat01-secret\n")).collect();
+    sh.screen("sendmeter-impl-3", &tall);
+    let r = OnShed(Fake::default(), sh);
+    let s = Server::new(&c, &r, Some(ADDR.into())).deferring();
+    let now = drover::now();
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
+    req(&s, "GET", "/screens/lanes", "", &cookie, now);
+    s.refresh(now);
+    let mut ms = vec![];
+    let mut sheet = String::new();
+    for _ in 0..20 {
+        let before = r.1.methods().len();
+        let t = std::time::Instant::now();
+        sheet = req(&s, "GET", "/screens/lanes/sendmeter-impl-3", "", &cookie, now);
+        ms.push(t.elapsed());
+        let calls = r.1.methods().split_off(before);
+        assert!(calls.len() <= 1, "one shed call per sheet: {calls:?}");
+    }
+    assert_eq!(r.1.last("read")["lines"], json!(200));
+    assert!(
+        sheet.contains("line 4999 ") && sheet.contains("line 4800 ") && !sheet.contains("line 4799 "),
+        "{sheet}"
+    );
+    assert!(!sheet.contains("sk-ant-oat01-secret"), "masked");
+    ms.sort();
+    let p95 = ms[(ms.len() * 95).div_ceil(100) - 1];
+    assert!(p95 <= std::time::Duration::from_millis(150), "p95 {p95:?}");
+}
+
 static STREAM_SLOTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn http(addr: std::net::SocketAddr, method: &str, path: &str, body: &str, cookie: &str) -> String {

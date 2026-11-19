@@ -18,7 +18,7 @@ ignore = true
 multiple-versions = "deny"
 wildcards = "deny"
 allow-wildcard-paths = true
-skip = [{ crate = "syn@2.0.119", reason = "ts-rs-macros only (the `ts` feature, never in the release build); clap and serde use syn 3" }]
+skip = [{ crate = "syn@2.0.119", reason = "ts-rs-macros, and ratatui's strum and crossterm's derive_more macros (build time only); clap and serde use syn 3" }]
 
 [sources]
 unknown-registry = "deny"
