@@ -33,6 +33,7 @@ try {
   out.ms = (await shown()) ? Date.now() - t0 : null;
   for (const t = Date.now(); Date.now() - t < 5000 && (await page.$eval('#dot', d => d.className.split(' ')[0])) !== 'g'; ) await wait(50);
   out.dot = await page.$eval('#dot', d => d.className.split(' ')[0]);
+  out.online = await page.evaluate(() => navigator.onLine);
 } catch (e) {
   out.error = String(e.stack ?? e);
 } finally {

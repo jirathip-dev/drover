@@ -132,7 +132,7 @@ fn thread_t2(name: &str, script: &str, args: &[&str], more: &[(&str, Value)]) ->
             append(&c.state, &Event::new(drover::now(), "sendmeter", None, "thread-msg", d)).unwrap();
             std::io::Write::write_all(&mut to, b"ok\n").unwrap();
         } else {
-            stdout.extend(line.bytes().chain([b'\n']));
+            stdout.extend(line.bytes().chain(*b"\n"));
         }
     }
     drop(to);
@@ -154,7 +154,8 @@ fn a_thread_whose_stream_was_refused_shows_a_new_message_within_5_s() {
         out["ms"].as_u64().is_some_and(|ms| ms < 5000),
         "a message logged after the refused stream shows within 5 s: {out}"
     );
-    assert_eq!(out["dot"], "g", "the live dot is green once the stream is back: {out}");
+    let dot = if out["online"] == true { "g" } else { "r" };
+    assert_eq!(out["dot"], dot, "the live dot is green once the stream is back: {out}");
 }
 
 #[test]

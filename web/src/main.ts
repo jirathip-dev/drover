@@ -30,8 +30,8 @@ const newer = (b: unknown) => {
 const url = (p: string) => new URL(p.replace(/^[/]/, '') + (exported && /^\/screens\/[^?]*$/.test(p) ? '/index.html' : ''), R).href;
 
 type Pend = { id: string; text: string; n: number; st: 'sending' | 'sent' | 'failed'; a: Act };
-type View = { path: string; model: Blk | null; at: number; live: boolean; es?: EventSource; root: HTMLElement; open: Set<string>; back: string[]; pend: Pend[] };
-const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, root, open: new Set(), back: [], pend: [] });
+type View = { path: string; model: Blk | null; at: number; live: boolean; es?: EventSource; retry?: ReturnType<typeof setTimeout>; tries: number; root: HTMLElement; open: Set<string>; back: string[]; pend: Pend[] };
+const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, tries: 0, root, open: new Set(), back: [], pend: [] });
 const tabs = PL.flatMap(p => (p.type === 'header-strip' && p.screen ? [{ ...p, screen: p.screen, v: view(p.screen, el('section', 'tab')), a: el('a') }] : []));
 const cards = PL.some(p => p.type === 'chat-cards') ? view('/screens/cards', $('#cards')) : null;
 type Tab = (typeof tabs)[number];
@@ -217,6 +217,7 @@ async function load(v: View, quiet = false, s?: Span) {
     if (isBlk(e) && e.status === 401) unpaired();
     else if (!v.model) v.root.replaceChildren(el('p', 'msg r', esc(msg(e))));
     v.live = false;
+    if (v.tries) revive(v);
     sync();
   } finally {
     clearTimeout(slow);
@@ -228,8 +229,12 @@ function stream(v: View) {
   const s = v.model && !isList(v.model) && v.model.stream ? v.model.stream : v === cards || v === shv ? v.path + '/stream' : null;
   if (!s || exported || !('EventSource' in window)) return void (v.live = false);
   const es = (v.es = new EventSource(url(String(s))));
-  es.onopen = () => { v.live = true; sync(); };
-  es.onerror = () => { v.live = false; sync(); };
+  es.onopen = () => { [v.live, v.tries] = [true, 0]; sync(); };
+  es.onerror = () => {
+    v.live = false;
+    if (es.readyState === EventSource.CLOSED) revive(v);
+    sync();
+  };
   es.onmessage = e => {
     const s = span('delta'), d = obj(JSON.parse(e.data));
     if (newer(d.build)) return;
@@ -248,7 +253,11 @@ function stream(v: View) {
     setTimeout(() => dot.classList.remove('p'), 600);
   };
 }
-const close = (v: View) => { v.es?.close(); v.es = undefined; v.live = false; };
+const close = (v: View) => { clearTimeout(v.retry); v.retry = undefined; v.es?.close(); v.es = undefined; v.live = false; };
+function revive(v: View) {
+  close(v);
+  v.retry = setTimeout(() => { v.retry = undefined; if (v === shv) stream(v); else void load(v, true); }, Math.min(30_000, 1000 * 2 ** v.tries++));
+}
 
 const ys = new Map<string, number>();
 function go(v: View, path: string, push = true, k?: Span) {
