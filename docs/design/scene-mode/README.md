@@ -13,6 +13,7 @@ Open questions: none
 | `scene-night-390.png`, `scene-night-1440.png` | Scene at night (`[☾]`): the night sky with stars, the Milky Way and the moon, and the night colours. The horses are the same pixel sprites. |
 | `old-herd-night-390.png`, `old-herd-night-1440.png` | The old Herd at night, same data, for comparison. |
 | `screens-390.png`, `screens-1440.png` | Screens mode: the board as it is today, with `[scene]` not pressed and no light button. Nothing else on the board changes. The settings sheet loses its `Herd` row (Scene is reached only from the header) and gets no style row: that is #1306. |
+| `built-scene-{day,night}-{390,1440}.png` | #1305's build, drawn by the page from the demo export's `/screens/scene`, beside the mockup and the old Herd above. |
 | `clip.gif` (390, 12 fps) | The motion. First paint: the loading horse trots ("saddling up…"). By day: the tree canopy sways and the grass bends on a shared 5.2 s gust (faster when host load is high), clouds drift, and working horses trot (0.4 s stride) and roam. By night: the stars drift, clouds pass and the horses keep trotting. |
 
 ## Behaviour

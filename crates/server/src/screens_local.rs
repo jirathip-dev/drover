@@ -5,7 +5,7 @@ use crate::runner::Runner;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
-const OFF: [&str; 3] = ["/screens/herd", "/screens/threads", "/screens/proxy-token"];
+const OFF: [&str; 3] = ["/screens/scene", "/screens/threads", "/screens/proxy-token"];
 const CARDS: &str = "/screens/cards";
 
 pub(in super::super) enum Who<'a> {

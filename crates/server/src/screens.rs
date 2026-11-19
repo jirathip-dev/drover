@@ -47,9 +47,8 @@ pub fn places() -> Value {
 pub fn page_places() -> Value {
     let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
     let hosts = json!({"type": "menu-row", "label": "Hosts", "subtitle": "on/off and reap, per host", "screen": "/screens/hosts"});
-    let herd = json!({"type": "menu-row", "label": "Herd", "subtitle": "the ranch: lanes by state, weather from host load", "screen": "/screens/herd"});
     let mut all = places().as_array().cloned().unwrap_or_default();
-    all.extend([threads, hosts, herd]);
+    all.extend([threads, hosts]);
     Value::Array(all)
 }
 
@@ -1138,13 +1137,12 @@ const BANDS: [(&str, &[&str]); 4] = [
 ];
 
 fn band(id: &str, name: &str, rows: &[Value]) -> Option<Value> {
-    (!rows.is_empty()).then(|| {
-        json!({"type": "section", "id": format!("h-{id}-{name}"), "header": format!("{name} ({})", rows.len()),
-            "blocks": [{"type": "list", "id": format!("h-{id}-{name}-list"), "rows": rows}]})
-    })
+    let header = if name == "blocked" { "blocked/dead" } else { name };
+    (!rows.is_empty())
+        .then(|| json!({"type": "section", "id": format!("h-{id}-{name}"), "header": header, "rows": rows}))
 }
 
-fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>) -> Option<Value> {
+fn scene_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>) -> Option<Value> {
     let needs = f.map(|f| f.needs.as_slice()).unwrap_or_default();
     let lanes: Vec<&HerdLane> = lanes.iter().filter(|l| !l.gone).collect();
     let mut sum = vec![];
@@ -1153,9 +1151,12 @@ fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>)
         .map(|q| {
             let need = needs.contains(&q.issue);
             let blocked = q.blocked_by.map(|b| format!("blocked by #{b}"));
-            let sub = need.then(|| "needs you".to_string()).or(blocked).or_else(|| q.title.clone());
-            json!({"type": "row", "id": format!("h-{name}-q{}", q.issue), "figure": {"state": if need { "needs" } else { "idle" }},
-                "title": format!("#{}", q.issue), "subtitle": sub.unwrap_or_default()})
+            let sub = need
+                .then(|| "needs you".to_string())
+                .or(blocked)
+                .or_else(|| q.title.clone());
+            json!({"id": format!("h-{name}-q{}", q.issue), "figure": {"state": if need { "needs" } else { "queued" }},
+                "title": format!("#{}", q.issue), "subtitle": sub.unwrap_or_default(), "blocked_by": q.blocked_by})
         })
         .collect();
     sum.push((gate.len(), "queued"));
@@ -1164,18 +1165,28 @@ fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>)
         let rows: Vec<Value> = (lanes.iter())
             .filter(|l| {
                 let need = l.issue.is_some_and(|i| needs.contains(&i));
-                if need { b == "blocked" } else { states.contains(&l.state.as_str()) }
+                if need {
+                    b == "blocked"
+                } else {
+                    states.contains(&l.state.as_str())
+                }
             })
             .map(|l| {
-                let need = l.issue.is_some_and(|i| needs.contains(&i));
-                let shown = if need { "needs you" } else { l.shown.as_str() };
-                let sub: Vec<&str> = [shown, l.host.as_deref().unwrap_or_default()].into_iter().filter(|s| !s.is_empty()).collect();
-                json!({"type": "row", "id": format!("h-{}", l.name), "figure": lane_figure(&l.name, if need { "blocked" } else { &l.state }),
-                    "title": l.name, "subtitle": sub.join(" · "), "value": l.age, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
+                let need = l.issue.filter(|i| needs.contains(i));
+                let (state, act, tone, shown) = match need {
+                    Some(_) => ("blocked", "blocked", "r", "needs you"),
+                    None => (l.state.as_str(), l.act.as_str(), l.tone.as_str(), l.shown.as_str()),
+                };
+                json!({"id": format!("h-{}", l.name), "figure": {"state": state, "act": act, "coat": l.coat},
+                    "title": l.name, "subtitle": shown, "tone": tone, "value": l.age, "host": l.host, "needs": need,
+                    "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
             })
             .collect();
         sum.push((rows.len(), b));
         blocks.extend(band(name, b, &rows));
+    }
+    if let Some(t) = sum.get_mut(1..) {
+        t.rotate_right(1);
     }
     let sum: Vec<String> = sum
         .iter()
@@ -1183,19 +1194,24 @@ fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>)
         .map(|(n, w)| format!("{n} {w}"))
         .collect();
     (f.is_some() || !lanes.is_empty())
-        .then(|| json!({"id": name, "title": name, "color": color, "subtitle": sum.join(" · "), "blocks": blocks}))
+        .then(|| json!({"id": name, "title": name, "color": color, "subtitle": sum.join("·"), "blocks": blocks}))
 }
 
-fn herd_screen(h: &Herd) -> Value {
+fn scene_screen(h: &Herd) -> Value {
     let mut repos: Vec<Value> = (h.fleets.iter())
-        .filter_map(|f| herd_repo(&f.name, &f.color, &f.lanes, Some(f)))
+        .filter_map(|f| scene_repo(&f.name, &f.color, &f.lanes, Some(f)))
         .collect();
-    repos.extend(herd_repo("others", "", &h.others, None));
+    repos.extend(scene_repo("others", "", &h.others, None));
     let host = &h.host;
     let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
-    let (sky, level) = match host.pressure.as_deref() {
+    let fog = match host.pressure.as_deref() {
+        Some("warn") => 1,
+        Some("critical") => 2,
+        _ => 0,
+    };
+    let (sky, level) = match fog {
         _ if host.gate.is_some() => ("storm", "held"),
-        Some("warn" | "critical") => ("fog", "busy"),
+        1 | 2 => ("fog", "busy"),
         _ if ratio >= 0.5 => ("windy", "busy"),
         _ => ("clear", "calm"),
     };
@@ -1205,8 +1221,9 @@ fn herd_screen(h: &Herd) -> Value {
         "load {load} · mem {} · swap {swap}",
         host.pressure.as_deref().unwrap_or("?")
     );
-    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene", "load": level,
-        "weather": {"sky": sky, "wind": (ratio.clamp(0.0, 1.0) * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
+    json!({"type": "screen", "id": "scene", "title": "Scene", "stream": "/screens/scene/stream", "blocks": [{"type": "scene", "id": "scene", "load": level,
+        "weather": {"sky": sky, "wind": (ratio.clamp(0.0, 1.0) * 100.0).round() / 100.0, "fog": fog, "storm": host.gate.is_some(), "line": line},
+        "repos": repos}]})
 }
 
 fn section_word(state: &str) -> &str {
@@ -1390,7 +1407,7 @@ impl Server<'_> {
             .into_iter()
             .flatten()
             .filter_map(|p| p["screen"].as_str().map(String::from))
-            .chain(["/screens/cards".to_string()])
+            .chain(["/screens/cards".to_string(), "/screens/scene".to_string()])
             .collect();
         let mut out = vec![];
         let mut i = 0;
@@ -1416,7 +1433,7 @@ impl Server<'_> {
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx, paired),
             "/screens/workflow" => workflow(ctx),
-            "/screens/herd" => herd_screen(&self.herd(ctx, None).ok()?),
+            "/screens/scene" => scene_screen(&self.herd(ctx, None).ok()?),
             "/screens/hot" => self.on_row(ctx, q, |c, r| {
                 let f = &c.name;
                 let rows: Vec<Value> = (hot(r).iter().enumerate())

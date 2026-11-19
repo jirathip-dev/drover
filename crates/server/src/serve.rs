@@ -1688,6 +1688,7 @@ impl<'a> Server<'a> {
              <script>let h=document.documentElement,m=new URLSearchParams(location.search).get('theme');try{{m=m||localStorage.theme}}catch(e){{}}h.dataset.theme=m||{th};\
              let SD={sd},PL={pl},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
              <body data-ts={}{ro}><header><b>drover</b>{badge}<i id=dot class=a></i>\
+             <button id=scb type=button aria-pressed=false aria-label=\"scene mode\"><span>scene</span></button><button id=hlt type=button hidden></button>\
              <button id=rf type=button aria-label=refresh>↻</button><button id=sysb type=button aria-haspopup=dialog aria-label=settings>⚙</button><button type=button class=pairb>pair</button></header>\
              <div id=strip><span id=ld hidden><i>↻</i> loading</span><span id=stale hidden></span></div>{msg}<div id=pairp hidden></div><p id=toast hidden></p>\
              <div id=cards></div><main></main><nav></nav><div id=sheet hidden><div class=sp><p class=sh></p><div class=sb></div></div></div><div id=confirm hidden></div>\
