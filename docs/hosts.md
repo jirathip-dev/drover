@@ -378,7 +378,11 @@ over ssh). The brief is the first prompt, and every later prompt goes through th
   per-lane key as `ANTHROPIC_AUTH_TOKEN`. The key reaches it only through the 0600 secrets file over ssh stdin, which
   is removed once the shell has read it. Port `<port>` there is an ssh reverse tunnel (`ssh -N -R`, started detached
   by spawn and each survey, its pid in `<state>/tunnel-<host>.pid`) to `drover proxy` here, which spawn starts when
-  it does not answer. The proxy checks the key, then forwards the call to `upstream` with the one
+  it does not answer. #1335: the tunnel is up only while its ssh lives and a `curl` to `127.0.0.1:<port>` run there
+  answers; else the listener a dead session still holds on that port there is killed (`ss -p`, then `sudo -n`) and
+  the tunnel restarted, and the survey keeps a `✗ tunnel down` row: no new lane goes there (a respawn leaves it)
+  until a look answers again. A lane that dies on `ECONNREFUSED` is gone with cause `ECONNREFUSED: proxy tunnel
+  down`, not `adapter crash`. The proxy checks the key, then forwards the call to `upstream` with the one
   `[proxy] token-file` token (#923: `claude setup-token`'s, 0600, [accounts](accounts.md); only the proxy reads it;
   a remote ACP spawn without it is refused `NO_PROXY_TOKEN` with that step; #1131: so is starting a `shed-acp`
   cloud host, by `hosts bootstrap` or drive, before the recipe's first call, so no VM is made or billed; doctor's
