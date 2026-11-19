@@ -164,7 +164,7 @@ fn a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_c
     if no_webkit() {
         return;
     }
-    let (_c, o) = thread_t2("page-compose", "compose.mjs", &[]);
+    let (_c, o) = thread_t2("page-compose", "compose.mjs", &[], &[]);
     let out: Value =
         serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
     assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
