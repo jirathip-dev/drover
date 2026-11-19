@@ -1,0 +1,7 @@
+Decided: a refused start of an extended issue only logs drive's code, so its row reads `extended · waiting: <CODE>`; pending::stalled raises one needs-human card per extension once stall_minutes pass with no lane.
+Because: "A start that is refused shows on the row in that pass: `extended · waiting: <CODE>`."
+Because: "An extended issue with no lane started after the stall threshold raises one owner card with the reason, once per extension."
+Rejected: keeping the immediate needs-human on a hard refusal — the AC wants SECRET_IN_WIP on the row after that pass, so ERROR goes the same way and gets the card at the threshold.
+Rejected: a card while paused or on a soft wait (HOST_BUSY, SPAWN_PENDING, DISK_*) — crates/cli/tests/owner_extend.rs:183 keeps an hour paused or busy card-free.
+Check: the leftover live agent test passes on the base too (sync and kick paths both supersede); the base failures are the SECRET_IN_WIP row and the never-tried card.
+Owner: an extra round that cannot start now says why on its row, and you get one card if it is still not running after 30 minutes.
