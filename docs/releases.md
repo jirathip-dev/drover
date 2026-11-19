@@ -57,7 +57,9 @@ fetches `[self_update] branch` (default `main`) of the drover fleet and reads th
    remote host (`mv drover.new drover`, the PATH links, its `profiles sync`, logged `host-sync`), then the main host
    last (`self-updated`), runs `profiles sync` and hands serve over: the running serve starts the new binary on its
    listening sockets, drains and execs it in place. A serve that does not answer on `<state dir>/serve-<port>.sock`
-   is restarted instead.
+   is restarted instead. A restarted serve must run with a pid and answer on its port; else it is bootstrapped
+   again once, and a serve still down alerts `serve-down` with the launchctl error. `drover check` bootstraps an
+   installed serve job that is not loaded (`serve-revived`).
 4. **A lagging host:** a disabled host, or a cloud host that is not running, is not waited for. An enabled host that is
    unreachable or whose stage fails is waited for up to `[limits] self_update_lag_minutes` (30) after the release was
    first found (`self-update-staging`); then the rest swap and it gets one `host-behind`. A later pass stages and swaps

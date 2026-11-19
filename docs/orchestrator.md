@@ -8,7 +8,22 @@ drover thread new acme "Grill #12"          # prints t1
 drover thread say t1 "what should #12 cover?"
 drover thread show t1 [--json]              # the conversation; marks it read
 drover thread ls [FLEET] [--json]           # per repo: title, last message, unread •, awake/asleep
+drover chat [THREAD]                        # the owner's: the same threads live, full screen in a terminal
 ```
+
+## `drover chat` (#1352)
+
+The owner's way in when the board is down: it needs only the drover binary, no `drover serve`. With no thread it
+opens the thread list (per repo, `all` first, newest on top; Enter opens one); `drover chat t1` opens t1 (an unknown
+id is refused as `thread show` refuses it). It reads the event log every 500 ms, so a reply, ask, card or settle line
+shows within a second, and ratatui redraws only the cells that changed. A line is sent as `thread say` sends it; with
+the box empty a number selects that option of the open ask and `a` / `d` approve / deny of the open card, its panel
+showing exactly what is sent or run; Enter confirms through `drover answer` / `card approve --sha` / `card deny`.
+The top line lists what is down from doctor's serve and shed checks (every 10 s); a shed that does not answer is
+started with its own job (`dev.shed.serve`, `shed.service`), a message waits for it and goes once it answers, and if it
+does not start the line gives the command to run. From 100 columns the list and the chat sit side by side. Tab
+switches to the Board tab (#1354). The keys are the design's list (`docs/design/drover-chat/README.md`); Ctrl-C quits
+and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
 
 ## The orchestrator lane
 

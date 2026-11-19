@@ -15,6 +15,23 @@ impl Jobs {
     pub(super) fn busy(&self) -> bool {
         self.0.values().any(|j| j.1.state == "running")
     }
+
+    fn add(&mut self, ctx: &Ctx, f: &BTreeMap<String, String>, (state, code, message): (&str, &str, String)) -> Job {
+        let g = |k: &str| f.get(k).map_or("", String::as_str);
+        self.1 += 1;
+        let j = Job {
+            id: format!("j{}-{}", ctx.now, self.1),
+            op: g("op").into(),
+            fleet: g("fleet").into(),
+            issue: g("issue").parse().ok(),
+            state: state.into(),
+            code: code.into(),
+            message,
+            ts: ctx.now,
+        };
+        self.0.insert(j.id.clone(), (key(f), j.clone()));
+        j
+    }
 }
 
 fn key(f: &BTreeMap<String, String>) -> String {
@@ -55,6 +72,22 @@ impl Server<'_> {
         lock(&self.tapped).0.values().any(|(x, j)| *x == k && !ended(j))
     }
 
+    pub(super) fn refusal(&self, kv: &[(&str, &str)]) -> Option<String> {
+        let k = key(&kv.iter().map(|(a, b)| ((*a).into(), (*b).into())).collect());
+        let jobs = lock(&self.tapped);
+        let last = jobs.0.values().filter(|(x, _)| *x == k).max_by_key(|(_, j)| j.ts);
+        last.filter(|(_, j)| j.state == "refused")
+            .map(|(_, j)| j.message.clone())
+    }
+
+    pub(super) fn refused_tap(&self, ctx: &Ctx, f: &BTreeMap<String, String>, e: &anyhow::Error) {
+        if let Some(r) = e.downcast_ref::<Refusal>() {
+            let mut jobs = lock(&self.tapped);
+            jobs.0.retain(|_, (_, j)| !ended(j) || ctx.now < j.ts + KEEP);
+            jobs.add(ctx, f, ("refused", r.code, shown(e)));
+        }
+    }
+
     pub(super) fn tap(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Option<Result<Job>> {
         let op = f.get("op").map_or("", String::as_str);
         let tx = self.jobs.as_ref().filter(|_| OPS.contains(&op))?;
@@ -73,19 +106,7 @@ impl Server<'_> {
             if let Some((_, j)) = again {
                 return Ok(j.clone());
             }
-            jobs.1 += 1;
-            let j = Job {
-                id: format!("j{}-{}", ctx.now, jobs.1),
-                op: g("op").into(),
-                fleet: g("fleet").into(),
-                issue: g("issue").parse().ok(),
-                state: "running".into(),
-                code: "ACCEPTED".into(),
-                message: format!("{} accepted", g("op")),
-                ts: ctx.now,
-            };
-            jobs.0.insert(j.id.clone(), (k, j.clone()));
-            j
+            jobs.add(ctx, f, ("running", "ACCEPTED", format!("{} accepted", g("op"))))
         };
         if let Err(e) = ready(ctx, f) {
             lock(&self.tapped).0.remove(&job.id);

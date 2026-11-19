@@ -190,6 +190,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         Server {
             fresh: true,
             cache: s.cache.clone(),
+            listed: s.listed.clone(),
             clients: s.clients.clone(),
             kick: s.kick.clone(),
             host: s.host.clone(),
@@ -381,6 +382,7 @@ pub struct Server<'a> {
     r: fresh::Fresh<'a>,
     addr: Option<String>,
     cache: Cache,
+    listed: Arc<Mutex<Option<(u64, crate::session::Sessions)>>>,
     fresh: bool,
     /// The background sampler's last host read (`serve_on`); a request only reads it.
     pub host: Arc<Mutex<Host>>,
@@ -751,6 +753,7 @@ impl<'a> Server<'a> {
             r: fresh::Fresh::new(r),
             addr,
             cache: Arc::default(),
+            listed: Arc::default(),
             fresh: false,
             host: Arc::default(),
             sent: Mutex::default(),
@@ -1039,6 +1042,7 @@ impl<'a> Server<'a> {
     }
 
     fn purge(&self) {
+        *lock(&self.listed) = None;
         lock(&self.cache).retain(|k, _| !k.starts_with("pane read"));
     }
 
@@ -1425,7 +1429,7 @@ impl<'a> Server<'a> {
         let on = crate::hosts::On::of(&self.r, sp);
         let live = l.as_ref().and_then(|l| l.session.as_ref());
         let t = match live {
-            Some(s) => crate::session::transcript::of(&on, s, None, Some(1)).ok(),
+            Some(s) => crate::session::transcript::of(&on, s, None, s.acp.then_some(1)).ok(),
             None => crate::session::transcript::page(&on, ctx, agent, None, 1),
         };
         if t.is_none() && l.as_ref().is_none_or(|l| l.session.is_none()) {
@@ -1787,7 +1791,7 @@ impl<'a> Server<'a> {
         let memo = self.cached(ctx.now, 2);
         let on = l.on(&memo);
         let text = l.session.as_ref().filter(|_| paired).and_then(|s| {
-            match crate::session::transcript::of(&on, s, None, Some(1)).ok()? {
+            match crate::session::transcript::of(&on, s, None, s.acp.then_some(1)).ok()? {
                 crate::session::transcript::Transcript::Screen(t) => Some(t),
                 crate::session::transcript::Transcript::Events(_) => None,
             }
@@ -1805,7 +1809,18 @@ impl<'a> Server<'a> {
 
     fn sessions(&self, now: u64) -> Option<crate::session::Sessions> {
         let cfg = Config::kept(self.ctx).unwrap_or_default();
-        Some(crate::session::all(&cfg, &self.cached(now, 10))).filter(crate::session::Sessions::listed)
+        let all = crate::session::all(&cfg, &self.cached(now, 10));
+        *lock(&self.listed) = Some((now, all.clone()));
+        Some(all).filter(crate::session::Sessions::listed)
+    }
+
+    fn recent_sessions(&self, now: u64, cfg: &Config) -> Option<crate::session::Sessions> {
+        let kept = lock(&self.listed).clone();
+        let fresh = kept.filter(|(t, _)| now >= *t && now - t < cfg.limits.serve_shed_secs);
+        fresh
+            .map(|k| k.1)
+            .filter(crate::session::Sessions::listed)
+            .or_else(|| self.sessions(now))
     }
 
     fn queue_tab(&self, ctx: &Ctx) -> QueueTab {
