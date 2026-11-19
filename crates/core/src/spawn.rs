@@ -1396,6 +1396,7 @@ pub fn spawn(
                 let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
                 crate::why::brief(r, f, &events, (fleet, issue), rev, body)
             }).flatten())
+            .chain((p.family == "rev").then(|| crate::guard::brief(&events, (fleet, issue))).flatten())
             .chain(note.clone())
             .chain(history.brief())
             .chain(resume)
