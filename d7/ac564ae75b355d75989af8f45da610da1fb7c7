@@ -1,0 +1,5 @@
+Decided: no src change this round; merged origin/staging to rerun CI, the red test is a timing flake in a fake-runner simulation.
+Because: crates/cli/tests/drive_sim.rs:134
+Rejected: changing drive_sim's timing asserts — out of scope for #1358 and the test passes 7/7 locally at this head.
+Check: shard 2 green at d7ac564a; drive_sim never calls runner::Real, the only runner this PR changed (crates/core/src/runner.rs:105).
+Owner: CI failed on an unrelated, timing-sensitive test; the fix itself is unchanged.
