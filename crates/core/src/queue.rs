@@ -396,12 +396,20 @@ pub fn flight(ctx: &crate::Ctx, st: &States, f: &Fleet, fleet: &str) -> Option<(
     Some((st.values().filter(flies).map(|s| s.issue).collect(), cap))
 }
 
-/// Why a first start of queued issue `n` waits: the fleet's other in-flight PRs fill its cap.
-pub fn flight_full(ctx: &crate::Ctx, st: &States, f: &Fleet, fleet: &str, n: u64) -> Option<(Vec<u64>, usize)> {
+/// Why a first start of queued issue `n` waits: the fleet's other in-flight PRs and `pending` starts fill its cap: (PRs, starts, cap).
+pub fn flight_full(
+    ctx: &crate::Ctx,
+    st: &States,
+    f: &Fleet,
+    fleet: &str,
+    (n, pending): (u64, &[Event]),
+) -> Option<(Vec<u64>, usize, usize)> {
     let fresh = state(st, fleet, n) == "queued" && crate::gh::cached_pr(ctx, fleet, n).at("state") != "OPEN";
     let (v, cap) = flight(ctx, st, f, fleet).filter(|_| fresh)?;
     let v: Vec<u64> = v.into_iter().filter(|&m| m != n).collect();
-    (v.len() >= cap).then_some((v, cap))
+    let starts = pending.iter().filter(|p| p.fleet == fleet).filter_map(|p| p.issue);
+    let starts: std::collections::BTreeSet<u64> = starts.filter(|m| *m != n && !v.contains(m)).collect();
+    (v.len() + starts.len() >= cap).then_some((v, starts.len(), cap))
 }
 
 /// The queue as shown: merged issues drop out; a blocker counts until it is merged.
@@ -461,7 +469,10 @@ pub fn skipped(
     let free = view(events, st, fleet)
         .iter()
         .any(|i| i.issue == n && labels(i).is_empty());
-    if let Some((v, cap)) = f.filter(|_| free).and_then(|f| flight_full(ctx, st, f, fleet, n)) {
+    if let Some((v, _, cap)) = f
+        .filter(|_| free)
+        .and_then(|f| flight_full(ctx, st, f, fleet, (n, &[])))
+    {
         let say = crate::promise::Say::InFlightCap(v.len(), cap).line();
         return Some((format!("in-flight cap {}/{cap}", v.len()), say));
     }

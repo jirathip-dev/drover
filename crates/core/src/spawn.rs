@@ -1556,7 +1556,9 @@ pub(crate) fn lane_admit(
     force: bool,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let events = &[events, &crate::drive::pending(ctx, cfg, r)].concat();
+    let lanes = fold(events);
+    let pending = crate::drive::pending(ctx, cfg, r);
+    let events = &[events, &pending].concat();
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
@@ -1581,14 +1583,19 @@ pub(crate) fn lane_admit(
     if let Some(cap) = cap.filter(|&c| n >= c) {
         return refused("CAP", format!("{n} {role} lane(s) open in {fleet}, max_{fam} = {cap}"));
     }
-    let Some((v, cap)) = crate::queue::flight_full(ctx, &st, f, fleet, issue).filter(|_| fam == "impl") else {
+    let admitted = crate::drive::own_marker(ctx, fleet, issue).is_some();
+    let full = crate::queue::flight_full(ctx, &lanes, f, fleet, (issue, &pending));
+    let Some((v, starting, cap)) = full.filter(|_| fam == "impl" && !admitted) else {
         return Ok(());
     };
-    let why = format!(
-        "{}/{cap} PRs in flight in {fleet} ({})",
-        v.len(),
-        crate::queue::hashes(&v)
-    );
+    let count = v.len() + starting;
+    let starting = (starting > 0).then(|| format!("{starting} starting"));
+    let named: Vec<String> = (!v.is_empty())
+        .then(|| crate::queue::hashes(&v))
+        .into_iter()
+        .chain(starting)
+        .collect();
+    let why = format!("{count}/{cap} PRs in flight in {fleet} ({})", named.join(", "));
     if !force {
         return refused("IN_FLIGHT_CAP", format!("{why}; they land first, or pass --force"));
     }
