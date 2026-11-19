@@ -1,0 +1,40 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.91s
+     Running tests/timer.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1350/debug/deps/timer-704c6a0fabb80551)
+
+running 17 tests
+test job_files_match_their_goldens ... ok
+test doctor_marks_a_job_launchd_refuses_red ... ok
+test check_bootstraps_an_unloaded_serve_job_once ... FAILED
+test install_beside_an_old_job_prints_the_swap_and_runs_none_of_it ... ok
+test install_run_by_the_local_bin_symlink_names_the_install_roots_binary ... ok
+test drift_is_missing_outdated_or_loaded ... ok
+test install_loads_and_prints_the_command ... ok
+test install_no_load_writes_without_loading_and_remove_deletes ... ok
+test setup_adopts_a_serve_job_under_another_label ... ok
+test services_rows_go_green_amber_and_red ... ok
+test setup_makes_a_missing_merge_label_once_then_says_already ... ok
+test slow_du_never_blocks_the_board ... ok
+test setup_writes_a_fleets_missing_hygiene_once ... ok
+test setup_twice_is_all_already_and_tailscale_absent_is_skipped ... ok
+test tick_failed_is_logged_at_most_once_an_hour ... ok
+test tick_runs_check_then_drive_and_exits_zero_on_refusals ... ok
+test tick_repairs_only_the_missing_job ... ok
+
+failures:
+
+---- check_bootstraps_an_unloaded_serve_job_once stdout ----
+
+thread 'check_bootstraps_an_unloaded_serve_job_once' (17504) panicked at crates/cli/tests/timer.rs:682:5:
+assertion `left == right` failed: ["git -C /tmp/does-not-matter/sendmeter fetch -q origin", "git -C /tmp/does-not-matter/sendmeter rev-parse origin/staging", "ps -axo pid=,ppid=,etime=,command=", "lsof -n -d cwd -F pcn", "git -C /tmp/does-not-matter/sendmeter fetch -q origin", "git -C /tmp/does-not-matter/sendmeter rev-parse origin/staging", "ps -axo pid=,ppid=,etime=,command=", "lsof -n -d cwd -F pcn"]
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    check_bootstraps_an_unloaded_serve_job_once
+
+test result: FAILED. 16 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+
+error: test failed, to rerun pass `--test timer`

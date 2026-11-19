@@ -1,0 +1,156 @@
+   Compiling subtle v2.6.1
+   Compiling libc v0.2.191
+   Compiling zeroize v1.9.1
+   Compiling typenum v1.20.1
+   Compiling cfg-if v1.0.5
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling cmov v0.5.4
+   Compiling proc-macro2 v1.0.107
+   Compiling const-oid v0.10.2
+   Compiling ctutils v0.4.7
+   Compiling quote v1.0.47
+   Compiling cpubits v0.1.1
+   Compiling unicode-ident v1.0.27
+   Compiling autocfg v1.5.1
+   Compiling hybrid-array v0.4.15
+   Compiling num-traits v0.2.19
+   Compiling serde_core v1.0.229
+   Compiling syn v3.0.9
+   Compiling block-buffer v0.12.1
+   Compiling ff v0.14.0
+   Compiling crypto-common v0.2.2
+   Compiling crypto-bigint v0.7.10
+   Compiling digest v0.11.3
+   Compiling serde v1.0.229
+   Compiling hmac v0.13.0
+   Compiling der v0.8.3
+   Compiling foldhash v0.2.0
+   Compiling cpufeatures v0.3.1
+   Compiling hashbrown v0.17.1
+   Compiling group v0.14.0
+   Compiling inout v0.2.5
+   Compiling base16ct v1.0.0
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.15
+   Compiling sec1 v0.8.1
+   Compiling hkdf v0.13.0
+   Compiling cc v1.11.0
+   Compiling utf8parse v0.2.2
+   Compiling pkg-config v0.3.34
+   Compiling vcpkg v0.2.15
+   Compiling zmij v1.0.23
+   Compiling serde_derive v1.0.229
+   Compiling anstyle-parse v1.0.0
+   Compiling elliptic-curve v0.14.3
+   Compiling cipher v0.5.2
+   Compiling primefield v0.14.0
+   Compiling universal-hash v0.6.1
+   Compiling equivalent v1.0.3
+   Compiling anstyle v1.0.14
+   Compiling serde_json v1.0.154
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling anstyle-query v1.1.5
+   Compiling anstream v1.0.0
+   Compiling indexmap v2.14.2
+   Compiling wnaf v0.14.1
+   Compiling libsqlite3-sys v0.39.1
+   Compiling polyval v0.7.3
+   Compiling spki v0.8.1
+   Compiling rfc6979 v0.6.0
+   Compiling signature v3.0.0
+   Compiling clap_lex v1.1.1
+   Compiling toml_write v0.1.2
+   Compiling heck v0.5.0
+   Compiling shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=9b88eb5be5bc9ba8c5c75480483b9861ddc6e993#9b88eb5b)
+   Compiling crc32fast v1.5.4
+   Compiling anyhow v1.0.104
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling strsim v0.11.1
+   Compiling winnow v0.7.15
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling clap_builder v4.6.7
+   Compiling clap_derive v4.6.7
+   Compiling toml_edit v0.22.27
+   Compiling ecdsa v0.17.0
+   Compiling ghash v0.6.0
+   Compiling primeorder v0.14.0
+   Compiling aes v0.9.3
+   Compiling ctr v0.10.1
+   Compiling aead v0.6.1
+   Compiling hashlink v0.12.2
+   Compiling sha2 v0.11.1
+   Compiling bitflags v2.13.2
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling simd-adler32 v0.3.10
+   Compiling fallible-iterator v0.3.0
+   Compiling adler2 v2.0.1
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/core)
+   Compiling smallvec v1.16.4
+   Compiling miniz_oxide v0.9.1
+   Compiling p256 v0.14.0
+   Compiling aes-gcm v0.11.1
+   Compiling toml v0.8.23
+   Compiling clap v4.6.7
+   Compiling base64 v0.23.1
+   Compiling drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/sys)
+   Compiling flate2 v1.1.10
+   Compiling mio v1.2.4
+   Compiling rusqlite v0.41.1
+   Compiling socket2 v0.6.5
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.12.1
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/cli)
+   Compiling tokio v1.54.1
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 53.36s
+     Running tests/self_update.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1350/debug/deps/self_update-90339b0e4e713a85)
+
+running 15 tests
+test a_config_with_telegram_keys_loads_with_a_warning ... ok
+test a_job_launchd_refuses_is_rebootstrapped_after_the_swap ... ok
+test a_serve_bootstrap_hitting_error_5_after_bootout_is_retried_until_serve_is_up ... FAILED
+test a_serve_restart_that_keeps_failing_alerts_serve_down_once_with_the_error ... FAILED
+test a_release_is_staged_gated_swapped_synced_and_restarted ... ok
+test a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head ... ok
+test a_release_missing_past_the_wait_alerts_once_with_the_failed_job_and_its_first_error ... ok
+test branch_main_ignores_a_newer_staging_head_and_installs_main_heads_release ... ok
+test setup_and_timer_write_the_update_and_daily_clean_jobs ... ok
+test the_serve_restart_is_the_jobs_own_restart_never_a_handover ... ok
+test a_bad_checksum_or_a_wrong_version_keeps_the_live_binary_and_alerts_once ... ok
+test pause_and_resume_are_logged_and_pause_stops_the_job ... ok
+test no_release_builds_nothing_waits_and_alerts_once_after_the_wait_limit ... ok
+test scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_once ... ok
+test the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state ... ok
+
+failures:
+
+---- a_serve_bootstrap_hitting_error_5_after_bootout_is_retried_until_serve_is_up stdout ----
+
+thread 'a_serve_bootstrap_hitting_error_5_after_bootout_is_retried_until_serve_is_up' (15800) panicked at crates/cli/tests/self_update.rs:431:5:
+assertion `left == right` failed: ✗ self-update abcdef1: installed, then the serve restart: systemctl --user enable --now dev.drover.serve.service failed (5): Bootstrap failed: 5: Input/output error; now live at /tmp/fleet-test-upd-boot5-15793-6/bin/drover
+
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a_serve_restart_that_keeps_failing_alerts_serve_down_once_with_the_error stdout ----
+
+thread 'a_serve_restart_that_keeps_failing_alerts_serve_down_once_with_the_error' (15801) panicked at crates/cli/tests/self_update.rs:460:5:
+assertion `left == right` failed: ✗ self-update abcdef1: installed, then the serve restart: systemctl --user enable --now dev.drover.serve.service failed (5): Bootstrap failed: 5: Input/output error; now live at /tmp/fleet-test-upd-serve-down-15793-7/bin/drover
+
+  left: 0
+ right: 1
+
+
+failures:
+    a_serve_bootstrap_hitting_error_5_after_bootout_is_retried_until_serve_is_up
+    a_serve_restart_that_keeps_failing_alerts_serve_down_once_with_the_error
+
+test result: FAILED. 13 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.90s
+
+error: test failed, to rerun pass `--test self_update`

@@ -1,0 +1,15 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.05s
+     Running tests/host_sync.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1350/debug/deps/host_sync-9f02d2902bc21162)
+
+running 7 tests
+test hosts_refresh_reads_each_hosts_build_and_never_installs ... ok
+test an_unreachable_or_switched_off_host_costs_no_build_read ... ok
+test a_linux_only_release_swaps_the_boats_and_leaves_the_mac_on_its_build ... ok
+test an_unsigned_mac_binary_at_the_release_sha_installs_the_signed_build_then_is_up_to_date ... ok
+test a_changed_build_rereads_the_host_health_in_the_same_pass_so_spawn_places_there ... ok
+test a_lagging_host_holds_the_swap_30_minutes_then_the_rest_swap_and_it_still_takes_lanes ... ok
+test an_external_github_token_never_warns_of_its_expiry ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+

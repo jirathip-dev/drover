@@ -1,0 +1,49 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/server)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1350/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.23s
+     Running tests/self_update.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1350/debug/deps/self_update-90339b0e4e713a85)
+
+running 15 tests
+test a_config_with_telegram_keys_loads_with_a_warning ... ok
+test a_serve_bootstrap_hitting_error_5_after_bootout_is_retried_until_serve_is_up ... ok
+test a_job_launchd_refuses_is_rebootstrapped_after_the_swap ... ok
+test a_serve_restart_that_keeps_failing_alerts_serve_down_once_with_the_error ... ok
+test a_release_is_staged_gated_swapped_synced_and_restarted ... ok
+test a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head ... ok
+test a_release_missing_past_the_wait_alerts_once_with_the_failed_job_and_its_first_error ... ok
+test branch_main_ignores_a_newer_staging_head_and_installs_main_heads_release ... ok
+test setup_and_timer_write_the_update_and_daily_clean_jobs ... ok
+test the_serve_restart_is_the_jobs_own_restart_never_a_handover ... ok
+test pause_and_resume_are_logged_and_pause_stops_the_job ... ok
+test a_bad_checksum_or_a_wrong_version_keeps_the_live_binary_and_alerts_once ... ok
+test no_release_builds_nothing_waits_and_alerts_once_after_the_wait_limit ... ok
+test scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_once ... ok
+test the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.26s
+
+     Running tests/timer.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1350/debug/deps/timer-704c6a0fabb80551)
+
+running 17 tests
+test job_files_match_their_goldens ... ok
+test doctor_marks_a_job_launchd_refuses_red ... ok
+test install_run_by_the_local_bin_symlink_names_the_install_roots_binary ... ok
+test install_beside_an_old_job_prints_the_swap_and_runs_none_of_it ... ok
+test drift_is_missing_outdated_or_loaded ... ok
+test install_loads_and_prints_the_command ... ok
+test install_no_load_writes_without_loading_and_remove_deletes ... ok
+test services_rows_go_green_amber_and_red ... ok
+test check_bootstraps_an_unloaded_serve_job_once ... ok
+test setup_adopts_a_serve_job_under_another_label ... ok
+test slow_du_never_blocks_the_board ... ok
+test setup_twice_is_all_already_and_tailscale_absent_is_skipped ... ok
+test setup_writes_a_fleets_missing_hygiene_once ... ok
+test setup_makes_a_missing_merge_label_once_then_says_already ... ok
+test tick_failed_is_logged_at_most_once_an_hour ... ok
+test tick_runs_check_then_drive_and_exits_zero_on_refusals ... ok
+test tick_repairs_only_the_missing_job ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.47s
+
