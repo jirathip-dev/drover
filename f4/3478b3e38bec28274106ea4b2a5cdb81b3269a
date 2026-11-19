@@ -1,0 +1,6 @@
+Decided: no code change for the round 5 CI red; merged origin/staging to get a fresh CI run
+Because: "GET /screens/events returns at most 100 rows and a cursor"
+Because: crates/server/src/screens_pages.rs:7
+Rejected: changing threads_tab or drive_sim tests — they passed at 674a74dd with the same web and server code and also flake on issue-1313
+Check: ui-webkit parity_26 and test shard 2 drive_sim are green at the new head
+Owner: Events, done and backlog load in pages of 100; the red CI was unrelated flakiness
