@@ -1,0 +1,10 @@
+Decided: wants_design counts only the first answer (approve, revise or reject) on the stage's latest design ask, so drive respawns the design lane instead of impl
+Because: "An `approve` logged after a `revise` on the same design ask does not count as approval"
+Because: crates/core/src/queue.rs:226
+Decided: an issue in design state with no lane now shows on drover waiting as an owner row with its spawn command
+Because: "An issue in `design` or `architect` state with no lane, no open ask and the stage flags off shows on `drover check` (stall) or moves on to impl"
+Because: crates/core/src/waiting.rs:674
+Rejected: refusing the stale approve in drover answer — the owner may still change an orchestrator's answer; the spec only says it must not count
+Rejected: a new revise card — after a revise the issue is queued and drive respawns the design lane; the existing pending card returns if that start is refused
+Check: an issue with no design ask logged keeps the old rule (any design-approved counts), so older logs and tests still pass
+Owner: A late approve after a revise no longer starts the build; the design is redrawn and needs a fresh approve.
