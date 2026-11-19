@@ -1,0 +1,9 @@
+Decided: an absent lane inside START_SECS of its spawn is Health::Unknown, so check skips it and its key stays live
+Because: "A fresh lane has a grace period after its spawn before it can be judged dead."
+Decided: a lane whose shed note is the proxy's lane-key 401 is restarted at once and logged as a self-heal, not a respawn
+Because: "restarted within one pass, logged as a heal; a second 401 on the same issue within the hour is one owner card"
+Rejected: counting the heal as a respawn — a respawn earlier in the issue's life turned the first 401 into a card
+Rejected: a new [limits] key for the grace — START_SECS already says how long a lane may take to show up
+Check: a timed-out probe was already Unknown on staging (view keeps Err for a failed report); the new test pins it
+Check: hosts keys and the proxy share proxy::state, so a key the proxy refuses never lists as live
+Owner: a lane that just started is no longer judged dead, and a lane cut off by its key is restarted once by itself
