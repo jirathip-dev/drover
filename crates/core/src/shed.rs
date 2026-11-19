@@ -267,6 +267,14 @@ pub fn cli(r: &dyn Runner, a: &[&str]) -> Result<Out> {
     Ok(o)
 }
 
+/// An agent's installed adapter command from `shed agents --json`: under `installed` since shed#129, else top level.
+pub fn adapter(r: &dyn Runner, id: &str) -> Result<Option<Vec<String>>> {
+    let agents: Value = serde_json::from_str(&cli(r, &["agents", "--json"])?.stdout)?;
+    let a = agents.as_array().into_iter().flatten().find(|a| a["id"] == id);
+    let a = a.map(|a| a.get("installed").unwrap_or(a));
+    Ok(a.and_then(|a| serde_json::from_value(a.get("cmd")?.clone()).ok()))
+}
+
 /// The kept events after `since` (shed keeps the last 1,000), read until the stream is quiet for `quiet`.
 pub fn events(w: &Wire, since: u64, quiet: Duration) -> Result<Vec<shed_proto::Event>> {
     let mut out = vec![];

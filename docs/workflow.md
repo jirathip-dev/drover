@@ -102,6 +102,7 @@ flowchart TD
     d6 -.- k_webhook_poll_minutes(["webhook_poll_minutes = 10"])
     d6 -.- k_silent_minutes(["silent_minutes = 10"])
     d6 -.- k_ci_start_minutes(["ci_start_minutes = 10"])
+    d6 -.- k_ci_stuck_minutes(["ci_stuck_minutes = 30"])
     d6 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
     d6 -.- k_review_rounds(["review_rounds = 3"])
     d6 -.- k_update_rounds(["update_rounds = 3"])

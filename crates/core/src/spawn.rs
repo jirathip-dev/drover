@@ -582,10 +582,7 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     if !shed_meta(r) {
         return refused("SHED_OLD", format!("{SHED_OLD}; the lane does not start"));
     }
-    let agents: Value = serde_json::from_str(&crate::shed::cli(r, &["agents", "--json"])?.stdout)?;
-    let agent = agents.as_array().into_iter().flatten().find(|a| a["id"] == id);
-    let cmd: Vec<String> = agent
-        .and_then(|a| serde_json::from_value(a.at("cmd").clone()).ok())
+    let cmd = crate::shed::adapter(r, id)?
         .with_context(|| format!("ACP agent {id} is not installed; `shed agents add {id}`"))?;
     let mut words = home(p.lane_cmd("").get(3..).unwrap_or_default().to_vec());
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());

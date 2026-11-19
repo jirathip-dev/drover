@@ -704,6 +704,7 @@ pub struct Limits {
     pub stall_minutes: u64,
     pub silent_minutes: u64,
     pub ci_start_minutes: u64,
+    pub ci_stuck_minutes: u64,
     pub load_per_cpu: f64,
     pub overload_minutes: u64,
     pub swapout_rate: f64,
@@ -822,6 +823,7 @@ impl Default for Limits {
             stall_minutes: 30,
             silent_minutes: 10,
             ci_start_minutes: 10,
+            ci_stuck_minutes: 30,
             load_per_cpu: 2.5,
             overload_minutes: 10,
             swapout_rate: 2000.0,
@@ -939,6 +941,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "ci_start_minutes",
         "a PR head with no checks this long after its push alerts `ci-missing`",
+    ),
+    (
+        "ci_stuck_minutes",
+        "a ready PR's check still pending this long after its run completed is re-run once, then alerts `ci-stuck`",
     ),
     ("load_per_cpu", "spawn refuses HOST_BUSY over this load per CPU"),
     (
