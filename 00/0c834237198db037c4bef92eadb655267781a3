@@ -1,0 +1,73 @@
+Decided: slice 1 only: accept and the request reader on a 2-worker tokio runtime, today's Server::one answered on at most 64 blocking threads
+Because: q2091
+Because: docs/architecture/screen-hub/adr.md:150
+Decided: the 65th request waits for a handler slot instead of getting a 503; only past 256 open connections is one refused
+Rejected: Arc<Server> with spawn_blocking and an owned Ctx — scoped threads fed by a channel bound the same 64 and leave serve_on and its 25 test call sites unchanged
+Rejected: moving the webhook listener now — it has its own 4-delivery limit and 25 MB body path; no slice-1 test needs it
+Decided: deliver() runs after the socket is closed or handed back, as before, so a Connection: close reply ends at once
+Decided: the tokio ban in core and sys from the ADR's arch.toml lines
+Because: docs/architecture/screen-hub/adr.md:296
+Decided: the ADR docs name the blocks repo as <org>/blocks, so shipped files stay setup-neutral
+Check: crates/cli/tests/serve_conn.rs: a slow half-request does not stall a fast one, 80 at once all get 200, a half request is dropped after 5 s
+Owner: serve now accepts on tokio and queues busy requests instead of refusing them; nothing on the page changes
+
+Decided: serve accepts and reads requests on a 2-worker tokio runtime; at most 64 are answered at once on blocking threads, the rest wait for a slot.
+Because: "drover serve moves onto tokio as part of #1318 (like drover service): async accept"
+Because: q2091
+Because: docs/architecture/screen-hub/adr.md:152
+Decided: the cap test holds 64 handlers inside a gated runner on the /design file route, so the 65th really waits.
+Rejected: 80 plain requests at once — they finish too fast to fill 64 slots, so that test passed on the old code.
+Rejected: a thread per connection with no handler cap (the old loop) — 256 slow requests meant 256 threads.
+Check: crates/cli/tests/serve_conn.rs fails on origin/staging with "65 vs 64" and passes at the head.
+Check: tokio is banned in core and sys in .drover/arch.toml; docs/serve.md lists tokio for crates/server.
+Owner: Serve now takes connections without a thread each and caps busy work at 64; extra requests wait their turn instead of piling up threads.
+
+Decided: serve accepts and reads requests on a 2-worker tokio runtime and answers them on at most 64 blocking handler threads; a kept-alive socket goes back to the runtime.
+Because: q2044
+Because: q2091
+Decided: blocking handlers are scoped threads gated by a semaphore, so serve_on keeps its signature and every test call site.
+Rejected: spawn_blocking with Arc<Server> — Server borrows Ctx and the runner, so it would change serve_on and every caller for no gain in slice 1
+Decided: the ui-webkit model-pick failure gets no code change; it fails on staging too (ci run 44469237497 at 290e2299).
+Check: crates/cli/tests/serve_conn.rs: the 65th request waits while 64 handlers are held, and fails on origin/staging.
+Check: .drover/arch.toml keeps staging's #1309/#1364 bans and adds the tokio ban on core and sys.
+Owner: the phone page's server now runs on async connections; busy moments make requests wait instead of failing.
+
+Decided: fix round 4 only merges origin/staging twice (the cap raise b9878ba5, then swag beside tokio in Cargo.toml and Cargo.lock); no code change.
+Because: q2091
+Decided: serve accepts and reads requests on a 2-worker tokio runtime and answers them on at most 64 blocking handler threads; a kept-alive socket goes back to the runtime.
+Because: q2044
+Rejected: spawn_blocking with Arc<Server> — Server borrows Ctx and the runner, so it would change serve_on and every caller for no gain in slice 1
+Check: rust CI is green with the 60000 cap; the two flaky ui-webkit tests also failed on staging at 290e2299, ea56879d and 20d6583e.
+Check: crates/cli/tests/serve_conn.rs: the 65th request waits while 64 handlers are held, and fails on origin/staging.
+Owner: the phone page's server now runs on async connections; busy moments make requests wait instead of failing.
+
+Decided: fix round 5 only merges origin/staging again; no code change, since the red ui-webkit was its job timeout, not a test.
+Because: q2091
+Rejected: re-running only the failed job with gh run rerun — a lane's only GitHub write is its PR, and staging had moved anyway
+Check: ui-webkit at 03aa1647 was cancelled at 20 min after apt took 16 min in the playwright webkit step; its hard-gate tests had passed.
+Owner: The red check was a slow package download timing out, not this change; CI is re-running on the new head.
+
+Decided: fix round 6 only merges origin/staging again (#1313's serve changes auto-merged cleanly); no code change.
+Because: q2091
+Decided: serve accepts and reads requests on a 2-worker tokio runtime and answers them on at most 64 blocking handler threads; a kept-alive socket goes back to the runtime.
+Because: q2044
+Rejected: a code change for the ui-webkit FAIL — the red run was a 20-minute job timeout in apt, and the next run at 4723949 passed
+Check: CI was green at 4723949 with ui-webkit passing, so the FAIL on 03aa1647 (a job timeout) is cleared.
+Check: serve_conn, serve_health, serve_wire, serve_workers and serve_load pass after the merge with #1313's serve.rs.
+Owner: The earlier red check passed on re-run; this round only brings in the latest staging, including the faster screen builds.
+
+Decided: a screen stream reads the log's last seq before it builds its first screen, not after
+Because: crates/server/src/screens.rs:1916
+Because: q2044
+Rejected: retry the WebKit job as flaky — CI failed this branch's ui-webkit 4 times while staging stayed green, and a 2-CPU local run reproduced it at the old head
+Rejected: a new deterministic race test — it needs a hook inside the stream's build, which is production code added only for tests
+Check: `taskset -c 0,1 cargo test --locked --test threads_tab webkit -- --test-threads=1` fails before 03b97da and passes at it
+Owner: The live phone view no longer misses a change made just as a screen opens.
+
+Decided: a screen stream reads the log's last seq before it builds its first screen, not after
+Because: crates/server/src/screens.rs:1916
+Because: q2044
+Rejected: retry the WebKit job as flaky — CI failed this branch's ui-webkit 4 times while staging stayed green, and a 2-CPU local run reproduced it at the old head
+Rejected: a new deterministic race test — it needs a hook inside the stream's build, which is production code added only for tests
+Check: `taskset -c 0,1 cargo test --locked --test threads_tab webkit -- --test-threads=1` fails before 03b97da and passes at it
+Owner: The live phone view no longer misses a change made just as a screen opens.
