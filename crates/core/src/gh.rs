@@ -441,8 +441,9 @@ pub fn check_state(c: &Value) -> &'static str {
             Some("PENDING" | "EXPECTED") => "pending",
             _ => "failed",
         },
-        _ if c["status"] != "COMPLETED" => "pending",
         _ if matches!(c["conclusion"].as_str(), Some("SUCCESS" | "NEUTRAL" | "SKIPPED")) => "green",
+        _ if c["conclusion"].as_str().is_some_and(|s| !s.is_empty()) => "failed",
+        _ if c["status"] != "COMPLETED" => "pending",
         _ => "failed",
     }
 }
@@ -600,4 +601,66 @@ pub fn missing(x: &Ctx, r: Option<&dyn Runner>, c: &Config, k: (&str, u64), e: &
     };
     let missing = || format!("CI missing (no checks {} after push)", crate::events::age(g));
     Some(broken.map_or_else(missing, |w| format!("CI broken: {w} did not start")))
+}
+
+/// A ready PR's check pending `ci_stuck_minutes` after its run completed: re-run its job once a head (`ci-rerun`), then alert `ci-stuck` once.
+pub fn unstick(
+    x: &Ctx,
+    c: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    k: (&str, u64),
+    ev: &[Event],
+    pr: &Value,
+) -> Result<()> {
+    let ((fleet, n), lim, f) = (k, c.limits.ci_stuck_minutes * 60, c.fleet(k.0)?);
+    let head = pr["headRefOid"].as_str().unwrap_or_default();
+    let old = |t: Option<&str>| t.and_then(crate::usage::epoch).is_some_and(|t| x.now >= t + lim);
+    let checks = required(&pr["statusCheckRollup"], f.checks(pr));
+    for ch in (checks.as_array().into_iter().flatten())
+        .filter(|c| check_state(c) == "pending" && old(c["startedAt"].as_str()))
+    {
+        let run = ch["detailsUrl"]
+            .as_str()
+            .and_then(|u| u.split("/runs/").nth(1)?.split('/').next());
+        let (Some(job), Some(run)) = (ch["databaseId"].as_u64(), run) else {
+            continue;
+        };
+        let api = format!("repos/{}/actions/runs/{run}", f.repo);
+        let st = ok(r, "gh", &["api", &api, "--jq", ".status + \" \" + .updated_at"]).unwrap_or_default();
+        if !st
+            .trim()
+            .split_once(' ')
+            .is_some_and(|(s, t)| s == "completed" && old(Some(t)))
+        {
+            continue;
+        }
+        let name = check_name(ch);
+        let mut d = json!({"sha": head, "check": name, "job": job});
+        let seen = |k| {
+            ev.iter()
+                .any(|e| e.is(k, fleet, n) && e.str("sha") == Some(head) && e.str("check") == Some(name))
+        };
+        if !seen("ci-rerun") {
+            ok(r, "gh", &["run", "rerun", "--job", &job.to_string(), "-R", &f.repo])?;
+            writeln!(
+                out,
+                "{fleet} #{n} ci-rerun: check `{name}` pending after its run completed"
+            )?;
+            crate::events::append(&x.state, &Event::new(x.now, fleet, Some(n), "ci-rerun", d).passive())?;
+        } else if !seen("ci-stuck") {
+            d.put(
+                "reason",
+                json!(format!(
+                    "#{n} check `{name}` still pending after its re-run at {head:.7}"
+                )),
+            );
+            crate::events::emit(
+                &x.state,
+                c,
+                Event::new(x.now, fleet, Some(n), "ci-stuck", d).passive().push(),
+            )?;
+        }
+    }
+    Ok(())
 }

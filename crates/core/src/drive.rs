@@ -45,6 +45,7 @@ pub const STEPS: [(&str, &[&str]); 8] = [
             "webhook_poll_minutes",
             "silent_minutes",
             "ci_start_minutes",
+            "ci_stuck_minutes",
             "gate_check_minutes",
             "review_rounds",
             "update_rounds",
@@ -1562,6 +1563,8 @@ fn pass(
             let file = file.to_string_lossy();
             let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
+        } else if !fast && s.state == "ready" && ci == "pending" {
+            gh::unstick(ctx, cfg, r, out, (fleet, s.issue), &events, &pr)?;
         }
     }
     if !updated && !fast {

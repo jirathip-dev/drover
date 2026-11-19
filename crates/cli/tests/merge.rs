@@ -873,3 +873,18 @@ fn list_form_premerge_still_runs_its_checks() {
         (Some("make lint"), Some("STAGING_WOULD_BREAK"))
     );
 }
+
+#[test]
+fn a_concluded_check_github_still_lists_in_progress_is_green() {
+    let (_d, c) = setup("stuck-status", CONFIG, &[("PASS", HEAD)]);
+    let checks = json!([
+        {"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"__typename": "CheckRun", "name": "actionlint", "status": "IN_PROGRESS", "conclusion": "SUCCESS"}
+    ]);
+    let r = pr("staging", &checks);
+    let (exit, out) = run(&c, &r, &["pr", "sendmeter", "12"]);
+    assert!(exit == 0 && out.contains("ci green (2 checks)"), "{out}");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    assert!(r.called("gh pr merge 34"), "{:?}", r.calls.borrow());
+}

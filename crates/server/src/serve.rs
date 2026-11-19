@@ -13,6 +13,7 @@ use crate::runner::{Out, Runner};
 use crate::snapshot::{key_in, out, Snapshot};
 use crate::{devices, gh, lanes, queue, term, Ctx};
 use anyhow::{bail, Context, Result};
+use blocks::theme::Scheme;
 use serde_json::json;
 use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -67,21 +68,6 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("", "terminal/icon-180.png", PNG),
     th!("", "terminal/icon-192.png", PNG),
     th!("", "terminal/icon-512.png", PNG),
-];
-macro_rules! sc {
-    ($($n:literal),*) => { [$(($n, include_bytes!(concat!("../assets/schemes/", $n, ".json")).as_slice())),*] };
-}
-const SCHEMES: [(&str, &[u8]); 10] = sc![
-    "github-dark",
-    "solarized-dark",
-    "gruvbox",
-    "nord",
-    "dracula",
-    "paper",
-    "farm",
-    "kitchen",
-    "garden-light",
-    "garden-dark"
 ];
 const PNG: &str = "image/png";
 const SVG: &str = "image/svg+xml";
@@ -1640,32 +1626,36 @@ impl<'a> Server<'a> {
                 )
             })
             .collect();
-        let block = |want: &serde_json::Value| -> Result<String> {
-            let b = SCHEMES.iter().find(|s| *want == s.0).unwrap_or(&SCHEMES[0]);
-            let b: serde_json::Value = serde_json::from_slice(b.1)?;
+        let all = schemes(ctx).0;
+        let block = |want: &serde_json::Value| {
+            let s = want
+                .as_str()
+                .and_then(|n| all.get(n))
+                .or_else(|| all.get("github-dark"));
+            let b = serde_json::to_value(s).unwrap_or_default();
             let tokens = b
                 .at("tokens")
                 .as_object()
                 .into_iter()
                 .flatten()
                 .map(|(k, v)| format!("{k}:{};", v.as_str().unwrap_or_default()));
-            Ok(format!(
+            format!(
                 ":root{{{}color-scheme:{}}}",
                 tokens.collect::<String>(),
                 b.at("color-scheme").as_str().unwrap_or("dark")
-            ))
+            )
         };
         let first = match def.get(name.as_str()).unwrap_or(&serde_json::Value::Null) {
             d @ serde_json::Value::Object(_) => {
                 format!(
                     "{}@media(prefers-color-scheme:dark){{{}}}",
-                    block(&d["light"])?,
-                    block(&d["dark"])?
+                    block(&d["light"]),
+                    block(&d["dark"])
                 )
             }
-            d => block(d)?,
+            d => block(d),
         };
-        let sd = json!({"t": def, "s": schemes(ctx)}).to_string().replace('<', "\\u003c");
+        let sd = json!({"t": def, "s": all}).to_string().replace('<', "\\u003c");
         let pl = screens::page_places().to_string().replace('<', "\\u003c");
         let home = if root.is_empty() {
             ""
@@ -3040,7 +3030,7 @@ pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json:
     t
 }
 
-fn schemes(ctx: &Ctx) -> BTreeMap<String, serde_json::Value> {
+pub(crate) fn schemes(ctx: &Ctx) -> (BTreeMap<String, Scheme>, Vec<String>) {
     let own = std::fs::read_dir(ctx.config.with_file_name("schemes"))
         .into_iter()
         .flatten()
@@ -3050,9 +3040,28 @@ fn schemes(ctx: &Ctx) -> BTreeMap<String, serde_json::Value> {
             let n = p.file_stem()?.to_str()?.to_string();
             (p.extension()? == "json" && n.bytes().all(ok)).then(|| (n, std::fs::read(&p).unwrap_or_default()))
         });
-    let all = SCHEMES.iter().map(|(n, j)| (n.to_string(), j.to_vec())).chain(own);
-    all.map(|(n, j)| (n, serde_json::from_slice(&j).unwrap_or_default()))
-        .collect()
+    let built = swag::schemes()
+        .iter()
+        .map(|(n, j)| ((*n).to_string(), j.as_bytes().to_vec()));
+    let (mut all, mut refused) = (BTreeMap::new(), Vec::new());
+    for (n, j) in built.chain(own) {
+        let misses = serde_json::from_slice::<Scheme>(&j)
+            .map_err(|e| e.to_string())
+            .and_then(|s| {
+                let m = blocks::theme::gate(&s);
+                m.is_empty().then_some(s).ok_or_else(|| {
+                    let m = m.iter().map(|m| format!("{} {:.2} < {}", m.what, m.got, m.min));
+                    m.collect::<Vec<_>>().join("; ")
+                })
+            });
+        match misses {
+            Ok(s) => {
+                all.insert(n, s);
+            }
+            Err(why) => refused.push(format!("scheme {n} refused: {why}")),
+        }
+    }
+    (all, refused)
 }
 
 fn theme(ctx: &Ctx, name: &str, file: &str) -> (Option<Vec<u8>>, Result<(), String>) {
