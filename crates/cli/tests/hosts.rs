@@ -1,4 +1,5 @@
 mod common;
+#[path = "hosts/report.rs"]
 mod report;
 use common::*;
 use drover::config::Config;
