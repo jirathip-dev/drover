@@ -180,9 +180,11 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     );
     assert!(st.val("doctor").is_boolean());
     let page = chat(&s, &cookie, T + 20);
-    assert!(
-        shown(&page).iter().all(|m| m["kind"] != "config"),
-        "settled: no card: {page}"
+    let c1 = msg(&page, "config", "c1");
+    assert_eq!(
+        (&c1["open"], &c1["answer"]["choice"]),
+        (&json!(false), &json!(backup)),
+        "applied: {page}"
     );
     assert!(
         shown(&page).iter().any(|m| m["kind"] == "note"

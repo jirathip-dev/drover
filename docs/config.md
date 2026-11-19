@@ -188,6 +188,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `respawn_max` | `3` | failed starts of an issue's role in the window before spawn refuses RESPAWN_LOOP |
 | `respawn_window_minutes` | `60` | the window `respawn_max` counts failed starts in |
 | `respawn_per_pass` | `2` | respawns a drive pass starts, each through admission (a fleet may set its own) |
+| `crash_wave_minutes` | `5` | 3+ lanes of one host dying by an adapter crash within it are one `lane-wave`: respawned together, one alert |
 | `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
 | `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
 | `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock |
@@ -225,7 +226,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `slo_api_p95_ms` | `1000` | `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once |
 | `slo_api_minutes` | `10` | how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api` |
 | `slo_idle_minutes` | `20` | no lane working this long while the queue has spawnable work breaches `slo-idle` |
-| `slo_tick_minutes` | `10` | a tick running longer than this breaches `slo-tick`; the next fast step stops it |
+| `slo_tick_minutes` | `10` | a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast step stops it |
 | `slo_pass_minutes` | `30` | no slow drive pass of a fleet for this long shows the owner's `Drive is stuck` card |
 | `stall_restart_hours` | `2` | an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own) |
 | `self_update_wait_minutes` | `45` | a head with no release build this long alerts `self-update-waiting` |

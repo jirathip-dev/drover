@@ -512,11 +512,6 @@ enum Cmd {
     )]
     Protection,
     #[command(
-        about = "#937: shed's one install path: the pinned rev onto PATH, shed serve restarted onto it, read back"
-    )]
-    #[command(subcommand)]
-    Shed(crate::shed::Cmd),
-    #[command(
         about = "Remove worktree + pane of merged or closed-issue lanes (never live ones; unsaved work goes to `wip/` first, kept on a secret) and list orphan folders; dry run unless --yes"
     )]
     Clean {
@@ -898,11 +893,11 @@ enum QueueCmd {
     #[command(about = "Drop an issue from the queue")]
     Rm { issue: u64 },
     #[command(
-        about = "Replace a queued issue's `needs` host tags, serial groups, design, architect, verify or repro mark (`queue set 12 needs docker,gpu`; `design on|off`)"
+        about = "Replace a queued issue's `needs` host tags, serial groups, design, architect, verify or repro mark or playbook (`queue set 12 needs docker,gpu`; `design on|off`; `playbook refactor|perf|off`)"
     )]
     Set {
         issue: u64,
-        #[arg(value_parser = ["needs", "serial", "design", "architect", "verify", "repro"])]
+        #[arg(value_parser = ["needs", "serial", "design", "architect", "verify", "repro", "playbook"])]
         key: String,
         #[arg(value_delimiter = ',')]
         tags: Vec<String>,
@@ -1973,7 +1968,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                 }
                 Cmd::Protection => return protection::protection(&cfg, r, out),
-                Cmd::Shed(crate::shed::Cmd::Install { yes }) => return crate::shed::install(ctx, r, out, yes),
                 Cmd::Stats { cmd } => cmd.run(ctx, &cfg, out)?,
                 Cmd::Clean {
                     fleet,
@@ -2219,6 +2213,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             anyhow::ensure!(
                                 !["design", "architect", "verify", "repro"].contains(&&*key) || on,
                                 "{key} is `on` or `off`"
+                            );
+                            anyhow::ensure!(
+                                key != "playbook" || ["refactor", "perf", "off"].iter().any(|p| tags == [*p]),
+                                "playbook is `refactor`, `perf` or `off`"
                             );
                             let mut d = queue::op("set", &[issue], false, None, None, None);
                             d.put(key.as_str(), json!(tags));

@@ -9,6 +9,8 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 pub mod fake_shed;
 #[allow(unused_imports, reason = "not every test crate drives the fake shed")]
 pub use fake_shed::{FakeShed, OnShed, OverSsh};
+/// The large board fixture the t141 performance tests share.
+pub mod large;
 
 pub const CONFIG: &str = r#"# fleet config (test)
 [fleet.sendmeter]

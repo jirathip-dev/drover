@@ -26,6 +26,9 @@ fn fire_event(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event], ev
         return Ok(());
     }
     writeln!(out, "{}", plain(&ev))?;
+    if ev.str("wave").is_some() {
+        return crate::events::append(&ctx.state, &ev);
+    }
     let ((sent, held), push) = (PUSHES.get(), ev.is_push());
     if push && sent >= cfg.limits.max_pushes_per_pass {
         PUSHES.set((sent, held + 1));

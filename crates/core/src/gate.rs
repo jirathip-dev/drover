@@ -485,33 +485,37 @@ fn reproduced(body: &str, verify: bool, section: impl FnOnce() -> Option<String>
 }
 
 fn tests_changed(diff: &str) -> Option<String> {
-    let (mut files, mut test, mut hunk, mut minus, mut plus) = (vec![], false, false, vec![], vec![]);
+    let (mut files, mut path, mut test, mut hash, mut hunk) = (vec![], "", false, false, false);
+    let (mut minus, mut plus) = (vec![], vec![]);
     for l in diff.lines() {
         if let Some(p) = l.strip_prefix("diff --git a/") {
-            let p = p.rsplit(" b/").next().unwrap_or(p);
-            let name = p.rsplit('/').next().unwrap_or(p);
-            test = p.split('/').any(|c| matches!(c, "test" | "tests" | "__tests__"))
+            path = p.rsplit(" b/").next().unwrap_or(p);
+            let name = path.rsplit('/').next().unwrap_or(path);
+            test = path.split('/').any(|c| matches!(c, "test" | "tests" | "__tests__"))
                 || [".test.", ".spec.", "_test.", "_tests."]
                     .iter()
                     .any(|s| name.contains(s));
+            hash = [".sh", ".bash", ".py"].iter().any(|s| name.ends_with(s));
             hunk = false;
-            if test {
-                files.push(p.to_string());
-            }
         } else if l.starts_with("@@") {
             hunk = true;
         } else if let Some((side, x)) = l.split_at_checked(1).filter(|_| test && hunk) {
+            let x = x.trim();
+            let comment =
+                ["//", "/*", "*/", "* "].iter().any(|c| x.starts_with(c)) || x == "*" || (hash && x.starts_with('#'));
             match side {
-                "+" => plus.push(x.trim()),
-                "-" => minus.push(x.trim()),
-                _ => {}
+                _ if x.is_empty() || comment => continue,
+                "+" => plus.push(x),
+                "-" => minus.push(x),
+                _ => continue,
+            }
+            if files.last() != Some(&path) {
+                files.push(path);
             }
         }
     }
-    for v in [&mut minus, &mut plus] {
-        v.retain(|x| !x.is_empty());
-        v.sort_unstable();
-    }
+    minus.sort_unstable();
+    plus.sort_unstable();
     (minus != plus).then(|| files.join(", "))
 }
 

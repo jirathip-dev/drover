@@ -12,6 +12,7 @@ use std::io::Write;
 use std::path::Path;
 
 mod pickup;
+mod remote;
 
 /// One pass's steps in order (`lap` names each, `pass-slow` the slowest) and the `[limits]` keys that time them.
 pub const STEPS: [(&str, &[&str]); 8] = [
@@ -337,10 +338,11 @@ fn launch(
     c: &[&str],
     start: bool,
 ) -> Result<i32> {
+    let p: &dyn Runner = &remote::Memo::here(r);
     let role = c.get(3).copied().unwrap_or_default();
     markers(ctx, cfg, r, true);
     let low =
-        |e: &Event| crate::host::free_gb(&crate::hosts::On::of(r, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
+        |e: &Event| crate::host::free_gb(&crate::hosts::On::of(p, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
     let bound = |p: &Event| {
         ev.iter()
             .rev()
@@ -369,7 +371,7 @@ fn launch(
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, (fleet, n, role), false)?;
     let skip = |h: &str| crate::starts::skip(ctx, (cfg, r), ev, (&all, &live), (me, start, n, role), h);
-    let placed = crate::hosts::place(ctx, cfg, r, ev, (fleet, n, role), (None, &skip))?;
+    let placed = crate::hosts::place(ctx, cfg, p, ev, (fleet, n, role), (None, &skip))?;
     if let Some((code, why)) = room(ctx, cfg, r) {
         return crate::gate::refused(code, why);
     }
@@ -893,7 +895,6 @@ fn one(
     name: &str,
     (manual, fast): (bool, bool),
 ) -> Result<()> {
-    let t0 = crate::clock::instant();
     let lock = format!("drive{}-{name}.lock", if fast { "-fast" } else { "" });
     let _held = match KICK.get() {
         Some(_) => None,
@@ -903,6 +904,9 @@ fn one(
             None => return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?),
         },
     };
+    let mut laps = remote::Laps::new();
+    let tally = remote::Tally(r, std::sync::Mutex::default());
+    let r: &dyn Runner = &tally;
     if KICK.get().is_none() {
         if let Err(e) =
             working(&ctx.state).and_then(|ev| crate::check::closed_on_github((ctx, cfg, r, &mut *out), ev, Some(name)))
@@ -910,9 +914,9 @@ fn one(
             writeln!(out, "{name} closed issues: {e:#}")?;
         }
     }
+    laps.lap("closed issues");
     ACTS.with_borrow_mut(BTreeMap::clear);
     ROOM.set((false, None));
-    let t = crate::clock::instant();
     let one_slot = cfg.limits.max_parallel_spawns == 1 && crate::starts::fix_due(&working(&ctx.state)?, name);
     let early = cfg.limits.max_parallel_spawns > 0 && KICK.get().is_none() && !one_slot;
     let res = if early {
@@ -920,10 +924,9 @@ fn one(
     } else {
         Ok(())
     };
-    let mut spawns = t.elapsed();
+    laps.lap("spawns");
     let res = res.and(pass(ctx, cfg, (r, seen), out, name, fast));
-    let reads = t.elapsed().saturating_sub(spawns);
-    let t = crate::clock::instant();
+    laps.lap("PR reads, gates, steps");
     let res = res.and_then(|()| {
         if fast {
             Ok(())
@@ -931,14 +934,13 @@ fn one(
             starts(ctx, cfg, r, out, name, false)
         }
     });
-    spawns += t.elapsed();
-    let slow = [("spawns", spawns), ("PR reads, gates, steps", reads)];
-    let slow = slow.into_iter().max_by_key(|s| s.1).unwrap_or(("spawns", spawns));
+    laps.lap("spawns");
     if let Err(e) = &res {
         let a = json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": format!("failed: {e:#}")});
         ACTS.with_borrow_mut(|m| m.entry(name.into()).or_default().push(a));
     }
     settle(ctx, r, out)?;
+    laps.lap("settle");
     let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
     if !fast && KICK.get().is_none() {
         std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string()).ok();
@@ -950,11 +952,9 @@ fn one(
             *["auto", "manual", "fast"].get(i).unwrap_or(&"fast"),
             crate::usage::date(r, end, "+%H:%M"),
         );
-        let secs = (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0;
-        let step_secs = (slow.1.as_secs_f64() * 10.0).round() / 10.0;
-        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs, "step": slow.0,
-            "step_secs": step_secs, "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
-        append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d)).ok();
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "spawns_launched": launched(&acts),
+            "actions": acts, "kick": KICK.get(), "remote": tally.json()});
+        append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", laps.with(d))).ok();
     }
     if !fast && KICK.get().is_none() {
         crate::gh::backlog(ctx, r, cfg.fleet(name)?, name)
@@ -1185,6 +1185,30 @@ fn escalate(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))
 }
 
+fn turn_prompt(what: &str) -> Option<(&'static str, &'static str)> {
+    if what == waiting::TURN_NUDGE {
+        Some((
+            "done",
+            "drover: you reported `done`, but nothing new is pushed at the PR head (or there is no \
+            PR). Push and open the PR, then `drover turn done`; or `drover turn blocked --why <reason>`.",
+        ))
+    } else if what.ends_with(waiting::TURN_ASK) {
+        Some((
+            "need-input",
+            "drover: you reported `need-input`, but filed no `drover ask`: no card reaches the owner. \
+            Ask with `drover ask <fleet> <issue> …`, then `drover turn need-input`; or `drover turn blocked \
+            --why <reason>`.",
+        ))
+    } else if what == waiting::TURN_GO_ON {
+        Some((
+            "working",
+            "drover: continue the task; end the turn with `drover turn …`.",
+        ))
+    } else {
+        None
+    }
+}
+
 fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -1331,17 +1355,7 @@ fn pass(
                 &ctx.state,
                 &Event::new(ctx.now, fleet, Some(s.issue), "lesson-prompted", d),
             )?;
-        } else if w.who == "drive" && matches!(w.what.as_str(), waiting::TURN_NUDGE | waiting::TURN_GO_ON) && !fast {
-            let (state, text) = if w.what == waiting::TURN_NUDGE {
-                let text = "drover: you reported `done`, but nothing new is pushed at the PR head (or there is no \
-                    PR). Push and open the PR, then `drover turn done`; or `drover turn blocked --why <reason>`.";
-                ("done", text)
-            } else {
-                (
-                    "working",
-                    "drover: continue the task; end the turn with `drover turn …`.",
-                )
-            };
+        } else if let Some((state, text)) = turn_prompt(&w.what).filter(|_| w.who == "drive" && !fast) {
             let Some(sent) = tell(r, &events, &w.lane, text) else {
                 continue;
             };
@@ -1935,7 +1949,18 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         |n: &String| acts(&|a| a["step"] == "start" && a["issue"].as_u64().is_some_and(|i| n == &i.to_string()));
     let stop = crate::starts::stops;
     let (mut res, mut go) = (Ok(()), !acts(&|a| a["step"] == "start" && stop(a["code"].as_str())));
-    for n in (queue::startable(&events, fleet).into_iter()).filter(|n| one(n) && !tried(n)) {
+    let mut queued: Vec<String> = (queue::startable(&events, fleet).into_iter())
+        .filter(|n| one(n) && !tried(n))
+        .collect();
+    let swept = if queued.is_empty() {
+        vec![]
+    } else {
+        markers(ctx, cfg, r, true).1
+    };
+    let stale =
+        |n: &String| crate::starts::went_stale(&swept, fleet, n) || crate::starts::went_stale(&events, fleet, n);
+    queued.sort_by_cached_key(stale);
+    for n in queued {
         if !go || fast && !crate::starts::free(cfg, &pending(ctx, cfg, r)) {
             break;
         }
@@ -2068,9 +2093,20 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     let back = spawn
         .filter(|_| KICK.get().is_none())
         .and_then(|n| retrying(ctx, ev, fleet, n));
-    let paced = (c.first() == Some(&"spawn") && step == "respawn" && KICK.get().is_none())
-        .then(|| paced(cfg, fleet))
-        .flatten();
+    let respawn = c.first() == Some(&"spawn") && step == "respawn" && KICK.get().is_none();
+    let lane = issue.and_then(|n| {
+        crate::events::of_issue(ev, fleet, n)
+            .into_iter()
+            .rfind(|e| e.kind == "spawn")
+    });
+    let wave = lane
+        .and_then(|e| e.str("agent"))
+        .filter(|_| respawn)
+        .and_then(|a| crate::breaker::wave_of(cfg, ev, a));
+    if let Some(w) = &wave {
+        crate::breaker::wave_alert(ctx, cfg, w)?;
+    }
+    let paced = (respawn && wave.is_none()).then(|| paced(cfg, fleet)).flatten();
     let full = (spawn.filter(|_| KICK.get().is_none() && !kicks).zip(c.get(3)))
         .and_then(|(n, role)| crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &[]));
     let res = match (back, paced, issue.filter(|_| kicks)) {

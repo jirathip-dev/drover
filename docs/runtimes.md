@@ -49,7 +49,8 @@ restart, and runs the user's login shell (`$SHELL -l`, in shed's environment). d
 exports and the harness command (`exec <harness> <args>`) into that shell. So no
 token is ever in the terminal's command line, in `ps` or in shed's state file. `exec` makes the harness the
 terminal's program, so the terminal ends when the harness exits; shed then lists it `exited` with its code until
-drover removes it, and `drover check` alerts `lane-dead` with the cause (#1053).
+drover removes it, and `drover check` alerts `lane-dead` with the cause (#1053), and for a crash the exit code or
+signal (shed's 128 + N), the terminal's last three lines (the adapter's stderr) and the last ACP event (#1311).
 
 `drover spawn --dry-run` shows the shed requests it would send (`shed <method> <params>`).
 
@@ -199,10 +200,11 @@ adapter loads both the same way. The tests in `crates/cli/tests/shed.rs` cover s
 ## Setup
 
 1. Install shed on every host that runs lanes, and start its server (`shed serve --detach`, or shed's launchd or
-   systemd unit). `shed connect --autostart` starts it on another host when needed. #937: on the main host,
-   `drover shed install` (a dry run that lists the terminals on serve; `--yes` to run it, as the `cmd` of a run
-   card) installs the rev drover pins and restarts `shed serve` onto it, then reads both builds back. Spawn
-   refuses `SHED_VERSION` while the shed on PATH or the running serve is off that pin.
+   systemd unit). `shed connect --autostart` starts it on another host when needed. #1289: drover never installs or
+   updates shed: shed updates itself from its own releases and hands its serve over itself. drover declares the
+   oldest shed protocol it accepts (`shed::MIN_PROTOCOL`); spawn and `doctor` refuse `SHED_VERSION` only when serve's
+   protocol is under it (or newer than shed's own window still serves), naming both. A shed on PATH of another
+   build than serve is shown by `doctor` as info, never refused.
 2. Set `[runtime] kind = "shed"` in fleet.toml on the main host (and on another host's fleet.toml if its lane hooks
    should use a non-default socket; without one, the hook uses shed's default socket).
 3. Run `drover profiles sync` so the Claude profiles get the state hooks.

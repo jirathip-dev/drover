@@ -17,9 +17,13 @@ lifeboat ([lifeboat.md](lifeboat.md)) stays the last resort when this page is br
 The page fetches a screen (`GET /screens/<x>`), draws it block by block, one renderer per block type (`screen`,
 `section`, `list`, `row`, `card`, `text`, `stat`, `chips`, `choice`, `button`, `run`, `images`, `form` with its
 `toggle`, `text`, `picker` and `secret` fields, `sheet`), follows its `stream` (`GET /screens/<x>/stream`: the open
-tab's and the cards', at most two at once) and applies each `{seq, ops}` patch in place, flashing the rows that
-changed. A block's `action` POSTs `/action` `{screen, block, action, values}` (a `confirm` asks first in the page's
-own dialog); the reply's `toast` shows under the header, its `ops` patch the screen, `close` closes the sheet. A
+tab's and the cards', and an open sheet's once an action ran in it) and applies each `{seq, ops}` patch in
+place, flashing the rows that changed. A block's `action` POSTs `/action` `{screen, block, action, values}` (a
+`confirm` asks first in the page's own dialog); the reply's `toast` shows under the header, its `ops` patch the
+screen, `close` closes the sheet. #1315: nothing is read again after an action: the stream brings the result (a stream whose client left frees its
+slot of serve's 4 within a second). A sent
+thread message or lane line shows at once, grey until serve's reply, then until the stream brings it (once); a failed
+one keeps its text with [retry]. An answered ask leaves at once and stays gone unless the answer fails. A
 row's `tap` opens a sheet (`sheet`), another screen in the tab with `[‹ back]` (`open`) or a link (`url`). A sheet's
 `done` posts its fields' values. A row's `figure` (`state`, `tool`, `coat`) is the theme's sprite, as before: a
 lane's avatar in its coat, else the 24 px row sprite, else the state glyph (terminal).
@@ -154,7 +158,7 @@ push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no
 client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
 shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), and rusqlite (bundled SQLite)
 for the state database (#344, docs/architecture.md), keyring for the main host's secret store
-(#441, owner-approved; docs/providers.md), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
+(#441, owner-approved; docs/providers.md), flate2 for serve's gzip (#1314, owner-approved), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
 fails on any other direct dependency.
 
 ## GitHub webhooks (#626)
@@ -190,6 +194,13 @@ them as `serve`: `sha` (the build it runs, #1081), `rss_mb`, `groups` (the last 
 (taps waiting for a worker), `started` and `slow` (set while `/api/v1` p95 has been over 200 ms for 5 min). Each start
 appends `<ts> cold|handover` to `serve-starts` (the last day kept); a start that fails appends `<ts> failed`.
 
+#1312: the page times what the owner feels: each tap, sheet open, tab switch, send and answer from the input event to
+the frame after the DOM changed (split into `network`, `parse` and `render`), and each stream delta from receipt to
+painted. It batches them into one `POST /api/v1/timings` (paired only; `[[kind, ms, network, parse, render], …]`) at
+most every 30 s, dropped while offline. `phone` in the health is the last minute by kind (`tap`, `sheet`, `tab`, `send`,
+`answer`, `delta`, and each `<kind>/network|parse|render`) with `count`, `p50`, `p95` and `max`; `phone_slow` is set
+while a kind's p95 has been over 150 ms for `slo_api_minutes`.
+
 #1081: a `serve` whose port is held asks that port's health which build holds it: its own build, it exits 0 (launchd and
 systemd restart it only after a failed exit); an older one, it asks that serve over its control socket to hand over (its
 bridge runs the installed binary), then exits 0; nothing answers, it fails.
@@ -207,8 +218,9 @@ listener is not the job's pid.
 | `serve-stale` | the serve on the port runs another build than the installed `drover` |
 | `serve-loop` | more than 3 failed serve starts in 1 h (launchd's serve exiting non-zero) |
 | `serve-slow` | `/api/v1` p95 over 200 ms for 5 min |
+| `phone-slow` | a phone kind's p95 (tap, sheet, tab, send, answer, delta) over 150 ms for `slo_api_minutes` |
 | `serve-503` | any read answered 503 in the last minute |
-| `drive-slow` | a fleet's last pass over `pass_max_secs` (120 s); names the fleet and its slowest step |
+| `drive-slow` | a fleet's last pass over `pass_max_secs` (120 s); names the fleet, its slowest step (closed issues, spawns, PR reads, settle) and each host's remote-call count and seconds |
 
 CI's gates are `crates/cli/tests/serve_health.rs`: the request-path guard (every read answers with the db write-locked,
 and none calls git, gh or ssh) and the bench (each route group's p95 within 50 ms on the fixture state).
@@ -251,6 +263,7 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `POST chat` | #555: `{harness, model, effort, mtime}`, `[chat]`'s defaults written into fleet.toml (`BAD_VALUE`, `STALE`, `DOCTOR` as `cond`) |
 | `POST close` | #555: `{fleet, issue}`, a backlog issue's [close]: `gh issue close`, logged `closed`; `NOT_BACKLOG` for a queued issue or one with a lane |
 | `POST qset` | #576 (paired): `fleet`, `issue`, `key` (`design`, `verify`, `repro`), `value` (`on`, `off`): the CLI's `queue <fleet> set <n> <key> <value>` |
+| `POST timings` | #1312 (paired): the page's batch `[[kind, ms, network, parse, render], …]` (500 at most; unknown kinds skipped) into health's `phone`; `BAD_TIMINGS` |
 | `POST lesson` | #576 (paired): `fleet`: the CLI's `lesson <fleet>`, its queue entry logged `by` the device |
 | `POST orchestrator-attach` | #633 (paired): `{fleet, thread}`, a cooee thread as the repo's orchestrator thread (`orchestrator-attached`): `ask --thread` takes it, lane asks route to it, its asks and decisions are `events`; answers `OrchestratorAttach`: `brief`, `settings` (the synced orchestrator Claude settings), `env` (`DROVER_LANE`, `DROVER_THREAD`, `DROVER_PORT`), `guarded` (#565's ACP guard holds) and `why` not |
 | `POST orchestrator-detach` | #633 (paired): `{fleet, thread}`, the link ends (`orchestrator-detached`; archiving the thread ends it too); `NO_SUCH_THREAD` unless attached |
@@ -300,7 +313,7 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
 - `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
   `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues, run
   cards and #1066 config proposals and secret requests as chat cards); #977: each full screen (not a sheet) shows the step's snapshot age, `as of 3m ago` (`as of: not yet known` before
-  one), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age` section's row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
+  one; #1310: sent as `{since, label}`, the label's `{}` the age the client ticks, as are a thread's message ages and the threads list's), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age` section's row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
   and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
   shows until a tap opens the full card; a second tap folds it again;
 - #1172: `GET /screens/queue/done?repo=<fleet>`, opened from the Queue's `done today` row (its value: the list's length): the fleet's merges of the last 24 h, newest first, each `#N title`, `merged HH:MM UTC · <sha>`, its `title`, `t` and `sha` from `done`; a row opens `/screens/issue` for it.
@@ -310,6 +323,8 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   plugin token only), the lane sheet: its facts (issue, role, state, host, branch, port, PR), Stop/Kill/Clean (Close pane
   for an Others agent), a Send line and the transcript (`/api/v1/lane/<agent>`'s blocks as text and row blocks). Each
   action runs the board's `act` (the CLI verb, `confirm`ed) or `send`, logged `act`/`prompt` with `device: cooee`;
+  #1315: `send` replies once the `prompt` is logged and hands the line to shed after the reply; a failed delivery is
+  logged `prompt-failed` (`agent`, `error`) and the sheet's transcript ends in a `✗ not delivered` row until the next prompt;
 - #1091: `GET /screens/hosts`, the page's Hosts sheet (a [⚙] row, not cooee's): one row per host, main first, then
   A→Z, with its kind, on/off and live lane count; a remote host's [Off]/[On] runs `host` (`host-off`/`host-on`) and
   the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token

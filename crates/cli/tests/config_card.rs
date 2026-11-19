@@ -271,3 +271,81 @@ fn a_proposal_stored_truncated_refuses_to_apply_and_asks_for_a_new_one() {
     );
     assert_eq!(std::fs::read_to_string(&c.config).unwrap(), old);
 }
+
+fn screen(s: &Server, cookie: &str, path: &str) -> Value {
+    let r = format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n");
+    let res = String::from_utf8_lossy(&s.respond(&r, T + 500)).into_owned();
+    assert!(res.starts_with("HTTP/1.1 200"), "{path}: {res}");
+    serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap()
+}
+
+fn config_cards(v: &Value) -> Vec<Value> {
+    fn go(v: &Value, out: &mut Vec<Value>) {
+        match v {
+            Value::Object(m) if m.get("kind") == Some(&json!("config")) => out.push(v.clone()),
+            Value::Object(m) => m.values().for_each(|x| go(x, out)),
+            Value::Array(a) => a.iter().for_each(|x| go(x, out)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    go(v, &mut out);
+    out
+}
+
+fn labels(card: &Value) -> Vec<String> {
+    let b = card["buttons"].as_array().cloned().unwrap_or_default();
+    b.iter().map(|b| b["label"].as_str().unwrap().to_string()).collect()
+}
+
+#[test]
+fn an_applied_proposal_shows_applied_with_no_buttons_and_never_stale() {
+    let c = setup("cfg-applied");
+    propose(&c);
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T + 500);
+    let proposed = std::fs::read_to_string(c.config.with_file_name("proposed.toml")).unwrap();
+    let old = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, &proposed).unwrap();
+    let mid = config_cards(&screen(&s, &cookie, "/screens/cards"));
+    assert!(
+        mid.iter().all(|k| !k.to_string().contains("stale")),
+        "mid-apply: {mid:?}"
+    );
+    std::fs::write(&c.config, &old).unwrap();
+
+    let (code, out) = run(&c, &r, &["config", "apply", "c1"]);
+    assert_eq!(code, 0, "{out}");
+    let backup = format!("{}.bak-{}", c.config.display(), c.now);
+    let home = config_cards(&screen(&s, &cookie, "/screens/cards"));
+    assert!(home.is_empty(), "settled: off the owner's cards: {home:?}");
+    let cards = config_cards(&screen(&s, &cookie, "/screens/threads/t1"));
+    assert_eq!(cards.len(), 1, "{cards:?}");
+    let card = cards[0].to_string();
+    assert!(
+        card.contains("applied by owner") && card.contains(&backup),
+        "who, when and the backup: {card}"
+    );
+    assert!(!card.contains("stale"), "{card}");
+    assert!(labels(&cards[0]).is_empty(), "no [discard] or [later]: {card}");
+}
+
+#[test]
+fn a_proposal_whose_fleet_toml_changed_another_way_shows_stale_with_discard() {
+    let c = setup("cfg-stale-card");
+    propose(&c);
+    let cur = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, cur + "\n# hand edit\n").unwrap();
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T + 500);
+    let cards = config_cards(&screen(&s, &cookie, "/screens/cards"));
+    assert_eq!(cards.len(), 1, "{cards:?}");
+    assert!(
+        cards[0]["subtitle"].as_str().unwrap().starts_with("stale"),
+        "{}",
+        cards[0]
+    );
+    assert_eq!(labels(&cards[0]), ["discard", "later"]);
+}

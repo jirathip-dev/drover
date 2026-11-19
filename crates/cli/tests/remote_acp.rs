@@ -311,7 +311,7 @@ fn hook_there(env: &BTreeMap<String, String>, dir: &Path, cmd: &str) -> String {
 #[test]
 fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_with_no_token_there() {
     let (c, home) = setup("racp-spawn", &["boat1"]);
-    let f = spawn_fake();
+    let f = spawn_fake().reply("@boat1 curl", "");
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let live = drover::hosts::survey(&c, &cfg, &shed_runner(&b, &cfg), false);
@@ -334,6 +334,11 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
         .iter()
         .position(|l| l.starts_with("ssh boat1 'shed' 'run' '--acp' 'claude-acp'"))
         .unwrap();
+    assert!(
+        calls[run_at].contains("'--no-hibernate'"),
+        "its start sources the key file spawn removes, so shed never restarts it: {}",
+        calls[run_at]
+    );
     let wt = PathBuf::from(sp[0].str("worktree").unwrap());
     assert!(wt.starts_with(&home), "under its $HOME there: {}", wt.display());
     let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
@@ -455,23 +460,34 @@ impl Runner for OldBuild<'_> {
 }
 
 #[test]
-fn a_boat_on_another_build_refuses_host_updating_and_is_not_marked_sick() {
+fn a_boat_on_the_previous_build_takes_lanes_while_no_release_swaps_and_is_held_only_during_a_swap() {
     let (c, _) = setup("racp-skew", &["boat1"]);
+    let behind = json!({"host": "boat1", "has": "bd6ba01", "wants": "8e7536e", "reason": "no release"});
+    let e = drover::events::Event::new(c.now - 3600, "drover", None, "host-behind", behind);
+    drover::events::append(&c.state, &e).unwrap();
     let f = spawn_fake();
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
-    let (code, o) = run(
-        &c,
-        &OldBuild(&b),
-        &["spawn", "sendmeter", "12", "impl", "--host", "boat1"],
-    );
+    let spawn = ["spawn", "sendmeter", "12", "impl", "--host", "boat1"];
+    let (code, o) = run(&c, &OldBuild(&b), &spawn);
+    assert_eq!(code, 0, "{o}");
+    assert!(!o.contains("HOST_UPDATING"), "{o}");
+    assert_eq!(spawned(&c)[0].str("host"), Some("boat1"));
+    let health = drover::hosts::cached(&c)["boat1"].health.clone();
+    assert!(!health.iter().any(|r| r.starts_with('✗')), "{health:?}");
+
+    let (c, _) = setup("racp-swap", &["boat1"]);
+    let d = json!({"sha": "8e7536e000000000000000000000000000000000", "target": "live", "hosts": ["boat1", "mini"]});
+    let e = drover::events::Event::new(c.now, "drover", None, "self-update-swapping", d);
+    drover::events::append(&c.state, &e).unwrap();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &OldBuild(&b), &spawn);
     assert_eq!(code, 3, "{o}");
     assert!(
-        o.contains("REFUSED HOST_UPDATING: boat1: drover there is drover 0.1.0 (0ld)") && !o.contains("ACP_UNGUARDED"),
+        o.contains("REFUSED HOST_UPDATING: boat1: drover swaps to 8e7536e on every host")
+            && !o.contains("ACP_UNGUARDED"),
         "{o}"
     );
     assert!(b.runs.borrow().is_empty(), "nothing started");
-    let health = drover::hosts::cached(&c)["boat1"].health.clone();
-    assert!(!health.iter().any(|r| r.starts_with('✗')), "{health:?}");
 }
 
 #[test]
@@ -484,7 +500,7 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     let checks = [
         "command -v git",
         "command -v gh",
-        "v=$(shed --version)",
+        "shed --version",
         "shed doctor",
         "command -v node",
         "shed agents --json",
@@ -510,10 +526,9 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     };
     assert!(!calls.iter().any(|l| herdr(&l)), "no herdr: {calls:?}");
     let has = |s: &str| calls.iter().any(|l| l.contains(s));
-    assert!(has(&format!(
-        "cargo install --git https://github.com/jirathip-dev/shed --rev {}",
-        drover::shed::REV
-    )));
+    assert!(has(
+        "cargo install --git https://github.com/jirathip-dev/shed --branch main --locked shed"
+    ));
     assert!(
         has("shed install --force") && has("shed agents add claude-acp"),
         "{calls:?}"
@@ -767,7 +782,7 @@ fn an_unknown_lane_key_401_is_no_sign_out_and_respawns_the_lane() {
 fn lane_key_401_respawns_the_lane(name: &str, why: &str) {
     let (c, _) = setup(name, &["boat1"]);
     let _main = FakeShed::attached(&c);
-    let f = spawn_fake();
+    let f = spawn_fake().reply("@boat1 curl", "");
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
     let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{o}");
@@ -1019,7 +1034,9 @@ fn a_proxy_lanes_auth_error_names_the_proxy_and_holds_its_host_unless_a_proxy_ca
             .replace("port = 9", &format!("port = 9\nupstream = \"http://127.0.0.1:{port}\""));
         std::fs::write(&c.config, toml).unwrap();
         let _main = FakeShed::attached(&c);
-        let f = spawn_fake().reply("gh issue view 13", r#"{"title":"Next","body":"AC: next"}"#);
+        let f = spawn_fake()
+            .reply("@boat1 curl", "")
+            .reply("gh issue view 13", r#"{"title":"Next","body":"AC: next"}"#);
         let b = Boat::new(&c, &f, &[("boat1", true, true)]);
         let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
         assert_eq!(code, 0, "{o}");
@@ -1065,4 +1082,91 @@ fn a_proxy_lanes_auth_error_names_the_proxy_and_holds_its_host_unless_a_proxy_ca
             assert!(code == 3 && o.contains("LOGIN_NEEDED"), "{name}: {o}");
         }
     }
+}
+
+fn look(c: &drover::Ctx, b: &Boat) -> String {
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    drover::hosts::survey(c, &cfg, &shed_runner(b, &cfg), false);
+    let (code, o) = run(c, b, &["hosts"]);
+    assert_eq!(code, 0, "{o}");
+    o
+}
+
+fn host_line(o: &str, h: &str) -> String {
+    o.lines()
+        .find(|l| l.starts_with(&format!("{h} ·")))
+        .unwrap_or_else(|| panic!("{o}"))
+        .to_string()
+}
+
+#[test]
+fn a_tunnel_whose_ssh_lives_but_whose_far_end_does_not_answer_is_down_and_takes_no_new_lane() {
+    let (c, _) = setup("racp-far-end", &["boat1", "boat2"]);
+    for h in ["boat1", "boat2"] {
+        std::fs::write(c.state.with_file_name(format!("tunnel-{h}.pid")), "777").unwrap();
+    }
+    let f = spawn_fake().reply("kill -0 777", "").reply("@boat2 curl", "");
+    let b = Boat::new(&c, &f, &[("boat1", true, true), ("boat2", true, true)]);
+    let o = look(&c, &b);
+    assert!(host_line(&o, "boat1").contains("tunnel down"), "{o}");
+    assert!(!host_line(&o, "boat2").contains("tunnel down"), "{o}");
+    let (code, o) = run(&c, &b, &["doctor"]);
+    assert!(
+        o.contains("tunnel boat1 down") && o.contains("tunnel boat2 up"),
+        "{code} {o}"
+    );
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{o}");
+    assert_eq!(spawned(&c)[0].str("host"), Some("boat2"), "{o}");
+}
+
+#[test]
+fn a_forward_that_failed_on_a_held_remote_port_frees_it_and_the_next_look_answers_through_it() {
+    let (c, _) = setup("racp-forward-failed", &["boat1"]);
+    std::fs::write(c.state.with_file_name("tunnel-boat1.pid"), "777").unwrap();
+    let log = "Error: remote port forwarding failed for listen port 9\n";
+    std::fs::write(c.state.with_file_name("tunnel-boat1.log"), log).unwrap();
+    let f = spawn_fake()
+        .once("@boat1 curl", 7, "")
+        .reply("@boat1 curl", "")
+        .reply("kill -0 4242", "");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let o = look(&c, &b);
+    assert!(host_line(&o, "boat1").contains("tunnel down"), "{o}");
+    let calls = f.calls.borrow().clone();
+    let free = calls
+        .iter()
+        .position(|l| l.starts_with("@boat1 sh -c") && l.contains("ss -Htlnp") && l.ends_with(" 9"))
+        .unwrap_or_else(|| panic!("the stale listener on :9 there is freed: {calls:?}"));
+    let ssh = calls.iter().position(|l| l.contains("nohup 'ssh'")).unwrap();
+    assert!(free < ssh, "freed before the new forward: {calls:?}");
+    let pid = std::fs::read_to_string(c.state.with_file_name("tunnel-boat1.pid")).unwrap();
+    assert_eq!(pid.trim(), "4242");
+    let o = look(&c, &b);
+    assert!(!host_line(&o, "boat1").contains("tunnel down"), "{o}");
+    assert_eq!(f.count("sh -c nohup 'ssh'"), 1, "{:?}", f.calls.borrow());
+}
+
+#[test]
+fn a_respawn_leaves_its_last_host_when_that_hosts_tunnel_is_down() {
+    let (c, _) = setup("racp-far-end-respawn", &["boat1", "boat2"]);
+    for h in ["boat1", "boat2"] {
+        std::fs::write(c.state.with_file_name(format!("tunnel-{h}.pid")), "777").unwrap();
+    }
+    let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "host": "boat1",
+        "machine": "boat1", "runtime": "shed-acp"});
+    let gone = json!({"agent": "sendmeter-impl-12", "state": "gone", "cause": "ECONNREFUSED: proxy tunnel down"});
+    for (ts, kind, d) in [(c.now - 600, "spawn", sp), (c.now - 500, "lane-state", gone)] {
+        drover::events::append(
+            &c.state,
+            &drover::events::Event::new(ts, "sendmeter", Some(12), kind, d),
+        )
+        .unwrap();
+    }
+    let f = spawn_fake().reply("kill -0 777", "").reply("@boat2 curl", "");
+    let b = Boat::new(&c, &f, &[("boat1", true, true), ("boat2", true, true)]);
+    assert!(host_line(&look(&c, &b), "boat1").contains("tunnel down"));
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    assert_eq!(code, 0, "{o}");
+    assert_eq!(spawned(&c).last().unwrap().str("host"), Some("boat2"), "{o}");
 }

@@ -90,10 +90,10 @@ pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     settled.into_iter().find(|e| e.str("id") == Some(id))
 }
 
-/// Proposal `p` was made over a fleet.toml that has changed since: it can no longer apply.
+/// Proposal `p` was made over a fleet.toml that has changed since, to other than `p` itself: it can no longer apply.
 pub fn stale(ctx: &Ctx, p: &Event) -> bool {
-    let cur = std::fs::read(&ctx.config).unwrap_or_default();
-    p.str("base") != Some(&sha256(&cur))
+    let cur = sha256(&std::fs::read(&ctx.config).unwrap_or_default());
+    p.str("base") != Some(&cur) && p.str("sha") != Some(&cur)
 }
 
 /// Thread `thread`'s proposals that wait for the owner (neither settled nor stale), oldest first.

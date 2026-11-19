@@ -38,10 +38,11 @@ pub fn get(r: &dyn Runner, name: &str) -> Result<Option<Session>> {
 /// This host's sessions, then each `[hosts]` machine's, each tagged with its host.
 pub fn all(cfg: &Config, r: &dyn Runner) -> Sessions {
     let mut out = vec![(None, on(r).map_err(|e| format!("{e:#}")))];
-    for (name, m) in cfg.hosts.iter().filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
+    let remote = cfg.hosts.iter().filter_map(|(n, h)| Some((n, h.machine.as_deref()?)));
+    out.extend(crate::hosts::each(remote, |(name, m)| {
         let got = on(&On::new(r, Some(m))).map(|all| tagged(all, name, m));
-        out.push((Some(m.to_string()), got.map_err(|e| format!("{e:#}"))));
-    }
+        (Some(m.to_string()), got.map_err(|e| format!("{e:#}")))
+    }));
     Sessions(out)
 }
 

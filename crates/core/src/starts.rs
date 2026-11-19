@@ -87,6 +87,14 @@ pub fn ended(ev: &[Event], l: &crate::db::Lease) -> bool {
     ev.iter().rev().take_while(|e| e.ts >= l.at).any(|e| end(&e))
 }
 
+/// `fleet` #`n`'s last start went stale (timed out or its kick died) with no spawn since: its next try waits behind the other queued starts.
+pub fn went_stale(ev: &[Event], fleet: &str, n: &str) -> bool {
+    let stale = |e: &Event| e.kind == "stale-marker" && e.str("file").is_some_and(|f| f.ends_with(".pending"));
+    let mine = |e: &&Event| e.fleet == fleet && e.issue.is_some_and(|i| i.to_string() == n);
+    let last = ev.iter().filter(mine).rfind(|e| e.kind == "spawn" || stale(e));
+    last.is_some_and(stale)
+}
+
 /// Some host has a free start slot, the `pending` spawns counted.
 pub fn free(cfg: &Config, pending: &[Event]) -> bool {
     let live: Vec<&Event> = pending.iter().collect();
