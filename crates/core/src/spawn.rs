@@ -1274,7 +1274,7 @@ pub fn spawn(
         let cause = crate::session::stamp::exit(&events, &p.agent).filter(|x| x.cause.resumable());
         let here = cause.is_some() && owt == wt && old.machine == on.machine;
         if stale.is_none() && !here && !hung {
-            wip = crate::check::save_lane(ctx, &old, &p.agent, owt)?;
+            wip = crate::check::save_lane(ctx, (cfg, fleet), &old, &p.agent, owt)?;
         }
         let mut killed = names.clone();
         for a in listed
@@ -1306,7 +1306,7 @@ pub fn spawn(
         .and_then(|e| Some((e, e.str("worktree")?)))
         .filter(|_| wip.is_none())
     {
-        wip = crate::check::save_lane(ctx, &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
+        wip = crate::check::save_lane(ctx, (cfg, fleet), &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
     }
 
     let mut sha = None;
@@ -1349,7 +1349,7 @@ pub fn spawn(
                 }
                 let git = |a: &[&str]| ok(r, "git", &[&["-C", &local, "worktree"][..], a].concat());
                 if on.exists(Path::new(&held)) {
-                    wip = wip.or(crate::check::save_lane(ctx, &on, &p.agent, &held)?);
+                    wip = wip.or(crate::check::save_lane(ctx, (cfg, fleet), &on, &p.agent, &held)?);
                     if git(&["remove", &held]).is_err() {
                         git(&["remove", "--force", &held])?;
                     }
@@ -1462,8 +1462,10 @@ pub fn spawn(
     }
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
     let cap_raise = crate::gh::cached_title(ctx, fleet, issue).is_some_and(|t| t.starts_with("cap:"));
+    let hygiene = crate::hygiene::of(ctx, Some(r), cfg, fleet);
     let rules = rules.map(|pl| crate::hook::Rules {
         cap_raise,
+        hygiene,
         ..crate::hook::Rules::resolve(cfg, fleet, role, &pl.name)
     });
     if let Some(rl) = &rules {
@@ -1645,6 +1647,9 @@ fn starts<'a>(
             "turn-end" if mine => (v, asked) = (vec![], None),
             "lane-dead" if agent.is_some_and(|a| e.str("key").is_some_and(|k| k.ends_with(&format!(":{a}")))) => {
                 fail(&mut v, "lane died");
+            }
+            "supersede"
+                if mine && agent.is_some_and(|a| e.val("killed").as_array().is_some_and(|k| k.contains(&json!(a)))) => {
             }
             "supersede" | "lane-killed" if mine => fail(&mut v, "killed"),
             "needs-decision" if e.str("respawn_loop") == Some(role) => {

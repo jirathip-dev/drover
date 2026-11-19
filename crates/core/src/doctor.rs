@@ -111,6 +111,7 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
     rows.push(format!("✓ config — {}", ctx.config.display()));
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
     rows.extend(cfg.shed().map(|b| crate::shed::line(r, &b.wire)));
+    rows.extend(crate::hygiene::doctor(ctx, cfg, r));
 }
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
