@@ -88,7 +88,6 @@ pub fn post(
 
 /// Log verdict event `ev`, then show it at its sha: `drover/verify` for verify's, else `drover/review`, with its round and blocking count.
 pub fn verdict(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: Event) -> Result<()> {
-    crate::events::emit(&ctx.state, cfg, ev.clone())?;
     let s = |k: &str| ev.str(k).unwrap_or_default();
     let (sha, pass) = (s("sha"), s("verdict") == "PASS");
     let blocking = crate::gate::findings(s("body")).iter().filter(|f| f.0).count();
@@ -100,14 +99,9 @@ pub fn verdict(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: Event) -> Result<()>
     let desc = format!("{} · round {} · {sha:.7}{tail}", s("verdict"), ev.val("round"));
     let context = if s("stage") == "verify" { VERIFY } else { REVIEW };
     let outcome = if pass { "success" } else { "failure" };
-    post(
-        ctx,
-        cfg,
-        r,
-        (&ev.fleet, ev.issue.unwrap_or_default()),
-        sha,
-        (context, outcome, &desc),
-    )
+    let (fleet, issue, sha) = (ev.fleet.clone(), ev.issue.unwrap_or_default(), sha.to_string());
+    crate::events::emit(&ctx.state, cfg, ev)?;
+    post(ctx, cfg, r, (&fleet, issue), &sha, (context, outcome, &desc))
 }
 
 /// The full drive pass: an open PR head with no verdict gets `drover/review` pending, each failed post is tried again, and a finished issue's posted ones are dropped.
