@@ -2206,7 +2206,7 @@ fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<(String
         ),
         Err(Snap::Push(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
-            format!("{agent}: wip push failed ({e:#}); committed in its worktree, nothing pushed, pane kept"),
+            format!("{agent}: wip push failed ({e:#}); nothing committed, nothing pushed, pane kept"),
         ),
         Ok(ws) => Ok(ws),
     }
@@ -2398,6 +2398,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         git(&["reset", "-q"]).ok();
         return Err(Snap::Secret(hit));
     }
+    let before = git(&["rev-parse", "HEAD"]).map_err(undo)?;
     if !staged.is_empty() {
         let unset = ["user.name", "user.email"].iter().any(|k| git(&["config", k]).is_err());
         let id: &[&str] = if unset {
@@ -2415,5 +2416,8 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         p => p,
     }
     .map(|w| (w, skip))
-    .map_err(Snap::Push)
+    .map_err(|e| {
+        git(&["reset", "-q", before.trim()]).ok();
+        Snap::Push(e)
+    })
 }
