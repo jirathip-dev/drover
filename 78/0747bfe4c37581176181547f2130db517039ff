@@ -1,0 +1,8 @@
+Decided: a host action returns the sheet from the sampled leftovers and proxy facts; only the sampler and refresh read them
+Because: "The hosts sheet is built only from data refreshed in the background, never from shed or leftovers on the request."
+Rejected: kicking the sampler after an action — no wake channel exists; the count catches up within serve_host_secs
+Decided: this PR's benches live in crates/cli/tests/perf/screens.rs, a child module of perf.rs
+Because: .drover/arch.toml:197
+Rejected: a new test target — it would copy perf.rs's fixtures and need a shard line
+Check: the AC test POSTs a host action and asserts zero shed ls; it fails with the old host_op
+Owner: the line cap raise (60000) is on staging; this PR now fits under it
