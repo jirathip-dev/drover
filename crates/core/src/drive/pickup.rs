@@ -111,7 +111,21 @@ pub(super) fn stuck(
     Ok(true)
 }
 
-pub(super) fn healed(ctx: &Ctx, ev: &[Event], w: &Waiting, started: bool) -> Result<()> {
+pub(super) fn after(
+    ctx: &Ctx,
+    out: &mut dyn Write,
+    ev: &[Event],
+    (w, step): (&Waiting, &str),
+    code: super::Code,
+) -> Result<()> {
+    if step == "verdict" && matches!(code, Some("ERROR" | "EXIT")) {
+        let why = super::last_why(&w.fleet).unwrap_or_default();
+        failed(ctx, out, (&w.fleet, w.issue, &w.lane), &why)?;
+    }
+    healed(ctx, ev, w, code.is_none())
+}
+
+fn healed(ctx: &Ctx, ev: &[Event], w: &Waiting, started: bool) -> Result<()> {
     if !started || !w.what.ends_with("without a verdict: reviewing again") {
         return Ok(());
     }
@@ -123,7 +137,7 @@ pub(super) fn healed(ctx: &Ctx, ev: &[Event], w: &Waiting, started: bool) -> Res
     )
 }
 
-pub(super) fn failed(ctx: &Ctx, out: &mut dyn Write, (fleet, n, lane): (&str, u64, &str), why: &str) -> Result<()> {
+fn failed(ctx: &Ctx, out: &mut dyn Write, (fleet, n, lane): (&str, u64, &str), why: &str) -> Result<()> {
     writeln!(out, "{fleet} #{n} {}{why}", waiting::PICKUP)?;
     let d = json!({"agent": lane, "why": why});
     append(
