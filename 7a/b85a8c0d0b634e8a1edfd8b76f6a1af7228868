@@ -1,0 +1,13 @@
+Decided: kick and waiting run through the pass runner (one probe per host); status's pass gets the config so it shares the mark
+Decided: the offline mark is a hosts.down file in the state dir, seeded into each non-tick pass while fresh (host_down_secs, 60 s)
+Because: "the probe result is shared): no further ssh to it, its lanes read `host offline`"
+Rejected: seeding the tick too — the tick is the 5-minute prober; seeding it would hide the hosts-skipped alert (stalled_host.rs)
+Decided: a pass spares every disabled host; survey keeps the old lane-aware set only on an explicit refresh
+Because: "its old lanes' verdicts are ingested only by an explicit refresh"
+Decided: check (the tick's first step) ends a kick lock older than kick_max_secs: kills its process group, logs kick-killed
+Because: "a kick over its limit is ended and logged"
+Rejected: a watchdog in tick that waits on kicks — kicks are detached, tick never waits on them; the lease sweep runs every tick
+Decided: a second kick keeps the coalesce flag, and now logs kick-in-flight and says so
+Because: "one runs, the other exits at once (logged), as `IN_FLIGHT`"
+Check: shed_version.rs and host_spared.rs expectations changed with the spec (one doctor line; no ssh to a disabled host)
+Owner: a dead or switched-off machine no longer slows every drover command; doctor says how long it has been down
