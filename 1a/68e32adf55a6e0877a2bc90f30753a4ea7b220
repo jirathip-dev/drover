@@ -1,0 +1,8 @@
+Decided: the scene's load level is held when the spawn gate refuses, busy from 0.5 load/limit or on memory pressure warn or critical, calm otherwise
+Because: q2384
+Because: "busy = load at or over the limit, or memory pressure at warn or critical; calm = everything else"
+Decided: one match in herd_screen picks both sky and load level, so fog always pairs with busy
+Because: "worked out in one place"
+Rejected: calm for warn pressure under 0.5 load/limit — review round 1 FAIL, q2384 changed only the load threshold
+Check: herd_tests.rs expects busy for memory warn at load 0.1; the golden herd.json is unchanged
+Owner: tight memory now shows the host as busy, matching the fog in the weather theme
