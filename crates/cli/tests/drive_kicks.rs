@@ -1208,7 +1208,11 @@ fn a_start_that_never_finishes_stops_blocking_the_next_spawn_once_the_limit_pass
     };
     let r = alive("  10:00\n");
     let d = pass(&later, &r);
-    assert_eq!(launched(&r, 3), 1, "the next queued start takes the freed slot: {d}");
+    assert_eq!(
+        (launched(&r, 1), launched(&r, 2), launched(&r, 3)),
+        (1, 1, 0),
+        "the freed slots go to the same issues, in queue order: {d}"
+    );
     let s = stale(&later);
     assert!(s.iter().any(|e| e.issue == Some(1)), "{s:?}");
 }
