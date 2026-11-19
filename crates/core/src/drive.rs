@@ -1430,6 +1430,7 @@ fn pass(
             let repro =
                 (step == "verdict" && arg(3) == "PASS").then(|| repro_seen(r, &events, (fleet, s.issue), &args));
             if repro.as_ref().is_some_and(|x| x.1) {
+                repro_stuck(ctx, cfg, out, &events, (fleet, s.issue, &w.lane))?;
                 continue;
             }
             if w.what.starts_with("reviewer exited") {
@@ -1460,7 +1461,14 @@ fn pass(
                 stale_replaced(ctx, cfg, out, (fleet, s.issue), arg(3), old, mins)?;
             }
             if let Some((hash, _)) = repro.filter(|_| code == Some("NO_REPRO")) {
-                repro_refused(ctx, cfg, r, (&events, &agents), (fleet, s.issue, &w.lane), &args, &hash)?;
+                repro_refused(
+                    ctx,
+                    cfg,
+                    (r, out),
+                    (&events, &agents),
+                    (fleet, s.issue, &w.lane),
+                    (&args, &hash),
+                )?;
             }
             if let Some((why, _)) = gone.filter(|_| code.is_none()) {
                 let on = crate::breaker::blame(&events, &w.lane);
@@ -1643,14 +1651,32 @@ fn repro_seen(r: &dyn Runner, ev: &[Event], (fleet, n): (&str, u64), args: &[&st
     (hash, seen)
 }
 
+fn repro_stuck(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    ev: &[Event],
+    (fleet, n, lane): crate::hosts::Lane,
+) -> Result<()> {
+    let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
+    let told =
+        |e: &&Event| e.is("repro-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts) && e.val("prompted") == true;
+    let mins = cfg.limits.stall_minutes;
+    let Some(e) = ev.iter().rfind(told).filter(|e| e.ts + mins * 60 <= ctx.now) else {
+        return Ok(());
+    };
+    let why = e.str("why").unwrap_or_default();
+    let why = format!("verdict refused NO_REPRO, not corrected {mins} min after the re-prompt: {why}");
+    escalate(ctx, cfg, out, (fleet, n), (lane, None), "NO_REPRO", &why)
+}
+
 fn repro_refused(
     ctx: &Ctx,
     cfg: &Config,
-    r: &dyn Runner,
+    (r, out): (&dyn Runner, &mut dyn Write),
     (ev, agents): (&[Event], &[Session]),
     (fleet, n, lane): (&str, u64, &str),
-    args: &[&str],
-    hash: &str,
+    (args, hash): (&[&str], &str),
 ) -> Result<()> {
     let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
     let on = crate::hosts::On::of(r, sp);
@@ -1666,7 +1692,12 @@ fn repro_refused(
     let tell = |p| crate::term::reply(&on, false, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
     let prompted = pane.is_some_and(tell);
     let d = json!({"sha": args.get(5), "hash": hash, "agent": lane, "why": why, "prompted": prompted});
-    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "repro-refused", d))
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "repro-refused", d))?;
+    if told {
+        let why = format!("verdict refused NO_REPRO again after the re-prompt: {why}");
+        escalate(ctx, cfg, out, (fleet, n), (lane, None), "NO_REPRO", &why)?;
+    }
+    Ok(())
 }
 
 fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool> {

@@ -2582,7 +2582,7 @@ fn a_no_repro_verdict_refiled_and_refused_again_is_one_owner_card() {
     c.now += 60;
     let (out, _) = drive(&c, &r);
     one_norepro_card(&c, &out);
-    assert!(out.contains("REFUSED NO_REPRO"), "{out}");
+    assert!(out.contains("NO_REPRO again after the re-prompt"), "{out}");
 }
 
 fn lesson(name: &str, live: bool) -> (drover::Ctx, Fake) {
