@@ -1,0 +1,7 @@
+Decided: write tick.step through config::write_atomic in Pass::note; leave the test and the slo-tick rule as they are
+Because: "If the rule is at fault, fix the rule, not the assertion."
+Because: crates/core/src/hosts.rs:303
+Rejected: test-only fix (retry or lock the read in busy) — slo::tick, stuck_step and doctor read the same torn file in production
+Rejected: a mutex around note — readers in other processes would still see the truncate
+Check: with the probe in the PR body, base fails 2/5 with "the tick ran 540 s" after SKIP mark=""; head passes 10/10
+Owner: The stuck-tick status file is now replaced in one step, so nothing can read it half-written; this fixes the flaky CI test.
