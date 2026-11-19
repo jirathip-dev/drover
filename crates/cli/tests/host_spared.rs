@@ -81,14 +81,23 @@ fn a_disabled_host_with_no_lane_there_gets_no_ssh_from_a_tick_or_status() {
 }
 
 #[test]
-fn a_disabled_host_with_a_live_lane_there_is_still_looked_at() {
+fn a_disabled_host_with_a_live_lane_there_is_read_by_hosts_refresh_alone() {
     let (c, _sh) = setup("spared-off-live", "enabled = false\n");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "sendmeter-impl-11", "workspace": "",
                    "worktree": "/Users/me/.herdr/worktrees/sendmeter/issue-11", "branch": "issue-11", "host": "boat1",
                    "machine": "boat1"});
-    append(&c.state, &Event::new(NOW - 600, "sendmeter", Some(11), "spawn", d)).unwrap();
+    append(
+        &c.state,
+        &Event::new(NOW - 600, "sendmeter", Some(11), "spawn", d.clone()),
+    )
+    .unwrap();
     let r = local();
     let (code, out) = run(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(to_boat1(&r), Vec::<String>::new(), "{out}");
+    let (c, _sh) = setup("spared-off-refresh", "enabled = false\n");
+    append(&c.state, &Event::new(NOW - 600, "sendmeter", Some(11), "spawn", d)).unwrap();
+    let (code, out) = run(&c, &r, &["hosts", "refresh"]);
     assert_eq!(code, 0, "{out}");
     let calls = to_boat1(&r);
     assert!(

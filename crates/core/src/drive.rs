@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+mod kicks;
 mod pickup;
 mod remote;
 
@@ -99,11 +100,8 @@ fn alive(r: &dyn Runner, pid: &str, age: u64) -> bool {
 /// Each spawn marker and kick lock (leases), live or stale: stale once its pid is gone (or reused) or it expired. `remove`: release each stale one, log `stale-marker`.
 pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<String>, Vec<Event>) {
     let (mut live, mut stale) = (vec![], vec![]);
-    let all = [
-        crate::db::leases(&ctx.state, "spawn-"),
-        crate::db::leases(&ctx.state, "kick-"),
-    ]
-    .concat();
+    let mut all = crate::db::leases(&ctx.state, "spawn-");
+    all.extend(crate::db::leases(&ctx.state, "kick-"));
     let ev = crate::events::working(&ctx.state).unwrap_or_default();
     for l in all {
         let name = l.key.clone();
@@ -112,7 +110,7 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
             continue;
         };
         let age = ctx.now.saturating_sub(l.at);
-        if holds(ctx, cfg, r, &ev, &l) {
+        if !kicks::overdue(ctx, cfg, r, &l, remove) && holds(ctx, cfg, r, &ev, &l) {
             live.push(name);
             continue;
         }
@@ -284,7 +282,7 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
     let flag = || crate::db::take(&ctx.state, &again, ctx.now, ttl, why, &|_| true).map(drop);
     let Some(k) = take(ctx, r, &format!("kick-{fleet}-{n}.lock"), ttl, fleet) else {
         flag();
-        return Ok(());
+        return kicks::in_flight(ctx, out, (fleet, n), why);
     };
     let start = crate::now();
     for _ in 0..30 {
