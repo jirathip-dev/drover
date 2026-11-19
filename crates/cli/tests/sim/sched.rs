@@ -173,6 +173,7 @@ impl Sim {
             let mut w = self.lock();
             let now = w.now;
             w.procs[me].started = Some(now);
+            drover::sim::env(lane_env(&w.procs[me].name));
             (crate::scenario::ctx(&w.root, now), w.root.clone())
         };
         let (a, b) = (Arc::clone(&self), Arc::clone(&self));
@@ -192,6 +193,7 @@ impl Sim {
             drover::main_with(cmd, &ctx, &r, &mut out, &mut std::io::empty())
         }));
         drover::sim::set(None);
+        drover::sim::env(vec![]);
         let mut w = self.lock();
         let text = String::from_utf8_lossy(&out).replace(&root.display().to_string(), "$D");
         w.procs[me].out.clone_from(&text);
@@ -401,6 +403,13 @@ impl World {
     pub fn proc_of_pid(&self, pid: u32) -> Option<&Proc> {
         self.procs.iter().find(|p| p.pid == pid)
     }
+}
+
+fn lane_env(name: &str) -> Vec<(String, String)> {
+    let lane = name.strip_prefix("turn:").and_then(|l| l.split('#').next());
+    lane.map(|l| ("DROVER_LANE".to_string(), l.to_string()))
+        .into_iter()
+        .collect()
 }
 
 /// The Runner each process sees: every call is a yield, then the model's answer.

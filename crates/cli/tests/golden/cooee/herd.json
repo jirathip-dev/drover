@@ -24,6 +24,7 @@
     },
     {
       "id": "herd-scene",
+      "load": "calm",
       "repos": [
         {
           "blocks": [

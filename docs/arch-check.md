@@ -89,8 +89,8 @@ cli = true
 
 A path counts when its first folder exists at the repo root (`../` ones from the doc's folder); fenced blocks are
 skipped. CI runs `drover arch-check --base HEAD^1 --pr-body <body>` on a pull request (checkout `fetch-depth: 2`,
-so `HEAD^1` is the base). The reason for a non-obvious line goes in the commit's why note (`drover why`), never in a
-comment.
+so `HEAD^1` is the base). The reason for a non-obvious line goes in the PR body, never in a comment. `drover turn
+done` runs arch-check in the lane's worktree too (#1362), so a violation refuses the `done` before any review.
 
 ## Frozen lists, collected folders and generated files (#890)
 

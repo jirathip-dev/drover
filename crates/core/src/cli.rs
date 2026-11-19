@@ -275,9 +275,7 @@ enum Cmd {
     Waiting(Scope),
     #[command(about = "Print the issue spec cached at spawn; read this instead of `gh issue view`")]
     Brief { fleet: String, issue: u64 },
-    #[command(
-        about = "Why a line is as it is: blame's commit, its issue, the why note on it, the issue's asks and answers"
-    )]
+    #[command(about = "Why a line is as it is: blame's commit, its issue, the issue's asks and answers")]
     Why {
         #[arg(help = "The line, as `<file>:<line>`")]
         at: String,
@@ -949,6 +947,8 @@ enum HostsCmd {
     Refresh,
     #[command(hide = true, about = "#1309: this host's lanes as one frame for the main host")]
     Report,
+    #[command(hide = true, about = "#1319: `report` kept open, a frame a change")]
+    Watch,
     #[command(about = "Let new lanes go to this host again; logs `host-on`")]
     On { name: String },
     #[command(
@@ -1278,8 +1278,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hosts {
-            cmd: Some(HostsCmd::Report),
-        } => crate::link::watch::serve(r, stdin, out)?,
+            cmd: Some(c @ (HostsCmd::Report | HostsCmd::Watch)),
+        } => crate::link::watch::answer(r, matches!(c, HostsCmd::Watch), stdin, out)?,
         Cmd::Hook {
             role,
             git_pre_push: true,
@@ -1819,7 +1819,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     writeln!(out, "{line}")?;
                 }
                 Cmd::Hosts { cmd } => match cmd {
-                    None | Some(HostsCmd::Report) => crate::hosts::list(ctx, &cfg, r, out, false)?,
+                    None | Some(HostsCmd::Report | HostsCmd::Watch) => crate::hosts::list(ctx, &cfg, r, out, false)?,
                     Some(HostsCmd::Refresh) => crate::hosts::list(ctx, &cfg, r, out, true)?,
                     Some(HostsCmd::On { name }) => crate::hosts::toggle(ctx, out, &name, true, "cli")?,
                     Some(HostsCmd::Off { name }) => crate::hosts::toggle(ctx, out, &name, false, "cli")?,
@@ -2059,16 +2059,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         bail!("a {role} lane reports no turn: impl, fix and update lanes do");
                     }
                     let done = state == "done" && !matches!(role, "triage" | "lesson");
+                    let head = if done {
+                        crate::done::turn(ctx, &cfg, r, (f, n), role)?
+                    } else {
+                        None
+                    };
                     let ui = done.then(|| crate::guard::turn(ctx, &cfg, r, out, (f, n), role));
                     let ui = ui.transpose()?.flatten();
-                    let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
-                    let note = note.transpose()?.flatten();
-                    let mut d = json!({"state": state, "why": why, "role": role});
+                    let mut d = json!({"state": state, "why": why, "role": role, "sha": head});
                     if let Some(u) = ui {
                         d.put("ui_check", u);
-                    }
-                    if let Some((code, w)) = &note {
-                        d.put("note", json!(format!("{code}: {w}")));
                     }
                     emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
                     writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
@@ -2076,9 +2076,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         writeln!(out, "ask the question with `drover ask {f} {n} …` if you have not")?;
                     }
                     kick(f, n, "turn");
-                    if let Some((code, w)) = note {
-                        return gate::refused(code, w);
-                    }
                 }
                 Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
                 Cmd::Lesson {

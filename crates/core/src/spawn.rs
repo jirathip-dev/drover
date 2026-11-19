@@ -761,7 +761,6 @@ pub const OWN_FILES: &[&str] = &[
     ".mcp.lane.json",
     "verdict.md",
     ".review-brief.md",
-    "why.md",
     "body.md",
     ".verify-browser.mjs",
     ".verify.md",
@@ -1409,10 +1408,7 @@ pub fn spawn(
             .map(plain)
             .chain(int_note)
             .chain(adr)
-            .chain((!crate::events::STAGES.contains(&p.family)).then(|| {
-                let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
-                crate::why::brief(r, f, &events, (fleet, issue), rev, body)
-            }).flatten())
+            .chain((p.family == "rev").then(|| crate::guard::brief(&events, (fleet, issue))).flatten())
             .chain(note.clone())
             .chain(history.brief())
             .chain(resume)

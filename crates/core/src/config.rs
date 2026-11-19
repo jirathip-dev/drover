@@ -466,6 +466,8 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// Fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<Premerge>>,
+    /// Commands `turn done` runs in the lane's worktree before any review; unset = `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
+    pub done_checks: Option<Vec<String>>,
     /// The repo's own line-cap script `drover cap` reads `N / cap M` lines from; unset = the first `premerge` check naming a cap, else the built-in Rust count.
     pub cap_script: Option<String>,
     /// `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
@@ -568,7 +570,7 @@ pub enum Sandbox {
     Srt,
 }
 
-/// `squash` lands a PR as one commit carrying its why notes and deletes its branch; `merge` keeps every commit.
+/// `squash` lands a PR as one commit and deletes its branch; `merge` keeps every commit.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MergeMode {
@@ -747,6 +749,12 @@ pub struct Limits {
     pub ssh_connect_secs: u64,
     pub ssh_quick_secs: u64,
     pub ssh_call_secs: u64,
+    pub link_beat_secs: u64,
+    pub link_stale_secs: u64,
+    pub link_retry_max_secs: u64,
+    pub link_poll_millis: u64,
+    pub link_sample_secs: u64,
+    pub link_down_minutes: u64,
     pub db_busy_secs: u64,
     pub db_retry_millis: u64,
     pub cloud_idle_stop_minutes: u64,
@@ -849,17 +857,9 @@ impl Default for Limits {
             fast_secs: 60,
             slow_secs: 300,
             overflow_after_minutes: 10,
-            form_categories: [
-                "trailer",
-                "pr-body",
-                "stale-baseline",
-                "format",
-                "docs-fresh",
-                "migration-redate",
-                "infra",
-            ]
-            .map(String::from)
-            .into(),
+            form_categories: ["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]
+                .map(String::from)
+                .into(),
             form_rounds: 3,
             import_max_age_hours: 24,
             max_pushes_per_pass: 3,
@@ -881,6 +881,12 @@ impl Default for Limits {
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
             ssh_call_secs: 20,
+            link_beat_secs: 5,
+            link_stale_secs: 20,
+            link_retry_max_secs: 30,
+            link_poll_millis: 500,
+            link_sample_secs: 30,
+            link_down_minutes: 5,
             db_busy_secs: 60,
             db_retry_millis: 10,
             cloud_idle_stop_minutes: 20,
@@ -1088,6 +1094,12 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe",
     ),
     ("ssh_call_secs", "a remote call in a pass is killed after this long"),
+    ("link_beat_secs", "a host's watcher with nothing to say writes a beat this often"),
+    ("link_stale_secs", "no frame from a host's link for this long: it is cut and dialled again"),
+    ("link_retry_max_secs", "the longest wait between a link's dials (1 s, doubling)"),
+    ("link_poll_millis", "how often a watcher looks at each outbox, verdict.md and shed session for a change"),
+    ("link_sample_secs", "a watcher sends a whole report this often, changed or not"),
+    ("link_down_minutes", "a host with lanes whose link is not live this long alerts `link-down`"),
     ("db_busy_secs", "the SQLite busy timeout"),
     (
         "db_retry_millis",
@@ -1845,7 +1857,7 @@ pub fn expand(p: &str) -> PathBuf {
 
 /// The environment variable `k`; `None` when unset or not UTF-8.
 pub fn env(k: &str) -> Option<String> {
-    std::env::var(k).ok()
+    crate::sim::var(k).or_else(|| std::env::var(k).ok())
 }
 
 /// The environment variable `k`, raw.

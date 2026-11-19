@@ -1221,12 +1221,12 @@ fn herd_screen(h: &Herd) -> Value {
         .collect();
     repos.extend(herd_repo("others", "", &h.others, None));
     let host = &h.host;
-    let wind = (host.load.unwrap_or_default() / host.limit.max(0.01)).clamp(0.0, 1.0);
-    let sky = match host.pressure.as_deref() {
-        _ if host.gate.is_some() => "storm",
-        Some("warn" | "critical") => "fog",
-        _ if wind >= 0.5 => "windy",
-        _ => "clear",
+    let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
+    let (sky, level) = match host.pressure.as_deref() {
+        _ if host.gate.is_some() => ("storm", "held"),
+        Some("warn" | "critical") => ("fog", "busy"),
+        _ if ratio >= 0.5 => ("windy", "busy"),
+        _ => ("clear", "calm"),
     };
     let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
     let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
@@ -1234,8 +1234,8 @@ fn herd_screen(h: &Herd) -> Value {
         "load {load} · mem {} · swap {swap}",
         host.pressure.as_deref().unwrap_or("?")
     );
-    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene",
-        "weather": {"sky": sky, "wind": (wind * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
+    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene", "load": level,
+        "weather": {"sky": sky, "wind": (ratio.clamp(0.0, 1.0) * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
 }
 
 fn section_word(state: &str) -> &str {
@@ -1986,3 +1986,7 @@ fn cooee() -> devices::Device {
         ..Default::default()
     }
 }
+
+#[cfg(test)]
+#[path = "herd_tests.rs"]
+mod tests;
