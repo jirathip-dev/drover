@@ -1,0 +1,13 @@
+Decided: the Board tab draws the phone's screen trees as text through one generic walk (board/lay.rs), reading blocks by field name; an unknown block type draws its text fields and its children.
+Because: "It draws the same screens the phone draws (`crates/server/src/screens.rs`, the JSON blocks; the #927 rule)"
+Decided: serve::Local (crates/server/src/screens_local.rs) builds screens and runs actions in-process; the HTTP /action arm and the door both call Server::perform.
+Because: q2382
+Decided: one slice, not three: the issue's AC is the complete client, so the door, the read-only tab and the actions land together.
+Rejected: typed blocks (a Rust enum per block type) — a new block would need a terminal change before it shows.
+Rejected: keeping the threads health check in the frame — it stays in Threads, which already owns it; the frame asks it for the top line.
+Decided: `drover board` opens the app only when APP is set, DROVER_LANE is unset and stdout is a terminal; else today's table, unchanged.
+Because: "`drover board` with stdout not a terminal (a lane, a pipe) prints today's table unchanged"
+Decided: a field's Enter keeps it, then opens its form's send or the sheet's done panel, so backlog search runs by two presses through the phone's own `queue` action.
+Check: cargo test -p drover --test board_tui --test local_screens --test chat_tui; every screen reached from the places draws every title, value, badge and label at 40 and 120.
+Check: crates/cli/tests/local_screens.rs compares Local::screen with the HTTP body for each screen and runs refusals through the door.
+Owner: `drover board` on a terminal is now the live phone board in text, with every action by two key presses, and needs no serve; please try it on the phone terminal.
