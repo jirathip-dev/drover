@@ -1,0 +1,10 @@
+Decided: serve accepts and reads requests on a 2-worker tokio runtime; at most 64 are answered at once on blocking threads, the rest wait for a slot.
+Because: "drover serve moves onto tokio as part of #1318 (like drover service): async accept"
+Because: q2091
+Because: docs/architecture/screen-hub/adr.md:152
+Decided: the cap test holds 64 handlers inside a gated runner on the /design file route, so the 65th really waits.
+Rejected: 80 plain requests at once — they finish too fast to fill 64 slots, so that test passed on the old code.
+Rejected: a thread per connection with no handler cap (the old loop) — 256 slow requests meant 256 threads.
+Check: crates/cli/tests/serve_conn.rs fails on origin/staging with "65 vs 64" and passes at the head.
+Check: tokio is banned in core and sys in .drover/arch.toml; docs/serve.md lists tokio for crates/server.
+Owner: Serve now takes connections without a thread each and caps busy work at 64; extra requests wait their turn instead of piling up threads.
