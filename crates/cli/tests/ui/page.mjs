@@ -82,8 +82,9 @@ try {
 
   await tap('#sysb');
   await tap('#sheet .row', 'drover');
-  await until(`!!document.querySelector('#sheet select[name="sendmeter.impl"]')`, 'the Fleets sheet');
-  await js(`(s => { s.value = 'sonnet'; s.dispatchEvent(new Event('change')); })(document.querySelector('#sheet select[name="sendmeter.impl"]'))`);
+  await tap('#sheet .fd:has(input[name="sendmeter.impl"]) .dd button');
+  await tap('#sheet .ddp [role=option]', 'sonnet');
+  await until(`document.querySelector('#sheet input[name="sendmeter.impl"]').value === 'sonnet'`, 'the Fleets sheet');
   await tap('#sheet .sh button', 'save');
   out.steps.fleets = await toast('save');
   out.sheetClosed = await js(`document.getElementById('sheet').hidden`);

@@ -1,0 +1,4 @@
+/* github-dark, the default scheme (assets/schemes/github-dark.json), set inline as the page's scheme loader would. */
+:root{color-scheme:dark;--bg:#0d1117;--card:#161b22;--edge:#30363d;--line:#21262d;--scrim:#000000aa;--fg:#c9d1d9;--mute:#8b949e;--l:#58a6ff;--link:#58a6ff;--g:#3fb950;--a:#d29922;--r:#f85149;--p:#bc8cff;--c:#39c5cf}
+/* Mockup only: the focus screen drawn in the page flow; at 1440 the column is centred at the focus screen's 760 px. */
+.scr{max-width:760px;margin-inline:auto}
