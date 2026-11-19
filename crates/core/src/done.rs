@@ -172,7 +172,8 @@ pub(crate) fn ungated(
             )
         },
     );
-    if refused.len() >= 3 || told.is_some_and(|t| ctx.now >= t.ts + cfg.limits.stall_minutes * 60) {
+    let quiet = told.map(|t| refused.last().map_or(t.ts, |e| e.ts.max(t.ts)));
+    if refused.len() >= 3 || quiet.is_some_and(|q| ctx.now >= q + cfg.limits.stall_minutes * 60) {
         writeln!(out, "{fleet} #{n} needs-human: {why}")?;
         let d = json!({"code": "DONE_REFUSED", "reason": why, "agent": lane, "sha": head});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))?;

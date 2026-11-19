@@ -49,6 +49,10 @@ fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
+fn done_at(c: &drover::Ctx, ts: u64, head: &str) {
+    ev(c, ts, "turn-end", json!({"state": "done", "role": "impl", "sha": head}));
+}
+
 fn lane(c: &drover::Ctx, ts: u64, role: &str, agent: &str, dir: &str) -> PathBuf {
     let wt = c.worktrees.join("sendmeter").join(dir);
     std::fs::create_dir_all(&wt).unwrap();
@@ -150,6 +154,7 @@ fn review_spawns_rev_at_the_pushed_head() {
     let c = setup("drive-review");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
+    done_at(&c, 11, &head);
     let r = fake(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy())])
         .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
         .reply("gh pr view issue-12", &pr(&head, "pending"))
@@ -991,6 +996,12 @@ fn a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_updat
     assert_eq!(state(&c), "fix(1)+u1");
     let (_, out) = run(&c, &pr_at("b2"), &["waiting", "sendmeter"]);
     assert!(
+        !out.contains("to spawn review"),
+        "no review before a passed done: {out}"
+    );
+    done_at(&c, 21, &sha("b2"));
+    let (_, out) = run(&c, &pr_at("b2"), &["waiting", "sendmeter"]);
+    assert!(
         out.contains("waiting for drive (next pass ≤ 5 min) to spawn review"),
         "{out}"
     );
@@ -1010,6 +1021,7 @@ fn a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_updat
         "spawn",
         json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"}),
     );
+    done_at(&c, 32, &sha("c3"));
     let (_, out) = run(&c, &pr_at("c3"), &["waiting", "sendmeter"]);
     assert!(
         out.contains("waiting for drive (next pass ≤ 5 min) to spawn review") && !out.contains("--update"),
@@ -1600,6 +1612,7 @@ fn under_limited_admission_a_review_goes_before_the_fleets_new_start() {
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "5"]).0, 0);
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
+    done_at(&c, 11, &head);
     let r = Fake {
         replies: fake(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy())])
             .reply("gh pr view issue-12", &pr(&head, "pending"))
@@ -1716,6 +1729,7 @@ fn a_refused_review_start_shows_waiting_for_a_reviewer_slot() {
     let c = setup("drive-rev-slot");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
+    done_at(&c, 11, &head);
     let r = Fake {
         replies: fake(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy())])
             .reply("gh pr view issue-12", &pr(&head, "pending"))
@@ -2633,6 +2647,7 @@ fn old_reviewer(name: &str, status: &str) -> (drover::Ctx, Fake) {
     let rev = lane(&c, 5, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
+    done_at(&c, 11, &head);
     let r = fake(&[
         ("sendmeter-impl-12", "idle", &wt.to_string_lossy()),
         ("sendmeter-rev-12-r1", status, &rev.to_string_lossy()),
