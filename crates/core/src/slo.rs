@@ -12,6 +12,25 @@ const DRIVE_HEALS: [&str; 3] = ["respawned-silent", "nudged", "marked-ready"];
 const WAITS: [&str; 1] = ["slo-idle:"];
 const PROGRESS: [&str; 5] = ["spawn", "verdict", "pushed", "lane-pushed", "turn-end"];
 const LOAD: [&str; 3] = ["HOST_BUSY", "MEM_LOW", "DISK_LOW"];
+const GONE_CWD: &str = "current directory: No such file or directory";
+
+/// A spawn error from drover's own deleted current directory: healed by one retry, never counted as failing the same way.
+pub fn cwd_gone(error: Option<&str>) -> bool {
+    error.is_some_and(|e| e.contains(GONE_CWD))
+}
+
+/// `start` of `fleet` #`n`'s lane, run once more after one `self-heal` when it failed on a deleted current directory.
+pub fn start_healed(ctx: &Ctx, (fleet, n): (&str, u64), start: impl Fn() -> Result<()>) -> Result<()> {
+    match start() {
+        Err(e) if cwd_gone(Some(&format!("{e:#}"))) => {
+            let did = format!("retried #{n}'s start from an existing directory");
+            let d = json!({"key": format!("error:{fleet}#{n}"), "did": did, "reason": GONE_CWD});
+            append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "self-heal", d))?;
+            start()
+        }
+        s => s,
+    }
+}
 
 enum Heal {
     StopTick(String),

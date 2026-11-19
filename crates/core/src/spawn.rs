@@ -1462,7 +1462,7 @@ pub fn spawn(
     event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
     pj.put("history", json!(history.line(&p.branch)));
-    bt.start(ctx, r, &pane, &labels, &wt, &acp)?;
+    crate::slo::start_healed(ctx, (fleet, issue), || bt.start(ctx, r, &pane, &labels, &wt, &acp))?;
     if bt.0.acp.is_none() {
         term::ok(r, &home(p.lane_cmd(&pane)))?;
         term::ok(r, &term::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
