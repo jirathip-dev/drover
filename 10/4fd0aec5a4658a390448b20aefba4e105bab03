@@ -1,0 +1,61 @@
+Decided: each board GET is one build: gh cache files parsed once (gh::memo), shed listed once, fleet.toml parsed once per file stamp
+Because: "Each gh cache file parsed once per build."
+Because: q2042
+Decided: the live Queue cause is the gh cache, re-parsed ~4x per issue plus the backlog per spec-less row; 486 -> 36 ms on a 139 MB fixture
+Decided: SQLite connections pool process-wide; a pooled one still runs the user_version upgrade on checkout
+Because: crates/core/src/db.rs:90
+Rejected: keep thread-local connections — serve spawns a thread per request, so each request reopened the database
+Decided: hosts sheet reads leftovers and proxy facts kept by the host sampler, refresh and actions
+Because: "never from shed or leftovers on the request"
+Check: the live-state snapshot numbers were not taken: no snapshot exists on this lane host
+Owner: Queue opens about 13x faster on a live-shaped cache; live-state numbers still need the approved snapshot
+
+Decided: each board GET is one build: gh cache files parsed once (gh::memo), shed listed once, fleet.toml parsed once per file stamp
+Because: "Each gh cache file parsed once per build."
+Because: q2042
+Decided: the live Queue cause is the gh cache, re-parsed ~4x per issue plus the backlog per spec-less row; 486 -> 36 ms on a 139 MB fixture
+Decided: SQLite connections pool process-wide; a pooled one still runs the user_version upgrade on checkout
+Because: crates/core/src/db.rs:90
+Rejected: keep thread-local connections — serve spawns a thread per request, so each request reopened the database
+Decided: hosts sheet reads leftovers and proxy facts kept by the host sampler, refresh and actions
+Because: "never from shed or leftovers on the request"
+Check: the live-state snapshot numbers were not taken: no snapshot exists on this lane host
+Owner: Queue opens about 13x faster on a live-shaped cache; live-state numbers still need the approved snapshot
+
+Decided: each board GET is one build: gh cache files parsed once (gh::memo), shed listed once, fleet.toml parsed once per file stamp
+Because: "Each gh cache file parsed once per build."
+Because: q2042
+Decided: the live Queue cause is the gh cache, re-parsed ~4x per issue plus the backlog per spec-less row; 486 -> 36 ms on a 139 MB fixture
+Decided: SQLite connections pool process-wide; a pooled one still runs the user_version upgrade on checkout
+Because: crates/core/src/db.rs:90
+Rejected: keep thread-local connections — serve spawns a thread per request, so each request reopened the database
+Decided: hosts sheet reads leftovers and proxy facts kept by the host sampler, refresh and actions
+Because: "never from shed or leftovers on the request"
+Check: the live-state snapshot numbers were not taken: no snapshot exists on this lane host
+Owner: Queue opens about 13x faster on a live-shaped cache; live-state numbers still need the approved snapshot
+
+Decided: merge origin/staging 49f95b77; serve.rs sessions() keeps this branch's once-per-build shed memo and fills staging's listed snapshot inside it
+Because: "One shed ls per build, shared by all its parts."
+Rejected: none
+Owner: Brought the speed-up up to date with staging; screens stay under 150 ms on the live-shaped fixture
+
+Decided: a host action returns the sheet from the sampled leftovers and proxy facts; only the sampler and refresh read them
+Because: "The hosts sheet is built only from data refreshed in the background, never from shed or leftovers on the request."
+Rejected: kicking the sampler after an action — no wake channel exists; the count catches up within serve_host_secs
+Decided: this PR's benches live in crates/cli/tests/perf/screens.rs, a child module of perf.rs
+Because: .drover/arch.toml:197
+Rejected: a new test target — it would copy perf.rs's fixtures and need a shard line
+Check: the AC test POSTs a host action and asserts zero shed ls; it fails with the old host_op
+Owner: the line cap raise (60000) is on staging; this PR now fits under it
+
+Decided: merge origin/staging 70bc331d; crates/cli/tests/shed.rs returns to staging's 2556 lines, under its 2557 size baseline
+Because: crates/cli/tests/shed.rs:1
+Rejected: merging the wip snapshot — it holds only local test logs, and build output never goes in git
+Check: arch-check's only remaining local violation is `just gen` missing on this host
+Owner: Brought the speed-up up to date with staging again; screens stay under 150 ms on the live-shaped fixture
+
+Decided: no code change this round; re-ran CI's failed jobs at d462050 instead
+Because: crates/cli/tests/drive.rs:781
+Rejected: editing the drive test's wall-clock line — it is staging's test, this diff does not touch the drive pass
+Check: ui-webkit at e60aeeb and d462050 died in `playwright install --with-deps` (apt mirrors unreachable), no UI test ran
+Owner: CI was red from a network outage and one timing-sensitive test; the code is unchanged
