@@ -1,0 +1,8 @@
+{"args":["turn","done"],"lane":"herdsman:1297:impl","ts":1795114129086}
+{"args":["done","--no-change","form-only fix: PR body now has ## Parity (rows 34 and 81 kept, none dropped); head unchanged at 54fa8e38","herdsman","1297"],"lane":"herdsman:1297:impl","ts":1795114643146}
+{"args":["turn","done"],"lane":"herdsman:1297:impl","ts":1795114649840}
+{"args":["turn","done"],"lane":"herdsman:1297:impl","ts":1795115849767}
+{"args":["turn","done"],"lane":"herdsman:1297:impl","ts":1795120594087}
+{"args":["turn","working","--why","rust green at 2aea3b4f; ui-webkit phone_timings flaked (send median 167 ms vs 28 ms at 18d40c7a, same web code); re-run of failed job in progress, then PR body evidence + turn done"],"lane":"herdsman:1297:impl","ts":1795121076458}
+{"args":["turn","working","--why","merged origin/staging, pushed 30658075; CI running (prior ui-webkit reds were the herd/phone_timings flakes also red on staging 3ab9185f); then PR body + turn done"],"lane":"herdsman:1297:impl","ts":1795121434001}
+{"args":["turn","done"],"lane":"herdsman:1297:impl","ts":1795121972722}
