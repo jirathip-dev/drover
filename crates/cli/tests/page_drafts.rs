@@ -317,7 +317,11 @@ fn a_page_of_an_older_build_reloads_once_without_drawing_a_newer_serves_blocks_a
     );
     assert_eq!(out["same"]["loads"], 2, "the same build never reloads: {out}");
     assert_eq!(
-        (&out["focused"]["loads"], &out["focused"]["new"], &out["focused"]["value"]),
+        (
+            &out["focused"]["loads"],
+            &out["focused"]["new"],
+            &out["focused"]["value"]
+        ),
         (&json!(3), &Value::Null, &json!("half a thought")),
         "a focused field holds the reload, and the newer event draws nothing: {out}"
     );
