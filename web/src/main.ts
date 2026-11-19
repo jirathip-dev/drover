@@ -256,7 +256,13 @@ function stream(v: View) {
 const close = (v: View) => { clearTimeout(v.retry); v.retry = undefined; v.es?.close(); v.es = undefined; v.live = false; };
 function revive(v: View) {
   close(v);
-  v.retry = setTimeout(() => { v.retry = undefined; if (v === shv) stream(v); else void load(v, true); }, Math.min(30_000, 1000 * 2 ** v.tries++));
+  v.retry = setTimeout(() => { v.retry = undefined; void (v === shv ? resheet() : load(v, true)); }, Math.min(30_000, 1000 * 2 ** v.tries++));
+}
+async function resheet() {
+  const p = shv.path, m = await fetchScreen(p).catch(() => null);
+  if (sh.hidden || shv.path !== p || shv.es) return;
+  if (m) { shv.model = m; drawSheet(); }
+  stream(shv);
 }
 
 const ys = new Map<string, number>();
