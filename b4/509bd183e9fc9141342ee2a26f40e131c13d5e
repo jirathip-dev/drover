@@ -1,0 +1,21 @@
+Decided: every local child the runner starts gets `/` as its current directory when drover's own is gone (crates/core/src/runner.rs:105); otherwise it inherits it as before.
+Because: "core never sets the current directory of the commands it runs"
+Decided: a lane start that fails with "current directory: No such file or directory" logs one self-heal and runs once more (crates/core/src/slo.rs:23); drive's failure count skips that error (crates/core/src/drive.rs:433).
+Because: "healed (retried once from an existing directory)"
+Rejected: chdir at process start only — a long-running serve or drive whose directory is deleted later would still pass it on; the per-command check covers both.
+Rejected: the state dir as the fallback — the runner holds no ctx, and `/` always exists (the spec says "its state dir, else `/`").
+Rejected: the retry in drive's act — drive.rs is over its size baseline, and the start in spawn.rs is the one place shed is called.
+Check: remote commands keep their remote cwd: only the local ssh process's directory changes, and only when the local one is gone.
+Owner: A lane started by a kick from a cleaned-up lane's hook no longer fails in shed or gets the issue stuck.
+
+Decided: gone_cwd is listed in CI's test shard 3, the smallest shard after shard 1 tie (scripts/test-shards.txt:62).
+Because: scripts/test-shards.sh:13
+Rejected: shard 1 — equal size; shard 3 is where the failing CI log pointed.
+Check: scripts/test-shards.sh check exits 0 and the rust job is green.
+Owner: The new regression test now runs in CI; nothing else changed in this round.
+
+Decided: no src change this round; merged origin/staging to rerun CI, the red test is a timing flake in a fake-runner simulation.
+Because: crates/cli/tests/drive_sim.rs:134
+Rejected: changing drive_sim's timing asserts — out of scope for #1358 and the test passes 7/7 locally at this head.
+Check: shard 2 green at d7ac564a; drive_sim never calls runner::Real, the only runner this PR changed (crates/core/src/runner.rs:105).
+Owner: CI failed on an unrelated, timing-sensitive test; the fix itself is unchanged.
