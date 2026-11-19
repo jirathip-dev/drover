@@ -108,6 +108,7 @@ fn parity_75() {
     let r = runner(&wt);
     let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
+    s.refresh(NOW);
     let off = json!({"host": "cloud1", "to": "off"});
     assert_eq!(post(&s, "", "host", &off).0, 401, "only a paired device acts");
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", NOW);

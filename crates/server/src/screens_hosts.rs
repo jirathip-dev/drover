@@ -115,7 +115,6 @@ impl Server<'_> {
     pub(super) fn host_op(&self, ctx: &Ctx, op: &str, v: &Value) -> Result<Value> {
         let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
         let line = self.form_op(ctx, op, &[("host", s("host")), ("to", s("to"))])?;
-        self.read_hosts(ctx.now);
         let sh = self.hosts_sheet(ctx).context("no hosts")?;
         Ok(json!({"ops": [{"op": "screen", "screen": sh}], "toast": line}))
     }

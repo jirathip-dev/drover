@@ -1296,6 +1296,8 @@ fn screens_on_a_live_shaped_fixture() {
 #[test]
 fn a_queue_build_lists_shed_once_and_neither_it_nor_the_hosts_sheet_starts_a_process() {
     let (c, f, sh) = big_with(10);
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, format!("{cfg}\n[hosts.b1]\nmachine = \"b1\"\n")).unwrap();
     let r = NoSpawn(
         Slow(f, Mutex::default(), AtomicUsize::new(0), Some(sh), shed()),
         Mutex::default(),
@@ -1314,6 +1316,20 @@ fn a_queue_build_lists_shed_once_and_neither_it_nor_the_hosts_sheet_starts_a_pro
         );
         assert!(ls() - before <= most, "{path} listed shed {} times", ls() - before);
     }
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", NOW);
+    let tap = json!({"screen": "hosts", "block": "hosts", "action": "host", "values": {"host": "b1", "to": "off"}})
+        .to_string();
+    let before = ls();
+    let res = s.respond(
+        &format!(
+            "POST /action HTTP/1.1\r\nHost: {ADDR}\r\n{ck}Content-Length: {}\r\n\r\n{tap}",
+            tap.len()
+        ),
+        NOW,
+    );
+    let res = String::from_utf8_lossy(&res);
+    assert!(res.starts_with("HTTP/1.1 200") && res.contains("b1 off"), "{res}");
+    assert_eq!(ls() - before, 0, "a host action listed shed");
     assert_eq!(
         *r.1.lock().unwrap(),
         Vec::<String>::new(),
