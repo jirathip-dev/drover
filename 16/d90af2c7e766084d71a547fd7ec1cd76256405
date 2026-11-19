@@ -1,0 +1,18 @@
+Decided: one reader crate::shed::adapter returns the adapter cmd from `installed` else the top level; spawn, doctor and the hosts guard call it
+Because: "an agent's adapter is `installed` when present, else the top-level fields (old shape)"
+Decided: the cloud check splits the JSON on `{` and needs id and cmd in one object, so a bare record runs `shed agents add`
+Because: "a record with `installed: null` is \"not installed\" in spawn, doctor, the hosts guard and the cloud setup step"
+Rejected: grep for `"id":"x","version"` — depends on shed's key order
+Check: crates/cli/tests/remote_acp.rs bootstrap test runs the real check string through sh against both shapes
+Owner: hosts on the new shed can start lanes again; an agent that is listed but not installed counts as missing
+
+Decided: one reader crate::shed::adapter returns the adapter cmd from `installed` else the top level; spawn, doctor and the hosts guard call it
+Because: "an agent's adapter is `installed` when present, else the top-level fields (old shape)"
+Decided: the cloud check splits the JSON on `{` and needs id and cmd in one object, so a bare record runs `shed agents add`
+Because: "a record with `installed: null` is \"not installed\" in spawn, doctor, the hosts guard and the cloud setup step"
+Rejected: grep for `"id":"x","version"` — depends on shed's key order
+Decided: the ACP listing fakes and the shed#129 test move to the tests/acp_listing submodule unchanged
+Because: .drover/arch-baseline.txt:4
+Rejected: raising shed.rs's size baseline — the baseline exists so the file only shrinks
+Check: crates/cli/tests/remote_acp.rs bootstrap test runs the real check string through sh against both shapes
+Owner: hosts on the new shed can start lanes again; an agent that is listed but not installed counts as missing
