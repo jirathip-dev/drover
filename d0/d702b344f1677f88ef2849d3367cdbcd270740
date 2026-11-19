@@ -1,0 +1,43 @@
+Decided: a stream reads the log's last seq before it builds its first screen, not after
+Because: crates/server/src/screens.rs:1909
+Because: "It waits for the queued row's button rather than racing the stream."
+Rejected: only lengthening the test's wait — the stream held the queued row for its 30 s rebuild, a real lag for the owner too
+Rejected: blaming #1351's build reload — #1318 failed at 13:48, before #1351 merged at 15:22
+Decided: the regression test appends a thread reply from inside the stream's first build (a runner hook on the shed call made by threads_screen), deterministic, no WebKit needed
+Decided: every staging push runs ui-webkit, chosen over a nightly run, so a break shows on the commit that caused it
+Because: .github/workflows/ci.yml:240
+Check: stream_quiet's new test fails at 0a916f7 alone and passes at the head; ui-webkit ran parity_26 and the model-pick test 10 of 10 at 98a9b27
+Owner: A message queued or a model picked just as a thread opens now shows at once, and the WebKit tests run on every staging push.
+
+Decided: a stream reads the log's last seq before it builds its first screen, not after
+Because: crates/server/src/screens.rs:1909
+Because: "It waits for the queued row's button rather than racing the stream."
+Rejected: only lengthening the test's wait — the stream held the queued row for its 30 s rebuild, a real lag for the owner too
+Rejected: blaming #1351's build reload — #1318 failed at 13:48, before #1351 merged at 15:22
+Decided: the regression test appends a thread reply from inside the stream's first build (a runner hook on the shed call made by threads_screen), deterministic, no WebKit needed
+Decided: every staging push runs ui-webkit, chosen over a nightly run, so a break shows on the commit that caused it
+Because: .github/workflows/ci.yml:240
+Check: stream_quiet's new test fails at 0a916f7 alone and passes at the head; ui-webkit ran parity_26 and the model-pick test 10 of 10 at 98a9b27
+Owner: A message queued or a model picked just as a thread opens now shows at once, and the WebKit tests run on every staging push.
+
+Decided: a stream reads the log's last seq before it builds its first screen, not after
+Because: crates/server/src/screens.rs:1909
+Because: "It waits for the queued row's button rather than racing the stream."
+Rejected: only lengthening the test's wait — the stream held the queued row for its 30 s rebuild, a real lag for the owner too
+Rejected: blaming #1351's build reload — #1318 failed at 13:48, before #1351 merged at 15:22
+Decided: the regression test appends a thread reply from inside the stream's first build (a runner hook on the shed call made by threads_screen), deterministic, no WebKit needed
+Decided: every staging push runs ui-webkit, chosen over a nightly run, so a break shows on the commit that caused it
+Because: .github/workflows/ci.yml:240
+Check: stream_quiet's new test fails at 0a916f7 alone and passes at the head; ui-webkit ran parity_26 and the model-pick test 10 of 10 at 98a9b27
+Owner: A message queued or a model picked just as a thread opens now shows at once, and the WebKit tests run on every staging push.
+
+Decided: a stream reads the log's last seq before it builds its first screen, not after
+Because: crates/server/src/screens.rs:1909
+Because: "It waits for the queued row's button rather than racing the stream."
+Rejected: only lengthening the test's wait — the stream held the queued row for its 30 s rebuild, a real lag for the owner too
+Rejected: blaming #1351's build reload — #1318 failed at 13:48, before #1351 merged at 15:22
+Decided: the regression test appends a thread reply from inside the stream's first build (a runner hook on the shed call made by threads_screen), deterministic, no WebKit needed
+Decided: every staging push runs ui-webkit, chosen over a nightly run, so a break shows on the commit that caused it
+Because: .github/workflows/ci.yml:240
+Check: stream_quiet's new test fails at 0a916f7 alone and passes at the head; ui-webkit ran parity_26 and the model-pick test 10 of 10 at 98a9b27
+Owner: A message queued or a model picked just as a thread opens now shows at once, and the WebKit tests run on every staging push.
