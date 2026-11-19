@@ -69,10 +69,9 @@ pub fn config(ctx: &Ctx) -> Result<Config> {
 
 /// Each alert's dedup key is built from the issue's last activity: once per state, again after a change.
 pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let events = working(&ctx.state)?;
+    let events = crate::timer::revive(ctx, cfg, r).and_then(|()| working(&ctx.state))?;
     PUSHES.set((0, 0));
     std::fs::write(ctx.state.with_file_name("check.at"), ctx.now.to_string()).ok();
-    crate::timer::revive(ctx, cfg, r)?;
     let local = crate::session::on(r).map_err(|e| format!("{e:#}"));
     if let Err(e) = &local {
         crate::stderr!("drover check: the agent list failed ({e}); skipping lane checks");
