@@ -1947,17 +1947,7 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         |n: &String| acts(&|a| a["step"] == "start" && a["issue"].as_u64().is_some_and(|i| n == &i.to_string()));
     let stop = crate::starts::stops;
     let (mut res, mut go) = (Ok(()), !acts(&|a| a["step"] == "start" && stop(a["code"].as_str())));
-    let mut queued: Vec<String> = (queue::startable(&events, fleet).into_iter())
-        .filter(|n| one(n) && !tried(n))
-        .collect();
-    let swept = if queued.is_empty() {
-        vec![]
-    } else {
-        markers(ctx, cfg, r, true).1
-    };
-    let stale =
-        |n: &String| crate::starts::went_stale(&swept, fleet, n) || crate::starts::went_stale(&events, fleet, n);
-    queued.sort_by_cached_key(stale);
+    let queued = (queue::startable(&events, fleet).into_iter()).filter(|n| one(n) && !tried(n));
     for n in queued {
         if !go || fast && !crate::starts::free(cfg, &pending(ctx, cfg, r)) {
             break;
