@@ -1,4 +1,6 @@
 mod common;
+#[path = "drive/update_limit.rs"]
+mod update_limit;
 use common::*;
 use drover::events::{append, fold, read, Event};
 use serde_json::json;
@@ -1977,35 +1979,6 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     assert_eq!(steps, ["start"], "{out}");
     assert!(!started("").is_empty(), "{:?}", r.calls.borrow());
     assert_eq!(state(&c), "fix(3)");
-}
-
-#[test]
-fn an_extend_during_a_pass_only_requeues_it() {
-    let c = setup("drive-extend-lock");
-    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
-    ev(
-        &c,
-        12,
-        "verdict",
-        json!({"verdict": "FAIL", "sha": sha("3"), "body": "FAIL"}),
-    );
-    ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
-    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
-    let r = fake(NONE)
-        .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
-        .reply("kill -0 4242", "")
-        .reply("git -C", "");
-    let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.ends_with("#12: extend\n"), "{out}");
-    assert!(started("sendmeter-impl-12").is_empty(), "{:?}", r.calls.borrow());
-    assert_eq!(state(&c), "queued");
-    assert!(
-        lease_on(&c, "drive-sendmeter.lock").is_some(),
-        "the pass's lock is left alone"
-    );
-    let all = read(&c.state).unwrap();
-    assert_eq!(all.iter().filter(|e| e.kind == "round-extended").count(), 1);
-    assert_eq!(drover::pending::of(&all, "sendmeter", 12), None);
 }
 
 #[test]
