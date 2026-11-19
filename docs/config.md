@@ -150,6 +150,24 @@ and a `[docs]` section (paths `docs/**/*.md` and `README.md`, the repo's `cli`, 
 `drover doctor` prints each fleet's `hygiene` line and a red `! hygiene` row for each drift: the fleet's own
 `merge` mode (#1097) differing from it, the repo on GitHub not allowing that method, or `comments = "strict"` with integration's `.drover/arch.toml` saying otherwise, or `docs = "on"` with no `[docs]` there.
 
+## Public repos (#1376)
+
+Text bound for a public repo is checked before it is sent: a lane's `gh issue|pr create|edit|comment|review|close`
+and writing `gh api` text (the hook), the commits a lane pushes (the pre-push hook), every wip save, and drover's own
+texts (`merge`'s squash message and closing comment, `amend`, the issues `lesson`, `triage` and `hotspots` file, a
+revert PR). Built-in patterns: home paths (a name under the root's `Users` or `home` folder), the names and machines of `[hosts]`,
+paths inside drover's state and orchestrator folders, and session ids (UUIDs). A hit refuses `PUBLIC_LEAK`, naming
+the pattern (`home-path`, `host`, `session-path`, `session-id`, `private-name #N`) and where, never the value.
+
+| key | default | what |
+|---|---|---|
+| `[fleet.<n>] public` | GitHub's visibility, read at most once a day (spawn, merge, doctor) and cached; the hook reads only the cache | `true` checks, `false` skips; the flag wins |
+| `[fleet.<n>] private_names` | `[]` | names (private repos, clients) never sent to the repo; the list stays in fleet.toml |
+
+`drover doctor` prints one `! hygiene` line naming the public fleets with no `private_names`. `drover hygiene scan
+<fleet>` lists the hits already in the repo's issues, PR bodies, comments and integration history, by pattern with
+their links; it changes nothing.
+
 ## Limits (#844)
 
 Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without one keeps the default below.

@@ -210,7 +210,7 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         "--body",
         &body,
     ];
-    let url = ok(r, "gh", &[&["pr", "create", "-R", &f.repo][..], &a].concat())?;
+    let url = crate::hygiene::gh(ctx, r, cfg, fleet, &[&["pr", "create", "-R", &f.repo][..], &a].concat())?;
     let num = url.trim().rsplit('/').next().unwrap_or_default().to_string();
     writeln!(out, "{fleet} #{n} revert PR #{num} opened: {job} red after {sha:.7}")?;
     d.put("pr", json!(num))

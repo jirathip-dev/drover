@@ -72,6 +72,25 @@ fn fourth_start_after_three_failed_is_refused_with_one_owner_ask() {
 }
 
 #[test]
+fn a_supersede_that_killed_the_live_lane_it_replaced_is_no_failed_start() {
+    for (live, refused) in [(true, false), (false, true)] {
+        let c = ctx(&tmpdir("respawn-live"), CONFIG);
+        let (_sh, r) = dying(&c);
+        let agent = "sendmeter-impl-12";
+        for m in [0, 5, 10] {
+            let t = c.now + m * 60;
+            let d = json!({"role": "impl", "agent": agent, "confirmed": true});
+            append(&c.state, &Event::new(t, "sendmeter", Some(12), "spawn", d)).unwrap();
+            let killed = if live { vec![agent] } else { vec![] };
+            let d = json!({"role": "impl", "agent": agent, "killed": killed, "reason": "", "wip": null});
+            append(&c.state, &Event::new(t + 60, "sendmeter", Some(12), "supersede", d)).unwrap();
+        }
+        let (_, out) = respawn(&c, &r, 15);
+        assert_eq!(out.contains("REFUSED RESPAWN_LOOP"), refused, "live {live}: {out}");
+    }
+}
+
+#[test]
 fn try_again_lets_a_start_through_and_a_push_resets_the_count() {
     let c = ctx(&tmpdir("respawn-again"), CONFIG);
     let (_sh, r) = dying(&c);

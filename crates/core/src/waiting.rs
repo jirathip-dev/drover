@@ -150,6 +150,13 @@ fn no_verdict(events: &[Event], s: &IssueState, path: &str, gone: bool, w: &mut 
     w.next_cmd = Some(format!("drover spawn {f} {n} {c} --supersede"));
 }
 
+fn rev_exited(ctx: &Ctx, cfg: &Config, events: &[Event], lane: &str, agents: &[Session]) -> bool {
+    let sp = last_spawn(events, lane);
+    !agents.iter().any(|a| a.name == lane)
+        && sp.is_none_or(|e| ctx.now >= e.ts + cfg.limits.stall_minutes * 60)
+        && crate::hosts::offline(ctx, Some(cfg), sp).is_none()
+}
+
 fn failed_start(events: &[Event], s: &IssueState) -> bool {
     let Some(sp) = s.lane.as_deref().and_then(|l| last_spawn(events, l)) else {
         return false;
@@ -781,7 +788,7 @@ pub fn scan_where(
             w.what = w.what.replace("review done", &format!("review done on {h}"));
         }
         if let Some(p) = path.as_deref().filter(|_| s.check_lane() == Some(&lane)) {
-            no_verdict(mine, &s, p, !agents.iter().any(|a| a.name == lane), &mut w);
+            no_verdict(mine, &s, p, rev_exited(ctx, cfg, mine, &lane, agents), &mut w);
         }
         let built = s.build.as_ref().and_then(|b| s.lanes.get(b)).unwrap_or(&lane).clone();
         let sp = last_spawn(mine, &built);
