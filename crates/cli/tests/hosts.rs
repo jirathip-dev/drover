@@ -1778,3 +1778,32 @@ fn disk_low_on_a_remote_host_sweeps_its_finished_lanes_scratch_before_refusing()
     assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
     assert!(e.contains("`drover reclaim --apply`"), "{e}");
 }
+
+#[test]
+fn a_remote_host_with_no_fleet_toml_reports_its_running_lane_and_is_up() {
+    let c = setup("hosts-bare-report", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    let (sh, bazzite) = (FakeShed::attached(&c), live_on());
+    let f = fake(1.0, 1.0);
+    let r = two(&f, &bazzite);
+    let on = drover::hosts::On::new(&r, Some("bazzite"));
+    let watch = r#"{"roots":[],"worktrees":[]}"#;
+    let o = drover::runner::Runner::run_in(
+        &on,
+        "/opt/drover/bin/drover",
+        &drover::runner::argv(&["hosts", "report"]),
+        watch,
+    )
+    .unwrap();
+    assert_eq!(o.code, 0, "{o:?}");
+    let frame: serde_json::Value = serde_json::from_str(o.stdout.trim()).unwrap();
+    assert_eq!(frame["body"]["shed"], serde_json::Value::Null, "{frame}");
+    assert_eq!(frame["body"]["lanes"][0]["session"]["name"], IMPL, "{frame}");
+    look(&c, &sh.on(&r));
+    let cfg = Config::load(&c.config).unwrap();
+    let v = drover::link::view::View::load(&c, &cfg).unwrap();
+    assert_eq!(v.down(Some("bazzite")), None);
+    let there = v.sessions().0.into_iter().find(|h| h.0.as_deref() == Some("bazzite"));
+    let names: Vec<String> = there.unwrap().1.unwrap().into_iter().map(|s| s.name).collect();
+    assert_eq!(names, [IMPL]);
+}
