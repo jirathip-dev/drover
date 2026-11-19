@@ -22,7 +22,7 @@ showing exactly what is sent or run; Enter confirms through `drover answer` / `c
 The top line lists what is down from doctor's serve and shed checks (every 10 s); a shed that does not answer is
 started with its own job (`dev.shed.serve`, `shed.service`), a message waits for it and goes once it answers, and if it
 does not start the line gives the command to run. From 100 columns the list and the chat sit side by side. Tab
-switches to the Board tab (#1354). The keys are the design's list (`docs/design/drover-chat/README.md`); Ctrl-C quits
+switches to the Board tab (#1354, docs/terminal.md). The keys are the design's list (`docs/design/drover-chat/README.md`); Ctrl-C quits
 and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
 
 ## The orchestrator lane
