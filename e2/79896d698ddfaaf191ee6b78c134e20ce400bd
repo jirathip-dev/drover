@@ -1,0 +1,51 @@
+Decided: an extend ask ends `closed: superseded` on any later spawn, verdict, round-extended or unparked on its issue; this replaces #1353's impl-only relaunch rule
+Because: "An extend ask closes by itself once its issue is out of needs-human, however it left"
+Decided: the state database's user_version goes to 3, so the next open rebuilds the asks table and closes asks already left open in the log
+Because: "Asks already open in the log close the same way on the next pass. No clean-up by hand."
+Decided: answering an extend ask whose issue is past needs-human, parked, impl and fix(n) logs only the decision, for either option
+Because: "closes the ask and changes nothing else. No `NOT_NEEDS_HUMAN`."
+Decided: an open extend ask makes a waiting row "waiting on your answer" only while its issue is needs-human, so drive starts rev or verify past it
+Because: "drive never waits on an extend ask to start a rev or verify lane."
+Rejected: a state check at read time in every ask view — the asks table is the one place that decides open, so the ending goes there
+Rejected: treating parked as past — a parked issue still refuses NOT_NEEDS_HUMAN as the existing refused-tap test expects
+Check: verify_stage.rs extend tests; extend_ask.rs now expects closed: superseded for a relaunch, as the spec renames it
+Owner: a "one more round?" question now disappears once its issue moves on, and never holds up the next check
+
+Decided: an extend ask ends `closed: superseded` on any later spawn, verdict, round-extended or unparked on its issue; this replaces #1353's impl-only relaunch rule
+Because: "An extend ask closes by itself once its issue is out of needs-human, however it left"
+Decided: the state database's user_version goes to 3, so the next open rebuilds the asks table and closes asks already left open in the log
+Because: "Asks already open in the log close the same way on the next pass. No clean-up by hand."
+Decided: answering an extend ask whose issue is past needs-human, parked, impl and fix(n) logs only the decision, for either option
+Because: "closes the ask and changes nothing else. No `NOT_NEEDS_HUMAN`."
+Decided: an open extend ask makes a waiting row "waiting on your answer" only while its issue is needs-human, so drive starts rev or verify past it
+Because: "drive never waits on an extend ask to start a rev or verify lane."
+Rejected: a state check at read time in every ask view — the asks table is the one place that decides open, so the ending goes there
+Rejected: treating parked as past — a parked issue still refuses NOT_NEEDS_HUMAN as the existing refused-tap test expects
+Check: verify_stage.rs extend tests; extend_ask.rs now expects closed: superseded for a relaunch, as the spec renames it
+Owner: a "one more round?" question now disappears once its issue moves on, and never holds up the next check
+
+Decided: an extend ask ends `closed: superseded` on any later spawn, verdict, round-extended or unparked on its issue; this replaces #1353's impl-only relaunch rule
+Because: "An extend ask closes by itself once its issue is out of needs-human, however it left"
+Decided: the state database's user_version goes to 3, so the next open rebuilds the asks table and closes asks already left open in the log
+Because: "Asks already open in the log close the same way on the next pass. No clean-up by hand."
+Decided: answering an extend ask whose issue is past needs-human, parked, impl and fix(n) logs only the decision, for either option
+Because: "closes the ask and changes nothing else. No `NOT_NEEDS_HUMAN`."
+Decided: an open extend ask makes a waiting row "waiting on your answer" only while its issue is needs-human, so drive starts rev or verify past it
+Because: "drive never waits on an extend ask to start a rev or verify lane."
+Rejected: a state check at read time in every ask view — the asks table is the one place that decides open, so the ending goes there
+Rejected: treating parked as past — a parked issue still refuses NOT_NEEDS_HUMAN as the existing refused-tap test expects
+Check: verify_stage.rs extend tests; extend_ask.rs now expects closed: superseded for a relaunch, as the spec renames it
+Owner: a "one more round?" question now disappears once its issue moves on, and never holds up the next check
+
+Decided: an extend ask ends `closed: superseded` on any later spawn, verdict, round-extended or unparked on its issue; this replaces #1353's impl-only relaunch rule
+Because: "An extend ask closes by itself once its issue is out of needs-human, however it left"
+Decided: the state database's user_version goes to 3, so the next open rebuilds the asks table and closes asks already left open in the log
+Because: "Asks already open in the log close the same way on the next pass. No clean-up by hand."
+Decided: answering an extend ask whose issue is past needs-human, parked, impl and fix(n) logs only the decision, for either option
+Because: "closes the ask and changes nothing else. No `NOT_NEEDS_HUMAN`."
+Decided: an open extend ask makes a waiting row "waiting on your answer" only while its issue is needs-human, so drive starts rev or verify past it
+Because: "drive never waits on an extend ask to start a rev or verify lane."
+Rejected: a state check at read time in every ask view — the asks table is the one place that decides open, so the ending goes there
+Rejected: treating parked as past — a parked issue still refuses NOT_NEEDS_HUMAN as the existing refused-tap test expects
+Check: verify_stage.rs extend tests; extend_ask.rs now expects closed: superseded for a relaunch, as the spec renames it
+Owner: a "one more round?" question now disappears once its issue moves on, and never holds up the next check
