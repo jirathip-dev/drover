@@ -1,0 +1,25 @@
+Decided: one module, crates/core/src/status.rs, posts every drover/* commit status and keeps a per-fleet ledger (cache/status-<fleet>-0.json) of what it posted
+Because: "A status that fails to post never blocks the verdict or the merge: it is logged, retried on the next pass and shown by `doctor`"
+Decided: CI ignores drover/* by dropping them in gh::required, the one filter every CI reader goes through
+Because: "drover's CI gate ignores its own `drover/*` statuses: they never make CI pending, red or green"
+Decided: pending posts and retries run in drive's push handoff on full passes only, never the fast step
+Rejected: every fast pass — it adds a GitHub call to the 304-only fast step and retries a 403 each minute
+Decided: a head that already has a verdict gets no pending, so verdicts recorded before this ships are not overwritten
+Decided: protection exits 1 when an integration branch does not require drover/review
+Because: q2254
+Decided: the status link is the page at serve.allowed_hosts' first name; with none set the status has no link
+Check: crates/cli/tests/commit_status.rs drives verdict, drive, pr, doctor and the hook with the fake gh
+Owner: PRs now show drover/review, drover/verify and drover/override checks; turn on drover/review as required per repo via the orchestrator's cards
+
+Decided: one module, crates/core/src/status.rs, posts every drover/* commit status and keeps a per-fleet ledger (cache/status-<fleet>-0.json) of what it posted
+Because: "A status that fails to post never blocks the verdict or the merge: it is logged, retried on the next pass and shown by `doctor`"
+Decided: CI ignores drover/* by dropping them in gh::required, the one filter every CI reader goes through
+Because: "drover's CI gate ignores its own `drover/*` statuses: they never make CI pending, red or green"
+Decided: pending posts and retries run in drive's push handoff on full passes only, never the fast step
+Rejected: every fast pass — it adds a GitHub call to the 304-only fast step and retries a 403 each minute
+Decided: a head that already has a verdict gets no pending, so verdicts recorded before this ships are not overwritten
+Decided: protection exits 1 when an integration branch does not require drover/review
+Because: q2254
+Decided: the status link is the page at serve.allowed_hosts' first name; with none set the status has no link
+Check: crates/cli/tests/commit_status.rs drives verdict, drive, pr, doctor and the hook with the fake gh
+Owner: PRs now show drover/review, drover/verify and drover/override checks; turn on drover/review as required per repo via the orchestrator's cards
