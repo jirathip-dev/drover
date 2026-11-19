@@ -251,3 +251,8 @@ pattern = "releases/download"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/release.rs"]
 reason = "#1275: only core::release knows where a build is published"
+
+[[ban]]
+pattern = "do sleep"
+paths = ["crates/*/tests/**"]
+reason = "#1364: a test's wait loop has a deadline (for i in $(seq N); do [ ready ] && break; sleep 0.05; done) so an orphaned job ends; its harness kills the job's process group on drop"
