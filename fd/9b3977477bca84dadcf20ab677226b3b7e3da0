@@ -1,0 +1,5 @@
+Decided: clear the arch-check doc violation with a `no doc:` line in the PR body, not a doc edit
+Because: crates/core/src/cli.rs:246
+Rejected: a doc line that merely contains "cmd" — it would name a clap field, not a user-facing key
+Check: the ci workflow's rust job is green at fd9b3977 and the PR body carries the no-doc note
+Owner: CI is green again; no code changed this round besides a staging merge.
