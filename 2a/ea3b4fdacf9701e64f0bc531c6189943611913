@@ -1,0 +1,6 @@
+Decided: the page parity script picks the Fleets sheet model by tapping the shared dropdown and its sonnet option, not a native select
+Because: "No native `<select>` stays."
+Because: crates/cli/tests/ui/page.mjs:85
+Rejected: setting the hidden input directly — it would skip the dropdown the user taps
+Check: CI ui job's --test page passes at 2aea3b4f; posted ends with save-fleets
+Owner: the phone page's settings test now picks a model through the new dropdown, as a person would
