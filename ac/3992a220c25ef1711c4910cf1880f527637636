@@ -1,0 +1,8 @@
+Decided: self-update reads a remote host's builds over ssh whenever the host is enabled and not a stopped cloud host; a missing cached $HOME is probed over ssh first instead of skipping the host.
+Because: "A failing report is a reason to update the host, not to skip it."
+Because: crates/core/src/update.rs:192 — the probe replaces the old gate that needed a cached $HOME, which only a host with a working report ever gets.
+Decided: host-behind's reason is the stage error, else the swap error, else the ssh/build-read error; the default is left only when nothing was tried (switched off or stopped).
+Because: "never the default when there is a known one"
+Rejected: reading the report's error from the link view for the reason — the host is reachable over ssh, so the ssh read's own error is the real one.
+Check: the two new host_sync tests fail on 437ddea2 and pass at the head.
+Owner: A host whose status report is broken still gets new releases once ssh to it works.
