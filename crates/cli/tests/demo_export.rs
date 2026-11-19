@@ -201,14 +201,14 @@ fn faults(site: &std::path::Path) -> Vec<String> {
 
 const KNOWN: [&str; 30] = [
     "screens/events Twice",
-    "screens/herd Extra scene",
-    "screens/herd Extra scene",
-    "screens/herd Extra scene",
-    "screens/herd Twice",
     "screens/lanes Twice",
     "screens/queue ActTwice",
     "screens/queue ActTwice",
     "screens/queue ActTwice",
+    "screens/scene Extra scene",
+    "screens/scene Extra scene",
+    "screens/scene Extra scene",
+    "screens/scene Twice",
     "screens/threads/t1 Shape card",
     "screens/threads/t1 Shape card",
     "screens/threads/t1 Shape card",

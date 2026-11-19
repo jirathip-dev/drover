@@ -1221,7 +1221,7 @@ fn scene_screen(h: &Herd) -> Value {
         "load {load} · mem {} · swap {swap}",
         host.pressure.as_deref().unwrap_or("?")
     );
-    json!({"type": "screen", "id": "scene", "title": "Scene", "stream": "/screens/scene/stream", "blocks": [{"type": "scene", "id": "scene", "load": level,
+    json!({"type": "screen", "id": "scene", "title": "Scene", "stream": "/screens/scene/stream", "blocks": [{"type": "scene", "id": "ranch", "load": level,
         "weather": {"sky": sky, "wind": (ratio.clamp(0.0, 1.0) * 100.0).round() / 100.0, "fog": fog, "storm": host.gate.is_some(), "line": line},
         "repos": repos}]})
 }
