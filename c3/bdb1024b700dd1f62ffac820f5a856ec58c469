@@ -1,0 +1,8 @@
+Decided: keep the existing blocks pin d800ee2 (from #1339); it already carries Built::check and diff
+Because: Cargo.toml:68
+Decided: check every exported demo screen with blocks::Built::check, today's 30 faults pinned as a ratchet
+Because: q2402
+Rejected: bump blocks to staging — its Scene still lacks load/weather/repos, so the herd faults stay
+Rejected: fix the screens here — "No other behaviour change" forbids it; follow-ups fix them per q2402
+Check: crates/cli/tests/demo_export.rs; a new fault or a fixed one left in KNOWN fails the assert_eq
+Owner: CI now runs blocks' screen check over the demo board; today's known faults are listed, new ones fail
