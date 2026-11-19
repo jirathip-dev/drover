@@ -10,6 +10,10 @@ const WT: &str = "/home/me/.herdr/worktrees/sendmeter/issue-12";
 const TOKEN: &str = concat!("sk", "-ant-oat01-DDDD-secret");
 
 fn setup(name: &str, limits: &str) -> (drover::Ctx, FakeShed, String, u16) {
+    spawned_ago(name, limits, 900)
+}
+
+fn spawned_ago(name: &str, limits: &str, ago: u64) -> (drover::Ctx, FakeShed, String, u16) {
     use std::os::unix::fs::PermissionsExt;
     let port = upstream();
     let d = tmpdir(name);
@@ -41,7 +45,7 @@ fn setup(name: &str, limits: &str) -> (drover::Ctx, FakeShed, String, u16) {
     c.now = NOW;
     let d = json!({"role": "impl", "agent": IMPL, "harness": "claude", "pane": IMPL, "workspace": "",
                    "worktree": WT, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
-    append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(12), "spawn", d)).unwrap();
+    append(&c.state, &Event::new(NOW - ago, "sendmeter", Some(12), "spawn", d)).unwrap();
     let port = proxy(&c);
     (c, sh, key, port)
 }
@@ -218,4 +222,40 @@ fn a_lane_whose_session_really_exited_on_an_answering_host_is_dead_and_its_key_e
     assert_eq!(key_state(&c), "ended");
     let (status, body) = call(port, &key);
     assert!(status.contains("401") && body.contains("ended"), "{status} {body}");
+}
+
+#[test]
+fn a_probe_that_times_out_once_ends_no_fresh_lane_and_its_next_request_passes() {
+    let (c, _sh, key, port) = spawned_ago("ldr-timeout", "", 120);
+    let (code, out) = run(&c, &Unanswered(&main_host(), 124), &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(dead(&c), 0, "a timed-out probe is unknown: {out}");
+    assert_eq!(key_state(&c), "live");
+    let (status, body) = call(port, &key);
+    assert!(status.contains("200"), "{status} {body}");
+}
+
+#[test]
+fn a_fresh_lane_its_answering_host_does_not_list_yet_is_dead_only_after_its_grace() {
+    let (mut c, _sh, key, port) = spawned_ago("ldr-grace", "", 120);
+    let (f, bazzite) = (main_host(), FakeShed::new());
+    let r = OverSsh {
+        f: &f,
+        hosts: vec![("bazzite", &bazzite)],
+    };
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(dead(&c), 0, "a lane two minutes old is not judged dead: {out}");
+    assert_eq!(key_state(&c), "live");
+    let (status, body) = call(port, &key);
+    assert!(status.contains("200"), "{status} {body}");
+    c.now = NOW + 600;
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        dead(&c),
+        1,
+        "past its grace, an answering host without it means gone: {out}"
+    );
+    assert_eq!(key_state(&c), "ended");
 }

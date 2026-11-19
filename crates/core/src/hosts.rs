@@ -498,9 +498,10 @@ pub fn cached(ctx: &Ctx) -> BTreeMap<String, Seen> {
 }
 
 const PROBE: &str = "uname -s; uname -m; echo \"$HOME\"; xcodebuild -version >/dev/null 2>&1 && echo xcode; \
-docker info >/dev/null 2>&1 && echo docker; true";
+docker info >/dev/null 2>&1 && echo docker; \
+ls -d \"$HOME\"/.cache/ms-playwright/webkit-* \"$HOME\"/Library/Caches/ms-playwright/webkit-* 2>/dev/null | grep -q . && echo webkit; true";
 
-/// The tags a host detects about itself (`os:macos|os:linux`, `arch:arm64|x86_64`, `xcode`, `docker`) and its `$HOME`.
+/// The tags a host detects about itself (`os:macos|os:linux`, `arch:arm64|x86_64`, `xcode`, `docker`, `webkit`) and its `$HOME`.
 pub fn probe(r: &dyn Runner) -> Option<(Vec<String>, String)> {
     let out = ok(r, "sh", &["-c", PROBE]).ok()?;
     let mut l = out.lines().map(str::trim);
@@ -659,17 +660,42 @@ pub fn needs(f: &Fleet, role: &str, events: &[Event], (fleet, issue): (&str, u64
     n
 }
 
-fn repro_os(r: &dyn Runner, f: &Fleet, events: &[Event], (fleet, issue, role): (&str, u64, &str)) -> Option<String> {
+/// The probed tag of a host whose Playwright cache holds the webkit browser.
+pub const WEBKIT: &str = "webkit";
+
+struct ReproNeeds {
+    os: Option<String>,
+    webkit: Option<String>,
+}
+
+fn repro_needs(
+    r: &dyn Runner,
+    f: &Fleet,
+    events: &[Event],
+    (fleet, issue, role): (&str, u64, &str),
+) -> Option<ReproNeeds> {
     if f.family(role) != "rev" || !crate::queue::repro(events, fleet, issue) {
         return None;
     }
     let st = crate::events::fold(events).remove(&(fleet.to_string(), issue));
     let branch = crate::gate::branch_of(st.as_ref(), issue);
     let diff = ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo]).ok()?;
-    diff.lines().filter(|l| l.starts_with('+')).find_map(|l| {
+    let added = || diff.lines().filter(|l| l.starts_with('+'));
+    let os = added().find_map(|l| {
         let os = l.split_once("cfg(target_os")?.1.split('"').nth(1)?;
         Some(format!("os:{os}"))
-    })
+    });
+    let ui = |p: &&str| {
+        p.contains("tests/ui/")
+            || f.ui_paths
+                .iter()
+                .any(|g| crate::config::glob(g.as_bytes(), p.as_bytes()))
+    };
+    let webkit = added()
+        .filter_map(|l| l.strip_prefix("+++ b/"))
+        .find(ui)
+        .map(String::from);
+    Some(ReproNeeds { os, webkit })
 }
 
 const IDLE: [&str; 6] = ["ready", "needs-human", "parked", "blocked", "merged", "closed"];
@@ -1236,11 +1262,7 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
             "profile {profile} there has no drover PreToolUse hook; `drover profiles sync` there"
         )));
     }
-    let agents = crate::shed::cli(on, &["agents", "--json"]).ok();
-    let agents: Value = agents
-        .and_then(|o| serde_json::from_str(&o.stdout).ok())
-        .unwrap_or_default();
-    if !agents.as_array().into_iter().flatten().any(|a| a["id"] == id) {
+    if crate::shed::adapter(on, id).ok().flatten().is_none() {
         return Err(Unguarded::Adapter(format!(
             "shed there lists no {id} (`shed agents add {id}` there)"
         )));
@@ -1335,7 +1357,13 @@ pub fn place(
         return Ok(Some(at(ctx, cfg, f, r, (h, machine), pre)));
     }
     let mut needs = needs(f, role, events, (fleet, issue));
-    needs.extend(repro_os(r, f, events, (fleet, issue, role)));
+    let repro = repro_needs(r, f, events, (fleet, issue, role)).unwrap_or(ReproNeeds { os: None, webkit: None });
+    let webkit = repro.webkit.map(|t| format!("needs {WEBKIT}: its repro test {t}"));
+    if webkit.is_some() {
+        needs.retain(|t| !f.needs.contains(t));
+        needs.push(WEBKIT.into());
+    }
+    needs.extend(repro.os);
     let seen = cached(ctx);
     let fit = |n: &str, h: &HostCfg| needs.iter().all(|t| tags(h, seen.get(n)).contains(t));
     let left = left(events, fleet, issue);
@@ -1418,7 +1446,7 @@ pub fn place(
         (false, ..) if needs.is_empty() => "no local host fits".into(),
         (false, ..) => format!("needs {}: no local host has it", needs.join(", ")),
     };
-    p.why = (!local(&p)).then_some(why);
+    p.why = webkit.or((!local(&p)).then_some(why));
     Ok(Some(p))
 }
 
@@ -1577,16 +1605,19 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         survey(ctx, cfg, r, refresh);
     }
     let (seen, events) = (cached(ctx), working(&ctx.state)?);
+    let view = crate::link::view::View::load(ctx, cfg).ok();
     let n = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
     for (name, h) in &cfg.hosts {
         let s = seen.get(name).cloned().unwrap_or_default();
         let lanes = lanes_on(cfg, &events, name);
-        let (words, t) = (
-            shown(h.enabled, &s, lanes.len(), ctx.now).1,
-            tags(h, Some(&s)).join(","),
-        );
+        let there = h.machine.as_deref().filter(|_| view.is_some());
+        let failing = there.and_then(|m| view.as_ref()?.failing(Some(m)));
+        let mut words = shown(h.enabled, &s, lanes.len(), ctx.now).1;
+        words.extend(failing.map(|w| format!(" · report: {w}")));
+        let t = tags(h, Some(&s)).join(",");
+        let built = there.and_then(|m| crate::release::sha_of(view.as_ref()?.build(Some(m))?));
         let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
-        let v = match s.drover.as_str() {
+        let v = match built.as_deref().unwrap_or(&s.drover) {
             "" => String::new(),
             x if x == env!("DROVER_SHA") => format!(" · drover {x} ✓"),
             x => format!(" · drover {x} ≠ {}", env!("DROVER_SHA")),

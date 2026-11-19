@@ -59,15 +59,17 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         SCRATCH.set(None);
-        OPEN.with_borrow_mut(|v| v.retain(|x| x.0 != self.0));
+        pool().retain(|x| x.0 != self.0);
         for x in ["", "-wal", "-shm"] {
             std::fs::remove_file(format!("{}{x}", self.0.display())).ok();
         }
     }
 }
 
-thread_local! {
-    static OPEN: RefCell<Vec<(PathBuf, u64, Connection)>> = const { RefCell::new(Vec::new()) };
+static OPEN: std::sync::Mutex<Vec<(PathBuf, u64, Connection)>> = std::sync::Mutex::new(Vec::new());
+
+fn pool() -> std::sync::MutexGuard<'static, Vec<(PathBuf, u64, Connection)>> {
+    OPEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
@@ -83,9 +85,15 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
         "{} still has files from before #344: run `drover migrate --live` to import them",
         state.parent().unwrap_or(Path::new(".")).display()
     );
-    let cached = OPEN.with_borrow_mut(|v| Some(v.swap_remove(v.iter().position(|x| x.0 == p)?)));
+    let cached = {
+        let mut v = pool();
+        v.iter().position(|x| x.0 == p).map(|i| v.swap_remove(i))
+    };
     let (mut c, fresh) = match cached {
-        Some((_, i, c)) if ino(&p) == Some(i) => (c, false),
+        Some((_, i, mut c)) if ino(&p) == Some(i) => {
+            upgrade(&mut c, state)?;
+            (c, false)
+        }
         _ => (open(state)?, true),
     };
     if (fresh || !scratch) && old {
@@ -93,7 +101,10 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
     }
     let r = f(&mut c);
     if let Some(i) = ino(&p) {
-        OPEN.with_borrow_mut(|v| v.push((p, i, c)));
+        let mut v = pool();
+        if v.iter().filter(|x| x.0 == p).count() < 8 {
+            v.push((p, i, c));
+        }
     }
     r
 }
@@ -115,8 +126,13 @@ fn open(state: &Path) -> Result<Connection> {
     anyhow::ensure!(mode(&c)? == "wal", "{} is not in WAL mode", file(state).display());
     c.execute_batch(SCHEMA)?;
     let mut c = c;
+    upgrade(&mut c, state)?;
+    Ok(c)
+}
+
+fn upgrade(c: &mut Connection, state: &Path) -> Result<()> {
     let version = |c: &Connection| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0));
-    if version(&c)? < 2 {
+    if version(c)? < 2 {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if version(&tx)? < 1 {
             offload_all(&tx, state)?;
@@ -128,7 +144,7 @@ fn open(state: &Path) -> Result<Connection> {
         }
         tx.commit()?;
     }
-    Ok(c)
+    Ok(())
 }
 
 fn offload_all(c: &Connection, state: &Path) -> Result<()> {

@@ -285,6 +285,26 @@ fn kill_snapshots_only_the_real_dirty_file() {
 }
 
 #[test]
+fn kill_leaves_an_untracked_log_out_of_the_snapshot_and_in_the_worktree() {
+    let (c, wt, sh) = lane("kill-log");
+    sh.lane(LANE, "idle", &wt);
+    let r = repo(&wt, "");
+    let line = concat!("Cache hit for restore-key: gh", "p_abcdefghijklmnopqrstu1234\n");
+    std::fs::write(format!("{wt}/ci.log"), line).unwrap();
+    std::fs::write(format!("{wt}/real.rs"), "fn x() {}\n").unwrap();
+    let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    let w = out.rsplit("work pushed to ").next().unwrap().trim();
+    let o = std::process::Command::new("git")
+        .args(["-C", &format!("{wt}.git"), "show", "--name-only", "--format=", w])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(o.stdout).unwrap().trim(), "real.rs");
+    assert_eq!(std::fs::read_to_string(format!("{wt}/ci.log")).unwrap(), line);
+    assert!(status(&wt).contains("?? ci.log"), "{}", status(&wt));
+}
+
+#[test]
 fn kill_restores_the_index_when_the_snapshot_fails() {
     let (c, wt, sh) = lane("kill-snapfail");
     sh.lane(LANE, "idle", &wt);

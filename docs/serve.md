@@ -156,7 +156,8 @@ logged, printed or served; the page gets only the public key and each device's l
 Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/thiserror, plus, for web
 push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
 client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
-shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), and rusqlite (bundled SQLite)
+shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), blocks and swag (#1339: the
+theme rules and the built-in colour schemes, each pinned to a commit), and rusqlite (bundled SQLite)
 for the state database (#344, docs/architecture.md), keyring for the main host's secret store
 (#441, owner-approved; docs/providers.md), flate2 for serve's gzip (#1314, owner-approved), ratatui (with its crossterm backend) in `crates/chat` only (#1352, owner-approved, q2151), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
 fails on any other direct dependency.
@@ -193,6 +194,7 @@ them as `serve`: `sha` (the build it runs, #1081), `rss_mb`, `groups` (the last 
 `count`, `p50`, `p95` and `max` ms), `busy` (reads answered 503 in that minute), `clients` (live streams), `queued`
 (taps waiting for a worker), `started` and `slow` (set while `/api/v1` p95 has been over 200 ms for 5 min). Each start
 appends `<ts> cold|handover` to `serve-starts` (the last day kept); a start that fails appends `<ts> failed`.
+Its `schemes` lists each colour scheme blocks' gate refused on load, with why (#1339, docs/themes.md).
 
 #1312: the page times what the owner feels: each tap, sheet open, tab switch, send and answer from the input event to
 the frame after the DOM changed (split into `network`, `parse` and `render`), and each stream delta from receipt to
@@ -333,7 +335,8 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
 - #1091: `GET /screens/hosts`, the page's Hosts sheet (a [⚙] row, not cooee's): one row per host, main first, then
   A→Z, with its kind, on/off and live lane count; a remote host's [Off]/[On] runs `host` (`host-off`/`host-on`) and
   the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token
-  proxy section under it holds doctor's proxy facts and [How to set], `GET /screens/proxy-token`, the token's steps;
+  proxy section under it holds doctor's proxy facts and [How to set], `GET /screens/proxy-token`, the token's steps.
+  #1313: the leftover count and the proxy facts are read off the request (the host sampler, `refresh`; never by a host action);
 - #1092: `GET /screens/herd`, the page's Herd (page-only, [⚙] → Herd; cooee draws its own scene): one `scene` block
   with `weather` (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `line`)
   and `repos`, each a fleet (then `others`) with its queued issues at the gate and its lanes in bands (working, idle,

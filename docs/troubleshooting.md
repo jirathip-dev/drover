@@ -213,3 +213,17 @@ grep -n CLAUDE_CODE_OAUTH_TOKEN ~/.zshrc ~/.zprofile ~/.bashrc ~/.profile 2>/dev
 - Tailscale SSH needs an ACL rule that allows your user on that machine; without it the ssh is refused. *(unverified)*
 - While securityd is wedged, Screen Sharing can accept the connection and then fail in the client, so ssh is the way
   in. *(unverified)*
+
+## 9. A fleet clone missing objects (#1363)
+
+**Symptom.** Every merge fails with `fatal: bad object refs/remotes/origin/…`, `did not send all necessary objects`
+or `pack has N unresolved deltas`.
+
+**Fix.** None by hand: the next fetch drops each remote-tracking ref to a missing object, runs
+`git fetch --refetch origin`, checks `git fsck --connectivity-only` and logs `clone-healed` (the refs dropped, the
+seconds). If origin does not answer, nothing is dropped, `clone-broken` alerts once and every later fetch retries the
+heal. Local branches, worktrees and anything not on origin are never touched. Fetches of one clone take turns
+(a lock file in the clone's git folder), and `drover clean` removes `tmp_pack_*` files older than a day.
+
+**Confirm.** `drover doctor` shows `✓ clone <fleet> — <dir> connectivity ok`, or the missing object and the commands
+that heal it.

@@ -94,8 +94,17 @@ pub fn frame(r: &dyn Runner, watch: &Watch) -> anyhow::Result<Frame> {
     })
 }
 
-/// `drover hosts report`: the `Watch` on `stdin` answered with one frame line on `out`.
+/// `drover hosts report`: the `Watch` on `stdin` answered with one frame line on `out`; with no shed runtime set, the host's own shed (`shed connect`).
 pub fn serve(r: &dyn Runner, stdin: &mut dyn std::io::Read, out: &mut dyn std::io::Write) -> anyhow::Result<()> {
+    let own = r.shed().is_none().then(|| {
+        let sh = crate::shed::Shed {
+            wire: crate::shed::Wire::Connect,
+            acp: None,
+            policy: "ask".into(),
+        };
+        crate::shed::With(r, sh)
+    });
+    let r: &dyn Runner = own.as_ref().map_or(r, |w| w);
     let mut w = String::new();
     stdin.read_to_string(&mut w)?;
     writeln!(

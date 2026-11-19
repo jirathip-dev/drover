@@ -481,3 +481,35 @@ fn supersede_closes_old_pane_after_confirm_unless_working() {
         }
     }
 }
+
+#[test]
+fn supersede_leaves_an_untracked_log_with_a_secret_looking_line_in_the_worktree() {
+    let d = tmpdir("dup-supersede-log");
+    let c = ctx(&d, CONFIG);
+    let w = wt(&c).to_string_lossy().into_owned();
+    let d0 = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12", "worktree": w});
+    append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", d0)).unwrap();
+    let (sh, r) = shed_happy(&c);
+    sh.lane("sendmeter-impl-12", "idle", &w);
+    let line = concat!("Cache hit for restore-key: gh", "p_abcdefghijklmnopqrstu1234\n");
+    std::fs::write(wt(&c).join("ci.log"), line).unwrap();
+    let st = format!("git -C {w} status --porcelain");
+    let r = (0..5)
+        .fold(r, |r, _| r.once(&st, 0, "?? ci.log\n"))
+        .once(&format!("git -C {w} diff --cached --name-only"), 0, "ci.log\0")
+        .once(
+            &format!("git -C {w} diff --cached"),
+            0,
+            &format!("diff --git a/ci.log b/ci.log\n+++ b/ci.log\n@@ -0,0 +1 @@\n+{line}"),
+        );
+    let (exit, out) = spawn(&c, &r, &["--supersede"]);
+    assert_eq!(exit, 0, "{out}");
+    assert!(!out.contains("SECRET_IN_WIP"), "{out}");
+    assert!(
+        !r.called(&format!("git -C {w} add")) && !r.called(&format!("git -C {w} push origin HEAD:refs/heads/wip/")),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert_eq!(std::fs::read_to_string(wt(&c).join("ci.log")).unwrap(), line);
+    assert_eq!(read(&c.state).unwrap().last().unwrap().kind, "spawn");
+}

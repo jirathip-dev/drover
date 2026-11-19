@@ -1,5 +1,7 @@
+mod acp_listing;
 mod common;
 mod lane_states;
+use acp_listing::acp_fake;
 use common::*;
 use drover::events::Event;
 use drover::hosts::On;
@@ -262,16 +264,6 @@ fn acp_config(sock: &std::path::Path, harness: &str) -> String {
 }
 
 const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
-
-fn acp_fake(adapter: &[&str]) -> Fake {
-    let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
-    spawn_fake()
-        .reply("shed help run", "--meta <JSON>")
-        .reply("shed agents --json", &agents.to_string())
-        .reply("shed run", "")
-        .reply("shed send", "")
-        .reply("shed cancel", "")
-}
 
 static META: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     let global = drover::config::home().join(".claude/CLAUDE.md");
@@ -1705,6 +1697,31 @@ fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
     );
     assert!(old.exists() && !c.worktrees.join("sendmeter/issue-12").exists());
     assert!(logged(&c, "worktree-moved").is_empty());
+}
+
+#[test]
+fn an_idle_impl_agent_holding_the_branch_is_superseded_by_an_update_round_in_review() {
+    let b = FakeShed::new();
+    let (c, f, local, old, _) = herdr_era_lane("update-idle", &b, true, &[]);
+    let rev = json!({"role": "rev", "agent": "sendmeter-rev-12-r2", "harness": "claude", "pane": "w3:p1",
+        "workspace": "w3", "worktree": c.worktrees.join("sendmeter/rev-12-r2"), "branch": "rev-12-r2"});
+    drover::events::append(&c.state, &Event::new(c.now - 60, "sendmeter", Some(12), "spawn", rev)).unwrap();
+    let st = drover::events::fold(&drover::events::read(&c.state).unwrap())[&("sendmeter".to_string(), 12)]
+        .state
+        .clone();
+    assert!(st.starts_with("review("), "{st}");
+    b.lane("sendmeter-impl-12-r1", "idle", old.to_str().unwrap());
+    let cli = Push(b.cli(&f), local.parent().unwrap().into());
+    let args = ["spawn", "sendmeter", "12", "impl", "--supersede", "--update"];
+    let (code, out) = run(&c, &cli, &args);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    assert!(!b.has("sendmeter-impl-12-r1"), "{out}");
+    let sup = logged(&c, "supersede");
+    assert!(
+        sup.iter()
+            .any(|e| e.val("killed").to_string().contains("sendmeter-impl-12-r1")),
+        "{sup:?}"
+    );
 }
 
 #[test]

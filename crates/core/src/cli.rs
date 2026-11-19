@@ -2058,9 +2058,15 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if cfg.fleet(f)?.family(role) != "impl" {
                         bail!("a {role} lane reports no turn: impl, fix and update lanes do");
                     }
+                    let done = state == "done" && !matches!(role, "triage" | "lesson");
+                    let ui = done.then(|| crate::guard::turn(ctx, &cfg, r, out, (f, n), role));
+                    let ui = ui.transpose()?.flatten();
                     let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
                     let note = note.transpose()?.flatten();
                     let mut d = json!({"state": state, "why": why, "role": role});
+                    if let Some(u) = ui {
+                        d.put("ui_check", u);
+                    }
                     if let Some((code, w)) = &note {
                         d.put("note", json!(format!("{code}: {w}")));
                     }

@@ -142,4 +142,6 @@ no why note: none attached
         ```
   - `Repro: verify`, only when the PR body has a `## Repro` section and the fleet has a verify role: quote its reason
     on a `>` line.
+- Never invent output: a test that cannot run on this host (it skips here) is said so in verdict.md, not a PASS;
+  drover refuses it `NO_REPRO`, and a refusal left uncorrected becomes the owner's card.
 - A repro test that passes on the base plus commit 1, or a fix that changes the test without a spec change, is a FAIL.

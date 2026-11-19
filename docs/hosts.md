@@ -64,7 +64,8 @@ as written on every host.
 
 Each `drover check` (and `drover hosts refresh`) looks at every host. Once an hour it probes the host's tags with
 one shell line: `os:macos` or `os:linux`, `arch:arm64` or `arch:x86_64`, `xcode` (when `xcodebuild -version` works) and
-`docker` (when `docker info` works). The results go to `<state dir>/hosts.json`, along with the host's `$HOME`,
+`docker` (when `docker info` works) and `webkit` (when the Playwright cache under `~/.cache/ms-playwright` or
+`~/Library/Caches/ms-playwright` holds a `webkit-*` browser). The results go to `<state dir>/hosts.json`, along with the host's `$HOME`,
 whether it answered, and its load/cpu, free memory and free disk. A host's tags are the detected ones plus its hand
 `tags`.
 
@@ -87,7 +88,10 @@ A lane needs the union of three lists:
    and `--host` or a pin naming another host is refused `DESIGN_MAIN_ONLY`.
 3. Otherwise, an issue that already had a lane stays on that lane's host, because its worktree is there. This holds
    even when the host has been turned off.
-4. Otherwise, drover takes the enabled hosts whose tags cover the needs, and picks the least busy: lowest load per
+4. A `--repro` review whose diff adds a test under `tests/ui/` or the fleet's `ui_paths` needs `webkit` in place of the
+   fleet's `needs` (#1355), and the spawn event names that test; with no enabled `webkit` host it is refused `NO_HOST`
+   and the issue gets one needs-human card. A `cfg(target_os)` test adds its `os:` tag.
+5. Otherwise, drover takes the enabled hosts whose tags cover the needs, and picks the least busy: lowest load per
    CPU first, then the most free memory.
 
 Admission runs per host: `DISK_LOW`, `MEM_LOW`, then `HOST_BUSY`. A host that fails admission (or is unreachable) is

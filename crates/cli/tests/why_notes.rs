@@ -559,3 +559,195 @@ fn a_pr_body_without_the_heads_evidence_is_refused_before_review() {
     let (code, out) = run(&c, &Git::new(&fake_body(&top, &body(&repo.head))), &["turn", "done"]);
     assert_eq!(code, 0, "a staging merge over the named head passes: {out}");
 }
+
+struct Ui<'a> {
+    git: Git<'a>,
+    bin: PathBuf,
+    hang: bool,
+    limits: std::sync::Mutex<Vec<std::time::Duration>>,
+}
+
+impl Runner for Ui<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        self.git.run_in(prog, args, "")
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        self.git.run_in(prog, args, input)
+    }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> anyhow::Result<Out> {
+        if prog != "sh" {
+            return self.git.run_in(prog, args, input);
+        }
+        self.limits.lock().unwrap().push(limit);
+        if self.hang {
+            return Ok(Out {
+                code: 124,
+                stderr: format!("sh: no answer in {limit:?}"),
+                ..Out::default()
+            });
+        }
+        let path = format!("{}:{}", self.bin.display(), std::env::var("PATH").unwrap());
+        let o = Command::new(prog).args(args).env("PATH", path).output()?;
+        Ok(Out {
+            code: o.status.code().unwrap_or(1),
+            stdout: String::from_utf8_lossy(&o.stdout).into(),
+            stderr: String::from_utf8_lossy(&o.stderr).into(),
+        })
+    }
+}
+
+fn ui_lane(name: &str, check: Option<(i32, Value)>) -> (Repo, drover::Ctx, FakeShed, PathBuf) {
+    let repo = repo(name);
+    let (c, sh) = lane(&repo, false);
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    let cfg = cfg.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nui_paths = [\"web/**\"]",
+    );
+    std::fs::write(&c.config, cfg).unwrap();
+    std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
+    let bin = repo.dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    if let Some((code, outcome)) = check {
+        std::fs::create_dir_all(repo.wt.join(".blocks")).unwrap();
+        std::fs::write(
+            repo.wt.join(".blocks/guard.json"),
+            r#"{"screens": ["fixtures/screens"]}"#,
+        )
+        .unwrap();
+        just(&repo, code, &outcome);
+    }
+    (repo, c, sh, bin)
+}
+
+fn just(repo: &Repo, code: i32, outcome: &Value) {
+    let out = if outcome.is_null() {
+        String::new()
+    } else {
+        outcome.to_string()
+    };
+    let log = repo.dir.join("just.log");
+    let script = format!(
+        "#!/bin/sh\necho \"$* $INTEGRATION $PWD\" >> {}\nprintf '%s' '{out}' > \"$GUARD_OUT\"\nexit {code}\n",
+        log.display()
+    );
+    let path = repo.dir.join("bin/just");
+    std::fs::write(&path, script).unwrap();
+    let mut p = std::fs::metadata(&path).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut p, 0o755);
+    std::fs::set_permissions(&path, p).unwrap();
+}
+
+fn ui_fake(head: &str, touched: &str) -> Fake {
+    fake(head).reply("gh api repos/jirathip-dev/sendmeter/pulls/100/files", touched)
+}
+
+fn finding(rule: &str) -> Value {
+    json!({"rule": rule, "severity": "error", "file": "fixtures/screens/queue.one.json", "at": "screen#queue/list#rows",
+        "line": 4, "message": "the title is over 60 characters: 74 characters", "fix": "Shorten the title to 60 characters."})
+}
+
+fn outcome(new: &[Value], known: usize) -> Value {
+    json!({"guard": 1, "pass": new.is_empty(), "new": new, "warned": [], "known": vec![finding("lint/old"); known],
+        "ignored": [], "checked": ["fixtures/screens/queue.one.json"], "skipped": []})
+}
+
+fn ui<'a>(git: Git<'a>, bin: &Path, hang: bool) -> Ui<'a> {
+    Ui {
+        git,
+        bin: bin.to_path_buf(),
+        hang,
+        limits: std::sync::Mutex::new(vec![]),
+    }
+}
+
+#[test]
+fn a_clean_ui_check_ends_the_turn_with_its_result() {
+    for (name, known) in [("ui-clean", 0), ("ui-baseline", 3)] {
+        let (repo, c, _sh, bin) = ui_lane(name, Some((0, outcome(&[], known))));
+        let f = ui_fake(&repo.head, "web/board.html\n");
+        let r = ui(Git::new(&f), &bin, false);
+        let (code, out) = run(&c, &r, &["turn", "done"]);
+        assert_eq!(code, 0, "{out}");
+        let ran = std::fs::read_to_string(repo.dir.join("just.log")).unwrap();
+        assert_eq!(
+            ran.trim(),
+            format!("guard staging {}", repo.wt.canonicalize().unwrap().display())
+        );
+        assert_eq!(*r.limits.lock().unwrap(), [std::time::Duration::from_secs(180)]);
+        let t = kinds(&c, "turn-end").pop().unwrap();
+        assert_eq!(t.val("ui_check")["result"], "clean", "{name}");
+        assert_eq!(t.val("ui_check")["known"], known, "{name}");
+        assert_eq!(kinds(&c, "ui-check").len(), 1);
+        assert_eq!(kinds(&c, "why").len(), 1, "the why note still goes on");
+    }
+}
+
+#[test]
+fn a_new_finding_refuses_the_turn_once_then_review_takes_it() {
+    let (repo, c, _sh, bin) = ui_lane("ui-new", Some((1, outcome(&[finding("lint/title-length")], 2))));
+    let f = ui_fake(&repo.head, "fixtures/screens/queue.one.json\n");
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED UI_CHECK: 1 new finding(s)"), "{out}");
+    let line = "lint/title-length fixtures/screens/queue.one.json:4 screen#queue/list#rows: the title is over 60 characters: 74 characters\n  fix: Shorten the title to 60 characters.";
+    assert!(out.contains(line), "{out}");
+    assert!(kinds(&c, "turn-end").is_empty(), "a refused turn logs no turn-end");
+    assert!(kinds(&c, "why").is_empty() && repo.wt.join("why.md").exists());
+    let run1 = kinds(&c, "ui-check").pop().unwrap();
+    assert_eq!((run1.val("new"), run1.val("refused")), (&json!(1), &json!(true)));
+    assert!(run1.val("secs").is_u64());
+
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 0, "the same findings again go to review: {out}");
+    let t = kinds(&c, "turn-end").pop().unwrap();
+    assert_eq!(t.val("ui_check")["result"], "new");
+    let ev = read(&c.state).unwrap().to_vec();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let fl = cfg.fleet("sendmeter").unwrap();
+    let brief = drover::why::brief(&Git::new(&f), fl, &ev, ("sendmeter", 12), Some(&repo.head), SPEC).unwrap();
+    assert!(brief.contains(line), "rev's brief carries them: {brief}");
+}
+
+#[test]
+fn a_different_finding_after_a_refusal_is_refused_again() {
+    let (repo, c, _sh, bin) = ui_lane("ui-other", Some((1, outcome(&[finding("lint/title-length")], 0))));
+    let f = ui_fake(&repo.head, "web/board.html\n");
+    assert_eq!(run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]).0, 3);
+    just(&repo, 1, &outcome(&[finding("lint/raw-ui")], 0));
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("lint/raw-ui"), "{out}");
+    assert!(kinds(&c, "turn-end").is_empty());
+}
+
+#[test]
+fn a_timed_out_or_broken_check_never_blocks_the_turn() {
+    for (name, hang, code, result) in [("ui-timeout", true, 0, "timeout"), ("ui-broken", false, 2, "broken")] {
+        let (repo, c, _sh, bin) = ui_lane(name, Some((code, Value::Null)));
+        let f = ui_fake(&repo.head, "web/board.html\n");
+        let (code, out) = run(&c, &ui(Git::new(&f), &bin, hang), &["turn", "done"]);
+        assert_eq!(code, 0, "{name}: {out}");
+        let t = kinds(&c, "turn-end").pop().unwrap();
+        assert_eq!(t.val("ui_check")["result"], result, "{name}");
+        assert_eq!(kinds(&c, "ui-check").pop().unwrap().val("result"), result);
+    }
+}
+
+#[test]
+fn no_check_runs_off_ui_paths_or_without_the_setup() {
+    for (name, setup, touched) in [
+        ("ui-off-path", true, "a.rs\n"),
+        ("ui-no-setup", false, "web/board.html\n"),
+    ] {
+        let check = setup.then(|| (1, outcome(&[finding("lint/title-length")], 0)));
+        let (repo, c, _sh, bin) = ui_lane(name, check);
+        let f = ui_fake(&repo.head, touched);
+        let r = ui(Git::new(&f), &bin, false);
+        let (code, out) = run(&c, &r, &["turn", "done"]);
+        assert_eq!(code, 0, "{name}: {out}");
+        assert!(r.limits.lock().unwrap().is_empty(), "{name}: the check never ran");
+        assert!(!repo.dir.join("just.log").exists(), "{name}");
+        assert!(kinds(&c, "turn-end").pop().unwrap().data.get("ui_check").is_none());
+    }
+}

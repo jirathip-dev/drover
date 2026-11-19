@@ -1,4 +1,6 @@
 mod common;
+#[path = "perf/screens.rs"]
+mod screens;
 use common::*;
 use drover::events::{append, Event};
 use drover::runner::{Out, Runner};

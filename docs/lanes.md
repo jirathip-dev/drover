@@ -111,7 +111,8 @@ refused `SECRET_IN_WIP` when the diff has a secret-looking value), closes the pa
 `lane-killed`. The worktree stays; a killed impl goes back
 to `queued` (or `fix(n)`), a killed review to the state before it, both re-spawnable.
 #646: every wip snapshot (kill, supersede, clean's auto-save, a cloud stop) stages tracked changes and new source
-files only. It always skips `target*/`, `node_modules/` and `.lane-logs/` (whatever `.gitignore` says), any file over
+files only. It always skips `target*/`, `node_modules/` and `.lane-logs/` (whatever `.gitignore` says), #1367: an untracked
+`*.log` (lane scratch: it neither counts as dirty nor is refused `SECRET_IN_WIP`; it stays in the worktree), any file over
 5 MB, and the largest files once the snapshot passes 50 MB. The skipped files are listed on the kill output and in
 the wip commit message, never committed. `drover wip prune <fleet> --dry-run` lists origin's `wip/*` branches
 with the size each adds over the integration branch, its issue's state and whether it carries build output, after
@@ -123,7 +124,8 @@ first use of a host) takes the integration branch only, and its later fetches sk
 `UNSAFE_CLEAN` with the reason. #605: a merged or closed issue's lane whose agent is not `working` for
 `[limits] idle_merged_minutes` (default 15) has its pane closed by `clean` (and so by drive's pass) the `kill --yes`
 way, logged `lane-closed` with `why: merged-idle`, then its worktree removed; the dry run says `would close`. A
-`SECRET_IN_WIP` or failed snapshot keeps the pane, one `lane-kept-dirty`, never retried. A working agent, an open
+`SECRET_IN_WIP` or failed snapshot keeps the pane, one `lane-kept-dirty`, never retried; drive's own restart
+refused `SECRET_IN_WIP` is one owner card naming the file and line. A working agent, an open
 issue's lane, an orchestrator or any other agent in the folder stays `keep …: live agent`.
 
 `--supersede` kills the old agent and logs it. `drover adopt` records a lane by hand.

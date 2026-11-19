@@ -1,7 +1,7 @@
-crates/cli/tests/drive.rs 2941
+crates/cli/tests/drive.rs 2982
 crates/cli/tests/hook.rs 1629
 crates/cli/tests/hosts.rs 1791
-crates/cli/tests/shed.rs 2541
+crates/cli/tests/shed.rs 2557
 crates/core/src/arch.rs:check 159
 crates/core/src/check.rs 2531
 crates/core/src/check.rs:check 543
@@ -10,13 +10,13 @@ crates/core/src/cli.rs 2506
 crates/core/src/cli.rs:dispatch 1017
 crates/core/src/config.rs:parse 170
 crates/core/src/doctor.rs:checks 264
-crates/core/src/drive.rs 2185
+crates/core/src/drive.rs 2216
 crates/core/src/drive.rs:drive 176
 crates/core/src/drive.rs:pass 364
 crates/core/src/gate.rs:verdict 192
 crates/core/src/pipeline.rs:validate 174
 crates/core/src/runners.rs:run 167
-crates/core/src/spawn.rs:spawn 502
+crates/core/src/spawn.rs:spawn 507
 crates/core/src/waiting.rs:scan_where 339
 crates/core/src/waiting.rs:waits 295
 crates/core/src/why.rs:show 152

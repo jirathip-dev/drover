@@ -154,6 +154,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "blocks"
+version = "0.1.0"
+source = "git+https://github.com/jirathip-dev/blocks?rev=d800ee2ab451f09bc19029e706b8b346e812675b#d800ee2ab451f09bc19029e706b8b346e812675b"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "by_address"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -531,11 +540,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "blocks",
  "drover-core",
  "drover-sys",
  "flate2",
  "serde",
  "serde_json",
+ "swag",
  "toml",
  "ts-rs",
 ]
@@ -1505,6 +1516,11 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "swag"
+version = "0.1.0"
+source = "git+https://github.com/jirathip-dev/swag?rev=e9ad9ba0ace20e3169e82f42efa2a5f1f8a21847#e9ad9ba0ace20e3169e82f42efa2a5f1f8a21847"
 
 [[package]]
 name = "syn"

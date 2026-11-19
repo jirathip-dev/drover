@@ -109,6 +109,16 @@ impl View {
         let h = self.hosts.iter().find(|h| h.1.as_deref() == m);
         h.map_or(Some("not configured".into()), |h| self.heard(h.2.as_ref()).err())
     }
+    /// Why the host at `m`'s last report failed (None: it answered, or was never asked).
+    pub fn failing(&self, m: Option<&str>) -> Option<String> {
+        let h = self.hosts.iter().find(|h| h.1.as_deref() == m)?.2.as_ref()?;
+        h.why.clone().filter(|w| w != super::NO_SERVICE)
+    }
+    /// The build the host at `m` last reported.
+    pub fn build(&self, m: Option<&str>) -> Option<&str> {
+        let h = self.hosts.iter().find(|h| h.1.as_deref() == m)?.2.as_ref()?;
+        h.build.as_deref()
+    }
     /// Every outbox line a host with fresh word reported, with its machine.
     pub fn lines(&self) -> impl Iterator<Item = (Option<&str>, &Line)> {
         let up = self.lanes.iter().filter(|l| self.up(l.0.as_deref()));

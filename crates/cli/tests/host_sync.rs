@@ -301,7 +301,12 @@ fn hosts_refresh_reads_each_hosts_build_and_never_installs() {
     let c = setup("hosts-build-read", "", true, 0);
     let _sh = FakeShed::attached(&c);
     let bazzite = FakeShed::new();
-    let r = synced(&format!("{}\n-\n", ver(OLD)));
+    let frame = serde_json::json!({"v": 1, "boot": "b", "n": 1, "at": 0,
+        "body": {"kind": "report", "build": ver(OLD), "shed": null, "lanes": []}});
+    let r = synced(&format!("{}\n-\n", ver(OLD))).reply(
+        &format!("{SSH}'/opt/drover/bin/drover' 'hosts' 'report'"),
+        &format!("{frame}\n"),
+    );
     let (code, out) = run(&c, &two(&r, &bazzite), &["hosts", "refresh"]);
     assert_eq!(code, 0, "{out}");
     assert!(

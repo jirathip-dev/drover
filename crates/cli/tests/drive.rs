@@ -2529,7 +2529,7 @@ fn a_no_repro_pass_tells_a_live_reviewer_once_and_waiting_names_the_refusal() {
     assert_eq!(told(), 1, "{:?}", r.calls.borrow());
     let refused = kinds(&c, "repro-refused");
     assert_eq!((refused.len(), refused[0].val("prompted").as_bool()), (1, Some(true)));
-    c.now += 7200;
+    c.now += 600;
     let (out, _) = drive(&c, &r);
     assert_eq!(
         (told(), kinds(&c, "repro-refused").len(), kinds(&c, "verdict").len()),
@@ -2540,6 +2540,49 @@ fn a_no_repro_pass_tells_a_live_reviewer_once_and_waiting_names_the_refusal() {
     let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
     assert!(out.contains("verdict refused NO_REPRO: `Repro: run` needs"), "{out}");
     assert!(!out.contains("recording within 1 min"), "{out}");
+}
+
+fn norepro_told(name: &str) -> (drover::Ctx, PathBuf, Fake) {
+    let (c, rev, r) = proofless(name, NO_OUTPUTS, true);
+    let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--repro"]);
+    assert_eq!(code, 0, "{out}");
+    let (out, _) = drive(&c, &r);
+    assert_eq!(kinds(&c, "repro-refused").len(), 1, "{out}");
+    (c, rev, r)
+}
+
+fn one_norepro_card(c: &drover::Ctx, out: &str) {
+    let nh = kinds(c, "needs-human");
+    assert_eq!(nh.len(), 1, "{out}");
+    assert_eq!(nh[0].str("code"), Some("NO_REPRO"), "{out}");
+    assert!(nh[0].str("reason").unwrap().contains("`Repro: run` needs"), "{nh:?}");
+    assert_eq!(state(c), "needs-human", "{out}");
+}
+
+#[test]
+fn a_no_repro_verdict_left_uncorrected_past_the_stall_threshold_is_one_owner_card() {
+    let (mut c, _, r) = norepro_told("drive-norepro-stuck");
+    c.now += 31 * 60;
+    let (out, _) = drive(&c, &r);
+    one_norepro_card(&c, &out);
+    c.now += 600;
+    let (out, _) = drive(&c, &r);
+    one_norepro_card(&c, &out);
+    assert!(started("sendmeter-rev").is_empty(), "{out}");
+}
+
+#[test]
+fn a_no_repro_verdict_refiled_and_refused_again_is_one_owner_card() {
+    let (mut c, rev, r) = norepro_told("drive-norepro-again");
+    std::fs::write(
+        rev.join("verdict.md"),
+        format!("{NO_OUTPUTS}\nCould not run WebKit here.\n"),
+    )
+    .unwrap();
+    c.now += 60;
+    let (out, _) = drive(&c, &r);
+    one_norepro_card(&c, &out);
+    assert!(out.contains("NO_REPRO again after the re-prompt"), "{out}");
 }
 
 fn lesson(name: &str, live: bool) -> (drover::Ctx, Fake) {
