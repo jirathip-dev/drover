@@ -1,0 +1,9 @@
+Decided: a size rule reads every file its paths match; walk enters a dot folder a size rule names, as for bans
+Because: "measured for every file a `[[size]]` rule's `paths` match, whatever its extension"
+Decided: a glob generated entry removes its matches before generate and compares before and after, restoring both
+Because: "or a committed match it no longer writes, also fails"
+Rejected: comparing only the matches on disk after generate — a generator that never deletes would hide a stale extra file
+Decided: Swift func is a third fns keyword; non-code files get no fns, so only max_file_lines applies
+Because: "Non-code files have no fn rule: only `max_file_lines` applies to them."
+Check: the tree is restored even when generate fails (o? runs after the restore loop)
+Owner: size limits now apply to Swift, justfile and .drover files, and a generated pattern covers new files
