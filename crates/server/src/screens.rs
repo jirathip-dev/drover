@@ -1221,16 +1221,12 @@ fn herd_screen(h: &Herd) -> Value {
     repos.extend(herd_repo("others", "", &h.others, None));
     let host = &h.host;
     let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
-    let level = match () {
-        () if host.gate.is_some() => "held",
-        () if ratio >= 0.5 => "busy",
-        () => "calm",
-    };
-    let sky = match host.pressure.as_deref() {
-        _ if host.gate.is_some() => "storm",
-        Some("warn" | "critical") => "fog",
-        _ if ratio >= 0.5 => "windy",
-        _ => "clear",
+    let (sky, level) = match host.pressure.as_deref() {
+        _ if host.gate.is_some() => ("storm", "held"),
+        Some("warn" | "critical") if ratio < 0.5 => ("fog", "calm"),
+        Some("warn" | "critical") => ("fog", "busy"),
+        _ if ratio >= 0.5 => ("windy", "busy"),
+        _ => ("clear", "calm"),
     };
     let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
     let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
