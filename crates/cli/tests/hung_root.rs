@@ -144,7 +144,7 @@ fn a_tick_stuck_on_one_step_shows_in_doctor_and_the_next_fast_drive() {
     let (_, out) = run(&r.c, &Fake::default(), &["doctor"]);
     let row = out.lines().find(|l| l.contains("tick step")).unwrap_or_default();
     assert!(row.starts_with('✗') && row.contains("check"), "{out}");
-    let (_, out) = run(&r.c, &host(), &["drive", "--fast"]);
+    let (_, out) = run(&r.c, &host(), &["drive"]);
     assert!(out.contains("tick stuck in check"), "{out}");
 }
 
@@ -196,24 +196,27 @@ fn a_lane_whose_reads_block_or_whose_root_was_removed_never_holds_clean_or_the_t
 }
 
 #[test]
-fn a_pass_stuck_past_three_pass_max_secs_is_logged_and_the_next_pass_takes_its_lock() {
+fn a_pass_stuck_past_twice_pass_max_secs_is_logged_stopped_and_its_lock_taken_over() {
     let r = setup("pass-stuck");
-    let f = host().reply("kill -0", "").reply("ps -o etime=", "01:00:00");
-    assert_eq!(run(&r.c, &f, &["drive", "--fast"]).0, 0);
-    let at = |ts: u64| drover::db::take(&r.c.state, "drive-fast.lock", ts, 360, "", &|_| false);
-    let fleet = drover::db::take(&r.c.state, "drive-fast-sendmeter.lock", NOW - 300, 360, "", &|_| false);
-    let live = fleet.expect("a pass holds the fleet's lock");
-    let (_, out) = run(&r.c, &f, &["drive", "--fast"]);
-    assert!(out.contains("another pass holds drive-fast-sendmeter.lock"), "{out}");
-    drover::db::release(&r.c.state, "drive-fast-sendmeter.lock", Some(&live));
-    at(NOW - 361).expect("a pass that hung 361 s ago");
-    let (code, out) = run(&r.c, &f, &["drive", "--fast"]);
+    let f = host().reply("kill -0", "").reply("kill -KILL 4242", "").reply("ps -o etime=", "01:00:00");
+    assert_eq!(run(&r.c, &f, &["drive"]).0, 0);
+    lease_as(&r.c, "drive-sendmeter.lock", 4242, NOW - 60, 120);
+    let (_, out) = run_only(&r.c, &f, &["drive", "sendmeter"]);
+    assert!(out.contains("another pass holds drive-sendmeter.lock"), "{out}");
+    assert!(!f.called("kill -KILL"), "a live pass inside its lease is left alone");
+    lease_as(&r.c, "drive-sendmeter.lock", 4242, NOW - 121, 120);
+    let (code, out) = run_only(&r.c, &f, &["drive", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("taken over"), "{out}");
     let events = read(&r.c.state).unwrap();
     let stuck: Vec<&Event> = events.iter().filter(|e| e.kind == "pass-stuck").collect();
     assert_eq!(stuck.len(), 1, "{stuck:#?}");
-    assert_eq!(stuck[0].str("step"), Some("after backlog"), "{stuck:#?}");
+    assert_eq!(
+        (stuck[0].str("step"), stuck[0].val("stopped")),
+        (Some("after settle"), &json!(true)),
+        "{stuck:#?}"
+    );
+    assert!(f.called("kill -KILL 4242"), "only that pass is stopped");
 }
 
 #[test]

@@ -73,7 +73,7 @@ pub fn setup(root: &Path, cfg: &str) {
 
 /// The three timers launchd runs, each first at a seeded offset.
 pub fn timers(m: &mut Model, rng: &mut Rng, start: u64) {
-    for (args, every) in [(&["drive"][..], 300), (&["drive", "--fast"], 60), (&["check"], 300)] {
+    for (args, every) in [(&["drive"][..], 300), (&["drive"], 60), (&["check"], 300)] {
         let args = args.iter().map(ToString::to_string).collect();
         m.at(start + rng.below(every), Ev::Timer { args, every });
     }

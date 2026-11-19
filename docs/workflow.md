@@ -53,7 +53,7 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
     j0["dev.drover.tick: drover tick"] --> t0
-    j1["dev.drover.fast: drover drive --fast"] --> d0
+    j1["dev.drover.fast: drover drive"] --> d0
     t0["check"] --> t1
     t1["drive"] --> t2
     t2["clean"] --> t3
@@ -62,14 +62,11 @@ flowchart TD
     t5["triage"] --> t6
     t6["hotspots"] --> t7
     t7["compact"]
-    d0["read log, host sample"] --> d1
-    d1["disk budget"] --> d2
-    d2["roots, redeliver"] --> d3
-    d3["look, orphans"] --> d4
-    d4["repair, outbox"] --> d5
-    d5["spawns"] --> d6
-    d6["PR reads, gates, steps"] --> d7
-    d7["backlog"]
+    d0["look, orphans, repair"] --> d1
+    d1["closed issues"] --> d2
+    d2["spawns"] --> d3
+    d3["PR reads, gates, steps"] --> d4
+    d4["settle"]
     t1 --> d0
     other["other timers: serve, hosts, store"]
     j0 -.- k_slow_secs(["slow_secs = 300"])
@@ -84,28 +81,24 @@ flowchart TD
     t0 -.- k_done_close_minutes(["done_close_minutes = 5"])
     t0 -.- k_idle_merged_minutes(["idle_merged_minutes = 15"])
     t0 -.- k_token_refresh_minutes(["token_refresh_minutes = 30"])
-    t1 -.- k_pass_max_secs(["pass_max_secs = 120"])
-    d1 -.- k_shed_read_millis(["shed_read_millis = 300"])
-    d1 -.- k_worktree_budget_gb(["worktree_budget_gb = 25.0"])
-    d1 -.- k_build_budget_gb(["build_budget_gb = 20.0"])
-    d2 -.- k_host_offline_minutes(["host_offline_minutes = 15"])
-    d3 -.- k_ssh_quick_secs(["ssh_quick_secs = 5"])
-    d3 -.- k_ssh_call_secs(["ssh_call_secs = 20"])
-    d3 -.- k_import_max_age_hours(["import_max_age_hours = 24"])
-    d5 -.- k_max_parallel_spawns(["max_parallel_spawns = 6"])
-    d5 -.- k_start_max(["start_max = 2"])
-    d5 -.- k_start_release(["start_release = "started""])
-    d5 -.- k_spawn_pending_max_secs(["spawn_pending_max_secs = 300"])
-    d5 -.- k_respawn_max(["respawn_max = 3"])
-    d5 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
-    d5 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])
-    d6 -.- k_webhook_poll_minutes(["webhook_poll_minutes = 10"])
-    d6 -.- k_silent_minutes(["silent_minutes = 10"])
-    d6 -.- k_ci_start_minutes(["ci_start_minutes = 10"])
-    d6 -.- k_ci_stuck_minutes(["ci_stuck_minutes = 30"])
-    d6 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
-    d6 -.- k_review_rounds(["review_rounds = 3"])
-    d6 -.- k_update_rounds(["update_rounds = 3"])
+    d0 -.- k_ssh_quick_secs(["ssh_quick_secs = 5"])
+    d0 -.- k_ssh_call_secs(["ssh_call_secs = 20"])
+    d0 -.- k_import_max_age_hours(["import_max_age_hours = 24"])
+    d2 -.- k_max_parallel_spawns(["max_parallel_spawns = 6"])
+    d2 -.- k_start_max(["start_max = 2"])
+    d2 -.- k_start_release(["start_release = "started""])
+    d2 -.- k_spawn_pending_max_secs(["spawn_pending_max_secs = 300"])
+    d2 -.- k_respawn_max(["respawn_max = 3"])
+    d2 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
+    d2 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])
+    d3 -.- k_webhook_poll_minutes(["webhook_poll_minutes = 10"])
+    d3 -.- k_silent_minutes(["silent_minutes = 10"])
+    d3 -.- k_ci_start_minutes(["ci_start_minutes = 10"])
+    d3 -.- k_ci_stuck_minutes(["ci_stuck_minutes = 30"])
+    d3 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
+    d3 -.- k_review_rounds(["review_rounds = 3"])
+    d3 -.- k_update_rounds(["update_rounds = 3"])
+    d4 -.- k_pass_max_secs(["pass_max_secs = 60"])
     other -.- k_overload_minutes(["overload_minutes = 10"])
     other -.- k_transcript_days(["transcript_days = 30"])
     other -.- k_crash_wave_minutes(["crash_wave_minutes = 5"])
@@ -121,6 +114,7 @@ flowchart TD
     other -.- k_db_retry_millis(["db_retry_millis = 10"])
     other -.- k_cloud_idle_stop_minutes(["cloud_idle_stop_minutes = 20"])
     other -.- k_notify_secs(["notify_secs = 15"])
+    other -.- k_shed_read_millis(["shed_read_millis = 300"])
     other -.- k_proxy_connect_secs(["proxy_connect_secs = 1"])
     other -.- k_proxy_retry_secs(["proxy_retry_secs = 300"])
     other -.- k_service_call_secs(["service_call_secs = 2"])
@@ -134,6 +128,7 @@ flowchart TD
     other -.- k_orchestrator_idle_minutes(["orchestrator_idle_minutes = 30"])
     other -.- k_orchestrator_reply_minutes(["orchestrator_reply_minutes = 10"])
     other -.- k_orchestrator_change_minutes(["orchestrator_change_minutes = 30"])
+    other -.- k_host_offline_minutes(["host_offline_minutes = 15"])
     other -.- k_host_down_secs(["host_down_secs = 60"])
     other -.- k_kick_max_secs(["kick_max_secs = 300"])
     other -.- k_serve_shed_secs(["serve_shed_secs = 5"])
@@ -144,7 +139,7 @@ flowchart TD
     other -.- k_slo_api_minutes(["slo_api_minutes = 10"])
     other -.- k_slo_idle_minutes(["slo_idle_minutes = 20"])
     other -.- k_slo_tick_minutes(["slo_tick_minutes = 10"])
-    other -.- k_slo_pass_minutes(["slo_pass_minutes = 30"])
+    other -.- k_slo_pass_minutes(["slo_pass_minutes = 5"])
     other -.- k_stall_restart_hours(["stall_restart_hours = 2"])
     other -.- k_self_update_wait_minutes(["self_update_wait_minutes = 45"])
     other -.- k_self_update_lag_minutes(["self_update_lag_minutes = 30"])

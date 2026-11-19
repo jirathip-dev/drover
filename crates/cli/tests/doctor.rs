@@ -61,7 +61,7 @@ fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
         0o600,
     );
     write(&st.join("webpush/subs.json"), SUB, 0o600);
-    for w in ["check", "drive"] {
+    for w in ["check", "drive-fast"] {
         write(&st.join(format!("{w}.at")), &(c.now - 60).to_string(), 0o644);
     }
     assert_eq!(run(&c, &good(), &["timer", "install", "--no-load"]).0, 0);
@@ -298,7 +298,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         ),
         (
             |c, _, r| {
-                write(&c.state.with_file_name("drive.at"), &(c.now - 3600).to_string(), 0o644);
+                write(&c.state.with_file_name("drive-fast.at"), &(c.now - 3600).to_string(), 0o644);
                 r
             },
             "watchdog drive",

@@ -89,7 +89,7 @@ fn passed(name: &str, cfg: &str, design: bool) -> (drover::Ctx, String, FakeShed
 }
 
 fn drive(c: &drover::Ctx, r: &Fake) -> String {
-    let (code, out) = run(c, r, &["drive"]);
+    let (code, out) = passes(c, r);
     assert_eq!(code, 0, "{out}");
     out
 }

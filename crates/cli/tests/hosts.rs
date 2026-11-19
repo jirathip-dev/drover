@@ -969,7 +969,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     let w = drover::waiting::scan(&c, &cfg, &sh.on(&r), &read(&c.state).unwrap(), &[], true, None);
     let w = w.iter().find(|(s, _)| s.issue == 12).unwrap();
     assert_eq!(w.1.what, "review done on bazzite · recording within 1 min");
-    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let all = read(&c.state).unwrap();
     let v = all.iter().find(|e| e.kind == "verdict").expect(&out);

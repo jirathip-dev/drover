@@ -354,7 +354,7 @@ impl Sim {
                 self.start(&["tick"], TICK_PID);
             }
             self.w.fast.set(true);
-            let (code, o) = run(&self.at(), &*self.w, &["drive", "--fast"]);
+            let (code, o) = run(&self.at(), &*self.w, &["drive"]);
             self.w.fast.set(false);
             assert_eq!(code, 0, "{o}");
             self.w.trace.borrow_mut().push(format!("{} fast: {o}", self.w.now()));

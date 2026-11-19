@@ -1838,14 +1838,14 @@ pub fn adopt(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "spawn", d))
 }
 
-pub fn orphans(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<bool> {
+pub fn orphans(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, only: &str) -> Result<bool> {
     let sessions = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?;
     let events = working(&ctx.state)?;
     let (st, mut any) = (fold(&events), false);
     for a in crate::lanes::orphans(ctx, cfg, &events, &sessions) {
         let (pane, m, name) = (a.name.as_str(), a.machine.as_deref(), Some(a.name.as_str()));
         let at = |e: &&Event| e.str("agent") == name;
-        let Some((fleet, Some(n), role)) = crate::lanes::whose(cfg, a) else {
+        let Some((fleet, Some(n), role)) = crate::lanes::whose(cfg, a).filter(|w| w.0 == only) else {
             continue;
         };
         let (role, wt) = (role.map(String::from), Some(a.cwd.to_string_lossy().into_owned()));

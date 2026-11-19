@@ -315,8 +315,11 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     row(rows, subs > 0 && notifier, '!', &line);
     let running = crate::timer::running(ctx, cfg);
     for what in ["check", "drive"] {
-        let stamp = std::fs::read_to_string(ctx.state.with_file_name(format!("{what}.at")));
-        let at = stamp.ok().and_then(|text| text.trim().parse::<u64>().ok());
+        let stamp = || std::fs::read_to_string(ctx.state.with_file_name(format!("{what}.at"))).ok();
+        let at = match what {
+            "drive" => crate::drive::fast_step(ctx).map(|s| s.0),
+            _ => stamp().and_then(|text| text.trim().parse::<u64>().ok()),
+        };
         let age = at.map_or("never".into(), |at| crate::events::age(ctx.now - at));
         let fresh = at.is_some_and(|at| ctx.now <= at + crate::timer::stuck_secs(cfg));
         let ran = match running.filter(|_| !fresh) {

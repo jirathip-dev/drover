@@ -74,7 +74,10 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     } else {
         std::fs::read_to_string(c.home.join(".config/systemd/user/dev.drover.fast.timer")).unwrap()
     };
-    assert!(fast.contains("--fast") && every.contains("60"), "{fast}\n{every}");
+    assert!(
+        fast.contains("drive") && !fast.contains("--fast") && every.contains("60"),
+        "{fast}\n{every}"
+    );
 
     let (code, out) = run(&c, &r, &["timer", "remove"]);
     assert_eq!(
@@ -138,7 +141,7 @@ fn tick_runs_check_then_drive_and_exits_zero_on_refusals() {
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("sendmeter #12 start: REFUSED HOST_BUSY"), "{out}");
-    for w in ["check.at", "drive.at"] {
+    for w in ["check.at", "drive-sendmeter.last"] {
         assert_eq!(
             std::fs::read_to_string(c.state.with_file_name(w)).unwrap(),
             "1000000",

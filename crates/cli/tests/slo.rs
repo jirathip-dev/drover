@@ -36,13 +36,13 @@ fn pass(c: &drover::Ctx, sh: &FakeShed, args: &[&str]) -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git ", "")
         .reply("sh -c nohup", "4321");
-    let (code, out) = run(c, &sh.on(&r), args);
+    let (code, out) = run_only(c, &sh.on(&r), args);
     assert_eq!(code, 0, "{out}");
     r
 }
 
 fn fast(c: &drover::Ctx, sh: &FakeShed) -> Fake {
-    pass(c, sh, &["drive", "--fast"])
+    pass(c, sh, &["drive"])
 }
 
 fn kinds(c: &drover::Ctx) -> Vec<String> {
@@ -152,26 +152,26 @@ fn a_missed_promise_with_its_lane_gone_makes_no_card_and_a_live_one_clears() {
 }
 
 #[test]
-fn no_drive_pass_for_30_minutes_is_one_card_and_push_until_the_next_pass() {
+fn no_drive_pass_for_5_minutes_is_one_card_and_push_until_the_next_pass() {
     let (c, sink, sh) = quiet("slo-no-pass");
     let last = c.state.with_file_name("drive-sendmeter.last");
     std::fs::write(&last, NOW.to_string()).unwrap();
-    fast(&at(&c, 29 * 60), &sh);
+    fast(&at(&c, 4 * 60), &sh);
     assert!(kinds(&c).is_empty(), "{:?}", kinds(&c));
-    fast(&at(&c, 31 * 60), &sh);
-    fast(&at(&c, 36 * 60), &sh);
+    fast(&at(&c, 6 * 60), &sh);
+    fast(&at(&c, 11 * 60), &sh);
     assert_eq!(kinds(&c), ["stuck"]);
     let pushes = std::fs::read_to_string(&sink).unwrap();
     assert_eq!(
         pushes,
-        "sendmeter stuck: no drive pass for 31 min; tried: nothing (no known heal)\n"
+        "sendmeter stuck: no drive pass for 6 min; tried: nothing (no known heal)\n"
     );
-    let shown = card(&c, &sh, NOW + 36 * 60).expect("the card").to_string();
-    assert!(shown.contains("no drive pass for 31 min"), "{shown}");
-    std::fs::write(&last, (NOW + 37 * 60).to_string()).unwrap();
-    fast(&at(&c, 37 * 60), &sh);
+    let shown = card(&c, &sh, NOW + 11 * 60).expect("the card").to_string();
+    assert!(shown.contains("no drive pass for 6 min"), "{shown}");
+    std::fs::write(&last, (NOW + 12 * 60).to_string()).unwrap();
+    fast(&at(&c, 12 * 60), &sh);
     assert_eq!(kinds(&c), ["stuck", "slo-ok"]);
-    assert_eq!(card(&c, &sh, NOW + 37 * 60), None);
+    assert_eq!(card(&c, &sh, NOW + 12 * 60), None);
 }
 
 fn failing(c: &drover::Ctx, n: u64) {
@@ -311,7 +311,12 @@ fn pass_with(c: &drover::Ctx, sh: &FakeShed, pr: Option<&str>) -> Fake {
         .reply("git ", "")
         .reply("gh issue view 7", r#"{"title":"t","body":"b"}"#)
         .reply("sh -c nohup", "4321");
-    let (code, out) = run(c, &sh.on(&r), &["drive", "--fast"]);
+    if pr.is_some() {
+        let cfg = drover::config::Config::load(&c.config).unwrap();
+        let f = cfg.fleet("sendmeter").unwrap();
+        assert_eq!(drover::gh::pr(c, &r, f, ("sendmeter", 7), "issue-7", c.now).unwrap()["number"], 34);
+    }
+    let (code, out) = run_only(c, &sh.on(&r), &["drive"]);
     assert_eq!(code, 0, "{out}");
     r
 }

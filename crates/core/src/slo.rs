@@ -33,7 +33,7 @@ pub fn start_healed(ctx: &Ctx, (fleet, n): (&str, u64), start: impl Fn() -> Resu
 }
 
 enum Heal {
-    StopTick(String),
+    Stop(String, String),
     Recount(String, u64),
     Restart(Stall),
     Move(Stall),
@@ -193,17 +193,17 @@ fn step(
 
 fn heal(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, h: &Heal) -> String {
     match h {
-        Heal::StopTick(pid) => {
+        Heal::Stop(what, pid) => {
             let gone = || ok(r, "kill", &["-0", pid]).is_err();
             ok(r, "kill", &["-TERM", pid]).ok();
             for _ in 0..10 {
                 if gone() {
-                    return format!("stopped tick pid {pid} (SIGTERM)");
+                    return format!("stopped {what} pid {pid} (SIGTERM)");
                 }
                 r.sleep(1);
             }
             ok(r, "kill", &["-KILL", pid]).ok();
-            format!("stopped tick pid {pid} (SIGKILL after 10 s)")
+            format!("stopped {what} pid {pid} (SIGKILL after 10 s)")
         }
         Heal::Recount(fleet, n) => {
             let was = crate::check::worktree_gb(ctx).unwrap_or_default();
@@ -356,17 +356,15 @@ fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
         |c: &str| (c.contains("drover") || c.contains("herdsman")) && [" tick", " drive"].iter().any(|w| c.contains(w));
     let named = pid.filter(|p| ok(r, "ps", &["-o", "command=", "-p", p]).is_ok_and(|c| ours(&c)));
     let child = m.at("child").as_str().filter(|c| !c.is_empty()).unwrap_or("none");
-    let mut step = vec![m.at("step").as_str().unwrap_or("?")];
-    let busy = |f: &&String| !crate::db::leases(&ctx.state, &format!("drive-{f}.lock")).is_empty();
-    step.extend(cfg.fleet.keys().filter(busy).map(String::as_str));
+    let step = m.at("step").as_str().unwrap_or("?");
     let mins = (ctx.now - since) / 60;
     Some(Breach {
         key: format!("slo-tick:{since}"),
         fleet: "drover".into(),
         issue: None,
         slo: Some("slo-tick"),
-        reason: format!("tick running {mins} min, in {}; waiting on: {child}", step.join(" · ")),
-        heal: named.map(Heal::StopTick),
+        reason: format!("tick running {mins} min, in {step}; waiting on: {child}"),
+        heal: named.map(|p| Heal::Stop("tick".into(), p)),
         since,
     })
 }
@@ -423,13 +421,17 @@ fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[crate::session::Ses
 fn no_pass(ctx: &Ctx, cfg: &Config, fleet: &str) -> Option<Breach> {
     let last = crate::drive::last_pass(ctx, fleet)?;
     let mins = ctx.now.saturating_sub(last) / 60;
+    let lock = format!("drive-{fleet}.lock");
+    let held = crate::db::leases(&ctx.state, &lock).into_iter().find(|l| l.key == lock);
+    let pid = held.filter(|l| l.pid != 0 && l.pid != crate::sim::pid() && l.host == crate::db::host());
+    let heal = pid.map(|l| Heal::Stop(format!("{fleet}'s pass"), l.pid.to_string()));
     (mins >= cfg.limits.slo_pass_minutes).then(|| Breach {
         key: format!("no-pass:{fleet}:{last}"),
         fleet: fleet.into(),
         issue: None,
         slo: None,
         reason: format!("no drive pass for {mins} min"),
-        heal: None,
+        heal,
         since: last,
     })
 }

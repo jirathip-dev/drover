@@ -165,7 +165,7 @@ fn report(line: &str) {
 fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
     let (c, r) = fixture();
     let t = Instant::now();
-    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let (code, out) = run(&c, &r, &["drive"]);
     let step = ms(t);
     assert_eq!(code, 0, "{out}");
     let calls = std::mem::take(&mut *r.1.lock().unwrap());
@@ -217,7 +217,7 @@ fn a_merged_lane_is_not_in_its_hosts_report() {
         &Event::new(NOW - 600, "sendmeter", Some(17), "merged", json!({})),
     )
     .unwrap();
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let inputs = r.0.inputs.borrow();
     let asked = inputs
         .iter()
@@ -232,7 +232,7 @@ fn a_merged_lane_is_not_in_its_hosts_report() {
 #[test]
 fn the_page_carries_no_tab_and_each_part_is_its_own_read() {
     let (c, r) = fixture();
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let s = drover::serve::Server::new(&c, &r, Some(ADDR.into()));
     let body = |path: &str, extra: &str| {
         let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"), NOW);
@@ -255,7 +255,7 @@ fn the_page_carries_no_tab_and_each_part_is_its_own_read() {
 #[test]
 fn parity_3_the_loader_and_the_age_are_one_strip_under_the_header() {
     let (c, r) = fixture();
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let s = drover::serve::Server::new(&c, &r, Some(ADDR.into()));
     let res = s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW + 600);
     let page = String::from_utf8_lossy(&res);
@@ -293,7 +293,7 @@ fn the_first_paint_in_webkit_is_under_300ms() {
         return;
     }
     let (c, r) = fixture();
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let base = format!("http://{}/", serve(c, r).2);
     let file = tmpdir("perf-fcp").join("page.png");
     let fcp = "Object.defineProperty(window, 'late', {get: () => new Promise(r => { const t = Date.now(), f = () => { const e = performance.getEntriesByName('first-contentful-paint')[0]; if (e || Date.now() - t > 5000) r([e ? e.startTime : -1]); else setTimeout(f, 20); }; f(); })})";
@@ -327,7 +327,7 @@ fn the_first_paint_in_webkit_is_under_300ms() {
 #[test]
 fn a_steady_state_live_change_is_one_part_under_5kb() {
     let (c, r) = fixture();
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let ask = |id: String, q: String| json!({"id": id, "question": q, "options": ["yes", "no"], "recommend": null});
     for i in 0..10 {
         let d = ask(format!("s{i}"), format!("seed-{i}?"));
@@ -439,7 +439,7 @@ fn parity_r6_waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
         .filter(|w| w.who == "owner" && w.lane.contains("impl"))
         .collect();
     assert_eq!(owner.len(), 10, "{owner:?}");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let mut snap = drover::snapshot::load(&c).unwrap();
     assert_eq!(snap.waits.len(), w.len(), "the step saves the waits the board reads");
     for w in &mut snap.waits {
@@ -476,7 +476,7 @@ fn cpu_ms() -> f64 {
 #[test]
 fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
     let (c, r, _sh) = big_with(20);
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let state = c.state.clone();
     let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0), None, shed()));
     let paths = [
@@ -1040,13 +1040,13 @@ fn a_fast_step_over_50k_worktree_files_walks_none_of_them() {
             std::fs::write(d.join(format!("f{f}.rs")), "x").unwrap();
         }
     }
-    let (fast, fast_ms, out) = walked(&c, &r, &["drive", "--fast"]);
-    let (slow, slow_ms, slow_out) = walked(&c, &r, &["drive"]);
+    let (fast, fast_ms, out) = walked(&c, &r, &["drive"]);
+    let (slow, slow_ms, slow_out) = walked(&c, &r, &["tick"]);
     report(&format!(
-        "#949 perf (50,000 worktree files): drive --fast {fast_ms} ms, {fast} entries walked · drive {slow_ms} ms, {slow} walked"
+        "#949 perf (50,000 worktree files): drive {fast_ms} ms, {fast} entries walked · tick {slow_ms} ms, {slow} walked"
     ));
-    assert_eq!(fast, 0, "drive --fast walked {fast} entries: {out}");
-    assert!(slow >= 50_000, "the slow pass walked only {slow} entries: {slow_out}");
+    assert_eq!(fast, 0, "drive walked {fast} entries: {out}");
+    assert!(slow >= 50_000, "the tick's budget walked only {slow} entries: {slow_out}");
 }
 
 #[test]
@@ -1056,13 +1056,13 @@ fn over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane() {
     let wt = c.worktrees.join("old");
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join("blob"), vec![0u8; 5000]).unwrap();
-    let (_, _, out) = walked(&c, &r, &["drive"]);
+    let (_, _, out) = walked(&c, &r, &["tick"]);
     assert!(
         out.contains("sendmeter #1 start: REFUSED DISK_BUDGET: worktrees"),
         "{out}"
     );
     std::fs::remove_dir_all(&wt).unwrap();
-    let (walks, _, out) = walked(&c, &r, &["drive", "--fast"]);
+    let (walks, _, out) = walked(&c, &r, &["drive"]);
     assert_eq!(walks, 0, "{out}");
     let (walks, _, out) = walked(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
     assert_eq!(walks, 0, "{out}");
@@ -1132,7 +1132,7 @@ fn a_pass_over_30k_events_and_150_done_issues_stays_fast() {
         };
         prs_at(&c, c.now, 151..=200);
         let t0 = cpu_ms();
-        assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+        assert_eq!(run(&c, &r, &["drive"]).0, 0);
         t.push((cpu_ms() - t0).round());
     }
     t.sort_by(f64::total_cmp);
@@ -1153,7 +1153,7 @@ fn a_pass_over_30k_events_and_150_done_issues_stays_fast() {
 fn a_pass_over_20_open_prs_reads_the_pr_cache_file_once() {
     let (c, r) = pass_log(20, 0, 20);
     let before = drover::gh::READS.get();
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     assert_eq!(drover::gh::READS.get() - before, 1);
     for n in 1..=20 {
         assert_eq!(
@@ -1248,7 +1248,7 @@ fn fleets5() -> (drover::Ctx, Boats) {
 
 fn boats_in(queued: bool, fleets: &str, lanes: &[(String, u64)]) -> (drover::Ctx, Boats) {
     let base = (CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""))
-        .replace("max_parallel_spawns = 0", "max_parallel_spawns = 6\npass_max_secs = 1")
+        .replace("max_parallel_spawns = 0", "max_parallel_spawns = 6")
         .replace(
             "integration = \"staging\"",
             "integration = \"staging\"\nmax_in_flight = 0",
@@ -1326,6 +1326,8 @@ fn a_pass_over_30_lanes_on_4_boats_at_700ms_a_call_is_under_20s_and_drive_slow_n
     assert!(p.val("steps")["spawns"].as_f64().is_some(), "{:?}", p.data);
     assert!(secs < 20.0, "a drive pass took {secs:.1} s (target < 20)");
     r.slow.store(false, Relaxed);
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, toml.replace("[limits]\n", "[limits]\npass_max_secs = 1\n")).unwrap();
     assert_eq!(run(&c, &r, &["check"]).0, 0);
     let ev = drover::events::read(&c.state).unwrap().to_vec();
     let why = ev
@@ -1342,12 +1344,12 @@ fn a_pass_over_30_lanes_on_4_boats_at_700ms_a_call_is_under_20s_and_drive_slow_n
 fn a_step_over_30_lanes_on_4_boats_makes_one_report_call_per_host_and_reads_none_after() {
     let (c, r) = boats_queued(false);
     let t = Instant::now();
-    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let (code, out) = run(&c, &r, &["drive"]);
     let secs = t.elapsed().as_secs_f64();
     assert_eq!(code, 0, "{out}");
     let by = r.per_host();
     report(&format!(
-        "#1309 perf (30 lanes on 4 boats, +700 ms per remote call): drive --fast {secs:.1} s, calls {by:?}"
+        "#1309 perf (30 lanes on 4 boats, +700 ms per remote call): drive {secs:.1} s, calls {by:?}"
     ));
     let one: std::collections::BTreeMap<String, usize> = ["b1", "b2", "b3", "b4"].map(|b| (b.into(), 1)).into();
     assert_eq!(by, one, "one report per host, no other call: {out}");
@@ -1366,12 +1368,8 @@ fn a_step_over_30_lanes_on_4_boats_makes_one_report_call_per_host_and_reads_none
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let by = r.per_host();
-    assert!(
-        by.keys().all(|k| !k.ends_with(" other")),
-        "the slow pass: a probe and a report a host: {by:?}"
-    );
-    assert_eq!(by.values().sum::<usize>(), 8, "{by:?}");
-    assert!(secs < 5.0, "drive --fast took {secs:.1} s (target < 5)");
+    assert_eq!(by, one, "the next step: one report a host, no probe: {by:?}");
+    assert!(secs < 5.0, "drive took {secs:.1} s (target < 5)");
 }
 
 #[test]
@@ -1385,7 +1383,7 @@ fn a_boat_lanes_turn_end_is_acted_on_in_the_next_step_inside_5s() {
     let line = json!({"args": ["turn", "blocked", "--why", "needs a key"], "lane": "sendmeter:41:impl", "ts": NOW * 1000 - 2_000});
     std::fs::write(wt.join(".drover/outbox.jsonl"), format!("{line}\n")).unwrap();
     let t = Instant::now();
-    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let (code, out) = run(&c, &r, &["drive"]);
     let secs = t.elapsed().as_secs_f64();
     assert_eq!(code, 0, "{out}");
     let ev = drover::events::read(&c.state).unwrap().to_vec();
@@ -1402,7 +1400,7 @@ fn a_boat_lanes_turn_end_is_acted_on_in_the_next_step_inside_5s() {
         "#1309 event-to-action: a boat lane's turn end is applied by the next step, which took {secs:.1} s (target < 5)"
     ));
     assert!(secs < 5.0, "the step took {secs:.1} s (target < 5)");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let again = drover::events::read(&c.state).unwrap();
     assert_eq!(
         again.iter().filter(|e| e.is("turn-end", "sendmeter", 41)).count(),
@@ -1415,7 +1413,7 @@ fn a_boat_lanes_turn_end_is_acted_on_in_the_next_step_inside_5s() {
 fn five_fleets_with_40_lanes_on_4_boats_at_700ms_a_call_end_every_pass_within_10s() {
     let (c, r) = fleets5();
     let t = Instant::now();
-    let (code, out) = run(&c, &r, &["drive"]);
+    let (code, out) = run_only(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let passes = std::mem::take(&mut *r.detached.lock().unwrap());
     std::thread::scope(|s| {
@@ -1423,7 +1421,7 @@ fn five_fleets_with_40_lanes_on_4_boats_at_700ms_a_call_end_every_pass_within_10
             let (c, r) = (&c, &r);
             s.spawn(move || {
                 let a: Vec<&str> = a.iter().map(String::as_str).collect();
-                let (code, out) = run(c, r, &a);
+                let (code, out) = run_only(c, r, &a);
                 assert_eq!(code, 0, "{a:?}: {out}");
             });
         }
@@ -1439,4 +1437,8 @@ fn five_fleets_with_40_lanes_on_4_boats_at_700ms_a_call_end_every_pass_within_10
         r.per_host()
     ));
     assert_eq!(done, FLEETS.into(), "{out}");
+    let mut one: Vec<Vec<String>> = FLEETS.iter().map(|f| vec!["drive".into(), (*f).into()]).collect();
+    one.sort();
+    assert_eq!(passes, one, "the fast job starts each fleet's pass as its own process");
+    assert!(secs < 10.0, "every pass done in {secs:.1} s (target < 10)");
 }

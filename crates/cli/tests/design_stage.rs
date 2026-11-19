@@ -46,7 +46,7 @@ fn fake(c: &drover::Ctx, head: &str) -> Fake {
 }
 
 fn drive(c: &drover::Ctx, r: &dyn Runner) -> String {
-    let (code, out) = run(c, r, &["drive"]);
+    let (code, out) = passes(c, r);
     assert_eq!(code, 0, "{out}");
     out
 }

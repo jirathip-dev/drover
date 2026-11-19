@@ -275,7 +275,7 @@ fn with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_a
         now: c.now + t,
         ..c.clone()
     };
-    let step = |t: u64| assert_eq!(run(&at(t), &r, &["drive", "--fast"]).0, 0);
+    let step = |t: u64| assert_eq!(run(&at(t), &r, &["drive"]).0, 0);
     let prs = || r.count("gh api") - r.count("gh api graphql -f owner=");
     step(0);
     let reads = prs();

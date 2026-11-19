@@ -216,7 +216,7 @@ logs `host-key-changed <host>` once (again only after the host was back online) 
   once it passes drive logs `runtime-up`, the held issues' earlier respawns stop counting, and spawns resume paced by
   `max_parallel_spawns`.
 - History (#234): `<state dir>/host-history.jsonl` keeps 24 h of `{ts, host, load_cpu, pressure, swap_out, mem_free_gb,
-  disk_free_gb, lanes}`: the main host a row a minute (`drive --fast`), a remote host a row every 5 minutes (`check`'s
+  disk_free_gb, lanes}`: the main host a row a minute (`drive`), a remote host a row every 5 minutes (`check`'s
   survey, no extra SSH). Rows past 24 h are dropped when it is rewritten (at most hourly), and it stays under
   about 180 KB a host. Each card row carries its 24 h series for a sparkline. Downsampling keeps the worst row of each bucket (the max; free space the
   min), so a peak is never hidden.

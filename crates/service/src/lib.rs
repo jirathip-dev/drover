@@ -10,10 +10,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
-use tokio::sync::{watch, Semaphore};
+use tokio::sync::{watch, Notify, Semaphore};
 use tokio::time::{interval, timeout};
 
 mod links;
+mod loops;
 
 const JOBS: usize = 16;
 const CONNS: usize = 64;
@@ -33,6 +34,7 @@ pub struct Service {
     conns: Arc<Semaphore>,
     polling: AtomicBool,
     seq: watch::Sender<u64>,
+    fleets: std::collections::BTreeMap<String, Notify>,
 }
 
 /// `drover service`: refuses a second one, then runs until killed.
@@ -68,6 +70,7 @@ pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::
             conns: Arc::new(Semaphore::new(CONNS)),
             polling: AtomicBool::new(false),
             seq: watch::channel(drover_core::db::last_seq(&ctx.state)).0,
+            fleets: loops::fleets(&ctx),
             ctx,
             r,
             clock,
@@ -79,6 +82,7 @@ pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::
         tokio::spawn(s.clone().poll());
         tokio::spawn(s.clone().local(local));
         s.links();
+        s.loops();
         loop {
             if let Ok((c, peer)) = api.accept().await {
                 tokio::spawn(s.clone().api(c, peer));
@@ -154,7 +158,7 @@ impl Service {
             if !self.polling.swap(true, Relaxed) {
                 let me = self.clone();
                 tokio::spawn(async move {
-                    me.job(argv(&["drive", "--fast"]), KICK_SECS).await;
+                    me.job(argv(&["drive"]), KICK_SECS).await;
                     me.polling.store(false, Relaxed);
                 });
             }
@@ -182,6 +186,10 @@ impl Service {
             .ok();
         let v: Value = serde_json::from_str(&line).unwrap_or_default();
         let k = v.at("kick");
+        let fleet = v.at("wake").as_str().or(k.at("fleet").as_str());
+        if let Some(woke) = fleet.and_then(|f| self.fleets.get(f)) {
+            woke.notify_one();
+        }
         if let (Some(f), Some(n)) = (k.at("fleet").as_str(), k.at("issue").as_u64()) {
             let why = k.at("why").as_str().unwrap_or("kick");
             let id = k.at("id").as_str().map(|i| ["--id".to_string(), i.into()]);
