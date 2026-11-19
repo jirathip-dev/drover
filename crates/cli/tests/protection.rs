@@ -3,7 +3,7 @@ use common::*;
 
 const MAIN: &str = "gh api repos/jirathip-dev/sendmeter/branches/main/protection";
 const STAGING: &str = "gh api repos/jirathip-dev/sendmeter/branches/staging/protection";
-const PROTECTED: &str = r#"{"url":"x","required_status_checks":{"strict":true,"contexts":["ci"]},"required_pull_request_reviews":{"required_approving_review_count":1},"enforce_admins":{"enabled":true}}"#;
+const PROTECTED: &str = r#"{"url":"x","required_status_checks":{"strict":true,"contexts":["ci","drover/review"]},"required_pull_request_reviews":{"required_approving_review_count":1},"enforce_admins":{"enabled":true}}"#;
 const NOT_PROTECTED: &str =
     r#"{"message":"Branch not protected","documentation_url":"https://docs.github.com","status":"404"}"#;
 const NO_BRANCH: &str =
@@ -51,6 +51,27 @@ fn all_protected_exits_zero() {
     );
     assert!(out.contains("jirathip-dev/sendmeter main: ✓ protected"), "{out}");
     assert!(!out.contains('⚠'), "{out}");
+}
+
+#[test]
+fn integration_without_drover_review_required_exits_non_zero() {
+    let ci_only = PROTECTED.replace(r#","drover/review""#, "");
+    let (code, out) = check("prot-review", &with(ok(&ci_only), ok(&ci_only)));
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains(
+            "staging: ✗ drover/review is not a required check → add drover/review to its required status checks"
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("main: ✗"), "only the integration branch needs it: {out}");
+    let checks = ci_only.replace(
+        r#""contexts":["ci"]"#,
+        r#""checks":[{"context":"drover/review","app_id":null}]"#,
+    );
+    let (code, out) = check("prot-review-checks", &with(ok(&ci_only), ok(&checks)));
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("staging: ✓ drover/review is a required check"), "{out}");
 }
 
 #[test]

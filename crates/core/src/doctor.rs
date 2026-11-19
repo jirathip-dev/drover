@@ -110,6 +110,7 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, r, rows);
     rows.extend(crate::proxy::status(ctx, cfg, r).map(|f| f.join(" · ")));
+    rows.extend(crate::status::doctor(ctx, cfg));
     if cfg
         .runtime
         .as_ref()

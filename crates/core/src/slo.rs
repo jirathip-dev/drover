@@ -264,7 +264,7 @@ fn stalls(ctx: &Ctx, cfg: &Config, events: &[Event], fleet: &str) -> Vec<Breach>
             || q.iter()
                 .any(|i| i.issue == n && (i.blocked_by.is_some() || !i.ext.is_empty()));
         let pr = crate::gh::cached_pr(ctx, fleet, n);
-        let ci = !pr.is_null() && crate::gh::ci(pr.at("statusCheckRollup")) != "green";
+        let ci = !pr.is_null() && crate::gh::ci(&crate::gh::required(pr.at("statusCheckRollup"), &[])) != "green";
         let asked = asks.iter().any(|e| e.fleet == fleet && e.issue == Some(n));
         let promise = mine
             .iter()

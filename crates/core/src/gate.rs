@@ -186,6 +186,22 @@ pub fn verdict(
         cfg,
         Event::new(ctx.now, fleet, Some(issue), "verdict", data),
     )?;
+    let blocking = findings(&body).iter().filter(|f| f.0).count();
+    let desc = format!(
+        "{v} · round {round} · {head:.7}{}",
+        if pass {
+            String::new()
+        } else {
+            format!(" · {blocking} blocking")
+        }
+    );
+    let context = if stage == "verify" {
+        crate::status::VERIFY
+    } else {
+        crate::status::REVIEW
+    };
+    let outcome = if pass { "success" } else { "failure" };
+    crate::status::post(ctx, cfg, r, (fleet, issue), &head, (context, outcome, &desc))?;
     let (limit, of_limit) = limit(f, cnt, st.as_ref());
     let (v, note) = if form {
         ("FAIL (form-only)", format!(" · not counted · form {}/{of}", used + 1))
@@ -1028,6 +1044,17 @@ fn merged(
         d.put("by", json!("owner")).put("override", json!("ROUND_LIMIT"));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
+    if over {
+        let desc = format!("ROUND_LIMIT overridden at {head:.7} · by: owner");
+        crate::status::post(
+            ctx,
+            cfg,
+            r,
+            (fleet, issue),
+            head,
+            (crate::status::OVERRIDE, "success", &desc),
+        )?;
+    }
     if f.land.is_some() {
         let checks = gh::required(&pr["statusCheckRollup"], f.checks(pr));
         let at = |k: &'static str| {

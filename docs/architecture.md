@@ -134,6 +134,7 @@ lane terminal call, on shed) and `gh` (cached GitHub reads).
 | `overlap` | conflict preview between open branches, `cap-check` |
 | `serve`, `lanes`, `devices`, `webpush` | the phone page, its Lanes tab, paired devices, web push |
 | `doctor`, `protection` | read-only host and branch-protection checks |
+| `status` | the commit statuses drover posts on PR heads: `drover/review`, `drover/verify`, `drover/override` |
 | `runner`, `term`, `gh` | the seams to external programs |
 
 ## API types

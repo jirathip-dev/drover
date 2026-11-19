@@ -67,6 +67,7 @@ pub mod snapshot;
 pub mod spawn;
 pub mod stall;
 pub mod starts;
+pub mod status;
 pub mod term;
 pub mod timer;
 pub mod top;
