@@ -1,0 +1,39 @@
+Decided: a changed composer block redraws the live composer in place instead of replacing its element
+Because: "never moves focus out of the composer, nor its caret or selection, nor closes the phone keyboard"
+Because: web/src/blocks.ts:523
+Rejected: refocusing the new textarea after a repaint — iOS will not reopen the keyboard on a programmatic focus
+Rejected: returning the old element from the renderer — its parent re-append detaches it and blurs it
+Check: compose.mjs sends working on, then a reply with working null; textarea node, focus and caret [4,6] stay
+Owner: typing in a thread is no longer interrupted when the orchestrator replies
+
+Decided: a changed composer block redraws the live composer in place instead of replacing its element
+Because: "never moves focus out of the composer, nor its caret or selection, nor closes the phone keyboard"
+Rejected: refocusing the new textarea after a repaint — iOS will not reopen the keyboard on a programmatic focus
+Rejected: returning the old element from the renderer — its parent re-append detaches it and blurs it
+Decided: round 2 only merges current staging; CI's earlier reds were in files this PR does not touch
+Check: compose.mjs sends working on, then a reply with working null; textarea node, focus and caret [4,6] stay
+Owner: typing in a thread is no longer interrupted when the orchestrator replies
+
+Decided: merged origin/staging; blocks.ts keeps staging's select picks inside this PR's in-place composer redraw
+Because: "never moves focus out of the composer, nor its caret or selection, nor closes the phone keyboard"
+Rejected: none
+Check: web/src/blocks.ts composer draw() uses around(row, top, picks) so the textarea row stays attached
+Owner: picked up the new model and effort dropdowns while keeping typing uninterrupted
+
+Decided: take staging's in-place composer patch (#1310) whole and drop this PR's duplicate live-map fix; keep the regression test
+Because: web/src/blocks.ts:405
+Rejected: keeping both mechanisms — two ways to do one thing in same()
+Check: page_drafts compose test passes on staging's composer code
+Owner: the fix is already on staging; this PR now only adds the test that guards it
+
+Decided: merge origin/staging (#1359) instead of rebasing; ci.yml regex keeps staging's line plus compose
+Because: web/src/blocks.ts:405
+Rejected: rebase — lanes never rewrite history or force-push
+Check: page_drafts compose test passes on staging's composer code
+Owner: the fix is already on staging; this PR now only adds the test that guards it
+
+Decided: fix round 6 merges origin/staging into the branch; this PR's test and ci.yml line are unchanged
+Because: q2176
+Rejected: editing threads_tab.rs — the two red tests pass in real WebKit at this head, so there is nothing to fix there
+Check: ui-webkit at 0cd702e35f1cfbf6b67ca42ebf98e71b517da34e; locally threads_tab webkit 10/10 and page_drafts 5/5 pass in playwright 1.63 WebKit
+Owner: the branch is up to date with staging; the regression test still guards typing in a thread
