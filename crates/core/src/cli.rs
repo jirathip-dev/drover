@@ -2,8 +2,8 @@ use crate::config::{home, Config};
 use crate::events::{emit, status_line, working, Event, Json};
 use crate::runner::{self, Runner};
 use crate::{
-    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx, CHAT,
-    SERVE, SERVICE,
+    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx, SERVE,
+    SERVICE,
 };
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -333,7 +333,7 @@ enum Cmd {
         about = "Print the first queued issue that has no lane and is not blocked; exit 0 found, 1 empty, 2 top item blocked"
     )]
     Next { fleet: String },
-    #[command(about = "Compact board (≤ 60 cols): queue order, state, lane, age, last event")]
+    #[command(about = "The app's Board tab on a terminal (docs/terminal.md), else the compact board (≤ 60 cols)")]
     Board { fleet: Option<String> },
     #[command(
         about = "#910: every live lane's processes (CPU %, run time, heavy kind) and heavy-slot waits, under the host's load, heavy slots and held respawns"
@@ -1455,6 +1455,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::top::print(&t, out)?;
             }
         }
+        Cmd::Board { fleet } if crate::app(ctx, r, &crate::Open::Board(fleet.clone()))? => {}
         Cmd::Board { fleet } => {
             let events = working(&ctx.state)?;
             let all = fleet.map_or_else(
@@ -1612,7 +1613,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             install: true,
         } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
         Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
-        Cmd::Chat { thread } => (CHAT.get().context("no chat")?)(ctx, r, thread.as_deref())?,
+        Cmd::Chat { thread } => anyhow::ensure!(crate::app(ctx, r, &crate::Open::Threads(thread))?, "needs a terminal"),
         cmd => {
             let cfg = match cmd {
                 Cmd::Check => check::config(ctx)?,

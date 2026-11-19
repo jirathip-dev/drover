@@ -33,6 +33,7 @@ mod fresh;
 mod jobs;
 #[path = "screens.rs"]
 mod screens;
+pub use screens::local::{Done, Local, Place};
 mod slo;
 mod v1;
 mod wire;

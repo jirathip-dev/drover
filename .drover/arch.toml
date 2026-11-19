@@ -187,6 +187,27 @@ paths = ["crates/*/src/**"]
 except = ["crates/core/src/clock.rs"]
 reason = "#809: time is read and waited on only in core's clock (crate::clock::instant)"
 
+[[ban]]
+pattern = "ratatui"
+paths = ["crates/*/src/**"]
+except = ["crates/chat/src/**"]
+reason = "#1354: only the terminal app draws; the screens stay data"
+
+[[ban]]
+pattern = "/screens/"
+paths = ["crates/chat/src/**"]
+reason = "#1354: the terminal names no screen: paths and places come from serve::Local"
+
+[[ban]]
+pattern = "TcpStream"
+paths = ["crates/chat/src/**"]
+reason = "#1354: the terminal calls the screens in-process (serve::Local), never over HTTP"
+
+[[ban]]
+pattern = "Server"
+paths = ["crates/chat/src/**"]
+reason = "#1354: the terminal uses serve::Local, the screens' in-process door, never the HTTP server"
+
 [[size]]
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000

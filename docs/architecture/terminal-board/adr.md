@@ -28,7 +28,7 @@ How does a terminal draw every screen the phone draws, run every action they off
 - A stream (`crates/server/src/screens.rs:1897`) is a loop: every 500 ms, if the log's last seq moved or 30 s
   passed, build the screen again and send the difference.
 - The snapshot the screens replay is taken by the timer's fast step, not by serve.
-- `crates/chat` is the app since #1352: `crates/chat/src/lib.rs:342` toggles a `board` flag that draws one grey
+- `crates/chat` is the app since #1352: its Tab toggled a `board` flag that draws one grey
   line. It depends on core only. Its two-press panel calls core's `answer` and `card::settle` directly.
 - `web/src/blocks.ts` is the phone's renderer: one function per block type. `header-strip` and `menu-row` are places
   from the manifest, not blocks; `toggle`, `picker` and `secret` are form fields; `diagram` has no phone renderer.
