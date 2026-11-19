@@ -1708,6 +1708,35 @@ fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
 }
 
 #[test]
+fn an_idle_impl_agent_holding_the_branch_is_superseded_by_an_update_round_in_review() {
+    let b = FakeShed::new();
+    let (c, f, local, old, _) = herdr_era_lane("update-idle", &b, true, &[]);
+    let rev = json!({"role": "rev", "agent": "sendmeter-rev-12-r2", "harness": "claude", "pane": "w3:p1",
+        "workspace": "w3", "worktree": c.worktrees.join("sendmeter/rev-12-r2"), "branch": "rev-12-r2"});
+    drover::events::append(&c.state, &Event::new(c.now - 60, "sendmeter", Some(12), "spawn", rev)).unwrap();
+    let st = drover::events::fold(&drover::events::read(&c.state).unwrap())[&("sendmeter".to_string(), 12)]
+        .state
+        .clone();
+    assert!(st.starts_with("review("), "{st}");
+    b.lane("sendmeter-impl-12-r1", "idle", old.to_str().unwrap());
+    let cli = Push(b.cli(&f), local.parent().unwrap().into());
+    let (code, out) = run(
+        &c,
+        &cli,
+        &["spawn", "sendmeter", "12", "impl", "--supersede", "--update"],
+    );
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    assert!(!b.has("sendmeter-impl-12-r1"), "{out}");
+    let sup = logged(&c, "supersede");
+    assert!(
+        sup.iter()
+            .any(|e| e.val("killed").to_string().contains("sendmeter-impl-12-r1")),
+        "{sup:?}"
+    );
+    assert!(!b.has("sendmeter-impl-12-r1"), "{out}");
+}
+
+#[test]
 fn a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path() {
     let b = FakeShed::new();
     let real = std::fs::canonicalize(env!("CARGO_BIN_EXE_drover")).unwrap();
