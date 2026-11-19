@@ -1,0 +1,12 @@
+Decided: one core module (hygiene.rs) holds the patterns, visibility cache, diff walker, scan and doctor line; every GitHub write path calls it
+Because: "every text drover itself sends to GitHub (`drover merge`'s closing comment and squash message, `amend`, `triage`, issue filing by `lesson`/`triage`/`hotspots`, …), all through the same check"
+Decided: the lane hook reads only the cached visibility; spawn, merge, doctor and wip saves refresh it at most once a day
+Because: "drover asks GitHub for the repo's visibility once a day and caches it; a fleet.toml flag overrides it"
+Decided: unknown visibility (gh fails, no cache) counts as public, the safe side
+Decided: the wip snapshot reuses the secret scan's diff walker, now hygiene::hits, for its file:line
+Because: q2333
+Rejected: a gh call inside the hook — it would run on every tool call and reach the network from tests
+Rejected: checking compact's PR body rewrite — it only swaps shas in text already public
+Check: crates/cli/tests/hygiene.rs drives the real hook, pre-push (real git repo), merge, amend, kill, doctor and scan paths
+Check: refusals print the pattern name and where, never the matched value
+Owner: Public repos now refuse text naming home folders, hosts, session ids or the fleet's private names.
