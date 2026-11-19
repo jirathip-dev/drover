@@ -13,6 +13,8 @@ use std::time::Duration;
 
 #[path = "later.rs"]
 mod later;
+#[path = "screens_local.rs"]
+pub(super) mod local;
 #[path = "screens_pages.rs"]
 mod pages;
 
@@ -53,7 +55,6 @@ pub fn page_places() -> Value {
 
 #[path = "screens_hosts.rs"]
 mod hosts;
-use hosts::HOST_ACTIONS;
 
 const THREAD_ACTIONS: [&str; 11] = [
     "thread-new",
@@ -1649,25 +1650,17 @@ impl Server<'_> {
                 let Ok(a) = serde_json::from_str::<Value>(body) else {
                     return line("400 Bad Request", "bad request body");
                 };
-                let name = a.at("action").as_str().unwrap_or_default();
-                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name) && !HOST_ACTIONS.contains(&name)) {
-                    let why =
-                        format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
-                    return line("403 Forbidden", &why);
-                }
-                let by = match auth {
-                    Ok(d) if !plugin => d.label.clone(),
-                    _ => "cooee".into(),
+                let who = match auth {
+                    Ok(d) if !plugin => local::Who::Device(&d.label),
+                    _ => local::Who::Plugin,
                 };
-                let res = match name {
-                    "later" => self.hide_card(ctx, &by, a.at("values")),
-                    n if HOST_ACTIONS.contains(&n) => self.host_op(ctx, n, a.at("values")),
-                    _ => self.action(ctx, name, &a),
-                };
-                match res {
+                match self.perform(ctx, &who, &a) {
                     Ok(v) => out("200 OK", &v),
-                    Err(e) if e.downcast_ref::<Refusal>().is_some() => line("409 Conflict", &shown(&e)),
-                    Err(e) => line("400 Bad Request", &shown(&e)),
+                    Err(e) => match e.downcast_ref::<Refusal>().map(|r| r.code) {
+                        Some("NOT_PERMITTED") => line("403 Forbidden", &shown(&e)),
+                        Some(_) => line("409 Conflict", &shown(&e)),
+                        None => line("400 Bad Request", &shown(&e)),
+                    },
                 }
             }
             _ => line("404 Not Found", "no such screen route"),

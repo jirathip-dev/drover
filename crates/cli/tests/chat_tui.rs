@@ -1,7 +1,7 @@
 mod common;
 use common::*;
 use drover::events::{read, Event};
-use drover_chat::App;
+use drover_chat::{App, Local, Open};
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Terminal;
@@ -84,8 +84,9 @@ fn with_no_serve_the_list_opens_a_thread_a_sent_line_reaches_the_orchestrator_an
     let f = acp();
     let cli = b.cli(&f);
     let cli = b.on(&cli);
+    let door = Local::new(&c, &cli);
     std::thread::scope(|s| {
-        let mut app = App::new(s, &c, &cli, None);
+        let mut app = App::new(s, &c, &cli, &door, &Open::Threads(None));
         let mut t = term(40, 18);
         let list = screen(&mut t, &mut app);
         assert!(list.contains(" SENDMETER"), "{list}");
@@ -170,8 +171,9 @@ fn keys_answer_the_open_ask_and_settle_a_card_and_an_expired_card_is_refused_as_
     let f = acp().reply("sh -c nohup", "4242");
     let cli = b.cli(&f);
     let cli = b.on(&cli);
+    let door = Local::new(&c, &cli);
     std::thread::scope(|s| {
-        let mut app = App::new(s, &c, &cli, Some("t1"));
+        let mut app = App::new(s, &c, &cli, &door, &Open::Threads(Some("t1".into())));
         let mut t = term(40, 18);
         let chat = screen(&mut t, &mut app);
         assert!(chat.contains("1-9 answer · a d card"), "{chat}");
@@ -217,8 +219,9 @@ fn keys_answer_the_open_ask_and_settle_a_card_and_an_expired_card_is_refused_as_
     let f = acp();
     let cli = b.cli(&f);
     let cli = b.on(&cli);
+    let door = Local::new(&late, &cli);
     std::thread::scope(|s| {
-        let mut app = App::new(s, &late, &cli, Some("t1"));
+        let mut app = App::new(s, &late, &cli, &door, &Open::Threads(Some("t1".into())));
         let mut t = term(40, 18);
         assert!(screen(&mut t, &mut app).contains("$ r2 · expired"));
         key(&mut app, KeyCode::Char('a'));
@@ -259,8 +262,9 @@ fn it_wraps_and_never_cuts_at_40x18_splits_at_120x40_and_never_panics_on_a_tiny_
     let f = acp();
     let cli = b.cli(&f);
     let cli = b.on(&cli);
+    let door = Local::new(&c, &cli);
     std::thread::scope(|s| {
-        let mut app = App::new(s, &c, &cli, None);
+        let mut app = App::new(s, &c, &cli, &door, &Open::Threads(None));
         let mut t = term(120, 40);
         let wide = screen(&mut t, &mut app);
         let at = |w: &str, s: &str| w.lines().position(|l| l.contains(s)).unwrap();
@@ -314,8 +318,9 @@ fn shed_down_is_started_with_its_job_and_the_top_line_says_so_or_gives_the_comma
             "Starting it with the",
         ),
     ] {
+        let door = Local::new(&c, &f);
         std::thread::scope(|s| {
-            let mut app = App::new(s, &c, &f, Some("t1"));
+            let mut app = App::new(s, &c, &f, &door, &Open::Threads(Some("t1".into())));
             until(&mut app, |a| {
                 shot(&mut term(40, 18), a).lines().next().unwrap().contains("shed")
             });
@@ -326,7 +331,7 @@ fn shed_down_is_started_with_its_job_and_the_top_line_says_so_or_gives_the_comma
             assert!(shown.contains("‹ t1 Board 502"), "the thread stays readable: {shown}");
         });
     }
-    drover::CHAT.set(drover_chat::main).ok();
+    drover::APP.set(drover_chat::main).ok();
     assert_eq!(
         run(&c, &Fake::default(), &["chat", "t9"]),
         run(&c, &Fake::default(), &["thread", "show", "t9"])
@@ -370,12 +375,13 @@ fn every_key_of_the_designs_list_does_what_the_list_says() {
     let cli = b.cli(&f);
     let cli = b.on(&cli);
     let ctrl = |app: &mut App, ch: char| app.key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL));
+    let door = Local::new(&c, &cli);
     std::thread::scope(|s| {
-        let mut app = App::new(s, &c, &cli, None);
+        let mut app = App::new(s, &c, &cli, &door, &Open::Threads(None));
         let mut t = term(40, 18);
         screen(&mut t, &mut app);
         key(&mut app, KeyCode::Tab);
-        assert!(screen(&mut t, &mut app).contains("#1354"));
+        assert!(screen(&mut t, &mut app).contains("Queue · Events · Lanes"));
         key(&mut app, KeyCode::Tab);
         key(&mut app, KeyCode::Char('?'));
         assert!(screen(&mut t, &mut app).contains("Ctrl-C"));
@@ -439,8 +445,9 @@ fn a_message_shed_did_not_take_stays_logged_and_goes_once_shed_answers() {
     let f = acp().once_err("shed run", 1, "shed: no server");
     let cli = b.cli(&f);
     let cli = b.on(&cli);
+    let door = Local::new(&c, &cli);
     std::thread::scope(|s| {
-        let mut app = App::new(s, &c, &cli, Some("t1"));
+        let mut app = App::new(s, &c, &cli, &door, &Open::Threads(Some("t1".into())));
         let mut t = term(40, 18);
         screen(&mut t, &mut app);
         typed(&mut app, "still there?");

@@ -18,6 +18,7 @@
 4 blocked_respawn
 1 board_errors
 4 board_fresh
+2 board_tui
 3 boat
 2 brief_golden
 4 chat_index
@@ -101,6 +102,7 @@
 3 lifeboat
 3 limits
 3 live
+3 local_screens
 3 log_share
 2 m3
 2 m3_fixes
@@ -167,11 +169,13 @@
 4 runner_limits
 1 runners
 3 runtime_breaker
+1 sbin_path
 1 schemes
 4 scratch
 2 screen_pages
 3 self_update
 3 serial_groups
+1 serve_conn
 2 serve_health
 3 serve_load
 1 serve_web
