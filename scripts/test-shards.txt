@@ -27,6 +27,7 @@
 1 chat_tui
 3 check_clean
 2 ci_templates
+1 clone_heal
 2 cloud
 1 compact
 2 compaction
