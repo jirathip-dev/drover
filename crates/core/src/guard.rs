@@ -9,7 +9,7 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
-/// The repo's opt-in to blocks' UI check (jirathip-dev/blocks#79's hook contract).
+/// The repo's opt-in to blocks' UI check (blocks#79 hook contract).
 pub const CONFIG: &str = ".blocks/guard.json";
 
 const RUN: &str = r#"o=$(mktemp) || exit 125
