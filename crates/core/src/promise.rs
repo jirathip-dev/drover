@@ -126,7 +126,10 @@ fn open(mine: &[&Event]) -> Option<(Promise, Option<String>)> {
     let at = mine.iter().rposition(|e| e.kind == "promise")?;
     let p = Promise::of(mine.get(at)?)?;
     let since = mine.get(at..)?;
-    if since.iter().any(|e| e.kind == "promise-void") {
+    if since
+        .iter()
+        .any(|e| matches!(e.kind.as_str(), "promise-void" | "spawn"))
+    {
         return None;
     }
     let missed = since.iter().rfind(|e| e.kind == "promise-missed");

@@ -648,7 +648,7 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
     Ok(head)
 }
 
-/// The merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines and a facts line. Returns (subject, body, whether the summary was there).
+/// The merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines, a facts line and the commits' `Cap:` trailers. Returns (subject, body, whether the summary was there).
 pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String, String, bool) {
     let title = pr["title"].as_str().unwrap_or_default().trim();
     let strip = |open: &str, close: char| {
@@ -671,6 +671,13 @@ pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String,
         .sum();
     let s = if rounds == 1 { "" } else { "s" };
     let facts = format!("Closes #{issue} · {rounds} review round{s} · src {src:+} · PASS {sha:.7}");
+    let commits = pr["commits"].as_array().into_iter().flatten();
+    let lines = commits.filter_map(|c| c["messageBody"].as_str()).flat_map(str::lines);
+    let caps: Vec<&str> = lines
+        .map(str::trim)
+        .filter(|l| crate::overlap::cap_trailer(l))
+        .collect();
+    let facts = [&[facts.as_str()][..], &caps].concat().join("\n");
     let body = if human.is_empty() {
         facts
     } else {
@@ -941,7 +948,8 @@ pub fn merge(
         }
     };
     gh::forget_pr(ctx, fleet, issue);
-    let view = ["pr", "view", &num, "-R", &f.repo, "--json", "number,title,body,files"];
+    let fields = "number,title,body,files,commits";
+    let view = ["pr", "view", &num, "-R", &f.repo, "--json", fields];
     let info = json(r, "gh", &view).unwrap_or_else(|_| pr.clone());
     let (subject, body, human) = merge_message(&info, issue, st.as_ref().map_or(0, |s| s.rounds), &head);
     if !human {
@@ -1098,6 +1106,13 @@ pub fn needs_human(
     Ok(())
 }
 
+/// `fleet` #`n` went on past an extend ask (out of needs-human, parked, impl and fix(n)): answering it only closes it.
+pub fn past_extend(ctx: &Ctx, fleet: &str, n: u64) -> Result<bool> {
+    let st = issue_state(ctx, fleet, n)?.map(|s| s.state).unwrap_or_default();
+    let asked = st == "parked" || st == "impl" || st.starts_with("fix(");
+    Ok(!asked && held(ctx, fleet, n).is_err())
+}
+
 /// An extend ask's `one more round`: needs-human's extend, or an extra round for the lane its issue went on with since the ask.
 pub fn extend_ask(
     ctx: &Ctx,
@@ -1127,14 +1142,16 @@ fn extended(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), (spawn, by): (bool
         .iter()
         .rfind(|e| e.is("needs-human", fleet, n))
         .cloned();
-    let unstarted = nh.is_some_and(|e| e.data.get("start") == Some(&json!(true)));
+    let update = state == "needs-human" && nh.as_ref().and_then(|e| e.str("code")) == Some("UPDATE_LIMIT");
+    let unstarted = nh.as_ref().is_some_and(|e| e.data.get("start") == Some(&json!(true)));
     let (kind, e) = match state {
+        _ if update => ("round-extended", json!({"by": by, "spawn": spawn, "update": true})),
         "needs-human" if !unstarted => ("round-extended", json!({"by": by, "spawn": spawn, "queued": spawn})),
         _ if spawn => (crate::pending::REQUEUED, json!({"by": by})),
         _ => return Ok(()),
     };
     crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), kind, e))?;
-    if spawn {
+    if spawn && !update {
         requeue(ctx, cfg, &working(&ctx.state)?, fleet, n)?;
     }
     Ok(())

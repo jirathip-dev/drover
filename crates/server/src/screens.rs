@@ -1937,7 +1937,8 @@ impl Server<'_> {
             + 1;
         let mut start = vec![json!({"op": "screen", "screen": cur})];
         start.extend(count(&cur).map(|n| json!({"op": "badge", "count": n})));
-        let mut msg = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\nid: {seq}\ndata: {}\n\n", json!({"seq": seq, "ops": start}));
+        let ver = format!("{:08x}", super::VER);
+        let mut msg = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\nid: {seq}\ndata: {}\n\n", json!({"seq": seq, "build": ver, "ops": start}));
         let (mut log, mut ping) = (crate::db::last_seq(&self.ctx.state), drover_core::clock::instant());
         let mut built = drover_core::clock::instant();
         let mut z = super::wire::Stream::new(head);
@@ -1960,7 +1961,10 @@ impl Server<'_> {
                     );
                     if !change.is_empty() {
                         seq += 1;
-                        msg = format!("id: {seq}\ndata: {}\n\n", json!({"seq": seq, "ops": change}));
+                        msg = format!(
+                            "id: {seq}\ndata: {}\n\n",
+                            json!({"seq": seq, "build": ver, "ops": change})
+                        );
                     }
                     cur = new;
                 }

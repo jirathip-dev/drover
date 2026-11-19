@@ -770,6 +770,8 @@ pub struct Limits {
     pub ask_waiting_minutes: u64,
     pub outbox_stale_minutes: u64,
     pub host_offline_minutes: u64,
+    pub host_down_secs: u64,
+    pub kick_max_secs: u64,
     pub promise_passes: std::collections::BTreeMap<crate::promise::Kind, u64>,
     pub serve_shed_secs: u64,
     pub serve_remote_secs: u64,
@@ -902,6 +904,8 @@ impl Default for Limits {
             ask_waiting_minutes: 30,
             outbox_stale_minutes: 5,
             host_offline_minutes: 15,
+            host_down_secs: 60,
+            kick_max_secs: 300,
             promise_passes: std::collections::BTreeMap::new(),
             serve_shed_secs: 5,
             serve_remote_secs: 10,
@@ -1035,7 +1039,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "spawn_pending_max_secs",
-        "a spawn marker or kick lock older than this is stale",
+        "a spawn marker older than this is stale",
     ),
     (
         "acp_start_minutes",
@@ -1166,6 +1170,14 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "host_offline_minutes",
         "a remote host unreachable this long has its open lanes restarted on the main host",
+    ),
+    (
+        "host_down_secs",
+        "a host a pass could not reach gets no ssh from any drover command this long",
+    ),
+    (
+        "kick_max_secs",
+        "a kick running this long is ended by the next tick and logged `kick-killed`",
     ),
     (
         "promise_passes",

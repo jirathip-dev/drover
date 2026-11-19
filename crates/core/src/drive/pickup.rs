@@ -1,6 +1,7 @@
-use crate::config::Config;
-use crate::events::{append, Event, IssueState, Json};
+use crate::config::{Config, Fleet};
+use crate::events::{append, emit, Event, IssueState, Json};
 use crate::runner::Runner;
+use crate::session::{Session, Status};
 use crate::waiting::{self, Waiting};
 use crate::Ctx;
 use anyhow::Result;
@@ -22,7 +23,12 @@ pub(super) fn fetch(
     (s, w): (&IssueState, &Waiting),
     pr: &Value,
 ) -> Result<Picked> {
-    let stuck = ["rev idle without", "reviewer exited without", waiting::PICKUP];
+    let stuck = [
+        "rev idle without",
+        "reviewer exited without",
+        "reviewer ended without",
+        waiting::PICKUP,
+    ];
     let sp = s.check_lane().and_then(|l| crate::events::last_spawn(ev, l));
     let sp = sp.filter(|e| e.str("machine").is_some() && stuck.iter().any(|p| w.what.starts_with(p)));
     let (Some(sp), Some(head)) = (sp, pr.at("headRefOid").as_str()) else {
@@ -39,7 +45,7 @@ pub(super) fn fetch(
         },
         None => match view.down(sp.str("machine")) {
             Some(why) => {
-                failed(ctx, out, ev, (&s.fleet, s.issue, &w.lane), &why)?;
+                failed(ctx, out, (&s.fleet, s.issue, &w.lane), &why)?;
                 return Ok(Picked::Held);
             }
             None => return Ok(Picked::No),
@@ -60,21 +66,79 @@ pub(super) fn fetch(
     Ok(Picked::Fetched(x))
 }
 
-pub(super) fn failed(
+fn unread(ctx: &Ctx, f: &Fleet, ev: &[Event], agents: &[Session], (s, w): (&IssueState, &Waiting)) -> bool {
+    let sp = crate::events::last_spawn(ev, &w.lane);
+    let ended = || {
+        let st = agents.iter().find(|a| a.name == w.lane).and_then(Session::status);
+        let rev = sp
+            .and_then(|e| e.str("role"))
+            .is_some_and(|r| r != "verify" && f.family(r) == "rev");
+        let old = sp.is_some_and(|e| ctx.now >= e.ts + crate::stall::START_SECS);
+        rev && old && matches!(st, Some(Status::Idle | Status::Done))
+    };
+    w.next_cmd.is_none()
+        && s.check_lane() == Some(&w.lane)
+        && (w.what.starts_with(waiting::PICKUP) || (w.what.starts_with(waiting::IDLE) && ended()))
+}
+
+fn no_verdict(ev: &[Event], lane: &str) -> String {
+    let wt = crate::events::last_spawn(ev, lane).and_then(|e| e.str("worktree"));
+    format!("{}{}/verdict.md", waiting::NO_VERDICT, wt.unwrap_or_default())
+}
+
+pub(super) fn stuck(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    f: &Fleet,
+    (ev, agents): (&[Event], &[Session]),
+    (s, w): (&IssueState, &Waiting),
+) -> Result<bool> {
+    if w.who == "drive" && w.what.starts_with(waiting::NO_VERDICT_AGAIN) {
+        writeln!(out, "{} #{} needs-human: {}", s.fleet, s.issue, w.what)?;
+        let d = json!({"code": "NO_VERDICT", "reason": w.what, "agent": w.lane});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, &s.fleet, Some(s.issue), "needs-human", d),
+        )?;
+        return Ok(true);
+    }
+    if !unread(ctx, f, ev, agents, (s, w)) {
+        return Ok(false);
+    }
+    failed(ctx, out, (&s.fleet, s.issue, &w.lane), &no_verdict(ev, &w.lane))?;
+    Ok(true)
+}
+
+pub(super) fn after(
     ctx: &Ctx,
     out: &mut dyn Write,
     ev: &[Event],
-    (fleet, n, lane): (&str, u64, &str),
-    why: &str,
+    (w, step): (&Waiting, &str),
+    code: super::Code,
 ) -> Result<()> {
-    writeln!(out, "{fleet} #{n} {}{why}", waiting::PICKUP)?;
-    let last = (ev.iter().rev())
-        .filter(|e| e.fleet == fleet && e.issue == Some(n))
-        .take_while(|e| !(e.kind == "spawn" && crate::events::checks(e)))
-        .find(|e| e.kind == "verdict-pickup-failed");
-    if last.is_some_and(|e| e.str("why") == Some(why)) {
+    if step == "verdict" && matches!(code, Some("ERROR" | "EXIT")) {
+        let why = super::last_why(&w.fleet).unwrap_or_default();
+        failed(ctx, out, (&w.fleet, w.issue, &w.lane), &why)?;
+    }
+    healed(ctx, ev, w, code.is_none())
+}
+
+fn healed(ctx: &Ctx, ev: &[Event], w: &Waiting, started: bool) -> Result<()> {
+    if !started || !w.what.ends_with("without a verdict: reviewing again") {
         return Ok(());
     }
+    let seq = crate::events::last_spawn(ev, &w.lane).map(|e| e.seq);
+    let d = json!({"agent": w.lane, "why": no_verdict(ev, &w.lane), "spawn": seq});
+    append(
+        &ctx.state,
+        &Event::new(ctx.now, &w.fleet, Some(w.issue), "self-heal", d),
+    )
+}
+
+fn failed(ctx: &Ctx, out: &mut dyn Write, (fleet, n, lane): (&str, u64, &str), why: &str) -> Result<()> {
+    writeln!(out, "{fleet} #{n} {}{why}", waiting::PICKUP)?;
     let d = json!({"agent": lane, "why": why});
     append(
         &ctx.state,

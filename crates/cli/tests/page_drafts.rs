@@ -160,6 +160,27 @@ fn a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every
 }
 
 #[test]
+fn a_new_orchestrator_message_while_typing_keeps_the_composer_focused_with_its_caret_and_text() {
+    if no_webkit() {
+        return;
+    }
+    let (_c, o) = thread_t2("page-compose", "compose.mjs", &[], &[]);
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    let typed = json!({"value": "half a thought", "focus": true, "same": true, "caret": [4, 6], "blurs": 0});
+    assert_eq!(out["before"], typed, "{out}");
+    assert_eq!(
+        out["after"], typed,
+        "a turn starting and a reply arriving keep the composer, its focus, caret and text: {out}"
+    );
+    assert_eq!(
+        out["typed"], "half! thought",
+        "the next key lands in the composer: {out}"
+    );
+}
+
+#[test]
 fn an_answered_card_leaves_the_cards_at_once_and_stays_gone_while_its_answer_runs() {
     if no_webkit() {
         return;
@@ -298,5 +319,41 @@ fn a_send_shows_at_once_then_once_and_an_answered_card_goes_at_once_and_stays_go
     assert!(
         log.iter().any(|e| e.kind == "decision" && e.str("id") == Some("q1")),
         "{out}"
+    );
+}
+
+#[test]
+fn a_page_of_an_older_build_reloads_once_without_drawing_a_newer_serves_blocks_and_waits_for_a_focused_field() {
+    if no_webkit() {
+        return;
+    }
+    let (_c, o) = thread_t2("page-build", "build.mjs", &[], &[]);
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    assert_eq!(
+        (&out["newer"]["loads"], &out["newer"]["t2"]),
+        (&json!(2), &json!("2")),
+        "a screen marked build b reloads the page, which draws none of it first: {out}"
+    );
+    assert_eq!(out["same"]["loads"], 2, "the same build never reloads: {out}");
+    assert_eq!(
+        (
+            &out["focused"]["loads"],
+            &out["focused"]["new"],
+            &out["focused"]["value"]
+        ),
+        (&json!(3), &Value::Null, &json!("half a thought")),
+        "a focused field holds the reload, and the newer event draws nothing: {out}"
+    );
+    assert_eq!(
+        (&out["blurred"]["loads"], &out["blurred"]["new"]),
+        (&json!(4), &Value::Null),
+        "blur reloads once: {out}"
+    );
+    assert_eq!(
+        (&out["blurred"]["value"], &out["blurred"]["draft"]),
+        (&json!("half a thought"), &json!("half a thought")),
+        "the draft survives the reload: {out}"
     );
 }

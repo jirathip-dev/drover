@@ -888,3 +888,56 @@ fn a_concluded_check_github_still_lists_in_progress_is_green() {
     assert_eq!(exit, 0, "{out}");
     assert!(r.called("gh pr merge 34"), "{:?}", r.calls.borrow());
 }
+
+#[test]
+fn a_squash_merge_keeps_the_cap_trailer_so_cap_check_passes() {
+    let (d, c) = setup("msg-cap", CONFIG, &[("PASS", HEAD)]);
+    let view = json!({"number": 34, "title": "cap: raise to 200", "body": "Closes #12",
+        "files": [{"path": "ci/cap.toml", "additions": 1, "deletions": 1}],
+        "commits": [{"oid": HEAD, "messageHeadline": "cap: raise to 200",
+            "messageBody": "Why it grows.\n\nCap: 100 → 200 (#12, q7)"}]});
+    let r = pr("staging", &green()).once(
+        "gh pr view 34 -R jirathip-dev/sendmeter --json number",
+        0,
+        &view.to_string(),
+    );
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    let calls = r.calls.borrow();
+    let call = calls.iter().find(|c| c.starts_with("gh pr merge 34")).unwrap();
+    let (rest, body) = call.split_once(" --body ").unwrap();
+    let subject = rest.split_once(" --subject ").unwrap().1;
+    let repo = d.join("repo");
+    std::fs::create_dir_all(repo.join("ci")).unwrap();
+    let git = |args: &[&str]| {
+        let o = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    };
+    git(&["init", "-q", "-b", "staging"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(repo.join("ci/cap.toml"), "[fleet.x]\nline_cap = 100\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "ci: the first cap"]);
+    let base = git(&["rev-parse", "HEAD"]);
+    std::fs::write(repo.join("ci/cap.toml"), "[fleet.x]\nline_cap = 200\n").unwrap();
+    git(&["commit", "-qam", &format!("{subject}\n\n{body}")]);
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["cap-check", "--config", "ci/cap.toml", "--base", &base])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert_eq!(o.status.code(), Some(0), "{body}\n{out}");
+    assert!(body.contains("\nCap: 100 → 200 (#12, q7)"), "{body}");
+}
