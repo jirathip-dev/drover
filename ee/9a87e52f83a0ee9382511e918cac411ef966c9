@@ -1,0 +1,5 @@
+Decided: staging build fix only: trim crates/cli/tests/shed.rs to 2556 lines, under its arch baseline
+Because: .drover/arch-baseline.txt:4
+Rejected: raising the baseline — baselines only ratchet down, and the extra lines were a duplicate assert
+Check: CI arch-check no longer reports shed.rs; the trimmed test still passes
+Owner: a test file someone else grew past its size limit is trimmed back so the checks go green
