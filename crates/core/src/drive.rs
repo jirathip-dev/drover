@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+mod kicks;
 mod pickup;
 mod remote;
 
@@ -45,6 +46,7 @@ pub const STEPS: [(&str, &[&str]); 8] = [
             "webhook_poll_minutes",
             "silent_minutes",
             "ci_start_minutes",
+            "ci_stuck_minutes",
             "gate_check_minutes",
             "review_rounds",
             "update_rounds",
@@ -98,11 +100,8 @@ fn alive(r: &dyn Runner, pid: &str, age: u64) -> bool {
 /// Each spawn marker and kick lock (leases), live or stale: stale once its pid is gone (or reused) or it expired. `remove`: release each stale one, log `stale-marker`.
 pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<String>, Vec<Event>) {
     let (mut live, mut stale) = (vec![], vec![]);
-    let all = [
-        crate::db::leases(&ctx.state, "spawn-"),
-        crate::db::leases(&ctx.state, "kick-"),
-    ]
-    .concat();
+    let mut all = crate::db::leases(&ctx.state, "spawn-");
+    all.extend(crate::db::leases(&ctx.state, "kick-"));
     let ev = crate::events::working(&ctx.state).unwrap_or_default();
     for l in all {
         let name = l.key.clone();
@@ -111,7 +110,7 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
             continue;
         };
         let age = ctx.now.saturating_sub(l.at);
-        if holds(ctx, cfg, r, &ev, &l) {
+        if !kicks::overdue(ctx, cfg, r, &l, remove) && holds(ctx, cfg, r, &ev, &l) {
             live.push(name);
             continue;
         }
@@ -283,7 +282,7 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
     let flag = || crate::db::take(&ctx.state, &again, ctx.now, ttl, why, &|_| true).map(drop);
     let Some(k) = take(ctx, r, &format!("kick-{fleet}-{n}.lock"), ttl, fleet) else {
         flag();
-        return Ok(());
+        return kicks::in_flight(ctx, out, (fleet, n), why);
     };
     let start = crate::now();
     for _ in 0..30 {
@@ -1354,7 +1353,7 @@ fn pass(
                 &Event::new(ctx.now, fleet, Some(s.issue), "lesson-prompted", d),
             )?;
         } else if let Some((state, text)) = turn_prompt(&w.what).filter(|_| w.who == "drive" && !fast) {
-            let Some(sent) = tell(r, &events, &w.lane, text) else {
+            let Some(sent) = tell(r, &events, &w.lane, text).or((state != "working").then_some(false)) else {
                 continue;
             };
             writeln!(
@@ -1378,6 +1377,7 @@ fn pass(
             )?;
         } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE && !fast {
             crate::lesson::idle_done(ctx, cfg, r, out, (fleet, s.issue), s.build.as_deref())?;
+        } else if !fast && pickup::stuck(ctx, cfg, out, f, (&events, &agents), (s, w))? {
         } else if w.who == "drive" {
             let gone = w.what.split_once(waiting::NO_PUSH);
             let ends =
@@ -1443,10 +1443,7 @@ fn pass(
                 save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
-            if step == "verdict" && matches!(code, Some("ERROR" | "EXIT")) {
-                let why = last_why(fleet).unwrap_or_default();
-                pickup::failed(ctx, out, &events, (fleet, s.issue, &w.lane), &why)?;
-            }
+            pickup::after(ctx, out, &events, (w, step), code)?;
             let stale = (code == Some("LANE_LIVE") && step == "review")
                 .then(|| s.lanes.get(arg(3)))
                 .flatten()
@@ -1562,6 +1559,8 @@ fn pass(
             let file = file.to_string_lossy();
             let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
+        } else if !fast && s.state == "ready" && ci == "pending" {
+            gh::unstick(ctx, cfg, r, out, (fleet, s.issue), &events, &pr)?;
         }
     }
     if !updated && !fast {
@@ -1718,6 +1717,7 @@ pub(crate) fn owner_refusal(code: &str) -> bool {
         "MCP_FORBIDDEN",
         "ACP_UNGUARDED",
         "ACCOUNT_ENV",
+        "SECRET_IN_WIP",
     ];
     owner.contains(&code)
 }
@@ -2009,7 +2009,8 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     if fast {
         return res;
     }
-    res.and(clean_merged(ctx, cfg, r, out, &events, fleet))
+    res.and(crate::pending::stalled(ctx, cfg, fleet))
+        .and(clean_merged(ctx, cfg, r, out, &events, fleet))
 }
 
 fn clean_merged(

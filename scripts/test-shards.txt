@@ -18,6 +18,7 @@
 4 blocked_respawn
 1 board_errors
 4 board_fresh
+2 board_tui
 3 boat
 2 brief_golden
 4 chat_index
@@ -26,7 +27,9 @@
 2 chat_tab
 1 chat_tui
 3 check_clean
+3 ci_stuck
 2 ci_templates
+1 clone_heal
 2 cloud
 1 compact
 2 compaction
@@ -73,6 +76,7 @@
 1 hosts_screen
 2 host_slots
 2 host_spared
+2 host_down
 3 host_sync
 1 host_tab
 1 host_words
@@ -99,6 +103,7 @@
 3 limits
 1 link
 3 live
+3 local_screens
 3 log_share
 2 m3
 2 m3_fixes
@@ -158,6 +163,7 @@
 3 respawn_loop
 2 respawn_pace
 2 retired_keys
+1 rev_no_verdict
 4 roots
 2 round_images
 1 run_card

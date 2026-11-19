@@ -2,8 +2,8 @@ use crate::config::{home, Config};
 use crate::events::{emit, status_line, working, Event, Json};
 use crate::runner::{self, Runner};
 use crate::{
-    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx, CHAT,
-    SERVE, SERVICE,
+    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx, SERVE,
+    SERVICE,
 };
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -91,7 +91,7 @@ enum Cmd {
         owner_override: bool,
     },
     #[command(
-        about = "Owner only: one more review round for a needs-human issue (its card's [one more round]); logs `round-extended`"
+        about = "Owner only: one more round for a needs-human issue (its card's [one more round]): an update round on an UPDATE_LIMIT card, else a review round; logs `round-extended`"
     )]
     Extend {
         fleet: String,
@@ -263,7 +263,7 @@ enum Cmd {
     Asks {
         #[command(flatten)]
         scope: Scope,
-        #[arg(help = "Closed asks too, with why: answered, closed: merged, closed: lane gone")]
+        #[arg(help = "Closed asks too, with why: answered, closed: merged, closed: lane gone, closed: superseded")]
         #[arg(long)]
         all: bool,
     },
@@ -333,7 +333,7 @@ enum Cmd {
         about = "Print the first queued issue that has no lane and is not blocked; exit 0 found, 1 empty, 2 top item blocked"
     )]
     Next { fleet: String },
-    #[command(about = "Compact board (≤ 60 cols): queue order, state, lane, age, last event")]
+    #[command(about = "The app's Board tab on a terminal (docs/terminal.md), else the compact board (≤ 60 cols)")]
     Board { fleet: Option<String> },
     #[command(
         about = "#910: every live lane's processes (CPU %, run time, heavy kind) and heavy-slot waits, under the host's load, heavy slots and held respawns"
@@ -953,7 +953,9 @@ enum HostsCmd {
     Watch,
     #[command(about = "Let new lanes go to this host again; logs `host-on`")]
     On { name: String },
-    #[command(about = "No new lanes on this host (its lanes finish there); still monitored; logs `host-off`")]
+    #[command(
+        about = "No new lanes on this host (its lanes finish there); only a hosts refresh contacts it; logs `host-off`"
+    )]
     Off { name: String },
     #[command(
         about = "Empty a root (default the host's first): new lanes skip it, its lanes are saved and restarted on the next root"
@@ -1338,8 +1340,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else {
                 let (events, cfg) = (working(&ctx.state)?, Config::load(&ctx.config).ok());
                 let serial = queue::fleets_use(ctx, &events, cfg.as_ref(), fleet.as_deref());
-                let off = cfg.as_ref().map(|c| crate::hosts::idle_off(c, &events));
-                let spared = crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), None);
+                let (off, spare) = (cfg.as_ref().map(crate::hosts::disabled), Config::load(&ctx.config).ok());
+                let spared =
+                    crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), spare.as_ref().map(|c| (ctx, c)));
                 let look = crate::snapshot::Snap::read(ctx, &spared);
                 let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
@@ -1457,6 +1460,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::top::print(&t, out)?;
             }
         }
+        Cmd::Board { fleet } if crate::app(ctx, r, &crate::Open::Board(fleet.clone()))? => {}
         Cmd::Board { fleet } => {
             let events = working(&ctx.state)?;
             let all = fleet.map_or_else(
@@ -1614,7 +1618,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             install: true,
         } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
         Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
-        Cmd::Chat { thread } => (CHAT.get().context("no chat")?)(ctx, r, thread.as_deref())?,
+        Cmd::Chat { thread } => anyhow::ensure!(crate::app(ctx, r, &crate::Open::Threads(thread))?, "needs a terminal"),
         cmd => {
             let cfg = match cmd {
                 Cmd::Check => check::config(ctx)?,
@@ -1626,15 +1630,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else {
                 crate::hosts::Pass::new(r, None)
             };
-            let off = match cmd {
-                Cmd::Check | Cmd::Drive { .. } => crate::hosts::idle_off(&cfg, &working(&ctx.state)?),
-                _ => std::collections::BTreeSet::new(),
-            };
+            let spare = matches!(cmd, Cmd::Check | Cmd::Drive { .. } | Cmd::Kick { .. } | Cmd::Waiting(_));
+            let off = crate::hosts::disabled(&cfg).into_iter().filter(|_| spare).collect();
             let pass = pass.sparing(off, Some((ctx, &cfg)));
-            let r: &dyn Runner = match cmd {
-                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } | Cmd::Reclaim { .. } => &pass,
-                _ => r,
-            };
+            let paced = spare || matches!(cmd, Cmd::Clean { .. } | Cmd::Reclaim { .. });
+            let r: &dyn Runner = if paced { &pass } else { r };
             let kick = |f: &str, n, why| {
                 let _ = crate::drive::kick(ctx, r, f, n, why);
             };
@@ -2063,9 +2063,15 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if cfg.fleet(f)?.family(role) != "impl" {
                         bail!("a {role} lane reports no turn: impl, fix and update lanes do");
                     }
+                    let done = state == "done" && !matches!(role, "triage" | "lesson");
+                    let ui = done.then(|| crate::guard::turn(ctx, &cfg, r, out, (f, n), role));
+                    let ui = ui.transpose()?.flatten();
                     let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
                     let note = note.transpose()?.flatten();
                     let mut d = json!({"state": state, "why": why, "role": role});
+                    if let Some(u) = ui {
+                        d.put("ui_check", u);
+                    }
                     if let Some((code, w)) = &note {
                         d.put("note", json!(format!("{code}: {w}")));
                     }

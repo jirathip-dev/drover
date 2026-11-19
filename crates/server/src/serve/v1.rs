@@ -581,6 +581,7 @@ impl Server<'_> {
             routes,
             sources: self.r.refreshed(),
             serve,
+            schemes: super::schemes(ctx).1,
         }
     }
 

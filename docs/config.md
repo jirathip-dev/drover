@@ -155,6 +155,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `stall_minutes` | `30` | a working lane with no event this long is stalled |
 | `silent_minutes` | `10` | an ACP lane's open turn with no session event this long is cancelled and nudged |
 | `ci_start_minutes` | `10` | a PR head with no checks this long after its push alerts `ci-missing` |
+| `ci_stuck_minutes` | `30` | a ready PR's check still pending this long after its run completed is re-run once, then alerts `ci-stuck` |
 | `load_per_cpu` | `2.5` | spawn refuses HOST_BUSY over this load per CPU |
 | `overload_minutes` | `10` | load per CPU over `load_per_cpu` this long alerts `host-overloaded` once, with the 5 busiest processes |
 | `swapout_rate` | `2000.0` | pages swapped out per 2 s sample that count as swapping |
@@ -182,7 +183,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `max_parallel_spawns` | `6` | concurrent detached spawn kicks on the main host (0: in the pass) |
 | `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
 | `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
-| `spawn_pending_max_secs` | `300` | a spawn marker or kick lock older than this is stale |
+| `spawn_pending_max_secs` | `300` | a spawn marker older than this is stale |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |
 | `keychain_readers` | `3` | more Keychain readers up over 60 s alert `keychain-jammed` |
@@ -216,6 +217,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `disk_sick_secs` | `300` | a disk that let a call run out of time stays hung this long |
 | `disk_trust_secs` | `60` | a folder that answered is trusted this long before it is probed again |
 | `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |
+| `guard_secs` | `180` | `turn done`'s UI check (`just guard`) runs this long at most; past it the turn ends and `ui-check` logs a timeout |
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
@@ -225,6 +227,8 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `ask_waiting_minutes` | `30` | an owner ask open this long alerts `ask-waiting` |
 | `outbox_stale_minutes` | `5` | a remote lane's outbox line undelivered this long alerts `outbox-stale` |
 | `host_offline_minutes` | `15` | a remote host unreachable this long has its open lanes restarted on the main host |
+| `host_down_secs` | `60` | a host a pass could not reach gets no ssh from any drover command this long |
+| `kick_max_secs` | `300` | a kick running this long is ended by the next tick and logged `kick-killed` |
 | `promise_passes` | `{}` | drive passes a promise of each kind may stay open before `promise-missed` (default 2) |
 | `serve_shed_secs` | `5` | serve re-reads shed's lanes in the background this often |
 | `serve_remote_secs` | `10` | serve re-reads the remote hosts (ssh) in the background this often |

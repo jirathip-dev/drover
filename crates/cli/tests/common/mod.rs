@@ -129,22 +129,28 @@ pub fn look(c: &Ctx, r: &dyn Runner) {
     drover::link::look(c, &cfg, r, &mut std::io::sink(), true).unwrap();
 }
 
-/// `ssh … <m> -- '<drover>' 'hosts' 'report'` answered in this process, on `r` as host `m` (its facts read through `r` over ssh).
+/// `ssh … <m> -- '<drover>' 'hosts' 'report'` answered in this process by the CLI on `r` as host `m`, which has no fleet.toml (its facts read through `r` over ssh).
 pub fn boat(r: &dyn Runner, prog: &str, args: &[String], input: &str) -> Option<anyhow::Result<Out>> {
     let end = args.iter().position(|a| a == "--")?;
     if prog != "ssh" || !args.last()?.ends_with("'hosts' 'report'") {
         return None;
     }
-    let sh = drover::shed::Shed {
-        wire: drover::shed::Wire::Connect,
-        acp: None,
-        policy: "ask".into(),
+    let on = drover::hosts::On::new(r, Some(args.get(end.checked_sub(1)?)?));
+    let bare = Ctx {
+        config: PathBuf::from("/nonexistent/drover/fleet.toml"),
+        state: PathBuf::from("/nonexistent/drover/state/events.jsonl"),
+        worktrees: PathBuf::from("/nonexistent/drover/worktrees"),
+        homes: std::collections::BTreeMap::new(),
+        exe: "/opt/drover/bin/drover".into(),
+        now: 1_000_000,
+        home: PathBuf::from("/nonexistent/drover/home"),
+        hints: vec![],
     };
-    let with = drover::shed::With(r, sh);
-    let on = drover::hosts::On::new(&with, Some(args.get(end.checked_sub(1)?)?));
     let mut stdout = vec![];
-    let res = drover::link::watch::serve(&on, &mut input.as_bytes(), &mut stdout);
-    Some(res.map(|()| Out {
+    let cmd = ["drover", "hosts", "report"].map(String::from).to_vec();
+    let code = drover::main_with(cmd, &bare, &on, &mut stdout, &mut input.as_bytes());
+    Some(Ok(Out {
+        code,
         stdout: String::from_utf8_lossy(&stdout).into(),
         ..Out::default()
     }))

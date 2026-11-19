@@ -114,6 +114,17 @@ pub fn frame(r: &dyn Runner, watch: &Watch) -> anyhow::Result<Frame> {
     })
 }
 
+fn own(r: &dyn Runner) -> Option<crate::shed::With<'_>> {
+    r.shed().is_none().then(|| {
+        let sh = crate::shed::Shed {
+            wire: crate::shed::Wire::Connect,
+            acp: None,
+            policy: "ask".into(),
+        };
+        crate::shed::With(r, sh)
+    })
+}
+
 fn stamp(r: &dyn Runner, watch: &Watch) -> String {
     let seen = crate::session::list::on(r).map(|all| {
         let one = |s: &crate::session::Session| format!("{} {:?}", s.name, s.life);
@@ -135,6 +146,8 @@ pub fn watch(
     stdin: &mut (dyn std::io::Read + Send),
     out: &mut dyn std::io::Write,
 ) -> anyhow::Result<()> {
+    let own = own(r);
+    let r: &dyn Runner = own.as_ref().map_or(r, |w| w);
     let mut stdin = std::io::BufReader::new(stdin);
     let mut first = String::new();
     std::io::BufRead::read_line(&mut stdin, &mut first)?;
@@ -185,8 +198,10 @@ pub fn watch(
     })
 }
 
-/// `drover hosts report`: the `Watch` on `stdin` answered with one frame line on `out`.
+/// `drover hosts report`: the `Watch` on `stdin` answered with one frame line on `out`; with no shed runtime set, the host's own shed (`shed connect`).
 pub fn serve(r: &dyn Runner, stdin: &mut dyn std::io::Read, out: &mut dyn std::io::Write) -> anyhow::Result<()> {
+    let own = own(r);
+    let r: &dyn Runner = own.as_ref().map_or(r, |w| w);
     let mut w = String::new();
     stdin.read_to_string(&mut w)?;
     writeln!(

@@ -99,7 +99,12 @@ pub const TURN_ASK: &str = "with no open ask: nudging it once to ask";
 /// A reviewer's verdict.md drive could not fetch or record; drive tries again each pass.
 pub const PICKUP: &str = "verdict pickup failed: ";
 const NUDGE_SECS: u64 = 600;
-const IDLE: &str = "rev idle without a verdict (check the pane)";
+pub const IDLE: &str = "rev idle without a verdict (check the pane)";
+/// Why a reviewer that is not working left no verdict to pick up; drive restarts its review once a round.
+pub const NO_VERDICT: &str = "no verdict.md at ";
+/// A restarted reviewer ended without a verdict too: one owner card, no third review.
+pub const NO_VERDICT_AGAIN: &str = "reviewer ended without a verdict again: ";
+const PICKUP_TRIES: usize = 3;
 
 fn this_review<'a>(events: &'a [Event], (f, n): (&'a str, u64)) -> impl Iterator<Item = &'a Event> {
     (events.iter().rev())
@@ -113,6 +118,36 @@ fn pickup(events: &[Event], at: (&str, u64)) -> Option<Say> {
         reason: format!("{PICKUP}{}", e.str("why")?),
         step: "fetch it again".into(),
     })
+}
+
+fn no_verdict(events: &[Event], s: &IssueState, path: &str, gone: bool, w: &mut Waiting) {
+    let (f, n) = (s.fleet.as_str(), s.issue);
+    if !w.what.starts_with(IDLE) && !w.what.starts_with(PICKUP) {
+        return;
+    }
+    let tries = this_review(events, (f, n))
+        .filter(|e| e.kind == "verdict-pickup-failed")
+        .count();
+    let exited = gone && w.next_cmd.is_none() && w.what.starts_with(IDLE);
+    if tries + 1 < PICKUP_TRIES && !exited {
+        return;
+    }
+    let now = (events.iter().rev()).find(|e| e.is("spawn", f, n) && crate::events::checks(e));
+    let mut round = (events.iter().rev()).take_while(|e| !e.is("verdict", f, n));
+    let healed = round.any(|e| {
+        e.is("self-heal", f, n)
+            && e.str("why").is_some_and(|y| y.starts_with(NO_VERDICT))
+            && e.data.get("spawn").and_then(Value::as_u64) != now.map(|s| s.seq)
+    });
+    w.who = "drive";
+    if healed {
+        (w.what, w.next_cmd, w.promise) = (format!("{NO_VERDICT_AGAIN}{path}"), None, None);
+        return;
+    }
+    let c = s.check.as_deref().unwrap_or("rev");
+    let how = if gone { "exited" } else { "ended" };
+    w.what = format!("reviewer {how} without a verdict: reviewing again");
+    w.next_cmd = Some(format!("drover spawn {f} {n} {c} --supersede"));
 }
 
 fn failed_start(events: &[Event], s: &IssueState) -> bool {
@@ -282,6 +317,10 @@ pub fn waiting_on(
     w
 }
 
+fn holds(ask: &Event, s: &IssueState) -> bool {
+    ask.data.get("extend").is_none() || s.state == "needs-human"
+}
+
 fn waits(
     log: &Log,
     events: &[Event],
@@ -328,7 +367,7 @@ fn waits(
     let cmd = |verb: &str, tail: &str| Some(format!("drover {verb} {f} {n}{tail}"));
     let mine =
         |a: &&Event| a.fleet == *f && (a.issue == Some(n) || s.lanes.values().any(|l| a.str("agent") == Some(l)));
-    if let Some(a) = log.asks.iter().copied().find(mine) {
+    if let Some(a) = log.asks.iter().copied().find(|a| mine(a) && holds(a, s)) {
         let id = a.str("id").unwrap_or("?");
         let next = crate::design::is_ask(a).then(|| format!("drover answer {f} {id} approve|revise|reject"));
         return w("owner", &format!("waiting on your answer ({id})"), a.ts, next);
@@ -721,7 +760,7 @@ pub fn scan_where(
                 && !pushed.is_empty()
                 && !x.eq_ignore_ascii_case(pushed)
                 && !mine.iter().any(updated)
-                && crate::overlap::carries(r, f, &s, x, pushed)
+                && crate::overlap::carries(ctx, r, f, &s, x, pushed)
         });
         let ev = carry.map(|(x, _)| {
             let d = serde_json::json!({"from": x, "to": pushed});
@@ -741,11 +780,8 @@ pub fn scan_where(
         if let Some(h) = spawn.filter(|e| e.str("machine").is_some()).and_then(|e| e.str("host")) {
             w.what = w.what.replace("review done", &format!("review done on {h}"));
         }
-        if w.what.starts_with("rev idle without") && !agents.iter().any(|a| a.name == lane) {
-            let c = s.check.as_deref().unwrap_or("rev");
-            w.who = "drive";
-            w.what = "reviewer exited without a verdict: reviewing again".into();
-            w.next_cmd = Some(format!("drover spawn {} {} {c} --supersede", s.fleet, s.issue));
+        if let Some(p) = path.as_deref().filter(|_| s.check_lane() == Some(&lane)) {
+            no_verdict(mine, &s, p, !agents.iter().any(|a| a.name == lane), &mut w);
         }
         let built = s.build.as_ref().and_then(|b| s.lanes.get(b)).unwrap_or(&lane).clone();
         let sp = last_spawn(mine, &built);

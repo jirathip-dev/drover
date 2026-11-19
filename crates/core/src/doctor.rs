@@ -150,11 +150,11 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             row(rows, has, '✗', &format!("label {name} — {l} in {repo} → {fix}"));
         }
         let dir = fleet.local_path().display().to_string();
-        let branch = &fleet.integration;
-        let origin = format!("origin/{branch}");
+        let (branch, origin) = (&fleet.integration, format!("origin/{}", fleet.integration));
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || git clone https://github.com/{repo}.git {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
+        rows.extend(git.then(|| crate::clone::doctor(r, name, &fleet.local_path())));
         hygiene(r, (name, fleet), &cfg.hygiene(name), view.as_ref(), rows);
         if let Some(m) = fleet
             .land
@@ -346,14 +346,14 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let Some(m) = h.machine.as_deref() else { continue };
         let on = crate::hosts::On::new(r, Some(m));
         let Some((tags, home)) = crate::hosts::probe(&on) else {
-            let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");
+            let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#}), down {}", crate::hosts::down_for(ctx, m));
             let why = ok::<&str>(&on, "true", &[]).map_or_else(ssh, |_| "probe: unreadable answer".into());
             rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
-            rows.extend(on.shed().map(|_| format!("✗ host {name} shed — unreachable")));
             continue;
         };
+        crate::hosts::went(ctx, m, true);
         let (tags, own) = ([tags, h.tags.clone()].concat(), h.watches_token());
-        let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
+        let bad = host_rows(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
         let v = crate::VERSION;
@@ -370,6 +370,13 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             rows.push(format!("! stale fleet.toml on {name}: no longer read → rm {conf}"));
         }
     }
+}
+
+fn host_rows(ctx: &Ctx, cfg: &Config, on: &crate::hosts::On, tags: &[String], home: &str) -> Vec<String> {
+    let mut bad = crate::hosts::health(ctx, cfg, on, tags, home);
+    let v = crate::link::view::View::load(ctx, cfg).ok();
+    bad.extend(v.and_then(|v| v.failing(on.machine)).map(|w| format!("✗ report — {w}")));
+    bad
 }
 
 const STARTUP: [&str; 4] = [".zshenv", ".zprofile", ".zshrc", ".zlogin"];
@@ -463,15 +470,9 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             )
         });
     }
-    let agents = ids
-        .first()
-        .and_then(|_| crate::shed::cli(r, &["agents", "--json"]).ok());
-    let agents: serde_json::Value = agents
-        .and_then(|o| serde_json::from_str(&o.stdout).ok())
-        .unwrap_or_default();
     for id in ids {
-        let a = agents.as_array().into_iter().flatten().find(|a| a["id"] == id.as_str());
-        let Some(cmd) = a.and_then(|a| a.at("cmd").at(0).as_str()) else {
+        let adapter = crate::shed::adapter(r, &id).ok().flatten().unwrap_or_default();
+        let Some(cmd) = adapter.first() else {
             rows.push(format!("✗ shed agent {id} — not installed → shed agents add {id}"));
             continue;
         };

@@ -915,8 +915,7 @@ pub fn clean_all(
         .context("cannot list the live agents; refusing to clean blind")?;
     let off = if all { disabled(cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
-    let mut failed = 0;
-    let (mut freed, mut removed) = (0, 0);
+    let (mut freed, mut removed, mut failed) = (0, 0, 0);
     let mut closed = BTreeMap::new();
     let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
     let mut fresh = std::collections::BTreeSet::new();
@@ -1145,6 +1144,7 @@ pub fn clean_all(
     }
     if lane.is_none() && issue.is_none() {
         sweep_off(ctx, cfg, r, out, &off, !yes)?;
+        crate::clone::sweep(cfg, out, !yes)?;
     }
     if yes {
         idle.retain(|n, _| fresh.contains(n) || agents.live().any(|a| a.name == *n && !a.busy()));
@@ -1434,6 +1434,7 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
         }
         let budget = cfg.limits.build_budget_gb;
         let trim = |out: &mut dyn Write| -> Result<u64> {
+            sweep::reported(ctx, cfg, &on)?;
             let live = live_lanes(ctx, cfg, &on)?;
             (build_dirs(ctx, cfg, &on).iter())
                 .map(|b| trim_remote(&on, name, b, budget, &live, &mut *out))
@@ -1594,6 +1595,7 @@ pub fn trim_on(ctx: &Ctx, on: &On, cfg: &Config, budget: f64, live: &Live, out: 
     let Some(m) = on.machine else {
         return trim_builds(ctx, cfg, budget, live, out, false);
     };
+    sweep::reported(ctx, cfg, on)?;
     let dirs = build_dirs(ctx, cfg, on);
     dirs.iter().map(|b| trim_remote(on, m, b, budget, live, out)).sum()
 }
@@ -2226,7 +2228,7 @@ fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<(String
         ),
         Err(Snap::Push(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
-            format!("{agent}: wip push failed ({e:#}); committed in its worktree, nothing pushed, pane kept"),
+            format!("{agent}: wip push failed ({e:#}); nothing committed, nothing pushed, pane kept"),
         ),
         Ok(ws) => Ok(ws),
     }
@@ -2284,7 +2286,7 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
-    git(&["fetch", "-q", "--prune", "origin"])?;
+    crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "--prune", "origin"])?;
     let integ = format!("origin/{}", f.integration);
     let refs = git(&[
         "for-each-ref",
@@ -2366,8 +2368,11 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
             .filter(|p| build(p))
             .map(String::from))
         .collect();
-        let no = NO_WIP.map(|d| format!(":(exclude,glob)**/{d}/**"));
-        git(&[&["add", "-A", "--", "."][..], &no.each_ref().map(String::as_str)].concat())?;
+        let logs = st.lines().filter_map(crate::spawn::scratch_log);
+        let mut no: Vec<String> = NO_WIP.map(|d| format!(":(exclude,glob)**/{d}/**")).into();
+        no.extend(logs.map(|p| format!(":(exclude,literal){p}")));
+        let no: Vec<&str> = no.iter().map(String::as_str).collect();
+        git(&[&["add", "-A", "--", "."][..], &no].concat())?;
         git(&[&["reset", "-q", "--"][..], &own_files().collect::<Vec<_>>(), SHOT_DIRS].concat())?;
         let changed = git(&["diff", "--cached", "--name-only", "--no-renames", "-z"])?;
         let tree = git(&["ls-tree", "-r", "-l", "-z", git(&["write-tree"])?.trim()])?;
@@ -2415,6 +2420,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         git(&["reset", "-q"]).ok();
         return Err(Snap::Secret(hit));
     }
+    let before = git(&["rev-parse", "HEAD"]).map_err(undo)?;
     if !staged.is_empty() {
         let unset = ["user.name", "user.email"].iter().any(|k| git(&["config", k]).is_err());
         let id: &[&str] = if unset {
@@ -2432,5 +2438,8 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         p => p,
     }
     .map(|w| (w, skip))
-    .map_err(Snap::Push)
+    .map_err(|e| {
+        git(&["reset", "-q", before.trim()]).ok();
+        Snap::Push(e)
+    })
 }

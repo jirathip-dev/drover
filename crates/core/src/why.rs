@@ -285,11 +285,17 @@ pub fn attach(
     let git = |a: &[&str], input: &str| r.run_in("git", &argv(&[&["-C", &local][..], a].concat()), input);
     let mine = format!("refs/notes/why-{head}");
     let res = (|| {
-        ok(r, "git", &["-C", &local, "fetch", "-q", "origin", branch])?;
+        crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "origin", branch])?;
         let mut err = String::new();
         for _ in 0..3 {
             git(&["update-ref", "-d", &mine], "")?;
-            git(&["fetch", "-q", "origin", &format!("+refs/notes/why:{mine}")], "").ok();
+            crate::clone::fetch(
+                ctx,
+                r,
+                &f.local_path(),
+                &["-q", "origin", &format!("+refs/notes/why:{mine}")],
+            )
+            .ok();
             let id = ["-c", "user.name=drover", "-c", "user.email=drover@localhost"];
             let o = git(
                 &[&id[..], &["notes", "--ref", &mine, "add", "-f", "-F", "-", head]].concat(),
@@ -300,7 +306,7 @@ pub fn attach(
             }
             let o = git(&["push", "-q", "origin", &format!("{mine}:refs/notes/why")], "")?;
             if o.code == 0 {
-                git(&["fetch", "-q", "origin", NOTES], "").ok();
+                crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "origin", NOTES]).ok();
                 return Ok(());
             }
             err = o.stderr;
@@ -368,18 +374,19 @@ pub fn brief(
     let (local, ids) = (f.local_path(), crate::compact::Shas::of(events));
     let mine: Vec<&Event> = events.iter().filter(|e| e.is("why", fleet, n)).collect();
     if let Some(head) = rev {
+        let ui = crate::guard::brief(events, (fleet, n)).map_or(String::new(), |g| format!("\n\n{g}"));
         let text = mine
             .iter()
             .any(|e| e.str("sha") == Some(head))
             .then(|| note(r, &local, head))
             .flatten();
         if let Some(t) = text {
-            return Some(format!("## Why note for this round ({head:.7})\n\n{t}"));
+            return Some(format!("## Why note for this round ({head:.7})\n\n{t}{ui}"));
         }
         let done = |e: &&Event| e.is("turn-end", fleet, n) && e.str("state") == Some("done");
         let why = events.iter().rfind(done).and_then(|e| e.str("note"));
         return Some(format!(
-            "## Why note for this round\n\nno why note: {}",
+            "## Why note for this round\n\nno why note: {}{ui}",
             why.unwrap_or("none attached")
         ));
     }

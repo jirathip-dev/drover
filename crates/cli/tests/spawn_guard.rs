@@ -481,3 +481,96 @@ fn supersede_closes_old_pane_after_confirm_unless_working() {
         }
     }
 }
+
+#[test]
+fn supersede_leaves_an_untracked_log_with_a_secret_looking_line_in_the_worktree() {
+    let d = tmpdir("dup-supersede-log");
+    let c = ctx(&d, CONFIG);
+    let w = wt(&c).to_string_lossy().into_owned();
+    let d0 = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12", "worktree": w});
+    append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", d0)).unwrap();
+    let (sh, r) = shed_happy(&c);
+    sh.lane("sendmeter-impl-12", "idle", &w);
+    let line = concat!("Cache hit for restore-key: gh", "p_abcdefghijklmnopqrstu1234\n");
+    std::fs::write(wt(&c).join("ci.log"), line).unwrap();
+    let st = format!("git -C {w} status --porcelain");
+    let r = (0..5)
+        .fold(r, |r, _| r.once(&st, 0, "?? ci.log\n"))
+        .once(&format!("git -C {w} diff --cached --name-only"), 0, "ci.log\0")
+        .once(
+            &format!("git -C {w} diff --cached"),
+            0,
+            &format!("diff --git a/ci.log b/ci.log\n+++ b/ci.log\n@@ -0,0 +1 @@\n+{line}"),
+        );
+    let (exit, out) = spawn(&c, &r, &["--supersede"]);
+    assert_eq!(exit, 0, "{out}");
+    assert!(!out.contains("SECRET_IN_WIP"), "{out}");
+    assert!(
+        !r.called(&format!("git -C {w} add")) && !r.called(&format!("git -C {w} push origin HEAD:refs/heads/wip/")),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert_eq!(std::fs::read_to_string(wt(&c).join("ci.log")).unwrap(), line);
+    assert_eq!(read(&c.state).unwrap().last().unwrap().kind, "spawn");
+}
+
+struct WtGit(Fake, String);
+
+impl Runner for WtGit {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if prog == "git" && args.first().is_some_and(|a| a == "-C") && args.get(1) == Some(&self.1) {
+            self.0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
+            return drover::runner::Real.run(prog, args);
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+}
+
+fn sh_git(a: &[&str]) -> String {
+    let o = std::process::Command::new("git").args(a).output().unwrap();
+    assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8(o.stdout).unwrap()
+}
+
+#[test]
+fn a_rejected_wip_push_leaves_the_worktree_as_it_was() {
+    let d = tmpdir("dup-supersede-rejected");
+    let c = ctx(&d, CONFIG);
+    let w = wt(&c).to_string_lossy().into_owned();
+    let (sh, f) = shed_happy(&c);
+    let origin = format!("{}/origin.git", d.display());
+    sh_git(&["init", "-q", "--bare", &origin]);
+    sh_git(&["clone", "-q", &origin, &w]);
+    for (k, v) in [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")] {
+        sh_git(&["-C", &w, "config", k, v]);
+    }
+    std::fs::write(format!("{w}/a.rs"), "fn a() {}\n").unwrap();
+    sh_git(&["-C", &w, "add", "-A"]);
+    sh_git(&["-C", &w, "commit", "-qm", "init"]);
+    sh_git(&["-C", &w, "push", "-q", "origin", "HEAD"]);
+    let hook = format!("{origin}/hooks/pre-receive");
+    std::fs::write(&hook, "#!/bin/sh\necho no wip here >&2\nexit 1\n").unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    std::fs::write(format!("{w}/a.rs"), "fn a() { 1; }\n").unwrap();
+    std::fs::write(format!("{w}/b.rs"), "fn b() {}\n").unwrap();
+    let head = sh_git(&["-C", &w, "rev-parse", "HEAD"]);
+    let before = sh_git(&["-C", &w, "status", "--porcelain"]);
+    let d0 = json!({"role": "impl", "agent": IMPL, "branch": "issue-12", "worktree": w});
+    append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", d0)).unwrap();
+    sh.lane(IMPL, "idle", &w);
+    let r = WtGit(f, w.clone());
+    let (exit, out) = spawn(&c, &r, &["--supersede"]);
+    assert_eq!(exit, 3, "{out} {:?}", r.0.calls.borrow());
+    assert!(out.contains("REFUSED SNAPSHOT_FAILED"), "{out}");
+    assert!(out.contains("no wip here"), "git's reason: {out}");
+    assert!(r.0.called(&format!("git -C {w} push origin HEAD:refs/heads/wip/")));
+    assert!(!sh.called("kill", IMPL) && sh.has(IMPL), "{:?}", sh.methods());
+    assert_eq!(sh_git(&["-C", &w, "rev-parse", "HEAD"]), head);
+    assert_eq!(sh_git(&["-C", &w, "status", "--porcelain"]), before);
+    assert_eq!(sh_git(&["-C", &w, "diff", "--cached", "--name-only"]), "");
+    assert!(!sh_git(&["-C", &w, "log", "--format=%s"]).contains("wip:"));
+    assert!(out.contains("nothing committed, nothing pushed, pane kept"), "{out}");
+}

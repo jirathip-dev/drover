@@ -59,15 +59,17 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         SCRATCH.set(None);
-        OPEN.with_borrow_mut(|v| v.retain(|x| x.0 != self.0));
+        pool().retain(|x| x.0 != self.0);
         for x in ["", "-wal", "-shm"] {
             std::fs::remove_file(format!("{}{x}", self.0.display())).ok();
         }
     }
 }
 
-thread_local! {
-    static OPEN: RefCell<Vec<(PathBuf, u64, Connection)>> = const { RefCell::new(Vec::new()) };
+static OPEN: std::sync::Mutex<Vec<(PathBuf, u64, Connection)>> = std::sync::Mutex::new(Vec::new());
+
+fn pool() -> std::sync::MutexGuard<'static, Vec<(PathBuf, u64, Connection)>> {
+    OPEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
@@ -83,9 +85,15 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
         "{} still has files from before #344: run `drover migrate --live` to import them",
         state.parent().unwrap_or(Path::new(".")).display()
     );
-    let cached = OPEN.with_borrow_mut(|v| Some(v.swap_remove(v.iter().position(|x| x.0 == p)?)));
+    let cached = {
+        let mut v = pool();
+        v.iter().position(|x| x.0 == p).map(|i| v.swap_remove(i))
+    };
     let (mut c, fresh) = match cached {
-        Some((_, i, c)) if ino(&p) == Some(i) => (c, false),
+        Some((_, i, mut c)) if ino(&p) == Some(i) => {
+            upgrade(&mut c, state)?;
+            (c, false)
+        }
         _ => (open(state)?, true),
     };
     if (fresh || !scratch) && old {
@@ -93,7 +101,10 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
     }
     let r = f(&mut c);
     if let Some(i) = ino(&p) {
-        OPEN.with_borrow_mut(|v| v.push((p, i, c)));
+        let mut v = pool();
+        if v.iter().filter(|x| x.0 == p).count() < 8 {
+            v.push((p, i, c));
+        }
     }
     r
 }
@@ -115,20 +126,27 @@ fn open(state: &Path) -> Result<Connection> {
     anyhow::ensure!(mode(&c)? == "wal", "{} is not in WAL mode", file(state).display());
     c.execute_batch(SCHEMA)?;
     let mut c = c;
+    upgrade(&mut c, state)?;
+    Ok(c)
+}
+
+fn upgrade(c: &mut Connection, state: &Path) -> Result<()> {
     let version = |c: &Connection| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0));
-    if version(&c)? < 2 {
+    if version(c)? < 3 {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if version(&tx)? < 1 {
             offload_all(&tx, state)?;
         }
         if version(&tx)? < 2 {
             tx.execute_batch(&format!("DROP TABLE lanes; {SCHEMA}"))?;
+        }
+        if version(&tx)? < 3 {
             rebuild_in(&tx, state)?;
-            tx.pragma_update(None, "user_version", 2)?;
+            tx.pragma_update(None, "user_version", 3)?;
         }
         tx.commit()?;
     }
-    Ok(c)
+    Ok(())
 }
 
 fn offload_all(c: &Connection, state: &Path) -> Result<()> {
@@ -230,18 +248,19 @@ fn project_ask(c: &Connection, e: &Event) -> Result<()> {
         return Ok(());
     }
     let issue = e.issue.and_then(|n| i64::try_from(n).ok()).map(Sql::Integer);
-    let relaunch = issue.clone().filter(|_| e.kind == "spawn");
+    let went_on = issue.clone().filter(|_| events::went_on(&e.kind));
     let (col, key, floor) = match e.kind.as_str() {
         "decision" | "ask-withdrawn" | "ask-delivered" | "ask-failed" | "ask-expired" => ("id", text("id"), 0),
         "merged" | "closed" | "closed-other" | "clean" if issue.is_some() => ("issue", issue.unwrap_or(Sql::Null), 5),
         "spawn" | "lane-killed" => ("agent", text("agent"), 7),
+        _ if went_on.is_some() => ("issue", went_on.clone().unwrap_or(Sql::Null), 7),
         _ => return Ok(()),
     };
     let q = format!("SELECT seq, json, rank FROM asks WHERE fleet = ?1 AND ({col} IS ?2 OR issue = ?5 AND agent IS NULL) AND (rank IS NULL OR rank BETWEEN ?3 AND ?4)");
     let found: Vec<(u64, String, Option<usize>)> = {
         let mut q = c.prepare(&q)?;
         let all = q.query_map(
-            params![e.fleet, key, floor + 1, events::ORDER.len() - 2, relaunch],
+            params![e.fleet, key, floor + 1, events::ORDER.len() - 2, went_on],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
         all.collect::<rusqlite::Result<_>>()?
