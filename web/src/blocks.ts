@@ -389,12 +389,8 @@ function composer(blk: Blk, c: Ctx): HTMLElement {
     else st.remove();
     const picks = el('div', 'pk');
     for (const ch of blks(b.chips)) {
-      const n = String(ch.name), s = el('select'), cur = String(d.picks[n] ?? ch.cur ?? '');
-      s.setAttribute('aria-label', n);
-      if (!cur) s.append(new Option(n, '', true, true));
-      for (const o of isList(ch.all) ? ch.all.map(String) : []) s.append(new Option(o, o, o === cur, o === cur));
-      s.onchange = () => (act('model') ? post(act('model'), { [n]: s.value }, s) : ((d.picks[n] = s.value), draw()));
-      picks.append(s);
+      const n = String(ch.name), cur = String(d.picks[n] ?? ch.cur ?? '');
+      picks.append(dropdown(n, isList(ch.all) ? ch.all.map(String) : [], cur, (v, t) => (act('model') ? post(act('model'), { [n]: v }, t) : ((d.picks[n] = v), draw())), true));
     }
     for (const k of [...f.children]) if (k !== row) k.remove();
     if (row.parentNode !== f) f.append(row);
@@ -460,19 +456,90 @@ function toggle(e: HTMLElement, id: unknown, c: Ctx, card = false) {
   else if (e.nextElementSibling instanceof HTMLElement) e.nextElementSibling.hidden = !c.open.has(k);
 }
 
+let dds = 0;
+/** The page's one picker: a `[name value ▾]` button over a listbox that opens toward the roomier side; `pick` gets a newly chosen value. */
+export function dropdown(name: string, opts: string[], cur: string, pick: (v: string, t: HTMLButtonElement) => void, chip = false): HTMLElement {
+  const d = el('div', chip ? 'dd' : 'dd end'), b = el('button'), p = el('div', 'ddp', `<b class=ddh>${esc(name)}</b>`), ul = el('ul', 'ddl'), id = `dd${++dds}`;
+  b.type = 'button';
+  b.append(el('span'), el('i', 'cv'));
+  b.setAttribute('aria-haspopup', 'listbox');
+  b.setAttribute('aria-expanded', 'false');
+  b.setAttribute('aria-controls', id);
+  Object.assign(ul, { id, tabIndex: -1 });
+  ul.setAttribute('role', 'listbox');
+  ul.setAttribute('aria-label', name);
+  p.append(ul);
+  d.append(b);
+  const items = opts.map((o, i) => {
+    const li = el('li', '', `<span>${esc(o)}</span>`);
+    li.id = `${id}-${i}`;
+    li.setAttribute('role', 'option');
+    li.onclick = () => choose(i);
+    return li;
+  });
+  ul.append(...items);
+  let at = 0;
+  const show = () => {
+    b.firstElementChild?.replaceChildren(...nodes(chip ? `<i class=k>${esc(name)}</i>${cur ? ` ${esc(cur)}` : ''}` : esc(cur)));
+    b.setAttribute('aria-label', `${name} ${cur}`.trim());
+    items.forEach((li, i) => li.setAttribute('aria-selected', String(opts[i] === cur)));
+  };
+  const hi = (i: number) => {
+    at = Math.min(items.length - 1, Math.max(0, i));
+    items.forEach((li, j) => li.classList.toggle('on', j === at));
+    ul.setAttribute('aria-activedescendant', items[at]?.id ?? '');
+    items[at]?.scrollIntoView({ block: 'nearest' });
+  };
+  const away = (e: Event) => { if (!(e.target instanceof Node && d.contains(e.target))) close(); };
+  const close = (focus = true) => {
+    p.remove();
+    b.setAttribute('aria-expanded', 'false');
+    removeEventListener('pointerdown', away, true);
+    if (focus) b.focus();
+  };
+  const choose = (i: number) => {
+    const v = opts[i];
+    close();
+    if (v === undefined || v === cur) return;
+    cur = v;
+    show();
+    pick(v, b);
+  };
+  b.onclick = () => {
+    if (p.isConnected) return close();
+    const r = b.getBoundingClientRect(), below = innerHeight - r.bottom, up = r.top > below;
+    d.classList.toggle('up', up);
+    p.style.setProperty('--room', `${Math.max(96, (up ? r.top : below) - 64)}px`);
+    d.append(p);
+    b.setAttribute('aria-expanded', 'true');
+    hi(opts.indexOf(cur));
+    ul.focus();
+    addEventListener('pointerdown', away, true);
+  };
+  ul.onkeydown = e => {
+    const k = e.key, m: Record<string, number> = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: items.length - 1 };
+    if (k in m) hi(m[k] ?? 0);
+    else if (k === 'Enter' || k === ' ') choose(at);
+    else if (k === 'Escape') close();
+    else return void (k === 'Tab' && close(false));
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  show();
+  return d;
+}
+
 function field(x: Blk, key: string): HTMLElement {
-  const l = el('label', 'fd');
+  const l = el(x.type === 'picker' ? 'div' : 'label', 'fd');
   l.append(el('span', 'fk', esc(x.label ?? x.name)));
   if (x.type === 'toggle') {
     const i = el('input');
     Object.assign(i, { type: 'checkbox', name: x.name, checked: !!x.value });
     l.append(i);
   } else if (x.type === 'picker') {
-    const s = el('select');
-    s.name = String(x.name);
-    const opts = [...new Set([x.value, ...(isList(x.options) ? x.options : [])].filter(o => o != null && o !== ''))];
-    for (const o of opts) s.append(Object.assign(el('option'), { value: o, textContent: o, selected: o === x.value }));
-    l.append(s);
+    const i = el('input'), opts = [...new Set([x.value, ...(isList(x.options) ? x.options : [])].filter(o => o != null && o !== '').map(String))];
+    Object.assign(i, { type: 'hidden', name: x.name, value: opts[0] ?? '' });
+    l.append(i, dropdown(String(x.label ?? x.name), opts, i.value, v => { i.value = v; }));
   } else {
     const i = el('input');
     Object.assign(i, { type: x.type === 'secret' ? 'password' : 'text', name: x.name, value: x.value ?? '', placeholder: x.placeholder ?? '', autocomplete: 'off' });
@@ -486,8 +553,8 @@ function field(x: Blk, key: string): HTMLElement {
 /** The values of every field under `root`, as an action's `values` (a toggle is a bool). */
 export function values(root: HTMLElement): Blk {
   const v: Blk = {};
-  root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('.fd input, .fd select').forEach(i => {
-    v[i.name] = i instanceof HTMLInputElement && i.type === 'checkbox' ? i.checked : i.value;
+  root.querySelectorAll<HTMLInputElement>('.fd input').forEach(i => {
+    v[i.name] = i.type === 'checkbox' ? i.checked : i.value;
   });
   return v;
 }

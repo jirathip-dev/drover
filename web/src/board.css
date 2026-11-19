@@ -45,7 +45,7 @@ button.pick{display:flex;width:100%;height:auto;min-height:var(--ctl);padding:ca
 button.pick::after{inset:calc(-1 * var(--s1)) calc(-1 * var(--s2));align-items:flex-start;padding-top:calc(var(--s1) + (var(--ctl) - 1.35em) / 2)}
 button.pick::before{top:calc((var(--ctl) - 1.35em) / 2)}
 button.pick>span{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
-input,select{font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2);min-width:0}
+input{font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2);min-width:0}
 input[type=checkbox]{width:var(--s4);height:var(--s4);accent-color:var(--l)}
 
 .msg{padding:var(--s2);border:1px solid currentColor;border-radius:6px;margin:var(--s2) 0}
@@ -110,7 +110,7 @@ input[type=checkbox]{width:var(--s4);height:var(--s4);accent-color:var(--l)}
 .imgs img{height:calc(var(--hit) * 3);border-radius:4px}
 .fd{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);border-bottom:1px solid var(--line)}
 .fd .fk{flex:1}
-.fd input:not([type=checkbox]),.fd select{flex:2}
+.fd input:not([type=checkbox]),.fd>.dd{flex:2}
 
 #sheet{position:fixed;inset:0;z-index:3;display:flex;align-items:flex-end;background:var(--scrim)}
 #sheet>.sp{width:100%;max-height:78vh;overflow-y:auto;overscroll-behavior:contain;background:var(--bg);border-top:1px solid var(--line);border-radius:12px 12px 0 0;padding:0 var(--s3) calc(var(--s4) + env(safe-area-inset-bottom))}
@@ -151,7 +151,27 @@ html[data-focus] #cards{display:none}
 .cmp .tb{position:relative;display:flex;align-items:center;gap:var(--s1)}
 .cmp .tb img{height:calc(var(--hit) * 1.5);border-radius:4px}
 .cmp .pk{display:flex;gap:var(--s3);margin:var(--s2) 0 0}
-.cmp .pk select{flex:1;min-width:0;max-height:var(--hit)}
+.cmp .pk>.dd{flex:1}
+/* #1297: the one terminal-style dropdown (`dropdown()`) for every picker: bracket trigger, square framed listbox, the current value `*` and green, the active row in the accent. */
+.dd{position:relative;display:flex;min-width:0}
+.dd>button{flex:1;min-width:0;justify-content:flex-start;gap:1ch;padding-right:2ch;color:var(--fg);text-transform:none}
+.dd>button>span{flex:1;text-align:left}
+.dd>button .k{color:var(--mute);font-style:normal}
+.dd>button>i.cv{flex:none;font-style:normal;color:var(--l)}
+.dd>button>i.cv::before{content:"▾"}
+.dd>button[aria-expanded=true]{color:var(--l)}
+.dd>button[aria-expanded=true]>i.cv::before{content:"▴"}
+.ddp{position:absolute;z-index:4;left:0;top:calc(100% + var(--s2));display:flex;flex-direction:column;min-width:100%;max-width:calc(100vw - 2 * var(--s3));max-height:var(--room,60vh);box-sizing:border-box;background:var(--bg);border:1px solid var(--edge);border-radius:0;box-shadow:0 0 0 var(--s2) var(--bg)}
+.ddh{position:absolute;top:-.75em;left:1ch;padding:0 .5ch;background:var(--bg);color:var(--mute);font-size:var(--fs-meta);font-weight:400;line-height:1.5}
+.ddl{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0;padding:var(--s2) 0 var(--s1);list-style:none;outline:none}
+.dd.up .ddp{top:auto;bottom:calc(100% + var(--s2))}
+.dd.end .ddp{left:auto;right:0;width:max-content}
+.ddl>li{display:flex;align-items:center;gap:1ch;min-height:var(--hit);box-sizing:border-box;padding:var(--s1) 1ch;color:var(--fg);cursor:pointer}
+.ddl>li::before{content:" ";flex:none;width:1ch;white-space:pre}
+.ddl>li>span{min-width:0;overflow-wrap:anywhere}
+.ddl>li[aria-selected=true]{color:var(--g)}
+.ddl>li[aria-selected=true]::before{content:"*"}
+.ddl>li.on{background:var(--l);color:var(--bg)}
 /* #1086, #1120: a focus screen is a column between the header and the tab bar or keyboard (`fit()`): bar, messages (the one scroller), composer. */
 html[data-focus] body{overflow:hidden}
 html[data-focus] #strip{position:fixed;left:0;right:0}
