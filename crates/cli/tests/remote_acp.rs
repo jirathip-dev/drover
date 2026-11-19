@@ -815,7 +815,7 @@ fn lane_key_401_respawns_the_lane(name: &str, why: &str) {
     assert_eq!(code, 0, "{o}");
     let ev = drover::events::read(&c.state).unwrap().to_vec();
     assert_eq!(spawned(&c).len(), 2, "the lane is respawned: {o}");
-    assert_eq!(ev.iter().filter(|e| e.kind == "respawn").count(), 1, "{o}");
+    assert_eq!(ev.iter().filter(|e| e.kind == "self-heal").count(), 1, "{o}");
 }
 
 fn refuse_key(b: &Boat, why: &str) {
