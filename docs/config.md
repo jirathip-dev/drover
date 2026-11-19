@@ -155,6 +155,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `stall_minutes` | `30` | a working lane with no event this long is stalled |
 | `silent_minutes` | `10` | an ACP lane's open turn with no session event this long is cancelled and nudged |
 | `ci_start_minutes` | `10` | a PR head with no checks this long after its push alerts `ci-missing` |
+| `ci_stuck_minutes` | `30` | a ready PR's check still pending this long after its run completed is re-run once, then alerts `ci-stuck` |
 | `load_per_cpu` | `2.5` | spawn refuses HOST_BUSY over this load per CPU |
 | `overload_minutes` | `10` | load per CPU over `load_per_cpu` this long alerts `host-overloaded` once, with the 5 busiest processes |
 | `swapout_rate` | `2000.0` | pages swapped out per 2 s sample that count as swapping |

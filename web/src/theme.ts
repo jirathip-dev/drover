@@ -1,7 +1,11 @@
 import { type Blk, blks, isBlk, obj } from './ops';
-import { block, choose } from './schemes';
 
-declare const SD: { t: Record<string, unknown>; s: Record<string, { tokens: Record<string, string> }> };
+declare const SD: { t: Record<string, unknown>; s: Record<string, Scheme> };
+type Scheme = { tokens: Record<string, string>; 'color-scheme': string };
+const css = (s: Scheme): string => `:root{${Object.entries(s.tokens).map(([k, v]) => `${k}:${v}`).join(';')};color-scheme:${s['color-scheme']}}`;
+const theirs = (def: unknown, dark: boolean): unknown => (def && typeof def === 'object' && Reflect.get(def, dark ? 'dark' : 'light')) || def;
+const choose = (pick: unknown, def: unknown, dark: boolean): string =>
+  [pick, theirs(def, dark)].find((n): n is string => typeof n === 'string' && Object.prototype.hasOwnProperty.call(SD.s, n)) ?? 'github-dark';
 const NS = 'http://www.w3.org/2000/svg';
 const H = document.documentElement;
 export const R = new URL('.', document.baseURI).href;
@@ -97,7 +101,7 @@ export async function theme(name: string): Promise<void> {
 const DARK = matchMedia('(prefers-color-scheme: dark)');
 /** The colours: this phone's pick, else its theme's default; kept so the head script paints it first next time. */
 export function colours() {
-  const n = choose(SD.s, new URLSearchParams(location.search).get('scheme') || get('scheme'), SD.t[H.dataset.theme ?? ''], DARK.matches), b = block(SD.s[n]);
+  const n = choose(new URLSearchParams(location.search).get('scheme') || get('scheme'), SD.t[H.dataset.theme ?? ''], DARK.matches), b = css(SD.s[n]);
   H.dataset.scheme = n;
   const sch = document.getElementById('sch'), meta = document.querySelector<HTMLMetaElement>('meta[name=theme-color]');
   if (sch) sch.textContent = b;
@@ -106,4 +110,4 @@ export function colours() {
 }
 DARK.addEventListener('change', colours);
 export const themes = () => Object.keys(SD.t);
-export const schemes = () => Object.keys(SD.s).filter(n => choose(SD.s, n, null, DARK.matches) === n);
+export const schemes = () => Object.keys(SD.s);
