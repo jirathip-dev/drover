@@ -1,0 +1,11 @@
+Decided: bush is built by scripts/swag-bush.mjs from swag's design/bush/art.mjs at swag#7's merged commit, in drover's theme contract; icons copied byte for byte
+Because: q2409
+Because: "The art is copied from cooee#22's finished pack, never redrawn"
+Rejected: copying packs/bush as is — its theme.json fails drover's check (`scene` a list) and its sprites lack the wombat (fix), stuck (blocked), rail, looks and rows per role
+Decided: the sign's levels, day sky and frame loop are page CSS on the new Scene beside kitchen's heat and garden's light; its reduced-motion rule stills the sign
+Because: web/src/board.css:281
+Decided: the swag crate moves to bf9a2c6b so bush-light and bush-dark are built-in schemes
+Because: Cargo.toml:69
+Check: farm, kitchen and garden bytes unchanged (SHA256SUMS lines identical); rerunning scripts/swag.sh with both pins reproduces assets/swag
+Check: the board has no ASCII renderer today; the ASCII widths are proven on the theme contract (themes.rs), not on a screen
+Owner: bush is a fourth built-in theme in the picker, its Fire Danger sign following host load
