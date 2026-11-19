@@ -1,0 +1,13 @@
+Decided: Scene is web/src/scene.ts, the old herd.js drawing and frame loop ported to typed TS, fed by /screens/scene (the old /screens/herd renamed) through the page's own view, cache and stream.
+Because: "A header button switches the whole page between the screens and Scene: full page, no sheet. Each phone remembers its choice."
+Because: q2007
+Decided: the Herd sheet's [⚙] row and its renderer (web/src/herd.ts) are gone; [scene] and [A]/[☀]/[☾] sit in the header shell, the light shown only in Scene.
+Because: "The Herd sheet from #1092 is gone. Nothing else on the board changes."
+Decided: Scene builds its own sa-* symbols from the theme's sprites so legs trot by --gait; the board's ha-* row sprites stay untouched.
+Decided: each repo's needs-you cards are the /screens/cards cards whose title names that repo, rendered by the board's own card renderer, so their buttons act.
+Rejected: a needs list and an art pin inside the scene block (the design note) — the cards already come from /screens JSON with their actions, and the art pin would only repeat assets/swag/SOURCE.
+Decided: the art stays the vendored copy of swag legacy-board at the pinned 68c01f0e, now checked file by file against SHA256SUMS for farm's sprites too.
+Because: docs/design/scene-mode/README.md:30
+Rejected: removing assets/swag to satisfy the git grep line — swag's crate does not ship legacy-board (only packs/), so dropping it means moving every theme's art (#1344), not Scene.
+Check: herd.rs the_scene_in_webkit_is_a_full_page_header_toggle_drawn_from_the_scene_screen fails if the page fetches herd.json or any path outside its own routes.
+Owner: the git grep line of the AC is not met: sprite art still lives under assets/swag (the pinned copy) until swag's crate ships legacy-board.
