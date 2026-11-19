@@ -106,10 +106,14 @@ fn doctor_gives_each_enabled_remote_host_a_shed_line_or_unreachable() {
     let far = format!(
         "✗ host far shed — SHED_VERSION: shed serve is 0.0.0 (unknown) protocol 0, drover needs shed protocol {MIN_PROTOCOL} or newer → "
     );
-    assert_eq!(lines.len(), 3, "{out}");
+    assert_eq!(lines.len(), 2, "{out}");
     assert!(lines[0].starts_with("✓ shed — server "), "{out}");
     assert!(lines[1].starts_with(&far), "{out}");
-    assert_eq!(lines[2], "✗ host gone shed — unreachable", "{out}");
+    let gone: Vec<_> = out.lines().filter(|l| l.contains("host gone")).collect();
+    assert!(
+        gone.len() == 1 && gone[0].starts_with("✗ host gone — unreachable (ssh: "),
+        "{out}"
+    );
 }
 
 #[test]

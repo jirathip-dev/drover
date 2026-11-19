@@ -102,7 +102,10 @@ fn a_kick_pays_one_connect_timeout_to_a_dead_host_with_twenty_old_lanes() {
     let r = Dead::new();
     let (code, out) = run(&c, &r, &["kick", "sendmeter", "12", "--why", "push", "--now"]);
     assert_eq!(code, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-impl-12"), "the kick still starts #12: {out}");
+    assert!(
+        sh.called("run", "sendmeter-impl-12"),
+        "the kick still starts #12: {out}"
+    );
     assert!(r.calls.get() <= 1, "{} calls to air: {out}", r.calls.get());
     assert!(r.waited() <= CONNECT, "{} s simulated", r.waited());
 }
@@ -168,7 +171,9 @@ fn tick_ends_a_kick_past_its_limit_logs_it_and_still_runs_every_fleet() {
 fn a_second_kick_for_a_running_issue_exits_at_once_and_is_logged() {
     let (c, sh) = setup("down-kick-twice", "enabled = false\n");
     lease_as(&c, "kick-sendmeter-12.lock", 4242, c.now, 300);
-    let r = local().reply("kill -0 4242", "").reply("ps -o etime= -p 4242", "00:01\n");
+    let r = local()
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "00:01\n");
     let (code, out) = run(&c, &r, &["kick", "sendmeter", "12", "--why", "push", "--now"]);
     assert_eq!(code, 0, "{out}");
     assert!(!sh.called("run", "sendmeter-impl-12"), "the running kick does the work");

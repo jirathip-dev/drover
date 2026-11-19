@@ -150,7 +150,7 @@ may not edit it); a missing or unreadable one fails closed `HOOK_FAILED_CLOSED`.
 value. The rules are frozen at spawn: after a config change that alters them, the board marks the lane `rules stale`
 until a respawn. A fleet.toml left on a remote host is no longer read: `drover doctor` shows
 `! stale fleet.toml on <host>: no longer read`; remove it by hand. #647: bootstrap removes one an old bootstrap wrote
-(only `[fleet.*]` and `[hosts.<host>]`); doctor's host row names the failed check (`unreachable (ssh: …)`,
+(only `[fleet.*]` and `[hosts.<host>]`); doctor's host row names the failed check (`unreachable (ssh: …), down 12m`,
 `✗ shed — does not answer: …`).
 
 ## Asks, answers and verdicts from another host (#275, #389)
@@ -179,12 +179,16 @@ An answer reaches a remote lane through that host's shed (`send`, then Enter).
 `drover hosts off <name>` sets `enabled = false` in fleet.toml and logs `host-off` with `by`. `hosts on` undoes it,
 logging `host-on`.
 
-An off host gets no new issues. It keeps being monitored, and its running lanes drain there: their reviews and fix
-rounds still go to it. `GET /api/v1/host` shows such a host grey, as `off · draining 2 lanes` while lanes remain,
+An off host gets no new issues, and its running lanes drain there: their reviews and fix rounds still go to it. `GET /api/v1/host` shows such a host grey, as `off · draining 2 lanes` while lanes remain,
 then `off · not used for lanes`. The main host (no `machine`) runs drover, the page and the log: `hosts off` refuses it `MAIN_HOST`; set `enabled = false` in fleet.toml by hand if you mean it.
 
-#939: once an off host has no open lane left, `drive`, `check`, `status` and the tick never contact it (no ssh at
-all); its lanes are still finished, cleaned and saved while any remain. Every remote call in a pass is killed with its
+#1357: `kick`, `drive`, `check`, `waiting`, `status` and the tick never contact an off host (no ssh at all), lanes
+there or not; only a hosts refresh reads it, its lanes' verdicts included. A host one ssh connect fails is offline
+for the rest of that command and, through `<state dir>/hosts.down`, for every other drover command for `host_down_secs`
+(60 s; the tick probes afresh and renews it): one dead host costs a pass one connect timeout, not one per lane. `doctor` shows it as one line,
+`unreachable (ssh: …), down 12m`. A kick running past `kick_max_secs` (300 s) is ended by the next tick's `check` and logged
+`kick-killed`; a second kick of an issue while one runs exits at once, logged `kick-in-flight`, and the running one
+drives it after. Every remote call in a pass is killed with its
 ssh's process group after `ssh_call_secs` (20 s), output still held open included; the host is then offline for the
 rest of that pass and the other hosts and fleets go on. An ssh refused with `REMOTE HOST IDENTIFICATION HAS CHANGED`
 logs `host-key-changed <host>` once (again only after the host was back online) and is not retried in that pass.

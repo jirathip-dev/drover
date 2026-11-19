@@ -74,6 +74,7 @@
 1 hosts_screen
 2 host_slots
 2 host_spared
+2 host_down
 3 host_sync
 1 host_tab
 1 host_words

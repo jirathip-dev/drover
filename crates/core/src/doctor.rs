@@ -346,12 +346,12 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let Some(m) = h.machine.as_deref() else { continue };
         let on = crate::hosts::On::new(r, Some(m));
         let Some((tags, home)) = crate::hosts::probe(&on) else {
-            let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");
+            let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#}), down {}", crate::hosts::down_for(ctx, m));
             let why = ok::<&str>(&on, "true", &[]).map_or_else(ssh, |_| "probe: unreadable answer".into());
             rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
-            rows.extend(on.shed().map(|_| format!("✗ host {name} shed — unreachable")));
             continue;
         };
+        crate::hosts::went(ctx, m, true);
         let (tags, own) = ([tags, h.tags.clone()].concat(), h.watches_token());
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
