@@ -1170,6 +1170,7 @@ struct Boats {
     calls: Mutex<Vec<String>>,
     slow: std::sync::atomic::AtomicBool,
     strict: std::sync::atomic::AtomicBool,
+    detached: Mutex<Vec<Vec<String>>>,
 }
 impl Boats {
     fn boat(&self, prog: &str, args: &[String]) -> Option<Out> {
@@ -1215,6 +1216,10 @@ impl Runner for Boats {
     fn shed(&self) -> Option<drover::shed::Shed> {
         Some(self.local.shed())
     }
+    fn detach(&self, _: &str, args: &[String], _: &std::path::Path) -> anyhow::Result<u32> {
+        self.detached.lock().unwrap().push(args.to_vec());
+        Ok(4242)
+    }
 }
 
 fn boats() -> (drover::Ctx, Boats) {
@@ -1222,6 +1227,26 @@ fn boats() -> (drover::Ctx, Boats) {
 }
 
 fn boats_queued(queued: bool) -> (drover::Ctx, Boats) {
+    let lanes: Vec<(String, u64)> = (1..=30).map(|n| ("sendmeter".into(), n)).collect();
+    boats_in(queued, "", &lanes)
+}
+
+fn fleets5() -> (drover::Ctx, Boats) {
+    let more: String = FLEETS[1..]
+        .iter()
+        .map(|f| {
+            format!(
+                "\n[fleet.{f}]\nrepo = \"jirathip-dev/{f}\"\nlocal = \"/tmp/does-not-matter/{f}\"\nintegration = \"staging\"\nmax_in_flight = 0\n\n[fleet.{f}.role.impl]\nharness = \"claude\"\nprofile = \"fleet-impl\"\n\n[fleet.{f}.role.rev]\nharness = \"claude\"\nprofile = \"fleet-rev\"\n"
+            )
+        })
+        .collect();
+    let lanes: Vec<(String, u64)> = (1..=40).map(|n| (FLEETS[(n % 5) as usize].into(), n)).collect();
+    let (c, r) = boats_in(false, &more, &lanes);
+    r.strict.store(false, Relaxed);
+    (c, r)
+}
+
+fn boats_in(queued: bool, fleets: &str, lanes: &[(String, u64)]) -> (drover::Ctx, Boats) {
     let base = (CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""))
         .replace("max_parallel_spawns = 0", "max_parallel_spawns = 6\npass_max_secs = 1")
         .replace(
@@ -1234,7 +1259,7 @@ fn boats_queued(queued: bool) -> (drover::Ctx, Boats) {
     let local = shed();
     let c = ctx(
         &tmpdir("boats"),
-        &local.config(&format!("{base}\n[hosts.mini]\n{hosts}")),
+        &local.config(&format!("{base}{fleets}\n[hosts.mini]\n{hosts}")),
     );
     let add: Vec<String> = (31..=40).map(|n| n.to_string()).collect();
     let add: Vec<&str> = ["queue", "sendmeter", "add"]
@@ -1252,13 +1277,13 @@ fn boats_queued(queued: bool) -> (drover::Ctx, Boats) {
     }
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(c.state.parent().unwrap().join("hosts.json"), seen.to_string()).unwrap();
-    for n in 1..=30u64 {
+    for (fleet, n) in lanes {
         let (b, sh) = sheds[(n % 4) as usize];
-        let wt = format!("/home/me/.herdr/worktrees/sendmeter/issue-{n}");
-        let agent = format!("sendmeter-impl-{n}");
+        let wt = format!("/home/me/.herdr/worktrees/{fleet}/issue-{n}");
+        let agent = format!("{fleet}-impl-{n}");
         let d = json!({"role": "impl", "agent": agent, "harness": "claude", "pane": agent, "runtime": "shed",
                        "worktree": wt, "branch": format!("issue-{n}"), "host": b, "machine": b});
-        append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(n), "spawn", d)).unwrap();
+        append(&c.state, &Event::new(NOW - 900, fleet, Some(*n), "spawn", d)).unwrap();
         sh.lane(&agent, "working", &wt);
     }
     let f = Fake::default()
@@ -1276,6 +1301,7 @@ fn boats_queued(queued: bool) -> (drover::Ctx, Boats) {
             calls: Mutex::default(),
             slow: true.into(),
             strict: (!queued).into(),
+            detached: Mutex::default(),
         },
     )
 }
@@ -1383,4 +1409,34 @@ fn a_boat_lanes_turn_end_is_acted_on_in_the_next_step_inside_5s() {
         1,
         "a line runs once"
     );
+}
+
+#[test]
+fn five_fleets_with_40_lanes_on_4_boats_at_700ms_a_call_end_every_pass_within_10s() {
+    let (c, r) = fleets5();
+    let t = Instant::now();
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let passes = std::mem::take(&mut *r.detached.lock().unwrap());
+    std::thread::scope(|s| {
+        for a in &passes {
+            let (c, r) = (&c, &r);
+            s.spawn(move || {
+                let a: Vec<&str> = a.iter().map(String::as_str).collect();
+                let (code, out) = run(c, r, &a);
+                assert_eq!(code, 0, "{a:?}: {out}");
+            });
+        }
+    });
+    let secs = t.elapsed().as_secs_f64();
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let done: std::collections::BTreeSet<&str> = (ev.iter().filter(|e| e.kind == "drive-pass"))
+        .map(|e| e.fleet.as_str())
+        .collect();
+    report(&format!(
+        "#1320 perf (5 fleets, 40 lanes on 4 boats, +700 ms per remote call): every pass done in {secs:.1} s, {} detached passes, calls {:?}",
+        passes.len(),
+        r.per_host()
+    ));
+    assert_eq!(done, FLEETS.into(), "{out}");
 }
