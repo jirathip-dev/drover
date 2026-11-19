@@ -47,7 +47,6 @@ impl Write for Pipe {
     }
 }
 
-/// The ADR's fixture: hosts whose every call costs 0.7 s on the test clock, counted per host; each `hosts watch` is a real watcher in a thread over its worktrees on disk and its own shed, its stream cut, muted or refused at will.
 struct Boats {
     fake: &'static Fake,
     sheds: BTreeMap<&'static str, &'static FakeShed>,

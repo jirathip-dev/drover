@@ -115,11 +115,8 @@ pub fn frame(r: &dyn Runner, watch: &Watch) -> anyhow::Result<Frame> {
 }
 
 fn stamp(r: &dyn Runner, watch: &Watch) -> String {
-    let seen = crate::session::list::raw(r).map(|all| {
-        let one = |s: &crate::shed::proto::TerminalInfo| {
-            let said = s.reported.as_ref().map(|x| x.state.clone());
-            format!("{} {:?} {:?} {said:?}", s.name, s.state, s.exit)
-        };
+    let seen = crate::session::list::on(r).map(|all| {
+        let one = |s: &crate::session::Session| format!("{} {:?}", s.name, s.life);
         all.iter().map(one).collect::<Vec<_>>()
     });
     let stat = |wt: &String| {

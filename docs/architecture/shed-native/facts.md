@@ -48,6 +48,6 @@ behind `core::session`.
 `crates/core/src/`: `term.rs`, `shed.rs`, `lanes.rs`, `stall.rs`, `check.rs`, `drive.rs`, `waiting.rs`,
 `spawn.rs`, `gate.rs`, `design.rs`, `orchestrator.rs`, `hosts.rs`, `host.rs`, `slo.rs`, `snapshot.rs`, `roots.rs`,
 `rename.rs`, `cloud.rs`, `lib.rs`, `cli.rs`, `providers/mod.rs` and each provider's screen readers;
-`crates/service/src/lanes.rs`; `crates/server/src/serve.rs`, `serve/v1.rs`, `serve/chat.rs`, `screens.rs`.
+`crates/server/src/serve.rs`, `serve/v1.rs`, `serve/chat.rs`, `screens.rs`.
 Docs: `docs/runtimes.md` ("State is reported, not scraped" becomes true), `docs/lanes.md`, `docs/serve.md`
 (the rolling transcript section goes).
