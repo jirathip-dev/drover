@@ -1,0 +1,60 @@
+Decided: one core module (hygiene.rs) holds the patterns, visibility cache, diff walker, scan and doctor line; every GitHub write path calls it
+Because: "every text drover itself sends to GitHub (`drover merge`'s closing comment and squash message, `amend`, `triage`, issue filing by `lesson`/`triage`/`hotspots`, …), all through the same check"
+Decided: the lane hook reads only the cached visibility; spawn, merge, doctor and wip saves refresh it at most once a day
+Because: "drover asks GitHub for the repo's visibility once a day and caches it; a fleet.toml flag overrides it"
+Decided: unknown visibility (gh fails, no cache) counts as public, the safe side
+Decided: the wip snapshot reuses the secret scan's diff walker, now hygiene::hits, for its file:line
+Because: q2333
+Rejected: a gh call inside the hook — it would run on every tool call and reach the network from tests
+Rejected: checking compact's PR body rewrite — it only swaps shas in text already public
+Check: crates/cli/tests/hygiene.rs drives the real hook, pre-push (real git repo), merge, amend, kill, doctor and scan paths
+Check: refusals print the pattern name and where, never the matched value
+Owner: Public repos now refuse text naming home folders, hosts, session ids or the fleet's private names.
+
+Decided: put the new hygiene test target in CI shard 3, the shard with the fewest targets
+Because: scripts/test-shards.sh:16
+Rejected: renaming or merging the test file into another target — the shard list is the one place CI reads targets from
+Check: bash scripts/test-shards.sh check exits 0 and every shard job now reaches nextest
+Owner: The new public-repo checks' tests now run in CI instead of stopping every test shard.
+
+Decided: put the new hygiene test target in CI shard 3, the shard with the fewest targets
+Because: scripts/test-shards.sh:16
+Rejected: renaming or merging the test file into another target — the shard list is the one place CI reads targets from
+Check: bash scripts/test-shards.sh check exits 0 and every shard job now reaches nextest
+Owner: The new public-repo checks' tests now run in CI instead of stopping every test shard.
+
+Decided: clear the arch-check doc violation with a `no doc:` line in the PR body, not a doc edit
+Because: crates/core/src/cli.rs:246
+Rejected: a doc line that merely contains "cmd" — it would name a clap field, not a user-facing key
+Check: the ci workflow's rust job is green at fd9b3977 and the PR body carries the no-doc note
+Owner: CI is green again; no code changed this round besides a staging merge.
+
+Decided: clear the arch-check doc violation with a `no doc:` line in the PR body, not a doc edit
+Because: crates/core/src/cli.rs:246
+Rejected: a doc line that merely contains "cmd" — it would name a clap field, not a user-facing key
+Check: the ci workflow's rust job is green at fd9b3977 and the PR body carries the no-doc note
+Owner: CI is green again; no code changed this round besides a staging merge.
+
+Decided: clear the arch-check doc violation with a `no doc:` line in the PR body, not a doc edit
+Because: crates/core/src/cli.rs:246
+Rejected: a doc line that merely contains "cmd" — it would name a clap field, not a user-facing key
+Check: the ci workflow's rust job is green at fd9b3977 and the PR body carries the no-doc note
+Owner: CI is green again; no code changed this round besides a staging merge.
+
+Decided: clear the arch-check doc violation with a `no doc:` line in the PR body, not a doc edit
+Because: crates/core/src/cli.rs:246
+Rejected: a doc line that merely contains "cmd" — it would name a clap field, not a user-facing key
+Check: the ci workflow's rust job is green at fd9b3977 and the PR body carries the no-doc note
+Owner: CI is green again; no code changed this round besides a staging merge.
+
+Decided: clear the arch-check doc violation with a `no doc:` line in the PR body, not a doc edit
+Because: crates/core/src/cli.rs:246
+Rejected: a doc line that merely contains "cmd" — it would name a clap field, not a user-facing key
+Check: the ci workflow's rust job is green at fd9b3977 and the PR body carries the no-doc note
+Owner: CI is green again; no code changed this round besides a staging merge.
+
+Decided: clear the arch-check doc violation with a `no doc:` line in the PR body, not a doc edit
+Because: crates/core/src/cli.rs:246
+Rejected: a doc line that merely contains "cmd" — it would name a clap field, not a user-facing key
+Check: the ci workflow's rust job is green at fd9b3977 and the PR body carries the no-doc note
+Owner: CI is green again; no code changed this round besides a staging merge.
