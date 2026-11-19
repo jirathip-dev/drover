@@ -739,9 +739,13 @@ pub(crate) fn answer_with(
         crate::design::decide(ctx, cfg, r, ask, text, by)?;
     }
     let extend = ask.issue.filter(|_| ask.data.get("extend").is_some());
-    if let Some(n) = extend.filter(|_| text == "park") {
+    let acts = match extend {
+        Some(n) => !gate::past_extend(ctx, fleet, n)?,
+        None => false,
+    };
+    if let Some(n) = extend.filter(|_| acts && text == "park") {
         gate::park(ctx, cfg, r, out, (fleet, n), by, None)?;
-    } else if let Some(n) = extend.filter(|_| last.is_none()) {
+    } else if let Some(n) = extend.filter(|_| acts && last.is_none()) {
         let spawn = *ask.val("spawn") != json!(false);
         gate::extend_ask(ctx, cfg, r, out, (fleet, n), (spawn, by))?;
     }

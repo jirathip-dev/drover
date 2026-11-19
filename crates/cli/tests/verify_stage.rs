@@ -834,3 +834,33 @@ fn answering_an_extend_ask_at_ready_closes_it_and_changes_nothing_else() {
         assert_eq!(state(&c), "ready", "{choice}");
     }
 }
+
+#[test]
+fn an_extend_ask_posted_at_ready_holds_no_verify_start() {
+    let (c, head, sh) = passed("verify-extend-open", &config(), false);
+    let r = fake(&head, "web/src/queue.ts\n").reply(RECIPE, "");
+    extend_ask(&c, 40);
+    let out = drive(&c, &r);
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{out}");
+    assert_eq!(state(&c), "verify(1)");
+}
+
+#[test]
+fn an_extend_ask_a_log_left_open_closes_on_the_next_read() {
+    let (c, _sh) = sctx("verify-extend-upgrade", &config());
+    let r = fake(&sha("abc"), "web/src/queue.ts\n");
+    ev(&c, 12, "needs-human", json!({"reason": "lane blocked"}));
+    extend_ask(&c, 13);
+    ev(&c, 20, "spawn", json!({"role": "rev", "agent": "sendmeter-rev-12-r1"}));
+    let db = drover::db::file(&c.state);
+    std::thread::spawn(move || {
+        let c = rusqlite::Connection::open(db).unwrap();
+        c.execute_batch("UPDATE asks SET rank = NULL, closed = NULL; PRAGMA user_version = 2;")
+            .unwrap();
+    })
+    .join()
+    .unwrap();
+    let all = says(&c, &r, &["asks", "sendmeter", "--all"]);
+    let row = all.lines().find(|l| l.contains("q5")).unwrap_or_default();
+    assert!(row.contains("closed: superseded"), "{all}");
+}

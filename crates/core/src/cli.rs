@@ -263,7 +263,7 @@ enum Cmd {
     Asks {
         #[command(flatten)]
         scope: Scope,
-        #[arg(help = "Closed asks too, with why: answered, closed: merged, closed: lane gone")]
+        #[arg(help = "Closed asks too, with why: answered, closed: merged, closed: lane gone, closed: superseded")]
         #[arg(long)]
         all: bool,
     },

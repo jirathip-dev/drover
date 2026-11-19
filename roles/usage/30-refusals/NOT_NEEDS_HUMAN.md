@@ -1,1 +1,1 @@
-- NOT_NEEDS_HUMAN: extend/park: the issue is not needs-human (once per episode)
+- NOT_NEEDS_HUMAN: extend/park: the issue is not needs-human (once per episode); an extend ask answered after its issue went on past needs-human, impl and fix(n) just closes (it closes by itself, `closed: superseded`, once the issue leaves needs-human)

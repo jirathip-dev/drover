@@ -1106,6 +1106,13 @@ pub fn needs_human(
     Ok(())
 }
 
+/// `fleet` #`n` went on past an extend ask (out of needs-human, parked, impl and fix(n)): answering it only closes it.
+pub fn past_extend(ctx: &Ctx, fleet: &str, n: u64) -> Result<bool> {
+    let st = issue_state(ctx, fleet, n)?.map(|s| s.state).unwrap_or_default();
+    let asked = st == "parked" || st == "impl" || st.starts_with("fix(");
+    Ok(!asked && held(ctx, fleet, n).is_err())
+}
+
 /// An extend ask's `one more round`: needs-human's extend, or an extra round for the lane its issue went on with since the ask.
 pub fn extend_ask(
     ctx: &Ctx,
