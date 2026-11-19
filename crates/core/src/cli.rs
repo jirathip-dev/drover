@@ -2,21 +2,14 @@ use crate::config::{home, Config};
 use crate::events::{emit, status_line, working, Event, Json};
 use crate::runner::{self, Runner};
 use crate::{
-    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx,
+    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx, CHAT,
+    SERVE, SERVICE,
 };
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-
-/// (`serve`, `serve --export`), set by the binary: the server crate depends on this one, never the reverse.
-pub static SERVE: std::sync::OnceLock<(Serve, Export)> = std::sync::OnceLock::new();
-type Serve = fn(&Ctx, &dyn Runner, &str, bool) -> Result<()>;
-type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
-/// `drover service` (api addr, board addr), set by the binary from the service crate.
-pub static SERVICE: std::sync::OnceLock<Service> = std::sync::OnceLock::new();
-type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
 
 #[derive(Parser)]
 #[command(
@@ -228,6 +221,8 @@ enum Cmd {
     },
     #[command(about = "The board's bug reports (#363), newest first: id, note, bundle path; with an id, that bundle")]
     Report { id: Option<String> },
+    #[command(about = "Owner only: the orchestrator threads full screen in a terminal; needs no serve")]
+    Chat { thread: Option<String> },
     #[command(
         about = "Orchestrator chat threads per repo (or `all`), each talked through by one orchestrator lane (docs/orchestrator.md)"
     )]
@@ -1616,6 +1611,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             install: true,
         } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
         Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
+        Cmd::Chat { thread } => (CHAT.get().context("no chat")?)(ctx, r, thread.as_deref())?,
         cmd => {
             let cfg = match cmd {
                 Cmd::Check => check::config(ctx)?,

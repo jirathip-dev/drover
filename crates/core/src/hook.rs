@@ -694,6 +694,9 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
                 .into(),
         );
     }
+    if r.first() == Some(&"chat") {
+        return Some("REFUSED OWNER_ONLY: `drover chat` is the owner's terminal, never a lane's (#1352)".into());
+    }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `drover setup`, never a lane (#303)".into());
     }
