@@ -1,0 +1,50 @@
+Decided: one cursor helper (crates/server/src/screens_pages.rs) pages Events, done today and the backlog by a descending (u64, u64) key: event seq, (merge time, issue), issue number
+Because: "Events, queue done and backlog send their first 100 rows plus a cursor."
+Decided: the paged block carries `more`, the next page's full path with the screen's own filters and after=<cursor>, so the page never rebuilds a filter
+Because: "Filters work across pages."
+Decided: a stream pins its window to the first page's cursor (to=<cursor>), so a delta inserts new rows on top and never removes a row that only slid past row 100
+Because: "A stream delta only adds or changes rows in the loaded window, and new rows go on top."
+Decided: Events filters kinds and pages before feed() and title lookups, so only the 100 shown rows are worded
+Because: "Events first paint is under 150 ms p95 on the large fixture."
+Rejected: dropping the 24 h window and the earlier-days link for one endless list — not asked; the cursor pages within the window
+Rejected: a bare cursor field the page joins to its path — a sheet's path does not carry the filter an action applied
+Check: crates/cli/tests/screen_pages.rs follows every `more` to the end and asserts no duplicate, the full count and newest-first order, with filters
+Check: the WebKit test (ui/pages.mjs) scrolls Events to the end and asserts scroll y and a row's top unchanged after the append; it ran here in Chromium only (WebKit lacks host libs)
+Owner: Events, done today and the backlog now load 100 rows at a time and fetch more as you scroll.
+
+Decided: the PR body's Parity section names rows 39 (done today) and 47 (backlog) as changed, their statuses kept, no row dropped
+Because: docs/parity.md:58
+Because: docs/parity.md:66
+Decided: ci.yml conflicts with staging resolved as the union of both sides' WebKit path lists, keeping this PR's screen_pages gate
+Because: .github/workflows/ci.yml:244
+Because: .github/workflows/ci.yml:272
+Decided: web/dist/board.js rebuilt from the merged web/src with npm run build, never hand-merged
+Because: web/package.json:7
+Rejected: taking either side's ci.yml line alone — it would drop staging's new WebKit tests or this PR's pages tests from the WebKit trigger
+Check: ci.yml:244 lists answered, optimistic, keyboard and pages; ui-webkit and all shards green at the head
+Owner: This round only merged the latest staging in; the paged Events, done-today and backlog lists are unchanged.
+
+Decided: serve_wire's gzip test checks one paged Events response instead of the whole log
+Because: "GET /screens/events returns at most 100 rows and a cursor"
+Rejected: keep the >1,000-row assertion — the spec caps a page at 100 rows
+Check: crates/cli/tests/serve_wire.rs:96 still demands a body over 10 KB that gzip shrinks over 5x
+Owner: A test from staging expected the full Events list; it now checks the first page.
+
+Decided: trim screens.rs to 2000 lines by reading Self::plugin once in the stream handler, with no behaviour change
+Because: .drover/arch.toml:192
+Rejected: a size baseline for screens.rs — that loosens the cap instead of meeting it
+Check: crates/server/src/screens.rs is 2000 lines and the arch-check size rule passes
+Owner: This round only shortens one file to fit the size limit; nothing changes on screen.
+
+Decided: no code change for the round 5 CI red; merged origin/staging to get a fresh CI run
+Because: "GET /screens/events returns at most 100 rows and a cursor"
+Because: crates/server/src/screens_pages.rs:7
+Rejected: changing threads_tab or drive_sim tests — they passed at 674a74dd with the same web and server code and also flake on issue-1313
+Check: ui-webkit parity_26 and test shard 2 drive_sim are green at the new head
+Owner: Events, done and backlog load in pages of 100; the red CI was unrelated flakiness
+
+Decided: keep both staging's sheet refill and this PR's next-page load when a sheet opens
+Because: "Scrolling to within about one screen of the end loads the next 100 by cursor"
+Rejected: dropping staging's loading-row refill — it is another issue's behaviour
+Check: web/src/main.ts sheet() calls more(shv) then fill(path); web/dist/board.js matches npm run build
+Owner: Merged the latest staging again; the earlier red check passed when it ran a second time.
