@@ -76,7 +76,11 @@ fn repos(name: &str) -> Repos {
     git(&seed, &["checkout", "-qb", "staging"]);
     commit(&seed, "a.txt", "staging");
     git(&d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
-    for (k, v) in [("user.email", "t@example.com"), ("user.name", "t")] {
+    for (k, v) in [
+        ("user.email", "t@example.com"),
+        ("user.name", "t"),
+        ("fetch.prune", "false"),
+    ] {
         git(&local, &["config", k, v]);
     }
     git(&seed, &["checkout", "-qb", "issue-3"]);
