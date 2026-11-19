@@ -1,4 +1,4 @@
-use super::{working, Config, Ctx, Result, Server};
+use super::{super::lock, working, Config, Ctx, Result, Server};
 use anyhow::Context;
 use serde_json::{json, Value};
 
@@ -45,11 +45,7 @@ fn host_row(name: &str, kind: &str, on: bool, lanes: usize, left: usize) -> Valu
 impl Server<'_> {
     pub(super) fn hosts_sheet(&self, ctx: &Ctx) -> Option<Value> {
         let (cfg, ev) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
-        let (left, proxy) = self
-            .hosts_read
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let (left, proxy) = lock(&self.hosts_read).clone();
         let rows: Vec<Value> = crate::hosts::cards(&cfg, &self.r)
             .into_iter()
             .map(|(name, h)| {
@@ -95,10 +91,7 @@ impl Server<'_> {
         let left = crate::session::live_on(&self.r).map_or(0, |a| {
             crate::check::leftovers(ctx, &cfg, &self.r, &a, false).map_or(0, |l| l.len())
         });
-        *self
-            .hosts_read
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = (left, crate::proxy::status(ctx, &cfg, &self.r));
+        *lock(&self.hosts_read) = (left, crate::proxy::status(ctx, &cfg, &self.r));
     }
 
     pub(super) fn proxy_how(ctx: &Ctx) -> Option<Value> {
