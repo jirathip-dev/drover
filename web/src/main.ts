@@ -131,7 +131,34 @@ function paint(v: View, before?: Blk | null) {
   }
   badges();
   mark();
+  void more(v);
 }
+const paged = (m: unknown): Blk | null => (isList(m) ? m.map(paged).find(Boolean) ?? null : isBlk(m) ? (m.more ? m : paged(Object.values(m))) : null);
+const fetching = new WeakSet<View>();
+async function more(v: View) {
+  const m = v.model, b = paged(m), sc = v === shv ? $('#sheet .sp') : document.scrollingElement;
+  if (!b || !sc || !sc.clientHeight || (v !== cur.v && v !== shv) || fetching.has(v) || sc.scrollTop + 2 * sc.clientHeight < sc.scrollHeight) return;
+  fetching.add(v);
+  try {
+    const n = find(await fetchScreen(String(b.more)), b.id) ?? {}, k = isList(b.rows) ? 'rows' : 'fields', list = b[k], add = n[k];
+    if (v.model !== m || !isList(list) || !isList(add)) return;
+    const id = (x: unknown) => String(obj(x).id ?? obj(x).name), have = new Set(list.map(id)), was = values(v.root);
+    blks(list).forEach(f => { if (typeof f.name === 'string' && f.name in was) f.value = was[f.name]; });
+    list.push(...add.filter(x => !have.has(id(x))));
+    if (n.more === b.more || !n.more) delete b.more;
+    else b.more = n.more;
+    const y = sc.scrollTop;
+    v === shv ? drawSheet() : paint(v);
+    sc.scrollTop = y;
+  } catch {
+    return;
+  } finally {
+    fetching.delete(v);
+  }
+  void more(v);
+}
+addEventListener('scroll', () => void more(cur.v), { passive: true });
+$('#sheet .sp').addEventListener('scroll', () => void more(shv), { passive: true });
 function mark() {
   const id = th ? /^\/([^/?]+)/.exec(th.v.path.slice(th.screen.length))?.[1] : '';
   lst?.root.querySelectorAll<HTMLElement>('.row[data-id]').forEach(r => r.toggleAttribute('aria-current', r.dataset.id === id));
@@ -276,6 +303,7 @@ async function sheet(path: string, push = true, s = span('sheet')) {
   sh.hidden = false;
   H.classList.add('sheet');
   painted(s);
+  void more(shv);
   fill(path);
 }
 function fill(path: string) {

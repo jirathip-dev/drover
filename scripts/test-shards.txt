@@ -164,6 +164,7 @@
 3 runtime_breaker
 1 schemes
 4 scratch
+2 screen_pages
 3 self_update
 3 serial_groups
 2 serve_health

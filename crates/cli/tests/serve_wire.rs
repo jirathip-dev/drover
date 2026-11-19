@@ -93,7 +93,7 @@ fn gzip_shrinks_the_events_screen_over_five_times_and_decodes_to_the_plain_body(
     assert!(zh.contains("\r\nContent-Encoding: gzip\r\n"), "{zh}");
     assert!(zh.contains(&format!("\r\nContent-Length: {}\r\n", zb.len())), "{zh}");
     assert!(
-        pb.len() > 100_000 && zb.len() * 5 <= pb.len(),
+        pb.len() > 10_000 && zb.len() * 5 <= pb.len(),
         "{} vs {}",
         pb.len(),
         zb.len()
@@ -105,7 +105,7 @@ fn gzip_shrinks_the_events_screen_over_five_times_and_decodes_to_the_plain_body(
             .matches("\"type\":\"row\"")
             .count()
     };
-    assert!(rows(pb) > 1_000);
+    assert!(rows(pb) >= 100);
     assert_eq!(rows(&gunzip(zb)), rows(pb));
     let (_, refused) = get(addr, "/screens/events", "Accept-Encoding: gzip;q=0\r\n");
     assert!(!split(&refused).0.contains("Content-Encoding"));
