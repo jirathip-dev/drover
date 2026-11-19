@@ -1,0 +1,89 @@
+Decided: a check lane missing from the listing is exited only after one stall window and while its host is not offline
+Because: "is not counted as exited while the host can't be read or the lane started less than one stall window ago"
+Decided: a supersede whose killed list holds the replaced lane is skipped in RESPAWN_LOOP's start count
+Because: "A supersede that finds the "lost" lane still live does not count as a failed start"
+Rejected: passing the per-host Sessions into waiting::scan — wider change; the cached host probe covers unreachable hosts
+Check: the waiting.rs fixture's #12 rev is moved past the 30-min stall window because the spec changed what counts as exited
+Owner: Remote reviewers are no longer killed a minute after start and no longer trip the keeps-failing card.
+
+Decided: a check lane missing from drive's agents list counts as exited only after one stall window and only while its host can be read
+Because: "is not counted as exited while the host can't be read or the lane started less than one stall window ago"
+Decided: a supersede whose killed list holds the replaced lane is not a failed start for RESPAWN_LOOP
+Because: "lane still live does not count as a failed start toward RESPAWN_LOOP"
+Decided: the new drive test lives in crates/cli/tests/drive/rev_unlisted.rs so drive.rs stays under its arch.toml size baseline
+Because: crates/cli/tests/drive.rs:4
+Rejected: raising drive.rs's size baseline — the update_limit.rs submodule already sets the pattern for splitting it
+Check: a rev spawned 60 s ago on a remote host and missing from the listing gets no lane-lost and no supersede
+Owner: remote reviewers are no longer killed a minute after they start, and these kills no longer end in a false owner card
+
+Decided: a check lane missing from drive's agents list counts as exited only after one stall window and only while its host can be read
+Because: "is not counted as exited while the host can't be read or the lane started less than one stall window ago"
+Decided: a supersede whose killed list holds the replaced lane is not a failed start for RESPAWN_LOOP
+Because: "lane still live does not count as a failed start toward RESPAWN_LOOP"
+Decided: the new drive test lives in crates/cli/tests/drive/rev_unlisted.rs so drive.rs stays under its arch.toml size baseline
+Because: crates/cli/tests/drive.rs:4
+Rejected: raising drive.rs's size baseline — the update_limit.rs submodule already sets the pattern for splitting it
+Check: a rev spawned 60 s ago on a remote host and missing from the listing gets no lane-lost and no supersede
+Owner: remote reviewers are no longer killed a minute after they start, and these kills no longer end in a false owner card
+
+Decided: a check lane missing from drive's agents list counts as exited only after one stall window and only while its host can be read
+Because: "is not counted as exited while the host can't be read or the lane started less than one stall window ago"
+Decided: a supersede whose killed list holds the replaced lane is not a failed start for RESPAWN_LOOP
+Because: "lane still live does not count as a failed start toward RESPAWN_LOOP"
+Decided: the new drive test lives in crates/cli/tests/drive/rev_unlisted.rs so drive.rs stays under its arch.toml size baseline
+Because: crates/cli/tests/drive.rs:4
+Rejected: raising drive.rs's size baseline — the update_limit.rs submodule already sets the pattern for splitting it
+Check: a rev spawned 60 s ago on a remote host and missing from the listing gets no lane-lost and no supersede
+Owner: remote reviewers are no longer killed a minute after they start, and these kills no longer end in a false owner card
+
+Decided: a check lane missing from drive's agents list counts as exited only after one stall window and only while its host can be read
+Because: "is not counted as exited while the host can't be read or the lane started less than one stall window ago"
+Decided: a supersede whose killed list holds the replaced lane is not a failed start for RESPAWN_LOOP
+Because: "lane still live does not count as a failed start toward RESPAWN_LOOP"
+Decided: the new drive test lives in crates/cli/tests/drive/rev_unlisted.rs so drive.rs stays under its arch.toml size baseline
+Because: crates/cli/tests/drive.rs:4
+Rejected: raising drive.rs's size baseline — the update_limit.rs submodule already sets the pattern for splitting it
+Check: a rev spawned 60 s ago on a remote host and missing from the listing gets no lane-lost and no supersede
+Owner: remote reviewers are no longer killed a minute after they start, and these kills no longer end in a false owner card
+
+Decided: a check lane missing from drive's agents list counts as exited only after one stall window and only while its host can be read
+Because: "is not counted as exited while the host can't be read or the lane started less than one stall window ago"
+Decided: a supersede whose killed list holds the replaced lane is not a failed start for RESPAWN_LOOP
+Because: "lane still live does not count as a failed start toward RESPAWN_LOOP"
+Decided: the new drive test lives in crates/cli/tests/drive/rev_unlisted.rs so drive.rs stays under its arch.toml size baseline
+Because: crates/cli/tests/drive.rs:4
+Rejected: raising drive.rs's size baseline — the update_limit.rs submodule already sets the pattern for splitting it
+Check: a rev spawned 60 s ago on a remote host and missing from the listing gets no lane-lost and no supersede
+Owner: remote reviewers are no longer killed a minute after they start, and these kills no longer end in a false owner card
+
+Decided: a check lane missing from drive's agents list counts as exited only after one stall window and only while its host can be read
+Because: "is not counted as exited while the host can't be read or the lane started less than one stall window ago"
+Decided: a supersede whose killed list holds the replaced lane is not a failed start for RESPAWN_LOOP
+Because: "lane still live does not count as a failed start toward RESPAWN_LOOP"
+Decided: the new drive test lives in crates/cli/tests/drive/rev_unlisted.rs so drive.rs stays under its arch.toml size baseline
+Because: crates/cli/tests/drive.rs:4
+Rejected: raising drive.rs's size baseline — the update_limit.rs submodule already sets the pattern for splitting it
+Check: a rev spawned 60 s ago on a remote host and missing from the listing gets no lane-lost and no supersede
+Owner: remote reviewers are no longer killed a minute after they start, and these kills no longer end in a false owner card
+
+Decided: a check lane missing from drive's agents list counts as exited only after one stall window and only while its host can be read
+Because: "is not counted as exited while the host can't be read or the lane started less than one stall window ago"
+Decided: a supersede whose killed list holds the replaced lane is not a failed start for RESPAWN_LOOP
+Because: "lane still live does not count as a failed start toward RESPAWN_LOOP"
+Decided: the new drive test lives in crates/cli/tests/drive/rev_unlisted.rs so drive.rs stays under its arch.toml size baseline
+Because: crates/cli/tests/drive.rs:4
+Rejected: raising drive.rs's size baseline — the update_limit.rs submodule already sets the pattern for splitting it
+Check: a rev spawned 60 s ago on a remote host and missing from the listing gets no lane-lost and no supersede
+Owner: remote reviewers are no longer killed a minute after they start, and these kills no longer end in a false owner card
+
+Decided: treat the red link.rs test at 44ade029 as a CI flake and merge origin/staging without code changes
+Because: crates/cli/tests/link.rs:325
+Rejected: changing link.rs or its service — this diff never touches the link code and the test passes 3 of 3 locally
+Check: CI test shard 1 is green at the new head, and the drive/respawn_loop/waiting tests still pass
+Owner: The one red test was an unrelated flaky check; the fix itself is unchanged.
+
+Decided: treat the red link.rs test at 44ade029 as a CI flake and merge origin/staging without code changes
+Because: crates/cli/tests/link.rs:325
+Rejected: changing link.rs or its service — this diff never touches the link code and the test passes 3 of 3 locally
+Check: CI test shard 1 is green at the new head, and the drive/respawn_loop/waiting tests still pass
+Owner: The one red test was an unrelated flaky check; the fix itself is unchanged.
