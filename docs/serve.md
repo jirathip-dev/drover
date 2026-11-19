@@ -101,7 +101,7 @@ The Home Screen icon is Corral's Palomino app icon (jirathip-dev/corral, `ios/to
 
 The page's look is data, no code: see [themes.md](themes.md) for the contract (per-role actions, looks, load scene,
 rail, moments, row sprites, icons, ASCII words, Lanes modes), the per-phone pick under `[⚙]`, `[serve] theme` (its
-default) and the built-in `farm`, `kitchen`, `garden` (pinned from the shared theme repo, #928) and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
+default) and the built-in `farm`, `kitchen`, `garden`, `bush` (pinned from the shared theme repo, #928) and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
 writes them to `themes/`. Colours are a separate per-phone pick in the same sheet: 8 built-in schemes plus your own
 `<config dir>/schemes/<name>.json`, each contrast-gated ([themes.md](themes.md#colour-schemes-244)).
 

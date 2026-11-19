@@ -66,7 +66,7 @@ ts-rs = { version = "12", features = ["serde-json-impl"] }
 shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "9b88eb5be5bc9ba8c5c75480483b9861ddc6e993" }
 # #1339: blocks' theme rules (Scheme, gate) and swag's built-in schemes, each pinned to a staging commit.
 blocks = { git = "https://github.com/jirathip-dev/blocks", rev = "d800ee2ab451f09bc19029e706b8b346e812675b" }
-swag = { git = "https://github.com/jirathip-dev/swag", rev = "e9ad9ba0ace20e3169e82f42efa2a5f1f8a21847" }
+swag = { git = "https://github.com/jirathip-dev/swag", rev = "bf9a2c6b5cb837db1e844e4746fe166cbaa06b91" }
 drover-sys = { path = "crates/sys" }
 drover-core = { path = "crates/core" }
 drover-server = { path = "crates/server" }

@@ -66,6 +66,12 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("swag/", "garden/icon-180.png", PNG),
     th!("swag/", "garden/icon-192.png", PNG),
     th!("swag/", "garden/icon-512.png", PNG),
+    th!("swag/", "bush/sprites.svg", SVG),
+    th!("swag/", "bush/theme.json", JSON),
+    th!("swag/", "bush/scene.svg", SVG),
+    th!("swag/", "bush/icon-180.png", PNG),
+    th!("swag/", "bush/icon-192.png", PNG),
+    th!("swag/", "bush/icon-512.png", PNG),
     th!("", "terminal/theme.json", JSON),
     th!("", "terminal/icon-180.png", PNG),
     th!("", "terminal/icon-192.png", PNG),
@@ -2840,7 +2846,7 @@ const THEME: [&str; 6] = [
     "icon-192.png",
     "icon-512.png",
 ];
-const BUILT: [&str; 4] = ["farm", "kitchen", "garden", "terminal"];
+const BUILT: [&str; 5] = ["farm", "kitchen", "garden", "bush", "terminal"];
 const ACTS: [(&str, &str); 7] = [
     ("impl", "working"),
     ("fix", "working"),
