@@ -1,0 +1,12 @@
+Decided: slice 1 only: accept and the request reader on a 2-worker tokio runtime, today's Server::one answered on at most 64 blocking threads
+Because: q2091
+Because: docs/architecture/screen-hub/adr.md:150
+Decided: the 65th request waits for a handler slot instead of getting a 503; only past 256 open connections is one refused
+Rejected: Arc<Server> with spawn_blocking and an owned Ctx — scoped threads fed by a channel bound the same 64 and leave serve_on and its 25 test call sites unchanged
+Rejected: moving the webhook listener now — it has its own 4-delivery limit and 25 MB body path; no slice-1 test needs it
+Decided: deliver() runs after the socket is closed or handed back, as before, so a Connection: close reply ends at once
+Decided: the tokio ban in core and sys from the ADR's arch.toml lines
+Because: docs/architecture/screen-hub/adr.md:296
+Decided: the ADR docs name the blocks repo as <org>/blocks, so shipped files stay setup-neutral
+Check: crates/cli/tests/serve_conn.rs: a slow half-request does not stall a fast one, 80 at once all get 200, a half request is dropped after 5 s
+Owner: serve now accepts on tokio and queues busy requests instead of refusing them; nothing on the page changes
