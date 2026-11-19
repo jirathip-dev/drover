@@ -1,0 +1,12 @@
+Decided: a rev lane that ended its turn (idle or done, past its start grace) with no verdict.md logs one failed pickup a pass; on the third the review restarts in the same round, logged `self-heal`.
+Because: "after 3 failed pickups drive restarts the review once in the same round; a second time it is one owner card"
+Because: crates/core/src/waiting.rs:132
+Decided: a second lane of the round ending without a file is one NO_VERDICT needs-human card naming the path; the heal records the spawn it replaced, so a slow async spawn is never mistaken for the second lane.
+Because: crates/core/src/waiting.rs:140
+Decided: root cause of the hours-long loop: a logged pickup failure turned the idle line into a drive line with no step, so neither the reviewer-exited heal nor the stall respawn ever fired; the line now counts and heals.
+Decided: a promise made before a later spawn is void, so a supersede drops the old lane's "missed" age and error.
+Because: crates/core/src/promise.rs:131
+Rejected: keep the dedupe of equal pickup failures — drive could never count to 3.
+Rejected: apply it to verify lanes — their stall respawn-then-card is tested and unchanged (crates/core/src/drive/pickup.rs:69).
+Check: crates/cli/tests/rev_no_verdict.rs covers the four AC; sim seed 9591 (rev exits before its verdict) still merges.
+Owner: A review that ends without writing its verdict is restarted once by itself; if the retry also writes nothing you get one card with the file path.
