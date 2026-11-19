@@ -1,0 +1,7 @@
+Decided: every child drover starts gets the caller's PATH with /usr/sbin:/sbin appended (runner's one spawn helper), so probes do not depend on the caller's shell.
+Because: "or adds `/usr/sbin:/sbin` to its own PATH, so its answers do not depend on the caller's shell"
+Rejected: absolute paths per tool — /usr/sbin/sysctl vs /sbin/sysctl differ by OS, and every call site would change.
+Decided: "not found" is a shell's exit 127 or a spawn NotFound; the sample keeps which probe tools hit 127.
+Because: "A missing tool gives `? <what> — <tool> not found`, exit code unchanged by it."
+Check: crates/core/src/runner.rs:112 appends, never reorders, the caller's PATH; doctor's ? rows do not count toward exit 1.
+Owner: doctor and top now see the host's load and serve the same from any shell, and say which tool is missing instead of a red ✗.
