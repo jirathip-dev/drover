@@ -1,0 +1,5 @@
+Decided: take staging's in-place composer patch (#1310) whole and drop this PR's duplicate live-map fix; keep the regression test
+Because: web/src/blocks.ts:405
+Rejected: keeping both mechanisms — two ways to do one thing in same()
+Check: page_drafts compose test passes on staging's composer code
+Owner: the fix is already on staging; this PR now only adds the test that guards it
