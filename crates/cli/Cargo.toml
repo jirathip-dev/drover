@@ -12,8 +12,10 @@ build = "../core/build.rs"
 drover-core.workspace = true
 drover-server.workspace = true
 drover-service.workspace = true
+drover-chat.workspace = true
 
 [dev-dependencies]
+ratatui.workspace = true
 aes-gcm.workspace = true
 anyhow.workspace = true
 base64.workspace = true
