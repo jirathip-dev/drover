@@ -136,7 +136,8 @@ fn slo_pass(c: &drover::Ctx, r: &Fake) {
     let (mini, bazzite) = (FakeShed::new(), FakeShed::new());
     let ssh = two(r, &bazzite);
     let on = mini.on(&ssh);
-    drover::slo::pass(c, &cfg, (&on, &on), &mut vec![], &["sendmeter"]).unwrap();
+    look(c, &on);
+    drover::slo::pass(c, &cfg, &on, &mut vec![], &["sendmeter"]).unwrap();
 }
 
 #[test]

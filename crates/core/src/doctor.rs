@@ -264,7 +264,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let hosts = cfg.serve.allowed_hosts.join(", ");
     let line = format!("serve hosts — [{hosts}] → set [serve] allowed_hosts = [\"<name>.ts.net\"]");
     row(rows, !hosts.is_empty(), '✗', &line);
-    let addr = "127.0.0.1:7777";
+    let addr = SERVE_ADDR;
     serve_rows(ctx, cfg, r, rows, addr);
     let tailscale = r.run("tailscale", &argv(&["serve", "status"]));
     let line = format!("tailscale — serve maps to {addr} → tailscale serve --bg --https=8443 http://{addr}");
@@ -399,6 +399,16 @@ fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
     Some(format!(
         "! a login shell{on} exports {var} (it overrides the host's own login in every lane) → remove it from {files}"
     ))
+}
+
+const SERVE_ADDR: &str = "127.0.0.1:7777";
+
+/// Doctor's serve rows that fail, for `drover chat`'s top line; none while serve is up.
+pub fn serve_down(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<String> {
+    let mut rows = vec![];
+    serve_rows(ctx, cfg, r, &mut rows, SERVE_ADDR);
+    rows.retain(|l| !l.starts_with('✓'));
+    rows
 }
 
 fn serve_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>, addr: &str) {

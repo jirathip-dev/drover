@@ -35,6 +35,7 @@ pub mod land;
 pub mod lanes;
 pub mod lesson;
 pub mod limit;
+pub mod link;
 pub mod orchestrator;
 pub mod outbox;
 pub mod overlap;
@@ -77,7 +78,7 @@ pub mod webpush;
 pub mod why;
 
 use anyhow::{bail, Context, Result};
-pub use cli::{main_with, usage_doc, write_stderr, SERVE, SERVICE};
+pub use cli::{main_with, usage_doc, write_stderr};
 use config::{home, set_in, set_value, write_atomic, Config};
 use events::{emit, working, Event, Json};
 use runner::Runner;
@@ -220,6 +221,17 @@ pub fn repo_read<T>(name: &str, read: impl Fn(&str) -> Option<T>) -> Option<T> {
         .iter()
         .find_map(|d| read(&format!("{d}/{name}")))
 }
+
+/// (`serve`, `serve --export`), set by the binary: the server crate depends on this one, never the reverse.
+pub static SERVE: std::sync::OnceLock<(Serve, Export)> = std::sync::OnceLock::new();
+type Serve = fn(&Ctx, &dyn Runner, &str, bool) -> Result<()>;
+type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
+/// `drover service` (api addr, board addr), set by the binary from the service crate.
+pub static SERVICE: std::sync::OnceLock<Service> = std::sync::OnceLock::new();
+type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
+/// `drover chat [thread]`, set by the binary from the chat crate.
+pub static CHAT: std::sync::OnceLock<Chat> = std::sync::OnceLock::new();
+type Chat = fn(&Ctx, &dyn Runner, Option<&str>) -> Result<()>;
 
 pub use clock::now;
 
@@ -490,24 +502,30 @@ pub fn orchestrator_extend(
     if orchestrator::fleet_of(&events, t)? != fleet {
         return gate::refused("OWNER_ASK", format!("#{n} is not on {t}'s repo; ask the owner"));
     }
-    gate::held(ctx, fleet, n)?;
+    let open = |e: &&Event| e.is("needs-decision", fleet, n) && e.data.get("extend").is_some();
+    let ask = events
+        .iter()
+        .rfind(open)
+        .filter(|a| events::closed(&events, a).is_none());
+    if ask.is_none() {
+        gate::held(ctx, fleet, n)?;
+    }
     let card = events.iter().rfind(|e| e.is("needs-human", fleet, n));
     if let Some(line) = typed {
+        let since = card.or(ask).map(|e| e.seq);
         let said = |m: &Event| m.kind == "thread-msg" && m.str("thread") == Some(t) && m.str("from") == Some("owner");
-        let after = |m: &Event| said(m) && m.str("text") == Some(line) && card.is_some_and(|c| m.seq > c.seq);
+        let after = |m: &Event| said(m) && m.str("text") == Some(line) && since.is_some_and(|s| m.seq > s);
         if !events.iter().any(after) {
             return gate::refused(
                 "NOT_TYPED",
                 format!("no owner message in {t} says that line after #{n}'s card"),
             );
         }
-        return gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, TYPED, None));
+        return match ask {
+            Some(a) => answer_with(ctx, cfg, r, out, a, "1", (TYPED, None), (None, None)),
+            None => gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, TYPED, None)),
+        };
     }
-    let open = |e: &&Event| e.is("needs-decision", fleet, n) && e.data.get("extend").is_some();
-    let ask = events
-        .iter()
-        .rfind(open)
-        .filter(|a| events::closed(&events, a).is_none());
     let ask = if let Some(a) = ask {
         a.clone()
     } else {
@@ -723,7 +741,7 @@ pub(crate) fn answer_with(
         gate::park(ctx, cfg, r, out, (fleet, n), by, None)?;
     } else if let Some(n) = extend.filter(|_| last.is_none()) {
         let spawn = *ask.val("spawn") != json!(false);
-        gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, by, None))?;
+        gate::extend_ask(ctx, cfg, r, out, (fleet, n), (spawn, by))?;
     }
     let mut d =
         json!({"id": id, "ask_seq": ask.seq, "choice": text, "by": by, "basis": basis, "note": note, "via": via});

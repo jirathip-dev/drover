@@ -648,3 +648,44 @@ fn doctor_marks_a_job_launchd_refuses_red() {
     let (_, out) = run(&c, &host(Fake::default()), &["doctor"]);
     assert!(!out.contains("dev.drover.clean spawn failed"), "{out}");
 }
+
+#[test]
+fn check_bootstraps_an_unloaded_serve_job_once() {
+    use std::os::unix::fs::MetadataExt;
+    let c = ctx(&tmpdir("timer-revive"), CONFIG);
+    let _sh = FakeShed::attached(&c);
+    let unit = drover::timer::files(&c, "dev.drover.serve", &[], "", 0, MAC)
+        .remove(0)
+        .0;
+    std::fs::create_dir_all(unit.parent().unwrap()).unwrap();
+    std::fs::write(&unit, "").unwrap();
+    let uid = std::fs::metadata(&c.home).unwrap().uid();
+    let (probe, up, loaded) = if MAC {
+        let t = format!("launchctl print gui/{uid}/dev.drover.serve");
+        (t.clone(), format!("launchctl bootstrap gui/{uid} "), (t, "pid = 42\n"))
+    } else {
+        (
+            "systemctl --user show -p MainPID -p LoadState dev.drover.serve.service".to_string(),
+            "systemctl --user enable --now dev.drover.serve.service".to_string(),
+            (
+                "systemctl --user show -p MainPID -p LoadState dev.drover.serve.service".to_string(),
+                "LoadState=loaded\nMainPID=42\n",
+            ),
+        )
+    };
+    let r = host(Fake::default())
+        .once_err(&probe, 113, "Could not find service")
+        .reply(&up, "")
+        .reply(&loaded.0, loaded.1);
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(r.count(&up), 1, "{:?}", r.calls.borrow());
+    let revived = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "serve-revived")
+        .count();
+    assert_eq!(revived, 1);
+}

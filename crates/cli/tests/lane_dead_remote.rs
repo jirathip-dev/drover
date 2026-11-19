@@ -183,6 +183,7 @@ fn a_lane_logged_dead_and_then_seen_running_again_keeps_a_live_key() {
     assert_eq!(dead(&c), 1);
     assert_eq!(key_state(&c), "ended");
     bazzite.lane(IMPL, "working", WT);
+    look(&c, &r);
     for _ in 0..2 {
         let (code, out) = run(&c, &r, &["check"]);
         assert_eq!(code, 0, "{out}");
@@ -194,6 +195,7 @@ fn a_lane_logged_dead_and_then_seen_running_again_keeps_a_live_key() {
         "{status} {body}"
     );
     bazzite.exit(IMPL);
+    look(&c, &r);
     assert_eq!(run(&c, &r, &["check"]).0, 0);
     assert_eq!(dead(&c), 2, "a later real death is logged again");
     assert_eq!(key_state(&c), "ended");

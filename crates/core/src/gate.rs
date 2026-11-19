@@ -83,8 +83,7 @@ pub fn verdict(
         .iter()
         .rfind(reviewer)
         .filter(|e| e.str("worktree").is_some_and(|w| file.starts_with(w)));
-    let body = (crate::hosts::On::of(r, at).read(Path::new(file)))
-        .with_context(|| format!("cannot read verdict file {file}"))?;
+    let body = crate::link::read(ctx, cfg, r, at, file).with_context(|| format!("cannot read verdict file {file}"))?;
     anyhow::ensure!(!body.trim().is_empty(), "verdict file {file} is empty");
     if let Some(bad) = no_proof(&body).filter(|_| !pass) {
         return refused("NO_PROOF", bad);
@@ -1082,6 +1081,30 @@ pub fn needs_human(
     }
     writeln!(out, "#{n}: {op}")?;
     Ok(())
+}
+
+/// An extend ask's `one more round`: needs-human's extend, or an extra round for the lane its issue went on with since the ask.
+pub fn extend_ask(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    (spawn, by): (bool, &str),
+) -> Result<()> {
+    let st = issue_state(ctx, fleet, n)?.map(|s| s.state).unwrap_or_default();
+    if held(ctx, fleet, n).is_ok() || !(st == "impl" || st.starts_with("fix(")) {
+        return needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, by, None));
+    }
+    let e = Event::new(
+        ctx.now,
+        fleet,
+        Some(n),
+        "round-extended",
+        json!({"by": by, "spawn": false}),
+    );
+    crate::events::append(&ctx.state, &e)?;
+    Ok(writeln!(out, "#{n}: extend")?)
 }
 
 fn extended(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), (spawn, by): (bool, &str), state: &str) -> Result<()> {

@@ -329,6 +329,9 @@ impl drover::runner::Runner for Air<'_> {
         })
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        if let Some(o) = boat(self, prog, args, input) {
+            return o;
+        }
         let batch = drover::hosts::quote("sh", &["-c".into(), drover::hosts::EXISTS.into()]);
         if args.last() == Some(&batch) || args.iter().any(|a| a.contains("'shed' 'connect'")) {
             self.over.run_in(prog, args, input)

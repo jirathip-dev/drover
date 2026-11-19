@@ -116,7 +116,9 @@ Remove the key to undo it. How it works and the other undos: `docs/workflow.md`,
 
 `max_in_flight = N` in `[fleet.<n>]` caps the fleet's PRs in flight (an issue in impl, fix, review, verify or ready,
 or one held with an open PR); unset is 8, `0` is off. At the cap drive starts no new issue but keeps reviewing, fixing
-and merging; `drover spawn` of a new issue is refused `IN_FLIGHT_CAP` unless `--force`.
+and merging; `drover spawn` of a new issue is refused `IN_FLIGHT_CAP` unless `--force`. A start drive admitted holds a
+slot until its lane comes or `spawn_pending_max_secs` passes; the refusal names the issues with a lane or a PR, and
+counts those starting. Drive gives the free slots to the queue in order; the kicks it launched count no cap again.
 
 ## Hygiene (#1101)
 
@@ -211,6 +213,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
+| `orchestrator_reply_minutes` | `10` | an owner message with no orchestrator reply this long gets a `no reply yet` row |
 | `orchestrator_change_minutes` | `30` | an orchestrator's answer may not change one this long after it |
 | `token_refresh_minutes` | `30` | `check` pushes a fresh runner registration token to every VM this often |
 | `ask_waiting_minutes` | `30` | an owner ask open this long alerts `ask-waiting` |

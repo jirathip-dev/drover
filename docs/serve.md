@@ -158,7 +158,7 @@ push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no
 client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
 shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), and rusqlite (bundled SQLite)
 for the state database (#344, docs/architecture.md), keyring for the main host's secret store
-(#441, owner-approved; docs/providers.md), flate2 for serve's gzip (#1314, owner-approved), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
+(#441, owner-approved; docs/providers.md), flate2 for serve's gzip (#1314, owner-approved), ratatui (with its crossterm backend) in `crates/chat` only (#1352, owner-approved, q2151), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
 fails on any other direct dependency.
 
 ## GitHub webhooks (#626)
@@ -317,6 +317,11 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
   shows until a tap opens the full card; a second tap folds it again;
 - #1172: `GET /screens/queue/done?repo=<fleet>`, opened from the Queue's `done today` row (its value: the list's length): the fleet's merges of the last 24 h, newest first, each `#N title`, `merged HH:MM UTC · <sha>`, its `title`, `t` and `sha` from `done`; a row opens `/screens/issue` for it.
+- #1316: Events, `/screens/queue/done` and `/screens/backlog` send their first 100 rows; the list (the backlog's form) then carries
+  `more`, the next page's path with its filters and `after=<cursor>` (the last row's key: event seq, merge time and issue,
+  issue number), no duplicate and no gap. The page fetches it when scrolled within a screen of the end and appends the rows
+  in place. An Events stream keeps the window it opened with (`to=<cursor>`): a delta adds rows on top or changes loaded
+  ones, never drops one.
 - #926: `GET /screens/lanes`, the Lanes chip: each live lane grouped waiting (blocked), working, asleep (idle), done, parked, dead, with its figure
   (`coat`, `state`), fleet and issue, role, host, now-line and age, and for a paired device the read-only `other in
   shed` section; a lane row (and a Queue row's live lane) opens `GET /screens/lanes/<agent>` (a paired device or the

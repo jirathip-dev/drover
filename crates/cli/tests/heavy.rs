@@ -2,11 +2,12 @@ mod common;
 use common::{tmpdir, CONFIG};
 use serde_json::{json, Value};
 use std::io::Write;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-const JOB: &str = "echo \"start $1\" >> log; while [ ! -f \"go-$1\" ]; do sleep 0.05; done; echo \"end $1\" >> log\n";
+const JOB: &str = "echo $$ > \"pid-$1\"; echo \"start $1\" >> log; for i in $(seq 200); do [ -f \"go-$1\" ] || [ ! -f \"$0\" ] && break; sleep 0.05; done; [ -f \"go-$1\" ] || exit 1; echo \"end $1\" >> log\n";
 
 fn lane(host: &str) -> PathBuf {
     let d = tmpdir("heavy");
@@ -75,24 +76,49 @@ fn log(d: &Path) -> String {
     std::fs::read_to_string(d.join("log")).unwrap_or_default()
 }
 
-fn start(d: &Path, cmd: &str) -> Child {
+struct Job(Option<Child>);
+
+impl Drop for Job {
+    fn drop(&mut self) {
+        if let Some(mut c) = self.0.take() {
+            drover_sys::kill_group(c.id());
+            c.wait().unwrap();
+        }
+    }
+}
+
+fn start(d: &Path, cmd: &str) -> Job {
     let out: Value = serde_json::from_str(&hook(d, cmd)).unwrap();
     let wrapped = out["hookSpecificOutput"]["updatedInput"]["command"]
         .as_str()
         .unwrap()
         .to_string();
     let n = tickets(d).len();
-    let child = in_lane("bash", d).args(["-c", &wrapped]).spawn().unwrap();
+    let child = in_lane("bash", d)
+        .args(["-c", &wrapped])
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let job = Job(Some(child));
     until("its ticket", || tickets(d).len() > n);
-    child
+    job
 }
 
 fn go(d: &Path, job: &str) {
     std::fs::write(d.join(format!("go-{job}")), "").unwrap();
 }
 
-fn finish(children: Vec<Child>) {
-    for mut c in children {
+fn alive(pid: &str) -> bool {
+    let out = Command::new("ps")
+        .args(["-o", "stat=", "-p", pid.trim()])
+        .output()
+        .unwrap();
+    out.status.success() && !String::from_utf8_lossy(&out.stdout).trim_start().starts_with('Z')
+}
+
+fn finish(jobs: Vec<Job>) {
+    for mut j in jobs {
+        let mut c = j.0.take().unwrap();
         assert!(c.wait().unwrap().success());
     }
 }
@@ -108,7 +134,7 @@ fn unmatched_commands_are_unchanged() {
 #[test]
 fn extra_commands_wait_first_come_first_served_and_all_finish() {
     let d = lane("");
-    let kids: Vec<Child> = ["a", "b", "c", "e"]
+    let kids: Vec<Job> = ["a", "b", "c", "e"]
         .map(|j| start(&d, &format!("sh test.sh {j}")))
         .into();
     until("two running", || log(&d).lines().count() == 2);
@@ -160,9 +186,7 @@ fn a_killed_holder_frees_its_slot() {
     let mut holders = vec![start(&d, "sh test.sh a"), start(&d, "sh test.sh b")];
     let c = start(&d, "sh test.sh c");
     until("two running", || log(&d).lines().count() == 2);
-    let mut a = holders.remove(0);
-    a.kill().unwrap();
-    a.wait().unwrap();
+    drop(holders.remove(0));
     until("c's start", || log(&d).contains("start c"));
     for j in ["a", "b", "c"] {
         go(&d, j);
@@ -188,4 +212,20 @@ fn a_wait_past_the_limit_runs_and_logs_heavy_timeout_once() {
     assert_eq!(late[0].str("kind"), Some("test"));
     let phone: drover::config::Notify = toml::from_str("cmd = \"\"\ntype = \"webpush\"").unwrap();
     assert!(phone.wants(late[0]), "a default phone notifier alerts on it");
+}
+
+#[test]
+fn a_dropped_job_ends_with_its_harness() {
+    let d = lane("");
+    let job = start(&d, "sh test.sh a");
+    until("a's start", || log(&d).contains("start a"));
+    let pid = std::fs::read_to_string(d.join("pid-a")).unwrap();
+    drop(job);
+    let end = Instant::now() + Duration::from_secs(5);
+    while alive(&pid) && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let gone = !alive(&pid);
+    Command::new("kill").args(["-9", pid.trim()]).status().unwrap();
+    assert!(gone, "job {} outlived its harness", pid.trim());
 }

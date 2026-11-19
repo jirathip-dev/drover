@@ -35,7 +35,9 @@ fn fixture(name: &str, paused: bool) -> (drover::Ctx, OnShed) {
             &format!("6a258db{} {}", "0".repeat(33), NOW - 7200),
         )
         .reply(&format!("git -C /wt/{RISKY} status"), " M src/a.rs\n");
-    (c, OnShed::new(r))
+    let r = OnShed::new(r);
+    look(&c, &r);
+    (c, r)
 }
 
 fn v1(s: &Server, path: &str) -> serde_json::Value {
