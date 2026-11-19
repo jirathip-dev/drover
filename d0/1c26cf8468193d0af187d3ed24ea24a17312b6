@@ -1,0 +1,5 @@
+Decided: trim screens.rs to 2000 lines by reading Self::plugin once in the stream handler, with no behaviour change
+Because: .drover/arch.toml:192
+Rejected: a size baseline for screens.rs — that loosens the cap instead of meeting it
+Check: crates/server/src/screens.rs is 2000 lines and the arch-check size rule passes
+Owner: This round only shortens one file to fit the size limit; nothing changes on screen.
