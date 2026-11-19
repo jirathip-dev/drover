@@ -548,21 +548,28 @@ fn the_model_and_effort_picks_are_one_row_of_dropdowns_and_a_model_pick_reaches_
     let js = format!("window.late = (async () => {{ {CMP}
 (await wait(() => q('.row[data-id=\"t3\"]'))).click();
 const pk = await wait(() => q('.cmp .pk'));
-const sel = all('.cmp .pk select'), m = q('.cmp .pk select[aria-label=model]');
-const one = Number(sel.length === 2 && sel.every(s => s.offsetTop === sel[0].offsetTop) && !q('.cmp .chips'));
+const dd = all('.cmp .pk .dd'), m = q('.cmp .pk .dd [aria-label^=model]');
+const one = Number(dd.length === 2 && dd.every(s => s.offsetTop === dd[0].offsetTop) && !q('.cmp .chips') && !q('select'));
 const low = Number(pk.getBoundingClientRect().height <= q('.cmp .cr').getBoundingClientRect().height);
-const opts = [...m.options].map(o => o.value).join(',');
-m.value = 'sonnet';
-m.dispatchEvent(new Event('change'));
-const bar = await wait(() => Number(q('.row.sticky')?.textContent.includes('sonnet') && q('.cmp .pk select[aria-label=model]')?.value === 'sonnet'));
-return [one, low, Number(opts === 'opus,sonnet'), bar];
+const sent = [], real = window.fetch;
+window.fetch = (u, o) => {{ if (String(u).endsWith('/action')) sent.push(JSON.parse(o.body)); return real(u, o); }};
+m.click();
+const ul = await wait(() => q('.cmp .ddp [role=listbox]'));
+const opts = all('.cmp .ddp [role=option]').map(o => o.textContent).join(',');
+const r = q('.cmp .ddp').getBoundingClientRect();
+const inside = Number(r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth && r.bottom <= m.getBoundingClientRect().top);
+const open = Number(m.getAttribute('aria-expanded') === 'true' && document.activeElement === ul);
+all('.cmp .ddp [role=option]').find(o => o.textContent === 'sonnet').click();
+const bar = await wait(() => Number(q('.row.sticky')?.textContent.includes('sonnet') && q('.cmp .pk .dd [aria-label^=model]')?.textContent.includes('sonnet')));
+const req = Number(sent.length === 1 && sent[0].action === 'thread-model' && sent[0].values.model === 'sonnet' && !q('.cmp .ddp'));
+return [one, low, Number(opts === 'opus,sonnet'), inside, open, bar, req];
 }})()");
     let extra = "\n[fleet.sendmeter.role.lesson]\nharness = \"claude\"\nmodel = \"sonnet\"\n";
     let v = composer_in_webkit_with("threads-webkit-picks", extra, &js);
     assert_eq!(
         v,
-        [1.0, 1.0, 1.0, 1.0],
-        "two dropdowns in one row, no taller than the send row, the harness's models, the pick in the bar"
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        "two dropdowns in one row, no taller than the send row, the harness's models, the list above the chip inside 390, focused, the pick in the bar, one model post"
     );
 }
 
