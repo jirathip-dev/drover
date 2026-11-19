@@ -711,3 +711,71 @@ fn a_shared_file_under_no_size_rule_fails_and_one_under_a_rule_passes() {
         "{out}"
     );
 }
+
+fn numbered(n: usize) -> String {
+    (0..n).map(|i| format!("let x{i} = {i}\n")).collect()
+}
+
+#[test]
+fn a_size_rule_measures_a_swift_file_and_func_a_justfile_and_a_dot_folder_file() {
+    let conf = r#"[[size]]
+paths = ["**/*.swift"]
+max_file_lines = 100
+max_fn_lines = 3
+
+[[size]]
+paths = ["justfile", ".drover/arch.toml"]
+max_file_lines = 6
+"#;
+    let long_func = "struct S {\n    private func big() {\n        a()\n        b()\n        c()\n    }\n}\n";
+    let d = repo(
+        "arch-swift",
+        &[
+            (".drover/arch.toml", conf),
+            ("apple/Long.swift", &numbered(300)),
+            ("apple/Ok.swift", "func small() {\n    a()\n}\n"),
+            ("apple/Fn.swift", long_func),
+            ("justfile", &numbered(20)),
+        ],
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    for want in [
+        "apple/Long.swift:1: `apple/Long.swift` is 300 lines, over 100",
+        "apple/Fn.swift:2: `apple/Fn.swift:big` is 5 lines, over 3",
+        "justfile:1: `justfile` is 20 lines, over 6",
+        ".drover/arch.toml:1: `.drover/arch.toml` is 8 lines, over 6",
+    ] {
+        assert!(out.contains(want), "{want}\n{out}");
+    }
+    assert!(!out.contains("Ok.swift"), "{out}");
+    assert!(out.contains("4 violations"), "{out}");
+}
+
+#[test]
+fn a_generated_glob_fails_a_stale_or_unwritten_match_and_passes_a_fresh_new_one() {
+    let conf = "generated = [\"gen/*.ts\"]\ngenerate = \"mkdir -p gen && for f in a b c; do echo \\\"export const $f = 1;\\\" > gen/$f.ts; done\"\n";
+    let fresh = |f: &str| format!("export const {f} = 1;\n");
+    let (a, b) = (fresh("a"), fresh("b"));
+    let d = committed("arch-gen-glob", conf, &[("gen/a.ts", &a), ("gen/b.ts", &b)]);
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("gen/c.ts: differs from what"), "{out}");
+    assert!(!d.join("gen/c.ts").exists(), "the check leaves the tree as it found it");
+    std::fs::write(d.join("gen/c.ts"), fresh("c")).unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::write(d.join("gen/b.ts"), "export const b = 2;\n").unwrap();
+    std::fs::write(d.join("gen/old.ts"), "export const old = 1;\n").unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("gen/b.ts: differs from what"), "{out}");
+    assert!(out.contains("gen/old.ts: differs from what"), "{out}");
+    assert!(out.contains("2 violations"), "{out}");
+    let left = std::fs::read_to_string(d.join("gen/b.ts")).unwrap();
+    assert_eq!(
+        left, "export const b = 2;\n",
+        "the check leaves the tree as it found it"
+    );
+    assert!(d.join("gen/old.ts").exists());
+}

@@ -1296,9 +1296,8 @@ fn own(v: &Value) -> Map<String, Value> {
 }
 
 fn kids(v: &Value) -> &[Value] {
-    v.get("blocks")
-        .or_else(|| v.get("rows"))
-        .and_then(Value::as_array)
+    v.as_array()
+        .or_else(|| v.get("blocks").or_else(|| v.get("rows")).and_then(Value::as_array))
         .map_or(&[], Vec::as_slice)
 }
 

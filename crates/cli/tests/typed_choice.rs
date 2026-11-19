@@ -65,7 +65,7 @@ fn a_typed_approve_with_a_note_approves_and_writes_the_note_under_amendments() {
     );
     assert_eq!(
         edited(&r).as_deref(),
-        Some(format!("Draw the meter.\n\n## Amendments\n- **Amendment (q1)**: {note}\n").as_str())
+        Some(format!("Draw the meter.\n\n## Amendments\n- **Amendment (1970-01-12)**: {note}\n").as_str())
     );
 }
 
@@ -108,8 +108,10 @@ fn an_ask_answered_by_the_owner_typed_is_an_amend_basis() {
     assert_eq!(code, 0, "{out}");
     assert_eq!(
         edited(&r).as_deref(),
-        Some("Tidy the tab.\n\n## Amendments\n- **Amendment (q1)**: scope: tab only\n")
+        Some("Tidy the tab.\n\n## Amendments\n- **Amendment (1970-01-12)**: scope: tab only\n")
     );
+    assert!(!edited(&r).unwrap_or_default().contains("q1"), "no ask id in the body");
+    assert_eq!(kinds(&c, "amend")[0].str("id"), Some("q1"));
 }
 
 #[test]

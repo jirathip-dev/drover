@@ -4,7 +4,16 @@ use anyhow::Result;
 use serde_json::Value;
 use std::io::Write;
 
-fn branch(r: &dyn Runner, repo: &str, b: &str) -> (Option<bool>, Vec<String>) {
+fn requires_review(body: &Value) -> bool {
+    let c = body.at("required_status_checks");
+    let named = |k: &str, f: &str| {
+        (c.at(k).as_array().into_iter().flatten())
+            .any(|x| x.at(f).as_str().or(x.as_str()) == Some(crate::status::REVIEW))
+    };
+    named("contexts", "") || named("checks", "context")
+}
+
+fn branch(r: &dyn Runner, repo: &str, b: &str, integration: bool) -> (Option<bool>, Vec<String>) {
     let o = match r.run("gh", &argv(&["api", &format!("repos/{repo}/branches/{b}/protection")])) {
         Ok(o) => o,
         Err(e) => return (Some(false), vec![format!("✗ unavailable: no HTTP status ({e:#})")]),
@@ -28,7 +37,18 @@ fn branch(r: &dyn Runner, repo: &str, b: &str) -> (Option<bool>, Vec<String>) {
         if body.at("enforce_admins").at("enabled") != true {
             lines.push("⚠ enforce_admins off: admins can bypass protection".into());
         }
-        return (Some(missing.is_empty()), lines);
+        let review = !integration || requires_review(&body);
+        if integration {
+            lines.push(if review {
+                format!("✓ {} is a required check", crate::status::REVIEW)
+            } else {
+                format!(
+                    "✗ {0} is not a required check → add {0} to its required status checks",
+                    crate::status::REVIEW
+                )
+            });
+        }
+        return (Some(missing.is_empty() && review), lines);
     }
     let msg = body.at("message").as_str().unwrap_or("").to_string();
     let status = body.at("status").as_str().map(String::from).or_else(|| {
@@ -58,7 +78,7 @@ fn branch(r: &dyn Runner, repo: &str, b: &str) -> (Option<bool>, Vec<String>) {
     }
 }
 
-/// One line per repo/branch; exit 0 only if every existing branch is protected and each repo has one.
+/// One line per repo/branch; exit 0 only if every existing branch is protected, each integration branch requires `drover/review`, and each repo has one.
 pub fn protection(cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let mut code = 0;
     for f in cfg.fleet.values() {
@@ -68,7 +88,7 @@ pub fn protection(cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<i
         }
         let mut seen = false;
         for b in branches {
-            let (ok, lines) = branch(r, &f.repo, b);
+            let (ok, lines) = branch(r, &f.repo, b, b == f.integration);
             seen |= ok.is_some();
             if ok == Some(false) {
                 code = 1;
