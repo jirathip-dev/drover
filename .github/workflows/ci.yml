@@ -241,7 +241,7 @@ jobs:
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
           webkit=false
-          grep -qE '^(web/|assets/|crates/server/|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|keyboard_webkit\.rs|ui/(drafts|repaint|timings|keyboard|answered|optimistic|pages)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs|phone_timings\.rs|screen_pages\.rs|common/large\.rs))' changed.txt && webkit=true
+          grep -qE '^(web/|assets/|crates/server/|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|keyboard_webkit\.rs|ui/(build|drafts|repaint|timings|keyboard|answered|optimistic|pages)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs|phone_timings\.rs|screen_pages\.rs|common/large\.rs))' changed.txt && webkit=true
           echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
 
   # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.
@@ -279,7 +279,7 @@ jobs:
         run: cargo test --locked --test parity_webkit -- --ignored --nocapture
       - name: "url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)"
         run: cargo test --locked --test url_links
-      - name: "typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65); a send shows at once and once, an answered card goes at once (#1315)"
+      - name: "typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65); a send shows at once and once, an answered card goes at once (#1315); an older page reloads for a new build (#1351)"
         run: cargo test --locked --test page_drafts
       - name: "the focused composer keeps its node, focus, text and caret while the stream changes it (#1310)"
         if: ${{ !cancelled() }}

@@ -11,6 +11,22 @@ const ro = 'ro' in B.dataset, demo = 'demo' in B.dataset;
 const $ = <T extends Element = HTMLElement>(s: string): T => { const e = document.querySelector<T>(s); if (!e) throw new Error(`no ${s}`); return e; };
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const exported = B.dataset.root === '';
+const build = /\/a\/(\w+)\/board\.js$/.exec(import.meta.url)?.[1];
+const typing = () => !!document.activeElement?.matches('input, textarea, select, [contenteditable]');
+function upgrade(b: string) {
+  if (typing()) return void document.addEventListener('focusout', () => setTimeout(() => upgrade(b)), { once: true });
+  const k = 'reloads:' + b, n = Number(sessionStorage.getItem(k) ?? 0);
+  if (n >= 3) return;
+  sessionStorage.setItem(k, String(n + 1));
+  location.reload();
+}
+let leaving = false;
+const newer = (b: unknown) => {
+  if (!build || typeof b !== 'string' || !b || b === build) return false;
+  if (!leaving) upgrade(b);
+  leaving = true;
+  return true;
+};
 const url = (p: string) => new URL(p.replace(/^[/]/, '') + (exported && /^\/screens\/[^?]*$/.test(p) ? '/index.html' : ''), R).href;
 
 type Pend = { id: string; text: string; n: number; st: 'sending' | 'sent' | 'failed'; a: Act };
@@ -49,6 +65,7 @@ async function fetchScreen(p: string, s?: Span): Promise<Blk> {
   const r = await get().catch(() => new Promise<Response>(ok => setTimeout(() => ok(get()), 300)));
   const j = obj(await read(r, s, t0).catch(() => ({ line: `${r.status}` })));
   if (!r.ok) throw Object.assign(new Error(String(j.line ?? r.status)), { status: r.status });
+  if (newer(r.headers.get('x-build'))) throw new Error('a new build: reloading');
   return j;
 }
 
@@ -214,7 +231,9 @@ function stream(v: View) {
   es.onopen = () => { v.live = true; sync(); };
   es.onerror = () => { v.live = false; sync(); };
   es.onmessage = e => {
-    const s = span('delta'), d = obj(JSON.parse(e.data)), was = JSON.stringify(v.model), before = v.model && obj(JSON.parse(was));
+    const s = span('delta'), d = obj(JSON.parse(e.data));
+    if (newer(d.build)) return;
+    const was = JSON.stringify(v.model), before = v.model && obj(JSON.parse(was));
     v.model = apply(v.model ?? {}, blks(d.ops));
     s.parse = performance.now() - s.t0;
     [v.at, v.live] = [Date.now(), true];
@@ -406,6 +425,7 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<bo
     if (r.status === 401) return (unpaired(), fail());
     if (!r.ok) return (toast(String(j.line ?? r.status), true, retry), fail());
     if (p) p.st = 'sent';
+    if (newer(r.headers.get('x-build'))) return true;
     const ops = blks(j.ops);
     const whole = ops.find(o => o.op === 'screen');
     if (whole && v !== shv) {
