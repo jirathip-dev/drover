@@ -1,0 +1,10 @@
+Decided: serve marks every HTTP response with an X-Build header and every screen stream event with a build field, both VER, the hash in the page's own /a/<VER>/board.js path
+Because: "Serve sends its build sha with each screen response and stream event"
+Decided: the page compares that with the build in import.meta.url; on a mismatch it drops the response or event unrendered and reloads
+Because: "An old page never draws a newer server's blocks."
+Decided: a focused input, textarea, select or contenteditable defers the reload to its focusout; drafts already live in localStorage
+Because: "If a field has focus, it reloads on blur."
+Decided: a sessionStorage counter caps reloads at 3 per build, so a cached old asset cannot loop the page
+Rejected: a separate /version poll — every response already carries the build, and a poll adds a timer and a request
+Check: crates/cli/tests/page_drafts.rs a_page_of_an_older_build fails at e5ab4c08a (exit 101) and passes at head with WebKit
+Owner: a phone left open across a serve update now reloads itself once instead of drawing broken cards
