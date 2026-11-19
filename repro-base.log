@@ -1,0 +1,203 @@
+   Compiling libc v0.2.191
+   Compiling cfg-if v1.0.5
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling subtle v2.6.1
+   Compiling zeroize v1.9.1
+   Compiling typenum v1.20.1
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling cmov v0.5.4
+   Compiling syn v3.0.9
+   Compiling ctutils v0.4.7
+   Compiling const-oid v0.10.2
+   Compiling hybrid-array v0.4.15
+   Compiling foldhash v0.2.0
+   Compiling equivalent v1.0.3
+   Compiling cpubits v0.1.1
+   Compiling allocator-api2 v0.2.21
+   Compiling autocfg v1.5.1
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling hashbrown v0.17.1
+   Compiling num-traits v0.2.19
+   Compiling serde_core v1.0.229
+   Compiling digest v0.11.3
+   Compiling strsim v0.11.1
+   Compiling heck v0.5.0
+   Compiling bitflags v2.13.2
+   Compiling ff v0.14.0
+   Compiling itoa v1.0.18
+   Compiling crypto-bigint v0.7.10
+   Compiling serde v1.0.229
+   Compiling hmac v0.13.0
+   Compiling der v0.8.3
+   Compiling syn v2.0.119
+   Compiling smallvec v1.16.4
+   Compiling unicode-segmentation v1.13.3
+   Compiling serde_derive v1.0.229
+   Compiling cpufeatures v0.3.1
+   Compiling group v0.14.0
+   Compiling inout v0.2.5
+   Compiling shlex v2.0.1
+   Compiling base16ct v1.0.0
+   Compiling find-msvc-tools v0.1.15
+   Compiling rustversion v1.0.23
+   Compiling cc v1.11.0
+   Compiling sec1 v0.8.1
+   Compiling hkdf v0.13.0
+   Compiling zmij v1.0.23
+   Compiling utf8parse v0.2.2
+   Compiling pkg-config v0.3.34
+   Compiling log v0.4.35
+   Compiling ident_case v1.0.1
+   Compiling thiserror v2.0.21
+   Compiling vcpkg v0.2.15
+   Compiling darling_core v0.24.1
+   Compiling mio v1.2.4
+   Compiling libsqlite3-sys v0.39.1
+   Compiling anstyle-parse v1.0.0
+   Compiling elliptic-curve v0.14.3
+   Compiling cipher v0.5.2
+   Compiling thiserror-impl v2.0.21
+   Compiling primefield v0.14.0
+   Compiling universal-hash v0.6.1
+   Compiling errno v0.3.15
+   Compiling parking_lot_core v0.9.12
+   Compiling anstyle v1.0.14
+   Compiling either v1.19.0
+   Compiling signal-hook v0.3.18
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling serde_json v1.0.154
+   Compiling colorchoice v1.0.5
+   Compiling anstyle-query v1.1.5
+   Compiling anstream v1.0.0
+   Compiling itertools v0.14.0
+   Compiling signal-hook-registry v1.4.8
+   Compiling polyval v0.7.3
+   Compiling wnaf v0.14.1
+   Compiling castaway v0.2.4
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling strum_macros v0.28.0
+   Compiling darling_macro v0.24.1
+   Compiling convert_case v0.10.0
+   Compiling rfc6979 v0.6.0
+   Compiling spki v0.8.1
+   Compiling indexmap v2.14.2
+   Compiling signature v3.0.0
+   Compiling shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=9b88eb5be5bc9ba8c5c75480483b9861ddc6e993#9b88eb5b)
+   Compiling static_assertions v1.1.0
+   Compiling ryu v1.0.23
+   Compiling anyhow v1.0.104
+   Compiling unicode-width v0.2.3
+   Compiling winnow v0.7.15
+   Compiling memchr v2.8.3
+   Compiling scopeguard v1.2.0
+   Compiling toml_write v0.1.2
+   Compiling clap_lex v1.1.1
+   Compiling rustix v1.1.6
+   Compiling clap_builder v4.6.7
+   Compiling lock_api v0.4.14
+   Compiling strum v0.28.0
+   Compiling toml_edit v0.22.27
+   Compiling unicode-truncate v2.0.1
+   Compiling compact_str v0.9.1
+   Compiling ecdsa v0.17.0
+   Compiling derive_more-impl v2.1.1
+   Compiling darling v0.24.1
+   Compiling primeorder v0.14.0
+   Compiling ghash v0.6.0
+   Compiling kasuari v0.4.13
+   Compiling aes v0.9.3
+   Compiling ctr v0.10.1
+   Compiling aead v0.6.1
+   Compiling sha2 v0.11.1
+   Compiling clap_derive v4.6.7
+   Compiling lru v0.18.5
+   Compiling hashlink v0.12.2
+   Compiling crc32fast v1.5.4
+   Compiling linux-raw-sys v0.12.1
+   Compiling litrs v1.0.1
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling fallible-iterator v0.3.0
+   Compiling indoc v2.0.8
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/core)
+   Compiling instability v0.3.14
+   Compiling clap v4.6.7
+   Compiling document-features v0.2.12
+   Compiling p256 v0.14.0
+   Compiling ratatui-core v0.1.2
+   Compiling aes-gcm v0.11.1
+   Compiling rusqlite v0.41.1
+   Compiling parking_lot v0.12.5
+   Compiling signal-hook-mio v0.2.5
+   Compiling derive_more v2.1.1
+   Compiling toml v0.8.23
+   Compiling base64 v0.23.1
+   Compiling adler2 v2.0.1
+   Compiling simd-adler32 v0.3.10
+   Compiling drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/sys)
+   Compiling crossterm v0.29.0
+   Compiling miniz_oxide v0.9.1
+   Compiling line-clipping v0.3.8
+   Compiling ratatui-widgets v0.3.2
+   Compiling flate2 v1.1.10
+   Compiling ratatui-crossterm v0.1.2
+   Compiling socket2 v0.6.5
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.12.1
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/cli)
+   Compiling ratatui v0.30.2
+   Compiling tokio v1.54.1
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/server)
+   Compiling drover-chat v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/chat)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 40.16s
+     Running tests/extend_ask.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1353/debug/deps/extend_ask-de25417fb3f1eaed)
+
+running 6 tests
+test an_update_lane_closes_the_blocked_lanes_extend_ask ... FAILED
+test an_answered_extend_ask_stays_answered_after_a_new_lane ... FAILED
+test a_superseding_lane_closes_the_blocked_lanes_extend_ask ... FAILED
+test a_refused_tap_shows_the_refusal_on_the_card ... ok
+test park_on_a_blocked_lanes_ask_parks_the_issue_and_the_card_goes ... ok
+test one_more_round_on_a_blocked_lanes_ask_closes_it_and_gives_the_lane_its_round ... ok
+
+failures:
+
+---- an_update_lane_closes_the_blocked_lanes_extend_ask stdout ----
+drover: cannot list the lanes for the duplicate guard: no shed server on /tmp/hsb-1431673-4.sock: No such file or directory (os error 2)
+
+thread 'an_update_lane_closes_the_blocked_lanes_extend_ask' (1431678) panicked at crates/cli/tests/extend_ask.rs:33:5:
+assertion `left == right` failed: ["spawn", "sendmeter", "12", "impl", "--update"]: 
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- an_answered_extend_ask_stays_answered_after_a_new_lane stdout ----
+drover: cannot list the lanes for the duplicate guard: no shed server on /tmp/hsb-1431673-0.sock: No such file or directory (os error 2)
+
+thread 'an_answered_extend_ask_stays_answered_after_a_new_lane' (1431677) panicked at crates/cli/tests/extend_ask.rs:33:5:
+assertion `left == right` failed: ["spawn", "sendmeter", "12", "impl", "--supersede"]: 
+  left: 1
+ right: 0
+
+---- a_superseding_lane_closes_the_blocked_lanes_extend_ask stdout ----
+drover: cannot list the lanes for the duplicate guard: no shed server on /tmp/hsb-1431673-2.sock: No such file or directory (os error 2)
+
+thread 'a_superseding_lane_closes_the_blocked_lanes_extend_ask' (1431676) panicked at crates/cli/tests/extend_ask.rs:33:5:
+assertion `left == right` failed: ["spawn", "sendmeter", "12", "impl", "--supersede"]: 
+  left: 1
+ right: 0
+
+
+failures:
+    a_superseding_lane_closes_the_blocked_lanes_extend_ask
+    an_answered_extend_ask_stays_answered_after_a_new_lane
+    an_update_lane_closes_the_blocked_lanes_extend_ask
+
+test result: FAILED. 3 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+error: test failed, to rerun pass `--test extend_ask`

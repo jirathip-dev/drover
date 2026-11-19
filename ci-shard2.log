@@ -1,0 +1,964 @@
+﻿2026-11-19T07:12:59.9164749Z Current runner version: '2.338.2'
+2026-11-19T07:12:59.9191401Z ##[group]Runner Image Provisioner
+2026-11-19T07:12:59.9192285Z Hosted Compute Agent
+2026-11-19T07:12:59.9192881Z Version: 20261103.629
+2026-11-19T07:12:59.9193603Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+2026-11-19T07:12:59.9194392Z Build Date: 2026-11-03T17:26:59Z
+2026-11-19T07:12:59.9195146Z Worker ID: {7cbfd973-7b99-4f5d-b564-628034b9b067}
+2026-11-19T07:12:59.9195874Z Region: eastus
+2026-11-19T07:12:59.9196421Z Cloud: Azure
+2026-11-19T07:12:59.9197323Z ##[endgroup]
+2026-11-19T07:12:59.9198927Z ##[group]Operating System
+2026-11-19T07:12:59.9199724Z Ubuntu
+2026-11-19T07:12:59.9200277Z 26.04.1
+2026-11-19T07:12:59.9200796Z LTS
+2026-11-19T07:12:59.9201360Z ##[endgroup]
+2026-11-19T07:12:59.9201911Z ##[group]Runner Image
+2026-11-19T07:12:59.9202535Z Image: ubuntu-26.04
+2026-11-19T07:12:59.9203196Z Version: 20261111.196.1
+2026-11-19T07:12:59.9204543Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261111.196/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-19T07:12:59.9206160Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261111.196
+2026-11-19T07:12:59.9207601Z ##[endgroup]
+2026-11-19T07:12:59.9208876Z ##[group]GITHUB_TOKEN Permissions
+2026-11-19T07:12:59.9211142Z Contents: read
+2026-11-19T07:12:59.9211789Z Metadata: read
+2026-11-19T07:12:59.9212394Z Packages: read
+2026-11-19T07:12:59.9213069Z ##[endgroup]
+2026-11-19T07:12:59.9215246Z Secret source: Actions
+2026-11-19T07:12:59.9216271Z Cache mode: write
+2026-11-19T07:12:59.9217288Z Prepare workflow directory
+2026-11-19T07:12:59.9625219Z Prepare all required actions
+2026-11-19T07:12:59.9675102Z Getting action download info
+2026-11-19T07:13:00.1387438Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-19T07:13:00.2669786Z Download action repository 'dtolnay/rust-toolchain@1.99.1' (SHA:263313d2989f864a2b8613f97277288638e7d8f8)
+2026-11-19T07:13:00.3580015Z Download action repository 'Swatinem/rust-cache@v2' (SHA:d1527c8f67ef9af357290475d4af4b0fab8f12e0)
+2026-11-19T07:13:00.4908585Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-11-19T07:13:00.5568938Z Download action repository 'taiki-e/install-action@v2' (SHA:75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f)
+2026-11-19T07:13:00.8771299Z Complete job name: test (shard 2/4)
+2026-11-19T07:13:00.9857987Z ##[group]Run actions/checkout@v4
+2026-11-19T07:13:00.9859108Z with:
+2026-11-19T07:13:00.9859634Z   repository: jirathip-dev/drover
+2026-11-19T07:13:00.9863837Z   token: ***
+2026-11-19T07:13:00.9864329Z   ssh-strict: true
+2026-11-19T07:13:00.9864811Z   ssh-user: git
+2026-11-19T07:13:00.9865288Z   persist-credentials: true
+2026-11-19T07:13:00.9865821Z   clean: true
+2026-11-19T07:13:00.9866301Z   sparse-checkout-cone-mode: true
+2026-11-19T07:13:00.9867028Z   fetch-depth: 1
+2026-11-19T07:13:00.9867516Z   fetch-tags: false
+2026-11-19T07:13:00.9868010Z   show-progress: true
+2026-11-19T07:13:00.9868498Z   lfs: false
+2026-11-19T07:13:00.9868986Z   submodules: false
+2026-11-19T07:13:00.9869484Z   set-safe-directory: true
+2026-11-19T07:13:00.9870034Z   allow-unsafe-pr-checkout: false
+2026-11-19T07:13:00.9871028Z env:
+2026-11-19T07:13:00.9871561Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:00.9872188Z ##[endgroup]
+2026-11-19T07:13:01.3056511Z Syncing repository: jirathip-dev/drover
+2026-11-19T07:13:01.3059666Z ##[group]Getting Git version info
+2026-11-19T07:13:01.3061414Z Working directory is '/home/runner/work/drover/drover'
+2026-11-19T07:13:01.3063216Z [command]/usr/bin/git version
+2026-11-19T07:13:01.3107628Z git version 2.56.1
+2026-11-19T07:13:01.3139306Z ##[endgroup]
+2026-11-19T07:13:01.3153614Z Temporarily overriding HOME='/home/runner/work/_temp/3e0b85a3-b44c-4622-b63d-7c775df4744d' before making global git config changes
+2026-11-19T07:13:01.3158192Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-19T07:13:01.3161712Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/drover/drover
+2026-11-19T07:13:01.3234255Z Deleting the contents of '/home/runner/work/drover/drover'
+2026-11-19T07:13:01.3238772Z ##[group]Initializing the repository
+2026-11-19T07:13:01.3243815Z [command]/usr/bin/git init /home/runner/work/drover/drover
+2026-11-19T07:13:01.3406035Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-19T07:13:01.3409216Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-19T07:13:01.3411944Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-19T07:13:01.3413996Z hint: call:
+2026-11-19T07:13:01.3415180Z hint:
+2026-11-19T07:13:01.3416916Z hint: 	git config --global init.defaultBranch <name>
+2026-11-19T07:13:01.3419244Z hint:
+2026-11-19T07:13:01.3421577Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-19T07:13:01.3425207Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-19T07:13:01.3430944Z hint:
+2026-11-19T07:13:01.3432686Z hint: 	git branch -m <name>
+2026-11-19T07:13:01.3434743Z hint:
+2026-11-19T07:13:01.3437703Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-19T07:13:01.3441627Z Initialized empty Git repository in /home/runner/work/drover/drover/.git/
+2026-11-19T07:13:01.3448551Z [command]/usr/bin/git remote add origin https://github.com/jirathip-dev/drover
+2026-11-19T07:13:01.3507092Z ##[endgroup]
+2026-11-19T07:13:01.3510288Z ##[group]Disabling automatic garbage collection
+2026-11-19T07:13:01.3513075Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-19T07:13:01.3555236Z ##[endgroup]
+2026-11-19T07:13:01.3558368Z ##[group]Setting up auth
+2026-11-19T07:13:01.3563609Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-19T07:13:01.3605015Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-19T07:13:01.4108776Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-19T07:13:01.4147080Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-19T07:13:01.4435433Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-19T07:13:01.4475797Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-19T07:13:01.4768383Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-19T07:13:01.4814862Z ##[endgroup]
+2026-11-19T07:13:01.4817091Z ##[group]Fetching the repository
+2026-11-19T07:13:01.4828696Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +3e123909f83dd0d2f68a6d9ee19c972ab2561be5:refs/remotes/pull/1379/merge
+2026-11-19T07:13:02.5757487Z From https://github.com/jirathip-dev/drover
+2026-11-19T07:13:02.5759114Z  * [new ref]         3e123909f83dd0d2f68a6d9ee19c972ab2561be5 -> pull/1379/merge
+2026-11-19T07:13:02.5764894Z ##[endgroup]
+2026-11-19T07:13:02.5765957Z ##[group]Determining the checkout info
+2026-11-19T07:13:02.5768801Z ##[endgroup]
+2026-11-19T07:13:02.5784722Z [command]/usr/bin/git sparse-checkout disable
+2026-11-19T07:13:02.5840778Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-19T07:13:02.5873610Z ##[group]Checking out the ref
+2026-11-19T07:13:02.5878610Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/1379/merge
+2026-11-19T07:13:02.7514208Z Note: switching to 'refs/remotes/pull/1379/merge'.
+2026-11-19T07:13:02.7514973Z 
+2026-11-19T07:13:02.7515394Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-11-19T07:13:02.7517451Z changes and commit them, and you can discard any commits you make in this
+2026-11-19T07:13:02.7518420Z state without impacting any branches by switching back to a branch.
+2026-11-19T07:13:02.7518906Z 
+2026-11-19T07:13:02.7519267Z If you want to create a new branch to retain commits you create, you may
+2026-11-19T07:13:02.7519974Z do so (now or later) by using -c with the switch command. Example:
+2026-11-19T07:13:02.7520360Z 
+2026-11-19T07:13:02.7520553Z   git switch -c <new-branch-name>
+2026-11-19T07:13:02.7520835Z 
+2026-11-19T07:13:02.7521020Z Or undo this operation with:
+2026-11-19T07:13:02.7521267Z 
+2026-11-19T07:13:02.7521430Z   git switch -
+2026-11-19T07:13:02.7521654Z 
+2026-11-19T07:13:02.7522005Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-11-19T07:13:02.7522457Z 
+2026-11-19T07:13:02.7522987Z HEAD is now at 3e12390 Merge 3d86a2143d5c3b96600284b9aa09e47585666bde into ea56879dc479dbed881fcd35e9eaeffe6a5fc03e
+2026-11-19T07:13:02.7531923Z ##[endgroup]
+2026-11-19T07:13:02.7585269Z [command]/usr/bin/git log -1 --format=%H
+2026-11-19T07:13:02.7614114Z 3e123909f83dd0d2f68a6d9ee19c972ab2561be5
+2026-11-19T07:13:02.8016470Z ##[group]Run dtolnay/rust-toolchain@1.99.1
+2026-11-19T07:13:02.8017099Z with:
+2026-11-19T07:13:02.8017349Z env:
+2026-11-19T07:13:02.8017642Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:02.8017989Z ##[endgroup]
+2026-11-19T07:13:02.8091363Z ##[start-action display=Parse toolchain version;id=__dtolnay_rust-toolchain.parse]
+2026-11-19T07:13:02.8169635Z ##[group]Run if [[ -z $toolchain ]]; then
+2026-11-19T07:13:02.8170147Z if [[ -z $toolchain ]]; then
+2026-11-19T07:13:02.8170784Z   # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070
+2026-11-19T07:13:02.8171446Z   echo "'toolchain' is a required input" >&2
+2026-11-19T07:13:02.8171821Z   exit 1
+2026-11-19T07:13:02.8172222Z elif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then
+2026-11-19T07:13:02.8172751Z   if [[ Linux == macOS ]]; then
+2026-11-19T07:13:02.8173393Z     echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT
+2026-11-19T07:13:02.8173975Z   else
+2026-11-19T07:13:02.8174436Z     echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT
+2026-11-19T07:13:02.8174960Z   fi
+2026-11-19T07:13:02.8175316Z elif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then
+2026-11-19T07:13:02.8175926Z   echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT
+2026-11-19T07:13:02.8176463Z elif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then
+2026-11-19T07:13:02.8177352Z   echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT
+2026-11-19T07:13:02.8177936Z else
+2026-11-19T07:13:02.8178192Z   delimiter=EOF
+2026-11-19T07:13:02.8178582Z   while [[ $toolchain == *$delimiter* ]]; do delimiter+=_; done
+2026-11-19T07:13:02.8179162Z   printf 'toolchain<<%s\n%s\n%s\n' "$delimiter" "$toolchain" "$delimiter" >> $GITHUB_OUTPUT
+2026-11-19T07:13:02.8179729Z fi
+2026-11-19T07:13:02.8236093Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:02.8236540Z env:
+2026-11-19T07:13:02.8237012Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:02.8237369Z   toolchain: 1.99.1
+2026-11-19T07:13:02.8237626Z ##[endgroup]
+2026-11-19T07:13:02.8376443Z ##[end-action id=__dtolnay_rust-toolchain.parse;outcome=success;conclusion=success;duration_ms=28]
+2026-11-19T07:13:02.8381958Z ##[start-action display=Set $CARGO_HOME;id=__dtolnay_rust-toolchain.__run]
+2026-11-19T07:13:02.8429058Z ##[group]Run echo CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV
+2026-11-19T07:13:02.8429639Z echo CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV
+2026-11-19T07:13:02.8481941Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:02.8482362Z env:
+2026-11-19T07:13:02.8482682Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:02.8483014Z ##[endgroup]
+2026-11-19T07:13:02.8574006Z ##[end-action id=__dtolnay_rust-toolchain.__run;outcome=success;conclusion=success;duration_ms=19]
+2026-11-19T07:13:02.8577614Z ##[start-action display=Install rustup if needed;id=__dtolnay_rust-toolchain.__run_2]
+2026-11-19T07:13:02.8667085Z ##[group]Run if ! command -v rustup &>/dev/null; then
+2026-11-19T07:13:02.8667672Z if ! command -v rustup &>/dev/null; then
+2026-11-19T07:13:02.8668550Z   curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y
+2026-11-19T07:13:02.8669381Z   echo "$CARGO_HOME/bin" >> $GITHUB_PATH
+2026-11-19T07:13:02.8669739Z fi
+2026-11-19T07:13:02.8724171Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:02.8724816Z env:
+2026-11-19T07:13:02.8725107Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:02.8725468Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:02.8725775Z ##[endgroup]
+2026-11-19T07:13:02.8813590Z ##[end-action id=__dtolnay_rust-toolchain.__run_2;outcome=success;conclusion=success;duration_ms=23]
+2026-11-19T07:13:02.8816451Z ##[start-action display=Install rustup if needed on windows;id=__dtolnay_rust-toolchain.__run_3]
+2026-11-19T07:13:02.8825534Z ##[end-action id=__dtolnay_rust-toolchain.__run_3;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-11-19T07:13:02.8843144Z ##[start-action display=rustup toolchain install 1.99.1;id=__dtolnay_rust-toolchain.__run_4]
+2026-11-19T07:13:02.8874959Z ##[group]Run set -f  # split targets and components on commas and whitespace, without glob expansion
+2026-11-19T07:13:02.8875726Z set -f  # split targets and components on commas and whitespace, without glob expansion
+2026-11-19T07:13:02.8876243Z flags=()
+2026-11-19T07:13:02.8876597Z for t in ${targets//,/ }; do flags+=(--target "$t"); done
+2026-11-19T07:13:02.8877359Z for c in ${components//,/ }; do flags+=(--component "$c"); done
+2026-11-19T07:13:02.8877942Z if [[ $toolchain == nightly && -n $components ]]; then flags+=(--allow-downgrade); fi
+2026-11-19T07:13:02.8878449Z log=$(mktemp)
+2026-11-19T07:13:02.8878740Z trap 'rm -f "$log"' EXIT
+2026-11-19T07:13:02.8879061Z for attempt in 1 2 3 4 5; do
+2026-11-19T07:13:02.8879720Z   if rustup toolchain install "$toolchain" "${flags[@]}" --profile minimal --no-self-update --force-non-host 2>&1 | tee "$log"; then
+2026-11-19T07:13:02.8880377Z     break
+2026-11-19T07:13:02.8880633Z   else
+2026-11-19T07:13:02.8880883Z     status=$?
+2026-11-19T07:13:02.8881148Z   fi
+2026-11-19T07:13:02.8881508Z   if [[ $attempt == 5 ]] || ! grep -Fq 'checksum failed for ' "$log" \
+2026-11-19T07:13:02.8882173Z       || ! grep -Fq 'this is likely due to an ongoing update of the official release server' "$log"; then
+2026-11-19T07:13:02.8882708Z     exit "$status"
+2026-11-19T07:13:02.8882985Z   fi
+2026-11-19T07:13:02.8883402Z   echo "Retrying rustup toolchain install in 30 seconds (retry $attempt of 4)" >&2
+2026-11-19T07:13:02.8883882Z   sleep 30
+2026-11-19T07:13:02.8884134Z done
+2026-11-19T07:13:02.8938046Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:02.8938457Z env:
+2026-11-19T07:13:02.8938859Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:02.8939452Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:02.8939934Z   toolchain: 1.99.1
+2026-11-19T07:13:02.8940201Z   targets: 
+2026-11-19T07:13:02.8940440Z   components: 
+2026-11-19T07:13:02.8940704Z   RUSTUP_PERMIT_COPY_RENAME: 1
+2026-11-19T07:13:02.8941232Z ##[endgroup]
+2026-11-19T07:13:02.9472124Z info: syncing channel updates for 1.99.1-x86_64-unknown-linux-gnu
+2026-11-19T07:13:03.0484423Z info: latest update on 2026-10-15 for version 1.99.1 (58cf8f9c3 2026-10-13)
+2026-11-19T07:13:03.0485106Z info: downloading 3 components
+2026-11-19T07:13:11.0198716Z 
+2026-11-19T07:13:11.0267478Z   1.99.1-x86_64-unknown-linux-gnu installed - rustc 1.99.1 (58cf8f9c3 2026-10-13)
+2026-11-19T07:13:11.0267908Z 
+2026-11-19T07:13:11.0557331Z ##[end-action id=__dtolnay_rust-toolchain.__run_4;outcome=success;conclusion=success;duration_ms=8171]
+2026-11-19T07:13:11.0564690Z ##[start-action display=rustup default 1.99.1;id=__dtolnay_rust-toolchain.__run_5]
+2026-11-19T07:13:11.0591284Z ##[group]Run rustup default "$toolchain" --force-non-host
+2026-11-19T07:13:11.0591745Z rustup default "$toolchain" --force-non-host
+2026-11-19T07:13:11.0640694Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:11.0641068Z env:
+2026-11-19T07:13:11.0641307Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:11.0641655Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:11.0642133Z   toolchain: 1.99.1
+2026-11-19T07:13:11.0642361Z ##[endgroup]
+2026-11-19T07:13:11.0757659Z info: using existing install for 1.99.1-x86_64-unknown-linux-gnu
+2026-11-19T07:13:11.0767149Z info: default toolchain set to 1.99.1-x86_64-unknown-linux-gnu
+2026-11-19T07:13:11.0767696Z 
+2026-11-19T07:13:11.0833092Z   1.99.1-x86_64-unknown-linux-gnu unchanged - rustc 1.99.1 (58cf8f9c3 2026-10-13)
+2026-11-19T07:13:11.0833575Z 
+2026-11-19T07:13:11.0836610Z info: note that the toolchain '1.99.1-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/drover/drover/rust-toolchain.toml')
+2026-11-19T07:13:11.0852356Z ##[end-action id=__dtolnay_rust-toolchain.__run_5;outcome=success;conclusion=success;duration_ms=28]
+2026-11-19T07:13:11.0856251Z ##[start-action display=Create cachekey;id=__dtolnay_rust-toolchain.rustc-version]
+2026-11-19T07:13:11.0878154Z ##[group]Run DATE=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')
+2026-11-19T07:13:11.0879119Z DATE=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')
+2026-11-19T07:13:11.0879811Z HASH=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-hash: //p')
+2026-11-19T07:13:11.0880343Z echo "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT
+2026-11-19T07:13:11.0928719Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:11.0929077Z env:
+2026-11-19T07:13:11.0929299Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:11.0929610Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:11.0929888Z   toolchain: 1.99.1
+2026-11-19T07:13:11.0930109Z ##[endgroup]
+2026-11-19T07:13:11.1289570Z ##[end-action id=__dtolnay_rust-toolchain.rustc-version;outcome=success;conclusion=success;duration_ms=43]
+2026-11-19T07:13:11.1292199Z ##[start-action display=Disable incremental compilation;id=__dtolnay_rust-toolchain.__run_6]
+2026-11-19T07:13:11.1313306Z ##[group]Run if [ -z "${CARGO_INCREMENTAL+set}" ]; then
+2026-11-19T07:13:11.1313733Z if [ -z "${CARGO_INCREMENTAL+set}" ]; then
+2026-11-19T07:13:11.1314056Z   echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV
+2026-11-19T07:13:11.1314335Z fi
+2026-11-19T07:13:11.1362822Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:11.1363179Z env:
+2026-11-19T07:13:11.1363400Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:11.1363703Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:11.1363949Z ##[endgroup]
+2026-11-19T07:13:11.1441923Z ##[end-action id=__dtolnay_rust-toolchain.__run_6;outcome=success;conclusion=success;duration_ms=14]
+2026-11-19T07:13:11.1444316Z ##[start-action display=Enable colors in Cargo output;id=__dtolnay_rust-toolchain.__run_7]
+2026-11-19T07:13:11.1464372Z ##[group]Run if [ -z "${CARGO_TERM_COLOR+set}" ]; then
+2026-11-19T07:13:11.1464900Z if [ -z "${CARGO_TERM_COLOR+set}" ]; then
+2026-11-19T07:13:11.1465252Z   echo CARGO_TERM_COLOR=always >> $GITHUB_ENV
+2026-11-19T07:13:11.1465549Z fi
+2026-11-19T07:13:11.1512871Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:11.1513236Z env:
+2026-11-19T07:13:11.1513457Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:11.1513760Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:11.1514013Z   CARGO_INCREMENTAL: 0
+2026-11-19T07:13:11.1514226Z ##[endgroup]
+2026-11-19T07:13:11.1590265Z ##[end-action id=__dtolnay_rust-toolchain.__run_7;outcome=success;conclusion=success;duration_ms=14]
+2026-11-19T07:13:11.1593814Z ##[start-action display=Enable Cargo sparse registry;id=__dtolnay_rust-toolchain.__run_8]
+2026-11-19T07:13:11.1615429Z ##[group]Run # implemented in 1.66, stabilized in 1.68, made default in 1.70
+2026-11-19T07:13:11.1616170Z # implemented in 1.66, stabilized in 1.68, made default in 1.70
+2026-11-19T07:13:11.1617360Z if [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then
+2026-11-19T07:13:11.1618159Z   if rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.6[89]\.'; then
+2026-11-19T07:13:11.1618775Z     touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true
+2026-11-19T07:13:11.1619318Z     echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV
+2026-11-19T07:13:11.1619837Z   elif rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.6[67]\.'; then
+2026-11-19T07:13:11.1620422Z     touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true
+2026-11-19T07:13:11.1620943Z     echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV
+2026-11-19T07:13:11.1621357Z   fi
+2026-11-19T07:13:11.1621690Z fi
+2026-11-19T07:13:11.1666950Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:11.1667346Z env:
+2026-11-19T07:13:11.1667580Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:11.1667892Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:11.1668145Z   CARGO_INCREMENTAL: 0
+2026-11-19T07:13:11.1668367Z   CARGO_TERM_COLOR: always
+2026-11-19T07:13:11.1668592Z   toolchain: 1.99.1
+2026-11-19T07:13:11.1668790Z ##[endgroup]
+2026-11-19T07:13:11.1982001Z ##[end-action id=__dtolnay_rust-toolchain.__run_8;outcome=success;conclusion=success;duration_ms=38]
+2026-11-19T07:13:11.1986225Z ##[start-action display=Work around spurious network errors in curl 8.0;id=__dtolnay_rust-toolchain.__run_9]
+2026-11-19T07:13:11.2008508Z ##[group]Run # https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation
+2026-11-19T07:13:11.2009308Z # https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation
+2026-11-19T07:13:11.2009952Z if rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.7[01]\.'; then
+2026-11-19T07:13:11.2010471Z   echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV
+2026-11-19T07:13:11.2010784Z fi
+2026-11-19T07:13:11.2059412Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:11.2059775Z env:
+2026-11-19T07:13:11.2059997Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:11.2060296Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:11.2060548Z   CARGO_INCREMENTAL: 0
+2026-11-19T07:13:11.2060763Z   CARGO_TERM_COLOR: always
+2026-11-19T07:13:11.2060987Z   toolchain: 1.99.1
+2026-11-19T07:13:11.2061185Z ##[endgroup]
+2026-11-19T07:13:11.2260455Z ##[end-action id=__dtolnay_rust-toolchain.__run_9;outcome=success;conclusion=success;duration_ms=27]
+2026-11-19T07:13:11.2265484Z ##[start-action display=rustc +1.99.1 --version --verbose;id=__dtolnay_rust-toolchain.__run_10]
+2026-11-19T07:13:11.2291293Z ##[group]Run rustc +"$toolchain" --version --verbose
+2026-11-19T07:13:11.2291682Z rustc +"$toolchain" --version --verbose
+2026-11-19T07:13:11.2340805Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-19T07:13:11.2341191Z env:
+2026-11-19T07:13:11.2341420Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:11.2341723Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:11.2341986Z   CARGO_INCREMENTAL: 0
+2026-11-19T07:13:11.2342204Z   CARGO_TERM_COLOR: always
+2026-11-19T07:13:11.2342425Z   toolchain: 1.99.1
+2026-11-19T07:13:11.2342624Z ##[endgroup]
+2026-11-19T07:13:11.2523526Z rustc 1.99.1 (58cf8f9c3 2026-10-13)
+2026-11-19T07:13:11.2524393Z binary: rustc
+2026-11-19T07:13:11.2524903Z commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+2026-11-19T07:13:11.2525541Z commit-date: 2026-10-13
+2026-11-19T07:13:11.2525999Z host: x86_64-unknown-linux-gnu
+2026-11-19T07:13:11.2526469Z release: 1.99.1
+2026-11-19T07:13:11.2527068Z LLVM version: 23.1.1
+2026-11-19T07:13:11.2541269Z ##[end-action id=__dtolnay_rust-toolchain.__run_10;outcome=success;conclusion=success;duration_ms=27]
+2026-11-19T07:13:11.2673483Z ##[group]Run Swatinem/rust-cache@v2
+2026-11-19T07:13:11.2673821Z with:
+2026-11-19T07:13:11.2674036Z   prefix-key: v0-rust
+2026-11-19T07:13:11.2674267Z   add-job-id-key: true
+2026-11-19T07:13:11.2674509Z   add-rust-environment-hash-key: true
+2026-11-19T07:13:11.2674785Z   cache-targets: true
+2026-11-19T07:13:11.2675006Z   cache-all-crates: false
+2026-11-19T07:13:11.2675256Z   cache-workspace-crates: false
+2026-11-19T07:13:11.2675503Z   save-if: true
+2026-11-19T07:13:11.2675713Z   cache-provider: github
+2026-11-19T07:13:11.2675935Z   cache-bin: true
+2026-11-19T07:13:11.2676139Z   lookup-only: false
+2026-11-19T07:13:11.2676345Z   cmd-format: {0}
+2026-11-19T07:13:11.2676539Z env:
+2026-11-19T07:13:11.2676903Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:11.2677207Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:11.2677460Z   CARGO_INCREMENTAL: 0
+2026-11-19T07:13:11.2677677Z   CARGO_TERM_COLOR: always
+2026-11-19T07:13:11.2677900Z ##[endgroup]
+2026-11-19T07:13:12.6463762Z ##[group]Cache Configuration
+2026-11-19T07:13:12.6465148Z Cache Provider:
+2026-11-19T07:13:12.6466197Z     github
+2026-11-19T07:13:12.6477839Z Workspaces:
+2026-11-19T07:13:12.6487248Z     /home/runner/work/drover/drover
+2026-11-19T07:13:12.6488379Z Cache Paths:
+2026-11-19T07:13:12.6489486Z     /home/runner/.cargo/bin
+2026-11-19T07:13:12.6490117Z     /home/runner/.cargo/.crates.toml
+2026-11-19T07:13:12.6490795Z     /home/runner/.cargo/.crates2.json
+2026-11-19T07:13:12.6491492Z     /home/runner/.cargo/registry
+2026-11-19T07:13:12.6492268Z     /home/runner/.cargo/git
+2026-11-19T07:13:12.6492990Z     /home/runner/work/drover/drover/target
+2026-11-19T07:13:12.6493573Z Restore Key:
+2026-11-19T07:13:12.6494196Z     v0-rust-test-shard-Linux-x64-43488e7b
+2026-11-19T07:13:12.6494887Z Cache Key:
+2026-11-19T07:13:12.6495520Z     v0-rust-test-shard-Linux-x64-43488e7b-7846f132
+2026-11-19T07:13:12.6496262Z .. Prefix:
+2026-11-19T07:13:12.6497015Z   - v0-rust-test-shard-Linux-x64
+2026-11-19T07:13:12.6497775Z .. Environment considered:
+2026-11-19T07:13:12.6498447Z   - Rust Versions:
+2026-11-19T07:13:12.6499236Z     - 1.99.1 x86_64-unknown-linux-gnu 58cf8f9c35b355199727627d07ae34a4e2846d67
+2026-11-19T07:13:12.6500192Z   - CARGO_HOME
+2026-11-19T07:13:12.6501015Z   - CARGO_INCREMENTAL
+2026-11-19T07:13:12.6501884Z   - CARGO_PROFILE_DEV_DEBUG
+2026-11-19T07:13:12.6502558Z   - CARGO_TERM_COLOR
+2026-11-19T07:13:12.6503171Z .. Lockfiles considered:
+2026-11-19T07:13:12.6503861Z   - /home/runner/work/drover/drover/Cargo.lock
+2026-11-19T07:13:12.6504732Z   - /home/runner/work/drover/drover/crates/chat/Cargo.toml
+2026-11-19T07:13:12.6505602Z   - /home/runner/work/drover/drover/crates/cli/Cargo.toml
+2026-11-19T07:13:12.6506456Z   - /home/runner/work/drover/drover/crates/core/Cargo.toml
+2026-11-19T07:13:12.6507570Z   - /home/runner/work/drover/drover/crates/server/Cargo.toml
+2026-11-19T07:13:12.6508481Z   - /home/runner/work/drover/drover/crates/service/Cargo.toml
+2026-11-19T07:13:12.6509383Z   - /home/runner/work/drover/drover/crates/sys/Cargo.toml
+2026-11-19T07:13:12.6510716Z   - /home/runner/work/drover/drover/rust-toolchain.toml
+2026-11-19T07:13:12.6511889Z ##[endgroup]
+2026-11-19T07:13:12.6512284Z 
+2026-11-19T07:13:12.6512617Z ... Restoring cache ...
+2026-11-19T07:13:12.7321861Z Cache hit for: v0-rust-test-shard-Linux-x64-43488e7b-7846f132
+2026-11-19T07:13:13.7481983Z Received 195101680 of 195101680 (100.0%), 193.2 MBs/sec
+2026-11-19T07:13:13.7482809Z Cache Size: ~186 MB (195101680 B)
+2026-11-19T07:13:13.7595507Z [command]/usr/bin/tar -xf /home/runner/work/_temp/b4a0598b-7aaf-4f54-93b6-6e46c9d224ea/cache.tzst -P -C /home/runner/work/drover/drover --use-compress-program unzstd
+2026-11-19T07:13:14.9585568Z Cache restored successfully
+2026-11-19T07:13:14.9671633Z Restored from cache key "v0-rust-test-shard-Linux-x64-43488e7b-7846f132" full match: true.
+2026-11-19T07:13:15.0458758Z ##[group]Run actions/setup-node@v4
+2026-11-19T07:13:15.0459077Z with:
+2026-11-19T07:13:15.0459281Z   node-version: 24
+2026-11-19T07:13:15.0459504Z   always-auth: false
+2026-11-19T07:13:15.0459745Z   check-latest: false
+2026-11-19T07:13:15.0462087Z   token: ***
+2026-11-19T07:13:15.0462287Z env:
+2026-11-19T07:13:15.0462498Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:15.0462803Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:15.0463073Z   CARGO_INCREMENTAL: 0
+2026-11-19T07:13:15.0463296Z   CARGO_TERM_COLOR: always
+2026-11-19T07:13:15.0463525Z   CACHE_ON_FAILURE: false
+2026-11-19T07:13:15.0463740Z ##[endgroup]
+2026-11-19T07:13:15.2008076Z Found in cache @ /opt/hostedtoolcache/node/24.22.2/x64
+2026-11-19T07:13:15.2015236Z ##[group]Environment details
+2026-11-19T07:13:15.2018361Z (node:2589) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-19T07:13:15.2019770Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-19T07:13:17.4489139Z node: v24.22.2
+2026-11-19T07:13:17.4489702Z npm: 11.19.1
+2026-11-19T07:13:17.4490081Z yarn: 1.22.22
+2026-11-19T07:13:17.4491545Z ##[endgroup]
+2026-11-19T07:13:17.4694440Z ##[group]Run taiki-e/install-action@v2
+2026-11-19T07:13:17.4694758Z with:
+2026-11-19T07:13:17.4694955Z   tool: cargo-nextest
+2026-11-19T07:13:17.4695182Z   checksum: true
+2026-11-19T07:13:17.4695389Z   fallback: cargo-binstall
+2026-11-19T07:13:17.4695615Z env:
+2026-11-19T07:13:17.4695822Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:17.4696120Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:17.4696375Z   CARGO_INCREMENTAL: 0
+2026-11-19T07:13:17.4696600Z   CARGO_TERM_COLOR: always
+2026-11-19T07:13:17.4697069Z   CACHE_ON_FAILURE: false
+2026-11-19T07:13:17.4697313Z ##[endgroup]
+2026-11-19T07:13:17.4702936Z ##[start-action display=Run bail() {;id=__taiki-e_install-action.__run]
+2026-11-19T07:13:17.4721439Z ##[group]Run bail() {
+2026-11-19T07:13:17.4721711Z bail() {
+2026-11-19T07:13:17.4721986Z   printf '::error::install-action: %s\n' "$*"
+2026-11-19T07:13:17.4722294Z   exit 1
+2026-11-19T07:13:17.4722498Z }
+2026-11-19T07:13:17.4722910Z # If /bin/sh is dash, environment variable containing % is not imported, but is fine
+2026-11-19T07:13:17.4723480Z # because it also means that it will not be exposed to subprocess.
+2026-11-19T07:13:17.4723914Z if /usr/bin/env | grep -Eq '^BASH_FUNC_'; then
+2026-11-19T07:13:17.4724469Z   bail 'bash function injection via BASH_FUNC_ environment variable is not allowed for security reasons'
+2026-11-19T07:13:17.4724975Z fi
+2026-11-19T07:13:17.4725203Z if ! command -v bash >/dev/null; then
+2026-11-19T07:13:17.4725550Z   if grep -Eq '^ID=alpine' /etc/os-release; then
+2026-11-19T07:13:17.4725999Z     printf '::group::Install packages required for install-action (bash)\n'
+2026-11-19T07:13:17.4726438Z     # NB: sync with apk_install in main.sh
+2026-11-19T07:13:17.4727001Z     if command -v sudo >/dev/null; then
+2026-11-19T07:13:17.4727339Z       sudo apk --no-cache add bash
+2026-11-19T07:13:17.4727873Z     elif command -v doas >/dev/null; then
+2026-11-19T07:13:17.4728189Z       doas apk --no-cache add bash
+2026-11-19T07:13:17.4728456Z     else
+2026-11-19T07:13:17.4728668Z       apk --no-cache add bash
+2026-11-19T07:13:17.4728918Z     fi
+2026-11-19T07:13:17.4729131Z     printf '::endgroup::\n'
+2026-11-19T07:13:17.4729379Z   else
+2026-11-19T07:13:17.4729596Z     bail 'this action requires bash'
+2026-11-19T07:13:17.4729865Z   fi
+2026-11-19T07:13:17.4730051Z fi
+2026-11-19T07:13:17.4730343Z bash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"
+2026-11-19T07:13:17.4731537Z shell: /usr/bin/env -u ENV -u BASH_ENV -u CDPATH -u SHELLOPTS -u BASHOPTS /bin/sh -eu {0}
+2026-11-19T07:13:17.4731958Z env:
+2026-11-19T07:13:17.4732168Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:17.4732461Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:17.4732727Z   CARGO_INCREMENTAL: 0
+2026-11-19T07:13:17.4732956Z   CARGO_TERM_COLOR: always
+2026-11-19T07:13:17.4733183Z   CACHE_ON_FAILURE: false
+2026-11-19T07:13:17.4733409Z   INPUT_TOOL: cargo-nextest
+2026-11-19T07:13:17.4733640Z   INPUT_CHECKSUM: true
+2026-11-19T07:13:17.4733873Z   INPUT_FALLBACK: cargo-binstall
+2026-11-19T07:13:17.4736275Z   DEFAULT_GITHUB_TOKEN: ***
+2026-11-19T07:13:17.4736573Z   ACTION_USER_AGENT: taiki-e/install-action (v2)
+2026-11-19T07:13:17.4737171Z   RUNNER_OS: Linux
+2026-11-19T07:13:17.4737386Z   RUNNER_ARCH: X64
+2026-11-19T07:13:17.4737583Z ##[endgroup]
+2026-11-19T07:13:17.4917150Z info: host platform: x86_64_linux
+2026-11-19T07:13:17.5205775Z info: installing cargo-nextest@latest
+2026-11-19T07:13:17.5436923Z info: downloading https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.152/cargo-nextest-0.9.152-x86_64-unknown-linux-gnu.tar.gz
+2026-11-19T07:13:17.6233790Z info: verifying sha256 checksum for cargo-nextest-0.9.152-x86_64-unknown-linux-gnu.tar.gz
+2026-11-19T07:13:17.8250382Z info: cargo-nextest installed at /home/runner/.cargo/bin/cargo-nextest
+2026-11-19T07:13:17.8254366Z + cargo-nextest nextest --version
+2026-11-19T07:13:17.8286949Z cargo-nextest 0.9.152 (26ebeda79 2026-11-13)
+2026-11-19T07:13:17.8287618Z release: 0.9.152
+2026-11-19T07:13:17.8288262Z commit-hash: 26ebeda79b9ae1d008cf64ddb01984bcaa6e1239
+2026-11-19T07:13:17.8288961Z commit-date: 2026-11-13
+2026-11-19T07:13:17.8289511Z host: x86_64-unknown-linux-gnu
+2026-11-19T07:13:17.8292473Z 
+2026-11-19T07:13:17.8307088Z ##[end-action id=__taiki-e_install-action.__run;outcome=success;conclusion=success;duration_ms=360]
+2026-11-19T07:13:17.8311844Z ##[start-action display=Run Set-StrictMode -Version Latest;id=__taiki-e_install-action.__run_2]
+2026-11-19T07:13:17.8315778Z ##[end-action id=__taiki-e_install-action.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-11-19T07:13:17.8350780Z ##[group]Run flags=$(scripts/test-shards.sh 2)
+2026-11-19T07:13:17.8351417Z flags=$(scripts/test-shards.sh 2)
+2026-11-19T07:13:17.8351839Z read -ra targets <<<"$flags"
+2026-11-19T07:13:17.8352313Z cargo nextest run --locked --no-fail-fast --workspace "${targets[@]}"
+2026-11-19T07:13:17.8453547Z shell: /usr/bin/bash -e {0}
+2026-11-19T07:13:17.8475251Z env:
+2026-11-19T07:13:17.8475614Z   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+2026-11-19T07:13:17.8476062Z   CARGO_HOME: /home/runner/.cargo
+2026-11-19T07:13:17.8476417Z   CARGO_INCREMENTAL: 0
+2026-11-19T07:13:17.8476698Z   CARGO_TERM_COLOR: always
+2026-11-19T07:13:17.8477238Z   CACHE_ON_FAILURE: false
+2026-11-19T07:13:17.8477498Z ##[endgroup]
+2026-11-19T07:13:17.9918073Z     Updating crates.io index
+2026-11-19T07:13:18.8530589Z    Compiling drover-core v0.1.0 (/home/runner/work/drover/drover/crates/core)
+2026-11-19T07:13:18.8567240Z    Compiling drover-sys v0.1.0 (/home/runner/work/drover/drover/crates/sys)
+2026-11-19T07:13:18.8602919Z    Compiling drover v0.1.0 (/home/runner/work/drover/drover/crates/cli)
+2026-11-19T07:13:32.8634228Z    Compiling drover-server v0.1.0 (/home/runner/work/drover/drover/crates/server)
+2026-11-19T07:13:32.8635904Z    Compiling drover-chat v0.1.0 (/home/runner/work/drover/drover/crates/chat)
+2026-11-19T07:13:46.8869611Z    Compiling drover-service v0.1.0 (/home/runner/work/drover/drover/crates/service)
+2026-11-19T07:14:13.3258842Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 54.59s
+2026-11-19T07:14:13.6187629Z ────────────
+2026-11-19T07:14:13.6189634Z  Nextest run ID e39048f7-fdfc-45be-8197-7c492a2744b3 with nextest profile: default
+2026-11-19T07:14:13.6191541Z     Starting 423 tests across 59 binaries (1 test skipped)
+2026-11-19T07:14:14.0244012Z         PASS [   0.403s] (  1/423) drover::adapter_death an_adapter_killed_by_a_signal_names_the_signal_its_last_stderr_line_and_acp_message
+2026-11-19T07:14:14.0429867Z         PASS [   0.424s] (  2/423) drover::api_v1_ops a_backlog_issue_gets_a_thread_or_closes
+2026-11-19T07:14:14.1011946Z         PASS [   0.077s] (  3/423) drover::api_v1_ops act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns
+2026-11-19T07:14:14.1118797Z         PASS [   0.068s] (  4/423) drover::api_v1_ops herd_and_roles_read_through_api_v1
+2026-11-19T07:14:14.1647342Z         PASS [   0.063s] (  5/423) drover::api_v1_ops menu_is_refused_shed_reports_no_menu
+2026-11-19T07:14:14.2748112Z         PASS [   0.163s] (  6/423) drover::api_v1_ops send_prompts_a_lane_with_the_boards_refusals_and_rate_limit
+2026-11-19T07:14:14.3441254Z         PASS [   0.724s] (  7/423) drover::adapter_death an_exit_heard_on_shed_events_carries_the_same_last_words
+2026-11-19T07:14:14.3455052Z         PASS [   0.071s] (  8/423) drover::api_v1_ops setup_starts_a_configured_terminal_and_reads_its_screen
+2026-11-19T07:14:14.3625349Z         PASS [   0.197s] (  9/423) drover::api_v1_ops set_takes_json_and_chat_writes_the_new_thread_defaults
+2026-11-19T07:14:14.4069164Z         PASS [   0.061s] ( 10/423) drover::autonomy an_owner_answer_breaks_autonomy_and_an_orchestrator_answer_does_not
+2026-11-19T07:14:14.4244500Z         PASS [   0.062s] ( 11/423) drover::autonomy explain_prints_the_owner_action_table
+2026-11-19T07:14:14.4794309Z         PASS [   0.072s] ( 12/423) drover::autonomy json_matches_the_table
+2026-11-19T07:14:14.5417665Z         PASS [   0.117s] ( 13/423) drover::autonomy since_and_weeks_cut_where_they_say
+2026-11-19T07:14:14.6456515Z         PASS [   0.103s] ( 14/423) drover::brief_golden briefs_carry_the_test_antipatterns
+2026-11-19T07:14:14.6957305Z         PASS [   0.216s] ( 15/423) drover::autonomy the_owners_verdict_and_spawn_count_and_a_lanes_do_not
+2026-11-19T07:14:14.8843551Z         PASS [   0.189s] ( 16/423) drover::brief_golden only_a_repro_issues_briefs_carry_the_repro_steps
+2026-11-19T07:14:14.9363106Z         PASS [   0.290s] ( 17/423) drover::brief_golden lane_briefs_match_staging
+2026-11-19T07:14:15.0451464Z         PASS [   0.108s] ( 18/423) drover::chat_tab a_device_that_is_not_paired_reads_the_thread_but_cannot_write
+2026-11-19T07:14:15.1749754Z         PASS [   1.553s] ( 19/423) drover::adapter_death six_lanes_of_one_host_dying_in_a_minute_come_back_in_one_pass_with_one_alert
+2026-11-19T07:14:15.2322798Z         PASS [   0.187s] ( 20/423) drover::chat_tab a_failed_delivery_shows_red_with_retry_and_retry_types_it_again
+2026-11-19T07:14:15.3640237Z         PASS [   0.188s] ( 21/423) drover::chat_tab a_finished_turns_commands_fold_and_the_live_turns_stay_open
+2026-11-19T07:14:15.4204896Z         PASS [   0.188s] ( 22/423) drover::chat_tab a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_retitles_it
+2026-11-19T07:14:15.5950250Z         PASS [   0.173s] ( 23/423) drover::chat_tab a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time
+2026-11-19T07:14:15.8180463Z         PASS [   0.454s] ( 24/423) drover::chat_tab a_large_attachment_arrives_whole_over_the_socket
+2026-11-19T07:14:15.8880602Z         PASS [   0.292s] ( 25/423) drover::chat_tab a_message_is_answered_once_logged_and_typed_into_the_conductor_after
+2026-11-19T07:14:16.0010973Z         PASS [   0.183s] ( 26/423) drover::chat_tab a_message_with_three_images_delivers_all_three_and_eleven_are_refused
+2026-11-19T07:14:16.0741177Z         PASS [   0.075s] ( 27/423) drover::chat_tab a_reply_file_from_a_lane_worktree_is_copied_into_the_thread_folder
+2026-11-19T07:14:16.1939773Z         PASS [   0.118s] ( 28/423) drover::chat_tab a_restored_shed_thread_resumes_its_orchestrators_session
+2026-11-19T07:14:19.5437322Z         PASS [   5.200s] ( 29/423) drover::ask_scale the_needs_and_chat_views_are_linear_in_the_log_and_one_event_updates_the_index
+2026-11-19T07:14:19.6672246Z         PASS [   0.123s] ( 30/423) drover::chat_tab a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_the_conductor
+2026-11-19T07:14:19.8672246Z         PASS [   0.200s] ( 31/423) drover::chat_tab an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline
+2026-11-19T07:14:20.0015036Z         PASS [   0.134s] ( 32/423) drover::chat_tab archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it
+2026-11-19T07:14:20.1167848Z         PASS [   0.115s] ( 33/423) drover::chat_tab the_service_worker_answers_a_thread_file_navigation_with_the_file
+2026-11-19T07:14:20.4677512Z         PASS [   4.581s] ( 34/423) drover::chat_tab a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
+2026-11-19T07:14:20.8346465Z         PASS [   0.367s] ( 35/423) drover::ci_templates nightly_red_runs_the_full_ci_and_reports_its_result
+2026-11-19T07:14:20.8360199Z         PASS [   0.719s] ( 36/423) drover::ci_templates ci_runs_on_labeled_with_a_run_unique_group_for_other_labels
+2026-11-19T07:14:20.8803202Z         PASS [   0.046s] ( 37/423) drover::cloud a_cloud_key_file_others_can_read_is_refused
+2026-11-19T07:14:20.8807404Z         PASS [   0.045s] ( 38/423) drover::cloud a_failed_bootstrap_step_shows_its_command_exit_code_and_output_and_logs_them
+2026-11-19T07:14:20.9205119Z         PASS [   0.040s] ( 39/423) drover::cloud a_failed_wip_push_aborts_the_stop
+2026-11-19T07:14:20.9232156Z         PASS [   0.042s] ( 40/423) drover::cloud a_failing_status_is_not_gone
+2026-11-19T07:14:20.9569177Z         PASS [   0.034s] ( 41/423) drover::cloud a_lost_end_marker_keeps_later_blocks_and_a_bad_address_is_refused
+2026-11-19T07:14:20.9897439Z         PASS [   0.032s] ( 42/423) drover::cloud a_recipe_without_key_env_runs_its_command_with_no_key
+2026-11-19T07:14:21.0285197Z         PASS [   0.108s] ( 43/423) drover::cloud a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns
+2026-11-19T07:14:21.0306428Z         PASS [   0.041s] ( 44/423) drover::cloud a_running_cloud_host_at_max_working_leaves_the_lane_held_on_the_busy_mac
+2026-11-19T07:14:21.0959521Z         PASS [   0.066s] ( 45/423) drover::cloud a_running_cloud_host_takes_a_lane_at_once_while_every_mac_is_busy_and_says_why
+2026-11-19T07:14:21.1400107Z         PASS [   0.109s] ( 46/423) drover::cloud a_shed_frozen_by_the_snapshot_is_restarted_once_then_fails_the_snapshot
+2026-11-19T07:14:21.1420824Z         PASS [   0.047s] ( 47/423) drover::cloud a_snapshot_needs_a_green_health_check_first
+2026-11-19T07:14:21.1780394Z         PASS [   0.037s] ( 48/423) drover::cloud a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enough
+2026-11-19T07:14:21.2146589Z         PASS [   0.072s] ( 49/423) drover::cloud an_idle_cloud_host_saves_each_lane_to_wip_then_stops
+2026-11-19T07:14:21.2260425Z         PASS [   0.047s] ( 50/423) drover::cloud an_issue_whose_last_lane_ran_on_the_busy_mac_goes_to_the_running_cloud_host
+2026-11-19T07:14:21.2659772Z         PASS [   0.038s] ( 51/423) drover::cloud bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_secrets
+2026-11-19T07:14:21.2748096Z         PASS [   0.060s] ( 52/423) drover::cloud an_unreachable_host_aborts_the_stop_and_destroy_saves_first
+2026-11-19T07:14:21.3009137Z         PASS [   0.036s] ( 53/423) drover::cloud bootstrap_installs_and_checks_the_real_exe_the_guard_runs_not_its_symlink
+2026-11-19T07:14:21.3157874Z         PASS [   0.041s] ( 54/423) drover::cloud bootstrap_installs_shed_from_its_latest_main_only_when_none_answers
+2026-11-19T07:14:21.3445938Z         PASS [   0.043s] ( 55/423) drover::cloud bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_terminal
+2026-11-19T07:14:21.3953984Z         PASS [   0.080s] ( 56/423) drover::cloud bootstrap_keeps_any_shed_that_answers_whatever_its_build
+2026-11-19T07:14:21.4233318Z         PASS [   0.078s] ( 57/423) drover::cloud bootstrap_links_a_stale_real_local_bin_drover_that_health_showed_with_both_versions
+2026-11-19T07:14:21.4435890Z         PASS [   0.048s] ( 58/423) drover::cloud bootstrap_of_a_vm_deleted_outside_drover_logs_it_gone_and_creates_it
+2026-11-19T07:14:21.4726517Z         PASS [   0.049s] ( 59/423) drover::cloud bootstrap_of_a_vm_stopped_outside_drover_logs_it_stopped_starts_it_and_repins
+2026-11-19T07:14:21.5011624Z         PASS [   0.057s] ( 60/423) drover::cloud bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there
+2026-11-19T07:14:21.5458878Z         PASS [   0.073s] ( 61/423) drover::cloud bootstrap_writes_the_oom_policy_drop_in_before_it_enables_the_shed_job
+2026-11-19T07:14:21.6246569Z         PASS [   0.124s] ( 62/423) drover::cloud the_budget_warns_at_80_percent_and_refuses_when_used_up
+2026-11-19T07:14:21.6277185Z         PASS [   0.082s] ( 63/423) drover::cloud the_dry_run_names_the_host_it_picked_and_why
+2026-11-19T07:14:21.6735961Z         PASS [   0.048s] ( 64/423) drover::cloud the_provider_key_never_reaches_argv_or_the_log
+2026-11-19T07:14:21.6772546Z         PASS [   0.049s] ( 65/423) drover::cloud the_ssh_include_rewrite_is_idempotent_and_keeps_other_blocks
+2026-11-19T07:14:21.6817439Z         PASS [   0.008s] ( 66/423) drover::cloud the_token_expiry_parses_and_warns_from_14_days
+2026-11-19T07:14:21.7171355Z         PASS [   0.040s] ( 67/423) drover::cloud tick_logs_a_vm_deleted_outside_drover_gone_once_and_stops_counting_its_spend
+2026-11-19T07:14:21.7201056Z         PASS [   0.038s] ( 68/423) drover::cloud tick_logs_a_vm_stopped_outside_drover_once_and_stops_counting_its_spend
+2026-11-19T07:14:22.0463928Z         PASS [   0.329s] ( 69/423) drover::compaction a_5mb_build_cloned_is_stored_in_16kb
+2026-11-19T07:14:22.0883025Z         PASS [   0.041s] ( 70/423) drover::compaction build_cloned_rows_from_before_978_move_their_errors_to_cache
+2026-11-19T07:14:22.1591927Z         PASS [   0.070s] ( 71/423) drover::compaction compaction_archives_old_done_issues_and_deletes_old_heartbeats
+2026-11-19T07:14:22.2945273Z         PASS [   0.135s] ( 72/423) drover::compaction the_shared_read_follows_appends_and_compaction
+2026-11-19T07:14:22.3649416Z         PASS [   6.171s] ( 73/423) drover::chat_tab a_stream_with_a_thread_open_stamps_its_watch_file
+2026-11-19T07:14:22.3939551Z         PASS [   7.509s] ( 74/423) drover::chat_scale the_chat_tab_is_linear_in_the_log_and_cached_by_its_last_seq
+2026-11-19T07:14:22.4802918Z         PASS [   0.084s] ( 75/423) drover::cooee_profiles a_started_chat_is_linked_once_and_takes_no_lane_asks
+2026-11-19T07:14:22.5009153Z         PASS [   0.023s] ( 76/423) drover::cooee_profiles an_orchestrator_id_cooee_cannot_name_is_refused_at_load
+2026-11-19T07:14:22.6499692Z         PASS [   0.145s] ( 77/423) drover::cooee_profiles each_orchestrator_is_served_with_the_owners_instructions_and_drovers_hook
+2026-11-19T07:14:22.6718740Z         PASS [   0.308s] ( 78/423) drover::cooee_profiles a_cooee_chat_posts_each_owner_card_and_reads_how_it_settled
+2026-11-19T07:14:22.8207029Z         PASS [   0.148s] ( 79/423) drover::design_orphan a_pane_adopted_once_is_never_adopted_again
+2026-11-19T07:14:23.2307542Z         PASS [   0.410s] ( 80/423) drover::design_orphan a_respawn_is_named_after_the_build_lane
+2026-11-19T07:14:24.0034772Z         PASS [   0.772s] ( 81/423) drover::design_orphan the_install_repair_unparks_a_lane_ends_a_design_adoption_caused
+2026-11-19T07:14:24.0838239Z         PASS [   0.080s] ( 82/423) drover::disk a_builder_with_a_pass_frees_its_build_folders
+2026-11-19T07:14:24.2014514Z         PASS [   0.117s] ( 83/423) drover::disk a_missing_root_counts_zero
+2026-11-19T07:14:24.2659414Z         PASS [   0.063s] ( 84/423) drover::disk a_reviewer_verdict_frees_its_build_folders
+2026-11-19T07:14:24.3170342Z         PASS [   0.050s] ( 85/423) drover::disk a_verdict_frees_its_reviewers_scratch
+2026-11-19T07:14:24.7129211Z         PASS [   0.395s] ( 86/423) drover::disk drive_refuses_starts_over_budget
+2026-11-19T07:14:25.3659194Z         PASS [   0.653s] ( 87/423) drover::disk leftovers_are_saved_to_wip_or_kept_on_a_secret
+2026-11-19T07:14:25.4827263Z         PASS [   0.119s] ( 88/423) drover::disk orphans_are_listed_and_removed_only_with_the_flag
+2026-11-19T07:14:25.5065463Z         PASS [   2.859s] ( 89/423) drover::design_orphan a_finished_design_lane_is_adopted_once_and_never_hides_the_fix_round
+2026-11-19T07:14:25.6133004Z         PASS [   0.130s] ( 90/423) drover::disk orphans_are_removed_for_a_paired_device_only
+2026-11-19T07:14:25.6649631Z         PASS [   0.158s] ( 91/423) drover::disk over_budget_frees_waiting_lanes_longest_waiting_first
+2026-11-19T07:14:25.7320501Z         PASS [   0.067s] ( 92/423) drover::disk the_budget_counts_a_hard_link_and_a_clone_once
+2026-11-19T07:14:25.7878190Z         PASS [   0.174s] ( 93/423) drover::disk parity_r24_over_budget_frees_the_idlest_lane_first_then_disk_budget
+2026-11-19T07:14:26.5759697Z         PASS [   0.787s] ( 94/423) drover::disk two_hosts_saving_one_lane_in_the_same_second_get_two_branches
+2026-11-19T07:14:26.7134525Z         PASS [   0.138s] ( 95/423) drover::doctor a_hook_naming_another_binary_is_named
+2026-11-19T07:14:26.7945465Z         PASS [   0.080s] ( 96/423) drover::doctor a_login_shell_exporting_the_token_warns
+2026-11-19T07:14:26.8795212Z         PASS [   0.085s] ( 97/423) drover::doctor a_long_tick_with_a_fresh_heartbeat_is_running_not_stuck
+2026-11-19T07:14:26.9280557Z         PASS [   1.196s] ( 98/423) drover::disk the_hourly_sweep_runs_once_per_hour
+2026-11-19T07:14:26.9789229Z         PASS [   0.098s] ( 99/423) drover::doctor a_missing_merge_label_is_red_with_its_create_command_then_green
+2026-11-19T07:14:27.0659368Z         PASS [   0.135s] (100/423) drover::doctor a_paused_self_update_shows_in_doctor_and_the_board
+2026-11-19T07:14:27.0808847Z         PASS [   0.102s] (101/423) drover::doctor a_serve_on_the_port_the_job_does_not_own_is_red
+2026-11-19T07:14:27.1879447Z         PASS [   0.107s] (102/423) drover::doctor an_archived_fleet_repo_is_named_with_its_fix
+2026-11-19T07:14:27.1898641Z         PASS [   0.124s] (103/423) drover::doctor all_good_exits_zero_and_never_writes
+2026-11-19T07:14:27.3339814Z         PASS [   0.147s] (104/423) drover::doctor bad_config_and_hermes_profiles
+2026-11-19T07:14:27.4715711Z         PASS [   0.137s] (105/423) drover::doctor hygiene_is_on_by_default_and_drift_is_flagged
+2026-11-19T07:14:27.4827482Z         PASS [   0.011s] (106/423) drover::doctor launchd_row_follows_the_configured_label
+2026-11-19T07:14:27.5992679Z         PASS [   0.116s] (107/423) drover::doctor retired_account_keys_warn_until_they_are_dropped
+2026-11-19T07:14:27.7392845Z         PASS [   0.140s] (108/423) drover::doctor secrets_never_echo
+2026-11-19T07:14:28.1394908Z         PASS [   0.395s] (109/423) drover::doctor spawns_row_dedupes_stale_names
+2026-11-19T07:14:28.2229155Z         PASS [   0.089s] (110/423) drover::doctor tailscale_missing_is_a_warning
+2026-11-19T07:14:28.2390591Z         PASS [   1.049s] (111/423) drover::doctor each_check_fails_with_its_fix_and_exit_one
+2026-11-19T07:14:28.3219274Z         PASS [   0.097s] (112/423) drover::doctor warnings_do_not_fail
+2026-11-19T07:14:29.0854620Z         PASS [   7.363s] (113/423) drover::compaction a_compaction_that_moves_nothing_keeps_the_shared_log
+2026-11-19T07:14:30.4341525Z         FAIL [   2.197s] (114/423) drover::drive_sim a_busy_tick_past_the_tick_slo_is_never_stopped_and_every_fleet_finishes_its_pass
+2026-11-19T07:14:30.4343481Z   stdout ───
+2026-11-19T07:14:30.4343906Z 
+2026-11-19T07:14:30.4344097Z     running 1 test
+2026-11-19T07:14:30.4345020Z     test a_busy_tick_past_the_tick_slo_is_never_stopped_and_every_fleet_finishes_its_pass ... FAILED
+2026-11-19T07:14:30.4345753Z 
+2026-11-19T07:14:30.4345931Z     failures:
+2026-11-19T07:14:30.4346601Z 
+2026-11-19T07:14:30.4346982Z     failures:
+2026-11-19T07:14:30.4347759Z         a_busy_tick_past_the_tick_slo_is_never_stopped_and_every_fleet_finishes_its_pass
+2026-11-19T07:14:30.4348405Z 
+2026-11-19T07:14:30.4349040Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 2.18s
+2026-11-19T07:14:30.4349982Z     
+2026-11-19T07:14:30.4350943Z   stderr ───
+2026-11-19T07:14:30.4351494Z 
+2026-11-19T07:14:30.4353120Z     thread 'a_busy_tick_past_the_tick_slo_is_never_stopped_and_every_fleet_finishes_its_pass' (6471) panicked at crates/cli/tests/drive_sim.rs:560:5:
+2026-11-19T07:14:30.4354561Z     the tick ran 540 s
+2026-11-19T07:14:30.4355563Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+2026-11-19T07:14:30.4356205Z 
+2026-11-19T07:14:31.1629831Z         PASS [   2.842s] (115/423) drover::drive_sim a_passed_draft_pr_is_marked_ready_and_merged
+2026-11-19T07:14:32.1309883Z         PASS [   1.697s] (116/423) drover::drive_sim a_tick_hung_on_ssh_is_stopped_within_the_slo_and_the_next_tick_runs
+2026-11-19T07:14:33.2137264Z         PASS [   1.083s] (117/423) drover::drive_sim worktrees_sharing_files_count_once_and_hold_no_spawn
+2026-11-19T07:14:33.3589650Z         PASS [   0.145s] (118/423) drover::events_tab an_open_ask_row_opens_its_choice_recommended_first_and_an_answered_one_offers_none
+2026-11-19T07:14:33.3699484Z         PASS [   0.009s] (119/423) drover::events_tab parity_83_each_kind_has_its_glyph_colour_and_weight
+2026-11-19T07:14:33.4338244Z         PASS [   0.065s] (120/423) drover::fleet_rename a_failure_mid_move_leaves_the_original_state
+2026-11-19T07:14:33.5335870Z         PASS [   0.100s] (121/423) drover::fleet_rename rename_moves_everything_and_the_old_name_resolves
+2026-11-19T07:14:33.6253068Z         PASS [   0.091s] (122/423) drover::fleet_rename rename_refuses_unpaused_live_or_taken
+2026-11-19T07:14:34.2330905Z         PASS [   3.070s] (123/423) drover::drive_sim an_offline_hosts_lanes_restart_on_the_main_host_after_15_minutes
+2026-11-19T07:14:34.9078573Z         PASS [   0.674s] (124/423) drover::handover a_job_started_serve_takes_the_port_from_a_same_build_serve_it_does_not_own
+2026-11-19T07:14:35.2074931Z         PASS [   0.300s] (125/423) drover::handover a_second_serve_on_a_port_its_own_build_holds_exits_0_once
+2026-11-19T07:14:35.5289786Z         PASS [   0.321s] (126/423) drover::handover a_serve_on_a_port_an_older_build_holds_has_it_hand_over_to_this_binary
+2026-11-19T07:14:40.0956984Z         PASS [   6.471s] (127/423) drover::handover a_handover_fails_no_request_and_loses_no_live_event
+2026-11-19T07:14:43.5411468Z         PASS [  14.457s] (128/423) drover::drive_sim a_silent_reviewer_is_superseded_and_the_review_completes
+2026-11-19T07:14:46.1566415Z         PASS [  10.628s] (129/423) drover::handover a_serve_over_its_memory_limit_hands_over_with_no_failed_request
+2026-11-19T07:14:46.4709670Z         PASS [   0.314s] (130/423) drover::history the_events_api_reads_a_seq_window
+2026-11-19T07:14:46.4764218Z         PASS [   0.006s] (131/423) drover::host_sample a_sample_never_sleeps_and_starts_one_process_per_host
+2026-11-19T07:14:46.4871411Z         PASS [   0.010s] (132/423) drover::host_sample the_rate_comes_from_the_last_kept_count_with_none_on_the_first
+2026-11-19T07:14:46.5513300Z         PASS [   0.063s] (133/423) drover::host_slots a_pending_start_counts_only_against_its_own_host
+2026-11-19T07:14:47.3099621Z         PASS [   0.759s] (134/423) drover::host_slots a_ready_or_needs_human_lane_holds_no_slot_even_if_its_agent_works
+2026-11-19T07:14:47.3180079Z         PASS [   7.220s] (135/423) drover::handover a_serve_started_by_a_handover_hands_over_again_past_its_memory_limit
+2026-11-19T07:14:47.4185338Z         PASS [   0.108s] (136/423) drover::host_slots a_recorded_rev_verdict_closes_the_rev_pane
+2026-11-19T07:14:47.4568521Z         PASS [   0.038s] (137/423) drover::host_slots an_offline_host_and_a_full_one_leave_the_idle_host_free
+2026-11-19T07:14:47.6523399Z         PASS [  25.358s] (138/423) drover::compaction the_tables_match_the_events_and_a_rebuild_gives_identical_rows
+2026-11-19T07:14:47.7717409Z         PASS [   0.456s] (139/423) drover::host_slots acp_panes_between_turns_hold_no_slot_and_a_new_start_is_placed
+2026-11-19T07:14:47.8537159Z         PASS [   0.397s] (140/423) drover::host_slots four_mid_turn_acp_panes_fill_the_host_whatever_idle_ones_sit_there
+2026-11-19T07:14:47.8912073Z         PASS [   0.037s] (141/423) drover::host_slots when_every_up_host_is_full_the_hold_never_names_the_offline_one
+2026-11-19T07:14:48.0406478Z         PASS [   0.388s] (142/423) drover::host_slots kicked_starts_count_against_the_cap_before_any_lane_is_up
+2026-11-19T07:14:48.5343275Z         PASS [   0.762s] (143/423) drover::host_slots over_max_working_a_start_waits_then_starts_when_a_lane_finishes
+2026-11-19T07:14:48.5827917Z         PASS [   5.041s] (144/423) drover::handover a_serve_that_starts_over_its_memory_limit_logs_once_and_keeps_serving
+2026-11-19T07:14:48.6170743Z         PASS [   0.726s] (145/423) drover::host_slots with_max_simulators_one_a_second_sim_lane_waits
+2026-11-19T07:14:48.7072113Z         PASS [   0.090s] (146/423) drover::in_flight a_held_issue_with_an_open_pr_counts_and_force_overrides_the_refusal_logged
+2026-11-19T07:14:49.0167285Z         PASS [   0.482s] (147/423) drover::host_spared a_disabled_host_with_a_live_lane_there_is_still_looked_at
+2026-11-19T07:14:49.0552361Z         PASS [   0.472s] (148/423) drover::host_spared a_disabled_host_with_no_lane_there_gets_no_ssh_from_a_tick_or_status
+2026-11-19T07:14:49.2073687Z         PASS [   0.152s] (149/423) drover::in_flight the_cap_defaults_to_8_and_0_turns_it_off
+2026-11-19T07:14:49.2290992Z         PASS [   1.188s] (150/423) drover::host_spared a_changed_host_key_alerts_once_and_is_never_retried_in_a_loop
+2026-11-19T07:14:49.2724061Z         PASS [   0.065s] (151/423) drover::lane_host_move a_running_terminal_on_the_old_host_is_never_removed
+2026-11-19T07:14:49.2939340Z         PASS [   0.065s] (152/423) drover::lane_host_move an_exited_terminal_on_the_old_host_is_ignored_and_removed
+2026-11-19T07:14:49.3547922Z         PASS [   0.061s] (153/423) drover::lane_host_move the_spawn_hosts_exit_still_records_gone_with_its_cause
+2026-11-19T07:14:49.3916254Z         PASS [   0.037s] (154/423) drover::lesson a_failing_shadow_check_passes_ci_and_the_summary_shows_would_fail
+2026-11-19T07:14:49.4375856Z         PASS [   0.046s] (155/423) drover::lesson a_lesson_pr_is_reviewed_by_its_own_rules_as_before
+2026-11-19T07:14:49.4703013Z         PASS [   0.454s] (156/423) drover::in_flight at_the_cap_drive_starts_no_new_issue_and_every_view_says_so
+2026-11-19T07:14:49.4952067Z         PASS [   0.057s] (157/423) drover::lesson a_pr_that_deletes_every_rule_is_reviewed_by_the_integration_rules
+2026-11-19T07:14:49.5163619Z         PASS [   0.021s] (158/423) drover::lesson a_rules_file_over_30_lines_fails_the_check
+2026-11-19T07:14:49.5980210Z         PASS [   0.081s] (159/423) drover::lesson briefs_carry_the_shared_pack_before_the_repo_rules
+2026-11-19T07:14:49.6082046Z         PASS [   0.334s] (160/423) drover::lane_host_move the_old_hosts_exit_events_stamp_nothing
+2026-11-19T07:14:49.6099831Z         PASS [   0.901s] (161/423) drover::in_flight a_review_spawn_is_not_held_by_the_cap_and_a_merge_frees_a_slot_for_the_next_in_queue_order
+2026-11-19T07:14:49.6234509Z         PASS [   0.153s] (162/423) drover::lesson a_prose_only_lesson_pr_is_a_fail
+2026-11-19T07:14:49.6675797Z         PASS [   0.070s] (163/423) drover::lesson digest_shows_the_last_week_and_redacts_secrets
+2026-11-19T07:14:49.6911636Z         PASS [   0.084s] (164/423) drover::lesson lesson_apply_promotes_and_retires_by_history_and_never_touches_hand_written_checks
+2026-11-19T07:14:49.7125033Z         PASS [   0.104s] (165/423) drover::lesson lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change
+2026-11-19T07:14:49.7802051Z         PASS [   0.157s] (166/423) drover::lesson lessons_missed_fires_once_after_8_days_and_never_when_off
+2026-11-19T07:14:49.7866160Z         PASS [   0.119s] (167/423) drover::lesson rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine
+2026-11-19T07:14:49.8031634Z         PASS [   0.023s] (168/423) drover::m3 agent_doc_and_roles_cover_m3
+2026-11-19T07:14:49.8359645Z         PASS [   0.049s] (169/423) drover::m3 board_matches_fixture_and_fits_phone_width
+2026-11-19T07:14:49.8635877Z         PASS [   0.028s] (170/423) drover::m3 pr_judges_and_counts_the_latest_run_of_each_check
+2026-11-19T07:14:49.8697302Z         PASS [   0.066s] (171/423) drover::m3 next_skips_blocked_and_live_lane_items
+2026-11-19T07:14:49.9331264Z         PASS [   0.070s] (172/423) drover::m3 pr_makes_one_gh_call_per_60s
+2026-11-19T07:14:49.9892756Z         PASS [   0.056s] (173/423) drover::m3 queue_survives_torn_last_line
+2026-11-19T07:14:49.9993990Z         PASS [   0.130s] (174/423) drover::m3 queue_add_mv_rm_block_ordering
+2026-11-19T07:14:50.0238261Z         PASS [   0.024s] (175/423) drover::m3 spec_is_refetched_only_when_updated_at_moves
+2026-11-19T07:14:50.0697122Z         PASS [   0.046s] (176/423) drover::m3 wait_exit_codes
+2026-11-19T07:14:50.1572606Z         PASS [   0.168s] (177/423) drover::m3 serve_is_read_only_html
+2026-11-19T07:14:50.1880759Z         PASS [   0.119s] (178/423) drover::m3_fixes clean_reaches_adopted_lanes_of_merged_issues
+2026-11-19T07:14:50.1935294Z         PASS [   0.036s] (179/423) drover::m3_fixes merged_issue_never_leaves_merged
+2026-11-19T07:14:50.2375799Z         PASS [   0.049s] (180/423) drover::m3_fixes notifier_runs_without_lane_hermes_env
+2026-11-19T07:14:50.2418128Z         PASS [   0.048s] (181/423) drover::m3_fixes spawn_and_adopt_on_merged_issue_are_refused
+2026-11-19T07:14:50.2448728Z         PASS [   0.007s] (182/423) drover::needs_human a_new_kind_reaches_a_default_phone_only_when_emitted_with_push
+2026-11-19T07:14:50.3083078Z         PASS [   0.067s] (183/423) drover::needs_human a_recorded_extension_is_a_pending_line_without_buttons
+2026-11-19T07:14:50.3409046Z         PASS [   0.096s] (184/423) drover::needs_human card_ops_need_needs_human_and_a_refused_extend_logs_nothing
+2026-11-19T07:14:50.3678559Z         PASS [   0.059s] (185/423) drover::needs_human card_with_a_fail_has_no_merge_anyway
+2026-11-19T07:14:50.3752906Z         PASS [   0.007s] (186/423) drover::needs_human needs_human_pushes_with_the_default_on
+2026-11-19T07:14:50.4173642Z         PASS [   0.076s] (187/423) drover::needs_human herd_marks_the_issue_and_park_clears_the_card
+2026-11-19T07:14:50.4333651Z         PASS [   0.058s] (188/423) drover::needs_human parity_67_card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only
+2026-11-19T07:14:50.5309457Z         PASS [   0.816s] (189/423) drover::lesson tick_skips_lesson_for_a_young_or_quiet_fleet
+2026-11-19T07:14:50.5772238Z         PASS [   0.144s] (190/423) drover::orchestrator_cold_start a_failed_background_start_shows_in_the_thread_its_message_kept
+2026-11-19T07:14:50.8989873Z         PASS [   1.208s] (191/423) drover::lesson tick_runs_lesson_once_a_week_and_never_when_off
+2026-11-19T07:14:51.0013887Z         PASS [   0.424s] (192/423) drover::owner_extend a_board_tap_logs_and_requeues_at_once_and_never_bounces_on_a_running_drive
+2026-11-19T07:14:51.2852829Z         PASS [   0.868s] (193/423) drover::orchestrator_cold_start a_blocked_orchestrator_start_holds_no_request
+2026-11-19T07:14:51.3577627Z         PASS [   0.072s] (194/423) drover::owner_extend an_extend_out_of_the_queue_goes_last
+2026-11-19T07:14:51.7304435Z         PASS [   0.831s] (195/423) drover::owner_extend a_hard_refusal_of_the_start_brings_the_card_back_naming_the_code
+2026-11-19T07:14:51.7496427Z         PASS [   1.221s] (196/423) drover::owner_extend a_975_pending_extend_is_requeued_once_and_its_card_never_comes_back
+2026-11-19T07:14:51.9321063Z         PASS [   0.574s] (197/423) drover::owner_extend an_extend_requeues_at_its_old_place_spawns_nothing_and_drive_starts_it_in_turn
+2026-11-19T07:14:52.6759938Z         PASS [   1.672s] (198/423) drover::owner_extend a_paused_then_busy_extend_waits_hours_with_no_card_and_starts_after_resume_with_no_tap
+2026-11-19T07:14:52.6839400Z         PASS [   0.009s] (199/423) drover::perf a_new_event_costs_the_same_on_a_log_twice_as_long
+2026-11-19T07:14:56.4063648Z         PASS [   4.657s] (200/423) drover::perf a_fast_step_over_50k_worktree_files_walks_none_of_them
+2026-11-19T07:14:56.5213433Z         PASS [   3.838s] (201/423) drover::perf a_pass_over_20_open_prs_reads_the_pr_cache_file_once
+2026-11-19T07:14:57.5895733Z         PASS [   5.657s] (202/423) drover::perf a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget
+2026-11-19T07:14:58.0889380Z         PASS [   0.499s] (203/423) drover::perf a_recorded_verdict_and_a_merged_lane_are_never_read
+2026-11-19T07:15:01.2064041Z         PASS [   4.685s] (204/423) drover::perf a_pass_over_30k_events_and_150_done_issues_stays_fast
+2026-11-19T07:15:02.0561479Z         PASS [   5.650s] (205/423) drover::perf a_pass_over_30_lanes_on_4_boats_at_700ms_a_call_is_under_20s_and_drive_slow_names_each_host
+2026-11-19T07:15:02.0649622Z         PASS [   0.008s] (206/423) drover::perf idle_serve_on_the_live_log_with_its_trickle_replayed
+2026-11-19T07:15:02.8031867Z         PASS [   0.738s] (207/423) drover::perf over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane
+2026-11-19T07:15:03.1463438Z         PASS [   1.940s] (208/423) drover::perf a_step_makes_one_remote_call_per_host_and_requests_make_none
+2026-11-19T07:15:03.2720244Z         PASS [   0.469s] (209/423) drover::perf parity_3_the_loader_and_the_age_are_one_strip_under_the_header
+2026-11-19T07:15:05.3550117Z         PASS [  13.624s] (210/423) drover::perf a_big_fold_holds_up_no_other_logs_read
+2026-11-19T07:15:05.3608498Z         PASS [   0.006s] (211/423) drover::perf serve_cpu_child
+2026-11-19T07:15:07.3798122Z         PASS [   4.233s] (212/423) drover::perf parity_r6_waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log
+2026-11-19T07:15:07.4158314Z         PASS [   0.036s] (213/423) drover::perf the_first_paint_in_webkit_is_under_300ms
+2026-11-19T07:15:07.5652995Z         PASS [   9.476s] (214/423) drover::perf a_steady_state_live_change_is_one_part_under_5kb
+2026-11-19T07:15:07.9449744Z         PASS [   0.529s] (215/423) drover::perf the_page_carries_no_tab_and_each_part_is_its_own_read
+2026-11-19T07:15:08.0715814Z         PASS [   0.127s] (216/423) drover::pr_snapshot a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet
+2026-11-19T07:15:08.7280038Z         PASS [   0.655s] (217/423) drover::pr_snapshot an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query
+2026-11-19T07:15:08.8252930Z         PASS [   0.098s] (218/423) drover::pr_snapshot status_and_serve_make_no_gh_call
+2026-11-19T07:15:08.8771325Z         PASS [   0.051s] (219/423) drover::pr_snapshot the_merge_gate_reads_checks_from_the_snapshot
+2026-11-19T07:15:08.9028393Z         PASS [   0.025s] (220/423) drover::protection all_protected_exits_zero
+2026-11-19T07:15:08.9269006Z         PASS [   0.024s] (221/423) drover::protection bad_credentials_is_unavailable_with_status
+2026-11-19T07:15:08.9520762Z         PASS [   0.024s] (222/423) drover::protection enforce_admins_off_is_a_warning_line
+2026-11-19T07:15:08.9774120Z         PASS [   0.025s] (223/423) drover::protection one_unprotected_among_fleets_exits_non_zero
+2026-11-19T07:15:09.0022137Z         PASS [   0.024s] (224/423) drover::protection private_free_plan_is_unavailable_with_status
+2026-11-19T07:15:09.0347455Z         PASS [   0.032s] (225/423) drover::protection protection_without_checks_or_reviews_is_incomplete
+2026-11-19T07:15:09.0599816Z         PASS [   0.025s] (226/423) drover::protection repo_with_no_branch_verified_exits_non_zero
+2026-11-19T07:15:09.0847417Z         PASS [   0.024s] (227/423) drover::protection repo_without_main_is_skipped
+2026-11-19T07:15:09.1169020Z         PASS [   0.032s] (228/423) drover::protection transient_failure_is_unavailable_never_bare_error
+2026-11-19T07:15:09.1407850Z         PASS [   0.024s] (229/423) drover::protection unprotected_staging_exits_non_zero
+2026-11-19T07:15:09.2149950Z         PASS [   0.074s] (230/423) drover::queue_titles cached_spec_and_pr_titles_show_in_the_queue_row
+2026-11-19T07:15:09.3289214Z         PASS [   0.114s] (231/423) drover::queue_titles check_caches_a_queued_issues_spec_once_and_its_row_shows_the_title
+2026-11-19T07:15:09.4181702Z         PASS [   0.089s] (232/423) drover::queue_titles queue_add_reads_an_uncached_title_and_a_backlog_row_has_the_reads
+2026-11-19T07:15:09.4834692Z         PASS [   0.066s] (233/423) drover::queue_titles sw_answers_a_navigation_to_a_json_read_with_the_page
+2026-11-19T07:15:09.6002312Z         PASS [   0.116s] (234/423) drover::queue_titles sw_never_serves_the_cache_over_a_non_200
+2026-11-19T07:15:09.6697517Z         PASS [   0.069s] (235/423) drover::queue_titles uncached_rows_have_no_title_and_make_no_gh_call
+2026-11-19T07:15:09.6794421Z         PASS [   0.009s] (236/423) drover::readme doc_links_resolve
+2026-11-19T07:15:09.7172912Z         PASS [   0.037s] (237/423) drover::readme docs_leak_no_ids_tokens_or_personal_paths
+2026-11-19T07:15:09.7259510Z         PASS [   0.008s] (238/423) drover::readme docs_name_no_real_tailnet_host
+2026-11-19T07:15:10.1178921Z         PASS [   0.390s] (239/423) drover::readme quick_start_runs_as_written
+2026-11-19T07:15:10.1538197Z         PASS [   0.037s] (240/423) drover::readme readme_commands_are_in_help_agent
+2026-11-19T07:15:10.1605957Z         PASS [   0.007s] (241/423) drover::readme readme_is_short
+2026-11-19T07:15:10.1673444Z         PASS [   0.006s] (242/423) drover::readme readme_links_setup
+2026-11-19T07:15:10.1841062Z         PASS [   0.017s] (243/423) drover::readme setup_commands_exist
+2026-11-19T07:15:10.1994555Z         PASS [   0.015s] (244/423) drover::readme setup_toml_parses
+2026-11-19T07:15:10.2183515Z         PASS [   0.018s] (245/423) drover::readme table_commands_exist
+2026-11-19T07:15:10.6218357Z         PASS [   0.403s] (246/423) drover::repro a_finished_rev_lanes_verdict_is_recorded_before_drive_supersedes_it
+2026-11-19T07:15:10.7145733Z         PASS [   0.092s] (247/423) drover::repro a_full_run_block_is_recorded_and_a_missing_or_half_one_is_no_repro
+2026-11-19T07:15:11.1360154Z         PASS [   0.421s] (248/423) drover::repro a_later_run_pass_at_the_head_clears_earlier_verify_passes
+2026-11-19T07:15:11.5488069Z         PASS [   0.412s] (249/423) drover::repro a_later_run_pass_at_the_head_does_not_force_the_verify_stage
+2026-11-19T07:15:12.6931550Z         PASS [   1.145s] (250/423) drover::repro a_merge_gate_refusal_at_a_passed_head_is_needs_human_once_and_no_rev_rerun
+2026-11-19T07:15:13.7932008Z         PASS [   1.100s] (251/423) drover::repro a_merge_no_repro_on_a_fleet_without_verify_is_needs_human_not_a_rerun
+2026-11-19T07:15:14.2319395Z         PASS [   0.438s] (252/423) drover::repro a_repro_verify_pass_goes_to_verify_outside_ui_paths
+2026-11-19T07:15:14.6740141Z         PASS [   0.442s] (253/423) drover::repro a_repro_verify_pass_merges_only_after_a_verify_pass_at_the_head
+2026-11-19T07:15:14.7345103Z         PASS [   0.061s] (254/423) drover::repro a_run_block_needs_two_outputs_and_a_failing_base
+2026-11-19T07:15:14.8117972Z         PASS [   0.076s] (255/423) drover::repro a_verify_block_needs_the_pr_bodys_repro_section_and_its_quote
+2026-11-19T07:15:14.8721184Z         PASS [   0.060s] (256/423) drover::repro a_verify_block_on_a_fleet_without_a_verify_role_is_no_repro_and_a_run_block_records
+2026-11-19T07:15:14.9170215Z         PASS [   0.045s] (257/423) drover::repro an_unmarked_issues_pass_is_never_parsed_for_a_repro_block
+2026-11-19T07:15:14.9512230Z         PASS [   0.033s] (258/423) drover::repro help_agent_documents_repro_and_no_repro
+2026-11-19T07:15:15.0042134Z         PASS [   0.053s] (259/423) drover::repro one_command_fence_with_both_outputs_is_recorded
+2026-11-19T07:15:15.0825400Z         PASS [   0.078s] (260/423) drover::repro queue_set_turns_the_mark_off_and_on
+2026-11-19T07:15:15.8522460Z         PASS [   0.770s] (261/423) drover::respawn_pace a_failed_start_waits_for_room_and_is_never_forced
+2026-11-19T07:15:17.5559375Z         PASS [  14.283s] (262/423) drover::perf parity_r7_no_board_request_starts_a_process
+2026-11-19T07:15:18.5963457Z         PASS [   1.040s] (263/423) drover::respawn_pace respawn_per_pass_is_read_from_limits_and_a_fleet_overrides_it
+2026-11-19T07:15:18.6702520Z         PASS [   0.073s] (264/423) drover::retired_keys check_alerts_a_retired_key_once_and_the_board_shows_it
+2026-11-19T07:15:18.6920631Z         PASS [   0.022s] (265/423) drover::retired_keys config_only_fails_on_a_config_this_build_cannot_load
+2026-11-19T07:15:18.7420701Z         PASS [   0.048s] (266/423) drover::retired_keys parity_r2_a_fleet_toml_from_before_each_retired_key_change_loads
+2026-11-19T07:15:19.0675172Z         PASS [   0.327s] (267/423) drover::round_images a_later_verify_rounds_card_shows_its_own_screenshot_through_the_service_worker
+2026-11-19T07:15:19.1697221Z         PASS [  13.809s] (268/423) drover::perf stats_autonomy_on_a_150k_event_log_stays_under_its_budget
+2026-11-19T07:15:19.3083593Z         PASS [   0.240s] (269/423) drover::round_images a_revised_designs_card_shows_its_own_rounds_png_through_the_service_worker
+2026-11-19T07:15:21.3154959Z         PASS [   2.007s] (270/423) drover::screen_pages done_today_and_the_backlog_come_in_pages_of_100_with_their_filters
+2026-11-19T07:15:21.4965927Z         PASS [   5.644s] (271/423) drover::respawn_pace fifteen_gone_lanes_wait_out_a_busy_host_then_come_back_paced_by_respawn_per_pass
+2026-11-19T07:15:21.5211365Z         PASS [   0.205s] (272/423) drover::screen_pages events_come_in_pages_of_100_by_cursor_with_no_gap_or_duplicate_and_filters_hold_across_pages
+2026-11-19T07:15:21.5406990Z         PASS [   0.044s] (273/423) drover::screen_pages scrolling_the_events_tab_to_its_end_appends_the_next_page_in_place_and_it_paints_within_150ms_in_webkit
+2026-11-19T07:15:21.6069676Z         PASS [   0.066s] (274/423) drover::serve_health a_fleets_pass_over_2_minutes_alerts_drive_slow_naming_its_slowest_step
+2026-11-19T07:15:21.7463202Z         PASS [   0.139s] (275/423) drover::serve_health a_fourth_cold_serve_start_in_a_day_alerts_serve_restarts_once
+2026-11-19T07:15:21.9832575Z         PASS [   0.237s] (276/423) drover::serve_health a_read_handler_that_calls_gh_fails_the_request_path_guard
+2026-11-19T07:15:22.0585847Z         PASS [   0.075s] (277/423) drover::serve_health a_serve_on_the_port_older_than_the_installed_binary_alerts_serve_stale_once
+2026-11-19T07:15:22.1636427Z         PASS [   0.105s] (278/423) drover::serve_health a_serve_that_cannot_take_its_port_logs_each_failure_and_a_fourth_in_an_hour_alerts_serve_loop
+2026-11-19T07:15:23.8958638Z         PASS [   1.732s] (279/423) drover::serve_health each_route_groups_p95_stays_within_50ms_on_the_fixture_state
+2026-11-19T07:15:24.1255453Z         PASS [   0.230s] (280/423) drover::serve_health every_read_answers_with_the_db_write_locked_and_runs_no_git_gh_or_ssh
+2026-11-19T07:15:24.2530262Z         PASS [   0.127s] (281/423) drover::serve_health the_phones_timings_land_in_serve_health_by_kind_and_a_slow_tap_alerts_phone_slow_once
+2026-11-19T07:15:28.7288676Z         PASS [  21.164s] (282/423) drover::perf the_state_read_stays_under_300ms_on_a_150k_event_log
+2026-11-19T07:15:36.6598687Z         PASS [  15.139s] (283/423) drover::serve_health a_3s_read_for_5_minutes_alerts_serve_slow_once_in_that_state
+2026-11-19T07:15:36.6900907Z         PASS [   0.030s] (284/423) drover::setup_terminal a_setup_closes_on_its_timeout
+2026-11-19T07:15:36.7365243Z         PASS [   0.046s] (285/423) drover::setup_terminal only_configured_names_run_and_a_remote_terminal_runs_there
+2026-11-19T07:15:36.8065783Z         PASS [   0.070s] (286/423) drover::setup_terminal the_board_starts_by_name_types_unlogged_and_shows_the_screen
+2026-11-19T07:15:36.9046406Z         PASS [   0.098s] (287/423) drover::spawn a_new_lane_worktree_leaves_out_docs_archive_unless_opted_out
+2026-11-19T07:15:36.9510958Z         PASS [   0.046s] (288/423) drover::spawn a_spawned_lanes_build_command_runs_in_the_background_but_a_design_lanes_does_not
+2026-11-19T07:15:36.9732045Z         PASS [   0.022s] (289/423) drover::spawn cap_asks_only_when_your_own_pr_crosses
+2026-11-19T07:15:37.0069755Z         PASS [   0.034s] (290/423) drover::spawn claude_dry_run_names_every_role
+2026-11-19T07:15:37.0246362Z         PASS [   0.018s] (291/423) drover::spawn claude_role_dry_run_uses_synced_profile
+2026-11-19T07:15:37.0351918Z         PASS [   0.010s] (292/423) drover::spawn clone_build_clones_on_a_lockfile_match_and_logs_failures
+2026-11-19T07:15:37.0569097Z         PASS [   0.022s] (293/423) drover::spawn conflict_predicted_is_not_a_hold
+2026-11-19T07:15:37.0868276Z         PASS [   0.030s] (294/423) drover::spawn each_lane_gets_a_private_scratch_dir_under_its_roots_build_folder
+2026-11-19T07:15:37.1181293Z         PASS [   0.031s] (295/423) drover::spawn each_lane_gets_its_own_cargo_target_under_its_root
+2026-11-19T07:15:37.1581843Z         PASS [   0.040s] (296/423) drover::spawn effort_maps_to_each_harness_flag
+2026-11-19T07:15:37.2091944Z         PASS [   0.051s] (297/423) drover::spawn failed_clone_is_logged_and_the_spawn_succeeds
+2026-11-19T07:15:37.2273642Z         PASS [   0.018s] (298/423) drover::spawn fleet_env_expands_drover_port
+2026-11-19T07:15:37.2451296Z         PASS [   0.018s] (299/423) drover::spawn fleet_env_is_exported_into_the_lane
+2026-11-19T07:15:37.2680184Z         PASS [   0.023s] (300/423) drover::spawn help_agent_doc_is_complete
+2026-11-19T07:15:37.2861894Z         PASS [   0.018s] (301/423) drover::spawn hermes_role_dry_run_kicks_prompt_after_boot
+2026-11-19T07:15:37.3155259Z         PASS [   0.029s] (302/423) drover::spawn invalid_effort_is_refused_at_config_load
+2026-11-19T07:15:37.3627767Z         PASS [   0.047s] (303/423) drover::spawn lane_port_collision_takes_the_next_free_one
+2026-11-19T07:15:37.3806699Z         PASS [   0.018s] (304/423) drover::spawn lane_port_is_stable_per_fleet_and_branch
+2026-11-19T07:15:37.3864246Z         PASS [   0.006s] (305/423) drover::spawn lane_title_strips_prefixes_and_cuts_at_words
+2026-11-19T07:15:37.3974207Z         PASS [   0.011s] (306/423) drover::spawn lockfiles_match_needs_an_identical_lockfile
+2026-11-19T07:15:37.4293071Z         PASS [   0.032s] (307/423) drover::spawn profiles_sync_gives_a_verify_profile_its_own_prompt
+2026-11-19T07:15:37.4585888Z         PASS [   0.029s] (308/423) drover::spawn profiles_sync_removes_a_stale_generated_profile
+2026-11-19T07:15:37.4877138Z         PASS [   0.029s] (309/423) drover::spawn profiles_turn_attribution_off_and_role_md_has_the_rule
+2026-11-19T07:15:37.5464494Z         PASS [   0.059s] (310/423) drover::spawn real_claude_spawn_writes_brief_and_logs_event
+2026-11-19T07:15:37.5842258Z         PASS [   0.038s] (311/423) drover::spawn reopen_spawn_clones_no_build_folder
+2026-11-19T07:15:37.5898020Z         PASS [   0.006s] (312/423) drover::spawn rev_role_flags_new_commit_trailers_only
+2026-11-19T07:15:37.6073635Z         PASS [   0.018s] (313/423) drover::spawn shared_cache_is_exported_into_the_lane
+2026-11-19T07:15:37.6493608Z         PASS [   0.042s] (314/423) drover::spawn unconfirmed_hermes_kick_presses_enter_then_exits_4
+2026-11-19T07:15:37.7137424Z         PASS [   0.064s] (315/423) drover::spawn_force a_forced_spawn_logs_its_override_by_the_owner_or_the_orchestrator
+2026-11-19T07:15:37.7472654Z         PASS [   0.033s] (316/423) drover::stall_move a_busy_last_host_whose_worktree_holds_only_untracked_scratch_yields_to_a_free_host
+2026-11-19T07:15:37.8202450Z         PASS [   0.073s] (317/423) drover::stall_move a_fix_spawn_held_on_its_busy_pinned_host_past_the_stall_window_moves_with_its_wip_saved
+2026-11-19T07:15:37.8641344Z         PASS [   0.044s] (318/423) drover::stall_move a_load_wait_past_the_stall_window_with_no_free_host_is_a_stuck_card_never_the_busy_host
+2026-11-19T07:15:37.8919814Z         PASS [   0.028s] (319/423) drover::state_db a_kind_flagged_passive_where_it_is_emitted_is_not_activity
+2026-11-19T07:15:37.9165443Z         PASS [   0.025s] (320/423) drover::state_db a_lease_is_held_until_it_expires_then_taken_over_with_no_stale_row_left
+2026-11-19T07:15:37.9425531Z         PASS [   0.026s] (321/423) drover::state_db a_log_written_after_the_import_is_imported_after_it
+2026-11-19T07:15:37.9850586Z         PASS [   0.043s] (322/423) drover::state_db a_thousand_last_seq_calls_list_the_state_directory_once
+2026-11-19T07:15:38.0258468Z         PASS [   0.041s] (323/423) drover::state_db migration_imports_once_with_an_equal_fold_and_the_export_is_the_old_format
+2026-11-19T07:15:38.0498422Z         PASS [   0.024s] (324/423) drover::state_db the_claim_lookup_is_an_index_search
+2026-11-19T07:15:38.0739946Z         PASS [   0.024s] (325/423) drover::state_db the_database_is_owner_only
+2026-11-19T07:15:38.1221540Z         PASS [   0.048s] (326/423) drover::state_write a_failed_write_keeps_the_old_devices_and_logs_once_an_hour
+2026-11-19T07:15:38.1326026Z         PASS [   0.010s] (327/423) drover::state_write an_existing_vapid_key_is_never_rewritten
+2026-11-19T07:15:38.1585863Z         PASS [   0.026s] (328/423) drover::state_write last_seen_is_written_at_most_hourly
+2026-11-19T07:15:38.4339302Z         PASS [   0.275s] (329/423) drover::state_write parity_r18_concurrent_device_updates_all_land_without_a_write_failure
+2026-11-19T07:15:38.4954148Z         PASS [   0.061s] (330/423) drover::synergy a_2011_file_pr_is_listed_whole_and_its_last_page_serial_path_refuses
+2026-11-19T07:15:38.5389038Z         PASS [   0.043s] (331/423) drover::synergy a_cached_head_is_not_listed_again
+2026-11-19T07:15:38.5770769Z         PASS [   0.038s] (332/423) drover::synergy a_rename_out_of_a_serial_path_reports_both_names
+2026-11-19T07:15:38.6195850Z         PASS [   0.042s] (333/423) drover::synergy above_the_apis_3000_files_the_checkout_lists_them
+2026-11-19T07:15:38.6785044Z         PASS [   0.059s] (334/423) drover::synergy design_lane_spawns_but_never_moves_the_issue
+2026-11-19T07:15:38.8224810Z         PASS [   0.144s] (335/423) drover::synergy in_flight_serial_issue_keeps_its_lanes_when_over_full
+2026-11-19T07:15:38.8628705Z         PASS [   0.040s] (336/423) drover::synergy marked_pr_touching_serial_path_merges
+2026-11-19T07:15:38.9922955Z         PASS [   0.129s] (337/423) drover::synergy max_impl_refuses_the_third_impl
+2026-11-19T07:15:39.1558477Z         PASS [   0.163s] (338/423) drover::synergy no_cap_by_default_even_with_50_lanes
+2026-11-19T07:15:39.1889192Z         PASS [   0.033s] (339/423) drover::synergy owner_override_still_refuses_an_unmarked_serial_pr
+2026-11-19T07:15:39.2290230Z         PASS [   0.040s] (340/423) drover::synergy pr_outside_serial_globs_merges_unmarked
+2026-11-19T07:15:39.3321795Z         PASS [   0.103s] (341/423) drover::synergy second_serial_impl_waits_until_first_merges
+2026-11-19T07:15:39.3378456Z         PASS [   0.006s] (342/423) drover::synergy serial_globs
+2026-11-19T07:15:39.4370529Z         PASS [   0.099s] (343/423) drover::synergy serial_max_two_admits_a_second_serial_and_refuses_a_third
+2026-11-19T07:15:39.4756629Z         PASS [   0.039s] (344/423) drover::synergy unmarked_pr_touching_serial_path_is_refused
+2026-11-19T07:15:39.5009195Z         PASS [   0.025s] (345/423) drover::term_adapter no_src_line_names_herdr_but_its_load_error
+2026-11-19T07:15:39.5288271Z         PASS [   0.028s] (346/423) drover::term_adapter only_term_rs_builds_pane_words
+2026-11-19T07:15:39.6280336Z         PASS [   0.099s] (347/423) drover::thread_handoff a_failed_first_try_of_a_handoff_tap_is_retried_and_delivered_once
+2026-11-19T07:15:39.7481485Z         PASS [   0.120s] (348/423) drover::thread_handoff a_failed_handoff_tap_shows_its_error_and_its_retry_is_the_one_delivery
+2026-11-19T07:15:39.8946010Z         PASS [   0.146s] (349/423) drover::thread_handoff a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not
+2026-11-19T07:15:40.0463122Z         PASS [   0.152s] (350/423) drover::thread_handoff a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_before_the_tap
+2026-11-19T07:15:40.1391275Z         PASS [   0.093s] (351/423) drover::thread_handoff a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_orchestrator_with_the_text
+2026-11-19T07:15:40.1918275Z         PASS [   0.053s] (352/423) drover::thread_handoff a_handoff_to_a_repo_without_a_orchestrator_logs_nothing
+2026-11-19T07:15:40.2628612Z         PASS [   0.071s] (353/423) drover::thread_handoff a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orchestrator
+2026-11-19T07:15:40.3570962Z         PASS [   0.094s] (354/423) drover::thread_handoff a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one
+2026-11-19T07:15:40.4161726Z         PASS [   0.059s] (355/423) drover::thread_handoff a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_the_shells_line_limit
+2026-11-19T07:15:40.5270269Z         PASS [   0.111s] (356/423) drover::thread_handoff a_orchestrators_thread_new_is_refused_naming_handoff_and_the_owners_still_works
+2026-11-19T07:15:40.6444522Z         PASS [   0.117s] (357/423) drover::thread_handoff a_pending_repo_handoff_is_one_item_with_choices_and_its_pick_delivers_it_in_both_threads
+2026-11-19T07:15:40.7269515Z         PASS [   0.082s] (358/423) drover::thread_handoff a_repos_threads_list_newest_active_first_with_newest_on_the_first
+2026-11-19T07:15:40.9639827Z         PASS [   0.237s] (359/423) drover::thread_handoff a_tap_on_a_thread_delivers_there_and_a_tap_on_new_starts_a_thread
+2026-11-19T07:15:41.1467949Z         PASS [   0.183s] (360/423) drover::thread_handoff an_issue_filed_and_an_ask_answered_in_the_target_each_add_one_row_to_the_source
+2026-11-19T07:15:41.2494226Z         PASS [   0.103s] (361/423) drover::thread_handoff the_chat_api_links_each_linked_row_and_thread_row
+2026-11-19T07:15:41.3423688Z         PASS [   0.093s] (362/423) drover::thread_handoff three_taps_on_one_handoff_deliver_it_once_and_each_gets_the_first_result
+2026-11-19T07:15:41.5366522Z         PASS [   0.194s] (363/423) drover::thread_refs only_the_archived_thread_reads_archived_in_the_chat_api
+2026-11-19T07:15:41.9192235Z         PASS [   0.382s] (364/423) drover::threads_tab a_composer_send_with_a_photo_over_32_kb_reaches_the_say_op_over_the_socket_and_an_over_limit_body_is_413
+2026-11-19T07:15:42.0017782Z         PASS [   0.082s] (365/423) drover::threads_tab a_long_thread_opens_on_its_last_30_and_its_marker_loads_the_30_before_with_the_later_ones
+2026-11-19T07:15:42.0370617Z         PASS [   0.035s] (366/423) drover::threads_tab a_sent_message_with_a_photo_shows_once_from_tap_to_echo_in_webkit_at_390
+2026-11-19T07:15:42.0715011Z         PASS [   0.034s] (367/423) drover::threads_tab a_thread_opens_at_its_end_in_webkit_with_its_bar_on_top_and_the_page_still
+2026-11-19T07:15:42.1068772Z         PASS [   0.035s] (368/423) drover::threads_tab an_image_opens_in_the_viewer_in_webkit_and_close_and_escape_shut_it
+2026-11-19T07:15:42.1838906Z         PASS [   0.077s] (369/423) drover::threads_tab every_card_kind_in_a_thread_is_its_golden_json
+2026-11-19T07:15:42.2174103Z         PASS [   0.034s] (370/423) drover::threads_tab older_messages_load_above_in_webkit_and_the_card_in_view_stays_in_place
+2026-11-19T07:15:42.3374290Z         PASS [   0.120s] (371/423) drover::threads_tab parity_15_the_owner_reads_a_thread_sends_and_answers_from_the_tab
+2026-11-19T07:15:42.3729478Z         PASS [   0.035s] (372/423) drover::threads_tab parity_21_two_photos_go_with_the_message_and_a_failed_send_keeps_them_in_webkit
+2026-11-19T07:15:42.4066094Z         PASS [   0.034s] (373/423) drover::threads_tab parity_26_a_message_sent_while_working_queues_and_send_now_steers_it_in_webkit
+2026-11-19T07:15:42.5871281Z         PASS [   0.180s] (374/423) drover::threads_tab parity_32_the_owner_settles_each_card_from_inside_its_thread
+2026-11-19T07:15:42.7989286Z         PASS [   0.212s] (375/423) drover::threads_tab parity_34_each_composer_op_reaches_its_thread_op_and_the_screen_shows_it
+2026-11-19T07:15:42.8340184Z         PASS [   0.035s] (376/423) drover::threads_tab the_composer_docks_below_the_messages_in_webkit_empty_and_with_4_lines_at_390_and_1440
+2026-11-19T07:15:42.8718119Z         PASS [   0.038s] (377/423) drover::threads_tab the_keyboard_keeps_the_composer_flush_on_it_in_webkit_and_the_page_still
+2026-11-19T07:15:42.9102867Z         PASS [   0.038s] (378/423) drover::threads_tab the_model_and_effort_picks_are_one_row_of_dropdowns_and_a_model_pick_reaches_the_bar_in_webkit
+2026-11-19T07:15:42.9791677Z         PASS [   0.069s] (379/423) drover::threads_tab the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only
+2026-11-19T07:15:43.0177927Z         PASS [   0.039s] (380/423) drover::threads_tab two_panes_in_webkit_at_1440_scroll_on_their_own_and_a_list_update_keeps_the_thread
+2026-11-19T07:15:44.1680077Z         PASS [   1.150s] (381/423) drover::tick_dead_host a_host_whose_ssh_never_connects_with_50_worktrees_costs_the_tick_under_a_minute
+2026-11-19T07:15:44.3157597Z         PASS [   0.148s] (382/423) drover::tick_dead_host a_reachable_off_host_is_still_cleaned_and_killed_when_asked_directly
+2026-11-19T07:15:44.3764521Z         PASS [   0.061s] (383/423) drover::timer check_bootstraps_an_unloaded_serve_job_once
+2026-11-19T07:15:44.4222248Z         PASS [   0.046s] (384/423) drover::timer doctor_marks_a_job_launchd_refuses_red
+2026-11-19T07:15:44.4545791Z         PASS [   0.032s] (385/423) drover::timer drift_is_missing_outdated_or_loaded
+2026-11-19T07:15:44.4833507Z         PASS [   0.029s] (386/423) drover::timer install_beside_an_old_job_prints_the_swap_and_runs_none_of_it
+2026-11-19T07:15:44.5278827Z         PASS [   0.044s] (387/423) drover::timer install_loads_and_prints_the_command
+2026-11-19T07:15:44.5701718Z         PASS [   0.042s] (388/423) drover::timer install_no_load_writes_without_loading_and_remove_deletes
+2026-11-19T07:15:44.5997726Z         PASS [   0.029s] (389/423) drover::timer install_run_by_the_local_bin_symlink_names_the_install_roots_binary
+2026-11-19T07:15:44.6099275Z         PASS [   0.010s] (390/423) drover::timer job_files_match_their_goldens
+2026-11-19T07:15:44.6664747Z         PASS [   0.056s] (391/423) drover::timer services_rows_go_green_amber_and_red
+2026-11-19T07:15:44.7243030Z         PASS [   0.058s] (392/423) drover::timer setup_adopts_a_serve_job_under_another_label
+2026-11-19T07:15:44.8019803Z         PASS [   0.078s] (393/423) drover::timer setup_makes_a_missing_merge_label_once_then_says_already
+2026-11-19T07:15:44.8816664Z         PASS [   0.080s] (394/423) drover::timer setup_twice_is_all_already_and_tailscale_absent_is_skipped
+2026-11-19T07:15:44.9621468Z         PASS [   0.080s] (395/423) drover::timer setup_writes_a_fleets_missing_hygiene_once
+2026-11-19T07:15:45.0275150Z         PASS [   0.065s] (396/423) drover::timer slow_du_never_blocks_the_board
+2026-11-19T07:15:45.1145933Z         PASS [   0.087s] (397/423) drover::timer tick_failed_is_logged_at_most_once_an_hour
+2026-11-19T07:15:45.2442476Z         PASS [  20.991s] (398/423) drover::serve_workers a_slow_write_on_one_issue_never_delays_another_and_one_issues_writes_run_in_order
+2026-11-19T07:15:45.6531171Z         PASS [   0.409s] (399/423) drover::timer tick_runs_check_then_drive_and_exits_zero_on_refusals
+2026-11-19T07:15:45.6977345Z         PASS [   0.044s] (400/423) drover::timer_install timer_install_logs_who_ran_it
+2026-11-19T07:15:46.1545889Z         PASS [   1.040s] (401/423) drover::timer tick_repairs_only_the_missing_job
+2026-11-19T07:15:46.3934839Z         PASS [   0.696s] (402/423) drover::turn a_nudged_done_left_unanswered_is_blocked_after_10_min
+2026-11-19T07:15:46.5674271Z         PASS [   0.413s] (403/423) drover::turn a_reported_lane_whose_pane_is_gone_takes_the_respawn_path
+2026-11-19T07:15:46.8247100Z         PASS [   0.431s] (404/423) drover::turn a_working_lane_that_hibernated_and_died_is_respawned_after_a_false_failed_start
+2026-11-19T07:15:46.9578218Z         PASS [   0.390s] (405/423) drover::turn blocked_is_an_owner_card_with_its_reason
+2026-11-19T07:15:47.2370129Z         PASS [   0.412s] (406/423) drover::turn done_at_a_pushed_head_spawns_review_at_once_without_waiting_for_ci
+2026-11-19T07:15:47.9490728Z         PASS [   0.712s] (407/423) drover::turn need_input_with_an_open_ask_waits_on_the_owner_unchanged
+2026-11-19T07:15:48.3485451Z         PASS [   1.391s] (408/423) drover::turn done_with_nothing_pushed_is_nudged_once_then_blocked
+2026-11-19T07:15:48.4150945Z         PASS [   0.066s] (409/423) drover::turn need_input_without_an_ask_says_so
+2026-11-19T07:15:48.4559976Z         PASS [   0.041s] (410/423) drover::turn no_state_reads_idle_without_pushing_as_before
+2026-11-19T07:15:48.5150756Z         PASS [   0.059s] (411/423) drover::turn the_stop_hook_asks_for_the_turn_once_per_prompt_and_never_loops
+2026-11-19T07:15:48.5254228Z         PASS [   0.010s] (412/423) drover::turn the_stop_hook_leaves_check_lanes_alone
+2026-11-19T07:15:48.5577634Z         PASS [   0.032s] (413/423) drover::turn the_verb_logs_turn_end_with_the_lanes_role_and_is_no_issue_activity
+2026-11-19T07:15:49.0013046Z         PASS [   1.052s] (414/423) drover::turn need_input_without_an_ask_is_nudged_once_then_a_parkable_owner_card
+2026-11-19T07:15:49.0376524Z         PASS [   0.036s] (415/423) drover::url_links an_events_row_with_a_pr_is_a_real_link_in_webkit
+2026-11-19T07:15:49.1276622Z         PASS [   0.090s] (416/423) drover::why_briefs a_fix_brief_carries_its_branchs_notes
+2026-11-19T07:15:49.1932146Z         PASS [   0.065s] (417/423) drover::why_briefs a_new_impl_brief_carries_the_notes_on_the_files_its_spec_names
+2026-11-19T07:15:49.3045557Z         PASS [   0.111s] (418/423) drover::why_briefs a_respawned_lanes_brief_carries_its_branchs_notes
+2026-11-19T07:15:49.4236024Z         PASS [   0.119s] (419/423) drover::why_briefs a_rev_brief_carries_the_rounds_note_or_why_there_is_none
+2026-11-19T07:15:49.4904657Z         PASS [   0.067s] (420/423) drover::why_briefs an_update_brief_carries_its_branchs_notes
+2026-11-19T07:15:49.6190659Z         PASS [   1.061s] (421/423) drover::turn working_gets_one_continue_prompt_after_the_idle_threshold_never_a_respawn
+2026-11-19T07:15:50.0793391Z         PASS [  30.909s] (422/423) drover::screen_pages a_stream_delta_puts_a_new_event_on_top_and_drops_no_loaded_row
+2026-11-19T07:16:00.1201816Z         PASS [  31.391s] (423/423) drover::serve_workers two_hundred_reads_are_all_answered_while_four_writes_run
+2026-11-19T07:16:00.1202889Z ────────────
+2026-11-19T07:16:00.1204177Z      Summary [ 106.502s] 423 tests run: 422 passed, 1 failed, 1 skipped
+2026-11-19T07:16:00.1205730Z         FAIL [   2.197s] (114/423) drover::drive_sim a_busy_tick_past_the_tick_slo_is_never_stopped_and_every_fleet_finishes_its_pass
+2026-11-19T07:16:00.1215416Z error: test run failed
+2026-11-19T07:16:00.1246430Z ##[error]Process completed with exit code 100.
+2026-11-19T07:16:00.1387529Z Post job cleanup.
+2026-11-19T07:16:00.2288990Z [command]/usr/bin/git version
+2026-11-19T07:16:00.2339558Z git version 2.56.1
+2026-11-19T07:16:00.2383580Z Temporarily overriding HOME='/home/runner/work/_temp/4d1f37c5-4a90-4535-9646-08755b7496f9' before making global git config changes
+2026-11-19T07:16:00.2385210Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-19T07:16:00.2390458Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/drover/drover
+2026-11-19T07:16:00.2438073Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-19T07:16:00.2482744Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-19T07:16:00.2816713Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-19T07:16:00.2856450Z http.https://github.com/.extraheader
+2026-11-19T07:16:00.2864529Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-19T07:16:00.2910247Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-19T07:16:00.3305599Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-19T07:16:00.3346094Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-19T07:16:00.3804178Z Cleaning up orphan processes
+2026-11-19T07:16:00.4146582Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

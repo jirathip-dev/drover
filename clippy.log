@@ -1,0 +1,14 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/core)
+    Checking drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/sys)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/cli)
+    Checking drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/server)
+    Checking drover-chat v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/chat)
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/service)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.96s
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/core)
+    Checking drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/sys)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/cli)
+    Checking drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/server)
+    Checking drover-chat v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/chat)
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/service)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.01s

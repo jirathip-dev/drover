@@ -1,0 +1,42 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/server)
+   Compiling drover-chat v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/chat)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1353/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.91s
+     Running tests/drive_sim.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1353/debug/deps/drive_sim-ec8684c0dede5f42)
+
+running 6 tests
+test worktrees_sharing_files_count_once_and_hold_no_spawn ... ok
+test a_tick_hung_on_ssh_is_stopped_within_the_slo_and_the_next_tick_runs ... ok
+test a_busy_tick_past_the_tick_slo_is_never_stopped_and_every_fleet_finishes_its_pass ... ok
+test a_passed_draft_pr_is_marked_ready_and_merged ... ok
+test an_offline_hosts_lanes_restart_on_the_main_host_after_15_minutes ... ok
+test a_silent_reviewer_is_superseded_and_the_review_completes ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.68s
+
+     Running tests/extend_ask.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1353/debug/deps/extend_ask-de25417fb3f1eaed)
+
+running 6 tests
+test a_refused_tap_shows_the_refusal_on_the_card ... ok
+test park_on_a_blocked_lanes_ask_parks_the_issue_and_the_card_goes ... ok
+test one_more_round_on_a_blocked_lanes_ask_closes_it_and_gives_the_lane_its_round ... ok
+test an_answered_extend_ask_stays_answered_after_a_new_lane ... ok
+test an_update_lane_closes_the_blocked_lanes_extend_ask ... ok
+test a_superseding_lane_closes_the_blocked_lanes_extend_ask ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+
+     Running tests/orchestrator_reviews.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1353/debug/deps/orchestrator_reviews-d90b325b23bf27d2)
+
+running 5 tests
+test a_basis_answers_a_design_ask_with_an_fyi_and_refuses_a_non_quote_or_owner_topic ... ok
+test a_basis_extend_posts_an_fyi_whose_change_parks_within_30_minutes_only ... ok
+test a_typed_design_answer_needs_the_owners_line_in_the_orchestrators_thread_after_the_ask ... ok
+test a_typed_extend_grants_one_round_after_the_card_only ... ok
+test a_typed_extend_on_a_working_lanes_open_extend_ask_grants_the_round_and_closes_it ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+exit=0
