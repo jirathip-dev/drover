@@ -648,7 +648,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && lst && duo() && !lst.live) load(lst, true);
 });
 colours();
-theme(H.dataset.theme ?? 'farm').then(redraw);
+theme(H.dataset.theme ?? 'farm').then(() => { redraw(); drawSheet(); });
 if (cards) load(cards);
 if (at && at[1] !== cur.screen) {
   history.replaceState(null, '', '#' + cur.id);

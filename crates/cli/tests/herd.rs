@@ -9,6 +9,10 @@ const T: u64 = 1_000_000;
 const SCREEN: &str = "⏺ Bash(cargo test)\n  ⎿ PANE-SECRET-TEXT ok\n";
 
 fn fixture(name: &str) -> (drover::Ctx, OnShed) {
+    fixture_at(name, "2", "3.90")
+}
+
+fn fixture_at(name: &str, pressure: &str, load: &str) -> (drover::Ctx, OnShed) {
     let cfg = format!("[serve]\nallowed_hosts = [\"mac.example\"]\n\n{CONFIG}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     let spawn = |fleet: &str, issue: u64, ts: u64, agent: &str| {
@@ -47,8 +51,11 @@ fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     .unwrap();
     let r = OnShed::new(
         Fake::default()
-            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "2\n")
-            .reply("sysctl -n vm.loadavg", "{ 3.90 1.20 1.00 }\n")
+            .reply(
+                "sysctl -n kern.memorystatus_vm_pressure_level",
+                &format!("{pressure}\n"),
+            )
+            .reply("sysctl -n vm.loadavg", &format!("{{ {load} 1.20 1.00 }}\n"))
             .reply("sysctl -n hw.ncpu", "10\n")
             .reply("vm_stat", "Swapouts: 100.\n"),
     );
@@ -307,5 +314,116 @@ fn the_herd_in_webkit_draws_a_figure_per_lane_switches_night_and_repo() {
         v.get(2..),
         Some(&["1", "1", "1", "0", "1", "1", "2", "1"][..]),
         "figures in sendmeter, kitchen's scene, sendmeter first, day; [☾] night; [›] synergy, its 2 figures, still night: {out}"
+    );
+}
+
+fn herd_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<String> {
+    let (pressure, load) = match level {
+        "calm" => ("1", "1.00"),
+        "busy" => ("1", "15.00"),
+        _ => ("2", "3.90"),
+    };
+    let (c, r) = fixture_at(&format!("load-{theme}-{level}"), pressure, load);
+    append(
+        &c.state,
+        &Event::new(
+            900_200,
+            "sendmeter",
+            Some(13),
+            "spawn",
+            json!({"role": "impl", "agent": "sendmeter-impl-13", "harness": "claude"}),
+        ),
+    )
+    .unwrap();
+    r.1.lane("sendmeter-impl-13", "idle", "/x");
+    let d = c.state.parent().unwrap().to_path_buf();
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    std::thread::spawn(move || drover::serve::serve_on(&c, &r, l, false));
+    let js = format!(
+        "window.late = (async () => {{ \
+        const w = f => new Promise(ok => {{ const t = Date.now(), g = () => {{ const v = f(); if (v) ok(v); else if (Date.now() - t > 8000) ok(null); else setTimeout(g, 50); }}; g(); }}); \
+        const q = s => document.querySelector(s), on = e => getComputedStyle(e).display !== 'none'; \
+        const shown = s => [...document.querySelectorAll('#sheet .hsc ' + s)].filter(on).length; \
+        q('#sysb').click(); \
+        (await w(() => [...document.querySelectorAll('#sheet .row')].find(r => r.textContent.toLowerCase().startsWith('herd')))).click(); \
+        await w(() => q('#sheet .herd .hsc svg')); \
+        const h = q('#sheet .herd'), anim = e => e && getComputedStyle(e).animationName !== 'none' ? 1 : 0; \
+        {check} }})()"
+    );
+    let mut cmd = webview();
+    cmd.env("DROVER_PRE", "localStorage['herd-night'] = '0'");
+    if reduce {
+        cmd.env("DROVER_REDUCE", "1");
+    }
+    let o = cmd
+        .args([&format!("http://{addr}/?theme={theme}"), "390", "-", "-"])
+        .arg(d.join(format!("herd-{theme}-{level}.png")))
+        .arg(js)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
+    out.split_whitespace().skip(2).map(String::from).collect()
+}
+
+#[test]
+fn the_herd_in_webkit_draws_kitchens_heat_held_while_the_spawn_gate_is_held() {
+    if no_webkit() {
+        return;
+    }
+    let check = "const lit = h.classList.contains('heat-held') ? 1 : 0; \
+        const flames = shown('.h-held'), others = shown(':is(.h-calm,.h-busy):not(.h-held)'), glow = anim(q('#sheet .hsc .kglow')), loop = anim(h); \
+        return [lit, flames > 0 ? 1 : 0, others, glow, loop, document.querySelectorAll('#sheet .herd use[href=\"#hfan\"]').length];";
+    assert_eq!(
+        herd_probe("kitchen", "held", false, check),
+        ["1", "1", "0", "1", "1", "1"],
+        "kitchen held: heat-held on the Herd, its flames shown, no calm or busy layer, the glow and the frame loop run, the idle lane fans"
+    );
+}
+
+#[test]
+fn the_herd_in_webkit_draws_each_load_level_of_kitchen_and_garden_and_farms_sky() {
+    if no_webkit() {
+        return;
+    }
+    for (level, sun) in [("calm", "l-sun"), ("busy", "l-overcast"), ("held", "l-rain")] {
+        let heat = format!(
+            "return [h.classList.contains('heat-{level}') ? 1 : 0, shown('.h-{level}') > 0 ? 1 : 0, shown(':is(.h-calm,.h-busy,.h-held):not(.h-{level})')];"
+        );
+        assert_eq!(
+            herd_probe("kitchen", level, false, &heat),
+            ["1", "1", "0"],
+            "kitchen {level}: heat-{level}, its flames and no other level's"
+        );
+        let light = format!(
+            "return [h.classList.contains('light-{level}') ? 1 : 0, shown('.{sun}') > 0 ? 1 : 0, shown(':is(.l-sun,.l-overcast,.l-rain):not(.{sun})')];"
+        );
+        assert_eq!(
+            herd_probe("garden", level, false, &light),
+            ["1", "1", "0"],
+            "garden {level}: light-{level}, its .{sun} window and no other"
+        );
+    }
+    for (level, sky) in [("calm", "clear"), ("busy", "windy"), ("held", "storm")] {
+        let farm = format!("return [h.dataset.sky === '{sky}' ? 1 : 0, /heat|light/.test(h.className) ? 1 : 0];");
+        assert_eq!(
+            herd_probe("farm", level, false, &farm),
+            ["1", "0"],
+            "farm {level}: sky {sky}, no heat or light"
+        );
+    }
+}
+
+#[test]
+fn the_herd_in_webkit_stops_the_flames_and_glow_under_reduced_motion() {
+    if no_webkit() {
+        return;
+    }
+    let check = "return [h.classList.contains('heat-held') ? 1 : 0, anim(h), anim(q('#sheet .hsc .kglow'))];";
+    assert_eq!(
+        herd_probe("kitchen", "held", true, check),
+        ["1", "0", "0"],
+        "kitchen held under reduced motion: heat-held, no frame loop, no glow animation"
     );
 }

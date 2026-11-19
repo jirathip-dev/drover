@@ -96,6 +96,7 @@ export async function theme(name: string): Promise<void> {
   });
   if (rs) ['queued', 'needs', 'merged', 'fail'].forEach(k => sym('hr-' + k, rs[k]));
   Object.entries(obj(T.stages)).forEach(([k, id]) => sym('hg-' + k, id));
+  sym('hfan', obj(T.load_scene).fan);
 }
 
 const DARK = matchMedia('(prefers-color-scheme: dark)');

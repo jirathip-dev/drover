@@ -20,6 +20,8 @@ R.scene = (b: Blk, c: Ctx) => {
   const repos = blks(b.repos), w = obj(b.weather), i = Math.max(0, repos.findIndex(r => r.id === at)), r = repos[i];
   const s = el('div', `herd${dark() ? ' night' : ''}`), strip = el('div', 'hsc'), t = document.documentElement.dataset.theme ?? 'farm';
   if (obj(T.scene).weather !== false) s.dataset.sky = String(w.sky ?? 'clear');
+  const kind = String(obj(T.load_scene).kind ?? ''), lv = String(b.load ?? '');
+  if (['heat', 'light', 'sign'].includes(kind) && lv) s.classList.add(kind, `${kind}-${lv}`);
   if (typeof r?.color === 'string') s.style.setProperty('--fk', `var(--${r.color})`);
   const have = art.get(t);
   if (have) strip.replaceChildren(...nodes(have));
@@ -37,5 +39,6 @@ R.scene = (b: Blk, c: Ctx) => {
   bar.prepend(btn('‹', 'previous repo', go(-1)));
   bar.append(btn('›', 'next repo', go(1)), btn(dark() ? '☀' : '☾', dark() ? 'day' : 'night', () => put('herd-night', (night = !dark()) ? '1' : '0')));
   s.append(strip, bar, el('p', 'm hw', esc(w.line ?? '')), ...(r ? kids(r.blocks, c) : [el('p', 'm', 'no lanes here')]));
+  if (kind === 'heat' && lv === 'held' && document.getElementById('hfan')) s.querySelectorAll('use[href="#ha-idle"]').forEach(u => u.setAttribute('href', '#hfan'));
   return s;
 };
