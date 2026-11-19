@@ -147,8 +147,8 @@ pub fn boat(r: &dyn Runner, prog: &str, args: &[String], input: &str) -> Option<
         hints: vec![],
     };
     let mut stdout = vec![];
-    let argv = ["drover", "hosts", "report"].map(String::from).to_vec();
-    let code = drover::main_with(argv, &bare, &on, &mut stdout, &mut input.as_bytes());
+    let cmd = ["drover", "hosts", "report"].map(String::from).to_vec();
+    let code = drover::main_with(cmd, &bare, &on, &mut stdout, &mut input.as_bytes());
     Some(Ok(Out {
         code,
         stdout: String::from_utf8_lossy(&stdout).into(),

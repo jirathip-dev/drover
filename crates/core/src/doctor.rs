@@ -342,8 +342,11 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     if cfg.shed().is_some() {
         shed_rows(ctx, cfg, r, rows);
     }
+    let view = crate::link::view::View::load(ctx, cfg).ok();
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let Some(m) = h.machine.as_deref() else { continue };
+        let failing = view.as_ref().and_then(|v| v.failing(Some(m)));
+        rows.extend(failing.map(|w| format!("✗ host {name} report — {w}")));
         let on = crate::hosts::On::new(r, Some(m));
         let Some((tags, home)) = crate::hosts::probe(&on) else {
             let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");

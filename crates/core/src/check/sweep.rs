@@ -79,6 +79,7 @@ pub enum Sweep {
 
 /// Host `host`'s finished lanes' build and scratch folders removed (`Preview`: listed); bytes freed.
 pub fn sweep(ctx: &Ctx, cfg: &Config, on: &On, host: &str, out: &mut dyn Write, how: Sweep) -> Result<u64> {
+    reported(ctx, cfg, on)?;
     let mut freed = 0;
     for b in build_dirs(ctx, cfg, on) {
         freed += sweep_in(
@@ -92,6 +93,15 @@ pub fn sweep(ctx: &Ctx, cfg: &Config, on: &On, host: &str, out: &mut dyn Write, 
         freed += sweep_in(ctx, cfg, on, (host, &b), out, how)?;
     }
     Ok(freed)
+}
+
+/// Err while the host at `on`'s report fails: its live lanes are unknown, so none of its folders go.
+pub(super) fn reported(ctx: &Ctx, cfg: &Config, on: &On) -> Result<()> {
+    let view = on.machine.and_then(|_| crate::link::view::View::load(ctx, cfg).ok());
+    match view.and_then(|v| v.failing(on.machine)) {
+        Some(why) => anyhow::bail!("its report fails ({why}): no folder removed"),
+        None => Ok(()),
+    }
 }
 
 fn finished(events: &[Event], states: &crate::events::States, sp: &Event) -> Option<&'static str> {
