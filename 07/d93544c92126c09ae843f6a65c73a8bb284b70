@@ -1,0 +1,12 @@
+Decided: an extend on an UPDATE_LIMIT card logs round-extended with update:true; the fold adds update_extra instead of a review round and, with spawn, puts the issue at ready so drive's conflict step starts the update lane
+Because: "An extension granted on an `UPDATE_LIMIT` needs-human episode grants one update round"
+Decided: spawn's update limit is update_rounds plus update_extra, checked in spawn::update_guard
+Because: crates/core/src/spawn.rs:1682
+Decided: the refusal logs needs-human only when the issue's last spawn/needs-human/round-extended event is a spawn (a working issue)
+Because: "On an issue that is already needs-human, or extended and waiting for its start, it prints the refusal and logs nothing."
+Decided: the new tests live in crates/cli/tests/drive/update_limit.rs, a #[path] child of drive.rs; an existing extend test moved there so drive.rs stays under its size baseline
+Because: .drover/arch-baseline.txt:1
+Rejected: a new test target — it would copy drive.rs's fixtures and need a shard line
+Check: cargo test -p drover --test drive -- update_limit fails 2 tests at commit 1 and passes at the head
+Check: an_extend_during_a_pass_only_requeues_it now seeds a ROUND_LIMIT card, since an UPDATE_LIMIT card no longer requeues
+Owner: [one more round] on a PR stuck on merge conflicts now buys one more conflict-fix lane, and a refused start no longer uses up your extension.
