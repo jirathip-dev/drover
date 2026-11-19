@@ -24,7 +24,7 @@ and where does this sit next to #1097 and #1099?
 
 - **The log pins commits in about 60 places.** Most compare a stored id with an open PR's live head (the gate at
   `crates/core/src/gate.rs:577`, drive, `waiting`). Two take a stored id to git for landed work: `drover why`
-  (`crates/core/src/why.rs:468`, and the note readers below it) and hotspots (`crates/core/src/hotspots.rs:94`).
+  (`crates/core/src/why.rs:101`) and hotspots (`crates/core/src/hotspots.rs:94`).
 - **The log is a database with monthly archives** (`crates/core/src/db.rs:390`). Events of issues done more than
   14 days ago are compressed files; a saved fold and a per-process cache sit on top.
 - **One in-place rewrite exists**: the fleet rename (`crates/core/src/db.rs:496`). It swaps one label for

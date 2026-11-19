@@ -1,15 +1,14 @@
-use super::{s, Act, App, Shed};
+use super::{s, Act, Shed, Threads as App};
+use crate::ui::{
+    bar, boxed, clamp, edged, ends, put, seg, st, text, wrap, Lines, AMBER, BLUE, CODE, GREY, PURPLE, RED,
+};
 use drover_core::card::TTL;
 use drover_core::events::age;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use serde_json::Value;
-
-type Seg = (String, Style);
-type Lines = Vec<Line<'static>>;
 
 const WIDE: u16 = 100;
 const LIST: u16 = 40;
@@ -33,158 +32,8 @@ const KEYS: [(&str, &str); 16] = [
     ("Esc or ⌫", "a selection open: back out; nothing is sent"),
 ];
 
-fn st(c: Color) -> Style {
-    Style::default().fg(c)
-}
-
-const AMBER: Color = Color::Yellow;
-const PURPLE: Color = Color::Magenta;
-const GREY: Color = Color::DarkGray;
-const RED: Color = Color::Red;
-const BLUE: Color = Color::LightBlue;
-const CODE: Color = Color::Cyan;
-const BAR: Color = Color::Indexed(236);
-
-fn seg(t: impl Into<String>, s: Style) -> Seg {
-    (t.into(), s)
-}
-
-fn line(pad: usize, cells: &[(char, Style)]) -> Line<'static> {
-    let mut spans = vec![Span::raw(" ".repeat(pad))];
-    for c in cells {
-        match spans.last_mut() {
-            Some(last) if last.style == c.1 => last.content.to_mut().push(c.0),
-            _ => spans.push(Span::styled(c.0.to_string(), c.1)),
-        }
-    }
-    Line::from(spans)
-}
-
-fn wrap(segs: &[Seg], w: usize, indent: usize) -> Lines {
-    let cells: Vec<(char, Style)> = segs.iter().flat_map(|(t, s)| t.chars().map(move |c| (c, *s))).collect();
-    let w = w.max(1);
-    let indent = if indent + 8 > w { 0 } else { indent };
-    let mut out = vec![];
-    for para in cells.split(|c| c.0 == '\n') {
-        let (mut rest, mut pad) = (para, 0);
-        loop {
-            let room = w - pad;
-            if rest.len() <= room {
-                out.push(line(pad, rest));
-                break;
-            }
-            let space = rest.iter().take(room + 1).rposition(|c| c.0 == ' ').filter(|i| *i > 0);
-            let (head, tail) = rest.split_at(space.unwrap_or(room));
-            out.push(line(pad, head));
-            rest = if space.is_some() {
-                tail.get(1..).unwrap_or_default()
-            } else {
-                tail
-            };
-            pad = indent;
-        }
-    }
-    out
-}
-
-fn boxed(rows: &[Vec<Seg>], w: usize, edge: Style, title: Option<Seg>) -> Lines {
-    if w < 8 {
-        return rows.iter().flat_map(|r| wrap(r, w, 2)).collect();
-    }
-    let t = title.as_ref().map_or(0, |t| t.0.chars().count() + 2);
-    let mut top = vec![Span::styled("┌", edge)];
-    top.extend(title.map(|(t, s)| Span::styled(format!(" {t} "), s)));
-    top.push(Span::styled(format!("{}┐", "─".repeat(w.saturating_sub(t + 2))), edge));
-    let mut out = vec![Line::from(top)];
-    for r in rows.iter().flat_map(|r| wrap(r, w - 4, 2)) {
-        let fill = " ".repeat((w - 4).saturating_sub(r.width()));
-        let mut spans = vec![Span::styled("│ ", edge)];
-        spans.extend(r.spans);
-        spans.push(Span::styled(format!("{fill} │"), edge));
-        out.push(Line::from(spans));
-    }
-    out.push(Line::styled(format!("└{}┘", "─".repeat(w - 2)), edge));
-    out
-}
-
-fn text(t: &str, w: usize, style: Style) -> Lines {
-    let (mut out, mut fence, mut code) = (vec![], false, vec![]);
-    for l in t.lines() {
-        if l.trim_start().starts_with("```") {
-            if fence {
-                out.extend(boxed(&std::mem::take(&mut code), w, st(GREY), None));
-            }
-            fence = !fence;
-        } else if fence {
-            code.push(vec![seg(l, st(CODE))]);
-        } else {
-            out.extend(wrap(&[seg(l, style)], w, 0));
-        }
-    }
-    out.extend(
-        (!code.is_empty())
-            .then(|| boxed(&code, w, st(GREY), None))
-            .into_iter()
-            .flatten(),
-    );
-    out
-}
-
-fn edged(lines: Lines, c: Color) -> Lines {
-    let mark = |mut l: Line<'static>| {
-        l.spans.insert(0, Span::styled("┃ ", st(c)));
-        l
-    };
-    lines.into_iter().map(mark).collect()
-}
-
-fn clamp(t: &str, n: usize) -> String {
-    if t.chars().count() <= n {
-        return t.into();
-    }
-    t.chars().take(n.saturating_sub(1)).chain(['…']).collect()
-}
-
-fn ends(mut left: Lines, right: Vec<Span<'static>>, w: usize) -> Lines {
-    let rw = Line::from(right.clone()).width();
-    let gap = match left.as_slice() {
-        [l] => w.checked_sub(l.width() + rw),
-        _ => None,
-    };
-    let fill = Span::raw(" ".repeat(gap.unwrap_or_else(|| w.saturating_sub(rw))));
-    match (gap, left.last_mut()) {
-        (Some(_), Some(l)) => l.spans.extend([vec![fill], right].concat()),
-        _ => left.push(Line::from([vec![fill], right].concat())),
-    }
-    left
-}
-
-fn bar(mut l: Line<'static>, w: usize) -> Line<'static> {
-    let fill = " ".repeat(w.saturating_sub(l.width()));
-    l.spans.push(Span::raw(fill));
-    l.style(Style::default().bg(BAR))
-}
-
-fn put(f: &mut Frame, area: Rect, lines: Lines) {
-    f.render_widget(Paragraph::new(lines), area);
-}
-
 impl App<'_, '_> {
-    /// Draw the whole screen: the top line, then the list, the chat, or both side by side from 100 columns.
-    pub fn draw(&self, f: &mut Frame) {
-        let a = f.area();
-        let top = self.top(usize::from(a.width));
-        let h = u16::try_from(top.len()).unwrap_or(a.height).min(a.height);
-        put(f, a, top);
-        let a = Rect {
-            y: a.y + h,
-            height: a.height - h,
-            ..a
-        };
-        if self.board {
-            let t = "The Board tab comes with #1354. Until then: drover board. Tab goes back.";
-            return put(f, a, wrap(&[seg(t, st(GREY))], usize::from(a.width), 0));
-        }
+    pub(crate) fn draw(&self, f: &mut Frame, a: Rect) {
         if let Some(n) = self.sheet {
             let (w, h) = (usize::from(a.width), usize::from(a.height));
             let hint = self.hint(w);
@@ -235,7 +84,7 @@ impl App<'_, '_> {
         f.buffer_mut().set_style(dim, st(GREY));
     }
 
-    fn top(&self, w: usize) -> Lines {
+    pub(crate) fn top(&self, w: usize, board: bool, badge: Option<u64>) -> Lines {
         let tab = |t: &str, on: bool| {
             let s = if on {
                 Style::default().add_modifier(Modifier::REVERSED)
@@ -277,7 +126,15 @@ impl App<'_, '_> {
             Shed::Up => {}
         }
         let right: Vec<Span> = down.into_iter().map(|(t, s)| Span::styled(t, s)).collect();
-        let left = vec![tab("Threads", !self.board), Span::raw(" "), tab("Board", self.board)];
+        let count = badge.filter(|n| *n > 0).map_or(String::new(), |n| format!(" {n}"));
+        let mut left = vec![
+            tab("Threads", !board),
+            Span::raw(" "),
+            tab(&format!("Board{count}"), board),
+        ];
+        if let Some(t) = left.get_mut(2).filter(|_| !board && !count.is_empty()) {
+            t.style = st(AMBER);
+        }
         let mut out = ends(vec![Line::from(left)], right, w);
         match self.shed {
             Shed::Starting(_) => out.extend(wrap(

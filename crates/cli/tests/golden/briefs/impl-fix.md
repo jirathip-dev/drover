@@ -35,6 +35,9 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - After three attempts in one diagnostic class without progress, stop and report.
 - End every turn with `drover turn <state>`: `done` once pushed with the PR open, `blocked --why <reason>`
   (the owner gets a card), `need-input` after `drover ask`, `working` when you stop mid-task. Drive acts on it.
+- `turn done` is a hard gate at the pushed head: the PR body names that sha with `## For humans` and no
+  'Generated with' line, and format and arch-check pass in your worktree. A refusal starts no review:
+  fix what it names, push, and run `drover turn done` again. No review without a passed `done`.
 - A `conflict-predicted` note means another open PR touches the same files. Don't wait for it.
   Finish your work, run the gates, push. If the other PR merges first, drover gives you an update round to resolve it.
 - A decision that says to wait for another issue #N: run `drover queue <fleet> block --on N <issue>`
@@ -112,7 +115,7 @@ AC: it {works} \ `ok`
 - Guard the context window: read the files you need, not the repo; keep logs in files, not in the chat.
 - Smallest correct diff: no refactor, dependency or feature the issue did not ask for.
 - Every rule names its enforcer: a rule nothing checks is retired.
-- Keep code comment-free: only `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` line on a public item, whole files included; the why goes in the why note.
+- Keep code comment-free: only `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` line on a public item, whole files included; a non-obvious reason goes in the PR body.
 - Leave the tree green: format, lint and test before you push.
 
 ## Review findings to fix (latest FAIL verdict)
@@ -133,12 +136,10 @@ FAIL
   or `$TMPDIR`; it is deleted when your lane ends.
 - Logs and downloads (test, lint, CI output) go in your scratch folder `$DROVER_SCRATCH_TARGET`, never the
   worktree.
-- #677: before `drover turn done`, write `why.md` in the worktree root (never commit it: drover puts it on your
-  pushed head as a git note and copies it into the PR body). At most 15 `Key: text` lines, `Owner:` once and last:
-  `Decided: …`, `Because: "spec quote" | q<id> | file:line`, `Rejected: alternative — why`,
-  `Check: what the reviewer should verify`, `Owner: one plain line`. Every `Because:` cites a verbatim spec quote
-  (12+ chars), an answered ask or a `file:line` at your head; no secrets. A bad note is refused `WHY_INVALID`.
-- #925: `turn done` refuses `PR_BODY` until the PR body names your pushed head sha, has `## For humans` and no
-  "Generated with" line: `gh pr edit --body` first.
-- #735: a non-obvious reason goes in that why note (`drover why`), never in a comment: arch-check fails a new
-  comment line but `// SAFETY:` over `unsafe` and one `///` line on a public item.
+- #1362: `drover turn done` is a hard gate, run in your worktree at the pushed head: it refuses `DONE_CHECK` while
+  `HEAD` is not the PR head ("push first") or a done check fails (the fleet's `done_checks`, else `drover arch-check`
+  and `cargo fmt --check` where the repo has them), and `PR_BODY` until the PR body names your pushed head sha, has
+  `## For humans` and no "Generated with" line (`gh pr edit --body` first). A refusal ends nothing and starts no
+  review: fix what it names, push, then `drover turn done` again.
+- #735: a non-obvious reason goes in the PR body, never in a comment: arch-check fails a new comment line but
+  `// SAFETY:` over `unsafe` and one `///` line on a public item.

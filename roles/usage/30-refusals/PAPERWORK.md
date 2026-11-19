@@ -1,0 +1,1 @@
+- PAPERWORK: verdict FAIL (#1362): a blocking finding tagged `[why-note]`, `[pr-body]` or `[format]`, named; `turn done`'s gate owns those, so drop it or make it a `non-blocking` note

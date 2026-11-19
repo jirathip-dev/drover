@@ -1,7 +1,7 @@
 0 drover #1 review(1) r0 u0 x0 | drive Some("drover verdict drover 1 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1 drover #1 ready r1 u0 x0 | drive Some("drover merge drover 1") | drive Some("drover merge drover 1") | ok
 2 drover #1 merged r1 u0 x0 | none None | none None | ok
-3 drover #4 impl r0 u0 x0 | drive Some("drover spawn drover 4 rev") | drive Some("drover spawn drover 4 rev") | NO_VERDICT
+3 drover #4 impl r0 u0 x0 | none None | none None | NO_VERDICT
 4 drover #4 review(1) r0 u0 x0 | drive Some("drover verdict drover 4 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 5 drover #4 review(1) r0 u0 x0 | drive Some("drover verdict drover 4 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 6 drover #4 review(1) r0 u0 x0 | drive Some("drover verdict drover 4 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -9,10 +9,10 @@
 8 drover #4 ready r1 u0 x0 | drive Some("drover merge drover 4") | drive Some("drover merge drover 4") | ok
 9 drover #4 merged r1 u0 x0 | none None | none None | ok
 10 drover #4 merged r1 u0 x0 | none None | none None | ok
-11 drover #5 impl r0 u0 x0 | drive Some("drover spawn drover 5 rev") | drive Some("drover spawn drover 5 rev") | NO_VERDICT
-12 drover #6 impl r0 u0 x0 | drive Some("drover spawn drover 6 rev") | drive Some("drover spawn drover 6 rev") | NO_VERDICT
-13 drover #2 impl r0 u0 x0 | drive Some("drover spawn drover 2 rev") | drive Some("drover spawn drover 2 rev") | NO_VERDICT
-14 drover #3 impl r0 u0 x0 | drive Some("drover spawn drover 3 rev") | drive Some("drover spawn drover 3 rev") | NO_VERDICT
+11 drover #5 impl r0 u0 x0 | none None | none None | NO_VERDICT
+12 drover #6 impl r0 u0 x0 | none None | none None | NO_VERDICT
+13 drover #2 impl r0 u0 x0 | none None | none None | NO_VERDICT
+14 drover #3 impl r0 u0 x0 | none None | none None | NO_VERDICT
 15 drover #6 review(1) r0 u0 x0 | drive Some("drover verdict drover 6 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 16 drover #5 review(1) r0 u0 x0 | drive Some("drover verdict drover 5 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 17 drover #2 review(1) r0 u0 x0 | drive Some("drover verdict drover 2 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -26,8 +26,8 @@
 25 drover #2 merged r1 u0 x0 | none None | none None | ok
 26 drover #2 merged r1 u0 x0 | none None | none None | ok
 27 drover #2 merged r1 u0 x0 | none None | none None | ok
-28 drover #3 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 3 rev") | ok
-29 drover #14 impl r0 u0 x0 | drive Some("drover spawn drover 14 rev") | drive Some("drover spawn drover 14 rev") | NO_VERDICT
+28 drover #3 fix(1) r1 u0 x0 | none None | none None | ok
+29 drover #14 impl r0 u0 x0 | none None | none None | NO_VERDICT
 30 drover #3 review(2) r1 u0 x0 | drive Some("drover verdict drover 3 PASS --sha e9273e8866a8b68ae9744bc91a8d7d709034ce4c --file /v.md") | none None | ok
 31 drover #3 ready r2 u0 x0 | drive Some("drover merge drover 3") | drive Some("drover merge drover 3") | ok
 32 drover #3 merged r2 u0 x0 | none None | none None | ok
@@ -35,25 +35,25 @@
 34 drover #3 merged r2 u0 x0 | none None | none None | ok
 35 drover #3 merged r2 u0 x0 | none None | none None | ok
 36 drover #5 ready r1 u0 x0 | drive Some("drover merge drover 5") | drive Some("drover merge drover 5") | ok
-37 drover #5 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 5 rev") | ok
+37 drover #5 fix(1) r1 u0 x0 | none None | none None | ok
 38 drover #14 review(1) r0 u0 x0 | drive Some("drover verdict drover 14 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 39 drover #14 ready r1 u0 x0 | drive Some("drover merge drover 14") | drive Some("drover merge drover 14") | ok
 40 drover #14 merged r1 u0 x0 | none None | none None | ok
 41 drover #14 merged r1 u0 x0 | none None | none None | ok
 42 drover #14 merged r1 u0 x0 | none None | none None | ok
-43 drover #5 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 5 rev") | ok
+43 drover #5 fix(1) r1 u0 x0 | none None | none None | ok
 44 drover #5 review(2) r1 u0 x0 | drive Some("drover verdict drover 5 PASS --sha 21981d065c556361794bc395ae0cb0bf1b06a1f9 --file /v.md") | none None | ok
 45 drover #5 ready r2 u0 x0 | drive Some("drover merge drover 5") | drive Some("drover merge drover 5") | ok
 46 drover #5 merged r2 u0 x0 | none None | none None | ok
 47 drover #5 merged r2 u0 x0 | none None | none None | ok
 48 drover #5 merged r2 u0 x0 | none None | none None | ok
-49 drover #16 impl r0 u0 x0 | drive Some("drover spawn drover 16 rev") | drive Some("drover spawn drover 16 rev") | NO_VERDICT
-50 atlas #2847 impl r0 u0 x0 | drive Some("drover spawn atlas 2847 rev") | drive Some("drover spawn atlas 2847 rev") | NO_VERDICT
-51 atlas #2831 impl r0 u0 x0 | drive Some("drover spawn atlas 2831 rev") | drive Some("drover spawn atlas 2831 rev") | NO_VERDICT
-52 atlas #2759 impl r0 u0 x0 | drive Some("drover spawn atlas 2759 rev") | drive Some("drover spawn atlas 2759 rev") | NO_VERDICT
-53 atlas #2605 impl r0 u0 x0 | drive Some("drover spawn atlas 2605 rev") | drive Some("drover spawn atlas 2605 rev") | NO_VERDICT
-54 atlas #2822 impl r0 u0 x0 | drive Some("drover spawn atlas 2822 rev") | drive Some("drover spawn atlas 2822 rev") | NO_VERDICT
-55 atlas #2840 impl r0 u0 x0 | drive Some("drover spawn atlas 2840 rev") | drive Some("drover spawn atlas 2840 rev") | NO_VERDICT
+49 drover #16 impl r0 u0 x0 | none None | none None | NO_VERDICT
+50 atlas #2847 impl r0 u0 x0 | none None | none None | NO_VERDICT
+51 atlas #2831 impl r0 u0 x0 | none None | none None | NO_VERDICT
+52 atlas #2759 impl r0 u0 x0 | none None | none None | NO_VERDICT
+53 atlas #2605 impl r0 u0 x0 | none None | none None | NO_VERDICT
+54 atlas #2822 impl r0 u0 x0 | none None | none None | NO_VERDICT
+55 atlas #2840 impl r0 u0 x0 | none None | none None | NO_VERDICT
 56 drover #16 review(1) r0 u0 x0 | drive Some("drover verdict drover 16 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 57 atlas #2847 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2847 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 58 atlas #2847 ready r1 u0 x0 | drive Some("drover merge atlas 2847") | drive Some("drover merge atlas 2847") | ok
@@ -61,14 +61,14 @@
 60 atlas #2831 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2831 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 61 atlas #2840 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2840 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 62 atlas #2831 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2831 impl --supersede") | drive Some("drover spawn atlas 2831 impl --supersede") | VERDICT_FAIL
-63 atlas #2831 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2831 rev") | VERDICT_FAIL
+63 atlas #2831 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 64 atlas #2840 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2840 impl --supersede") | drive Some("drover spawn atlas 2840 impl --supersede") | VERDICT_FAIL
-65 atlas #2840 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2840 rev") | VERDICT_FAIL
+65 atlas #2840 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 66 atlas #2822 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2822 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 67 atlas #2822 ready r1 u0 x0 | drive Some("drover merge atlas 2822") | drive Some("drover merge atlas 2822") | ok
 68 atlas #2822 blocked r1 u0 x0 | drive Some("drover merge atlas 2822") | drive Some("drover merge atlas 2822") | ok
 69 drover #16 ready r1 u0 x0 | drive Some("drover merge drover 16") | drive Some("drover merge drover 16") | ok
-70 drover #9 impl r0 u0 x0 | drive Some("drover spawn drover 9 rev") | drive Some("drover spawn drover 9 rev") | NO_VERDICT
+70 drover #9 impl r0 u0 x0 | none None | none None | NO_VERDICT
 71 atlas #2831 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2831 PASS --sha fac1e63466d4fd8d9ce7a3a86faf12247c6de553 --file /v.md") | none None | VERDICT_FAIL
 72 atlas #2831 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2831 impl --supersede") | drive Some("drover spawn atlas 2831 impl --supersede") | VERDICT_FAIL
 73 drover #9 review(1) r0 u0 x0 | drive Some("drover verdict drover 9 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -76,15 +76,15 @@
 75 drover #9 merged r1 u0 x0 | none None | none None | ok
 76 drover #9 merged r1 u0 x0 | none None | none None | ok
 77 drover #9 merged r1 u0 x0 | none None | none None | ok
-78 atlas #2831 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2831 rev") | VERDICT_FAIL
+78 atlas #2831 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 79 atlas #2759 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2759 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 80 atlas #2759 ready r1 u0 x0 | drive Some("drover merge atlas 2759") | drive Some("drover merge atlas 2759") | ok
 81 atlas #2759 blocked r1 u0 x0 | drive Some("drover merge atlas 2759") | drive Some("drover merge atlas 2759") | ok
 82 atlas #2840 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2840 PASS --sha f61b5e27320e36af3a7c62f1d3a0ee022d6143bc --file /v.md") | none None | VERDICT_FAIL
 83 atlas #2840 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2840 impl --supersede") | drive Some("drover spawn atlas 2840 impl --supersede") | VERDICT_FAIL
-84 drover #16 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 16 rev") | ok
-85 drover #17 impl r0 u0 x0 | drive Some("drover spawn drover 17 rev") | drive Some("drover spawn drover 17 rev") | NO_VERDICT
-86 drover #19 impl r0 u0 x0 | drive Some("drover spawn drover 19 rev") | drive Some("drover spawn drover 19 rev") | NO_VERDICT
+84 drover #16 fix(1) r1 u0 x0 | none None | none None | ok
+85 drover #17 impl r0 u0 x0 | none None | none None | NO_VERDICT
+86 drover #19 impl r0 u0 x0 | none None | none None | NO_VERDICT
 87 atlas #2840 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2840 PASS --sha 898703d82e7f1a8a5efdcde9eaf6459922c34257 --file /v.md") | none None | VERDICT_FAIL
 88 drover #16 review(2) r1 u0 x0 | drive Some("drover verdict drover 16 PASS --sha 4bb94fa2c1d31da0e18902d41f21d564604d66b3 --file /v.md") | none None | ok
 89 drover #17 review(1) r0 u0 x0 | drive Some("drover verdict drover 17 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -99,8 +99,8 @@
 98 atlas #2831 ready r3 u0 x0 | drive Some("drover merge atlas 2831") | drive Some("drover merge atlas 2831") | ok
 99 drover #17 ready r1 u0 x0 | drive Some("drover merge drover 17") | drive Some("drover merge drover 17") | ok
 100 drover #19 ready r1 u0 x0 | drive Some("drover merge drover 19") | drive Some("drover merge drover 19") | ok
-101 drover #17 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 17 rev") | ok
-102 drover #19 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 19 rev") | ok
+101 drover #17 fix(1) r1 u0 x0 | none None | none None | ok
+102 drover #19 fix(1) r1 u0 x0 | none None | none None | ok
 103 drover #17 review(2) r1 u0 x0 | drive Some("drover verdict drover 17 PASS --sha 290af23c99d4019f5083623ff26b50fa1f7f3edd --file /v.md") | none None | ok
 104 drover #19 review(2) r1 u0 x0 | drive Some("drover verdict drover 19 PASS --sha c6934688afdb7d46d2ff79348d63af75ca655991 --file /v.md") | none None | ok
 105 drover #17 ready r2 u0 x0 | drive Some("drover merge drover 17") | drive Some("drover merge drover 17") | ok
@@ -113,14 +113,14 @@
 112 drover #19 merged r2 u0 x0 | none None | none None | ok
 113 drover #19 merged r2 u0 x0 | none None | none None | ok
 114 drover #19 merged r2 u0 x0 | none None | none None | ok
-115 atlas #2838 impl r0 u0 x0 | drive Some("drover spawn atlas 2838 rev") | drive Some("drover spawn atlas 2838 rev") | NO_VERDICT
-116 drover #24 impl r0 u0 x0 | drive Some("drover spawn drover 24 rev") | drive Some("drover spawn drover 24 rev") | NO_VERDICT
+115 atlas #2838 impl r0 u0 x0 | none None | none None | NO_VERDICT
+116 drover #24 impl r0 u0 x0 | none None | none None | NO_VERDICT
 117 drover #24 review(1) r0 u0 x0 | drive Some("drover verdict drover 24 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 118 drover #24 ready r1 u0 x0 | drive Some("drover merge drover 24") | drive Some("drover merge drover 24") | ok
 119 drover #24 merged r1 u0 x0 | none None | none None | ok
 120 drover #24 merged r1 u0 x0 | none None | none None | ok
 121 drover #24 merged r1 u0 x0 | none None | none None | ok
-122 drover #25 impl r0 u0 x0 | drive Some("drover spawn drover 25 rev") | drive Some("drover spawn drover 25 rev") | NO_VERDICT
+122 drover #25 impl r0 u0 x0 | none None | none None | NO_VERDICT
 123 atlas #2847 merged r1 u0 x0 | none None | none None | ok
 124 atlas #2847 merged r1 u0 x0 | none None | none None | ok
 125 atlas #2847 merged r1 u0 x0 | none None | none None | ok
@@ -128,7 +128,7 @@
 127 atlas #2822 merged r1 u0 x0 | none None | none None | ok
 128 atlas #2822 merged r1 u0 x0 | none None | none None | ok
 129 atlas #2759 merged r1 u0 x0 | none None | none None | ok
-130 drover #27 impl r0 u0 x0 | drive Some("drover spawn drover 27 rev") | drive Some("drover spawn drover 27 rev") | NO_VERDICT
+130 drover #27 impl r0 u0 x0 | none None | none None | NO_VERDICT
 131 atlas #2759 merged r1 u0 x0 | none None | none None | ok
 132 atlas #2759 merged r1 u0 x0 | none None | none None | ok
 133 atlas #2831 blocked r3 u0 x0 | drive Some("drover merge atlas 2831") | drive Some("drover merge atlas 2831") | ok
@@ -148,7 +148,7 @@
 147 drover #27 merged r1 u0 x0 | none None | none None | ok
 148 drover #27 merged r1 u0 x0 | none None | none None | ok
 149 drover #27 merged r1 u0 x0 | none None | none None | ok
-150 drover #30 impl r0 u0 x0 | drive Some("drover spawn drover 30 rev") | drive Some("drover spawn drover 30 rev") | NO_VERDICT
+150 drover #30 impl r0 u0 x0 | none None | none None | NO_VERDICT
 151 drover #30 review(1) r0 u0 x0 | drive Some("drover verdict drover 30 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 152 drover #30 ready r1 u0 x0 | drive Some("drover merge drover 30") | drive Some("drover merge drover 30") | ok
 153 atlas #2840 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2840 PASS --sha 898703d82e7f1a8a5efdcde9eaf6459922c34257 --file /v.md") | none None | ok
@@ -168,8 +168,8 @@
 167 atlas #2831 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
 168 atlas #2831 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
 169 atlas #2831 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
-170 drover #30 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 30 rev") | ok
-171 drover #32 impl r0 u0 x0 | drive Some("drover spawn drover 32 rev") | drive Some("drover spawn drover 32 rev") | NO_VERDICT
+170 drover #30 fix(1) r1 u0 x0 | none None | none None | ok
+171 drover #32 impl r0 u0 x0 | none None | none None | NO_VERDICT
 172 drover #30 review(2) r1 u0 x0 | drive Some("drover verdict drover 30 PASS --sha 5101b3ce0a98f35337e3508ed32407bac4547fa8 --file /v.md") | none None | ok
 173 drover #32 review(1) r0 u0 x0 | drive Some("drover verdict drover 32 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 174 drover #30 ready r2 u0 x0 | drive Some("drover merge drover 30") | drive Some("drover merge drover 30") | ok
@@ -181,28 +181,28 @@
 180 drover #32 merged r1 u0 x0 | none None | none None | ok
 181 drover #32 merged r1 u0 x0 | none None | none None | ok
 182 drover #32 merged r1 u0 x0 | none None | none None | ok
-183 drover #34 impl r0 u0 x0 | drive Some("drover spawn drover 34 rev") | drive Some("drover spawn drover 34 rev") | NO_VERDICT
+183 drover #34 impl r0 u0 x0 | none None | none None | NO_VERDICT
 184 atlas #2605 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2605 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 185 atlas #2838 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2838 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 186 atlas #2605 ready r1 u0 x0 | drive Some("drover merge atlas 2605") | drive Some("drover merge atlas 2605") | ok
 187 atlas #2838 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2838 impl --supersede") | drive Some("drover spawn atlas 2838 impl --supersede") | VERDICT_FAIL
-188 drover #34 impl r0 u0 x0 | drive Some("drover spawn drover 34 rev") | drive Some("drover spawn drover 34 rev") | NO_VERDICT
-189 atlas #2838 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2838 rev") | VERDICT_FAIL
-190 atlas #2714 impl r0 u0 x0 | drive Some("drover spawn atlas 2714 rev") | drive Some("drover spawn atlas 2714 rev") | NO_VERDICT
+188 drover #34 impl r0 u0 x0 | none None | none None | NO_VERDICT
+189 atlas #2838 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+190 atlas #2714 impl r0 u0 x0 | none None | none None | NO_VERDICT
 191 drover #34 review(1) r0 u0 x0 | drive Some("drover verdict drover 34 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-192 atlas #2850 impl r0 u0 x0 | drive Some("drover spawn atlas 2850 rev") | drive Some("drover spawn atlas 2850 rev") | NO_VERDICT
+192 atlas #2850 impl r0 u0 x0 | none None | none None | NO_VERDICT
 193 drover #34 fix(1) r1 u0 x0 | drive Some("drover spawn drover 34 impl --supersede") | drive Some("drover spawn drover 34 impl --supersede") | VERDICT_FAIL
-194 drover #34 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 34 rev") | VERDICT_FAIL
+194 drover #34 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 195 drover #34 review(2) r1 u0 x0 | drive Some("drover verdict drover 34 PASS --sha a3c024bc3f413421cdd5a3861a2a67ed0a25d345 --file /v.md") | none None | VERDICT_FAIL
 196 drover #34 ready r2 u0 x0 | drive Some("drover merge drover 34") | drive Some("drover merge drover 34") | ok
 197 drover #34 merged r2 u0 x0 | none None | none None | ok
 198 drover #34 merged r2 u0 x0 | none None | none None | ok
 199 drover #34 merged r2 u0 x0 | none None | none None | ok
 200 drover #34 merged r2 u0 x0 | none None | none None | ok
-201 drover #40 impl r0 u0 x0 | drive Some("drover spawn drover 40 rev") | drive Some("drover spawn drover 40 rev") | NO_VERDICT
+201 drover #40 impl r0 u0 x0 | none None | none None | NO_VERDICT
 202 drover #40 review(1) r0 u0 x0 | drive Some("drover verdict drover 40 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 203 drover #40 fix(1) r1 u0 x0 | drive Some("drover spawn drover 40 impl --supersede") | drive Some("drover spawn drover 40 impl --supersede") | VERDICT_FAIL
-204 drover #40 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 40 rev") | VERDICT_FAIL
+204 drover #40 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 205 drover #40 review(2) r1 u0 x0 | drive Some("drover verdict drover 40 PASS --sha 3ffc2698c700e96b10aaac5697645a02e568ea05 --file /v.md") | none None | VERDICT_FAIL
 206 drover #40 ready r2 u0 x0 | drive Some("drover merge drover 40") | drive Some("drover merge drover 40") | ok
 207 drover #40 merged r2 u0 x0 | none None | none None | ok
@@ -210,38 +210,38 @@
 209 drover #40 merged r2 u0 x0 | none None | none None | ok
 210 drover #40 merged r2 u0 x0 | none None | none None | ok
 211 atlas #2838 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2838 PASS --sha cb27aa087743e51f70f6755db6ffa960e14f9490 --file /v.md") | none None | VERDICT_FAIL
-212 drover #42 impl r0 u0 x0 | drive Some("drover spawn drover 42 rev") | drive Some("drover spawn drover 42 rev") | NO_VERDICT
+212 drover #42 impl r0 u0 x0 | none None | none None | NO_VERDICT
 213 atlas #2850 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2850 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 214 atlas #2838 ready r2 u0 x0 | drive Some("drover merge atlas 2838") | drive Some("drover merge atlas 2838") | ok
 215 atlas #2838 blocked r2 u0 x0 | drive Some("drover merge atlas 2838") | drive Some("drover merge atlas 2838") | ok
-216 drover #31 impl r0 u0 x0 | drive Some("drover spawn drover 31 rev") | drive Some("drover spawn drover 31 rev") | NO_VERDICT
+216 drover #31 impl r0 u0 x0 | none None | none None | NO_VERDICT
 217 drover #31 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 218 atlas #2850 ready r1 u0 x0 | drive Some("drover merge atlas 2850") | drive Some("drover merge atlas 2850") | ok
-219 drover #31 impl r0 u0 x0 | drive Some("drover spawn drover 31 rev") | drive Some("drover spawn drover 31 rev") | NO_VERDICT
+219 drover #31 impl r0 u0 x0 | none None | none None | NO_VERDICT
 220 drover #42 review(1) r0 u0 x0 | drive Some("drover verdict drover 42 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 221 drover #42 fix(1) r1 u0 x0 | drive Some("drover spawn drover 42 impl --supersede") | drive Some("drover spawn drover 42 impl --supersede") | VERDICT_FAIL
-222 drover #42 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 42 rev") | VERDICT_FAIL
+222 drover #42 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 223 drover #31 review(1) r0 u0 x0 | drive Some("drover verdict drover 31 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 224 drover #31 fix(1) r1 u0 x0 | drive Some("drover spawn drover 31 impl --supersede") | drive Some("drover spawn drover 31 impl --supersede") | VERDICT_FAIL
-225 drover #31 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 31 rev") | VERDICT_FAIL
+225 drover #31 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 226 atlas #2838 merged r2 u0 x0 | none None | none None | ok
 227 atlas #2838 merged r2 u0 x0 | none None | none None | ok
 228 atlas #2838 merged r2 u0 x0 | none None | none None | ok
 229 atlas #2838 merged r2 u0 x0 | none None | none None | ok
 230 atlas #2857 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2857 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 231 drover #42 review(2) r1 u0 x0 | drive Some("drover verdict drover 42 PASS --sha 527b1637f0336b030f315705af0b99630b3e7340 --file /v.md") | none None | VERDICT_FAIL
-232 atlas #2852 impl r0 u0 x0 | drive Some("drover spawn atlas 2852 rev") | drive Some("drover spawn atlas 2852 rev") | NO_VERDICT
+232 atlas #2852 impl r0 u0 x0 | none None | none None | NO_VERDICT
 233 atlas #2859 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2859 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 234 drover #31 review(2) r1 u0 x0 | drive Some("drover verdict drover 31 PASS --sha 26ae1842e9d9abb2205a79b79362912bedc3b5c0 --file /v.md") | none None | VERDICT_FAIL
 235 drover #42 fix(2) r2 u0 x0 | drive Some("drover spawn drover 42 impl --supersede") | drive Some("drover spawn drover 42 impl --supersede") | VERDICT_FAIL
-236 drover #42 fix(2) r2 u0 x0 | none None | drive Some("drover spawn drover 42 rev") | VERDICT_FAIL
+236 drover #42 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 237 drover #31 ready r2 u0 x0 | drive Some("drover merge drover 31") | drive Some("drover merge drover 31") | ok
 238 drover #31 merged r2 u0 x0 | none None | none None | ok
 239 drover #31 merged r2 u0 x0 | none None | none None | ok
 240 drover #31 merged r2 u0 x0 | none None | none None | ok
 241 drover #31 merged r2 u0 x0 | none None | none None | ok
-242 drover #46 impl r0 u0 x0 | drive Some("drover spawn drover 46 rev") | drive Some("drover spawn drover 46 rev") | NO_VERDICT
-243 atlas #2557 impl r0 u0 x0 | drive Some("drover spawn atlas 2557 rev") | drive Some("drover spawn atlas 2557 rev") | NO_VERDICT
+242 drover #46 impl r0 u0 x0 | none None | none None | NO_VERDICT
+243 atlas #2557 impl r0 u0 x0 | none None | none None | NO_VERDICT
 244 drover #42 review(3) r2 u0 x0 | drive Some("drover verdict drover 42 PASS --sha 605297cc5d597b954bed1c33752c6202f3509024 --file /v.md") | none None | VERDICT_FAIL
 245 atlas #2850 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2850 PASS --sha a6a39400110e6a637232f814ba5ef092e3daf1db --file /v.md") | none None | ok
 246 drover #46 review(1) r0 u0 x0 | drive Some("drover verdict drover 46 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -256,11 +256,11 @@
 255 atlas #2850 merged r2 u0 x0 | none None | none None | ok
 256 atlas #2850 merged r2 u0 x0 | none None | none None | ok
 257 atlas #2850 merged r2 u0 x0 | none None | none None | ok
-258 drover #43 impl r0 u0 x0 | drive Some("drover spawn drover 43 rev") | drive Some("drover spawn drover 43 rev") | NO_VERDICT
+258 drover #43 impl r0 u0 x0 | none None | none None | NO_VERDICT
 259 drover #46 fix(1) r1 u0 x0 | drive Some("drover spawn drover 46 impl --supersede") | drive Some("drover spawn drover 46 impl --supersede") | VERDICT_FAIL
-260 drover #46 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 46 rev") | VERDICT_FAIL
-261 atlas #2709 impl r0 u0 x0 | drive Some("drover spawn atlas 2709 rev") | drive Some("drover spawn atlas 2709 rev") | NO_VERDICT
-262 atlas #2858 impl r0 u0 x0 | drive Some("drover spawn atlas 2858 rev") | drive Some("drover spawn atlas 2858 rev") | NO_VERDICT
+260 drover #46 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+261 atlas #2709 impl r0 u0 x0 | none None | none None | NO_VERDICT
+262 atlas #2858 impl r0 u0 x0 | none None | none None | NO_VERDICT
 263 atlas #2557 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2557 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 264 drover #46 review(2) r1 u0 x0 | drive Some("drover verdict drover 46 PASS --sha 8f96cc05624af8edea100251eb4c23a274d3a210 --file /v.md") | none None | VERDICT_FAIL
 265 drover #46 ready r2 u0 x0 | drive Some("drover merge drover 46") | drive Some("drover merge drover 46") | ok
@@ -269,15 +269,15 @@
 268 drover #46 merged r2 u0 x0 | none None | none None | ok
 269 drover #46 merged r2 u0 x0 | none None | none None | ok
 270 atlas #2709 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-271 drover #18 impl r0 u0 x0 | drive Some("drover spawn drover 18 rev") | drive Some("drover spawn drover 18 rev") | NO_VERDICT
-272 drover #43 impl r0 u0 x0 | drive Some("drover spawn drover 43 rev") | drive Some("drover spawn drover 43 rev") | NO_VERDICT
+271 drover #18 impl r0 u0 x0 | none None | none None | NO_VERDICT
+272 drover #43 impl r0 u0 x0 | none None | none None | NO_VERDICT
 273 atlas #2857 ready r1 u0 x0 | drive Some("drover merge atlas 2857") | drive Some("drover merge atlas 2857") | ok
 274 atlas #2859 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2859 impl --supersede") | drive Some("drover spawn atlas 2859 impl --supersede") | VERDICT_FAIL
 275 drover #43 review(1) r0 u0 x0 | drive Some("drover verdict drover 43 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-276 atlas #2859 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2859 rev") | VERDICT_FAIL
+276 atlas #2859 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 277 drover #18 review(1) r0 u0 x0 | drive Some("drover verdict drover 18 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 278 drover #43 fix(1) r1 u0 x0 | drive Some("drover spawn drover 43 impl --supersede") | drive Some("drover spawn drover 43 impl --supersede") | VERDICT_FAIL
-279 drover #43 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 43 rev") | VERDICT_FAIL
+279 drover #43 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 280 drover #18 ready r1 u0 x0 | drive Some("drover merge drover 18") | drive Some("drover merge drover 18") | ok
 281 drover #18 merged r1 u0 x0 | none None | none None | ok
 282 drover #18 merged r1 u0 x0 | none None | none None | ok
@@ -288,44 +288,44 @@
 287 atlas #2557 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2557 impl --supersede") | drive Some("drover spawn atlas 2557 impl --supersede") | VERDICT_FAIL
 288 atlas #2858 ready r1 u0 x0 | drive Some("drover merge atlas 2858") | drive Some("drover merge atlas 2858") | ok
 289 atlas #2852 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2852 impl --supersede") | drive Some("drover spawn atlas 2852 impl --supersede") | VERDICT_FAIL
-290 atlas #2557 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2557 rev") | VERDICT_FAIL
+290 atlas #2557 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 291 drover #43 review(2) r1 u0 x0 | drive Some("drover verdict drover 43 PASS --sha fa02465e403be8b733629433c3555bf59c5e649a --file /v.md") | none None | VERDICT_FAIL
-292 atlas #2852 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2852 rev") | VERDICT_FAIL
+292 atlas #2852 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 293 drover #43 ready r2 u0 x0 | drive Some("drover merge drover 43") | drive Some("drover merge drover 43") | ok
 294 drover #43 merged r2 u0 x0 | none None | none None | ok
 295 drover #43 merged r2 u0 x0 | none None | none None | ok
 296 drover #43 merged r2 u0 x0 | none None | none None | ok
 297 drover #43 merged r2 u0 x0 | none None | none None | ok
-298 drover #36 impl r0 u0 x0 | drive Some("drover spawn drover 36 rev") | drive Some("drover spawn drover 36 rev") | NO_VERDICT
+298 drover #36 impl r0 u0 x0 | none None | none None | NO_VERDICT
 299 atlas #2709 review(1) r0 u0 x0 | owner None | owner None | NO_VERDICT
 300 atlas #2709 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2709 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 301 atlas #2605 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2605 impl --supersede") | drive Some("drover spawn atlas 2605 impl --supersede") | VERDICT_FAIL
-302 atlas #2605 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2605 rev") | VERDICT_FAIL
+302 atlas #2605 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 303 drover #36 review(1) r0 u0 x0 | drive Some("drover verdict drover 36 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 304 drover #36 ready r1 u0 x0 | drive Some("drover merge drover 36") | drive Some("drover merge drover 36") | ok
 305 drover #36 merged r1 u0 x0 | none None | none None | ok
 306 drover #36 merged r1 u0 x0 | none None | none None | ok
 307 drover #36 merged r1 u0 x0 | none None | none None | ok
-308 drover #37 impl r0 u0 x0 | drive Some("drover spawn drover 37 rev") | drive Some("drover spawn drover 37 rev") | NO_VERDICT
+308 drover #37 impl r0 u0 x0 | none None | none None | NO_VERDICT
 309 atlas #2709 ready r1 u0 x0 | drive Some("drover merge atlas 2709") | drive Some("drover merge atlas 2709") | ok
 310 atlas #2852 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2852 PASS --sha e3a13769da5d8931cf2d0cbbde7bd8cefcd96e08 --file /v.md") | none None | VERDICT_FAIL
 311 atlas #2709 merged r1 u0 x0 | none None | none None | ok
 312 atlas #2709 merged r1 u0 x0 | none None | none None | ok
 313 atlas #2709 merged r1 u0 x0 | none None | none None | ok
-314 atlas #2823 impl r0 u0 x0 | drive Some("drover spawn atlas 2823 rev") | drive Some("drover spawn atlas 2823 rev") | NO_VERDICT
+314 atlas #2823 impl r0 u0 x0 | none None | none None | NO_VERDICT
 315 atlas #2823 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-316 atlas #2696 impl r0 u0 x0 | drive Some("drover spawn atlas 2696 rev") | drive Some("drover spawn atlas 2696 rev") | NO_VERDICT
+316 atlas #2696 impl r0 u0 x0 | none None | none None | NO_VERDICT
 317 atlas #2852 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2852 impl --supersede") | drive Some("drover spawn atlas 2852 impl --supersede") | VERDICT_FAIL
 318 drover #37 review(1) r0 u0 x0 | drive Some("drover verdict drover 37 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-319 atlas #2852 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2852 rev") | VERDICT_FAIL
+319 atlas #2852 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 320 drover #37 ready r1 u0 x0 | drive Some("drover merge drover 37") | drive Some("drover merge drover 37") | ok
 321 drover #37 merged r1 u0 x0 | none None | none None | ok
 322 drover #37 merged r1 u0 x0 | none None | none None | ok
 323 drover #37 merged r1 u0 x0 | none None | none None | ok
-324 drover #39 impl r0 u0 x0 | drive Some("drover spawn drover 39 rev") | drive Some("drover spawn drover 39 rev") | NO_VERDICT
+324 drover #39 impl r0 u0 x0 | none None | none None | NO_VERDICT
 325 atlas #2557 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2557 PASS --sha 625490d7a817a8658abd0300fbb58695a19ed86b --file /v.md") | none None | VERDICT_FAIL
 326 atlas #2557 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2557 impl --supersede") | drive Some("drover spawn atlas 2557 impl --supersede") | VERDICT_FAIL
-327 atlas #2557 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2557 rev") | VERDICT_FAIL
+327 atlas #2557 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 328 atlas #2859 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2859 PASS --sha bc30faa540d3793338153df4e15d866f5cab5d0a --file /v.md") | none None | VERDICT_FAIL
 329 atlas #2557 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2557 PASS --sha 70c6c19e35d883ebec35fcfc942c9987019642a0 --file /v.md") | none None | VERDICT_FAIL
 330 atlas #2557 fix(3) r3 u0 x0 | drive Some("drover spawn atlas 2557 impl --supersede") | drive Some("drover spawn atlas 2557 impl --supersede") | VERDICT_FAIL
@@ -333,7 +333,7 @@
 332 atlas #2696 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2696 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 333 atlas #2696 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2696 impl --supersede") | drive Some("drover spawn atlas 2696 impl --supersede") | VERDICT_FAIL
 334 drover #39 review(1) r0 u0 x0 | drive Some("drover verdict drover 39 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-335 atlas #2696 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2696 rev") | VERDICT_FAIL
+335 atlas #2696 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 336 drover #39 ready r1 u0 x0 | drive Some("drover merge drover 39") | drive Some("drover merge drover 39") | ok
 337 drover #39 merged r1 u0 x0 | none None | none None | ok
 338 drover #39 merged r1 u0 x0 | none None | none None | ok
@@ -342,7 +342,7 @@
 341 atlas #2852 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2852 PASS --sha 9d4d794181a785bd2738c5077f7e80a4ad2903a4 --file /v.md") | none None | VERDICT_FAIL
 342 atlas #2859 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2859 impl --supersede") | drive Some("drover spawn atlas 2859 impl --supersede") | VERDICT_FAIL
 343 atlas #2696 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2696 PASS --sha 2de0025396171006a2326e3b633a815b4b588ad6 --file /v.md") | none None | VERDICT_FAIL
-344 atlas #2859 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2859 rev") | VERDICT_FAIL
+344 atlas #2859 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 345 atlas #2852 ready r3 u0 x0 | drive Some("drover merge atlas 2852") | drive Some("drover merge atlas 2852") | ok
 346 atlas #2696 ready r2 u0 x0 | drive Some("drover merge atlas 2696") | drive Some("drover merge atlas 2696") | ok
 347 atlas #2605 fix(2) r2 u0 x0 | owner None | owner None | VERDICT_FAIL
@@ -355,23 +355,23 @@
 354 atlas #2696 merged r2 u0 x0 | none None | none None | ok
 355 atlas #2696 merged r2 u0 x0 | none None | none None | ok
 356 atlas #2696 merged r2 u0 x0 | none None | none None | ok
-357 atlas #2823 impl r0 u0 x0 | drive Some("drover spawn atlas 2823 rev") | drive Some("drover spawn atlas 2823 rev") | NO_VERDICT
+357 atlas #2823 impl r0 u0 x0 | none None | none None | NO_VERDICT
 358 atlas #2557 needs-human r3 u0 x0 | owner Some("drover extend atlas 2557") | owner Some("drover extend atlas 2557") | VERDICT_FAIL
-359 atlas #2605 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2605 rev") | VERDICT_FAIL
-360 drover #53 impl r0 u0 x0 | drive Some("drover spawn drover 53 rev") | drive Some("drover spawn drover 53 rev") | NO_VERDICT
+359 atlas #2605 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
+360 drover #53 impl r0 u0 x0 | none None | none None | NO_VERDICT
 361 atlas #2859 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2859 PASS --sha 36b28a678539ed4a7e3d5540e14323b8776e0973 --file /v.md") | none None | VERDICT_FAIL
 362 drover #53 review(1) r0 u0 x0 | drive Some("drover verdict drover 53 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-363 atlas #2849 impl r0 u0 x0 | drive Some("drover spawn atlas 2849 rev") | drive Some("drover spawn atlas 2849 rev") | NO_VERDICT
+363 atlas #2849 impl r0 u0 x0 | none None | none None | NO_VERDICT
 364 drover #53 ready r1 u0 x0 | drive Some("drover merge drover 53") | drive Some("drover merge drover 53") | ok
 365 drover #53 merged r1 u0 x0 | none None | none None | ok
 366 drover #53 merged r1 u0 x0 | none None | none None | ok
-367 atlas #2844 impl r0 u0 x0 | drive Some("drover spawn atlas 2844 rev") | drive Some("drover spawn atlas 2844 rev") | NO_VERDICT
+367 atlas #2844 impl r0 u0 x0 | none None | none None | NO_VERDICT
 368 atlas #2557 needs-human r3 u0 x0 | owner None | owner None | VERDICT_FAIL
 369 atlas #2859 ready r3 u0 x0 | drive Some("drover merge atlas 2859") | drive Some("drover merge atlas 2859") | ok
 370 atlas #2605 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2605 PASS --sha 583fff83e78351a6b657131abb3f98b02dac7ba7 --file /v.md") | none None | VERDICT_FAIL
 371 atlas #2605 ready r3 u0 x0 | drive Some("drover merge atlas 2605") | drive Some("drover merge atlas 2605") | ok
 372 atlas #2557 needs-human r3 u0 x0 | owner Some("drover extend atlas 2557") | owner Some("drover extend atlas 2557") | VERDICT_FAIL
-373 drover #55 impl r0 u0 x0 | drive Some("drover spawn drover 55 rev") | drive Some("drover spawn drover 55 rev") | NO_VERDICT
+373 drover #55 impl r0 u0 x0 | none None | none None | NO_VERDICT
 374 atlas #2849 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2849 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 375 atlas #2849 ready r1 u0 x0 | drive Some("drover merge atlas 2849") | drive Some("drover merge atlas 2849") | ok
 376 drover #55 review(1) r0 u0 x0 | drive Some("drover verdict drover 55 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -385,15 +385,15 @@
 384 drover #55 merged r1 u0 x0 | none None | none None | ok
 385 drover #55 merged r1 u0 x0 | none None | none None | ok
 386 atlas #2823 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2823 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-387 drover #57 impl r0 u0 x0 | drive Some("drover spawn drover 57 rev") | drive Some("drover spawn drover 57 rev") | NO_VERDICT
-388 drover #58 impl r0 u0 x0 | drive Some("drover spawn drover 58 rev") | drive Some("drover spawn drover 58 rev") | NO_VERDICT
+387 drover #57 impl r0 u0 x0 | none None | none None | NO_VERDICT
+388 drover #58 impl r0 u0 x0 | none None | none None | NO_VERDICT
 389 atlas #2849 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2849 PASS --sha e7c339bea0e10de60a216d99cd99761de37b1140 --file /v.md") | none None | ok
 390 atlas #2844 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2844 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 391 atlas #2849 ready r2 u0 x0 | drive Some("drover merge atlas 2849") | drive Some("drover merge atlas 2849") | ok
 392 atlas #2844 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2844 impl --supersede") | drive Some("drover spawn atlas 2844 impl --supersede") | VERDICT_FAIL
 393 atlas #2823 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2823 impl --supersede") | drive Some("drover spawn atlas 2823 impl --supersede") | VERDICT_FAIL
-394 atlas #2823 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2823 rev") | VERDICT_FAIL
-395 atlas #2844 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2844 rev") | VERDICT_FAIL
+394 atlas #2823 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+395 atlas #2844 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 396 drover #58 review(1) r0 u0 x0 | drive Some("drover verdict drover 58 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 397 atlas #2849 merged r2 u0 x0 | none None | none None | ok
 398 atlas #2849 merged r2 u0 x0 | none None | none None | ok
@@ -405,10 +405,10 @@
 404 drover #58 merged r1 u0 x0 | none None | none None | ok
 405 drover #58 merged r1 u0 x0 | none None | none None | ok
 406 drover #58 merged r1 u0 x0 | none None | none None | ok
-407 drover #63 impl r0 u0 x0 | drive Some("drover spawn drover 63 rev") | drive Some("drover spawn drover 63 rev") | NO_VERDICT
+407 drover #63 impl r0 u0 x0 | none None | none None | NO_VERDICT
 408 drover #57 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
 409 drover #57 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
-410 drover #57 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 57 rev") | VERDICT_FAIL
+410 drover #57 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 411 drover #57 review(2) r1 u0 x0 | drive Some("drover verdict drover 57 PASS --sha d9a46a66e3633616791da5b84e0cc480aa449e2f --file /v.md") | none None | VERDICT_FAIL
 412 atlas #2823 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2823 PASS --sha f7350c9ba119c3e18802501039b7bf5d871c747e --file /v.md") | none None | VERDICT_FAIL
 413 drover #57 ready r2 u0 x0 | drive Some("drover merge drover 57") | drive Some("drover merge drover 57") | ok
@@ -416,10 +416,10 @@
 415 drover #57 merged r2 u0 x0 | none None | none None | ok
 416 drover #57 merged r2 u0 x0 | none None | none None | ok
 417 drover #63 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-418 atlas #2858 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2858 rev") | ok
-419 drover #63 impl r0 u0 x0 | drive Some("drover spawn drover 63 rev") | drive Some("drover spawn drover 63 rev") | NO_VERDICT
+418 atlas #2858 fix(1) r1 u0 x0 | none None | none None | ok
+419 drover #63 impl r0 u0 x0 | none None | none None | NO_VERDICT
 420 atlas #2823 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2823 impl --supersede") | drive Some("drover spawn atlas 2823 impl --supersede") | VERDICT_FAIL
-421 atlas #2823 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2823 rev") | VERDICT_FAIL
+421 atlas #2823 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 422 atlas #2844 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2844 PASS --sha 65cd64438256e5655335d9fd568ffd655abcfbde --file /v.md") | none None | VERDICT_FAIL
 423 atlas #2844 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2844 PASS --sha 65cd64438256e5655335d9fd568ffd655abcfbde --file /v.md") | none None | VERDICT_FAIL
 424 atlas #2557 review(4) r3 u0 x0 | drive Some("drover verdict atlas 2557 PASS --sha 72330ff7794a9218a3d3818d5388ad3d3e1abea1 --file /v.md") | none None | VERDICT_FAIL
@@ -438,15 +438,15 @@
 437 drover #63 merged r1 u0 x0 | none None | none None | ok
 438 drover #63 merged r1 u0 x0 | none None | none None | ok
 439 drover #63 merged r1 u0 x0 | none None | none None | ok
-440 drover #65 impl r0 u0 x0 | drive Some("drover spawn drover 65 rev") | drive Some("drover spawn drover 65 rev") | NO_VERDICT
+440 drover #65 impl r0 u0 x0 | none None | none None | NO_VERDICT
 441 atlas #2844 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2844 impl --supersede") | drive Some("drover spawn atlas 2844 impl --supersede") | VERDICT_FAIL
-442 atlas #2844 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2844 rev") | VERDICT_FAIL
+442 atlas #2844 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 443 atlas #2858 merged r2 u0 x0 | none None | none None | ok
 444 atlas #2858 merged r2 u0 x0 | none None | none None | ok
 445 atlas #2858 merged r2 u0 x0 | none None | none None | ok
 446 atlas #2858 merged r2 u0 x0 | none None | none None | ok
-447 atlas #2872 impl r0 u0 x0 | drive Some("drover spawn atlas 2872 rev") | drive Some("drover spawn atlas 2872 rev") | NO_VERDICT
-448 drover #67 impl r0 u0 x0 | drive Some("drover spawn drover 67 rev") | drive Some("drover spawn drover 67 rev") | NO_VERDICT
+447 atlas #2872 impl r0 u0 x0 | none None | none None | NO_VERDICT
+448 drover #67 impl r0 u0 x0 | none None | none None | NO_VERDICT
 449 atlas #2557 needs-human r4 u0 x0 | owner Some("drover extend atlas 2557") | owner Some("drover extend atlas 2557") | ROUND_LIMIT
 450 atlas #2557 needs-human r4 u0 x0 | owner Some("drover extend atlas 2557") | owner Some("drover extend atlas 2557") | ROUND_LIMIT
 451 atlas #2557 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
@@ -457,9 +457,9 @@
 456 atlas #2557 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
 457 drover #65 review(1) r0 u0 x0 | drive Some("drover verdict drover 65 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 458 drover #67 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-459 drover #67 impl r0 u0 x0 | drive Some("drover spawn drover 67 rev") | drive Some("drover spawn drover 67 rev") | NO_VERDICT
+459 drover #67 impl r0 u0 x0 | none None | none None | NO_VERDICT
 460 drover #65 fix(1) r1 u0 x0 | drive Some("drover spawn drover 65 impl --supersede") | drive Some("drover spawn drover 65 impl --supersede") | VERDICT_FAIL
-461 drover #65 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 65 rev") | VERDICT_FAIL
+461 drover #65 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 462 atlas #2872 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2872 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 463 drover #67 review(1) r0 u0 x0 | drive Some("drover verdict drover 67 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 464 drover #65 review(2) r1 u0 x0 | drive Some("drover verdict drover 65 PASS --sha efe88837c1a95c0c925dfed973fb46d29bae4a10 --file /v.md") | none None | VERDICT_FAIL
@@ -474,7 +474,7 @@
 473 drover #65 merged r2 u0 x0 | none None | none None | ok
 474 drover #65 merged r2 u0 x0 | none None | none None | ok
 475 drover #65 merged r2 u0 x0 | none None | none None | ok
-476 drover #66 impl r0 u0 x0 | drive Some("drover spawn drover 66 rev") | drive Some("drover spawn drover 66 rev") | NO_VERDICT
+476 drover #66 impl r0 u0 x0 | none None | none None | NO_VERDICT
 477 atlas #2872 merged r1 u0 x0 | none None | none None | ok
 478 atlas #2872 merged r1 u0 x0 | none None | none None | ok
 479 atlas #2872 merged r1 u0 x0 | none None | none None | ok
@@ -484,9 +484,9 @@
 483 drover #66 merged r1 u0 x0 | none None | none None | ok
 484 drover #66 merged r1 u0 x0 | none None | none None | ok
 485 drover #66 merged r1 u0 x0 | none None | none None | ok
-486 drover #68 impl r0 u0 x0 | drive Some("drover spawn drover 68 rev") | drive Some("drover spawn drover 68 rev") | NO_VERDICT
-487 atlas #2881 impl r0 u0 x0 | drive Some("drover spawn atlas 2881 rev") | drive Some("drover spawn atlas 2881 rev") | NO_VERDICT
-488 atlas #2881 impl r0 u0 x0 | drive Some("drover spawn atlas 2881 rev") | drive Some("drover spawn atlas 2881 rev") | NO_VERDICT
+486 drover #68 impl r0 u0 x0 | none None | none None | NO_VERDICT
+487 atlas #2881 impl r0 u0 x0 | none None | none None | NO_VERDICT
+488 atlas #2881 impl r0 u0 x0 | none None | none None | NO_VERDICT
 489 atlas #2823 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2823 PASS --sha 781dfde0ccaf9ca958166b0ee2fc54a2d69e38e5 --file /v.md") | none None | VERDICT_FAIL
 490 atlas #2823 ready r3 u0 x0 | drive Some("drover merge atlas 2823") | drive Some("drover merge atlas 2823") | ok
 491 atlas #2881 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2881 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -495,14 +495,14 @@
 494 atlas #2823 merged r3 u0 x0 | none None | none None | ok
 495 atlas #2823 merged r3 u0 x0 | none None | none None | ok
 496 atlas #2823 merged r3 u0 x0 | none None | none None | ok
-497 atlas #2844 fix(3) r3 u0 x0 | none None | drive Some("drover spawn atlas 2844 rev") | ok
-498 atlas #2726 impl r0 u0 x0 | drive Some("drover spawn atlas 2726 rev") | drive Some("drover spawn atlas 2726 rev") | NO_VERDICT
+497 atlas #2844 fix(3) r3 u0 x0 | none None | none None | ok
+498 atlas #2726 impl r0 u0 x0 | none None | none None | NO_VERDICT
 499 atlas #2726 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 500 atlas #2881 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2881 impl --supersede") | drive Some("drover spawn atlas 2881 impl --supersede") | VERDICT_FAIL
-501 atlas #2851 impl r0 u0 x0 | drive Some("drover spawn atlas 2851 rev") | drive Some("drover spawn atlas 2851 rev") | NO_VERDICT
+501 atlas #2851 impl r0 u0 x0 | none None | none None | NO_VERDICT
 502 atlas #2844 review(4) r3 u0 x0 | drive Some("drover verdict atlas 2844 PASS --sha 96e16ed52d04ee74e5ee53a51591a8302dad6141 --file /v.md") | none None | ok
 503 atlas #2726 review(1) r0 u0 x0 | owner None | owner None | NO_VERDICT
-504 atlas #2881 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2881 rev") | VERDICT_FAIL
+504 atlas #2881 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 505 drover #68 review(1) r0 u0 x0 | drive Some("drover verdict drover 68 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 506 atlas #2844 ready r4 u0 x0 | drive Some("drover merge atlas 2844") | drive Some("drover merge atlas 2844") | ROUND_LIMIT
 507 atlas #2851 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2851 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -510,11 +510,11 @@
 509 atlas #2851 ready r1 u0 x0 | drive Some("drover merge atlas 2851") | drive Some("drover merge atlas 2851") | ok
 510 atlas #2881 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2881 PASS --sha 7816332a98d49a22b2cc333da69c9e61e22bd3a6 --file /v.md") | none None | VERDICT_FAIL
 511 atlas #2726 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
-512 atlas #2726 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2726 rev") | VERDICT_FAIL
+512 atlas #2726 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 513 atlas #2844 needs-human r4 u0 x0 | owner Some("drover extend atlas 2844") | owner Some("drover extend atlas 2844") | ROUND_LIMIT
 514 drover #68 fix(1) r1 u0 x0 | drive Some("drover spawn drover 68 impl --supersede") | drive Some("drover spawn drover 68 impl --supersede") | VERDICT_FAIL
-515 drover #68 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 68 rev") | VERDICT_FAIL
-516 drover #73 impl r0 u0 x0 | drive Some("drover spawn drover 73 rev") | drive Some("drover spawn drover 73 rev") | NO_VERDICT
+515 drover #68 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+516 drover #73 impl r0 u0 x0 | none None | none None | NO_VERDICT
 517 atlas #2881 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2881 impl --supersede") | drive Some("drover spawn atlas 2881 impl --supersede") | VERDICT_FAIL
 518 drover #68 review(2) r1 u0 x0 | drive Some("drover verdict drover 68 PASS --sha fd0c436de8428425b8989c7b9695f95230a692c9 --file /v.md") | none None | VERDICT_FAIL
 519 drover #73 review(1) r0 u0 x0 | drive Some("drover verdict drover 73 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -531,24 +531,24 @@
 530 atlas #2851 merged r1 u0 x0 | none None | none None | ok
 531 atlas #2851 merged r1 u0 x0 | none None | none None | ok
 532 atlas #2851 merged r1 u0 x0 | none None | none None | ok
-533 drover #70 impl r0 u0 x0 | drive Some("drover spawn drover 70 rev") | drive Some("drover spawn drover 70 rev") | NO_VERDICT
+533 drover #70 impl r0 u0 x0 | none None | none None | NO_VERDICT
 534 atlas #2881 ready r2 u0 x0 | drive Some("drover merge atlas 2881") | drive Some("drover merge atlas 2881") | ok
-535 atlas #2683 impl r0 u0 x0 | drive Some("drover spawn atlas 2683 rev") | drive Some("drover spawn atlas 2683 rev") | NO_VERDICT
+535 atlas #2683 impl r0 u0 x0 | none None | none None | NO_VERDICT
 536 drover #70 review(1) r0 u0 x0 | drive Some("drover verdict drover 70 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 537 drover #70 ready r1 u0 x0 | drive Some("drover merge drover 70") | drive Some("drover merge drover 70") | ok
 538 drover #70 merged r1 u0 x0 | none None | none None | ok
 539 drover #70 merged r1 u0 x0 | none None | none None | ok
 540 drover #70 merged r1 u0 x0 | none None | none None | ok
-541 drover #71 impl r0 u0 x0 | drive Some("drover spawn drover 71 rev") | drive Some("drover spawn drover 71 rev") | NO_VERDICT
-542 drover #59 impl r0 u0 x0 | drive Some("drover spawn drover 59 rev") | drive Some("drover spawn drover 59 rev") | NO_VERDICT
+541 drover #71 impl r0 u0 x0 | none None | none None | NO_VERDICT
+542 drover #59 impl r0 u0 x0 | none None | none None | NO_VERDICT
 543 drover #71 review(1) r0 u0 x0 | drive Some("drover verdict drover 71 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 544 drover #71 ready r1 u0 x0 | drive Some("drover merge drover 71") | drive Some("drover merge drover 71") | ok
 545 atlas #2683 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2683 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 546 drover #59 review(1) r0 u0 x0 | drive Some("drover verdict drover 59 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 547 drover #59 fix(1) r1 u0 x0 | drive Some("drover spawn drover 59 impl --supersede") | drive Some("drover spawn drover 59 impl --supersede") | VERDICT_FAIL
 548 atlas #2683 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2683 impl --supersede") | drive Some("drover spawn atlas 2683 impl --supersede") | VERDICT_FAIL
-549 drover #59 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 59 rev") | VERDICT_FAIL
-550 atlas #2683 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2683 rev") | VERDICT_FAIL
+549 drover #59 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+550 atlas #2683 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 551 drover #71 blocked r1 u0 x0 | drive Some("drover merge drover 71") | drive Some("drover spawn drover 71 rev --supersede") | ok
 552 drover #71 review(2) r1 u0 x0 | drive Some("drover verdict drover 71 PASS --sha 34a75e71533f9b4966796a547f2115fa362c07a7 --file /v.md") | none None | ok
 553 drover #71 ready r2 u0 x0 | drive Some("drover merge drover 71") | drive Some("drover merge drover 71") | ok
@@ -561,13 +561,13 @@
 560 drover #59 merged r2 u0 x0 | none None | none None | ok
 561 drover #59 merged r2 u0 x0 | none None | none None | ok
 562 drover #59 merged r2 u0 x0 | none None | none None | ok
-563 drover #60 impl r0 u0 x0 | drive Some("drover spawn drover 60 rev") | drive Some("drover spawn drover 60 rev") | NO_VERDICT
+563 drover #60 impl r0 u0 x0 | none None | none None | NO_VERDICT
 564 atlas #2683 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2683 PASS --sha e37c4b299778de965114d8104c49b8ff27a81700 --file /v.md") | none None | VERDICT_FAIL
 565 drover #60 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 566 atlas #2683 ready r2 u0 x0 | drive Some("drover merge atlas 2683") | drive Some("drover merge atlas 2683") | ok
 567 drover #60 review(1) r0 u0 x0 | owner None | owner None | NO_VERDICT
 568 drover #60 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
-569 drover #60 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 60 rev") | VERDICT_FAIL
+569 drover #60 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 570 drover #60 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
 571 drover #60 review(2) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
 572 drover #60 ready r2 u0 x0 | owner None | owner None | ok
@@ -584,14 +584,14 @@
 583 drover #60 merged r2 u0 x0 | none None | none None | ok
 584 drover #60 merged r2 u0 x0 | none None | none None | ok
 585 atlas #2881 ready r2 u0 x0 | owner None | owner None | ok
-586 atlas #2881 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2881 rev") | ok
-587 drover #81 impl r0 u0 x0 | drive Some("drover spawn drover 81 rev") | drive Some("drover spawn drover 81 rev") | NO_VERDICT
-588 atlas #2726 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2726 rev") | VERDICT_FAIL
-589 atlas #2726 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2726 rev") | VERDICT_FAIL
-590 atlas #2881 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2881 rev") | ok
+586 atlas #2881 fix(2) r2 u0 x0 | none None | none None | ok
+587 drover #81 impl r0 u0 x0 | none None | none None | NO_VERDICT
+588 atlas #2726 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+589 atlas #2726 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+590 atlas #2881 fix(2) r2 u0 x0 | none None | none None | ok
 591 atlas #2881 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2881 PASS --sha 7efcb667495b71b43a6be0c5207885bf88ab48c4 --file /v.md") | none None | ok
 592 drover #81 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-593 drover #81 impl r0 u0 x0 | drive Some("drover spawn drover 81 rev") | drive Some("drover spawn drover 81 rev") | NO_VERDICT
+593 drover #81 impl r0 u0 x0 | none None | none None | NO_VERDICT
 594 atlas #2881 ready r3 u0 x0 | drive Some("drover merge atlas 2881") | drive Some("drover merge atlas 2881") | ok
 595 drover #81 review(1) r0 u0 x0 | drive Some("drover verdict drover 81 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 596 drover #81 ready r1 u0 x0 | drive Some("drover merge drover 81") | drive Some("drover merge drover 81") | ok
@@ -600,7 +600,7 @@
 599 drover #81 merged r1 u0 x0 | none None | none None | ok
 600 drover #82 queued r0 u0 x0 | owner None | owner None | NO_VERDICT
 601 drover #82 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-602 drover #83 impl r0 u0 x0 | drive Some("drover spawn drover 83 rev") | drive Some("drover spawn drover 83 rev") | NO_VERDICT
+602 drover #83 impl r0 u0 x0 | none None | none None | NO_VERDICT
 603 drover #82 review(1) r0 u0 x0 | owner None | owner None | NO_VERDICT
 604 drover #82 ready r1 u0 x0 | owner None | owner None | ok
 605 drover #82 merged r1 u0 x0 | none None | none None | ok
@@ -614,66 +614,66 @@
 613 drover #83 merged r2 u0 x0 | none None | none None | ok
 614 drover #83 merged r2 u0 x0 | none None | none None | ok
 615 drover #83 merged r2 u0 x0 | none None | none None | ok
-616 drover #88 impl r0 u0 x0 | drive Some("drover spawn drover 88 rev") | drive Some("drover spawn drover 88 rev") | NO_VERDICT
-617 drover #87 impl r0 u0 x0 | drive Some("drover spawn drover 87 rev") | drive Some("drover spawn drover 87 rev") | NO_VERDICT
+616 drover #88 impl r0 u0 x0 | none None | none None | NO_VERDICT
+617 drover #87 impl r0 u0 x0 | none None | none None | NO_VERDICT
 618 drover #88 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-619 drover #88 impl r0 u0 x0 | drive Some("drover spawn drover 88 rev") | drive Some("drover spawn drover 88 rev") | NO_VERDICT
+619 drover #88 impl r0 u0 x0 | none None | none None | NO_VERDICT
 620 drover #88 review(1) r0 u0 x0 | drive Some("drover verdict drover 88 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 621 drover #88 ready r1 u0 x0 | drive Some("drover merge drover 88") | drive Some("drover merge drover 88") | ok
 622 drover #88 merged r1 u0 x0 | none None | none None | ok
 623 drover #88 merged r1 u0 x0 | none None | none None | ok
 624 drover #88 merged r1 u0 x0 | none None | none None | ok
-625 drover #89 impl r0 u0 x0 | drive Some("drover spawn drover 89 rev") | drive Some("drover spawn drover 89 rev") | NO_VERDICT
+625 drover #89 impl r0 u0 x0 | none None | none None | NO_VERDICT
 626 drover #87 review(1) r0 u0 x0 | drive Some("drover verdict drover 87 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 627 drover #87 fix(1) r1 u0 x0 | drive Some("drover spawn drover 87 impl --supersede") | drive Some("drover spawn drover 87 impl --supersede") | VERDICT_FAIL
 628 drover #87 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
-629 drover #87 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 87 rev") | VERDICT_FAIL
+629 drover #87 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 630 drover #89 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 631 drover #87 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
 632 atlas #2881 ready r3 u0 x0 | owner None | owner None | ok
-633 drover #89 impl r0 u0 x0 | drive Some("drover spawn drover 89 rev") | drive Some("drover spawn drover 89 rev") | NO_VERDICT
-634 drover #92 impl r0 u0 x0 | drive Some("drover spawn drover 92 rev") | drive Some("drover spawn drover 92 rev") | NO_VERDICT
-635 drover #87 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 87 rev") | VERDICT_FAIL
+633 drover #89 impl r0 u0 x0 | none None | none None | NO_VERDICT
+634 drover #92 impl r0 u0 x0 | none None | none None | NO_VERDICT
+635 drover #87 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 636 atlas #2881 ready r3 u0 x0 | drive Some("drover merge atlas 2881") | drive Some("drover merge atlas 2881") | ok
-637 atlas #2888 impl r0 u0 x0 | drive Some("drover spawn atlas 2888 rev") | drive Some("drover spawn atlas 2888 rev") | NO_VERDICT
+637 atlas #2888 impl r0 u0 x0 | none None | none None | NO_VERDICT
 638 drover #87 review(2) r1 u0 x0 | drive Some("drover verdict drover 87 PASS --sha b4614a43f76d2aeaae8ebce432ae868011c5e548 --file /v.md") | none None | VERDICT_FAIL
 639 drover #87 ready r2 u0 x0 | drive Some("drover merge drover 87") | drive Some("drover merge drover 87") | ok
 640 drover #87 merged r2 u0 x0 | none None | none None | ok
 641 drover #87 merged r2 u0 x0 | none None | none None | ok
 642 drover #87 merged r2 u0 x0 | none None | none None | ok
 643 drover #92 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-644 drover #92 impl r0 u0 x0 | drive Some("drover spawn drover 92 rev") | drive Some("drover spawn drover 92 rev") | NO_VERDICT
+644 drover #92 impl r0 u0 x0 | none None | none None | NO_VERDICT
 645 drover #92 review(1) r0 u0 x0 | drive Some("drover verdict drover 92 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 646 drover #92 fix(1) r1 u0 x0 | drive Some("drover spawn drover 92 impl --supersede") | drive Some("drover spawn drover 92 impl --supersede") | VERDICT_FAIL
 647 atlas #2888 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2888 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-648 drover #92 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 92 rev") | VERDICT_FAIL
+648 drover #92 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 649 drover #92 review(2) r1 u0 x0 | drive Some("drover verdict drover 92 PASS --sha 7ce6e8acc441bd1c1b9980fef3d9be57a196689b --file /v.md") | none None | VERDICT_FAIL
-650 atlas #2886 impl r0 u0 x0 | drive Some("drover spawn atlas 2886 rev") | drive Some("drover spawn atlas 2886 rev") | NO_VERDICT
+650 atlas #2886 impl r0 u0 x0 | none None | none None | NO_VERDICT
 651 atlas #2886 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-652 atlas #2886 impl r0 u0 x0 | drive Some("drover spawn atlas 2886 rev") | drive Some("drover spawn atlas 2886 rev") | NO_VERDICT
+652 atlas #2886 impl r0 u0 x0 | none None | none None | NO_VERDICT
 653 atlas #2888 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2888 impl --supersede") | drive Some("drover spawn atlas 2888 impl --supersede") | VERDICT_FAIL
 654 drover #92 review(2) r1 u0 x0 | drive Some("drover verdict drover 92 PASS --sha 7ce6e8acc441bd1c1b9980fef3d9be57a196689b --file /v.md") | none None | VERDICT_FAIL
-655 atlas #2888 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2888 rev") | VERDICT_FAIL
+655 atlas #2888 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 656 drover #92 ready r2 u0 x0 | drive Some("drover merge drover 92") | drive Some("drover merge drover 92") | ok
 657 drover #92 merged r2 u0 x0 | none None | none None | ok
 658 drover #92 merged r2 u0 x0 | none None | none None | ok
 659 drover #92 merged r2 u0 x0 | none None | none None | ok
 660 drover #92 merged r2 u0 x0 | none None | none None | ok
-661 drover #93 impl r0 u0 x0 | drive Some("drover spawn drover 93 rev") | drive Some("drover spawn drover 93 rev") | NO_VERDICT
+661 drover #93 impl r0 u0 x0 | none None | none None | NO_VERDICT
 662 atlas #2886 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2886 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 663 drover #93 ready r1 u0 x0 | drive Some("drover merge drover 93") | drive Some("drover merge drover 93") | ok
 664 drover #93 merged r1 u0 x0 | none None | none None | ok
 665 drover #93 merged r1 u0 x0 | none None | none None | ok
-666 drover #107 impl r0 u0 x0 | drive Some("drover spawn drover 107 rev") | drive Some("drover spawn drover 107 rev") | NO_VERDICT
-667 drover #100 impl r0 u0 x0 | drive Some("drover spawn drover 100 rev") | drive Some("drover spawn drover 100 rev") | NO_VERDICT
-668 drover #101 impl r0 u0 x0 | drive Some("drover spawn drover 101 rev") | drive Some("drover spawn drover 101 rev") | NO_VERDICT
-669 drover #102 impl r0 u0 x0 | drive Some("drover spawn drover 102 rev") | drive Some("drover spawn drover 102 rev") | NO_VERDICT
-670 drover #97 impl r0 u0 x0 | drive Some("drover spawn drover 97 rev") | drive Some("drover spawn drover 97 rev") | NO_VERDICT
-671 drover #95 impl r0 u0 x0 | drive Some("drover spawn drover 95 rev") | drive Some("drover spawn drover 95 rev") | NO_VERDICT
+666 drover #107 impl r0 u0 x0 | none None | none None | NO_VERDICT
+667 drover #100 impl r0 u0 x0 | none None | none None | NO_VERDICT
+668 drover #101 impl r0 u0 x0 | none None | none None | NO_VERDICT
+669 drover #102 impl r0 u0 x0 | none None | none None | NO_VERDICT
+670 drover #97 impl r0 u0 x0 | none None | none None | NO_VERDICT
+671 drover #95 impl r0 u0 x0 | none None | none None | NO_VERDICT
 672 atlas #2886 ready r1 u0 x0 | drive Some("drover merge atlas 2886") | drive Some("drover merge atlas 2886") | ok
 673 drover #97 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 674 drover #107 review(1) r0 u0 x0 | drive Some("drover verdict drover 107 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-675 drover #97 impl r0 u0 x0 | drive Some("drover spawn drover 97 rev") | drive Some("drover spawn drover 97 rev") | NO_VERDICT
+675 drover #97 impl r0 u0 x0 | none None | none None | NO_VERDICT
 676 atlas #2888 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2888 PASS --sha 91aeae0024c6de4beefba01afdb5e939751d85a3 --file /v.md") | none None | VERDICT_FAIL
 677 drover #100 review(1) r0 u0 x0 | drive Some("drover verdict drover 100 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 678 drover #102 review(1) r0 u0 x0 | drive Some("drover verdict drover 102 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -685,15 +685,15 @@
 684 drover #100 merged r1 u0 x0 | none None | none None | ok
 685 drover #100 merged r1 u0 x0 | none None | none None | ok
 686 drover #100 merged r1 u0 x0 | none None | none None | ok
-687 drover #96 impl r0 u0 x0 | drive Some("drover spawn drover 96 rev") | drive Some("drover spawn drover 96 rev") | NO_VERDICT
-688 drover #99 impl r0 u0 x0 | drive Some("drover spawn drover 99 rev") | drive Some("drover spawn drover 99 rev") | NO_VERDICT
-689 drover #103 impl r0 u0 x0 | drive Some("drover spawn drover 103 rev") | drive Some("drover spawn drover 103 rev") | NO_VERDICT
-690 drover #104 impl r0 u0 x0 | drive Some("drover spawn drover 104 rev") | drive Some("drover spawn drover 104 rev") | NO_VERDICT
+687 drover #96 impl r0 u0 x0 | none None | none None | NO_VERDICT
+688 drover #99 impl r0 u0 x0 | none None | none None | NO_VERDICT
+689 drover #103 impl r0 u0 x0 | none None | none None | NO_VERDICT
+690 drover #104 impl r0 u0 x0 | none None | none None | NO_VERDICT
 691 drover #102 fix(1) r1 u0 x0 | drive Some("drover spawn drover 102 impl --supersede") | drive Some("drover spawn drover 102 impl --supersede") | VERDICT_FAIL
 692 drover #103 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-693 drover #103 impl r0 u0 x0 | drive Some("drover spawn drover 103 rev") | drive Some("drover spawn drover 103 rev") | NO_VERDICT
+693 drover #103 impl r0 u0 x0 | none None | none None | NO_VERDICT
 694 drover #115 queued r0 u0 x0 | none None | none None | NO_VERDICT
-695 drover #102 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 102 rev") | VERDICT_FAIL
+695 drover #102 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 696 atlas #2888 ready r2 u0 x0 | drive Some("drover merge atlas 2888") | drive Some("drover merge atlas 2888") | ok
 697 atlas #2888 merged r2 u0 x0 | none None | none None | ok
 698 atlas #2888 merged r2 u0 x0 | none None | none None | ok
@@ -707,20 +707,20 @@
 706 drover #97 review(1) r0 u0 x0 | drive Some("drover verdict drover 97 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 707 atlas #2726 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2726 PASS --sha 51df33a739bc2948677d67259dd3f86a607f136a --file /v.md") | none None | VERDICT_FAIL
 708 drover #101 fix(1) r1 u0 x0 | drive Some("drover spawn drover 101 impl --supersede") | drive Some("drover spawn drover 101 impl --supersede") | VERDICT_FAIL
-709 drover #105 impl r0 u0 x0 | drive Some("drover spawn drover 105 rev") | drive Some("drover spawn drover 105 rev") | NO_VERDICT
-710 drover #101 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 101 rev") | VERDICT_FAIL
+709 drover #105 impl r0 u0 x0 | none None | none None | NO_VERDICT
+710 drover #101 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 711 drover #95 ready r1 u0 x0 | drive Some("drover merge drover 95") | drive Some("drover merge drover 95") | ok
 712 drover #95 merged r1 u0 x0 | none None | none None | ok
 713 drover #95 merged r1 u0 x0 | none None | none None | ok
 714 drover #95 merged r1 u0 x0 | none None | none None | ok
 715 drover #96 review(1) r0 u0 x0 | drive Some("drover verdict drover 96 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 716 drover #99 fix(1) r1 u0 x0 | drive Some("drover spawn drover 99 impl --supersede") | drive Some("drover spawn drover 99 impl --supersede") | VERDICT_FAIL
-717 drover #99 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 99 rev") | VERDICT_FAIL
+717 drover #99 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 718 drover #102 review(2) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
 719 atlas #2881 ready r4 u0 x0 | drive Some("drover merge atlas 2881") | drive Some("drover merge atlas 2881") | ROUND_LIMIT
 720 atlas #2881 needs-human r4 u0 x0 | owner Some("drover extend atlas 2881") | owner Some("drover extend atlas 2881") | ROUND_LIMIT
 721 atlas #2726 ready r2 u0 x0 | drive Some("drover merge atlas 2726") | drive Some("drover merge atlas 2726") | ok
-722 atlas #2886 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2886 rev") | ok
+722 atlas #2886 fix(1) r1 u0 x0 | none None | none None | ok
 723 drover #105 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 724 atlas #2886 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2886 PASS --sha ece56921a7cd080ebd8e98c969a9218928972eca --file /v.md") | none None | ok
 725 atlas #2886 ready r2 u0 x0 | drive Some("drover merge atlas 2886") | drive Some("drover merge atlas 2886") | ok
@@ -728,12 +728,12 @@
 727 atlas #2886 merged r2 u0 x0 | none None | none None | ok
 728 atlas #2886 merged r2 u0 x0 | none None | none None | ok
 729 atlas #2886 merged r2 u0 x0 | none None | none None | ok
-730 atlas #2752 impl r0 u0 x0 | drive Some("drover spawn atlas 2752 rev") | drive Some("drover spawn atlas 2752 rev") | NO_VERDICT
-731 atlas #2781 impl r0 u0 x0 | drive Some("drover spawn atlas 2781 rev") | drive Some("drover spawn atlas 2781 rev") | NO_VERDICT
+730 atlas #2752 impl r0 u0 x0 | none None | none None | NO_VERDICT
+731 atlas #2781 impl r0 u0 x0 | none None | none None | NO_VERDICT
 732 atlas #2781 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 733 atlas #2752 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 734 drover #97 fix(1) r1 u0 x0 | drive Some("drover spawn drover 97 impl --supersede") | drive Some("drover spawn drover 97 impl --supersede") | VERDICT_FAIL
-735 drover #97 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 97 rev") | VERDICT_FAIL
+735 drover #97 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 736 drover #99 review(2) r1 u0 x0 | drive Some("drover verdict drover 99 PASS --sha b5eebe658e2044bdf6c5b095b6fa778f83aae69c --file /v.md") | none None | VERDICT_FAIL
 737 drover #97 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
 738 drover #101 review(2) r1 u0 x0 | drive Some("drover verdict drover 101 PASS --sha 1190b62a2bf007385076ba6cf2c7549665f476dc --file /v.md") | none None | VERDICT_FAIL
@@ -741,26 +741,26 @@
 740 drover #104 review(1) r0 u0 x0 | drive Some("drover verdict drover 104 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 741 drover #102 ready r2 u0 x0 | owner None | owner None | ok
 742 drover #99 fix(2) r2 u0 x0 | drive Some("drover spawn drover 99 impl --supersede") | drive Some("drover spawn drover 99 impl --supersede") | VERDICT_FAIL
-743 drover #99 fix(2) r2 u0 x0 | none None | drive Some("drover spawn drover 99 rev") | VERDICT_FAIL
+743 drover #99 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 744 drover #103 fix(1) r1 u0 x0 | drive Some("drover spawn drover 103 impl --supersede") | drive Some("drover spawn drover 103 impl --supersede") | VERDICT_FAIL
 745 atlas #2714 closed r0 u0 x0 | none None | none None | NO_VERDICT
-746 drover #105 impl r0 u0 x0 | drive Some("drover spawn drover 105 rev") | drive Some("drover spawn drover 105 rev") | NO_VERDICT
+746 drover #105 impl r0 u0 x0 | none None | none None | NO_VERDICT
 747 drover #102 ready r2 u0 x0 | drive Some("drover merge drover 102") | drive Some("drover merge drover 102") | ok
-748 drover #97 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 97 rev") | VERDICT_FAIL
-749 drover #103 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 103 rev") | VERDICT_FAIL
+748 drover #97 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+749 drover #103 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 750 drover #96 fix(1) r1 u0 x0 | drive Some("drover spawn drover 96 impl --supersede") | drive Some("drover spawn drover 96 impl --supersede") | VERDICT_FAIL
-751 drover #96 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 96 rev") | VERDICT_FAIL
+751 drover #96 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 752 drover #101 ready r2 u0 x0 | drive Some("drover merge drover 101") | drive Some("drover merge drover 101") | ok
 753 drover #101 merged r2 u0 x0 | none None | none None | ok
 754 drover #101 merged r2 u0 x0 | none None | none None | ok
 755 drover #101 merged r2 u0 x0 | none None | none None | ok
 756 drover #101 merged r2 u0 x0 | none None | none None | ok
 757 drover #104 fix(1) r1 u0 x0 | drive Some("drover spawn drover 104 impl --supersede") | drive Some("drover spawn drover 104 impl --supersede") | VERDICT_FAIL
-758 drover #104 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 104 rev") | VERDICT_FAIL
-759 drover #114 impl r0 u0 x0 | drive Some("drover spawn drover 114 rev") | drive Some("drover spawn drover 114 rev") | NO_VERDICT
+758 drover #104 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+759 drover #114 impl r0 u0 x0 | none None | none None | NO_VERDICT
 760 drover #102 ready r2 u0 x0 | owner None | owner None | ok
-761 atlas #2781 impl r0 u0 x0 | drive Some("drover spawn atlas 2781 rev") | drive Some("drover spawn atlas 2781 rev") | NO_VERDICT
-762 atlas #2752 impl r0 u0 x0 | drive Some("drover spawn atlas 2752 rev") | drive Some("drover spawn atlas 2752 rev") | NO_VERDICT
+761 atlas #2781 impl r0 u0 x0 | none None | none None | NO_VERDICT
+762 atlas #2752 impl r0 u0 x0 | none None | none None | NO_VERDICT
 763 atlas #2881 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
 764 drover #102 ready r2 u0 x0 | drive Some("drover merge drover 102") | drive Some("drover merge drover 102") | ok
 765 atlas #2881 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
@@ -785,19 +785,19 @@
 784 drover #102 merged r3 u0 x0 | none None | none None | ok
 785 drover #102 merged r3 u0 x0 | none None | none None | ok
 786 drover #99 ready r3 u0 x0 | drive Some("drover merge drover 99") | drive Some("drover merge drover 99") | ok
-787 drover #99 fix(3) r3 u0 x0 | none None | drive Some("drover spawn drover 99 rev") | ok
+787 drover #99 fix(3) r3 u0 x0 | none None | none None | ok
 788 drover #104 ready r2 u0 x0 | drive Some("drover merge drover 104") | drive Some("drover merge drover 104") | ok
 789 drover #97 ready r2 u0 x0 | drive Some("drover merge drover 97") | drive Some("drover merge drover 97") | ok
-790 drover #97 fix(2) r2 u0 x0 | none None | drive Some("drover spawn drover 97 rev") | ok
+790 drover #97 fix(2) r2 u0 x0 | none None | none None | ok
 791 drover #114 ready r1 u0 x0 | drive Some("drover merge drover 114") | drive Some("drover merge drover 114") | ok
 792 drover #114 merged r1 u0 x0 | none None | none None | ok
 793 drover #114 merged r1 u0 x0 | none None | none None | ok
 794 drover #96 fix(2) r2 u0 x0 | drive Some("drover spawn drover 96 impl --supersede") | drive Some("drover spawn drover 96 impl --supersede") | VERDICT_FAIL
-795 drover #96 fix(2) r2 u0 x0 | none None | drive Some("drover spawn drover 96 rev") | VERDICT_FAIL
+795 drover #96 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 796 drover #103 ready r2 u0 x0 | drive Some("drover merge drover 103") | drive Some("drover merge drover 103") | ok
-797 drover #103 fix(2) r2 u0 x0 | none None | drive Some("drover spawn drover 103 rev") | ok
+797 drover #103 fix(2) r2 u0 x0 | none None | none None | ok
 798 drover #105 ready r1 u0 x0 | drive Some("drover merge drover 105") | drive Some("drover merge drover 105") | ok
-799 drover #105 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 105 rev") | ok
+799 drover #105 fix(1) r1 u0 x0 | none None | none None | ok
 800 drover #97 review(3) r2 u0 x0 | drive Some("drover verdict drover 97 PASS --sha 82efb383bf05d3fdd4a65691ec2815d5e416db40 --file /v.md") | none None | ok
 801 drover #99 review(4) r3 u0 x0 | drive Some("drover verdict drover 99 PASS --sha 4de8ca5bdb74838aee93ed4861e4304d005ec8f5 --file /v.md") | none None | ok
 802 drover #104 blocked r2 u0 x0 | drive Some("drover merge drover 104") | drive Some("drover spawn drover 104 rev --supersede") | ok
@@ -816,8 +816,8 @@
 815 drover #96 fix(3) r3 u0 x0 | drive Some("drover spawn drover 96 impl --supersede") | drive Some("drover spawn drover 96 impl --supersede") | VERDICT_FAIL
 816 drover #96 needs-human r3 u0 x0 | owner Some("drover extend drover 96") | owner Some("drover extend drover 96") | VERDICT_FAIL
 817 drover #104 ready r3 u0 x0 | drive Some("drover merge drover 104") | drive Some("drover merge drover 104") | ok
-818 drover #104 fix(3) r3 u0 x0 | none None | drive Some("drover spawn drover 104 rev") | ok
-819 drover #96 fix(3) r3 u0 x0 | none None | drive Some("drover spawn drover 96 rev") | VERDICT_FAIL
+818 drover #104 fix(3) r3 u0 x0 | none None | none None | ok
+819 drover #96 fix(3) r3 u0 x0 | none None | none None | VERDICT_FAIL
 820 drover #99 needs-human r4 u0 x0 | owner Some("drover extend drover 99") | owner Some("drover extend drover 99") | ROUND_LIMIT
 821 drover #105 ready r2 u0 x0 | drive Some("drover merge drover 105") | drive Some("drover merge drover 105") | ok
 822 drover #105 merged r2 u0 x0 | none None | none None | ok
@@ -831,13 +831,13 @@
 830 drover #103 merged r3 u0 x0 | none None | none None | ok
 831 drover #103 merged r3 u0 x0 | none None | none None | ok
 832 drover #103 merged r3 u0 x0 | none None | none None | ok
-833 atlas #2683 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2683 rev") | ok
-834 drover #122 impl r0 u0 x0 | drive Some("drover spawn drover 122 rev") | drive Some("drover spawn drover 122 rev") | NO_VERDICT
-835 atlas #2726 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2726 rev") | ok
+833 atlas #2683 fix(2) r2 u0 x0 | none None | none None | ok
+834 drover #122 impl r0 u0 x0 | none None | none None | NO_VERDICT
+835 atlas #2726 fix(2) r2 u0 x0 | none None | none None | ok
 836 atlas #2726 fix(2) r2 u0 x0 | owner None | owner None | ok
-837 drover #98 impl r0 u0 x0 | drive Some("drover spawn drover 98 rev") | drive Some("drover spawn drover 98 rev") | NO_VERDICT
+837 drover #98 impl r0 u0 x0 | none None | none None | NO_VERDICT
 838 atlas #2683 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2683 PASS --sha 2801ca7347deed5c9330eda5e94bba28d655ada1 --file /v.md") | none None | ok
-839 atlas #2726 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2726 rev") | ok
+839 atlas #2726 fix(2) r2 u0 x0 | none None | none None | ok
 840 drover #96 review(4) r3 u0 x0 | drive Some("drover verdict drover 96 PASS --sha 895d445cea1926c919d983e683e11665aa314ac1 --file /v.md") | none None | VERDICT_FAIL
 841 atlas #2683 ready r3 u0 x0 | drive Some("drover merge atlas 2683") | drive Some("drover merge atlas 2683") | ok
 842 drover #99 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
@@ -852,15 +852,15 @@
 851 atlas #2683 merged r3 u0 x0 | none None | none None | ok
 852 atlas #2683 merged r3 u0 x0 | none None | none None | ok
 853 drover #98 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-854 drover #98 impl r0 u0 x0 | drive Some("drover spawn drover 98 rev") | drive Some("drover spawn drover 98 rev") | NO_VERDICT
+854 drover #98 impl r0 u0 x0 | none None | none None | NO_VERDICT
 855 drover #96 ready r4 u0 x0 | drive Some("drover merge drover 96") | drive Some("drover merge drover 96") | ROUND_LIMIT
 856 drover #96 needs-human r4 u0 x0 | owner Some("drover extend drover 96") | owner Some("drover extend drover 96") | ROUND_LIMIT
 857 atlas #2726 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2726 PASS --sha 2b71a5fb044549edbeb124dd517c13fc91e468ac --file /v.md") | none None | ok
 858 drover #104 review(4) r3 u0 x0 | drive Some("drover verdict drover 104 PASS --sha c591c22f45f7263e44bf151c3c0fea8ff06b1cf1 --file /v.md") | none None | ok
 859 drover #122 review(1) r0 u0 x0 | drive Some("drover verdict drover 122 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-860 drover #124 impl r0 u0 x0 | drive Some("drover spawn drover 124 rev") | drive Some("drover spawn drover 124 rev") | NO_VERDICT
-861 drover #115 impl r0 u0 x0 | drive Some("drover spawn drover 115 rev") | drive Some("drover spawn drover 115 rev") | NO_VERDICT
-862 drover #123 impl r0 u0 x0 | drive Some("drover spawn drover 123 rev") | drive Some("drover spawn drover 123 rev") | NO_VERDICT
+860 drover #124 impl r0 u0 x0 | none None | none None | NO_VERDICT
+861 drover #115 impl r0 u0 x0 | none None | none None | NO_VERDICT
+862 drover #123 impl r0 u0 x0 | none None | none None | NO_VERDICT
 863 drover #104 ready r4 u0 x0 | drive Some("drover merge drover 104") | drive Some("drover merge drover 104") | ROUND_LIMIT
 864 atlas #2726 ready r3 u0 x0 | drive Some("drover merge atlas 2726") | drive Some("drover merge atlas 2726") | ok
 865 atlas #2726 merged r3 u0 x0 | none None | none None | ok
@@ -868,7 +868,7 @@
 867 atlas #2726 merged r3 u0 x0 | none None | none None | ok
 868 atlas #2726 merged r3 u0 x0 | none None | none None | ok
 869 atlas #2726 merged r3 u0 x0 | none None | none None | ok
-870 atlas #2841 impl r0 u0 x0 | drive Some("drover spawn atlas 2841 rev") | drive Some("drover spawn atlas 2841 rev") | NO_VERDICT
+870 atlas #2841 impl r0 u0 x0 | none None | none None | NO_VERDICT
 871 drover #104 needs-human r4 u0 x0 | owner Some("drover extend drover 104") | owner Some("drover extend drover 104") | ROUND_LIMIT
 872 drover #122 ready r1 u0 x0 | drive Some("drover merge drover 122") | drive Some("drover merge drover 122") | ok
 873 drover #124 review(1) r0 u0 x0 | drive Some("drover verdict drover 124 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -881,12 +881,12 @@
 880 drover #122 merged r1 u0 x0 | none None | none None | ok
 881 drover #122 merged r1 u0 x0 | none None | none None | ok
 882 drover #122 merged r1 u0 x0 | none None | none None | ok
-883 drover #127 impl r0 u0 x0 | drive Some("drover spawn drover 127 rev") | drive Some("drover spawn drover 127 rev") | NO_VERDICT
-884 drover #128 impl r0 u0 x0 | drive Some("drover spawn drover 128 rev") | drive Some("drover spawn drover 128 rev") | NO_VERDICT
+883 drover #127 impl r0 u0 x0 | none None | none None | NO_VERDICT
+884 drover #128 impl r0 u0 x0 | none None | none None | NO_VERDICT
 885 drover #127 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 886 drover #124 ready r1 u0 x0 | drive Some("drover merge drover 124") | drive Some("drover merge drover 124") | ok
-887 drover #127 impl r0 u0 x0 | drive Some("drover spawn drover 127 rev") | drive Some("drover spawn drover 127 rev") | NO_VERDICT
-888 drover #129 impl r0 u0 x0 | drive Some("drover spawn drover 129 rev") | drive Some("drover spawn drover 129 rev") | NO_VERDICT
+887 drover #127 impl r0 u0 x0 | none None | none None | NO_VERDICT
+888 drover #129 impl r0 u0 x0 | none None | none None | NO_VERDICT
 889 drover #96 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
 890 drover #96 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
 891 drover #96 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
@@ -901,7 +901,7 @@
 900 drover #123 review(1) r0 u0 x0 | drive Some("drover verdict drover 123 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 901 drover #128 review(1) r0 u0 x0 | drive Some("drover verdict drover 128 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 902 atlas #2781 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2781 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-903 drover #130 impl r0 u0 x0 | drive Some("drover spawn drover 130 rev") | drive Some("drover spawn drover 130 rev") | NO_VERDICT
+903 drover #130 impl r0 u0 x0 | none None | none None | NO_VERDICT
 904 drover #98 review(1) r0 u0 x0 | drive Some("drover verdict drover 98 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 905 drover #130 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 906 drover #115 review(1) r0 u0 x0 | drive Some("drover verdict drover 115 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -909,7 +909,7 @@
 908 drover #128 fix(1) r1 u0 x0 | drive Some("drover spawn drover 128 impl --supersede") | drive Some("drover spawn drover 128 impl --supersede") | VERDICT_FAIL
 909 atlas #2781 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2781 impl --supersede") | drive Some("drover spawn atlas 2781 impl --supersede") | VERDICT_FAIL
 910 drover #123 ready r1 u0 x0 | drive Some("drover merge drover 123") | drive Some("drover merge drover 123") | ok
-911 atlas #2781 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2781 rev") | VERDICT_FAIL
+911 atlas #2781 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 912 drover #123 merged r1 u0 x0 | none None | none None | ok
 913 drover #123 merged r1 u0 x0 | none None | none None | ok
 914 drover #123 merged r1 u0 x0 | none None | none None | ok
@@ -921,13 +921,13 @@
 920 drover #127 merged r1 u0 x0 | none None | none None | ok
 921 drover #129 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 922 atlas #2752 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2752 impl --supersede") | drive Some("drover spawn atlas 2752 impl --supersede") | VERDICT_FAIL
-923 atlas #2752 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2752 rev") | VERDICT_FAIL
-924 drover #128 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 128 rev") | VERDICT_FAIL
+923 atlas #2752 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+924 drover #128 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 925 drover #98 merged r1 u0 x0 | none None | none None | ok
 926 drover #98 merged r1 u0 x0 | none None | none None | ok
 927 drover #98 merged r1 u0 x0 | none None | none None | ok
 928 drover #115 ready r1 u0 x0 | drive Some("drover merge drover 115") | drive Some("drover merge drover 115") | ok
-929 drover #130 impl r0 u0 x0 | drive Some("drover spawn drover 130 rev") | drive Some("drover spawn drover 130 rev") | NO_VERDICT
+929 drover #130 impl r0 u0 x0 | none None | none None | NO_VERDICT
 930 atlas #2752 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2752 PASS --sha ad0564734deecd4a27eabab9d9459576ca781c05 --file /v.md") | none None | VERDICT_FAIL
 931 atlas #2781 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2781 PASS --sha 09c2bb54207f826bf760c9241eaa4c5dd6279765 --file /v.md") | none None | VERDICT_FAIL
 932 drover #115 merged r1 u0 x0 | none None | none None | ok
@@ -940,41 +940,41 @@
 939 drover #128 review(2) r1 u0 x0 | drive Some("drover verdict drover 128 PASS --sha 8b9fc5d7710faad2aa43f1dee48617bc8be0d4bc --file /v.md") | none None | VERDICT_FAIL
 940 drover #128 ready r2 u0 x0 | drive Some("drover merge drover 128") | drive Some("drover merge drover 128") | ok
 941 drover #130 fix(1) r1 u0 x0 | drive Some("drover spawn drover 130 impl --supersede") | drive Some("drover spawn drover 130 impl --supersede") | VERDICT_FAIL
-942 drover #129 impl r0 u0 x0 | drive Some("drover spawn drover 129 rev") | drive Some("drover spawn drover 129 rev") | NO_VERDICT
+942 drover #129 impl r0 u0 x0 | none None | none None | NO_VERDICT
 943 drover #128 merged r2 u0 x0 | none None | none None | ok
 944 drover #128 merged r2 u0 x0 | none None | none None | ok
 945 drover #128 merged r2 u0 x0 | none None | none None | ok
 946 drover #128 merged r2 u0 x0 | none None | none None | ok
 947 drover #129 review(1) r0 u0 x0 | drive Some("drover verdict drover 129 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-948 drover #130 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 130 rev") | VERDICT_FAIL
+948 drover #130 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 949 drover #129 ready r1 u0 x0 | drive Some("drover merge drover 129") | drive Some("drover merge drover 129") | ok
 950 drover #130 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
-951 drover #130 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 130 rev") | VERDICT_FAIL
+951 drover #130 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 952 atlas #2752 ready r2 u0 x0 | drive Some("drover merge atlas 2752") | drive Some("drover merge atlas 2752") | ok
-953 drover #129 fix(1)+u1 r1 u0 x0 | none None | drive Some("drover spawn drover 129 rev") | ok
+953 drover #129 fix(1)+u1 r1 u0 x0 | none None | none None | ok
 954 drover #138 queued r0 u0 x0 | none None | none None | NO_VERDICT
 955 drover #129 fix(1)+u1 r1 u0 x0 | owner None | owner None | ok
 956 atlas #2781 ready r2 u0 x0 | drive Some("drover merge atlas 2781") | drive Some("drover merge atlas 2781") | ok
 957 drover #130 review(2) r1 u0 x0 | drive Some("drover verdict drover 130 PASS --sha 04dc6a59932ef7cba890304140256bbc3bd42dbb --file /v.md") | none None | VERDICT_FAIL
-958 drover #129 fix(1)+u1 r1 u0 x0 | none None | drive Some("drover spawn drover 129 rev") | ok
+958 drover #129 fix(1)+u1 r1 u0 x0 | none None | none None | ok
 959 atlas #2841 merged r1 u0 x0 | none None | none None | ok
 960 atlas #2841 merged r1 u0 x0 | none None | none None | ok
 961 atlas #2841 merged r1 u0 x0 | none None | none None | ok
-962 atlas #2782 impl r0 u0 x0 | drive Some("drover spawn atlas 2782 rev") | drive Some("drover spawn atlas 2782 rev") | NO_VERDICT
+962 atlas #2782 impl r0 u0 x0 | none None | none None | NO_VERDICT
 963 atlas #2753 queued r0 u0 x0 | owner None | owner None | NO_VERDICT
 964 atlas #2753 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-965 atlas #2892 impl r0 u0 x0 | drive Some("drover spawn atlas 2892 rev") | drive Some("drover spawn atlas 2892 rev") | NO_VERDICT
+965 atlas #2892 impl r0 u0 x0 | none None | none None | NO_VERDICT
 966 atlas #2892 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 967 drover #129 review(1)+u1 r1 u0 x0 | drive Some("drover verdict drover 129 PASS --sha 8e199bace571502f71b74131a1ce4979d4ccf39c --file /v.md") | none None | ok
 968 drover #130 ready r2 u0 x0 | drive Some("drover merge drover 130") | drive Some("drover merge drover 130") | ok
 969 atlas #2782 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-970 atlas #2753 impl r0 u0 x0 | drive Some("drover spawn atlas 2753 rev") | drive Some("drover spawn atlas 2753 rev") | NO_VERDICT
-971 atlas #2892 impl r0 u0 x0 | drive Some("drover spawn atlas 2892 rev") | drive Some("drover spawn atlas 2892 rev") | NO_VERDICT
-972 drover #139 impl r0 u0 x0 | drive Some("drover spawn drover 139 rev") | drive Some("drover spawn drover 139 rev") | NO_VERDICT
+970 atlas #2753 impl r0 u0 x0 | none None | none None | NO_VERDICT
+971 atlas #2892 impl r0 u0 x0 | none None | none None | NO_VERDICT
+972 drover #139 impl r0 u0 x0 | none None | none None | NO_VERDICT
 973 atlas #2753 queued r0 u0 x0 | none None | none None | NO_VERDICT
 974 atlas #2892 queued r0 u0 x0 | none None | none None | NO_VERDICT
-975 atlas #2782 impl r0 u0 x0 | drive Some("drover spawn atlas 2782 rev") | drive Some("drover spawn atlas 2782 rev") | NO_VERDICT
-976 atlas #2684 impl r0 u0 x0 | drive Some("drover spawn atlas 2684 rev") | drive Some("drover spawn atlas 2684 rev") | NO_VERDICT
+975 atlas #2782 impl r0 u0 x0 | none None | none None | NO_VERDICT
+976 atlas #2684 impl r0 u0 x0 | none None | none None | NO_VERDICT
 977 drover #129 ready r1 u1 x0 | drive Some("drover merge drover 129") | drive Some("drover merge drover 129") | ok
 978 drover #130 merged r2 u0 x0 | none None | none None | ok
 979 drover #130 merged r2 u0 x0 | none None | none None | ok
@@ -985,44 +985,44 @@
 984 atlas #2781 merged r2 u0 x0 | none None | none None | ok
 985 atlas #2781 merged r2 u0 x0 | none None | none None | ok
 986 atlas #2781 merged r2 u0 x0 | none None | none None | ok
-987 atlas #2755 impl r0 u0 x0 | drive Some("drover spawn atlas 2755 rev") | drive Some("drover spawn atlas 2755 rev") | NO_VERDICT
-988 atlas #2891 impl r0 u0 x0 | drive Some("drover spawn atlas 2891 rev") | drive Some("drover spawn atlas 2891 rev") | NO_VERDICT
-989 atlas #2898 impl r0 u0 x0 | drive Some("drover spawn atlas 2898 rev") | drive Some("drover spawn atlas 2898 rev") | NO_VERDICT
-990 drover #129 fix(1)+u2 r1 u1 x0 | none None | drive Some("drover spawn drover 129 rev") | ok
+987 atlas #2755 impl r0 u0 x0 | none None | none None | NO_VERDICT
+988 atlas #2891 impl r0 u0 x0 | none None | none None | NO_VERDICT
+989 atlas #2898 impl r0 u0 x0 | none None | none None | NO_VERDICT
+990 drover #129 fix(1)+u2 r1 u1 x0 | none None | none None | ok
 991 drover #138 queued r0 u0 x0 | owner None | owner None | NO_VERDICT
 992 drover #138 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 993 drover #129 fix(1)+u2 r1 u1 x0 | owner None | owner None | ok
 994 atlas #2898 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-995 drover #129 fix(1)+u2 r1 u1 x0 | none None | drive Some("drover spawn drover 129 rev") | ok
-996 drover #138 impl r0 u0 x0 | drive Some("drover spawn drover 138 rev") | drive Some("drover spawn drover 138 rev") | NO_VERDICT
-997 atlas #2898 impl r0 u0 x0 | drive Some("drover spawn atlas 2898 rev") | drive Some("drover spawn atlas 2898 rev") | NO_VERDICT
+995 drover #129 fix(1)+u2 r1 u1 x0 | none None | none None | ok
+996 drover #138 impl r0 u0 x0 | none None | none None | NO_VERDICT
+997 atlas #2898 impl r0 u0 x0 | none None | none None | NO_VERDICT
 998 drover #129 review(1)+u2 r1 u1 x0 | drive Some("drover verdict drover 129 PASS --sha fb7030c57e9cc5fc0555c58488d98be6d8e6765b --file /v.md") | none None | ok
 999 drover #141 queued r0 u0 x0 | none None | none None | NO_VERDICT
-1000 drover #140 impl r0 u0 x0 | drive Some("drover spawn drover 140 rev") | drive Some("drover spawn drover 140 rev") | NO_VERDICT
+1000 drover #140 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1001 atlas #2891 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2891 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1002 drover #140 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 1003 drover #129 review(1)+u2 r1 u1 x0 | drive Some("drover verdict drover 129 PASS --sha fb7030c57e9cc5fc0555c58488d98be6d8e6765b --file /v.md") | none None | ok
 1004 atlas #2891 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2891 impl --supersede") | drive Some("drover spawn atlas 2891 impl --supersede") | VERDICT_FAIL
-1005 atlas #2891 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2891 rev") | VERDICT_FAIL
+1005 atlas #2891 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1006 drover #129 ready r1 u2 x0 | drive Some("drover merge drover 129") | drive Some("drover merge drover 129") | ok
 1007 atlas #2684 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2684 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1008 atlas #2891 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2891 PASS --sha efeee860fa31b9b9c978799072f4ef24113a28ab --file /v.md") | none None | VERDICT_FAIL
 1009 drover #129 merged r1 u2 x0 | none None | none None | ok
 1010 drover #129 merged r1 u2 x0 | none None | none None | ok
 1011 atlas #2684 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2684 impl --supersede") | drive Some("drover spawn atlas 2684 impl --supersede") | VERDICT_FAIL
-1012 atlas #2684 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2684 rev") | VERDICT_FAIL
+1012 atlas #2684 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1013 atlas #2782 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2782 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1014 atlas #2782 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2782 impl --supersede") | drive Some("drover spawn atlas 2782 impl --supersede") | VERDICT_FAIL
 1015 atlas #2684 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2684 PASS --sha f204a52e163de593ce713550093e874e70e87bac --file /v.md") | none None | VERDICT_FAIL
-1016 atlas #2782 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2782 rev") | VERDICT_FAIL
+1016 atlas #2782 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1017 atlas #2891 ready r2 u0 x0 | drive Some("drover merge atlas 2891") | drive Some("drover merge atlas 2891") | ok
-1018 atlas #2821 impl r0 u0 x0 | drive Some("drover spawn atlas 2821 rev") | drive Some("drover spawn atlas 2821 rev") | NO_VERDICT
+1018 atlas #2821 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1019 atlas #2622 queued r0 u0 x0 | owner None | owner None | NO_VERDICT
 1020 atlas #2622 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 1021 atlas #2684 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2684 impl --supersede") | drive Some("drover spawn atlas 2684 impl --supersede") | VERDICT_FAIL
-1022 atlas #2303 impl r0 u0 x0 | drive Some("drover spawn atlas 2303 rev") | drive Some("drover spawn atlas 2303 rev") | NO_VERDICT
-1023 atlas #2666 impl r0 u0 x0 | drive Some("drover spawn atlas 2666 rev") | drive Some("drover spawn atlas 2666 rev") | NO_VERDICT
-1024 atlas #2684 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2684 rev") | VERDICT_FAIL
+1022 atlas #2303 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1023 atlas #2666 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1024 atlas #2684 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 1025 atlas #2303 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2303 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1026 atlas #2303 ready r1 u0 x0 | drive Some("drover merge atlas 2303") | drive Some("drover merge atlas 2303") | ok
 1027 atlas #2684 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2684 PASS --sha beed72703f14412858008d7d061bb537195ae89b --file /v.md") | none None | VERDICT_FAIL
@@ -1031,28 +1031,28 @@
 1030 atlas #2666 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2666 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1031 atlas #2782 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2782 impl --supersede") | drive Some("drover spawn atlas 2782 impl --supersede") | VERDICT_FAIL
 1032 atlas #2821 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2821 impl --supersede") | drive Some("drover spawn atlas 2821 impl --supersede") | VERDICT_FAIL
-1033 atlas #2782 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2782 rev") | VERDICT_FAIL
-1034 atlas #2821 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2821 rev") | VERDICT_FAIL
+1033 atlas #2782 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
+1034 atlas #2821 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1035 atlas #2782 fix(2) r2 u0 x0 | owner None | owner None | VERDICT_FAIL
 1036 atlas #2666 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2666 impl --supersede") | drive Some("drover spawn atlas 2666 impl --supersede") | VERDICT_FAIL
 1037 atlas #2684 fix(3) r3 u0 x0 | drive Some("drover spawn atlas 2684 impl --supersede") | drive Some("drover spawn atlas 2684 impl --supersede") | VERDICT_FAIL
 1038 atlas #2684 needs-human r3 u0 x0 | owner Some("drover extend atlas 2684") | owner Some("drover extend atlas 2684") | VERDICT_FAIL
 1039 atlas #2821 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2821 PASS --sha e5be15b70d971bb60fc7f22c8f2671f986e457db --file /v.md") | none None | VERDICT_FAIL
-1040 atlas #2782 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2782 rev") | VERDICT_FAIL
-1041 atlas #2666 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2666 rev") | VERDICT_FAIL
+1040 atlas #2782 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
+1041 atlas #2666 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1042 atlas #2782 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2782 PASS --sha f5ef6f2bbcbc8be5a2b351ffdecd93db0a7f05a5 --file /v.md") | none None | VERDICT_FAIL
 1043 atlas #2666 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2666 PASS --sha 289cf259c334022adbfbe78cb95e76e5c02d14bf --file /v.md") | none None | VERDICT_FAIL
-1044 drover #140 impl r0 u0 x0 | drive Some("drover spawn drover 140 rev") | drive Some("drover spawn drover 140 rev") | NO_VERDICT
+1044 drover #140 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1045 atlas #2666 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2666 impl --supersede") | drive Some("drover spawn atlas 2666 impl --supersede") | VERDICT_FAIL
 1046 atlas #2782 fix(3) r3 u0 x0 | drive Some("drover spawn atlas 2782 impl --supersede") | drive Some("drover spawn atlas 2782 impl --supersede") | VERDICT_FAIL
 1047 atlas #2782 needs-human r3 u0 x0 | owner Some("drover extend atlas 2782") | owner Some("drover extend atlas 2782") | VERDICT_FAIL
-1048 atlas #2900 impl r0 u0 x0 | drive Some("drover spawn atlas 2900 rev") | drive Some("drover spawn atlas 2900 rev") | NO_VERDICT
+1048 atlas #2900 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1049 atlas #2684 review(4) r3 u0 x0 | drive Some("drover verdict atlas 2684 PASS --sha ed29ffc928f14a36024429247c870349a1cdadaa --file /v.md") | none None | VERDICT_FAIL
-1050 atlas #2622 impl r0 u0 x0 | drive Some("drover spawn atlas 2622 rev") | drive Some("drover spawn atlas 2622 rev") | NO_VERDICT
-1051 drover #143 impl r0 u0 x0 | drive Some("drover spawn drover 143 rev") | drive Some("drover spawn drover 143 rev") | NO_VERDICT
+1050 atlas #2622 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1051 drover #143 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1052 drover #141 queued r0 u0 x0 | owner None | owner None | NO_VERDICT
 1053 drover #141 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-1054 atlas #2666 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2666 rev") | VERDICT_FAIL
+1054 atlas #2666 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 1055 atlas #2684 fix(4) r4 u0 x0 | drive Some("drover spawn atlas 2684 impl --supersede") | drive Some("drover spawn atlas 2684 impl --supersede") | VERDICT_FAIL
 1056 atlas #2684 needs-human r4 u0 x0 | owner Some("drover extend atlas 2684") | owner Some("drover extend atlas 2684") | VERDICT_FAIL
 1057 drover #140 review(1) r0 u0 x0 | drive Some("drover verdict drover 140 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -1070,7 +1070,7 @@
 1069 atlas #2891 merged r2 u0 x0 | none None | none None | ok
 1070 atlas #2891 merged r2 u0 x0 | none None | none None | ok
 1071 atlas #2900 ready r1 u0 x0 | drive Some("drover merge atlas 2900") | drive Some("drover merge atlas 2900") | ok
-1072 atlas #2646 impl r0 u0 x0 | drive Some("drover spawn atlas 2646 rev") | drive Some("drover spawn atlas 2646 rev") | NO_VERDICT
+1072 atlas #2646 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1073 drover #139 ready r1 u0 x0 | drive Some("drover merge drover 139") | drive Some("drover merge drover 139") | ok
 1074 drover #140 ready r1 u0 x0 | drive Some("drover merge drover 140") | drive Some("drover merge drover 140") | ok
 1075 drover #143 ready r1 u0 x0 | drive Some("drover merge drover 143") | drive Some("drover merge drover 143") | ok
@@ -1091,12 +1091,12 @@
 1090 drover #140 merged r1 u0 x0 | none None | none None | ok
 1091 drover #143 merged r1 u0 x0 | none None | none None | ok
 1092 drover #143 merged r1 u0 x0 | none None | none None | ok
-1093 drover #141 impl r0 u0 x0 | drive Some("drover spawn drover 141 rev") | drive Some("drover spawn drover 141 rev") | NO_VERDICT
+1093 drover #141 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1094 drover #141 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-1095 drover #141 impl r0 u0 x0 | drive Some("drover spawn drover 141 rev") | drive Some("drover spawn drover 141 rev") | NO_VERDICT
-1096 drover #147 impl r0 u0 x0 | drive Some("drover spawn drover 147 rev") | drive Some("drover spawn drover 147 rev") | NO_VERDICT
+1095 drover #141 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1096 drover #147 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1097 drover #141 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-1098 drover #148 impl r0 u0 x0 | drive Some("drover spawn drover 148 rev") | drive Some("drover spawn drover 148 rev") | NO_VERDICT
+1098 drover #148 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1099 atlas #2900 merged r1 u0 x0 | none None | none None | ok
 1100 atlas #2900 merged r1 u0 x0 | none None | none None | ok
 1101 atlas #2646 merged r1 u0 x0 | none None | none None | ok
@@ -1108,45 +1108,45 @@
 1107 atlas #2821 merged r2 u0 x0 | none None | none None | ok
 1108 atlas #2665 queued r0 u0 x0 | owner None | owner None | NO_VERDICT
 1109 atlas #2665 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-1110 atlas #2893 impl r0 u0 x0 | drive Some("drover spawn atlas 2893 rev") | drive Some("drover spawn atlas 2893 rev") | NO_VERDICT
-1111 atlas #2909 impl r0 u0 x0 | drive Some("drover spawn atlas 2909 rev") | drive Some("drover spawn atlas 2909 rev") | NO_VERDICT
-1112 drover #141 impl r0 u0 x0 | drive Some("drover spawn drover 141 rev") | drive Some("drover spawn drover 141 rev") | NO_VERDICT
+1110 atlas #2893 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1111 atlas #2909 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1112 drover #141 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1113 drover #147 review(1) r0 u0 x0 | drive Some("drover verdict drover 147 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1114 atlas #2755 merged r1 u0 x0 | none None | none None | ok
 1115 atlas #2755 merged r1 u0 x0 | none None | none None | ok
-1116 atlas #2665 impl r0 u0 x0 | drive Some("drover spawn atlas 2665 rev") | drive Some("drover spawn atlas 2665 rev") | NO_VERDICT
+1116 atlas #2665 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1117 drover #148 review(1) r0 u0 x0 | drive Some("drover verdict drover 148 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1118 drover #147 review(1) r0 u0 x0 | drive Some("drover verdict drover 147 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1119 drover #150 impl r0 u0 x0 | drive Some("drover spawn drover 150 rev") | drive Some("drover spawn drover 150 rev") | NO_VERDICT
+1119 drover #150 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1120 drover #147 ready r1 u0 x0 | drive Some("drover merge drover 147") | drive Some("drover merge drover 147") | ok
 1121 drover #148 ready r1 u0 x0 | drive Some("drover merge drover 148") | drive Some("drover merge drover 148") | ok
-1122 drover #149 impl r0 u0 x0 | drive Some("drover spawn drover 149 rev") | drive Some("drover spawn drover 149 rev") | NO_VERDICT
-1123 drover #151 impl r0 u0 x0 | drive Some("drover spawn drover 151 rev") | drive Some("drover spawn drover 151 rev") | NO_VERDICT
-1124 drover #154 impl r0 u0 x0 | drive Some("drover spawn drover 154 rev") | drive Some("drover spawn drover 154 rev") | NO_VERDICT
+1122 drover #149 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1123 drover #151 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1124 drover #154 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1125 atlas #2622 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2622 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1126 atlas #2893 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2893 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1127 atlas #2870 impl r0 u0 x0 | drive Some("drover spawn atlas 2870 rev") | drive Some("drover spawn atlas 2870 rev") | NO_VERDICT
+1127 atlas #2870 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1128 drover #147 merged r1 u0 x0 | none None | none None | ok
 1129 drover #147 merged r1 u0 x0 | none None | none None | ok
 1130 drover #148 ready r1 u0 x0 | drive Some("drover merge drover 148") | drive Some("drover merge drover 148") | ok
 1131 drover #150 review(1) r0 u0 x0 | drive Some("drover verdict drover 150 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1132 atlas #2622 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2622 impl --supersede") | drive Some("drover spawn atlas 2622 impl --supersede") | VERDICT_FAIL
 1133 atlas #2893 ready r1 u0 x0 | drive Some("drover merge atlas 2893") | drive Some("drover merge atlas 2893") | ok
-1134 atlas #2910 impl r0 u0 x0 | drive Some("drover spawn atlas 2910 rev") | drive Some("drover spawn atlas 2910 rev") | NO_VERDICT
+1134 atlas #2910 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1135 atlas #2910 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-1136 atlas #2911 impl r0 u0 x0 | drive Some("drover spawn atlas 2911 rev") | drive Some("drover spawn atlas 2911 rev") | NO_VERDICT
+1136 atlas #2911 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1137 drover #148 merged r1 u0 x0 | none None | none None | ok
 1138 drover #148 merged r1 u0 x0 | none None | none None | ok
 1139 drover #150 ready r1 u0 x0 | drive Some("drover merge drover 150") | drive Some("drover merge drover 150") | ok
 1140 drover #162 queued r0 u0 x0 | none None | none None | NO_VERDICT
 1141 drover #151 review(1) r0 u0 x0 | drive Some("drover verdict drover 151 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1142 atlas #2622 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2622 rev") | VERDICT_FAIL
+1142 atlas #2622 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1143 drover #151 ready r1 u0 x0 | drive Some("drover merge drover 151") | drive Some("drover merge drover 151") | ok
 1144 drover #150 blocked r1 u0 x0 | drive Some("drover merge drover 150") | drive Some("drover spawn drover 150 rev --supersede") | ok
 1145 drover #151 merged r1 u0 x0 | none None | none None | ok
 1146 drover #151 merged r1 u0 x0 | none None | none None | ok
 1147 drover #150 blocked r1 u0 x0 | drive Some("drover merge drover 150") | drive Some("drover spawn drover 150 rev --supersede") | ok
-1148 atlas #2910 impl r0 u0 x0 | drive Some("drover spawn atlas 2910 rev") | drive Some("drover spawn atlas 2910 rev") | NO_VERDICT
+1148 atlas #2910 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1149 atlas #2782 review(4) r3 u0 x0 | drive Some("drover verdict atlas 2782 PASS --sha 9636b8196f12afeb0ceae054d78b85828a1a4d6e --file /v.md") | none None | VERDICT_FAIL
 1150 atlas #2684 review(5) r4 u0 x0 | drive Some("drover verdict atlas 2684 PASS --sha 4026e713f186725da6e016be80aae562af3f12c0 --file /v.md") | none None | VERDICT_FAIL
 1151 drover #150 review(2) r1 u0 x0 | drive Some("drover verdict drover 150 PASS --sha cee1b72e1f22c5de232a1838448430db9ee867fd --file /v.md") | none None | ok
@@ -1157,21 +1157,21 @@
 1156 drover #150 merged r2 u0 x0 | none None | none None | ok
 1157 drover #150 merged r2 u0 x0 | none None | none None | ok
 1158 drover #154 ready r1 u0 x0 | drive Some("drover merge drover 154") | drive Some("drover merge drover 154") | ok
-1159 drover #168 impl r0 u0 x0 | drive Some("drover spawn drover 168 rev") | drive Some("drover spawn drover 168 rev") | NO_VERDICT
-1160 drover #165 impl r0 u0 x0 | drive Some("drover spawn drover 165 rev") | drive Some("drover spawn drover 165 rev") | NO_VERDICT
-1161 drover #164 impl r0 u0 x0 | drive Some("drover spawn drover 164 rev") | drive Some("drover spawn drover 164 rev") | NO_VERDICT
+1159 drover #168 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1160 drover #165 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1161 drover #164 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1162 drover #149 ready r1 u0 x0 | drive Some("drover merge drover 149") | drive Some("drover merge drover 149") | ok
 1163 drover #154 merged r1 u0 x0 | none None | none None | ok
 1164 drover #154 merged r1 u0 x0 | none None | none None | ok
-1165 drover #166 impl r0 u0 x0 | drive Some("drover spawn drover 166 rev") | drive Some("drover spawn drover 166 rev") | NO_VERDICT
-1166 drover #155 impl r0 u0 x0 | drive Some("drover spawn drover 155 rev") | drive Some("drover spawn drover 155 rev") | NO_VERDICT
+1165 drover #166 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1166 drover #155 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1167 drover #170 queued r0 u0 x0 | none None | none None | NO_VERDICT
 1168 atlas #2622 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2622 PASS --sha 72bc25a8fb16c7d08cca132d64b63421fdbede78 --file /v.md") | none None | VERDICT_FAIL
 1169 atlas #2684 ready r4 u0 x0 | drive Some("drover merge atlas 2684") | drive Some("drover merge atlas 2684") | ROUND_LIMIT
 1170 atlas #2782 ready r4 u0 x0 | drive Some("drover merge atlas 2782") | drive Some("drover merge atlas 2782") | ROUND_LIMIT
 1171 drover #141 ready r1 u0 x0 | drive Some("drover merge drover 141") | drive Some("drover merge drover 141") | ok
 1172 atlas #2622 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2622 impl --supersede") | drive Some("drover spawn atlas 2622 impl --supersede") | VERDICT_FAIL
-1173 atlas #2446 impl r0 u0 x0 | drive Some("drover spawn atlas 2446 rev") | drive Some("drover spawn atlas 2446 rev") | NO_VERDICT
+1173 atlas #2446 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1174 atlas #2870 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2870 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1175 atlas #2909 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2909 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1176 atlas #2684 fix(4) r4 u0 x0 | drive Some("drover spawn atlas 2684 impl --supersede") | drive Some("drover spawn atlas 2684 impl --supersede") | VERDICT_FAIL
@@ -1181,21 +1181,21 @@
 1180 atlas #2870 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2870 impl --supersede") | drive Some("drover spawn atlas 2870 impl --supersede") | VERDICT_FAIL
 1181 atlas #2909 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2909 impl --supersede") | drive Some("drover spawn atlas 2909 impl --supersede") | VERDICT_FAIL
 1182 drover #173 queued r0 u0 x0 | none None | none None | NO_VERDICT
-1183 drover #149 fix(1)+u1 r1 u0 x0 | none None | drive Some("drover spawn drover 149 rev") | ok
+1183 drover #149 fix(1)+u1 r1 u0 x0 | none None | none None | ok
 1184 drover #165 review(1) r0 u0 x0 | drive Some("drover verdict drover 165 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1185 drover #162 impl r0 u0 x0 | drive Some("drover spawn drover 162 rev") | drive Some("drover spawn drover 162 rev") | NO_VERDICT
+1185 drover #162 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1186 drover #162 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
-1187 drover #162 impl r0 u0 x0 | drive Some("drover spawn drover 162 rev") | drive Some("drover spawn drover 162 rev") | NO_VERDICT
+1187 drover #162 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1188 atlas #2446 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 1189 drover #165 ready r1 u0 x0 | drive Some("drover merge drover 165") | drive Some("drover merge drover 165") | ok
-1190 atlas #2924 impl r0 u0 x0 | drive Some("drover spawn atlas 2924 rev") | drive Some("drover spawn atlas 2924 rev") | NO_VERDICT
-1191 drover #169 impl r0 u0 x0 | drive Some("drover spawn drover 169 rev") | drive Some("drover spawn drover 169 rev") | NO_VERDICT
-1192 atlas #2622 fix(2) r2 u0 x0 | none None | drive Some("drover spawn atlas 2622 rev") | VERDICT_FAIL
-1193 atlas #2870 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2870 rev") | VERDICT_FAIL
-1194 atlas #2909 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2909 rev") | VERDICT_FAIL
+1190 atlas #2924 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1191 drover #169 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1192 atlas #2622 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
+1193 atlas #2870 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
+1194 atlas #2909 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1195 atlas #2910 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2910 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1196 atlas #2898 queued r0 u0 x0 | none None | none None | NO_VERDICT
-1197 atlas #2919 impl r0 u0 x0 | drive Some("drover spawn atlas 2919 rev") | drive Some("drover spawn atlas 2919 rev") | NO_VERDICT
+1197 atlas #2919 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1198 atlas #2898 closed r0 u0 x0 | none None | none None | NO_VERDICT
 1199 drover #165 merged r1 u0 x0 | none None | none None | ok
 1200 drover #165 merged r1 u0 x0 | none None | none None | ok
@@ -1203,7 +1203,7 @@
 1202 atlas #2910 ready r1 u0 x0 | drive Some("drover merge atlas 2910") | drive Some("drover merge atlas 2910") | ok
 1203 drover #149 review(1)+u1 r1 u0 x0 | drive Some("drover verdict drover 149 PASS --sha 0d1357f5a0db86e7dded041eb8156d17b3cc3513 --file /v.md") | none None | ok
 1204 drover #164 review(1) r0 u0 x0 | drive Some("drover verdict drover 164 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1205 drover #172 impl r0 u0 x0 | drive Some("drover spawn drover 172 rev") | drive Some("drover spawn drover 172 rev") | NO_VERDICT
+1205 drover #172 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1206 atlas #2893 merged r1 u0 x0 | none None | none None | ok
 1207 atlas #2893 merged r1 u0 x0 | none None | none None | ok
 1208 atlas #2910 merged r1 u0 x0 | none None | none None | ok
@@ -1211,7 +1211,7 @@
 1210 drover #149 ready r1 u1 x0 | drive Some("drover merge drover 149") | drive Some("drover merge drover 149") | ok
 1211 atlas #2924 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2924 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1212 atlas #2924 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2924 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1213 atlas #2446 impl r0 u0 x0 | drive Some("drover spawn atlas 2446 rev") | drive Some("drover spawn atlas 2446 rev") | NO_VERDICT
+1213 atlas #2446 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1214 atlas #2919 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 1215 drover #149 merged r1 u1 x0 | none None | none None | ok
 1216 drover #149 merged r1 u1 x0 | none None | none None | ok
@@ -1220,47 +1220,47 @@
 1219 atlas #2924 fix(1) r1 u0 x0 | drive Some("drover spawn atlas 2924 impl --supersede") | drive Some("drover spawn atlas 2924 impl --supersede") | VERDICT_FAIL
 1220 drover #141 fix(2) r2 u0 x0 | drive Some("drover spawn drover 141 impl --supersede") | drive Some("drover spawn drover 141 impl --supersede") | VERDICT_FAIL
 1221 drover #155 review(1) r0 u0 x0 | drive Some("drover verdict drover 155 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1222 drover #164 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 164 rev") | VERDICT_FAIL
+1222 drover #164 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1223 drover #166 review(1) r0 u0 x0 | drive Some("drover verdict drover 166 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1224 drover #168 review(1) r0 u0 x0 | drive Some("drover verdict drover 168 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1225 atlas #2870 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2870 impl --supersede") | drive Some("drover spawn atlas 2870 impl --supersede") | VERDICT_FAIL
-1226 atlas #2929 impl r0 u0 x0 | drive Some("drover spawn atlas 2929 rev") | drive Some("drover spawn atlas 2929 rev") | NO_VERDICT
+1226 atlas #2929 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1227 drover #166 ready r1 u0 x0 | drive Some("drover merge drover 166") | drive Some("drover merge drover 166") | ok
-1228 drover #141 fix(2) r2 u0 x0 | none None | drive Some("drover spawn drover 141 rev") | VERDICT_FAIL
+1228 drover #141 fix(2) r2 u0 x0 | none None | none None | VERDICT_FAIL
 1229 drover #155 fix(1) r1 u0 x0 | drive Some("drover spawn drover 155 impl --supersede") | drive Some("drover spawn drover 155 impl --supersede") | VERDICT_FAIL
 1230 drover #166 merged r1 u0 x0 | none None | none None | ok
 1231 drover #168 ready r1 u0 x0 | drive Some("drover merge drover 168") | drive Some("drover merge drover 168") | ok
 1232 drover #169 review(1) r0 u0 x0 | drive Some("drover verdict drover 169 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1233 drover #169 ready r1 u0 x0 | drive Some("drover merge drover 169") | drive Some("drover merge drover 169") | ok
-1234 atlas #2919 impl r0 u0 x0 | drive Some("drover spawn atlas 2919 rev") | drive Some("drover spawn atlas 2919 rev") | NO_VERDICT
-1235 atlas #2684 fix(4) r4 u0 x1 | none None | drive Some("drover spawn atlas 2684 rev") | VERDICT_FAIL
-1236 atlas #2782 fix(4) r4 u0 x1 | none None | drive Some("drover spawn atlas 2782 rev") | VERDICT_FAIL
+1234 atlas #2919 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1235 atlas #2684 fix(4) r4 u0 x1 | none None | none None | VERDICT_FAIL
+1236 atlas #2782 fix(4) r4 u0 x1 | none None | none None | VERDICT_FAIL
 1237 drover #141 review(3) r2 u0 x0 | drive Some("drover verdict drover 141 PASS --sha b6e4235eafc766ea3f4f600ec191511c76e7b1e6 --file /v.md") | none None | VERDICT_FAIL
 1238 drover #169 merged r1 u0 x0 | none None | none None | ok
 1239 drover #169 merged r1 u0 x0 | none None | none None | ok
 1240 drover #141 ready r3 u0 x0 | drive Some("drover merge drover 141") | drive Some("drover merge drover 141") | ok
-1241 drover #155 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 155 rev") | VERDICT_FAIL
+1241 drover #155 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1242 drover #162 review(1) r0 u0 x0 | drive Some("drover verdict drover 162 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1243 drover #141 merged r3 u0 x0 | none None | none None | ok
 1244 drover #141 merged r3 u0 x0 | none None | none None | ok
 1245 drover #141 merged r3 u0 x0 | none None | none None | ok
-1246 drover #160 impl r0 u0 x0 | drive Some("drover spawn drover 160 rev") | drive Some("drover spawn drover 160 rev") | NO_VERDICT
+1246 drover #160 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1247 drover #162 fix(1) r1 u0 x0 | drive Some("drover spawn drover 162 impl --supersede") | drive Some("drover spawn drover 162 impl --supersede") | VERDICT_FAIL
-1248 atlas #2931 impl r0 u0 x0 | drive Some("drover spawn atlas 2931 rev") | drive Some("drover spawn atlas 2931 rev") | NO_VERDICT
+1248 atlas #2931 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1249 atlas #2909 review(2) r1 u0 x0 | drive Some("drover verdict atlas 2909 PASS --sha d0d2a6a6744d26611d5d08bafbec36002384613b --file /v.md") | none None | VERDICT_FAIL
 1250 atlas #2924 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
-1251 atlas #2924 fix(1) r1 u0 x0 | none None | drive Some("drover spawn atlas 2924 rev") | VERDICT_FAIL
+1251 atlas #2924 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1252 atlas #2931 queued r0 u0 x0 | none None | none None | NO_VERDICT
 1253 atlas #2909 ready r2 u0 x0 | drive Some("drover merge atlas 2909") | drive Some("drover merge atlas 2909") | ok
 1254 drover #155 review(2) r1 u0 x0 | drive Some("drover verdict drover 155 PASS --sha 5434e5f841ad3bf8ec26b019e343938790645159 --file /v.md") | none None | VERDICT_FAIL
 1255 drover #160 review(1) r0 u0 x0 | drive Some("drover verdict drover 160 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1256 drover #162 fix(1) r1 u0 x0 | none None | drive Some("drover spawn drover 162 rev") | VERDICT_FAIL
+1256 drover #162 fix(1) r1 u0 x0 | none None | none None | VERDICT_FAIL
 1257 drover #164 review(2) r1 u0 x0 | drive Some("drover verdict drover 164 PASS --sha 2a93e72a0b240aeee821f91d9e16eea0309fdb25 --file /v.md") | none None | VERDICT_FAIL
-1258 drover #168 fix(1)+u1 r1 u0 x0 | none None | drive Some("drover spawn drover 168 rev") | ok
+1258 drover #168 fix(1)+u1 r1 u0 x0 | none None | none None | ok
 1259 drover #172 review(1) r0 u0 x0 | drive Some("drover verdict drover 172 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1260 drover #170 impl r0 u0 x0 | drive Some("drover spawn drover 170 rev") | drive Some("drover spawn drover 170 rev") | NO_VERDICT
+1260 drover #170 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1261 atlas #2911 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2911 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1262 drover #183 impl r0 u0 x0 | drive Some("drover spawn drover 183 rev") | drive Some("drover spawn drover 183 rev") | NO_VERDICT
+1262 drover #183 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1263 atlas #2909 merged r2 u0 x0 | none None | none None | ok
 1264 atlas #2909 merged r2 u0 x0 | none None | none None | ok
 1265 drover #155 ready r2 u0 x0 | drive Some("drover merge drover 155") | drive Some("drover merge drover 155") | ok
@@ -1280,15 +1280,15 @@
 1279 atlas #2924 fix(2) r2 u0 x0 | drive Some("drover spawn atlas 2924 impl --supersede") | drive Some("drover spawn atlas 2924 impl --supersede") | VERDICT_FAIL
 1280 atlas #2446 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2446 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1281 atlas #2929 review(1) r0 u0 x0 | drive Some("drover verdict atlas 2929 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1282 drover #162 fix(2)+u1 r2 u0 x0 | none None | drive Some("drover spawn drover 162 rev") | ok
+1282 drover #162 fix(2)+u1 r2 u0 x0 | none None | none None | ok
 1283 atlas #2870 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2870 PASS --sha 395b06feebce4a7c3f7af70875772644a68a8dd4 --file /v.md") | none None | VERDICT_FAIL
 1284 atlas #2924 review(3) r2 u0 x0 | drive Some("drover verdict atlas 2924 PASS --sha 32c17721691a0e704e642b3dbff8b1b810b7b5e4 --file /v.md") | none None | VERDICT_FAIL
-1285 drover #164 fix(2)+u1 r2 u0 x0 | none None | drive Some("drover spawn drover 164 rev") | ok
+1285 drover #164 fix(2)+u1 r2 u0 x0 | none None | none None | ok
 1286 drover #168 review(1)+u1 r1 u0 x0 | drive Some("drover verdict drover 168 PASS --sha a7aa3ba7108c53c1197730fa367528fbd1086c37 --file /v.md") | none None | ok
 1287 drover #170 review(1) r0 u0 x0 | drive Some("drover verdict drover 170 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1288 drover #183 review(1) r0 u0 x0 | drive Some("drover verdict drover 183 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
-1289 drover #182 impl r0 u0 x0 | drive Some("drover spawn drover 182 rev") | drive Some("drover spawn drover 182 rev") | NO_VERDICT
-1290 drover #173 impl r0 u0 x0 | drive Some("drover spawn drover 173 rev") | drive Some("drover spawn drover 173 rev") | NO_VERDICT
+1289 drover #182 impl r0 u0 x0 | none None | none None | NO_VERDICT
+1290 drover #173 impl r0 u0 x0 | none None | none None | NO_VERDICT
 1291 atlas #2446 ready r1 u0 x0 | drive Some("drover merge atlas 2446") | drive Some("drover merge atlas 2446") | ok
 1292 atlas #2870 ready r2 u0 x0 | drive Some("drover merge atlas 2870") | drive Some("drover merge atlas 2870") | ok
 1293 atlas #2924 ready r2 u0 x0 | drive Some("drover merge atlas 2924") | drive Some("drover merge atlas 2924") | ok

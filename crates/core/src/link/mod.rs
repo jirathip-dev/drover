@@ -49,22 +49,29 @@ fn watch(ctx: &Ctx, cfg: &Config, events: &[Event], (name, m): (&str, Option<&st
     let roots = set
         .iter()
         .map(|p| crate::hosts::under(p, home.as_deref()).display().to_string());
+    let l = &cfg.limits;
     Watch {
         roots: roots.collect(),
         worktrees,
+        beat_secs: l.link_beat_secs,
+        poll_millis: l.link_poll_millis,
+        sample_secs: l.link_sample_secs,
     }
+}
+
+fn exe(ctx: &Ctx, name: &str) -> String {
+    let home = crate::hosts::cached(ctx)
+        .get(name)
+        .map(|s| s.home.clone())
+        .filter(|h| !h.is_empty());
+    home.map_or("drover".into(), |h| crate::hosts::real_exe(ctx, &h))
 }
 
 fn report(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, m): (&str, Option<&str>), ev: &[Event]) -> Result<Frame> {
     let w = watch(ctx, cfg, ev, (name, m));
     let Some(m) = m else { return watch::frame(r, &w) };
-    let home = crate::hosts::cached(ctx)
-        .get(name)
-        .map(|s| s.home.clone())
-        .filter(|h| !h.is_empty());
-    let exe = home.map_or("drover".into(), |h| crate::hosts::real_exe(ctx, &h));
     let args = crate::runner::argv(&["hosts", "report"]);
-    let o = crate::hosts::On::new(r, Some(m)).run_in(&exe, &args, &serde_json::to_string(&w)?)?;
+    let o = crate::hosts::On::new(r, Some(m)).run_in(&exe(ctx, name), &args, &serde_json::to_string(&w)?)?;
     let why = || o.stderr.lines().next().map_or(format!("exit {}", o.code), String::from);
     anyhow::ensure!(o.code == 0, "{}", why());
     let line = o.stdout.lines().find(|l| l.starts_with('{')).context("no frame")?;
@@ -75,7 +82,7 @@ fn report(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, m): (&str, Option<&str
 pub fn look(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, all: bool) -> Result<view::View> {
     let v = view::View::load(ctx, cfg)?;
     let due: Vec<&str> = v.stale();
-    poll(ctx, cfg, r, out, &|name, _| all || due.contains(&name))
+    poll(ctx, cfg, r, out, &|name, _| all && !v.live(name) || due.contains(&name))
 }
 
 /// The host at `m` polled now: after a lane starts there, so the view holds its session.
@@ -107,11 +114,94 @@ fn poll(
     let mut got: Vec<_> = here.into_iter().map(one).collect();
     got.extend(crate::hosts::each(there, one));
     for (name, m, f) in got {
-        intake::apply(ctx, cfg, r, out, (&name, m.as_deref()), f)?;
+        intake::apply(ctx, cfg, r, out, (&name, m.as_deref()), (f, false))?;
     }
     let v = view::View::load(ctx, cfg)?;
     crate::session::stamp::observe(ctx, cfg, r, &v.sessions())?;
     Ok(v)
+}
+
+/// The service's link to host `name` at `m`: `drover hosts watch` there kept open, each frame applied as it comes, dialled again after 1 s, doubling to `link_retry_max_secs`; it never returns.
+pub fn run(ctx: &Ctx, r: &dyn Runner, (name, m): (&str, Option<&str>), clock: fn() -> u64) {
+    let mut wait = 1;
+    loop {
+        let c = Ctx {
+            now: clock(),
+            ..ctx.clone()
+        };
+        let mut most = wait;
+        if let Ok(cfg) = Config::load(&c.config) {
+            most = cfg.limits.link_retry_max_secs;
+            let off = working(&c.state).map(|ev| crate::hosts::idle_off(&cfg, &ev));
+            if off.is_ok_and(|off| m.is_none_or(|m| !off.contains(m))) {
+                let (heard, why) = dial(&c, &cfg, r, (name, m), clock);
+                wait = if heard { 1 } else { wait };
+                let c = Ctx { now: clock(), ..c };
+                intake::apply(&c, &cfg, r, &mut std::io::sink(), (name, m), (Err(why), true)).ok();
+            }
+        }
+        crate::clock::sleep(std::time::Duration::from_secs(wait));
+        wait = (wait * 2).min(most.max(1));
+    }
+}
+
+fn dial(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (name, m): (&str, Option<&str>),
+    clock: fn() -> u64,
+) -> (bool, anyhow::Error) {
+    let mut heard = false;
+    let why = (|| -> Result<std::convert::Infallible> {
+        let mut w = watch(ctx, cfg, &working(&ctx.state)?, (name, m));
+        let args = crate::runner::argv(&["hosts", "watch"]);
+        let (prog, args) = match m {
+            Some(_) => crate::hosts::On::new(r, m).wrap(&exe(ctx, name), &args),
+            None => (ctx.exe.clone(), args),
+        };
+        let (mut tx, rx) = r.pipe(&prog, &args)?;
+        let (got, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let rx = std::io::BufRead::lines(std::io::BufReader::new(rx));
+            rx.map_while(Result::ok).try_for_each(|l| got.send(l))
+        });
+        let mut send = |text: &str| -> Result<()> { Ok(writeln!(tx, "{text}").and_then(|()| tx.flush())?) };
+        send(&serde_json::to_string(&w)?)?;
+        let stale = std::time::Duration::from_secs(cfg.limits.link_stale_secs);
+        let mut at: Option<(String, u64)> = None;
+        loop {
+            let line = lines.recv_timeout(stale).map_err(|e| match e {
+                std::sync::mpsc::RecvTimeoutError::Timeout => anyhow::anyhow!("no frame for {} s", stale.as_secs()),
+                std::sync::mpsc::RecvTimeoutError::Disconnected => anyhow::anyhow!("the link closed"),
+            })?;
+            let f: Frame = serde_json::from_str(&line).context("a line that is no frame")?;
+            let report = matches!(f.body, frame::Body::Report(_));
+            let next = at.as_ref().map_or(report, |(b, n)| *b == f.boot && f.n == n + 1);
+            anyhow::ensure!(next, "frame {} of boot {} came out of order", f.n, f.boot);
+            at = Some((f.boot.clone(), f.n));
+            heard = true;
+            let c = Ctx {
+                now: clock(),
+                ..ctx.clone()
+            };
+            for ack in intake::apply(&c, cfg, r, &mut std::io::sink(), (name, m), (Ok(f), true))? {
+                send(&ack)?;
+            }
+            if report {
+                let mut seen = view::View::load(&c, cfg)?.sessions();
+                seen.0.retain(|h| h.0.as_deref() == m);
+                crate::session::stamp::observe(&c, cfg, r, &seen)?;
+                let now = watch(&c, cfg, &working(&c.state)?, (name, m));
+                if now != w {
+                    send(&serde_json::to_string(&now)?)?;
+                    w = now;
+                }
+            }
+        }
+    })();
+    let Err(why) = why;
+    (heard, why)
 }
 
 /// Every host's sessions from `fresh`'s view (none: the database did not answer).

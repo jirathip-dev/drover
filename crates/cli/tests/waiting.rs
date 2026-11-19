@@ -97,6 +97,15 @@ fn fixture(name: &str) -> (drover::Ctx, Fake) {
     verdict(&c, t + 20, 42, "FAIL", &sha("1"));
     spawn(&c, t + 30, 42, "impl", "sendmeter-impl-42");
     spawn(&c, t, 31, "impl", "sendmeter-impl-31");
+    for (n, head) in [(42, "605297c"), (31, "70fe5a1")] {
+        ev(
+            &c,
+            t + 40,
+            Some(n),
+            "turn-end",
+            json!({"state": "done", "role": "impl", "sha": sha(head)}),
+        );
+    }
     for (n, v) in [
         (3, "FAIL"),
         (4, "PASS"),
@@ -435,6 +444,13 @@ fn a_killed_lane_waits_on_drive_to_respawn_it() {
         Some(42),
         "lane-killed",
         json!({"role": "rev", "agent": "sendmeter-rev-42-r1"}),
+    );
+    ev(
+        &c,
+        t + 30,
+        Some(42),
+        "turn-end",
+        json!({"state": "done", "role": "impl", "sha": sha("605297c")}),
     );
     spawn(&c, t, 3, "impl", "sendmeter-impl-3");
     spawn(&c, t + 10, 3, "rev", "sendmeter-rev-3-r1");

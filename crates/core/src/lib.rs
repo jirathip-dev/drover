@@ -23,6 +23,7 @@ pub mod design;
 pub mod devices;
 pub mod diagram;
 pub mod doctor;
+pub mod done;
 pub mod drive;
 pub mod events;
 pub mod gate;
@@ -232,9 +233,22 @@ type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
 /// `drover service` (api addr, board addr), set by the binary from the service crate.
 pub static SERVICE: std::sync::OnceLock<Service> = std::sync::OnceLock::new();
 type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
-/// `drover chat [thread]`, set by the binary from the chat crate.
-pub static CHAT: std::sync::OnceLock<Chat> = std::sync::OnceLock::new();
-type Chat = fn(&Ctx, &dyn Runner, Option<&str>) -> Result<()>;
+/// Which tab the full-screen app opens on: Threads (`drover chat`) or Board (`drover board`), with its thread or fleet.
+pub enum Open {
+    Threads(Option<String>),
+    Board(Option<String>),
+}
+/// The full-screen app, set by the binary from the chat crate; `Ok(false)`: stdout is no terminal, nothing was drawn.
+pub static APP: std::sync::OnceLock<App> = std::sync::OnceLock::new();
+type App = fn(&Ctx, &dyn Runner, &Open) -> Result<bool>;
+
+/// Open the app on `open` when the binary set one and this is no lane; `Ok(false)`: nothing drawn, print the plain view.
+pub fn app(ctx: &Ctx, r: &dyn Runner, open: &Open) -> Result<bool> {
+    match APP.get().filter(|_| config::env("DROVER_LANE").is_none()) {
+        Some(app) => app(ctx, r, open),
+        None => Ok(false),
+    }
+}
 
 pub use clock::now;
 

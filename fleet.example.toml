@@ -54,9 +54,10 @@ integration = "staging"
 # serial_paths = ["supabase/migrations/**"]   # the old form of one [[fleet.web.serial]] group named serial_label (default "db"), serial_max at a time
 # required_checks = ["quality"]   # gate/check/wait look only at these (latest run each); unset = all checks
 # premerge = ["drover cap-check --config ci/cap.toml", "cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = the cap check if ci/cap.toml
+# done_checks = ["npm run format:check", "drover arch-check"]   # #1362: `turn done` runs these in the lane's worktree (gate_check_minutes each) before any review; unset = `drover arch-check` with .drover/arch.toml, `cargo fmt --check` with a Cargo.toml
 # cap_script = "scripts/line-cap.sh"   # #754: `drover cap` runs it and reads its `N / cap M` lines; unset = the first premerge check naming a cap, else the built-in Rust count
 merge_label = "merge-ready"   # the full CI runs only with this label; drover adds it on a PASS at the head (docs/ci.md)
-# merge = "merge"   # #1097: default "squash": one commit per PR carrying its why notes, lane branch deleted; "merge" keeps every commit
+# merge = "merge"   # #1097: default "squash": one commit per PR, lane branch deleted; "merge" keeps every commit
 # update_ready = "always"   # catch every behind PASSed PR up with integration; default "needed": only on a conflict or a strict branch rule
 # line_cap = 10000   # `drover cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
 # hotspots = "off"   # #889: `drover tick` runs `drover hotspots` weekly per fleet (default "weekly"); "off" opts out
@@ -135,7 +136,7 @@ profile = "lane-design"
 review_rounds = 3
 update_rounds = 3   # `spawn --update` (conflict/behind) rounds, counted apart from review_rounds
 # form_rounds = 3   # `FAIL (form-only)` verdicts per issue that don't count as a review round; then they do
-# form_categories = ["trailer", "pr-body", "stale-baseline", "format", "docs-fresh", "migration-redate", "infra"]
+# form_categories = ["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]
 #                   # a fleet's own `form_categories` / `form_rounds` replace these
 # Both are the built-in pipeline's limits; a fleet with its own [fleet.<n>.pipeline] sets `rounds` per stage (docs/pipeline.md).
 stall_minutes = 30   # drover check: stall / ready-unmerged threshold
