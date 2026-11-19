@@ -1,0 +1,10 @@
+{"args":["turn","done"],"lane":"herdsman:1393:impl","ts":1795103143962}
+{"args":["done","--no-change","form-only FAIL: added ## Parity (none; rows 32/33/63 stay kept) to PR#1420 body; head d96df1a6 unchanged","drover","1393"],"lane":"herdsman:1393:impl","ts":1795103847002}
+{"args":["turn","done","--why","form-only fix: PR body now has ## Parity; head d96df1a6 unchanged (done --no-change filed)"],"lane":"herdsman:1393:impl","ts":1795103853759}
+{"args":["turn","working","--why","form-only FAIL needs no new commit: PR#1420 body got ## Parity; 'drover done --no-change' for 1393 is queued in the outbox (ts 1795103847002) to re-review head d96df1a6"],"lane":"herdsman:1393:impl","ts":1795103892004}
+{"args":["done","--no-change","the only finding was a PR body form fix: the ## Parity section is now in PR #1420's body; head d96df1a6 unchanged","herdsman","1393"],"lane":"herdsman:1393:impl","ts":1795107056732}
+{"args":["turn","done","--why","form-only FAIL: ## Parity added to PR #1420 body; head d96df1a6 unchanged, done --no-change filed"],"lane":"herdsman:1393:impl","ts":1795107060140}
+{"args":["turn","working","--why","pushed e23f0414 (staging merge brings #1423's stream race fix); waiting on CI before done"],"lane":"herdsman:1393:impl","ts":1795109898728}
+{"args":["turn","done"],"lane":"herdsman:1393:impl","ts":1795110692302}
+{"args":["turn","done"],"lane":"herdsman:1393:impl","ts":1795110756451}
+{"args":["turn","done"],"lane":"herdsman:1393:impl","ts":1795111447215}
