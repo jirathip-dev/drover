@@ -59,7 +59,8 @@ fn lock(r: &dyn Runner, dir: &Path) -> Result<Option<std::fs::File>> {
         .truncate(false)
         .write(true)
         .open(gitdir.join("drover-fetch.lock"))?;
-    for _ in 0..crate::runner::limit("git", &["fetch".into()]).as_secs() {
+    let (t, wait) = (crate::clock::instant(), crate::runner::limit("git", &["fetch".into()]));
+    while t.elapsed() < wait {
         match f.try_lock() {
             Ok(()) => return Ok(Some(f)),
             Err(std::fs::TryLockError::WouldBlock) => r.sleep(1),
