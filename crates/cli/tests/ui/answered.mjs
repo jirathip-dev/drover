@@ -1,13 +1,13 @@
 // #1185: the cards in Playwright's WebKit at 390 px on a real serve whose answers stay in flight: node answered.mjs <url> <cookie name=value>.
 // Approves the architect ask (q2), types a revise note on the design ask (q3), answers a plain ask (q1), then sends the note.
-// Each step: the /action reply, whether the card is on screen 1 s later and after the page's own reload of the cards. Prints one JSON object.
+// Each step: the /action reply, whether the card is on screen 1 s later and 3 s later (#1315: the page reads nothing again). Prints one JSON object.
 import { createRequire } from 'node:module';
 
-const { webkit } = createRequire(import.meta.url)('playwright');
+const pw = createRequire(import.meta.url)('playwright');
 const [url, cookie] = process.argv.slice(2);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const out = { errors: [], steps: {} };
-const browser = await webkit.launch();
+const browser = await pw[process.env.DROVER_ENGINE ?? 'webkit'].launch();
 try {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
   const [name, value] = cookie.split(/=(.*)/);
@@ -22,14 +22,11 @@ try {
   const asks = () => page.evaluate(() => [...document.querySelectorAll('#cards .card[data-id^="ask-"]')].map(c => c.dataset.id).sort());
   const step = async (id, tap) => {
     const posted = page.waitForResponse(r => r.url().endsWith('/action'));
-    const reloaded = page.waitForResponse(r => r.request().method() === 'GET' && new URL(r.url()).pathname.endsWith('/screens/cards'));
-    const t0 = await page.evaluate(() => Date.now());
     await tap();
     const status = (await posted).status();
     await page.clock.runFor(1000);
     const at1s = (await asks()).includes(id);
-    await reloaded;
-    await until(t => JSON.parse(localStorage.getItem('scr:/screens/cards') ?? '{"t":0}').t >= t, `the reloaded cards after ${id}`, t0 + 1000);
+    await page.clock.runFor(2000);
     const left = await asks();
     out.steps[id] = { status, at1s, after: left.includes(id), left };
   };

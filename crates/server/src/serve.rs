@@ -394,11 +394,21 @@ pub struct Server<'a> {
     writes: AtomicUsize,
     export: Option<bool>,
     snap: Mutex<(Option<u64>, Arc<Snapshot>)>,
-    later: Mutex<Vec<(Ctx, (Event, String))>>,
+    later: Mutex<Vec<(Ctx, Later)>>,
     chat: Mutex<[(serde_json::Value, serde_json::Value); 2]>,
     timing: Mutex<slo::Timing>,
     phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
+    streams: AtomicUsize,
+}
+
+fn hung_up(s: &TcpStream) -> bool {
+    s.set_read_timeout(Some(Duration::from_millis(1))).is_ok() && matches!(s.peek(&mut [0; 1]), Ok(0))
+}
+
+enum Later {
+    Thread(Event, String),
+    Prompt(Box<lanes::Lane>, String, String),
 }
 
 const JSON: &str = "application/json; charset=utf-8";
@@ -758,6 +768,7 @@ impl<'a> Server<'a> {
             timing: Mutex::default(),
             phone: Mutex::default(),
             rss: std::sync::atomic::AtomicU64::default(),
+            streams: AtomicUsize::new(0),
         }
     }
 
@@ -915,14 +926,35 @@ impl<'a> Server<'a> {
     }
 
     pub(crate) fn later(&self, ctx: &Ctx, jobs: impl IntoIterator<Item = (Event, String)>) {
-        lock(&self.later).extend(jobs.into_iter().map(|l| (ctx.clone(), l)));
+        lock(&self.later).extend(jobs.into_iter().map(|(e, l)| (ctx.clone(), Later::Thread(e, l))));
     }
 
     fn deliver(&self) {
         let jobs = std::mem::take(&mut *lock(&self.later));
         for (c, job) in jobs {
-            chat::deliver(&c, &self.r, &job);
+            match job {
+                Later::Thread(e, l) => chat::deliver(&c, &self.r, &(e, l)),
+                Later::Prompt(l, fleet, text) => self.tell(&c, &l, &fleet, &text),
+            }
             self.kick.store(true, Relaxed);
+        }
+    }
+
+    fn tell(&self, ctx: &Ctx, l: &lanes::Lane, fleet: &str, text: &str) {
+        let pane = l.pane().unwrap_or_default();
+        match term::reply(&l.on(&self.r), l.harness == "dsh", &l.name, pane, text) {
+            Ok(()) => {
+                if let Some(n) = l.issue {
+                    crate::drive::kick(ctx, &self.r, fleet, n, "board");
+                }
+            }
+            Err(e) => {
+                let d = serde_json::json!({"via": "web", "agent": l.name, "error": shown(&e)});
+                drop(append(
+                    &ctx.state,
+                    &Event::new(ctx.now, fleet, l.issue, "prompt-failed", d),
+                ));
+            }
         }
     }
 
@@ -1329,9 +1361,8 @@ impl<'a> Server<'a> {
 
     fn prompt(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Send) -> Result<String> {
         let (agent, text) = (f.agent.as_str(), f.text.as_str());
-        let (l, fleet, pane) = self.lane(ctx, agent)?;
-        let (fleet, pane) = (&fleet, &pane);
-        if reviewer(ctx, fleet, &l.role) {
+        let (l, fleet, _) = self.lane(ctx, agent)?;
+        if reviewer(ctx, &fleet, &l.role) {
             return refused("REV_READONLY", "reviewer lanes are not steered mid-review");
         }
         let n = text.chars().count();
@@ -1341,12 +1372,10 @@ impl<'a> Server<'a> {
         if text.chars().any(|c| (c < ' ' && c != '\n') || c == '\x7f') {
             return refused("BAD_VALUE", "a message has no control characters (newlines are fine)");
         }
-        term::reply(&l.on(&self.r), l.harness == "dsh", agent, pane, text)?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "chars": n});
-        append(&ctx.state, &Event::new(ctx.now, fleet, l.issue, "prompt", d))?;
-        if let Some(n) = l.issue {
-            crate::drive::kick(ctx, &self.r, fleet, n, "board");
-        }
+        append(&ctx.state, &Event::new(ctx.now, &fleet, l.issue, "prompt", d))?;
+        let job = Later::Prompt(Box::new(l), fleet, text.to_string());
+        lock(&self.later).push((ctx.clone(), job));
         Ok(format!("sent to {agent}"))
     }
 

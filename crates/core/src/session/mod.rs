@@ -169,6 +169,7 @@ impl Session {
 pub enum Cause {
     Limit,
     Crash,
+    Refused,
     Killed,
     Ended,
 }
@@ -188,19 +189,20 @@ impl Cause {
         match self {
             Cause::Limit => "usage limit",
             Cause::Crash => "adapter crash",
+            Cause::Refused => "ECONNREFUSED: proxy tunnel down",
             Cause::Killed => "killed",
             Cause::Ended => "ended normally",
         }
     }
     /// The cause a logged word names (old rows too).
     pub fn parse(w: &str) -> Option<Cause> {
-        [Cause::Limit, Cause::Crash, Cause::Killed, Cause::Ended]
+        [Cause::Limit, Cause::Crash, Cause::Refused, Cause::Killed, Cause::Ended]
             .into_iter()
             .find(|c| c.word() == w)
     }
     /// Drover resumes the lane in its worktree.
     pub fn resumable(self) -> bool {
-        matches!(self, Cause::Limit | Cause::Crash)
+        matches!(self, Cause::Limit | Cause::Crash | Cause::Refused)
     }
 }
 

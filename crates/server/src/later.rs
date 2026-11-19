@@ -205,3 +205,12 @@ pub(super) fn gone_ops(name: &str, block: &str, fleet: &str, issue: &str) -> Vec
     };
     vec![json!({"op": "remove", "id": gone})]
 }
+
+pub(super) fn undelivered(ev: &[Event], agent: &str) -> Option<Value> {
+    let told = ev
+        .iter()
+        .rev()
+        .find(|e| ["prompt", "prompt-failed"].contains(&e.kind.as_str()) && e.str("agent") == Some(agent))?;
+    let why = json!({"text": told.str("error")?, "tone": "bad"});
+    (told.kind == "prompt-failed").then(|| json!({"type": "row", "id": format!("undelivered-{}", told.seq), "title": "✗ not delivered", "subtitle": why}))
+}

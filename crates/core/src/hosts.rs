@@ -552,20 +552,27 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                 let live = live.unwrap_or_default();
                 (landed, s.drover) = (!s.drover.is_empty() && live != s.drover, live);
             }
-            if let Some(Err(e)) = h
+            let tunnel = h
                 .machine
                 .as_deref()
                 .filter(|_| cfg.host_acp(name).is_some())
-                .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)))
-            {
-                crate::stderr!("proxy {name}: {e:#}");
-            }
+                .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)));
             if (due || landed) && h.machine.is_some() && h.enabled {
                 s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
                 if h.watches_token() {
                     let (card, warn) = crate::cloud::github(&on, ctx.now);
                     (s.github, ()) = (card, s.health.extend(warn));
                 }
+            }
+            s.health.retain(|w| !w.starts_with(crate::proxy::DOWN));
+            let down = match tunnel {
+                Some(Ok(false)) => Some("no answer through it there; restarted".to_string()),
+                Some(Err(e)) => Some(format!("{e:#}")),
+                _ => None,
+            };
+            if let Some(why) = down {
+                crate::stderr!("proxy {name}: tunnel down: {why}");
+                s.health.push(format!("{}: {why}", crate::proxy::DOWN));
             }
             let mut hs = host::sample(&on);
             host::pace(&ctx.state, on.machine, &mut hs, ctx.now);
@@ -1338,7 +1345,7 @@ pub fn place(
         let code = p.refusal.as_ref().map(|x| x.0);
         let busy = matches!(
             code,
-            Some("DISK_LOW" | "HOST_BUSY" | "HOST_UPDATING" | "LOGIN_NEEDED" | "MEM_LOW")
+            Some("DISK_LOW" | "HOST_BUSY" | "HOST_UPDATING" | "LOGIN_NEEDED" | "MEM_LOW" | "NO_HOST")
         );
         let fits = cfg.hosts.get(was.0).map_or(needs.is_empty(), |h| fit(was.0, h));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);

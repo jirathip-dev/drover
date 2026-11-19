@@ -8,14 +8,13 @@ use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Map, Value};
 use std::io::Write;
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 #[path = "later.rs"]
 mod later;
 
 const MANIFEST: &str = include_str!("../../../cooee-plugin.toml");
-static STREAMS: AtomicUsize = AtomicUsize::new(0);
 type Res = (&'static str, &'static str, Vec<u8>);
 type Q = BTreeMap<String, String>;
 
@@ -67,6 +66,10 @@ const THREAD_ACTIONS: [&str; 11] = [
     "thread-model",
     "thread-signin",
 ];
+
+pub(super) fn ticking(t: u64, label: &str) -> Value {
+    json!({"since": iso(t), "label": label})
+}
 
 pub(super) fn iso(t: u64) -> String {
     let (d, s) = (t / 86_400, t % 86_400);
@@ -1121,7 +1124,7 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
         {"type": "chips", "id": "kind", "name": "kind", "multi": true, "selected": sel, "action": "filter", "options": opts},
         {"type": "section", "id": "today", "header": header, "blocks": [{"type": "list", "id": "ev", "rows": rows}]},
         {"type": "list", "id": "older-list", "rows": [{"type": "row", "id": "older", "title": "earlier days", "style": "link",
-            "tap": {"open": format!("/screens/events?{kq}before={}", before.saturating_sub(86_400))}}]}]});
+            "tap": {"open": format!("/screens/events?{kq}before={}", before.saturating_sub(86_400).div_ceil(3_600) * 3_600)}}]}]});
     if !stream.is_empty() {
         s.put("stream", json!(stream.trim_end_matches(['?', '&'])));
     }
@@ -1475,9 +1478,7 @@ impl Server<'_> {
         let age = snap.map(|t| ctx.now.saturating_sub(t));
         let page = v.at("type") == "screen";
         if let Some(b) = v.get_mut("blocks").and_then(Value::as_array_mut).filter(|_| page) {
-            let line = age.map_or("as of: not yet known".into(), |a| {
-                format!("as of {} ago", crate::events::age(a))
-            });
+            let line = snap.map_or(json!("as of: not yet known"), |t| ticking(t, "as of {} ago"));
             let tone = if age.is_some_and(|a| a <= 600) { "mute" } else { "warn" };
             let row =
                 json!({"type": "row", "id": "age", "title": "Snapshot", "subtitle": {"text": line, "tone": tone}});
@@ -1528,7 +1529,7 @@ impl Server<'_> {
         let chat = self
             .transcript(ctx, &q)
             .and_then(|t| serde_json::from_str::<Chat>(&t).ok());
-        let said: Vec<Value> = chat.map_or_else(Vec::new, |c| {
+        let mut said: Vec<Value> = chat.map_or_else(Vec::new, |c| {
             let lc = self.blocks(ctx, &q, c);
             lc.blocks
                 .iter()
@@ -1536,6 +1537,7 @@ impl Server<'_> {
                 .map(|(i, b)| said(i, b, &lc.chat.lines))
                 .collect()
         });
+        said.extend(later::undelivered(&ev, agent));
         let values = json!({ "agent": agent });
         let other = l.role == "other";
         let acts: &[(&str, &str)] = if other {
@@ -1916,13 +1918,13 @@ impl Server<'_> {
             now: crate::now(),
             ..self.ctx.clone()
         };
-        let (q, open) = (form(query), STREAMS.fetch_add(1, Relaxed) < 4);
+        let (q, open) = (form(query), self.streams.fetch_add(1, Relaxed) < 4);
         let paired = Self::plugin(self.ctx, head)
             || devices::check(self.ctx, header(head, "cookie").unwrap_or_default()).is_ok();
         let screen = |c: &Ctx| crate::runner::request(|| self.screen(c, base, &q, paired));
         let first = screen(&ctx()).filter(|_| open && (Self::plugin(self.ctx, head) || self.allowed(self.ctx, head)));
         let Some(mut cur) = first else {
-            STREAMS.fetch_sub(1, Relaxed);
+            self.streams.fetch_sub(1, Relaxed);
             let r = line(
                 if open {
                     "503 Service Unavailable"
@@ -1971,12 +1973,12 @@ impl Server<'_> {
                     }
                     cur = new;
                 }
-                if msg.is_empty() && ping.elapsed() >= Duration::from_secs(15) {
+                if msg.is_empty() && (ping.elapsed() >= Duration::from_secs(15) || super::hung_up(s)) {
                     (msg, ping) = (": ping\n\n".into(), drover_core::clock::instant());
                 }
             }
         };
-        STREAMS.fetch_sub(1, Relaxed);
+        self.streams.fetch_sub(1, Relaxed);
         res
     }
 }
