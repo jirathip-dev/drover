@@ -10,7 +10,7 @@ const THREADS = [
   { repo: 'all repos', id: 't34', title: 'Docs: issue names', last: 'Orchestrator: Filed both docs issues and queued each one last', age: '11d', st: 'asleep' },
   { repo: 'drover', id: 't139', title: 'Board 502: serve restart', last: 'Orchestrator asks q2170: Restart serve now, or wait for the fix?', age: '2m', st: 'choose', unread: true },
   { repo: 'drover', id: 't135', title: 'drover chat + board TUI', last: "Orchestrator: Done: the 'one app' line is in #1352's spec", age: '1h', st: 'asleep' },
-  { repo: 'drover', id: 't138', title: 'synergy asks stuck open', last: 'Orchestrator: Filed #1353, held until #1299 merges', age: '14h', st: 'asleep', unread: true },
+  { repo: 'drover', id: 't138', title: 'lane asks stuck open', last: 'Orchestrator: Filed #1353, held until #1299 merges', age: '14h', st: 'asleep', unread: true },
   { repo: 'drover', id: 't117', title: 'Orchestrator profile: Drover vs Cooee', last: "Orchestrator: No, you didn't lose anything you need", age: '24h', st: 'asleep' },
   { repo: 'cooee', id: 't77', title: 'cooee layout-blocks #300', last: 'Orchestrator asks q1858: Look gets New theme… and Edit…', age: '43h', st: 'working' },
   { repo: 'cooee', id: 't59', title: 'Cooee native app: designs', last: 'from t65: answered q1463: the composer mic', age: '6d', st: 'asleep' },
