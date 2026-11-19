@@ -24,6 +24,7 @@
 1 chat_pick
 2 chat_scale
 2 chat_tab
+1 chat_tui
 3 check_clean
 2 ci_templates
 2 cloud
