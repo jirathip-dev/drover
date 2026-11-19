@@ -496,6 +496,11 @@ pub struct Fleet {
     /// `[fleet.<n>.hygiene]`, this fleet's keys over `[hygiene]`'s.
     #[serde(default)]
     pub hygiene: Hygiene,
+    /// The repo is public (`PUBLIC_LEAK` checks text bound for it); unset = GitHub's visibility, cached a day.
+    pub public: Option<bool>,
+    /// Names a public fleet's text never carries (private repos, clients): kept here, never in a repo.
+    #[serde(default)]
+    pub private_names: Vec<String>,
     /// `srt` starts every lane's agent inside sandbox-runtime with the rules `sandbox::settings` writes; unset = off.
     pub sandbox: Option<Sandbox>,
     /// lanes see history since this commit only (`drover baseline`); unset = all of it.

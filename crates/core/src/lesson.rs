@@ -109,9 +109,11 @@ pub(crate) fn file(
     (title, body): (&str, &str),
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
-    let url = ok(
+    let url = crate::hygiene::gh(
+        ctx,
         r,
-        "gh",
+        cfg,
+        fleet,
         &["issue", "create", "-R", &f.repo, "--title", title, "--body", body],
     )?;
     let n: u64 = url

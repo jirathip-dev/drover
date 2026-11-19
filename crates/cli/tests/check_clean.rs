@@ -636,7 +636,11 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
     );
     assert!(!removed(&r1, &unpushed) && !removed(&r1, &open));
     assert!(!sh.called("kill", "impl-22") && !sh.called("kill", "impl-23"));
-    assert_eq!(r1.count("gh "), 0, "the closed-issue read is cached");
+    assert_eq!(
+        r1.count("gh ") - r1.count("gh repo view"),
+        0,
+        "the closed-issue read is cached"
+    );
     assert_eq!(kinds(&c, "clean"), 1);
 }
 
