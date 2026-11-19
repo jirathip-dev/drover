@@ -1223,7 +1223,6 @@ fn herd_screen(h: &Herd) -> Value {
     let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
     let (sky, level) = match host.pressure.as_deref() {
         _ if host.gate.is_some() => ("storm", "held"),
-        Some("warn" | "critical") if ratio < 0.5 => ("fog", "calm"),
         Some("warn" | "critical") => ("fog", "busy"),
         _ if ratio >= 0.5 => ("windy", "busy"),
         _ => ("clear", "calm"),

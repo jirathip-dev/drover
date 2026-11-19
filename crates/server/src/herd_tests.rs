@@ -33,6 +33,6 @@ fn the_herd_scene_sends_the_load_level_of_the_host() {
             host,
             ..Herd::default()
         })["blocks"][0]["load"],
-        "calm"
+        "busy"
     );
 }
