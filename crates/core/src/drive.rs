@@ -1378,6 +1378,17 @@ fn pass(
             )?;
         } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE && !fast {
             crate::lesson::idle_done(ctx, cfg, r, out, (fleet, s.issue), s.build.as_deref())?;
+        } else if w.who == "drive" && w.what.starts_with(waiting::NO_VERDICT_AGAIN) && !fast {
+            writeln!(out, "{fleet} #{n} needs-human: {}", w.what)?;
+            let d = json!({"code": "NO_VERDICT", "reason": w.what, "agent": w.lane});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
+            )?;
+        } else if !fast && pickup::unread(ctx, f, &events, &agents, (s, w)) {
+            let why = pickup::no_verdict(&events, &w.lane);
+            pickup::failed(ctx, out, (fleet, s.issue, &w.lane), &why)?;
         } else if w.who == "drive" {
             let gone = w.what.split_once(waiting::NO_PUSH);
             let ends =
@@ -1445,7 +1456,13 @@ fn pass(
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
             if step == "verdict" && matches!(code, Some("ERROR" | "EXIT")) {
                 let why = last_why(fleet).unwrap_or_default();
-                pickup::failed(ctx, out, &events, (fleet, s.issue, &w.lane), &why)?;
+                pickup::failed(ctx, out, (fleet, s.issue, &w.lane), &why)?;
+            }
+            if code.is_none() && w.what.ends_with("without a verdict: reviewing again") {
+                let why = pickup::no_verdict(&events, &w.lane);
+                let seq = crate::events::last_spawn(&events, &w.lane).map(|e| e.seq);
+                let d = json!({"role": args.get(3), "agent": w.lane, "why": why, "spawn": seq});
+                append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "self-heal", d))?;
             }
             let stale = (code == Some("LANE_LIVE") && step == "review")
                 .then(|| s.lanes.get(arg(3)))
