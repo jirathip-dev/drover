@@ -1,0 +1,13 @@
+Decided: a --repro rev whose diff adds a file under tests/ui/ or the fleet's ui_paths needs the probed `webkit` tag in place of the fleet's needs, and the spawn event's why names the test.
+Because: "rev placement requires a host probed as having it, like the `cfg(target_os)` rule"
+Because: crates/core/src/hosts.rs:662
+Decided: no enabled webkit host is refused NO_HOST by spawn, which logs one needs-human card (skipped when the issue is already needs-human).
+Because: "No enabled host has WebKit: no rev lane starts; one owner card names the missing capability."
+Decided: a NO_REPRO refusal after the re-prompt, or one left stall_minutes after it, is a needs-human card with the refusal text.
+Because: crates/core/src/drive.rs:1654
+Rejected: a new refusal code for a missing webkit host — NO_HOST already names the missing tag, and a new code means another usage doc entry.
+Rejected: a "could not run here" respawn on another host — not in the AC; placement now sends such reviews to a webkit host first.
+Decided: a supersede event's killed list names every agent the supersede closed in the old worktree, not only those in the new one.
+Check: on staging the idle impl agent in the old worktree was closed but logged `killed: []`; I could not reproduce a drive-level block of the --update spawn, so the fix is the log only.
+Check: per q2259 the boats' WebKit install is the owner's, outside this PR; the probe tags them once it is there.
+Owner: Repro reviews with browser tests go to a host that has WebKit, and a stuck repro review now reaches you as one card instead of idling.
