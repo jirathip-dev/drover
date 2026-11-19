@@ -138,8 +138,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
-    links(ctx, cfg, &view, &events)?;
-    let synced = working(&ctx.state)?;
+    let synced = links(ctx, cfg, &view, &events).and_then(|()| working(&ctx.state))?;
     for name in cfg.hosts.keys() {
         let mut tries = (synced.iter().rev()).filter(|e| e.kind == "host-sync" && e.str("host") == Some(name));
         let Some(e) = tries.next().filter(|e| e.val("ok") == false) else {
