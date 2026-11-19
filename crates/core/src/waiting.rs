@@ -732,7 +732,7 @@ pub fn scan_where(
                 && !pushed.is_empty()
                 && !x.eq_ignore_ascii_case(pushed)
                 && !mine.iter().any(updated)
-                && crate::overlap::carries(r, f, &s, x, pushed)
+                && crate::overlap::carries(ctx, r, f, &s, x, pushed)
         });
         let ev = carry.map(|(x, _)| {
             let d = serde_json::json!({"from": x, "to": pushed});

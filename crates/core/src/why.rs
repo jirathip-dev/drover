@@ -285,11 +285,17 @@ pub fn attach(
     let git = |a: &[&str], input: &str| r.run_in("git", &argv(&[&["-C", &local][..], a].concat()), input);
     let mine = format!("refs/notes/why-{head}");
     let res = (|| {
-        ok(r, "git", &["-C", &local, "fetch", "-q", "origin", branch])?;
+        crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "origin", branch])?;
         let mut err = String::new();
         for _ in 0..3 {
             git(&["update-ref", "-d", &mine], "")?;
-            git(&["fetch", "-q", "origin", &format!("+refs/notes/why:{mine}")], "").ok();
+            crate::clone::fetch(
+                ctx,
+                r,
+                &f.local_path(),
+                &["-q", "origin", &format!("+refs/notes/why:{mine}")],
+            )
+            .ok();
             let id = ["-c", "user.name=drover", "-c", "user.email=drover@localhost"];
             let o = git(
                 &[&id[..], &["notes", "--ref", &mine, "add", "-f", "-F", "-", head]].concat(),
@@ -300,7 +306,7 @@ pub fn attach(
             }
             let o = git(&["push", "-q", "origin", &format!("{mine}:refs/notes/why")], "")?;
             if o.code == 0 {
-                git(&["fetch", "-q", "origin", NOTES], "").ok();
+                crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "origin", NOTES]).ok();
                 return Ok(());
             }
             err = o.stderr;

@@ -349,7 +349,7 @@ pub fn diff_names(
         let mut out = ok(r, "gh", &["api", &path, "--paginate", "--jq", jq])?;
         if out.lines().filter(|l| !l.trim().is_empty()).count() >= 3000 {
             let (dir, range) = (f.local_path(), format!("origin/{}...{head}", f.integration));
-            crate::overlap::git(r, &dir, &["fetch", "-q", "origin"])?;
+            crate::clone::fetch(ctx, r, &dir, &["-q", "origin"])?;
             out = crate::overlap::git(r, &dir, &["diff", "--name-only", "--no-renames", &range])?;
         }
         let names = out.lines().flat_map(|l| l.split('\t')).map(str::trim);

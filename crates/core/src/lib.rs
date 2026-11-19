@@ -14,6 +14,7 @@ pub mod card;
 pub mod check;
 mod cli;
 pub mod clock;
+pub mod clone;
 pub mod cloud;
 pub mod compact;
 pub mod config;

@@ -52,11 +52,11 @@ pub fn no_proof(body: &str) -> Option<String> {
     (!bad.is_empty()).then(|| bad.join("; "))
 }
 
-fn pr_diff(r: &dyn Runner, f: &Fleet, branch: &str, head: &str) -> Result<String> {
+fn pr_diff(ctx: &Ctx, r: &dyn Runner, f: &Fleet, branch: &str, head: &str) -> Result<String> {
     match ok(r, "gh", &["pr", "diff", branch, "-R", &f.repo]) {
         Err(e) if format!("{e:#}").contains("too_large") => {
             let (dir, range) = (f.local_path(), format!("origin/{}...{head}", f.integration));
-            git(r, &dir, &["fetch", "-q", "origin"])?;
+            crate::clone::fetch(ctx, r, &dir, &["-q", "origin"])?;
             git(r, &dir, &["diff", &range])
         }
         d => d,
@@ -95,7 +95,7 @@ pub fn verdict(
     let head = ok(r, "gh", &["api", &api, "--jq", ".commit.sha"])?.trim().to_string();
     let carried = || {
         st.as_ref()
-            .is_some_and(|s| crate::overlap::carries(r, f, s, sha, &head))
+            .is_some_and(|s| crate::overlap::carries(ctx, r, f, s, sha, &head))
     };
     if !head.eq_ignore_ascii_case(sha) && !carried() {
         return refused("STALE_SHA", format!("{branch} head is {head}, not {sha}"));
@@ -108,7 +108,7 @@ pub fn verdict(
     };
     let lp = p.loop_of(stage);
     let prose = pass && stage != "verify" && crate::lesson::is_lesson(ctx, st.as_ref(), (fleet, issue)) && {
-        crate::lesson::prose_only(&pr_diff(r, f, &branch, &head)?)
+        crate::lesson::prose_only(&pr_diff(ctx, r, f, &branch, &head)?)
     };
     let (pass, body) = if prose {
         writeln!(out, "prose-only lesson PR: recorded as a FAIL")?;
@@ -146,7 +146,7 @@ pub fn verdict(
             }
         }
         Some("refactor") => {
-            let diff = pr_diff(r, f, &branch, &head)?;
+            let diff = pr_diff(ctx, r, f, &branch, &head)?;
             if let Some(files) = tests_changed(&diff) {
                 return refused(
                     "TESTS_CHANGED",
@@ -289,7 +289,7 @@ pub fn sync_label(
     if s.done() || pr["state"] != "OPEN" || head.is_empty() || pr["landing"] == "fast-first" {
         return Ok(());
     }
-    let carried = || s.verdicts.iter().any(|v| v.1 == "PASS") && crate::overlap::pure(r, f, s, head);
+    let carried = || s.verdicts.iter().any(|v| v.1 == "PASS") && crate::overlap::pure(ctx, r, f, s, head);
     let (flag, kind) = match (
         passed(&working(&ctx.state)?, s, head) || carried(),
         gh::has_label(pr, label),
@@ -691,7 +691,7 @@ fn premerge(
         format!("origin/{}", f.integration),
     );
     let (dir, wts) = (f.local_path(), wt.to_string_lossy());
-    let tip = || git(r, &dir, &["fetch", "-q", "origin"]).and_then(|_| git(r, &dir, &["rev-parse", &into]));
+    let tip = || crate::clone::fetch(ctx, r, &dir, &["-q", "origin"]).and_then(|_| git(r, &dir, &["rev-parse", &into]));
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     for _ in 0..2 {
         let base = tip()?;
@@ -867,7 +867,7 @@ pub fn merge(
     let fast = pr.at("landing") == "fast-first";
     let h = pr.at("headRefOid").as_str().unwrap_or_default();
     let st = st.map(|mut s| {
-        if !h.is_empty() && !s.reviewed(h) && crate::overlap::pure(r, f, &s, h) {
+        if !h.is_empty() && !s.reviewed(h) && crate::overlap::pure(ctx, r, f, &s, h) {
             s.verdicts
                 .extend(f.flow().checks().map(|c| (h.into(), "PASS".into(), c.name.clone())));
         }
@@ -896,7 +896,7 @@ pub fn merge(
         res => res,
     };
     let res = match res.and_then(|h| crate::compact::head(r, &events, (fleet, f), h)) {
-        Ok(h) if fast && !crate::land::based(r, f, &h) => Err(refuse(
+        Ok(h) if fast && !crate::land::based(ctx, r, f, &h) => Err(refuse(
             "BEHIND",
             format!(
                 "{} moved past {h:.7}; drive catches it up, its fast checks run again",
