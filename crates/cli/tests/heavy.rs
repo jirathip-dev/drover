@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-const JOB: &str = "echo \"start $1\" >> log; while [ ! -f \"go-$1\" ]; do sleep 0.05; done; echo \"end $1\" >> log\n";
+const JOB: &str = "echo $$ > \"pid-$1\"; echo \"start $1\" >> log; while [ ! -f \"go-$1\" ]; do sleep 0.05; done; echo \"end $1\" >> log\n";
 
 fn lane(host: &str) -> PathBuf {
     let d = tmpdir("heavy");
@@ -89,6 +89,14 @@ fn start(d: &Path, cmd: &str) -> Child {
 
 fn go(d: &Path, job: &str) {
     std::fs::write(d.join(format!("go-{job}")), "").unwrap();
+}
+
+fn alive(pid: &str) -> bool {
+    let out = Command::new("ps")
+        .args(["-o", "stat=", "-p", pid.trim()])
+        .output()
+        .unwrap();
+    out.status.success() && !String::from_utf8_lossy(&out.stdout).trim_start().starts_with('Z')
 }
 
 fn finish(children: Vec<Child>) {
@@ -188,4 +196,20 @@ fn a_wait_past_the_limit_runs_and_logs_heavy_timeout_once() {
     assert_eq!(late[0].str("kind"), Some("test"));
     let phone: drover::config::Notify = toml::from_str("cmd = \"\"\ntype = \"webpush\"").unwrap();
     assert!(phone.wants(late[0]), "a default phone notifier alerts on it");
+}
+
+#[test]
+fn a_dropped_job_ends_with_its_harness() {
+    let d = lane("");
+    let job = start(&d, "sh test.sh a");
+    until("a's start", || log(&d).contains("start a"));
+    let pid = std::fs::read_to_string(d.join("pid-a")).unwrap();
+    drop(job);
+    let end = Instant::now() + Duration::from_secs(5);
+    while alive(&pid) && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let gone = !alive(&pid);
+    Command::new("kill").args(["-9", pid.trim()]).status().unwrap();
+    assert!(gone, "job {} outlived its harness", pid.trim());
 }
