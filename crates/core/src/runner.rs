@@ -28,7 +28,7 @@ pub trait Runner: Sync {
     }
     fn attached(&self, prog: &str, args: &[String]) -> Result<i32> {
         use std::os::unix::process::ExitStatusExt;
-        let st = Command::new(prog).args(args).status()?;
+        let st = here(&mut Command::new(prog)).args(args).status()?;
         Ok(st.code().or(st.signal().map(|s| 128 + s)).unwrap_or(1))
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
@@ -102,6 +102,13 @@ pub fn inherited() -> Vec<std::net::TcpListener> {
     drover_sys::adopt_listeners(fds)
 }
 
+fn here(c: &mut Command) -> &mut Command {
+    if !std::env::current_dir().is_ok_and(|d| d.is_dir()) {
+        c.current_dir("/");
+    }
+    c
+}
+
 pub struct Real;
 
 impl Runner for Real {
@@ -117,7 +124,8 @@ impl Runner for Real {
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         let log = std::fs::File::options().create(true).append(true).open(log)?;
         let mut c = Command::new(exe);
-        c.args(args)
+        here(&mut c)
+            .args(args)
             .stdin(std::process::Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log);
@@ -147,7 +155,7 @@ impl Real {
     fn stream(prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
         use std::io::Write;
         use std::process::Stdio;
-        let mut c = Command::new(prog)
+        let mut c = here(&mut Command::new(prog))
             .args(plain(prog, args))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -179,7 +187,7 @@ impl Real {
         let end = crate::clock::instant() + limit;
         let start = || {
             use std::os::unix::process::CommandExt;
-            let mut c = Command::new(prog)
+            let mut c = here(&mut Command::new(prog))
                 .args(args)
                 .process_group(0)
                 .stdin(Stdio::piped())

@@ -430,7 +430,7 @@ pub(crate) fn failures<'a>(ev: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Even
     let mine = ev.iter().rev().filter(|e| e.fleet == fleet && e.issue == Some(n));
     let mut v: Vec<&Event> = mine
         .take_while(|e| e.kind != "spawn")
-        .filter(|e| e.kind == "spawn-error")
+        .filter(|e| e.kind == "spawn-error" && !crate::slo::cwd_gone(e.str("error")))
         .collect();
     v.reverse();
     v
