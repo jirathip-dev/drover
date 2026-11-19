@@ -1,0 +1,5 @@
+
+> lint
+> node --no-warnings lint.mjs src
+
+ts-lint: 0 violations
