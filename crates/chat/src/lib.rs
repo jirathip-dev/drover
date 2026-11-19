@@ -341,7 +341,7 @@ impl<'s, 'e> App<'s, 'e> {
             (KeyCode::Char('c'), true) => self.quit = true,
             (KeyCode::Tab, _) => self.board = !self.board,
             (KeyCode::Up | KeyCode::Char('k'), _) if self.sheet.is_some() => {
-                self.sheet = self.sheet.map(|n| n.saturating_sub(1))
+                self.sheet = self.sheet.map(|n| n.saturating_sub(1));
             }
             (KeyCode::Down | KeyCode::Char('j'), _) if self.sheet.is_some() => self.sheet = self.sheet.map(|n| n + 1),
             (KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('?'), _) if self.sheet.is_some() => self.sheet = None,
@@ -383,7 +383,7 @@ impl<'s, 'e> App<'s, 'e> {
             (KeyCode::Down, _) => self.scroll.set(self.scroll.get().saturating_sub(1)),
             (KeyCode::PageUp, _) | (KeyCode::Char('b'), true) => self.scroll.set(self.scroll.get() + 10),
             (KeyCode::PageDown, _) | (KeyCode::Char('f'), true) => {
-                self.scroll.set(self.scroll.get().saturating_sub(10))
+                self.scroll.set(self.scroll.get().saturating_sub(10));
             }
             (KeyCode::Char('?'), false) if empty => self.sheet = Some(0),
             (KeyCode::Char(c), false) if empty && self.select(c).is_some() => {
