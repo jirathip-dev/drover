@@ -1,0 +1,5 @@
+Decided: no code change for the phone timings FAIL; drop the re-committed lane outbox and rerun CI
+Because: crates/cli/tests/phone_timings.rs:80
+Rejected: raising the 150 ms budget — a shared gate this issue does not own, and staging fails it on its own too
+Check: ui-webkit green at 10214928; .drover/outbox.jsonl absent from the PR diff
+Owner: the timing test that failed is a known flaky one on staging; the bush theme is unchanged
