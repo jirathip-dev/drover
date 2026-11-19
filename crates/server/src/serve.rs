@@ -1258,7 +1258,7 @@ impl<'a> Server<'a> {
         }
         let allow = if self.addr.is_some() { "GET, POST" } else { "GET" };
         let mut res = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nAllow: {allow}\r\n{extra}Cache-Control: {cache}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nAllow: {allow}\r\nX-Build: {VER:08x}\r\n{extra}Cache-Control: {cache}\r\nConnection: close\r\n\r\n",
             body.len()
         )
         .into_bytes();
