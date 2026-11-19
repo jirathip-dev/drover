@@ -27,6 +27,7 @@ pub mod drive;
 pub mod events;
 pub mod gate;
 pub mod gh;
+pub mod guard;
 pub mod heavy;
 pub mod hook;
 pub mod host;

@@ -806,7 +806,13 @@ pub fn changes(st: &str) -> usize {
             .chain(["node_modules/", providers::LOCAL_DIR]))
         .any(|f| l.trim_end() == format!("?? {f}"))
     };
-    st.lines().filter(|l| !own(l)).count()
+    st.lines().filter(|l| !own(l) && scratch_log(l).is_none()).count()
+}
+
+/// An untracked `*.log` in a `git status --porcelain` line: lane scratch, never wip.
+pub fn scratch_log(l: &str) -> Option<&str> {
+    let log = |p: &&str| Path::new(p).extension().is_some_and(|e| e.eq_ignore_ascii_case("log"));
+    l.trim_end().strip_prefix("?? ").filter(log)
 }
 
 /// Some lockfile exists, and each one reads the same in the local checkout and the new lane.

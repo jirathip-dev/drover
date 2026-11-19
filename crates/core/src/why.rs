@@ -374,18 +374,19 @@ pub fn brief(
     let (local, ids) = (f.local_path(), crate::compact::Shas::of(events));
     let mine: Vec<&Event> = events.iter().filter(|e| e.is("why", fleet, n)).collect();
     if let Some(head) = rev {
+        let ui = crate::guard::brief(events, (fleet, n)).map_or(String::new(), |g| format!("\n\n{g}"));
         let text = mine
             .iter()
             .any(|e| e.str("sha") == Some(head))
             .then(|| note(r, &local, head))
             .flatten();
         if let Some(t) = text {
-            return Some(format!("## Why note for this round ({head:.7})\n\n{t}"));
+            return Some(format!("## Why note for this round ({head:.7})\n\n{t}{ui}"));
         }
         let done = |e: &&Event| e.is("turn-end", fleet, n) && e.str("state") == Some("done");
         let why = events.iter().rfind(done).and_then(|e| e.str("note"));
         return Some(format!(
-            "## Why note for this round\n\nno why note: {}",
+            "## Why note for this round\n\nno why note: {}{ui}",
             why.unwrap_or("none attached")
         ));
     }
