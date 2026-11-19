@@ -1720,11 +1720,8 @@ fn an_idle_impl_agent_holding_the_branch_is_superseded_by_an_update_round_in_rev
     assert!(st.starts_with("review("), "{st}");
     b.lane("sendmeter-impl-12-r1", "idle", old.to_str().unwrap());
     let cli = Push(b.cli(&f), local.parent().unwrap().into());
-    let (code, out) = run(
-        &c,
-        &cli,
-        &["spawn", "sendmeter", "12", "impl", "--supersede", "--update"],
-    );
+    let args = ["spawn", "sendmeter", "12", "impl", "--supersede", "--update"];
+    let (code, out) = run(&c, &cli, &args);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     assert!(!b.has("sendmeter-impl-12-r1"), "{out}");
     let sup = logged(&c, "supersede");
@@ -1733,7 +1730,6 @@ fn an_idle_impl_agent_holding_the_branch_is_superseded_by_an_update_round_in_rev
             .any(|e| e.val("killed").to_string().contains("sendmeter-impl-12-r1")),
         "{sup:?}"
     );
-    assert!(!b.has("sendmeter-impl-12-r1"), "{out}");
 }
 
 #[test]
