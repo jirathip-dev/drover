@@ -488,6 +488,15 @@ fn swap(
         Err(e) => {
             let why = format!("{head:.7}: {e:#}");
             writeln!(out, "✗ self-update {why}; now live at {}", t.live.display())?;
+            if e.is::<ServeDown>() {
+                let d = json!({"key": head, "reason": format!("serve down after self-update {why}")});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, "drover", None, "serve-down", d).push(),
+                )?;
+                return Ok(1);
+            }
             let key = why.lines().find(|l| l.starts_with("✗ shed")).unwrap_or(head);
             failed(ctx, cfg, events, key, json!({"reason": format!("self-update {why}")}))?;
             Ok(1)
@@ -512,9 +521,41 @@ fn remote_swap(cfg: &Config, m: &Member) -> Result<String> {
     ok(&m.on, "sh", &["-c", &line])
 }
 
+#[derive(Debug)]
+struct ServeDown(String);
+
+impl std::fmt::Display for ServeDown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ServeDown {}
+
 fn restart_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
-    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
-    crate::timer::restart(ctx, r, label).map(|_| "serve restarted".into())
+    let (label, addr) = (
+        cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve"),
+        cfg.serve.addr(),
+    );
+    let first = crate::timer::restart(ctx, r, label);
+    if first.is_ok() && crate::timer::serving(ctx, r, label, &addr) {
+        return Ok("serve restarted".into());
+    }
+    let again = crate::timer::rebootstrap(ctx, r, label, false);
+    if again.is_ok() && crate::timer::serving(ctx, r, label, &addr) {
+        return Ok("serve restarted, bootstrapped again".into());
+    }
+    let said: Vec<String> = [first, again]
+        .into_iter()
+        .filter_map(Result::err)
+        .map(|e| format!("{e:#}"))
+        .collect();
+    let said = if said.is_empty() {
+        format!("{label} has no pid or {addr} does not answer")
+    } else {
+        said.join("; ")
+    };
+    Err(ServeDown(said).into())
 }
 
 /// Ask the serve on control socket `sock` to hand over; the bridge's pid once it serves.

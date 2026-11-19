@@ -26,7 +26,10 @@ fn setup(name: &str) -> (drover::Ctx, PathBuf) {
 
 fn setup_with(name: &str, config: &str) -> (drover::Ctx, PathBuf) {
     let d = tmpdir(name);
-    let mut c = ctx(&d, config);
+    let board = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let config = format!("{config}\n[serve]\naddr = \"{}\"\n", board.local_addr().unwrap());
+    std::mem::forget(board);
+    let mut c = ctx(&d, &config);
     version_bin(&d.join("bin/drover"), &ver(OLD));
     c.exe = d.join("bin/drover").to_string_lossy().into();
     std::fs::create_dir_all(&c.home).unwrap();
@@ -68,6 +71,8 @@ fn base(c: &drover::Ctx, live: &Path) -> Fake {
         .reply(&format!("{}.new doctor --config-only", staging.display()), "")
         .reply(&format!("{} profiles sync", live.display()), "")
         .reply("git -C /x/drover fetch", "")
+        .reply("launchctl print gui/", "pid = 42\n")
+        .reply("systemctl --user show -p MainPID", "LoadState=loaded\nMainPID=42\n")
         .reply("launchctl", "")
         .reply("systemctl", "")
 }
@@ -393,6 +398,73 @@ fn the_serve_restart_is_the_jobs_own_restart_never_a_handover() {
     assert!(ctl.accept().is_err(), "no serve was asked to hand over");
     let calls = r.calls.borrow().join("\n");
     assert!(!calls.contains(" serve"), "no other serve start: {calls}");
+}
+
+fn serve_ctl(c: &drover::Ctx) -> (String, String) {
+    use std::os::unix::fs::MetadataExt;
+    let uid = std::fs::metadata(&c.home).unwrap().uid();
+    if cfg!(target_os = "macos") {
+        (
+            format!("launchctl print gui/{uid}/dev.drover.serve"),
+            format!("launchctl bootstrap gui/{uid} "),
+        )
+    } else {
+        (
+            "systemctl --user is-active dev.drover.serve.service".into(),
+            "systemctl --user enable --now dev.drover.serve.service".into(),
+        )
+    }
+}
+
+const REFUSED: &str = "job state = spawn failed\nlast exit reason = OS_REASON_CODESIGNING\n";
+
+#[test]
+fn a_serve_bootstrap_hitting_error_5_after_bootout_is_retried_until_serve_is_up() {
+    let (c, live) = setup("upd-boot5");
+    let (probe, up) = serve_ctl(&c);
+    let r = release(base(&c, &live), "main", SHA, &live)
+        .once(&probe, 0, REFUSED)
+        .once(&probe, 0, "state = running\n")
+        .once_err(&probe, 113, "Could not find service")
+        .once_err(&up, 5, "Bootstrap failed: 5: Input/output error");
+    let (code, out) = run(&c, &Disk(&r), &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.trim_end().ends_with("serve restarted"), "{out}");
+    let calls = r.calls.borrow().clone();
+    let ups: Vec<usize> = (0..calls.len()).filter(|i| calls[*i].starts_with(&up)).collect();
+    assert_eq!(ups.len(), 2, "{calls:?}");
+    let probes: Vec<usize> = (0..calls.len()).filter(|i| calls[*i].starts_with(&probe)).collect();
+    assert!(
+        probes.len() >= 3 && probes[2] < ups[0],
+        "bootstrap only once the job is gone: {calls:?}"
+    );
+    assert!(
+        calls[probes[1]..probes[2]].iter().any(|c| c.starts_with("sleep ")),
+        "it waits while the job is still there: {calls:?}"
+    );
+    assert!(
+        calls[ups[0]..ups[1]].iter().any(|c| c.starts_with("sleep ")),
+        "backs off before the retry: {calls:?}"
+    );
+    assert!(kinds(&c, "serve-down").is_empty());
+}
+
+#[test]
+fn a_serve_restart_that_keeps_failing_alerts_serve_down_once_with_the_error() {
+    let (c, live) = setup("upd-serve-down");
+    let (probe, up) = serve_ctl(&c);
+    let mut r = release(base(&c, &live), "main", SHA, &live).once(&probe, 0, REFUSED);
+    for _ in 0..12 {
+        r = r.once_err(&up, 5, "Bootstrap failed: 5: Input/output error");
+    }
+    let (code, out) = run(&c, &Disk(&r), &["self-update"]);
+    assert_eq!(code, 1, "{out}");
+    let down = kinds(&c, "serve-down");
+    assert_eq!(down.len(), 1, "{out}");
+    assert!(down[0].is_push(), "serve-down reaches the phone");
+    let why = down[0].str("reason").unwrap_or_default();
+    assert!(why.contains("Input/output error"), "{why}");
+    assert!(kinds(&c, "self-update-failed").is_empty(), "one alert, not two");
 }
 
 #[test]
