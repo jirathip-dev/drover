@@ -1,0 +1,5 @@
+Decided: merge origin/staging 70bc331d; crates/cli/tests/shed.rs returns to staging's 2556 lines, under its 2557 size baseline
+Because: crates/cli/tests/shed.rs:1
+Rejected: merging the wip snapshot — it holds only local test logs, and build output never goes in git
+Check: arch-check's only remaining local violation is `just gen` missing on this host
+Owner: Brought the speed-up up to date with staging again; screens stay under 150 ms on the live-shaped fixture
