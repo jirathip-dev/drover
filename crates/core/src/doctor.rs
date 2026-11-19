@@ -342,11 +342,8 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     if cfg.shed().is_some() {
         shed_rows(ctx, cfg, r, rows);
     }
-    let view = crate::link::view::View::load(ctx, cfg).ok();
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let Some(m) = h.machine.as_deref() else { continue };
-        let failing = view.as_ref().and_then(|v| v.failing(Some(m)));
-        rows.extend(failing.map(|w| format!("✗ host {name} report — {w}")));
         let on = crate::hosts::On::new(r, Some(m));
         let Some((tags, home)) = crate::hosts::probe(&on) else {
             let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");
@@ -356,7 +353,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             continue;
         };
         let (tags, own) = ([tags, h.tags.clone()].concat(), h.watches_token());
-        let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
+        let bad = host_rows(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
         let v = crate::VERSION;
@@ -373,6 +370,13 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             rows.push(format!("! stale fleet.toml on {name}: no longer read → rm {conf}"));
         }
     }
+}
+
+fn host_rows(ctx: &Ctx, cfg: &Config, on: &crate::hosts::On, tags: &[String], home: &str) -> Vec<String> {
+    let mut bad = crate::hosts::health(ctx, cfg, on, tags, home);
+    let v = crate::link::view::View::load(ctx, cfg).ok();
+    bad.extend(v.and_then(|v| v.failing(on.machine)).map(|w| format!("✗ report — {w}")));
+    bad
 }
 
 const STARTUP: [&str; 4] = [".zshenv", ".zprofile", ".zshrc", ".zlogin"];

@@ -95,7 +95,6 @@ pub fn sweep(ctx: &Ctx, cfg: &Config, on: &On, host: &str, out: &mut dyn Write, 
     Ok(freed)
 }
 
-/// Err while the host at `on`'s report fails: its live lanes are unknown, so none of its folders go.
 pub(super) fn reported(ctx: &Ctx, cfg: &Config, on: &On) -> Result<()> {
     let view = on.machine.and_then(|_| crate::link::view::View::load(ctx, cfg).ok());
     match view.and_then(|v| v.failing(on.machine)) {
