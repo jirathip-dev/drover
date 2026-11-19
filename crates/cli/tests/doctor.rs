@@ -646,3 +646,15 @@ fn a_serve_on_the_port_the_job_does_not_own_is_red() {
     assert_eq!(code, 0, "{out}");
     assert!(line(&out, "serve job").starts_with('✓'), "{out}");
 }
+
+#[test]
+fn a_missing_tool_is_unknown_with_its_name_and_leaves_the_exit_code() {
+    let (c, _) = setup("doc-missing-tool", "claude");
+    let r = good()
+        .once("sysctl -n kern.memorystatus_vm_pressure_level", 127, "")
+        .once("lsof -nP -iTCP:7777", 127, "");
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(line(&out, "host"), "? host — sysctl not found", "{out}");
+    assert_eq!(line(&out, "serve"), "? serve — lsof not found", "{out}");
+}

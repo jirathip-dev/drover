@@ -43,6 +43,9 @@ pub struct Lane {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Top {
     pub load_per_cpu: Option<f64>,
+    /// Why the load is unknown: `<tool> not found`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load_unknown: Option<String>,
     pub limit: f64,
     pub heavy_used: usize,
     pub heavy_max: usize,
@@ -156,8 +159,12 @@ pub fn top(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Top> {
             .unwrap_or_default()
     };
     let held = cfg.fleet.keys().filter_map(last).flat_map(acts);
+    let h = host::sample(r);
     Ok(Top {
-        load_per_cpu: host::sample(r).load_per_cpu,
+        load_per_cpu: h.load_per_cpu,
+        load_unknown: h
+            .not_found(&["sysctl", "cat", "nproc"])
+            .filter(|_| h.load_per_cpu.is_none()),
         limit: cfg.limits.load_per_cpu,
         heavy_used: line.iter().filter(|(_, t)| t.running).count(),
         heavy_max: main.and_then(|h| h.heavy_max).unwrap_or(3),
@@ -168,10 +175,14 @@ pub fn top(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Top> {
 
 /// `drover top`'s plain text: the header line, then each lane and its indented process tree.
 pub fn print(t: &Top, out: &mut dyn Write) -> Result<()> {
-    let load = t.load_per_cpu.map_or("?".into(), |l| format!("{l:.2}"));
+    let load = match (t.load_per_cpu, &t.load_unknown) {
+        (Some(l), _) => format!("load/cpu {l:.2}"),
+        (None, Some(why)) => format!("? load/cpu — {why}"),
+        (None, None) => "load/cpu ?".into(),
+    };
     writeln!(
         out,
-        "load/cpu {load} (limit {}) · heavy slots {}/{} · respawns held {}",
+        "{load} (limit {}) · heavy slots {}/{} · respawns held {}",
         t.limit, t.heavy_used, t.heavy_max, t.respawns_held
     )?;
     for l in &t.lanes {
