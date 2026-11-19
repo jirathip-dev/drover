@@ -3,7 +3,12 @@ use crate::api::HerdHost;
 
 #[test]
 fn the_herd_scene_sends_the_load_level_of_the_host() {
-    for (load, gate, want) in [(0.4, None, "calm"), (1.3, None, "busy"), (0.4, Some("load"), "held")] {
+    for (load, gate, want) in [
+        (0.4, None, "calm"),
+        (0.5, None, "busy"),
+        (1.3, None, "busy"),
+        (0.4, Some("load"), "held"),
+    ] {
         let host = HerdHost {
             load: Some(load),
             limit: 1.0,
@@ -28,6 +33,6 @@ fn the_herd_scene_sends_the_load_level_of_the_host() {
             host,
             ..Herd::default()
         })["blocks"][0]["load"],
-        "busy"
+        "calm"
     );
 }

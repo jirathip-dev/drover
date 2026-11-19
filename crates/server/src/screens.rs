@@ -1221,10 +1221,9 @@ fn herd_screen(h: &Herd) -> Value {
     repos.extend(herd_repo("others", "", &h.others, None));
     let host = &h.host;
     let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
-    let strained = matches!(host.pressure.as_deref(), Some("warn" | "critical"));
     let level = match () {
         () if host.gate.is_some() => "held",
-        () if strained || ratio >= 1.0 => "busy",
+        () if ratio >= 0.5 => "busy",
         () => "calm",
     };
     let sky = match host.pressure.as_deref() {
