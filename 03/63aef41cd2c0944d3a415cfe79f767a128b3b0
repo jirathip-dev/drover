@@ -1,0 +1,5 @@
+Decided: keep both staging's sheet refill and this PR's next-page load when a sheet opens
+Because: "Scrolling to within about one screen of the end loads the next 100 by cursor"
+Rejected: dropping staging's loading-row refill — it is another issue's behaviour
+Check: web/src/main.ts sheet() calls more(shv) then fill(path); web/dist/board.js matches npm run build
+Owner: Merged the latest staging again; the earlier red check passed when it ran a second time.
