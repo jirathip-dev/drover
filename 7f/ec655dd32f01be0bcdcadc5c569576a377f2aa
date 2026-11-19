@@ -1,0 +1,69 @@
+Decided: one dropdown() in web/src/blocks.ts replaces both native selects; form pickers keep their name on a hidden input so values() posts unchanged
+Because: "One shared terminal-style dropdown in `web/src`, used by every picker on the page"
+Because: q1992
+Rejected: a styled native select — iOS still opens its own frosted sheet, which is the complaint
+Rejected: a new web/src module file — blocks.ts already owns el/btn/esc and both call sites
+Check: the composer WebKit test at 390 taps the model option and asserts one thread-model post and the list inside the viewport
+Check: keyboard_webkit fails identically with the base web/dist on this host (pre-existing)
+Owner: Pickers on the phone page now open the page's own bracketed list instead of the iPhone menu.
+
+Decided: one dropdown() in web/src/blocks.ts replaces both native selects; form pickers keep their name on a hidden input so values() posts unchanged
+Because: "One shared terminal-style dropdown in `web/src`, used by every picker on the page"
+Because: q1992
+Rejected: a styled native select — iOS still opens its own frosted sheet, which is the complaint
+Rejected: a new web/src module file — blocks.ts already owns el/btn/esc and both call sites
+Check: the composer WebKit test at 390 taps the model option and asserts one thread-model post and the list inside the viewport
+Check: keyboard_webkit fails identically with the base web/dist on this host (pre-existing)
+Owner: Pickers on the phone page now open the page's own bracketed list instead of the iPhone menu.
+
+Decided: one dropdown() in web/src/blocks.ts replaces both native selects; form pickers keep their name on a hidden input so values() posts unchanged
+Because: "One shared terminal-style dropdown in `web/src`, used by every picker on the page"
+Because: q1992
+Rejected: a styled native select — iOS still opens its own frosted sheet, which is the complaint
+Rejected: a new web/src module file — blocks.ts already owns el/btn/esc and both call sites
+Check: the composer WebKit test at 390 taps the model option and asserts one thread-model post and the list inside the viewport
+Check: keyboard_webkit fails identically with the base web/dist on this host (pre-existing)
+Owner: Pickers on the phone page now open the page's own bracketed list instead of the iPhone menu.
+
+Decided: one dropdown() in web/src/blocks.ts replaces both native selects; form pickers keep their name on a hidden input so values() posts unchanged
+Because: "One shared terminal-style dropdown in `web/src`, used by every picker on the page"
+Because: q1992
+Rejected: a styled native select — iOS still opens its own frosted sheet, which is the complaint
+Rejected: a new web/src module file — blocks.ts already owns el/btn/esc and both call sites
+Check: the composer WebKit test at 390 taps the model option and asserts one thread-model post and the list inside the viewport
+Check: keyboard_webkit fails identically with the base web/dist on this host (pre-existing)
+Owner: Pickers on the phone page now open the page's own bracketed list instead of the iPhone menu.
+
+Decided: the composer's picker row sits var(--s4) below the attach/send row so no tap areas overlap
+Because: web/src/board.css:39
+Because: "It stays on screen at 390 (opens upward near the bottom, as the composer needs)"
+Rejected: raising the composer row's z-index — the dropdown trigger's own top tap area would then be covered instead
+Check: the ui job's thread view reports 0 tap-area outliers for attach and send
+Owner: The model and effort pickers no longer steal taps meant for the attach and send buttons.
+
+Decided: the composer's picker row sits var(--s4) below the attach/send row so no tap areas overlap
+Because: web/src/board.css:39
+Because: "It stays on screen at 390 (opens upward near the bottom, as the composer needs)"
+Rejected: raising the composer row's z-index — the dropdown trigger's own top tap area would then be covered instead
+Check: the ui job's thread view reports 0 tap-area outliers for attach and send
+Owner: The model and effort pickers no longer steal taps meant for the attach and send buttons.
+
+Decided: the page parity script picks the Fleets sheet model by tapping the shared dropdown and its sonnet option, not a native select
+Because: "No native `<select>` stays."
+Because: crates/cli/tests/ui/page.mjs:85
+Rejected: setting the hidden input directly — it would skip the dropdown the user taps
+Check: CI ui job's --test page passes at 2aea3b4f; posted ends with save-fleets
+Owner: the phone page's settings test now picks a model through the new dropdown, as a person would
+
+Decided: the page parity script picks the Fleets sheet model by tapping the shared dropdown and its sonnet option, not a native select
+Because: "No native `<select>` stays."
+Because: crates/cli/tests/ui/page.mjs:85
+Rejected: setting the hidden input directly — it would skip the dropdown the user taps
+Check: CI ui job's --test page passes at 2aea3b4f; posted ends with save-fleets
+Owner: the phone page's settings test now picks a model through the new dropdown, as a person would
+
+Decided: no code change this round; merged origin/staging and re-ran CI, which is green at 30658075
+Because: crates/cli/tests/herd.rs:402
+Rejected: patching the herd or phone_timings test here — the herd test is red on staging 3ab9185f too, and phone_timings passed at 18d40c7a with the same web code
+Check: CI run 44612748016 at 30658075 has every job green, ui-webkit included
+Owner: Nothing changed in the dropdown; the earlier red checks were flaky tests that also fail on staging.
