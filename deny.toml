@@ -23,4 +23,8 @@ skip = [{ crate = "syn@2.0.119", reason = "ts-rs-macros, and ratatui's strum and
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = ["https://github.com/jirathip-dev/shed"]
+allow-git = [
+    "https://github.com/jirathip-dev/shed",
+    "https://github.com/jirathip-dev/blocks",
+    "https://github.com/jirathip-dev/swag",
+]
