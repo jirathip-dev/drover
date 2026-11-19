@@ -1,0 +1,5 @@
+Decided: put the new hygiene test target in CI shard 3, the shard with the fewest targets
+Because: scripts/test-shards.sh:16
+Rejected: renaming or merging the test file into another target — the shard list is the one place CI reads targets from
+Check: bash scripts/test-shards.sh check exits 0 and every shard job now reaches nextest
+Owner: The new public-repo checks' tests now run in CI instead of stopping every test shard.
