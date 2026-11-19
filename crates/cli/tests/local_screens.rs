@@ -58,7 +58,7 @@ fn the_door_builds_what_http_serves_with_no_socket_and_prunes_what_the_terminal_
     assert_eq!(Local::home(Some("sendmeter")), "/screens/queue?repo=sendmeter");
     for gone in [
         "/screens/legend",
-        "/screens/herd",
+        "/screens/scene",
         "/screens/threads",
         "/screens/threads/t1",
         "/screens/proxy-token",

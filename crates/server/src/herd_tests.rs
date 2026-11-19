@@ -2,7 +2,7 @@ use super::*;
 use crate::api::HerdHost;
 
 #[test]
-fn the_herd_scene_sends_the_load_level_of_the_host() {
+fn the_scene_sends_the_load_level_of_the_host() {
     for (load, gate, want) in [
         (0.4, None, "calm"),
         (0.5, None, "busy"),
@@ -16,7 +16,7 @@ fn the_herd_scene_sends_the_load_level_of_the_host() {
             gate: gate.map(Into::into),
             ..HerdHost::default()
         };
-        let s = herd_screen(&Herd {
+        let s = scene_screen(&Herd {
             host,
             ..Herd::default()
         });
@@ -29,7 +29,7 @@ fn the_herd_scene_sends_the_load_level_of_the_host() {
         ..HerdHost::default()
     };
     assert_eq!(
-        herd_screen(&Herd {
+        scene_screen(&Herd {
             host,
             ..Herd::default()
         })["blocks"][0]["load"],
