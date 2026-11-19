@@ -1262,11 +1262,7 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
             "profile {profile} there has no drover PreToolUse hook; `drover profiles sync` there"
         )));
     }
-    let agents = crate::shed::cli(on, &["agents", "--json"]).ok();
-    let agents: Value = agents
-        .and_then(|o| serde_json::from_str(&o.stdout).ok())
-        .unwrap_or_default();
-    if !agents.as_array().into_iter().flatten().any(|a| a["id"] == id) {
+    if crate::shed::adapter(on, id).ok().flatten().is_none() {
         return Err(Unguarded::Adapter(format!(
             "shed there lists no {id} (`shed agents add {id}` there)"
         )));
