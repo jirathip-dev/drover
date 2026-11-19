@@ -148,7 +148,7 @@ pub fn set(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str, sha: Opt
     let f = cfg.fleet(fleet)?;
     let dir = f.local_path();
     let int = format!("origin/{}", f.integration);
-    git(r, &dir, &["fetch", "-q", "origin", &f.integration])?;
+    crate::clone::fetch(ctx, r, &dir, &["-q", "origin", &f.integration])?;
     let want = sha.unwrap_or(&int);
     let Ok(t) = git(
         r,

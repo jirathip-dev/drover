@@ -1,5 +1,7 @@
+mod acp_listing;
 mod common;
 mod lane_states;
+use acp_listing::acp_fake;
 use common::*;
 use drover::events::Event;
 use drover::hosts::On;
@@ -262,16 +264,6 @@ fn acp_config(sock: &std::path::Path, harness: &str) -> String {
 }
 
 const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
-
-fn acp_fake(adapter: &[&str]) -> Fake {
-    let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
-    spawn_fake()
-        .reply("shed help run", "--meta <JSON>")
-        .reply("shed agents --json", &agents.to_string())
-        .reply("shed run", "")
-        .reply("shed send", "")
-        .reply("shed cancel", "")
-}
 
 static META: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     let global = drover::config::home().join(".claude/CLAUDE.md");
@@ -1341,6 +1333,7 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
     assert_eq!((st.len(), st[1].val("resumed").clone()), (2, json!(false)));
 
     b.lock().terms.remove("orchestrator-t1");
+    look(&at(&c, quiet.now + 120), &b.on(&cli));
     assert_eq!(run(&at(&c, quiet.now + 120), &cli, &["check"]).0, 0);
     let sl = thread_events(&c, "orchestrator-sleep");
     assert_eq!(sl.last().and_then(|e| e.str("why")), Some("gone"));
@@ -1423,6 +1416,7 @@ fn an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_ba
 }
 
 fn board_get(c: &drover::Ctx, r: Fake, path: &str) -> Value {
+    look(c, &r);
     let r: &'static Fake = Box::leak(Box::new(r));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
@@ -1703,6 +1697,31 @@ fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
     );
     assert!(old.exists() && !c.worktrees.join("sendmeter/issue-12").exists());
     assert!(logged(&c, "worktree-moved").is_empty());
+}
+
+#[test]
+fn an_idle_impl_agent_holding_the_branch_is_superseded_by_an_update_round_in_review() {
+    let b = FakeShed::new();
+    let (c, f, local, old, _) = herdr_era_lane("update-idle", &b, true, &[]);
+    let rev = json!({"role": "rev", "agent": "sendmeter-rev-12-r2", "harness": "claude", "pane": "w3:p1",
+        "workspace": "w3", "worktree": c.worktrees.join("sendmeter/rev-12-r2"), "branch": "rev-12-r2"});
+    drover::events::append(&c.state, &Event::new(c.now - 60, "sendmeter", Some(12), "spawn", rev)).unwrap();
+    let st = drover::events::fold(&drover::events::read(&c.state).unwrap())[&("sendmeter".to_string(), 12)]
+        .state
+        .clone();
+    assert!(st.starts_with("review("), "{st}");
+    b.lane("sendmeter-impl-12-r1", "idle", old.to_str().unwrap());
+    let cli = Push(b.cli(&f), local.parent().unwrap().into());
+    let args = ["spawn", "sendmeter", "12", "impl", "--supersede", "--update"];
+    let (code, out) = run(&c, &cli, &args);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    assert!(!b.has("sendmeter-impl-12-r1"), "{out}");
+    let sup = logged(&c, "supersede");
+    assert!(
+        sup.iter()
+            .any(|e| e.val("killed").to_string().contains("sendmeter-impl-12-r1")),
+        "{sup:?}"
+    );
 }
 
 #[test]
@@ -2164,6 +2183,7 @@ fn an_auth_failure_alerts_signed_out_once_and_holds_the_host() {
     b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["reported"] = json!({"state": "error", "note": err});
     let cli = Push(b.cli(&f), wt.clone());
     for s in [60, 120] {
+        look(&later(&c, s), &b.on(&cli));
         let (code, out) = run(&later(&c, s), &cli, &["check"]);
         assert_eq!(code, 0, "{out}");
     }

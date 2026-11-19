@@ -18,6 +18,7 @@ struct Machine {
     hook: bool,
     bare: bool,
     sudo: bool,
+    listed: bool,
 }
 
 struct Boat<'a> {
@@ -134,6 +135,21 @@ impl Boat<'_> {
                 Ok(out(0, &(lines.collect::<Vec<_>>().join("\n") + "\n")))
             }
             ["shed", "agents", "--json"] => Ok(out(0, &self.machines.borrow()[m].agents.to_string())),
+            ["sh", "-c", script] if self.machines.borrow()[m].listed && script.contains("shed agents --json |") => {
+                let list = format!("printf '%s' '{}'", self.machines.borrow()[m].agents);
+                real(
+                    &["sh".into(), "-c".into(), script.replace("shed agents --json", &list)],
+                    "",
+                )
+            }
+            ["sh", "-c", script]
+                if self.machines.borrow()[m].listed && script.ends_with("shed agents add claude-acp") =>
+            {
+                let a = json!({"id": "claude-acp", "version": "0.107.0", "distribution": "binary", "cmd": ["env"]});
+                self.machines.borrow_mut().get_mut(m).unwrap().agents =
+                    json!([{"id": "claude-acp", "source": "built-in", "provider": {}, "installed": a}]);
+                Ok(out(0, ""))
+            }
             ["shed", "help", "run"] => Ok(out(0, "--meta <JSON>")),
             ["shed", "send", ..] => Ok(out(0, "")),
             ["shed", "run", ..] => {
@@ -204,6 +220,9 @@ impl Runner for Boat<'_> {
         self.run_in(prog, args, "")
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        if let Some(o) = boat(self, prog, args, input) {
+            return o;
+        }
         if prog == "ssh" && args.iter().any(|a| a == "--") {
             let m = args[args.len() - 3].clone();
             self.f
@@ -418,6 +437,31 @@ fn a_host_whose_herdr_answers_but_whose_shed_does_not_is_offline() {
 }
 
 #[test]
+fn a_host_whose_shed_lists_a_bare_record_refuses_acp_unguarded_and_one_with_installed_starts() {
+    let (c, _) = setup("racp-shape", &["boat1"]);
+    let f = spawn_fake();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let record = |i: Value| json!([{"id": "claude-acp", "source": "built-in", "provider": {}, "installed": i}]);
+    b.machines.borrow_mut().get_mut("boat1").unwrap().agents = record(Value::Null);
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl", "--host", "boat1"]);
+    assert_eq!(code, 3, "{o}");
+    assert!(
+        o.contains("REFUSED ACP_UNGUARDED") && o.contains("lists no claude-acp"),
+        "{o}"
+    );
+    assert!(b.runs.borrow().is_empty(), "nothing started");
+
+    let (c, _) = setup("racp-shape-installed", &["boat1"]);
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let a = json!({"id": "claude-acp", "version": "0.107.0", "distribution": "binary", "cmd": ["env"]});
+    b.machines.borrow_mut().get_mut("boat1").unwrap().agents = record(a);
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl", "--host", "boat1"]);
+    assert_eq!(code, 0, "{o}");
+    assert_eq!(spawned(&c)[0].str("host"), Some("boat1"));
+    assert_eq!(b.runs.borrow().len(), 1, "one lane started");
+}
+
+#[test]
 fn a_host_missing_the_adapter_or_the_hook_refuses_acp_unguarded_and_the_lane_goes_elsewhere() {
     let (c, _) = setup("racp-place", &["boat1", "boat2"]);
     let f = spawn_fake();
@@ -533,6 +577,41 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
         has("shed install --force") && has("shed agents add claude-acp"),
         "{calls:?}"
     );
+}
+
+#[test]
+fn bootstrap_adds_the_adapter_when_shed_lists_a_record_with_nothing_installed_on_either_shape() {
+    let adapter = json!({"id": "claude-acp", "version": "0.107.0", "distribution": "binary", "cmd": ["env"]});
+    let record = |i: Value| json!([{"id": "claude-acp", "source": "built-in", "provider": {}, "installed": i}]);
+    for (agents, added) in [
+        (record(Value::Null), true),
+        (json!([{"id": "codex-acp", "version": "0.1.0", "cmd": ["env"]}]), true),
+        (record(adapter.clone()), false),
+        (json!([adapter.clone()]), false),
+    ] {
+        let (c, _) = setup("racp-boot-shape", &["boat1"]);
+        let f = Fake::default()
+            .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
+            .reply("@boat1 sh -c", "")
+            .reply("sh -c nohup", "4242\n");
+        let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+        {
+            let mut all = b.machines.borrow_mut();
+            let h = all.get_mut("boat1").unwrap();
+            (h.agents, h.listed) = (agents.clone(), true);
+        }
+        let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat1"]);
+        assert_eq!(code, 0, "{agents}: {o}");
+        let want = if added {
+            "claude-acp — installed"
+        } else {
+            "claude-acp — there"
+        };
+        assert!(o.contains(want), "{agents}: {o}");
+        let calls = f.calls.borrow();
+        let add = calls.iter().any(|l| l.contains("shed agents add claude-acp"));
+        assert_eq!(add, added, "{agents}: {calls:?}");
+    }
 }
 
 #[test]
@@ -812,7 +891,53 @@ fn lane_key_401_respawns_the_lane(name: &str, why: &str) {
     assert_eq!(code, 0, "{o}");
     let ev = drover::events::read(&c.state).unwrap().to_vec();
     assert_eq!(spawned(&c).len(), 2, "the lane is respawned: {o}");
-    assert_eq!(ev.iter().filter(|e| e.kind == "respawn").count(), 1, "{o}");
+    assert_eq!(ev.iter().filter(|e| e.kind == "self-heal").count(), 1, "{o}");
+}
+
+fn refuse_key(b: &Boat, why: &str) {
+    let err = format!("auth: Failed to authenticate. API Error: {why}");
+    b.machines
+        .borrow_mut()
+        .get_mut("boat1")
+        .unwrap()
+        .terms
+        .get_mut("sendmeter-impl-12")
+        .unwrap()["reported"] = json!({"state": "error", "note": err});
+}
+
+#[test]
+fn an_ended_lane_key_401_heals_the_live_lane_once_then_one_owner_card_within_the_hour() {
+    let (c, _) = setup("racp-key-heal", &["boat1"]);
+    let _main = FakeShed::attached(&c);
+    let f = spawn_fake().reply("@boat1 curl", "");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let old = json!({"role": "impl", "agent": "sendmeter-impl-12", "why": "failed start"});
+    let old = drover::events::Event::new(c.now - 7200, "sendmeter", Some(12), "respawn", old);
+    drover::events::append(&c.state, &old).unwrap();
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{o}");
+    refuse_key(&b, "401 lane key 27fad669 ended");
+    let at = |s: u64| drover::Ctx {
+        now: c.now + s,
+        ..c.clone()
+    };
+    let (code, o) = run(&at(120), &b, &["drive"]);
+    assert_eq!(code, 0, "{o}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let kinds = |k: &str| ev.iter().filter(|e| e.kind == k).count();
+    assert_eq!(spawned(&c).len(), 2, "the lane is restarted within one pass: {o}");
+    assert_eq!(kinds("self-heal"), 1, "logged as a heal: {o}");
+    assert_eq!(kinds("needs-human"), 0, "{o}");
+    refuse_key(&b, "401 lane key 6fbac9bf ended");
+    for s in [240, 360] {
+        let (code, o) = run(&at(s), &b, &["drive"]);
+        assert_eq!(code, 0, "{o}");
+    }
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let cards: Vec<_> = ev.iter().filter(|e| e.kind == "needs-human").collect();
+    assert_eq!(spawned(&c).len(), 2, "a second 401 within the hour is not restarted");
+    assert_eq!(cards.len(), 1, "one owner card: {cards:?}");
+    assert!(cards[0].str("reason").unwrap().contains("401"), "{cards:?}");
 }
 
 #[test]

@@ -13,6 +13,7 @@ use crate::runner::{Out, Runner};
 use crate::snapshot::{key_in, out, Snapshot};
 use crate::{devices, gh, lanes, queue, term, Ctx};
 use anyhow::{bail, Context, Result};
+use blocks::theme::Scheme;
 use serde_json::json;
 use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -67,21 +68,6 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("", "terminal/icon-180.png", PNG),
     th!("", "terminal/icon-192.png", PNG),
     th!("", "terminal/icon-512.png", PNG),
-];
-macro_rules! sc {
-    ($($n:literal),*) => { [$(($n, include_bytes!(concat!("../assets/schemes/", $n, ".json")).as_slice())),*] };
-}
-const SCHEMES: [(&str, &[u8]); 10] = sc![
-    "github-dark",
-    "solarized-dark",
-    "gruvbox",
-    "nord",
-    "dracula",
-    "paper",
-    "farm",
-    "kitchen",
-    "garden-light",
-    "garden-dark"
 ];
 const PNG: &str = "image/png";
 const SVG: &str = "image/svg+xml";
@@ -148,6 +134,14 @@ type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
 const TOO_LARGE: &[u8] = b"HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"line\":\"request body too large\"}";
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+thread_local!(static LISTED: std::cell::RefCell<Option<std::rc::Rc<OnceCell<Option<crate::session::Sessions>>>>> = const { std::cell::RefCell::new(None) });
+
+fn build<T>(f: impl FnOnce() -> T) -> T {
+    let was = LISTED.replace(Some(std::rc::Rc::default()));
+    let t = gh::memo(f);
+    LISTED.set(was);
+    t
+}
 
 pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> Result<()> {
     serve_with(ctx, r, l, read_only, None)
@@ -205,6 +199,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             host::pace(&ctx.state, None, &mut hs, crate::now());
             host::window(&ctx.state, &mut hs);
             *lock(&h) = hs;
+            s.read_hosts(crate::now());
             s.r.sampled(crate::now());
             drover_core::clock::sleep(Duration::from_secs(limits().serve_host_secs.max(1)));
         });
@@ -401,6 +396,7 @@ pub struct Server<'a> {
     timing: Mutex<slo::Timing>,
     phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
+    hosts_read: Mutex<(usize, Option<Vec<String>>)>,
     streams: AtomicUsize,
 }
 
@@ -771,6 +767,7 @@ impl<'a> Server<'a> {
             timing: Mutex::default(),
             phone: Mutex::default(),
             rss: std::sync::atomic::AtomicU64::default(),
+            hosts_read: Mutex::default(),
             streams: AtomicUsize::new(0),
         }
     }
@@ -788,6 +785,7 @@ impl<'a> Server<'a> {
         for src in fresh::Source::ALL {
             self.r.refresh(src, src.every(&l), now);
         }
+        self.read_hosts(now);
     }
 
     fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
@@ -1075,7 +1073,7 @@ impl<'a> Server<'a> {
     fn reply(&self, req: &str, now: u64) -> Vec<u8> {
         let t = drover_core::clock::instant();
         let res = if req.starts_with("GET ") {
-            crate::runner::request(|| self.route(req, now))
+            crate::runner::request(|| build(|| self.route(req, now)))
         } else {
             self.route(req, now)
         };
@@ -1640,32 +1638,36 @@ impl<'a> Server<'a> {
                 )
             })
             .collect();
-        let block = |want: &serde_json::Value| -> Result<String> {
-            let b = SCHEMES.iter().find(|s| *want == s.0).unwrap_or(&SCHEMES[0]);
-            let b: serde_json::Value = serde_json::from_slice(b.1)?;
+        let all = schemes(ctx).0;
+        let block = |want: &serde_json::Value| {
+            let s = want
+                .as_str()
+                .and_then(|n| all.get(n))
+                .or_else(|| all.get("github-dark"));
+            let b = serde_json::to_value(s).unwrap_or_default();
             let tokens = b
                 .at("tokens")
                 .as_object()
                 .into_iter()
                 .flatten()
                 .map(|(k, v)| format!("{k}:{};", v.as_str().unwrap_or_default()));
-            Ok(format!(
+            format!(
                 ":root{{{}color-scheme:{}}}",
                 tokens.collect::<String>(),
                 b.at("color-scheme").as_str().unwrap_or("dark")
-            ))
+            )
         };
         let first = match def.get(name.as_str()).unwrap_or(&serde_json::Value::Null) {
             d @ serde_json::Value::Object(_) => {
                 format!(
                     "{}@media(prefers-color-scheme:dark){{{}}}",
-                    block(&d["light"])?,
-                    block(&d["dark"])?
+                    block(&d["light"]),
+                    block(&d["dark"])
                 )
             }
-            d => block(d)?,
+            d => block(d),
         };
-        let sd = json!({"t": def, "s": schemes(ctx)}).to_string().replace('<', "\\u003c");
+        let sd = json!({"t": def, "s": all}).to_string().replace('<', "\\u003c");
         let pl = screens::page_places().to_string().replace('<', "\\u003c");
         let home = if root.is_empty() {
             ""
@@ -1808,10 +1810,27 @@ impl<'a> Server<'a> {
     }
 
     fn sessions(&self, now: u64) -> Option<crate::session::Sessions> {
-        let cfg = Config::kept(self.ctx).unwrap_or_default();
-        let all = crate::session::all(&cfg, &self.cached(now, 10));
-        *lock(&self.listed) = Some((now, all.clone()));
-        Some(all).filter(crate::session::Sessions::listed)
+        let list = || {
+            let cfg = Config::kept(self.ctx).unwrap_or_default();
+            let mut all = crate::link::view::View::load(
+                &Ctx {
+                    now,
+                    ..self.ctx.clone()
+                },
+                &cfg,
+            )
+            .ok()?
+            .sessions();
+            if let Some(here) = all.0.iter_mut().find(|h| h.0.is_none()) {
+                here.1 = crate::session::on(&self.cached(now, 10)).map_err(|e| format!("{e:#}"));
+            }
+            *lock(&self.listed) = Some((now, all.clone()));
+            Some(all).filter(crate::session::Sessions::listed)
+        };
+        match LISTED.with_borrow(Clone::clone) {
+            Some(once) => once.get_or_init(list).clone(),
+            None => list(),
+        }
     }
 
     fn recent_sessions(&self, now: u64, cfg: &Config) -> Option<crate::session::Sessions> {
@@ -1990,7 +2009,7 @@ impl<'a> Server<'a> {
                 pr: e.str("pr").map(Into::into),
                 sha: e.str("merge_sha").map(Into::into),
             };
-            let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
+            let bl = gh::cached(ctx, "backlog", f, 0).unwrap_or_default();
             let mut open: BTreeMap<String, BacklogIssue> =
                 serde_json::from_value(bl.at("issues").clone()).unwrap_or_default();
             open.retain(|n, _| n.parse().is_ok_and(|n| !queued(n) && !st.contains_key(&(f.clone(), n))));
@@ -2058,7 +2077,7 @@ impl<'a> Server<'a> {
                 card.notes
                     .push(format!("landing paused: {} red since {at}", fc.integration));
             }
-            let cap: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "cap", f, 0)).unwrap_or_default();
+            let cap = gh::cached(ctx, "cap", f, 0).unwrap_or_default();
             let left = cap.at("cap").as_i64().zip(cap.at("lines").as_i64()).map(|(c, n)| c - n);
             if let Some(l) = left.filter(|l| *l < cap.at("warn").as_i64().unwrap_or(500)) {
                 card.notes
@@ -2072,7 +2091,7 @@ impl<'a> Server<'a> {
 
     fn lanes(&self, now: u64, cfg: &Config, events: &[Event], st: &States) -> Option<Vec<lanes::Lane>> {
         let list = self.sessions(now)?;
-        Some(crate::snapshot::lanes(cfg, &self.cached(now, 30), (events, st), &list))
+        Some(crate::snapshot::lanes(self.ctx, cfg, (events, st), &list))
     }
 
     fn waits(&self, ctx: &Ctx, cfg: &Config, events: &[Event], all: &[lanes::Lane]) -> Vec<crate::waiting::Waiting> {
@@ -3029,7 +3048,7 @@ pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json:
     t
 }
 
-fn schemes(ctx: &Ctx) -> BTreeMap<String, serde_json::Value> {
+pub(crate) fn schemes(ctx: &Ctx) -> (BTreeMap<String, Scheme>, Vec<String>) {
     let own = std::fs::read_dir(ctx.config.with_file_name("schemes"))
         .into_iter()
         .flatten()
@@ -3039,9 +3058,28 @@ fn schemes(ctx: &Ctx) -> BTreeMap<String, serde_json::Value> {
             let n = p.file_stem()?.to_str()?.to_string();
             (p.extension()? == "json" && n.bytes().all(ok)).then(|| (n, std::fs::read(&p).unwrap_or_default()))
         });
-    let all = SCHEMES.iter().map(|(n, j)| (n.to_string(), j.to_vec())).chain(own);
-    all.map(|(n, j)| (n, serde_json::from_slice(&j).unwrap_or_default()))
-        .collect()
+    let built = swag::schemes()
+        .iter()
+        .map(|(n, j)| ((*n).to_string(), j.as_bytes().to_vec()));
+    let (mut all, mut refused) = (BTreeMap::new(), Vec::new());
+    for (n, j) in built.chain(own) {
+        let misses = serde_json::from_slice::<Scheme>(&j)
+            .map_err(|e| e.to_string())
+            .and_then(|s| {
+                let m = blocks::theme::gate(&s);
+                m.is_empty().then_some(s).ok_or_else(|| {
+                    let m = m.iter().map(|m| format!("{} {:.2} < {}", m.what, m.got, m.min));
+                    m.collect::<Vec<_>>().join("; ")
+                })
+            });
+        match misses {
+            Ok(s) => {
+                all.insert(n, s);
+            }
+            Err(why) => refused.push(format!("scheme {n} refused: {why}")),
+        }
+    }
+    (all, refused)
 }
 
 fn theme(ctx: &Ctx, name: &str, file: &str) -> (Option<Vec<u8>>, Result<(), String>) {
@@ -3089,6 +3127,9 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         },
         ..ctx.clone()
     };
+    if demo {
+        crate::link::look(ctx, &Config::load(&ctx.config)?, r, &mut std::io::sink(), true)?;
+    }
     let s = Server {
         export: Some(demo),
         host: Arc::new(Mutex::new(host::sample(r))),

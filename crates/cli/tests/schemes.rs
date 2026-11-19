@@ -4,39 +4,22 @@ use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
-const BUILT: [&str; 10] = [
-    "github-dark",
-    "solarized-dark",
-    "gruvbox",
-    "nord",
+const SWAG: [&str; 12] = [
     "dracula",
-    "paper",
     "farm",
-    "kitchen",
-    "garden-light",
+    "farm-light",
     "garden-dark",
+    "garden-light",
+    "github-dark",
+    "gruvbox",
+    "kitchen",
+    "kitchen-light",
+    "nord",
+    "paper",
+    "solarized-dark",
 ];
 
-fn built(n: &str) -> Value {
-    let p = format!("{}/../../assets/schemes/{n}.json", env!("CARGO_MANIFEST_DIR"));
-    serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
-}
-
-fn node(js: &str) -> Option<Value> {
-    if std::process::Command::new("node").arg("--version").output().is_err() {
-        eprintln!("skipping: no node here");
-        return None;
-    }
-    let src = include_str!("../../../web/src/schemes.ts");
-    let part = &src[..src.find("export {").unwrap()];
-    let d = tmpdir("schemes-js");
-    std::fs::write(d.join("t.ts"), format!("{part}\nconsole.log(JSON.stringify({js}))")).unwrap();
-    let o = std::process::Command::new("node").arg(d.join("t.ts")).output().unwrap();
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    Some(serde_json::from_slice(&o.stdout).unwrap())
-}
-
-fn page(theme: Option<&str>, own: &[(&str, &str)]) -> String {
+fn served(theme: Option<&str>, own: &[(&str, &str)]) -> (String, Value) {
     let d = tmpdir("scheme");
     let cfg = theme.map_or(CONFIG.to_string(), |t| format!("{CONFIG}\n[serve]\ntheme = \"{t}\"\n"));
     let c = ctx(&d, &cfg);
@@ -47,7 +30,34 @@ fn page(theme: Option<&str>, own: &[(&str, &str)]) -> String {
     }
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    String::from_utf8(s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap()
+    let p = String::from_utf8(s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap();
+    (
+        p,
+        serde_json::from_str(&api(&s, ADDR, "", 1_000_000, "health")).unwrap(),
+    )
+}
+
+fn page(theme: Option<&str>, own: &[(&str, &str)]) -> String {
+    served(theme, own).0
+}
+
+fn node(all: &Value, js: &str) -> Option<Value> {
+    if std::process::Command::new("node").arg("--version").output().is_err() {
+        eprintln!("skipping: no node here");
+        return None;
+    }
+    let src = include_str!("../../../web/src/theme.ts");
+    let part = &src[src.find("type Scheme").unwrap()..src.find("const NS").unwrap()];
+    let d = tmpdir("schemes-js");
+    let body = format!("const SD = {{ s: {all}, t: {{}} }};\n{part}\nconsole.log(JSON.stringify({js}))");
+    std::fs::write(d.join("t.ts"), body).unwrap();
+    let o = std::process::Command::new("node").arg(d.join("t.ts")).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    Some(serde_json::from_slice(&o.stdout).unwrap())
+}
+
+fn built(n: &str) -> Value {
+    sd(&page(None, &[]))["s"][n].clone()
 }
 
 fn sd(page: &str) -> Value {
@@ -60,79 +70,74 @@ fn sd(page: &str) -> Value {
 }
 
 #[test]
-fn every_built_in_has_the_whole_token_set_and_passes_the_gate() {
-    let Some(tokens) = node("TOKENS") else { return };
-    let all: serde_json::Map<String, Value> = BUILT.iter().map(|n| (n.to_string(), built(n))).collect();
-    for (n, s) in &all {
-        let keys: Vec<&String> = s["tokens"].as_object().unwrap().keys().collect();
-        assert_eq!(
-            json!(keys.len()),
-            json!(tokens.as_array().unwrap().len()),
-            "{n}: {keys:?}"
-        );
-        assert!(
-            tokens
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|t| s["tokens"].get(t.as_str().unwrap()).is_some()),
-            "{n}"
-        );
-    }
-    let got = node(&format!(
-        "Object.fromEntries(Object.entries({}).map(([n, s]) => [n, fails(s)]))",
-        json!(all)
-    ))
-    .unwrap();
-    for n in BUILT {
-        assert_eq!(got[n], json!([]), "{n} fails the gate");
-    }
+fn every_swag_scheme_is_served_and_none_is_refused() {
+    let (p, h) = served(None, &[]);
+    let names: Vec<String> = sd(&p)["s"].as_object().unwrap().keys().cloned().collect();
+    assert_eq!(names, SWAG);
+    assert_eq!(h["schemes"], json!([]));
 }
 
 #[test]
-fn a_bad_scheme_is_refused_with_the_reason() {
+fn an_owner_scheme_that_fails_the_gate_is_refused_on_load_with_the_reason_in_health() {
     let ok = built("github-dark");
     let with = |k: &str, v: &str| {
         let mut s = ok.clone();
         s["tokens"][k] = json!(v);
-        s
+        s.to_string()
     };
     let mut missing = ok.clone();
     missing["tokens"].as_object_mut().unwrap().remove("--fk-a");
-    let mut light = ok.clone();
-    light["color-scheme"] = json!("dim");
-    let cases = [
-        (missing, "missing or not #rrggbb[aa]: --fk-a"),
-        (with("--r", "red"), "missing or not #rrggbb[aa]: --r"),
-        (with("--mute", "#444c56"), "--mute on --bg 2.18 < 4.5"),
-        (with("--fg", "#5b2a2a"), "--fg on --bg 1.63 < 4.5"),
-        (with("--r", "#3a1d1d"), "--r on --bg 1.24 < 3"),
-        (with("--a", "#f05a48"), "ΔE2000 --a ↔ --r 2.35 < 20"),
-        (with("--l", "#d6a02a"), "ΔE2000 --l ↔ --a 2.06 < 20"),
-        (light, "color-scheme is not \"dark\" or \"light\""),
-    ];
-    let js = format!(
-        "{}.map(s => fails(s)[0])",
-        json!(cases.iter().map(|c| &c.0).collect::<Vec<_>>())
-    );
-    let Some(got) = node(&js) else { return };
-    for (i, (_, want)) in cases.iter().enumerate() {
-        assert_eq!(got[i], json!(want), "case {i}");
-    }
-    let tint = node(&format!(
-        "fails({}).filter(f => f.includes('needs-you card'))",
-        with("--mute", "#7d8590")
+    let mut dim = ok.clone();
+    dim["color-scheme"] = json!("dim");
+    let refused = std::fs::read_to_string(format!(
+        "{}/../../docs/design/schemes/refused/solarized-canonical.json",
+        env!("CARGO_MANIFEST_DIR")
     ))
     .unwrap();
-    assert_eq!(tint, json!(["--mute on the needs-you card 4.33 < 4.5"]));
-    for f in ["missing-token", "solarized-canonical"] {
-        let p = format!(
-            "{}/../../docs/design/schemes/refused/{f}.json",
-            env!("CARGO_MANIFEST_DIR")
+    let (mute, fg, delta) = (
+        with("--mute", "#444c56"),
+        with("--fg", "#5b2a2a"),
+        with("--a", "#f05a48"),
+    );
+    let (missing, dim) = (missing.to_string(), dim.to_string());
+    let own = [
+        ("mute.json", mute.as_str()),
+        ("nord.json", fg.as_str()),
+        ("delta.json", delta.as_str()),
+        ("missing.json", missing.as_str()),
+        ("dim.json", dim.as_str()),
+        ("bad.json", "{not json"),
+        ("canonical.json", refused.as_str()),
+    ];
+    let (p, h) = served(None, &own);
+    let names: Vec<String> = sd(&p)["s"].as_object().unwrap().keys().cloned().collect();
+    assert_eq!(names, SWAG, "no refused scheme is served");
+    assert_ne!(
+        sd(&p)["s"]["nord"]["tokens"]["--fg"],
+        json!("#5b2a2a"),
+        "a refused own nord keeps swag's"
+    );
+    let why: Vec<&str> = h["schemes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    let has = |n: &str, part: &str| {
+        assert!(
+            why.iter()
+                .any(|w| w.starts_with(&format!("scheme {n} refused: ")) && w.contains(part)),
+            "{n}: {part} in {why:?}"
         );
-        let n = node(&format!("fails({}).length", std::fs::read_to_string(p).unwrap())).unwrap();
-        assert!(n.as_u64().unwrap() > 0, "{f} passes");
-    }
+    };
+    has("mute", "--mute on --bg 2.18 < 4.5");
+    has("nord", "--fg on --bg 1.63 < 4.5");
+    has("delta", "ΔE2000 --a ↔ --r 2.35 < 20");
+    has("missing", "missing field `--fk-a`");
+    has("dim", "unknown variant `dim`");
+    has("bad", "key must be a string");
+    has("canonical", " < ");
+    assert_eq!(why.len(), own.len(), "{why:?}");
 }
 
 #[test]
@@ -152,18 +157,23 @@ fn parity_11_a_user_scheme_is_served_and_overrides_a_built_in() {
     let s = &sd(&p)["s"];
     assert_eq!(s["nord"], mine, "the user file wins");
     assert_eq!(s["moss"], built("farm"));
-    assert_eq!(s["bad"], Value::Null, "unreadable: served as null, the gate refuses it");
+    assert_eq!(s["bad"], Value::Null, "unreadable: refused, not served");
     assert_eq!(s["github-dark"], built("github-dark"));
     let names: Vec<&String> = s.as_object().unwrap().keys().collect();
     assert_eq!(
         names.len(),
-        BUILT.len() + 2,
+        SWAG.len() + 1,
         "{names:?}: a.b and notes.txt are not schemes"
     );
-    let Some(got) = node(&format!("[fails({}).length > 0, choose({s}, 'bad', 'farm')]", s["bad"])) else {
+    let first = json!(&p[p.find("<style id=sch>").unwrap() + 14..p.find("</style>").unwrap()]);
+    let Some(got) = node(s, &format!("[choose('bad', 'farm', true), css(SD.s.farm) === {first}]")) else {
         return;
     };
-    assert_eq!(got, json!([true, "farm"]));
+    assert_eq!(
+        got,
+        json!(["farm", true]),
+        "the page writes farm's block as serve's first paint does"
+    );
 }
 
 #[test]
@@ -194,11 +204,9 @@ fn each_theme_names_its_default_and_the_first_paint_is_the_board_themes() {
     let p = String::from_utf8(s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap();
     assert_eq!(sd(&p)["t"]["space"], json!("github-dark"));
     let all = json!({"farm": built("farm"), "nord": built("nord"), "github-dark": built("github-dark")});
-    let js = format!(
-        "[choose({all}, null, 'farm'), choose({all}, 'nord', 'farm'), choose({all}, 'gone', 'nord'), choose({all}, null, 'gone')]"
-    );
-    let Some(got) = node(&js) else { return };
-    assert_eq!(got, json!(["farm", "nord", "nord", "github-dark"]));
+    let js = "[choose(null, 'farm'), choose('nord', 'farm'), choose('gone', 'nord'), choose(null, 'gone'), choose('toString', null)]";
+    let Some(got) = node(&all, js) else { return };
+    assert_eq!(got, json!(["farm", "nord", "nord", "github-dark", "github-dark"]));
 }
 
 #[test]
@@ -247,10 +255,13 @@ fn a_light_dark_scheme_follows_the_phone_and_a_pick_still_wins() {
         first[dark.unwrap()..].contains(&format!("--bg:{};", tok("garden-dark"))),
         "{first}"
     );
-    let Some(got) = node(&format!(
-        "[choose({s}, null, {d}, false), choose({s}, null, {d}, true), choose({s}, 'nord', {d}, true), \
-         choose({s}, null, 'kitchen', true), choose({s}, null, 'kitchen', false), choose({s}, null, undefined, true)]"
-    )) else {
+    let Some(got) = node(
+        s,
+        &format!(
+            "[choose(null, {d}, false), choose(null, {d}, true), choose('nord', {d}, true), \
+             choose(null, 'kitchen', true), choose(null, 'kitchen', false), choose(null, undefined, true)]"
+        ),
+    ) else {
         return;
     };
     assert_eq!(

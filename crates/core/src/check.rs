@@ -7,7 +7,7 @@ use crate::host;
 use crate::hosts::On;
 use crate::lanes::Health;
 use crate::runner::{ok, Runner};
-use crate::session::{Session, Sessions, Status};
+use crate::session::{Session, Status};
 use crate::spawn::{changes, dirty, own_files, SHOT_DIRS};
 use crate::Ctx;
 use crate::{gh, term};
@@ -34,9 +34,10 @@ fn ready<'a>(ctx: &Ctx, r: &dyn Runner, cfg: &'a Config, s: &IssueState) -> Opti
 
 fn amendment(ctx: &Ctx, on: &On, cfg: &Config, s: &IssueState, wt: &str) -> Option<(String, String)> {
     let (f, r) = (cfg.fleet(&s.fleet).ok()?, on.r);
-    let brief = on.read(&Path::new(wt).join(".brief.md"))?;
     let spec = gh::spec(ctx, r, f, &s.fleet, s.issue, true).ok()?;
-    let url = spec.at("amended").as_str().filter(|u| !brief.contains(*u))?;
+    let url = spec.at("amended").as_str()?;
+    let brief = on.read(&Path::new(wt).join(".brief.md"))?;
+    let url = Some(url).filter(|u| !brief.contains(*u))?;
     let n = s.issue;
     let fleet = &s.fleet;
     let line = format!("AMENDMENT on #{n} ({url}): run `drover brief {fleet} {n}` and apply it");
@@ -72,7 +73,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let events = crate::timer::revive(ctx, cfg, r).and_then(|()| working(&ctx.state))?;
     PUSHES.set((0, 0));
     std::fs::write(ctx.state.with_file_name("check.at"), ctx.now.to_string()).ok();
-    let local = crate::session::on(r).map_err(|e| format!("{e:#}"));
+    let view = crate::link::fresh(ctx, cfg, r)?;
+    let (sessions, local) = (view.sessions(), view.here());
     if let Err(e) = &local {
         crate::stderr!("drover check: the agent list failed ({e}); skipping lane checks");
     }
@@ -91,9 +93,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             }
         }
     }
-    let stall = cfg.limits.stall_minutes * 60;
-    let remote = crate::hosts::survey(ctx, cfg, r, false);
-    let sessions = with_remote(cfg, local, &remote);
+    let (stall, remote) = (cfg.limits.stall_minutes * 60, crate::hosts::survey(ctx, cfg, r, false));
     crate::session::stamp::observe(ctx, cfg, r, &sessions)?;
     let events = working(&ctx.state)?;
     crate::cloud::tick(ctx, cfg, r, &remote, out)?;
@@ -298,7 +298,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             };
             let status = agent.and_then(Session::status);
             let wt = (spawned.filter(|e| crate::roots::skip(ctx, cfg, e).is_none())).and_then(|e| e.str("worktree"));
-            let parked = agent.is_none() && wt.is_some_and(|wt| dirty(r, Path::new(wt)).is_none());
+            let seen = spawned.filter(|_| wt.is_some()).and_then(|e| view.worktree(e));
+            let parked = agent.is_none() && seen.is_some_and(|w| w.dirty.is_none());
             let key = if parked {
                 format!("parked:{lane}")
             } else {
@@ -494,7 +495,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         crate::events::append(&ctx.state, &e)?;
     }
     overload(ctx, cfg, r, out, &events, agents.as_deref().unwrap_or_default())?;
-    for (e, lane, ts) in crate::outbox::stale(r, &events, (ctx.now, cfg.limits.outbox_stale_minutes * 60)) {
+    for (e, lane, ts) in outbox_stale(&view, &events, (ctx.now, cfg.limits.outbox_stale_minutes * 60)) {
         let why = format!(
             "{lane}'s outbox holds a line from {} ago that drive has not delivered",
             age(ctx.now.saturating_sub(ts / 1000))
@@ -819,19 +820,22 @@ fn expire(
     Ok(if n > 0 { working(&ctx.state)? } else { events })
 }
 
-fn with_remote(
-    cfg: &Config,
-    local: std::result::Result<Vec<Session>, String>,
-    remote: &BTreeMap<String, Option<Vec<Session>>>,
-) -> Sessions {
-    let mut all = vec![(None, local)];
-    for (name, got) in remote {
-        let Some(m) = cfg.hosts.get(name).and_then(|h| h.machine.clone()) else {
+fn outbox_stale(
+    view: &crate::link::view::View,
+    events: &[Event],
+    (now, after): (u64, u64),
+) -> Vec<(Event, String, u64)> {
+    let mut out: Vec<(Event, String, u64)> = vec![];
+    for (m, l) in view.lines() {
+        let old = now.saturating_mul(1000).saturating_sub(l.sent) > after * 1000;
+        let Some((sp, lane)) = crate::link::intake::lane_of(events, m, &l.worktree).filter(|_| old) else {
             continue;
         };
-        all.push((Some(m), got.clone().ok_or_else(|| format!("{name} unreachable"))));
+        if !crate::link::intake::ran(events, &lane, l.sent) && !out.iter().any(|o| o.1 == lane) {
+            out.push((sp, lane, l.sent));
+        }
     }
-    Sessions(all)
+    out
 }
 
 /// After `drover merge`: close the issue's clean lane panes, then `drover clean --yes` them.
@@ -884,13 +888,12 @@ pub fn clean_all(
 ) -> Result<()> {
     let events = working(&ctx.state)?;
     let states = fold(&events);
-    let agents = crate::session::all(cfg, r)
+    let agents = (crate::link::look(ctx, cfg, r, &mut std::io::sink(), true)?.sessions())
         .checked()
         .context("cannot list the live agents; refusing to clean blind")?;
     let off = if all { disabled(cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
-    let mut failed = 0;
-    let (mut freed, mut removed) = (0, 0);
+    let (mut freed, mut removed, mut failed) = (0, 0, 0);
     let mut closed = BTreeMap::new();
     let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
     let mut fresh = std::collections::BTreeSet::new();
@@ -1119,6 +1122,7 @@ pub fn clean_all(
     }
     if lane.is_none() && issue.is_none() {
         sweep_off(ctx, cfg, r, out, &off, !yes)?;
+        crate::clone::sweep(cfg, out, !yes)?;
     }
     if yes {
         idle.retain(|n, _| fresh.contains(n) || agents.live().any(|a| a.name == *n && !a.busy()));
@@ -1408,6 +1412,7 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
         }
         let budget = cfg.limits.build_budget_gb;
         let trim = |out: &mut dyn Write| -> Result<u64> {
+            sweep::reported(ctx, cfg, &on)?;
             let live = live_lanes(ctx, cfg, &on)?;
             (build_dirs(ctx, cfg, &on).iter())
                 .map(|b| trim_remote(&on, name, b, budget, &live, &mut *out))
@@ -1568,6 +1573,7 @@ pub fn trim_on(ctx: &Ctx, on: &On, cfg: &Config, budget: f64, live: &Live, out: 
     let Some(m) = on.machine else {
         return trim_builds(ctx, cfg, budget, live, out, false);
     };
+    sweep::reported(ctx, cfg, on)?;
     let dirs = build_dirs(ctx, cfg, on);
     dirs.iter().map(|b| trim_remote(on, m, b, budget, live, out)).sum()
 }
@@ -1981,7 +1987,10 @@ fn kill_as(
 
 /// Each pane a supersede left on a host it could not reach (`stale_host`), killed as `kill --host` does once that host answers; a pane already gone there is only logged.
 pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let events = working(&ctx.state)?;
+    let (events, sessions) = (
+        working(&ctx.state)?,
+        crate::link::view::View::load(ctx, cfg)?.sessions(),
+    );
     let events = lanes(&events);
     for s in events.iter().filter(|e| e.kind == "supersede") {
         let (Some(h), Some(agent), pane) = (s.str("stale_host"), s.str("agent"), s.str("stale_pane")) else {
@@ -1992,10 +2001,13 @@ pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         if events.iter().any(|e| done(e) && e.str("pane") == pane) || machine.is_none() {
             continue;
         }
-        let Ok(there) = crate::session::live_on(&On::new(r, machine)) else {
+        let Some((_, Ok(there))) = sessions.0.iter().find(|h| h.0.as_deref() == machine) else {
             continue;
         };
-        if there.iter().any(|a| a.name == agent && Some(a.name.as_str()) == pane) {
+        if there
+            .iter()
+            .any(|a| a.running() && a.name == agent && Some(a.name.as_str()) == pane)
+        {
             if let Err(e) = kill(ctx, cfg, r, out, (agent, Some(h)), true) {
                 writeln!(out, "stale pane {h}:{agent}: {e:#}")?;
             }
@@ -2067,7 +2079,7 @@ pub fn dedup(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     if !keys.fold(false, |two, (k, a)| by.insert(k, a).is_some_and(|b| b != a) || two) {
         return Ok(());
     }
-    let all = crate::session::all(cfg, r).checked()?;
+    let all = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?;
     for ((fl, n, role), names) in dups(&events, &all.running()).into_iter().filter(|d| on(&d.0 .0)) {
         let keep = names.last().map_or("", String::as_str);
         match stop_rounds(ctx, cfg, r, (&fl, n, &role), keep) {
@@ -2252,7 +2264,7 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
-    git(&["fetch", "-q", "--prune", "origin"])?;
+    crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "--prune", "origin"])?;
     let integ = format!("origin/{}", f.integration);
     let refs = git(&[
         "for-each-ref",
@@ -2334,8 +2346,11 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
             .filter(|p| build(p))
             .map(String::from))
         .collect();
-        let no = NO_WIP.map(|d| format!(":(exclude,glob)**/{d}/**"));
-        git(&[&["add", "-A", "--", "."][..], &no.each_ref().map(String::as_str)].concat())?;
+        let logs = st.lines().filter_map(crate::spawn::scratch_log);
+        let mut no: Vec<String> = NO_WIP.map(|d| format!(":(exclude,glob)**/{d}/**")).into();
+        no.extend(logs.map(|p| format!(":(exclude,literal){p}")));
+        let no: Vec<&str> = no.iter().map(String::as_str).collect();
+        git(&[&["add", "-A", "--", "."][..], &no].concat())?;
         git(&[&["reset", "-q", "--"][..], &own_files().collect::<Vec<_>>(), SHOT_DIRS].concat())?;
         let changed = git(&["diff", "--cached", "--name-only", "--no-renames", "-z"])?;
         let tree = git(&["ls-tree", "-r", "-l", "-z", git(&["write-tree"])?.trim()])?;

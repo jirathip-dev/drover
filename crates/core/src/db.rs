@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS push (n INTEGER PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshot (n INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE NOT NULL, ts INTEGER NOT NULL,
     json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS host_view (host TEXT PRIMARY KEY, link TEXT NOT NULL, since INTEGER NOT NULL, why TEXT,
+    boot TEXT, n INTEGER, heard INTEGER, build TEXT, load TEXT);
+CREATE TABLE IF NOT EXISTS lane_view (host TEXT NOT NULL, key TEXT NOT NULL, heard INTEGER NOT NULL, json TEXT NOT NULL,
+    PRIMARY KEY (host, key));
 CREATE TABLE IF NOT EXISTS states (fleet TEXT NOT NULL, issue INTEGER NOT NULL, done INTEGER NOT NULL, json TEXT NOT NULL,
     PRIMARY KEY (fleet, issue));
 CREATE TABLE IF NOT EXISTS lanes (lane TEXT PRIMARY KEY, seq INTEGER NOT NULL, json TEXT NOT NULL);
@@ -55,15 +59,17 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         SCRATCH.set(None);
-        OPEN.with_borrow_mut(|v| v.retain(|x| x.0 != self.0));
+        pool().retain(|x| x.0 != self.0);
         for x in ["", "-wal", "-shm"] {
             std::fs::remove_file(format!("{}{x}", self.0.display())).ok();
         }
     }
 }
 
-thread_local! {
-    static OPEN: RefCell<Vec<(PathBuf, u64, Connection)>> = const { RefCell::new(Vec::new()) };
+static OPEN: std::sync::Mutex<Vec<(PathBuf, u64, Connection)>> = std::sync::Mutex::new(Vec::new());
+
+fn pool() -> std::sync::MutexGuard<'static, Vec<(PathBuf, u64, Connection)>> {
+    OPEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
@@ -79,9 +85,15 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
         "{} still has files from before #344: run `drover migrate --live` to import them",
         state.parent().unwrap_or(Path::new(".")).display()
     );
-    let cached = OPEN.with_borrow_mut(|v| Some(v.swap_remove(v.iter().position(|x| x.0 == p)?)));
+    let cached = {
+        let mut v = pool();
+        v.iter().position(|x| x.0 == p).map(|i| v.swap_remove(i))
+    };
     let (mut c, fresh) = match cached {
-        Some((_, i, c)) if ino(&p) == Some(i) => (c, false),
+        Some((_, i, mut c)) if ino(&p) == Some(i) => {
+            upgrade(&mut c, state)?;
+            (c, false)
+        }
         _ => (open(state)?, true),
     };
     if (fresh || !scratch) && old {
@@ -89,7 +101,10 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
     }
     let r = f(&mut c);
     if let Some(i) = ino(&p) {
-        OPEN.with_borrow_mut(|v| v.push((p, i, c)));
+        let mut v = pool();
+        if v.iter().filter(|x| x.0 == p).count() < 8 {
+            v.push((p, i, c));
+        }
     }
     r
 }
@@ -111,8 +126,13 @@ fn open(state: &Path) -> Result<Connection> {
     anyhow::ensure!(mode(&c)? == "wal", "{} is not in WAL mode", file(state).display());
     c.execute_batch(SCHEMA)?;
     let mut c = c;
+    upgrade(&mut c, state)?;
+    Ok(c)
+}
+
+fn upgrade(c: &mut Connection, state: &Path) -> Result<()> {
     let version = |c: &Connection| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0));
-    if version(&c)? < 2 {
+    if version(c)? < 2 {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if version(&tx)? < 1 {
             offload_all(&tx, state)?;
@@ -124,7 +144,7 @@ fn open(state: &Path) -> Result<Connection> {
         }
         tx.commit()?;
     }
-    Ok(c)
+    Ok(())
 }
 
 fn offload_all(c: &Connection, state: &Path) -> Result<()> {
@@ -226,18 +246,20 @@ fn project_ask(c: &Connection, e: &Event) -> Result<()> {
         return Ok(());
     }
     let issue = e.issue.and_then(|n| i64::try_from(n).ok()).map(Sql::Integer);
+    let relaunch = issue.clone().filter(|_| e.kind == "spawn");
     let (col, key, floor) = match e.kind.as_str() {
         "decision" | "ask-withdrawn" | "ask-delivered" | "ask-failed" | "ask-expired" => ("id", text("id"), 0),
         "merged" | "closed" | "closed-other" | "clean" if issue.is_some() => ("issue", issue.unwrap_or(Sql::Null), 5),
         "spawn" | "lane-killed" => ("agent", text("agent"), 7),
         _ => return Ok(()),
     };
-    let q = format!("SELECT seq, json, rank FROM asks WHERE fleet = ?1 AND {col} IS ?2 AND (rank IS NULL OR rank BETWEEN ?3 AND ?4)");
+    let q = format!("SELECT seq, json, rank FROM asks WHERE fleet = ?1 AND ({col} IS ?2 OR issue = ?5 AND agent IS NULL) AND (rank IS NULL OR rank BETWEEN ?3 AND ?4)");
     let found: Vec<(u64, String, Option<usize>)> = {
         let mut q = c.prepare(&q)?;
-        let all = q.query_map(params![e.fleet, key, floor + 1, events::ORDER.len() - 2], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-        })?;
+        let all = q.query_map(
+            params![e.fleet, key, floor + 1, events::ORDER.len() - 2, relaunch],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
         all.collect::<rusqlite::Result<_>>()?
     };
     let q = "SELECT MIN(seq) FROM events WHERE type = 'spawn-started' AND json_extract(json, '$.agent') IS ?1 \
@@ -614,6 +636,52 @@ pub fn claim(
 pub fn processed(state: &Path, id: &str, now: u64) -> Result<bool> {
     let q = "INSERT OR IGNORE INTO processed (id, at) VALUES (?1, ?2)";
     with(state, true, 0, |c| Ok(c.execute(q, params![id, now])?)).map(|n| n > 0)
+}
+
+/// Host `h`'s `host_view` row, and with `lanes` (key, json) its `lane_view` rows replaced, in one transaction.
+pub fn view_put(state: &Path, h: &crate::link::view::HostSeen, lanes: Option<&[(String, String)]>) -> Result<()> {
+    with(state, true, (), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let q = "INSERT OR REPLACE INTO host_view (host, link, since, why, boot, n, heard, build) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+        tx.execute(
+            q,
+            params![h.host, h.link, h.since, h.why, h.boot, h.n, h.heard, h.build],
+        )?;
+        if let Some(all) = lanes {
+            tx.execute("DELETE FROM lane_view WHERE host = ?1", [&h.host])?;
+            for (k, json) in all {
+                let q = "INSERT OR REPLACE INTO lane_view (host, key, heard, json) VALUES (?1, ?2, ?3, ?4)";
+                tx.execute(q, params![h.host, k, h.heard, json])?;
+            }
+        }
+        Ok(tx.commit()?)
+    })
+}
+
+/// `lane_view` rows as (host, json).
+pub type Rows = Vec<(String, String)>;
+
+/// Every `host_view` row, and every `lane_view` row as (host, json).
+pub fn view(state: &Path) -> Result<(Vec<crate::link::view::HostSeen>, Rows)> {
+    with(state, false, (vec![], vec![]), |c| {
+        let mut q = c.prepare_cached("SELECT host, link, since, why, boot, n, heard, build FROM host_view")?;
+        let row = |r: &rusqlite::Row| {
+            Ok(crate::link::view::HostSeen {
+                host: r.get(0)?,
+                link: r.get(1)?,
+                since: r.get(2)?,
+                why: r.get(3)?,
+                boot: r.get(4)?,
+                n: r.get(5)?,
+                heard: r.get(6)?,
+                build: r.get(7)?,
+            })
+        };
+        let hosts = q.query_map([], row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut q = c.prepare_cached("SELECT host, json FROM lane_view ORDER BY host, key")?;
+        let lanes = q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok((hosts, lanes.collect::<rusqlite::Result<Vec<_>>>()?))
+    })
 }
 
 /// A snapshot row (`board`'s reads).

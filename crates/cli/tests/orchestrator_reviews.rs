@@ -298,3 +298,44 @@ fn a_basis_extend_posts_an_fyi_whose_change_parks_within_30_minutes_only() {
     let st = drover::events::fold(&read(&c.state).unwrap());
     assert_eq!(st[&("sendmeter".to_string(), 36)].state, "parked");
 }
+
+fn extend_ask(c: &drover::Ctx, ts: u64, id: &str) {
+    let d = json!({"id": id, "question": "One more round for #36? (lane blocked: waits on q9)",
+        "options": ["one more round", "park"], "recommend": 1, "kind": "owner", "extend": true, "spawn": true});
+    log(c, ts, "sendmeter", Some(36), "needs-decision", d);
+}
+
+#[test]
+fn a_typed_extend_on_a_working_lanes_open_extend_ask_grants_the_round_and_closes_it() {
+    let _env = env();
+    let (c, _sh) = setup("typed-extend-ask");
+    log(
+        &c,
+        NOW - 350,
+        "sendmeter",
+        Some(36),
+        "verdict",
+        json!({"verdict": "FAIL", "sha": "1".repeat(40)}),
+    );
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-36", "pane": "sendmeter-impl-36", "runtime": "shed"});
+    log(&c, NOW - 300, "sendmeter", Some(36), "spawn", d);
+    extend_ask(&c, NOW - 200, "q1");
+    said(&c, NOW - 100, "t1", "one more round");
+    let typed = ["extend", "sendmeter", "36", "--no-spawn", "--typed", "one more round"];
+    let (code, out) = by(&c, Some("t1"), NOW, &typed);
+    assert_eq!(code, 0, "{out}");
+    let ext = kinds(&c, "round-extended");
+    assert_eq!((ext.len(), ext[0].str("by")), (1, Some("owner (typed)")));
+    let (_, asks) = by(&c, None, NOW, &["asks", "sendmeter"]);
+    assert!(!asks.contains("q1"), "the ask closes: {asks}");
+
+    log(&c, NOW - 50, "sendmeter", Some(36), "parked", json!({"by": "owner"}));
+    extend_ask(&c, NOW - 40, "q2");
+    said(&c, NOW - 30, "t1", "one more round");
+    let (code, out) = by(&c, Some("t1"), NOW, &typed);
+    assert!(code == 3 && out.contains("REFUSED NOT_NEEDS_HUMAN"), "parked: {out}");
+    log(&c, NOW - 20, "sendmeter", Some(36), "merged", json!({}));
+    let (code, out) = by(&c, Some("t1"), NOW, &typed);
+    assert!(code == 3 && out.contains("REFUSED NOT_NEEDS_HUMAN"), "merged: {out}");
+    assert_eq!(kinds(&c, "round-extended").len(), 1);
+}

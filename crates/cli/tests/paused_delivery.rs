@@ -31,6 +31,9 @@ impl Runner for Air<'_> {
         })
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        if let Some(o) = boat(self, prog, args, input) {
+            return o;
+        }
         if args.join(" ").contains("air -- 'shed' 'connect'") {
             self.0.run_in(prog, args, input)
         } else {
@@ -82,7 +85,10 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     assert_eq!(asks[0].str("agent"), Some("sendmeter-impl-12"));
     let turns: Vec<_> = ev.iter().filter(|e| e.kind == "turn-end").collect();
     assert!(turns.len() == 1 && turns[0].issue == Some(12), "{ev:?}");
-    assert!(!ob.exists() && !wt.join(".drover/outbox.jsonl.draining").exists());
+    assert!(
+        ob.exists(),
+        "a line stays on the host until it is acked; the log's id drops it"
+    );
     let (_, asked) = run(&main, &r, &["asks", "sendmeter"]);
     assert!(asked.contains("q1 #12") && asked.contains("Which way?"), "{asked}");
 

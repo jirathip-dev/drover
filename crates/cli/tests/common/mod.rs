@@ -118,6 +118,44 @@ impl Fake {
 /// Batch suffix: each remote read in the step's one ssh script ends with it.
 pub const BATCH: &str = " </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"";
 
+/// The step's poll: every host's report on `r` into the view, as `drive` takes it before it plans.
+pub fn look(c: &Ctx, r: &dyn Runner) {
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let with = cfg
+        .shed()
+        .filter(|_| r.shed().is_none())
+        .map(|b| drover::shed::With(r, b));
+    let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
+    drover::link::look(c, &cfg, r, &mut std::io::sink(), true).unwrap();
+}
+
+/// `ssh … <m> -- '<drover>' 'hosts' 'report'` answered in this process by the CLI on `r` as host `m`, which has no fleet.toml (its facts read through `r` over ssh).
+pub fn boat(r: &dyn Runner, prog: &str, args: &[String], input: &str) -> Option<anyhow::Result<Out>> {
+    let end = args.iter().position(|a| a == "--")?;
+    if prog != "ssh" || !args.last()?.ends_with("'hosts' 'report'") {
+        return None;
+    }
+    let on = drover::hosts::On::new(r, Some(args.get(end.checked_sub(1)?)?));
+    let bare = Ctx {
+        config: PathBuf::from("/nonexistent/drover/fleet.toml"),
+        state: PathBuf::from("/nonexistent/drover/state/events.jsonl"),
+        worktrees: PathBuf::from("/nonexistent/drover/worktrees"),
+        homes: std::collections::BTreeMap::new(),
+        exe: "/opt/drover/bin/drover".into(),
+        now: 1_000_000,
+        home: PathBuf::from("/nonexistent/drover/home"),
+        hints: vec![],
+    };
+    let mut stdout = vec![];
+    let cmd = ["drover", "hosts", "report"].map(String::from).to_vec();
+    let code = drover::main_with(cmd, &bare, &on, &mut stdout, &mut input.as_bytes());
+    Some(Ok(Out {
+        code,
+        stdout: String::from_utf8_lossy(&stdout).into(),
+        ..Out::default()
+    }))
+}
+
 impl Runner for Fake {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         self.answer(prog, args)
@@ -127,7 +165,11 @@ impl Runner for Fake {
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
-        self.inputs.borrow_mut().push((line, input.into()));
+        self.inputs.borrow_mut().push((line.clone(), input.into()));
+        if let Some(o) = boat(self, prog, args, input).filter(|_| !self.scripted(&line)) {
+            self.calls.borrow_mut().push(line);
+            return o;
+        }
         let batch = drover::hosts::quote("sh", &["-c".into(), drover::hosts::EXISTS.into()]);
         if prog == "ssh" && args.last() == Some(&batch) {
             self.calls.borrow_mut().push(format!("{prog} {}", args.join(" ")));
@@ -150,6 +192,11 @@ impl Runner for Fake {
 }
 
 impl Fake {
+    /// A reply or once scripted for this host report (its prefix names `'report'`): the test answers it, not `boat`.
+    pub fn scripted(&self, line: &str) -> bool {
+        let hit = |p: &String| p.contains("'report'") && line.starts_with(p.as_str());
+        self.onces.borrow().iter().any(|o| hit(&o.0)) || self.replies.iter().any(|o| hit(&o.0))
+    }
     fn answer(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
         self.calls.borrow_mut().push(line.clone());

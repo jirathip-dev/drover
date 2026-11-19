@@ -947,6 +947,8 @@ enum PushCmd {
 enum HostsCmd {
     #[command(about = "Probe every host's tags again (else hourly, by `check`)")]
     Refresh,
+    #[command(hide = true, about = "#1309: this host's lanes as one frame for the main host")]
+    Report,
     #[command(about = "Let new lanes go to this host again; logs `host-on`")]
     On { name: String },
     #[command(about = "No new lanes on this host (its lanes finish there); still monitored; logs `host-off`")]
@@ -1273,6 +1275,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &crate::repo_path(&rules), out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
+        Cmd::Hosts {
+            cmd: Some(HostsCmd::Report),
+        } => crate::link::watch::serve(r, stdin, out)?,
         Cmd::Hook {
             role,
             git_pre_push: true,
@@ -1340,15 +1345,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
                 let waits = cfg.map(|mut c| {
                     c.fleet.retain(|k, _| fleet.as_ref().is_none_or(|f| f == k));
-                    crate::waiting::scan(
-                        ctx,
-                        &c,
-                        &look,
-                        &events,
-                        &crate::session::all(&c, &look).running(),
-                        false,
-                        None,
-                    )
+                    let agents = crate::link::sessions(ctx, &c, &look).running();
+                    crate::waiting::scan(ctx, &c, &look, &events, &agents, false, None)
                 });
                 let cfg = Config::load(&ctx.config).ok();
                 let hosts = cfg.as_ref().is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
@@ -1399,7 +1397,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 write!(out, "{serial}")?;
                 if let Some(c) = &cfg {
-                    let agents = crate::session::all(c, &look).running();
+                    let agents = crate::link::sessions(ctx, c, &look).running();
                     write!(out, "{}", crate::hosts::slots_line(c, &events, &agents))?;
                 }
                 if let Some(t) = look.ts {
@@ -1821,7 +1819,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     writeln!(out, "{line}")?;
                 }
                 Cmd::Hosts { cmd } => match cmd {
-                    None => crate::hosts::list(ctx, &cfg, r, out, false)?,
+                    None | Some(HostsCmd::Report) => crate::hosts::list(ctx, &cfg, r, out, false)?,
                     Some(HostsCmd::Refresh) => crate::hosts::list(ctx, &cfg, r, out, true)?,
                     Some(HostsCmd::On { name }) => crate::hosts::toggle(ctx, out, &name, true, "cli")?,
                     Some(HostsCmd::Off { name }) => crate::hosts::toggle(ctx, out, &name, false, "cli")?,
@@ -1857,7 +1855,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now, id.as_deref()))?;
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
-                    let (events, agents) = (working(&ctx.state)?, crate::session::all(&cfg, r).running());
+                    let (events, agents) = (working(&ctx.state)?, crate::link::sessions(ctx, &cfg, r).running());
                     let (at, slots) = places(ctx, &cfg, r, &events);
                     let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true, None);
                     let mut rows: Vec<_> = all
@@ -2060,9 +2058,15 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if cfg.fleet(f)?.family(role) != "impl" {
                         bail!("a {role} lane reports no turn: impl, fix and update lanes do");
                     }
+                    let done = state == "done" && !matches!(role, "triage" | "lesson");
+                    let ui = done.then(|| crate::guard::turn(ctx, &cfg, r, out, (f, n), role));
+                    let ui = ui.transpose()?.flatten();
                     let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
                     let note = note.transpose()?.flatten();
                     let mut d = json!({"state": state, "why": why, "role": role});
+                    if let Some(u) = ui {
+                        d.put("ui_check", u);
+                    }
                     if let Some((code, w)) = &note {
                         d.put("note", json!(format!("{code}: {w}")));
                     }
@@ -2487,7 +2491,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
 
 fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> queue::Places {
     let st = crate::events::fold(events);
-    let ls = crate::snapshot::lanes(cfg, r, (events, &st), &crate::session::all(cfg, r));
+    let ls = crate::snapshot::lanes(ctx, cfg, (events, &st), &crate::link::sessions(ctx, cfg, r));
     let at = ls.into_iter().map(|l| (l.name, l.place)).collect();
     (at, crate::starts::held_now(ctx, cfg, r))
 }

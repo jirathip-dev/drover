@@ -390,3 +390,57 @@ fn a_working_lane_that_hibernated_and_died_is_respawned_after_a_false_failed_sta
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["respawn"], "{out}");
 }
+
+#[test]
+fn done_from_an_asleep_lane_on_a_busy_host_is_still_a_card_after_the_nudge_window() {
+    let (c, r, sh) = lane("turn-done-asleep", true, None);
+    sh.set(LANE, |t| t["reported"] = json!({"state": "hibernated"}));
+    let p = "sysctl -n kern.memorystatus_vm_pressure_level";
+    let r = (0..40).fold(r, |r, _| r.once(p, 0, "4\n"));
+    turn(&c, &r, &["done"]);
+    drive(&c, &r);
+    assert_eq!(typed(&sh, NUDGE), 0, "an asleep lane is not woken on a busy host");
+    let (w, _) = texts(&at(&c, 60), &r);
+    assert!(w.contains("reported done, nothing pushed: nudged 60s ago"), "{w}");
+    let (out, _) = drive(&at(&c, 601), &r);
+    assert!(
+        out.contains("needs-human: lane blocked: done again with nothing pushed"),
+        "{out}"
+    );
+    drive(&at(&c, 7200), &r);
+    assert_eq!(kinds(&c, "needs-human").len(), 1, "one card");
+}
+
+#[test]
+fn a_respawn_refused_for_a_secret_in_a_changed_file_is_one_owner_card_naming_file_and_line() {
+    let (c, r, sh) = lane("turn-gone-secret", false, None);
+    let w = c.worktrees.join("sendmeter/issue-12").display().to_string();
+    let diff = concat!(
+        "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1,0 +2 @@\n",
+        "+const T: &str = \"gh",
+        "p_abcdefghijklmnopqrstu1234\";\n"
+    );
+    let r = (0..6)
+        .fold(r, |r, _| {
+            r.once(&format!("git -C {w} status --porcelain"), 0, " M src/a.rs\n")
+        })
+        .once(&format!("git -C {w} diff --cached --name-only"), 0, "src/a.rs\0")
+        .once(&format!("git -C {w} diff --cached"), 0, diff);
+    turn(&c, &r, &["working"]);
+    let (out, _) = drive(&c, &r);
+    assert!(
+        out.contains("REFUSED SECRET_IN_WIP") || out.contains("SECRET_IN_WIP"),
+        "{out}"
+    );
+    assert!(!respawned(&sh), "{:?}", sh.methods());
+    let nh = kinds(&c, "needs-human");
+    assert_eq!(nh.len(), 1, "{out}");
+    assert_eq!(nh[0].str("refused"), Some("SECRET_IN_WIP"));
+    assert!(nh[0].str("reason").unwrap().contains("src/a.rs:2:"), "{:?}", nh[0]);
+    assert!(
+        !nh[0].str("reason").unwrap().contains("ghp_abc"),
+        "the secret is never shown"
+    );
+    drive(&at(&c, 3600), &r);
+    assert_eq!(kinds(&c, "needs-human").len(), 1, "one card");
+}

@@ -240,6 +240,7 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
     assert!(kills(&r).is_empty(), "a working lane keeps its children");
 
     let r = fake(&sh, "done");
+    look(&c, &sh.on(&r));
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(
