@@ -891,7 +891,7 @@ pub fn configured(cfg: &Config, m: &str) -> bool {
     cfg.hosts.values().any(|h| h.machine.as_deref() == Some(m))
 }
 
-/// `host offline: <host>` for spawn `sp`'s lane when the last look (`survey`) or a call within `host_down_secs` could not reach its host; `host offline (not configured): <machine>` when no `[hosts]` entry runs on its machine.
+/// `host offline: <host>` for spawn `sp`'s lane when the last look (`survey`) could not reach its host; `host offline (not configured): <machine>` when no `[hosts]` entry runs on its machine.
 pub fn offline(ctx: &Ctx, cfg: Option<&Config>, sp: Option<&Event>) -> Option<String> {
     let sp = sp?;
     let m = sp.str("machine")?;
@@ -899,12 +899,10 @@ pub fn offline(ctx: &Ctx, cfg: Option<&Config>, sp: Option<&Event>) -> Option<St
         return Some(format!("host offline (not configured): {m}"));
     }
     let h = sp.str("host")?;
-    let failed = cfg.is_some_and(|c| {
-        down(ctx)
-            .get(m)
-            .is_some_and(|d| ctx.now < d.1 + c.limits.host_down_secs)
-    });
-    (failed || cached(ctx).get(h).is_some_and(|s| !s.up)).then(|| format!("host offline: {h}"))
+    cached(ctx)
+        .get(h)
+        .is_some_and(|s| !s.up)
+        .then(|| format!("host offline: {h}"))
 }
 
 /// Spawn `sp`'s lane is on a host that is `off` or failed its last probe: a pass never reaches into it.

@@ -185,9 +185,6 @@ fn parked_seeds() {
 #[test]
 fn the_incident_seed_records_the_verdict_with_one_supersede() {
     let o = run(seeds::INCIDENT, None);
-    for l in o.trace.iter().filter(|l| { let t: u64 = l.split_whitespace().nth(1).and_then(|x| x.strip_prefix("t+")).and_then(|x| x.parse().ok()).unwrap_or(0); (380..=450).contains(&t) && (l.contains("spawn drive") || l.contains("exit drive") || l.contains("shed") || l.contains(" append ") || l.contains("lease")) }) {
-        eprintln!("DBG {}", l.chars().take(220).collect::<String>());
-    }
     assert!(o.failure.is_none(), "{}", o.report());
     let sup = o.trace.iter().filter(|l| l.contains(" append supersede #370 ")).count();
     let told = o
@@ -420,14 +417,14 @@ fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     assert!(o.failure.is_none(), "{}", o.report());
     let want = metrics::Metrics {
-        to_merge: vec![963, 1286],
+        to_merge: vec![964, 1286],
         spawns: 5,
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 231,
+        idle: 237,
         ci_wait: 600,
-        lock_wait: 6,
+        lock_wait: 12,
         serial: 0,
         host_busy: 0,
         caps: 0,
@@ -443,9 +440,9 @@ fn the_known_fleet_gives_exact_metrics() {
             ("caps", 0.0),
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 3.85),
-            ("lock_wait_min", 0.1),
-            ("queue_to_merge_p50_min", 16.05),
+            ("idle_lane_min", 3.95),
+            ("lock_wait_min", 0.2),
+            ("queue_to_merge_p50_min", 16.07),
             ("queue_to_merge_p90_min", 21.43),
             ("review_rounds_per_merge", 1.0),
             ("serial_busy", 0.0),
