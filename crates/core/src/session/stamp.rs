@@ -92,13 +92,23 @@ fn gone(
     if latest(&events, agent).is_some_and(|e| e.str("state") == Some("gone")) {
         return Ok(false);
     }
+    let said = (exit.cause == Cause::Crash).then(said).flatten();
+    let refused = [&exit.note, &said]
+        .into_iter()
+        .flatten()
+        .any(|w| w.contains("ECONNREFUSED"));
+    let cause = if refused && exit.cause == Cause::Crash {
+        Cause::Refused
+    } else {
+        exit.cause
+    };
     d.put("state", json!("gone"))
         .put("code", json!(exit.code))
-        .put("cause", json!(exit.cause.word()));
+        .put("cause", json!(cause.word()));
     if let Some(n) = &exit.note {
         d.put("note", json!(n));
     }
-    if let Some(w) = said().filter(|_| exit.cause == Cause::Crash) {
+    if let Some(w) = said {
         d.put("said", json!(w));
     }
     stamp(ctx, &events, (fleet, issue), agent, d)?;
