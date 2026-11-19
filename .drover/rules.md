@@ -27,3 +27,4 @@
 - don't print to stdout or stderr but through the CLI's one writer `stderr!`, or write `unsafe` outside crates/sys (enforced by: CI clippy print_stdout/print_stderr, `unsafe_code = "forbid"`, CI banned-API fixtures)
 - don't use `Command::new`/`std::process` outside core's runner.rs, `env::var` outside config.rs, or `thread::sleep`/`SystemTime::now`/`Instant::now` outside clock.rs (enforced by: CI arch-check, #809 bans)
 - don't use `any`, a non-null `!`, an `as` cast but `as const`, `@ts-ignore`/`@ts-expect-error`, innerHTML/outerHTML/insertAdjacentHTML, eval/new Function, console.log, a default export or an `enum` in web/src (enforced by: CI web, `npm run lint` and tsc --strict, web/lint-fixtures)
+- don't write a wait loop without a deadline in a test script, or start a test job its harness does not kill on drop, a panic included (enforced by: CI arch-check, #1364 `do sleep` ban; crates/cli/tests/heavy.rs a_dropped_job_ends_with_its_harness)
