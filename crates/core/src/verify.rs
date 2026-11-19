@@ -23,10 +23,7 @@ pub fn why(
         .into_iter()
         .find(|i| i.issue == n)
         .and_then(|i| i.verify);
-    let ui = || {
-        let hit = |p: &&String| ui_paths.iter().any(|g| crate::config::glob(g.as_bytes(), p.as_bytes()));
-        files.iter().find(hit).map(|p| format!("touches {p}"))
-    };
+    let ui = || ui(ui_paths, files).map(|p| format!("touches {p}"));
     match mark {
         _ if crate::gate::repro_verify(events, (fleet, n), head) => Some("Repro: verify".into()),
         Some(on) => on.then(|| "queued --verify".into()),
@@ -38,6 +35,12 @@ pub fn why(
         }
         None => ui(),
     }
+}
+
+/// The first of `files` the fleet's `ui_paths` match.
+pub fn ui<'a>(ui_paths: &[String], files: &'a [String]) -> Option<&'a String> {
+    let hit = |p: &&String| ui_paths.iter().any(|g| crate::config::glob(g.as_bytes(), p.as_bytes()));
+    files.iter().find(hit)
 }
 
 /// Drive's step before spawning the verify lane at a PASS: true if it runs; else `verify-skipped` (not needed) or `verify-no-recipe` (needed, but the head has no recipe) is logged at that sha, which passes the stage there.

@@ -1354,7 +1354,7 @@ fn pass(
                 &Event::new(ctx.now, fleet, Some(s.issue), "lesson-prompted", d),
             )?;
         } else if let Some((state, text)) = turn_prompt(&w.what).filter(|_| w.who == "drive" && !fast) {
-            let Some(sent) = tell(r, &events, &w.lane, text) else {
+            let Some(sent) = tell(r, &events, &w.lane, text).or((state != "working").then_some(false)) else {
                 continue;
             };
             writeln!(
@@ -1718,6 +1718,7 @@ pub(crate) fn owner_refusal(code: &str) -> bool {
         "MCP_FORBIDDEN",
         "ACP_UNGUARDED",
         "ACCOUNT_ENV",
+        "SECRET_IN_WIP",
     ];
     owner.contains(&code)
 }
