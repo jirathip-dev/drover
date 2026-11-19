@@ -1,0 +1,119 @@
+Decided: the watcher sends a whole Report on any change (outbox, verdict.md or shed session stat, polled every link_poll_millis) and a Beat when idle; no per-lane or per-line frames yet.
+Because: docs/architecture/drive-push/shapes.md:114
+Decided: acks ride the watch's own stdin as `<worktree>\t<sent>` lines, kept in .drover/outbox.acked; there is no separate `hosts ack` call.
+Rejected: a `drover hosts ack` ssh call per applied line — one more remote call per line.
+Because: "0 calls per pass on a live link"
+Decided: a turn's job start is the kick that running the line already makes (turn → kick → the service socket or a detached kick), so intake returns acks, not Wakes.
+Decided: every outbox line runs under a file lock beside state.db, because link threads now run lines at the same time and the lane's env var is process-wide.
+Decided: the links services row shows only while the service runs; with no service the fast step row already says the hosts are polled.
+Rejected: link_report_minutes — the watcher already sends a whole Report every link_sample_secs, which is the catch-up.
+Check: crates/cli/tests/link.rs drives the real watcher, link and service over the ADR fixture (0.7 s a call on a test clock, calls counted per host, streams cut, muted or refused).
+Decided: a poll (drive re-reading a host after a lane starts there) never sets a live link down; only the link thread does, so the links row stays level under load.
+Because: crates/core/src/link/intake.rs:85
+Decided: hosts watch runs through the host's own shed like hosts report (#1403), from one dispatch arm so cli.rs stays under its size baseline.
+Owner: Boats now push lane commands to the main host over a kept-open ssh link while the service runs, so a lane's turn is acted on in about half a second instead of up to a minute.
+
+Decided: the watcher sends a whole Report on any change (outbox, verdict.md or shed session stat, polled every link_poll_millis) and a Beat when idle; no per-lane or per-line frames yet.
+Because: docs/architecture/drive-push/shapes.md:114
+Decided: acks ride the watch's own stdin as `<worktree>\t<sent>` lines, kept in .drover/outbox.acked; there is no separate `hosts ack` call.
+Rejected: a `drover hosts ack` ssh call per applied line — one more remote call per line.
+Because: "0 calls per pass on a live link"
+Decided: a turn's job start is the kick that running the line already makes (turn → kick → the service socket or a detached kick), so intake returns acks, not Wakes.
+Decided: every outbox line runs under a file lock beside state.db, because link threads now run lines at the same time and the lane's env var is process-wide.
+Decided: the links services row shows only while the service runs; with no service the fast step row already says the hosts are polled.
+Rejected: link_report_minutes — the watcher already sends a whole Report every link_sample_secs, which is the catch-up.
+Check: crates/cli/tests/link.rs drives the real watcher, link and service over the ADR fixture (0.7 s a call on a test clock, calls counted per host, streams cut, muted or refused).
+Decided: a poll (drive re-reading a host after a lane starts there) never sets a live link down; only the link thread does, so the links row stays level under load.
+Because: crates/core/src/link/intake.rs:85
+Decided: hosts watch runs through the host's own shed like hosts report (#1403), from one dispatch arm so cli.rs stays under its size baseline.
+Owner: Boats now push lane commands to the main host over a kept-open ssh link while the service runs, so a lane's turn is acted on in about half a second instead of up to a minute.
+
+Decided: the watcher sends a whole Report on any change (outbox, verdict.md or shed session stat, polled every link_poll_millis) and a Beat when idle; no per-lane or per-line frames yet.
+Because: docs/architecture/drive-push/shapes.md:114
+Decided: acks ride the watch's own stdin as `<worktree>\t<sent>` lines, kept in .drover/outbox.acked; there is no separate `hosts ack` call.
+Rejected: a `drover hosts ack` ssh call per applied line — one more remote call per line.
+Because: "0 calls per pass on a live link"
+Decided: a turn's job start is the kick that running the line already makes (turn → kick → the service socket or a detached kick), so intake returns acks, not Wakes.
+Decided: every outbox line runs under a file lock beside state.db, because link threads now run lines at the same time and the lane's env var is process-wide.
+Decided: the links services row shows only while the service runs; with no service the fast step row already says the hosts are polled.
+Rejected: link_report_minutes — the watcher already sends a whole Report every link_sample_secs, which is the catch-up.
+Check: crates/cli/tests/link.rs drives the real watcher, link and service over the ADR fixture (0.7 s a call on a test clock, calls counted per host, streams cut, muted or refused).
+Decided: a poll (drive re-reading a host after a lane starts there) never sets a live link down; only the link thread does, so the links row stays level under load.
+Because: crates/core/src/link/intake.rs:85
+Decided: hosts watch runs through the host's own shed like hosts report (#1403), from one dispatch arm so cli.rs stays under its size baseline.
+Owner: Boats now push lane commands to the main host over a kept-open ssh link while the service runs, so a lane's turn is acted on in about half a second instead of up to a minute.
+
+Decided: the watcher sends a whole Report on any change (outbox, verdict.md or shed session stat, polled every link_poll_millis) and a Beat when idle; no per-lane or per-line frames yet.
+Because: docs/architecture/drive-push/shapes.md:114
+Decided: acks ride the watch's own stdin as `<worktree>\t<sent>` lines, kept in .drover/outbox.acked; there is no separate `hosts ack` call.
+Rejected: a `drover hosts ack` ssh call per applied line — one more remote call per line.
+Because: "0 calls per pass on a live link"
+Decided: a turn's job start is the kick that running the line already makes (turn → kick → the service socket or a detached kick), so intake returns acks, not Wakes.
+Decided: every outbox line runs under a file lock beside state.db, because link threads now run lines at the same time and the lane's env var is process-wide.
+Decided: the links services row shows only while the service runs; with no service the fast step row already says the hosts are polled.
+Rejected: link_report_minutes — the watcher already sends a whole Report every link_sample_secs, which is the catch-up.
+Check: crates/cli/tests/link.rs drives the real watcher, link and service over the ADR fixture (0.7 s a call on a test clock, calls counted per host, streams cut, muted or refused).
+Decided: a poll (drive re-reading a host after a lane starts there) never sets a live link down; only the link thread does, so the links row stays level under load.
+Because: crates/core/src/link/intake.rs:85
+Decided: hosts watch runs through the host's own shed like hosts report (#1403), from one dispatch arm so cli.rs stays under its size baseline.
+Owner: Boats now push lane commands to the main host over a kept-open ssh link while the service runs, so a lane's turn is acted on in about half a second instead of up to a minute.
+
+Decided: the watcher sends a whole Report on any change (outbox, verdict.md or shed session stat, polled every link_poll_millis) and a Beat when idle; no per-lane or per-line frames yet.
+Because: docs/architecture/drive-push/shapes.md:114
+Decided: acks ride the watch's own stdin as `<worktree>\t<sent>` lines, kept in .drover/outbox.acked; there is no separate `hosts ack` call.
+Rejected: a `drover hosts ack` ssh call per applied line — one more remote call per line.
+Because: "0 calls per pass on a live link"
+Decided: a turn's job start is the kick that running the line already makes (turn → kick → the service socket or a detached kick), so intake returns acks, not Wakes.
+Decided: every outbox line runs under a file lock beside state.db, because link threads now run lines at the same time and the lane's env var is process-wide.
+Decided: the links services row shows only while the service runs; with no service the fast step row already says the hosts are polled.
+Rejected: link_report_minutes — the watcher already sends a whole Report every link_sample_secs, which is the catch-up.
+Check: crates/cli/tests/link.rs drives the real watcher, link and service over the ADR fixture (0.7 s a call on a test clock, calls counted per host, streams cut, muted or refused).
+Decided: a poll (drive re-reading a host after a lane starts there) never sets a live link down; only the link thread does, so the links row stays level under load.
+Because: crates/core/src/link/intake.rs:85
+Decided: hosts watch runs through the host's own shed like hosts report (#1403), from one dispatch arm so cli.rs stays under its size baseline.
+Owner: Boats now push lane commands to the main host over a kept-open ssh link while the service runs, so a lane's turn is acted on in about half a second instead of up to a minute.
+
+Decided: the watcher sends a whole Report on any change (outbox, verdict.md or shed session stat, polled every link_poll_millis) and a Beat when idle; no per-lane or per-line frames yet.
+Because: docs/architecture/drive-push/shapes.md:114
+Decided: acks ride the watch's own stdin as `<worktree>\t<sent>` lines, kept in .drover/outbox.acked; there is no separate `hosts ack` call.
+Rejected: a `drover hosts ack` ssh call per applied line — one more remote call per line.
+Because: "0 calls per pass on a live link"
+Decided: a turn's job start is the kick that running the line already makes (turn → kick → the service socket or a detached kick), so intake returns acks, not Wakes.
+Decided: every outbox line runs under a file lock beside state.db, because link threads now run lines at the same time and the lane's env var is process-wide.
+Decided: the links services row shows only while the service runs; with no service the fast step row already says the hosts are polled.
+Rejected: link_report_minutes — the watcher already sends a whole Report every link_sample_secs, which is the catch-up.
+Check: crates/cli/tests/link.rs drives the real watcher, link and service over the ADR fixture (0.7 s a call on a test clock, calls counted per host, streams cut, muted or refused).
+Decided: a poll (drive re-reading a host after a lane starts there) never sets a live link down; only the link thread does, so the links row stays level under load.
+Because: crates/core/src/link/intake.rs:85
+Decided: hosts watch runs through the host's own shed like hosts report (#1403), from one dispatch arm so cli.rs stays under its size baseline.
+Owner: Boats now push lane commands to the main host over a kept-open ssh link while the service runs, so a lane's turn is acted on in about half a second instead of up to a minute.
+
+Decided: the watcher sends a whole Report on any change (outbox, verdict.md or shed session stat, polled every link_poll_millis) and a Beat when idle; no per-lane or per-line frames yet.
+Because: docs/architecture/drive-push/shapes.md:114
+Decided: acks ride the watch's own stdin as `<worktree>\t<sent>` lines, kept in .drover/outbox.acked; there is no separate `hosts ack` call.
+Rejected: a `drover hosts ack` ssh call per applied line — one more remote call per line.
+Because: "0 calls per pass on a live link"
+Decided: a turn's job start is the kick that running the line already makes (turn → kick → the service socket or a detached kick), so intake returns acks, not Wakes.
+Decided: every outbox line runs under a file lock beside state.db, because link threads now run lines at the same time and the lane's env var is process-wide.
+Decided: the links services row shows only while the service runs; with no service the fast step row already says the hosts are polled.
+Rejected: link_report_minutes — the watcher already sends a whole Report every link_sample_secs, which is the catch-up.
+Check: crates/cli/tests/link.rs drives the real watcher, link and service over the ADR fixture (0.7 s a call on a test clock, calls counted per host, streams cut, muted or refused).
+Decided: a poll (drive re-reading a host after a lane starts there) never sets a live link down; only the link thread does, so the links row stays level under load.
+Because: crates/core/src/link/intake.rs:85
+Decided: hosts watch runs through the host's own shed like hosts report (#1403), from one dispatch arm so cli.rs stays under its size baseline.
+Owner: Boats now push lane commands to the main host over a kept-open ssh link while the service runs, so a lane's turn is acted on in about half a second instead of up to a minute.
+
+Decided: the watcher sends a whole Report on any change (outbox, verdict.md or shed session stat, polled every link_poll_millis) and a Beat when idle; no per-lane or per-line frames yet.
+Because: docs/architecture/drive-push/shapes.md:114
+Decided: acks ride the watch's own stdin as `<worktree>\t<sent>` lines, kept in .drover/outbox.acked; there is no separate `hosts ack` call.
+Rejected: a `drover hosts ack` ssh call per applied line — one more remote call per line.
+Because: "0 calls per pass on a live link"
+Decided: a turn's job start is the kick that running the line already makes (turn → kick → the service socket or a detached kick), so intake returns acks, not Wakes.
+Decided: every outbox line runs under a file lock beside state.db, because link threads now run lines at the same time and the lane's env var is process-wide.
+Decided: the links services row shows only while the service runs; with no service the fast step row already says the hosts are polled.
+Rejected: link_report_minutes — the watcher already sends a whole Report every link_sample_secs, which is the catch-up.
+Check: crates/cli/tests/link.rs drives the real watcher, link and service over the ADR fixture (0.7 s a call on a test clock, calls counted per host, streams cut, muted or refused).
+Decided: a poll (drive re-reading a host after a lane starts there) never sets a live link down; only the link thread does, so the links row stays level under load.
+Because: crates/core/src/link/intake.rs:85
+Decided: hosts watch runs through the host's own shed like hosts report (#1403), from one dispatch arm so cli.rs stays under its size baseline.
+Owner: Boats now push lane commands to the main host over a kept-open ssh link while the service runs, so a lane's turn is acted on in about half a second instead of up to a minute.
