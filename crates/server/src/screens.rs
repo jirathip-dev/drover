@@ -479,35 +479,6 @@ fn done_screen(c: &QueueCard, q: &Q) -> Value {
         "blocks": [pages::paged(rows_list("done-list", &rows), more)]})
 }
 
-const LEGEND: [(&str, &str); 17] = [
-    ("queued", "waiting its turn"),
-    ("design · architect", "a design or ADR waits for your approval"),
-    ("impl", "being built"),
-    ("review n", "being checked, round n"),
-    ("fix n", "fixing review findings, round n"),
-    ("verify n", "the real app is being checked, round n"),
-    ("update", "merging the integration branch into its PR"),
-    ("ready", "passed, waiting to merge"),
-    ("merged", "merged into the integration branch"),
-    ("waiting: decision", "a lane asked: tap the row to answer in its sheet"),
-    ("needs-human", "out of rounds or stuck: your call"),
-    ("blocked · held until #N", "waits for another issue to merge"),
-    ("parked", "lane closed, its work saved on the PR"),
-    ("dead", "lane gone with unsaved work"),
-    ("▲ [◆ rev] ◫ ✓", "the issue's pipeline, its current stage in brackets"),
-    ("🔒 group", "serial: one lane of the group at a time"),
-    ("🔒 hot ×N", "holds N hot files, one lane at a time: tap to list them"),
-];
-
-fn legend() -> Value {
-    let rows = LEGEND
-        .iter()
-        .enumerate()
-        .map(|(i, (w, m))| json!({"type": "row", "id": format!("lg-{i}"), "title": w, "subtitle": m}));
-    json!({"type": "sheet", "id": "legend", "title": "What the marks mean", "cancel": "Done",
-        "blocks": [{"type": "list", "id": "legend-list", "rows": rows.collect::<Vec<_>>()}]})
-}
-
 const FILTERS: [(&str, &str); 5] = [
     ("new", "new"),
     ("30", ">30 days"),
@@ -1462,7 +1433,6 @@ impl Server<'_> {
                 self.on_row(ctx, q, |c, r| issue_sheet(ctx, &ev, fl(c), c, r))?
             }
             "/screens/verdict" => verdict_sheet(&working(&ctx.state).ok()?, q)?,
-            "/screens/legend" => legend(),
             "/screens/backlog" => {
                 let tab = self.queue_tab(ctx);
                 backlog(ctx.now, tab.fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?, q)?
@@ -1603,7 +1573,6 @@ impl Server<'_> {
         let menu = [
             json!({"label": "Fleets…", "tap": {"sheet": "/screens/fleets"}}),
             json!({"label": "Drive all now", "action": "drive-all"}),
-            json!({"label": "Legend [?]", "tap": {"sheet": "/screens/legend"}}),
         ];
         let badge = self.needs_count(ctx, &ev);
         json!({"type": "screen", "id": "queue", "title": "Queue", "stream": stream, "badge": badge,
