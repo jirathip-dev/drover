@@ -163,6 +163,7 @@
 4 scratch
 3 self_update
 3 serial_groups
+1 serve_conn
 2 serve_health
 3 serve_load
 1 serve_web
