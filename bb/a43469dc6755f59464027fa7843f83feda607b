@@ -1,0 +1,61 @@
+Decided: the scene's load level is held when the spawn gate refuses, busy from 0.5 load/limit, calm under 0.5
+Because: q2384
+Decided: one match in herd_screen picks both sky and load level from the same ratio, pressure and gate
+Because: "worked out in one place"
+Rejected: busy only at or over the limit, or on memory pressure — q2384 chose the 0.5 rule docs/themes.md already used
+Rejected: a pressure term in the level — warn or critical already sets the gate, crates/core/src/host.rs:389
+Decided: the unit test lives in crates/server/src/herd_tests.rs so screens.rs stays under its 2000-line size rule
+Because: .drover/arch.toml:192
+Check: the golden herd.json gains only "load": "calm" (the demo host sits at 0.48 load/limit)
+Owner: the Herd now tells themes calm, busy or held, the same way the weather and kitchen themes already read load
+
+Decided: the scene's load level is held when the spawn gate refuses, busy from 0.5 load/limit or on memory pressure warn or critical, calm otherwise
+Because: q2384
+Because: "busy = load at or over the limit, or memory pressure at warn or critical; calm = everything else"
+Decided: one match in herd_screen picks both sky and load level, so fog always pairs with busy
+Because: "worked out in one place"
+Rejected: calm for warn pressure under 0.5 load/limit — review round 1 FAIL, q2384 changed only the load threshold
+Check: herd_tests.rs expects busy for memory warn at load 0.1; the golden herd.json is unchanged
+Owner: tight memory now shows the host as busy, matching the fog in the weather theme
+
+Decided: the scene's load level is held when the spawn gate refuses, busy from 0.5 load/limit or on memory pressure warn or critical, calm otherwise
+Because: q2384
+Because: "busy = load at or over the limit, or memory pressure at warn or critical; calm = everything else"
+Decided: one match in herd_screen picks both sky and load level, so fog always pairs with busy
+Because: "worked out in one place"
+Rejected: calm for warn pressure under 0.5 load/limit — review round 1 FAIL, q2384 changed only the load threshold
+Check: herd_tests.rs expects busy for memory warn at load 0.1; the golden herd.json is unchanged
+Owner: tight memory now shows the host as busy, matching the fog in the weather theme
+
+Decided: the scene's load level is held when the spawn gate refuses, busy from 0.5 load/limit or on memory pressure warn or critical, calm otherwise
+Because: q2384
+Because: "busy = load at or over the limit, or memory pressure at warn or critical; calm = everything else"
+Decided: one match in herd_screen picks both sky and load level, so fog always pairs with busy
+Because: "worked out in one place"
+Rejected: calm for warn pressure under 0.5 load/limit — review round 1 FAIL, q2384 changed only the load threshold
+Check: herd_tests.rs expects busy for memory warn at load 0.1; the golden herd.json is unchanged
+Owner: tight memory now shows the host as busy, matching the fog in the weather theme
+
+Decided: the scene's load level is held when the spawn gate refuses, busy from 0.5 load/limit or on memory pressure warn or critical, calm otherwise
+Because: q2384
+Because: "busy = load at or over the limit, or memory pressure at warn or critical; calm = everything else"
+Decided: round 3 changes no code; it merges staging and pushes again for a fresh CI run
+Rejected: editing threads_tab or web code — the PR touches neither, so the ui-webkit dropdown failure is not from this diff
+Check: ui-webkit is green at the new head; herd_tests.rs still expects busy for memory warn at load 0.1
+Owner: no behaviour change this round, only a rerun of the browser check on current staging
+
+Decided: the scene's load level is held when the spawn gate refuses, busy from 0.5 load/limit or on memory pressure warn or critical, calm otherwise
+Because: q2384
+Because: "busy = load at or over the limit, or memory pressure at warn or critical; calm = everything else"
+Decided: round 3 changes no code; it merges staging and pushes again for a fresh CI run
+Rejected: editing threads_tab or web code — the PR touches neither, so the ui-webkit dropdown failure is not from this diff
+Check: ui-webkit is green at the new head; herd_tests.rs still expects busy for memory warn at load 0.1
+Owner: no behaviour change this round, only a rerun of the browser check on current staging
+
+Decided: the scene's load level is held when the spawn gate refuses, busy from 0.5 load/limit or on memory pressure warn or critical, calm otherwise
+Because: q2384
+Because: "busy = load at or over the limit, or memory pressure at warn or critical; calm = everything else"
+Decided: round 3 changes no code; it merges staging and pushes again for a fresh CI run
+Rejected: editing threads_tab or web code — the PR touches neither, so the ui-webkit dropdown failure is not from this diff
+Check: ui-webkit is green at the new head; herd_tests.rs still expects busy for memory warn at load 0.1
+Owner: no behaviour change this round, only a rerun of the browser check on current staging
