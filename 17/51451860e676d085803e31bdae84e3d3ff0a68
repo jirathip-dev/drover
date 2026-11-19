@@ -1,0 +1,7 @@
+Decided: a check lane missing from the listing is exited only after one stall window and while its host is not offline
+Because: "is not counted as exited while the host can't be read or the lane started less than one stall window ago"
+Decided: a supersede whose killed list holds the replaced lane is skipped in RESPAWN_LOOP's start count
+Because: "A supersede that finds the "lost" lane still live does not count as a failed start"
+Rejected: passing the per-host Sessions into waiting::scan — wider change; the cached host probe covers unreachable hosts
+Check: the waiting.rs fixture's #12 rev is moved past the 30-min stall window because the spec changed what counts as exited
+Owner: Remote reviewers are no longer killed a minute after start and no longer trip the keeps-failing card.
