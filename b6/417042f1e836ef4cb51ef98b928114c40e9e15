@@ -1,0 +1,11 @@
+Decided: each board GET is one build: gh cache files parsed once (gh::memo), shed listed once, fleet.toml parsed once per file stamp
+Because: "Each gh cache file parsed once per build."
+Because: q2042
+Decided: the live Queue cause is the gh cache, re-parsed ~4x per issue plus the backlog per spec-less row; 486 -> 36 ms on a 139 MB fixture
+Decided: SQLite connections pool process-wide; a pooled one still runs the user_version upgrade on checkout
+Because: crates/core/src/db.rs:90
+Rejected: keep thread-local connections — serve spawns a thread per request, so each request reopened the database
+Decided: hosts sheet reads leftovers and proxy facts kept by the host sampler, refresh and actions
+Because: "never from shed or leftovers on the request"
+Check: the live-state snapshot numbers were not taken: no snapshot exists on this lane host
+Owner: Queue opens about 13x faster on a live-shaped cache; live-state numbers still need the approved snapshot
