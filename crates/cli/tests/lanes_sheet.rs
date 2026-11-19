@@ -782,17 +782,17 @@ fn a_stream_the_client_left_frees_its_slot_within_two_seconds() {
         (first.and_then(Result::ok).unwrap_or_default(), s)
     };
     let mut left = vec![];
-    while left.len() < 5 {
+    while left.len() < 17 {
         let (head, s) = open();
         if !head.starts_with("HTTP/1.1 200 ") {
-            assert!(head.starts_with("HTTP/1.1 404 "), "{head}");
+            assert!(head.starts_with("HTTP/1.1 503 "), "{head}");
             break;
         }
         left.push(s);
     }
     assert!(
-        !left.is_empty() && left.len() <= 4,
-        "at most 4 streams at once: {}",
+        !left.is_empty() && left.len() <= 16,
+        "at most 16 streams a device at once: {}",
         left.len()
     );
     drop(left);
