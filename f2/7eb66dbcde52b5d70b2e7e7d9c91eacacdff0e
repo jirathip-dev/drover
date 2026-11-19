@@ -1,0 +1,13 @@
+Decided: each fleet's pass runs as its own process under its own lock and ends itself at pass_max_secs; the fast job and the tick only start passes.
+Because: "A pass per fleet, run as its own process with its own deadline"
+Decided: a kick's pass polls every host with no live stream before acting, as staging's kick did.
+Because: crates/core/src/drive.rs:827
+Rejected: reusing the fast job's saved view in a kick — it showed a reviewer's old verdict.md and escalated a fixed review to needs-human.
+Decided: the test helper detects a pass that already ran from its stamp file, not by reading the event log.
+Because: crates/cli/tests/common/mod.rs:410
+Decided: the exact sim golden is re-pinned (+1 s to merge, +6 s idle and lock wait).
+Because: crates/cli/tests/sim/main.rs:427
+Rejected: treating a recent failed call as host offline — it stopped the verdict-pickup-failed log a test relies on.
+Check: the four AC tests in crates/cli/tests/drive_loops.rs, and perf five_fleets: 1.8 s to 1.1 s median.
+Check: the shed missing-shed test fails on this host only because /usr/local/bin/shed exists; confirm CI is green.
+Owner: one project's stuck background check no longer delays the others; each is stopped at one minute.
