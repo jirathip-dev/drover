@@ -1,0 +1,12 @@
+Decided: every fleet-clone fetch goes through crate::clone::fetch, which holds a flock on <clone>/.git/drover-fetch.lock for the fetch and heals on a missing or bad object.
+Because: "one fetch of a clone at a time"
+Decided: the heal asks origin first (ls-remote), drops only remote-tracking refs to missing objects, runs fetch --refetch and fsck --connectivity-only.
+Because: "Never deletes a local branch, a worktree or anything not on origin: only remote-tracking refs and git's own leftover temp packs."
+Decided: a failed heal stays due in the state db (clone-heal:<dir>), so later fetches retry it and clone-broken alerts only once.
+Because: crates/core/src/clone.rs:21
+Decided: round 4 changes no code: the shard 4 red at f5d6c88 was a drive_kicks flake; CI at c647477 is green 13/13.
+Because: crates/cli/tests/common/mod.rs:18 points the test fleet at a path with no .git, so clone::lock is never taken in drive_kicks.
+Rejected: try_lock and skip — a skipped fetch fails the merge for that pass; the wait is bounded by the clock.
+Check: crates/cli/tests/clone_heal.rs builds a clone missing staging's tree with a ref to a missing commit; one drive pass heals and merges.
+Check: drive_kicks failing_retries_never_starve_another_fleets_start passes at c647477 in CI and 5/5 locally.
+Owner: a fleet clone that loses objects now fixes itself on the next fetch, and you get one alert only if origin cannot be reached.
