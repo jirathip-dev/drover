@@ -1,0 +1,6 @@
+Decided: no code change for the round-5 FAIL; merged current staging and pushed so CI runs again at the new head.
+Because: crates/cli/tests/phone_timings.rs:80
+Rejected: tuning the send path — staging 7fec655d failed the same 150 ms send gate (CI run 44614525857, 160 ms), so the flake predates this PR.
+Decided: stop tracking .drover/outbox.jsonl, a lane queue file the wip snapshot committed by mistake.
+Check: ui-webkit's phone timings job at 1ef09bae, and that .drover/outbox.jsonl is gone from the PR diff.
+Owner: The timing failure also happens on staging; this round only re-runs CI on a fresh merge and drops a stray file.
