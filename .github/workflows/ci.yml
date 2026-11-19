@@ -265,6 +265,13 @@ jobs:
           npx --prefix "$RUNNER_TEMP/pw" playwright install --with-deps webkit
           echo "NODE_PATH=$RUNNER_TEMP/pw/node_modules" >> "$GITHUB_ENV"
           NODE_PATH="$RUNNER_TEMP/pw/node_modules" node -e "require('playwright')"
+      - name: "#1423 evidence: the queue/steer and model-pick composer tests 10 times in a row"
+        run: |
+          cargo test --locked --test threads_tab --no-run
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            echo "run $i"
+            cargo test --locked --test threads_tab -- --exact parity_26_a_message_sent_while_working_queues_and_send_now_steers_it_in_webkit the_model_and_effort_picks_are_one_row_of_dropdowns_and_a_model_pick_reaches_the_bar_in_webkit
+          done
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
       - name: "phone timings on the large board (#1312, hard gate: tab, lane sheet, thread open, send and answer each a median <= 150 ms)"
