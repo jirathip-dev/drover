@@ -78,11 +78,7 @@ pub fn verdict(
         return refused("BAD_SHA", format!("--sha {sha} must be a full 40-hex commit sha"));
     }
     let evs = working(&ctx.state)?;
-    let reviewer = |e: &&Event| e.is("spawn", fleet, issue) && crate::events::checks(e);
-    let at = evs
-        .iter()
-        .rfind(reviewer)
-        .filter(|e| e.str("worktree").is_some_and(|w| file.starts_with(w)));
+    let at = reviewer_once(&evs, (fleet, issue), file, sha)?;
     let body = crate::link::read(ctx, cfg, r, at, file).with_context(|| format!("cannot read verdict file {file}"))?;
     anyhow::ensure!(!body.trim().is_empty(), "verdict file {file} is empty");
     if let Some(bad) = no_proof(&body).filter(|_| !pass) {
@@ -253,6 +249,31 @@ pub fn verdict(
     writeln!(out, "{kind} {}: {reason}", agent.unwrap_or_default())?;
     let d = json!({"agent": agent, "reason": reason});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d))
+}
+
+fn reviewer_once<'a>(
+    evs: &'a [Event],
+    (fleet, issue): (&str, u64),
+    file: &str,
+    sha: &str,
+) -> Result<Option<&'a Event>> {
+    let reviewer = |e: &&Event| e.is("spawn", fleet, issue) && crate::events::checks(e);
+    let at = evs
+        .iter()
+        .rfind(reviewer)
+        .filter(|e| e.str("worktree").is_some_and(|w| file.starts_with(w)));
+    let again = |sp: &Event| {
+        evs.iter().any(|e| {
+            e.seq > sp.seq
+                && e.is("verdict", fleet, issue)
+                && e.str("file") == Some(file)
+                && e.str("sha").is_some_and(|s| s.eq_ignore_ascii_case(sha))
+        })
+    };
+    if at.is_some_and(again) {
+        return refused("ALREADY_DONE", format!("skipped: {file} @ {sha} is recorded already"));
+    }
+    Ok(at)
 }
 
 fn passed(events: &[Event], s: &IssueState, head: &str) -> bool {
