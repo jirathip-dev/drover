@@ -1,0 +1,7 @@
+Decided: a screen stream reads the log's last seq before it builds its first screen, not after
+Because: crates/server/src/screens.rs:1916
+Because: q2044
+Rejected: retry the WebKit job as flaky — CI failed this branch's ui-webkit 4 times while staging stayed green, and a 2-CPU local run reproduced it at the old head
+Rejected: a new deterministic race test — it needs a hook inside the stream's build, which is production code added only for tests
+Check: `taskset -c 0,1 cargo test --locked --test threads_tab webkit -- --test-threads=1` fails before 03b97da and passes at it
+Owner: The live phone view no longer misses a change made just as a screen opens.
