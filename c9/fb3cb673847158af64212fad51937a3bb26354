@@ -1,0 +1,6 @@
+Decided: merge origin/staging 49f95b77; serve's sessions keep the view read and also fill staging's new short cache that recent_sessions reads.
+Because: crates/server/src/serve.rs:1824
+Decided: the lane sheet calls snapshot::lanes with ctx (this branch's signature); the new remote_sheet test takes the step's look before it reads, as every remote test here does.
+Because: crates/cli/tests/remote_sheet.rs:26
+Rejected: none
+Owner: brought the branch up to date with staging; no behaviour change beyond it.
