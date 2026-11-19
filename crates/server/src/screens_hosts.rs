@@ -1,4 +1,4 @@
-use super::{working, Config, Ctx, Result, Server};
+use super::{super::lock, working, Config, Ctx, Result, Server};
 use anyhow::Context;
 use serde_json::{json, Value};
 
@@ -45,9 +45,7 @@ fn host_row(name: &str, kind: &str, on: bool, lanes: usize, left: usize) -> Valu
 impl Server<'_> {
     pub(super) fn hosts_sheet(&self, ctx: &Ctx) -> Option<Value> {
         let (cfg, ev) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
-        let left = crate::session::live_on(&self.r).map_or(0, |a| {
-            crate::check::leftovers(ctx, &cfg, &self.r, &a, false).map_or(0, |l| l.len())
-        });
+        let (left, proxy) = lock(&self.hosts_read).clone();
         let rows: Vec<Value> = crate::hosts::cards(&cfg, &self.r)
             .into_iter()
             .map(|(name, h)| {
@@ -72,7 +70,7 @@ impl Server<'_> {
             "footer": "Tap a host for its buttons. Host history and charts live in Beacon.",
             "blocks": [{"type": "list", "id": "hosts-list", "rows": rows}]}),
         ];
-        if let Some(facts) = crate::proxy::status(ctx, &cfg, &self.r) {
+        if let Some(facts) = proxy {
             let mut rows: Vec<Value> = (facts.iter().enumerate())
                 .map(|(i, f)| json!({"type": "row", "id": format!("px-{i}"), "title": f}))
                 .collect();
@@ -82,6 +80,18 @@ impl Server<'_> {
                 "blocks": [{"type": "list", "id": "proxy-list", "rows": rows}]}));
         }
         Some(json!({"type": "sheet", "id": "hosts", "title": "Hosts", "cancel": "Close", "blocks": blocks}))
+    }
+
+    pub(crate) fn read_hosts(&self, now: u64) {
+        let Ok(cfg) = Config::kept(self.ctx) else { return };
+        let ctx = &Ctx {
+            now,
+            ..self.ctx.clone()
+        };
+        let left = crate::session::live_on(&self.r).map_or(0, |a| {
+            crate::check::leftovers(ctx, &cfg, &self.r, &a, false).map_or(0, |l| l.len())
+        });
+        *lock(&self.hosts_read) = (left, crate::proxy::status(ctx, &cfg, &self.r));
     }
 
     pub(super) fn proxy_how(ctx: &Ctx) -> Option<Value> {
