@@ -1,0 +1,5 @@
+Decided: fix round 6 merges origin/staging into the branch; this PR's test and ci.yml line are unchanged
+Because: q2176
+Rejected: editing threads_tab.rs — the two red tests pass in real WebKit at this head, so there is nothing to fix there
+Check: ui-webkit at 0cd702e35f1cfbf6b67ca42ebf98e71b517da34e; locally threads_tab webkit 10/10 and page_drafts 5/5 pass in playwright 1.63 WebKit
+Owner: the branch is up to date with staging; the regression test still guards typing in a thread
