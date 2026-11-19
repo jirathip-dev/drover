@@ -1755,3 +1755,127 @@ test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running tests/outbox.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1363/debug/deps/outbox-77f1914743ac8142)
 
 running 1 test
+test a_remote_lane_only_queues_and_drive_drains_it_once ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.43s
+
+     Running tests/overlap.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1363/debug/deps/overlap-c52d2e6877eac8a7)
+
+running 31 tests
+test a_branch_in_review_is_not_updated ... ok
+test a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses ... ok
+test a_second_pass_with_nothing_moved_starts_no_worktree ... ok
+test a_pure_merge_head_keeps_the_label_and_a_new_change_loses_it ... ok
+test a_verdict_naming_a_head_a_commit_moved_from_is_stale_and_none_means_the_spawn_head ... ok
+test a_verdict_naming_the_current_head_records_there_whatever_the_spawn_head ... ok
+test a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges ... ok
+test a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried ... ok
+test cap_check_reads_the_limit_from_config ... ok
+test cap_check_refuses_a_cap_edit_without_its_trailer ... ok
+test cap_check_reports_web_lines_without_capping_them ... ok
+test cap_check_takes_the_highest_raise_in_cap_d ... ok
+test cap_check_warns_within_reach_of_the_cap ... ok
+test a_written_verdict_is_recorded_before_the_update_in_the_same_pass ... ok
+test cap_log_prints_every_cap_change_from_git ... ok
+test cap_finds_the_repos_own_line_cap_script ... ok
+test behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is ... ok
+test cap_prints_the_queue_wide_view ... ok
+test cap_reports_a_script_it_cannot_parse ... ok
+test cap_runs_the_repos_line_cap_script_when_the_fleet_names_none ... ok
+test cap_shows_each_cap_a_script_prints ... ok
+test cap_uses_the_fleets_own_cap_script ... ok
+test conflicting_auto_update_spawns_an_update_lane ... ok
+test check_emits_cap_near_once_per_integration_sha ... ok
+test clean_auto_update_keeps_the_pass_and_spawns_no_lane ... ok
+test an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass ... ok
+test heads_up_reaches_a_working_lane_once ... ok
+test merge_tree_finds_the_pair_and_its_files_once ... ok
+test strict_rule_auto_updates_and_puts_the_merge_label_back ... ok
+test drive_merges_the_ready_pr_that_conflicts_with_nothing_first ... ok
+test gate_refuses_a_merge_head_that_adds_its_own_change ... ok
+
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.90s
+
+     Running tests/owner_extend.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1363/debug/deps/owner_extend-7a82a1f8818ca622)
+
+running 6 tests
+test a_board_tap_logs_and_requeues_at_once_and_never_bounces_on_a_running_drive ... ok
+test an_extend_out_of_the_queue_goes_last ... ok
+test a_hard_refusal_of_the_start_brings_the_card_back_naming_the_code ... ok
+test an_extend_requeues_at_its_old_place_spawns_nothing_and_drive_starts_it_in_turn ... ok
+test a_975_pending_extend_is_requeued_once_and_its_card_never_comes_back ... ok
+test a_paused_then_busy_extend_waits_hours_with_no_card_and_starts_after_resume_with_no_tap ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.51s
+
+     Running tests/page.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1363/debug/deps/page-5d4cdd112ef0aa58)
+
+running 1 test
+test parity_1_a_paired_phone_answers_settles_cards_pauses_stops_and_saves_fleets_through_the_page_and_paints_offline ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/page_drafts.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1363/debug/deps/page_drafts-d1375e5af87a322e)
+
+running 4 tests
+test a_blurred_composer_with_storage_full_keeps_its_text_and_a_repaint_keeps_every_node ... ok
+test a_send_shows_at_once_then_once_and_an_answered_card_goes_at_once_and_stays_gone ... ok
+test typed_text_focus_caret_and_scroll_survive_repaints_and_a_draft_survives_a_reload_until_sent ... ok
+test an_answered_card_leaves_the_cards_at_once_and_stays_gone_while_its_answer_runs ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/pair_status.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1363/debug/deps/pair_status-79bee7fcf685220b)
+
+running 3 tests
+test pair_status_says_whether_this_browser_is_paired ... ok
+test pairing_the_same_browser_again_keeps_one_row ... ok
+test parity_r3_a_database_error_is_503_never_401_and_each_refusal_logs_one_line ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/parity_check.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1363/debug/deps/parity_check-fd0bd95a2a9b75ea)
+
+running 3 tests
+test a_parity_test_in_no_row_fails ... ok
+test deleting_parity_38_fails_unless_its_row_is_dropped_with_an_owner_decision ... ok
+test this_repos_parity_list_names_every_parity_test ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/parity_webkit.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1363/debug/deps/parity_webkit-1cbecbf0e7669584)
+
+running 14 tests
+test issue_1290_a_slow_queue_after_a_thread_keeps_the_strip_off_its_header_and_tiles_unbroken ... ok
+test parity_19_a_fenced_block_copies_its_exact_text ... ok
+test done_today_opens_the_list_a_row_opens_its_issue_card_and_back_returns ... ok
+test parity_18_a_message_links_its_urls_and_thread_refs_and_keeps_its_markdown ... ok
+test parity_20_a_tapped_image_opens_fitted_in_the_viewer ... ok
+test parity_24_an_edge_swipe_past_40_percent_goes_back_to_the_list_where_it_was_and_a_short_one_stays ... ok
+test parity_24_opening_a_thread_pushes_history_and_back_returns_to_the_list ... ok
+test parity_28_a_long_press_offers_copy_copy_as_markdown_and_quote ... ok
+test parity_29_a_long_thread_shows_its_last_30_and_older_ones_load_on_scroll ... ok
+test parity_2_a_live_update_never_moves_the_scroll_or_replaces_a_kept_node ... ignored, red until #1084: a live update repaints every node
+test parity_35_handoff_chips_flow_back_lines_and_a_pick_a_thread_tap_that_delivers_once ... ok
+test parity_r25_a_sheet_closes_without_a_flash ... ok
+test parity_r4_in_a_thread_only_the_messages_scroll_and_the_composer_sits_at_the_bottom ... ok
+test parity_r5_a_slow_load_shows_the_strip_after_300ms_and_the_page_stays_tappable ... ok
+
+test result: ok. 13 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/parked.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1363/debug/deps/parked-3e42cbe281ab8e38)
+
+running 6 tests
+test a_fix_round_held_for_a_spawn_slot_is_not_parked ... ok
+test a_held_lane_reads_held_by_its_blocker_and_a_parked_pr_number_drops_off ... ok
+test gone_pane_with_safe_work_is_parked_dirty_is_dead ... ok
+test unpaused_fleet_resumes_a_parked_impl_to_review ... ok
+test parked_lane_alerts_once_and_never_stalls ... ok
+test cleaned_lane_of_a_closed_issue_is_not_dead ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/pass_budget.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1363/debug/deps/pass_budget-b51ade18943ffd25)
+
+running 2 tests
+test pass_profile_on_the_fixture_log ... ignored, profiling run: DROVER_PROFILE_RUNS
