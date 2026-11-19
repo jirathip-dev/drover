@@ -123,6 +123,8 @@ AC: it {works} \ `ok`
 - A second build or checkout (base, staging, head) goes under `$DROVER_SCRATCH_TARGET` only (builds with
   `CARGO_TARGET_DIR=$DROVER_SCRATCH_TARGET/target`, checkouts in `$DROVER_SCRATCH_TARGET/<name>`), never `/tmp`
   or `$TMPDIR`; it is deleted when your lane ends.
+- Logs and downloads (test, lint, CI output) go in your scratch folder `$DROVER_SCRATCH_TARGET`, never the
+  worktree.
 - #677: before `drover turn done`, write `why.md` in the worktree root (never commit it: drover puts it on your
   pushed head as a git note and copies it into the PR body). At most 15 `Key: text` lines, `Owner:` once and last:
   `Decided: …`, `Because: "spec quote" | q<id> | file:line`, `Rejected: alternative — why`,
