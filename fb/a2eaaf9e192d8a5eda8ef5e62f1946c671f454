@@ -1,0 +1,6 @@
+Decided: the level classes go on the .herd div the scene block draws, and the restored rules target .herd and .hsc
+Because: web/src/herd.ts:22
+Rejected: rules for .lds, .hqh, .hb and .hn .ask — the new page has none of these elements
+Rejected: per-rule reduced-motion lines — web/src/board.css:127 already stops every animation
+Check: kitchen held shows heat-held, its flames, the glow and the fan on an idle lane; garden shows one window layer per level
+Owner: The kitchen and garden Herd scenes move with the host's load again, as before #927.
