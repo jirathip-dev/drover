@@ -1,0 +1,53 @@
+Decided: a kick that holds its issue's spawn marker acts on the issue even while its launching pass still holds the per-issue drive lock
+Because: crates/core/src/drive.rs:1315
+Because: "A CI-only FAIL starts its fix round on the next pass, like a rev FAIL does."
+Rejected: dropping the per-issue lock before act in the pass loop — it also guards the merge, supersede and repro steps after act
+Rejected: retrying a busy lock as a kick follow-up — a 10 s retry can still lose to a slow pass, and the step stays silent
+Check: the launcher's lock is skipped only when SLOT is set, i.e. the kick holds spawn-<fleet>-<n>.pending, which the launcher took for exactly this spawn
+Check: tests make the parent pass's pid alive (kill -0, ps etime); before the fix the fix-round kick logs "its kick started nothing"
+Owner: after a red check on a passed PR, drive now starts the fix round on its next pass instead of leaving the issue for a hand spawn
+
+Decided: a kick that holds its issue's spawn marker acts on the issue even while its launching pass still holds the per-issue drive lock
+Because: crates/core/src/drive.rs:1315
+Because: "A CI-only FAIL starts its fix round on the next pass, like a rev FAIL does."
+Rejected: dropping the per-issue lock before act in the pass loop — it also guards the merge, supersede and repro steps after act
+Rejected: retrying a busy lock as a kick follow-up — a 10 s retry can still lose to a slow pass, and the step stays silent
+Check: the launcher's lock is skipped only when SLOT is set, i.e. the kick holds spawn-<fleet>-<n>.pending, which the launcher took for exactly this spawn
+Check: tests make the parent pass's pid alive (kill -0, ps etime); before the fix the fix-round kick logs "its kick started nothing"
+Owner: after a red check on a passed PR, drive now starts the fix round on its next pass instead of leaving the issue for a hand spawn
+
+Decided: a kick that holds its issue's spawn marker acts on the issue even while its launching pass still holds the per-issue drive lock
+Because: crates/core/src/drive.rs:1315
+Because: "A CI-only FAIL starts its fix round on the next pass, like a rev FAIL does."
+Rejected: dropping the per-issue lock before act in the pass loop — it also guards the merge, supersede and repro steps after act
+Rejected: retrying a busy lock as a kick follow-up — a 10 s retry can still lose to a slow pass, and the step stays silent
+Check: the launcher's lock is skipped only when SLOT is set, i.e. the kick holds spawn-<fleet>-<n>.pending, which the launcher took for exactly this spawn
+Check: tests make the parent pass's pid alive (kill -0, ps etime); before the fix the fix-round kick logs "its kick started nothing"
+Owner: after a red check on a passed PR, drive now starts the fix round on its next pass instead of leaving the issue for a hand spawn
+
+Decided: a kick that holds its issue's spawn marker acts on the issue even while its launching pass still holds the per-issue drive lock
+Because: crates/core/src/drive.rs:1315
+Because: "A CI-only FAIL starts its fix round on the next pass, like a rev FAIL does."
+Rejected: dropping the per-issue lock before act in the pass loop — it also guards the merge, supersede and repro steps after act
+Rejected: retrying a busy lock as a kick follow-up — a 10 s retry can still lose to a slow pass, and the step stays silent
+Check: the launcher's lock is skipped only when SLOT is set, i.e. the kick holds spawn-<fleet>-<n>.pending, which the launcher took for exactly this spawn
+Check: tests make the parent pass's pid alive (kill -0, ps etime); before the fix the fix-round kick logs "its kick started nothing"
+Owner: after a red check on a passed PR, drive now starts the fix round on its next pass instead of leaving the issue for a hand spawn
+
+Decided: a kick that holds its issue's spawn marker acts on the issue even while its launching pass still holds the per-issue drive lock
+Because: crates/core/src/drive.rs:1315
+Because: "A CI-only FAIL starts its fix round on the next pass, like a rev FAIL does."
+Rejected: dropping the per-issue lock before act in the pass loop — it also guards the merge, supersede and repro steps after act
+Rejected: retrying a busy lock as a kick follow-up — a 10 s retry can still lose to a slow pass, and the step stays silent
+Check: the launcher's lock is skipped only when SLOT is set, i.e. the kick holds spawn-<fleet>-<n>.pending, which the launcher took for exactly this spawn
+Check: tests make the parent pass's pid alive (kill -0, ps etime); before the fix the fix-round kick logs "its kick started nothing"
+Owner: after a red check on a passed PR, drive now starts the fix round on its next pass instead of leaving the issue for a hand spawn
+
+Decided: a kick that holds its issue's spawn marker acts on the issue even while its launching pass still holds the per-issue drive lock
+Because: crates/core/src/drive.rs:1315
+Because: "A CI-only FAIL starts its fix round on the next pass, like a rev FAIL does."
+Rejected: dropping the per-issue lock before act in the pass loop — it also guards the merge, supersede and repro steps after act
+Rejected: retrying a busy lock as a kick follow-up — a 10 s retry can still lose to a slow pass, and the step stays silent
+Check: the launcher's lock is skipped only when SLOT is set, i.e. the kick holds spawn-<fleet>-<n>.pending, which the launcher took for exactly this spawn
+Check: tests make the parent pass's pid alive (kill -0, ps etime); before the fix the fix-round kick logs "its kick started nothing"
+Owner: after a red check on a passed PR, drive now starts the fix round on its next pass instead of leaving the issue for a hand spawn
