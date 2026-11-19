@@ -1,0 +1,5 @@
+Decided: merge origin/staging (#1359) instead of rebasing; ci.yml regex keeps staging's line plus compose
+Because: web/src/blocks.ts:405
+Rejected: rebase — lanes never rewrite history or force-push
+Check: page_drafts compose test passes on staging's composer code
+Owner: the fix is already on staging; this PR now only adds the test that guards it
