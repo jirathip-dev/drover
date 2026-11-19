@@ -317,6 +317,10 @@ pub fn waiting_on(
     w
 }
 
+fn holds(ask: &Event, s: &IssueState) -> bool {
+    ask.data.get("extend").is_none() || s.state == "needs-human"
+}
+
 fn waits(
     log: &Log,
     events: &[Event],
@@ -363,7 +367,7 @@ fn waits(
     let cmd = |verb: &str, tail: &str| Some(format!("drover {verb} {f} {n}{tail}"));
     let mine =
         |a: &&Event| a.fleet == *f && (a.issue == Some(n) || s.lanes.values().any(|l| a.str("agent") == Some(l)));
-    if let Some(a) = log.asks.iter().copied().find(mine) {
+    if let Some(a) = log.asks.iter().copied().find(|a| mine(a) && holds(a, s)) {
         let id = a.str("id").unwrap_or("?");
         let next = crate::design::is_ask(a).then(|| format!("drover answer {f} {id} approve|revise|reject"));
         return w("owner", &format!("waiting on your answer ({id})"), a.ts, next);

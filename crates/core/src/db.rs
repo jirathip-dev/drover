@@ -132,15 +132,17 @@ fn open(state: &Path) -> Result<Connection> {
 
 fn upgrade(c: &mut Connection, state: &Path) -> Result<()> {
     let version = |c: &Connection| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0));
-    if version(c)? < 2 {
+    if version(c)? < 3 {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if version(&tx)? < 1 {
             offload_all(&tx, state)?;
         }
         if version(&tx)? < 2 {
             tx.execute_batch(&format!("DROP TABLE lanes; {SCHEMA}"))?;
+        }
+        if version(&tx)? < 3 {
             rebuild_in(&tx, state)?;
-            tx.pragma_update(None, "user_version", 2)?;
+            tx.pragma_update(None, "user_version", 3)?;
         }
         tx.commit()?;
     }
@@ -246,18 +248,19 @@ fn project_ask(c: &Connection, e: &Event) -> Result<()> {
         return Ok(());
     }
     let issue = e.issue.and_then(|n| i64::try_from(n).ok()).map(Sql::Integer);
-    let relaunch = issue.clone().filter(|_| e.kind == "spawn");
+    let went_on = issue.clone().filter(|_| events::went_on(&e.kind));
     let (col, key, floor) = match e.kind.as_str() {
         "decision" | "ask-withdrawn" | "ask-delivered" | "ask-failed" | "ask-expired" => ("id", text("id"), 0),
         "merged" | "closed" | "closed-other" | "clean" if issue.is_some() => ("issue", issue.unwrap_or(Sql::Null), 5),
         "spawn" | "lane-killed" => ("agent", text("agent"), 7),
+        _ if went_on.is_some() => ("issue", went_on.clone().unwrap_or(Sql::Null), 7),
         _ => return Ok(()),
     };
     let q = format!("SELECT seq, json, rank FROM asks WHERE fleet = ?1 AND ({col} IS ?2 OR issue = ?5 AND agent IS NULL) AND (rank IS NULL OR rank BETWEEN ?3 AND ?4)");
     let found: Vec<(u64, String, Option<usize>)> = {
         let mut q = c.prepare(&q)?;
         let all = q.query_map(
-            params![e.fleet, key, floor + 1, events::ORDER.len() - 2, relaunch],
+            params![e.fleet, key, floor + 1, events::ORDER.len() - 2, went_on],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
         all.collect::<rusqlite::Result<_>>()?
