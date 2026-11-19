@@ -1311,9 +1311,10 @@ fn pass(
         .filter(|(s, w)| s.fleet == fleet && !(fast && s.done()) && s.lane.as_ref() == Some(&w.lane))
     {
         let lock = format!("drive-{fleet}-{}.lock", s.issue);
-        let Some(_mine) = take(ctx, r, &lock, STALE_LOCK_SECS, fleet) else {
+        let mine = take(ctx, r, &lock, STALE_LOCK_SECS, fleet);
+        if mine.is_none() && !SLOT.get() {
             continue;
-        };
+        }
         let mut pr = gh::cached_pr(ctx, fleet, s.issue);
         crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
         let ci = gh::ci(&gh::required(pr.at("statusCheckRollup"), f.checks(&pr)));
