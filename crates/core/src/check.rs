@@ -93,8 +93,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             }
         }
     }
-    let stall = cfg.limits.stall_minutes * 60;
-    let remote = crate::hosts::survey(ctx, cfg, r, false);
+    let (stall, remote) = (cfg.limits.stall_minutes * 60, crate::hosts::survey(ctx, cfg, r, false));
     crate::session::stamp::observe(ctx, cfg, r, &sessions)?;
     let events = working(&ctx.state)?;
     crate::cloud::tick(ctx, cfg, r, &remote, out)?;
