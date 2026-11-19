@@ -86,7 +86,7 @@ fn the_door_runs_the_phones_handler_with_its_permissions_and_refusals() {
     let stamp = door.stamp();
     let drop17 = json!({"screen": "queue", "block": "q-sendmeter-17", "action": "drop", "values": {"fleet": "sendmeter", "issue": 17}});
     let done = door.act(T, &drop17).unwrap();
-    assert!(!done.toast.is_empty());
+    assert_ne!(done.toast, "");
     let last = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!((last.kind.as_str(), last.val("op")), ("queue", &json!("rm")));
     assert_ne!(door.stamp(), stamp, "the stamp moves with the log");

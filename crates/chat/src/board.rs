@@ -354,6 +354,9 @@ impl<'s, 'e> Board<'s, 'e> {
             Does::Set(name, v) => {
                 self.top_mut().ui.edits.insert(name, v);
             }
+            Does::Send(_) if self.pick.is_some() => {
+                self.said = Some(("one action at a time: the last one is still running".into(), st(AMBER)));
+            }
             Does::Send(_) => {
                 self.pick = Some(Pick {
                     act: a,
