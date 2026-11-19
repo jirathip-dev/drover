@@ -1,0 +1,10 @@
+Decided: heavy.rs jobs start in their own process group, held by a Job whose Drop SIGKILLs the group, so a panic or failed assert ends the job too
+Because: "the test kills its children on every exit path, a panic included"
+Decided: the job script counts to a 10 s deadline and stops at once when its own script file is gone, exiting 1 so finish() catches a missed go-file
+Because: "it exits after a few seconds without its file, and when its folder is gone"
+Decided: an arch-check ban on `do sleep` under crates/*/tests, named in .drover/rules.md; the bounded form puts the ready test before the sleep
+Because: "No test script under `crates/*/tests` has a wait loop without a deadline"
+Rejected: a regex/AST check for loops without counters — arch-check bans are substring-only; one substring covers the only form the tests used
+Rejected: changes to dsh.rs and repro.rs — they drive fake runners and start no real waiting process; other test sleeps are one-shot `exec sleep N`
+Check: a_dropped_job_ends_with_its_harness fails at commit 1 (job outlives its harness) and passes at the head
+Owner: test jobs can no longer outlive a crashed test run; the stray "sh test.sh" loops on the hosts stop for good
