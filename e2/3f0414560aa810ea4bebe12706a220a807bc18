@@ -1,0 +1,7 @@
+Decided: no code change this round; merge origin/staging (bba43469), which carries #1423's fix for the stream race that failed parity_26 at d96df1a6
+Because: crates/server/src/screens.rs:1327
+Because: "the card goes within one stream update"
+Rejected: changing threads_tab parity_26 or the composer — the failure is staging's first-frame stream race (#1423), not this PR's kids change, which only branches on a top-level array
+Check: CI at e23f0414 is all green, ui-webkit and test (shard 3/4) included
+Check: page_drafts a_settled still fails at 4c006d2e and passes at the head
+Owner: settled config, secret and run cards leave the page by themselves; this round only took staging's fix for an unrelated flaky check
