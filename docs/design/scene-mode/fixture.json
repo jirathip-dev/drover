@@ -1,0 +1,42 @@
+{
+  "type": "screen",
+  "id": "scene",
+  "title": "Scene",
+  "blocks": [
+    {
+      "type": "scene",
+      "id": "scene",
+      "art": { "repo": "jirathip-dev/swag", "commit": "68c01f0ebe83bd81e0f056714a23e8f0f95b556d", "dir": "legacy-board/farm", "sums": "SHA256SUMS" },
+      "weather": { "sky": "windy", "wind": 0.62, "fog": 0, "storm": false, "line": "load 4.96 · mem normal · swap 0" },
+      "repos": [
+        {
+          "id": "acme-api", "title": "acme-api", "color": "g", "subtitle": "3 queued·1 blocked·3 working·1 idle·1 done",
+          "needs": [{ "issue": 22, "line": "#22 · needs-human · review round 3 of 3", "button": "one more round" }],
+          "blocks": [
+            { "type": "section", "id": "acme-api-queued", "header": "queued", "rows": [
+              { "id": "q21", "title": "#24", "figure": { "state": "queued" }, "subtitle": "" },
+              { "id": "q25", "title": "#25", "figure": { "state": "queued" }, "subtitle": "blocked by #21", "tone": "r" },
+              { "id": "q26", "title": "#26", "figure": { "state": "queued" }, "subtitle": "" }
+            ] },
+            { "type": "section", "id": "acme-api-working", "header": "working", "rows": [
+              { "id": "acme-api-impl-21", "title": "acme-api-impl-21", "figure": { "state": "working", "act": "impl", "coat": 4 }, "subtitle": "plough", "tone": "g", "value": "14m", "host": "mini" },
+              { "id": "acme-api-fix-19", "title": "acme-api-fix-19", "figure": { "state": "working", "act": "fix", "coat": 1 }, "subtitle": "farrier", "tone": "g", "value": "3m", "host": "mini" },
+              { "id": "acme-api-rev-18", "title": "acme-api-rev-18", "figure": { "state": "working", "act": "rev", "coat": 3 }, "subtitle": "vet", "tone": "g", "value": "6m", "host": "linux-1" }
+            ] },
+            { "type": "section", "id": "acme-api-idle", "header": "idle", "rows": [
+              { "id": "acme-api-impl-17", "title": "acme-api-impl-17", "figure": { "state": "idle", "act": "idle", "coat": 0 }, "subtitle": "grazing", "tone": "m", "value": "41m", "host": "mini" }
+            ] },
+            { "type": "section", "id": "acme-api-done", "header": "done", "rows": [
+              { "id": "acme-api-rev-16", "title": "acme-api-rev-16", "figure": { "state": "done", "act": "done", "coat": 7 }, "subtitle": "PASS", "tone": "g", "value": "1h", "host": "mini" }
+            ] },
+            { "type": "section", "id": "acme-api-blocked", "header": "blocked/dead", "rows": [
+              { "id": "acme-api-impl-22", "title": "acme-api-impl-22", "figure": { "state": "blocked", "act": "blocked", "coat": 2 }, "subtitle": "needs you", "tone": "r", "value": "2h", "host": "mini", "needs": 22 }
+            ] }
+          ]
+        },
+        { "id": "acme-web", "title": "acme-web", "color": "l", "subtitle": "2 working", "needs": [], "blocks": [] },
+        { "id": "others", "title": "Others", "color": "", "subtitle": "1 idle", "needs": [], "blocks": [] }
+      ]
+    }
+  ]
+}
