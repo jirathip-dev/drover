@@ -195,3 +195,16 @@ fn overload_minutes_comes_from_the_config() {
     run(&c, &f, &["check"]);
     assert_eq!(overloads(&c).len(), 1);
 }
+
+#[test]
+fn a_missing_tool_names_itself_on_the_load_line() {
+    let (c, _sh, f, _) = setup("top-missing-tool", "");
+    let f = f.once("sysctl -n vm.loadavg", 127, "");
+    let (code, out) = run(&c, &f, &["top"]);
+    assert_eq!(code, 0, "{out}");
+    let first = out.lines().next().unwrap();
+    assert!(
+        first.starts_with("? load/cpu — sysctl not found (limit 2.5) · "),
+        "{out}"
+    );
+}

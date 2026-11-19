@@ -106,7 +106,29 @@ fn here(c: &mut Command) -> &mut Command {
     if !std::env::current_dir().is_ok_and(|d| d.is_dir()) {
         c.current_dir("/");
     }
-    c
+    c.env("PATH", system_path())
+}
+
+fn system_path() -> std::ffi::OsString {
+    let path = crate::config::env_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into());
+    let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
+    for d in ["/usr/sbin", "/sbin"] {
+        if !dirs.iter().any(|p| p.as_os_str() == d) {
+            dirs.push(d.into());
+        }
+    }
+    std::env::join_paths(dirs).unwrap_or(path)
+}
+
+/// True when the program could not be found: the spawn's `NotFound` or a shell's 127.
+pub fn not_found(o: &Result<Out>) -> bool {
+    match o {
+        Ok(o) => o.code == 127,
+        Err(e) => e.chain().any(|c| {
+            c.downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        }),
+    }
 }
 
 pub struct Real;

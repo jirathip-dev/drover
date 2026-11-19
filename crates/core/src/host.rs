@@ -192,6 +192,16 @@ pub struct Host {
     pub mem_total_gb: Option<f64>,
     /// The 3 busiest processes drover did not start, `name cpu%`.
     pub top: Vec<String>,
+    /// The probe tools the shell could not find.
+    pub missing: Vec<String>,
+}
+
+impl Host {
+    /// The first of `tools` the sample could not find, as `<tool> not found`.
+    pub fn not_found(&self, tools: &[&str]) -> Option<String> {
+        let tool = self.missing.iter().find(|m| tools.contains(&m.as_str()));
+        tool.map(|t| format!("{t} not found"))
+    }
 }
 
 fn procs(ps: &str) -> Vec<(u64, u64, f64, String)> {
@@ -301,7 +311,12 @@ pub fn sample(r: &dyn Runner) -> Host {
             )
         })
         .collect();
-    let mut outs = crate::snapshot::batch(r, &lines).into_iter();
+    let ran = crate::snapshot::exits(r, &lines);
+    let missing: Vec<String> = (PROBES.iter().zip(&ran))
+        .filter(|(_, (_, code))| *code == Some(127))
+        .filter_map(|(p, _)| p.first().map(|t| (*t).to_string()))
+        .collect();
+    let mut outs = (ran.into_iter()).map(|(o, code)| o.filter(|_| code == Some(0)));
     let mut next = || outs.next().flatten();
     let (pressure, vm, load, ncpu, ps, size) = (next(), next(), next(), next(), next(), next());
     let pressure = pressure.and_then(|s| {
@@ -335,6 +350,7 @@ pub fn sample(r: &dyn Runner) -> Host {
         free_mem_gb: mem_gb(&vm).or_else(|| Some(word(&avail, 1)? / 1_048_576.0)),
         mem_total_gb: size,
         top,
+        missing,
         ..Host::default()
     }
 }

@@ -166,7 +166,7 @@ fn the_ask_ends_with_a_new_lane(name: &str, how: &[&str]) {
     assert!(!open(&c, &r), "{how:?}: the ask closes");
     let all = ok(&c, &r, &["asks", "sendmeter", "--all"]);
     let row = all.lines().find(|l| l.contains("q5")).unwrap_or_default();
-    assert!(row.contains("closed: lane gone"), "{how:?}: {all}");
+    assert!(row.contains("closed: superseded"), "{how:?}: {all}");
     assert!(!says_waiting(&c, &r), "{how:?}: no lane waits on q5");
 }
 

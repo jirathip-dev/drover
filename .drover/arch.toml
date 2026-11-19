@@ -187,6 +187,27 @@ paths = ["crates/*/src/**"]
 except = ["crates/core/src/clock.rs"]
 reason = "#809: time is read and waited on only in core's clock (crate::clock::instant)"
 
+[[ban]]
+pattern = "ratatui"
+paths = ["crates/*/src/**"]
+except = ["crates/chat/src/**"]
+reason = "#1354: only the terminal app draws; the screens stay data"
+
+[[ban]]
+pattern = "/screens/"
+paths = ["crates/chat/src/**"]
+reason = "#1354: the terminal names no screen: paths and places come from serve::Local"
+
+[[ban]]
+pattern = "TcpStream"
+paths = ["crates/chat/src/**"]
+reason = "#1354: the terminal calls the screens in-process (serve::Local), never over HTTP"
+
+[[ban]]
+pattern = "Server"
+paths = ["crates/chat/src/**"]
+reason = "#1354: the terminal uses serve::Local, the screens' in-process door, never the HTTP server"
+
 [[size]]
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000
@@ -273,3 +294,8 @@ reason = "#1309: a lane fact is read from link::view::View; only link lists anot
 pattern = "do sleep"
 paths = ["crates/*/tests/**"]
 reason = "#1364: a test's wait loop has a deadline (for i in $(seq N); do [ ready ] && break; sleep 0.05; done) so an orphaned job ends; its harness kills the job's process group on drop"
+
+[[ban]]
+pattern = "tokio"
+paths = ["crates/core/src/**", "crates/sys/src/**"]
+reason = "#1318 (q2044): tokio is serve's and service's transport; core and sys stay synchronous"

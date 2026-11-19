@@ -22,7 +22,10 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     if !config_only {
         let sample = crate::host::sample(r);
         let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.load_per_cpu.is_some();
-        row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH");
+        match sample.not_found(&["sysctl", "vm_stat"]).filter(|_| !host) {
+            Some(why) => rows.push(format!("? host — {why}")),
+            None => row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH"),
+        }
         let gh = ok(r, "gh", &["auth", "status"]).is_ok();
         row(&mut rows, gh, '✗', "gh — auth status → gh auth login");
     }
@@ -420,8 +423,12 @@ pub fn serve_down(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<String> {
 
 fn serve_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>, addr: &str) {
     let line = format!("serve — listening on {addr} → drover serve --addr {addr}");
-    let up = ok(r, "lsof", &["-nP", "-iTCP:7777", "-sTCP:LISTEN"]).is_ok();
-    row(rows, up, '✗', &line);
+    let lsof = r.run("lsof", &argv(&["-nP", "-iTCP:7777", "-sTCP:LISTEN"]));
+    if crate::runner::not_found(&lsof) {
+        rows.push("? serve — lsof not found".into());
+    } else {
+        row(rows, lsof.is_ok_and(|o| o.code == 0), '✗', &line);
+    }
     let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
     let (at, job) = (cfg.serve.addr(), crate::timer::job_pid(ctx, r, label));
     let held = crate::timer::listeners(r, &at);
