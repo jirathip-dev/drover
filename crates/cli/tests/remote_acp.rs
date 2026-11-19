@@ -204,6 +204,9 @@ impl Runner for Boat<'_> {
         self.run_in(prog, args, "")
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        if let Some(o) = boat(self, prog, args, input) {
+            return o;
+        }
         if prog == "ssh" && args.iter().any(|a| a == "--") {
             let m = args[args.len() - 3].clone();
             self.f

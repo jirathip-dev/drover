@@ -253,6 +253,23 @@ except = ["crates/core/src/release.rs"]
 reason = "#1275: only core::release knows where a build is published"
 
 [[ban]]
+pattern = "outbox.jsonl"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/outbox.rs", "crates/core/src/link/**"]
+reason = "#1309: a lane's outbox is written by core::outbox and read by core::link only"
+
+[[ban]]
+pattern = "lane_view"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/link/**", "crates/core/src/db.rs"]
+reason = "#1309: the view is written by link::intake and read through link::view::View"
+
+[[ban]]
+pattern = "hosts::On"
+paths = ["crates/core/src/waiting.rs", "crates/core/src/session/list.rs"]
+reason = "#1309: a lane fact is read from link::view::View; only link lists another host's sessions"
+
+[[ban]]
 pattern = "do sleep"
 paths = ["crates/*/tests/**"]
 reason = "#1364: a test's wait loop has a deadline (for i in $(seq N); do [ ready ] && break; sleep 0.05; done) so an orphaned job ends; its harness kills the job's process group on drop"

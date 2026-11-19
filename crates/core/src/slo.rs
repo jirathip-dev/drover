@@ -40,15 +40,9 @@ struct Breach {
 }
 
 /// Each fleet SLO: its known heal first; `stuck` a pass later only when drive itself is broken.
-pub fn pass(
-    ctx: &Ctx,
-    cfg: &Config,
-    (r, seen): (&dyn Runner, &dyn Runner),
-    out: &mut dyn Write,
-    fleets: &[&str],
-) -> Result<()> {
+pub fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleets: &[&str]) -> Result<()> {
     let events = crate::events::working(&ctx.state)?;
-    let agents = crate::session::all(cfg, seen).checked()?.running();
+    let agents = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?.running();
     let mut now: Vec<Breach> = tick(ctx, cfg, r).into_iter().collect();
     for f in fleets {
         now.extend(idle(ctx, cfg, &events, &agents, f));
@@ -480,7 +474,7 @@ fn errors(ctx: &Ctx, events: &[Event], fleet: &str) -> Vec<Breach> {
 /// A stuck card's [force]: the issue's `drover waiting` next command, once, with `--force`.
 pub fn force(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, (fleet, n): (&str, u64)) -> Result<String> {
     let events = crate::events::working(&ctx.state)?;
-    let agents = crate::session::all(cfg, r).checked()?.running();
+    let agents = crate::link::fresh(ctx, cfg, r)?.sessions().checked()?.running();
     let rows = crate::waiting::scan(ctx, cfg, r, &events, &agents, false, Some(fleet));
     let next = rows
         .into_iter()
