@@ -291,6 +291,9 @@ impl Server<'_> {
         super::jobs::ready(ctx, f)?;
         let (res, later) = crate::orchestrator::deferred(|| self.work(ctx, f));
         self.later(ctx, later);
+        if let Err(e) = &res {
+            self.refused_tap(ctx, f, e);
+        }
         res
     }
 

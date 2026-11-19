@@ -723,7 +723,7 @@ pub(crate) fn answer_with(
         gate::park(ctx, cfg, r, out, (fleet, n), by, None)?;
     } else if let Some(n) = extend.filter(|_| last.is_none()) {
         let spawn = *ask.val("spawn") != json!(false);
-        gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, by, None))?;
+        gate::extend_ask(ctx, cfg, r, out, (fleet, n), (spawn, by))?;
     }
     let mut d =
         json!({"id": id, "ask_seq": ask.seq, "choice": text, "by": by, "basis": basis, "note": note, "via": via});
