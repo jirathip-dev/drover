@@ -1,7 +1,7 @@
 # #264: core (state, gates, commands) <- server (the phone page) <- service (#345) <- cli (the `drover` binary);
 # docs/architecture.md.
 [workspace]
-members = ["crates/sys", "crates/core", "crates/server", "crates/service", "crates/cli"]
+members = ["crates/sys", "crates/core", "crates/server", "crates/service", "crates/chat", "crates/cli"]
 resolver = "2"
 
 [workspace.package]
@@ -45,6 +45,8 @@ aes-gcm = "0.11.1"
 anyhow = "1"
 base64 = "0.23.1"
 clap = { version = "4", features = ["derive"] }
+# #1352: `drover chat` draws full screen with ratatui over its crossterm backend (crates/chat only; owner-approved, q2151).
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 # #1314: gzip for serve's responses and SSE streams (owner-approved, q2018); the pure-Rust miniz_oxide backend.
 flate2 = "1"
 hkdf = "0.13.0"
@@ -66,6 +68,7 @@ drover-sys = { path = "crates/sys" }
 drover-core = { path = "crates/core" }
 drover-server = { path = "crates/server" }
 drover-service = { path = "crates/service" }
+drover-chat = { path = "crates/chat" }
 
 [profile.release]
 lto = "thin"

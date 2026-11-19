@@ -1199,7 +1199,12 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             Some(m)
         }
         "thread-model" => Some(json!({"ts": e.ts, "from": "system", "text": picked(e)})),
-        "run-card" => Some(json!({"ts": e.ts, "from": "orchestrator", "text": crate::card::text(e)})),
+        "run-card" => {
+            let open = crate::card::settled(events, e.str("id").unwrap_or_default()).is_none();
+            Some(
+                json!({"ts": e.ts, "from": "orchestrator", "text": crate::card::text(e), "card": e.data, "open": open}),
+            )
+        }
         "timer-install" => {
             let (by, w, l) = (e.str("by").unwrap_or("?"), &e.val("written"), &e.val("reloaded"));
             let text = format!("{by} ran `drover timer install`: wrote {w}, reloaded {l}");
@@ -1220,7 +1225,7 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             let lane = if e.kind == "ask-owner" { lane_of(events, e)? } else { e };
             let open = events::closed(events, lane).is_none();
             Some(
-                json!({"ts": e.ts, "from": "orchestrator", "ask": e.str("id"), "question": e.str("question"),
+                json!({"ts": e.ts, "from": "orchestrator", "ask": e.str("id"), "fleet": lane.fleet, "question": e.str("question"),
                 "options": opts, "recommend": e.val("recommend"), "open": open}),
             )
         }
