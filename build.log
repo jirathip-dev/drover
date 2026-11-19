@@ -1,0 +1,5 @@
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1309/crates/server)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1309/crates/cli)
+   Compiling drover-chat v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1309/crates/chat)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1309/crates/service)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 41s

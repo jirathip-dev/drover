@@ -1,0 +1,4 @@
+src lines (formatted): 55408 / cap 55500
+cap raised by ci/cap.d/2026-11-19-55500.toml
+web lines (TypeScript, soft budget, not capped): 1470
+WARN: 92 lines of headroom (< 500)
