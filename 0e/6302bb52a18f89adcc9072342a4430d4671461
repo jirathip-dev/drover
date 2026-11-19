@@ -1,0 +1,12 @@
+Decided: a check's conclusion decides green or failed before its status is read; status only says pending when no conclusion came.
+Because: "A check that has a conclusion counts as finished, whatever its status says."
+Decided: drive, on a ready PR with pending CI, reads the workflow run of each check pending past ci_stuck_minutes and re-runs its job once a head when the run completed that long ago.
+Because: crates/core/src/drive.rs:1566
+Decided: the re-run logs a passive ci-rerun; the next stuck pass emits one ci-stuck push alert, both keyed by head sha and check name.
+Because: crates/core/src/gh.rs:644
+Decided: new limit ci_stuck_minutes, default 30, listed by config show and docs/config.md.
+Because: crates/core/src/config.rs:826
+Rejected: re-run any check pending past the limit without reading its run — a slow job still running would be restarted.
+Rejected: alert from drover check — drive already holds the PR and runner at this step, so one place owns both re-run and alert.
+Check: the run lookup is one gh api call per pending check older than the limit, only on ready PRs, so a normal PR costs no extra calls.
+Owner: a check GitHub forgot to close no longer holds a passed PR; drive re-runs it once and tells you if that did not help.
