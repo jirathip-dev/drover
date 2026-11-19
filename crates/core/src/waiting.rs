@@ -655,6 +655,7 @@ pub fn scan_where(
 ) -> Vec<(IssueState, Waiting)> {
     let (mut out, log) = (vec![], Log::new(events));
     let view = crate::link::view::View::load(ctx, cfg).ok();
+    let listed = view.as_ref().map(crate::link::view::View::sessions).unwrap_or_default();
     let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());
     let hung = crate::roots::hung_now(events);
     let mine = |st: &crate::events::States| {
@@ -799,7 +800,9 @@ pub fn scan_where(
         let built = s.build.as_ref().and_then(|b| s.lanes.get(b)).unwrap_or(&lane).clone();
         let sp = last_spawn(mine, &built);
         let unconfirmed = sp.and_then(|e| e.data.get("confirmed")) == Some(&Value::Bool(false));
-        let gone = !agents.iter().any(|a| a.name == built);
+        let unread = |m: &&str| matches!(listed.seen(&built, Some(m)), crate::session::Seen::Unreachable);
+        let unknown = sp.and_then(|e| e.str("machine")).filter(unread);
+        let gone = !agents.iter().any(|a| a.name == built) && unknown.is_none();
         let settled = || {
             sp.is_some_and(|e| ctx.now >= e.ts + 120)
                 && !crate::drive::pending(ctx, cfg, r)
@@ -866,6 +869,10 @@ pub fn scan_where(
             } else {
                 format!("{why}{NO_PUSH}respawning {role}")
             };
+        }
+        if let Some(m) = unknown.filter(|_| idle) {
+            (w.who, w.next_cmd, w.promise) = ("none", None, None);
+            w.what = format!("lane unknown: {m}'s shed listing unreadable");
         }
         if let Some(h) = crate::hosts::offline(ctx, Some(cfg), sp).filter(|_| s.active_lane().is_some()) {
             (w.who, w.what, w.next_cmd, w.promise) = ("none", h, None, None);
