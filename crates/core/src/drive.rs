@@ -1379,6 +1379,7 @@ fn pass(
             )?;
         } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE && !fast {
             crate::lesson::idle_done(ctx, cfg, r, out, (fleet, s.issue), s.build.as_deref())?;
+        } else if !fast && pickup::stuck(ctx, cfg, out, f, (&events, &agents), (s, w))? {
         } else if w.who == "drive" {
             let gone = w.what.split_once(waiting::NO_PUSH);
             let ends =
@@ -1444,10 +1445,7 @@ fn pass(
                 save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
-            if step == "verdict" && matches!(code, Some("ERROR" | "EXIT")) {
-                let why = last_why(fleet).unwrap_or_default();
-                pickup::failed(ctx, out, &events, (fleet, s.issue, &w.lane), &why)?;
-            }
+            pickup::after(ctx, out, &events, (w, step), code)?;
             let stale = (code == Some("LANE_LIVE") && step == "review")
                 .then(|| s.lanes.get(arg(3)))
                 .flatten()
