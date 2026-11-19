@@ -1,5 +1,7 @@
+mod acp_listing;
 mod common;
 mod lane_states;
+use acp_listing::acp_fake;
 use common::*;
 use drover::events::Event;
 use drover::hosts::On;
@@ -262,16 +264,6 @@ fn acp_config(sock: &std::path::Path, harness: &str) -> String {
 }
 
 const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
-
-fn acp_fake(adapter: &[&str]) -> Fake {
-    let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
-    spawn_fake()
-        .reply("shed help run", "--meta <JSON>")
-        .reply("shed agents --json", &agents.to_string())
-        .reply("shed run", "")
-        .reply("shed send", "")
-        .reply("shed cancel", "")
-}
 
 static META: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     let global = drover::config::home().join(".claude/CLAUDE.md");
