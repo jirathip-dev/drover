@@ -1220,14 +1220,8 @@ pub fn spawn(
 
     lane_admit(ctx, (cfg, r), &events, (fleet, issue, role), o.force)?;
     respawn_guard(ctx, cfg, &events, (fleet, issue, role))?;
-    let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
-    if o.update && updates >= f.flow().update_limit() {
-        let why = format!(
-            "PR still conflicts after {updates}/{} update rounds",
-            f.flow().update_limit()
-        );
-        event("needs-human", json!({"code": "UPDATE_LIMIT", "reason": why}))?;
-        return refused("UPDATE_LIMIT", why);
+    if o.update {
+        update_guard(ctx, cfg, &events, (fleet, issue), f.flow().update_limit())?;
     }
 
     let refusal = match &placed {
@@ -1668,6 +1662,30 @@ fn starts<'a>(
         }
     }
     (v, asked)
+}
+
+fn update_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue): (&str, u64), limit: u32) -> Result<()> {
+    let (updates, extra) = fold(events)
+        .remove(&(fleet.into(), issue))
+        .map_or((0, 0), |s| (s.updates, s.update_extra));
+    let limit = limit.saturating_add(extra);
+    if updates < limit {
+        return Ok(());
+    }
+    let why = format!("PR still conflicts after {updates}/{limit} update rounds");
+    let turn = ["spawn", "needs-human", "round-extended"];
+    let held = (events.iter().rev())
+        .filter(|e| e.fleet == fleet && e.issue == Some(issue))
+        .find(|e| turn.contains(&e.kind.as_str()));
+    if held.is_none_or(|e| e.kind == "spawn") {
+        let d = json!({"code": "UPDATE_LIMIT", "reason": why});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, Some(issue), "needs-human", d),
+        )?;
+    }
+    refused("UPDATE_LIMIT", why)
 }
 
 fn respawn_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue, role): (&str, u64, &str)) -> Result<()> {

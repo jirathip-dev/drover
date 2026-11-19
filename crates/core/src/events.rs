@@ -422,6 +422,8 @@ pub struct IssueState {
     /// Passed `--update` rounds, apart from `rounds`; `updating` while one is open (state `fix(n)+uk`).
     pub updates: u32,
     pub updating: bool,
+    /// Update rounds the owner allowed past `update_rounds` (`round-extended` on an `UPDATE_LIMIT` card).
+    pub update_extra: u32,
     pub last_ts: u64,
     pub last_event: String,
     /// Latest agent per role (impl, rev).
@@ -1043,8 +1045,15 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             "reverted" | "land-fix" => s.state = format!("fix({})", s.rounds),
             "round-extended" if s.state == "needs-human" && s.card() == "start lane" => s.state = "queued".into(),
             "round-extended" => {
-                (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
-                if s.state == "needs-human" && e.data.get("queued") == Some(&Value::Bool(true)) {
+                let on = |k: &str| e.data.get(k) == Some(&Value::Bool(true));
+                if on("update") {
+                    s.update_extra += 1;
+                } else {
+                    (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
+                }
+                if s.state == "needs-human" && on("update") && on("spawn") {
+                    s.state = "ready".into();
+                } else if s.state == "needs-human" && on("queued") {
                     s.state = "queued".into();
                 } else if s.state == "needs-human" {
                     s.state = if s.verdicts.is_empty() {

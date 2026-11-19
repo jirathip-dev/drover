@@ -1,1 +1,1 @@
-- UPDATE_LIMIT: spawn --update after [limits].update_rounds (default 3) PASSed update rounds (→ needs-human)
+- UPDATE_LIMIT: spawn --update after [limits].update_rounds (default 3) PASSed update rounds, plus one per `extend` on an UPDATE_LIMIT card (→ needs-human when drive finds it; a refused spawn on a needs-human or extended issue logs nothing)

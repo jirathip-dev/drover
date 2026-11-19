@@ -10,7 +10,7 @@ fn an_extend_during_a_pass_only_requeues_it() {
         "verdict",
         json!({"verdict": "FAIL", "sha": sha("3"), "body": "FAIL"}),
     );
-    ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
+    ev(&c, 14, "needs-human", json!({"code": "ROUND_LIMIT"}));
     lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let r = fake(NONE)
         .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
