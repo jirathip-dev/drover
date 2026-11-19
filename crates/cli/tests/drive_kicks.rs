@@ -1285,7 +1285,7 @@ impl drover::runner::Runner for Kicked {
             let alive = r()
                 .reply(&format!("kill -0 {pid}"), "")
                 .reply(&format!("ps -o etime= -p {pid}"), "  00:01\n");
-            run(&c, &alive, &a)
+            run(&c, &Kicked(alive, c.clone(), r), &a)
         })
         .join()
         .unwrap();

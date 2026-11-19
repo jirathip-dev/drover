@@ -185,6 +185,9 @@ fn parked_seeds() {
 #[test]
 fn the_incident_seed_records_the_verdict_with_one_supersede() {
     let o = run(seeds::INCIDENT, None);
+    for l in o.trace.iter().filter(|l| { let t: u64 = l.split_whitespace().nth(1).and_then(|x| x.strip_prefix("t+")).and_then(|x| x.parse().ok()).unwrap_or(0); (380..=450).contains(&t) && (l.contains("spawn drive") || l.contains("exit drive") || l.contains("shed") || l.contains(" append ") || l.contains("lease")) }) {
+        eprintln!("DBG {}", l.chars().take(220).collect::<String>());
+    }
     assert!(o.failure.is_none(), "{}", o.report());
     let sup = o.trace.iter().filter(|l| l.contains(" append supersede #370 ")).count();
     let told = o

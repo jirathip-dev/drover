@@ -404,21 +404,30 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
     }
 }
 
-/// `args` run in this process. `drive` (the fast job) and `tick` start each fleet's pass as its own process; here each runs after them, in its stead.
+/// `args` run in this process. `drive` (the fast job) and `tick` start each fleet's pass as its own process; here a fleet whose pass logged nothing during them runs after them, in its stead.
 pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
+    let passes = |f: &str| {
+        drover::events::read(&ctx.state)
+            .map(|ev| ev.iter().filter(|e| e.kind == "drive-pass" && e.fleet == f).count())
+            .unwrap_or(0)
+    };
+    let cfg = drover::config::Config::load(&ctx.config);
+    let fleets = cfg.map(|c| c.fleet.into_keys().collect::<Vec<_>>()).unwrap_or_default();
+    let before: Vec<usize> = fleets.iter().map(|f| passes(f)).collect();
     let (mut code, o) = run_only(ctx, r, args);
     if args != ["drive"] && args != ["tick"] {
         return (code, o);
     }
-    let cfg = drover::config::Config::load(&ctx.config);
-    let fleets = cfg.map(|c| c.fleet.into_keys().collect::<Vec<_>>()).unwrap_or_default();
     let started = |l: &&str| {
         fleets
             .iter()
             .any(|f| l.starts_with(&format!("{f}: pass not started: ")))
     };
     let mut out: String = o.lines().filter(|l| !started(l)).map(|l| format!("{l}\n")).collect();
-    for f in &fleets {
+    for (f, n) in fleets.iter().zip(before) {
+        if passes(f) > n {
+            continue;
+        }
         let (k, o) = run_only(ctx, r, &["drive", f]);
         code = code.max(k);
         out += &o;

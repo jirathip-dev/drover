@@ -1619,7 +1619,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Check => check::config(ctx)?,
                 _ => Config::load(&ctx.config)?,
             };
-            let pass = if matches!(cmd, Cmd::Drive { fleet: None }) {
+            let pass = if matches!(cmd, Cmd::Drive { .. }) {
                 crate::hosts::Pass::fast(r)
             } else {
                 crate::hosts::Pass::new(r, None)

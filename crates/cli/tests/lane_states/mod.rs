@@ -157,14 +157,15 @@ fn wait_sends_continue_at_the_reset_only_on_the_owners_pick() {
     );
     let at = p.val("at").as_u64().unwrap();
     assert!(at > c.now + 2 * 86_400, "{p:?}");
-    drive_at(&c, &cli, at - c.now - 1);
+    let pass_at = |secs: u64| assert_eq!(passes(&later(&c, secs), &cli).0, 0);
+    pass_at(at - c.now - 1);
     assert_eq!(
         f.count("shed send sendmeter-impl-12 continue"),
         0,
         "not before the reset"
     );
-    drive_at(&c, &cli, at - c.now);
-    drive_at(&c, &cli, at - c.now + 60);
+    pass_at(at - c.now);
+    pass_at(at - c.now + 60);
     assert_eq!(f.count("shed send sendmeter-impl-12 continue"), 1, "once at the reset");
     assert_eq!(logged(&c, "spawn").len(), 1);
 }

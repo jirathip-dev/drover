@@ -1362,12 +1362,19 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "4\n")
         .reply("git -C", "")
         .reply(QUICK, &format!("{TRIMMED}\ntotal 9 freed 9\n"));
-    let r = r.reply(SWEEP, "");
+    let r = r.reply(SWEEP, "").reply("sh -c nohup", "4321\n");
     let bazzite = FakeShed::new();
-    let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
+    let (code, out) = run_only(&c, &two(&r, &bazzite), &["tick"]);
     assert_eq!(code, 0, "{out}");
-    let (driven, trimmed) = (out.find("sendmeter #12 start:"), out.find(TRIMMED));
-    assert!(driven.is_some() && trimmed.is_some() && driven < trimmed, "{out}");
+    let calls = r.calls.borrow();
+    let driven = calls
+        .iter()
+        .position(|l| l.starts_with("sh -c nohup") && l.contains(" drive sendmeter >>"));
+    let trimmed = calls.iter().position(|l| l.starts_with(QUICK));
+    assert!(
+        driven.is_some() && trimmed.is_some() && driven < trimmed,
+        "{out} {calls:?}"
+    );
 }
 
 #[test]

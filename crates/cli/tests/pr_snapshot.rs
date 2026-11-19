@@ -140,7 +140,9 @@ fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
     assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let gh: Vec<_> = r.calls.borrow()[seen..]
         .iter()
-        .filter(|l| l.starts_with("gh ") && !l.starts_with("gh api graphql -f owner="))
+        .filter(|l| {
+            l.starts_with("gh ") && !l.starts_with("gh api graphql -f owner=") && !l.starts_with("gh api -X POST")
+        })
         .cloned()
         .collect();
     assert_eq!(

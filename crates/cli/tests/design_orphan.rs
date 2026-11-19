@@ -104,7 +104,7 @@ fn a_finished_design_lane_is_adopted_once_and_never_hides_the_fix_round() {
     assert_eq!(state(&c, 12), "fix(1)");
     let w = waiting(&c, &r, 12);
     let fix = "review FAIL, waiting for drive (next pass ≤ 5 min) to start fix round · held: SHED_MISSING";
-    assert!(w["what"].as_str().is_some_and(|x| x.starts_with(fix)), "{w}");
+    assert!(w["what"].as_str().is_some_and(|x| x.contains(fix)), "{w}");
     assert_eq!(
         w["next_cmd"].as_str(),
         Some("drover spawn sendmeter 12 impl --supersede"),

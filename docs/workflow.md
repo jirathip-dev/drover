@@ -62,7 +62,7 @@ flowchart TD
     t5["triage"] --> t6
     t6["hotspots"] --> t7
     t7["compact"]
-    d0["look, orphans, repair"] --> d1
+    d0["look, repair"] --> d1
     d1["closed issues"] --> d2
     d2["spawns"] --> d3
     d3["PR reads, gates, steps"] --> d4

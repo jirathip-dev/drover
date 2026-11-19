@@ -177,6 +177,7 @@ fn a_hung_pass_ends_itself_at_pass_max_secs_and_names_its_step() {
 fn a_wake_starts_its_fleets_pass_within_a_second() {
     let c = ctx(&tmpdir("loops-wake"), &format!("{CONFIG}{SLOW}"));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let _sh = FakeShed::attached(&c);
     let r: &'static Fake = Box::leak(Box::new(Fake::default()));
     let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let sc = c.clone();

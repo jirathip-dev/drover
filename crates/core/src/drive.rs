@@ -18,7 +18,7 @@ mod remote;
 /// A fleet pass's steps in order (`drive-<fleet>.lock.step` names the running one, `pass-slow` the one its deadline hit) and the `[limits]` keys that time them.
 pub const STEPS: [(&str, &[&str]); 5] = [
     (
-        "look, orphans, repair",
+        "look, repair",
         &["ssh_quick_secs", "ssh_call_secs", "import_max_age_hours"],
     ),
     ("closed issues", &[]),
@@ -723,11 +723,17 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let on = |n: &&str| crate::compact::drives(ctx, cfg, r, n, out);
     let fleets: Vec<&str> = cfg.fleet.keys().map(String::as_str).filter(on).collect();
     if !fleets.is_empty() {
+        if let Some(_one) = take(ctx, r, "orphans.lock", cfg.limits.pass_max_secs, "") {
+            crate::spawn::orphans(ctx, cfg, r, out).map_or_else(|e| drop(writeln!(out, "orphans: {e:#}")), drop);
+        }
         crate::breaker::probe(ctx, cfg, r, out).unwrap_or_else(|e| drop(writeln!(out, "runtime canary: {e:#}")));
     }
     crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| crate::stderr!("drover: stale panes: {e:#}"));
     crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| crate::stderr!("drover: lane-dup: {e:#}"));
     crate::slo::pass(ctx, cfg, r, out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "slo: {e:#}")));
+    if !fleets.is_empty() && r.shed().is_none() {
+        anyhow::bail!(crate::config::NO_RUNTIME);
+    }
     for f in &fleets {
         start_pass(ctx, r, out, f)?;
     }
@@ -805,7 +811,11 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     } else {
         cfg.limits.webhook_poll_minutes * 60
     };
-    let was = (gh::FORCE.replace(KICK.get().is_some()), gh::CATCHUP.replace(catchup));
+    let was = (
+        gh::FORCE.replace(KICK.get().is_some()),
+        gh::CATCHUP.replace(catchup),
+        gh::PROBE.replace(true),
+    );
     let file = ctx.state.with_file_name(format!("{lock}.step"));
     let mark = |step: &str| {
         debug_assert!(STEPS.iter().any(|(s, _)| *s == step), "{step} is not in STEPS");
@@ -813,11 +823,8 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
             std::fs::write(&file, step).ok();
         }
     };
-    mark("look, orphans, repair");
+    mark("look, repair");
     crate::link::look(ctx, cfg, r, out, false).map_or_else(|e| drop(writeln!(out, "look: {e:#}")), drop);
-    if let Err(e) = crate::spawn::orphans(ctx, cfg, r, out, fleet) {
-        writeln!(out, "orphans: {e:#}")?;
-    }
     if let Err(e) = repair(ctx, cfg, r, out, fleet) {
         writeln!(out, "repair: {e:#}")?;
     }
@@ -829,6 +836,7 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     }
     gh::FORCE.set(was.0);
     gh::CATCHUP.set(was.1);
+    gh::PROBE.set(was.2);
     res
 }
 
