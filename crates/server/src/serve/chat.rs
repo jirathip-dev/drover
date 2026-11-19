@@ -612,7 +612,7 @@ fn figure(state: &str) -> Value {
     json!({"state": match state { "choose" => "needs", "working" => "working", _ => "idle" }})
 }
 
-fn row_block((at, r): &(u64, ThreadRow), repo: Option<&str>) -> Value {
+fn row_block((at, r): &(u64, ThreadRow), repo: Option<&str>, act: &str) -> Value {
     let (word, tone) = match r.state.as_str() {
         "choose" => ("! choose · ", "warn"),
         "working" => ("✻ working · ", ""),
@@ -620,7 +620,6 @@ fn row_block((at, r): &(u64, ThreadRow), repo: Option<&str>) -> Value {
         _ => ("", ""),
     };
     let sub = repo.map_or(format!("{word}{}", r.line), |f| format!("{f} · {}", r.line));
-    let act = or(repo.is_some(), "restore", "archive");
     let mut v = json!({"type": "row", "id": r.id, "figure": figure(&r.state), "title": r.title,
         "subtitle": {"text": sub, "tone": tone}, "value": super::screens::ticking(*at, "{}"), "tap": {"open": format!("/screens/threads/{}", r.id)},
         "swipe": [{"label": act, "action": format!("thread-{act}"), "values": {"thread": r.id}}]});
@@ -632,24 +631,27 @@ fn row_block((at, r): &(u64, ThreadRow), repo: Option<&str>) -> Value {
 
 pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]) -> Value {
     let threads = conductor::threads(events);
-    let (mut blocks, mut arch) = (vec![], vec![]);
+    let (mut blocks, mut older, mut arch) = (vec![], vec![], vec![]);
     for repo in std::iter::once("all").chain(cfg.fleet.keys().map(String::as_str)) {
+        let name = or(repo == "all", "all repos", repo);
+        let mut all: Vec<_> = (threads.iter().filter(|t| t.fleet == repo))
+            .map(|t| {
+                (
+                    conductor::archived(events, t.str("thread").unwrap_or_default()),
+                    row(ctx, events, t, agents),
+                )
+            })
+            .collect();
+        all.sort_by_key(|(_, r)| std::cmp::Reverse(r.0));
         let mut rows = vec![];
-        for t in threads.iter().filter(|t| t.fleet == repo) {
-            let on = conductor::archived(events, t.str("thread").unwrap_or_default());
-            let r = row(ctx, events, t, agents);
-            if on {
-                arch.push((r.0, row_block(&r, Some(or(repo == "all", "all repos", repo)))));
-            } else {
-                rows.push((r.0, row_block(&r, None)));
+        for (i, (on, r)) in all.iter().enumerate() {
+            match (on, i < 3) {
+                (true, _) => arch.push((r.0, row_block(r, Some(name), "restore"))),
+                (false, true) => rows.push(row_block(r, None, "archive")),
+                (false, false) => older.push((r.0, row_block(r, Some(name), "archive"))),
             }
         }
-        rows.sort_by_key(|r| std::cmp::Reverse(r.0));
-        let mut rows: Vec<Value> = rows.into_iter().map(|r| r.1).collect();
-        let older = rows.split_off(rows.len().min(3));
-        let n = rows.len() + older.len();
-        let name = or(repo == "all", "all repos", repo);
-        let count = match n {
+        let count = match all.iter().filter(|(on, _)| !on).count() {
             0 => "no threads".into(),
             1 => "1 thread".into(),
             n => format!("{n} threads"),
@@ -658,20 +660,21 @@ pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]
         if !rows.is_empty() {
             kids.push(json!({"type": "list", "id": format!("l-{repo}"), "rows": rows}));
         }
-        if !older.is_empty() {
-            kids.push(json!({"type": "card", "id": format!("older-{repo}"), "fold": {"line": format!("▸ {} older threads", older.len())},
-                "blocks": [{"type": "list", "id": format!("l-older-{repo}"), "rows": older}]}));
-        }
         kids.push(json!({"type": "button", "id": format!("new-{repo}"), "label": "+ thread", "tap": {"open": format!("/screens/threads/new/{repo}")}}));
         blocks.push(json!({"type": "section", "id": format!("r-{repo}"), "header": format!("{name} · {count}"), "blocks": kids}));
     }
-    if !arch.is_empty() {
-        arch.sort_by_key(|r| std::cmp::Reverse(r.0));
-        let rows: Vec<Value> = arch.into_iter().map(|r| r.1).collect();
-        blocks.push(
-            json!({"type": "card", "id": "archived", "fold": {"line": format!("▸ {} archived", rows.len())},
-            "blocks": [{"type": "list", "id": "l-archived", "rows": rows}]}),
-        );
+    for (id, word, mut rows) in [
+        ("older-threads", "older threads", older),
+        ("archived", "archived", arch),
+    ] {
+        if !rows.is_empty() {
+            rows.sort_by_key(|r| std::cmp::Reverse(r.0));
+            let rows: Vec<Value> = rows.into_iter().map(|r| r.1).collect();
+            blocks.push(
+                json!({"type": "card", "id": id, "fold": {"line": format!("▸ {} {word}", rows.len())},
+                "blocks": [{"type": "list", "id": format!("l-{id}"), "rows": rows}]}),
+            );
+        }
     }
     json!({"type": "screen", "id": "threads", "title": "Threads", "badge": choosing(events),
         "stream": "/screens/threads/stream", "blocks": blocks})
