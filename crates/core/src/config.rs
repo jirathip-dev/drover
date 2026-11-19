@@ -1279,7 +1279,10 @@ impl Notify {
         let kind = e.kind.as_str();
         self.on.iter().any(|k| k == kind)
             || (self.on.is_empty() && self.webpush() && e.is_push())
-            || matches!(kind, "land-paused" | "reverted" | "revert-failed" | "service-stalled")
+            || matches!(
+                kind,
+                "land-paused" | "reverted" | "revert-failed" | "service-stalled" | "clone-broken"
+            )
             || kind == "report" && !self.webpush()
     }
 }

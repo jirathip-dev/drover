@@ -893,8 +893,7 @@ pub fn clean_all(
         .context("cannot list the live agents; refusing to clean blind")?;
     let off = if all { disabled(cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
-    let mut failed = 0;
-    let (mut freed, mut removed) = (0, 0);
+    let (mut freed, mut removed, mut failed) = (0, 0, 0);
     let mut closed = BTreeMap::new();
     let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
     let mut fresh = std::collections::BTreeSet::new();
@@ -1123,6 +1122,7 @@ pub fn clean_all(
     }
     if lane.is_none() && issue.is_none() {
         sweep_off(ctx, cfg, r, out, &off, !yes)?;
+        crate::clone::sweep(cfg, out, !yes)?;
     }
     if yes {
         idle.retain(|n, _| fresh.contains(n) || agents.live().any(|a| a.name == *n && !a.busy()));
@@ -2262,7 +2262,7 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
-    git(&["fetch", "-q", "--prune", "origin"])?;
+    crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "--prune", "origin"])?;
     let integ = format!("origin/{}", f.integration);
     let refs = git(&[
         "for-each-ref",

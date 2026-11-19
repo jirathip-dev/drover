@@ -49,9 +49,9 @@ pub fn note(events: &[Event], fleet: &str, n: u64) -> Option<String> {
 }
 
 /// Swap-if-unchanged: integration's tip is in `head`, so the fast checks ran against what it lands on. Only the head is pinned (`--match-head-commit`): integration moving between this check and the merge is a small window left open.
-pub fn based(r: &dyn Runner, f: &Fleet, head: &str) -> bool {
+pub fn based(ctx: &Ctx, r: &dyn Runner, f: &Fleet, head: &str) -> bool {
     let (dir, tip) = (f.local_path(), format!("origin/{}", f.integration));
-    git(r, &dir, &["fetch", "-q", "origin"]).is_ok()
+    crate::clone::fetch(ctx, r, &dir, &["-q", "origin"]).is_ok()
         && git(r, &dir, &["merge-base", "--is-ancestor", &tip, head]).is_ok()
 }
 
@@ -173,7 +173,7 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     let (dir, wt) = (f.local_path(), ctx.state.with_file_name(format!("revert-{fleet}")));
     let (wts, branch) = (wt.to_string_lossy(), format!("revert-{n}-{sha:.7}"));
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
-    git(r, &dir, &["fetch", "-q", "origin"])?;
+    crate::clone::fetch(ctx, r, &dir, &["-q", "origin"])?;
     tree(&["remove", "--force", &wts]).ok();
     tree(&["add", "-f", "--detach", &wts, &format!("origin/{}", f.integration)])?;
     let parents = git(r, &wt, &["log", "-1", "--format=%P", sha]).unwrap_or_default();
@@ -393,7 +393,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     prs.sort_by_key(|p| p.0);
     let (dir, wt) = (f.local_path(), ctx.state.with_file_name(format!("update-{fleet}")));
     let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
-    git(r, &dir, &["fetch", "-q", "origin"])?;
+    crate::clone::fetch(ctx, r, &dir, &["-q", "origin"])?;
     let checks = crate::gate::premerge_checks(ctx, f);
     let base = git(r, &dir, &["rev-parse", &into])?;
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());

@@ -46,7 +46,7 @@ pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[E
     let dir = f.local_path();
     let rev = |b: &str| git(r, &dir, &["rev-parse", &format!("origin/{b}")]);
     let ev = |n, kind, d| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), kind, d));
-    git(r, &dir, &["fetch", "-q", "origin"])?;
+    crate::clone::fetch(ctx, r, &dir, &["-q", "origin"])?;
     crate::baseline::grafts(r, f, &dir).ok();
     let st: Vec<IssueState> = fold(events)
         .into_values()
@@ -113,16 +113,17 @@ pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[E
 }
 
 /// `h` merges a passed head (or an earlier pure update of one) with integration and adds nothing: its first parent carries the PASS, its second is on integration, and its tree is the one `git merge-tree` makes of the two.
-pub fn pure(r: &dyn Runner, f: &Fleet, s: &IssueState, h: &str) -> bool {
+pub fn pure(ctx: &Ctx, r: &dyn Runner, f: &Fleet, s: &IssueState, h: &str) -> bool {
     let dir = f.local_path();
-    git(r, &dir, &["fetch", "-q", "origin"]).is_ok() && pure_at(r, &dir, &format!("origin/{}", f.integration), s, h)
+    crate::clone::fetch(ctx, r, &dir, &["-q", "origin"]).is_ok()
+        && pure_at(r, &dir, &format!("origin/{}", f.integration), s, h)
 }
 
 /// `h` is a pure update of `x`, so a verdict at `x` (whatever it says) carries to `h`.
-pub fn carries(r: &dyn Runner, f: &Fleet, s: &IssueState, x: &str, h: &str) -> bool {
+pub fn carries(ctx: &Ctx, r: &dyn Runner, f: &Fleet, s: &IssueState, x: &str, h: &str) -> bool {
     let mut s = s.clone();
     s.verdicts.push((x.into(), "PASS".into(), String::new()));
-    pure(r, f, &s, h)
+    pure(ctx, r, f, &s, h)
 }
 
 fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> bool {
@@ -444,7 +445,7 @@ fn script_caps(
 pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut dyn std::io::Write) -> Result<i32> {
     let f = cfg.fleet(fleet)?;
     let dir = f.local_path();
-    git(r, &dir, &["fetch", "-q", "origin"]).ok();
+    crate::clone::fetch(ctx, r, &dir, &["-q", "origin"]).ok();
     let head = git(r, &dir, &["rev-parse", &format!("origin/{}", f.integration)]);
     let script = head.as_ref().ok().and_then(|h| cap_script(r, f, h));
     let (sha, caps, warn) = if let Some(s) = &script {
