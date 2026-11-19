@@ -1,0 +1,9 @@
+Decided: the thread view's revive refetches the thread before reopening its stream, as every other view already did through load.
+Because: "when a view's stream is down, it reconnects with backoff and refetches the screen in the meantime"
+Decided: the refetch is skipped when the sheet closed, moved to another path or already has a stream; a failed fetch still re-streams, and an error there backs off again.
+Because: web/src/main.ts:261
+Decided: added a Parity section naming row 2 as changed, with no row dropped.
+Because: docs/parity.md:21
+Rejected: refetching inside stream() on every open — that would refetch on first open too, which sheet() already does.
+Check: a_thread_whose_stream_was_refused_shows_a_new_message_within_5_s passes with WebKit; typed_text fails on this host at 450d8e64 too.
+Owner: When a thread's live connection drops, the page now reloads the thread before reconnecting, so nothing logged during the gap is missed.
