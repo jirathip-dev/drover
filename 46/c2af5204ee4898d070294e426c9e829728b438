@@ -1,0 +1,9 @@
+Decided: an extend ask (no agent) ends `closed: lane gone` on a later impl `spawn` of its issue, in `events::closes` and the asks projection's spawn lookup
+Because: "a later `spawn` of the issue's impl role (a first start, `--supersede`, `--update`, a drive respawn) closes it"
+Rejected: writing the impl agent into the extend ask — `own()` treats a supersede of the same agent name as the ask's own lane, and `lane-killed` would end it too
+Decided: `drover extend --typed|--basis` skips the needs-human gate when an open extend ask exists and answers it through `answer_with`, which calls `gate::extend_ask`
+Because: "takes #1299's `gate::extend_ask` path (logs `round-extended`, closes the ask) instead of refusing `NOT_NEEDS_HUMAN`"
+Check: an answered ask keeps rank `answered` (lower than lane gone), so a later spawn never re-closes it; a parked or merged issue still refuses via `gate::extend_ask`
+Check: extend_ask.rs's fixture now logs the lane's respawn before the ask, since a respawn after it now closes it
+Decided: round 2 merges origin/staging only; the shard-2 drive_sim tick failure at 3d86a21 is outside this diff and passes at the merged head
+Owner: a blocked lane's "one more round?" question now goes away once the issue gets a new lane, and an orchestrator's typed extend works on a working lane
