@@ -33,6 +33,9 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - After three attempts in one diagnostic class without progress, stop and report.
 - End every turn with `drover turn <state>`: `done` once pushed with the PR open, `blocked --why <reason>`
   (the owner gets a card), `need-input` after `drover ask`, `working` when you stop mid-task. Drive acts on it.
+- `turn done` is a hard gate at the pushed head: the PR body names that sha with `## For humans` and no
+  'Generated with' line, and format and arch-check pass in your worktree. A refusal starts no review:
+  fix what it names, push, and run `drover turn done` again. No review without a passed `done`.
 - A `conflict-predicted` note means another open PR touches the same files. Don't wait for it.
   Finish your work, run the gates, push. If the other PR merges first, drover gives you an update round to resolve it.
 - A decision that says to wait for another issue #N: run `drover queue <fleet> block --on N <issue>`

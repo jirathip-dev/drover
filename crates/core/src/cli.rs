@@ -275,9 +275,7 @@ enum Cmd {
     Waiting(Scope),
     #[command(about = "Print the issue spec cached at spawn; read this instead of `gh issue view`")]
     Brief { fleet: String, issue: u64 },
-    #[command(
-        about = "Why a line is as it is: blame's commit, its issue, the why note on it, the issue's asks and answers"
-    )]
+    #[command(about = "Why a line is as it is: blame's commit, its issue, the issue's asks and answers")]
     Why {
         #[arg(help = "The line, as `<file>:<line>`")]
         at: String,
@@ -2059,16 +2057,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         bail!("a {role} lane reports no turn: impl, fix and update lanes do");
                     }
                     let done = state == "done" && !matches!(role, "triage" | "lesson");
+                    let head = if done {
+                        crate::done::turn(ctx, &cfg, r, (f, n), role)?
+                    } else {
+                        None
+                    };
                     let ui = done.then(|| crate::guard::turn(ctx, &cfg, r, out, (f, n), role));
                     let ui = ui.transpose()?.flatten();
-                    let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
-                    let note = note.transpose()?.flatten();
-                    let mut d = json!({"state": state, "why": why, "role": role});
+                    let mut d = json!({"state": state, "why": why, "role": role, "sha": head});
                     if let Some(u) = ui {
                         d.put("ui_check", u);
-                    }
-                    if let Some((code, w)) = &note {
-                        d.put("note", json!(format!("{code}: {w}")));
                     }
                     emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
                     writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
@@ -2076,9 +2074,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         writeln!(out, "ask the question with `drover ask {f} {n} …` if you have not")?;
                     }
                     kick(f, n, "turn");
-                    if let Some((code, w)) = note {
-                        return gate::refused(code, w);
-                    }
                 }
                 Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
                 Cmd::Lesson {

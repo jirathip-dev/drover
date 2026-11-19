@@ -466,6 +466,8 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// Fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<Premerge>>,
+    /// Commands `turn done` runs in the lane's worktree before any review; unset = `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
+    pub done_checks: Option<Vec<String>>,
     /// The repo's own line-cap script `drover cap` reads `N / cap M` lines from; unset = the first `premerge` check naming a cap, else the built-in Rust count.
     pub cap_script: Option<String>,
     /// `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
@@ -568,7 +570,7 @@ pub enum Sandbox {
     Srt,
 }
 
-/// `squash` lands a PR as one commit carrying its why notes and deletes its branch; `merge` keeps every commit.
+/// `squash` lands a PR as one commit and deletes its branch; `merge` keeps every commit.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MergeMode {
@@ -849,17 +851,9 @@ impl Default for Limits {
             fast_secs: 60,
             slow_secs: 300,
             overflow_after_minutes: 10,
-            form_categories: [
-                "trailer",
-                "pr-body",
-                "stale-baseline",
-                "format",
-                "docs-fresh",
-                "migration-redate",
-                "infra",
-            ]
-            .map(String::from)
-            .into(),
+            form_categories: ["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]
+                .map(String::from)
+                .into(),
             form_rounds: 3,
             import_max_age_hours: 24,
             max_pushes_per_pass: 3,
@@ -1845,7 +1839,7 @@ pub fn expand(p: &str) -> PathBuf {
 
 /// The environment variable `k`; `None` when unset or not UTF-8.
 pub fn env(k: &str) -> Option<String> {
-    std::env::var(k).ok()
+    crate::sim::var(k).or_else(|| std::env::var(k).ok())
 }
 
 /// The environment variable `k`, raw.

@@ -3,7 +3,12 @@ use crate::scenario::{args, config, timers, T0};
 use crate::sched::{Rng, World};
 
 /// The "sometimes" states: the gate scenarios fail the run unless one of them reaches each.
-pub const SOMETIMES: &[&str] = &["round-limit", "head-moved-after-pass", "merge-after-retried-verdict"];
+pub const SOMETIMES: &[&str] = &[
+    "round-limit",
+    "head-moved-after-pass",
+    "merge-after-retried-verdict",
+    "done-refused-card",
+];
 
 /// A gate that dies instead of answering, one scenario per seed (`world`).
 pub const SCENARIOS: &[(u64, &str)] = &[
@@ -16,6 +21,10 @@ pub const SCENARIOS: &[(u64, &str)] = &[
     (9597, "drive dies between GitHub's merge call and the merged event"),
     (9598, "every reviewer FAILs: the limit of 3 refuses round 3"),
     (9599, "the impl pushes again right after the PASS, before the merge"),
+    (
+        9600,
+        "the PR body never names the head: 3 refused dones are one owner card, no review",
+    ),
 ];
 
 const N: u64 = 959;
@@ -93,6 +102,11 @@ pub fn world(seed: u64) -> (Model, String) {
             m.after_pass.push((N, AfterPass::Push));
             m
         }
+        9600 => {
+            let mut m = one(vec![review(true)]);
+            m.unanchored.push(N);
+            m
+        }
         _ => panic!("no gate scenario for seed {seed}"),
     };
     (m, cfg)
@@ -107,6 +121,19 @@ pub fn on_append(w: &mut World) {
     let data = serde_json::to_string(&ev.data).unwrap_or_default();
     if ev.kind == "needs-human" && (data.contains("ROUND_LIMIT") || data.contains("review rounds ran out (3")) {
         w.model.reached.insert("round-limit");
+    }
+    if ev.kind == "needs-human" && ev.str("code") == Some("DONE_REFUSED") && data.contains("PR_BODY") {
+        let reviewed = (w.wrote.iter()).any(|x| x.ev.kind == "pushed" && x.ev.issue == Some(n));
+        let cards = (w.wrote.iter())
+            .filter(|x| x.ev.kind == "needs-human" && x.ev.issue == Some(n))
+            .count();
+        if reviewed || cards > 1 {
+            w.fail(format!(
+                "#{n}: a review or a second card for a head no `turn done` passed"
+            ));
+        } else {
+            w.model.reached.insert("done-refused-card");
+        }
     }
     match ev.kind.as_str() {
         "verdict" if ev.str("verdict") == Some("PASS") => {

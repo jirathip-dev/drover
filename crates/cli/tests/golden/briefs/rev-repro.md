@@ -16,17 +16,17 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
   its pid (`cmd & echo $! > server.pid`), then `kill "$(cat server.pid)"`; never `pkill`/`killall` (the hook refuses them).
 - Write shell commands that the harness won't flag: guard variables in destructive commands
   (`rm -f "${S:?}"/*.png`), quote paths, no `rm -rf` on computed paths.
-- Check the PR body's evidence names the exact head sha you review; evidence anchored at an
-  older sha is stale — flag it.
-- The PR body has a `## For humans` section (2–4 plain lines on what changes for the user,
-  no code identifiers); missing or inaccurate is a `blocking` finding. So is a 'Generated with'
-  or AI co-author line in the PR body (editable), or an AI co-author trailer in a commit made by
+- Paperwork is not a finding (#1362): `drover turn done` refuses a head until the PR body names it,
+  has `## For humans` and no 'Generated with' line, and format and arch-check pass. `drover verdict`
+  refuses a blocker tagged `[why-note]`, `[pr-body]` or `[format]` (`PAPERWORK`).
+- A `## For humans` section that is inaccurate is a `blocking` finding. So is an AI co-author
+  line in the PR body (editable), or an AI co-author trailer in a commit made by
   this round's lane (after the sha the last verdict reviewed). Trailers in older commits are not a
   finding: new commits only, never force-push. Never ask for a history rewrite.
 - UI PRs: confirm the `ui` job is green and open its `ui-390` screenshots. Any visual change not in the issue is a FAIL. (docs/ui.md)
 - Parity (#1094), in a repo with `docs/parity.md`: a PR touching `web/`, `assets/`, `screens.rs` or `serve.rs`
   has a `## Parity` section in its body naming each parity row it changes or drops (or `none`); missing is a
-  `blocking [pr-body]` finding. A row it drops, or a `parity_<row>` test it deletes, without an owner q-number on
+  `blocking [parity]` finding. A row it drops, or a `parity_<row>` test it deletes, without an owner q-number on
   that row's `dropped q<N>` line in `docs/parity.md` is a FAIL.
 - Budgets are soft. FAIL only for real bloat: duplicated logic, dead code, or a much simpler
   equivalent. Name the lines.
@@ -43,10 +43,10 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
     Verify-stage screenshots listed by path count as run proof.
   - `Proof: spec`, then a `>` quoted line from the issue's acceptance criteria, its `## Amendments`,
     or a named rule in `roles/rev.md` or `docs/ui.md`, plus the `file:line` that breaks it (the PR
-    body as `PR#<n>:<line>`). Form categories (`pr-body`, `trailer`, `format`) use this form.
+    body as `PR#<n>:<line>`). Form categories (e.g. `trailer`) use this form.
   `drover verdict` refuses a FAIL with `NO_PROOF` when a blocker's proof is missing or malformed.
 - Verdict is PASS or FAIL. `FAIL (form-only)` only if every blocker is in a form category (the
-  brief lists them; e.g. `trailer`, `pr-body`, `format`); one substantive blocker makes it a
+  brief lists them; e.g. `trailer`); one substantive blocker makes it a
   plain FAIL. Name the single biggest remaining gap; on PASS, state exactly what you could NOT
   verify.
 
@@ -78,10 +78,6 @@ not verify.
 
 AC: it {works} \ `ok`
 
-## Why note for this round
-
-no why note: none attached
-
 ## Shared rules (rules/shared.md)
 
 - Subtract before you add: delete dead code, duplicate paths and needless options before writing new ones.
@@ -98,7 +94,7 @@ no why note: none attached
 - Guard the context window: read the files you need, not the repo; keep logs in files, not in the chat.
 - Smallest correct diff: no refactor, dependency or feature the issue did not ask for.
 - Every rule names its enforcer: a rule nothing checks is retired.
-- Keep code comment-free: only `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` line on a public item, whole files included; the why goes in the why note.
+- Keep code comment-free: only `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` line on a public item, whole files included; a non-obvious reason goes in the PR body.
 - Leave the tree green: format, lint and test before you push.
 
 ## Output contract
@@ -109,7 +105,7 @@ no why note: none attached
 - An approved design under `docs/design/` on the branch is part of the spec: an impl that deviates from it is a FAIL.
 - Write `<TMP>/worktrees/api/rev-12-r1/verdict.md`: first line `PASS` or `FAIL`, then findings (`blocking`/`non-blocking`, file:line).
 - Tag each blocking finding with its category: `- blocking [<category>] file:line: what`. First line
-  `FAIL (form-only)` only if every blocker is in a form category (trailer, pr-body, stale-baseline, format, docs-fresh, migration-redate, infra); one substantive blocker
+  `FAIL (form-only)` only if every blocker is in a form category (trailer, stale-baseline, docs-fresh, migration-redate, infra); one substantive blocker
   makes it a plain `FAIL`. A form-only FAIL doesn't use up a review round.
 - A blocking finding needs a `Proof:` block right under it: `Proof: run` (the command fenced, then its output at
   this head) or `Proof: spec` (a `>` quoted AC/amendment/rule line, plus the breaking `file:line`); else it is a
@@ -119,9 +115,8 @@ no why note: none attached
 - A second build or checkout (base, staging, head) goes under `$DROVER_SCRATCH_TARGET` only (builds with
   `CARGO_TARGET_DIR=$DROVER_SCRATCH_TARGET/target`, checkouts in `$DROVER_SCRATCH_TARGET/<name>`), never `/tmp`
   or `$TMPDIR`; it is deleted when your lane ends.
-- #677: a why note that contradicts the diff is a blocking finding (`Proof: spec`: the note line `>` quoted, plus
-  the `file:line`); no why note for the round may be one too.
-- #735: read the commits' why notes (`drover why <file:line>`): the reasons live there, not in comments.
+- #1362: the PR body's head-sha anchor, `## For humans` and format are `drover turn done`'s gate, never findings:
+  `drover verdict` refuses a blocker tagged `[why-note]`, `[pr-body]` or `[format]` (`PAPERWORK`).
 - This issue is queued `--repro`: a PASS verdict.md carries one of these blocks, else `drover verdict` refuses it
   (`NO_REPRO`):
   - `Repro: run`, then the test command fenced, its failing output fenced, run on the PR base plus the branch's

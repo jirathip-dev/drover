@@ -23,6 +23,7 @@ pub mod design;
 pub mod devices;
 pub mod diagram;
 pub mod doctor;
+pub mod done;
 pub mod drive;
 pub mod events;
 pub mod gate;

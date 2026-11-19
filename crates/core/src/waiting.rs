@@ -411,7 +411,7 @@ fn waits(
     while let Some(e) = update(base) {
         base = e.str("from").unwrap_or_default();
     }
-    let handed = |h: &str| events.iter().any(|e| e.is("pushed", f, n) && e.str("sha") == Some(h));
+    let at = |k: &str| events.iter().any(|e| e.is(k, f, n) && e.str("sha") == Some(pushed));
     let checks = gh::required(&pr["statusCheckRollup"], req);
     let how = match (pr["mergeable"].as_str(), pr["mergeStateStatus"].as_str()) {
         (Some("CONFLICTING"), _) => "conflicts with",
@@ -560,7 +560,7 @@ fn waits(
         "impl" | "fix"
             if !pushed.is_empty()
                 && (!s.reviewed(pushed) || s.last_event == "fix-no-change" || fix_done(events, f, n).is_some())
-                && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
+                && (at("pushed") || (s.reviewed(pushed) || at("turn-end")) && head.is_none_or(|h| h.0 == pushed)) =>
         {
             let how = match s.rounds {
                 _ if s.reviewed(pushed) => "no change at ",
