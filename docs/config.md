@@ -211,6 +211,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
+| `orchestrator_reply_minutes` | `10` | an owner message with no orchestrator reply this long gets a `no reply yet` row |
 | `orchestrator_change_minutes` | `30` | an orchestrator's answer may not change one this long after it |
 | `token_refresh_minutes` | `30` | `check` pushes a fresh runner registration token to every VM this often |
 | `ask_waiting_minutes` | `30` | an owner ask open this long alerts `ask-waiting` |

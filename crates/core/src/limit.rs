@@ -57,7 +57,7 @@ pub fn wait(ctx: &Ctx, r: &dyn Runner, (fleet, n): (&str, u64), by: &str) -> Res
     Ok(format!("{fleet} #{n}: {} gets `{CONTINUE}` at {when}", a.name))
 }
 
-fn reset_at(r: &dyn Runner, note: &str, now: u64) -> Option<u64> {
+pub(crate) fn reset_at(r: &dyn Runner, note: &str, now: u64) -> Option<u64> {
     let s = note
         .to_lowercase()
         .replace([',', '(', ')', '.'], " ")
