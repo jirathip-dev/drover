@@ -1533,7 +1533,8 @@ fn pass(
                     if code.is_none() {
                         let on = crate::breaker::blame(&events, &w.lane);
                         let d = json!({"role": role, "agent": w.lane, "why": why, "failed_on": on});
-                        append(&ctx.state, &stall::restarted(ctx.now, (fleet, s.issue), d))?;
+                        let kind = if why == stall::KEY_401 { "self-heal" } else { "respawn" };
+                        append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), kind, d))?;
                     }
                 }
                 stall::Act::Escalate(code, why) => {

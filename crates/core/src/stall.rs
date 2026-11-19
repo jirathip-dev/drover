@@ -14,19 +14,7 @@ use std::io::Write;
 pub const START_SECS: u64 = 600;
 
 /// Why drive restarts a live lane the token proxy refused (401): one `self-heal` an hour per issue.
-pub const KEY_REFUSED: &str = "lane key refused";
-
-/// The event a stalled lane's restart logs: a `self-heal` for a refused key, else a `respawn`.
-pub fn restarted(now: u64, (fleet, n): (&str, u64), d: serde_json::Value) -> Event {
-    let e = Event::new(now, fleet, Some(n), "respawn", d);
-    if e.str("why") != Some(KEY_REFUSED) {
-        return e;
-    }
-    let lane = e.str("agent").unwrap_or_default();
-    let did = format!("restarted {lane} after the proxy refused its key");
-    let d = json!({"key": format!("lane-key:{lane}"), "did": did, "reason": KEY_REFUSED, "agent": lane});
-    Event::new(now, fleet, Some(n), "self-heal", d)
-}
+pub const KEY_401: &str = "lane key refused";
 
 /// What drive does about a stalled lane: respawn it (`why`), or a needs-human card (code, reason).
 pub enum Act {
@@ -84,18 +72,14 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], sessions: 
     let resent = ev.iter().rfind(resent);
     let (n, _) = crate::waiting::respawns(ev, &w.fleet, w.issue);
     let ago = |t: u64| crate::events::age(ctx.now.saturating_sub(t));
-    let refused = sessions.get(lane).filter(|x| x.key_refused());
-    if let Some(note) = refused.map(|x| crate::lanes::mask(x.note.as_deref().unwrap_or_default())) {
-        let hour = |e: &&Event| {
-            e.is("self-heal", &w.fleet, w.issue) && e.str("reason") == Some(KEY_REFUSED) && ctx.now < e.ts + 3600
+    if let Some(x) = sessions.get(lane).filter(|x| x.key_refused()) {
+        let healed = |e: &&Event| e.is("self-heal", &w.fleet, w.issue) && e.str("why") == Some(KEY_401);
+        let Some(e) = ev.iter().rfind(healed).filter(|e| ctx.now < e.ts + 3600) else {
+            return Some(Act::Respawn(role.into(), KEY_401));
         };
-        return Some(match ev.iter().rfind(hour) {
-            None => Act::Respawn(role.into(), KEY_REFUSED),
-            Some(e) => Act::Escalate(
-                "LANE_KEY_REFUSED",
-                format!("lane {lane}'s key refused again {} after its heal: {note}", ago(e.ts)),
-            ),
-        });
+        let note = x.note.as_deref().map(crate::lanes::mask).unwrap_or_default();
+        let why = format!("lane {lane}'s key refused again {} after its heal: {note}", ago(e.ts));
+        return Some(Act::Escalate("LANE_KEY_REFUSED", why));
     }
     match crate::lanes::health(ctx, cfg, ev, sessions, &s) {
         Health::NeverStarted { since } => {
