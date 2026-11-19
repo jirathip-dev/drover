@@ -82,6 +82,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         (local.as_ref().ok()).map(|a| a.iter().filter(|s| s.running() && s.lane()).cloned().collect());
     if let Some(a) = &agents {
         crate::orchestrator::sleep_idle(ctx, cfg, r, &events, a)?;
+        crate::orchestrator::silence(ctx, cfg, r, &events, a)?;
         for t in events.iter().filter(|e| e.kind == "thread-new") {
             let id = t.str("thread").unwrap_or_default();
             if let Some((s, quiet)) = crate::orchestrator::hung(ctx, cfg, &events, a, id) {
