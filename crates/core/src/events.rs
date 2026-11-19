@@ -819,6 +819,7 @@ pub(crate) fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option
     VISITS.fetch_add(1, Relaxed);
     let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
     let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
+    let relaunch = on("spawn") && e.str("role") == Some("impl") && a.data.get("extend").is_some();
     let id = names(e, a);
     if e.fleet != a.fleet {
         None
@@ -836,7 +837,7 @@ pub(crate) fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option
         Some("closed: merged")
     } else if on("closed") || on("closed-other") {
         Some("closed: issue closed")
-    } else if mine && !(e.kind == "spawn" && own()) || on("clean") {
+    } else if mine && !(e.kind == "spawn" && own()) || on("clean") || relaunch {
         Some("closed: lane gone")
     } else {
         None
