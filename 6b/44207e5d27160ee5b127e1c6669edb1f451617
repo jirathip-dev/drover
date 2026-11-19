@@ -1,0 +1,5 @@
+Decided: gone_cwd is listed in CI's test shard 3, the smallest shard after shard 1 tie (scripts/test-shards.txt:62).
+Because: scripts/test-shards.sh:13
+Rejected: shard 1 — equal size; shard 3 is where the failing CI log pointed.
+Check: scripts/test-shards.sh check exits 0 and the rust job is green.
+Owner: The new regression test now runs in CI; nothing else changed in this round.
