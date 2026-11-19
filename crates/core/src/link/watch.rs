@@ -198,6 +198,20 @@ pub fn watch(
     })
 }
 
+/// `drover hosts report`, or `drover hosts watch` when `kept_open` (on the process's own `stdin`, read on a thread).
+pub fn answer(
+    r: &dyn Runner,
+    kept_open: bool,
+    stdin: &mut dyn std::io::Read,
+    out: &mut dyn std::io::Write,
+) -> anyhow::Result<()> {
+    if kept_open {
+        watch(r, &mut std::io::stdin(), out)
+    } else {
+        serve(r, stdin, out)
+    }
+}
+
 /// `drover hosts report`: the `Watch` on `stdin` answered with one frame line on `out`; with no shed runtime set, the host's own shed (`shed connect`).
 pub fn serve(r: &dyn Runner, stdin: &mut dyn std::io::Read, out: &mut dyn std::io::Write) -> anyhow::Result<()> {
     let own = own(r);

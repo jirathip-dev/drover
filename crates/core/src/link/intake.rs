@@ -82,7 +82,11 @@ pub fn apply(
         anyhow::ensure!(f.v == V, "it sends frames v{}, this build reads v{V}", f.v);
         Ok(f)
     });
-    let link = if live && f.is_ok() { "live" } else { "down" };
+    let link = if f.is_ok() && live || !live && old.link == "live" {
+        "live"
+    } else {
+        "down"
+    };
     let since = if old.link == link { old.since } else { ctx.now };
     let f = match f {
         Ok(f) => f,
@@ -123,7 +127,7 @@ pub fn apply(
     let rows: Vec<(String, String)> = (rep.lanes.iter())
         .filter_map(|s| Some((key(s)?, serde_json::to_string(s).ok()?)))
         .collect();
-    let why = rep.shed.or_else(|| (!live).then(|| super::NO_SERVICE.into()));
+    let why = rep.shed.or_else(|| (link != "live").then(|| super::NO_SERVICE.into()));
     let h = HostSeen {
         host: host.into(),
         link: link.into(),

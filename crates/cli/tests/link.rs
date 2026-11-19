@@ -419,3 +419,15 @@ fn with_a_link_down_a_pass_polls_that_host_as_before() {
     );
     once_each(&f, 1);
 }
+
+#[test]
+fn a_poll_of_a_linked_host_leaves_its_link_live() {
+    let f = fleet("link-poll", "");
+    f.links();
+    until("every boat's link is live", 10, || BOATS.iter().all(|h| f.live(h)));
+    f.r.mute("boat-1", true);
+    let cfg = drover::config::Config::load(&f.c.config).unwrap();
+    drover::link::look_at(&f.now(), &cfg, f.r, Some("boat-1")).unwrap();
+    assert!(f.live("boat-1"), "{:?}", f.view().link("boat-1"));
+    f.r.mute("boat-1", false);
+}

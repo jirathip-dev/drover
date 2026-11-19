@@ -1280,11 +1280,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hosts {
-            cmd: Some(HostsCmd::Report),
-        } => crate::link::watch::serve(r, stdin, out)?,
-        Cmd::Hosts {
-            cmd: Some(HostsCmd::Watch),
-        } => crate::link::watch::watch(r, &mut std::io::stdin(), out)?,
+            cmd: Some(c @ (HostsCmd::Report | HostsCmd::Watch)),
+        } => crate::link::watch::answer(r, matches!(c, HostsCmd::Watch), stdin, out)?,
         Cmd::Hook {
             role,
             git_pre_push: true,
