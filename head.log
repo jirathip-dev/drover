@@ -1,0 +1,30 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/server)
+   Compiling drover-chat v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/chat)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/service)
+warning: use of deprecated method `std::sync::atomic::Atomic::<u32>::fetch_update`: renamed to `try_update` for consistency
+   --> crates/cli/tests/gone_cwd.rs:140:23
+    |
+140 |             if self.1.fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1)).is_ok() {
+    |                       ^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+help: replace the use of the deprecated method
+    |
+140 -             if self.1.fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1)).is_ok() {
+140 +             if self.1.try_update(SeqCst, SeqCst, |n| n.checked_sub(1)).is_ok() {
+    |
+
+warning: `drover` (test "gone_cwd") generated 1 warning (run `cargo fix --test "gone_cwd" -p drover` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.52s
+     Running tests/gone_cwd.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1358/target/debug/deps/gone_cwd-c0d78832e64abfd9)
+
+running 4 tests
+test a_gone_current_directory_never_counts_towards_fails_the_same_way ... ok
+test a_spawn_that_fails_on_a_gone_current_directory_is_retried_once_and_starts ... ok
+test a_kick_and_a_spawn_from_a_deleted_directory_start_their_shed_lane ... ok
+test a_stop_hook_from_a_cleaned_worktree_kicks_from_a_directory_that_exists ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+

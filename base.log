@@ -1,0 +1,55 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/server)
+   Compiling drover-chat v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/chat)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.11s
+     Running tests/gone_cwd.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1358/target/debug/deps/gone_cwd-c0d78832e64abfd9)
+
+running 4 tests
+test a_gone_current_directory_never_counts_towards_fails_the_same_way ... FAILED
+test a_spawn_that_fails_on_a_gone_current_directory_is_retried_once_and_starts ... FAILED
+test a_kick_and_a_spawn_from_a_deleted_directory_start_their_shed_lane ... FAILED
+test a_stop_hook_from_a_cleaned_worktree_kicks_from_a_directory_that_exists ... FAILED
+
+failures:
+
+---- a_gone_current_directory_never_counts_towards_fails_the_same_way stdout ----
+
+thread 'a_gone_current_directory_never_counts_towards_fails_the_same_way' (1222889) panicked at crates/cli/tests/gone_cwd.rs:181:5:
+assertion `left == right` failed: one retry: ["df -k /", "hostname -s", "git -C /tmp/does-not-matter/sendmeter fetch -q origin", "git -C /tmp/does-not-matter/sendmeter config --get drover.baseline", "git -C /tmp/does-not-matter/sendmeter rev-parse origin/staging", "kill -0 1222888", "which shed", "shed help run", "shed agents --json", "df -k /", "sh -c 'sysctl' '-n' 'kern.memorystatus_vm_pressure_level' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'vm_stat' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'sysctl' '-n' 'vm.loadavg' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'sysctl' '-n' 'hw.ncpu' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'ps' '-Ao' 'pid=,ppid=,pcpu=,comm=' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'sysctl' '-n' 'hw.memsize' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'cat' '/proc/loadavg' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'nproc' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'grep' 'MemAvailable' '/proc/meminfo' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'grep' 'MemTotal' '/proc/meminfo' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n", "sysctl -n kern.memorystatus_vm_pressure_level", "vm_stat ", "sysctl -n vm.loadavg", "sysctl -n hw.ncpu", "ps -Ao pid=,ppid=,pcpu=,comm=", "sysctl -n hw.memsize", "cat /proc/loadavg", "nproc ", "grep MemAvailable /proc/meminfo", "grep MemTotal /proc/meminfo", "gh issue view 12 -R jirathip-dev/sendmeter --json title,body,updatedAt,comments,url", "git -C /tmp/does-not-matter/sendmeter fetch origin staging", "git -C /tmp/does-not-matter/sendmeter rev-parse --verify --quiet issue-12", "git -C /tmp/does-not-matter/sendmeter worktree add -b issue-12 /tmp/fleet-test-gone-stuck-1222888-1/worktrees/sendmeter/issue-12 origin/staging", "git -C /tmp/fleet-test-gone-stuck-1222888-1/worktrees/sendmeter/issue-12 sparse-checkout set --no-cone /* !/docs/archive/", "git -C /tmp/fleet-test-gone-stuck-1222888-1/worktrees/sendmeter/issue-12 config --get drover.baseline", "date -r 1795069004 +%H:%M", "df -k /", "hostname -s", "sleep 10"]
+  left: 1
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a_spawn_that_fails_on_a_gone_current_directory_is_retried_once_and_starts stdout ----
+
+thread 'a_spawn_that_fails_on_a_gone_current_directory_is_retried_once_and_starts' (1222891) panicked at crates/cli/tests/gone_cwd.rs:168:5:
+assertion `left == right` failed: ["df -k /", "hostname -s", "git -C /tmp/does-not-matter/sendmeter fetch -q origin", "git -C /tmp/does-not-matter/sendmeter config --get drover.baseline", "git -C /tmp/does-not-matter/sendmeter rev-parse origin/staging", "kill -0 1222888", "which shed", "shed help run", "shed agents --json", "df -k /", "sh -c 'sysctl' '-n' 'kern.memorystatus_vm_pressure_level' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'vm_stat' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'sysctl' '-n' 'vm.loadavg' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'sysctl' '-n' 'hw.ncpu' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'ps' '-Ao' 'pid=,ppid=,pcpu=,comm=' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'sysctl' '-n' 'hw.memsize' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'cat' '/proc/loadavg' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'nproc' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'grep' 'MemAvailable' '/proc/meminfo' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n'grep' 'MemTotal' '/proc/meminfo' </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"\n", "sysctl -n kern.memorystatus_vm_pressure_level", "vm_stat ", "sysctl -n vm.loadavg", "sysctl -n hw.ncpu", "ps -Ao pid=,ppid=,pcpu=,comm=", "sysctl -n hw.memsize", "cat /proc/loadavg", "nproc ", "grep MemAvailable /proc/meminfo", "grep MemTotal /proc/meminfo", "gh issue view 12 -R jirathip-dev/sendmeter --json title,body,updatedAt,comments,url", "git -C /tmp/does-not-matter/sendmeter fetch origin staging", "git -C /tmp/does-not-matter/sendmeter rev-parse --verify --quiet issue-12", "git -C /tmp/does-not-matter/sendmeter worktree add -b issue-12 /tmp/fleet-test-gone-heal-1222888-2/worktrees/sendmeter/issue-12 origin/staging", "git -C /tmp/fleet-test-gone-heal-1222888-2/worktrees/sendmeter/issue-12 sparse-checkout set --no-cone /* !/docs/archive/", "git -C /tmp/fleet-test-gone-heal-1222888-2/worktrees/sendmeter/issue-12 config --get drover.baseline", "date -r 1795069004 +%H:%M", "df -k /", "hostname -s", "sleep 10"]
+  left: 1
+ right: 2
+
+---- a_kick_and_a_spawn_from_a_deleted_directory_start_their_shed_lane stdout ----
+
+thread 'a_kick_and_a_spawn_from_a_deleted_directory_start_their_shed_lane' (1222890) panicked at crates/cli/tests/gone_cwd.rs:95:9:
+["kick", "sendmeter", "12", "--why", "stop", "--now"]: sendmeter #12 start: error: shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd /tmp/fleet-test-gone-cwd-1222888-0/worktrees/sendmeter/issue-12 --mcp /tmp/fleet-test-gone-cwd-1222888-0/worktrees/sendmeter/issue-12/.mcp.lane.json --meta {"claudeCode":{"options":{"settingSources":["project","local"],"settings":{"claudeMdExcludes":["/home/user/.claude/CLAUDE.md"]},"strictMcpConfig":true}}} --label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter --label item=#12 --label round=0 --label url=https://github.com/jirathip-dev/sendmeter/issues/12 --label drover.fleet=sendmeter --label drover.issue=12 --label drover.role=impl --label drover.round=0 -- sh -c export DROVER_LANE='sendmeter:12:impl' DROVER_PORT=41556 CARGO_TARGET_DIR='/tmp/fleet-test-gone-cwd-1222888-0/worktrees/.build/sendmeter-impl-12' DROVER_SCRATCH_TARGET='/tmp/fleet-test-gone-cwd-1222888-0/worktrees/.build/.scratch/sendmeter-impl-12' CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ANTHROPIC_MODEL='opus' && unset CLAUDE_CODE_OAUTH_TOKEN && if [ -x /usr/sbin/taskpolicy ]; then /usr/sbin/taskpolicy -b -p $$; else renice -n 10 -p $$ >/dev/null; ionice -c3 -p $$ 2>/dev/null; true; fi && mkdir -p .claude && cp '/tmp/fleet-test-gone-cwd-1222888-0/config/claude/fleet-impl/settings.json' .claude/settings.local.json && cp '/tmp/fleet-test-gone-cwd-1222888-0/config/claude/fleet-impl/role.md' CLAUDE.local.md && unset SHED BERTH && exec "$@" sh echo claude-agent-acp failed (1): sh: 0: getcwd() failed: No such file or directory
+shed: current directory: No such file or directory (os error 2)
+ [Event { seq: 6, ts: 1000000, fleet: "sendmeter", issue: Some(12), kind: "spawn-error", passive: false, push: false, data: {"error": String("shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd /tmp/fleet-test-gone-cwd-1222888-0/worktrees/sendmeter/issue-12 --mcp /tmp/fleet-test-gone-cwd-1222888-0/worktrees/sendmeter/issue-12/.mcp.lane.json --meta {\"claudeCode\":{\"options\":{\"settingSources\":[\"project\",\"local\"],\"settings\":{\"claudeMdExcludes\":[\"/home/user/.claude/CLAUDE.md\"]},\"strictMcpConfig\":true}}} --label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter --label item=#12 --label round=0 --label url=https://github.com/jirathip-dev/sendmeter/issues/12 --label drover.fleet=sendmeter --label drover.issue=12 --label drover.role=impl --label drover.round=0 -- sh -c export DROVER_LANE='sendmeter:12:impl' DROVER_PORT=41556 CARGO_TARGET_DIR='/tmp/fleet-test-gone-cwd-1222888-0/worktrees/.build/sendmeter-impl-12' DROVER_SCRATCH_TARGET='/tmp/fleet-test-gone-cwd-1222888-0/worktrees/.build/.scratch/sendmeter-impl-12' CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ANTHROPIC_MODEL='opus' && unset CLAUDE_CODE_OAUTH_TOKEN && if [ -x /usr/sbin/taskpolicy ]; then /usr/sbin/taskpolicy -b -p $$; else renice -n 10 -p $$ >/dev/null; ionice -c3 -p $$ 2>/dev/null; true; fi && mkdir -p .claude && cp '/tmp/fleet-test-gone-cwd-1222888-0/config/claude/fleet-impl/settings.json' .claude/settings.local.json && cp '/tmp/fleet-test-gone-cwd-1222888-0/config/claude/fleet-impl/role.md' CLAUDE.local.md && unset SHED BERTH && exec \"$@\" sh echo claude-agent-acp failed (1): sh: 0: getcwd() failed: No such file or directory"), "head": Null, "step": String("start")} }]
+
+---- a_stop_hook_from_a_cleaned_worktree_kicks_from_a_directory_that_exists stdout ----
+
+thread 'a_stop_hook_from_a_cleaned_worktree_kicks_from_a_directory_that_exists' (1222892) panicked at crates/cli/tests/gone_cwd.rs:129:5:
+assertion `left == right` failed
+  left: "sh: 0: getcwd() failed: No such file or directory\ngone\n"
+ right: "here\n"
+
+
+failures:
+    a_gone_current_directory_never_counts_towards_fails_the_same_way
+    a_kick_and_a_spawn_from_a_deleted_directory_start_their_shed_lane
+    a_spawn_that_fails_on_a_gone_current_directory_is_retried_once_and_starts
+    a_stop_hook_from_a_cleaned_worktree_kicks_from_a_directory_that_exists
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+
+error: test failed, to rerun pass `-p drover --test gone_cwd`

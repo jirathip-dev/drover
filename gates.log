@@ -1,0 +1,48 @@
+fmt 0
+    Checking drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/cli)
+    Checking drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/server)
+    Checking drover-chat v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/chat)
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/service)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.55s
+clippy-lib 0
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/core)
+    Checking drover-sys v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/sys)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/cli)
+    Checking drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/server)
+    Checking drover-chat v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/chat)
+    Checking drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/service)
+error: use of deprecated method `std::sync::atomic::Atomic::<u32>::fetch_update`: renamed to `try_update` for consistency
+   --> crates/cli/tests/gone_cwd.rs:140:23
+    |
+140 |             if self.1.fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1)).is_ok() {
+    |                       ^^^^^^^^^^^^
+    |
+    = note: `-D deprecated` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(deprecated)]`
+help: replace the use of the deprecated method
+    |
+140 -             if self.1.fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1)).is_ok() {
+140 +             if self.1.try_update(SeqCst, SeqCst, |n| n.checked_sub(1)).is_ok() {
+    |
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+  --> crates/cli/tests/gone_cwd.rs:92:39
+   |
+92 |         let (code, out) = run(&c, &r, &args);
+   |                                       ^^^^^ help: change this to: `args`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_borrow
+   = note: `-D clippy::needless-borrow` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::needless_borrow)]`
+
+error: could not compile `drover` (test "gone_cwd") due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+clippy-tests 101
+src lines (formatted): 54941 / cap 55500
+cap raised by ci/cap.d/2026-11-19-55500.toml
+web lines (TypeScript, soft budget, not capped): 1470
+cap 0
+`just gen` exited 127: sh: 1: just: not found
+arch-check: 939 files, 1 violations
+arch 1

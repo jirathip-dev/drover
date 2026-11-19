@@ -1,0 +1,16 @@
+Auto-merging scripts/test-shards.txt
+Merge made by the 'ort' strategy.
+ .github/workflows/ci.yml           |   4 +-
+ crates/cli/tests/screen_pages.rs   | 263 +++++++++++++++++++++++++++++++++++++
+ crates/cli/tests/serve_wire.rs     |   4 +-
+ crates/cli/tests/ui/pages.mjs      |  61 +++++++++
+ crates/server/src/screens.rs       |  53 ++++----
+ crates/server/src/screens_pages.rs |  52 ++++++++
+ docs/serve.md                      |   5 +
+ scripts/test-shards.txt            |   1 +
+ web/dist/board.js                  |   8 +-
+ web/src/main.ts                    |  28 ++++
+ 10 files changed, 446 insertions(+), 33 deletions(-)
+ create mode 100644 crates/cli/tests/screen_pages.rs
+ create mode 100644 crates/cli/tests/ui/pages.mjs
+ create mode 100644 crates/server/src/screens_pages.rs

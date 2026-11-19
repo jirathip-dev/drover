@@ -1,0 +1,29 @@
+   Compiling drover-core v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/core)
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/cli)
+   Compiling drover-server v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/server)
+   Compiling drover-chat v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/chat)
+   Compiling drover-service v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.28s
+     Running tests/drive_sim.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1358/debug/deps/drive_sim-ec8684c0dede5f42)
+
+running 6 tests
+test worktrees_sharing_files_count_once_and_hold_no_spawn ... ok
+test a_tick_hung_on_ssh_is_stopped_within_the_slo_and_the_next_tick_runs ... ok
+test a_busy_tick_past_the_tick_slo_is_never_stopped_and_every_fleet_finishes_its_pass ... ok
+test a_passed_draft_pr_is_marked_ready_and_merged ... ok
+test an_offline_hosts_lanes_restart_on_the_main_host_after_15_minutes ... ok
+test a_silent_reviewer_is_superseded_and_the_review_completes ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.29s
+
+     Running tests/gone_cwd.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1358/debug/deps/gone_cwd-c0d78832e64abfd9)
+
+running 4 tests
+test a_gone_current_directory_never_counts_towards_fails_the_same_way ... ok
+test a_spawn_that_fails_on_a_gone_current_directory_is_retried_once_and_starts ... ok
+test a_kick_and_a_spawn_from_a_deleted_directory_start_their_shed_lane ... ok
+test a_stop_hook_from_a_cleaned_worktree_kicks_from_a_directory_that_exists ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+tests=0

@@ -1,0 +1,9 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1358/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.71s
+     Running tests/working_set.rs (/home/user/.local/share/drover/work/.build/.scratch/herdsman-impl-1358/target/debug/deps/working_set-cd6736ed5f65465b)
+
+running 1 test
+test working_set_drops_quiet_history_and_the_fold_is_saved_on_append ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.52s
+
