@@ -1,0 +1,14 @@
+Decided: every fleet-clone fetch goes through crate::clone::fetch, which holds a flock on <clone>/.git/drover-fetch.lock for the fetch and heals on a missing or bad object.
+Because: "one fetch of a clone at a time"
+Because: crates/core/src/drive.rs:695 runs a fast pass under drive-fast.lock apart from the slow pass, so both (plus merge, check, spawn) fetched one clone at once.
+Decided: the heal asks origin first (ls-remote), drops only remote-tracking refs to missing objects, runs fetch --refetch and fsck --connectivity-only.
+Because: "Never deletes a local branch, a worktree or anything not on origin: only remote-tracking refs and git's own leftover temp packs."
+Decided: a failed heal stays due in the state db (clone-heal:<dir>), so later fetches retry it and clone-broken alerts only once.
+Because: crates/core/src/clone.rs:21
+Decided: round 3 records a verdict.md at one sha once per reviewer spawn; a second record of it is a no-op that exits 0.
+Because: crates/core/src/gate.rs:264 recorded; the sim fixture replay logged 5 verdicts against the real 4 once the clone lock let kick and drive --fast both record one verdict.md.
+Rejected: refusing the repeat with ALREADY_DONE — overlap's a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges re-runs drover verdict and expects exit 0.
+Decided: clone_heal's local clone sets fetch.prune false, so a host-wide fetch.prune=true cannot prune the broken ref before the heal is tested.
+Check: crates/cli/tests/clone_heal.rs builds a clone missing staging's tree with a ref to a missing commit; one drive pass heals and merges.
+Check: cargo test --test sim passes: the fixture's verdict count matches the real log; the known fleet's metrics are re-pinned (lock_wait 6 s).
+Owner: a fleet clone that loses objects now fixes itself on the next fetch, and you get one alert only if origin cannot be reached.
