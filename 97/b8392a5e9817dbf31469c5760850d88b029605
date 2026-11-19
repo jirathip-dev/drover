@@ -1,0 +1,5 @@
+Decided: treat the red link.rs test at 44ade029 as a CI flake and merge origin/staging without code changes
+Because: crates/cli/tests/link.rs:325
+Rejected: changing link.rs or its service — this diff never touches the link code and the test passes 3 of 3 locally
+Check: CI test shard 1 is green at the new head, and the drive/respawn_loop/waiting tests still pass
+Owner: The one red test was an unrelated flaky check; the fix itself is unchanged.
