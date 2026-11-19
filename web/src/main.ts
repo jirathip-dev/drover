@@ -252,9 +252,10 @@ const close = (v: View) => { v.es?.close(); v.es = undefined; v.live = false; };
 
 const ys = new Map<string, number>();
 function go(v: View, path: string, push = true, k?: Span) {
+  const nav = push && path.split('?')[0] !== v.path.split('?')[0];
   if (v === cur.v) ys.set(v.path, scrollY);
-  if (push) v.back.push(v.path);
-  if (push && v === cur.v) history.pushState(null, '', hashOf(cur, path));
+  if (nav) v.back.push(v.path);
+  if (push && v === cur.v) history[nav ? 'pushState' : 'replaceState'](null, '', hashOf(cur, path));
   const s = spot(scroller(v));
   if (s) spots.set(v.path, s);
   v.es?.close();

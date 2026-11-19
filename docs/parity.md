@@ -64,7 +64,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 45 | Issue card sections; its lanes newest first, tap opens sheet | parity_45 | kept |
 | 46 | "waiting: decision" with options; link to the asking thread | parity_46 | kept |
 | 47 | Backlog: search, filters, tick issues, [queue N] | parity_47 | kept |
-| 48 | Legend sheet [?] and serial-group 🔒 tags | parity_38 | kept |
+| 48 | Serial-group 🔒 tags (the legend sheet [?] half: dropped, owner decision #1392) | parity_48 | kept |
 | 49 | Lanes grouped by state, then by repo, newest first | parity_49 | kept |
 | 50 | Lane row: name and age, waiting reason, one-line "now:" | parity_50 | kept |
 | 51 | Parked, dead and host-offline states with plain reasons | — | open |

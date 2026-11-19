@@ -33,6 +33,12 @@ fn parity_1_a_paired_phone_answers_settles_cards_pauses_stops_and_saves_fleets_t
         ev(now - 60, None, "run-card", card);
     }
     sh.lane(LANE, "working", &wt);
+    for args in [
+        ["queue", "sendmeter", "add", "30", "31"].as_slice(),
+        &["queue", "sendmeter", "block", "--on", "30", "31"],
+    ] {
+        assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
+    }
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let ck = pair(
@@ -54,8 +60,15 @@ fn parity_1_a_paired_phone_answers_settles_cards_pauses_stops_and_saves_fleets_t
         serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
     assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
     assert_eq!(
+        out["home"],
+        json!({"back": 0, "menu": ["Fleets…", "Drive all now"], "hash": "#queue"}),
+        "chips and a fold on the Queue home add no back button; its menu has no legend: {out}"
+    );
+    assert_eq!(
         out["posted"],
         json!([
+            "filter",
+            "filter",
             "answer",
             "run-card",
             "run-card",

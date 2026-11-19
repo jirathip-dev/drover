@@ -48,6 +48,16 @@ try {
   await cmd('Page.navigate', { url });
   await until(`!!document.querySelector('main .scr')`, 'the first screen');
 
+  const home = `({ back: [...document.querySelectorAll('main button')].filter(b => b.checkVisibility() && b.textContent.includes('back')).length,
+    menu: [...document.querySelectorAll('main .scr[data-id=queue] > .tabh button')].map(b => b.textContent.trim()), hash: location.hash })`;
+  for (const chip of ['sendmeter', 'all']) {
+    await tap('main .chips button', chip);
+    await until(`document.querySelector('main .chips button[aria-pressed=true]')?.textContent.trim().toLowerCase().startsWith(${JSON.stringify(chip)})`, `the ${chip} chip`);
+  }
+  await tap('main .row[data-id="chain-sendmeter-30"]');
+  await until(`!document.querySelector('main [data-id="q-sendmeter-31"]')`, 'the folded chain');
+  out.home = await js(home);
+
   await tap('[data-id="ask-q7"] .fl');
   await tap('[data-id="ask-q7"] button.pick', 'refuse');
   out.steps.answer = await toast('answer');

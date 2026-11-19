@@ -47,7 +47,6 @@ fn the_door_builds_what_http_serves_with_no_socket_and_prunes_what_the_terminal_
         "/screens/lanes/sendmeter-impl-12",
         "/screens/fleets",
         "/screens/workflow",
-        "/screens/legend",
         "/screens/issue?repo=sendmeter&issue=17",
     ] {
         assert_eq!(door.screen(T, p), Some(get(p)), "{p}");
@@ -58,6 +57,7 @@ fn the_door_builds_what_http_serves_with_no_socket_and_prunes_what_the_terminal_
     );
     assert_eq!(Local::home(Some("sendmeter")), "/screens/queue?repo=sendmeter");
     for gone in [
+        "/screens/legend",
         "/screens/herd",
         "/screens/threads",
         "/screens/threads/t1",
