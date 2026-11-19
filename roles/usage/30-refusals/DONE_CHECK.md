@@ -1,0 +1,1 @@
+- DONE_CHECK: turn done (#1362): the worktree's `HEAD` is not the pushed PR head ("push first"), or a done check failed, could not start or timed out (the fleet's `done_checks`; unset = `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with a `Cargo.toml`), named with its output tail; final until fixed: no `turn-end`, no review, 3 at one head is an owner card

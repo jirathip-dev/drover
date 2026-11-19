@@ -6,4 +6,5 @@ This is a fix round; a fresh review follows at your pushed head.
 2. Resolve the conflicts preserving both sides' intent.
 3. Run the repo's gates (build, lint, tests) and push.
 4. Report the resolved files.
-5. A merge-only round's `why.md` may be short: one `Decided:`, `Because:` and `Owner:` (`Rejected: none` allowed).
+5. `drover turn done` gates the pushed head (PR body at the head, format, arch-check); a refusal means fix, push, and
+   run it again.

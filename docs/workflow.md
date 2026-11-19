@@ -26,17 +26,17 @@ stateDiagram-v2
     design --> design_review : design pushed, the owner's ask
     design_review --> queued : approve or revise
     design_review --> needs_human : reject
-    impl --> review : turn done with a push, review spawned
-    impl --> needs_human : turn blocked, or stalled past stall_minutes = 30
+    impl --> review : turn done passes its gate at the pushed head, review spawned
+    impl --> needs_human : turn blocked, 3 done refusals at a head, or stalled past stall_minutes = 30
     impl --> queued : lane killed, or repaired while blocked
     review --> ready : PASS at head
     review --> fix : FAIL at head
     review --> needs_human : ROUND_LIMIT after review_rounds = 3
-    fix --> review : fix pushed, next review round
-    fix --> needs_human : turn blocked, or stalled past stall_minutes = 30
+    fix --> review : fix pushed and turn done passed, next review round
+    fix --> needs_human : turn blocked, 3 done refusals at a head, or stalled past stall_minutes = 30
     ready --> review : verify stage at head for ui_paths, a verify or repro mark
     ready --> fix : update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds = 3
-    ready --> merged : squash-merge into one commit carrying its why notes, with PASS at head and CI green, no STAGING_WOULD_BREAK
+    ready --> merged : squash-merge into one commit, with PASS at head and CI green, no STAGING_WOULD_BREAK
     ready --> blocked : merge refused, or PR closed outside drover
     blocked --> fix : fix round spawned
     blocked --> review : review spawned at a new head

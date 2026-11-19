@@ -189,8 +189,9 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
             let made = w.model.incarnation(i);
             w.model.produced.push(made);
             w.model.at(ci, Ev::Ci { sha, green });
-            stop(sim, w, i, n);
+            done(sim, w, id, i, step);
         }
+        (Some(Script::Push { .. }), 4 | 5) => done(sim, w, id, i, step),
         (_, 3) => stop(sim, w, i, n),
         (Some(Script::Bad { stale, .. }), 1) => {
             let head = w.model.heads.get(&cwd).cloned().unwrap_or_default();
@@ -232,6 +233,25 @@ fn write_verdict(cwd: &str, body: &str, now: u64) {
         .write(true)
         .open(&f)
         .and_then(|f| f.set_modified(t));
+}
+
+/// A pushing lane's `drover turn done`; one whose PR body names no head runs it again, 3 times in all, then stops.
+fn done(sim: &Arc<Sim>, w: &mut World, id: &str, i: usize, step: u8) {
+    let agent = w.model.panes[i].agent.clone().unwrap_or_default();
+    let (n, role) = (issue_of(&agent), agent.split('-').nth(1).unwrap_or("impl").to_string());
+    sim.spawn(w, &format!("turn:{FLEET}:{n}:{role}"), &["turn", "done"]);
+    if w.model.unanchored.contains(&n) && step < 5 {
+        let pane = id.into();
+        w.model.at(
+            w.now + 60,
+            Ev::Lane {
+                pane,
+                step: step.max(3) + 1,
+            },
+        );
+    } else {
+        stop(sim, w, i, n);
+    }
 }
 
 fn stop(sim: &Arc<Sim>, w: &mut World, i: usize, n: u64) {

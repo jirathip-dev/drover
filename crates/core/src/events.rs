@@ -1117,8 +1117,14 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
     (
         "impl",
         &[
-            ("review(n)", "turn done with a push, review spawned"),
-            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+            (
+                "review(n)",
+                "turn done passes its gate at the pushed head, review spawned",
+            ),
+            (
+                "needs-human",
+                "turn blocked, 3 done refusals at a head, or stalled past stall_minutes",
+            ),
             ("queued", "lane killed, or repaired while blocked"),
         ],
     ),
@@ -1133,8 +1139,11 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
     (
         "fix(n)",
         &[
-            ("review(n)", "fix pushed, next review round"),
-            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+            ("review(n)", "fix pushed and turn done passed, next review round"),
+            (
+                "needs-human",
+                "turn blocked, 3 done refusals at a head, or stalled past stall_minutes",
+            ),
         ],
     ),
     (
@@ -1145,7 +1154,10 @@ pub const STATES: &[(&str, &[(&str, &str)])] = &[
                 "fix(n)",
                 "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
             ),
-            ("merged", "squash-merge into one commit carrying its why notes, with PASS at head and CI green, no STAGING_WOULD_BREAK"),
+            (
+                "merged",
+                "squash-merge into one commit, with PASS at head and CI green, no STAGING_WOULD_BREAK",
+            ),
             ("blocked", "merge refused, or PR closed outside drover"),
         ],
     ),

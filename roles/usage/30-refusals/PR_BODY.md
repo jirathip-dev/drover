@@ -1,0 +1,1 @@
+- PR_BODY: turn done (#925): the PR body names no sha of the pushed head (nor one under its integration merges), lacks `## For humans` or carries a "Generated with" line; final until fixed (`gh pr edit --body`, then `turn done` again): no `turn-end`, no review

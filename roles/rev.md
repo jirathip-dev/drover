@@ -14,17 +14,17 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
   its pid (`cmd & echo $! > server.pid`), then `kill "$(cat server.pid)"`; never `pkill`/`killall` (the hook refuses them).
 - Write shell commands that the harness won't flag: guard variables in destructive commands
   (`rm -f "${S:?}"/*.png`), quote paths, no `rm -rf` on computed paths.
-- Check the PR body's evidence names the exact head sha you review; evidence anchored at an
-  older sha is stale — flag it.
-- The PR body has a `## For humans` section (2–4 plain lines on what changes for the user,
-  no code identifiers); missing or inaccurate is a `blocking` finding. So is a 'Generated with'
-  or AI co-author line in the PR body (editable), or an AI co-author trailer in a commit made by
+- Paperwork is not a finding (#1362): `drover turn done` refuses a head until the PR body names it,
+  has `## For humans` and no 'Generated with' line, and format and arch-check pass. `drover verdict`
+  refuses a blocker tagged `[why-note]`, `[pr-body]` or `[format]` (`PAPERWORK`).
+- A `## For humans` section that is inaccurate is a `blocking` finding. So is an AI co-author
+  line in the PR body (editable), or an AI co-author trailer in a commit made by
   this round's lane (after the sha the last verdict reviewed). Trailers in older commits are not a
   finding: new commits only, never force-push. Never ask for a history rewrite.
 - UI PRs: confirm the `ui` job is green and open its `ui-390` screenshots. Any visual change not in the issue is a FAIL. (docs/ui.md)
 - Parity (#1094), in a repo with `docs/parity.md`: a PR touching `web/`, `assets/`, `screens.rs` or `serve.rs`
   has a `## Parity` section in its body naming each parity row it changes or drops (or `none`); missing is a
-  `blocking [pr-body]` finding. A row it drops, or a `parity_<row>` test it deletes, without an owner q-number on
+  `blocking [parity]` finding. A row it drops, or a `parity_<row>` test it deletes, without an owner q-number on
   that row's `dropped q<N>` line in `docs/parity.md` is a FAIL.
 - Budgets are soft. FAIL only for real bloat: duplicated logic, dead code, or a much simpler
   equivalent. Name the lines.
@@ -41,10 +41,10 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
     Verify-stage screenshots listed by path count as run proof.
   - `Proof: spec`, then a `>` quoted line from the issue's acceptance criteria, its `## Amendments`,
     or a named rule in `roles/rev.md` or `docs/ui.md`, plus the `file:line` that breaks it (the PR
-    body as `PR#<n>:<line>`). Form categories (`pr-body`, `trailer`, `format`) use this form.
+    body as `PR#<n>:<line>`). Form categories (e.g. `trailer`) use this form.
   `drover verdict` refuses a FAIL with `NO_PROOF` when a blocker's proof is missing or malformed.
 - Verdict is PASS or FAIL. `FAIL (form-only)` only if every blocker is in a form category (the
-  brief lists them; e.g. `trailer`, `pr-body`, `format`); one substantive blocker makes it a
+  brief lists them; e.g. `trailer`); one substantive blocker makes it a
   plain FAIL. Name the single biggest remaining gap; on PASS, state exactly what you could NOT
   verify.
 

@@ -9,15 +9,11 @@ use std::process::{Command, Stdio};
 
 struct Git<'a> {
     fake: &'a Fake,
-    before_push: std::sync::Mutex<Option<Box<dyn FnOnce() + Send + 'a>>>,
 }
 
 impl<'a> Git<'a> {
     fn new(fake: &'a Fake) -> Self {
-        Git {
-            fake,
-            before_push: std::sync::Mutex::new(None),
-        }
+        Git { fake }
     }
 }
 
@@ -30,11 +26,6 @@ impl Runner for Git<'_> {
             return self.fake.run_in(prog, args, input);
         }
         self.fake.calls.borrow_mut().push(format!("git {}", args.join(" ")));
-        if args.iter().any(|a| a == "push") && args.iter().any(|a| a.contains("refs/notes")) {
-            if let Some(f) = self.before_push.lock().unwrap().take() {
-                f();
-            }
-        }
         let mut c = Command::new("git")
             .args(args)
             .stdin(Stdio::piped())
@@ -127,7 +118,7 @@ fn repo(name: &str) -> Repo {
     }
 }
 
-fn lane(repo: &Repo, update: bool) -> (drover::Ctx, FakeShed) {
+fn lane(repo: &Repo) -> (drover::Ctx, FakeShed) {
     set_env("DROVER_LANE", "sendmeter:12:impl");
     let c = ctx(
         &repo.dir,
@@ -137,7 +128,7 @@ fn lane(repo: &Repo, update: bool) -> (drover::Ctx, FakeShed) {
     ev(
         10,
         "spawn",
-        json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "worktree": repo.wt, "branch": "issue-12", "update": update}),
+        json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "worktree": repo.wt, "branch": "issue-12"}),
     );
     ev(
         11,
@@ -164,32 +155,10 @@ fn fake(head: &str) -> Fake {
 
 fn fake_body(head: &str, body: &str) -> Fake {
     let pr = json!({"number": 100, "state": "OPEN", "headRefOid": head, "body": body});
-    Fake::default()
-        .reply("gh pr view issue-12", &pr.to_string())
-        .reply(
-            "gh issue view 12",
-            &json!({"title": "Meter sends", "body": SPEC}).to_string(),
-        )
-        .reply("gh pr edit", "")
-}
-
-const NOTE: &str = "Decided: count a retry as the same send\n\
-Because: \"counts every send once, retries included\"\n\
-Rejected: a counter per attempt — the spec counts sends\n\
-Because: q5\n\
-Check: a.rs:2 counts the retry once\n\
-Owner: retries no longer double the meter\n";
-
-fn origin_note(repo: &Repo, sha: &str) -> Option<String> {
-    let o = Command::new("git")
-        .arg("--git-dir")
-        .arg(&repo.origin)
-        .args(["notes", "--ref", "why", "show", sha])
-        .output()
-        .unwrap();
-    o.status
-        .success()
-        .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+    Fake::default().reply("gh pr view issue-12", &pr.to_string()).reply(
+        "gh issue view 12",
+        &json!({"title": "Meter sends", "body": SPEC}).to_string(),
+    )
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
@@ -202,170 +171,11 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
 }
 
 #[test]
-fn why_note_written_on_origin_pr_body_and_log() {
-    let repo = repo("why-written");
-    let (c, _sh) = lane(&repo, false);
-    std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
-    let r = fake(&repo.head);
-    let (code, out) = run(&c, &Git::new(&r), &["turn", "done"]);
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(origin_note(&repo, &repo.head).as_deref(), Some(NOTE));
-    let calls = r.calls.borrow();
-    let edit = calls
-        .iter()
-        .find(|c| c.starts_with("gh pr edit 100 -R jirathip-dev/sendmeter --body"))
-        .unwrap();
-    assert!(edit.contains("Closes #12") && edit.contains("## For humans"), "{edit}");
-    assert!(edit.contains("## Why (round 1)\n\nDecided: count a retry"), "{edit}");
-    let w = &kinds(&c, "why")[0];
-    assert_eq!(
-        (w.issue, w.str("sha"), w.val("round").as_u64()),
-        (Some(12), Some(repo.head.as_str()), Some(1))
-    );
-    assert_eq!(w.str("owner"), Some("retries no longer double the meter"));
-    assert_eq!(*w.val("files"), json!(["a.rs"]));
-    assert!(kinds(&c, "turn-end")[0].data.get("note").is_none());
-    assert!(!repo.wt.join("why.md").exists());
-}
-
-#[test]
-fn an_update_rounds_short_note_is_accepted() {
-    let repo = repo("why-short");
-    let (c, _sh) = lane(&repo, true);
-    let short = "Decided: merged staging, no conflicts\nBecause: q5\nRejected: none\nOwner: brought up to date\n";
-    std::fs::write(repo.wt.join("why.md"), short).unwrap();
-    let (code, out) = run(&c, &Git::new(&fake(&repo.head)), &["turn", "done"]);
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(origin_note(&repo, &repo.head).as_deref(), Some(short));
-}
-
-#[test]
-fn an_invalid_note_is_refused_with_its_reason_and_nothing_is_pushed() {
-    let cases = [
-        (None, "why.md missing"),
-        (
-            Some(NOTE.replace("Check: a.rs:2 counts the retry once\n", "")),
-            "why.md form: no Check: line",
-        ),
-        (
-            Some(NOTE.replace("Because: q5", "Because: the owner said so")),
-            "why.md:4 uncited",
-        ),
-        (
-            Some(NOTE.replace("Because: q5", "Because: q99")),
-            "why.md:4 cite: q99 is no answered ask",
-        ),
-        (
-            Some(NOTE.replace("Because: q5", "Because: \"each send is metered twice\"")),
-            "is not in the spec",
-        ),
-        (
-            Some(NOTE.replace("Because: q5", "Because: a.rs:9")),
-            "cite: a.rs:9 past its end (3)",
-        ),
-        (
-            Some(NOTE.replace("Because: q5", "Because: token ghp_abcdefghij0123456789xyz")),
-            "why.md:4 secret: Because: token •••",
-        ),
-    ];
-    for (i, (note, why)) in cases.into_iter().enumerate() {
-        let repo = repo(&format!("why-refused-{i}"));
-        let (c, _sh) = lane(&repo, false);
-        if let Some(n) = &note {
-            std::fs::write(repo.wt.join("why.md"), n).unwrap();
-        }
-        let r = fake(&repo.head);
-        let (code, out) = run(&c, &Git::new(&r), &["turn", "done"]);
-        assert_eq!(code, 3, "{why}: {out}");
-        assert!(
-            out.contains("REFUSED WHY_INVALID: ") && out.contains(why),
-            "{why}: {out}"
-        );
-        assert!(!out.contains("ghp_abcdefghij"), "{out}");
-        let ls = g(&repo.dir, &["ls-remote", repo.origin.to_str().unwrap(), "refs/notes/*"]);
-        assert_eq!(ls, "", "{why}: nothing pushed");
-        assert!(!r.called("gh pr edit") && kinds(&c, "why").is_empty(), "{why}");
-        let t = &kinds(&c, "turn-end")[0];
-        assert!(
-            t.str("note").unwrap().starts_with("WHY_INVALID: "),
-            "{why}: the turn still ends"
-        );
-    }
-}
-
-#[test]
-fn a_note_pushed_between_fetch_and_push_is_kept() {
-    let repo = repo("why-race-between");
-    let (c, _sh) = lane(&repo, false);
-    std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
-    let base = g(&repo.local, &["rev-parse", "origin/staging"]);
-    let other = repo.dir.join("other");
-    g(
-        &repo.dir,
-        &["clone", "-q", repo.origin.to_str().unwrap(), other.to_str().unwrap()],
-    );
-    let r = fake(&repo.head);
-    let git = Git::new(&r);
-    let o = other.clone();
-    *git.before_push.lock().unwrap() = Some(Box::new(move || {
-        g(
-            &o,
-            &["notes", "--ref", "why", "add", "-m", "Owner: the other lane", &base],
-        );
-        g(&o, &["push", "-q", "origin", "refs/notes/why"]);
-    }));
-    let (code, out) = run(&c, &git, &["turn", "done"]);
-    assert_eq!(code, 0, "{out}");
-    let base = g(&repo.local, &["rev-parse", "origin/staging"]);
-    assert_eq!(origin_note(&repo, &base).as_deref(), Some("Owner: the other lane\n"));
-    assert_eq!(origin_note(&repo, &repo.head).as_deref(), Some(NOTE));
-    let pushes = r
-        .calls
-        .borrow()
-        .iter()
-        .filter(|c| c.contains("push -q origin refs/notes/why-"))
-        .count();
-    assert_eq!(pushes, 2, "rejected once, then pushed");
-}
-
-#[test]
-fn two_lanes_finishing_at_once_both_keep_their_notes() {
-    let repo = repo("why-race-two");
-    let (c, _sh) = lane(&repo, false);
-    let seed = repo.dir.join("seed");
-    g(&seed, &["checkout", "-qb", "issue-13", "staging"]);
-    std::fs::write(seed.join("b.rs"), "b\n").unwrap();
-    g(&seed, &["add", "."]);
-    g(&seed, &["commit", "-qm", "b"]);
-    g(&seed, &["push", "-q", "origin", "issue-13"]);
-    let other = g(&seed, &["rev-parse", "HEAD"]);
-    let cfg = drover::config::Config::load(&c.config).unwrap();
-    let f = cfg.fleet("sendmeter").unwrap();
-    let r = Fake::default();
-    let git = Git::new(&r);
-    std::thread::scope(|s| {
-        let a = s.spawn(|| drover::why::attach(&c, &git, f, "sendmeter", ("issue-12", &repo.head), "Owner: twelve\n"));
-        let b = s.spawn(|| drover::why::attach(&c, &git, f, "sendmeter", ("issue-13", &other), "Owner: thirteen\n"));
-        a.join().unwrap().unwrap();
-        b.join().unwrap().unwrap();
-    });
-    assert_eq!(origin_note(&repo, &repo.head).as_deref(), Some("Owner: twelve\n"));
-    assert_eq!(origin_note(&repo, &other).as_deref(), Some("Owner: thirteen\n"));
-}
-
-#[test]
-fn why_reads_a_merged_line_back() {
+fn why_reads_a_merged_line_back_with_its_issue_and_asks_and_no_note() {
     let repo = repo("why-cmd");
-    let (c, _sh) = lane(&repo, false);
+    let (c, _sh) = lane(&repo);
     let seed = repo.dir.join("seed");
-    std::fs::write(seed.join("c.rs"), "c\n").unwrap();
-    g(&seed, &["add", "."]);
-    g(&seed, &["commit", "-qm", "meter: test it"]);
-    g(&seed, &["push", "-q", "origin", "issue-12"]);
-    let head = g(&seed, &["rev-parse", "HEAD"]);
-    g(&repo.wt, &["pull", "-q", "origin", "issue-12"]);
-    std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
-    assert_eq!(run(&c, &Git::new(&fake(&head)), &["turn", "done"]).0, 0);
+    let head = repo.head.clone();
     g(&seed, &["checkout", "-q", "staging"]);
     g(
         &seed,
@@ -375,6 +185,8 @@ fn why_reads_a_merged_line_back() {
     let merge = g(&seed, &["rev-parse", "HEAD"]);
     let d = json!({"pr": "100", "merge_sha": merge, "verdict_sha": head, "into": "staging"});
     append(&c.state, &Event::new(50, "sendmeter", Some(12), "merged", d)).unwrap();
+    let old = json!({"sha": head, "round": 1, "owner": "an old note"});
+    append(&c.state, &Event::new(30, "sendmeter", Some(12), "why", old)).unwrap();
     let look = repo.dir.join("look");
     g(
         &repo.dir,
@@ -389,11 +201,15 @@ fn why_reads_a_merged_line_back() {
         out.contains("issue   #12 Meter sends") && out.contains("PR #100 · merged"),
         "{out}"
     );
-    assert!(out.contains(&format!("note    round 1 · on {head:.9}")), "{out}");
-    assert!(out.contains("  Owner: retries no longer double the meter"), "{out}");
+    assert!(!out.contains("note") && !out.contains("an old note"), "{out}");
     assert!(
         out.contains("q5 owner · Count retries?") && out.contains("→ owner (web): yes, each once"),
         "{out}"
+    );
+    assert!(
+        !r.calls.borrow().iter().any(|c| c.contains("notes")),
+        "{:?}",
+        r.calls.borrow()
     );
     let (code, out) = run(&c, &Git::new(&r), &["why", &at, "--json"]);
     assert_eq!(code, 0, "{out}");
@@ -402,123 +218,24 @@ fn why_reads_a_merged_line_back() {
         (v["issue"]["number"].as_u64(), v["issue"]["merge_sha"].as_str()),
         (Some(12), Some(merge.as_str()))
     );
-    assert_eq!(v["note"]["sha"], json!(head));
-    assert_eq!(v["note"]["owner"], json!("retries no longer double the meter"));
+    assert!(v.get("note").is_none(), "{v}");
     assert_eq!(v["asks"][0]["answer"]["choice"], json!("yes, each once"));
 }
 
-#[test]
-fn a_squash_merge_lands_one_commit_carrying_every_lane_note() {
-    let repo = repo("why-squash");
-    let (c, _sh) = lane(&repo, false);
-    let pr = |head: &str| {
-        let green =
-            json!([{"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
-        let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
-            "body": body(head), "statusCheckRollup": green});
-        Fake::default()
-            .reply("gh pr view issue-12", &pr.to_string())
-            .reply(
-                "gh issue view 12",
-                &json!({"title": "Meter sends", "body": SPEC}).to_string(),
-            )
-            .reply("gh pr edit", "")
-    };
-    std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
-    assert_eq!(run(&c, &Git::new(&pr(&repo.head)), &["turn", "done"]).0, 0);
-    let seed = repo.dir.join("seed");
-    std::fs::write(seed.join("c.rs"), "c\n").unwrap();
-    g(&seed, &["add", "."]);
-    g(&seed, &["commit", "-qm", "meter: test it"]);
-    g(&seed, &["push", "-q", "origin", "issue-12"]);
-    let head = g(&seed, &["rev-parse", "HEAD"]);
-    g(&repo.wt, &["pull", "-q", "origin", "issue-12"]);
-    let second = "Decided: test the meter\nBecause: q5\nRejected: no test — the meter would drift\nCheck: c.rs holds the test\nOwner: the meter has a test\n";
-    std::fs::write(repo.wt.join("why.md"), second).unwrap();
-    set_env("DROVER_LANE", "sendmeter:12:impl");
-    let r = pr(&head);
-    let (code, out) = run(&c, &Git::new(&r), &["turn", "done"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(origin_note(&repo, &head).is_some(), "{out}");
-    let v = json!({"verdict": "PASS", "sha": head});
-    append(&c.state, &Event::new(40, "sendmeter", Some(12), "verdict", v)).unwrap();
-    g(&seed, &["checkout", "-q", "staging"]);
-    g(&seed, &["merge", "-q", "--squash", "issue-12"]);
-    g(&seed, &["commit", "-qm", "meter: count sends (#12) (#100)"]);
-    g(&seed, &["push", "-q", "origin", "staging"]);
-    let squash = g(&seed, &["rev-parse", "HEAD"]);
-    let r = pr(&head)
-        .reply("gh pr merge 100", "")
-        .reply("gh pr view 100", &json!({"mergeCommit": {"oid": squash}}).to_string())
-        .reply("gh issue", "");
-    let (code, out) = run(&c, &Git::new(&r), &["merge", "sendmeter", "12"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(r.called(&format!(
-        "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
-    )));
-    let note = origin_note(&repo, &squash).expect("a note on the squash commit");
-    assert_eq!(note.trim(), format!("{}\n\n{}", NOTE.trim(), second.trim()));
-    let look = repo.dir.join("look");
-    g(
-        &repo.dir,
-        &["clone", "-q", repo.origin.to_str().unwrap(), look.to_str().unwrap()],
-    );
-    assert_eq!(g(&look, &["rev-list", "--count", "origin/staging"]), "2");
-    let at = format!("{}:2", look.join("a.rs").display());
-    let (code, out) = run(&c, &Git::new(&r), &["why", &at]);
-    assert_eq!(code, 0, "{out}");
+fn refused(c: &drover::Ctx, r: &dyn Runner, code: &str) -> (String, Event) {
+    let (exit, out) = run(c, r, &["turn", "done"]);
+    assert_eq!(exit, 3, "{out}");
+    assert!(out.contains(&format!("REFUSED {code}: ")), "{out}");
     assert!(
-        out.contains(&format!("commit  {squash:.9}  meter: count sends (#12) (#100)")),
-        "{out}"
+        kinds(c, "turn-end").is_empty(),
+        "a refused done logs no turn-end: {out}"
     );
-    assert!(
-        out.contains("issue   #12 Meter sends") && out.contains("PR #100 · merged"),
-        "{out}"
-    );
-    assert!(out.contains(&format!("on {squash:.9}")), "{out}");
-    assert!(
-        out.contains("  Owner: retries no longer double the meter") && out.contains("  Owner: the meter has a test"),
-        "{out}"
-    );
+    (out, kinds(c, "done-refused").pop().unwrap())
 }
 
 #[test]
-fn a_refused_note_is_nudged_once_then_review_goes_ahead() {
-    let repo = repo("why-nudge");
-    let (c, sh) = lane(&repo, false);
-    let wt = repo.wt.to_string_lossy().into_owned();
-    sh.lane("sendmeter-impl-12", "idle", &wt);
-    let ci = json!([{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
-    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": repo.head, "statusCheckRollup": ci, "body": body(&repo.head)});
-    let r = Fake::default().reply("gh pr view issue-12", &pr.to_string()).reply(
-        "gh issue view 12",
-        &json!({"title": "Meter sends", "body": SPEC}).to_string(),
-    );
-    assert_eq!(run(&c, &Git::new(&r), &["turn", "done"]).0, 3);
-    let later = |s| drover::Ctx {
-        now: c.now + s,
-        ..c.clone()
-    };
-    let (code, out) = run(&later(200), &Git::new(&r), &["drive"]);
-    assert_eq!(code, 0, "{out}");
-    let nudge = "drover: your `turn done` was refused: WHY_INVALID: why.md missing";
-    let nudges = || {
-        sh.sent("sendmeter-impl-12")
-            .iter()
-            .filter(|t| t.starts_with(nudge))
-            .count()
-    };
-    assert_eq!(nudges(), 1, "{:?}", sh.all("send"));
-    assert!(kinds(&c, "pushed").is_empty(), "no review before the nudge is answered");
-    assert_eq!(run(&later(300), &Git::new(&r), &["turn", "done"]).0, 3);
-    run(&later(400), &Git::new(&r), &["drive"]);
-    assert_eq!(nudges(), 1);
-    assert_eq!(kinds(&c, "pushed").len(), 1, "{:?}", r.calls.borrow());
-}
-
-#[test]
-fn a_pr_body_without_the_heads_evidence_is_refused_before_review() {
-    let repo = repo("why-pr-body");
+fn a_pr_body_without_the_heads_evidence_is_refused_and_ends_no_turn() {
+    let repo = repo("done-pr-body");
     let base = g(&repo.wt, &["rev-parse", "HEAD^1"]);
     let stale = format!("## For humans\n\nx\n\n## Evidence (head {base})\n\ncargo test: exit 0");
     let cases = [
@@ -539,25 +256,123 @@ fn a_pr_body_without_the_heads_evidence_is_refused_before_review() {
             "carries `🤖 Generated with [Claude Code]",
         ),
     ];
-    let (c, _sh) = lane(&repo, false);
-    std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
+    let (c, _sh) = lane(&repo);
     for (b, why) in cases {
         let r = fake_body(&repo.head, &b);
-        let (code, out) = run(&c, &Git::new(&r), &["turn", "done"]);
-        assert_eq!(code, 3, "{why}: {out}");
-        assert!(out.contains("REFUSED PR_BODY: ") && out.contains(why), "{why}: {out}");
-        assert!(!r.called("gh pr edit") && kinds(&c, "why").is_empty(), "{why}");
-        let t = kinds(&c, "turn-end").pop().unwrap();
-        assert!(
-            t.str("note").unwrap().starts_with("PR_BODY: "),
-            "{why}: the turn still ends"
+        let (out, e) = refused(&c, &Git::new(&r), "PR_BODY");
+        assert!(out.contains(why), "{why}: {out}");
+        assert_eq!(
+            (e.str("code"), e.str("sha")),
+            (Some("PR_BODY"), Some(repo.head.as_str()))
         );
+        assert!(e.str("why").unwrap().contains(why), "{why}");
     }
     let merged = "Merge remote-tracking branch 'origin/staging' into issue-12";
     g(&repo.wt, &["commit", "-q", "--allow-empty", "-m", merged]);
     let top = g(&repo.wt, &["rev-parse", "HEAD"]);
     let (code, out) = run(&c, &Git::new(&fake_body(&top, &body(&repo.head))), &["turn", "done"]);
     assert_eq!(code, 0, "a staging merge over the named head passes: {out}");
+    assert_eq!(kinds(&c, "turn-end").pop().unwrap().str("sha"), Some(top.as_str()));
+}
+
+#[test]
+fn an_unpushed_commit_is_refused_push_first() {
+    let repo = repo("done-unpushed");
+    let (c, _sh) = lane(&repo);
+    g(&repo.wt, &["commit", "-q", "--allow-empty", "-m", "local only"]);
+    let r = fake(&repo.head);
+    let (out, e) = refused(&c, &Git::new(&r), "DONE_CHECK");
+    assert!(out.contains("push first"), "{out}");
+    assert_eq!(e.str("sha"), Some(repo.head.as_str()));
+}
+
+fn tool(bin: &Path, name: &str, code: i32, say: &str) {
+    let path = bin.join(name);
+    let log = bin.join("ran.log");
+    let script = format!(
+        "#!/bin/sh\necho \"{name} $* $PWD\" >> {}\necho '{say}'\nexit {code}\n",
+        log.display()
+    );
+    std::fs::write(&path, script).unwrap();
+    let mut p = std::fs::metadata(&path).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut p, 0o755);
+    std::fs::set_permissions(&path, p).unwrap();
+}
+
+fn checked(name: &str, (fmt, arch): (i32, i32)) -> (Repo, drover::Ctx, FakeShed, PathBuf) {
+    let (repo, c, sh, bin) = ui_lane(name, None);
+    std::fs::write(repo.wt.join("Cargo.toml"), "[package]\n").unwrap();
+    std::fs::create_dir_all(repo.wt.join(".drover")).unwrap();
+    std::fs::write(repo.wt.join(".drover/arch.toml"), "").unwrap();
+    tool(&bin, "cargo", fmt, "Diff in a.rs at line 2");
+    tool(&bin, "drover", arch, "a.rs:2: a comment");
+    (repo, c, sh, bin)
+}
+
+#[test]
+fn a_failing_format_or_arch_check_is_refused_with_its_output_tail() {
+    for (name, codes, failed) in [
+        (
+            "done-fmt",
+            (1, 0),
+            "`cargo fmt --check` failed (exit 1):\nDiff in a.rs at line 2",
+        ),
+        (
+            "done-arch",
+            (0, 1),
+            "`drover arch-check` failed (exit 1):\na.rs:2: a comment",
+        ),
+    ] {
+        let (repo, c, _sh, bin) = checked(name, codes);
+        let f = fake(&repo.head);
+        let (out, e) = refused(&c, &ui(Git::new(&f), &bin, false), "DONE_CHECK");
+        assert!(out.contains(failed), "{name}: {out}");
+        assert_eq!(e.str("code"), Some("DONE_CHECK"));
+    }
+}
+
+#[test]
+fn a_clean_done_runs_both_checks_in_the_worktree_and_logs_its_head() {
+    let (repo, c, _sh, bin) = checked("done-clean", (0, 0));
+    let f = fake(&repo.head);
+    let r = ui(Git::new(&f), &bin, false);
+    let (code, out) = run(&c, &r, &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    let wt = repo.wt.canonicalize().unwrap();
+    let ran = std::fs::read_to_string(bin.join("ran.log")).unwrap();
+    assert_eq!(
+        ran,
+        format!(
+            "drover arch-check {}\ncargo fmt --check {}\n",
+            wt.display(),
+            wt.display()
+        )
+    );
+    assert_eq!(*r.limits.lock().unwrap(), [std::time::Duration::from_mins(30); 2]);
+    let t = kinds(&c, "turn-end").pop().unwrap();
+    assert_eq!((t.str("state"), t.str("sha")), (Some("done"), Some(repo.head.as_str())));
+    assert!(kinds(&c, "done-refused").is_empty());
+}
+
+#[test]
+fn a_check_that_cannot_start_or_times_out_refuses_the_done() {
+    let (repo, c, _sh, bin) = checked("done-missing", (0, 0));
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    let cfg = cfg.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\ndone_checks = [\"no-such-tool-1362 --check\"]",
+    );
+    std::fs::write(&c.config, cfg).unwrap();
+    let f = fake(&repo.head);
+    let (out, _) = refused(&c, &ui(Git::new(&f), &bin, false), "DONE_CHECK");
+    assert!(out.contains("`no-such-tool-1362 --check` cannot start"), "{out}");
+    assert!(!bin.join("ran.log").exists(), "the set list replaces the defaults");
+    let (out, _) = refused(&c, &ui(Git::new(&f), &bin, true), "DONE_CHECK");
+    assert!(
+        out.contains("`no-such-tool-1362 --check` timed out after 30 min"),
+        "{out}"
+    );
+    assert_eq!(kinds(&c, "done-refused").len(), 2);
 }
 
 struct Ui<'a> {
@@ -598,14 +413,13 @@ impl Runner for Ui<'_> {
 
 fn ui_lane(name: &str, check: Option<(i32, Value)>) -> (Repo, drover::Ctx, FakeShed, PathBuf) {
     let repo = repo(name);
-    let (c, sh) = lane(&repo, false);
+    let (c, sh) = lane(&repo);
     let cfg = std::fs::read_to_string(&c.config).unwrap();
     let cfg = cfg.replace(
         "integration = \"staging\"",
         "integration = \"staging\"\nui_paths = [\"web/**\"]",
     );
     std::fs::write(&c.config, cfg).unwrap();
-    std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
     let bin = repo.dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     if let Some((code, outcome)) = check {
@@ -679,7 +493,6 @@ fn a_clean_ui_check_ends_the_turn_with_its_result() {
         assert_eq!(t.val("ui_check")["result"], "clean", "{name}");
         assert_eq!(t.val("ui_check")["known"], known, "{name}");
         assert_eq!(kinds(&c, "ui-check").len(), 1);
-        assert_eq!(kinds(&c, "why").len(), 1, "the why note still goes on");
     }
 }
 
@@ -693,7 +506,6 @@ fn a_new_finding_refuses_the_turn_once_then_review_takes_it() {
     let line = "lint/title-length fixtures/screens/queue.one.json:4 screen#queue/list#rows: the title is over 60 characters: 74 characters\n  fix: Shorten the title to 60 characters.";
     assert!(out.contains(line), "{out}");
     assert!(kinds(&c, "turn-end").is_empty(), "a refused turn logs no turn-end");
-    assert!(kinds(&c, "why").is_empty() && repo.wt.join("why.md").exists());
     let run1 = kinds(&c, "ui-check").pop().unwrap();
     assert_eq!((run1.val("new"), run1.val("refused")), (&json!(1), &json!(true)));
     assert!(run1.val("secs").is_u64());
@@ -703,9 +515,7 @@ fn a_new_finding_refuses_the_turn_once_then_review_takes_it() {
     let t = kinds(&c, "turn-end").pop().unwrap();
     assert_eq!(t.val("ui_check")["result"], "new");
     let ev = read(&c.state).unwrap().to_vec();
-    let cfg = drover::config::Config::load(&c.config).unwrap();
-    let fl = cfg.fleet("sendmeter").unwrap();
-    let brief = drover::why::brief(&Git::new(&f), fl, &ev, ("sendmeter", 12), Some(&repo.head), SPEC).unwrap();
+    let brief = drover::guard::brief(&ev, ("sendmeter", 12)).unwrap();
     assert!(brief.contains(line), "rev's brief carries them: {brief}");
 }
 
