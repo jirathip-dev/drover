@@ -1,0 +1,7 @@
+Decided: the scene's load level is held when the spawn gate refuses, busy from 0.5 load/limit or on memory pressure warn or critical, calm otherwise
+Because: q2384
+Because: "busy = load at or over the limit, or memory pressure at warn or critical; calm = everything else"
+Decided: round 3 changes no code; it merges staging and pushes again for a fresh CI run
+Rejected: editing threads_tab or web code — the PR touches neither, so the ui-webkit dropdown failure is not from this diff
+Check: ui-webkit is green at the new head; herd_tests.rs still expects busy for memory warn at load 0.1
+Owner: no behaviour change this round, only a rerun of the browser check on current staging
