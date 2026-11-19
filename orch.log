@@ -1,0 +1,15 @@
+   Compiling drover v0.1.0 (/home/user/.local/share/drover/work/drover/issue-1334/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running tests/orchestrator.rs (/home/user/.local/share/drover/work/.build/herdsman-impl-1334/debug/deps/orchestrator-7407798c2b10c826)
+
+running 7 tests
+test a_thread_needs_a_orchestrator_or_impl_role_and_spawn_never_starts_one ... ok
+test a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_into_the_thread ... ok
+test a_harness_without_resume_gets_the_history_in_its_kick ... ok
+test a_shed_orchestrator_resumes_its_session ... ok
+test a_rate_limited_orchestrator_tells_the_owner_and_gets_one_continue_at_its_reset ... ok
+test a_thread_starts_sleeps_when_idle_and_restarts_with_its_history ... ok
+test no_harness_starts_an_agent_with_a_control_character_in_its_argv ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
