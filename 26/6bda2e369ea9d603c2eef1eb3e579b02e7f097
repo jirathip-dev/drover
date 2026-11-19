@@ -1,0 +1,7 @@
+Decided: this round only refreshes the PR body evidence to the pushed head and merges origin/staging twice, with no change to the fix.
+Because: .drover/rules.md:23
+Decided: the web/dist/board.js conflict with #1297 was settled by rebuilding the bundle from the merged web/src, not by hand.
+Because: .drover/rules.md:16
+Rejected: pushing the leftover snapshot commit 05852e4e — it held only the lane-local .drover/outbox.jsonl.
+Check: the evidence section names 266bda2e, and CI's evidence and arch-check generated-file jobs are green there.
+Owner: Same fix as before, now brought up to date with staging, and the test evidence matches the latest push.
