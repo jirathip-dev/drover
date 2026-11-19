@@ -1,0 +1,22 @@
+Decided: an untracked `*.log` is lane scratch: it never counts as dirty work and every wip snapshot leaves it out, so supersede, kill and clean no longer stop on a CI log line.
+Because: "The wip snapshot leaves out untracked files that are scratch (logs) instead of refusing the whole kill"
+Decided: SECRET_IN_WIP joins drive's owner refusals, so a refused restart of a gone lane is one needs-human card quoting the refusal's file:line.
+Because: "the owner gets one card naming the file and line, instead of the same nudge line for hours"
+Decided: a done or need-input nudge that cannot reach the lane (asleep on a busy host) is still logged as a nudge, not sent, so the 10-minute window then blocks it with a card.
+Because: crates/core/src/drive.rs:1357
+Rejected: a hook that refuses or moves worktree-root logs — the snapshot change already makes such a file harmless; the brief line steers lanes to the scratch folder.
+Rejected: logging the working-state prompt as sent when held — a working lane should keep being retried, never blocked.
+Check: the four new tests fail on b8b13392^ and pass at head; the impl, fix and update brief goldens carry the scratch folder line.
+Owner: a lane's stray log file no longer blocks its restart, and a lane that says done without pushing reaches you as a card instead of waiting silently.
+
+Decided: an untracked *.log is lane scratch: it never counts as dirty work and every wip snapshot leaves it out.
+Because: "The wip snapshot leaves out untracked files that are scratch (logs) instead of refusing the whole kill"
+Decided: SECRET_IN_WIP joins drive's owner refusals, so a refused restart is one needs-human card with file:line.
+Because: "the owner gets one card naming the file and line, instead of the same nudge line for hours"
+Decided: a done or need-input nudge that cannot reach an asleep lane is still logged, so the stall window blocks it with a card.
+Because: crates/core/src/drive.rs:1357
+Decided: staging build fix: trim #1380's shed.rs test (duplicate assert, wrapped call) back under its 2557-line baseline.
+Because: .drover/arch-baseline.txt:4
+Rejected: raising the shed.rs baseline — baselines only ratchet down; the test lost nothing by the trim.
+Check: arch-check passes shed.rs at dd12ea1; the four repro tests fail on b8b13392^ and pass at head.
+Owner: a lane's stray log file no longer blocks its restart, and a silent done reaches you as a card.
