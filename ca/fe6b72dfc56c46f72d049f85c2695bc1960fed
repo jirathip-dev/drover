@@ -1,0 +1,8 @@
+Decided: merge_message appends every valid `Cap:` trailer from the PR's commit bodies after the facts line; drover merge asks gh for `commits` too.
+Because: "drover merge keeps every `Cap:` trailer of the PR's commits in the squash commit message it writes"
+Because: crates/core/src/overlap.rs:173
+Decided: lines are matched with cap-check's own `cap_trailer`, so the squash carries exactly what cap-check accepts, verbatim (trimmed).
+Rejected: copying every commit body into the squash — noisy changelog, and the spec asks only for the Cap: lines.
+Rejected: a server-side git trailer parse — gh pr view already returns commit bodies in the one call merge makes.
+Check: the test builds a real squash commit from the `gh pr merge --body` drover sends and runs `drover cap-check --base <pre-merge>` on it.
+Owner: Merging a cap raise now keeps its Cap: line, so the next release PR passes the cap check.
