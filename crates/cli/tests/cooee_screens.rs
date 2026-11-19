@@ -914,28 +914,7 @@ fn parity_38_the_queue_draws_chains_as_a_folding_tree_more_rows_lock_tags_and_mo
         paused["fold"]["main"],
         json!({"action": "pause", "label": "Resume", "values": {"fleet": "sendmeter", "on": false}})
     );
-    let legend = get(q["actions"][0]["menu"][2]["tap"]["sheet"].as_str().unwrap());
-    like(&legend, "fleets", false);
-    let words: Vec<&str> = find(&legend, "legend-list")["rows"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|r| r["title"].as_str().unwrap())
-        .collect();
-    for w in [
-        "queued",
-        "impl",
-        "review n",
-        "fix n",
-        "ready",
-        "merged",
-        "needs-human",
-        "parked",
-        "dead",
-        "🔒 hot ×N",
-    ] {
-        assert!(words.contains(&w), "{w}: {words:?}");
-    }
+    assert_eq!(req(&s, T, "GET", "/screens/legend", "", "").0, 404);
 }
 
 #[test]

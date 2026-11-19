@@ -243,7 +243,6 @@ fn every_screen_the_phone_reaches_draws_every_title_value_badge_and_label_at_40_
         "/screens/cards",
         "/screens/issue?",
         "/screens/backlog?",
-        "/screens/legend",
         "/screens/lanes/",
     ] {
         assert!(
