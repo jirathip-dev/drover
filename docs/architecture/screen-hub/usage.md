@@ -145,8 +145,8 @@ when it goes. The stream client and the patcher come from the blocks package; th
 `render`.
 
 ```ts
-import { patcher } from '@jirathip-dev/blocks/patch';
-import { stream } from '@jirathip-dev/blocks/stream';
+import { patcher } from '@<org>/blocks/patch';
+import { stream } from '@<org>/blocks/stream';
 import { render } from './blocks';
 
 const live = stream({ url: R + 'stream', state: sync });     // the one EventSource; the sync dot follows it

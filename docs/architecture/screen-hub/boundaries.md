@@ -3,7 +3,7 @@
 ## The repos and the crates
 
 ```
-jirathip-dev/blocks                 its own repo, built by its own issues (q2071); it names nothing of drover's
+<org>/blocks                 its own repo, built by its own issues (q2071); it names nothing of drover's
   its crate       the diff, the ops, the frames, both ends' bookkeeping    no tokio, no clock, no socket
   its TS package  the generated types, the stream client, the patcher
         ▲ one commit: a git rev in Cargo.toml (slice 4), the same in web/package.json (slice 6)

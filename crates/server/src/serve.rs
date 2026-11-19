@@ -234,11 +234,8 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         sc.spawn(move || {
             for j in todo {
                 sc.spawn(move || {
-                    j.answer(|st, req, over| {
-                        let keep = s.one(st, req, over).unwrap_or(false);
-                        s.deliver();
-                        keep
-                    });
+                    j.answer(|st, req, over| s.one(st, req, over).unwrap_or(false));
+                    s.deliver();
                 });
             }
         });

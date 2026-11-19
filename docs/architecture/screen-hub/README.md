@@ -30,7 +30,7 @@ config, gh cache files, the clock, lane tails  ──>  builds each stale screen
                                           GET /screens/<x> reads the same JSON     the page patches the named rows,
                                                                                    once per 100 ms, reading position kept
 serve: tasks on tokio for sockets and streams; builds and today's handler in spawn_blocking.
-from jirathip-dev/blocks, one commit pinned, built there by its own issues: the diff, the ops, the frames, both
+from <org>/blocks, one commit pinned, built there by its own issues: the diff, the ops, the frames, both
 ends' bookkeeping, the page's stream client and patcher.
 ```
 

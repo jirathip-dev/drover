@@ -12,7 +12,7 @@ Open questions: keep drover's own drawing code until blocks' renderer replaces i
 ## Status
 
 Revised 2026-11-18, four times, for the owner's amendments: q2039 (row ops required, one patch per frame, reading
-position kept), q2044 (serve on tokio), q2049 (the renderer core lives in `jirathip-dev/blocks`) and q2071 (#1318
+position kept), q2044 (serve on tokio), q2049 (the renderer core lives in `<org>/blocks`) and q2071 (#1318
 builds nothing there: it consumes blocks#4, blocks#5 and blocks#2's slices, pinned). Earlier versions: `e7bf23a0f`,
 `354e1f49f`, `010f53fe2`. Read `usage.md` first, then this, `shapes.md`, `boundaries.md`; `facts.md` holds the
 measurements. This revision drops the two slices that built in blocks, says what drover needs from blocks and which
@@ -79,7 +79,7 @@ of 150). 36 ms is inside that; slice 7 makes 70 ms its own gate on #1313's fixtu
 Option 2, in six parts (`shapes.md` has the types and the protocol).
 
 1. **The diff, the protocol and the patcher are taken from blocks** (q2071). drover pins one commit of
-   `jirathip-dev/blocks` and writes no diff, op, frame or patch code of its own. The next section says what drover
+   `<org>/blocks` and writes no diff, op, frame or patch code of its own. The next section says what drover
    needs from it and which blocks issue brings each part.
 2. **The hub.** A cache of built screens by `Key` (canonical path and query, paired or not). A key is stale when
    one of 7 signals it depends on moved: the log's last seq, the snapshot's stamp, the background reads, the

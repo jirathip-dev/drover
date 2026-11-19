@@ -160,10 +160,10 @@ as `hello.v`, and an app's own kinds as an argument to the check.
 **The pin.** One commit, merged on blocks' `staging`, named twice in drover; a test fails when the two differ.
 
 ```toml
-blocks = { git = "https://github.com/jirathip-dev/blocks", rev = "<40 hex>" }     # Cargo.toml, slice 4; deny.toml allows the source
+blocks = { git = "https://github.com/<org>/blocks", rev = "<40 hex>" }     # Cargo.toml, slice 4; deny.toml allows the source
 ```
 ```json
-"@jirathip-dev/blocks": "github:jirathip-dev/blocks#<the same 40 hex>"
+"@<org>/blocks": "github:<org>/blocks#<the same 40 hex>"
 ```
 
 The second line comes with slice 6. drover's esbuild bundles the package into `web/dist`, and its `tsc --strict`

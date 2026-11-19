@@ -83,7 +83,6 @@ async fn read(p: Pool, mut s: TcpStream, mut rest: Vec<u8>, conn: OwnedSemaphore
 }
 
 /// Accept on `l` on a runtime of 2 workers, reading each request there (5 s for all of it), then sending it to `jobs`.
-/// Past 256 open connections one gets `busy` (503); after each accept `each` gets whether every connection is done.
 pub fn accept(
     l: std::net::TcpListener,
     jobs: Sender<Job>,

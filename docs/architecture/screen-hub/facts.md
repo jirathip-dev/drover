@@ -21,7 +21,7 @@ issue. The host was busy (load average 14 to 40, other lanes building), so each 
 | Screen | JSON bytes | rows + cards | build p50 ms | p95 ms | allocated per build | parsed tree | diff ms |
 |---|---|---|---|---|---|---|---|
 | `/screens/queue` | 20,077 | 45 | 8.5 | 11.9 | 13.5 MB | 239 KB | 0.34 |
-| `/screens/queue?repo=sendmeter` | 7,612 | 15 | 7.8 | 10.4 | 11.2 MB | 91 KB | 0.12 |
+| `/screens/queue?repo=<repo>` | 7,612 | 15 | 7.8 | 10.4 | 11.2 MB | 91 KB | 0.12 |
 | `/screens/queue?more=…` (every row shown) | 70,808 | 126 | 9.5 | 12.8 | 16.4 MB | 889 KB | 1.16 |
 | `/screens/cards` | 4,219 | 6 | 1.1 | 1.8 | 4.6 MB | 42 KB | (none: below) |
 | `/screens/lanes` | 2,364 | 11 | 0.9 | 1.9 | 2.5 MB | 25 KB | 0.02 |
@@ -109,7 +109,7 @@ budget of 150. It did not measure a copy of the live state either. The hub's per
 
 Read when #1318 was to build the crate there; q2071 moved that work to blocks' own issues. Kept as what was found.
 
-- **The repo.** `jirathip-dev/blocks`: public, MIT, one commit (a licence file), `main` and `staging` at `f3f06ae`.
+- **The repo.** `<org>/blocks`: public, MIT, one commit (a licence file), `main` and `staging` at `f3f06ae`.
   drover's fleet config has a `blocks` fleet with impl, rev and architect roles.
 - **cooee's schema.** Its `screens.schema.json` (under its plugin docs) at cooee staging `9c0987c9a`: 40
   definitions, 21 block kinds, 7 ops (`replace`, `merge`, `remove`, `insert`, `screen`, `badge`, `dot`). An unknown block type is allowed:

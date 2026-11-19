@@ -251,3 +251,8 @@ pattern = "releases/download"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/release.rs"]
 reason = "#1275: only core::release knows where a build is published"
+
+[[ban]]
+pattern = "tokio"
+paths = ["crates/core/src/**", "crates/sys/src/**"]
+reason = "#1318 (q2044): tokio is serve's and service's transport; core and sys stay synchronous"
