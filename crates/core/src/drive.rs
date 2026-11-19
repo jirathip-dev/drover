@@ -1806,6 +1806,7 @@ fn handoff(
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
     let mut any = false;
+    crate::status::sync(ctx, cfg, r, out, fleet)?;
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))

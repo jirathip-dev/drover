@@ -478,7 +478,10 @@ pub fn check_name(c: &Value) -> &str {
 
 /// The latest run of each check name (by `startedAt`, `completedAt`, then id), only the `required` ones if set.
 pub fn required(rollup: &Value, required: &[String]) -> Value {
-    let all = rollup.as_array().map(Vec::as_slice).unwrap_or_default();
+    let all: Vec<Value> = (rollup.as_array().into_iter().flatten())
+        .filter(|c| !crate::status::ours(check_name(c)))
+        .cloned()
+        .collect();
     let latest = |n: &str| {
         let at = |c: &&Value, k: &str| c[k].as_str().unwrap_or_default().to_owned();
         let runs = all.iter().filter(|c| check_name(c) == n);
@@ -607,7 +610,12 @@ pub fn missing(x: &Ctx, r: Option<&dyn Runner>, c: &Config, k: (&str, u64), e: &
         .map(|e| e.ts)
         .min()?;
     let labelled = f.merge_label.as_deref().is_none_or(|l| has_label(pr, l));
-    (labelled && x.now >= since + g && pr["statusCheckRollup"].as_array().is_none_or(Vec::is_empty)).then_some(())?;
+    (labelled
+        && x.now >= since + g
+        && required(&pr["statusCheckRollup"], &[])
+            .as_array()
+            .is_none_or(Vec::is_empty))
+    .then_some(())?;
     let p = cache_path(x, "runs", fleet, issue);
     let api = format!("repos/{}/actions/runs", f.repo);
     let c = load::<Value>(&p).filter(|c| c["head"] == head);
