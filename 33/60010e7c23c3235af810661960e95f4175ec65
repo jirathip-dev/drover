@@ -1,0 +1,10 @@
+Decided: built-in schemes come from swag::schemes(); every scheme is parsed as blocks::theme::Scheme and gated on load in serve
+Because: "takes the built-in schemes from the swag crate, and parses and gates them with blocks::theme"
+Because: crates/server/src/serve.rs:3033
+Decided: a refused scheme is not served and health's schemes lists it with why
+Because: "An owner scheme that fails the gate is refused on load, with the reason in health."
+Decided: the page keeps a one-line choose and a css writer identical to blocks' web theme.ts; schemes.ts removed
+Because: q2334
+Rejected: hold D1 for a blocks npm package with choose — blocks web has no choose and npm cannot install a git subdir
+Check: crates/cli/tests/schemes.rs refused-on-load test fails on staging (no health schemes field) and passes at the head
+Owner: Colour schemes now come from the shared swag pack and are contrast-checked when serve loads them; failing ones show in health.
