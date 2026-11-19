@@ -1220,7 +1220,14 @@ fn herd_screen(h: &Herd) -> Value {
         .collect();
     repos.extend(herd_repo("others", "", &h.others, None));
     let host = &h.host;
-    let wind = (host.load.unwrap_or_default() / host.limit.max(0.01)).clamp(0.0, 1.0);
+    let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
+    let wind = ratio.clamp(0.0, 1.0);
+    let strained = matches!(host.pressure.as_deref(), Some("warn" | "critical"));
+    let level = match () {
+        () if host.gate.is_some() => "held",
+        () if strained || ratio >= 1.0 => "busy",
+        () => "calm",
+    };
     let sky = match host.pressure.as_deref() {
         _ if host.gate.is_some() => "storm",
         Some("warn" | "critical") => "fog",
@@ -1233,7 +1240,7 @@ fn herd_screen(h: &Herd) -> Value {
         "load {load} · mem {} · swap {swap}",
         host.pressure.as_deref().unwrap_or("?")
     );
-    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene",
+    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene", "load": level,
         "weather": {"sky": sky, "wind": (wind * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
 }
 
@@ -1986,5 +1993,42 @@ fn cooee() -> devices::Device {
     devices::Device {
         label: "cooee".into(),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::HerdHost;
+
+    #[test]
+    fn the_herd_scene_sends_the_load_level_of_the_host() {
+        for (load, gate, want) in [(0.4, None, "calm"), (1.3, None, "busy"), (0.4, Some("load"), "held")] {
+            let host = HerdHost {
+                load: Some(load),
+                limit: 1.0,
+                pressure: Some("normal".into()),
+                gate: gate.map(Into::into),
+                ..HerdHost::default()
+            };
+            let s = herd_screen(&Herd {
+                host,
+                ..Herd::default()
+            });
+            assert_eq!(s["blocks"][0]["load"], want, "load {load}, gate {gate:?}");
+        }
+        let host = HerdHost {
+            load: Some(0.1),
+            limit: 1.0,
+            pressure: Some("warn".into()),
+            ..HerdHost::default()
+        };
+        assert_eq!(
+            herd_screen(&Herd {
+                host,
+                ..Herd::default()
+            })["blocks"][0]["load"],
+            "busy"
+        );
     }
 }

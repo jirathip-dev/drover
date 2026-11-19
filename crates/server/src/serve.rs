@@ -2965,7 +2965,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             })
     };
     let ls = |x: &Value| {
-        ["weather", "heat", "light", "none"].contains(&x["kind"].as_str().unwrap_or_default())
+        ["weather", "heat", "light", "sign", "none"].contains(&x["kind"].as_str().unwrap_or_default())
             && x.get("levels").is_none_or(levels)
     };
     let modes = |x: &Value| {
@@ -2998,7 +2998,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
         (
             "load_scene",
             &ls,
-            "{\"kind\": weather|heat|light|none, \"levels\": {calm, busy, held}}",
+            "{\"kind\": weather|heat|light|sign|none, \"levels\": {calm, busy, held}}",
         ),
         ("modes", &modes, "a list of scene, ascii, glyph, each at most once"),
         (
