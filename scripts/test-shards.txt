@@ -167,6 +167,7 @@
 4 runner_limits
 1 runners
 3 runtime_breaker
+1 sbin_path
 1 schemes
 4 scratch
 2 screen_pages
