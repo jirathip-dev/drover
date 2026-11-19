@@ -1,0 +1,6 @@
+Decided: one new ci/cap.d file raises line_cap to 60000; ci/cap.toml untouched
+Because: "One new file `ci/cap.d/2026-11-19-60000.toml` with `line_cap = 60000`"
+Because: q2307
+Rejected: editing ci/cap.toml directly — the lane hook refuses it and the cap.d drop-in is the repo's raise path
+Check: the commit carries the Cap: 55500 → 60000 (#1384, q2307) trailer and cap-check is green
+Owner: the code-size limit rises to 60,000 lines as decided in q2307
