@@ -951,7 +951,9 @@ enum HostsCmd {
     Report,
     #[command(about = "Let new lanes go to this host again; logs `host-on`")]
     On { name: String },
-    #[command(about = "No new lanes on this host (its lanes finish there); still monitored; logs `host-off`")]
+    #[command(
+        about = "No new lanes on this host (its lanes finish there); only a hosts refresh contacts it; logs `host-off`"
+    )]
     Off { name: String },
     #[command(
         about = "Empty a root (default the host's first): new lanes skip it, its lanes are saved and restarted on the next root"
@@ -1333,8 +1335,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else {
                 let (events, cfg) = (working(&ctx.state)?, Config::load(&ctx.config).ok());
                 let serial = queue::fleets_use(ctx, &events, cfg.as_ref(), fleet.as_deref());
-                let off = cfg.as_ref().map(|c| crate::hosts::idle_off(c, &events));
-                let spared = crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), None);
+                let (off, spare) = (cfg.as_ref().map(crate::hosts::disabled), Config::load(&ctx.config).ok());
+                let spared =
+                    crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), spare.as_ref().map(|c| (ctx, c)));
                 let look = crate::snapshot::Snap::read(ctx, &spared);
                 let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
@@ -1621,15 +1624,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else {
                 crate::hosts::Pass::new(r, None)
             };
-            let off = match cmd {
-                Cmd::Check | Cmd::Drive { .. } => crate::hosts::idle_off(&cfg, &working(&ctx.state)?),
-                _ => std::collections::BTreeSet::new(),
-            };
+            let spare = matches!(cmd, Cmd::Check | Cmd::Drive { .. } | Cmd::Kick { .. } | Cmd::Waiting(_));
+            let off = crate::hosts::disabled(&cfg).into_iter().filter(|_| spare).collect();
             let pass = pass.sparing(off, Some((ctx, &cfg)));
-            let r: &dyn Runner = match cmd {
-                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } | Cmd::Reclaim { .. } => &pass,
-                _ => r,
-            };
+            let paced = spare || matches!(cmd, Cmd::Clean { .. } | Cmd::Reclaim { .. });
+            let r: &dyn Runner = if paced { &pass } else { r };
             let kick = |f: &str, n, why| {
                 let _ = crate::drive::kick(ctx, r, f, n, why);
             };

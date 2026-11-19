@@ -128,6 +128,8 @@ flowchart TD
     other -.- k_orchestrator_idle_minutes(["orchestrator_idle_minutes = 30"])
     other -.- k_orchestrator_reply_minutes(["orchestrator_reply_minutes = 10"])
     other -.- k_orchestrator_change_minutes(["orchestrator_change_minutes = 30"])
+    other -.- k_host_down_secs(["host_down_secs = 60"])
+    other -.- k_kick_max_secs(["kick_max_secs = 300"])
     other -.- k_serve_shed_secs(["serve_shed_secs = 5"])
     other -.- k_serve_remote_secs(["serve_remote_secs = 10"])
     other -.- k_serve_host_secs(["serve_host_secs = 10"])
