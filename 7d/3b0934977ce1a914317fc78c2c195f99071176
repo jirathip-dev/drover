@@ -1,0 +1,10 @@
+Decided: the scene's load level is held when the spawn gate refuses, busy from 0.5 load/limit, calm under 0.5
+Because: q2384
+Decided: one match in herd_screen picks both sky and load level from the same ratio, pressure and gate
+Because: "worked out in one place"
+Rejected: busy only at or over the limit, or on memory pressure — q2384 chose the 0.5 rule docs/themes.md already used
+Rejected: a pressure term in the level — warn or critical already sets the gate, crates/core/src/host.rs:389
+Decided: the unit test lives in crates/server/src/herd_tests.rs so screens.rs stays under its 2000-line size rule
+Because: .drover/arch.toml:192
+Check: the golden herd.json gains only "load": "calm" (the demo host sits at 0.48 load/limit)
+Owner: the Herd now tells themes calm, busy or held, the same way the weather and kitchen themes already read load
