@@ -1,0 +1,9 @@
+Decided: every local child the runner starts gets `/` as its current directory when drover's own is gone (crates/core/src/runner.rs:105); otherwise it inherits it as before.
+Because: "core never sets the current directory of the commands it runs"
+Decided: a lane start that fails with "current directory: No such file or directory" logs one self-heal and runs once more (crates/core/src/slo.rs:23); drive's failure count skips that error (crates/core/src/drive.rs:433).
+Because: "healed (retried once from an existing directory)"
+Rejected: chdir at process start only — a long-running serve or drive whose directory is deleted later would still pass it on; the per-command check covers both.
+Rejected: the state dir as the fallback — the runner holds no ctx, and `/` always exists (the spec says "its state dir, else `/`").
+Rejected: the retry in drive's act — drive.rs is over its size baseline, and the start in spawn.rs is the one place shed is called.
+Check: remote commands keep their remote cwd: only the local ssh process's directory changes, and only when the local one is gone.
+Owner: A lane started by a kick from a cleaned-up lane's hook no longer fails in shed or gets the issue stuck.
