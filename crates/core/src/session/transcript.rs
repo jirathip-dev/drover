@@ -27,13 +27,13 @@ pub fn read(r: &dyn Runner, name: &str, before: Option<u64>, n: Option<usize>) -
     }
 }
 
-/// Session `s`'s log from shed on `r`, as `read` reads it.
+/// Session `s`'s log from shed on `r`, as `read` reads it (a screen's last `n` lines, at most 5,000).
 pub fn of(r: &dyn Runner, s: &super::Session, before: Option<u64>, n: Option<usize>) -> Result<Transcript> {
     let name = &s.name;
     let w = r.shed().context("no shed runtime")?.wire;
     let p = ReadParams {
         name: name.clone(),
-        lines: (!s.acp).then_some(LINES),
+        lines: (!s.acp).then(|| n.map_or(LINES, |n| n.min(LINES))),
         history: !s.acp,
         events: s.acp,
         before: before.filter(|_| s.acp),
