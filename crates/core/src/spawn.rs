@@ -674,6 +674,24 @@ fn remote_acp(
     Ok(())
 }
 
+fn no_webkit(ctx: &Ctx, cfg: &Config, ev: &[Event], (fleet, issue): (&str, u64), e: &anyhow::Error) {
+    let Some(x) = e.downcast_ref::<crate::gate::Refusal>() else {
+        return;
+    };
+    let carded = fold(ev)
+        .get(&(fleet.to_string(), issue))
+        .is_some_and(|s| s.state == "needs-human");
+    if x.code == "NO_HOST" && x.msg.contains(crate::hosts::WEBKIT) && !carded {
+        let d = json!({"code": x.code, "reason": format!("its repro test needs Playwright WebKit: {}", x.msg)});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, Some(issue), "needs-human", d),
+        )
+        .ok();
+    }
+}
+
 fn checked_out(r: &dyn Runner, local: &str, branch: &str) -> Option<String> {
     let list = ok(r, "git", &["-C", local, "worktree", "list", "--porcelain"]).ok()?;
     let want = format!("branch refs/heads/{branch}");
@@ -1051,7 +1069,8 @@ pub fn spawn(
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
     let ev = crate::compact::on_root(r, working(&ctx.state)?, (fleet, f))?;
     let host = o.host.clone().or_else(|| crate::starts::admitted(ctx, fleet, issue));
-    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))?;
+    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))
+        .inspect_err(|e| no_webkit(ctx, cfg, &ev, (fleet, issue), e))?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
         return refused("RUNTIME_DOWN", why);
     }
@@ -1261,6 +1280,7 @@ pub fn spawn(
         if stale.is_none() && !here && !hung {
             wip = crate::check::save_lane(ctx, &old, &p.agent, owt)?;
         }
+        let mut killed = names.clone();
         for a in listed
             .as_deref()
             .unwrap_or_default()
@@ -1268,12 +1288,15 @@ pub fn spawn(
             .filter(|a| a.in_dir(&p.agent, Path::new(owt)))
         {
             term::close(ctx, &old, &a.name)?;
+            if !killed.contains(&a.name.as_str()) {
+                killed.push(&a.name);
+            }
         }
         if stale.is_none() && !hung {
             crate::check::reap(ctx, cfg, &old, was, (fleet, Some(issue)), owt)?;
         }
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
-        let mut d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; "), "wip": wip});
+        let mut d = json!({"role": role, "agent": p.agent, "killed": killed, "reason": why.join("; "), "wip": wip});
         if let Some(e) = stale {
             d.put("stale_host", json!(e.str("host")))
                 .put("stale_pane", json!(e.str("pane")));
