@@ -176,3 +176,98 @@ fn rename_refuses_unpaused_live_or_taken() {
     }
     assert!(fleets(&c).iter().all(|f| f == "sendmeter"));
 }
+
+fn repo(c: &drover::Ctx, name: &str) {
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    let text = text.replace("jirathip-dev/sendmeter", &format!("jirathip-dev/{name}"));
+    std::fs::write(&c.config, text).unwrap();
+}
+
+#[test]
+fn a_stray_event_under_the_repo_name_joins_the_renamed_fleet() {
+    let (c, _sh) = fixture("rename-stray", true);
+    repo(&c, "shed");
+    let d = json!({"agent": "sendmeter-impl-130"});
+    append(&c.state, &Event::new(T, "shed", Some(130), "fix-done", d)).unwrap();
+    let (code, out) = run(&c, &Fake::default(), &["fleet", "rename", "sendmeter", "shed", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    let evs = history(&c.state).unwrap();
+    assert!(evs.iter().all(|e| e.fleet == "shed"), "{evs:?}");
+    let rows = drover::db::issues(&c.state).unwrap();
+    assert!(rows.contains_key(&("shed".to_string(), 130)));
+    assert!(rows.iter().all(|(k, s)| k.0 == "shed" && s.fleet == "shed"));
+}
+
+#[test]
+fn rename_onto_drover_ignores_its_system_events() {
+    let (c, _sh) = fixture("rename-system", true);
+    for (kind, d) in [
+        ("pass-slow", json!({"secs": 40})),
+        ("job", json!({"name": "tick"})),
+        ("push-sent", json!({"kind": "stall"})),
+        ("ask-waiting", json!({"id": "q9"})),
+        ("slo-tick", json!({})),
+        ("self-updated", json!({"version": "1.2.3"})),
+    ] {
+        append(&c.state, &Event::new(T, "drover", None, kind, d)).unwrap();
+    }
+    let (code, out) = run(
+        &c,
+        &Fake::default(),
+        &["fleet", "rename", "sendmeter", "drover", "--yes"],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(history(&c.state).unwrap().iter().all(|e| e.fleet == "drover"));
+    let rows = drover::db::issues(&c.state).unwrap();
+    let issues: Vec<u64> = rows.keys().map(|k| k.1).collect();
+    assert_eq!(issues, vec![12], "{rows:?}");
+    let (code, status) = run(&c, &Fake::default(), &["status", "drover"]);
+    assert_eq!(code, 0, "{status}");
+    let rows: Vec<&str> = status.lines().filter(|l| l.contains(" #")).collect();
+    assert!(
+        rows.len() == 1 && rows[0].starts_with("drover ") && rows[0].contains("#12"),
+        "{status}"
+    );
+    for kind in [
+        "pass-slow",
+        "job",
+        "push-sent",
+        "ask-waiting",
+        "slo-tick",
+        "self-updated",
+        "#0",
+    ] {
+        assert!(!status.contains(kind), "{kind}: {status}");
+    }
+    let (_, asks) = run(&c, &Fake::default(), &["asks", "drover", "--all", "--json"]);
+    assert!(asks.contains("\"q1\"") && !asks.contains("q9"), "{asks}");
+    let (code, board) = run(&c, &Fake::default(), &["board", "drover"]);
+    assert_eq!(code, 0, "{board}");
+    assert!(board.contains("13"), "{board}");
+    for kind in [
+        "pass-slow",
+        "job",
+        "push-sent",
+        "ask-waiting",
+        "slo-tick",
+        "self-updated",
+        "#0",
+    ] {
+        assert!(!board.contains(kind), "{kind}: {board}");
+    }
+}
+
+#[test]
+fn rename_onto_another_real_fleet_is_refused() {
+    let (c, _sh) = fixture("rename-other", true);
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    let other = "\n[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\nintegration = \"staging\"\n";
+    std::fs::write(&c.config, format!("{text}{other}")).unwrap();
+    let d = json!({"role": "impl", "agent": "past-impl-5"});
+    append(&c.state, &Event::new(T, "past", Some(5), "spawn", d)).unwrap();
+    for taken in ["other", "past"] {
+        let (code, out) = run(&c, &Fake::default(), &["fleet", "rename", "sendmeter", taken, "--yes"]);
+        assert!(code == 3 && out.contains("BAD_NAME"), "{taken}: {out}");
+    }
+    assert!(history(&c.state).unwrap().iter().all(|e| e.fleet != "other"));
+}
