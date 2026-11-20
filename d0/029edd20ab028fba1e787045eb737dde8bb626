@@ -1,0 +1,9 @@
+Decided: a scheduled clean counts git's "contains modified or untracked files" refusal as kept, not failed, and prints the --lane command
+Because: "exits 0 when the only problems are worktrees kept because they are dirty or unpushed"
+Decided: the last scheduled run's kept count goes to state file clean.kept; doctor shows it as one `!` row and drops it at a run with none kept
+Because: "`drover doctor` shows a `!` row with the count"
+Decided: watchdog age uses saturating_sub; a drive pass that stamps drive.at after doctor read its clock made `now - at` wrap to u64::MAX/86400 days
+Because: crates/core/src/doctor.rs:324
+Rejected: forcing `git worktree remove` when only lane scratch is left — deletes work the owner may want; the issue calls keeping it the safe choice
+Check: any other git error from worktree remove (exit 128, other text) still counts as failed, exits 1 and writes clean.failed
+Owner: the nightly clean stays green when it only kept dirty worktrees; doctor tells you how many to look at
