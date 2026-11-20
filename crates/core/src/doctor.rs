@@ -306,7 +306,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         r,
         &crate::events::working(&ctx.state).unwrap_or_default(),
     ));
-    rows.extend(login_token(r, None));
+    rows.extend(login_token(r, None).into_iter().chain(crate::check::kept_row(ctx)));
     let paired = crate::devices::load(ctx).len();
     let line = format!("phone — {paired} paired → open the page, then drover serve approve <code>");
     row(rows, paired > 0, '!', &line);
@@ -322,7 +322,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     for what in ["check", "drive"] {
         let stamp = std::fs::read_to_string(ctx.state.with_file_name(format!("{what}.at")));
         let at = stamp.ok().and_then(|text| text.trim().parse::<u64>().ok());
-        let age = at.map_or("never".into(), |at| crate::events::age(ctx.now - at));
+        let age = at.map_or("never".into(), |at| crate::events::age(ctx.now.saturating_sub(at)));
         let fresh = at.is_some_and(|at| ctx.now <= at + crate::timer::stuck_secs(cfg));
         let ran = match running.filter(|_| !fresh) {
             Some(since) => format!("running for {}", crate::events::age(ctx.now.saturating_sub(since))),
@@ -364,14 +364,14 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let bad = host_rows(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
-        let v = crate::VERSION;
-        let ok = format!("✓ host {name} — git, gh, {logins}drover {v}, shed");
+        let ok = format!("✓ host {name} — git, gh, {logins}drover {}, shed", crate::VERSION);
         let at = |w: &String| w.replacen(' ', &format!(" host {name} "), 1);
         let shed = on.shed().filter(|_| !bad.iter().any(|w| w.contains(" shed")));
         rows.extend(bad.iter().map(at));
         rows.extend(bad.is_empty().then_some(ok));
         rows.extend(shed.map(|b| at(&crate::shed::line(&on, &b.wire))));
         rows.extend(login_token(&on, Some(name)));
+        rows.push(crate::hosts::sshd_row(&on, name));
         rows.extend(own.then(|| crate::cloud::github(&on, ctx.now).1).flatten());
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {

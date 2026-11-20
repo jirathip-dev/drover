@@ -620,6 +620,7 @@ fn boot_fake(gh_in: bool) -> Fake {
         .reply(&format!("{SSH}'sh' '-c' 'uname -s"), "Linux\nx86_64\n/home/me\n")
         .reply(&step("shed --version"), "")
         .reply(&step("shed doctor"), "")
+        .reply(&step("grep -qx 'MaxSessions 32'"), "")
         .once(&step("command -v gh"), 1, "")
         .once(&step(&mine), 1, "")
         .reply(&step("command -v"), "")
@@ -670,6 +671,7 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
         "apt_ just",
         "command -v claude",
         "command -v cargo",
+        "grep -qx 'MaxSessions 32' /etc/ssh/sshd_config.d/10-drover.conf",
         "shed --version",
         "shed doctor",
     ];
@@ -1327,4 +1329,23 @@ fn bootstrap_writes_the_oom_policy_drop_in_before_it_enables_the_shed_job() {
         "{calls}"
     );
     assert_eq!(sh(&check).0, Some(0), "the job with its drop-in is there");
+}
+
+#[test]
+fn bootstrap_writes_the_sshd_keepalive_drop_in_when_the_host_lacks_it() {
+    let (c, cfg) = running("cloud-sshd");
+    let r = Stdin(
+        boot_fake(true)
+            .once(&step("grep -qx 'MaxSessions 32'"), 1, "")
+            .reply(&step("printf 'ClientAliveInterval"), "")
+            .reply(&step("test -d"), ""),
+        Shared::default(),
+    );
+    let mut out = vec![];
+    drover::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert!(out.contains("✓ sshd keepalive — installed"), "{out}");
+    let conf = "printf 'ClientAliveInterval 60\\nClientAliveCountMax 3\\nMaxSessions 32\\n' | \
+                sudo tee /etc/ssh/sshd_config.d/10-drover.conf >/dev/null && sudo sshd -t";
+    assert!(r.0.called(&step(conf)), "{:?}", r.0.calls.borrow());
 }
