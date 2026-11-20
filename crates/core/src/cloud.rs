@@ -409,7 +409,7 @@ pub fn token(text: &str, now: u64) -> (String, Option<String>) {
 /// Before each bootstrap step there: the user's tool folders on PATH, and `apt_ <pkg>` installs a package.
 pub const SH: &str = "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; apt_() { sudo apt-get update -qq && \
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
-const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh";
+const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh\njust\tcommand -v just\tapt_ just";
 const SHED: &str = "shed job\tshed doctor >/dev/null 2>&1 && { [ -f \"$HOME/Library/LaunchAgents/dev.shed.serve.plist\" ] || \
 grep -qx OOMPolicy=continue \"$HOME/.config/systemd/user/shed.service.d/drover.conf\"; }\tshed install --force && \
 { { mkdir -p \"$HOME/.config/systemd/user/shed.service.d\" && \

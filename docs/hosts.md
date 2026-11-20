@@ -325,7 +325,7 @@ overflow_after_minutes = 10  # the default
 Each step checks first and is skipped when already done, then is read back after its install, so it is safe to run
 again. In order:
 
-1. git, gh, Claude Code, Rust with a C linker (apt and the official install scripts), then shed at drover's pin
+1. git, gh, just, Claude Code, Rust with a C linker (apt and the official install scripts), then shed at drover's pin
    and its job (on a `shed-acp` host also node and the ACP adapter, below). Other toolchains a fleet needs go in your
    own snapshot.
 2. **drover** at this host's exact sha: `cargo install --git <drover repo> --rev <sha>` into the same root as
