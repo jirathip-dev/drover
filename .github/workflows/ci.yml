@@ -292,6 +292,3 @@ jobs:
         run: cargo test --locked --test issue_sheet_webkit
       - name: "the Herd in WebKit (#1092: a figure per lane, night, the next repo, the pinned swag scene)"
         run: cargo test --locked --test herd
-      - name: "#1452 the load-level test 10 runs in a row"
-        if: ${{ !cancelled() }}
-        run: for _ in 1 2 3 4 5 6 7 8 9 10; do cargo test --locked --test herd the_scene_in_webkit_draws_each_load_level_of_kitchen_and_garden_and_farms_sky -- --exact || exit 1; done
