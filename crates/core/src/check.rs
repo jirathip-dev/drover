@@ -896,7 +896,7 @@ pub fn clean(
     (issue, lane, sched): (Option<u64>, Option<&str>, bool),
     yes: bool,
 ) -> Result<()> {
-    clean_all(ctx, cfg, r, out, fleet, (issue, lane, sched, false), yes)
+    clean_all(ctx, cfg, r, out, fleet, (issue, lane, sched, false), yes).map(drop)
 }
 
 /// `clean`; `all` (an explicit `drover clean`) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch.
@@ -908,7 +908,7 @@ pub fn clean_all(
     fleet: Option<&str>,
     (issue, lane, sched, all): (Option<u64>, Option<&str>, bool, bool),
     yes: bool,
-) -> Result<()> {
+) -> Result<usize> {
     let events = working(&ctx.state)?;
     let states = fold(&events);
     let agents = (crate::link::look(ctx, cfg, r, &mut std::io::sink(), true)?.sessions())
@@ -916,7 +916,7 @@ pub fn clean_all(
         .context("cannot list the live agents; refusing to clean blind")?;
     let off = if all { disabled(cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
-    let (mut freed, mut removed, mut failed, mut kept) = (0, 0, 0, 0);
+    let (mut freed, mut removed, mut tallies) = (0, 0, (0, 0));
     let mut closed = BTreeMap::new();
     let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
     let mut fresh = std::collections::BTreeSet::new();
@@ -1080,7 +1080,7 @@ pub fn clean_all(
             if lane.is_some() {
                 return unsafe_lane(&reason);
             }
-            kept += usize::from(!live);
+            tallies.0 += usize::from(!live);
             writeln!(out, "keep {shown}: {reason}")?;
             continue;
         }
@@ -1089,14 +1089,7 @@ pub fn clean_all(
             continue;
         }
         if let Err(err) = remove(&on, cfg, &e.fleet, wt, saved) {
-            if format!("{err:#}").contains("contains modified or untracked files") {
-                kept += 1;
-                let agent = e.str("agent").unwrap_or_default();
-                writeln!(out, "keep {shown}: {err:#} → drover clean --lane {agent}")?;
-                continue;
-            }
-            writeln!(out, "failed {shown}: {err:#}")?;
-            failed += 1;
+            tally(out, &shown, e, &err, &mut tallies)?;
             continue;
         }
         if !pane.is_empty() {
@@ -1169,27 +1162,44 @@ pub fn clean_all(
     } else if freed > 0 {
         writeln!(out, "freed {freed} bytes of build folders")?;
     }
-    let mark = ctx.state.with_file_name(KEPT);
-    if sched && yes && kept > 0 {
-        std::fs::write(&mark, kept.to_string())?;
-    } else if sched && yes {
-        std::fs::remove_file(&mark).ok();
+    if tallies.1 > 0 {
+        anyhow::bail!("{} worktree(s) could not be removed; see above", tallies.1);
     }
-    if failed > 0 {
-        anyhow::bail!("{failed} worktree(s) could not be removed; see above");
+    Ok(tallies.0)
+}
+
+fn tally(out: &mut dyn Write, shown: &str, e: &Event, err: &anyhow::Error, tallies: &mut (usize, usize)) -> Result<()> {
+    let agent = e.str("agent").unwrap_or_default();
+    if format!("{err:#}").contains("contains modified or untracked files") {
+        tallies.0 += 1;
+        writeln!(out, "keep {shown}: {err:#} → drover clean --lane {agent}")?;
+    } else {
+        tallies.1 += 1;
+        writeln!(out, "failed {shown}: {err:#}")?;
     }
     Ok(())
 }
 
 const IDLE: &str = "idle-merged";
+const KEPT: &str = "clean.kept";
 
-/// The state file holding how many worktrees the last scheduled clean kept dirty or unpushed.
-pub const KEPT: &str = "clean.kept";
+/// Doctor's `!` row when the last scheduled clean kept worktrees that are dirty or unpushed.
+pub fn kept_row(ctx: &Ctx) -> Option<String> {
+    let n = std::fs::read_to_string(ctx.state.with_file_name(KEPT)).ok()?;
+    let n = n.trim().parse::<usize>().ok()?;
+    Some(format!(
+        "! clean — {n} worktree(s) kept: dirty or unpushed → drover clean --lane <agent>"
+    ))
+}
 
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let res = clean(ctx, cfg, r, out, None, (None, None, true), true);
+    let res = clean_all(ctx, cfg, r, out, None, (None, None, true, false), true);
     let mark = ctx.state.with_file_name("clean.failed");
     let Err(e) = res else {
+        match res {
+            Ok(n @ 1..) => std::fs::write(ctx.state.with_file_name(KEPT), n.to_string())?,
+            _ => drop(std::fs::remove_file(ctx.state.with_file_name(KEPT))),
+        }
         std::fs::remove_file(&mark).ok();
         return Ok(());
     };

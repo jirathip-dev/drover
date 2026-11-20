@@ -305,7 +305,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         r,
         &crate::events::working(&ctx.state).unwrap_or_default(),
     ));
-    rows.extend(login_token(r, None));
+    rows.extend(login_token(r, None).into_iter().chain(crate::check::kept_row(ctx)));
     let paired = crate::devices::load(ctx).len();
     let line = format!("phone — {paired} paired → open the page, then drover serve approve <code>");
     row(rows, paired > 0, '!', &line);
@@ -329,12 +329,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         };
         let line = format!("watchdog {what} — {ran} → drover timer install");
         row(rows, fresh || running.is_some(), '✗', &line);
-    }
-    let kept = std::fs::read_to_string(ctx.state.with_file_name(crate::check::KEPT));
-    if let Some(n) = kept.ok().and_then(|t| t.trim().parse::<usize>().ok()) {
-        rows.push(format!(
-            "! clean — {n} worktree(s) kept: dirty or unpushed → drover clean --lane <agent>"
-        ));
     }
     let stuck = crate::timer::stuck_step(ctx, cfg);
     let line = stuck.as_ref().map_or("tick step — advancing".into(), |(step, secs)| {
