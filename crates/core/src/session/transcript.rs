@@ -124,20 +124,36 @@ fn last_event(e: &EventKind) -> String {
     }
 }
 
-/// Session `name`'s last words on wire `w`, masked: its screen's last lines (where the bridge echoes the adapter's stderr) and its last ACP event.
-pub fn last_words(r: &dyn Runner, w: &crate::shed::Wire, name: &str) -> Option<String> {
-    let read = |p: ReadParams| -> Option<ReadResult> {
-        serde_json::from_value(crate::shed::call(r, w, Method::Read, json!(p)).ok()?).ok()
+/// Sessions `names`' last words on wire `w` over one connection, masked: each one's screen's last lines (where the bridge echoes the adapter's stderr) and its last ACP event.
+pub fn last_words(r: &dyn Runner, w: &crate::shed::Wire, names: &[&str]) -> Vec<Option<String>> {
+    let reads = |name: &&str| {
+        let p = ReadParams {
+            name: (*name).into(),
+            lines: Some(LINES),
+            history: false,
+            events: false,
+            before: None,
+            n: None,
+        };
+        let acp = ReadParams {
+            lines: None,
+            events: true,
+            n: Some(LAST_EVENTS),
+            ..p.clone()
+        };
+        [(Method::Read, json!(p)), (Method::Read, json!(acp))]
     };
-    let p = ReadParams {
-        name: name.into(),
-        lines: Some(LINES),
-        history: false,
-        events: false,
-        before: None,
-        n: None,
-    };
-    let screen = read(p.clone()).map(|g| {
+    let qs: Vec<_> = names.iter().flat_map(reads).collect();
+    let got = crate::shed::calls(r, w, &qs).unwrap_or_default().into_iter();
+    let mut got = got.map(|g| serde_json::from_value::<ReadResult>(g.ok()?).ok());
+    names
+        .iter()
+        .map(|_| words(got.next().flatten(), got.next().flatten()))
+        .collect()
+}
+
+fn words(screen: Option<ReadResult>, acp: Option<ReadResult>) -> Option<String> {
+    let screen = screen.map(|g| {
         let mut lines: Vec<&str> = g
             .text
             .lines()
@@ -148,12 +164,6 @@ pub fn last_words(r: &dyn Runner, w: &crate::shed::Wire, name: &str) -> Option<S
             .collect();
         lines.reverse();
         lines.join(" | ")
-    });
-    let acp = read(ReadParams {
-        lines: None,
-        events: true,
-        n: Some(LAST_EVENTS),
-        ..p
     });
     let said = |e: &&Logged| {
         !matches!(

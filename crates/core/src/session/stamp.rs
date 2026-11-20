@@ -161,7 +161,11 @@ pub fn on_event(ctx: &Ctx, cfg: &Config, w: &crate::shed::Wire, e: &shed_proto::
                 note: None,
                 said: None,
             };
-            let said = || super::transcript::last_words(&crate::runner::Real, w, &e.name);
+            let said = || {
+                super::transcript::last_words(&crate::runner::Real, w, &[&e.name])
+                    .pop()
+                    .flatten()
+            };
             gone(
                 ctx,
                 cfg,
@@ -202,7 +206,16 @@ fn word(s: Status) -> Option<&'static str> {
     }
 }
 
-fn look(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], m: Option<&str>, s: &Session) -> Result<bool> {
+type Said<'a> = &'a dyn Fn(&str) -> Option<String>;
+
+fn look(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    events: &[Event],
+    (m, said): (Option<&str>, Said),
+    s: &Session,
+) -> Result<bool> {
     let (Some((fleet, Some(issue))), Some(sp)) = (whose(cfg, &s.labels), last_spawn(events, &s.name)) else {
         return Ok(false);
     };
@@ -233,23 +246,39 @@ fn look(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], m: Option<&st
                 note: s.note.clone(),
                 said: None,
             };
-            let on = On::new(r, m);
-            let said = || {
-                let b = on.shed()?;
-                super::transcript::last_words(&on, &b.wire, &s.name)
-            };
-            gone(ctx, cfg, at, &s.name, &exit, said, json!({"why": "exited"}))
+            gone(ctx, cfg, at, &s.name, &exit, || said(&s.name), json!({"why": "exited"}))
         }
     }
+}
+
+fn crashed_words<'a>(
+    ctx: &Ctx,
+    on: &On,
+    got: impl Iterator<Item = &'a Session>,
+) -> std::collections::BTreeMap<&'a str, Option<String>> {
+    let events = crate::events::working(&ctx.state).unwrap_or_default();
+    let new = |s: &&Session| {
+        matches!(s.life, Life::Exited { code, last } if Cause::of(code, last) == Cause::Crash)
+            && latest(&events, &s.name).is_none_or(|e| e.str("state") != Some("gone"))
+    };
+    let names: Vec<&str> = got.filter(new).map(|s| s.name.as_str()).collect();
+    let words = on.shed().map(|b| super::transcript::last_words(on, &b.wire, &names));
+    names.into_iter().zip(words.into_iter().flatten()).collect()
 }
 
 /// A pass's look at every lane session on its spawn's host: a changed status or an exit stamped into the log as `lane-state`; how many. An exited one of the same name on another host is removed.
 pub fn observe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, sessions: &Sessions) -> Result<usize> {
     let mut n = 0;
     for (m, got) in &sessions.0 {
+        let on = On::new(r, m.as_deref());
+        let words = std::cell::OnceCell::new();
+        let said = |name: &str| {
+            let all = words.get_or_init(|| crashed_words(ctx, &on, got.iter().flatten()));
+            all.get(name).cloned().flatten()
+        };
         for s in got.iter().flatten() {
             let events = crate::events::working(&ctx.state)?;
-            n += usize::from(look(ctx, cfg, r, &events, m.as_deref(), s)?);
+            n += usize::from(look(ctx, cfg, r, &events, (m.as_deref(), &said), s)?);
         }
     }
     Ok(n)
