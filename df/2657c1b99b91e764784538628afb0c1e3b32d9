@@ -1,0 +1,9 @@
+Decided: a name is taken by a fleet in fleet.toml, or by events no system event and no stray under the old fleet's repo name
+Because: "A name is taken only by a fleet in fleet.toml, or by events from a fleet that isn't this one."
+Decided: system events keep their `drover` label and are read by shape: fleet drover with no issue
+Because: crates/core/src/rename.rs:85
+Rejected: a new label for system events — ~40 call sites plus a migration of every logged event, for no reader that mixes them
+Because: "reading them by type. Status, board and asks must not mix them up."
+Decided: strays under the repo's name already carry the new name, so the rename's UPDATE leaves them in place and the dry run counts them
+Check: status, board and asks for a fleet renamed to drover list only its issues and asks (crates/cli/tests/fleet_rename.rs)
+Owner: you can now rename berth to shed and herdsman to drover; a real other fleet's name is still refused
