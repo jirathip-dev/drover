@@ -260,7 +260,7 @@ pub fn open_rollout(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, 
 }
 
 /// The owner's dismiss of `fleet` #`n`'s open rollout, logged `rollout-dismissed` with `by`.
-pub fn dismiss(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), by: &str) -> Result<String> {
+fn dismiss(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), by: &str) -> Result<String> {
     if !rollouts(&working(&ctx.state)?)
         .iter()
         .any(|o| o.is("rollout-open", fleet, n))
@@ -276,8 +276,40 @@ pub fn dismiss(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), by: &str) -> Re
     Ok(format!("rollout #{n} dismissed by {by}"))
 }
 
-/// The open rollouts as `drover waiting` rows: the owner's, on their thread's orchestrator.
-pub fn rollout_rows(events: &[Event]) -> Vec<crate::waiting::Waiting> {
+/// `drover rollout`: a merged issue's open rollout.
+#[derive(clap::Subcommand)]
+pub enum Rollout {
+    #[command(about = "Owner only: dismiss a merged issue's open rollout; logs `rollout-dismissed` with `by`")]
+    Dismiss {
+        fleet: String,
+        issue: u64,
+        #[arg(long, default_value = "owner", help = "Who dismissed it, as the log shows it")]
+        by: String,
+    },
+}
+
+impl Rollout {
+    /// Run this `rollout` command; its line.
+    pub fn run(self, ctx: &Ctx, cfg: &Config) -> Result<String> {
+        match self {
+            Rollout::Dismiss { fleet, issue, by } => dismiss(ctx, cfg, (&fleet, issue), &by),
+        }
+    }
+}
+
+/// A `gh issue create` an orchestrator thread ran: its flow-back `text` to the threads that handed off to it, and `issue-filed` for the fleet whose repo `filed` names.
+pub fn filed(ctx: &Ctx, cfg: &Config, thread: &str, (text, filed): (&str, Option<(String, u64)>)) -> Result<()> {
+    orchestrator::flow(ctx, cfg, thread, text)?;
+    let Some((repo, n)) = filed else { return Ok(()) };
+    let Some(f) = cfg.fleet.iter().find(|f| f.1.repo == repo).map(|f| f.0) else {
+        return Ok(());
+    };
+    let e = Event::new(ctx.now, f, Some(n), "issue-filed", json!({"filed_in": thread}));
+    emit(&ctx.state, cfg, e.passive())
+}
+
+/// The open rollouts (of `fleet`, else all) as `drover waiting` rows: the owner's, on their thread's orchestrator.
+pub fn rollout_rows(events: &[Event], fleet: Option<&str>) -> Vec<crate::waiting::Waiting> {
     let row = |o: &&Event| {
         let (t, n) = (o.str("to").unwrap_or("no thread"), o.issue.unwrap_or_default());
         crate::waiting::Waiting {
@@ -291,7 +323,8 @@ pub fn rollout_rows(events: &[Event]) -> Vec<crate::waiting::Waiting> {
             promise: None,
         }
     };
-    rollouts(events).iter().map(row).collect()
+    let mine = |o: &&&Event| fleet.is_none_or(|f| f == o.fleet);
+    rollouts(events).iter().filter(mine).map(row).collect()
 }
 
 /// `GET /api/v1/config`: fleet.toml as cooee's config screens read it.

@@ -66,10 +66,7 @@ fn rows(c: &drover::Ctx, t: &str) -> Vec<String> {
     msgs.map(|e| e.str("text").unwrap_or_default().to_string()).collect()
 }
 
-fn filed_in(c: &drover::Ctx, thread: &str) {
-    let input = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash",
-        "tool_input": {"command": "gh issue create -R jirathip-dev/sendmeter -t \"Swift key\" -F -"},
-        "tool_response": {"stdout": "https://github.com/jirathip-dev/sendmeter/issues/12\n", "stderr": "", "interrupted": false}});
+fn hook(c: &drover::Ctx, thread: &str, input: &serde_json::Value) -> String {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_drover"));
     for k in ["FLEET_LANE", "DROVER_OUTBOX", "SHED", "BERTH"] {
         cmd.env_remove(k);
@@ -92,6 +89,14 @@ fn filed_in(c: &drover::Ctx, thread: &str) {
         .unwrap();
     let o = child.wait_with_output().unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+fn filed_in(c: &drover::Ctx, thread: &str) {
+    let input = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash",
+        "tool_input": {"command": "gh issue create -R jirathip-dev/sendmeter -t \"Swift key\" -F -"},
+        "tool_response": {"stdout": "https://github.com/jirathip-dev/sendmeter/issues/12\n", "stderr": "", "interrupted": false}});
+    hook(c, thread, &input);
     assert_eq!(kinds(c, "issue-filed").len(), 1);
 }
 
@@ -216,4 +221,10 @@ fn the_owner_dismisses_an_open_rollout_with_by() {
     assert!(!waiting(&c).0.contains("rollout"));
     let (code, out) = dismiss(&[]);
     assert!(code == 3 && out.contains("REFUSED NO_SUCH_ROLLOUT"), "{out}");
+    let cmd = format!("drover rollout {} sendmeter 12", "dismiss");
+    let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+    assert!(
+        hook(&c, "t1", &input).contains("REFUSED OWNER_ONLY"),
+        "an orchestrator never dismisses"
+    );
 }
