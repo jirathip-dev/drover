@@ -31,6 +31,7 @@ mod conn;
 #[path = "cooee.rs"]
 mod cooee;
 mod fresh;
+mod hub;
 mod jobs;
 #[path = "screens.rs"]
 mod screens;
@@ -66,6 +67,12 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("swag/", "garden/icon-180.png", PNG),
     th!("swag/", "garden/icon-192.png", PNG),
     th!("swag/", "garden/icon-512.png", PNG),
+    th!("swag/", "bush/sprites.svg", SVG),
+    th!("swag/", "bush/theme.json", JSON),
+    th!("swag/", "bush/scene.svg", SVG),
+    th!("swag/", "bush/icon-180.png", PNG),
+    th!("swag/", "bush/icon-192.png", PNG),
+    th!("swag/", "bush/icon-512.png", PNG),
     th!("", "terminal/theme.json", JSON),
     th!("", "terminal/icon-180.png", PNG),
     th!("", "terminal/icon-192.png", PNG),
@@ -132,7 +139,6 @@ fn sent(s: &mut TcpStream, mut b: &[u8], end: Instant) -> bool {
 
 type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>, String)>>>;
 const PER_DEVICE: usize = 4;
-const STREAMS_PER_DEVICE: usize = 16;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
 const TOO_LARGE: &[u8] = b"HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"line\":\"request body too large\"}";
@@ -212,6 +218,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             s.slo(crate::now());
             drover_core::clock::sleep(Duration::from_secs(60));
         });
+        sc.spawn(move || s.hub.publish(s));
         w.tick();
         sc.spawn(move || loop {
             w.tick();
@@ -399,37 +406,13 @@ pub struct Server<'a> {
     rss: std::sync::atomic::AtomicU64,
     hosts_read: Mutex<(usize, Option<Vec<String>>)>,
     streams: Mutex<BTreeMap<String, usize>>,
+    hub: hub::Hub,
 }
 
 fn hung_up(s: &TcpStream) -> bool {
     s.set_read_timeout(Some(Duration::from_millis(1))).is_ok()
         && s.peek(&mut [0; 1])
             .map_or_else(|e| !matches!(e.kind(), WouldBlock | TimedOut), |n| n == 0)
-}
-
-struct StreamSlot<'a>(&'a Mutex<BTreeMap<String, usize>>, String);
-
-impl<'a> StreamSlot<'a> {
-    fn take(m: &'a Mutex<BTreeMap<String, usize>>, who: String) -> Option<Self> {
-        let mut held = lock(m);
-        let n = held.entry(who.clone()).or_default();
-        (*n < STREAMS_PER_DEVICE).then(|| {
-            *n = n.saturating_add(1);
-            Self(m, who)
-        })
-    }
-}
-
-impl Drop for StreamSlot<'_> {
-    fn drop(&mut self) {
-        let mut held = lock(self.0);
-        if let Some(n) = held.get_mut(&self.1) {
-            *n = n.saturating_sub(1);
-            if *n == 0 {
-                held.remove(&self.1);
-            }
-        }
-    }
 }
 
 enum Later {
@@ -797,6 +780,7 @@ impl<'a> Server<'a> {
             rss: std::sync::atomic::AtomicU64::default(),
             hosts_read: Mutex::default(),
             streams: Mutex::default(),
+            hub: hub::Hub::new(),
         }
     }
 
@@ -932,6 +916,7 @@ impl<'a> Server<'a> {
         let out = self.reply(&req, crate::now());
         if write {
             self.writes.fetch_sub(1, Relaxed);
+            self.hub.kick();
         }
         let head = req.split("\r\n\r\n").next().unwrap_or_default();
         let keep = wire::keep(head);
@@ -1159,7 +1144,8 @@ impl<'a> Server<'a> {
         let (status, ctype, body) = match (method, path) {
             (_, p) if p.starts_with("/api/") => self.api(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
             (_, p) if p.starts_with("/cooee/") => self.cooee(ctx, head, (method, p), body),
-            (_, p) if p.starts_with("/screens/") || p == "/action" => self.screens(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
+            ("GET", p) if p.starts_with("/screens/") => self.screen_get(ctx, head, p, query, self.auth(ctx, head, &a), &mut extra),
+            (_, p) if p.starts_with("/screens/") || p == "/action" => self.screens(ctx, head, (method, p), body, self.auth(ctx, head, &a)),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
             ("GET", "/live" | "/pair/status") if busy(self.auth(ctx, head, &a)) => deny(""),
@@ -2840,7 +2826,7 @@ const THEME: [&str; 6] = [
     "icon-192.png",
     "icon-512.png",
 ];
-const BUILT: [&str; 4] = ["farm", "kitchen", "garden", "terminal"];
+const BUILT: [&str; 5] = ["farm", "kitchen", "garden", "bush", "terminal"];
 const ACTS: [(&str, &str); 7] = [
     ("impl", "working"),
     ("fix", "working"),

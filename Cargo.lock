@@ -1523,7 +1523,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "swag"
 version = "0.1.0"
-source = "git+https://github.com/jirathip-dev/swag?rev=e9ad9ba0ace20e3169e82f42efa2a5f1f8a21847#e9ad9ba0ace20e3169e82f42efa2a5f1f8a21847"
+source = "git+https://github.com/jirathip-dev/swag?rev=bf9a2c6b5cb837db1e844e4746fe166cbaa06b91#bf9a2c6b5cb837db1e844e4746fe166cbaa06b91"
 
 [[package]]
 name = "syn"

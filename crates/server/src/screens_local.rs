@@ -144,7 +144,7 @@ impl<'a> Local<'a> {
             return None;
         }
         let ctx = self.at(now);
-        let mut v = crate::runner::request(|| self.0.screen(&ctx, p, &form(q), true))?;
+        let mut v = crate::runner::request(|| self.0.build_screen(&ctx, p, &form(q), true))?;
         if p == CARDS {
             v = json!({"type": "screen", "id": "cards", "title": "asks and cards", "blocks": v});
         }
