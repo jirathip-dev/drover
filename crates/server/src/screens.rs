@@ -3,7 +3,7 @@ use super::{
 };
 use super::{LaneRow, LanesTab, NeedAsk, NeedIssue, QueueCard, QueueRow, JSON};
 use crate::access::{civil_month_day, civil_year};
-use crate::api::{Block, Herd, HerdFleet, HerdHost, HerdLane, Lane};
+use crate::api::{Block, Herd, HerdFleet, HerdLane, Lane};
 use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Map, Value};
@@ -1033,14 +1033,9 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
     let (mut rows, mut asks) = (vec![], None);
     for e in &list {
         let k = kind_of(&e.kind).unwrap_or_default();
+        let role = e.data.get("role").and_then(Value::as_str).unwrap_or_default();
         let mut fig = match (k, e.tone.as_str()) {
-            ("lane", _) => figure(
-                super::act(
-                    e.data.get("role").and_then(Value::as_str).unwrap_or_default(),
-                    "working",
-                ),
-                "",
-            ),
+            ("lane", _) => figure(super::act(role, "working"), ""),
             (_, "g") => figure("done", ""),
             (_, "r") => figure("blocked", "dead"),
             (_, "a") => figure("blocked", ""),
@@ -1049,13 +1044,12 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
         if e.kind == "verdict" && e.tone != "r" {
             fig.put("act", json!("rev"));
         }
-        let moment = match e.kind.as_str() {
+        if let Some(m) = match e.kind.as_str() {
             "merged" => Some("merged"),
             "verdict" if e.tone == "r" => Some("fail"),
             "needs-human" | "needs-decision" => Some("needs-you"),
             _ => None,
-        };
-        if let Some(m) = moment {
+        } {
             fig.put("moment", json!(m));
         }
         let mut r = json!({"type": "row", "id": format!("e-{}", e.seq), "figure": fig, "title": e.text, "value": {"since": iso(e.ts)}});
@@ -1212,16 +1206,6 @@ fn scene_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>
         .then(|| json!({"id": name, "title": name, "color": color, "subtitle": sum.join("·"), "blocks": blocks}))
 }
 
-pub(super) fn weather(host: &HerdHost) -> (&'static str, &'static str) {
-    let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
-    match host.pressure.as_deref() {
-        _ if host.gate.is_some() => ("storm", "held"),
-        Some("warn" | "critical") => ("fog", "busy"),
-        _ if ratio >= 0.5 => ("windy", "busy"),
-        _ => ("clear", "calm"),
-    }
-}
-
 fn scene_screen(h: &Herd) -> Value {
     let mut repos: Vec<Value> = (h.fleets.iter())
         .filter_map(|f| scene_repo(&f.name, &f.color, &f.lanes, Some(f)))
@@ -1234,7 +1218,7 @@ fn scene_screen(h: &Herd) -> Value {
         Some("critical") => 2,
         _ => 0,
     };
-    let (sky, level) = weather(host);
+    let (sky, level) = hosts::weather(host);
     let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
     let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
     let line = format!(
