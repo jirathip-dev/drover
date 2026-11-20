@@ -305,7 +305,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         r,
         &crate::events::working(&ctx.state).unwrap_or_default(),
     ));
-    rows.extend(login_token(r, None));
+    rows.extend(login_token(r, None).into_iter().chain(crate::check::kept_row(ctx)));
     let paired = crate::devices::load(ctx).len();
     let line = format!("phone — {paired} paired → open the page, then drover serve approve <code>");
     row(rows, paired > 0, '!', &line);
@@ -321,7 +321,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     for what in ["check", "drive"] {
         let stamp = std::fs::read_to_string(ctx.state.with_file_name(format!("{what}.at")));
         let at = stamp.ok().and_then(|text| text.trim().parse::<u64>().ok());
-        let age = at.map_or("never".into(), |at| crate::events::age(ctx.now - at));
+        let age = at.map_or("never".into(), |at| crate::events::age(ctx.now.saturating_sub(at)));
         let fresh = at.is_some_and(|at| ctx.now <= at + crate::timer::stuck_secs(cfg));
         let ran = match running.filter(|_| !fresh) {
             Some(since) => format!("running for {}", crate::events::age(ctx.now.saturating_sub(since))),
