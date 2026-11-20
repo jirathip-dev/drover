@@ -683,3 +683,60 @@ fn a_job_launchd_refuses_is_rebootstrapped_after_the_swap() {
     assert!(!r.called(&tick[1]), "a healthy job is left alone");
     assert!(out.contains("dev.drover.clean"), "{out}");
 }
+
+#[test]
+fn scheduled_clean_lists_a_worktree_git_kept_dirty_and_exits_zero_but_fails_on_a_real_git_error() {
+    let d = tmpdir("clean-kept");
+    let c = ctx(&d, CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let lane = |issue: u64| {
+        let w = c.worktrees.join("sendmeter").join(format!("issue-{issue}"));
+        std::fs::create_dir_all(&w).unwrap();
+        let w = w.to_string_lossy().into_owned();
+        let d = json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("impl-{issue}"), "runtime": "shed"});
+        append(&c.state, &Event::new(10, "sendmeter", Some(issue), "spawn", d)).unwrap();
+        let m = json!({"pr": "1", "merge_sha": "m", "into": "staging"});
+        append(
+            &c.state,
+            &Event::new(c.now - 4 * 86_400, "sendmeter", Some(issue), "merged", m),
+        )
+        .unwrap();
+        w
+    };
+    let (kept, gone) = (lane(1), lane(2));
+    let remove = |w: &str| format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}");
+    let git = |f: Fake| {
+        [&kept, &gone]
+            .iter()
+            .fold(f, |f, w| f.reply(&format!("git -C {w} rev-list"), "0\n"))
+            .reply("git -C", "")
+    };
+    let refusal = format!("fatal: '{kept}' contains modified or untracked files, use --force to delete it");
+    let r = git(Fake::default().once_err(&remove(&kept), 128, &refusal));
+    let (code, out) = run(&c, &r, &["clean", "--scheduled"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("keep {kept}: ")), "{out}");
+    assert!(out.contains("contains modified or untracked files"), "{out}");
+    assert!(out.contains("drover clean --lane impl-1"), "{out}");
+    assert!(out.contains(&format!("removed {gone}")), "{out}");
+    assert!(!c.state.with_file_name("clean.failed").exists(), "{out}");
+    assert!(kinds(&c, "clean-failed").is_empty(), "{out}");
+    let (_, doc) = run(&c, &Fake::default(), &["doctor"]);
+    let row = doc
+        .lines()
+        .find(|l| l.contains(" clean — "))
+        .unwrap_or_else(|| panic!("{doc}"));
+    assert!(row.starts_with('!') && row.contains("1 worktree(s) kept"), "{doc}");
+
+    let broken = lane(3);
+    let r = Fake::default()
+        .once_err(&remove(&broken), 128, "fatal: not a git repository: '/gone/.git'")
+        .reply(&format!("git -C {broken} rev-list"), "0\n");
+    let (code, out) = run(&c, &git(r), &["clean", "--scheduled"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains(&format!("failed {broken}: ")), "{out}");
+    assert!(c.state.with_file_name("clean.failed").exists(), "{out}");
+    assert_eq!(kinds(&c, "clean-failed").len(), 1, "{out}");
+    drop(sh);
+}
