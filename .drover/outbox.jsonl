@@ -1,0 +1,9 @@
+{"args":["turn","done"],"lane":"herdsman:1457:impl","ts":1795137364852}
+{"args":["done","--no-change","form-only FAIL: PR body now has ## Parity (rows 21 and 34 changed, none dropped); code at e31daaef unchanged","herdsman","1457"],"lane":"herdsman:1457:impl","ts":1795137904502}
+{"args":["turn","done","--why","form fix: ## Parity added to PR #1458 body; head e31daaef unchanged"],"lane":"herdsman:1457:impl","ts":1795137907610}
+{"args":["turn","done"],"lane":"herdsman:1457:impl","ts":1795156475981}
+{"args":["turn","done"],"lane":"herdsman:1457:impl","ts":1795167852789}
+{"args":["turn","done"],"lane":"herdsman:1457:impl","ts":1795167948306}
+{"args":["turn","working","--why","CI running at 90a3e7c4 (staging merged: cap fixed); waiting on ui-webkit send timing, which does not reproduce locally"],"lane":"herdsman:1457:impl","ts":1795188673291}
+{"args":["turn","done"],"lane":"herdsman:1457:impl","ts":1795190503291}
+{"args":["turn","done"],"lane":"herdsman:1457:impl","ts":1795190580985}
