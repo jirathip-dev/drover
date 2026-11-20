@@ -296,6 +296,14 @@ pub fn limit(prog: &str, args: &[String]) -> Duration {
     let name = std::path::Path::new(prog)
         .file_name()
         .map_or(prog.into(), |n| n.to_string_lossy());
+    let carried = args.iter().skip_while(|a| *a != "--").nth(1);
+    let carried = carried.and_then(|l| l.strip_prefix('\'')?.strip_suffix('\''));
+    if let Some(words) = carried.filter(|_| name == "ssh") {
+        let words: Vec<String> = words.split("' '").map(String::from).collect();
+        if let Some((p, a)) = words.split_first() {
+            return limit(p, a);
+        }
+    }
     let secs = match &*name {
         "security" | "codesign" => 10,
         "git" if args.iter().any(net) => 600,

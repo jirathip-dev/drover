@@ -56,27 +56,29 @@ fn every_ssh_drover_starts_is_bounded_by_a_deadline() {
         3,
         "On::run, run_in and run_for hand every wrapped ssh to On::remote"
     );
-    let remote = hosts.split("    fn remote(&self").nth(1).unwrap();
+    let remote = hosts.split("    fn remote(").nth(1).unwrap();
     let remote = &remote[..remote.find("\n    }\n").unwrap()];
     assert!(
-        remote.contains("self.r.run_for(&p, &a, input, limit)")
-            && !remote.contains("self.r.run(")
-            && !remote.contains("self.r.run_in("),
-        "On::remote runs every wrapped ssh by run_for with a limit"
+        remote.contains("Some(l) => self.r.run_for(&p, &a, input, l)")
+            && remote.contains("None => self.r.run_in(&p, &a, input)")
+            && !remote.contains("self.r.run("),
+        "On::remote runs a wrapped ssh by run_for with the limit its caller named, else by run_in with the runner's own"
     );
     let pass = hosts.split("impl Runner for Pass<'_> {").nth(1).unwrap();
     let pass = &pass[..pass.find("\n}\n").unwrap()];
     assert!(
-        pass.contains("self.call(prog, args, None)") && pass.contains("self.call(prog, args, Some(input))"),
-        "a pass's run and run_in go through Pass::call"
+        pass.contains("self.call(prog, args, None, None)")
+            && pass.contains("self.call(prog, args, Some(input), None)")
+            && pass.contains("self.call(prog, args, Some(input), Some(limit))"),
+        "a pass's run, run_in and run_for go through Pass::call"
     );
-    let call = hosts.split("    fn call(&self").nth(1).unwrap();
+    let call = hosts.split("    fn call(").nth(1).unwrap();
     let call = &call[..call.find("\n    fn ").unwrap()];
     let remote = call.split_once("        };\n").unwrap().1;
     assert!(
         remote.contains("crate::config::limits().ssh_call_secs")
             && !remote.contains("self.r.run(")
             && !remote.contains("self.r.run_in("),
-        "Pass::call runs every remote call with the ssh_call_secs deadline"
+        "Pass::call runs every remote call with its own limit, else the ssh_call_secs deadline"
     );
 }

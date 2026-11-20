@@ -17,10 +17,11 @@ impl Runner for SlowCheck {
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
         self.run_for(prog, args, input, drover::runner::limit(prog, args))
     }
-    fn run_for(&self, prog: &str, _args: &[String], _input: &str, limit: Duration) -> anyhow::Result<Out> {
+    fn run_for(&self, prog: &str, args: &[String], _input: &str, limit: Duration) -> anyhow::Result<Out> {
         assert_eq!(prog, "ssh");
         self.limits.lock().unwrap().push(limit);
-        let code = if limit < TAKES { 124 } else { 0 };
+        let slow = args.iter().any(|a| a.contains("arch-check"));
+        let code = if slow && limit < TAKES { 124 } else { 0 };
         Ok(Out {
             code,
             stdout: "0 violations\n".into(),
@@ -33,7 +34,7 @@ impl Runner for SlowCheck {
 fn a_remote_run_for_past_ssh_call_secs_keeps_its_limit_and_its_host() {
     let call = Duration::from_secs(drover::config::limits().ssh_call_secs);
     assert!(call < TAKES);
-    let gate = Duration::from_secs(30 * 60);
+    let gate = Duration::from_secs(drover::config::limits().gate_check_minutes * 60);
     let ssh = SlowCheck::default();
     let pass = Pass::fast(&ssh);
     let on = On::new(&pass, Some("boat"));
