@@ -321,7 +321,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     for what in ["check", "drive"] {
         let stamp = std::fs::read_to_string(ctx.state.with_file_name(format!("{what}.at")));
         let at = stamp.ok().and_then(|text| text.trim().parse::<u64>().ok());
-        let age = at.map_or("never".into(), |at| crate::events::age(ctx.now - at));
+        let age = at.map_or("never".into(), |at| crate::events::age(ctx.now.saturating_sub(at)));
         let fresh = at.is_some_and(|at| ctx.now <= at + crate::timer::stuck_secs(cfg));
         let ran = match running.filter(|_| !fresh) {
             Some(since) => format!("running for {}", crate::events::age(ctx.now.saturating_sub(since))),
@@ -329,6 +329,12 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         };
         let line = format!("watchdog {what} — {ran} → drover timer install");
         row(rows, fresh || running.is_some(), '✗', &line);
+    }
+    let kept = std::fs::read_to_string(ctx.state.with_file_name(crate::check::KEPT));
+    if let Some(n) = kept.ok().and_then(|t| t.trim().parse::<usize>().ok()) {
+        rows.push(format!(
+            "! clean — {n} worktree(s) kept: dirty or unpushed → drover clean --lane <agent>"
+        ));
     }
     let stuck = crate::timer::stuck_step(ctx, cfg);
     let line = stuck.as_ref().map_or("tick step — advancing".into(), |(step, secs)| {

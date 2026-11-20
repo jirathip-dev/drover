@@ -916,7 +916,7 @@ pub fn clean_all(
         .context("cannot list the live agents; refusing to clean blind")?;
     let off = if all { disabled(cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
-    let (mut freed, mut removed, mut failed) = (0, 0, 0);
+    let (mut freed, mut removed, mut failed, mut kept) = (0, 0, 0, 0);
     let mut closed = BTreeMap::new();
     let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
     let mut fresh = std::collections::BTreeSet::new();
@@ -1080,6 +1080,7 @@ pub fn clean_all(
             if lane.is_some() {
                 return unsafe_lane(&reason);
             }
+            kept += usize::from(!live);
             writeln!(out, "keep {shown}: {reason}")?;
             continue;
         }
@@ -1088,6 +1089,12 @@ pub fn clean_all(
             continue;
         }
         if let Err(err) = remove(&on, cfg, &e.fleet, wt, saved) {
+            if format!("{err:#}").contains("contains modified or untracked files") {
+                kept += 1;
+                let agent = e.str("agent").unwrap_or_default();
+                writeln!(out, "keep {shown}: {err:#} → drover clean --lane {agent}")?;
+                continue;
+            }
             writeln!(out, "failed {shown}: {err:#}")?;
             failed += 1;
             continue;
@@ -1162,6 +1169,12 @@ pub fn clean_all(
     } else if freed > 0 {
         writeln!(out, "freed {freed} bytes of build folders")?;
     }
+    let mark = ctx.state.with_file_name(KEPT);
+    if sched && yes && kept > 0 {
+        std::fs::write(&mark, kept.to_string())?;
+    } else if sched && yes {
+        std::fs::remove_file(&mark).ok();
+    }
     if failed > 0 {
         anyhow::bail!("{failed} worktree(s) could not be removed; see above");
     }
@@ -1169,6 +1182,9 @@ pub fn clean_all(
 }
 
 const IDLE: &str = "idle-merged";
+
+/// The state file holding how many worktrees the last scheduled clean kept dirty or unpushed.
+pub const KEPT: &str = "clean.kept";
 
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let res = clean(ctx, cfg, r, out, None, (None, None, true), true);
