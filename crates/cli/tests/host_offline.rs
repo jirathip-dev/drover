@@ -374,7 +374,7 @@ fn a_start_on_a_host_offline_this_pass_waits_for_it_with_no_card_or_backoff() {
         let a = acts.into_iter().find(|a| a["issue"] == 13).unwrap();
         a["why"].as_str().unwrap_or_default().to_string()
     };
-    for k in [0, 400] {
+    for k in [0, 240] {
         let (f, bazzite) = (
             remote(mini_only()).once_err(&format!("{ssh} 'df'"), 124, "no answer"),
             FakeShed::new(),
