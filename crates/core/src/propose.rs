@@ -259,7 +259,6 @@ pub fn open_rollout(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, 
     Ok(())
 }
 
-/// The owner's dismiss of `fleet` #`n`'s open rollout, logged `rollout-dismissed` with `by`.
 fn dismiss(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), by: &str) -> Result<String> {
     if !rollouts(&working(&ctx.state)?)
         .iter()
@@ -297,10 +296,12 @@ impl Rollout {
     }
 }
 
-/// A `gh issue create` an orchestrator thread ran: its flow-back `text` to the threads that handed off to it, and `issue-filed` for the fleet whose repo `filed` names.
-pub fn filed(ctx: &Ctx, cfg: &Config, thread: &str, (text, filed): (&str, Option<(String, u64)>)) -> Result<()> {
+/// A `gh issue create` an orchestrator thread ran (hook `input`): its flow-back `text` to the threads that handed off to it, and `issue-filed` for the fleet whose repo its URL names.
+pub fn filed(ctx: &Ctx, cfg: &Config, thread: &str, text: &str, input: &Value) -> Result<()> {
     orchestrator::flow(ctx, cfg, thread, text)?;
-    let Some((repo, n)) = filed else { return Ok(()) };
+    let Some((repo, n)) = crate::hook::filed_issue(input) else {
+        return Ok(());
+    };
     let Some(f) = cfg.fleet.iter().find(|f| f.1.repo == repo).map(|f| f.0) else {
         return Ok(());
     };

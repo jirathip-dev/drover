@@ -2314,8 +2314,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     }
     let thread = crate::config::env("DROVER_THREAD").unwrap_or_default();
     if let Some(text) = hook::issue_filed(&input).filter(|_| !thread.is_empty()) {
-        let filed = |cfg: Config| crate::propose::filed(ctx, &cfg, &thread, (&text, hook::filed_issue(&input)));
-        if let Err(e) = Config::load(&ctx.config).and_then(filed) {
+        if let Err(e) = Config::load(&ctx.config).and_then(|c| crate::propose::filed(ctx, &c, &thread, &text, &input)) {
             crate::stderr!("drover hook: {e:#}");
         }
     }
