@@ -13,6 +13,7 @@ use std::cmp::Ordering::Equal;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -216,13 +217,7 @@ impl Drop for Slot<'_> {
 }
 
 impl On<'_> {
-    fn remote(
-        &self,
-        m: &str,
-        (p, a): (String, Vec<String>),
-        input: &str,
-        limit: Option<std::time::Duration>,
-    ) -> Result<Out> {
+    fn remote(&self, m: &str, (p, a): (String, Vec<String>), input: &str, limit: Option<Duration>) -> Result<Out> {
         let _slot = Slot::take(m);
         let send = || match limit {
             Some(l) => self.r.run_for(&p, &a, input, l),
@@ -404,19 +399,12 @@ impl<'a> Pass<'a> {
         self.seen(m, u);
         u
     }
-    fn call(
-        &self,
-        prog: &str,
-        args: &[String],
-        input: Option<&str>,
-        limit: Option<std::time::Duration>,
-    ) -> Result<Out> {
+    fn call(&self, prog: &str, args: &[String], input: Option<&str>, limit: Option<Duration>) -> Result<Out> {
         self.note(&quote(prog, args));
         let Some(m) = Self::host(prog, args) else {
-            return match (input, limit) {
-                (i, Some(l)) => self.r.run_for(prog, args, i.unwrap_or_default(), l),
-                (Some(i), None) => self.r.run_in(prog, args, i),
-                (None, None) => self.r.run(prog, args),
+            return match limit {
+                Some(l) => self.r.run_for(prog, args, input.unwrap_or_default(), l),
+                None => input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i)),
             };
         };
         let unknown = self.log.is_some_and(|(_, cfg)| !configured(cfg, m));
@@ -445,7 +433,7 @@ impl<'a> Pass<'a> {
                 ..Out::default()
             });
         }
-        let limit = limit.unwrap_or(std::time::Duration::from_secs(crate::config::limits().ssh_call_secs));
+        let limit = limit.unwrap_or(Duration::from_secs(crate::config::limits().ssh_call_secs));
         let input = input.unwrap_or_default();
         let refused =
             |o: &Out| o.code == 255 && (o.stderr.contains("connect to host") || o.stderr.contains(KEY_CHANGED));
@@ -561,7 +549,7 @@ impl Runner for Pass<'_> {
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
         self.call(prog, args, Some(input), None)
     }
-    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> Result<Out> {
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> Result<Out> {
         self.call(prog, args, Some(input), Some(limit))
     }
     fn sleep(&self, secs: u64) {
