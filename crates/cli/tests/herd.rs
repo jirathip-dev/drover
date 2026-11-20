@@ -253,14 +253,11 @@ fn the_scene_is_the_pinned_swag_packs_and_a_custom_theme_overrides_it() {
     );
     let (c, r) = fixture("swag");
     let raw = |p: &str| s_raw(&Server::new(&c, &r, Some(ADDR.into())), p);
-    for t in ["kitchen", "garden"] {
-        let (head, svg) = raw(&format!("/themes/{t}/scene.svg"));
-        assert!(head.starts_with("HTTP/1.1 200 OK"), "{t}: {head}");
-        let sum = format!("{}  {t}/scene.svg", drover::devices::sha256(&svg));
-        assert!(
-            sums.lines().any(|l| l == sum),
-            "{t}'s scene is not the pinned pack's: {sum}"
-        );
+    for f in ["kitchen/scene.svg", "garden/scene.svg", "farm/sprites.svg"] {
+        let (head, body) = raw(&format!("/themes/{f}"));
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{f}: {head}");
+        let sum = format!("{}  {f}", drover::devices::sha256(&body));
+        assert!(sums.lines().any(|l| l == sum), "{f} is not the pinned pack's: {sum}");
     }
     assert!(
         raw("/themes/farm/scene.svg").0.starts_with("HTTP/1.1 404 "),
@@ -280,7 +277,7 @@ fn s_raw(s: &Server, path: &str) -> (String, Vec<u8>) {
 }
 
 #[test]
-fn the_herd_in_webkit_draws_a_figure_per_lane_switches_night_and_repo() {
+fn the_scene_in_webkit_is_a_full_page_header_toggle_drawn_from_the_scene_screen() {
     if no_webkit() {
         return;
     }
@@ -291,39 +288,57 @@ fn the_herd_in_webkit_draws_a_figure_per_lane_switches_night_and_repo() {
     std::thread::spawn(move || drover::serve::serve_on(&c, &r, l, false));
     let js = "window.late = (async () => { \
         const w = f => new Promise(ok => { const t = Date.now(), g = () => { const v = f(); if (v) ok(v); else if (Date.now() - t > 8000) ok(null); else setTimeout(g, 50); }; g(); }); \
-        const q = s => document.querySelector(s), figs = () => document.querySelectorAll('#sheet .herd .av').length; \
-        q('#sysb').click(); \
-        (await w(() => [...document.querySelectorAll('#sheet .row')].find(r => r.textContent.toLowerCase().startsWith('herd')))).click(); \
-        await w(() => q('#sheet .herd .hsc svg')); \
-        const one = [figs(), !!q('#sheet .hsc #kglow'), q('#sheet .herd .hn').textContent === 'sendmeter', !!q('#sheet .herd.night')]; \
-        q('#sheet .herd button[aria-label=night]').click(); \
-        const night = !!q('#sheet .herd.night'); \
-        q('#sheet .herd button[aria-label=\"next repo\"]').click(); \
-        return [...one, night, q('#sheet .herd .hn').textContent === 'synergy', figs(), !!q('#sheet .herd.night')]; })()";
+        const q = s => document.querySelector(s), b = q('#scb'), sc = q('#scene'), lb = q('#hlt'), n = x => x ? 1 : 0; \
+        const figs = () => document.querySelectorAll('#scene .hh').length, title = () => q('#scene .hs b').textContent; \
+        const off = [n(b.getAttribute('aria-pressed') === 'false'), n(sc.hidden), n(lb.hidden)]; \
+        b.click(); \
+        await w(() => figs()); \
+        const on = [n(b.getAttribute('aria-pressed') === 'true'), n(!sc.hidden), n(localStorage.scene === '1'), n(q('#sheet').hidden), n(getComputedStyle(q('main')).display === 'none'), \
+          n(!lb.hidden), figs(), n(title() === 'sendmeter'), n(!!q('#scene .rsn .cn')), n(!!q('#scene .hh.working use[href=\"#sa-impl\"]')), n(!!q('#sa-impl .leg')), n(sc.classList.contains('night')), n(lb.textContent === '☀')]; \
+        lb.click(); \
+        const night = [n(sc.classList.contains('night')), n(localStorage['scene-light'] === 'night'), n(lb.textContent === '☾')]; \
+        q('#scene .hnx').click(); \
+        const next = [n(title() === 'synergy'), figs(), n(sc.classList.contains('night')), n(localStorage['scene-repo'] === 'synergy')]; \
+        b.click(); \
+        const back = [n(b.getAttribute('aria-pressed') === 'false'), n(sc.hidden), n(localStorage.scene == null), n(getComputedStyle(q('main')).display !== 'none'), n(lb.hidden)]; \
+        const got = performance.getEntriesByType('resource').map(e => new URL(e.name).pathname); \
+        const ours = /^\\/(screens\\/|themes\\/|a\\/|pair\\/|api\\/v1\\/timings$|sw\\.js$|manifest\\.webmanifest$|icon-|favicon|apple-touch)/; \
+        return [...off, ...on, ...night, ...next, ...back, n(got.includes('/screens/scene')), got.filter(p => !ours.test(p) || /herd/.test(p)).length]; })()";
     let o = webview()
-        .env("DROVER_PRE", "localStorage['herd-night'] = '0'")
-        .args([&format!("http://{addr}/?theme=kitchen"), "390", "-", "-"])
-        .arg(d.join("herd.png"))
+        .env("DROVER_PRE", "localStorage['scene-light'] = 'day'")
+        .args([&format!("http://{addr}/"), "390", "-", "-"])
+        .arg(d.join("scene.png"))
         .arg(js)
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&o.stdout).into_owned();
     assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
     let v: Vec<&str> = out.split_whitespace().collect();
+    let want = [
+        "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "0", "1", "1", "1", "1", "1", "2", "1",
+        "1", "1", "1", "1", "1", "1", "1", "0",
+    ];
     assert_eq!(
         v.get(2..),
-        Some(&["1", "1", "1", "0", "1", "1", "2", "1"][..]),
-        "figures in sendmeter, kitchen's scene, sendmeter first, day; [☾] night; [›] synergy, its 2 figures, still night: {out}"
+        Some(&want[..]),
+        "off: unpressed, hidden, no light; [scene]: pressed, the page under the header (no sheet, the tabs gone), kept, \
+         the light shown, sendmeter's 1 horse ploughing in its gait, the ranch drawn, day [☀]; [☀] → night [☾], kept; \
+         [›] synergy, its 2 horses, still night, kept; [scene] again: unpressed, hidden, forgotten, the tabs back; \
+         /screens/scene fetched and nothing outside the page's routes (no herd.json, no old board route): {out}"
     );
 }
 
-fn herd_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<String> {
+fn scene_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<String> {
+    scene_at(&format!("theme={theme}"), theme, "", level, reduce, check)
+}
+
+fn scene_at(query: &str, name: &str, pick: &str, level: &str, reduce: bool, check: &str) -> Vec<String> {
     let (pressure, load) = match level {
         "calm" => ("1", "1.00"),
         "busy" => ("1", "15.00"),
         _ => ("2", "3.90"),
     };
-    let (c, r) = fixture_at(&format!("load-{theme}-{level}"), pressure, load);
+    let (c, r) = fixture_at(&format!("load-{name}-{level}"), pressure, load);
     append(
         &c.state,
         &Event::new(
@@ -344,21 +359,20 @@ fn herd_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<String
         "window.late = (async () => {{ \
         const w = f => new Promise(ok => {{ const t = Date.now(), g = () => {{ const v = f(); if (v) ok(v); else if (Date.now() - t > 8000) ok(null); else setTimeout(g, 50); }}; g(); }}); \
         const q = s => document.querySelector(s), on = e => getComputedStyle(e).display !== 'none'; \
-        const shown = s => [...document.querySelectorAll('#sheet .hsc ' + s)].filter(on).length; \
-        q('#sysb').click(); \
-        (await w(() => [...document.querySelectorAll('#sheet .row')].find(r => r.textContent.toLowerCase().startsWith('herd')))).click(); \
-        await w(() => q('#sheet .herd .hsc svg')); \
-        const h = q('#sheet .herd'), anim = e => e && getComputedStyle(e).animationName !== 'none' ? 1 : 0; \
+        const shown = s => [...document.querySelectorAll('#scene .rsn ' + s)].filter(on).length; \
+        {pick} \
+        await w(() => q('#scene .rsn svg') && document.querySelector('#scene .hh') && document.querySelector('symbol[id^=sa-]')); \
+        const h = q('#scene'), anim = e => e && getComputedStyle(e).animationName !== 'none' ? 1 : 0; \
         {check} }})()"
     );
     let mut cmd = webview();
-    cmd.env("DROVER_PRE", "localStorage['herd-night'] = '0'");
+    cmd.env("DROVER_PRE", "localStorage.scene = '1'");
     if reduce {
         cmd.env("DROVER_REDUCE", "1");
     }
     let o = cmd
-        .args([&format!("http://{addr}/?theme={theme}"), "390", "-", "-"])
-        .arg(d.join(format!("herd-{theme}-{level}.png")))
+        .args([&format!("http://{addr}/?{query}"), "390", "-", "-"])
+        .arg(d.join(format!("scene-{name}-{level}.png")))
         .arg(js)
         .output()
         .unwrap();
@@ -368,22 +382,22 @@ fn herd_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<String
 }
 
 #[test]
-fn the_herd_in_webkit_draws_kitchens_heat_held_while_the_spawn_gate_is_held() {
+fn the_scene_in_webkit_draws_kitchens_heat_held_while_the_spawn_gate_is_held() {
     if no_webkit() {
         return;
     }
     let check = "const lit = h.classList.contains('heat-held') ? 1 : 0; \
-        const flames = shown('.h-held'), others = shown(':is(.h-calm,.h-busy):not(.h-held)'), glow = anim(q('#sheet .hsc .kglow')), loop = anim(h); \
-        return [lit, flames > 0 ? 1 : 0, others, glow, loop, document.querySelectorAll('#sheet .herd use[href=\"#hfan\"]').length];";
+        const flames = shown('.h-held'), others = shown(':is(.h-calm,.h-busy):not(.h-held)'), glow = anim(q('#scene .rsn .kglow')), loop = anim(h); \
+        return [lit, flames > 0 ? 1 : 0, others, glow, loop, document.querySelectorAll('#scene use[href=\"#sfan\"]').length];";
     assert_eq!(
-        herd_probe("kitchen", "held", false, check),
+        scene_probe("kitchen", "held", false, check),
         ["1", "1", "0", "1", "1", "1"],
-        "kitchen held: heat-held on the Herd, its flames shown, no calm or busy layer, the glow and the frame loop run, the idle lane fans"
+        "kitchen held: heat-held on the Scene, its flames shown, no calm or busy layer, the glow and the frame loop run, the idle lane fans"
     );
 }
 
 #[test]
-fn the_herd_in_webkit_draws_each_load_level_of_kitchen_and_garden_and_farms_sky() {
+fn the_scene_in_webkit_draws_each_load_level_of_kitchen_and_garden_and_farms_sky() {
     if no_webkit() {
         return;
     }
@@ -392,7 +406,7 @@ fn the_herd_in_webkit_draws_each_load_level_of_kitchen_and_garden_and_farms_sky(
             "return [h.classList.contains('heat-{level}') ? 1 : 0, shown('.h-{level}') > 0 ? 1 : 0, shown(':is(.h-calm,.h-busy,.h-held):not(.h-{level})')];"
         );
         assert_eq!(
-            herd_probe("kitchen", level, false, &heat),
+            scene_probe("kitchen", level, false, &heat),
             ["1", "1", "0"],
             "kitchen {level}: heat-{level}, its flames and no other level's"
         );
@@ -400,30 +414,79 @@ fn the_herd_in_webkit_draws_each_load_level_of_kitchen_and_garden_and_farms_sky(
             "return [h.classList.contains('light-{level}') ? 1 : 0, shown('.{sun}') > 0 ? 1 : 0, shown(':is(.l-sun,.l-overcast,.l-rain):not(.{sun})')];"
         );
         assert_eq!(
-            herd_probe("garden", level, false, &light),
+            scene_probe("garden", level, false, &light),
             ["1", "1", "0"],
             "garden {level}: light-{level}, its .{sun} window and no other"
         );
     }
-    for (level, sky) in [("calm", "clear"), ("busy", "windy"), ("held", "storm")] {
-        let farm = format!("return [h.dataset.sky === '{sky}' ? 1 : 0, /heat|light/.test(h.className) ? 1 : 0];");
+    for (level, want) in [
+        ("calm", ["0", "0", "0", "0"]),
+        ("busy", ["0", "1", "0", "0"]),
+        ("held", ["1", "0", "0", "1"]),
+    ] {
+        let farm = "const c = h.classList, n = x => x ? 1 : 0; \
+            return [n(c.contains('storm')), n(c.contains('gust')), n(/heat|light/.test(h.className)), n(getComputedStyle(q('#scene .hrain')).display === 'block')];";
         assert_eq!(
-            herd_probe("farm", level, false, &farm),
-            ["1", "0"],
-            "farm {level}: sky {sky}, no heat or light"
+            scene_probe("farm", level, false, farm),
+            want,
+            "farm {level}: storm, gust, no heat or light, rain only in the storm"
         );
     }
 }
 
 #[test]
-fn the_herd_in_webkit_stops_the_flames_and_glow_under_reduced_motion() {
+fn the_scene_in_webkit_stops_the_flames_and_glow_under_reduced_motion() {
     if no_webkit() {
         return;
     }
-    let check = "return [h.classList.contains('heat-held') ? 1 : 0, anim(h), anim(q('#sheet .hsc .kglow'))];";
+    let check = "return [h.classList.contains('heat-held') ? 1 : 0, anim(h), anim(q('#scene .rsn .kglow'))];";
     assert_eq!(
-        herd_probe("kitchen", "held", true, check),
+        scene_probe("kitchen", "held", true, check),
         ["1", "0", "0"],
         "kitchen held under reduced motion: heat-held, no frame loop, no glow animation"
+    );
+}
+
+const PICK_BUSH: &str = "q('#sysb').click(); \
+    (await w(() => [...document.querySelectorAll('#sheet .row')].find(r => r.textContent.replace('✓', '').trim() === 'bush'))).click(); \
+    await w(() => document.documentElement.dataset.theme === 'bush' && [...document.querySelectorAll('.hdefs symbol')].some(s => s.id === 'ha-fix' && s.innerHTML.includes('--wo'))); \
+    [...document.querySelectorAll('#sheet .sh button')].find(b => b.textContent === 'close').click();";
+
+#[test]
+fn the_scene_in_webkit_draws_bush_picked_from_the_theme_list_its_sign_at_each_level_light_and_dark() {
+    if no_webkit() {
+        return;
+    }
+    for (query, scheme) in [
+        ("theme=farm", "bush-light"),
+        ("theme=farm&scheme=bush-dark", "bush-dark"),
+    ] {
+        for (level, word) in [("calm", "moderate"), ("busy", "high"), ("held", "catastrophic")] {
+            let check = format!(
+                "await w(() => q('#scene.sign-{level}') && document.querySelector('#scene .fdr')); \
+                return [document.documentElement.dataset.scheme === '{scheme}' ? 1 : 0, h.classList.contains('sign-{level}') ? 1 : 0, \
+                shown('.fdr') > 0 ? 1 : 0, shown('.s-{word}') > 0 ? 1 : 0, shown(':is(.s-moderate,.s-high,.s-catastrophic):not(.s-{word})'), \
+                h.querySelectorAll('use[href=\"#sa-idle\"]').length > 0 ? 1 : 0, anim(h)];"
+            );
+            assert_eq!(
+                scene_at(query, scheme, PICK_BUSH, level, false, &check),
+                ["1", "1", "1", "1", "0", "1", "1"],
+                "bush {scheme} {level}: picked from the list, sign-{level} on the Scene, the sign reads {word} and no other level, the lane drawn, the loop runs"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_scene_in_webkit_holds_bushs_sign_still_under_reduced_motion() {
+    if no_webkit() {
+        return;
+    }
+    let check = "await w(() => q('#scene.sign-held') && document.querySelector('#scene .fdr')); \
+        return [h.classList.contains('sign-held') ? 1 : 0, shown('.s-catastrophic') > 0 ? 1 : 0, shown(':is(.s-moderate,.s-high):not(.s-catastrophic)'), anim(h)];";
+    assert_eq!(
+        scene_at("theme=bush", "bush-still", "", "held", true, check),
+        ["1", "1", "0", "0"],
+        "bush held under reduced motion: catastrophic alone shown, no frame loop"
     );
 }

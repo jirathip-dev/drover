@@ -103,7 +103,7 @@ The Home Screen icon is Corral's Palomino app icon (jirathip-dev/corral, `ios/to
 
 The page's look is data, no code: see [themes.md](themes.md) for the contract (per-role actions, looks, load scene,
 rail, moments, row sprites, icons, ASCII words, Lanes modes), the per-phone pick under `[⚙]`, `[serve] theme` (its
-default) and the built-in `farm`, `kitchen`, `garden` (pinned from the shared theme repo, #928) and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
+default) and the built-in `farm`, `kitchen`, `garden`, `bush` (pinned from the shared theme repo, #928) and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
 writes them to `themes/`. Colours are a separate per-phone pick in the same sheet: 8 built-in schemes plus your own
 `<config dir>/schemes/<name>.json`, each contrast-gated ([themes.md](themes.md#colour-schemes-244)).
 
@@ -339,13 +339,16 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token
   proxy section under it holds doctor's proxy facts and [How to set], `GET /screens/proxy-token`, the token's steps.
   #1313: the leftover count and the proxy facts are read off the request (the host sampler, `refresh`; never by a host action);
-- #1092: `GET /screens/herd`, the page's Herd (page-only, [⚙] → Herd; cooee draws its own scene): one `scene` block
-  with `weather` (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `line`),
-  #1415 `load` (calm, busy or held: a `sign` theme's needle)
-  and `repos`, each a fleet (then `others`) with its queued issues at the gate and its lanes in bands (working, idle,
-  done, blocked) as rows with figures. The page draws the theme's `scene.svg` (the pinned swag pack; a `<config
-  dir>/themes/<name>/scene.svg` overrides it; farm and terminal, with none, get a drawn ranch), [‹] [›] switch repo
-  and [☾] switches night;
+- #1305: `GET /screens/scene` (and its `/stream`), the page's Scene (page-only; the header's `[scene]` swaps the whole
+  page between the screens and Scene, kept per phone; cooee draws its own scene): one `scene` block with `weather`
+  (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `fog` 0–2, `storm`,
+  `line`), #1415 `load` (calm, busy or held: a `sign` theme's needle) and `repos`, each a fleet (then `others`) with its
+  queued issues at the gate (`blocked_by`) and its lanes in bands (`working`, `idle`, `done`, `blocked/dead`) as rows
+  with `figure` (`state`, `act`, `coat`), `tone`, `value` (age), `host` and `needs`. The page draws the old Herd
+  (#37, #71, #292): the ranch strip (the theme's `scene.svg`, the pinned swag pack, a `<config
+  dir>/themes/<name>/scene.svg` overriding it; farm, with none, gets the drawn ranch), the farm sprites from the pinned
+  swag pack, one page per repo ([‹] [›], the dots, ←/→, a wheel or a drag), the repo's needs-you cards from
+  `/screens/cards`, and `[A]`/`[☀]`/`[☾]` in the header (Auto: night before 07:00 and from 19:00, phone clock);
 - `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
   `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;

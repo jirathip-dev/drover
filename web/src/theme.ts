@@ -2,7 +2,7 @@ import { type Blk, blks, isBlk, obj } from './ops';
 
 declare const SD: { t: Record<string, unknown>; s: Record<string, Scheme> };
 type Scheme = { tokens: Record<string, string>; 'color-scheme': string };
-const block = (s: Scheme): string => `:root{${Object.entries(s.tokens).map(([k, v]) => `${k}:${v}`).join(';')};color-scheme:${s['color-scheme']}}`;
+const css = (s: Scheme): string => `:root{${Object.entries(s.tokens).map(([k, v]) => `${k}:${v}`).join(';')};color-scheme:${s['color-scheme']}}`;
 const theirs = (def: unknown, dark: boolean): unknown => (def && typeof def === 'object' && Reflect.get(def, dark ? 'dark' : 'light')) || def;
 const choose = (pick: unknown, def: unknown, dark: boolean): string =>
   [pick, theirs(def, dark)].find((n): n is string => typeof n === 'string' && Object.prototype.hasOwnProperty.call(SD.s, n)) ?? 'github-dark';
@@ -54,13 +54,13 @@ const GLYPH: Record<string, string> = { working: '●', needs: '!', fail: '✗',
 const WORD: Record<string, string> = { working: 'working', needs: 'needs you', fail: 'failed', done: 'done', merged: 'merged', idle: 'idle' };
 const TONE: Record<string, string> = { working: 'g', needs: 'r', fail: 'r', done: 'mute', idle: 'mute', merged: 'g' };
 const MK: Record<string, string> = { merged: 'merged', fail: 'fail', 'needs-you': 'needs' };
-const css = (o: Blk) => Object.entries(o).filter(e => e[0] !== 'id').map(e => e.join(':')).join(';');
+const decl = (o: Blk) => Object.entries(o).filter(e => e[0] !== 'id').map(e => e.join(':')).join(';');
 const mo = (f: Blk): string => (typeof f.moment === 'string' ? f.moment : f.state === 'needs' ? 'needs-you' : f.state === 'fail' ? 'fail' : '');
 
 function plant(stage: unknown, n: number, row: boolean) {
   const id = obj(T.stages)[String(stage)], L = blks(T.species), s = L.length && n >= 0 ? L[n % L.length] : null, x = row ? '-row' : '';
   if (typeof id !== 'string') return null;
-  return { ids: [s ? `${id}-${String(s.id)}${x}` : '', id + x].filter(Boolean), style: s ? css(s) : '' };
+  return { ids: [s ? `${id}-${String(s.id)}${x}` : '', id + x].filter(Boolean), style: s ? decl(s) : '' };
 }
 
 function avatar(f: Blk, a: string, s: string, g: string, word: string): string {
@@ -71,7 +71,7 @@ function avatar(f: Blk, a: string, s: string, g: string, word: string): string {
   }
   if (st() !== 'pixel' || !has('ha-' + a)) return `<span class="av ${esc(s)}" role=img aria-label="${esc(word)}" title="${esc(word)}">${g}</span>`;
   const looks = blks(T.looks), coat = String(f.coat);
-  const look = looks.length ? css(looks[Math.max(Object.keys(COATS).indexOf(coat), 0) % looks.length]) : COATS[coat] ?? COATS.bay;
+  const look = looks.length ? decl(looks[Math.max(Object.keys(COATS).indexOf(coat), 0) % looks.length]) : COATS[coat] ?? COATS.bay;
   const p = plant(f.grow, Number(f.issue ?? -1), false), under = p?.ids.find(i => has('hs-' + i));
   const art = (p && under ? `<use href="#hs-${under}" style="${p.style}"/>` : '') + `<use href="#ha-${a}"/>`;
   return `<span class="av ${esc(s)}" role=img aria-label="${esc(word)}" title="${esc(word)}"><svg class=px viewBox="0 0 132 100" style="${look}">${art}</svg></span>`;
@@ -157,6 +157,10 @@ export function word(k: string, plain: unknown): string {
 
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 export const nodes = (h: string) => new DOMParser().parseFromString('<body>' + h, 'text/html').body.childNodes;
+let srcs: Element[] = [];
+const pick = (src: Element | undefined, id: unknown) => (src && id ? src.querySelector('#' + CSS.escape(String(id))) : null);
+/** The theme's sprite `want` (farm's where the theme lacks it), else farm's `alt`. */
+export const sprite = (want: unknown, alt?: unknown): Element | null => pick(srcs[0], want) || pick(srcs[1], want) || pick(srcs[1], alt);
 const got = (u: string, j: boolean): Promise<unknown> => fetch(u).then(r => (r.ok ? (j ? r.json() : r.text()) : Promise.reject())).catch(() => (j ? {} : ''));
 
 /** Loads theme `name` (farm filling what it lacks) and builds the `ha-*` and `hr-*` symbols. */
@@ -166,10 +170,10 @@ export async function theme(name: string): Promise<void> {
   if (H.dataset.theme !== name) return;
   const svg = (t: unknown) => new DOMParser().parseFromString(`<svg>${t}</svg>`, 'text/html').body.firstElementChild ?? document.createElementNS(NS, 'svg'), farm = svg(fs), own = svg(ts);
   T = obj(tj);
+  srcs = [own, farm];
   defs.replaceChildren();
-  const sprite = (src: Element, id: unknown) => (id ? src.querySelector('#' + CSS.escape(String(id))) : null);
   const sym = (id: string, want: unknown, alt?: unknown, vb = '0 0 132 100') => {
-    const g = (sprite(own, want) || sprite(farm, want) || sprite(farm, alt))?.cloneNode(true);
+    const g = sprite(want, alt)?.cloneNode(true);
     if (!(g instanceof Element)) return;
     const s = document.createElementNS(NS, 'symbol');
     s.id = id;
@@ -200,7 +204,7 @@ export async function theme(name: string): Promise<void> {
 const DARK = matchMedia('(prefers-color-scheme: dark)');
 /** The colours: this phone's pick, else its theme's default; kept so the head script paints it first next time. */
 export function colours() {
-  const n = choose(new URLSearchParams(location.search).get('scheme') || get('scheme'), SD.t[H.dataset.theme ?? ''], DARK.matches), b = block(SD.s[n]);
+  const n = choose(new URLSearchParams(location.search).get('scheme') || get('scheme'), SD.t[H.dataset.theme ?? ''], DARK.matches), b = css(SD.s[n]);
   H.dataset.scheme = n;
   const sch = document.getElementById('sch'), meta = document.querySelector<HTMLMetaElement>('meta[name=theme-color]');
   if (sch) sch.textContent = b;

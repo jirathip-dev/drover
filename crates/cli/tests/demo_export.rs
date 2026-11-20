@@ -155,15 +155,15 @@ fn demo_page_is_inert_and_relative() {
 }
 
 #[test]
-fn the_herd_screen_of_the_demo_fleet_is_its_golden() {
+fn the_scene_screen_of_the_demo_fleet_is_its_golden() {
     let (site, _) = export();
-    let got = screen(&site, "screens/herd");
-    let f = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/cooee/herd.json");
+    let got = screen(&site, "screens/scene");
+    let f = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/cooee/scene.json");
     if std::env::var_os("BLESS").is_some() {
         std::fs::write(&f, serde_json::to_string_pretty(&got).unwrap() + "\n").unwrap();
     }
     let want: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
-    assert_eq!(got, want, "`BLESS=1` rewrites tests/golden/cooee/herd.json");
+    assert_eq!(got, want, "`BLESS=1` rewrites tests/golden/cooee/scene.json");
 }
 
 fn faults(site: &std::path::Path) -> Vec<String> {
@@ -201,14 +201,14 @@ fn faults(site: &std::path::Path) -> Vec<String> {
 
 const KNOWN: [&str; 30] = [
     "screens/events Twice",
-    "screens/herd Extra scene",
-    "screens/herd Extra scene",
-    "screens/herd Extra scene",
-    "screens/herd Twice",
     "screens/lanes Twice",
     "screens/queue ActTwice",
     "screens/queue ActTwice",
     "screens/queue ActTwice",
+    "screens/scene Extra scene",
+    "screens/scene Extra scene",
+    "screens/scene Extra scene",
+    "screens/scene Twice",
     "screens/threads/t1 Shape card",
     "screens/threads/t1 Shape card",
     "screens/threads/t1 Shape card",

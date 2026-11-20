@@ -15,7 +15,7 @@ through the same handler (the same permissions and `REFUSED <CODE>` lines), and 
 when the log or the snapshot moves, so a change shows within a second or two. A screen, block or button added to
 the screens later shows up here with no terminal change; a block type the app does not know draws its text.
 
-Not offered: Herd (drawn on the phone only) and the proxy-token entry (a secret is entered on a paired device only).
+Not offered: Scene (drawn on the phone only) and the proxy-token entry (a secret is entered on a paired device only).
 Images are named, and shown on the phone.
 
 The design, with every key: `docs/design/terminal-board/README.md`; the architecture:
