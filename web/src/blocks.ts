@@ -311,7 +311,8 @@ function composer(blk: Blk, c: Ctx): HTMLElement {
     const queue = !steer && (b.working || d.q != null) ? act('queue') : '', action = steer ? act('steer') : queue || String(b.action);
     const v: Blk = { ...d.picks, text: ta.value, name: d.files.map(x => x.name).join('/'), data: d.files.map(x => x.data).join(',') };
     if (queue && d.q != null) v.q = d.q;
-    if ('req' in obj(b.values)) v.req = d.req ??= `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    const req = obj(b.values).req;
+    if (req != null) v.req = d.req ??= `${String(req)}.${Math.random().toString(36).slice(2, 10)}`;
     [d.st, d.steer] = ['sending', false];
     draw();
     if (await post(action, v, steer ? undefined : go)) {

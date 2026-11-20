@@ -33,7 +33,7 @@
       "type": "composer",
       "values": {
         "repo": "sendmeter",
-        "req": ""
+        "req": "sendmeter-1000000"
       }
     }
   ],
