@@ -35,6 +35,8 @@ jobs:
         run: scripts/test-shards.sh check
       - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events; #954: a drive pass over 30,000 events and 150 done issues; #962: stats autonomy on 150,000 events; #1313: the screens on a live-shaped gh cache)"
         run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests the_state_read_stays_under_300ms a_pass_over_30k_events_and_150_done_issues_stays_fast stats_autonomy_on_a_150k screens_on_a_live_shaped_fixture --nocapture --test-threads=1
+      - name: "screen hub in release (#1372: one build per change for every reader, fresh data under 150 ms p95, 30 streams with no 503, ETag and 304)"
+        run: cargo test --release --locked --test screen_hub -- --nocapture --test-threads=1
       - name: "soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)"
         if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
         run: cargo test --release --locked --test soak -- --ignored --nocapture --test-threads=1
