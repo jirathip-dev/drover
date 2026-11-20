@@ -25,7 +25,7 @@ How does a terminal draw every screen the phone draws, run every action they off
   export already uses one that never listens.
 - The permission check, the `later` and host actions and the reply's status sit inline in the HTTP arm
   (`crates/server/src/screens.rs:1648`), so nothing else can run "the same handler" today.
-- A stream (`crates/server/src/serve/hub.rs:394`) waits on the hub (#1372): one publisher rebuilds each held
+- A stream (`crates/server/src/serve/hub.rs:361`) waits on the hub (#1372): one publisher rebuilds each held
   screen once per change and hands every stream holding it the difference.
 - The snapshot the screens replay is taken by the timer's fast step, not by serve.
 - `crates/chat` is the app since #1352: its Tab toggled a `board` flag that draws one grey
