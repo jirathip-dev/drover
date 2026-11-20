@@ -1,0 +1,12 @@
+Decided: the hub is synchronous (Mutex and Condvar, one publisher thread), because slice 1 landed with scoped handler threads, not the ADR's Arc'd async Server
+Because: crates/server/src/serve.rs:242
+Decided: a build that changes a held screen hands its delta to every holder, whoever built it (a GET or the publisher), so a GET that rebuilds first never makes a stream miss the change
+Decided: rev bumps only when the diff has ops, so an identical rebuild keeps the ETag and answers 304
+Decided: a server without background reads (tests, Local, export) treats its reads as always moved, so it builds on every read as before
+Decided: the workflow screen depends on everything, not only the config as shapes.md lists, because it shows live counts
+Decided: the per-device cap of 16 streams (#1298) stays; the server-wide cap was already gone
+Because: "The server-wide cap of 4 and the per-stream build loop are deleted."
+Decided: marking a thread read moves out of the build into the hub, after a paired build of that thread
+Rejected: routing screens_local through the hub — it has no background reads, so it would rebuild every read anyway; the ban excepts it
+Check: a stream whose queue overflows (64 frames or 1 MB) or sees a gap gets one whole screen, then deltas again
+Owner: Every phone now shares one build per change, and a screen request can answer 304 when nothing changed.
