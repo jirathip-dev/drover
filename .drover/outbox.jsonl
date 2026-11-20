@@ -1,0 +1,2 @@
+{"args":["turn","done"],"lane":"herdsman:1508:impl","ts":1795210355656}
+{"args":["turn","blocked","--why","DONE_CHECK is #1508 itself: the main host's installed drover (staging, without this fix) kills remote arch-check at ssh_call_secs 20s. In the worktree at pushed head 640de2fad: drover arch-check exit 0 (0 violations, 42s), cargo fmt --check exit 0. Retrying refuses the same way; needs an owner override or review past the gate."],"lane":"herdsman:1508:impl","ts":1795210576126}
