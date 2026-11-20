@@ -9,12 +9,8 @@ use tokio::sync::Notify;
 use tokio::time::timeout;
 
 pub(crate) fn fleets(ctx: &Ctx) -> BTreeMap<String, Notify> {
-    let names = Config::load(&ctx.config).map(|c| c.fleet.into_keys().collect::<Vec<_>>());
-    names
-        .unwrap_or_default()
-        .into_iter()
-        .map(|f| (f, Notify::new()))
-        .collect()
+    let cfg = Config::load(&ctx.config).unwrap_or_default();
+    cfg.fleet.into_keys().map(|f| (f, Notify::new())).collect()
 }
 
 impl Service {
