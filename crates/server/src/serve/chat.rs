@@ -472,7 +472,10 @@ pub fn post(
             let all = all.join(", ");
             let text = or(g("text").trim().is_empty(), &all, g("text"));
             let new = g("op") == "new";
-            if let Some(t) = conductor::resent(ctx, &cfg, &events, g("repo"), g("req")).filter(|_| new) {
+            if let Some(t) = new
+                .then(|| conductor::resent(ctx, &cfg, &events, g("repo"), g("req")))
+                .flatten()
+            {
                 return Ok(format!("{t} started"));
             }
             let id = if new {
