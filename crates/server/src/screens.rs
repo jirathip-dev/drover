@@ -1201,7 +1201,6 @@ fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>)
         .then(|| json!({"id": name, "title": name, "color": color, "subtitle": sum.join(" · "), "blocks": blocks}))
 }
 
-/// The host's sky and its load level (calm, busy, held): the Herd's weather, a Host row's miniature.
 pub(super) fn weather(host: &HerdHost) -> (&'static str, &'static str) {
     let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
     match host.pressure.as_deref() {
