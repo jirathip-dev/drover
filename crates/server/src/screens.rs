@@ -7,26 +7,24 @@ use crate::api::{Block, Herd, HerdFleet, HerdLane, Lane};
 use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Map, Value};
-use std::io::Write;
 use std::sync::atomic::Ordering::Relaxed;
-use std::time::Duration;
 
 #[path = "later.rs"]
 mod later;
 #[path = "screens_local.rs"]
 pub(super) mod local;
 #[path = "screens_pages.rs"]
-mod pages;
+pub(super) mod pages;
 
 const MANIFEST: &str = include_str!("../../../cooee-plugin.toml");
-type Res = (&'static str, &'static str, Vec<u8>);
+pub(super) type Res = (&'static str, &'static str, Vec<u8>);
 type Q = BTreeMap<String, String>;
 
 fn out(status: &'static str, v: &Value) -> Res {
     (status, JSON, v.to_string().into_bytes())
 }
 
-fn line(status: &'static str, l: &str) -> Res {
+pub(super) fn line(status: &'static str, l: &str) -> Res {
     out(status, &json!({ "line": l }))
 }
 
@@ -1379,10 +1377,6 @@ pub fn ops(a: &Value, b: &Value) -> Vec<Value> {
     out
 }
 
-fn count(v: &Value) -> Option<u64> {
-    v["badge"].as_u64()
-}
-
 fn sheets(v: &Value, out: &mut Vec<String>) {
     match v {
         Value::Object(m) => {
@@ -1413,7 +1407,7 @@ impl Server<'_> {
         let mut i = 0;
         while let Some(p) = paths.get(i).cloned() {
             i += 1;
-            if let Some(v) = self.screen(ctx, &p, &Q::new(), paired) {
+            if let Some(v) = self.build_screen(ctx, &p, &Q::new(), paired) {
                 let mut more = vec![];
                 sheets(&v, &mut more);
                 more.retain(|m| !paths.contains(m));
@@ -1424,7 +1418,7 @@ impl Server<'_> {
         out
     }
 
-    fn screen(&self, ctx: &Ctx, path: &str, q: &Q, paired: bool) -> Option<Value> {
+    pub(super) fn build_screen(&self, ctx: &Ctx, path: &str, q: &Q, paired: bool) -> Option<Value> {
         let mut v = match path {
             "/screens/queue" => self.queue_screen(ctx, q),
             "/screens/lanes" => lanes_screen(&self.lanes_tab(ctx, paired)),
@@ -1608,27 +1602,12 @@ impl Server<'_> {
         .any(|t| !t.is_empty() && devices::sha256(bearer.as_bytes()) == devices::sha256(t.as_bytes()))
     }
 
-    pub(super) fn screens(
-        &self,
-        ctx: &Ctx,
-        head: &str,
-        (method, p): (&str, &str),
-        query: &str,
-        body: &str,
-        auth: &Auth,
-    ) -> Res {
+    pub(super) fn screens(&self, ctx: &Ctx, head: &str, (method, p): (&str, &str), body: &str, auth: &Auth) -> Res {
         let plugin = Self::plugin(ctx, head);
         if !plugin && !self.allowed(ctx, head) {
             return line("403 Forbidden", "foreign Host or Origin");
         }
         match (method, p) {
-            ("GET", p) if p.starts_with("/screens/lanes/") && !plugin && auth.is_err() => {
-                line("401 Unauthorized", "pair this device first")
-            }
-            ("GET", p) => match self.screen(ctx, p, &form(query), plugin || auth.is_ok()) {
-                Some(v) => out("200 OK", &v),
-                None => line("404 Not Found", "no such screen"),
-            },
             ("POST", "/action") if self.addr.is_none() => line("405 Method Not Allowed", "read-only: GET only"),
             ("POST", "/action") if !plugin && auth.is_err() => line("401 Unauthorized", "pair this device first"),
             ("POST", "/action") => {
@@ -1656,6 +1635,10 @@ impl Server<'_> {
         let mut f: Q = kv.iter().map(|(k, v)| ((*k).into(), v.clone())).collect();
         f.extend([("op".into(), op.into()), ("mtime".into(), mtime(ctx))]);
         self.op(ctx, &f)
+    }
+
+    fn paired_screen(&self, ctx: &Ctx, path: &str, q: &Q) -> Option<Value> {
+        self.build_screen(ctx, path, q, true)
     }
 
     fn action(&self, ctx: &Ctx, name: &str, a: &Value) -> Result<Value> {
@@ -1687,7 +1670,7 @@ impl Server<'_> {
                         ),
                     },
                 };
-                let s = self.screen(ctx, screen, &form(&q), true).context("no such screen")?;
+                let s = self.paired_screen(ctx, screen, &form(&q)).context("no such screen")?;
                 return Ok(json!({"ops": [{"op": "screen", "screen": s}]}));
             }
             "drive" => self.form_op(ctx, "drive", &[("fleet", fleet)])?,
@@ -1723,7 +1706,7 @@ impl Server<'_> {
                     let (f, words) = found.context("no issue ticked")?;
                     let mut q = form(&format!("repo={f}"));
                     q.insert("q".into(), list(words));
-                    let s = self.screen(ctx, "/screens/backlog", &q, true).context("no backlog")?;
+                    let s = self.paired_screen(ctx, "/screens/backlog", &q).context("no backlog")?;
                     return Ok(json!({"ops": [{"op": "screen", "screen": s}], "toast": "no issue ticked: searched"}));
                 };
                 let mut d = crate::queue::op("add", &ns, false, None, None, None);
@@ -1872,105 +1855,6 @@ impl Server<'_> {
         } else {
             done.join("; ")
         })
-    }
-
-    pub(super) fn stream(
-        &self,
-        s: &mut std::net::TcpStream,
-        req: &str,
-        path: &str,
-        query: &str,
-    ) -> std::io::Result<()> {
-        let (head, base) = (
-            req.split("\r\n\r\n").next().unwrap_or_default(),
-            path.trim_end_matches("/stream"),
-        );
-        let ctx = || Ctx {
-            now: crate::now(),
-            ..self.ctx.clone()
-        };
-        let q = form(query);
-        let plugin = Self::plugin(self.ctx, head);
-        let dev = devices::check(self.ctx, header(head, "cookie").unwrap_or_default());
-        let paired = plugin || dev.is_ok();
-        let who = match dev {
-            _ if plugin => "cooee".into(),
-            Ok(d) => d.hash,
-            Err(_) => s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default(),
-        };
-        let slot = super::StreamSlot::take(&self.streams, who);
-        let open = slot.is_some();
-        let screen = |c: &Ctx, q: &Q| crate::runner::request(|| self.screen(c, base, q, paired));
-        let mut log = crate::db::last_seq(&self.ctx.state);
-        let Some(mut cur) = screen(&ctx(), &q).filter(|_| open && (plugin || self.allowed(self.ctx, head))) else {
-            let r = line(
-                if open {
-                    "404 Not Found"
-                } else {
-                    "503 Service Unavailable"
-                },
-                "no stream",
-            );
-            let h = format!(
-                "HTTP/1.1 {}\r\nContent-Type: {JSON}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                r.0,
-                r.2.len()
-            );
-            return s.write_all(&[h.as_bytes(), &r.2].concat());
-        };
-        let q = pages::window(q, &cur);
-        let mut seq = header(head, "last-event-id")
-            .and_then(|n| n.parse::<u64>().ok())
-            .unwrap_or(0)
-            + 1;
-        let mut start = vec![json!({"op": "screen", "screen": cur})];
-        start.extend(count(&cur).map(|n| json!({"op": "badge", "count": n})));
-        let ver = format!("{:08x}", super::VER);
-        let mut msg = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\nid: {seq}\ndata: {}\n\n", json!({"seq": seq, "build": ver, "ops": start}));
-        let mut ping = drover_core::clock::instant();
-        let mut built = drover_core::clock::instant();
-        let mut z = super::wire::Stream::new(head);
-        let mut missed = 0;
-        'out: loop {
-            let end = drover_core::clock::instant() + Duration::from_secs(10);
-            if !z.frame(&msg).is_ok_and(|b| super::sent(s, &b, end)) {
-                break;
-            }
-            msg.clear();
-            while msg.is_empty() {
-                if super::hung_up(s) {
-                    break 'out;
-                }
-                drover_core::clock::sleep(Duration::from_millis(500));
-                let now = crate::db::last_seq(&self.ctx.state);
-                if now != log || built.elapsed() >= Duration::from_secs(30) {
-                    (log, built) = (now, drover_core::clock::instant());
-                    let new = screen(&ctx(), &q).unwrap_or_else(|| cur.clone());
-                    let mut change = ops(&cur, &new);
-                    change.extend(
-                        count(&new)
-                            .filter(|n| Some(*n) != count(&cur))
-                            .map(|n| json!({"op": "badge", "count": n})),
-                    );
-                    if !change.is_empty() {
-                        seq += 1;
-                        msg = format!(
-                            "id: {seq}\ndata: {}\n\n",
-                            json!({"seq": seq, "build": ver, "ops": change})
-                        );
-                    }
-                    cur = new;
-                }
-                if msg.is_empty() && ping.elapsed() >= Duration::from_secs(5) {
-                    missed = if drover_sys::unsent(s) > 0 { missed + 1 } else { 0 };
-                    if missed >= 2 {
-                        break 'out;
-                    }
-                    (msg, ping) = (": ping\n\n".into(), drover_core::clock::instant());
-                }
-            }
-        }
-        Ok(())
     }
 }
 

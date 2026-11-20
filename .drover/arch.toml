@@ -299,3 +299,9 @@ reason = "#1364: a test's wait loop has a deadline (for i in $(seq N); do [ read
 pattern = "tokio"
 paths = ["crates/core/src/**", "crates/sys/src/**"]
 reason = "#1318 (q2044): tokio is serve's and service's transport; core and sys stay synchronous"
+
+[[ban]]
+pattern = ".build_screen("
+paths = ["crates/server/src/**"]
+except = ["crates/server/src/serve/hub.rs", "crates/server/src/screens.rs", "crates/server/src/screens_local.rs"]
+reason = "#1318: a screen is built once per change by the hub (serve/hub.rs); a request and a stream read its cache"

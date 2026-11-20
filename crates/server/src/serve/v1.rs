@@ -609,6 +609,7 @@ impl Server<'_> {
             slow: slow.map(|(r, p95)| format!("{r} p95 {p95} ms, over 200 ms for 5 min")),
             phone,
             phone_slow: phone_slow.map(|(k, p95)| format!("{k} p95 {p95} ms, over {PHONE_P95_MS} ms for {mins} min")),
+            keys: self.hub.keys(),
         }
     }
 

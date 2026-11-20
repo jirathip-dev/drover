@@ -1038,6 +1038,21 @@ pub fn new_screen(cfg: &Config, repo: &str, now: u64) -> Option<Value> {
 }
 
 impl super::Server<'_> {
+    pub(super) fn mark_read(&self, ctx: &Ctx, path: &str, paired: bool) {
+        let id = path
+            .strip_prefix("/screens/threads/")
+            .filter(|id| !id.starts_with("new/"));
+        let Some(id) = id.filter(|_| paired && self.addr.is_some() && self.export.is_none()) else {
+            return;
+        };
+        let (Ok(cfg), Ok(events)) = (Config::kept(ctx), crate::events::working(&ctx.state)) else {
+            return;
+        };
+        if let Ok(t) = conductor::find(&events, id) {
+            drop(conductor::mark_read(ctx, &cfg, &events, t));
+        }
+    }
+
     pub(super) fn threads_screen(&self, ctx: &Ctx, sub: &str, before: Option<&String>, paired: bool) -> Option<Value> {
         let (cfg, events) = (Config::kept(ctx).ok()?, crate::events::working(&ctx.state).ok()?);
         let agents = self.sessions(ctx.now).map(|s| s.running()).unwrap_or_default();
@@ -1046,14 +1061,6 @@ impl super::Server<'_> {
             s if s.starts_with("/new/") => new_screen(&cfg, &s[5..], ctx.now),
             s => {
                 let id = s.strip_prefix('/')?;
-                if paired && self.addr.is_some() && self.export.is_none() {
-                    drop(conductor::mark_read(
-                        ctx,
-                        &cfg,
-                        &events,
-                        conductor::find(&events, id).ok()?,
-                    ));
-                }
                 let before = before.and_then(|b| b.parse().ok()).unwrap_or(u64::MAX);
                 thread_screen(ctx, &cfg, &events, &agents, id, (before, paired))
             }

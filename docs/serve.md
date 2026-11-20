@@ -195,6 +195,8 @@ them as `serve`: `sha` (the build it runs, #1081), `rss_mb`, `groups` (the last 
 (taps waiting for a worker), `started` and `slow` (set while `/api/v1` p95 has been over 200 ms for 5 min). Each start
 appends `<ts> cold|handover` to `serve-starts` (the last day kept); a start that fails appends `<ts> failed`.
 Its `schemes` lists each colour scheme blocks' gate refused on load, with why (#1339, docs/themes.md).
+`keys` lists the screens the hub keeps (#1372): each `key` (path and query), `paired`, `bytes`, `rev`, `holders` (open
+streams) and `builds`.
 
 #1312: the page times what the owner feels: each tap, sheet open, tab switch, send and answer from the input event to
 the frame after the DOM changed (split into `network`, `parse` and `render`), and each stream delta from receipt to
@@ -347,8 +349,14 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   dir>/themes/<name>/scene.svg` overriding it; farm, with none, gets the drawn ranch), the farm sprites from the pinned
   swag pack, one page per repo ([‹] [›], the dots, ←/→, a wheel or a drag), the repo's needs-you cards from
   `/screens/cards`, and `[A]`/`[☀]`/`[☾]` in the header (Auto: night before 07:00 and from 19:00, phone clock);
+- `GET /screens/<x>` answers from the hub (#1372, `serve/hub.rs`): each screen is built once per change for every
+  reader, and only when a signal it depends on moved (the log, the snapshot, a background read, the config, the gh
+  cache folder, a 30 s clock); a read of a stale screen nobody is building builds it, others wait for that build. It
+  carries `ETag: "<epoch>.<rev>"` and answers a matching `If-None-Match` with 304;
 - `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
   `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
+  one publisher thread rebuilds the screens open streams hold (every 25 ms, at once after a write, asleep while none
+  is held) and hands each stream the diff; no server-wide stream cap, 16 a device;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
   each other runs the board's own op (a refusal is 409 with its line).
 
