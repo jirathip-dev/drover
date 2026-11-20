@@ -186,23 +186,70 @@ impl<'a> On<'a> {
     }
 }
 
+/// What the shared connection answers when the host's sshd has no session left for it (`MaxSessions`).
+pub const MUX_REFUSED: &str = "Session open refused by peer";
+
+static SESSIONS: (std::sync::Mutex<BTreeMap<String, usize>>, std::sync::Condvar) =
+    (std::sync::Mutex::new(BTreeMap::new()), std::sync::Condvar::new());
+
+struct Slot<'a>(&'a str);
+
+impl<'a> Slot<'a> {
+    fn take(m: &'a str) -> Self {
+        let cap = crate::config::limits().ssh_sessions.max(1);
+        let mut held = lock(&SESSIONS.0);
+        while held.get(m).is_some_and(|n| *n >= cap) {
+            held = SESSIONS.1.wait(held).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        *held.entry(m.into()).or_default() += 1;
+        Slot(m)
+    }
+}
+
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        if let Some(n) = lock(&SESSIONS.0).get_mut(self.0) {
+            *n = n.saturating_sub(1);
+        }
+        SESSIONS.1.notify_all();
+    }
+}
+
+impl On<'_> {
+    fn remote(&self, m: &str, (p, a): (String, Vec<String>), input: &str, limit: std::time::Duration) -> Result<Out> {
+        let _slot = Slot::take(m);
+        let mut o = self.r.run_for(&p, &a, input, limit)?;
+        for _ in 0..3 {
+            if o.code != 255 || !o.stderr.contains(MUX_REFUSED) {
+                break;
+            }
+            self.r.sleep(crate::config::limits().ssh_retry_secs);
+            o = self.r.run_for(&p, &a, input, limit)?;
+        }
+        Ok(o)
+    }
+}
+
 impl Runner for On<'_> {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
         let (p, a) = self.wrap(prog, args);
-        if p == "ssh" {
-            return self.r.run_for(&p, &a, "", crate::runner::limit(prog, args));
+        if let Some(m) = self.machine {
+            return self.remote(m, (p, a), "", crate::runner::limit(prog, args));
         }
         self.r.run(&p, &a)
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
         let (p, a) = self.wrap(prog, args);
-        if p == "ssh" {
-            return self.r.run_for(&p, &a, input, crate::runner::limit(prog, args));
+        if let Some(m) = self.machine {
+            return self.remote(m, (p, a), input, crate::runner::limit(prog, args));
         }
         self.r.run_in(&p, &a, input)
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> Result<Out> {
         let (p, a) = self.wrap(prog, args);
+        if let Some(m) = self.machine {
+            return self.remote(m, (p, a), input, limit);
+        }
         self.r.run_for(&p, &a, input, limit)
     }
     fn sleep(&self, secs: u64) {
@@ -383,6 +430,10 @@ impl<'a> Pass<'a> {
         let refused =
             |o: &Out| o.code == 255 && (o.stderr.contains("connect to host") || o.stderr.contains(KEY_CHANGED));
         let mut o = self.r.run_for(prog, args, input, limit)?;
+        if o.code == 255 && o.stderr.contains(MUX_REFUSED) {
+            self.note("");
+            return Ok(o);
+        }
         if matches!(o.code, 124 | 255) && !refused(&o) && args.iter().any(|a| a == CM[1]) {
             let g = ok(self.r, "ssh", &["-G", CM[1], m]).unwrap_or_default();
             if let Some(sock) = g.lines().find_map(|l| l.strip_prefix("controlpath ")) {
@@ -1216,6 +1267,55 @@ pub fn shed_row(on: &On) -> Option<String> {
         _ => l,
     };
     line.filter(|l| !l.starts_with('✓')).map(dead)
+}
+
+const SSHD_LOOK: &str = "{ sudo -n sshd -T 2>/dev/null || cat /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config 2>/dev/null; } | \
+awk 'tolower($1) ~ /^(clientaliveinterval|clientalivecountmax|maxsessions)$/ && !s[tolower($1)]++ { print tolower($1), $2 }'; \
+ps -eo pid=,ppid=,args= | awk '$3 ~ /^sshd/ && /@notty/ { n[$1] = 1 } { p[$2] = 1 } \
+END { c = 0; for (i in n) if (!(i in p)) c++; print \"stale\", c }'";
+
+const STALE_SESSIONS: u64 = 20;
+
+/// `hosts bootstrap`'s sshd step: dead clients' sessions end within 3 min, and `MaxSessions` well over `ssh_sessions`.
+pub fn sshd_step() -> String {
+    let max = crate::config::limits().ssh_sessions * 4;
+    let conf = "/etc/ssh/sshd_config.d/10-drover.conf";
+    format!(
+        "sshd keepalive\tgrep -qx 'MaxSessions {max}' {conf}\tprintf 'ClientAliveInterval 60\\nClientAliveCountMax 3\\nMaxSessions {max}\\n' | \
+sudo tee {conf} >/dev/null && sudo sshd -t && {{ sudo systemctl reload ssh || sudo systemctl reload sshd || \
+sudo launchctl kickstart -k system/com.openssh.sshd || true; }} 2>/dev/null"
+    )
+}
+
+/// Doctor's sshd row for host `name`: `✓` with keepalive on, `MaxSessions` at least twice `ssh_sessions` and few stale sessions, else `!`.
+pub fn sshd_row(on: &On, name: &str) -> String {
+    let o = ok(on, "sh", &["-c", SSHD_LOOK]).unwrap_or_default();
+    let seen: BTreeMap<&str, u64> = o
+        .lines()
+        .filter_map(|l| l.split_once(' '))
+        .filter_map(|(k, v)| Some((k, v.trim().parse().ok()?)))
+        .collect();
+    let Some(&stale) = seen.get("stale") else {
+        let m = on.machine.unwrap_or_default();
+        return format!("! host {name} sshd — unreadable → ssh {m} sudo sshd -T");
+    };
+    let get = |k: &str, d: u64| seen.get(k).copied().unwrap_or(d);
+    let (alive, count, max) = (
+        get("clientaliveinterval", 0),
+        get("clientalivecountmax", 3),
+        get("maxsessions", 10),
+    );
+    let want = u64::try_from(crate::config::limits().ssh_sessions * 2).unwrap_or(u64::MAX);
+    let pass = alive > 0 && count > 0 && max >= want && stale <= STALE_SESSIONS;
+    let line = format!(
+        "host {name} sshd — ClientAliveInterval {alive}, ClientAliveCountMax {count}, MaxSessions {max} (want {want}+), \
+{stale} stale notty sessions (at most {STALE_SESSIONS})"
+    );
+    if pass {
+        format!("✓ {line}")
+    } else {
+        format!("! {line} → hosts bootstrap {name}, then restart sshd there")
+    }
 }
 
 fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {

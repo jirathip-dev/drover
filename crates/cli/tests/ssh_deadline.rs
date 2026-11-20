@@ -50,11 +50,19 @@ fn every_ssh_drover_starts_is_bounded_by_a_deadline() {
         "an ssh is started only by the host probe (its deadline), `ssh -G` (no connection) and the detached proxy tunnel; every other one goes through hosts::On::wrap, whose ssh runs by run_for"
     );
     let hosts = std::fs::read_to_string(root.join("core/src/hosts.rs")).unwrap();
-    let routed = "        if p == \"ssh\" {\n            return self.r.run_for(";
+    let routed = "        if let Some(m) = self.machine {\n            return self.remote(m, (p, a), ";
     assert_eq!(
         hosts.matches(routed).count(),
-        2,
-        "On::run and On::run_in hand every wrapped ssh to run_for with a limit"
+        3,
+        "On::run, run_in and run_for hand every wrapped ssh to On::remote"
+    );
+    let remote = hosts.split("    fn remote(&self").nth(1).unwrap();
+    let remote = &remote[..remote.find("\n    }\n").unwrap()];
+    assert!(
+        remote.contains("self.r.run_for(&p, &a, input, limit)")
+            && !remote.contains("self.r.run(")
+            && !remote.contains("self.r.run_in("),
+        "On::remote runs every wrapped ssh by run_for with a limit"
     );
     let pass = hosts.split("impl Runner for Pass<'_> {").nth(1).unwrap();
     let pass = &pass[..pass.find("\n}\n").unwrap()];
