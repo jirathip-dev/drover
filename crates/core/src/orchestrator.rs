@@ -187,12 +187,28 @@ fn assign(cfg: &Config, repo: &str, want: Option<&str>) -> Result<String> {
 }
 
 /// `drover thread new <fleet|all> <title> [--harness <h>]`: its id. the thread keeps its harness (`harness`, else the default's) for good.
-pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, harness: Option<&str>) -> Result<String> {
-    new_with(ctx, cfg, repo, title, (harness, None))
+pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, req): Opt2) -> Result<String> {
+    make(ctx, cfg, repo, title, (harness, None), req)
 }
 
 /// `new`, the thread talking to orchestrator `orch` (`assign`).
-pub fn new_with(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch): Opt2) -> Result<String> {
+pub fn new_with(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, o: Opt2) -> Result<String> {
+    make(ctx, cfg, repo, title, o, None)
+}
+
+/// The thread a `new` with request id `req` in `repo` made under `[limits] thread_resend_minutes` ago.
+pub fn resent<'a>(ctx: &Ctx, cfg: &Config, events: &'a [Event], repo: &str, req: &str) -> Option<&'a str> {
+    let since = ctx.now.saturating_sub(cfg.limits.thread_resend_minutes * 60);
+    let made = |e: &&Event| e.kind == "thread-new" && e.fleet == repo && e.ts >= since && e.str("req") == Some(req);
+    events
+        .iter()
+        .rev()
+        .find(made)
+        .and_then(|e| e.str("thread"))
+        .filter(|_| !req.is_empty())
+}
+
+fn make(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch): Opt2, req: Option<&str>) -> Result<String> {
     if repo != "all" {
         cfg.fleet(repo)?;
     }
@@ -212,6 +228,9 @@ pub fn new_with(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch
     let mut d = json!({"thread": id, "title": title, "harness": h});
     if orch != DEFAULT {
         d.put("orchestrator", json!(orch));
+    }
+    if let Some(r) = req.filter(|r| !r.is_empty()) {
+        d.put("req", json!(r));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-new", d))?;
     Ok(id)
@@ -438,7 +457,7 @@ fn send(
     (fwd, ask): (Option<u64>, Option<&str>),
 ) -> Result<String> {
     let to = if to == "new" {
-        new(ctx, cfg, repo, title, None)?
+        new(ctx, cfg, repo, title, (None, None))?
     } else {
         to.into()
     };

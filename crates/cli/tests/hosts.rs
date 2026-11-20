@@ -1,6 +1,8 @@
 mod common;
 #[path = "hosts/report.rs"]
 mod report;
+#[path = "hosts/wip.rs"]
+mod wip;
 use common::*;
 use drover::config::Config;
 use drover::events::{append, read, Event};

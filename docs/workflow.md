@@ -100,6 +100,7 @@ flowchart TD
     d3 -.- k_update_rounds(["update_rounds = 3"])
     d4 -.- k_pass_max_secs(["pass_max_secs = 60"])
     other -.- k_overload_minutes(["overload_minutes = 10"])
+    other -.- k_thread_resend_minutes(["thread_resend_minutes = 5"])
     other -.- k_transcript_days(["transcript_days = 30"])
     other -.- k_crash_wave_minutes(["crash_wave_minutes = 5"])
     other -.- k_runtime_down_minutes(["runtime_down_minutes = 30"])
