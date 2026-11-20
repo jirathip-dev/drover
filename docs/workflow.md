@@ -112,6 +112,7 @@ flowchart TD
     other -.- k_crash_wave_minutes(["crash_wave_minutes = 5"])
     other -.- k_runtime_down_minutes(["runtime_down_minutes = 30"])
     other -.- k_ssh_connect_secs(["ssh_connect_secs = 10"])
+    other -.- k_ssh_retry_secs(["ssh_retry_secs = 1"])
     other -.- k_link_beat_secs(["link_beat_secs = 5"])
     other -.- k_link_stale_secs(["link_stale_secs = 20"])
     other -.- k_link_retry_max_secs(["link_retry_max_secs = 30"])

@@ -81,7 +81,10 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, (old, new): (&str, &s
         return refused("NO_SUCH_FLEET", format!("no fleet {old} in fleet.toml"));
     };
     let events = crate::events::history(&ctx.state)?;
-    if !name_ok(new) || cfg.fleet.contains_key(new) || events.iter().any(|e| e.fleet == new) {
+    let stray = f.repo.rsplit('/').next() == Some(new);
+    let system = |e: &Event| e.fleet == "drover" && e.issue.is_none();
+    let others = events.iter().any(|e| e.fleet == new && !stray && !system(e));
+    if !name_ok(new) || cfg.fleet.contains_key(new) || others {
         let why = format!("{new} is taken or no fleet name (a-z, 0-9, - and _)");
         return refused("BAD_NAME", why);
     }
@@ -111,6 +114,12 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, (old, new): (&str, &s
         "state.db: {} events (queue, history, asks, verdicts, threads) {old} → {new}",
         mine.len()
     ));
+    let strays = events.iter().filter(|e| stray && e.fleet == new && !system(e)).count();
+    if strays > 0 {
+        lines.push(format!(
+            "state.db: {strays} stray events under the repo's name {new} join {new}"
+        ));
+    }
     let secrets: std::collections::BTreeSet<&str> = mine
         .iter()
         .filter(|e| e.kind == "secret-set")

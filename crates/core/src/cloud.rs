@@ -471,7 +471,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     for (n, i) in crate::providers::lanes().filter_map(|h| Some((h.name, h.install()?))) {
         steps += &format!("{n}\tcommand -v {n}\t{i}\n");
     }
-    steps += &format!("{RUST}\n");
+    steps += &format!("{RUST}\n{}\n", crate::hosts::sshd_step());
     let shed = format!("cargo install --git {} --branch main --locked shed", crate::shed::git());
     steps += &format!("shed\tshed --version\t{shed}\n{SHED}\n");
     if acp {
