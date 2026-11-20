@@ -1,0 +1,8 @@
+Decided: the Scene probe also waits until the theme's own load layers (.h-calm, .l-sun, .s-moderate) are in the strip; farm has no scene.svg and keeps the old wait
+Because: "The test waits until the scene's SVG is drawn before it reads the layers"
+Because: crates/cli/tests/herd.rs:365
+Decided: the repro delays scene.svg by 2 s in every Scene probe through DROVER_PRE, so the race fails every time on staging and stays as a guard
+Rejected: a wait per check string — the kitchen held and reduced-motion probes read .kglow from the same scene.svg and share the race
+Rejected: waiting on shape-rendering=crispEdges — an attribute of the drawing, not what the test reads
+Check: ui-webkit at 2f50e9eb fails the load-level test (run 44644891500 job 136011865951); at 59830c13 it passes 10 of 10 (job 136007472678); the 10x step is removed at the head
+Owner: the kitchen and garden scene test now waits for the scene picture before checking it, so it no longer fails at random
