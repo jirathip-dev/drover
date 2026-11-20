@@ -1257,7 +1257,7 @@ fn pass(
     let verdict = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover verdict "));
     let merge = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover merge "));
     waits.sort_by_key(|(s, w)| (!verdict(w), !merge(w), !rev(w), conflicts.contains_key(&s.issue)));
-    let (mut updated, mut held) = (false, false);
+    let (mut updated, mut spawns_held) = (false, false);
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && !s.done() && s.lane.as_ref() == Some(&w.lane))
@@ -1359,7 +1359,7 @@ fn pass(
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
             let arg = |i: usize| args.get(i).copied().unwrap_or_default();
-            if held && arg(0) == "spawn" {
+            if spawns_held && arg(0) == "spawn" {
                 continue;
             }
             let step = match (arg(0), args.get(3).copied()) {
@@ -1396,7 +1396,7 @@ fn pass(
                 save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
-            held |= arg(0) == "spawn" && crate::starts::stops(code);
+            spawns_held |= arg(0) == "spawn" && crate::starts::stops(code);
             pickup::after(ctx, out, &events, (w, step), code)?;
             let stale = (code == Some("LANE_LIVE") && step == "review")
                 .then(|| s.lanes.get(arg(3)))

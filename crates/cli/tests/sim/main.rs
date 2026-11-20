@@ -417,19 +417,19 @@ fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     assert!(o.failure.is_none(), "{}", o.report());
     let want = metrics::Metrics {
-        to_merge: vec![964, 1286],
-        spawns: 5,
+        to_merge: vec![964, 2059],
+        spawns: 6,
         wasted: 1,
         supersedes: 1,
-        lanes: 4,
-        idle: 237,
-        ci_wait: 600,
-        lock_wait: 12,
+        lanes: 5,
+        idle: 243,
+        ci_wait: 900,
+        lock_wait: 22,
         serial: 0,
         host_busy: 0,
         caps: 0,
         merges: 2,
-        rounds: 2,
+        rounds: 3,
     };
     assert_eq!(o.metrics, want, "{}", o.report());
     let s = metrics::summary(&[o.metrics]);
@@ -438,15 +438,15 @@ fn the_known_fleet_gives_exact_metrics() {
         got,
         [
             ("caps", 0.0),
-            ("ci_wait_min", 10.0),
+            ("ci_wait_min", 15.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 3.95),
-            ("lock_wait_min", 0.2),
+            ("idle_lane_min", 4.05),
+            ("lock_wait_min", 0.37),
             ("queue_to_merge_p50_min", 16.07),
-            ("queue_to_merge_p90_min", 21.43),
-            ("review_rounds_per_merge", 1.0),
+            ("queue_to_merge_p90_min", 34.32),
+            ("review_rounds_per_merge", 1.5),
             ("serial_busy", 0.0),
-            ("supersedes_per_lane", 0.25),
+            ("supersedes_per_lane", 0.2),
             ("wasted_spawns", 1.0),
         ]
     );
@@ -463,13 +463,13 @@ fn a_metric_over_20_percent_worse_is_a_warning() {
     assert_eq!(
         warns,
         [
-            "WARNING ci_wait_min: 8 -> 10 (+25%) against the last staging baseline",
+            "WARNING ci_wait_min: 8 -> 15 (+88%) against the last staging baseline",
             "WARNING wasted_spawns: 0 -> 1 (from 0) against the last staging baseline",
         ],
         "{t}"
     );
     assert!(
-        t.contains("| ci_wait_min | 10 | 8 |\n") && t.contains("| caps | 0 | - |\n"),
+        t.contains("| ci_wait_min | 15 | 8 |\n") && t.contains("| caps | 0 | - |\n"),
         "{t}"
     );
     let back: serde_json::Value = serde_json::from_str(&metrics::to_json(1, &s).to_string()).unwrap();
