@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Write};
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
+const ACTS: [&str; 7] = ["impl", "fix", "rev", "update", "idle", "done", "blocked"];
 
 fn fixture_json(name: &str) -> Value {
     let f = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/golden/cooee/{name}.json"));
@@ -933,11 +934,14 @@ fn parity_44_a_moving_row_shows_its_stage_strip_and_plant_a_stuck_one_its_state(
     assert_eq!(fix["badge"], json!({"text": "[▲ impl · fix] ◆ ◫", "tone": "working"}));
     assert_eq!(
         fix["figure"],
-        json!({"state": "working", "tool": "edit", "grow": "fix"})
+        json!({"state": "working", "act": "fix", "grow": "fix", "issue": 12})
     );
     assert!(fix["value"]["since"].is_string(), "{fix}");
     let stuck = find(&q, "q-sendmeter-5");
-    assert_eq!(stuck["figure"], json!({"state": "needs", "grow": "blocked"}));
+    assert_eq!(
+        stuck["figure"],
+        json!({"state": "needs", "act": "blocked", "grow": "blocked", "issue": 5})
+    );
     assert!(!stuck["badge"]["text"].as_str().unwrap().contains('['), "{stuck}");
 }
 
@@ -1460,4 +1464,90 @@ fn a_review_queue_wait_alone_never_makes_a_stuck_row() {
     let card = find(&cards(), "stuck-sendmeter").clone();
     let md = card["blocks"][0]["markdown"].as_str().unwrap().to_string();
     assert!(md.contains("#20") && !md.contains("#17"), "{md}");
+}
+
+#[test]
+fn parity_60_every_row_figure_carries_the_fields_its_art_needs_and_the_board_reads_no_old_route() {
+    let (c, r) = recorded("cooee-art");
+    r.1.lane("sendmeter-impl-5", "blocked", "/x");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let get = |p: &str| {
+        let (status, v) = req(&s, T, "GET", p, "", "");
+        assert_eq!(status, 200, "{p}: {v}");
+        v
+    };
+    let figures = |v: &Value| -> Vec<(String, Value)> {
+        fn go(v: &Value, out: &mut Vec<(String, Value)>) {
+            match v {
+                Value::Object(m) => {
+                    if let Some(f) = m.get("figure") {
+                        out.push((m["id"].as_str().unwrap_or_default().to_string(), f.clone()));
+                    }
+                    m.values().for_each(|x| go(x, out));
+                }
+                Value::Array(a) => a.iter().for_each(|x| go(x, out)),
+                _ => {}
+            }
+        }
+        let mut out = vec![];
+        go(v, &mut out);
+        out
+    };
+    let acts = |f: &Value| ACTS.contains(&f["act"].as_str().unwrap_or_default());
+    let q = figures(&get("/screens/queue"));
+    assert!(q.len() >= 3, "{q:?}");
+    for (id, f) in &q {
+        assert!(f["state"].is_string() && acts(f), "{id}: {f}");
+        assert!(f["grow"].is_string() && f["issue"].is_u64(), "{id}: {f}");
+    }
+    let fix = &q.iter().find(|(id, _)| id == "q-sendmeter-12").unwrap().1;
+    assert_eq!((&fix["act"], &fix["grow"]), (&json!("fix"), &json!("fix")));
+    let e = figures(&get("/screens/events"));
+    assert!(e.iter().all(|(_, f)| f["state"].is_string() && acts(f)), "{e:?}");
+    let moments: BTreeSet<&str> = e.iter().filter_map(|(_, f)| f["moment"].as_str()).collect();
+    assert_eq!(moments, BTreeSet::from(["fail", "merged", "needs-you"]), "{e:?}");
+    let l = figures(&get("/screens/lanes"));
+    let lane = |n: &str| {
+        &l.iter()
+            .find(|(id, _)| id == n)
+            .unwrap_or_else(|| panic!("{n}: {l:?}"))
+            .1
+    };
+    assert_eq!(
+        (
+            &lane("l-sendmeter-impl-12")["act"],
+            &lane("l-sendmeter-impl-12")["state"]
+        ),
+        (&json!("fix"), &json!("working"))
+    );
+    assert_eq!(lane("l-sendmeter-impl-5")["act"], "blocked");
+    assert_eq!(
+        (
+            &lane("l-sendmeter-impl-12")["grow"],
+            &lane("l-sendmeter-impl-12")["issue"]
+        ),
+        (&json!("fix"), &json!(12))
+    );
+    assert!(l.iter().all(|(_, f)| f["coat"].is_string() && acts(f)), "{l:?}");
+    let h = get("/screens/hosts");
+    let main = &h["blocks"][0]["blocks"][0]["rows"][0];
+    assert!(
+        ["calm", "busy", "held"].contains(&main["figure"]["load"].as_str().unwrap_or_default()),
+        "{main}"
+    );
+    let board = include_str!("../../../web/dist/board.js");
+    for old in ["live?tab", "herd.json", "lane?agent", "lane?setup", "/live"] {
+        assert!(!board.contains(old), "the board reads the old route {old}");
+    }
+    for want in [
+        "ascii_rows",
+        "ascii_load",
+        "ascii_loading",
+        "load_scene",
+        "moments",
+        "stages",
+        "species",
+    ] {
+        assert!(board.contains(want), "the board draws no {want}");
+    }
 }

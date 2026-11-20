@@ -1,5 +1,5 @@
 import { type Blk, blks, isBlk, isList, obj } from './ops';
-import { esc, figure, get, nodes, put, word } from './theme';
+import { esc, figure, get, load, nodes, put, word } from './theme';
 
 export type Act = { action: unknown; block?: unknown; values?: unknown; confirm?: unknown };
 export type Ctx = {
@@ -99,8 +99,9 @@ export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     const r: HTMLElement = url ? href(el('a', cls), url) : el('div', cls);
     r.dataset.id = String(b.id ?? '');
     const sub = b.subtitle == null ? null : tone(b.subtitle), badge = b.badge == null ? null : tone(b.badge);
-    r.replaceChildren(...nodes((isBlk(b.figure) ? figure(b.figure) : '') + `<span class=rm><span class=rt>${esc(b.title)}</span>` +
-      (badge ? ` <span class="tag ${esc(badge.tone ?? '')}">${esc(badge.text)}</span>` : '') +
+    const fig = isBlk(b.figure) ? b.figure : null, mini = fig && fig.load != null ? load(String(fig.load)) : '';
+    r.replaceChildren(...nodes((fig && fig.load == null ? figure(fig) : '') + `<span class=rm><span class=rt>${esc(b.title)}</span>` +
+      (badge ? ` <span class="tag ${esc(badge.tone ?? '')}">${esc(badge.text)}</span>` : '') + mini +
       (sub ? `<span class="rs ${esc(sub.tone ?? '')}">${ticks(sub.text)}</span>` : '') + '</span>' +
       (b.value != null ? `<span class=rv>${ticks(b.value)}</span>` : '')));
     const swipe = blks(b.swipe);

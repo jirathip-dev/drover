@@ -1,7 +1,7 @@
 import { type Act, type Ctx, el, kids, morph, render, sent, values } from './blocks';
 import './herd';
 import { apply, type Blk, blks, find, isBlk, isList, obj } from './ops';
-import { R, colours, esc, get, nodes, put, schemes, theme, themes } from './theme';
+import { R, STYLES, colours, esc, get, moments, nodes, put, schemes, style, theme, themes } from './theme';
 import { type Kind, type Span, flush, painted, read, span } from './timing';
 
 type Place = { type: string; id?: string; label?: string; subtitle?: string; screen?: string };
@@ -126,10 +126,9 @@ function paint(v: View, before?: Blk | null) {
   }
   morph(v.root, body);
   if (scrollY !== y) scrollTo(0, y);
-  if (before) {
-    const was = rows(before);
-    rows(m).forEach((j, id) => { if (was.has(id) && was.get(id) !== j) v.root.querySelector(`[data-id="${CSS.escape(id)}"]`)?.classList.add('fl'); });
-  }
+  const old = before ? rows(before) : null, now = rows(m);
+  if (old) now.forEach((j, id) => { if (old.has(id) && old.get(id) !== j) v.root.querySelector(`[data-id="${CSS.escape(id)}"]`)?.classList.add('fl'); });
+  moments(v.root, old, now);
   if (v === cur.v) sync();
   if (focus && !v.root.hidden) {
     fit();
@@ -519,6 +518,7 @@ function settings() {
   const menu = PL.flatMap(p => (p.type === 'menu-row' && p.screen ? [{ ...p, screen: p.screen }] : []));
   if (menu.length) body.push(sec('screens', menu.map(p => row(p.label ?? p.screen, false, () => sheet(p.screen), p.subtitle))));
   body.push(sec('theme', themes().map(n => row(n, n === H.dataset.theme, () => { put('theme', n); H.dataset.theme = n; colours(); theme(n).then(redraw); settings(); }))));
+  body.push(sec('style', STYLES.map(n => row(n, n === H.dataset.style, () => { style(n); redraw(); settings(); }))));
   body.push(sec('colours', schemes().map(n => row(n, n === H.dataset.scheme, () => { put('scheme', n); colours(); settings(); }))));
   if (app && 'PushManager' in window && B.dataset.key) body.push(sec('alerts', [row('enable alerts on this phone', false, alerts)]));
   body.push(el('p', 'm foot', 'this phone only · the home-screen icon keeps its install-time look'));

@@ -10,6 +10,9 @@
                 "text": "on",
                 "tone": "ok"
               },
+              "figure": {
+                "load": "calm"
+              },
               "id": "h-mini",
               "subtitle": {
                 "text": "main host · 2 leftovers"
