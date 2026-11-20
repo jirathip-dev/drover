@@ -1040,6 +1040,18 @@ pub struct ServeHealth {
     /// The phone's last minute by kind (`tap`, `sheet`, `tab`, `send`, `answer`, `delta`; `<kind>/network|parse|render`).
     pub phone: Vec<RouteTime>,
     pub phone_slow: Option<String>,
+    /// The hub's screens (#1372): each key's JSON size, rev, streams holding it and builds.
+    pub keys: Vec<ScreenKey>,
+}
+
+/// One screen the hub keeps: its path and query, paired or not.
+pub struct ScreenKey {
+    pub key: String,
+    pub paired: bool,
+    pub bytes: u64,
+    pub rev: u64,
+    pub holders: u64,
+    pub builds: u64,
 }
 
 /// One route's requests in the window: how many, their median, 95th percentile and slowest in ms.

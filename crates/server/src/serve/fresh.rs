@@ -2,6 +2,7 @@ use crate::config::Limits;
 use crate::runner::{in_request, Out, Runner};
 use anyhow::Result;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -53,6 +54,8 @@ struct Read {
 pub struct Fresh<'a> {
     pub r: &'a dyn Runner,
     pub defer: bool,
+    /// Bumped when a background read's output changes.
+    pub changes: AtomicU64,
     reads: Mutex<BTreeMap<Key, Read>>,
     host: Mutex<u64>,
 }
@@ -66,6 +69,7 @@ impl<'a> Fresh<'a> {
         Fresh {
             r,
             defer: false,
+            changes: AtomicU64::new(0),
             reads: Mutex::default(),
             host: Mutex::default(),
         }
@@ -109,6 +113,12 @@ impl<'a> Fresh<'a> {
                 ..Out::default()
             });
             if let Some(r) = lock(&self.reads).get_mut(k) {
+                if r.out
+                    .as_ref()
+                    .is_none_or(|o| (o.code, &o.stdout) != (out.code, &out.stdout))
+                {
+                    self.changes.fetch_add(1, Relaxed);
+                }
                 (r.out, r.at) = (Some(out), now);
             }
         }
