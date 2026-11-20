@@ -1,0 +1,9 @@
+{"args":["turn","working","--why","release build for arch/cap/lesson checks running; then push and open PR"],"lane":"herdsman:1418:impl","ts":1795126970848}
+{"args":["turn","working","--why","waiting on the release build for arch/cap/lesson checks; then push and open the PR"],"lane":"herdsman:1418:impl","ts":1795126986260}
+{"args":["turn","done"],"lane":"herdsman:1418:impl","ts":1795127085283}
+{"args":["turn","done"],"lane":"herdsman:1418:impl","ts":1795127306741}
+{"args":["turn","done"],"lane":"herdsman:1418:impl","ts":1795127314110}
+{"args":["turn","working","--why","fix pushed at 1e682280; waiting on CI (ui-webkit) before done"],"lane":"herdsman:1418:impl","ts":1795128633322}
+{"args":["turn","done","--why","herd ui-webkit race fixed at 1e682280 (herd step green on CI); ui-webkit now red only on the phone_timings median gate (send 160 ms vs 150, 3 samples), code this PR does not touch; it passed at f5f7b580; locally that test fails identically on staging (no tab in health) so it can't be checked here; needs a CI re-run"],"lane":"herdsman:1418:impl","ts":1795129217300}
+{"args":["turn","working","--why","pushed 10214928 (flaky phone-timings gate, outbox dropped); waiting on CI before done"],"lane":"herdsman:1418:impl","ts":1795131510620}
+{"args":["turn","done"],"lane":"herdsman:1418:impl","ts":1795132118095}
