@@ -48,9 +48,9 @@ pub fn each<T: Send, U: Send>(items: impl IntoIterator<Item = T>, f: impl Fn(T) 
     })
 }
 
-/// `On::existing`'s script: the paths on stdin, a line each.
 /// The reason a call to a host found down earlier in this pass was not sent.
 pub const OFFLINE: &str = "host offline this pass";
+/// `On::existing`'s script: the paths on stdin, a line each.
 pub const EXISTS: &str = "while IFS= read -r p; do test -e \"$p\" && echo y || echo n; done";
 
 /// The worktrees of `spawns` that exist, as `(machine, worktree)`: one `existing` call per host.
