@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::path::Path;
 
 const VERDICT_MAX: usize = 64 * 1024;
-const ACKED: &str = ".drover/outbox.acked";
+use crate::outbox::{ACKED, FILE};
 
 fn head(r: &dyn Runner, wt: &str) -> Option<(String, u64)> {
     let g = ok(r, "git", &["-C", wt, "log", "-1", "--format=%H %ct"]).ok()?;
@@ -43,7 +43,7 @@ fn ack(line: &str) {
 }
 
 fn lines(wt: &str) -> Vec<Line> {
-    let text = std::fs::read_to_string(Path::new(wt).join(".drover/outbox.jsonl")).unwrap_or_default();
+    let text = std::fs::read_to_string(Path::new(wt).join(FILE)).unwrap_or_default();
     let done = acked(wt);
     let line = |l: &str| {
         let v: Value = serde_json::from_str(l).ok()?;
@@ -131,7 +131,7 @@ fn stamp(r: &dyn Runner, watch: &Watch) -> String {
         all.iter().map(one).collect::<Vec<_>>()
     });
     let stat = |wt: &String| {
-        let files = [".drover/outbox.jsonl", "verdict.md", ACKED].map(|f| {
+        let files = [FILE, "verdict.md", ACKED].map(|f| {
             let m = std::fs::metadata(Path::new(wt).join(f)).ok();
             m.map(|m| (m.len(), m.modified().ok()))
         });
