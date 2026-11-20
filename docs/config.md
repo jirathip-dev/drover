@@ -224,6 +224,8 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
+| `ssh_sessions` | `8` | remote calls open at once to one host over its shared connection; more wait their turn (under sshd's `MaxSessions`) |
+| `ssh_retry_secs` | `1` | a call the shared connection refused (`Session open refused by peer`) runs again on it after this long, up to 3 times |
 | `link_beat_secs` | `5` | a host's watcher with nothing to say writes a beat this often |
 | `link_stale_secs` | `20` | no frame from a host's link for this long: it is cut and dialled again |
 | `link_retry_max_secs` | `30` | the longest wait between a link's dials (1 s, doubling) |

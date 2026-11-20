@@ -204,6 +204,7 @@
 2 spawn_force
 3 spawn_guard
 1 ssh_deadline
+4 ssh_sessions
 4 stale_rev
 2 stall_move
 4 stalled_host

@@ -663,3 +663,15 @@ fn a_missing_tool_is_unknown_with_its_name_and_leaves_the_exit_code() {
     assert_eq!(line(&out, "host"), "? host — sysctl not found", "{out}");
     assert_eq!(line(&out, "serve"), "? serve — lsof not found", "{out}");
 }
+
+#[test]
+fn watchdog_drive_shows_never_without_a_record_and_no_huge_age_for_a_stamp_past_its_clock() {
+    let (c, _) = setup("doc-watch-age", "claude");
+    std::fs::remove_file(c.state.with_file_name("drive.at")).unwrap();
+    let (_, out) = run(&c, &good(), &["doctor"]);
+    assert!(line(&out, "watchdog drive").contains("ran never"), "{out}");
+    write(&c.state.with_file_name("drive.at"), &(c.now + 5).to_string(), 0o644);
+    let (_, out) = run(&c, &good(), &["doctor"]);
+    let row = line(&out, "watchdog drive");
+    assert!(row.starts_with('✓') && row.contains("ran 0s"), "{out}");
+}
