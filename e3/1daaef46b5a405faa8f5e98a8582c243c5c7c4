@@ -1,0 +1,10 @@
+Decided: a new-thread send carries `req`; a repeat of the same id in that repo within [limits] thread_resend_minutes (5) returns the thread it made and posts no second first message.
+Because: "a repeat of the same id within a few minutes returns the thread already made instead of making another"
+Decided: the server puts `req` (repo plus render time) in the new-thread composer's values, so the page and cooee both send it without client-side id code.
+Because: "Both drover's page and cooee send the id."
+Decided: the page composer ignores a send while its last one is still sending.
+Because: "A send can't fire twice while the first is in flight."
+Rejected: a random id made by the page per draft — cooee would not send it, and the server value already reaches both clients.
+Rejected: a hard-coded window — core timings are [limits] keys (scripts/timing-check.sh).
+Check: crates/cli/tests/threads_tab.rs a_resent_new_thread_is_the_same_thread_and_a_new_request_id_is_another fails on commit 1 and passes at head.
+Owner: Sending the same new-thread message twice by accident now opens one thread, not two.
