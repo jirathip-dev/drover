@@ -1135,14 +1135,7 @@ fn a_pass_over_30k_events_and_150_done_issues_stays_fast() {
         };
         prs_at(&c, c.now, 151..=200);
         let t0 = cpu_ms();
-        assert_eq!(run_only(&c, &r, &["drive"]).0, 0);
-        let t1 = cpu_ms();
-        assert_eq!(run_only(&c, &r, &["drive", "sendmeter"]).0, 0);
-        let ev = drover::events::read(&c.state).unwrap();
-        let mut kinds = std::collections::BTreeMap::new();
-        for e in ev.iter().skip(30_000) { *kinds.entry(e.kind.clone()).or_insert(0) += 1; }
-        eprintln!("KINDS {kinds:?}");
-        eprintln!("SPLIT job {:.0} pass {:.0}", t1 - t0, cpu_ms() - t1);
+        assert_eq!(run(&c, &r, &["drive"]).0, 0);
         t.push((cpu_ms() - t0).round());
     }
     t.sort_by(f64::total_cmp);
