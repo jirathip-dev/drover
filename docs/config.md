@@ -194,6 +194,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `effort` | `unset` | default reasoning effort for roles that set none |
 | `ask_default_minutes` | `30` | a routine ask unanswered this long takes its recommended option |
 | `ask_expire_hours` | `24` | an ask no live lane waits on expires after this many hours |
+| `thread_resend_minutes` | `5` | a new-thread send repeating a request id this soon gets the thread it made |
 | `idle_reap_minutes` | `10` | a lane done or idle this long loses the processes its agent started |
 | `done_close_minutes` | `5` | a done lane handed off this long closes its session |
 | `idle_merged_minutes` | `15` | a merged or closed issue's idle lane has its pane closed after this long |

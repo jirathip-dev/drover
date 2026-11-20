@@ -1786,7 +1786,9 @@ impl Server<'_> {
             "config-card" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
             "thread-signin" => crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("name"), "web")?,
             n if THREAD_ACTIONS.contains(&n) || n == "secret-card" => {
-                let keys = ["text", "repo", "name", "act", "data", "q", "harness", "model", "effort"];
+                let keys = [
+                    "text", "repo", "name", "act", "data", "q", "harness", "model", "effort", "req",
+                ];
                 let mut f: Q = keys.into_iter().map(|k| (k.into(), s(k))).collect();
                 f.extend([
                     ("t".into(), s("thread")),

@@ -472,6 +472,9 @@ pub fn post(
             let all = all.join(", ");
             let text = or(g("text").trim().is_empty(), &all, g("text"));
             let new = g("op") == "new";
+            if let Some(t) = conductor::resent(ctx, &cfg, &events, g("repo"), g("req")).filter(|_| new) {
+                return Ok(format!("{t} started"));
+            }
             let id = if new {
                 conductor::role(&cfg, g("repo"))?;
                 conductor::text_ok(text)?;
@@ -481,7 +484,7 @@ pub fn post(
                     &cfg,
                     g("repo"),
                     &first(text),
-                    Some(g("harness")).filter(|h| !h.is_empty()),
+                    (Some(g("harness")).filter(|h| !h.is_empty()), Some(g("req"))),
                 )?
             } else {
                 conductor::find(&events, id)?;
@@ -1012,14 +1015,14 @@ pub fn thread_screen(
 }
 
 /// A new thread in `repo` (`/screens/threads/new/<repo>`): its first message starts it.
-pub fn new_screen(cfg: &Config, repo: &str) -> Option<Value> {
+pub fn new_screen(cfg: &Config, repo: &str, now: u64) -> Option<Value> {
     let role = conductor::defaults(cfg, repo).ok()?.1;
     let who = super::join(&[repo, role.harness.as_str(), role.model.as_deref().unwrap_or_default()]);
     let chips = [chip("harness", Some(&role.harness), &crate::providers::lane_names())];
     let c = composer(
         "start",
         "thread-new",
-        &json!({ "repo": repo }),
+        &json!({ "repo": repo, "req": format!("{repo}-{now}") }),
         json!({ "chips": chips }),
     );
     let hint = "Your first message starts the thread and its orchestrator, and titles it with its first line. Nothing is logged until you send.";
@@ -1037,7 +1040,7 @@ impl super::Server<'_> {
         let agents = self.sessions(ctx.now).map(|s| s.running()).unwrap_or_default();
         match sub {
             "" => Some(list_screen(ctx, &cfg, &events, &agents)),
-            s if s.starts_with("/new/") => new_screen(&cfg, &s[5..]),
+            s if s.starts_with("/new/") => new_screen(&cfg, &s[5..], ctx.now),
             s => {
                 let id = s.strip_prefix('/')?;
                 if paired && self.addr.is_some() && self.export.is_none() {

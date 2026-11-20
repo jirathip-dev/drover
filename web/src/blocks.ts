@@ -307,7 +307,7 @@ function composer(blk: Blk, c: Ctx): HTMLElement {
   };
   const post = async (action: string, values: Blk, x?: HTMLElement) => c.act({ action, block: b.id, values: { ...obj(b.values), ...values } }, x);
   const send = async (steer = false) => {
-    if (!ta.value.trim() && !d.files.length) return;
+    if (d.st === 'sending' || (!ta.value.trim() && !d.files.length)) return;
     const queue = !steer && (b.working || d.q != null) ? act('queue') : '', action = steer ? act('steer') : queue || String(b.action);
     const v: Blk = { ...d.picks, text: ta.value, name: d.files.map(x => x.name).join('/'), data: d.files.map(x => x.data).join(',') };
     if (queue && d.q != null) v.q = d.q;
