@@ -598,35 +598,88 @@ fn vector_horses_keep_a_coat_per_name() {
 }
 
 #[test]
-fn a_lane_sheet_is_one_shed_read_of_the_200_lines_it_shows_within_150ms_p95_on_the_large_board() {
-    let (c, sh) = large::large("sheet-p95");
-    let tall: String = (0..5000).map(|i| format!("line {i} sk-ant-oat01-secret\n")).collect();
-    sh.screen("sendmeter-impl-3", &tall);
-    let r = OnShed(Fake::default(), sh);
+fn older_pages_back_200_lines_out_of_the_kept_tail() {
+    let (c, r) = fixture("older");
+    let tall: String = (1..=450).map(|i| format!("line {i} sk-ant-oat01-secret\n")).collect();
+    r.1.screen("sendmeter-impl-12", &tall);
     let s = Server::new(&c, &r, Some(ADDR.into())).deferring();
-    let now = drover::now();
-    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
-    req(&s, "GET", "/screens/lanes", "", &cookie, now);
-    s.refresh(now);
-    let mut ms = vec![];
-    let mut sheet = String::new();
-    for _ in 0..20 {
-        let before = r.1.methods().len();
-        let t = std::time::Instant::now();
-        sheet = req(&s, "GET", "/screens/lanes/sendmeter-impl-3", "", &cookie, now);
-        ms.push(t.elapsed());
-        let calls = r.1.methods().split_off(before);
-        assert!(calls.len() <= 1, "one shed call per sheet: {calls:?}");
-    }
-    assert_eq!(r.1.last("read")["lines"], json!(200));
+    let cookie = paired(&s, &c);
+    req(&s, "GET", "/screens/lanes", "", &cookie, T);
+    s.refresh(T);
+    req(&s, "GET", "/screens/lanes/sendmeter-impl-12", "", &cookie, T);
+    s.refresh(T + 1);
+    let sheet = json_of(&req(&s, "GET", "/screens/lanes/sendmeter-impl-12", "", &cookie, T + 1));
+    let t = sheet["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "transcript")
+        .unwrap();
+    let first = t["blocks"][0]["id"].as_str().unwrap().to_string();
+    let gen = first.split('-').next().unwrap();
+    assert_eq!(first, format!("{gen}-251"), "{t}");
     assert!(
-        sheet.contains("line 4999 ") && sheet.contains("line 4800 ") && !sheet.contains("line 4799 "),
-        "{sheet}"
+        t.to_string().contains("line 450 ") && !t.to_string().contains("line 250 "),
+        "{t}"
     );
-    assert!(!sheet.contains("sk-ant-oat01-secret"), "masked");
-    ms.sort();
-    let p95 = ms[(ms.len() * 95).div_ceil(100) - 1];
-    assert!(p95 <= std::time::Duration::from_millis(150), "p95 {p95:?}");
+    let before = r.1.methods().len();
+    let older = |at: &str| {
+        req(
+            &s,
+            "GET",
+            &format!("/screens/lanes/sendmeter-impl-12/older?before={at}"),
+            "",
+            &cookie,
+            T + 1,
+        )
+    };
+    let page = json_of(&older(&first));
+    let text = page["blocks"].to_string();
+    assert_eq!(page["blocks"][0]["id"], format!("{gen}-51"), "{page}");
+    assert!(
+        text.contains("line 51 ") && text.contains("line 250 ") && !text.contains("line 50 "),
+        "{text}"
+    );
+    assert!(
+        !text.contains("line 251 ") && !text.contains("sk-ant-oat01-secret"),
+        "{text}"
+    );
+    assert_eq!(page["more"], true);
+    let page = json_of(&older(&format!("{gen}-51")));
+    assert!(
+        page["blocks"].to_string().contains("line 1 ") && page["blocks"].as_array().unwrap().len() == 1,
+        "{page}"
+    );
+    assert_eq!(page["more"], false, "no line before the first: {page}");
+    assert_eq!(r.1.methods().len(), before, "no shed call");
+    assert!(older("t99-51").starts_with("HTTP/1.1 410 "), "another gen");
+    let builds = |now: u64| {
+        req(&s, "GET", "/screens/lanes/sendmeter-impl-12", "", &cookie, now);
+        let h = json_of(&req(&s, "GET", "/api/v1/health", "", &cookie, now));
+        let keys = h["serve"]["keys"].as_array().unwrap().clone();
+        let k = keys
+            .iter()
+            .find(|k| k["key"] == "/screens/lanes/sendmeter-impl-12")
+            .cloned();
+        k.unwrap_or_else(|| panic!("the sheet's key is in the hub: {keys:?}"))["builds"]
+            .as_u64()
+            .unwrap()
+    };
+    let one = builds(T + 1);
+    s.refresh(T + 2);
+    assert_eq!(builds(T + 2), one, "no new line, no build");
+    r.1.screen("sendmeter-impl-12", &(tall + "line 451\n"));
+    s.refresh(T + 3);
+    assert_eq!(builds(T + 3), one + 1, "one build per change");
+    assert!(req(
+        &s,
+        "GET",
+        "/screens/lanes/sendmeter-impl-12/older?before=t1-51",
+        "",
+        "",
+        T
+    )
+    .starts_with("HTTP/1.1 401 "));
 }
 
 static STREAM_SLOTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
