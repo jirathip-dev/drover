@@ -1,0 +1,9 @@
+{"args":["ask","herdsman","1464","Which ask id (q<N>) is the owner's 62500 cap answer of 2026-11-20 (t135)? The Cap: trailer needs it and this lane's host has no event log, so drover asks returns nothing here.","--kind","routine","--recommend","1","--option","Reply with the q id; I commit with Cap: 60000 → 62500 (#1464, q<id>)"],"lane":"herdsman:1464:impl","ts":1795146398021}
+{"args":["turn","need-input","--why","need the owner's q id for the 62500 cap decision to write the Cap: trailer; ci/cap.d/2026-11-20-62500.toml is written, uncommitted"],"lane":"herdsman:1464:impl","ts":1795146402108}
+{"args":["turn","done"],"lane":"herdsman:1464:impl","ts":1795146435963}
+{"args":["turn","done"],"lane":"herdsman:1464:impl","ts":1795146445812}
+{"args":["turn","done"],"lane":"herdsman:1464:impl","ts":1795146495165}
+{"args":["turn","done"],"lane":"herdsman:1464:impl","ts":1795156197631}
+{"args":["turn","done"],"lane":"herdsman:1464:impl","ts":1795157451808}
+{"args":["turn","done"],"lane":"herdsman:1464:impl","ts":1795167454954}
+{"args":["turn","done"],"lane":"herdsman:1464:impl","ts":1795167867012}
