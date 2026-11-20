@@ -344,3 +344,78 @@ fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
     assert_eq!(std::fs::read_to_string(&note).unwrap().lines().count(), 1);
     assert!(bazzite.all("run").is_empty(), "{:?}", bazzite.methods());
 }
+
+#[test]
+fn a_start_on_a_host_offline_this_pass_waits_for_it_with_no_card_or_backoff() {
+    let (c, _sh) = setup("offline-start");
+    let q = ["queue", "sendmeter", "add", "13", "--needs", "os:linux"];
+    assert_eq!(run(&c, &Fake::default(), &q).0, 0);
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite --";
+    let remote = |mut f: Fake| {
+        let fresh =
+            format!("{ssh} 'sh' '-c' 'test -e \"$1\"' 'sh' '/home/me/.local/share/drover/work/sendmeter/issue-13'");
+        let no = drover::runner::Out {
+            code: 1,
+            ..Default::default()
+        };
+        f.replies.push((fresh, no));
+        f.reply(&format!("{ssh} 'sh' '-c' 'test -e"), "")
+            .reply(&format!("{ssh} 'git'"), "")
+            .reply(&format!("{ssh} '/opt/drover/bin/drover' 'profiles' 'sync'"), "")
+            .reply(&format!("{ssh} 'sh' '-c' 'mkdir"), "")
+    };
+    let at = |k: u64| drover::Ctx {
+        now: NOW + k,
+        ..c.clone()
+    };
+    let why = |c: &drover::Ctx| {
+        let pass = kinds(c, "drive-pass").into_iter().last().unwrap();
+        let acts = pass.val("actions").as_array().unwrap().clone();
+        let a = acts.into_iter().find(|a| a["issue"] == 13).unwrap();
+        a["why"].as_str().unwrap_or_default().to_string()
+    };
+    for k in [0, 400] {
+        let (f, bazzite) = (
+            remote(mini_only()).once_err(&format!("{ssh} 'df'"), 124, "no answer"),
+            FakeShed::new(),
+        );
+        let (code, out) = run(&at(k), &with_bazzite(&f, &bazzite), &["drive"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            why(&c).contains("bazzite: not sent (host offline this pass)"),
+            "{}",
+            why(&c)
+        );
+        assert!(bazzite.all("run").is_empty(), "{:?}", bazzite.methods());
+        assert_eq!(run(&at(k + 60), &mini_only(), &["check"]).0, 0);
+    }
+    let mine: Vec<String> = read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.issue == Some(13))
+        .map(|e| e.kind)
+        .collect();
+    for k in ["spawn-error", "needs-human", "stuck", "spawn-failing", "needs-decision"] {
+        assert!(!mine.iter().any(|m| m == k), "{k}: {mine:?}");
+    }
+    assert!(kinds(&c, "stuck").is_empty(), "{:?}", kinds(&c, "stuck"));
+    let st = &drover::events::fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 13)];
+    assert_eq!(st.state, "queued");
+
+    let denied = remote(mini_only()).once_err(&format!("{ssh} 'sh' '-c' 'mkdir"), 1, "Permission denied");
+    let bazzite = FakeShed::new();
+    assert_eq!(run(&at(450), &with_bazzite(&denied, &bazzite), &["drive"]).0, 0);
+    let errs = kinds(&c, "spawn-error");
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert!(errs[0].str("error").unwrap().contains("Permission denied"), "{errs:?}");
+
+    let (f, bazzite) = (remote(mini_only()), FakeShed::new());
+    let (code, out) = run(&at(500), &with_bazzite(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        bazzite.called("run", "sendmeter-impl-13"),
+        "{out} {:?}",
+        bazzite.methods()
+    );
+}
