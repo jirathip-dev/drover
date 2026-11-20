@@ -366,7 +366,10 @@ fn scene_at(query: &str, name: &str, pick: &str, level: &str, reduce: bool, chec
         {check} }})()"
     );
     let mut cmd = webview();
-    cmd.env("DROVER_PRE", "localStorage.scene = '1'");
+    cmd.env(
+        "DROVER_PRE",
+        "localStorage.scene = '1'; (f => { window.fetch = (u, o) => String(u).endsWith('/scene.svg') ? new Promise(ok => setTimeout(ok, 2000)).then(() => f(u, o)) : f(u, o); })(window.fetch.bind(window));",
+    );
     if reduce {
         cmd.env("DROVER_REDUCE", "1");
     }
