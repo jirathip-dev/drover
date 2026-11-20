@@ -361,7 +361,8 @@ fn scene_at(query: &str, name: &str, pick: &str, level: &str, reduce: bool, chec
         const q = s => document.querySelector(s), on = e => getComputedStyle(e).display !== 'none'; \
         const shown = s => [...document.querySelectorAll('#scene .rsn ' + s)].filter(on).length; \
         {pick} \
-        await w(() => q('#scene .rsn svg') && document.querySelector('#scene .hh') && document.querySelector('symbol[id^=sa-]')); \
+        await w(() => q('#scene .rsn svg') && document.querySelector('#scene .hh') && document.querySelector('symbol[id^=sa-]') \
+            && (document.documentElement.dataset.theme === 'farm' || q('#scene .rsn :is(.h-calm,.l-sun,.s-moderate)'))); \
         const h = q('#scene'), anim = e => e && getComputedStyle(e).animationName !== 'none' ? 1 : 0; \
         {check} }})()"
     );
