@@ -1270,8 +1270,7 @@ fn lanes_screen(t: &LanesTab) -> Value {
     json!({"type": "screen", "id": "lanes", "title": "Lanes", "stream": "/screens/lanes/stream", "blocks": blocks})
 }
 
-pub(super) fn said(i: usize, b: &Block, lines: &[String]) -> Value {
-    let id = format!("t-{i}");
+pub(super) fn said(id: &str, b: &Block, lines: &[String]) -> Value {
     let text = |m: String| json!({"type": "text", "id": id, "markdown": m});
     match b {
         Block::Prompt { text: t } => text(format!("**›** {t}")),
@@ -1508,7 +1507,7 @@ impl Server<'_> {
                 json!({"type": "row", "id": "f-pr", "title": "PR", "value": format!("#{n}"), "tap": {"url": url}}),
             );
         }
-        let mut said = self.sheet_transcript(ctx, &l);
+        let mut said = self.tails.sheet(&l);
         said.extend(later::undelivered(&ev, agent));
         let values = json!({ "agent": agent });
         let other = l.role == "other";
