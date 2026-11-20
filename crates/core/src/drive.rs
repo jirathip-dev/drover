@@ -824,16 +824,26 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         }
     };
     mark("look, repair");
+    let tt = crate::clock::instant();
     crate::link::look(ctx, cfg, r, out, KICK.get().is_some()).map_or_else(|e| drop(writeln!(out, "look: {e:#}")), drop);
+    crate::stderr!("TT look {:?}", tt.elapsed());
+    let tt = crate::clock::instant();
     if let Err(e) = repair(ctx, cfg, r, out, fleet) {
         writeln!(out, "repair: {e:#}")?;
     }
+    crate::stderr!("TT repair {:?}", tt.elapsed());
+    let tt = crate::clock::instant();
     let seen = crate::snapshot::take(ctx, cfg, r);
+    crate::stderr!("TT snap {:?}", tt.elapsed());
+    let tt = crate::clock::instant();
     let grew = crate::db::last_seq(&ctx.state);
     let res = one(ctx, cfg, (r, &seen), out, (fleet, manual), &mark);
+    crate::stderr!("TT one {:?}", tt.elapsed());
+    let tt = crate::clock::instant();
     if crate::db::last_seq(&ctx.state) != grew {
         crate::snapshot::take(ctx, cfg, r);
     }
+    crate::stderr!("TT snap2 {:?}", tt.elapsed());
     gh::FORCE.set(was.0);
     gh::CATCHUP.set(was.1);
     gh::PROBE.set(was.2);
@@ -1169,6 +1179,7 @@ fn pass(
     out: &mut dyn Write,
     fleet: &str,
 ) -> Result<()> {
+    let tq = crate::clock::instant();
     let f = cfg.fleet(fleet)?;
     let sessions = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?;
     let agents = sessions.running();
@@ -1223,19 +1234,26 @@ fn pass(
             emit(&ctx.state, cfg, e)?;
         }
     }
+    crate::stderr!("PP load+held {:?}", tq.elapsed()); let tq = crate::clock::instant();
     for s in st.values().filter(|s| s.fleet == fleet && s.state == "design") {
         crate::design::handoff(ctx, cfg, r, out, &agents, s)?;
     }
+    crate::stderr!("PP design {:?}", tq.elapsed()); let tq = crate::clock::instant();
     crate::stall::refused(ctx, cfg, r, out, &working(&ctx.state)?, fleet)?;
+    crate::stderr!("PP refused {:?}", tq.elapsed()); let tq = crate::clock::instant();
     silent(ctx, cfg, r, out, &agents, fleet)?;
+    crate::stderr!("PP silent {:?}", tq.elapsed()); let tq = crate::clock::instant();
     if let Err(e) = crate::hotspots::sync(ctx, cfg, r, fleet) {
         writeln!(out, "{fleet} hotspots: {e:#}")?;
     }
     let events = working(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
+    crate::stderr!("PP hotspots+working {:?}", tq.elapsed()); let tq = crate::clock::instant();
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
     waits.retain(one);
+    crate::stderr!("PP scan {:?}", tq.elapsed()); let tq = crate::clock::instant();
     crate::promise::pass(ctx, cfg, fleet, &events, &waits)?;
+    crate::stderr!("PP promise {:?}", tq.elapsed()); let tq = crate::clock::instant();
     external(ctx, cfg, out, fleet)?;
     ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {
@@ -1243,11 +1261,14 @@ fn pass(
             writeln!(out, "{fleet} land: {e:#}")?;
         }
     }
+    crate::stderr!("PP ext+land {:?}", tq.elapsed()); let tq = crate::clock::instant();
     if handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, seen, &working(&ctx.state)?, &agents, false, Some(fleet));
         waits.retain(one);
     }
+    crate::stderr!("PP handoff {:?}", tq.elapsed()); let tq = crate::clock::instant();
     let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();
+    crate::stderr!("PP preview {:?}", tq.elapsed());
     let rev = |w: &Waiting| {
         w.next_cmd
             .as_deref()
@@ -1258,19 +1279,27 @@ fn pass(
     let merge = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover merge "));
     waits.sort_by_key(|(s, w)| (!verdict(w), !merge(w), !rev(w), conflicts.contains_key(&s.issue)));
     let mut updated = false;
+    let acc = std::cell::RefCell::new([std::time::Duration::ZERO; 6]);
+    let tl = crate::clock::instant();
+    let _pp = PPDrop(&acc, tl);
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
     {
+        let tz = crate::clock::instant();
+        if s.issue % 25 == 1 { crate::stderr!("WW #{} state={} lane={:?} wlane={} n={}", s.issue, s.state, s.lane, w.lane, waits.len()); }
         let lock = format!("drive-{fleet}-{}.lock", s.issue);
         let mine = take(ctx, r, &lock, STALE_LOCK_SECS, fleet);
+        if s.issue % 25 == 1 { crate::stderr!("WW2 #{} mine={} slot={}", s.issue, mine.is_some(), SLOT.get()); }
         if mine.is_none() && !SLOT.get() {
             continue;
         }
+        acc.borrow_mut()[0] += tz.elapsed(); let tz = crate::clock::instant();
         let mut pr = gh::cached_pr(ctx, fleet, s.issue);
         crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
         let ci = gh::ci(&gh::required(pr.at("statusCheckRollup"), f.checks(&pr)));
         let gone = gh::missing(ctx, None, cfg, (fleet, s.issue), &events, &pr).filter(|m| w.what.contains(m));
+        acc.borrow_mut()[1] += tz.elapsed(); let tz = crate::clock::instant();
         let n = s.issue.to_string();
         if pr.at("state") == "OPEN" && !s.done() && !queue::serials(&events, f, fleet).is_empty() {
             serial(ctx, cfg, r, out, (fleet, s), &pr)?;
@@ -1281,15 +1310,20 @@ fn pass(
         if crate::gate::ready_draft(ctx, cfg, r, out, s, &pr)? && merge(w) {
             continue;
         }
+        acc.borrow_mut()[2] += tz.elapsed(); let tz = crate::clock::instant();
+        if s.issue % 25 == 1 { crate::stderr!("WW3 #{} reached fetch", s.issue); }
         let fetched = match pickup::fetch(ctx, cfg, r, out, &events, (s, w), &pr)? {
             pickup::Picked::Held => continue,
             pickup::Picked::Fetched(x) => Some(x),
             pickup::Picked::No => None,
         };
+        acc.borrow_mut()[3] += tz.elapsed(); let tz = crate::clock::instant();
         let w = fetched.as_ref().unwrap_or(w);
+        acc.borrow_mut()[4] += tz.elapsed(); let tz = crate::clock::instant();
         if let Some(e) = crate::events::last_at(&working(&ctx.state)?, "auto-updated", (fleet, s.issue), ctx.now) {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
+        } else if { acc.borrow_mut()[5] += tz.elapsed(); false } {
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT {
             let p = crate::lesson::prompt(fleet, s.issue, s.build.as_deref());
             let Some(sent) = tell(r, &events, &w.lane, &p) else {
@@ -2137,4 +2171,11 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     writeln!(out, "{who} {step}: {result}")?;
     let d = json!({"step": step, "cmd": format!("drover {}", c.join(" ")), "result": result, "code": code});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "driven", d)).map(|()| code)
+}
+
+struct PPDrop<'a>(&'a std::cell::RefCell<[std::time::Duration; 6]>, std::time::Instant);
+impl Drop for PPDrop<'_> {
+    fn drop(&mut self) {
+        crate::stderr!("PP loop {:?} parts {:?}", self.1.elapsed(), self.0.borrow());
+    }
 }
