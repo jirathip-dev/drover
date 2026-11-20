@@ -4,13 +4,13 @@ use crate::api::ScreenKey;
 use crate::events::Json;
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
+use std::io::Write;
 use std::net::TcpStream;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 const POLL: Duration = Duration::from_millis(25);
-const BUILDS: usize = 2;
 const UNHELD: usize = 64;
 const UNHELD_SECS: u64 = 60;
 const FRAMES: usize = 64;
@@ -35,8 +35,8 @@ pub struct Key {
 
 impl Key {
     fn new(path: &str, q: &Q, paired: bool) -> Key {
-        let q = q.iter().filter(|(_, v)| !v.is_empty());
-        let q = q.map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut q = q.clone();
+        q.retain(|_, v| !v.is_empty());
         Key {
             path: path.into(),
             q,
@@ -52,7 +52,6 @@ impl Key {
     fn deps(&self) -> u8 {
         match self.path.as_str() {
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => LOG | READS | CONFIG | CLOCK,
-            "/screens/proxy-token" => CONFIG,
             _ => ALL,
         }
     }
@@ -81,7 +80,6 @@ struct Entry {
     holders: Vec<Weak<Queue>>,
     read_at: u64,
     builds: u64,
-    ms: VecDeque<u64>,
 }
 
 /// One stream's outbound frames (from, rev, ops): the hub pushes, the stream's thread writes.
@@ -117,18 +115,9 @@ impl Queue {
 pub struct Hub {
     keys: Mutex<BTreeMap<Key, Entry>>,
     built: Condvar,
-    slots: (Mutex<usize>, Condvar),
+    slots: (Mutex<()>, Mutex<()>),
     kicked: (Mutex<bool>, Condvar),
     epoch: String,
-}
-
-struct Slot<'h>(&'h Hub);
-
-impl Drop for Slot<'_> {
-    fn drop(&mut self) {
-        *lock(&self.0.slots.0) -= 1;
-        self.0.slots.1.notify_one();
-    }
 }
 
 fn wait<'m, T>(c: &Condvar, g: MutexGuard<'m, T>) -> MutexGuard<'m, T> {
@@ -140,7 +129,7 @@ impl Hub {
         Hub {
             keys: Mutex::default(),
             built: Condvar::new(),
-            slots: (Mutex::new(0), Condvar::new()),
+            slots: (Mutex::new(()), Mutex::new(())),
             kicked: (Mutex::new(false), Condvar::new()),
             epoch: format!(
                 "{:08x}",
@@ -176,15 +165,14 @@ impl Hub {
     }
 
     fn build(&self, s: &Server, ctx: &Ctx, k: &Key, now: Signals, old: Option<&str>) -> Option<(u64, Arc<str>)> {
-        let t = drover_core::clock::instant();
         let new = {
-            let mut n = lock(&self.slots.0);
-            while *n >= BUILDS {
-                n = wait(&self.slots.1, n);
-            }
-            *n += 1;
-            drop(n);
-            let _slot = Slot(self);
+            let s0 = || lock(&self.slots.0);
+            let _slot = self
+                .slots
+                .0
+                .try_lock()
+                .or_else(|_| self.slots.1.try_lock())
+                .unwrap_or_else(|_| s0());
             crate::runner::request(|| super::build(|| s.build_screen(ctx, &k.path, &k.q, k.paired)))
         };
         let text: Option<Arc<str>> = new.as_ref().map(|v| v.to_string().into());
@@ -199,10 +187,6 @@ impl Hub {
         let mut m = lock(&self.keys);
         let e = m.entry(k.clone()).or_default();
         (e.built, e.building, e.seen, e.builds) = (true, false, now, e.builds + 1);
-        e.ms.push_back(t.elapsed().as_millis().try_into().unwrap_or(u64::MAX));
-        if e.ms.len() > 32 {
-            e.ms.pop_front();
-        }
         if e.json.is_none() && text.is_some() || delta.is_some() {
             e.rev += 1;
         }
@@ -233,11 +217,9 @@ impl Hub {
     }
 
     fn hold(&self, k: &Key, q: &Arc<Queue>) {
-        lock(&self.keys)
-            .entry(k.clone())
-            .or_default()
-            .holders
-            .push(Arc::downgrade(q));
+        let mut m = lock(&self.keys);
+        m.entry(k.clone()).or_default().holders.push(Arc::downgrade(q));
+        drop(m);
         self.kick();
     }
 
@@ -277,15 +259,8 @@ impl Hub {
         }
     }
 
-    /// Each key kept: its size, rev, holders, builds and build times.
+    /// Each key kept: its size, rev, holders and builds.
     pub fn keys(&self) -> Vec<ScreenKey> {
-        let pct = |ms: &VecDeque<u64>, p: usize| {
-            let mut v: Vec<u64> = ms.iter().copied().collect();
-            v.sort_unstable();
-            v.get((v.len() * p / 100).min(v.len().saturating_sub(1)))
-                .copied()
-                .unwrap_or(0)
-        };
         let m = lock(&self.keys);
         m.iter()
             .map(|(k, e)| ScreenKey {
@@ -293,16 +268,8 @@ impl Hub {
                 paired: k.paired,
                 bytes: e.json.as_ref().map_or(0, |j| j.len().try_into().unwrap_or(u64::MAX)),
                 rev: e.rev,
-                holders: e
-                    .holders
-                    .iter()
-                    .filter(|h| h.strong_count() > 0)
-                    .count()
-                    .try_into()
-                    .unwrap_or(u64::MAX),
+                holders: e.holders.len().try_into().unwrap_or(u64::MAX),
                 builds: e.builds,
-                p50: pct(&e.ms, 50),
-                p95: pct(&e.ms, 95),
             })
             .collect()
     }
@@ -420,20 +387,17 @@ impl Server<'_> {
                 Some((self.hub.read(self, &ctx(), &key)?, key))
             });
         let Some(((mut have, json), key)) = first else {
-            let r = line(
-                if slot.is_some() {
-                    "404 Not Found"
-                } else {
-                    "503 Service Unavailable"
-                },
-                "no stream",
+            let st = if slot.is_some() {
+                "404 Not Found"
+            } else {
+                "503 Service Unavailable"
+            };
+            let body = r#"{"line":"no stream"}"#;
+            let n = body.len();
+            return write!(
+                s,
+                "HTTP/1.1 {st}\r\nContent-Type: {JSON}\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n{body}"
             );
-            let h = format!(
-                "HTTP/1.1 {}\r\nContent-Type: {JSON}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                r.0,
-                r.2.len()
-            );
-            return std::io::Write::write_all(s, &[h.as_bytes(), &r.2].concat());
         };
         let mut seq = header(head, "last-event-id")
             .and_then(|n| n.parse::<u64>().ok())

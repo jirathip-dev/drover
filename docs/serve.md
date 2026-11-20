@@ -196,7 +196,7 @@ them as `serve`: `sha` (the build it runs, #1081), `rss_mb`, `groups` (the last 
 appends `<ts> cold|handover` to `serve-starts` (the last day kept); a start that fails appends `<ts> failed`.
 Its `schemes` lists each colour scheme blocks' gate refused on load, with why (#1339, docs/themes.md).
 `keys` lists the screens the hub keeps (#1372): each `key` (path and query), `paired`, `bytes`, `rev`, `holders` (open
-streams), `builds` and its last 32 builds' `p50` and `p95` ms.
+streams) and `builds`.
 
 #1312: the page times what the owner feels: each tap, sheet open, tab switch, send and answer from the input event to
 the frame after the DOM changed (split into `network`, `parse` and `render`), and each stream delta from receipt to
