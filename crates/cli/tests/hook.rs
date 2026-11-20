@@ -1055,6 +1055,7 @@ fn config_apply_and_secret_ls_rm_are_owner_only() {
     for cmd in [
         "drover config apply c1",
         "drover config discard c1",
+        "drover rollout dismiss sendmeter 12",
         "drover secret ls",
         "drover secret rm all TOKEN",
     ] {

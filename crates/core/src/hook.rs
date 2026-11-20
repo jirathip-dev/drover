@@ -690,14 +690,15 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if matches!(
         (r.first(), r.get(1)),
         (Some(&"config"), Some(&("apply" | "discard")))
+            | (Some(&"rollout"), Some(&"dismiss"))
             | (Some(&"secret"), Some(&("ls" | "rm")))
             | (Some(&"card"), Some(&("approve" | "deny" | "run")))
             | (Some(&"fleet"), Some(&"rename"))
             | (Some(&"baseline"), _)
     ) {
         return Some(
-            "REFUSED OWNER_ONLY: only the owner applies config, settles run cards, lists and removes secrets, \
-             renames a fleet or sets its history baseline, never a lane (#387, #935, #1099)"
+            "REFUSED OWNER_ONLY: only the owner applies config, dismisses a rollout, settles run cards, lists and \
+             removes secrets, renames a fleet or sets its history baseline, never a lane (#387, #935, #1099, #1479)"
                 .into(),
         );
     }
@@ -907,13 +908,19 @@ pub fn issue_filed(input: &Value) -> Option<String> {
         let end = rest.find(|c: char| q.map_or(c.is_whitespace(), |q| c == q));
         Some(rest[..end.unwrap_or(rest.len())].to_string()).filter(|t| !t.is_empty())
     });
-    let res = input["tool_response"].to_string() + &input["result"].to_string();
-    let n = res.split("/issues/").nth(1).and_then(|r| {
-        let d: String = r.chars().take_while(char::is_ascii_digit).collect();
-        d.parse().ok()
-    });
+    let n = filed_issue(input).map(|f| f.1);
     let head = n.map_or("filed".into(), |n: u64| format!("filed #{n}"));
     title.map(|t| format!("{head}: {t}")).or(n.map(|_| head))
+}
+
+/// A `gh issue create` that ran: the repo and number its printed issue URL names.
+pub fn filed_issue(input: &Value) -> Option<(String, u64)> {
+    fleet_cmd(input).filter(|c| after(input) && c.contains("gh issue create"))?;
+    let res = input["tool_response"].to_string() + &input["result"].to_string();
+    let (head, tail) = res.split_once("/issues/")?;
+    let repo = head.rsplit_once("github.com/")?.1;
+    let d: String = tail.chars().take_while(char::is_ascii_digit).collect();
+    Some((repo.into(), d.parse().ok()?))
 }
 
 /// The first `Co-Authored-By:` line in a commit log that names an AI.
