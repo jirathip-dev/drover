@@ -363,14 +363,14 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let bad = host_rows(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
-        let v = crate::VERSION;
-        let ok = format!("✓ host {name} — git, gh, {logins}drover {v}, shed");
+        let ok = format!("✓ host {name} — git, gh, {logins}drover {}, shed", crate::VERSION);
         let at = |w: &String| w.replacen(' ', &format!(" host {name} "), 1);
         let shed = on.shed().filter(|_| !bad.iter().any(|w| w.contains(" shed")));
         rows.extend(bad.iter().map(at));
         rows.extend(bad.is_empty().then_some(ok));
         rows.extend(shed.map(|b| at(&crate::shed::line(&on, &b.wire))));
         rows.extend(login_token(&on, Some(name)));
+        rows.push(crate::hosts::sshd_row(&on, name));
         rows.extend(own.then(|| crate::cloud::github(&on, ctx.now).1).flatten());
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {
