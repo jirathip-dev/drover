@@ -4,7 +4,9 @@ use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
-const SWAG: [&str; 12] = [
+const SWAG: [&str; 14] = [
+    "bush-dark",
+    "bush-light",
     "dracula",
     "farm",
     "farm-light",
@@ -182,7 +184,7 @@ fn each_theme_names_its_default_and_the_first_paint_is_the_board_themes() {
     assert_eq!(
         sd(&p)["t"],
         json!({"farm": "farm", "kitchen": "kitchen", "garden": {"light": "garden-light", "dark": "garden-dark"},
-            "terminal": "github-dark"})
+            "bush": {"light": "bush-light", "dark": "bush-dark"}, "terminal": "github-dark"})
     );
     assert!(p.contains("<style id=sch>:root{--a:#f29b4b;"), "farm's block first");
     assert!(

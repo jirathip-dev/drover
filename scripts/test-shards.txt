@@ -176,6 +176,7 @@
 1 sbin_path
 1 schemes
 4 scratch
+2 screen_hub
 2 screen_pages
 3 self_update
 3 serial_groups
@@ -202,6 +203,7 @@
 2 spawn_force
 3 spawn_guard
 1 ssh_deadline
+4 ssh_sessions
 4 stale_rev
 2 stall_move
 4 stalled_host

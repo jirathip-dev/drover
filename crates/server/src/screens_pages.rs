@@ -33,7 +33,7 @@ pub(super) fn paged(mut block: Value, more: Option<String>) -> Value {
     block
 }
 
-pub(super) fn window(mut q: Q, first: &Value) -> Q {
+pub(in crate::serve) fn window(mut q: Q, first: &Value) -> Q {
     if let Some(c) = cursor(first) {
         q.insert("to".into(), c);
     }

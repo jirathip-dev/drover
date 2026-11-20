@@ -329,12 +329,16 @@ fn the_scene_in_webkit_is_a_full_page_header_toggle_drawn_from_the_scene_screen(
 }
 
 fn scene_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<String> {
+    scene_at(&format!("theme={theme}"), theme, "", level, reduce, check)
+}
+
+fn scene_at(query: &str, name: &str, pick: &str, level: &str, reduce: bool, check: &str) -> Vec<String> {
     let (pressure, load) = match level {
         "calm" => ("1", "1.00"),
         "busy" => ("1", "15.00"),
         _ => ("2", "3.90"),
     };
-    let (c, r) = fixture_at(&format!("load-{theme}-{level}"), pressure, load);
+    let (c, r) = fixture_at(&format!("load-{name}-{level}"), pressure, load);
     append(
         &c.state,
         &Event::new(
@@ -356,18 +360,23 @@ fn scene_probe(theme: &str, level: &str, reduce: bool, check: &str) -> Vec<Strin
         const w = f => new Promise(ok => {{ const t = Date.now(), g = () => {{ const v = f(); if (v) ok(v); else if (Date.now() - t > 8000) ok(null); else setTimeout(g, 50); }}; g(); }}); \
         const q = s => document.querySelector(s), on = e => getComputedStyle(e).display !== 'none'; \
         const shown = s => [...document.querySelectorAll('#scene .rsn ' + s)].filter(on).length; \
-        await w(() => q('#scene .rsn svg') && document.querySelector('#scene .hh')); \
+        {pick} \
+        await w(() => q('#scene .rsn svg') && document.querySelector('#scene .hh') && document.querySelector('symbol[id^=sa-]') \
+            && (document.documentElement.dataset.theme === 'farm' || q('#scene .rsn :is(.h-calm,.l-sun,.s-moderate)'))); \
         const h = q('#scene'), anim = e => e && getComputedStyle(e).animationName !== 'none' ? 1 : 0; \
         {check} }})()"
     );
     let mut cmd = webview();
-    cmd.env("DROVER_PRE", "localStorage.scene = '1'");
+    cmd.env(
+        "DROVER_PRE",
+        "localStorage.scene = '1'; (f => { window.fetch = (u, o) => String(u).endsWith('/scene.svg') ? new Promise(ok => setTimeout(ok, 2000)).then(() => f(u, o)) : f(u, o); })(window.fetch.bind(window));",
+    );
     if reduce {
         cmd.env("DROVER_REDUCE", "1");
     }
     let o = cmd
-        .args([&format!("http://{addr}/?theme={theme}"), "390", "-", "-"])
-        .arg(d.join(format!("scene-{theme}-{level}.png")))
+        .args([&format!("http://{addr}/?{query}"), "390", "-", "-"])
+        .arg(d.join(format!("scene-{name}-{level}.png")))
         .arg(js)
         .output()
         .unwrap();
@@ -439,5 +448,49 @@ fn the_scene_in_webkit_stops_the_flames_and_glow_under_reduced_motion() {
         scene_probe("kitchen", "held", true, check),
         ["1", "0", "0"],
         "kitchen held under reduced motion: heat-held, no frame loop, no glow animation"
+    );
+}
+
+const PICK_BUSH: &str = "q('#sysb').click(); \
+    (await w(() => [...document.querySelectorAll('#sheet .row')].find(r => r.textContent.replace('✓', '').trim() === 'bush'))).click(); \
+    await w(() => document.documentElement.dataset.theme === 'bush' && [...document.querySelectorAll('.hdefs symbol')].some(s => s.id === 'ha-fix' && s.innerHTML.includes('--wo'))); \
+    [...document.querySelectorAll('#sheet .sh button')].find(b => b.textContent === 'close').click();";
+
+#[test]
+fn the_scene_in_webkit_draws_bush_picked_from_the_theme_list_its_sign_at_each_level_light_and_dark() {
+    if no_webkit() {
+        return;
+    }
+    for (query, scheme) in [
+        ("theme=farm", "bush-light"),
+        ("theme=farm&scheme=bush-dark", "bush-dark"),
+    ] {
+        for (level, word) in [("calm", "moderate"), ("busy", "high"), ("held", "catastrophic")] {
+            let check = format!(
+                "await w(() => q('#scene.sign-{level}') && document.querySelector('#scene .fdr')); \
+                return [document.documentElement.dataset.scheme === '{scheme}' ? 1 : 0, h.classList.contains('sign-{level}') ? 1 : 0, \
+                shown('.fdr') > 0 ? 1 : 0, shown('.s-{word}') > 0 ? 1 : 0, shown(':is(.s-moderate,.s-high,.s-catastrophic):not(.s-{word})'), \
+                h.querySelectorAll('use[href=\"#sa-idle\"]').length > 0 ? 1 : 0, anim(h)];"
+            );
+            assert_eq!(
+                scene_at(query, scheme, PICK_BUSH, level, false, &check),
+                ["1", "1", "1", "1", "0", "1", "1"],
+                "bush {scheme} {level}: picked from the list, sign-{level} on the Scene, the sign reads {word} and no other level, the lane drawn, the loop runs"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_scene_in_webkit_holds_bushs_sign_still_under_reduced_motion() {
+    if no_webkit() {
+        return;
+    }
+    let check = "await w(() => q('#scene.sign-held') && document.querySelector('#scene .fdr')); \
+        return [h.classList.contains('sign-held') ? 1 : 0, shown('.s-catastrophic') > 0 ? 1 : 0, shown(':is(.s-moderate,.s-high):not(.s-catastrophic)'), anim(h)];";
+    assert_eq!(
+        scene_at("theme=bush", "bush-still", "", "held", true, check),
+        ["1", "1", "0", "0"],
+        "bush held under reduced motion: catastrophic alone shown, no frame loop"
     );
 }

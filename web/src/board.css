@@ -278,7 +278,7 @@ header #hlt{min-width:3ch}
 .ldg svg{width:132px;aspect-ratio:132/100;overflow:visible}
 @media (prefers-reduced-motion:reduce){.hrain,.hflash{display:none!important}.hr,.fog{transition:none}}
 .kf1{opacity:var(--o1,1)}.kf2{opacity:var(--o2,0)}.ksteam{opacity:var(--steam,0)}
-#scene:is(.heat,.light){animation:kfr 1.2s infinite}
+#scene:is(.heat,.light,.sign){animation:kfr 1.2s infinite}
 @keyframes kfr{0%,49.9%{--o1:1;--o2:0}50%,100%{--o1:0;--o2:1}}
 .heat-calm{--f1:#3d7fd9;--f2:#9cc8ff}.heat-busy{--f1:#ee7a22;--f2:#ffd15a;--steam:1}.heat-held{--f1:#e04a1e;--f2:#ffb03a;--steam:1}
 .rsn :is(.h-calm,.h-busy,.h-held){display:none}
@@ -290,8 +290,11 @@ header #hlt{min-width:3ch}
 @keyframes kflut{from{rotate:-3deg}to{rotate:3deg}}
 .rsn :is(.l-sun,.l-overcast,.l-rain){display:none}
 .light-calm .rsn .l-sun,.light-busy .rsn .l-overcast,.light-held .rsn .l-rain{display:inline}
+.rsn :is(.s-moderate,.s-high,.s-catastrophic,.s-up){display:none}
+.sign-calm .rsn .s-moderate,.sign-busy .rsn :is(.s-high,.s-up),.sign-held .rsn :is(.s-catastrophic,.s-up){display:inline}
+.night .rsn .sky-day{display:none}
 #scene.light .hn .card{background:var(--card)}
-@media (prefers-reduced-motion:reduce){#scene:is(.heat,.light),.heat-held .kglow,.hqh.n use{animation:none}}
+@media (prefers-reduced-motion:reduce){#scene:is(.heat,.light,.sign),.heat-held .kglow,.hqh.n use{animation:none}}
 @media (min-width:900px){
   .field{display:grid;grid-template-columns:repeat(auto-fill,var(--cw,320px));justify-content:start;padding-left:calc(2 * var(--s1) + var(--s2))}
   #scene .hh{width:var(--cw,320px)}.hl{align-self:stretch;max-width:none}.hl>*{width:max-content;max-width:100%;align-self:center}
