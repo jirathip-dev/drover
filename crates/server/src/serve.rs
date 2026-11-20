@@ -1401,15 +1401,15 @@ impl<'a> Server<'a> {
         match op {
             "stop" => crate::check::stop(ctx, &cfg, &self.r, &mut out, agent)?,
             "kill" => crate::check::kill(ctx, &cfg, &self.r, &mut out, (agent, None), yes)?,
-            "clean" => crate::check::clean(
+            "clean" => drop(crate::check::clean_all(
                 ctx,
                 &cfg,
                 &self.r,
                 &mut out,
                 Some(&fleet),
-                (None, Some(agent), false),
+                (None, Some(agent), false, false),
                 yes,
-            )?,
+            )?),
             "close" => crate::check::close(ctx, &cfg, &self.r, &mut out, agent, None)?,
             op => return refused("BAD_VALUE", format!("op is stop, kill, clean or close, not `{op}`")),
         }

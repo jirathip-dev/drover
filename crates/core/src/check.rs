@@ -883,23 +883,10 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
     if seen.is_empty() {
         return Ok(());
     }
-    clean(ctx, cfg, r, out, Some(fleet), (Some(issue), None, false), true)
+    clean_all(ctx, cfg, r, out, Some(fleet), (Some(issue), None, false, false), true).map(drop)
 }
 
-/// Remove worktree + pane of lanes whose issue is merged (or closed on GitHub). Dry run unless `yes`. `--lane` (one agent's worktree) refuses `UNSAFE_CLEAN` with the reason when it cannot go.
-pub fn clean(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    fleet: Option<&str>,
-    (issue, lane, sched): (Option<u64>, Option<&str>, bool),
-    yes: bool,
-) -> Result<()> {
-    clean_all(ctx, cfg, r, out, fleet, (issue, lane, sched, false), yes)
-}
-
-/// `clean`; `all` (an explicit `drover clean`) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch.
+/// Remove worktree + pane of lanes whose issue is merged (or closed on GitHub), dry run unless `yes`, and count the dirty ones kept; `--lane` refuses `UNSAFE_CLEAN` with the reason; `all` (an explicit `drover clean`) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch.
 pub fn clean_all(
     ctx: &Ctx,
     cfg: &Config,
@@ -908,7 +895,7 @@ pub fn clean_all(
     fleet: Option<&str>,
     (issue, lane, sched, all): (Option<u64>, Option<&str>, bool, bool),
     yes: bool,
-) -> Result<()> {
+) -> Result<usize> {
     let events = working(&ctx.state)?;
     let states = fold(&events);
     let agents = (crate::link::look(ctx, cfg, r, &mut std::io::sink(), true)?.sessions())
@@ -916,7 +903,7 @@ pub fn clean_all(
         .context("cannot list the live agents; refusing to clean blind")?;
     let off = if all { disabled(cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
-    let (mut freed, mut removed, mut failed) = (0, 0, 0);
+    let (mut freed, mut removed, mut tallies) = (0, 0, (0, 0));
     let mut closed = BTreeMap::new();
     let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
     let mut fresh = std::collections::BTreeSet::new();
@@ -1080,6 +1067,7 @@ pub fn clean_all(
             if lane.is_some() {
                 return unsafe_lane(&reason);
             }
+            tallies.0 += usize::from(!live);
             writeln!(out, "keep {shown}: {reason}")?;
             continue;
         }
@@ -1088,8 +1076,7 @@ pub fn clean_all(
             continue;
         }
         if let Err(err) = remove(&on, cfg, &e.fleet, wt, saved) {
-            writeln!(out, "failed {shown}: {err:#}")?;
-            failed += 1;
+            tally(out, &shown, e, &err, &mut tallies)?;
             continue;
         }
         if !pane.is_empty() {
@@ -1162,16 +1149,29 @@ pub fn clean_all(
     } else if freed > 0 {
         writeln!(out, "freed {freed} bytes of build folders")?;
     }
-    if failed > 0 {
-        anyhow::bail!("{failed} worktree(s) could not be removed; see above");
-    }
-    Ok(())
+    anyhow::ensure!(tallies.1 == 0, "{} worktree(s) not removed; see above", tallies.1);
+    Ok(tallies.0)
+}
+
+fn tally(out: &mut dyn Write, shown: &str, e: &Event, err: &anyhow::Error, tallies: &mut (usize, usize)) -> Result<()> {
+    let dirty = format!("{err:#}").contains("contains modified or untracked files");
+    *if dirty { &mut tallies.0 } else { &mut tallies.1 } += 1;
+    let what = if dirty { "keep" } else { "failed" };
+    let agent = e.str("agent").unwrap_or_default();
+    Ok(writeln!(out, "{what} {shown}: {err:#} → drover clean --lane {agent}")?)
 }
 
 const IDLE: &str = "idle-merged";
 
+pub fn kept_row(ctx: &Ctx) -> Option<String> {
+    let n = std::fs::read_to_string(ctx.state.with_file_name("clean.kept")).ok()?;
+    let n = n.trim().parse::<usize>().ok().filter(|n| *n > 0)?;
+    Some(format!("! clean — {n} worktree(s) kept: dirty or unpushed"))
+}
+
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let res = clean(ctx, cfg, r, out, None, (None, None, true), true);
+    let res = clean_all(ctx, cfg, r, out, None, (None, None, true, false), true);
+    let res = res.and_then(|n| Ok(std::fs::write(ctx.state.with_file_name("clean.kept"), n.to_string())?));
     let mark = ctx.state.with_file_name("clean.failed");
     let Err(e) = res else {
         std::fs::remove_file(&mark).ok();
