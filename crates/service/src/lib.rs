@@ -186,10 +186,12 @@ impl Service {
             .ok();
         let v: Value = serde_json::from_str(&line).unwrap_or_default();
         let k = v.at("kick");
-        let fleet = v.at("wake").as_str().or(k.at("fleet").as_str());
-        if let Some(woke) = fleet.and_then(|f| self.fleets.get(f)) {
-            woke.notify_one();
-        }
+        let wake = |f: Option<&str>| {
+            if let Some(woke) = f.and_then(|f| self.fleets.get(f)) {
+                woke.notify_one();
+            }
+        };
+        wake(v.at("wake").as_str());
         if let (Some(f), Some(n)) = (k.at("fleet").as_str(), k.at("issue").as_u64()) {
             let why = k.at("why").as_str().unwrap_or("kick");
             let id = k.at("id").as_str().map(|i| ["--id".to_string(), i.into()]);
@@ -198,6 +200,7 @@ impl Service {
             if self.job(k, KICK_SECS).await.is_none() {
                 drover_core::db::release(&self.ctx.state, &format!("spawn-{f}-{n}.pending"), None);
             }
+            wake(Some(f));
         }
     }
 

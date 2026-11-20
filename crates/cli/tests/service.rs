@@ -192,12 +192,25 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     );
 }
 
-struct Proc(std::process::Child);
+struct Proc(std::process::Child, std::path::PathBuf);
 
 impl Drop for Proc {
     fn drop(&mut self) {
         let _ = self.0.kill();
         let _ = self.0.wait();
+        for _ in 0..10 {
+            let passes = drover::db::leases(&self.1, "drive-").into_iter();
+            for l in passes.filter(|l| !l.key.trim_end_matches(".lock").ends_with(|c: char| c.is_ascii_digit())) {
+                if l.pid == 0 || l.pid == std::process::id() {
+                    continue;
+                }
+                let _ = std::process::Command::new("kill")
+                    .args(["-9", &l.pid.to_string()])
+                    .status();
+                drover::db::release(&self.1, &l.key, Some(&l));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
 }
 
@@ -216,7 +229,7 @@ fn service(c: &drover::Ctx, bin: &std::path::Path, api: &str) -> (Proc, u64) {
         .stderr(std::process::Stdio::null())
         .spawn()
         .unwrap();
-    let p = Proc(child);
+    let p = Proc(child, c.state.clone());
     for _ in 0..200 {
         if let Some(pid) = drover::service::up(c) {
             return (p, pid);
@@ -283,7 +296,9 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
 
     let (a, pid_a) = service(&c, &bin, "127.0.0.1:0");
     pass(&host());
-    assert_eq!(marker().map(|l| u64::from(l.pid)), Some(pid_a));
+    until("the pass took the start slot for the service", || {
+        marker().is_some_and(|l| u64::from(l.pid) == pid_a)
+    });
     until("the spawn reached GitHub", || {
         std::fs::read_to_string(&log).is_ok_and(|s| s.contains("issue view 1"))
     });
@@ -307,7 +322,9 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
     pass(&host());
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().any(|e| e.kind == "stale-marker" && e.issue == Some(1)));
-    assert_eq!(marker().map(|l| u64::from(l.pid)), Some(pid_b));
+    until("the pass took the start slot for the service", || {
+        marker().is_some_and(|l| u64::from(l.pid) == pid_b)
+    });
     until("the spawn was retried", || {
         std::fs::read_to_string(&log).is_ok_and(|s| s.matches("issue view 1").count() == 2)
     });
