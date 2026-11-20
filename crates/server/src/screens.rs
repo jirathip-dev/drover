@@ -1637,6 +1637,10 @@ impl Server<'_> {
         self.op(ctx, &f)
     }
 
+    fn paired_screen(&self, ctx: &Ctx, path: &str, q: &Q) -> Option<Value> {
+        self.build_screen(ctx, path, q, true)
+    }
+
     fn action(&self, ctx: &Ctx, name: &str, a: &Value) -> Result<Value> {
         let v = &a["values"];
         let s = |k: &str| match &v[k] {
@@ -1666,9 +1670,7 @@ impl Server<'_> {
                         ),
                     },
                 };
-                let s = self
-                    .build_screen(ctx, screen, &form(&q), true)
-                    .context("no such screen")?;
+                let s = self.paired_screen(ctx, screen, &form(&q)).context("no such screen")?;
                 return Ok(json!({"ops": [{"op": "screen", "screen": s}]}));
             }
             "drive" => self.form_op(ctx, "drive", &[("fleet", fleet)])?,
@@ -1704,9 +1706,7 @@ impl Server<'_> {
                     let (f, words) = found.context("no issue ticked")?;
                     let mut q = form(&format!("repo={f}"));
                     q.insert("q".into(), list(words));
-                    let s = self
-                        .build_screen(ctx, "/screens/backlog", &q, true)
-                        .context("no backlog")?;
+                    let s = self.paired_screen(ctx, "/screens/backlog", &q).context("no backlog")?;
                     return Ok(json!({"ops": [{"op": "screen", "screen": s}], "toast": "no issue ticked: searched"}));
                 };
                 let mut d = crate::queue::op("add", &ns, false, None, None, None);

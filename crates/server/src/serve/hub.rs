@@ -155,7 +155,6 @@ impl Hub {
         self.kicked.1.notify_one();
     }
 
-    /// The screen `k` as of now, built only when stale and nobody else is building it; its rev and JSON.
     fn read(&self, s: &Server, ctx: &Ctx, k: &Key) -> Option<(u64, Arc<str>)> {
         let now = s.signals(ctx);
         let mut m = lock(&self.keys);
@@ -364,7 +363,6 @@ impl Server<'_> {
         ])
     }
 
-    /// `GET /screens/<x>`: the hub's copy with its `ETag` (`extra`), or 304 when the client holds it.
     pub(super) fn screen_get(
         &self,
         ctx: &Ctx,
@@ -393,7 +391,6 @@ impl Server<'_> {
         ("200 OK", JSON, json.as_bytes().to_vec())
     }
 
-    /// `GET /screens/<x>/stream`: the screen, then its deltas as the hub publishes them, in `{seq, build, ops}` frames.
     pub(super) fn stream(&self, s: &mut TcpStream, req: &str, path: &str, query: &str) -> std::io::Result<()> {
         let (head, base) = (
             req.split("\r\n\r\n").next().unwrap_or_default(),

@@ -1032,7 +1032,6 @@ pub fn new_screen(cfg: &Config, repo: &str) -> Option<Value> {
 }
 
 impl super::Server<'_> {
-    /// A paired reader saw thread `path`'s screen: mark it read.
     pub(super) fn mark_read(&self, ctx: &Ctx, path: &str, paired: bool) {
         let id = path
             .strip_prefix("/screens/threads/")
