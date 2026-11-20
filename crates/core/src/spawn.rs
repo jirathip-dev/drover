@@ -764,6 +764,8 @@ pub const OWN_FILES: &[&str] = &[
     "body.md",
     ".verify-browser.mjs",
     ".verify.md",
+    crate::outbox::FILE,
+    crate::outbox::ACKED,
 ];
 
 const OWN_REPO: [&str; 8] = [

@@ -3,6 +3,11 @@ use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
+/// A lane's outbox in its worktree: drover's own file, never wip.
+pub const FILE: &str = ".drover/outbox.jsonl";
+/// How many outbox lines the main host has delivered: drover's own file, never wip.
+pub const ACKED: &str = ".drover/outbox.acked";
+
 pub const QUEUED: &str = "queued for the main host: drive delivers it within 1 min\n";
 
 /// A lane on another host (spawn exports `DROVER_OUTBOX`): its `DROVER_LANE`.
@@ -15,7 +20,7 @@ pub fn lane() -> Option<String> {
 pub fn queue(lane: &str, args: &[String]) -> Result<PathBuf> {
     let cwd = std::env::current_dir()?;
     let wt = cwd.ancestors().find(|d| d.join(".git").exists());
-    let p = wt.context("no worktree holds the cwd")?.join(".drover/outbox.jsonl");
+    let p = wt.context("no worktree holds the cwd")?.join(FILE);
     std::fs::create_dir_all(p.parent().context("no dir")?)?;
     let mut f = std::fs::File::options().create(true).read(true).append(true).open(&p)?;
     f.lock()?;
