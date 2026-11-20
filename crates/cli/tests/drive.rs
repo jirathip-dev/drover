@@ -1,4 +1,10 @@
 mod common;
+#[path = "drive/remote_unlisted.rs"]
+mod remote_unlisted;
+#[path = "drive/rev_unlisted.rs"]
+mod rev_unlisted;
+#[path = "drive/update_limit.rs"]
+mod update_limit;
 use common::*;
 use drover::events::{append, fold, read, Event};
 use serde_json::json;
@@ -47,6 +53,10 @@ fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
+fn done_at(c: &drover::Ctx, ts: u64, head: &str) {
+    ev(c, ts, "turn-end", json!({"state": "done", "role": "impl", "sha": head}));
+}
+
 fn lane(c: &drover::Ctx, ts: u64, role: &str, agent: &str, dir: &str) -> PathBuf {
     let wt = c.worktrees.join("sendmeter").join(dir);
     std::fs::create_dir_all(&wt).unwrap();
@@ -93,6 +103,7 @@ fn fake<A: AsRef<str>, B: AsRef<str>, C: AsRef<str>>(live: &[(A, B, C)]) -> Fake
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+        .reply("gh api -X POST repos/jirathip-dev/sendmeter/statuses/", "{}")
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
@@ -148,6 +159,7 @@ fn review_spawns_rev_at_the_pushed_head() {
     let c = setup("drive-review");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
+    done_at(&c, 11, &head);
     let r = fake(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy())])
         .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
         .reply("gh pr view issue-12", &pr(&head, "pending"))
@@ -989,6 +1001,12 @@ fn a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_updat
     assert_eq!(state(&c), "fix(1)+u1");
     let (_, out) = run(&c, &pr_at("b2"), &["waiting", "sendmeter"]);
     assert!(
+        !out.contains("to spawn review"),
+        "no review before a passed done: {out}"
+    );
+    done_at(&c, 21, &sha("b2"));
+    let (_, out) = run(&c, &pr_at("b2"), &["waiting", "sendmeter"]);
+    assert!(
         out.contains("waiting for drive (next pass ≤ 5 min) to spawn review"),
         "{out}"
     );
@@ -1008,6 +1026,7 @@ fn a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_updat
         "spawn",
         json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"}),
     );
+    done_at(&c, 32, &sha("c3"));
     let (_, out) = run(&c, &pr_at("c3"), &["waiting", "sendmeter"]);
     assert!(
         out.contains("waiting for drive (next pass ≤ 5 min) to spawn review") && !out.contains("--update"),
@@ -1544,19 +1563,19 @@ fn the_result_line_is_red_on_an_error_green_on_a_start_or_merge_amber_when_all_h
 }
 
 #[test]
-fn a_pr_head_moved_without_a_handoff_is_handed_off_by_the_pr_once_ci_is_done() {
+fn a_pr_head_with_a_passed_done_is_handed_off_by_the_pr() {
     let c = setup("drive-handoff");
     let wt = lane(&c, c.now - 300, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("bee");
+    let d = json!({"state": "done", "role": "impl", "sha": head});
+    append(&c.state, &Event::new(c.now - 200, "sendmeter", Some(12), "turn-end", d)).unwrap();
     let r = |ci: &str| {
         fake(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy())])
             .reply("gh pr view issue-12", &pr(&head, ci))
             .reply(&format!("git -C {} log", wt.display()), &format!("{} 20", sha("a1")))
             .reply("git -C", "")
     };
-    idle(&c, &r("pending"));
-    drover::gh::forget_pr(&c, "sendmeter", 12);
-    let (out, steps) = drive(&c, &r("green"));
+    let (out, steps) = drive(&c, &r("pending"));
     assert_eq!(steps, ["review"], "{out}");
     assert!(out.contains("sendmeter #12 pushed: bee0000 via pr"), "{out}");
     let all = read(&c.state).unwrap();
@@ -1598,6 +1617,7 @@ fn under_limited_admission_a_review_goes_before_the_fleets_new_start() {
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "5"]).0, 0);
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
+    done_at(&c, 11, &head);
     let r = Fake {
         replies: fake(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy())])
             .reply("gh pr view issue-12", &pr(&head, "pending"))
@@ -1714,6 +1734,7 @@ fn a_refused_review_start_shows_waiting_for_a_reviewer_slot() {
     let c = setup("drive-rev-slot");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
+    done_at(&c, 11, &head);
     let r = Fake {
         replies: fake(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy())])
             .reply("gh pr view issue-12", &pr(&head, "pending"))
@@ -1977,35 +1998,6 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     assert_eq!(steps, ["start"], "{out}");
     assert!(!started("").is_empty(), "{:?}", r.calls.borrow());
     assert_eq!(state(&c), "fix(3)");
-}
-
-#[test]
-fn an_extend_during_a_pass_only_requeues_it() {
-    let c = setup("drive-extend-lock");
-    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
-    ev(
-        &c,
-        12,
-        "verdict",
-        json!({"verdict": "FAIL", "sha": sha("3"), "body": "FAIL"}),
-    );
-    ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
-    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
-    let r = fake(NONE)
-        .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
-        .reply("kill -0 4242", "")
-        .reply("git -C", "");
-    let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.ends_with("#12: extend\n"), "{out}");
-    assert!(started("sendmeter-impl-12").is_empty(), "{:?}", r.calls.borrow());
-    assert_eq!(state(&c), "queued");
-    assert!(
-        lease_on(&c, "drive-sendmeter.lock").is_some(),
-        "the pass's lock is left alone"
-    );
-    let all = read(&c.state).unwrap();
-    assert_eq!(all.iter().filter(|e| e.kind == "round-extended").count(), 1);
-    assert_eq!(drover::pending::of(&all, "sendmeter", 12), None);
 }
 
 #[test]
@@ -2660,6 +2652,7 @@ fn old_reviewer(name: &str, status: &str) -> (drover::Ctx, Fake) {
     let rev = lane(&c, 5, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
+    done_at(&c, 11, &head);
     let r = fake(&[
         ("sendmeter-impl-12", "idle", &wt.to_string_lossy()),
         ("sendmeter-rev-12-r1", status, &rev.to_string_lossy()),

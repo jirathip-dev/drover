@@ -443,11 +443,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         }
     });
     let budget = loaded.as_ref().map_or(u64::MAX, |c| c.limits.slow_secs);
-    let events = working(&ctx.state).unwrap_or_default();
-    let spared = loaded
-        .as_ref()
-        .ok()
-        .map(|c| (crate::hosts::idle_off(c, &events), (ctx, c)));
+    let spared = loaded.as_ref().ok().map(|c| (crate::hosts::disabled(c), (ctx, c)));
     let (off, log) = spared.map_or_else(Default::default, |(o, l)| (o, Some(l)));
     let mut pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now))).sparing(off, log);
     pass.until = crate::clock::instant().checked_add(std::time::Duration::from_secs(budget));
@@ -746,16 +742,19 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let why = k.map(|e| format!(" ({} #{})", e.str("why").unwrap_or("?"), e.issue.unwrap_or(0)));
     let d = format!("last kick {}{}", ago(ctx.now, k.map(|e| e.ts)), why.unwrap_or_default());
     rows.push(row("kick", "m", d, ""));
-    for rt in ["shed"].iter().filter(|_| service.is_some()) {
-        let last = events
-            .iter()
-            .rfind(|e| e.kind == "lane-stream" && e.str("runtime") == Some(rt));
-        let Some(e) = last else { continue };
-        let (t, d) = match e.str("why") {
-            None => ("g", format!("live, since {}", ago(ctx.now, Some(e.ts)))),
-            Some(why) => ("a", format!("down {}: {why} · polling", ago(ctx.now, Some(e.ts)))),
+    if let (Some(_), Ok(v)) = (service, crate::link::view::View::load(ctx, cfg)) {
+        let hosts = crate::link::hosts(cfg);
+        let why = |h: &str| v.link(h).and_then(|l| l.why.clone()).unwrap_or_default();
+        let down: Vec<_> = (hosts.iter().filter(|h| !v.live(&h.0)))
+            .map(|h| format!("{} ({})", h.0, why(&h.0)))
+            .collect();
+        let live = format!("{} of {} live", hosts.len() - down.len(), hosts.len());
+        let (t, d) = if down.is_empty() {
+            ("g", live)
+        } else {
+            ("a", format!("{live} · polling {}", down.join(", ")))
         };
-        rows.push(row(&format!("{rt} lane events"), t, d, ""));
+        rows.push(row("links", t, d, ""));
     }
     let (t, d) = phone(ctx, Some(cfg), &events);
     rows.push(row("phone alerts", t, d, "drover push test"));

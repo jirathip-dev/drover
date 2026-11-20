@@ -6,12 +6,10 @@
   or `$TMPDIR`; it is deleted when your lane ends.
 - Logs and downloads (test, lint, CI output) go in your scratch folder `$DROVER_SCRATCH_TARGET`, never the
   worktree.
-- #677: before `drover turn done`, write `why.md` in the worktree root (never commit it: drover puts it on your
-  pushed head as a git note and copies it into the PR body). At most 15 `Key: text` lines, `Owner:` once and last:
-  `Decided: …`, `Because: "spec quote" | q<id> | file:line`, `Rejected: alternative — why`,
-  `Check: what the reviewer should verify`, `Owner: one plain line`. Every `Because:` cites a verbatim spec quote
-  (12+ chars), an answered ask or a `file:line` at your head; no secrets. A bad note is refused `WHY_INVALID`.
-- #925: `turn done` refuses `PR_BODY` until the PR body names your pushed head sha, has `## For humans` and no
-  "Generated with" line: `gh pr edit --body` first.
-- #735: a non-obvious reason goes in that why note (`drover why`), never in a comment: arch-check fails a new
-  comment line but `// SAFETY:` over `unsafe` and one `///` line on a public item.
+- #1362: `drover turn done` is a hard gate, run in your worktree at the pushed head: it refuses `DONE_CHECK` while
+  `HEAD` is not the PR head ("push first") or a done check fails (the fleet's `done_checks`, else `drover arch-check`
+  and `cargo fmt --check` where the repo has them), and `PR_BODY` until the PR body names your pushed head sha, has
+  `## For humans` and no "Generated with" line (`gh pr edit --body` first). A refusal ends nothing and starts no
+  review: fix what it names, push, then `drover turn done` again.
+- #735: a non-obvious reason goes in the PR body, never in a comment: arch-check fails a new comment line but
+  `// SAFETY:` over `unsafe` and one `///` line on a public item.

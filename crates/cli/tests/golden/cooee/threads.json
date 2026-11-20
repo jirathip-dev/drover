@@ -37,6 +37,62 @@
                 "label": "{}",
                 "since": "1970-01-12T12:58:20Z"
               }
+            },
+            {
+              "figure": {
+                "state": "idle"
+              },
+              "id": "t9",
+              "subtitle": {
+                "text": "",
+                "tone": ""
+              },
+              "swipe": [
+                {
+                  "action": "thread-archive",
+                  "label": "archive",
+                  "values": {
+                    "thread": "t9"
+                  }
+                }
+              ],
+              "tap": {
+                "open": "/screens/threads/t9"
+              },
+              "title": "Old thread 9",
+              "type": "row",
+              "value": {
+                "label": "{}",
+                "since": "1970-01-11T21:21:40Z"
+              }
+            },
+            {
+              "figure": {
+                "state": "idle"
+              },
+              "id": "t8",
+              "subtitle": {
+                "text": "",
+                "tone": ""
+              },
+              "swipe": [
+                {
+                  "action": "thread-archive",
+                  "label": "archive",
+                  "values": {
+                    "thread": "t8"
+                  }
+                }
+              ],
+              "tap": {
+                "open": "/screens/threads/t8"
+              },
+              "title": "Old thread 8",
+              "type": "row",
+              "value": {
+                "label": "{}",
+                "since": "1970-01-11T21:20:00Z"
+              }
             }
           ],
           "type": "list"
@@ -50,7 +106,7 @@
           "type": "button"
         }
       ],
-      "header": "all repos · 1 thread",
+      "header": "all repos · 4 threads",
       "id": "r-all",
       "type": "section"
     },
@@ -90,6 +146,62 @@
                 "label": "{}",
                 "since": "1970-01-12T13:41:40Z"
               }
+            },
+            {
+              "figure": {
+                "state": "idle"
+              },
+              "id": "t6",
+              "subtitle": {
+                "text": "",
+                "tone": ""
+              },
+              "swipe": [
+                {
+                  "action": "thread-archive",
+                  "label": "archive",
+                  "values": {
+                    "thread": "t6"
+                  }
+                }
+              ],
+              "tap": {
+                "open": "/screens/threads/t6"
+              },
+              "title": "Old thread 6",
+              "type": "row",
+              "value": {
+                "label": "{}",
+                "since": "1970-01-11T21:16:40Z"
+              }
+            },
+            {
+              "figure": {
+                "state": "idle"
+              },
+              "id": "t5",
+              "subtitle": {
+                "text": "",
+                "tone": ""
+              },
+              "swipe": [
+                {
+                  "action": "thread-archive",
+                  "label": "archive",
+                  "values": {
+                    "thread": "t5"
+                  }
+                }
+              ],
+              "tap": {
+                "open": "/screens/threads/t5"
+              },
+              "title": "Old thread 5",
+              "type": "row",
+              "value": {
+                "label": "{}",
+                "since": "1970-01-11T21:15:00Z"
+              }
             }
           ],
           "type": "list"
@@ -103,9 +215,80 @@
           "type": "button"
         }
       ],
-      "header": "sendmeter · 1 thread",
+      "header": "sendmeter · 4 threads",
       "id": "r-sendmeter",
       "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "l-older-threads",
+          "rows": [
+            {
+              "figure": {
+                "state": "idle"
+              },
+              "id": "t7",
+              "subtitle": {
+                "text": "all repos · ",
+                "tone": ""
+              },
+              "swipe": [
+                {
+                  "action": "thread-archive",
+                  "label": "archive",
+                  "values": {
+                    "thread": "t7"
+                  }
+                }
+              ],
+              "tap": {
+                "open": "/screens/threads/t7"
+              },
+              "title": "Old thread 7",
+              "type": "row",
+              "value": {
+                "label": "{}",
+                "since": "1970-01-11T21:18:20Z"
+              }
+            },
+            {
+              "figure": {
+                "state": "idle"
+              },
+              "id": "t4",
+              "subtitle": {
+                "text": "sendmeter · ",
+                "tone": ""
+              },
+              "swipe": [
+                {
+                  "action": "thread-archive",
+                  "label": "archive",
+                  "values": {
+                    "thread": "t4"
+                  }
+                }
+              ],
+              "tap": {
+                "open": "/screens/threads/t4"
+              },
+              "title": "Old thread 4",
+              "type": "row",
+              "value": {
+                "label": "{}",
+                "since": "1970-01-11T21:13:20Z"
+              }
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "fold": {
+        "line": "▸ 2 older threads"
+      },
+      "id": "older-threads",
+      "type": "card"
     },
     {
       "blocks": [

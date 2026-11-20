@@ -22,13 +22,19 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     if !config_only {
         let sample = crate::host::sample(r);
         let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.load_per_cpu.is_some();
-        row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH");
+        match sample.not_found(&["sysctl", "vm_stat"]).filter(|_| !host) {
+            Some(why) => rows.push(format!("? host — {why}")),
+            None => row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH"),
+        }
         let gh = ok(r, "gh", &["auth", "status"]).is_ok();
         row(&mut rows, gh, '✗', "gh — auth status → gh auth login");
     }
     match Config::load(&ctx.config) {
         Ok(cfg) if config_only => config_rows(ctx, &cfg, r, &mut rows),
-        Ok(cfg) => checks(ctx, &cfg, r, &mut rows),
+        Ok(cfg) => {
+            checks(ctx, &cfg, r, &mut rows);
+            rows.extend(crate::status::doctor(ctx, &cfg));
+        }
         Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
     }
     if json {
@@ -105,6 +111,7 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
     rows.push(format!("✓ config — {}", ctx.config.display()));
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
     rows.extend(cfg.shed().map(|b| crate::shed::line(r, &b.wire)));
+    rows.extend(crate::hygiene::doctor(ctx, cfg, r));
 }
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
@@ -346,12 +353,12 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let Some(m) = h.machine.as_deref() else { continue };
         let on = crate::hosts::On::new(r, Some(m));
         let Some((tags, home)) = crate::hosts::probe(&on) else {
-            let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");
+            let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#}), down {}", crate::hosts::down_for(ctx, m));
             let why = ok::<&str>(&on, "true", &[]).map_or_else(ssh, |_| "probe: unreadable answer".into());
             rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
-            rows.extend(on.shed().map(|_| format!("✗ host {name} shed — unreachable")));
             continue;
         };
+        crate::hosts::went(ctx, m, true);
         let (tags, own) = ([tags, h.tags.clone()].concat(), h.watches_token());
         let bad = host_rows(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
@@ -420,8 +427,12 @@ pub fn serve_down(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<String> {
 
 fn serve_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>, addr: &str) {
     let line = format!("serve — listening on {addr} → drover serve --addr {addr}");
-    let up = ok(r, "lsof", &["-nP", "-iTCP:7777", "-sTCP:LISTEN"]).is_ok();
-    row(rows, up, '✗', &line);
+    let lsof = r.run("lsof", &argv(&["-nP", "-iTCP:7777", "-sTCP:LISTEN"]));
+    if crate::runner::not_found(&lsof) {
+        rows.push("? serve — lsof not found".into());
+    } else {
+        row(rows, lsof.is_ok_and(|o| o.code == 0), '✗', &line);
+    }
     let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
     let (at, job) = (cfg.serve.addr(), crate::timer::job_pid(ctx, r, label));
     let held = crate::timer::listeners(r, &at);

@@ -5,6 +5,7 @@ use crate::events::{
 use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
+use crate::hygiene::Check;
 use crate::lanes::Health;
 use crate::runner::{ok, Runner};
 use crate::session::{Session, Status};
@@ -68,6 +69,28 @@ pub fn config(ctx: &Ctx) -> Result<Config> {
     }
 }
 
+fn links(ctx: &Ctx, cfg: &Config, view: &crate::link::view::View, events: &[Event]) -> Result<()> {
+    let linked = crate::service::up(ctx).map_or(vec![], |_| crate::link::hosts(cfg));
+    for name in linked.iter().map(|h| h.0.as_str()) {
+        let h = view.link(name).filter(|_| !view.live(name));
+        let long = h.is_some_and(|h| ctx.now.saturating_sub(h.since) >= cfg.limits.link_down_minutes * 60);
+        let down = long && !crate::hosts::lanes_on(cfg, events, name).is_empty();
+        let was = |e: &&Event| e.str("host") == Some(name) && matches!(e.kind.as_str(), "link-down" | "link-up");
+        let last = events.iter().rev().find(was);
+        if down != last.is_some_and(|e| e.kind == "link-down") {
+            let (kind, why) = if down {
+                ("link-down", h.and_then(|h| h.why.clone()))
+            } else {
+                ("link-up", None)
+            };
+            let why = format!("{name}: link {}: {}", &kind[5..], why.unwrap_or_else(|| "live".into()));
+            let d = json!({"host": name, "reason": why, "since": h.map(|h| h.since)});
+            crate::events::emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d).push())?;
+        }
+    }
+    Ok(())
+}
+
 /// Each alert's dedup key is built from the issue's last activity: once per state, again after a change.
 pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = crate::timer::revive(ctx, cfg, r).and_then(|()| working(&ctx.state))?;
@@ -116,7 +139,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
-    let synced = working(&ctx.state)?;
+    let synced = links(ctx, cfg, &view, &events).and_then(|()| working(&ctx.state))?;
     for name in cfg.hosts.keys() {
         let mut tries = (synced.iter().rev()).filter(|e| e.kind == "host-sync" && e.str("host") == Some(name));
         let Some(e) = tries.next().filter(|e| e.val("ok") == false) else {
@@ -1257,9 +1280,19 @@ fn save(
 ) -> Result<Option<String>> {
     let agent = e.str("agent").unwrap_or_default();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
-    let (w, sha) = match snapshot(r, wt, &wip_branch(ctx, r, agent), "wip: auto-saved by drover") {
-        Err(Snap::Secret(hit)) => {
-            let why = format!("unsaved work has a secret ({hit})");
+    let chk = crate::hygiene::of(ctx, Some(r.r), cfg, &e.fleet);
+    let (w, sha) = match snapshot(
+        r,
+        wt,
+        (&wip_branch(ctx, r, agent), "wip: auto-saved by drover"),
+        chk.as_ref(),
+    ) {
+        Err(Snap::Secret(hit) | Snap::Leak(hit)) => {
+            let why = if hit.starts_with("REFUSED") {
+                hit
+            } else {
+                format!("unsaved work has a secret ({hit})")
+            };
             let d = json!({"key": wt, "agent": agent, "reason": format!("{wt}: {why}; kept")});
             fire(ctx, cfg, out, events, (&e.fleet, e.issue), "wip-blocked", d)?;
             return Ok(Some(why));
@@ -1965,7 +1998,14 @@ fn kill_as(
     }
     let wip = match wip {
         Some(w) => {
-            let (w, skip) = save_on(&on, agent, wt.unwrap_or_default(), &w, "wip: kill snapshot")?;
+            let chk = crate::hygiene::of(ctx, Some(r), cfg, &e.fleet);
+            let (w, skip) = save_on(
+                &on,
+                agent,
+                wt.unwrap_or_default(),
+                (&w, "wip: kill snapshot"),
+                chk.as_ref(),
+            )?;
             let _ = skip.is_empty()
                 || writeln!(out, "skipped (build output or over the size caps): {}", skip.join(", ")).is_ok();
             Some(w)
@@ -2194,8 +2234,14 @@ fn close_gone(ctx: &Ctx, on: &On, agent: &str, pane: &str) -> Result<()> {
     Ok(())
 }
 
-fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<(String, Vec<String>)> {
-    match snapshot(on, wt, w, msg) {
+fn save_on(
+    on: &On,
+    agent: &str,
+    wt: &str,
+    (w, msg): (&str, &str),
+    chk: Option<&Check>,
+) -> Result<(String, Vec<String>)> {
+    match snapshot(on, wt, (w, msg), chk) {
         Err(Snap::Failed(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
             format!("{agent}: wip snapshot failed ({e:#}); index restored, nothing pushed, pane kept"),
@@ -2204,21 +2250,31 @@ fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<(String
             "SECRET_IN_WIP",
             format!("{agent}'s unpushed diff has a secret ({hit}); nothing pushed, pane kept"),
         ),
+        Err(Snap::Leak(why)) => crate::gate::refused(
+            crate::hygiene::CODE,
+            format!(
+                "{agent}'s wip snapshot: {}; nothing pushed, pane kept",
+                why.split_once(": ").map_or("", |w| w.1)
+            ),
+        ),
         Err(Snap::Push(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
-            format!("{agent}: wip push failed ({e:#}); committed in its worktree, nothing pushed, pane kept"),
+            format!("{agent}: wip push failed ({e:#}); nothing committed, nothing pushed, pane kept"),
         ),
         Ok(ws) => Ok(ws),
     }
 }
 
 /// A superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any.
-pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<String>> {
+pub fn save_lane(ctx: &Ctx, (cfg, fleet): (&Config, &str), on: &On, agent: &str, wt: &str) -> Result<Option<String>> {
     if !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
         return Ok(None);
     }
-    let w = wip_branch(ctx, on, agent);
-    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|(w, _)| Some(w))
+    let (w, chk) = (
+        wip_branch(ctx, on, agent),
+        crate::hygiene::of(ctx, Some(on.r), cfg, fleet),
+    );
+    save_on(on, agent, wt, (&w, "wip: supersede snapshot"), chk.as_ref()).map(|(w, _)| Some(w))
 }
 
 pub(crate) fn wip_branch(ctx: &Ctx, on: &On, agent: &str) -> String {
@@ -2241,8 +2297,9 @@ fn tag(seed: &str) -> String {
 
 /// Push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first); the branch it went to.
 pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<String> {
-    snapshot(r, wt, w, msg).map(|(w, _)| w).map_err(|e| match e {
+    snapshot(r, wt, (w, msg), None).map(|(w, _)| w).map_err(|e| match e {
         Snap::Secret(hit) => anyhow::anyhow!("a secret in the diff ({hit})"),
+        Snap::Leak(why) => anyhow::anyhow!("{why}"),
         Snap::Failed(e) | Snap::Push(e) => e,
     })
 }
@@ -2250,6 +2307,7 @@ pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<String> 
 enum Snap {
     Failed(anyhow::Error),
     Secret(String),
+    Leak(String),
     Push(anyhow::Error),
 }
 
@@ -2331,7 +2389,12 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     Ok(())
 }
 
-fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<(String, Vec<String>), Snap> {
+fn snapshot(
+    r: &dyn Runner,
+    wt: &str,
+    (w, msg): (&str, &str),
+    chk: Option<&Check>,
+) -> std::result::Result<(String, Vec<String>), Snap> {
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
     let undo = |e: anyhow::Error| {
         git(&["reset", "-q"]).ok();
@@ -2374,30 +2437,18 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         ))
     };
     let (staged, log) = snap().map_err(undo)?;
-    let mut head = false;
-    let mut file = "";
-    let mut n = 0;
-    let mut hit = None;
-    for l in staged.lines().chain(log.lines()) {
-        head = (head || l.starts_with("diff --git ")) && !l.starts_with("@@");
-        if let Some((_, h)) = l.strip_prefix("@@ ").and_then(|h| h.split_once('+')) {
-            n = h.split([',', ' ']).next().and_then(|s| s.parse().ok()).unwrap_or(1);
-        } else if head {
-            file = l.strip_prefix("+++ b/").unwrap_or(file);
-        } else if let Some(a) = l.strip_prefix('+').filter(|_| hit.is_none()) {
-            let m = crate::lanes::redact(a.trim());
-            if m != a.trim() {
-                hit = Some(format!("{file}:{n}: {m}"));
-            }
-        }
-        if !head && l.starts_with(['+', ' ']) {
-            n += 1;
-        }
-    }
+    let diff = format!("{staged}\n{log}");
+    let secret = |a: &str| Some(crate::lanes::redact(a.trim())).filter(|m| m != a.trim());
+    let leak = chk.and_then(|c| Some((c, crate::hygiene::hits(&diff, |l| c.find(l)).into_iter().next()?)));
+    let hit = match crate::hygiene::hits(&diff, secret).into_iter().next() {
+        Some((_, at, m)) => Some(Snap::Secret(format!("{at}: {m}"))),
+        None => leak.map(|(c, (_, at, p))| Snap::Leak(crate::hygiene::why(&c.repo, &at, &p))),
+    };
     if let Some(hit) = hit {
         git(&["reset", "-q"]).ok();
-        return Err(Snap::Secret(hit));
+        return Err(hit);
     }
+    let before = git(&["rev-parse", "HEAD"]).map_err(undo)?;
     if !staged.is_empty() {
         let unset = ["user.name", "user.email"].iter().any(|k| git(&["config", k]).is_err());
         let id: &[&str] = if unset {
@@ -2415,5 +2466,8 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         p => p,
     }
     .map(|w| (w, skip))
-    .map_err(Snap::Push)
+    .map_err(|e| {
+        git(&["reset", "-q", before.trim()]).ok();
+        Snap::Push(e)
+    })
 }

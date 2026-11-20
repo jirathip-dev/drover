@@ -159,6 +159,8 @@ fn a_pr_outside_ui_paths_skips_verify_and_goes_to_the_gates() {
         (Some(head.as_str()), Some("verify"))
     );
     assert!(!started(&sh, "sendmeter-verify"));
+    let post = format!("gh api -X POST repos/jirathip-dev/sendmeter/statuses/{head} -f state=success -f context=drover/verify -f description=verify-skipped: no design stage, no UI files, not queued --verify");
+    assert!(r.called(&post), "{:?}", r.calls.borrow());
     drive(&c, &r);
     assert!(r.called(&format!(
         "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
@@ -232,6 +234,8 @@ fn no_recipe_logs_verify_no_recipe_shows_it_and_goes_on_to_the_gates() {
     assert!(out.contains("verify-no-recipe"), "{out}");
     assert_eq!(kinds(&c, "verify-no-recipe").len(), 1);
     assert!(!started(&sh, "sendmeter-verify"));
+    let post = format!("gh api -X POST repos/jirathip-dev/sendmeter/statuses/{head} -f state=success -f context=drover/verify -f description=verify-no-recipe: ");
+    assert!(r.called(&post), "{:?}", r.calls.borrow());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let res =
         String::from_utf8_lossy(&s.respond(&format!("GET /api/v1/queue HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now))
@@ -760,4 +764,107 @@ fn a_same_name_verify_lane_without_a_verdict_is_still_lane_live() {
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED LANE_LIVE: live agent(s)"), "{out}");
     assert!(kinds(&c, "supersede").is_empty() && !sh.called("run", "sendmeter-verify-12-r1"));
+}
+
+fn extend_ask(c: &drover::Ctx, ts: u64) {
+    let q = json!({"id": "q5", "question": "One more round for #12? (lane blocked)",
+        "options": ["one more round", "park"], "recommend": 1, "kind": "owner", "extend": true, "spawn": true});
+    ev(c, ts, "needs-decision", q);
+}
+
+fn says(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
+    let (code, out) = run(c, r, args);
+    assert_eq!(code, 0, "{args:?}: {out}");
+    out
+}
+
+#[test]
+fn an_extend_ask_closes_once_its_issue_goes_on_to_ready_and_holds_no_verify_start() {
+    let (c, sh) = sctx("verify-extend-ask", &config());
+    let head = sha("abc");
+    let r = fake(&head, "web/src/queue.ts\n").reply(RECIPE, "");
+    ev(
+        &c,
+        10,
+        "spawn",
+        json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"}),
+    );
+    ev(&c, 12, "needs-human", json!({"reason": "lane blocked"}));
+    extend_ask(&c, 13);
+    ev(
+        &c,
+        20,
+        "spawn",
+        json!({"role": "rev", "stage": "rev", "check": true, "agent": "sendmeter-rev-12-r1"}),
+    );
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "stage": "rev", "loop": "rev", "body": "PASS"}),
+    );
+    assert_eq!(state(&c), "ready");
+    let all = says(&c, &r, &["asks", "sendmeter", "--all"]);
+    let row = all.lines().find(|l| l.contains("q5")).unwrap_or_default();
+    assert!(row.contains("closed: superseded"), "{all}");
+    assert!(!says(&c, &r, &["asks", "sendmeter"]).contains("q5"));
+    let status = says(&c, &r, &["status", "sendmeter"]);
+    assert!(!status.contains("waiting on your answer"), "{status}");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cards =
+        String::from_utf8_lossy(&s.respond(&format!("GET /screens/cards HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now))
+            .into_owned();
+    assert!(
+        cards.starts_with("HTTP/1.1 200") && !cards.contains("ask-q5"),
+        "{cards}"
+    );
+    drive(&c, &r);
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{:?}", sh.methods());
+    assert_eq!(state(&c), "verify(1)");
+}
+
+#[test]
+fn answering_an_extend_ask_at_ready_closes_it_and_changes_nothing_else() {
+    for choice in ["1", "2"] {
+        let (c, head, _sh) = passed(&format!("verify-extend-ready-{choice}"), &config(), false);
+        let r = fake(&head, "web/src/queue.ts\n");
+        extend_ask(&c, 40);
+        let before = read(&c.state).unwrap().len();
+        says(&c, &r, &["answer", "sendmeter", "q5", choice]);
+        assert!(!says(&c, &r, &["asks", "sendmeter"]).contains("q5"), "{choice}");
+        let evs = read(&c.state).unwrap().to_vec();
+        let new: Vec<&str> = evs[before..].iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(new, ["decision"], "{choice}");
+        assert_eq!(state(&c), "ready", "{choice}");
+    }
+}
+
+#[test]
+fn an_extend_ask_posted_at_ready_holds_no_verify_start() {
+    let (c, head, sh) = passed("verify-extend-open", &config(), false);
+    let r = fake(&head, "web/src/queue.ts\n").reply(RECIPE, "");
+    extend_ask(&c, 40);
+    let out = drive(&c, &r);
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{out}");
+    assert_eq!(state(&c), "verify(1)");
+}
+
+#[test]
+fn an_extend_ask_a_log_left_open_closes_on_the_next_read() {
+    let (c, _sh) = sctx("verify-extend-upgrade", &config());
+    let r = fake(&sha("abc"), "web/src/queue.ts\n");
+    ev(&c, 12, "needs-human", json!({"reason": "lane blocked"}));
+    extend_ask(&c, 13);
+    ev(&c, 20, "spawn", json!({"role": "rev", "agent": "sendmeter-rev-12-r1"}));
+    let db = drover::db::file(&c.state);
+    std::thread::spawn(move || {
+        let c = rusqlite::Connection::open(db).unwrap();
+        c.execute_batch("UPDATE asks SET rank = NULL, closed = NULL; PRAGMA user_version = 2;")
+            .unwrap();
+    })
+    .join()
+    .unwrap();
+    let all = says(&c, &r, &["asks", "sendmeter", "--all"]);
+    let row = all.lines().find(|l| l.contains("q5")).unwrap_or_default();
+    assert!(row.contains("closed: superseded"), "{all}");
 }

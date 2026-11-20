@@ -295,7 +295,7 @@ fn schema_validation_names_the_problem() {
         ),
         (
             r#"{"load_scene": {"kind": "rain"}}"#,
-            "`load_scene` must be {\"kind\": weather|heat|light|none",
+            "`load_scene` must be {\"kind\": weather|heat|light|sign|none",
         ),
         (
             r#"{"load_scene": {"kind": "heat", "levels": {"hot": "x"}}}"#,
@@ -612,6 +612,8 @@ fn stages_species_and_a_light_dark_scheme_are_checked() {
         "load_scene": {"kind": "light", "levels": {"calm": "sun"}}}"##;
     validate(ok.as_bytes()).unwrap();
     validate(br#"{"scheme": {"light": "paper", "dark": "nord"}}"#).unwrap();
+    validate(br#"{"load_scene": {"kind": "sign"}}"#).unwrap();
+    validate(br#"{"load_scene": {"kind": "sign", "levels": {"held": "catastrophic"}}}"#).unwrap();
 }
 
 #[test]

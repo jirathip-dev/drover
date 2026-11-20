@@ -25,6 +25,8 @@ pub struct Policy {
     pub cap: bool,
     /// A design lane: its edits land only under its issue's design paths.
     pub design: Option<Design>,
+    /// A public fleet's text check (`PUBLIC_LEAK`); none for a private repo.
+    pub hygiene: Option<crate::hygiene::Check>,
 }
 
 /// A design lane's worktree `root` and the folders under it (`crate::design::Recipe`) it may write.
@@ -50,6 +52,9 @@ pub struct Rules {
     /// A `cap:` issue's lane, frozen at spawn from the main host's title cache.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cap_raise: bool,
+    /// A public fleet's text check, resolved where a runner can read the repo's visibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hygiene: Option<crate::hygiene::Check>,
 }
 
 impl Rules {
@@ -79,8 +84,33 @@ impl Rules {
             reviewer: family == Some("rev") || role == "triage",
             builds: !matches!(role, "lesson" | "triage") && family == Some("impl"),
             cap_raise: false,
+            hygiene: None,
         }
     }
+}
+
+/// Lane `fleet:issue:role`'s rules: its frozen rules file (`DROVER_RULES`), else fleet.toml's with the fleet's text check.
+pub fn lane_rules(ctx: &crate::Ctx, lane: &str) -> Result<Rules, String> {
+    if let Some(p) = crate::config::env_os("DROVER_RULES") {
+        let p = PathBuf::from(p);
+        let bad = |e: &dyn std::fmt::Display| format!("rules file {} is unreadable ({e})", p.display());
+        let text = std::fs::read_to_string(&p).map_err(|e| bad(&e))?;
+        return serde_json::from_str(&text).map_err(|e| bad(&e));
+    }
+    let cfg = Config::load(&ctx.config).map_err(|e| {
+        crate::stderr!("drover hook: {e:#}");
+        "fleet.toml failed to load".to_string()
+    })?;
+    let mut it = lane.split(':');
+    let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
+    if !cfg.fleet.contains_key(fleet) {
+        return Err(format!("fleet `{fleet}` is not in fleet.toml"));
+    }
+    let host = crate::config::env("DROVER_HOST").unwrap_or_default();
+    Ok(Rules {
+        hygiene: crate::hygiene::of(ctx, None, &cfg, fleet),
+        ..Rules::resolve(&cfg, fleet, role, &host)
+    })
 }
 
 /// Lane spawn `sp` froze rules (a remote lane's) that fleet.toml now resolves otherwise: a respawn takes them.
@@ -91,8 +121,13 @@ pub fn rules_stale(cfg: &Config, fleet: &str, sp: &crate::events::Event) -> bool
         .get("rules")
         .and_then(|r| r.get("cap_raise"))
         .and_then(serde_json::Value::as_bool);
+    let hygiene = sp
+        .data
+        .get("rules")
+        .and_then(|r| serde_json::from_value(r.get("hygiene")?.clone()).ok());
     let now = Rules {
         cap_raise: cap_raise.unwrap_or_default(),
+        hygiene,
         ..Rules::resolve(cfg, fleet, role, host)
     };
     let now = serde_json::to_value(now).ok();
@@ -179,7 +214,8 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
     if dialects().any(|d| d.shell == tool) {
         let cmd = ti["command"].as_str().unwrap_or_default();
         let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
-        return bash(cmd, cwd, p, cur_branch);
+        let leak = p.hygiene.as_ref().and_then(|c| crate::hygiene::gh_text(c, cmd, cwd));
+        return leak.or_else(|| bash(cmd, cwd, p, cur_branch));
     }
     if !dialects().any(|d| d.edits.contains(&tool)) {
         return None;
@@ -273,8 +309,8 @@ fn notes(t: &[&str]) -> Option<String> {
         (rest.iter().position(|w| *w == "notes")).is_some_and(|i| rest.iter().skip(i).any(|w| writes.contains(w)));
     let push = rest.contains(&"push") && rest.iter().any(|w| w.contains("refs/notes"));
     (write || push).then(|| {
-        "REFUSED NOTES_DROVER_ONLY: only drover writes or pushes why notes: write why.md, then \
-        `drover turn done` (#677)"
+        "REFUSED NOTES_DROVER_ONLY: lanes write and push no git notes; a non-obvious reason goes in the \
+        PR body (#1362)"
             .into()
     })
 }
@@ -601,6 +637,13 @@ fn gh(t: &[&str]) -> Option<String> {
         );
     }
     let api = rest.first() == Some(&"api");
+    let status = |w: &&str| w.contains("/statuses/") || w.ends_with("/statuses") && api_writes(rest);
+    if api && rest.iter().any(status) {
+        return Some(
+            "only drover posts commit statuses (drover/review, drover/verify, drover/override), from the main host"
+                .into(),
+        );
+    }
     let comment = rest
         .windows(2)
         .any(|w| w == ["issue", "comment"] || w == ["pr", "comment"] || w == ["pr", "review"])

@@ -488,6 +488,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "base64",
+ "blocks",
  "drover-chat",
  "drover-core",
  "drover-server",
@@ -510,6 +511,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "drover-core",
+ "drover-server",
  "ratatui",
  "serde_json",
 ]
@@ -547,6 +549,7 @@ dependencies = [
  "serde",
  "serde_json",
  "swag",
+ "tokio",
  "toml",
  "ts-rs",
 ]

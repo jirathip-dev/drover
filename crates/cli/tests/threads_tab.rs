@@ -150,6 +150,21 @@ fn recorded(name: &str) -> drover::Ctx {
 #[test]
 fn the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only() {
     let c = recorded("threads-get");
+    for (n, fleet) in [
+        (4, "sendmeter"),
+        (5, "sendmeter"),
+        (6, "sendmeter"),
+        (7, "all"),
+        (8, "all"),
+        (9, "all"),
+    ] {
+        let d = json!({"thread": format!("t{n}"), "title": format!("Old thread {n}"), "harness": "claude"});
+        append(
+            &c.state,
+            &Event::new(T - 60_000 + n * 100, fleet, None, "thread-new", d),
+        )
+        .unwrap();
+    }
     let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let list = get(&s, "/screens/threads", "");
@@ -161,7 +176,7 @@ fn the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only() {
         .iter()
         .map(|b| b["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, ["r-all", "r-sendmeter", "archived"]);
+    assert_eq!(ids, ["r-all", "r-sendmeter", "older-threads", "archived"]);
     assert_eq!(
         find(&list, "t2")["subtitle"]["text"],
         "! choose · conductor: Retry-After only, or the X-RateLimit headers too?"
@@ -533,21 +548,28 @@ fn the_model_and_effort_picks_are_one_row_of_dropdowns_and_a_model_pick_reaches_
     let js = format!("window.late = (async () => {{ {CMP}
 (await wait(() => q('.row[data-id=\"t3\"]'))).click();
 const pk = await wait(() => q('.cmp .pk'));
-const sel = all('.cmp .pk select'), m = q('.cmp .pk select[aria-label=model]');
-const one = Number(sel.length === 2 && sel.every(s => s.offsetTop === sel[0].offsetTop) && !q('.cmp .chips'));
+const dd = all('.cmp .pk .dd'), m = q('.cmp .pk .dd [aria-label^=model]');
+const one = Number(dd.length === 2 && dd.every(s => s.offsetTop === dd[0].offsetTop) && !q('.cmp .chips') && !q('select'));
 const low = Number(pk.getBoundingClientRect().height <= q('.cmp .cr').getBoundingClientRect().height);
-const opts = [...m.options].map(o => o.value).join(',');
-m.value = 'sonnet';
-m.dispatchEvent(new Event('change'));
-const bar = await wait(() => Number(q('.row.sticky')?.textContent.includes('sonnet') && q('.cmp .pk select[aria-label=model]')?.value === 'sonnet'));
-return [one, low, Number(opts === 'opus,sonnet'), bar];
+const sent = [], real = window.fetch;
+window.fetch = (u, o) => {{ if (String(u).endsWith('/action')) sent.push(JSON.parse(o.body)); return real(u, o); }};
+m.click();
+const ul = await wait(() => q('.cmp .ddp [role=listbox]'));
+const opts = all('.cmp .ddp [role=option]').map(o => o.textContent).join(',');
+const r = q('.cmp .ddp').getBoundingClientRect();
+const inside = Number(r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth && r.bottom <= m.getBoundingClientRect().top);
+const open = Number(m.getAttribute('aria-expanded') === 'true' && document.activeElement === ul);
+all('.cmp .ddp [role=option]').find(o => o.textContent === 'sonnet').click();
+const bar = await wait(() => Number(q('.row.sticky')?.textContent.includes('sonnet') && q('.cmp .pk .dd [aria-label^=model]')?.textContent.includes('sonnet')));
+const req = Number(sent.length === 1 && sent[0].action === 'thread-model' && sent[0].values.model === 'sonnet' && !q('.cmp .ddp'));
+return [one, low, Number(opts === 'opus,sonnet'), inside, open, bar, req];
 }})()");
     let extra = "\n[fleet.sendmeter.role.lesson]\nharness = \"claude\"\nmodel = \"sonnet\"\n";
     let v = composer_in_webkit_with("threads-webkit-picks", extra, &js);
     assert_eq!(
         v,
-        [1.0, 1.0, 1.0, 1.0],
-        "two dropdowns in one row, no taller than the send row, the harness's models, the pick in the bar"
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        "two dropdowns in one row, no taller than the send row, the harness's models, the list above the chip inside 390, focused, the pick in the bar, one model post"
     );
 }
 
@@ -802,8 +824,9 @@ const pill = Number(!!(await wait(() => q('.cmp .pill .pt')))?.textContent.start
 type('after this');
 const go = q('.cmp .cr button.primary'), label = Number(go.textContent === 'queue');
 go.click();
-const queued = await wait(() => all('.cmp .qd').filter(r => r.textContent.includes('after this')).length);
-q('.cmp .qd button.primary').click();
+const now = await wait(() => all('.cmp .qd').find(r => r.textContent.includes('after this'))?.querySelector('button.primary'));
+const queued = Number(!!now);
+now?.click();
 const steered = await wait(() => Number(!q('.cmp .qd') && all('.card.k-you').some(c => c.textContent.includes('after this'))));
 return [pill, label, queued, steered];
 }})()");
@@ -1011,4 +1034,112 @@ fn two_panes_in_webkit_at_1440_scroll_on_their_own_and_a_list_update_keeps_the_t
         out["empty"]["text"].as_str().unwrap().contains("new thread") && out["empty"]["list"] == 60,
         "{out}"
     );
+}
+
+#[test]
+fn one_older_card_holds_every_repos_older_threads_and_an_archive_brings_none_up() {
+    let c = ctx(&tmpdir("threads-older-card"), CONFIG);
+    let r = OnShed::new(Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let ev =
+        |ts: u64, fleet: &str, kind: &str, d: Value| append(&c.state, &Event::new(ts, fleet, None, kind, d)).unwrap();
+    let new = |ts, fleet: &str, id: &str| {
+        ev(
+            ts,
+            fleet,
+            "thread-new",
+            json!({"thread": id, "title": id, "harness": "claude"}),
+        );
+    };
+    for n in 1..=5 {
+        new(T - 1_000 + n * 10, "sendmeter", &format!("s{n}"));
+    }
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let rows = |list: &Value, id: &str| -> Vec<String> {
+        find(list, id)["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap().into())
+            .collect()
+    };
+    let ids = |list: &Value| -> Vec<String> {
+        list["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b["id"].as_str().unwrap().into())
+            .collect()
+    };
+    let list = get(&s, "/screens/threads", &ck);
+    assert_eq!(rows(&list, "l-sendmeter"), ["s5", "s4", "s3"]);
+    assert_eq!(rows(&list, "l-older-threads"), ["s2", "s1"]);
+    assert_eq!(ids(&list), ["r-all", "r-sendmeter", "older-threads"]);
+    assert_eq!(find(&list, "older-threads")["fold"]["line"], "▸ 2 older threads");
+    assert_eq!(find(&list, "s2")["subtitle"]["text"], "sendmeter · ");
+    assert_eq!(find(&list, "s2")["swipe"][0]["action"], "thread-archive");
+    assert_eq!(find(&list, "s2")["tap"], json!({"open": "/screens/threads/s2"}));
+
+    let arch = json!({"screen": "threads", "block": "s4", "action": "thread-archive", "values": {"thread": "s4"}});
+    let (status, v) = req(&s, "POST", "/action", &arch.to_string(), &ck);
+    assert_eq!(status, 200, "{v}");
+    let list = get(&s, "/screens/threads", &ck);
+    assert_eq!(rows(&list, "l-sendmeter"), ["s5", "s3"]);
+    assert_eq!(rows(&list, "l-older-threads"), ["s2", "s1"]);
+    assert_eq!(rows(&list, "l-archived"), ["s4"]);
+    assert_eq!(find(&list, "r-sendmeter")["header"], "sendmeter · 4 threads");
+
+    ev(
+        T - 100,
+        "sendmeter",
+        "thread-msg",
+        json!({"thread": "s1", "from": "owner", "text": "back"}),
+    );
+    let list = get(&s, "/screens/threads", &ck);
+    assert_eq!(rows(&list, "l-sendmeter"), ["s1", "s5"]);
+    assert_eq!(rows(&list, "l-older-threads"), ["s3", "s2"]);
+
+    new(T - 90, "sendmeter", "s6");
+    new(T - 80, "all", "a1");
+    let list = get(&s, "/screens/threads", &ck);
+    assert_eq!(rows(&list, "l-sendmeter"), ["s6", "s1", "s5"]);
+    assert_eq!(rows(&list, "l-older-threads"), ["s3", "s2"]);
+
+    for n in 2..=4 {
+        new(T - 2_000 + n, "all", &format!("a{n}"));
+    }
+    ev(
+        T - 70,
+        "sendmeter",
+        "thread-msg",
+        json!({"thread": "s2", "from": "owner", "text": "up"}),
+    );
+    let list = get(&s, "/screens/threads", &ck);
+    assert_eq!(rows(&list, "l-sendmeter"), ["s2", "s6", "s1"]);
+    assert_eq!(rows(&list, "l-all"), ["a1", "a4", "a3"]);
+    assert_eq!(rows(&list, "l-older-threads"), ["s5", "s3", "a2"]);
+    assert_eq!(find(&list, "a2")["subtitle"]["text"], "all repos · ");
+    assert!(
+        !list.to_string().contains("older-sendmeter") && !list.to_string().contains("older-all"),
+        "{list}"
+    );
+
+    let restore = json!({"screen": "threads", "block": "s4", "action": "thread-restore", "values": {"thread": "s4"}});
+    assert_eq!(req(&s, "POST", "/action", &restore.to_string(), &ck).0, 200);
+    let list = get(&s, "/screens/threads", &ck);
+    assert_eq!(rows(&list, "l-older-threads"), ["s5", "s4", "s3", "a2"]);
+    assert_eq!(ids(&list), ["r-all", "r-sendmeter", "older-threads"]);
+}
+
+#[test]
+fn no_older_thread_sends_no_older_card() {
+    let c = ctx(&tmpdir("threads-no-older"), CONFIG);
+    for n in 1..=3 {
+        let d = json!({"thread": format!("s{n}"), "title": "x", "harness": "claude"});
+        append(&c.state, &Event::new(T - 100 + n, "sendmeter", None, "thread-new", d)).unwrap();
+    }
+    let r = OnShed::new(Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let list = get(&s, "/screens/threads", "");
+    assert!(!list.to_string().contains("older"), "{list}");
 }

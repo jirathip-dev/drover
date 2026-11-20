@@ -14,6 +14,5 @@
 - A second build or checkout (base, staging, head) goes under `$DROVER_SCRATCH_TARGET` only (builds with
   `CARGO_TARGET_DIR=$DROVER_SCRATCH_TARGET/target`, checkouts in `$DROVER_SCRATCH_TARGET/<name>`), never `/tmp`
   or `$TMPDIR`; it is deleted when your lane ends.
-- #677: a why note that contradicts the diff is a blocking finding (`Proof: spec`: the note line `>` quoted, plus
-  the `file:line`); no why note for the round may be one too.
-- #735: read the commits' why notes (`drover why <file:line>`): the reasons live there, not in comments.
+- #1362: the PR body's head-sha anchor, `## For humans` and format are `drover turn done`'s gate, never findings:
+  `drover verdict` refuses a blocker tagged `[why-note]`, `[pr-body]` or `[format]` (`PAPERWORK`).

@@ -27,12 +27,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+mod conn;
 #[path = "cooee.rs"]
 mod cooee;
 mod fresh;
 mod jobs;
 #[path = "screens.rs"]
 mod screens;
+pub use screens::local::{Done, Local, Place};
 mod slo;
 mod v1;
 mod wire;
@@ -130,6 +132,7 @@ fn sent(s: &mut TcpStream, mut b: &[u8], end: Instant) -> bool {
 
 type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>, String)>>>;
 const PER_DEVICE: usize = 4;
+const STREAMS_PER_DEVICE: usize = 16;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
 const TOO_LARGE: &[u8] = b"HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"line\":\"request body too large\"}";
@@ -147,10 +150,6 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
     serve_with(ctx, r, l, read_only, None)
 }
 
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "public API: the handed-over listener lives as long as the server"
-)]
 pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho: Option<&Handover>) -> Result<()> {
     devices::cooee_token(ctx)?;
     let addr = (!read_only)
@@ -191,7 +190,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             ..Server::new(ctx, r, s.addr.clone())
         },
     );
-    let (s, busy, open) = (&s, &AtomicUsize::new(0), &AtomicUsize::new(0));
+    let s = &s;
     std::thread::scope(|sc| {
         let limits = || Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
         sc.spawn(move || loop {
@@ -229,29 +228,31 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         if let Some((h, sock)) = ho.zip(sock) {
             sc.spawn(move || h.control(&sock));
         }
-        for mut st in l.incoming().flatten() {
-            if busy.fetch_add(1, Relaxed) < 256 {
-                open.fetch_add(1, Relaxed);
+        let (jobs, todo) = channel::<conn::Job>();
+        sc.spawn(move || {
+            for j in todo {
                 sc.spawn(move || {
-                    drop(s.handle(st));
-                    busy.fetch_sub(1, Relaxed);
+                    j.answer(|st, req, over| s.one(st, req, over).unwrap_or(false));
                     s.deliver();
-                    open.fetch_sub(1, Relaxed);
                 });
-            } else {
-                busy.fetch_sub(1, Relaxed);
-                lock(&s.timing).busy(crate::now());
-                drop(st.write_all(BUSY));
             }
-            if let Some(h) = ho.filter(|h| h.stopping()) {
-                h.left();
-                lock(&s.clients)
-                    .drain(..)
-                    .for_each(|c| drop(c.0.send("retry: 250\n\n".into())));
-                h.finish(|| open.load(Relaxed) == 0 && !lock(&s.tapped).busy());
-            }
-        }
-    });
+        });
+        conn::accept(
+            l,
+            jobs,
+            BUSY,
+            || lock(&s.timing).busy(crate::now()),
+            |idle| {
+                if let Some(h) = ho.filter(|h| h.stopping()) {
+                    h.left();
+                    lock(&s.clients)
+                        .drain(..)
+                        .for_each(|c| drop(c.0.send("retry: 250\n\n".into())));
+                    h.finish(|| idle() && !lock(&s.tapped).busy());
+                }
+            },
+        )
+    })?;
     Ok(())
 }
 
@@ -397,11 +398,38 @@ pub struct Server<'a> {
     phone: Mutex<slo::Timing>,
     rss: std::sync::atomic::AtomicU64,
     hosts_read: Mutex<(usize, Option<Vec<String>>)>,
-    streams: AtomicUsize,
+    streams: Mutex<BTreeMap<String, usize>>,
 }
 
 fn hung_up(s: &TcpStream) -> bool {
-    s.set_read_timeout(Some(Duration::from_millis(1))).is_ok() && matches!(s.peek(&mut [0; 1]), Ok(0))
+    s.set_read_timeout(Some(Duration::from_millis(1))).is_ok()
+        && s.peek(&mut [0; 1])
+            .map_or_else(|e| !matches!(e.kind(), WouldBlock | TimedOut), |n| n == 0)
+}
+
+struct StreamSlot<'a>(&'a Mutex<BTreeMap<String, usize>>, String);
+
+impl<'a> StreamSlot<'a> {
+    fn take(m: &'a Mutex<BTreeMap<String, usize>>, who: String) -> Option<Self> {
+        let mut held = lock(m);
+        let n = held.entry(who.clone()).or_default();
+        (*n < STREAMS_PER_DEVICE).then(|| {
+            *n = n.saturating_add(1);
+            Self(m, who)
+        })
+    }
+}
+
+impl Drop for StreamSlot<'_> {
+    fn drop(&mut self) {
+        let mut held = lock(self.0);
+        if let Some(n) = held.get_mut(&self.1) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                held.remove(&self.1);
+            }
+        }
+    }
 }
 
 enum Later {
@@ -768,7 +796,7 @@ impl<'a> Server<'a> {
             phone: Mutex::default(),
             rss: std::sync::atomic::AtomicU64::default(),
             hosts_read: Mutex::default(),
-            streams: AtomicUsize::new(0),
+            streams: Mutex::default(),
         }
     }
 
@@ -786,21 +814,6 @@ impl<'a> Server<'a> {
             self.r.refresh(src, src.every(&l), now);
         }
         self.read_hosts(now);
-    }
-
-    fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
-        s.set_read_timeout(Some(Duration::from_secs(5)))?;
-        let mut rest = vec![];
-        loop {
-            let (buf, over) = wire::request(&mut s, &mut rest)?;
-            if buf.is_empty() {
-                return Ok(());
-            }
-            if !self.one(&mut s, &buf, over)? {
-                return Ok(());
-            }
-            self.deliver();
-        }
     }
 
     fn one(&self, s: &mut TcpStream, buf: &[u8], over: bool) -> std::io::Result<bool> {
@@ -1258,7 +1271,7 @@ impl<'a> Server<'a> {
         }
         let allow = if self.addr.is_some() { "GET, POST" } else { "GET" };
         let mut res = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nAllow: {allow}\r\n{extra}Cache-Control: {cache}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nAllow: {allow}\r\nX-Build: {VER:08x}\r\n{extra}Cache-Control: {cache}\r\nConnection: close\r\n\r\n",
             body.len()
         )
         .into_bytes();
@@ -1703,6 +1716,7 @@ impl<'a> Server<'a> {
              <script>let h=document.documentElement,m=new URLSearchParams(location.search).get('theme');try{{m=m||localStorage.theme}}catch(e){{}}h.dataset.theme=m||{th};\
              let SD={sd},PL={pl},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
              <body data-ts={}{ro}><header><b>drover</b>{badge}<i id=dot class=a></i>\
+             <button id=scb type=button aria-pressed=false aria-label=\"scene mode\"><span>scene</span></button><button id=hlt type=button hidden></button>\
              <button id=rf type=button aria-label=refresh>↻</button><button id=sysb type=button aria-haspopup=dialog aria-label=settings>⚙</button><button type=button class=pairb>pair</button></header>\
              <div id=strip><span id=ld hidden><i>↻</i> loading</span><span id=stale hidden></span></div>{msg}<div id=pairp hidden></div><p id=toast hidden></p>\
              <div id=cards></div><main></main><nav></nav><div id=sheet hidden><div class=sp><p class=sh></p><div class=sb></div></div></div><div id=confirm hidden></div>\
@@ -2965,7 +2979,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             })
     };
     let ls = |x: &Value| {
-        ["weather", "heat", "light", "none"].contains(&x["kind"].as_str().unwrap_or_default())
+        ["weather", "heat", "light", "sign", "none"].contains(&x["kind"].as_str().unwrap_or_default())
             && x.get("levels").is_none_or(levels)
     };
     let modes = |x: &Value| {
@@ -2998,7 +3012,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
         (
             "load_scene",
             &ls,
-            "{\"kind\": weather|heat|light|none, \"levels\": {calm, busy, held}}",
+            "{\"kind\": weather|heat|light|sign|none, \"levels\": {calm, busy, held}}",
         ),
         ("modes", &modes, "a list of scene, ascii, glyph, each at most once"),
         (

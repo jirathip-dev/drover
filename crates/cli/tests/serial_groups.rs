@@ -404,6 +404,8 @@ fn a_pushed_head_on_a_held_hot_file_is_reviewed_and_its_fix_round_may_start() {
     lane(&c, 12);
     sh.lane("sendmeter-impl-12", "done", "/x");
     sh.exit("sendmeter-impl-12");
+    let d = json!({"state": "done", "role": "impl", "sha": sha("12a")});
+    append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "turn-end", d)).unwrap();
     let both = [(9, format!("{HOT}\n")), (12, format!("{HOT}\n"))];
     let both: Vec<_> = both.iter().map(|(n, f)| (*n, f.as_str())).collect();
     let (out, steps) = drive(&c, &fake(&both));

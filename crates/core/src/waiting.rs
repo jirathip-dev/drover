@@ -150,6 +150,13 @@ fn no_verdict(events: &[Event], s: &IssueState, path: &str, gone: bool, w: &mut 
     w.next_cmd = Some(format!("drover spawn {f} {n} {c} --supersede"));
 }
 
+fn rev_exited(ctx: &Ctx, cfg: &Config, events: &[Event], lane: &str, agents: &[Session]) -> bool {
+    let sp = last_spawn(events, lane);
+    !agents.iter().any(|a| a.name == lane)
+        && sp.is_none_or(|e| ctx.now >= e.ts + cfg.limits.stall_minutes * 60)
+        && crate::hosts::offline(ctx, Some(cfg), sp).is_none()
+}
+
 fn failed_start(events: &[Event], s: &IssueState) -> bool {
     let Some(sp) = s.lane.as_deref().and_then(|l| last_spawn(events, l)) else {
         return false;
@@ -317,6 +324,10 @@ pub fn waiting_on(
     w
 }
 
+fn holds(ask: &Event, s: &IssueState) -> bool {
+    ask.data.get("extend").is_none() || s.state == "needs-human"
+}
+
 fn waits(
     log: &Log,
     events: &[Event],
@@ -363,7 +374,7 @@ fn waits(
     let cmd = |verb: &str, tail: &str| Some(format!("drover {verb} {f} {n}{tail}"));
     let mine =
         |a: &&Event| a.fleet == *f && (a.issue == Some(n) || s.lanes.values().any(|l| a.str("agent") == Some(l)));
-    if let Some(a) = log.asks.iter().copied().find(mine) {
+    if let Some(a) = log.asks.iter().copied().find(|a| mine(a) && holds(a, s)) {
         let id = a.str("id").unwrap_or("?");
         let next = crate::design::is_ask(a).then(|| format!("drover answer {f} {id} approve|revise|reject"));
         return w("owner", &format!("waiting on your answer ({id})"), a.ts, next);
@@ -407,7 +418,7 @@ fn waits(
     while let Some(e) = update(base) {
         base = e.str("from").unwrap_or_default();
     }
-    let handed = |h: &str| events.iter().any(|e| e.is("pushed", f, n) && e.str("sha") == Some(h));
+    let at = |k: &str| events.iter().any(|e| e.is(k, f, n) && e.str("sha") == Some(pushed));
     let checks = gh::required(&pr["statusCheckRollup"], req);
     let how = match (pr["mergeable"].as_str(), pr["mergeStateStatus"].as_str()) {
         (Some("CONFLICTING"), _) => "conflicts with",
@@ -556,7 +567,7 @@ fn waits(
         "impl" | "fix"
             if !pushed.is_empty()
                 && (!s.reviewed(pushed) || s.last_event == "fix-no-change" || fix_done(events, f, n).is_some())
-                && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
+                && (at("pushed") || (s.reviewed(pushed) || at("turn-end")) && head.is_none_or(|h| h.0 == pushed)) =>
         {
             let how = match s.rounds {
                 _ if s.reviewed(pushed) => "no change at ",
@@ -593,17 +604,8 @@ fn waits(
         "impl" | "fix" if failed_start(events, s) => w("owner", "failed start (no event back)", s.last_ts, None),
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
         "design" => {
-            let role = if s.lane.is_some() && s.lanes.get("architect") == s.lane.as_ref() {
-                "architect"
-            } else {
-                "design"
-            };
-            w(
-                "none",
-                &format!("{role} lane idle without a pushed {role} (check the pane)"),
-                s.last_ts,
-                cmd("spawn", &format!(" {role} --supersede")),
-            )
+            let (who, what, tail) = design_stage(log.all, s, p.start());
+            w(who, &what, s.last_ts, cmd("spawn", &tail))
         }
         "needs-human" => {
             let what = format!("needs-human: your card's [{}]", s.card());
@@ -611,6 +613,21 @@ fn waits(
         }
         st => w("none", &format!("nothing to do ({st})"), s.last_ts, None),
     }
+}
+
+fn design_stage(all: &[Event], s: &IssueState, start: &str) -> (&'static str, String, String) {
+    if s.lane.as_deref().unwrap_or_default().is_empty() {
+        let role = crate::queue::wants_design(all, &s.fleet, s.issue).unwrap_or(start);
+        let what = format!("design stage with no lane and no open ask: spawn {role}");
+        return ("owner", what, format!(" {role}"));
+    }
+    let role = if s.lanes.get("architect") == s.lane.as_ref() {
+        "architect"
+    } else {
+        "design"
+    };
+    let what = format!("{role} lane idle without a pushed {role} (check the pane)");
+    ("none", what, format!(" {role} --supersede"))
 }
 
 pub fn scan(
@@ -638,6 +655,7 @@ pub fn scan_where(
 ) -> Vec<(IssueState, Waiting)> {
     let (mut out, log) = (vec![], Log::new(events));
     let view = crate::link::view::View::load(ctx, cfg).ok();
+    let listed = view.as_ref().map(crate::link::view::View::sessions).unwrap_or_default();
     let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());
     let hung = crate::roots::hung_now(events);
     let mine = |st: &crate::events::States| {
@@ -654,7 +672,7 @@ pub fn scan_where(
                 .and_then(|b| s.lanes.get(b))
                 .or(s.check_lane())
                 .cloned()
-                .or((s.state == "needs-human").then(String::new))
+                .or(matches!(s.state.as_str(), "needs-human" | "design").then(String::new))
         }) else {
             continue;
         };
@@ -777,12 +795,14 @@ pub fn scan_where(
             w.what = w.what.replace("review done", &format!("review done on {h}"));
         }
         if let Some(p) = path.as_deref().filter(|_| s.check_lane() == Some(&lane)) {
-            no_verdict(mine, &s, p, !agents.iter().any(|a| a.name == lane), &mut w);
+            no_verdict(mine, &s, p, rev_exited(ctx, cfg, mine, &lane, agents), &mut w);
         }
         let built = s.build.as_ref().and_then(|b| s.lanes.get(b)).unwrap_or(&lane).clone();
         let sp = last_spawn(mine, &built);
         let unconfirmed = sp.and_then(|e| e.data.get("confirmed")) == Some(&Value::Bool(false));
-        let gone = !agents.iter().any(|a| a.name == built);
+        let unread = |m: &&str| matches!(listed.seen(&built, Some(m)), crate::session::Seen::Unreachable);
+        let unknown = sp.and_then(|e| e.str("machine")).filter(unread);
+        let gone = !agents.iter().any(|a| a.name == built) && unknown.is_none();
         let settled = || {
             sp.is_some_and(|e| ctx.now >= e.ts + 120)
                 && !crate::drive::pending(ctx, cfg, r)
@@ -849,6 +869,10 @@ pub fn scan_where(
             } else {
                 format!("{why}{NO_PUSH}respawning {role}")
             };
+        }
+        if let Some(m) = unknown.filter(|_| idle) {
+            (w.who, w.next_cmd, w.promise) = ("none", None, None);
+            w.what = format!("lane unknown: {m}'s shed listing unreadable");
         }
         if let Some(h) = crate::hosts::offline(ctx, Some(cfg), sp).filter(|_| s.active_lane().is_some()) {
             (w.who, w.what, w.next_cmd, w.promise) = ("none", h, None, None);

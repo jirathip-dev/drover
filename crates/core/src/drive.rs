@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+mod kicks;
 mod pickup;
 mod remote;
 
@@ -53,8 +54,6 @@ pub const STEPS: [(&str, &[&str]); 8] = [
     ),
     ("backlog", &[]),
 ];
-/// Drive's one prompt on a `done` whose why note was refused.
-pub const WHY_NUDGE: &str = "your `turn done` was refused: ";
 const STALE_LOCK_SECS: u64 = 3600;
 
 struct Lock(std::path::PathBuf, crate::db::Lease);
@@ -99,11 +98,8 @@ fn alive(r: &dyn Runner, pid: &str, age: u64) -> bool {
 /// Each spawn marker and kick lock (leases), live or stale: stale once its pid is gone (or reused) or it expired. `remove`: release each stale one, log `stale-marker`.
 pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<String>, Vec<Event>) {
     let (mut live, mut stale) = (vec![], vec![]);
-    let all = [
-        crate::db::leases(&ctx.state, "spawn-"),
-        crate::db::leases(&ctx.state, "kick-"),
-    ]
-    .concat();
+    let mut all = crate::db::leases(&ctx.state, "spawn-");
+    all.extend(crate::db::leases(&ctx.state, "kick-"));
     let ev = crate::events::working(&ctx.state).unwrap_or_default();
     for l in all {
         let name = l.key.clone();
@@ -112,7 +108,7 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
             continue;
         };
         let age = ctx.now.saturating_sub(l.at);
-        if holds(ctx, cfg, r, &ev, &l) {
+        if !kicks::overdue(ctx, cfg, r, &l, remove) && holds(ctx, cfg, r, &ev, &l) {
             live.push(name);
             continue;
         }
@@ -284,7 +280,7 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
     let flag = || crate::db::take(&ctx.state, &again, ctx.now, ttl, why, &|_| true).map(drop);
     let Some(k) = take(ctx, r, &format!("kick-{fleet}-{n}.lock"), ttl, fleet) else {
         flag();
-        return Ok(());
+        return kicks::in_flight(ctx, out, (fleet, n), why);
     };
     let start = crate::now();
     for _ in 0..30 {
@@ -1313,9 +1309,10 @@ fn pass(
         .filter(|(s, w)| s.fleet == fleet && !(fast && s.done()) && s.lane.as_ref() == Some(&w.lane))
     {
         let lock = format!("drive-{fleet}-{}.lock", s.issue);
-        let Some(_mine) = take(ctx, r, &lock, STALE_LOCK_SECS, fleet) else {
+        let mine = take(ctx, r, &lock, STALE_LOCK_SECS, fleet);
+        if mine.is_none() && !SLOT.get() {
             continue;
-        };
+        }
         let mut pr = gh::cached_pr(ctx, fleet, s.issue);
         crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
         let ci = gh::ci(&gh::required(pr.at("statusCheckRollup"), f.checks(&pr)));
@@ -1584,7 +1581,7 @@ fn no_proof(
     let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
     let on = crate::hosts::On::of(r, sp);
     let body = crate::link::read(ctx, cfg, r, sp, args.get(7).unwrap_or(&"")).unwrap_or_default();
-    let Some(why) = crate::gate::no_proof(&body) else {
+    let Some((code, why)) = crate::gate::unfit(&body) else {
         return Ok(None);
     };
     let hash = &crate::devices::sha256(body.as_bytes())[..16];
@@ -1599,30 +1596,35 @@ fn no_proof(
     let told = mine.iter().any(|e| e.val("prompted") == true);
     if !seen {
         act(ctx, cfg, r, out, ev, (fleet, Some(n), "verdict"), args)?;
-        let text = format!("drover verdict refused your verdict.md: REFUSED NO_PROOF: {why}. Add the Proof blocks.");
+        let fix = if code == "NO_PROOF" {
+            "Add the Proof blocks"
+        } else {
+            "Drop those findings"
+        };
+        let text = format!("drover verdict refused your verdict.md: REFUSED {code}: {why}. {fix}.");
         let tell =
             |p| crate::term::reply(&on, false, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
         let prompted = open.filter(|_| !told).is_some_and(tell);
         let d = json!({"sha": args.get(5), "hash": hash, "agent": lane, "prompted": prompted});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "proof-refused", d))?;
         if prompted {
-            return Ok(Some(Some("NO_PROOF")));
+            return Ok(Some(Some(code)));
         }
     }
     if fast {
-        return Ok(Some(Some("NO_PROOF")));
+        return Ok(Some(Some(code)));
     }
     let spawned = ev
         .iter()
         .rposition(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
     let mut before = ev.iter().take(spawned.unwrap_or_default());
     if before.any(|e| e.is("proof-refused", fleet, n) && e.str("sha") == args.get(5).copied()) {
-        let why = format!("a re-review at the same head was refused NO_PROOF too: {why}");
-        escalate(ctx, cfg, out, (fleet, n), (lane, None), "NO_PROOF", &why)?;
-        return Ok(Some(Some("NO_PROOF")));
+        let why = format!("a re-review at the same head was refused {code} too: {why}");
+        escalate(ctx, cfg, out, (fleet, n), (lane, None), code, &why)?;
+        return Ok(Some(Some(code)));
     }
     let role = sp.and_then(|e| e.str("role")).unwrap_or("rev");
-    let (num, why) = (n.to_string(), "verdict refused NO_PROOF: re-review");
+    let (num, why) = (n.to_string(), format!("verdict refused {code}: re-review"));
     let c = ["spawn", fleet, &num, role, "--supersede"];
     let code = act(ctx, cfg, r, out, ev, (fleet, Some(n), "review"), &c)?;
     if code.is_none() {
@@ -1700,7 +1702,7 @@ fn repro_refused(
     Ok(())
 }
 
-fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool> {
+pub(crate) fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool> {
     let sp = crate::events::last_spawn(events, lane);
     let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
     let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
@@ -1804,6 +1806,7 @@ fn handoff(
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
     let mut any = false;
+    crate::status::sync(ctx, cfg, r, out, fleet)?;
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
@@ -1821,34 +1824,22 @@ fn handoff(
         let unlabelled = f.merge_label.as_deref().is_some_and(|l| !gh::has_label(&pr, l));
         let quiet = w.who == "none" || w.what.contains(waiting::NO_PUSH) || turn.is_some();
         let idle = done || quiet && ctx.now >= w.since + 120;
-        if !(idle && building && (done || unlabelled || ci != "pending") && pr.at("state") == "OPEN") || head.is_empty()
-        {
+        if !building || pr.at("state") != "OPEN" || head.is_empty() {
             continue;
         }
         if s.reviewed(head) {
-            any |= no_change(ctx, cfg, out, (fleet, s.issue), ev, head, ci)?;
+            if idle && (done || unlabelled || ci != "pending") {
+                any |= no_change(ctx, cfg, out, (fleet, s.issue), ev, head, ci)?;
+            }
             continue;
         }
         if handed {
             continue;
         }
-        if let Some(why) = turn.and_then(|t| t.str("note").map(|w| (t.ts, w))) {
-            let sp = crate::events::last_spawn(ev, &w.lane).map_or(0, |e| e.ts);
-            let told = |e: &&Event| e.is("why-nudged", fleet, s.issue) && e.str("agent") == Some(&w.lane) && e.ts >= sp;
-            match ev.iter().rfind(told) {
-                None => {
-                    let text = format!("drover: {WHY_NUDGE}{}. Fix it, then `drover turn done`.", why.1);
-                    let Some(sent) = tell(r, ev, &w.lane, &text) else {
-                        continue;
-                    };
-                    writeln!(out, "{fleet} #{} why note refused: nudged", s.issue)?;
-                    let d = json!({"agent": w.lane, "note": why.1, "sent": sent});
-                    append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "why-nudged", d))?;
-                    continue;
-                }
-                Some(p) if why.0 <= p.ts && ctx.now < p.ts + 600 => continue,
-                Some(_) => {}
-            }
+        let gated = |e: &Event| e.is("turn-end", fleet, s.issue) && e.str("sha") == Some(head);
+        if !ev.iter().any(gated) {
+            any |= crate::done::ungated(ctx, cfg, r, out, (fleet, s.issue), ev, (&w.lane, head), idle)?;
+            continue;
         }
         writeln!(out, "{fleet} #{} pushed: {head:.7} via pr", s.issue)?;
         let d = json!({"sha": head, "via": "pr"});
@@ -2011,7 +2002,8 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     if fast {
         return res;
     }
-    res.and(clean_merged(ctx, cfg, r, out, &events, fleet))
+    res.and(crate::pending::stalled(ctx, cfg, fleet))
+        .and(clean_merged(ctx, cfg, r, out, &events, fleet))
 }
 
 fn clean_merged(

@@ -761,7 +761,6 @@ pub const OWN_FILES: &[&str] = &[
     ".mcp.lane.json",
     "verdict.md",
     ".review-brief.md",
-    "why.md",
     "body.md",
     ".verify-browser.mjs",
     ".verify.md",
@@ -1220,14 +1219,8 @@ pub fn spawn(
 
     lane_admit(ctx, (cfg, r), &events, (fleet, issue, role), o.force)?;
     respawn_guard(ctx, cfg, &events, (fleet, issue, role))?;
-    let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
-    if o.update && updates >= f.flow().update_limit() {
-        let why = format!(
-            "PR still conflicts after {updates}/{} update rounds",
-            f.flow().update_limit()
-        );
-        event("needs-human", json!({"code": "UPDATE_LIMIT", "reason": why}))?;
-        return refused("UPDATE_LIMIT", why);
+    if o.update {
+        update_guard(ctx, cfg, &events, (fleet, issue), f.flow().update_limit())?;
     }
 
     let refusal = match &placed {
@@ -1281,7 +1274,7 @@ pub fn spawn(
         let cause = crate::session::stamp::exit(&events, &p.agent).filter(|x| x.cause.resumable());
         let here = cause.is_some() && owt == wt && old.machine == on.machine;
         if stale.is_none() && !here && !hung {
-            wip = crate::check::save_lane(ctx, &old, &p.agent, owt)?;
+            wip = crate::check::save_lane(ctx, (cfg, fleet), &old, &p.agent, owt)?;
         }
         let mut killed = names.clone();
         for a in listed
@@ -1313,7 +1306,7 @@ pub fn spawn(
         .and_then(|e| Some((e, e.str("worktree")?)))
         .filter(|_| wip.is_none())
     {
-        wip = crate::check::save_lane(ctx, &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
+        wip = crate::check::save_lane(ctx, (cfg, fleet), &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
     }
 
     let mut sha = None;
@@ -1356,7 +1349,7 @@ pub fn spawn(
                 }
                 let git = |a: &[&str]| ok(r, "git", &[&["-C", &local, "worktree"][..], a].concat());
                 if on.exists(Path::new(&held)) {
-                    wip = wip.or(crate::check::save_lane(ctx, &on, &p.agent, &held)?);
+                    wip = wip.or(crate::check::save_lane(ctx, (cfg, fleet), &on, &p.agent, &held)?);
                     if git(&["remove", &held]).is_err() {
                         git(&["remove", "--force", &held])?;
                     }
@@ -1415,10 +1408,7 @@ pub fn spawn(
             .map(plain)
             .chain(int_note)
             .chain(adr)
-            .chain((!crate::events::STAGES.contains(&p.family)).then(|| {
-                let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
-                crate::why::brief(r, f, &events, (fleet, issue), rev, body)
-            }).flatten())
+            .chain((p.family == "rev").then(|| crate::guard::brief(&events, (fleet, issue))).flatten())
             .chain(note.clone())
             .chain(history.brief())
             .chain(resume)
@@ -1472,8 +1462,10 @@ pub fn spawn(
     }
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
     let cap_raise = crate::gh::cached_title(ctx, fleet, issue).is_some_and(|t| t.starts_with("cap:"));
+    let hygiene = crate::hygiene::of(ctx, Some(r), cfg, fleet);
     let rules = rules.map(|pl| crate::hook::Rules {
         cap_raise,
+        hygiene,
         ..crate::hook::Rules::resolve(cfg, fleet, role, &pl.name)
     });
     if let Some(rl) = &rules {
@@ -1656,6 +1648,9 @@ fn starts<'a>(
             "lane-dead" if agent.is_some_and(|a| e.str("key").is_some_and(|k| k.ends_with(&format!(":{a}")))) => {
                 fail(&mut v, "lane died");
             }
+            "supersede"
+                if mine && agent.is_some_and(|a| e.val("killed").as_array().is_some_and(|k| k.contains(&json!(a)))) => {
+            }
             "supersede" | "lane-killed" if mine => fail(&mut v, "killed"),
             "needs-decision" if e.str("respawn_loop") == Some(role) => {
                 asks.extend(e.str("id"));
@@ -1668,6 +1663,30 @@ fn starts<'a>(
         }
     }
     (v, asked)
+}
+
+fn update_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue): (&str, u64), limit: u32) -> Result<()> {
+    let (updates, extra) = fold(events)
+        .remove(&(fleet.into(), issue))
+        .map_or((0, 0), |s| (s.updates, s.update_extra));
+    let limit = limit.saturating_add(extra);
+    if updates < limit {
+        return Ok(());
+    }
+    let why = format!("PR still conflicts after {updates}/{limit} update rounds");
+    let turn = ["spawn", "needs-human", "round-extended"];
+    let held = (events.iter().rev())
+        .filter(|e| e.fleet == fleet && e.issue == Some(issue))
+        .find(|e| turn.contains(&e.kind.as_str()));
+    if held.is_none_or(|e| e.kind == "spawn") {
+        let d = json!({"code": "UPDATE_LIMIT", "reason": why});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, Some(issue), "needs-human", d),
+        )?;
+    }
+    refused("UPDATE_LIMIT", why)
 }
 
 fn respawn_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue, role): (&str, u64, &str)) -> Result<()> {

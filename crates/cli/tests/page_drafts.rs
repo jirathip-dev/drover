@@ -114,14 +114,48 @@ fn thread_t2(name: &str, script: &str, args: &[&str], more: &[(&str, Value)]) ->
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
     std::thread::spawn(move || drover::serve::serve_on(&c2, &OnShed::new(Fake::default()), l, false));
-    let o = std::process::Command::new("node")
+    let mut node = std::process::Command::new("node")
         .arg(format!("{}/tests/ui/{script}", env!("CARGO_MANIFEST_DIR")))
         .arg(format!("http://{addr}/"))
         .arg(ck.trim().trim_start_matches("Cookie: "))
         .args(args)
-        .output()
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .unwrap();
-    (c, o)
+    let (mut to, mut stdout) = (node.stdin.take().unwrap(), vec![]);
+    for line in std::io::BufRead::lines(std::io::BufReader::new(node.stdout.take().unwrap())) {
+        let line = line.unwrap();
+        if let Some(text) = line.strip_prefix("log ") {
+            let d = json!({"thread": "t2", "from": "orchestrator", "text": text});
+            append(&c.state, &Event::new(drover::now(), "sendmeter", None, "thread-msg", d)).unwrap();
+            std::io::Write::write_all(&mut to, b"ok\n").unwrap();
+        } else {
+            stdout.extend(line.bytes().chain(*b"\n"));
+        }
+    }
+    drop(to);
+    let o = node.wait_with_output().unwrap();
+    (c, std::process::Output { stdout, ..o })
+}
+
+#[test]
+fn a_thread_whose_stream_was_refused_shows_a_new_message_within_5_s() {
+    if no_webkit() {
+        return;
+    }
+    let (_, o) = thread_t2("page-revive", "revive.mjs", &[], &[]);
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    assert_eq!(out["refused"], 1, "the thread's first stream got a 503: {out}");
+    assert!(
+        out["ms"].as_u64().is_some_and(|ms| ms < 5000),
+        "a message logged after the refused stream shows within 5 s: {out}"
+    );
+    let dot = if out["online"] == true { "g" } else { "r" };
+    assert_eq!(out["dot"], dot, "the live dot is green once the stream is back: {out}");
 }
 
 #[test]
@@ -318,6 +352,167 @@ fn a_send_shows_at_once_then_once_and_an_answered_card_goes_at_once_and_stays_go
     let log = read(&c.state).unwrap().to_vec();
     assert!(
         log.iter().any(|e| e.kind == "decision" && e.str("id") == Some("q1")),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_page_of_an_older_build_reloads_once_without_drawing_a_newer_serves_blocks_and_waits_for_a_focused_field() {
+    if no_webkit() {
+        return;
+    }
+    let (_c, o) = thread_t2("page-build", "build.mjs", &[], &[]);
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    assert_eq!(
+        (&out["newer"]["loads"], &out["newer"]["t2"]),
+        (&json!(2), &json!("2")),
+        "a screen marked build b reloads the page, which draws none of it first: {out}"
+    );
+    assert_eq!(out["same"]["loads"], 2, "the same build never reloads: {out}");
+    assert_eq!(
+        (
+            &out["focused"]["loads"],
+            &out["focused"]["new"],
+            &out["focused"]["value"]
+        ),
+        (&json!(3), &Value::Null, &json!("half a thought")),
+        "a focused field holds the reload, and the newer event draws nothing: {out}"
+    );
+    assert_eq!(
+        (&out["blurred"]["loads"], &out["blurred"]["new"]),
+        (&json!(4), &Value::Null),
+        "blur reloads once: {out}"
+    );
+    assert_eq!(
+        (&out["blurred"]["value"], &out["blurred"]["draft"]),
+        (&json!("half a thought"), &json!("half a thought")),
+        "the draft survives the reload: {out}"
+    );
+}
+
+#[test]
+fn a_settled_config_run_or_secret_card_leaves_the_cards_and_the_thread_at_once() {
+    use std::io::{BufRead, Write};
+    if no_webkit() {
+        return;
+    }
+    let c = ctx(
+        &tmpdir("page-settled"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+    );
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::write(profile.join("settings.json"), "{}").unwrap();
+    let cli = |args: &[&str]| {
+        let (code, out) = run(
+            &drover::Ctx {
+                now: drover::now(),
+                ..c.clone()
+            },
+            &Fake::default(),
+            args,
+        );
+        assert_eq!(code, 0, "{args:?}: {out}");
+        out
+    };
+    let propose = |line: &str| {
+        let file = c.config.with_file_name("proposed.toml");
+        let cur = std::fs::read_to_string(&c.config).unwrap();
+        std::fs::write(&file, format!("{cur}# {line}\n")).unwrap();
+        cli(&["config", "propose", "t1", file.to_str().unwrap()])
+    };
+    cli(&["thread", "new", "sendmeter", "Models"]);
+    assert_eq!((propose("one"), propose("two")), ("c1\n".into(), "c2\n".into()));
+    for why in ["run one", "run two"] {
+        let args = [
+            "card",
+            "post",
+            "t1",
+            "--cmd",
+            "git status",
+            "--why",
+            why,
+            "--blast",
+            "read-only",
+            "--dir",
+            "/srv/app",
+        ];
+        cli(&args);
+    }
+    cli(&["secret", "request", "t1", "API_KEY", "--why", "the search API"]);
+    let ck = pair(
+        &Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
+        &c,
+        "Mozilla/5.0 (iPhone)",
+        drover::now(),
+    );
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let c2 = c.clone();
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &OnShed::new(Fake::default()), l, false));
+    let mut node = std::process::Command::new("node")
+        .arg(format!("{}/tests/ui/settled.mjs", env!("CARGO_MANIFEST_DIR")))
+        .arg(format!("http://{addr}/"))
+        .arg(ck.trim().trim_start_matches("Cookie: "))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut to = node.stdin.take().unwrap();
+    let mut last = String::new();
+    for line in std::io::BufReader::new(node.stdout.take().unwrap()).lines() {
+        let line = line.unwrap();
+        match line.as_str() {
+            "need c3" => assert_eq!((propose("three"), propose("four")), ("c3\n".into(), "c4\n".into())),
+            "need settle" => {
+                cli(&["config", "apply", "c4"]);
+                cli(&["card", "deny", "r2"]);
+            }
+            _ => {
+                last = line;
+                continue;
+            }
+        }
+        writeln!(to, "ok").unwrap();
+    }
+    node.wait().unwrap();
+    let out: Value = serde_json::from_str(&last).unwrap_or_else(|_| panic!("{last}"));
+    assert!(out.get("error").is_none() && out["errors"] == json!([]), "{out}");
+    assert_eq!(
+        out["before"],
+        json!([true, true]),
+        "c1 is in the cards and the thread: {out}"
+    );
+    for t in ["config proposal c2", "config proposal c1", "run one", "secret API_KEY"] {
+        let s = &out["steps"][t];
+        assert_eq!(s["status"], 200, "{t}: {out}");
+        assert!(
+            s["ms"].as_u64().is_some_and(|ms| ms < 1000),
+            "{t} leaves the cards and the thread within 1 s: {out}"
+        );
+        assert_eq!(s["after"], json!([false, false]), "{t}: {out}");
+    }
+    for t in ["c4", "r2"] {
+        assert!(
+            out["steps"]["terminal"][t].as_u64().is_some_and(|ms| ms < 1500),
+            "{t} settled in the terminal leaves within one stream update: {out}"
+        );
+    }
+    assert_eq!(
+        out["draft"],
+        json!({"value": "half a thought", "same": true}),
+        "the typed draft and its box survive: {out}"
+    );
+    assert_eq!(out["reloaded"], false, "no page reload: {out}");
+    let log = read(&c.state).unwrap().to_vec();
+    let settled = |id: &str, applied: bool| {
+        log.iter()
+            .any(|e| e.kind == "config-settled" && e.str("id") == Some(id) && e.val("applied") == applied)
+    };
+    assert!(
+        settled("c1", true) && settled("c2", false) && settled("c3", false) && settled("c4", true),
         "{out}"
     );
 }

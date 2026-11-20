@@ -12,5 +12,6 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 drover-core.workspace = true
+drover-server.workspace = true
 ratatui.workspace = true
 serde_json.workspace = true

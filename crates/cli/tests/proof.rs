@@ -7,8 +7,8 @@ const RUN: &str =
     "- blocking [code] src/x.rs:9: total is off by one\n  Proof: run\n  ```\n  cargo test total\n  ```\n  \
 ```\n  left: 4, right: 5 (AC 2 wants 5)\n  ```\n";
 const SPEC: &str = "- blocking [code] src/x.rs:9: no refusal\n  Proof: spec\n  > AC 3: an empty file is refused\n";
-const BODY: &str = "- blocking [pr-body] PR body: no `## For humans`\n  Proof: spec\n  \
-> The PR body has a `## For humans` section\n  PR#34:1 has none\n";
+const BODY: &str = "- blocking [trailer] abc1234: an AI co-author trailer\n  Proof: spec\n  \
+> an AI co-author trailer in a commit made by this round's lane\n  abc1234:5\n";
 
 fn verdict(v: &str, body: &str) -> (i32, String, drover::Ctx) {
     let d = tmpdir("proof");
@@ -132,8 +132,8 @@ fn proof_output_and_quotes_are_never_findings() {
 ```\n  - blocking [x] pasted output\n  ```\n";
     let (code, out, _) = verdict("FAIL", body);
     assert_eq!(code, 0, "{out}");
-    let quoted = "FAIL (form-only)\n\n- blocking [pr-body] PR body stale\n  Proof: spec\n  \
-> missing or inaccurate is a `blocking` finding\n  PR#34:2\n";
+    let quoted = "FAIL (form-only)\n\n- blocking [trailer] abc1234 has one\n  Proof: spec\n  \
+> an AI co-author trailer in a commit is a `blocking` finding\n  abc1234:5\n";
     let (code, out, _) = verdict("FAIL", quoted);
     assert!(code == 0 && out.contains("recorded FAIL (form-only)"), "{out}");
 }

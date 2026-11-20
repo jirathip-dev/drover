@@ -68,6 +68,10 @@ export function word(k: string, plain: unknown): string {
 
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 export const nodes = (h: string) => new DOMParser().parseFromString('<body>' + h, 'text/html').body.childNodes;
+let srcs: Element[] = [];
+const pick = (src: Element | undefined, id: unknown) => (src && id ? src.querySelector('#' + CSS.escape(String(id))) : null);
+/** The theme's sprite `want` (farm's where the theme lacks it), else farm's `alt`. */
+export const sprite = (want: unknown, alt?: unknown): Element | null => pick(srcs[0], want) || pick(srcs[1], want) || pick(srcs[1], alt);
 const got = (u: string, j: boolean): Promise<unknown> => fetch(u).then(r => (r.ok ? (j ? r.json() : r.text()) : Promise.reject())).catch(() => (j ? {} : ''));
 
 /** Loads theme `name` (farm filling what it lacks) and builds the `ha-*` and `hr-*` symbols. */
@@ -77,10 +81,10 @@ export async function theme(name: string): Promise<void> {
   if (H.dataset.theme !== name) return;
   const svg = (t: unknown) => new DOMParser().parseFromString(`<svg>${t}</svg>`, 'text/html').body.firstElementChild ?? document.createElementNS(NS, 'svg'), farm = svg(fs), own = svg(ts);
   T = obj(tj);
+  srcs = [own, farm];
   defs.replaceChildren();
-  const sprite = (src: Element, id: unknown) => (id ? src.querySelector('#' + CSS.escape(String(id))) : null);
   const sym = (id: string, want: unknown, alt?: unknown) => {
-    const g = (sprite(own, want) || sprite(farm, want) || sprite(farm, alt))?.cloneNode(true);
+    const g = sprite(want, alt)?.cloneNode(true);
     if (!(g instanceof Element)) return;
     const s = document.createElementNS(NS, 'symbol');
     s.id = id;
@@ -96,6 +100,7 @@ export async function theme(name: string): Promise<void> {
   });
   if (rs) ['queued', 'needs', 'merged', 'fail'].forEach(k => sym('hr-' + k, rs[k]));
   Object.entries(obj(T.stages)).forEach(([k, id]) => sym('hg-' + k, id));
+  sym('hfan', obj(T.load_scene).fan);
 }
 
 const DARK = matchMedia('(prefers-color-scheme: dark)');

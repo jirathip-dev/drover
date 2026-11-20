@@ -108,6 +108,8 @@ pub struct Model {
     /// Faults: what happens to an issue's head once rev's PASS lands, and a `drive`/`merge` that dies right after GitHub's merge call.
     pub after_pass: Vec<(u64, crate::gates::AfterPass)>,
     pub crash_on_merge: bool,
+    /// Issues whose PR body never names its head: each `turn done` there is refused `PR_BODY`.
+    pub unanchored: Vec<u64>,
     /// The "sometimes" states this run reached (`gates::SOMETIMES`).
     pub reached: std::collections::BTreeSet<&'static str>,
 }
@@ -150,7 +152,14 @@ impl Model {
                 "conclusion": if g { "SUCCESS" } else { "FAILURE" }}),
         };
         let n = branch.trim_start_matches("issue-");
-        json!({"number": p.number, "title": format!("#{n}"), "body": format!("Closes #{n}"), "state": p.state,
+        let anchored = !n.parse().is_ok_and(|n: u64| self.unanchored.contains(&n));
+        let at = if anchored {
+            format!("\n\n## Evidence (head {})", p.head)
+        } else {
+            String::new()
+        };
+        let body = format!("Closes #{n}\n\n## For humans\n\nx{at}");
+        json!({"number": p.number, "title": format!("#{n}"), "body": body, "state": p.state,
             "baseRefName": p.base, "headRefName": branch, "headRefOid": p.head, "mergeable": "MERGEABLE",
             "mergeStateStatus": if self.base.get(&p.head) == self.origin.get(&p.base) { "CLEAN" } else { "BEHIND" }, "labels": [], "statusCheckRollup": [check],
             "url": format!("https://github.com/{REPO}/pull/{}", p.number),
@@ -399,6 +408,7 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
                 .collect();
             ok(json!({"data": {"repository": repo}}).to_string())
         }
+        ["api", "-X", "POST", path, ..] if path.contains("/statuses/") => ok("{}"),
         ["api", "-i", ..] => ok(format!("HTTP/2.0 200 OK\netag: \"v{}\"\n\n[]", m.version)),
         ["api", path, "--jq", _] if path.contains("/rules/branches/") => ok("true\n"),
         ["api", path, "--paginate", ..] if path.ends_with("/files") => ok(""),

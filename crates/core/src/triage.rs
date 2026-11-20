@@ -240,7 +240,13 @@ pub fn fold_spec(
         spec.trim()
     );
     let repo = &cfg.fleet(fleet)?.repo;
-    ok(r, "gh", &["issue", "edit", &n.to_string(), "-R", repo, "--body", &body])?;
+    crate::hygiene::gh(
+        ctx,
+        r,
+        cfg,
+        fleet,
+        &["issue", "edit", &n.to_string(), "-R", repo, "--body", &body],
+    )?;
     let undo = "its earlier text is in the folded block";
     log(
         ctx,
@@ -361,9 +367,11 @@ pub fn docs(
          README's top (intent) section.\n\n{}\n",
         items.join("\n")
     );
-    let url = ok(
+    let url = crate::hygiene::gh(
+        ctx,
         r,
-        "gh",
+        cfg,
+        fleet,
         &["issue", "create", "-R", &f.repo, "--title", &title, "--body", &body],
     )?;
     let n: u64 = (url.trim().rsplit('/').next().and_then(|n| n.parse().ok())).context("gh issue create: no number")?;

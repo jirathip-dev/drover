@@ -2,8 +2,8 @@ use crate::config::{home, Config};
 use crate::events::{emit, status_line, working, Event, Json};
 use crate::runner::{self, Runner};
 use crate::{
-    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx, CHAT,
-    SERVE, SERVICE,
+    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx, SERVE,
+    SERVICE,
 };
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -91,7 +91,7 @@ enum Cmd {
         owner_override: bool,
     },
     #[command(
-        about = "Owner only: one more review round for a needs-human issue (its card's [one more round]); logs `round-extended`"
+        about = "Owner only: one more round for a needs-human issue (its card's [one more round]): an update round on an UPDATE_LIMIT card, else a review round; logs `round-extended`"
     )]
     Extend {
         fleet: String,
@@ -240,6 +240,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: FleetCmd,
     },
+    #[command(about = "#1376: text bound for a public repo: paths, hosts, session ids, private names")]
+    Hygiene {
+        #[command(subcommand)]
+        cmd: crate::hygiene::Cmd,
+    },
     #[command(about = "#646: the fleet repo's `wip/*` branches")]
     Wip {
         #[command(subcommand)]
@@ -263,7 +268,7 @@ enum Cmd {
     Asks {
         #[command(flatten)]
         scope: Scope,
-        #[arg(help = "Closed asks too, with why: answered, closed: merged, closed: lane gone")]
+        #[arg(help = "Closed asks too, with why: answered, closed: merged, closed: lane gone, closed: superseded")]
         #[arg(long)]
         all: bool,
     },
@@ -275,9 +280,7 @@ enum Cmd {
     Waiting(Scope),
     #[command(about = "Print the issue spec cached at spawn; read this instead of `gh issue view`")]
     Brief { fleet: String, issue: u64 },
-    #[command(
-        about = "Why a line is as it is: blame's commit, its issue, the why note on it, the issue's asks and answers"
-    )]
+    #[command(about = "Why a line is as it is: blame's commit, its issue, the issue's asks and answers")]
     Why {
         #[arg(help = "The line, as `<file>:<line>`")]
         at: String,
@@ -333,7 +336,7 @@ enum Cmd {
         about = "Print the first queued issue that has no lane and is not blocked; exit 0 found, 1 empty, 2 top item blocked"
     )]
     Next { fleet: String },
-    #[command(about = "Compact board (≤ 60 cols): queue order, state, lane, age, last event")]
+    #[command(about = "The app's Board tab on a terminal (docs/terminal.md), else the compact board (≤ 60 cols)")]
     Board { fleet: Option<String> },
     #[command(
         about = "#910: every live lane's processes (CPU %, run time, heavy kind) and heavy-slot waits, under the host's load, heavy slots and held respawns"
@@ -949,9 +952,13 @@ enum HostsCmd {
     Refresh,
     #[command(hide = true, about = "#1309: this host's lanes as one frame for the main host")]
     Report,
+    #[command(hide = true, about = "#1319: `report` kept open, a frame a change")]
+    Watch,
     #[command(about = "Let new lanes go to this host again; logs `host-on`")]
     On { name: String },
-    #[command(about = "No new lanes on this host (its lanes finish there); still monitored; logs `host-off`")]
+    #[command(
+        about = "No new lanes on this host (its lanes finish there); only a hosts refresh contacts it; logs `host-off`"
+    )]
     Off { name: String },
     #[command(
         about = "Empty a root (default the host's first): new lanes skip it, its lanes are saved and restarted on the next root"
@@ -1276,8 +1283,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hosts {
-            cmd: Some(HostsCmd::Report),
-        } => crate::link::watch::serve(r, stdin, out)?,
+            cmd: Some(c @ (HostsCmd::Report | HostsCmd::Watch)),
+        } => crate::link::watch::answer(r, matches!(c, HostsCmd::Watch), stdin, out)?,
         Cmd::Hook {
             role,
             git_pre_push: true,
@@ -1333,8 +1340,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else {
                 let (events, cfg) = (working(&ctx.state)?, Config::load(&ctx.config).ok());
                 let serial = queue::fleets_use(ctx, &events, cfg.as_ref(), fleet.as_deref());
-                let off = cfg.as_ref().map(|c| crate::hosts::idle_off(c, &events));
-                let spared = crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), None);
+                let (off, spare) = (cfg.as_ref().map(crate::hosts::disabled), Config::load(&ctx.config).ok());
+                let spared =
+                    crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), spare.as_ref().map(|c| (ctx, c)));
                 let look = crate::snapshot::Snap::read(ctx, &spared);
                 let (at, slots) = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
                 let skip = |s: &crate::events::IssueState| {
@@ -1452,6 +1460,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::top::print(&t, out)?;
             }
         }
+        Cmd::Board { fleet } if crate::app(ctx, r, &crate::Open::Board(fleet.clone()))? => {}
         Cmd::Board { fleet } => {
             let events = working(&ctx.state)?;
             let all = fleet.map_or_else(
@@ -1609,7 +1618,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             install: true,
         } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
         Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
-        Cmd::Chat { thread } => (CHAT.get().context("no chat")?)(ctx, r, thread.as_deref())?,
+        Cmd::Chat { thread } => anyhow::ensure!(crate::app(ctx, r, &crate::Open::Threads(thread))?, "needs a terminal"),
         cmd => {
             let cfg = match cmd {
                 Cmd::Check => check::config(ctx)?,
@@ -1621,15 +1630,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else {
                 crate::hosts::Pass::new(r, None)
             };
-            let off = match cmd {
-                Cmd::Check | Cmd::Drive { .. } => crate::hosts::idle_off(&cfg, &working(&ctx.state)?),
-                _ => std::collections::BTreeSet::new(),
-            };
+            let spare = matches!(cmd, Cmd::Check | Cmd::Drive { .. } | Cmd::Kick { .. } | Cmd::Waiting(_));
+            let off = crate::hosts::disabled(&cfg).into_iter().filter(|_| spare).collect();
             let pass = pass.sparing(off, Some((ctx, &cfg)));
-            let r: &dyn Runner = match cmd {
-                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } | Cmd::Reclaim { .. } => &pass,
-                _ => r,
-            };
+            let paced = spare || matches!(cmd, Cmd::Clean { .. } | Cmd::Reclaim { .. });
+            let r: &dyn Runner = if paced { &pass } else { r };
             let kick = |f: &str, n, why| {
                 let _ = crate::drive::kick(ctx, r, f, n, why);
             };
@@ -1786,6 +1791,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Wip {
                     cmd: WipCmd::Prune { fleet, dry_run },
                 } => check::prune(ctx, &cfg, r, out, &fleet, dry_run)?,
+                Cmd::Hygiene {
+                    cmd: crate::hygiene::Cmd::Scan { fleet },
+                } => crate::hygiene::scan(ctx, &cfg, r, out, &fleet)?,
                 Cmd::Secret { cmd } => match cmd {
                     SecretCmd::Request { thread, name, why } => {
                         crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
@@ -1819,7 +1827,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     writeln!(out, "{line}")?;
                 }
                 Cmd::Hosts { cmd } => match cmd {
-                    None | Some(HostsCmd::Report) => crate::hosts::list(ctx, &cfg, r, out, false)?,
+                    None | Some(HostsCmd::Report | HostsCmd::Watch) => crate::hosts::list(ctx, &cfg, r, out, false)?,
                     Some(HostsCmd::Refresh) => crate::hosts::list(ctx, &cfg, r, out, true)?,
                     Some(HostsCmd::On { name }) => crate::hosts::toggle(ctx, out, &name, true, "cli")?,
                     Some(HostsCmd::Off { name }) => crate::hosts::toggle(ctx, out, &name, false, "cli")?,
@@ -2059,16 +2067,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         bail!("a {role} lane reports no turn: impl, fix and update lanes do");
                     }
                     let done = state == "done" && !matches!(role, "triage" | "lesson");
+                    let head = if done {
+                        crate::done::turn(ctx, &cfg, r, (f, n), role)?
+                    } else {
+                        None
+                    };
                     let ui = done.then(|| crate::guard::turn(ctx, &cfg, r, out, (f, n), role));
                     let ui = ui.transpose()?.flatten();
-                    let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
-                    let note = note.transpose()?.flatten();
-                    let mut d = json!({"state": state, "why": why, "role": role});
+                    let mut d = json!({"state": state, "why": why, "role": role, "sha": head});
                     if let Some(u) = ui {
                         d.put("ui_check", u);
-                    }
-                    if let Some((code, w)) = &note {
-                        d.put("note", json!(format!("{code}: {w}")));
                     }
                     emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
                     writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
@@ -2076,9 +2084,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         writeln!(out, "ask the question with `drover ask {f} {n} …` if you have not")?;
                     }
                     kick(f, n, "turn");
-                    if let Some((code, w)) = note {
-                        return gate::refused(code, w);
-                    }
                 }
                 Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
                 Cmd::Lesson {
@@ -2290,7 +2295,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             crate::drive::kick_once(ctx, r, (f, n), why, id);
         }
     }
-    let builds = || lane_rules(ctx, &lane).is_ok_and(|r| r.builds);
+    let builds = || hook::lane_rules(ctx, &lane).is_ok_and(|r| r.builds);
     if let Some(v) = hook::turn_end(&input, &hook::turn_mark(&ctx.state, &lane), builds) {
         writeln!(out, "{v}")?;
         return Ok(());
@@ -2310,7 +2315,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         }
         return Ok(());
     }
-    let rules = match lane_rules(ctx, &lane) {
+    let rules = match hook::lane_rules(ctx, &lane) {
         Ok(r) => r,
         Err(cause) => return fail_closed(ctx, out, &input, &cause),
     };
@@ -2357,6 +2362,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         scratch: crate::config::env("DROVER_SCRATCH_TARGET").filter(|s| !s.is_empty()),
         cap,
         design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
+        hygiene: rules.hygiene,
     };
     let cur = |d: &str| {
         runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])
@@ -2385,26 +2391,6 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         lane_event(ctx, "thread-cmd", d);
     }
     Ok(())
-}
-
-fn lane_rules(ctx: &Ctx, lane: &str) -> std::result::Result<hook::Rules, String> {
-    if let Some(p) = crate::config::env_os("DROVER_RULES") {
-        let p = PathBuf::from(p);
-        let bad = |e: &dyn std::fmt::Display| format!("rules file {} is unreadable ({e})", p.display());
-        let text = std::fs::read_to_string(&p).map_err(|e| bad(&e))?;
-        return serde_json::from_str(&text).map_err(|e| bad(&e));
-    }
-    let cfg = Config::load(&ctx.config).map_err(|e| {
-        crate::stderr!("drover hook: {e:#}");
-        "fleet.toml failed to load".to_string()
-    })?;
-    let mut it = lane.split(':');
-    let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
-    if !cfg.fleet.contains_key(fleet) {
-        return Err(format!("fleet `{fleet}` is not in fleet.toml"));
-    }
-    let host = crate::config::env("DROVER_HOST").unwrap_or_default();
-    Ok(hook::Rules::resolve(&cfg, fleet, role, &host))
 }
 
 fn fail_closed(ctx: &Ctx, out: &mut dyn Write, input: &serde_json::Value, cause: &str) -> Result<()> {
@@ -2449,7 +2435,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;
     let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
-    let rules = lane_rules(ctx, &lane).unwrap_or_else(|_| {
+    let rules = hook::lane_rules(ctx, &lane).unwrap_or_else(|_| {
         let (mut it, host) = (lane.split(':'), crate::config::env("DROVER_HOST").unwrap_or_default());
         let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
         hook::Rules::resolve(&Config::load(&ctx.config).unwrap_or_default(), fleet, role, &host)
@@ -2482,6 +2468,11 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         if let Some(d) = hit.find_map(|l| hook::denied(&l[1..], &deny)) {
             lane_event(ctx, "hook-denied", json!({"rule": d.reason()}));
             writeln!(out, "drover: a pushed script runs `{}`: {}", d.cmd(), d.reason())?;
+            return Ok(1);
+        }
+        if let Some(why) = rules.hygiene.as_ref().and_then(|c| crate::hygiene::pushed(r, c, sha)) {
+            lane_event(ctx, "hook-denied", json!({"rule": why}));
+            writeln!(out, "drover: {why}")?;
             return Ok(1);
         }
         coauthor_warn(ctx, r, ".", sha);

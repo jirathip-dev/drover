@@ -155,13 +155,98 @@ fn demo_page_is_inert_and_relative() {
 }
 
 #[test]
-fn the_herd_screen_of_the_demo_fleet_is_its_golden() {
+fn the_scene_screen_of_the_demo_fleet_is_its_golden() {
     let (site, _) = export();
-    let got = screen(&site, "screens/herd");
-    let f = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/cooee/herd.json");
+    let got = screen(&site, "screens/scene");
+    let f = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/cooee/scene.json");
     if std::env::var_os("BLESS").is_some() {
         std::fs::write(&f, serde_json::to_string_pretty(&got).unwrap() + "\n").unwrap();
     }
     let want: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
-    assert_eq!(got, want, "`BLESS=1` rewrites tests/golden/cooee/herd.json");
+    assert_eq!(got, want, "`BLESS=1` rewrites tests/golden/cooee/scene.json");
+}
+
+fn faults(site: &std::path::Path) -> Vec<String> {
+    let mut out = vec![];
+    let mut dirs = vec![site.join("screens")];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                dirs.push(p);
+                continue;
+            }
+            let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+            let screens = v.as_array().cloned().unwrap_or_else(|| vec![v]);
+            let at = p.parent().unwrap().strip_prefix(site).unwrap().display().to_string();
+            for s in screens {
+                for f in blocks::Built::new(s).check(&[]) {
+                    let f = format!("{f:?}");
+                    let kind = f.split([' ', '{']).next().unwrap_or_default();
+                    let why = f
+                        .split_once("kind: ")
+                        .map_or("", |(_, k)| k.split(',').next().unwrap_or_default());
+                    out.push(
+                        format!("{at} {kind} {}", why.trim_end_matches(" }").trim_matches('"'))
+                            .trim_end()
+                            .to_string(),
+                    );
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+const KNOWN: [&str; 30] = [
+    "screens/events Twice",
+    "screens/lanes Twice",
+    "screens/queue ActTwice",
+    "screens/queue ActTwice",
+    "screens/queue ActTwice",
+    "screens/scene Extra scene",
+    "screens/scene Extra scene",
+    "screens/scene Extra scene",
+    "screens/scene Twice",
+    "screens/threads/t1 Shape card",
+    "screens/threads/t1 Shape card",
+    "screens/threads/t1 Shape card",
+    "screens/threads/t2 Shape card",
+    "screens/threads/t2 Shape card",
+    "screens/threads/t2 Shape card",
+    "screens/threads/t3 Shape card",
+    "screens/threads/t3 Shape card",
+    "screens/threads/t4 Shape card",
+    "screens/threads/t4 Shape card",
+    "screens/threads/t4 Shape card",
+    "screens/threads/t4 Shape card",
+    "screens/threads/t4 Shape card",
+    "screens/threads/t4 Shape card",
+    "screens/threads/t4 Shape card",
+    "screens/threads/t4 Shape card",
+    "screens/threads/t5 Shape card",
+    "screens/threads/t5 Shape card",
+    "screens/threads/t6 Shape card",
+    "screens/threads/t7 Shape card",
+    "screens/threads/t8 Shape card",
+];
+
+#[test]
+fn demo_screens_have_no_blocks_fault_beyond_the_known_list() {
+    let (site, _) = export();
+    assert_eq!(faults(&site), KNOWN);
+}
+
+#[test]
+fn a_broken_demo_screen_fails_blocks_check() {
+    let (site, _) = export();
+    let path = site.join("screens/fleets/index.html");
+    let mut j: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let first = j["blocks"][0].clone();
+    j["blocks"].as_array_mut().unwrap().push(first);
+    std::fs::write(&path, j.to_string()).unwrap();
+    let got = faults(&site);
+    assert!(got.contains(&"screens/fleets Twice".to_string()), "{got:?}");
+    assert_ne!(got, KNOWN);
 }

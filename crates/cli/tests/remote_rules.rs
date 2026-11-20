@@ -200,7 +200,7 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
         .unwrap();
     let v: serde_json::Value = serde_json::from_str(&rules.1).unwrap();
     let keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
-    assert_eq!(keys, ["branches", "builds", "deny", "groups", "reviewer"]);
+    assert_eq!(keys, ["branches", "builds", "deny", "groups", "hygiene", "reviewer"]);
     for secret in [
         "SEKRIT",
         "telegram",

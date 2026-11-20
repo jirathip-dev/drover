@@ -222,7 +222,7 @@ jobs:
         env:
           FLAKY: ${{ needs.ui.outputs.flaky }}
 
-  # #862: ui-webkit runs only when the diff touches the page (#927: web/, assets/; #1312: crates/server/) or its own tests.
+  # #862: on a PR, ui-webkit runs only when the diff touches the page (#927: web/, assets/; #1312: crates/server/) or its own tests; #1423: every staging push runs it.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -235,13 +235,14 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF: ${{ github.ref }}
         run: |
-          if [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+          if [ "$REF" = refs/heads/staging ] || [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             echo "webkit=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
           webkit=false
-          grep -qE '^(web/|assets/|crates/server/|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|keyboard_webkit\.rs|ui/(drafts|repaint|compose|timings|keyboard|answered|optimistic|pages)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs|phone_timings\.rs|screen_pages\.rs|common/large\.rs))' changed.txt && webkit=true
+          grep -qE '^(web/|assets/|crates/server/|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|keyboard_webkit\.rs|ui/(build|drafts|repaint|compose|timings|keyboard|answered|optimistic|settled|pages|revive)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs|phone_timings\.rs|screen_pages\.rs|common/large\.rs))' changed.txt && webkit=true
           echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
 
   # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.
@@ -279,7 +280,7 @@ jobs:
         run: cargo test --locked --test parity_webkit -- --ignored --nocapture
       - name: "url taps are real links in WebKit (#1085: no window.open, no white page in the Home Screen app)"
         run: cargo test --locked --test url_links
-      - name: "typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65); a send shows at once and once, an answered card goes at once (#1315)"
+      - name: "typed text, focus, caret and scroll survive repaints; per-thread drafts (#1084, #65); a send shows at once and once, an answered card goes at once (#1315); an older page reloads for a new build (#1351)"
         run: cargo test --locked --test page_drafts
       - name: "the focused composer keeps its node, focus, text and caret while the stream changes it (#1310)"
         if: ${{ !cancelled() }}

@@ -219,17 +219,21 @@ fn file(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
     let open: Value = serde_json::from_str(&ok(r, "gh", &list)?).unwrap_or_default();
     let found = (open.as_array().into_iter().flatten()).find(|i| i["title"] == title.as_str());
     let n = if let Some(n) = found.and_then(|i| i["number"].as_u64()) {
-        ok(
+        crate::hygiene::gh(
+            ctx,
             r,
-            "gh",
+            cfg,
+            fleet,
             &["issue", "edit", &n.to_string(), "-R", &f.repo, "--body", body],
         )?;
         writeln!(out, "updated {fleet}#{n}: {title}")?;
         n
     } else {
-        let url = ok(
+        let url = crate::hygiene::gh(
+            ctx,
             r,
-            "gh",
+            cfg,
+            fleet,
             &["issue", "create", "-R", &f.repo, "--title", &title, "--body", body],
         )?;
         let n = (url.trim().rsplit('/').next().and_then(|n| n.parse().ok())).context("gh issue create: no number")?;

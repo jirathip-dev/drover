@@ -44,6 +44,21 @@ pub fn branch_of(st: Option<&IssueState>, issue: u64) -> String {
         .unwrap_or_else(|| format!("issue-{issue}"))
 }
 
+/// A FAIL drover refuses: a blocker in a category the `turn done` gate owns (`PAPERWORK`), else one without its Proof block (`NO_PROOF`).
+pub fn unfit(body: &str) -> Option<(&'static str, String)> {
+    let gate = |(b, ls): (bool, Vec<&str>)| {
+        let l = ls.first().filter(|_| b)?.trim();
+        let t = tag(&l.to_lowercase()).filter(|t| ["why-note", "pr-body", "format"].contains(&t.as_str()))?;
+        Some(format!(
+            "`{l}` ([{t}] is `turn done`'s check, not a finding: drop it or make it non-blocking)"
+        ))
+    };
+    let bad: Vec<String> = findings(body).into_iter().filter_map(gate).collect();
+    (!bad.is_empty())
+        .then(|| ("PAPERWORK", bad.join("; ")))
+        .or_else(|| Some(("NO_PROOF", no_proof(body)?)))
+}
+
 /// Each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call. The `NO_PROOF` text naming each one that doesn't.
 pub fn no_proof(body: &str) -> Option<String> {
     let proofless =
@@ -84,8 +99,8 @@ pub fn verdict(
     }
     let body = crate::link::read(ctx, cfg, r, at, file).with_context(|| format!("cannot read verdict file {file}"))?;
     anyhow::ensure!(!body.trim().is_empty(), "verdict file {file} is empty");
-    if let Some(bad) = no_proof(&body).filter(|_| !pass) {
-        return refused("NO_PROOF", bad);
+    if let Some((code, bad)) = unfit(&body).filter(|_| !pass) {
+        return refused(code, bad);
     }
     let st = issue_state(ctx, fleet, issue)?;
     let branch = branch_of(st.as_ref(), issue);
@@ -181,11 +196,7 @@ pub fn verdict(
     let shots = crate::verify::shots(&body, Path::new(file), lane);
     let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
         "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha")), "files": shots, "repro": repro});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, fleet, Some(issue), "verdict", data),
-    )?;
+    crate::status::verdict(ctx, cfg, r, Event::new(ctx.now, fleet, Some(issue), "verdict", data))?;
     let (limit, of_limit) = limit(f, cnt, st.as_ref());
     let (v, note) = if form {
         ("FAIL (form-only)", format!(" · not counted · form {}/{of}", used + 1))
@@ -371,12 +382,13 @@ pub fn form_only(body: &str, cats: &[String]) -> bool {
         .filter(|f| f.0)
         .filter_map(|f| f.1.first().map(|l| l.to_lowercase()))
         .collect();
-    let tag = |l: &str| {
-        let (_, rest) = l.split_once("blocking")?;
-        let rest = rest.trim_start_matches(['*', '_', ':', ' ']).strip_prefix('[')?;
-        rest.split_once(']').map(|t| t.0.trim().to_string())
-    };
     !blockers.is_empty() && blockers.iter().all(|l| tag(l).is_some_and(|t| cats.contains(&t)))
+}
+
+fn tag(l: &str) -> Option<String> {
+    let (_, rest) = l.split_once("blocking")?;
+    let rest = rest.trim_start_matches(['*', '_', ':', ' ']).strip_prefix('[')?;
+    rest.split_once(']').map(|t| t.0.trim().to_string())
 }
 
 pub(crate) fn findings(body: &str) -> Vec<(bool, Vec<&str>)> {
@@ -967,9 +979,11 @@ pub fn merge(
     .concat();
     let inputs = json!({"pr": num, "head": head, "over": over, "fast": fast});
     let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
+    let full = [&["pr", "merge", &num, "-R", &f.repo][..], &m].concat();
+    crate::hygiene::args(ctx, r, cfg, fleet, &full)?;
     let at = (fleet, issue, "merge", head.as_str());
     let intent = crate::action::begin(r, &ctx.state, ctx.now, at, inputs, MERGE_SECS, &probe)?.act()?;
-    ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
+    ok(r, "gh", &full)?;
     intent.done(json!({"pr": num, "head": head}))?;
     merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
 }
@@ -1028,6 +1042,17 @@ fn merged(
         d.put("by", json!("owner")).put("override", json!("ROUND_LIMIT"));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
+    if over {
+        let desc = format!("ROUND_LIMIT overridden at {head:.7} · by: owner");
+        crate::status::post(
+            ctx,
+            cfg,
+            r,
+            (fleet, issue),
+            head,
+            (crate::status::OVERRIDE, "success", &desc),
+        )?;
+    }
     if f.land.is_some() {
         let checks = gh::required(&pr["statusCheckRollup"], f.checks(pr));
         let at = |k: &'static str| {
@@ -1045,24 +1070,16 @@ fn merged(
         let d = json!({"mode": mode, "sha": merge_sha, "pr": num, "checks_secs": secs});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
-    let log = working(&ctx.state)?;
-    if f.merge == crate::config::MergeMode::Squash {
-        if let Err(e) = crate::why::squash(ctx, r, f, (fleet, issue), &log, &merge_sha) {
-            writeln!(out, "why note not on {merge_sha:.7}: {e:#}")?;
-        }
-    }
-    let why = log.iter().rfind(|e| e.is("why", fleet, issue));
-    let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
-        "Merged via `drover merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}{}",
+        "Merged via `drover merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}",
         f.integration,
         if over { "\nOwner override: ROUND_LIMIT" } else { "" },
-        why.unwrap_or_default()
     );
     let n = issue.to_string();
     writeln!(out, "{evidence}")?;
     let comment = ["issue", "comment", &n, "-R", &f.repo, "--body", &evidence];
-    if let Err(e) = ok(r, "gh", &comment).or_else(|_| ok(r, "gh", &comment)) {
+    let sent = crate::hygiene::args(ctx, r, cfg, fleet, &comment);
+    if let Err(e) = sent.and_then(|()| ok(r, "gh", &comment).or_else(|_| ok(r, "gh", &comment))) {
         let reason = format!("PR #{num} merged @ {merge_sha}, but the evidence comment failed twice: {e:#}");
         let e = Event::new(
             ctx.now,
@@ -1106,6 +1123,13 @@ pub fn needs_human(
     Ok(())
 }
 
+/// `fleet` #`n` went on past an extend ask (out of needs-human, parked, impl and fix(n)): answering it only closes it.
+pub fn past_extend(ctx: &Ctx, fleet: &str, n: u64) -> Result<bool> {
+    let st = issue_state(ctx, fleet, n)?.map(|s| s.state).unwrap_or_default();
+    let asked = st == "parked" || st == "impl" || st.starts_with("fix(");
+    Ok(!asked && held(ctx, fleet, n).is_err())
+}
+
 /// An extend ask's `one more round`: needs-human's extend, or an extra round for the lane its issue went on with since the ask.
 pub fn extend_ask(
     ctx: &Ctx,
@@ -1135,14 +1159,16 @@ fn extended(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), (spawn, by): (bool
         .iter()
         .rfind(|e| e.is("needs-human", fleet, n))
         .cloned();
-    let unstarted = nh.is_some_and(|e| e.data.get("start") == Some(&json!(true)));
+    let update = state == "needs-human" && nh.as_ref().and_then(|e| e.str("code")) == Some("UPDATE_LIMIT");
+    let unstarted = nh.as_ref().is_some_and(|e| e.data.get("start") == Some(&json!(true)));
     let (kind, e) = match state {
+        _ if update => ("round-extended", json!({"by": by, "spawn": spawn, "update": true})),
         "needs-human" if !unstarted => ("round-extended", json!({"by": by, "spawn": spawn, "queued": spawn})),
         _ if spawn => (crate::pending::REQUEUED, json!({"by": by})),
         _ => return Ok(()),
     };
     crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), kind, e))?;
-    if spawn {
+    if spawn && !update {
         requeue(ctx, cfg, &working(&ctx.state)?, fleet, n)?;
     }
     Ok(())

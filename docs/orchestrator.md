@@ -22,7 +22,7 @@ showing exactly what is sent or run; Enter confirms through `drover answer` / `c
 The top line lists what is down from doctor's serve and shed checks (every 10 s); a shed that does not answer is
 started with its own job (`dev.shed.serve`, `shed.service`), a message waits for it and goes once it answers, and if it
 does not start the line gives the command to run. From 100 columns the list and the chat sit side by side. Tab
-switches to the Board tab (#1354). The keys are the design's list (`docs/design/drover-chat/README.md`); Ctrl-C quits
+switches to the Board tab (#1354, docs/terminal.md). The keys are the design's list (`docs/design/drover-chat/README.md`); Ctrl-C quits
 and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
 
 ## The orchestrator lane
@@ -113,7 +113,7 @@ and restores the terminal. The lane hook refuses it (`OWNER_ONLY`).
   owner's pick there re-sends `DECISION <id>: <choice>` to the lane, `by: owner`, replacing it.
 - **Amendments (#574):** `drover amend <fleet> <issue> --basis q<id> "<text>"` (orchestrators and the owner; the lane
   hook refuses it for impl, rev and design lanes) writes an owner's decision into the spec: it appends
-  `- **Amendment (q<id>)**: <text>` to the issue body's `## Amendments` section (made once, at the end), logs `amend`
+  `- **Amendment (<YYYY-MM-DD>)**: <text>` to the issue body's `## Amendments` section (made once, at the end), logs `amend`
   `{id, text}` and re-runs the open PR's failed spec-reading checks (board-freeze). `q<id>` must be an ask on that
   issue answered `by: owner` (or a routine ask's `by: default`), else `REFUSED NO_DECISION` before any GitHub call.
   An orchestrator runs it as soon as an owner decision names an amendment; the thread shows it as a tool row.

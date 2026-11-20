@@ -23,6 +23,7 @@
 {"ts":1793422988,"fleet":"acme-web","issue":38,"type":"spawn","role":"impl","agent":"acme-web-impl-38","harness":"claude","model":"opus","effort":"xhigh","branch":"issue-38"}
 {"ts":1793423088,"fleet":"docs","issue":6,"type":"merged","pr":"14","into":"staging","merge_sha":"0707070707070707070707070707070707070707"}
 {"ts":1793423488,"fleet":"docs","issue":8,"type":"spawn","role":"impl","agent":"docs-impl-8","harness":"claude","model":"sonnet","effort":"high","branch":"issue-8"}
+{"ts":1793429400,"fleet":"docs","issue":8,"type":"turn-end","state":"done","role":"impl","sha":"0808080808080808080808080808080808080808"}
 {"ts":1793424488,"fleet":"acme-api","issue":17,"type":"spawn","role":"impl","agent":"acme-api-impl-17","harness":"dsh","branch":"issue-17"}
 {"ts":1793424988,"fleet":"docs","issue":9,"type":"spawn","role":"impl","agent":"docs-impl-9","harness":"claude","model":"sonnet","effort":"high","branch":"issue-9"}
 {"ts":1793425488,"fleet":"acme-api","issue":15,"type":"spawn","role":"rev","agent":"acme-api-rev-15","harness":"claude","model":"opus"}
@@ -53,6 +54,12 @@
 {"ts":1793429610,"fleet":"acme-web","type":"queue","issues":[49],"on":47,"op":"block"}
 {"ts":1793429610,"fleet":"acme-web","type":"queue","issues":[50],"op":"add"}
 {"ts":1793429610,"fleet":"acme-web","type":"queue","issues":[50],"on":49,"op":"block"}
+{"ts":1793200000,"fleet":"acme-api","type":"thread-new","thread":"t6","title":"Error codes catalogue"}
+{"ts":1793200060,"fleet":"acme-api","type":"thread-msg","thread":"t6","from":"conductor","text":"Listed every error code in docs/errors.md."}
+{"ts":1793210000,"fleet":"acme-api","type":"thread-new","thread":"t7","title":"Pagination for /v1/items"}
+{"ts":1793210060,"fleet":"acme-api","type":"thread-msg","thread":"t7","from":"conductor","text":"Cursor pagination shipped in #12."}
+{"ts":1793220000,"fleet":"acme-api","type":"thread-new","thread":"t8","title":"Health check endpoint"}
+{"ts":1793220060,"fleet":"acme-api","type":"thread-msg","thread":"t8","from":"conductor","text":"/healthz answers 200 once the db is up."}
 {"ts":1793300000,"fleet":"all","type":"thread-new","thread":"t1","title":"Weekly ship notes"}
 {"ts":1793300060,"fleet":"all","type":"thread-msg","thread":"t1","from":"owner","text":"Draft the ship notes from this week's merges, every Friday."}
 {"ts":1793300100,"fleet":"all","type":"conductor-start","thread":"t1","agent":"conductor-t1","pane":"w7:p1","workspace":"w7","harness":"claude","session":"2b9e41c0-5d3a-4f7e-9a61-0c8d2e3f4a5b","resumed":false,"confirmed":true}

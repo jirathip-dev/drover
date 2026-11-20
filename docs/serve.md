@@ -159,7 +159,7 @@ client), ts-rs behind the `ts` feature for the board's TS types (#375, never in 
 shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), blocks and swag (#1339: the
 theme rules and the built-in colour schemes, each pinned to a commit), and rusqlite (bundled SQLite)
 for the state database (#344, docs/architecture.md), keyring for the main host's secret store
-(#441, owner-approved; docs/providers.md), flate2 for serve's gzip (#1314, owner-approved), ratatui (with its crossterm backend) in `crates/chat` only (#1352, owner-approved, q2151), and tokio in `crates/service` only (#345, docs/service.md). CI's deps gate
+(#441, owner-approved; docs/providers.md), flate2 for serve's gzip (#1314, owner-approved), ratatui (with its crossterm backend) in `crates/chat` only (#1352, owner-approved, q2151), and tokio in `crates/service` (#345, docs/service.md) and in `crates/server` for serve's connections (#1318). CI's deps gate
 fails on any other direct dependency.
 
 ## GitHub webhooks (#626)
@@ -337,12 +337,16 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token
   proxy section under it holds doctor's proxy facts and [How to set], `GET /screens/proxy-token`, the token's steps.
   #1313: the leftover count and the proxy facts are read off the request (the host sampler, `refresh`; never by a host action);
-- #1092: `GET /screens/herd`, the page's Herd (page-only, [⚙] → Herd; cooee draws its own scene): one `scene` block
-  with `weather` (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `line`)
-  and `repos`, each a fleet (then `others`) with its queued issues at the gate and its lanes in bands (working, idle,
-  done, blocked) as rows with figures. The page draws the theme's `scene.svg` (the pinned swag pack; a `<config
-  dir>/themes/<name>/scene.svg` overrides it; farm and terminal, with none, get a drawn ranch), [‹] [›] switch repo
-  and [☾] switches night;
+- #1305: `GET /screens/scene` (and its `/stream`), the page's Scene (page-only; the header's `[scene]` swaps the whole
+  page between the screens and Scene, kept per phone; cooee draws its own scene): one `scene` block with `weather`
+  (`sky` clear, windy, fog or storm from host load, memory pressure and the spawn gate; `wind`, `fog` 0–2, `storm`,
+  `line`), #1415 `load` (calm, busy or held: a `sign` theme's needle) and `repos`, each a fleet (then `others`) with its
+  queued issues at the gate (`blocked_by`) and its lanes in bands (`working`, `idle`, `done`, `blocked/dead`) as rows
+  with `figure` (`state`, `act`, `coat`), `tone`, `value` (age), `host` and `needs`. The page draws the old Herd
+  (#37, #71, #292): the ranch strip (the theme's `scene.svg`, the pinned swag pack, a `<config
+  dir>/themes/<name>/scene.svg` overriding it; farm, with none, gets the drawn ranch), the farm sprites from the pinned
+  swag pack, one page per repo ([‹] [›], the dots, ←/→, a wheel or a drag), the repo's needs-you cards from
+  `/screens/cards`, and `[A]`/`[☀]`/`[☾]` in the header (Auto: night before 07:00 and from 19:00, phone clock);
 - `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
   `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;

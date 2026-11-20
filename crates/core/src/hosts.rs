@@ -251,10 +251,22 @@ impl<'a> Pass<'a> {
             log: None,
         }
     }
-    /// Never contact the machines `off`; a host's changed key logs `host-key-changed` once (with `log`).
+    /// Never contact the machines `off`; with `log`, a host's changed key logs `host-key-changed` once and a fresh shared offline mark holds but in the tick, which probes afresh.
     #[must_use]
-    pub fn sparing(self, off: std::collections::BTreeSet<String>, log: Option<(&'a Ctx, &'a Config)>) -> Self {
+    pub fn sparing(mut self, off: std::collections::BTreeSet<String>, log: Option<(&'a Ctx, &'a Config)>) -> Self {
+        if let (Some((ctx, cfg)), Ok(up), None) = (log, self.up.get_mut(), &self.mark) {
+            let fresh = down(ctx)
+                .into_iter()
+                .filter(|d| ctx.now < d.1 .1 + cfg.limits.host_down_secs);
+            up.extend(fresh.map(|d| (d.0, false)));
+        }
         Pass { off, log, ..self }
+    }
+    fn seen(&self, m: &str, up: bool) {
+        let was = lock(&self.up).insert(m.into(), up);
+        if let Some((ctx, _)) = self.log.filter(|_| was != Some(up)) {
+            went(ctx, m, up);
+        }
     }
     pub fn over(&self) -> bool {
         self.until.is_some_and(|t| crate::clock::instant() >= t)
@@ -330,7 +342,7 @@ impl<'a> Pass<'a> {
             lock(&self.late).insert(m.into());
         }
         let u = o.is_ok_and(|o| !matches!(o.code, 124 | 255));
-        lock(&self.up).insert(m.into(), u);
+        self.seen(m, u);
         u
     }
     fn call(&self, prog: &str, args: &[String], input: Option<&str>) -> Result<Out> {
@@ -340,11 +352,7 @@ impl<'a> Pass<'a> {
         };
         let unknown = self.log.is_some_and(|(_, cfg)| !configured(cfg, m));
         if self.off.contains(m) || unknown {
-            let why = if unknown {
-                "not configured"
-            } else {
-                "host disabled, no lane there"
-            };
+            let why = if unknown { "not configured" } else { "host disabled" };
             let stderr = format!("{m}: not sent ({why})");
             return Ok(Out {
                 code: 255,
@@ -390,7 +398,9 @@ impl<'a> Pass<'a> {
         }
         self.key_changed(m, &o);
         if matches!(o.code, 124 | 255) {
-            lock(&self.up).insert(m.into(), false);
+            self.seen(m, false);
+        } else if lock(&self.up).get(m).is_none() {
+            self.seen(m, true);
         }
         if o.code == 124 {
             lock(&self.late).insert(m.into());
@@ -402,7 +412,6 @@ impl<'a> Pass<'a> {
         if !o.stderr.contains(KEY_CHANGED) {
             return;
         }
-        lock(&self.up).insert(m.into(), false);
         let Some((ctx, cfg)) = self.log else {
             return;
         };
@@ -428,7 +437,45 @@ impl<'a> Pass<'a> {
 
 const KEY_CHANGED: &str = "REMOTE HOST IDENTIFICATION HAS CHANGED";
 
-/// The machines of disabled hosts with no open lane logged there: drive, check and status never contact them.
+/// The machines of disabled hosts: kick, tick, check, drive, `waiting` and `status` never contact them; `hosts refresh` does.
+pub fn disabled(cfg: &Config) -> std::collections::BTreeSet<String> {
+    let off = cfg.hosts.values().filter(|h| !h.enabled);
+    off.filter_map(|h| h.machine.clone()).collect()
+}
+
+fn down_file(ctx: &Ctx) -> PathBuf {
+    ctx.state.with_file_name("hosts.down")
+}
+
+/// The machines a drover command could not reach (`<state dir>/hosts.down`): since when, and the last failed try.
+pub fn down(ctx: &Ctx) -> BTreeMap<String, (u64, u64)> {
+    let text = std::fs::read_to_string(down_file(ctx)).unwrap_or_default();
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+/// Share machine `m`'s reachability with every drover command; down, the time it has been down since.
+pub fn went(ctx: &Ctx, m: &str, up: bool) -> u64 {
+    let mut all = down(ctx);
+    let since = all.get(m).map_or(ctx.now, |d| d.0);
+    let changed = if up {
+        all.remove(m).is_some()
+    } else {
+        all.insert(m.into(), (since, ctx.now));
+        true
+    };
+    if changed {
+        let text = serde_json::to_string(&all).unwrap_or_default();
+        crate::config::write_atomic(&down_file(ctx), &text).ok();
+    }
+    since
+}
+
+/// How long machine `m` has been down, marked down now: doctor's `down 12m`.
+pub fn down_for(ctx: &Ctx, m: &str) -> String {
+    crate::events::age(ctx.now.saturating_sub(went(ctx, m, false)))
+}
+
+/// The machines of disabled hosts with no open lane logged there: a survey and a look skip them.
 pub fn idle_off(cfg: &Config, events: &[Event]) -> std::collections::BTreeSet<String> {
     let idle = |(n, h): &(&String, &HostCfg)| !h.enabled && lanes_on(cfg, events, n).is_empty();
     cfg.hosts
@@ -519,7 +566,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         return agents;
     }
     let events = working(&ctx.state).unwrap_or_default();
-    let off = idle_off(cfg, &events);
+    let off = if refresh { idle_off(cfg, &events) } else { disabled(cfg) };
     let seen = crate::link::look(ctx, cfg, r, &mut std::io::sink(), refresh).map(|v| v.sessions());
     let seen = seen.unwrap_or_default();
     for (name, h) in &cfg.hosts {

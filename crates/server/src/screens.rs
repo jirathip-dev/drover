@@ -13,6 +13,8 @@ use std::time::Duration;
 
 #[path = "later.rs"]
 mod later;
+#[path = "screens_local.rs"]
+pub(super) mod local;
 #[path = "screens_pages.rs"]
 mod pages;
 
@@ -45,15 +47,13 @@ pub fn places() -> Value {
 pub fn page_places() -> Value {
     let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
     let hosts = json!({"type": "menu-row", "label": "Hosts", "subtitle": "on/off and reap, per host", "screen": "/screens/hosts"});
-    let herd = json!({"type": "menu-row", "label": "Herd", "subtitle": "the ranch: lanes by state, weather from host load", "screen": "/screens/herd"});
     let mut all = places().as_array().cloned().unwrap_or_default();
-    all.extend([threads, hosts, herd]);
+    all.extend([threads, hosts]);
     Value::Array(all)
 }
 
 #[path = "screens_hosts.rs"]
 mod hosts;
-use hosts::HOST_ACTIONS;
 
 const THREAD_ACTIONS: [&str; 11] = [
     "thread-new",
@@ -476,35 +476,6 @@ fn done_screen(c: &QueueCard, q: &Q) -> Value {
         .collect();
     json!({"type": "screen", "id": format!("done-{f}"), "title": format!("{f} · done today"),
         "blocks": [pages::paged(rows_list("done-list", &rows), more)]})
-}
-
-const LEGEND: [(&str, &str); 17] = [
-    ("queued", "waiting its turn"),
-    ("design · architect", "a design or ADR waits for your approval"),
-    ("impl", "being built"),
-    ("review n", "being checked, round n"),
-    ("fix n", "fixing review findings, round n"),
-    ("verify n", "the real app is being checked, round n"),
-    ("update", "merging the integration branch into its PR"),
-    ("ready", "passed, waiting to merge"),
-    ("merged", "merged into the integration branch"),
-    ("waiting: decision", "a lane asked: tap the row to answer in its sheet"),
-    ("needs-human", "out of rounds or stuck: your call"),
-    ("blocked · held until #N", "waits for another issue to merge"),
-    ("parked", "lane closed, its work saved on the PR"),
-    ("dead", "lane gone with unsaved work"),
-    ("▲ [◆ rev] ◫ ✓", "the issue's pipeline, its current stage in brackets"),
-    ("🔒 group", "serial: one lane of the group at a time"),
-    ("🔒 hot ×N", "holds N hot files, one lane at a time: tap to list them"),
-];
-
-fn legend() -> Value {
-    let rows = LEGEND
-        .iter()
-        .enumerate()
-        .map(|(i, (w, m))| json!({"type": "row", "id": format!("lg-{i}"), "title": w, "subtitle": m}));
-    json!({"type": "sheet", "id": "legend", "title": "What the marks mean", "cancel": "Done",
-        "blocks": [{"type": "list", "id": "legend-list", "rows": rows.collect::<Vec<_>>()}]})
 }
 
 const FILTERS: [(&str, &str); 5] = [
@@ -1166,13 +1137,12 @@ const BANDS: [(&str, &[&str]); 4] = [
 ];
 
 fn band(id: &str, name: &str, rows: &[Value]) -> Option<Value> {
-    (!rows.is_empty()).then(|| {
-        json!({"type": "section", "id": format!("h-{id}-{name}"), "header": format!("{name} ({})", rows.len()),
-            "blocks": [{"type": "list", "id": format!("h-{id}-{name}-list"), "rows": rows}]})
-    })
+    let header = if name == "blocked" { "blocked/dead" } else { name };
+    (!rows.is_empty())
+        .then(|| json!({"type": "section", "id": format!("h-{id}-{name}"), "header": header, "rows": rows}))
 }
 
-fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>) -> Option<Value> {
+fn scene_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>) -> Option<Value> {
     let needs = f.map(|f| f.needs.as_slice()).unwrap_or_default();
     let lanes: Vec<&HerdLane> = lanes.iter().filter(|l| !l.gone).collect();
     let mut sum = vec![];
@@ -1181,9 +1151,12 @@ fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>)
         .map(|q| {
             let need = needs.contains(&q.issue);
             let blocked = q.blocked_by.map(|b| format!("blocked by #{b}"));
-            let sub = need.then(|| "needs you".to_string()).or(blocked).or_else(|| q.title.clone());
-            json!({"type": "row", "id": format!("h-{name}-q{}", q.issue), "figure": {"state": if need { "needs" } else { "idle" }},
-                "title": format!("#{}", q.issue), "subtitle": sub.unwrap_or_default()})
+            let sub = need
+                .then(|| "needs you".to_string())
+                .or(blocked)
+                .or_else(|| q.title.clone());
+            json!({"id": format!("h-{name}-q{}", q.issue), "figure": {"state": if need { "needs" } else { "queued" }},
+                "title": format!("#{}", q.issue), "subtitle": sub.unwrap_or_default(), "blocked_by": q.blocked_by})
         })
         .collect();
     sum.push((gate.len(), "queued"));
@@ -1192,18 +1165,28 @@ fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>)
         let rows: Vec<Value> = (lanes.iter())
             .filter(|l| {
                 let need = l.issue.is_some_and(|i| needs.contains(&i));
-                if need { b == "blocked" } else { states.contains(&l.state.as_str()) }
+                if need {
+                    b == "blocked"
+                } else {
+                    states.contains(&l.state.as_str())
+                }
             })
             .map(|l| {
-                let need = l.issue.is_some_and(|i| needs.contains(&i));
-                let shown = if need { "needs you" } else { l.shown.as_str() };
-                let sub: Vec<&str> = [shown, l.host.as_deref().unwrap_or_default()].into_iter().filter(|s| !s.is_empty()).collect();
-                json!({"type": "row", "id": format!("h-{}", l.name), "figure": lane_figure(&l.name, if need { "blocked" } else { &l.state }),
-                    "title": l.name, "subtitle": sub.join(" · "), "value": l.age, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
+                let need = l.issue.filter(|i| needs.contains(i));
+                let (state, act, tone, shown) = match need {
+                    Some(_) => ("blocked", "blocked", "r", "needs you"),
+                    None => (l.state.as_str(), l.act.as_str(), l.tone.as_str(), l.shown.as_str()),
+                };
+                json!({"id": format!("h-{}", l.name), "figure": {"state": state, "act": act, "coat": l.coat},
+                    "title": l.name, "subtitle": shown, "tone": tone, "value": l.age, "host": l.host, "needs": need,
+                    "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
             })
             .collect();
         sum.push((rows.len(), b));
         blocks.extend(band(name, b, &rows));
+    }
+    if let Some(t) = sum.get_mut(1..) {
+        t.rotate_right(1);
     }
     let sum: Vec<String> = sum
         .iter()
@@ -1211,21 +1194,26 @@ fn herd_repo(name: &str, color: &str, lanes: &[HerdLane], f: Option<&HerdFleet>)
         .map(|(n, w)| format!("{n} {w}"))
         .collect();
     (f.is_some() || !lanes.is_empty())
-        .then(|| json!({"id": name, "title": name, "color": color, "subtitle": sum.join(" · "), "blocks": blocks}))
+        .then(|| json!({"id": name, "title": name, "color": color, "subtitle": sum.join("·"), "blocks": blocks}))
 }
 
-fn herd_screen(h: &Herd) -> Value {
+fn scene_screen(h: &Herd) -> Value {
     let mut repos: Vec<Value> = (h.fleets.iter())
-        .filter_map(|f| herd_repo(&f.name, &f.color, &f.lanes, Some(f)))
+        .filter_map(|f| scene_repo(&f.name, &f.color, &f.lanes, Some(f)))
         .collect();
-    repos.extend(herd_repo("others", "", &h.others, None));
+    repos.extend(scene_repo("others", "", &h.others, None));
     let host = &h.host;
-    let wind = (host.load.unwrap_or_default() / host.limit.max(0.01)).clamp(0.0, 1.0);
-    let sky = match host.pressure.as_deref() {
-        _ if host.gate.is_some() => "storm",
-        Some("warn" | "critical") => "fog",
-        _ if wind >= 0.5 => "windy",
-        _ => "clear",
+    let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
+    let fog = match host.pressure.as_deref() {
+        Some("warn") => 1,
+        Some("critical") => 2,
+        _ => 0,
+    };
+    let (sky, level) = match fog {
+        _ if host.gate.is_some() => ("storm", "held"),
+        1 | 2 => ("fog", "busy"),
+        _ if ratio >= 0.5 => ("windy", "busy"),
+        _ => ("clear", "calm"),
     };
     let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
     let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
@@ -1233,8 +1221,9 @@ fn herd_screen(h: &Herd) -> Value {
         "load {load} · mem {} · swap {swap}",
         host.pressure.as_deref().unwrap_or("?")
     );
-    json!({"type": "screen", "id": "herd", "title": "Herd", "blocks": [{"type": "scene", "id": "herd-scene",
-        "weather": {"sky": sky, "wind": (wind * 100.0).round() / 100.0, "line": line}, "repos": repos}]})
+    json!({"type": "screen", "id": "scene", "title": "Scene", "stream": "/screens/scene/stream", "blocks": [{"type": "scene", "id": "ranch", "load": level,
+        "weather": {"sky": sky, "wind": (ratio.clamp(0.0, 1.0) * 100.0).round() / 100.0, "fog": fog, "storm": host.gate.is_some(), "line": line},
+        "repos": repos}]})
 }
 
 fn section_word(state: &str) -> &str {
@@ -1324,9 +1313,8 @@ fn own(v: &Value) -> Map<String, Value> {
 }
 
 fn kids(v: &Value) -> &[Value] {
-    v.get("blocks")
-        .or_else(|| v.get("rows"))
-        .and_then(Value::as_array)
+    v.as_array()
+        .or_else(|| v.get("blocks").or_else(|| v.get("rows")).and_then(Value::as_array))
         .map_or(&[], Vec::as_slice)
 }
 
@@ -1419,7 +1407,7 @@ impl Server<'_> {
             .into_iter()
             .flatten()
             .filter_map(|p| p["screen"].as_str().map(String::from))
-            .chain(["/screens/cards".to_string()])
+            .chain(["/screens/cards".to_string(), "/screens/scene".to_string()])
             .collect();
         let mut out = vec![];
         let mut i = 0;
@@ -1445,7 +1433,7 @@ impl Server<'_> {
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx, paired),
             "/screens/workflow" => workflow(ctx),
-            "/screens/herd" => herd_screen(&self.herd(ctx, None).ok()?),
+            "/screens/scene" => scene_screen(&self.herd(ctx, None).ok()?),
             "/screens/hot" => self.on_row(ctx, q, |c, r| {
                 let f = &c.name;
                 let rows: Vec<Value> = (hot(r).iter().enumerate())
@@ -1461,7 +1449,6 @@ impl Server<'_> {
                 self.on_row(ctx, q, |c, r| issue_sheet(ctx, &ev, fl(c), c, r))?
             }
             "/screens/verdict" => verdict_sheet(&working(&ctx.state).ok()?, q)?,
-            "/screens/legend" => legend(),
             "/screens/backlog" => {
                 let tab = self.queue_tab(ctx);
                 backlog(ctx.now, tab.fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?, q)?
@@ -1602,7 +1589,6 @@ impl Server<'_> {
         let menu = [
             json!({"label": "Fleets…", "tap": {"sheet": "/screens/fleets"}}),
             json!({"label": "Drive all now", "action": "drive-all"}),
-            json!({"label": "Legend [?]", "tap": {"sheet": "/screens/legend"}}),
         ];
         let badge = self.needs_count(ctx, &ev);
         json!({"type": "screen", "id": "queue", "title": "Queue", "stream": stream, "badge": badge,
@@ -1649,25 +1635,17 @@ impl Server<'_> {
                 let Ok(a) = serde_json::from_str::<Value>(body) else {
                     return line("400 Bad Request", "bad request body");
                 };
-                let name = a.at("action").as_str().unwrap_or_default();
-                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name) && !HOST_ACTIONS.contains(&name)) {
-                    let why =
-                        format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
-                    return line("403 Forbidden", &why);
-                }
-                let by = match auth {
-                    Ok(d) if !plugin => d.label.clone(),
-                    _ => "cooee".into(),
+                let who = match auth {
+                    Ok(d) if !plugin => local::Who::Device(&d.label),
+                    _ => local::Who::Plugin,
                 };
-                let res = match name {
-                    "later" => self.hide_card(ctx, &by, a.at("values")),
-                    n if HOST_ACTIONS.contains(&n) => self.host_op(ctx, n, a.at("values")),
-                    _ => self.action(ctx, name, &a),
-                };
-                match res {
+                match self.perform(ctx, &who, &a) {
                     Ok(v) => out("200 OK", &v),
-                    Err(e) if e.downcast_ref::<Refusal>().is_some() => line("409 Conflict", &shown(&e)),
-                    Err(e) => line("400 Bad Request", &shown(&e)),
+                    Err(e) => match e.downcast_ref::<Refusal>().map(|r| r.code) {
+                        Some("NOT_PERMITTED") => line("403 Forbidden", &shown(&e)),
+                        Some(_) => line("409 Conflict", &shown(&e)),
+                        None => line("400 Bad Request", &shown(&e)),
+                    },
                 }
             }
             _ => line("404 Not Found", "no such screen route"),
@@ -1909,17 +1887,25 @@ impl Server<'_> {
             now: crate::now(),
             ..self.ctx.clone()
         };
-        let (q, open) = (form(query), self.streams.fetch_add(1, Relaxed) < 4);
+        let q = form(query);
         let plugin = Self::plugin(self.ctx, head);
-        let paired = plugin || devices::check(self.ctx, header(head, "cookie").unwrap_or_default()).is_ok();
+        let dev = devices::check(self.ctx, header(head, "cookie").unwrap_or_default());
+        let paired = plugin || dev.is_ok();
+        let who = match dev {
+            _ if plugin => "cooee".into(),
+            Ok(d) => d.hash,
+            Err(_) => s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default(),
+        };
+        let slot = super::StreamSlot::take(&self.streams, who);
+        let open = slot.is_some();
         let screen = |c: &Ctx, q: &Q| crate::runner::request(|| self.screen(c, base, q, paired));
+        let mut log = crate::db::last_seq(&self.ctx.state);
         let Some(mut cur) = screen(&ctx(), &q).filter(|_| open && (plugin || self.allowed(self.ctx, head))) else {
-            self.streams.fetch_sub(1, Relaxed);
             let r = line(
                 if open {
-                    "503 Service Unavailable"
-                } else {
                     "404 Not Found"
+                } else {
+                    "503 Service Unavailable"
                 },
                 "no stream",
             );
@@ -1937,16 +1923,22 @@ impl Server<'_> {
             + 1;
         let mut start = vec![json!({"op": "screen", "screen": cur})];
         start.extend(count(&cur).map(|n| json!({"op": "badge", "count": n})));
-        let mut msg = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\nid: {seq}\ndata: {}\n\n", json!({"seq": seq, "ops": start}));
-        let (mut log, mut ping) = (crate::db::last_seq(&self.ctx.state), drover_core::clock::instant());
+        let ver = format!("{:08x}", super::VER);
+        let mut msg = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\nid: {seq}\ndata: {}\n\n", json!({"seq": seq, "build": ver, "ops": start}));
+        let mut ping = drover_core::clock::instant();
         let mut built = drover_core::clock::instant();
         let mut z = super::wire::Stream::new(head);
-        let res = loop {
-            if let Err(e) = z.frame(&msg).and_then(|b| s.write_all(&b)) {
-                break Err(e);
+        let mut missed = 0;
+        'out: loop {
+            let end = drover_core::clock::instant() + Duration::from_secs(10);
+            if !z.frame(&msg).is_ok_and(|b| super::sent(s, &b, end)) {
+                break;
             }
             msg.clear();
             while msg.is_empty() {
+                if super::hung_up(s) {
+                    break 'out;
+                }
                 drover_core::clock::sleep(Duration::from_millis(500));
                 let now = crate::db::last_seq(&self.ctx.state);
                 if now != log || built.elapsed() >= Duration::from_secs(30) {
@@ -1960,17 +1952,23 @@ impl Server<'_> {
                     );
                     if !change.is_empty() {
                         seq += 1;
-                        msg = format!("id: {seq}\ndata: {}\n\n", json!({"seq": seq, "ops": change}));
+                        msg = format!(
+                            "id: {seq}\ndata: {}\n\n",
+                            json!({"seq": seq, "build": ver, "ops": change})
+                        );
                     }
                     cur = new;
                 }
-                if msg.is_empty() && (ping.elapsed() >= Duration::from_secs(15) || super::hung_up(s)) {
+                if msg.is_empty() && ping.elapsed() >= Duration::from_secs(5) {
+                    missed = if drover_sys::unsent(s) > 0 { missed + 1 } else { 0 };
+                    if missed >= 2 {
+                        break 'out;
+                    }
                     (msg, ping) = (": ping\n\n".into(), drover_core::clock::instant());
                 }
             }
-        };
-        self.streams.fetch_sub(1, Relaxed);
-        res
+        }
+        Ok(())
     }
 }
 
@@ -1988,3 +1986,7 @@ fn cooee() -> devices::Device {
         ..Default::default()
     }
 }
+
+#[cfg(test)]
+#[path = "herd_tests.rs"]
+mod tests;

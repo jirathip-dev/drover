@@ -1,6 +1,6 @@
 import { type Act, type Ctx, el, kids, morph, render, sent, values } from './blocks';
-import './herd';
 import { apply, type Blk, blks, find, isBlk, isList, obj } from './ops';
+import { S, scene, sceneOn } from './scene';
 import { R, colours, esc, get, nodes, put, schemes, theme, themes } from './theme';
 import { type Kind, type Span, flush, painted, read, span } from './timing';
 
@@ -11,13 +11,29 @@ const ro = 'ro' in B.dataset, demo = 'demo' in B.dataset;
 const $ = <T extends Element = HTMLElement>(s: string): T => { const e = document.querySelector<T>(s); if (!e) throw new Error(`no ${s}`); return e; };
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const exported = B.dataset.root === '';
+const build = /\/a\/(\w+)\/board\.js$/.exec(import.meta.url)?.[1];
+const typing = () => !!document.activeElement?.matches('input, textarea, [role=listbox], [contenteditable]');
+function upgrade(b: string) {
+  if (typing()) return void document.addEventListener('focusout', () => setTimeout(() => upgrade(b)), { once: true });
+  const k = 'reloads:' + b, n = Number(sessionStorage.getItem(k) ?? 0);
+  if (n >= 3) return;
+  sessionStorage.setItem(k, String(n + 1));
+  location.reload();
+}
+let leaving = false;
+const newer = (b: unknown) => {
+  if (!build || typeof b !== 'string' || !b || b === build) return false;
+  if (!leaving) upgrade(b);
+  leaving = true;
+  return true;
+};
 const url = (p: string) => new URL(p.replace(/^[/]/, '') + (exported && /^\/screens\/[^?]*$/.test(p) ? '/index.html' : ''), R).href;
 
 type Pend = { id: string; text: string; n: number; st: 'sending' | 'sent' | 'failed'; a: Act };
-type View = { path: string; model: Blk | null; at: number; live: boolean; es?: EventSource; root: HTMLElement; open: Set<string>; back: string[]; pend: Pend[] };
-const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, root, open: new Set(), back: [], pend: [] });
+type View = { path: string; model: Blk | null; at: number; live: boolean; es?: EventSource; retry?: ReturnType<typeof setTimeout>; tries: number; root: HTMLElement; open: Set<string>; back: string[]; pend: Pend[] };
+const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, tries: 0, root, open: new Set(), back: [], pend: [] });
 const tabs = PL.flatMap(p => (p.type === 'header-strip' && p.screen ? [{ ...p, screen: p.screen, v: view(p.screen, el('section', 'tab')), a: el('a') }] : []));
-const cards = PL.some(p => p.type === 'chat-cards') ? view('/screens/cards', $('#cards')) : null;
+const cards = PL.some(p => p.type === 'chat-cards') ? view('/screens/cards', $('#cards')) : null, scv = view('/screens/scene', S);
 type Tab = (typeof tabs)[number];
 const hashOf = (t: Tab, p: string) => '#' + t.id + (p.startsWith(t.screen + '/') ? p.slice(t.screen.length) : '');
 const route = (h = location.hash.slice(1) || (get('tab') ?? '')): [Tab, string] | null => {
@@ -49,6 +65,7 @@ async function fetchScreen(p: string, s?: Span): Promise<Blk> {
   const r = await get().catch(() => new Promise<Response>(ok => setTimeout(() => ok(get()), 300)));
   const j = obj(await read(r, s, t0).catch(() => ({ line: `${r.status}` })));
   if (!r.ok) throw Object.assign(new Error(String(j.line ?? r.status)), { status: r.status });
+  if (newer(r.headers.get('x-build'))) throw new Error('a new build: reloading');
   return j;
 }
 
@@ -98,6 +115,7 @@ const scroller = (v: View) => v.root.querySelector<HTMLElement>(':scope > .scr >
 function paint(v: View, before?: Blk | null) {
   const m = shown(v), y = scrollY;
   if (!m) return;
+  if (v === scv) return sc();
   const focus = !isList(m) && !!m.focus, was = scroller(v), place = focus && was?.parentElement?.dataset.id === m.id ? spot(was) : (spots.get(v.path) ?? null);
   const c = ctx(v, isList(m) ? 'cards' : String(m.id));
   const body = isList(m) ? kids(m, c) : [render(m, c)].filter((e): e is HTMLElement => !!e);
@@ -132,7 +150,30 @@ function paint(v: View, before?: Blk | null) {
   badges();
   mark();
   void more(v);
+  if (v === cards && scening()) sc();
 }
+const scening = () => H.classList.contains('scening');
+const sc = () => scene(scv.model, ctx(scv, 'scene'), needs);
+function needs(repo: string, all: string[]): HTMLElement[] {
+  const mine = (k: Blk) => { const t = String(k.title ?? ''), r = all.find(a => t.startsWith(`${a} #`)); return repo === 'others' ? !r : r === repo; };
+  return cards && isList(cards.model) ? kids(blks(cards.model).filter(mine), ctx(cards, 'cards')) : [];
+}
+const scb = $('#scb');
+function sceneMode(on: boolean) {
+  put('scene', on ? '1' : null);
+  scb.setAttribute('aria-pressed', String(on));
+  H.classList.toggle('scening', on);
+  sceneOn(on);
+  if (on) {
+    close(cur.v);
+    sc();
+    void load(scv, !!scv.model);
+  } else {
+    close(scv);
+    show(cur);
+  }
+}
+scb.onclick = () => sceneMode(!scening());
 const paged = (m: unknown): Blk | null => (isList(m) ? m.map(paged).find(Boolean) ?? null : isBlk(m) ? (m.more ? m : paged(Object.values(m))) : null);
 const fetching = new WeakSet<View>();
 async function more(v: View) {
@@ -200,6 +241,7 @@ async function load(v: View, quiet = false, s?: Span) {
     if (isBlk(e) && e.status === 401) unpaired();
     else if (!v.model) v.root.replaceChildren(el('p', 'msg r', esc(msg(e))));
     v.live = false;
+    if (v.tries) revive(v);
     sync();
   } finally {
     clearTimeout(slow);
@@ -211,10 +253,16 @@ function stream(v: View) {
   const s = v.model && !isList(v.model) && v.model.stream ? v.model.stream : v === cards || v === shv ? v.path + '/stream' : null;
   if (!s || exported || !('EventSource' in window)) return void (v.live = false);
   const es = (v.es = new EventSource(url(String(s))));
-  es.onopen = () => { v.live = true; sync(); };
-  es.onerror = () => { v.live = false; sync(); };
+  es.onopen = () => { [v.live, v.tries] = [true, 0]; sync(); };
+  es.onerror = () => {
+    v.live = false;
+    if (es.readyState === EventSource.CLOSED) revive(v);
+    sync();
+  };
   es.onmessage = e => {
-    const s = span('delta'), d = obj(JSON.parse(e.data)), was = JSON.stringify(v.model), before = v.model && obj(JSON.parse(was));
+    const s = span('delta'), d = obj(JSON.parse(e.data));
+    if (newer(d.build)) return;
+    const was = JSON.stringify(v.model), before = v.model && obj(JSON.parse(was));
     v.model = apply(v.model ?? {}, blks(d.ops));
     s.parse = performance.now() - s.t0;
     [v.at, v.live] = [Date.now(), true];
@@ -229,13 +277,24 @@ function stream(v: View) {
     setTimeout(() => dot.classList.remove('p'), 600);
   };
 }
-const close = (v: View) => { v.es?.close(); v.es = undefined; v.live = false; };
+const close = (v: View) => { clearTimeout(v.retry); v.retry = undefined; v.es?.close(); v.es = undefined; v.live = false; };
+function revive(v: View) {
+  close(v);
+  v.retry = setTimeout(() => { v.retry = undefined; void (v === shv ? resheet() : load(v, true)); }, Math.min(30_000, 1000 * 2 ** v.tries++));
+}
+async function resheet() {
+  const p = shv.path, m = await fetchScreen(p).catch(() => null);
+  if (sh.hidden || shv.path !== p || shv.es) return;
+  if (m) { shv.model = m; drawSheet(); }
+  stream(shv);
+}
 
 const ys = new Map<string, number>();
 function go(v: View, path: string, push = true, k?: Span) {
+  const nav = push && path.split('?')[0] !== v.path.split('?')[0];
   if (v === cur.v) ys.set(v.path, scrollY);
-  if (push) v.back.push(v.path);
-  if (push && v === cur.v) history.pushState(null, '', hashOf(cur, path));
+  if (nav) v.back.push(v.path);
+  if (push && v === cur.v) history[nav ? 'pushState' : 'replaceState'](null, '', hashOf(cur, path));
   const s = spot(scroller(v));
   if (s) spots.set(v.path, s);
   v.es?.close();
@@ -406,6 +465,7 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement): Promise<bo
     if (r.status === 401) return (unpaired(), fail());
     if (!r.ok) return (toast(String(j.line ?? r.status), true, retry), fail());
     if (p) p.st = 'sent';
+    if (newer(r.headers.get('x-build'))) return true;
     const ops = blks(j.ops);
     const whole = ops.find(o => o.op === 'screen');
     if (whole && v !== shv) {
@@ -507,10 +567,11 @@ function redraw() {
   tabs.forEach(t => paint(t.v));
   if (lst) paint(lst);
   if (cards) paint(cards);
+  if (scening()) sc();
 }
 function reload() {
   if (cards) load(cards);
-  load(cur.v);
+  load(scening() ? scv : cur.v);
 }
 
 const nav = $('nav'), main = $('main');
@@ -623,17 +684,18 @@ addEventListener('touchcancel', release, { passive: true });
 addEventListener('hashchange', () => slide(0));
 setInterval(() => { if (!document.hidden) sync(); }, 30_000);
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && !cur.v.live) load(cur.v, true);
+  if (!document.hidden && !(scening() ? scv : cur.v).live) load(scening() ? scv : cur.v, true);
   if (!document.hidden && lst && duo() && !lst.live) load(lst, true);
 });
 colours();
-theme(H.dataset.theme ?? 'farm').then(redraw);
+theme(H.dataset.theme ?? 'farm').then(() => { redraw(); drawSheet(); });
 if (cards) load(cards);
 if (at && at[1] !== cur.screen) {
   history.replaceState(null, '', '#' + cur.id);
   history.pushState(null, '', hashOf(cur, at[1]));
 }
 show(cur, at?.[1]);
+if (get('scene') === '1' || new URLSearchParams(location.search).get('scene') === '1') sceneMode(true);
 const report = (leaving = false) => flush(body => void fetch(url('api/v1/timings'), { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: true }).catch(() => {}), leaving);
 if (!demo && !ro && !exported) { setInterval(report, 5_000); addEventListener('pagehide', () => report(true)); }
 if ('serviceWorker' in navigator && !demo) navigator.serviceWorker.register(url('sw.js')).catch(() => {});
