@@ -51,7 +51,12 @@ fn independent_calls_to_another_host_share_one_shed_connect_and_answer_as_single
         .map(|(m, p)| shed::call(&on, &Wire::Connect, *m, p.clone()).unwrap())
         .collect();
     let before = f.calls.borrow().len();
-    assert_eq!(before, qs.len(), "one shed connect per single call: {:?}", f.calls.borrow());
+    assert_eq!(
+        before,
+        qs.len(),
+        "one shed connect per single call: {:?}",
+        f.calls.borrow()
+    );
     let batch = shed::calls(&on, &Wire::Connect, &qs).unwrap();
     let calls = f.calls.borrow()[before..].to_vec();
     assert_eq!(calls.len(), 1, "{calls:?}");
@@ -191,7 +196,11 @@ fn a_drive_pass_reads_every_crashed_lanes_last_words_on_a_host_over_one_shed_con
             .unwrap_or_else(|| panic!("no lane-state for {a}"));
         assert_eq!(gone.str("state"), Some("gone"), "{a}");
         let n = a.trim_start_matches("sendmeter-impl-");
-        assert_eq!(gone.str("said"), Some(format!("last output: ⏺ Working on #{n} | ❯").as_str()), "{a}");
+        assert_eq!(
+            gone.str("said"),
+            Some(format!("last output: ⏺ Working on #{n} | ❯").as_str()),
+            "{a}"
+        );
     }
     assert_eq!(reads, 1, "one shed connect reads every crashed lane's last words");
 }
