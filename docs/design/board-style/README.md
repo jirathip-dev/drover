@@ -1,0 +1,20 @@
+# board style (#1306): old board (c34235855~1, left) vs the JSON board (right)
+
+Same demo data, garden theme, 390 and 1440, pixel and ascii. Regenerate with the demo export and a headless browser at both sizes.
+
+- [events-ascii-1440.png](events-ascii-1440.png)
+- [events-ascii-390.png](events-ascii-390.png)
+- [events-pixel-1440.png](events-pixel-1440.png)
+- [events-pixel-390.png](events-pixel-390.png)
+- [hosts-ascii-1440.png](hosts-ascii-1440.png)
+- [hosts-ascii-390.png](hosts-ascii-390.png)
+- [hosts-pixel-1440.png](hosts-pixel-1440.png)
+- [hosts-pixel-390.png](hosts-pixel-390.png)
+- [lanes-ascii-1440.png](lanes-ascii-1440.png)
+- [lanes-ascii-390.png](lanes-ascii-390.png)
+- [lanes-pixel-1440.png](lanes-pixel-1440.png)
+- [lanes-pixel-390.png](lanes-pixel-390.png)
+- [queue-ascii-1440.png](queue-ascii-1440.png)
+- [queue-ascii-390.png](queue-ascii-390.png)
+- [queue-pixel-1440.png](queue-pixel-1440.png)
+- [queue-pixel-390.png](queue-pixel-390.png)
