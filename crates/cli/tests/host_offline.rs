@@ -419,3 +419,71 @@ fn a_start_on_a_host_offline_this_pass_waits_for_it_with_no_card_or_backoff() {
         bazzite.methods()
     );
 }
+
+const PROBE: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none bazzite -- true";
+
+fn pass_call(c: &drover::Ctx, r: &dyn drover::runner::Runner) -> drover::runner::Out {
+    use drover::runner::Runner;
+    let cfg = Config::load(&c.config).unwrap();
+    let pass = drover::hosts::Pass::new(r, None).sparing(Default::default(), Some((c, &cfg)));
+    pass.run("ssh", &drover::runner::argv(&["bazzite", "--", "echo", "hi"]))
+        .unwrap()
+}
+
+#[test]
+fn one_slow_probe_is_retried_and_the_host_stays_up() {
+    let (c, _sh) = setup("slow-probe-once");
+    let f = mini_only()
+        .once_err(PROBE, 124, "no answer")
+        .reply(PROBE, "")
+        .reply("ssh bazzite -- echo", "hi");
+    let o = pass_call(&c, &f);
+    assert_eq!((o.code, o.stdout.as_str()), (0, "hi"), "{o:?} {:?}", f.calls.borrow());
+    assert_eq!(f.count(PROBE), 2, "{:?}", f.calls.borrow());
+    assert!(!drover::hosts::down(&c).contains_key("bazzite"));
+}
+
+#[test]
+fn two_slow_probes_in_a_row_mark_the_host_down() {
+    let (c, _sh) = setup("slow-probe-twice");
+    let f = mini_only()
+        .once_err(PROBE, 124, "no answer")
+        .once_err(PROBE, 124, "no answer")
+        .reply(PROBE, "")
+        .reply("ssh bazzite -- echo", "hi");
+    let o = pass_call(&c, &f);
+    assert_eq!(o.code, 255, "{o:?}");
+    assert!(o.stderr.contains("host offline this pass"), "{o:?}");
+    assert!(!f.called("ssh bazzite -- echo"), "{:?}", f.calls.borrow());
+    assert!(drover::hosts::down(&c).contains_key("bazzite"));
+}
+
+#[test]
+fn a_live_control_master_skips_the_fresh_handshake_probe() {
+    let (c, _sh) = setup("probe-master");
+    let f = mini_only()
+        .reply("ssh -oControlPath=/tmp/drover-ssh-%C -O check bazzite", "")
+        .reply(PROBE, "")
+        .reply("ssh bazzite -- echo", "hi");
+    let o = pass_call(&c, &f);
+    assert_eq!(o.code, 0, "{o:?}");
+    assert!(!f.called(PROBE), "{:?}", f.calls.borrow());
+}
+
+#[test]
+fn after_a_retried_slow_probe_the_hosts_lanes_keep_their_state() {
+    let (c, _sh) = setup("slow-probe-listing");
+    remote_spawn(&c);
+    let f = mini_only().once_err(PROBE, 124, "no answer").reply(PROBE, "");
+    let bazzite = FakeShed::new();
+    bazzite.lane(IMPL, "working", WT);
+    let (code, out) = run(&c, &with_bazzite(&f, &bazzite), &["waiting", "--json"]);
+    assert_eq!(code, 0, "{out}");
+    let w: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let row = w.as_array().unwrap().iter().find(|x| x["issue"] == 12).unwrap().clone();
+    let what = row.to_string();
+    assert!(!what.contains("lane unknown"), "{what}");
+    assert!(!what.contains("host offline"), "{what}");
+    assert!(!bazzite.methods().is_empty(), "the listing was read");
+    assert_eq!(f.count(PROBE), 2, "{:?}", f.calls.borrow());
+}
