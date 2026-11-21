@@ -1,0 +1,7 @@
+{"args":["turn","done"],"lane":"herdsman:1466:impl","ts":1795148051077}
+{"args":["turn","done"],"lane":"herdsman:1466:impl","ts":1795148138156}
+{"args":["turn","done"],"lane":"herdsman:1466:impl","ts":1795156185289}
+{"args":["turn","done"],"lane":"herdsman:1466:impl","ts":1795156220312}
+{"args":["turn","blocked","--why","turn done refused DONE_CHECK 'worktree is at <empty>', but git rev-parse HEAD here = 71e1a0e0af65 = PR head, tree clean. The main host's ssh read of this remote worktree's HEAD returns nothing (same ssh path that timed out the earlier 30-min arch-check). Locally at 71e1a0e: cargo fmt --check exit 0, drover arch-check exit 0. Needs the main host's ssh to this host checked; nothing to push."],"lane":"herdsman:1466:impl","ts":1795157438383}
+{"args":["turn","done"],"lane":"herdsman:1466:impl","ts":1795167663909}
+{"args":["turn","done"],"lane":"herdsman:1466:impl","ts":1795185185401}
