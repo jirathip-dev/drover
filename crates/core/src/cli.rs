@@ -417,14 +417,12 @@ enum Cmd {
         id: Option<String>,
     },
     #[command(
-        about = "CI: lines of the `count` globs (less `exclude`) in --config, default src/**/*.rs, against its `line_cap` or a higher one in cap.d/; exit 1 over it or a --rules file over 30 lines"
+        about = "CI: lines of the `count` globs (less `exclude`) in --config, default src/**/*.rs, against its `line_cap` or a higher one in cap.d/; exit 1 over it"
     )]
     #[command(hide = true)]
     CapCheck {
         #[arg(long)]
         config: std::path::PathBuf,
-        #[arg(long, default_value = ".drover/rules.md")]
-        rules: std::path::PathBuf,
         #[arg(long)]
         base: Option<String>,
     },
@@ -442,12 +440,21 @@ enum Cmd {
         pr_body: Option<PathBuf>,
     },
     #[command(
-        about = "CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1"
+        about = "CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1, as does a rule naming no enforcer or a file over 30 lines"
     )]
     #[command(hide = true)]
     LessonCheck {
         #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
+    },
+    #[command(about = "`turn done`'s PR_BODY rule on --file for the --head sha; exit 1 with the reason")]
+    PrBody {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        head: String,
+        #[arg(long, default_value = "staging")]
+        base: String,
     },
     #[command(
         about = "Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun. `setup <host> <name>` (#303): run that configured login in a shed terminal on the host instead"
@@ -1147,7 +1154,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             | Cmd::Help { .. }
     ) || matches!(
         cli.cmd,
-        Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. }
+        Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. } | Cmd::PrBody { .. }
     );
     if !quiet && args.first().is_some_and(|a| a.ends_with("herdsman")) {
         crate::stderr!("herdsman is now drover: the old name works for one more release");
@@ -1265,9 +1272,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
-        Cmd::CapCheck { config, rules, base } => {
-            return crate::overlap::cap_check(r, &config, &crate::repo_path(&rules), base.as_deref(), out)
-        }
+        Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
         Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
         Cmd::ArchCheck {
             config,
@@ -1285,6 +1290,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )
         }
         Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &crate::repo_path(&rules), out),
+        Cmd::PrBody { file, head, base } => return crate::done::pr_body(r, &file, &head, &base, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hosts {

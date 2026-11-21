@@ -276,6 +276,46 @@ fn a_pr_body_without_the_heads_evidence_is_refused_and_ends_no_turn() {
 }
 
 #[test]
+fn pr_body_applies_the_done_rule_to_a_file_with_no_fleet_config() {
+    let repo = repo("pr-body-verb");
+    let file = repo.dir.join("body.md");
+    let verb = |b: &str, head: &str| {
+        std::fs::write(&file, b).unwrap();
+        let o = Command::new(env!("CARGO_BIN_EXE_drover"))
+            .args(["pr-body", "--file", file.to_str().unwrap(), "--head", head])
+            .env("HOME", repo.dir.join("home"))
+            .env("FLEET_CONFIG", repo.dir.join("none.toml"))
+            .current_dir(&repo.wt)
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr);
+        (o.status.code().unwrap(), out)
+    };
+    assert_eq!(verb(&body(&repo.head), &repo.head), (0, String::new()));
+    let base = g(&repo.wt, &["rev-parse", "HEAD^1"]);
+    for (b, why) in [
+        (body(&base), "names no sha of head"),
+        (
+            format!("## Evidence (head {})", repo.head),
+            "no `## For humans` section",
+        ),
+        (
+            format!("{}\n\nGenerated with x", body(&repo.head)),
+            "carries `Generated with x`",
+        ),
+    ] {
+        let (code, out) = verb(&b, &repo.head);
+        assert_eq!(code, 1, "{why}: {out}");
+        assert!(out.contains("PR_BODY: ") && out.contains(why), "{why}: {out}");
+    }
+    let merged = "Merge remote-tracking branch 'origin/staging' into issue-12";
+    g(&repo.wt, &["commit", "-q", "--allow-empty", "-m", merged]);
+    let top = g(&repo.wt, &["rev-parse", "HEAD"]);
+    assert_eq!(verb(&body(&repo.head), &top).0, 0);
+    assert_eq!(verb(&body(&repo.head), "nothex").0, 1);
+}
+
+#[test]
 fn an_unpushed_commit_is_refused_push_first() {
     let repo = repo("done-unpushed");
     let (c, _sh) = lane(&repo);
