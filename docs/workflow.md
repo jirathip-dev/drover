@@ -65,8 +65,7 @@ flowchart TD
     d0["look, repair"] --> d1
     d1["closed issues"] --> d2
     d2["spawns"] --> d3
-    d3["PR reads, gates, steps"] --> d4
-    d4["settle"]
+    d3["PR reads, gates, steps"]
     t1 --> d0
     other["other timers: serve, hosts, store"]
     j0 -.- k_slow_secs(["slow_secs = 300"])
@@ -81,6 +80,7 @@ flowchart TD
     t0 -.- k_done_close_minutes(["done_close_minutes = 5"])
     t0 -.- k_idle_merged_minutes(["idle_merged_minutes = 15"])
     t0 -.- k_token_refresh_minutes(["token_refresh_minutes = 30"])
+    d0 -.- k_pass_max_secs(["pass_max_secs = 60"])
     d0 -.- k_ssh_quick_secs(["ssh_quick_secs = 5"])
     d0 -.- k_ssh_call_secs(["ssh_call_secs = 20"])
     d0 -.- k_import_max_age_hours(["import_max_age_hours = 24"])
@@ -98,7 +98,7 @@ flowchart TD
     d3 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
     d3 -.- k_review_rounds(["review_rounds = 3"])
     d3 -.- k_update_rounds(["update_rounds = 3"])
-    d4 -.- k_pass_max_secs(["pass_max_secs = 60"])
+    d3 -.- k_job_max(["job_max = 4"])
     other -.- k_overload_minutes(["overload_minutes = 10"])
     other -.- k_thread_resend_minutes(["thread_resend_minutes = 5"])
     other -.- k_transcript_days(["transcript_days = 30"])
