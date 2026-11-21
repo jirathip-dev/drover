@@ -269,13 +269,13 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
         }
     }
     let (again, ttl) = (format!("kick-{fleet}-{n}.again"), cfg.limits.spawn_pending_max_secs);
-    let pending = (why == "drive").then(|| held(ctx, &format!("spawn-{fleet}-{n}.pending")));
-    let mut pending = pending.flatten().map(|l| Lock(ctx.state.clone(), l));
     let flag = || crate::db::take(&ctx.state, &again, ctx.now, ttl, why, &|_| true).map(drop);
     let Some(k) = take(ctx, r, &format!("kick-{fleet}-{n}.lock"), ttl, fleet) else {
         flag();
         return kicks::in_flight(ctx, out, (fleet, n), why);
     };
+    let pending = (why == "drive").then(|| held(ctx, &format!("spawn-{fleet}-{n}.pending")));
+    let mut pending = pending.flatten().map(|l| Lock(ctx.state.clone(), l));
     let start = crate::now();
     for _ in 0..30 {
         let ctx = &Ctx {
