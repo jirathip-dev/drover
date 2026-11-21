@@ -43,7 +43,8 @@ enabled = true          # false: no new lanes go there (see below)
 ## Workspace roots (#630)
 
 Everything drover makes on a host lives under its workspace root: worktrees at `<root>/<repo>/<lane>`, the
-each lane's Cargo build at `<root>/.build/<agent>` (cloned from its fleet's warmest one on the same root) and its
+each lane's Cargo build at `<root>/.build/<agent>` (cloned copy-on-write from its fleet's warmest one on the same root, on that host; no reflinks, e.g. ext4: it starts
+cold and `build-cloned` logs why) and its
 scratch under `<root>/.build/.scratch`.
 
 `roots = ["/Volumes/NVMe/drover", "~/.local/share/drover/work"]` lists several in order (an external drive
@@ -99,7 +100,8 @@ skipped. A `DISK_LOW` names the done lanes' worktrees `drover clean --yes` would
 are none and points to `drover reclaim --apply`); a remote host's finished lanes' folders are swept first (#1215), and a spawn still starting toward a full host holds no `max_parallel_spawns`
 slot, so it never holds back spawns bound for another host (#416). `drover clean` covers every host's merged or
 closed lanes (shown as `<host>:<path>`) and lists the orphan folders under each enabled host's worktree root;
-`--orphans --yes` removes them. When every fitting host fails, the spawn is refused with the least-busy host's reason. The load in `HOST_BUSY` leaves out
+`--orphans --yes` removes them. It lists each leftover secrets file (`*.env` beside a worktree or none) on every host;
+`--yes` removes them (#1532). When every fitting host fails, the spawn is refused with the least-busy host's reason. The load in `HOST_BUSY` leaves out
 drover's own processes and the `cp` clones they run (#825), and a refusal on load names the 3 busiest other processes
 (`top: rustc 900%, …`). A tapped start held by load alone waits and starts on the first pass the host admits it; its
 card never comes back for the load. When no host fits at

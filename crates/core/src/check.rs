@@ -1750,8 +1750,26 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, remove: bool) -> Re
     Ok(found.len())
 }
 
-/// `orphan <host>:<path> <size>` per orphan folder under each enabled remote host's root; gone with `remove`.
-pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove: bool) -> Result<usize> {
+/// `secrets file <path>` per `*.env` a spawn left beside a worktree, or where none is, under the worktree root; gone with `remove`.
+pub fn secrets_files(ctx: &Ctx, out: &mut dyn Write, remove: bool) -> Result<()> {
+    let repos = std::fs::read_dir(&ctx.worktrees).into_iter().flatten().flatten();
+    let files = repos.flat_map(|d| std::fs::read_dir(d.path()).into_iter().flatten().flatten());
+    let left = files
+        .map(|f| f.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "env") && p.is_file());
+    for p in left {
+        if remove {
+            std::fs::remove_file(&p).with_context(|| format!("removing {}", p.display()))?;
+            writeln!(out, "removed secrets file {}", p.display())?;
+        } else {
+            writeln!(out, "secrets file {}", p.display())?;
+        }
+    }
+    Ok(())
+}
+
+/// `orphan <host>:<path> <size>` per orphan folder under each enabled remote host's root, gone with `orphans`; `secrets file <host>:<path>` per leftover `*.env`, gone with `yes`.
+pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, (remove, yes): (bool, bool)) -> Result<usize> {
     let (ours, mut found): (Vec<&str>, _) = (cfg.fleet.values().map(crate::config::Fleet::repo_name).collect(), 0);
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled && h.1.machine.is_some()) {
         let (on, root) = (
@@ -1761,7 +1779,14 @@ pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove:
         let list = ok(&on, "sh", &["-c", DIRS, "sh", root.trim_start_matches("~/")]);
         let list = list.or_else(|e| writeln!(out, "cannot list orphans on {name}: {e:#}").map(|()| String::new()))?;
         for (kb, p) in list.lines().filter_map(|l| l.split_once('\t')) {
-            if !ours.iter().any(|o| p.rsplit('/').next() == Some(o)) {
+            if kb == "env" {
+                if yes {
+                    ok(&on, "rm", &["-f", p])?;
+                    writeln!(out, "removed secrets file {name}:{p}")?;
+                } else {
+                    writeln!(out, "secrets file {name}:{p}")?;
+                }
+            } else if !ours.iter().any(|o| p.rsplit('/').next() == Some(o)) {
                 found += 1;
                 if remove {
                     ok(&on, "rm", &["-rf", "--", p])?;
@@ -1780,7 +1805,8 @@ pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove:
 }
 
 const DIRS: &str = "cd && cd \"$1\" 2>/dev/null || exit 0; \
-for d in */; do [ -d \"$d\" ] && [ ! -L \"${d%/}\" ] && du -sk \"$PWD/${d%/}\"; done; true";
+for d in */; do [ -d \"$d\" ] && [ ! -L \"${d%/}\" ] && du -sk \"$PWD/${d%/}\"; done; \
+for f in */*.env; do [ -f \"$f\" ] && [ ! -L \"$f\" ] && printf 'env\\t%s\\n' \"$PWD/$f\"; done; true";
 
 fn drop_log(ctx: &Ctx, agent: Option<&str>) {
     crate::session::transcript::forget(ctx, agent.unwrap_or_default());
