@@ -133,6 +133,11 @@ impl Runner for Limits {
         self.0.lock().unwrap().push((prog.into(), 0));
         Ok(drover::runner::Out::default())
     }
+    fn run_in(&self, prog: &str, args: &[String], _: &str) -> anyhow::Result<drover::runner::Out> {
+        let l = drover::runner::limit(prog, args).as_secs();
+        self.0.lock().unwrap().push((prog.into(), l));
+        Ok(drover::runner::Out::default())
+    }
     fn run_for(&self, prog: &str, _: &[String], _: &str, l: Duration) -> anyhow::Result<drover::runner::Out> {
         self.0.lock().unwrap().push((prog.into(), l.as_secs()));
         Ok(drover::runner::Out::default())
