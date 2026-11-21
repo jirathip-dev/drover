@@ -779,3 +779,22 @@ fn a_generated_glob_fails_a_stale_or_unwritten_match_and_passes_a_fresh_new_one(
     );
     assert!(d.join("gen/old.ts").exists());
 }
+
+#[test]
+fn a_frozen_file_missing_at_the_base_may_be_created_and_then_only_shrinks() {
+    let conf = "frozen = [\"ci/cap.toml\"]\n";
+    let d = committed("arch-frozen-new", conf, &[("src/a.rs", "fn a() {}\n")]);
+    std::fs::create_dir_all(d.join("ci")).unwrap();
+    std::fs::write(d.join("ci/cap.toml"), "[fleet.x]\nline_cap = 10\n").unwrap();
+    git(&d, &["add", "-A"]);
+    git(&d, &["commit", "-qm", "cap"]);
+    let (code, out) = arch(&d, &["--base", "HEAD^1"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::write(d.join("ci/cap.toml"), "[fleet.x]\nline_cap = 10\nmore = 1\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("ci/cap.toml:3: `more = 1` added to a frozen list"),
+        "{out}"
+    );
+}
