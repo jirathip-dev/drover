@@ -1665,6 +1665,44 @@ pub(crate) fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> 
 
 pub(crate) const OLD: &str = "is in the way: replacing it";
 
+fn stuck(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, ev: &[Event], at: At, (code, why): (&str, &str)) -> Result<()> {
+    let (fleet, Some(n), step) = at else {
+        return Ok(());
+    };
+    let waits = [
+        "SPAWN_PENDING",
+        "SPAWN_BACKOFF",
+        "RESPAWN_PACED",
+        "HOST_FULL",
+        "IN_FLIGHT",
+        "ALREADY_DONE",
+        "LANE_LIVE",
+        "EXIT",
+        "ERROR",
+        "ROUND_LIMIT",
+        "UPDATE_LIMIT",
+    ];
+    let carded = step == "start" || step == "respawn" && owner_refusal(code);
+    if carded || waits.contains(&code) || crate::pending::SOFT.contains(&code) || crate::starts::stops(Some(code)) {
+        return Ok(());
+    }
+    let mine = crate::events::of_issue(ev, fleet, n);
+    let turn = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "needs-human" | "round-extended");
+    let from = mine.iter().rposition(turn).map_or(0, |i| i + 1);
+    let same = |e: &&&Event| e.kind == "driven" && e.str("step") == Some(step) && e.str("code") == Some(code);
+    let Some(first) = (mine.get(from..).unwrap_or_default().iter())
+        .find(same)
+        .filter(|e| ctx.now >= e.ts + cfg.limits.stall_minutes * 60)
+    else {
+        return Ok(());
+    };
+    let since = crate::events::age(ctx.now.saturating_sub(first.ts));
+    let reason = format!("{step} refused {code} on every pass for {since}: {why}");
+    writeln!(out, "{fleet} #{n} needs-human: {reason}")?;
+    let d = json!({"code": code, "reason": reason});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))
+}
+
 pub(crate) fn owner_refusal(code: &str) -> bool {
     let owner = [
         "RESPAWN_LOOP",
@@ -2132,6 +2170,9 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
             .is_ok_and(|f| f.flow().is_check(c.get(3).copied().unwrap_or_default()))
     }) {
         crate::pending::refused(ctx, (fleet, n), k, why.unwrap_or_default())?;
+    }
+    if let Some((n, k)) = spawn.zip(code) {
+        stuck(ctx, cfg, out, ev, (fleet, Some(n), step), (k, why.unwrap_or_default()))?;
     }
     ACTS.with_borrow_mut(|a| {
         a.entry(fleet.into()).or_default().push(

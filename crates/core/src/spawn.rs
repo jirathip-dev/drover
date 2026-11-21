@@ -1300,7 +1300,7 @@ pub fn spawn(
         let cause = crate::session::stamp::exit(&events, &p.agent).filter(|x| x.cause.resumable());
         let here = cause.is_some() && owt == wt && old.machine == on.machine;
         if stale.is_none() && !here && !hung {
-            wip = crate::check::save_lane(ctx, (cfg, fleet), &old, &p.agent, owt)?;
+            wip = crate::check::save_lane(ctx, (cfg, fleet), &old, (&p.agent, p.family), owt)?;
         }
         let mut killed = names.clone();
         for a in listed
@@ -1332,7 +1332,13 @@ pub fn spawn(
         .and_then(|e| Some((e, e.str("worktree")?)))
         .filter(|_| wip.is_none())
     {
-        wip = crate::check::save_lane(ctx, (cfg, fleet), &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
+        wip = crate::check::save_lane(
+            ctx,
+            (cfg, fleet),
+            &crate::hosts::On::of(base, Some(e)),
+            (&p.agent, p.family),
+            owt,
+        )?;
     }
 
     let mut sha = None;
@@ -1375,7 +1381,13 @@ pub fn spawn(
                 }
                 let git = |a: &[&str]| ok(r, "git", &[&["-C", &local, "worktree"][..], a].concat());
                 if on.exists(Path::new(&held)) {
-                    wip = wip.or(crate::check::save_lane(ctx, (cfg, fleet), &on, &p.agent, &held)?);
+                    wip = wip.or(crate::check::save_lane(
+                        ctx,
+                        (cfg, fleet),
+                        &on,
+                        (&p.agent, p.family),
+                        &held,
+                    )?);
                     if git(&["remove", &held]).is_err() {
                         git(&["remove", "--force", &held])?;
                     }
