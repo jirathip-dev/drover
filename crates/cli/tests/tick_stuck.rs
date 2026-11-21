@@ -94,7 +94,7 @@ impl Runner for Hang {
 }
 
 #[test]
-fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
+fn a_host_that_never_answers_costs_one_retried_probe_and_drive_still_starts() {
     let (c, sh) = setup("stuck-air", "");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "w8:p1", "workspace": "w8",
@@ -114,9 +114,8 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
     assert_eq!(
-        to_air,
-        ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"],
-        "one probe, nothing after it"
+        to_air, ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"; 2],
+        "one probe and its one retry, nothing after them"
     );
     assert!(r.spent.get() <= 60, "{}s on the Air", r.spent.get());
     let mark = r.seen.borrow()[0].clone();
@@ -171,7 +170,7 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
 }
 
 #[test]
-fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
+fn clean_reports_a_silent_disabled_host_offline_after_one_retried_probe() {
     let (c, _sh) = setup("stuck-disabled-silent", "enabled = false");
     let r = Hang {
         f: local(),
@@ -190,11 +189,10 @@ fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
     assert_eq!(
-        to_air,
-        ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"],
-        "one probe, nothing after it"
+        to_air, ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"; 2],
+        "one probe and its one retry, nothing after them"
     );
-    assert!(r.spent.get() <= 5, "{}s on the Air", r.spent.get());
+    assert!(r.spent.get() <= 10, "{}s on the Air", r.spent.get());
 }
 
 #[test]
@@ -255,7 +253,7 @@ fn a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once() {
             .filter(|e| e.kind == k)
             .collect()
     };
-    let drive = |c: &drover::Ctx| assert_eq!(run(c, &local(), &["drive", "--fast"]).0, 0);
+    let drive = |c: &drover::Ctx| assert_eq!(run(c, &local(), &["drive"]).0, 0);
     std::fs::write(
         &mark,
         json!({"since": NOW - 300, "step": "clean", "child": child}).to_string(),
@@ -305,15 +303,11 @@ fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self
         json!({"since": NOW - 700, "step": "drive", "child": "", "pid": 4242}).to_string(),
     )
     .unwrap();
-    drover::db::take(&c.state, "drive-sendmeter.lock", NOW - 650, 3600, "sendmeter", &|_| {
-        false
-    })
-    .unwrap();
     let r = local()
         .once("kill -0 4242", 0, "")
         .reply("ps -o command= -p 4242", "/Users/me/.local/bin/drover tick\n")
         .reply("kill -TERM 4242", "");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     assert_eq!(r.count("kill -TERM 4242"), 1);
     assert!(!r.called("kill -KILL"), "it ended on SIGTERM");
     let ev = read(&c.state).unwrap();
@@ -321,14 +315,16 @@ fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self
     assert_eq!(heal.len(), 1, "{heal:?}");
     assert_eq!(heal[0].str("did"), Some("stopped tick pid 4242 (SIGTERM)"));
     let why = heal[0].str("reason").unwrap();
-    assert!(why.starts_with("tick running 11 min, in drive · sendmeter;"), "{why}");
+    assert!(why.starts_with("tick running 11 min, in drive;"), "{why}");
     assert_eq!(ev.iter().filter(|e| e.kind == "slo-tick").count(), 1);
     let later = drover::Ctx {
         now: NOW + 600,
         ..c.clone()
     };
+    let last = c.state.parent().unwrap().join("drive-sendmeter.last");
+    std::fs::write(last, (NOW + 540).to_string()).unwrap();
     let r = local().reply("ps -o command= -p 4242", "/Users/me/.local/bin/drover tick\n");
-    assert_eq!(run(&later, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&later, &r, &["drive"]).0, 0);
     assert!(!r.called("kill -TERM"), "a stopped tick is not stopped again");
     let kinds: Vec<String> = read(&c.state)
         .unwrap()
@@ -356,7 +352,7 @@ fn a_process_that_is_no_drover_tick_is_never_killed() {
     let r = local()
         .reply("kill -0 4243", "")
         .reply("ps -o command= -p 4243", "/usr/bin/vim notes.txt\n");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     assert!(
         !r.called("kill -TERM") && !r.called("kill -KILL"),
         "{:?}",
@@ -383,7 +379,7 @@ fn a_tick_that_ignores_sigterm_is_killed_after_10_s() {
         .reply("ps -o command= -p 4244", "drover drive\n")
         .reply("kill -TERM 4244", "")
         .reply("kill -KILL 4244", "");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     assert_eq!(
         (
             r.count("kill -TERM 4244"),

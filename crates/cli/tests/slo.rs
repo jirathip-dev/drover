@@ -10,7 +10,7 @@ fn setup(name: &str) -> (drover::Ctx, std::path::PathBuf, FakeShed) {
     let dir = tmpdir(name);
     let sink = dir.join("push.txt");
     let cfg = format!(
-        "{CONFIG}worktree_budget_gb = 0.000004\n\n[[notify]]\ncmd = \"cat >> '{}'\"\non = [\"stuck\"]\n",
+        "{CONFIG}worktree_budget_gb = 0.000004\n\n[[notify]]\ncmd = \"cat >> '{}'\"\non = [\"stuck\", \"slo-idle\"]\n",
         sink.display()
     );
     let c = ctx(&dir, &cfg);
@@ -36,13 +36,13 @@ fn pass(c: &drover::Ctx, sh: &FakeShed, args: &[&str]) -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git ", "")
         .reply("sh -c nohup", "4321");
-    let (code, out) = run(c, &sh.on(&r), args);
+    let (code, out) = run_only(c, &sh.on(&r), args);
     assert_eq!(code, 0, "{out}");
     r
 }
 
 fn fast(c: &drover::Ctx, sh: &FakeShed) -> Fake {
-    pass(c, sh, &["drive", "--fast"])
+    pass(c, sh, &["drive"])
 }
 
 fn kinds(c: &drover::Ctx) -> Vec<String> {
@@ -51,14 +51,25 @@ fn kinds(c: &drover::Ctx) -> Vec<String> {
     ev.filter(|k| ours.contains(&k.as_str())).collect()
 }
 
-fn card(c: &drover::Ctx, sh: &FakeShed, now: u64) -> Option<Value> {
+fn screen(c: &drover::Ctx, sh: &FakeShed, path: &str, now: u64) -> Value {
     let f = Fake::default();
     let r = sh.on(&f);
     let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
-    let res = s.respond("GET /screens/cards HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", now);
+    let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n");
+    let res = s.respond(&req, now);
     let res = String::from_utf8_lossy(&res);
-    let v: Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    v.as_array()
+    serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap()
+}
+
+fn health_line(c: &drover::Ctx, sh: &FakeShed, now: u64) -> Option<String> {
+    let v = screen(c, sh, "/screens/cards", now);
+    let first = v.as_array().unwrap().first()?;
+    (first["id"] == "drive-health-list").then(|| first["rows"][0]["title"].as_str().unwrap().to_string())
+}
+
+fn card(c: &drover::Ctx, sh: &FakeShed, now: u64) -> Option<Value> {
+    screen(c, sh, "/screens/cards", now)
+        .as_array()
         .unwrap()
         .iter()
         .find(|c| c["title"] == "Drive is stuck")
@@ -94,11 +105,16 @@ fn idle_21_minutes_with_spawnable_work_heals_and_never_makes_a_card() {
     assert_eq!(kinds(&c), ["slo-idle", "self-heal"], "a wait: no stuck");
     assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
     assert_eq!(card(&c, &sh, NOW + 40 * 60), None);
+    assert_eq!(
+        health_line(&c, &sh, NOW + 40 * 60).as_deref(),
+        Some("idle: 1 fleet · 40m")
+    );
     sh.lane("sendmeter-impl-12", "working", "/x");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "runtime": "shed", "worktree": "/x", "branch": "issue-12"});
     append(&c.state, &Event::new(NOW + 41 * 60, "sendmeter", Some(12), "spawn", d)).unwrap();
     fast(&at(&c, 42 * 60), &sh);
     assert_eq!(kinds(&c), ["slo-idle", "self-heal", "slo-ok"]);
+    assert_eq!(health_line(&c, &sh, NOW + 42 * 60), None);
 }
 
 #[test]
@@ -151,27 +167,71 @@ fn a_missed_promise_with_its_lane_gone_makes_no_card_and_a_live_one_clears() {
     assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
 }
 
+fn pass_error(c: &drover::Ctx, fleet: &str, ts: u64, error: bool) {
+    let outcome = if error { "error" } else { "ok" };
+    let d = json!({"by": "timer", "actions": [{"step": "pass", "outcome": outcome, "words": "failed: config gone"}]});
+    append(&c.state, &Event::new(NOW + ts, fleet, None, "drive-pass", d)).unwrap();
+}
+
 #[test]
-fn no_drive_pass_for_30_minutes_is_one_card_and_push_until_the_next_pass() {
-    let (c, sink, sh) = quiet("slo-no-pass");
-    let last = c.state.with_file_name("drive-sendmeter.last");
-    std::fs::write(&last, NOW.to_string()).unwrap();
-    fast(&at(&c, 29 * 60), &sh);
-    assert!(kinds(&c).is_empty(), "{:?}", kinds(&c));
-    fast(&at(&c, 31 * 60), &sh);
-    fast(&at(&c, 36 * 60), &sh);
-    assert_eq!(kinds(&c), ["stuck"]);
-    let pushes = std::fs::read_to_string(&sink).unwrap();
-    assert_eq!(
-        pushes,
-        "sendmeter stuck: no drive pass for 31 min; tried: nothing (no known heal)\n"
+fn late_and_erroring_drive_in_two_fleets_is_one_top_line_never_a_card_or_a_push() {
+    let dir = tmpdir("slo-health");
+    let sink = dir.join("push.txt");
+    let kiln = "\n[fleet.kiln]\nrepo = \"jirathip-dev/kiln\"\nlocal = \"/tmp/does-not-matter/kiln\"\nintegration = \"staging\"\n";
+    let cfg = format!(
+        "{CONFIG}\n[[notify]]\ncmd = \"cat >> '{}'\"\non = [\"stuck\", \"slo-idle\"]\n{kiln}",
+        sink.display()
     );
-    let shown = card(&c, &sh, NOW + 36 * 60).expect("the card").to_string();
-    assert!(shown.contains("no drive pass for 31 min"), "{shown}");
-    std::fs::write(&last, (NOW + 37 * 60).to_string()).unwrap();
-    fast(&at(&c, 37 * 60), &sh);
-    assert_eq!(kinds(&c), ["stuck", "slo-ok"]);
-    assert_eq!(card(&c, &sh, NOW + 37 * 60), None);
+    let c = ctx(&dir, &cfg);
+    let sh = FakeShed::attached(&c);
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    for f in ["sendmeter", "kiln"] {
+        std::fs::write(c.state.with_file_name(format!("drive-{f}.last")), NOW.to_string()).unwrap();
+    }
+    pass_error(&c, "kiln", 0, true);
+    fast(&at(&c, 4 * 60), &sh);
+    assert_eq!(
+        health_line(&c, &sh, NOW + 4 * 60).as_deref(),
+        Some("pass error: 1 fleet · 4m")
+    );
+    fast(&at(&c, 6 * 60), &sh);
+    fast(&at(&c, 11 * 60), &sh);
+    assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "", "never a push");
+    assert_eq!(card(&c, &sh, NOW + 11 * 60), None, "never a card");
+    assert_eq!(
+        health_line(&c, &sh, NOW + 11 * 60).as_deref(),
+        Some("drive late: 2 fleets · pass error: 1 fleet · 11m")
+    );
+    let cards = screen(&c, &sh, "/screens/cards", NOW + 11 * 60);
+    assert_eq!(cards[0]["rows"][0]["tap"], json!({"sheet": "/screens/drive-health"}));
+    let sheet = screen(&c, &sh, "/screens/drive-health", NOW + 11 * 60);
+    let rows: Vec<(String, String, String)> = (sheet["blocks"][0]["rows"].as_array().unwrap().iter())
+        .map(|r| {
+            let s = |k: &str| r[k].as_str().unwrap().to_string();
+            (s("title"), s("subtitle"), s("value"))
+        })
+        .collect();
+    let row = |a: &str, b: &str| (a.to_string(), b.to_string(), "11m".to_string());
+    assert_eq!(
+        rows,
+        [
+            row("kiln · drive late", "no drive pass for 6 min"),
+            row("sendmeter · drive late", "no drive pass for 6 min"),
+            row("kiln · pass error", "drive's pass failed: config gone"),
+        ]
+    );
+    assert_eq!(sheet["blocks"][1]["label"], "Drive now");
+    assert_eq!(sheet["blocks"][1]["action"], "drive-all");
+    for f in ["sendmeter", "kiln"] {
+        std::fs::write(
+            c.state.with_file_name(format!("drive-{f}.last")),
+            (NOW + 12 * 60).to_string(),
+        )
+        .unwrap();
+    }
+    pass_error(&c, "kiln", 12 * 60, false);
+    fast(&at(&c, 12 * 60), &sh);
+    assert_eq!(health_line(&c, &sh, NOW + 12 * 60), None, "healthy: no line");
 }
 
 fn failing(c: &drover::Ctx, n: u64) {
@@ -311,7 +371,15 @@ fn pass_with(c: &drover::Ctx, sh: &FakeShed, pr: Option<&str>) -> Fake {
         .reply("git ", "")
         .reply("gh issue view 7", r#"{"title":"t","body":"b"}"#)
         .reply("sh -c nohup", "4321");
-    let (code, out) = run(c, &sh.on(&r), &["drive", "--fast"]);
+    if pr.is_some() {
+        let cfg = drover::config::Config::load(&c.config).unwrap();
+        let f = cfg.fleet("sendmeter").unwrap();
+        assert_eq!(
+            drover::gh::pr(c, &r, f, ("sendmeter", 7), "issue-7", c.now).unwrap()["number"],
+            34
+        );
+    }
+    let (code, out) = run_only(c, &sh.on(&r), &["drive"]);
     assert_eq!(code, 0, "{out}");
     r
 }

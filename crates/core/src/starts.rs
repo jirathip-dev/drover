@@ -165,6 +165,7 @@ pub fn stops(code: Option<&str>) -> bool {
                 | "LOGIN_NEEDED"
                 | "CAP"
                 | "IN_FLIGHT_CAP"
+                | "SHED_MISSING"
         )
     )
 }

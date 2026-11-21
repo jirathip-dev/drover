@@ -717,6 +717,17 @@ fn wait_of(l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> Option<crate::
     w.filter(|_| matches!(l.state.word().as_str(), "idle" | "done" | "unknown" | "parked"))
 }
 
+fn herd_host(h: Host, lim: &Limits) -> HerdHost {
+    HerdHost {
+        load: h.load_per_cpu,
+        limit: lim.load_per_cpu,
+        gate: host::admit(&h, lim).err(),
+        pressure: h.pressure,
+        swapouts: h.swapout,
+        swap_limit: lim.swapout_rate,
+    }
+}
+
 pub fn act(role: &str, state: &str) -> &'static str {
     let busy = |r: &str| match r {
         "fix" => "fix",
@@ -1531,7 +1542,7 @@ impl<'a> Server<'a> {
             }
             "drive" => {
                 let cfg = Config::kept(ctx)?;
-                crate::drive::drive(ctx, &cfg, &self.r, &mut out, Some(fleet), true, false)?;
+                crate::drive::drive(ctx, &cfg, &self.r, &mut out, fleet, true)?;
                 crate::drive::summary(fleet, &String::from_utf8_lossy(&out))
             }
             op @ ("override" | "extend" | "park") => {
@@ -2192,14 +2203,7 @@ impl<'a> Server<'a> {
         Ok(Herd {
             fleets,
             others: lanes(None),
-            host: HerdHost {
-                load: h.load_per_cpu,
-                limit: lim.load_per_cpu,
-                gate: host::admit(&h, lim).err(),
-                pressure: h.pressure,
-                swapouts: h.swapout,
-                swap_limit: lim.swapout_rate,
-            },
+            host: herd_host(h, lim),
         })
     }
 

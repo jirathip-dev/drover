@@ -15,9 +15,10 @@ named like a built-in wins, file by file.
 ## Picking one
 
 Each phone picks its own in the **look** sheet: the header's `[◐]`, on every tab, opens the board's own bottom sheet
-with three lists, THEME (each theme's row sprite, else its icon), COLOURS (below) and STYLE (#335: `pixel`, the sprites,
-or `ascii`, the theme's ASCII figures on the Lanes scene, the Queue and Events rows and the loading
-overlay; default `pixel`, hidden for a theme without `ascii` in `modes`, like terminal), the current row of each ticked (#290).
+with three lists, THEME (each theme's row sprite, else its icon), COLOURS (below) and STYLE (#1306: `terminal`, the
+plain state glyphs; `ascii`, the theme's ASCII figures on the Queue, Events and Lanes rows, the Hosts load and the
+loading strip; `pixel`, its animated sprites, plants, load miniatures and moments; default `pixel`; `?style=` overrides
+it like `?theme=`), the current row of each ticked (#290).
 A tap, or Enter on a focused row (↑/↓ move), applies it in place, no reload, and the sheet stays open. The pick is kept
 in localStorage and applied before the first paint like the tab, so there is no flash; a switch swaps the favicon. A
 phone that never picked gets `[serve] theme = "<name>"` (default `farm`). `GET /api/v1/host`'s `theme` row shows the page's

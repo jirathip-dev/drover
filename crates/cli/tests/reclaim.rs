@@ -127,6 +127,75 @@ fn busy_or_recent_worktrees_are_skipped() {
     assert!(out.contains("0.00 GB freed"), "{out}");
 }
 
+struct Held(std::process::Child);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn sqlite_holding(db: &Path) -> Held {
+    use std::io::BufRead;
+    let py = "import sqlite3,sys\nc=sqlite3.connect(sys.argv[1],isolation_level=None)\n\
+              c.execute('PRAGMA locking_mode=EXCLUSIVE');c.execute('BEGIN EXCLUSIVE')\n\
+              c.execute('CREATE TABLE t(x)');print('held',flush=True);sys.stdin.read()";
+    let mut c = std::process::Command::new("python3")
+        .args(["-I", "-c", py])
+        .arg(db)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    std::io::BufReader::new(c.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let held = Held(c);
+    assert_eq!(line.trim(), "held");
+    held
+}
+
+#[test]
+fn swift_build_folders_are_trimmed_past_the_budget_except_one_xcodebuild_or_swiftpm_holds() {
+    let d = tmpdir("reclaim-swift");
+    let root = d.join("worktrees/.build");
+    let cfg = CONFIG.replace("build_root = \"\"", "build_budget_gb = 0");
+    let c = ctx(&d, &cfg);
+    let folder = |p: &str| {
+        let dir = root.join(p);
+        std::fs::create_dir_all(dir.join("Build")).unwrap();
+        std::fs::write(dir.join("Build/blob"), vec![0u8; 4096]).unwrap();
+        dir
+    };
+    let xcode = folder("sendmeter-impl-1/xcode");
+    let db = xcode.join("Build/Intermediates.noindex/XCBuildData/build.db");
+    std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+    let spm = folder("sendmeter-impl-2/swiftpm");
+    std::fs::write(spm.join(".lock"), "").unwrap();
+    let flock = std::fs::File::open(spm.join(".lock")).unwrap();
+    flock.lock().unwrap();
+    let idle = [folder("other-impl-3/xcode"), folder("other-impl-3/swiftpm")];
+    let sqlite = sqlite_holding(&db);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let (code, out) = run(&c, &Fake::default(), &["reclaim", "--apply"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(idle.iter().all(|d| !d.exists()), "{out}");
+    for d in [&xcode, &spm] {
+        assert!(d.join("Build/blob").exists(), "{}: {out}", d.display());
+        assert!(
+            out.contains(&format!("keep {}: swift is building", d.display())),
+            "{out}"
+        );
+    }
+    drop((sqlite, flock));
+    let (code, out) = run(&c, &Fake::default(), &["reclaim", "--apply"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!xcode.exists() && !spm.exists(), "released, they go: {out}");
+}
+
 #[test]
 fn the_shared_build_folder_is_trimmed_past_its_budget_except_a_building_profile() {
     let d = tmpdir("reclaim-shared");

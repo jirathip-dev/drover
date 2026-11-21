@@ -148,6 +148,11 @@ enum Cmd {
         #[arg(long, default_value = "owner")]
         by: String,
     },
+    #[command(about = "#1479: a merged issue's open rollout (`rollout dismiss`, owner only)")]
+    Rollout {
+        #[command(subcommand)]
+        cmd: crate::propose::Rollout,
+    },
     #[command(about = "Owner only: a rate-limited lane's [wait], one `continue` at shed's reset; logs `limit-picked`")]
     Limit(crate::limit::Pick),
     #[command(
@@ -357,6 +362,8 @@ enum Cmd {
     },
     #[command(about = "#1100: file this week's triage issue and spawn its lane, or a triage lane's verb")]
     Triage(crate::triage::Args),
+    #[command(about = "#1488: file this month's deps issue, queue it and spawn its lane (orchestrators, owner)")]
+    Deps(crate::deps::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
     #[command(alias = "host")]
     Hosts {
@@ -393,14 +400,9 @@ enum Cmd {
         cmd: PushCmd,
     },
     #[command(
-        about = "One pass of the loop for every unpaused fleet: do every step that's due, then exit; safe from cron"
+        about = "A fleet's pass: every step that's due, ended at pass_max_secs; with no fleet, each unpaused fleet's pass started as its own process; safe from cron"
     )]
-    Drive {
-        fleet: Option<String>,
-        #[arg(help = "#212: only record verdicts and merge PASS + green (the every-minute job); no lane starts")]
-        #[arg(long)]
-        fast: bool,
-    },
+    Drive { fleet: Option<String> },
     #[command(
         about = "Drive one issue's due steps now, detached (lane hooks and board taps run it); the timers stay the safety net"
     )]
@@ -417,14 +419,12 @@ enum Cmd {
         id: Option<String>,
     },
     #[command(
-        about = "CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it or a --rules file over 30 lines"
+        about = "CI: lines of the `count` globs (less `exclude`) in --config, default src/**/*.rs, against its `line_cap` or a higher one in cap.d/; exit 1 over it"
     )]
     #[command(hide = true)]
     CapCheck {
         #[arg(long)]
         config: std::path::PathBuf,
-        #[arg(long, default_value = ".drover/rules.md")]
-        rules: std::path::PathBuf,
         #[arg(long)]
         base: Option<String>,
     },
@@ -442,12 +442,21 @@ enum Cmd {
         pr_body: Option<PathBuf>,
     },
     #[command(
-        about = "CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1"
+        about = "CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1, as does a rule naming no enforcer or a file over 30 lines"
     )]
     #[command(hide = true)]
     LessonCheck {
         #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
+    },
+    #[command(about = "`turn done`'s PR_BODY rule on --file for the --head sha; exit 1 with the reason")]
+    PrBody {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        head: String,
+        #[arg(long, default_value = "staging")]
+        base: String,
     },
     #[command(
         about = "Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun. `setup <host> <name>` (#303): run that configured login in a shed terminal on the host instead"
@@ -745,7 +754,12 @@ enum ConfigCmd {
     #[command(
         about = "Propose <file> as the whole new fleet.toml in a thread: validated, its diff a card with [apply] [discard]"
     )]
-    Propose { thread: String, file: PathBuf },
+    Propose {
+        thread: String,
+        file: PathBuf,
+        #[arg(long, help = "The merged issue whose open rollout its apply closes")]
+        rollout: Option<u64>,
+    },
     #[command(about = "Owner only: apply a proposal (backup kept, doctor run)")]
     Apply { id: String },
     #[command(about = "Owner only: discard a proposal")]
@@ -1142,7 +1156,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             | Cmd::Help { .. }
     ) || matches!(
         cli.cmd,
-        Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. }
+        Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. } | Cmd::PrBody { .. }
     );
     if !quiet && args.first().is_some_and(|a| a.ends_with("herdsman")) {
         crate::stderr!("herdsman is now drover: the old name works for one more release");
@@ -1260,9 +1274,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
-        Cmd::CapCheck { config, rules, base } => {
-            return crate::overlap::cap_check(r, &config, &crate::repo_path(&rules), base.as_deref(), out)
-        }
+        Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
         Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
         Cmd::ArchCheck {
             config,
@@ -1280,6 +1292,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )
         }
         Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &crate::repo_path(&rules), out),
+        Cmd::PrBody { file, head, base } => return crate::done::pr_body(r, &file, &head, &base, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hosts {
@@ -1624,8 +1637,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Check => check::config(ctx)?,
                 _ => Config::load(&ctx.config)?,
             };
-            let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
-            let pass = if fast {
+            let pass = if matches!(cmd, Cmd::Drive { .. }) {
                 crate::hosts::Pass::fast(r)
             } else {
                 crate::hosts::Pass::new(r, None)
@@ -1777,8 +1789,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Config { cmd } => {
                     let (id, apply) = match cmd {
                         ConfigCmd::Show => return crate::config::show(&cfg, out).map(|()| 0),
-                        ConfigCmd::Propose { thread, file } => {
-                            return crate::propose::propose(ctx, &cfg, out, &thread, &file).map(|()| 0)
+                        ConfigCmd::Propose { thread, file, rollout } => {
+                            return crate::propose::propose(ctx, &cfg, out, (&thread, &file), rollout).map(|()| 0)
                         }
                         ConfigCmd::Apply { id } => (id, true),
                         ConfigCmd::Discard { id } => (id, false),
@@ -1852,7 +1864,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
-                Cmd::Drive { fleet, fast } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false, fast)?,
+                Cmd::Drive { fleet } => crate::drive::job(ctx, &cfg, r, out, fleet.as_deref())?,
                 Cmd::Kick {
                     fleet,
                     issue,
@@ -1940,6 +1952,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             (w.who, w.what) = ("drive", l);
                         }
                     }
+                    rows.extend(crate::propose::rollout_rows(&events, fleet.as_deref()));
                     let slots = crate::drive::holders(ctx, &cfg, r);
                     if !json && !slots.is_empty() {
                         writeln!(out, "slots: {slots}")?;
@@ -1985,8 +1998,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
-                        check::strays(ctx, &cfg, out, yes)?;
-                        check::remote_orphans(&cfg, r, out, orphans && yes)?;
+                        check::strays(ctx, &cfg, out, yes).and_then(|()| check::secrets_files(ctx, out, yes))?;
+                        check::remote_orphans(&cfg, r, out, (orphans && yes, yes))?;
                         for f in cfg.fleet.keys().filter(|f| fleet.as_ref().is_none_or(|x| x == *f)) {
                             if let Err(e) = check::prune(ctx, &cfg, r, out, f, !yes) {
                                 writeln!(out, "{f}: wip prune failed: {e:#}")?;
@@ -2094,16 +2107,13 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(LessonCmd::Apply { fleet, rules }),
                     ..
                 } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?,
-                Cmd::Lesson { fleet, .. } => {
-                    let fleet = fleet.context("usage: drover lesson <FLEET> | drover lesson digest <FLEET>")?;
-                    if !crate::lesson::run(ctx, &cfg, r, out, &fleet, None)? {
-                        return Ok(4);
-                    }
-                }
+                Cmd::Lesson { fleet, .. } => return crate::lesson::cli(ctx, &cfg, r, out, fleet),
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
+                Cmd::Deps(a) => return crate::deps::cli(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
+                Cmd::Rollout { cmd } => writeln!(out, "{}", cmd.run(ctx, &cfg)?)?,
                 Cmd::Limit(p) => crate::limit::pick(ctx, r, out, &p)?,
                 Cmd::Unpark { fleet, issue, by } => gate::unpark(ctx, &cfg, out, (&fleet, issue), &by)?,
                 Cmd::Brief { fleet, issue } => {
@@ -2302,7 +2312,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     }
     let thread = crate::config::env("DROVER_THREAD").unwrap_or_default();
     if let Some(text) = hook::issue_filed(&input).filter(|_| !thread.is_empty()) {
-        if let Err(e) = Config::load(&ctx.config).and_then(|cfg| crate::orchestrator::flow(ctx, &cfg, &thread, &text)) {
+        if let Err(e) = Config::load(&ctx.config).and_then(|c| crate::propose::filed(ctx, &c, &thread, &text, &input)) {
             crate::stderr!("drover hook: {e:#}");
         }
     }
@@ -2364,12 +2374,12 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
         hygiene: rules.hygiene,
     };
-    let cur = |d: &str| {
-        runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])
+    let git = |d: &str, a: &[&str]| {
+        runner::ok(r, "git", &[&["-C", d][..], a].concat())
             .ok()
             .map(|s| s.trim().to_string())
     };
-    if let Some(reason) = hook::decide(&input, &policy, &cur) {
+    if let Some(reason) = hook::decide(&input, &policy, &git) {
         if policy.deny.iter().any(|d| d.reason() == reason) {
             lane_event(ctx, "hook-denied", json!({"rule": reason}));
         }

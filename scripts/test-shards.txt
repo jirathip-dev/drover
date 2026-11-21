@@ -18,6 +18,7 @@
 4 blocked_respawn
 1 board_errors
 4 board_fresh
+1 board_style
 2 board_tui
 3 boat
 2 brief_golden
@@ -40,6 +41,7 @@
 2 cooee_profiles
 4 cooee_screens
 1 cooee_token
+1 deps
 1 demo_export
 2 design_orphan
 4 design_stage
@@ -50,6 +52,7 @@
 3 done_gate
 3 drive
 4 drive_kicks
+2 drive_loops
 2 drive_sim
 4 dsh
 4 dsh_unit
@@ -169,6 +172,7 @@
 2 respawn_pace
 2 retired_keys
 1 rev_no_verdict
+2 rollout
 4 roots
 2 round_images
 1 run_card
@@ -180,6 +184,7 @@
 4 scratch
 2 screen_hub
 2 screen_pages
+3 screens_parity
 3 self_update
 3 serial_groups
 1 serve_conn

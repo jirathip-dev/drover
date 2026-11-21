@@ -71,7 +71,7 @@ fn a_fast_pass_over_a_100k_event_log_reads_it_once_and_stays_under_its_bound() {
     let c = fixture();
     let f = lanes();
     let (r0, t0) = (drover::db::ROWS.load(Relaxed), Instant::now());
-    let (code, out) = run(&c, &f, &["drive", "--fast"]);
+    let (code, out) = run(&c, &f, &["drive"]);
     let (secs, rows) = (t0.elapsed().as_secs_f64(), drover::db::ROWS.load(Relaxed) - r0);
     assert_eq!(code, 0, "{out}");
     let len = EVENTS + ISSUES + 1;
@@ -98,7 +98,7 @@ fn pass_profile_on_the_fixture_log() {
             t.split(':').fold(0.0, |a, p| a * 60.0 + p.parse::<f64>().unwrap())
         };
         let (r0, c0, t0) = (drover::db::ROWS.load(Relaxed), cpu(), Instant::now());
-        let (code, _) = run(&c, &f, &["drive", "--fast"]);
+        let (code, _) = run(&c, &f, &["drive"]);
         let (wall, cpu, rows) = (
             t0.elapsed().as_secs_f64(),
             cpu() - c0,

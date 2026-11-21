@@ -40,7 +40,7 @@ fn a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet() {
     }
     lane(&c, "alpha", 5);
     let r = calm().reply("gh api graphql", &open_prs(&[12, 13, 14, 15, 5]));
-    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let calls = r.calls.borrow();
     let graphql: Vec<_> = calls
@@ -90,7 +90,7 @@ fn status_and_serve_make_no_gh_call() {
     sh.attach(&c);
     lane(&c, "sendmeter", 12);
     let r = calm().reply("gh api graphql", &open_prs(&[12]));
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let seen = r.calls.borrow().len();
     let (code, out) = run(&c, &r, &["status"]);
     assert_eq!(code, 0, "{out}");
@@ -127,7 +127,7 @@ fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
         )
         .reply("gh api -i -H If-None-Match: ", &probe("304 Not Modified", "\"x\""));
     let mut c = c;
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     assert_eq!(
         r.count("gh api graphql --paginate"),
         1,
@@ -135,12 +135,14 @@ fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
         r.calls.borrow()
     );
     assert_eq!(drover::gh::cached_pr(&c, "sendmeter", 30)["number"], 130);
-    c.now += 15;
+    c.now += 60;
     let seen = r.calls.borrow().len();
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let gh: Vec<_> = r.calls.borrow()[seen..]
         .iter()
-        .filter(|l| l.starts_with("gh "))
+        .filter(|l| {
+            l.starts_with("gh ") && !l.starts_with("gh api graphql -f owner=") && !l.starts_with("gh api -X POST")
+        })
         .cloned()
         .collect();
     assert_eq!(
@@ -160,7 +162,7 @@ fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
         .reply("gh api graphql", &open_prs(&ns))
         .reply("gh api -i -H If-None-Match: W/\"p1\"", &probe("200 OK", "W/\"p2\""))
         .reply("gh api -i -H If-None-Match: ", &probe("304 Not Modified", "\"x\""));
-    c.now += 15;
-    assert_eq!(run(&c, &r2, &["drive", "--fast"]).0, 0);
+    c.now += 60;
+    assert_eq!(run(&c, &r2, &["drive"]).0, 0);
     assert_eq!(r2.count("gh api graphql --paginate"), 1, "{:?}", r2.calls.borrow());
 }

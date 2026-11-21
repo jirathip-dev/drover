@@ -113,7 +113,8 @@ fn a_supersede_snapshot_holds_the_source_file_and_not_the_outbox() {
 
 #[test]
 fn a_host_name_in_a_product_file_is_still_refused_public_leak() {
-    let (code, out, files, bazzite) = superseded("hosts-wip-leak", Some("fn a() {}\nconst H: &str = \"bazzite\";\n"));
+    let (code, out, files, bazzite) =
+        superseded("hosts-wip-leak", Some("fn a() {}\nconst H: &str = \"ssh bazzite\";\n"));
     assert_eq!(code, 3, "{out}");
     assert!(
         out.contains("REFUSED PUBLIC_LEAK") && out.contains("src/a.rs:2 has a host"),

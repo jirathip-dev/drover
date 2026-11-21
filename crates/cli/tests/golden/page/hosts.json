@@ -10,6 +10,9 @@
                 "text": "on",
                 "tone": "ok"
               },
+              "figure": {
+                "load": "calm"
+              },
               "id": "h-mini",
               "subtitle": {
                 "text": "main host · 2 leftovers"
@@ -67,6 +70,33 @@
       "footer": "Tap a host for its buttons. Host history and charts live in Beacon.",
       "header": "hosts (2)",
       "id": "hosts-sec",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "disk-list",
+          "rows": [
+            {
+              "id": "disk-worktrees",
+              "title": "worktrees",
+              "type": "row",
+              "value": "not measured yet / 25 GB"
+            },
+            {
+              "id": "disk-orphans",
+              "subtitle": "under the worktree root, no fleet's",
+              "title": "orphan folders",
+              "type": "row",
+              "value": "0"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "footer": "The worktree total is drive's last walk.",
+      "header": "fleet disk",
+      "id": "disk-sec",
       "type": "section"
     },
     {

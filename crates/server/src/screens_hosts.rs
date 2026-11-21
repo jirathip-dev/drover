@@ -1,8 +1,19 @@
 use super::{super::lock, working, Config, Ctx, Result, Server};
+use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Value};
 
-pub(super) const HOST_ACTIONS: [&str; 2] = ["host", "reap"];
+pub(super) const HOST_ACTIONS: [&str; 3] = ["host", "reap", "orphans"];
+
+pub(super) fn weather(host: &crate::api::HerdHost) -> (&'static str, &'static str) {
+    let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
+    match host.pressure.as_deref() {
+        _ if host.gate.is_some() => ("storm", "held"),
+        Some("warn" | "critical") => ("fog", "busy"),
+        _ if ratio >= 0.5 => ("windy", "busy"),
+        _ => ("clear", "calm"),
+    }
+}
 
 fn plural(n: usize, w: &str) -> String {
     format!("{n} {w}{}", if n == 1 { "" } else { "s" })
@@ -42,10 +53,38 @@ fn host_row(name: &str, kind: &str, on: bool, lanes: usize, left: usize) -> Valu
     json!({"type": "row", "id": format!("h-{name}"), "title": name, "badge": badge, "subtitle": {"text": sub}, "value": plural(lanes, "lane"), "swipe": swipe})
 }
 
+fn disk(ctx: &Ctx, cfg: &Config) -> Value {
+    let budget = cfg.limits.worktree_budget_gb;
+    let mut wt = json!({"type": "row", "id": "disk-worktrees", "title": "worktrees"});
+    match crate::check::worktree_du(ctx) {
+        Some((gb, _)) => {
+            wt.put("value", json!(format!("{gb:.1} / {budget:.0} GB")));
+            if gb > budget {
+                wt.put(
+                    "subtitle",
+                    json!({"text": "over budget: drive frees the idlest lanes' build folders", "tone": "warn"}),
+                );
+            }
+        }
+        None => {
+            wt.put("value", json!(format!("not measured yet / {budget:.0} GB")));
+        }
+    }
+    let n = crate::check::orphan_dirs(ctx, cfg).len();
+    let mut orphans = json!({"type": "row", "id": "disk-orphans", "title": "orphan folders", "subtitle": "under the worktree root, no fleet's", "value": n.to_string()});
+    if n > 0 {
+        orphans.put("swipe", json!([{"label": format!("Remove {n}"), "tone": "bad", "action": "orphans", "values": {},
+            "confirm": {"title": format!("Remove {}?", plural(n, "orphan folder")), "message": "No configured fleet owns them; they are deleted, not saved.", "ok": "Remove"}}]));
+    }
+    json!({"type": "section", "id": "disk-sec", "header": "fleet disk", "footer": "The worktree total is drive's last walk.",
+        "blocks": [{"type": "list", "id": "disk-list", "rows": [wt, orphans]}]})
+}
+
 impl Server<'_> {
     pub(super) fn hosts_sheet(&self, ctx: &Ctx) -> Option<Value> {
         let (cfg, ev) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
         let (left, proxy) = lock(&self.hosts_read).clone();
+        let (_, level) = weather(&super::super::herd_host(self.sample(), &cfg.limits));
         let rows: Vec<Value> = crate::hosts::cards(&cfg, &self.r)
             .into_iter()
             .map(|(name, h)| {
@@ -56,19 +95,24 @@ impl Server<'_> {
                     _ => "remote host",
                 };
                 let lanes = crate::hosts::lanes_on(&cfg, &ev, &name).len();
-                host_row(
+                let mut row = host_row(
                     &name,
                     kind,
                     h.is_none_or(|h| h.enabled),
                     lanes,
                     if main { left } else { 0 },
-                )
+                );
+                if main {
+                    row.put("figure", json!({"load": level}));
+                }
+                row
             })
             .collect();
         let mut blocks = vec![
             json!({"type": "section", "id": "hosts-sec", "header": format!("hosts ({})", rows.len()),
             "footer": "Tap a host for its buttons. Host history and charts live in Beacon.",
             "blocks": [{"type": "list", "id": "hosts-list", "rows": rows}]}),
+            disk(ctx, &cfg),
         ];
         if let Some(facts) = proxy {
             let mut rows: Vec<Value> = (facts.iter().enumerate())

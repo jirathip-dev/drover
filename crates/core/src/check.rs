@@ -1469,8 +1469,12 @@ pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     Ok(names.chain(spawned).map(String::from).collect())
 }
 
+const XCODE_DB: &str = "Build/Intermediates.noindex/XCBuildData/build.db";
+
 fn building(d: &Path, depth: u8) -> bool {
-    let held = std::fs::File::open(d.join(".cargo-lock")).is_ok_and(|f| f.try_lock().is_err());
+    let open = |f: &str| std::fs::File::open(d.join(f));
+    let flock = |f: &str| open(f).is_ok_and(|f| f.try_lock().is_err());
+    let held = flock(".cargo-lock") || flock(".lock") || open(XCODE_DB).is_ok_and(|f| drover_sys::record_locked(&f));
     held || depth > 0
         && (std::fs::read_dir(d).into_iter().flatten().flatten())
             .any(|e| e.file_type().is_ok_and(|t| t.is_dir()) && building(&e.path(), depth - 1))
@@ -1505,9 +1509,10 @@ fn trim_root(root: &Path, budget: f64, live: &Live, out: &mut dyn Write, dry: bo
     }
     let (mut total, mut freed) = (du(root), 0);
     let ls = |p: &Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path());
+    let swift = |p: &Path| p.is_dir() && crate::spawn::SWIFT.iter().any(|v| p.ends_with(v.1));
     let profiles = ls(root)
         .flat_map(|r| ls(&r))
-        .filter(|p| p.join(".cargo-lock").is_file())
+        .filter(|p| p.join(".cargo-lock").is_file() || swift(p))
         .map(|p| (p, 0));
     let scratch = ls(&root.join(crate::spawn::SCRATCH))
         .filter(|p| p.is_dir())
@@ -1523,7 +1528,12 @@ fn trim_root(root: &Path, budget: f64, live: &Live, out: &mut dyn Write, dry: bo
             break;
         }
         if building(&dir, depth) {
-            writeln!(out, "keep {}: cargo is building", dir.display())?;
+            let who = if dir.join(".cargo-lock").is_file() {
+                "cargo"
+            } else {
+                "swift"
+            };
+            writeln!(out, "keep {}: {who} is building", dir.display())?;
             continue;
         }
         if lane(&dir, depth).is_some_and(|n| live.contains(&n)) {
@@ -1582,11 +1592,11 @@ cd "$r" 2>/dev/null || { echo "total 0 freed 0"; exit 0; }
 t=$(du -sk . | cut -f1); f=0
 for d in */*/; do
   [ "$t" -le "$b" ] && break
-  [ -f "$d.cargo-lock" ] || continue
+  case $d in */xcode/) h=${d}Build/Intermediates.noindex/XCBuildData/build.db w=swift;; */swiftpm/) h=$d.lock w=swift;; *) h=$d.cargo-lock w=cargo; [ -f "$h" ] || continue;; esac
   n=${d%%/*}; k=
   for l in "$@"; do [ "$l" = "$n" ] && k=1; done
   if [ -n "$k" ]; then echo "keep $o/$d: a live lane"; continue; fi
-  if command -v lsof >/dev/null && lsof "$d.cargo-lock" >/dev/null 2>&1; then echo "keep $o/$d: cargo is building"; continue; fi
+  if [ -f "$h" ] && command -v lsof >/dev/null && lsof "$h" >/dev/null 2>&1; then echo "keep $o/$d: $w is building"; continue; fi
   s=$(du -sk "$d" | cut -f1)
   rm -rf "./${d:?}" && t=$((t - s)) && f=$((f + s)) && echo "trimmed $o/$d ($s KB)"
 done
@@ -1740,8 +1750,26 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, remove: bool) -> Re
     Ok(found.len())
 }
 
-/// `orphan <host>:<path> <size>` per orphan folder under each enabled remote host's root; gone with `remove`.
-pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove: bool) -> Result<usize> {
+/// `secrets file <path>` per `*.env` a spawn left beside a worktree, or where none is, under the worktree root; gone with `remove`.
+pub fn secrets_files(ctx: &Ctx, out: &mut dyn Write, remove: bool) -> Result<()> {
+    let repos = std::fs::read_dir(&ctx.worktrees).into_iter().flatten().flatten();
+    let files = repos.flat_map(|d| std::fs::read_dir(d.path()).into_iter().flatten().flatten());
+    let left = files
+        .map(|f| f.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "env") && p.is_file());
+    for p in left {
+        if remove {
+            std::fs::remove_file(&p).with_context(|| format!("removing {}", p.display()))?;
+            writeln!(out, "removed secrets file {}", p.display())?;
+        } else {
+            writeln!(out, "secrets file {}", p.display())?;
+        }
+    }
+    Ok(())
+}
+
+/// `orphan <host>:<path> <size>` per orphan folder under each enabled remote host's root, gone with `orphans`; `secrets file <host>:<path>` per leftover `*.env`, gone with `yes`.
+pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, (remove, yes): (bool, bool)) -> Result<usize> {
     let (ours, mut found): (Vec<&str>, _) = (cfg.fleet.values().map(crate::config::Fleet::repo_name).collect(), 0);
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled && h.1.machine.is_some()) {
         let (on, root) = (
@@ -1751,7 +1779,14 @@ pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove:
         let list = ok(&on, "sh", &["-c", DIRS, "sh", root.trim_start_matches("~/")]);
         let list = list.or_else(|e| writeln!(out, "cannot list orphans on {name}: {e:#}").map(|()| String::new()))?;
         for (kb, p) in list.lines().filter_map(|l| l.split_once('\t')) {
-            if !ours.iter().any(|o| p.rsplit('/').next() == Some(o)) {
+            if kb == "env" {
+                if yes {
+                    ok(&on, "rm", &["-f", p])?;
+                    writeln!(out, "removed secrets file {name}:{p}")?;
+                } else {
+                    writeln!(out, "secrets file {name}:{p}")?;
+                }
+            } else if !ours.iter().any(|o| p.rsplit('/').next() == Some(o)) {
                 found += 1;
                 if remove {
                     ok(&on, "rm", &["-rf", "--", p])?;
@@ -1770,7 +1805,8 @@ pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove:
 }
 
 const DIRS: &str = "cd && cd \"$1\" 2>/dev/null || exit 0; \
-for d in */; do [ -d \"$d\" ] && [ ! -L \"${d%/}\" ] && du -sk \"$PWD/${d%/}\"; done; true";
+for d in */; do [ -d \"$d\" ] && [ ! -L \"${d%/}\" ] && du -sk \"$PWD/${d%/}\"; done; \
+for f in */*.env; do [ -f \"$f\" ] && [ ! -L \"$f\" ] && printf 'env\\t%s\\n' \"$PWD/$f\"; done; true";
 
 fn drop_log(ctx: &Ctx, agent: Option<&str>) {
     crate::session::transcript::forget(ctx, agent.unwrap_or_default());

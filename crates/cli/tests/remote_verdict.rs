@@ -119,7 +119,7 @@ fn a_remote_reviewer_that_exited_leaving_verdict_md_is_recorded_next_pass_after_
         failed[0]
             .str("why")
             .unwrap_or_default()
-            .contains("Connection timed out"),
+            .contains("bazzite: not sent (host offline this pass)"),
         "{failed:?}"
     );
     let (_, waiting) = run(&c, &two(&down, &bazzite), &["waiting", "sendmeter"]);

@@ -48,7 +48,9 @@
        "type": "row",
        "id": "e-912",
        "figure": {
-        "state": "done"
+        "state": "done",
+        "act": "done",
+        "moment": "merged"
        },
        "title": "merged #708 into staging",
        "subtitle": "doctor: bound every Keychain/codesign call",
@@ -61,7 +63,8 @@
        "type": "row",
        "id": "e-911",
        "figure": {
-        "state": "done"
+        "state": "done",
+        "act": "done"
        },
        "title": "PASS #708 review 2",
        "subtitle": "at 9e41c07 · CI green",
@@ -72,7 +75,7 @@
        "id": "e-909",
        "figure": {
         "state": "working",
-        "tool": "edit"
+        "act": "fix"
        },
        "title": "spawn herdsman-impl-641 · fix 1",
        "subtitle": "on mini · Claude Code · opus 5.5",
@@ -85,7 +88,9 @@
        "type": "row",
        "id": "e-910",
        "figure": {
-        "state": "needs"
+        "state": "needs",
+        "act": "blocked",
+        "moment": "needs-you"
        },
        "title": "ask q947 · #722",
        "subtitle": {
@@ -101,7 +106,9 @@
        "type": "row",
        "id": "e-908",
        "figure": {
-        "state": "fail"
+        "state": "fail",
+        "act": "blocked",
+        "moment": "fail"
        },
        "title": "FAIL #641 review 1",
        "subtitle": "2 findings · blocking [correctness]",
@@ -111,7 +118,8 @@
        "type": "row",
        "id": "e-907",
        "figure": {
-        "state": "fail"
+        "state": "fail",
+        "act": "blocked"
        },
        "title": "round limit · synergy #2708",
        "subtitle": {
@@ -125,7 +133,7 @@
        "id": "e-906",
        "figure": {
         "state": "working",
-        "tool": "run"
+        "act": "impl"
        },
        "title": "spawn herdsman-impl-722 · impl",
        "subtitle": "on mini · Codex · gpt-5.6-luna",

@@ -76,7 +76,7 @@ fn fake_on(base: Fake, prs: &[(u64, &str)]) -> Fake {
 
 fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
-    let (code, out) = run(c, r, &["drive"]);
+    let (code, out) = passes(c, r);
     assert_eq!(code, 0, "{out}");
     let new = read(&c.state).unwrap().to_vec().split_off(before);
     let steps = new

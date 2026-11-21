@@ -50,6 +50,8 @@ pub fn page_places() -> Value {
     Value::Array(all)
 }
 
+#[path = "screens_fleets.rs"]
+mod fleets;
 #[path = "screens_hosts.rs"]
 mod hosts;
 
@@ -83,22 +85,15 @@ pub(super) fn iso(t: u64) -> String {
     )
 }
 
-fn tool(role: &str) -> &'static str {
-    match role {
-        "rev" | "review" => "read",
-        "fix" | "update" => "edit",
-        _ => "run",
-    }
-}
-
 fn figure(act: &str, state: &str) -> Value {
-    match act {
-        "impl" | "fix" | "rev" | "update" => json!({"state": "working", "tool": tool(act)}),
-        "done" => json!({"state": "done"}),
-        "blocked" if state == "dead" || state == "blocked" => json!({"state": "fail"}),
-        "blocked" => json!({"state": "needs"}),
-        _ => json!({"state": "idle"}),
-    }
+    let state = match act {
+        "impl" | "fix" | "rev" | "update" => "working",
+        "done" => "done",
+        "blocked" if state == "dead" || state == "blocked" => "fail",
+        "blocked" => "needs",
+        _ => "idle",
+    };
+    json!({"state": state, "act": act})
 }
 
 fn badge_tone(fig: &Value) -> &str {
@@ -200,6 +195,7 @@ const LINE: usize = 48;
 fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<usize>, lane: Option<&Lane>) -> Value {
     let mut fig = figure(&r.act, &r.state);
     fig.put("grow", json!(r.grow));
+    fig.put("issue", json!(r.issue));
     let title = format!(
         "#{} {}",
         r.issue,
@@ -950,6 +946,35 @@ fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
         "fold": fold(Some(n), "needs-human", &i.why, age, &main.unwrap_or_default()), "blocks": blocks})
 }
 
+fn health_line(now: u64, ev: &[Event]) -> Option<Value> {
+    let h = crate::slo::drive_health(ev);
+    let oldest = now.saturating_sub(h.first()?.since) / 60;
+    let mut parts: Vec<String> = ["drive late", "idle", "pass error"]
+        .iter()
+        .filter_map(|w| {
+            let n = (h.iter().filter(|x| x.what == *w).map(|x| x.fleet)).collect::<std::collections::BTreeSet<_>>();
+            let s = if n.len() == 1 { "" } else { "s" };
+            (!n.is_empty()).then(|| format!("{w}: {} fleet{s}", n.len()))
+        })
+        .collect();
+    parts.push(format!("{oldest}m"));
+    let row = json!({"type": "row", "id": "drive-health", "title": parts.join(" · "), "figure": {"state": "blocked"},
+        "accessory": "chevron", "tap": {"sheet": "/screens/drive-health"}});
+    Some(json!({"type": "list", "id": "drive-health-list", "rows": [row]}))
+}
+
+fn health_sheet(now: u64, ev: &[Event]) -> Value {
+    let rows: Vec<Value> = (crate::slo::drive_health(ev).iter().enumerate())
+        .map(|(i, h)| {
+            json!({"type": "row", "id": format!("health-{i}"), "title": format!("{} · {}", h.fleet, h.what),
+                "subtitle": h.reason, "value": format!("{}m", now.saturating_sub(h.since) / 60)})
+        })
+        .collect();
+    let drive = json!({"type": "button", "id": "health-drive", "label": "Drive now", "style": "primary", "action": "drive-all"});
+    json!({"type": "sheet", "id": "drive-health", "title": "Drive health", "cancel": "Done",
+        "blocks": [{"type": "list", "id": "health-rows", "rows": rows}, drive]})
+}
+
 fn run_cards(now: u64, ev: &[Event]) -> Vec<Value> {
     let open = ev
         .iter()
@@ -962,34 +987,6 @@ fn run_cards(now: u64, ev: &[Event]) -> Vec<Value> {
                 "dir": s("dir"), "touches": s("blast"), "until": iso(e.ts + crate::card::TTL)}]})
     })
     .collect()
-}
-
-fn fleets(cfg: &Config) -> Value {
-    let mut blocks = vec![];
-    for (f, fc) in &cfg.fleet {
-        let mut fields = vec![
-            json!({"type": "toggle", "name": format!("{f}.drive"), "label": "Drive", "value": !fc.paused}),
-            json!({"type": "text", "name": format!("{f}.integration"), "label": "Branch", "value": fc.integration, "placeholder": "integration branch"}),
-        ];
-        for (role, label) in [("impl", "Impl"), ("rev", "Review")]
-            .into_iter()
-            .filter(|_| !cfg.models.is_empty())
-        {
-            let Some(r) = fc.role.get(role) else { continue };
-            let value = r.model.clone().unwrap_or_default();
-            fields.push(json!({"type": "picker", "name": format!("{f}.{role}"), "label": label, "value": value, "options": cfg.models}));
-        }
-        blocks.push(json!({"type": "section", "id": format!("fleet-{f}"), "header": f, "footer": "Pause stops new lanes; live ones finish.",
-            "blocks": [{"type": "form", "id": format!("f-{f}"), "fields": fields}]}));
-    }
-    for f in cfg.fleet.keys() {
-        let confirm = json!({"title": format!("Remove {f}?"), "message": "Only its config section; its queue, lanes and log stay on disk.", "ok": "Remove"});
-        blocks.push(
-            json!({"type": "button", "id": format!("rm-{f}"), "label": format!("Remove {f}…"), "style": "destructive",
-            "action": "remove-fleet", "values": {"fleet": f}, "confirm": confirm}),
-        );
-    }
-    json!({"type": "sheet", "id": "fleets", "title": "Fleets", "cancel": "Cancel", "done": {"label": "Save", "action": "save-fleets"}, "blocks": blocks})
 }
 
 fn workflow(ctx: &Ctx) -> Value {
@@ -1021,31 +1018,85 @@ fn kind_of(kind: &str) -> Option<&'static str> {
     }
 }
 
+const GROUPS: [&str; 4] = ["hour", "today", "yesterday", "earlier"];
+
+fn when(now: u64, t: u64) -> (&'static str, &'static str) {
+    match now.saturating_sub(t) {
+        a if a < 3_600 => ("hour", "last hour"),
+        _ if t / 86_400 == now / 86_400 => ("today", "today"),
+        _ if t / 86_400 + 1 == now / 86_400 => ("yesterday", "yesterday"),
+        _ => ("earlier", "earlier"),
+    }
+}
+
+fn groups(now: u64, q: &Q, rows: Vec<(u64, Value)>, more: Option<String>) -> Vec<Value> {
+    let mut out: Vec<(&str, &str, Vec<Value>)> = vec![];
+    for (t, r) in rows {
+        let (id, header) = (q.get("in"))
+            .and_then(|g| GROUPS.iter().find(|x| **x == g.as_str()))
+            .map_or_else(|| when(now, t), |g| (*g, ""));
+        match out.iter_mut().find(|g| g.0 == id) {
+            Some(g) => g.2.push(r),
+            None => out.push((id, header, vec![r])),
+        }
+    }
+    out.sort_by_key(|g| GROUPS.iter().position(|x| *x == g.0));
+    let end = out.len().saturating_sub(1);
+    let more = more.map(|m| match out.last().filter(|_| !q.contains_key("in")) {
+        Some(g) => format!("{m}&in={}", g.0),
+        None => m,
+    });
+    (out.into_iter().enumerate())
+        .map(|(i, (id, header, rows))| {
+            let list = rows_list(&format!("ev-{id}-list"), &rows);
+            let list = pages::paged(list, more.clone().filter(|_| i == end));
+            json!({"type": "section", "id": format!("ev-{id}"), "header": header, "blocks": [list]})
+        })
+        .collect()
+}
+
 fn events_screen(ctx: &Ctx, q: &Q) -> Value {
     let before = q.get("before").and_then(|b| b.parse().ok()).unwrap_or(ctx.now);
     let picked: Vec<&str> = q.get("kind").map_or("all", String::as_str).split(',').collect();
     let all = picked.contains(&"all") || picked.iter().all(|k| !KINDS.iter().any(|(v, _)| v == k));
+    let imp = picked.contains(&"imp");
+    let cfg = Config::kept(ctx).ok();
+    let serial = |e: &Event| (cfg.as_ref().and_then(|c| c.fleet.get(&e.fleet))).map_or("serial", |f| f.serial_label());
     let kinds = ["merged", "verdict", "needs-human", "spawn", "needs-decision"];
     let window = crate::events::since(&ctx.state, &kinds, before.saturating_sub(86_400)).unwrap_or_default();
-    let keep = |e: &Event| e.ts < before && kind_of(&e.kind).is_some_and(|k| all || picked.contains(&k));
+    let keep = |e: &Event| {
+        e.ts < before
+            && kind_of(&e.kind).is_some_and(|k| all || picked.contains(&k))
+            && (!imp || super::words(e, serial(e)).3)
+    };
     let rows = window.into_iter().filter(keep).map(|e| ((e.seq, 0), e));
     let (shown, more) = pages::page("/screens/events", q, rows);
-    let repos: BTreeMap<String, String> = Config::kept(ctx)
-        .map(|c| c.fleet.into_iter().map(|(f, fc)| (f, fc.repo)).collect())
-        .unwrap_or_default();
+    let repos: BTreeMap<String, String> = (cfg.iter().flat_map(|c| &c.fleet))
+        .map(|(f, fc)| (f.clone(), fc.repo.clone()))
+        .collect();
     let list = super::v1::feed(ctx, &shown, usize::MAX).list;
     let (mut rows, mut asks) = (vec![], None);
     for e in &list {
         let k = kind_of(&e.kind).unwrap_or_default();
-        let fig = match (k, e.tone.as_str()) {
-            ("lane", _) => {
-                json!({"state": "working", "tool": tool(e.data.get("role").and_then(Value::as_str).unwrap_or_default())})
-            }
-            (_, "g") => json!({"state": "done"}),
-            (_, "r") => json!({"state": "fail"}),
-            (_, "a") => json!({"state": "needs"}),
-            _ => json!({"state": "idle"}),
+        let role = e.data.get("role").and_then(Value::as_str).unwrap_or_default();
+        let mut fig = match (k, e.tone.as_str()) {
+            ("lane", _) => figure(super::act(role, "working"), ""),
+            (_, "g") => figure("done", ""),
+            (_, "r") => figure("blocked", "dead"),
+            (_, "a") => figure("blocked", ""),
+            _ => figure("idle", ""),
         };
+        if e.kind == "verdict" && e.tone != "r" {
+            fig.put("act", json!("rev"));
+        }
+        if let Some(m) = match e.kind.as_str() {
+            "merged" => Some("merged"),
+            "verdict" if e.tone == "r" => Some("fail"),
+            "needs-human" | "needs-decision" => Some("needs-you"),
+            _ => None,
+        } {
+            fig.put("moment", json!(m));
+        }
         let mut r = json!({"type": "row", "id": format!("e-{}", e.seq), "figure": fig, "title": e.text, "value": {"since": iso(e.ts)}});
         if let Some(t) = e.issue.and_then(|n| crate::gh::cached_title(ctx, &e.fleet, n)) {
             r.put("subtitle", json!(t));
@@ -1070,40 +1121,43 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
         if r.at("tap").is_null() {
             r.as_object_mut().map(|o| o.remove("tap"));
         }
-        rows.push(r);
+        rows.push((e.ts, r));
     }
-    let sel: Vec<&str> = if all { vec!["all"] } else { picked.clone() };
+    let mut sel: Vec<&str> = if all { vec!["all"] } else { picked.clone() };
+    if all && imp {
+        sel.push("imp");
+    }
     let mut opts = vec![json!({"value": "all", "label": "all"})];
     opts.extend(KINDS.iter().map(|(v, l)| json!({"value": v, "label": l})));
-    let kq = if all {
+    opts.push(json!({"value": "imp", "label": "important"}));
+    let kq = if all && !imp {
         String::new()
     } else {
         format!("kind={}&", sel.join(","))
-    };
-    let header = if before == ctx.now {
-        "last 24 h".into()
-    } else {
-        format!("24 h before {}", iso(before))
     };
     let stream = if before == ctx.now {
         format!("/screens/events/stream?{kq}")
     } else {
         String::new()
     };
-    let mut s = json!({"type": "screen", "id": "events", "title": "Events", "blocks": [
-        {"type": "chips", "id": "kind", "name": "kind", "multi": true, "selected": sel, "action": "filter", "options": opts},
-        {"type": "section", "id": "today", "header": header, "blocks": [pages::paged(rows_list("ev", &rows), more)]},
-        {"type": "list", "id": "older-list", "rows": [{"type": "row", "id": "older", "title": "earlier days", "style": "link",
-            "tap": {"open": format!("/screens/events?{kq}before={}", before.saturating_sub(86_400).div_ceil(3_600) * 3_600)}}]}]});
+    let mut blocks = vec![
+        json!({"type": "chips", "id": "kind", "name": "kind", "multi": true, "selected": sel, "action": "filter", "options": opts}),
+    ];
+    blocks.extend(groups(ctx.now, q, rows, more));
+    blocks.push(json!({"type": "list", "id": "older-list", "rows": [{"type": "row", "id": "older", "title": "earlier days", "style": "link",
+            "tap": {"open": format!("/screens/events?{kq}before={}", before.saturating_sub(86_400).div_ceil(3_600) * 3_600)}}]}));
+    let mut s = json!({"type": "screen", "id": "events", "title": "Events", "blocks": blocks});
     if !stream.is_empty() {
         s.put("stream", json!(stream.trim_end_matches(['?', '&'])));
     }
     s
 }
 
+const DRY: [&str; 2] = ["kill", "clean"];
+
 const COATS: [&str; 5] = ["bay", "blk", "ch", "gry", "wht"];
 
-fn lane_figure(name: &str, state: &str) -> Value {
+fn lane_figure(name: &str, state: &str, act: &str) -> Value {
     let i = usize::from_str_radix(&devices::sha256(name.as_bytes())[..2], 16).unwrap_or(0) % COATS.len();
     let state = match state {
         "working" => "working",
@@ -1112,7 +1166,7 @@ fn lane_figure(name: &str, state: &str) -> Value {
         "dead" => "fail",
         _ => "idle",
     };
-    json!({"coat": COATS.get(i), "state": state})
+    json!({"coat": COATS.get(i), "state": state, "act": act})
 }
 
 fn lane_row(fleet: &str, l: &LaneRow) -> Value {
@@ -1123,7 +1177,12 @@ fn lane_row(fleet: &str, l: &LaneRow) -> Value {
         .into_iter()
         .filter(|s| !s.is_empty())
         .collect();
-    json!({"type": "row", "id": format!("l-{}", l.name), "figure": lane_figure(&l.name, &l.state), "title": title,
+    let mut fig = lane_figure(&l.name, &l.state, &l.act);
+    if let Some(n) = l.issue {
+        fig.put("grow", json!(l.grow));
+        fig.put("issue", json!(n));
+    }
+    json!({"type": "row", "id": format!("l-{}", l.name), "figure": fig, "title": title,
         "subtitle": sub.join(" · "), "value": l.ago, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
 }
 
@@ -1207,12 +1266,7 @@ fn scene_screen(h: &Herd) -> Value {
         Some("critical") => 2,
         _ => 0,
     };
-    let (sky, level) = match fog {
-        _ if host.gate.is_some() => ("storm", "held"),
-        1 | 2 => ("fog", "busy"),
-        _ if ratio >= 0.5 => ("windy", "busy"),
-        _ => ("clear", "calm"),
-    };
+    let (sky, level) = hosts::weather(host);
     let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
     let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
     let line = format!(
@@ -1423,9 +1477,11 @@ impl Server<'_> {
             "/screens/lanes" => lanes_screen(&self.lanes_tab(ctx, paired)),
             p if paired && p.starts_with("/screens/lanes/") => self.lane_sheet(ctx, &p[15..])?,
             "/screens/events" => events_screen(ctx, q),
-            "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
+            "/screens/fleets" => fleets::sheet(&Config::kept(ctx).ok()?),
+            "/screens/notify" => fleets::notify(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx, paired),
             "/screens/workflow" => workflow(ctx),
+            "/screens/drive-health" => health_sheet(ctx.now, &working(&ctx.state).ok()?),
             "/screens/scene" => scene_screen(&self.herd(ctx, None).ok()?),
             "/screens/hot" => self.on_row(ctx, q, |c, r| {
                 let f = &c.name;
@@ -1520,8 +1576,11 @@ impl Server<'_> {
             json!({"type": "section", "id": "facts", "header": "lane", "blocks": [{"type": "list", "id": "facts-list", "rows": facts}]}),
         ];
         blocks.extend(acts.iter().map(|(a, label)| {
-            let confirm = json!({"title": format!("{label} {agent}?"), "ok": label});
-            json!({"type": "button", "id": format!("act-{a}"), "label": label, "style": "destructive", "action": a, "values": values, "confirm": confirm})
+            let mut b = json!({"type": "button", "id": format!("act-{a}"), "label": label, "style": "destructive", "action": a, "values": values});
+            if !DRY.contains(a) {
+                b.put("confirm", json!({"title": format!("{label} {agent}?"), "ok": label}));
+            }
+            b
         }));
         let mut v = json!({"type": "sheet", "id": format!("lane-{agent}"), "title": agent, "cancel": "Close"});
         if !other {
@@ -1532,6 +1591,36 @@ impl Server<'_> {
         blocks.push(json!({"type": "section", "id": "transcript", "header": "transcript", "blocks": said}));
         v.put("blocks", json!(blocks));
         Some(v)
+    }
+
+    fn dry_run(&self, ctx: &Ctx, op: &str, agent: &str) -> Value {
+        let act = crate::api::Act {
+            agent: agent.into(),
+            op: op.into(),
+            confirm: String::new(),
+        };
+        let label = if op == "kill" { "Kill" } else { "Clean" };
+        let (said, ok) = match self.act(ctx, &cooee(), &act) {
+            Ok(l) => (
+                l.split("dry run:")
+                    .next()
+                    .unwrap_or_default()
+                    .trim_end_matches("; ")
+                    .into(),
+                true,
+            ),
+            Err(e) => (shown(&e), false),
+        };
+        let mut blocks = vec![json!({"type": "text", "id": "dry-run", "markdown": said})];
+        if ok {
+            let confirm = json!({"title": format!("{label} {agent}?"), "message": said, "ok": label});
+            blocks.push(
+                json!({"type": "button", "id": format!("act-{op}"), "label": label, "style": "destructive",
+                "action": op, "values": {"agent": agent, "confirm": "1"}, "confirm": confirm}),
+            );
+        }
+        let sheet = json!({"type": "sheet", "id": format!("{op}-{agent}"), "title": format!("{label} {agent}?"), "cancel": "Back", "blocks": blocks});
+        json!({"ops": [{"op": "screen", "screen": sheet}], "close": false})
     }
 
     fn on_row(&self, ctx: &Ctx, q: &Q, draw: impl Fn(&QueueCard, &QueueRow) -> Value) -> Option<Value> {
@@ -1713,6 +1802,7 @@ impl Server<'_> {
                 crate::queue_change(ctx, &cfg, f, d, Some("cooee"))? + " (needs-check)"
             }
             "limit" => crate::limit::wait(ctx, &self.r, (&fleet, n()?), "owner")?,
+            n if DRY.contains(&n) && s("confirm") != "1" => return Ok(self.dry_run(ctx, n, &s("agent"))),
             "stop" | "kill" | "clean" | "close" => {
                 let act = crate::api::Act {
                     agent: s("agent"),
@@ -1808,52 +1898,6 @@ impl Server<'_> {
             || name == "answer" && a["screen"] != "cards";
         let ops = later::gone_ops(name, block, &s("fleet"), &s("issue"));
         Ok(json!({"ops": ops, "toast": toast, "close": close}))
-    }
-
-    fn save_fleets(&self, ctx: &Ctx, cfg: &Config, v: &Value) -> Result<String> {
-        let (mut done, mut set) = (vec![], vec![]);
-        for (f, fc) in &cfg.fleet {
-            let val = |k: &str| v.get(format!("{f}.{k}")).filter(|x| !x.is_null());
-            if let Some(on) = val("drive").and_then(Value::as_bool).filter(|on| *on == fc.paused) {
-                done.push(self.form_op(ctx, if on { "resume" } else { "pause" }, &[("fleet", f.clone())])?);
-            }
-            for role in ["impl", "rev"] {
-                let cur = fc.role.get(role).and_then(|r| r.model.clone()).unwrap_or_default();
-                if let Some(m) = val(role).and_then(Value::as_str).filter(|m| !m.is_empty() && *m != cur) {
-                    let wanted = vec![("model", m.to_string())];
-                    crate::set(ctx, &mut vec![], f, role, wanted, Some("cooee"))?;
-                    done.push(format!("{f} {role}: model {m}"));
-                }
-            }
-            if let Some(b) = val("integration")
-                .and_then(Value::as_str)
-                .filter(|b| *b != fc.integration)
-            {
-                set.push(crate::propose::ConfigSet {
-                    path: format!("fleet.{f}.integration"),
-                    value: json!(b),
-                });
-            }
-        }
-        if !set.is_empty() {
-            let c = crate::propose::ConfigChange {
-                hash: crate::propose::view(ctx)?.hash,
-                set,
-                ..Default::default()
-            };
-            done.push(crate::propose::edit(
-                ctx,
-                &Config::kept(ctx)?,
-                &self.r,
-                &c,
-                "owner (cooee)",
-            )?);
-        }
-        Ok(if done.is_empty() {
-            "nothing changed".into()
-        } else {
-            done.join("; ")
-        })
     }
 }
 

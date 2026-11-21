@@ -25,59 +25,6 @@ fn req(s: &Server, now: u64, method: &str, path: &str, body: &str, extra: &str) 
     (head[9..12].parse().unwrap(), serde_json::from_str(body).unwrap())
 }
 
-fn recorded(name: &str) -> (drover::Ctx, OnShed) {
-    let c = ctx(&tmpdir(name), &format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}"));
-    for args in [
-        &["queue", "sendmeter", "add", "17", "20"][..],
-        &["queue", "sendmeter", "block", "--on", "17", "20"],
-    ] {
-        assert_eq!(run(&c, &Fake::default(), args).0, 0);
-    }
-    let ev = |ts: u64, n: Option<u64>, kind: &str, d: Value| {
-        append(&c.state, &Event::new(ts, "sendmeter", n, kind, d)).unwrap();
-    };
-    let spawn = |ts, n, role: &str, agent: &str| {
-        ev(
-            ts,
-            Some(n),
-            "spawn",
-            json!({"role": role, "agent": agent, "harness": "claude"}),
-        );
-    };
-    spawn(T - 9_000, 9, "impl", "sendmeter-impl-9");
-    ev(T - 600, Some(9), "merged", json!({"pr": 41, "into": "staging"}));
-    spawn(T - 5_000, 12, "impl", "sendmeter-impl-12");
-    spawn(T - 4_000, 12, "rev", "sendmeter-rev-12-r1");
-    ev(
-        T - 3_500,
-        Some(12),
-        "verdict",
-        json!({"verdict": "FAIL", "sha": "a".repeat(40)}),
-    );
-    spawn(T - 3_000, 12, "fix", "sendmeter-impl-12");
-    spawn(T - 8_000, 5, "impl", "sendmeter-impl-5");
-    ev(
-        T - 2_000,
-        Some(5),
-        "verdict",
-        json!({"verdict": "FAIL", "sha": "b".repeat(40)}),
-    );
-    ev(
-        T - 1_900,
-        Some(5),
-        "needs-human",
-        json!({"code": "ROUND_LIMIT", "reason": "review rounds ran out (4/3)"}),
-    );
-    let ask = json!({"id": "q7", "question": "Move the branch out?", "options": ["move", "refuse"], "recommend": 1, "kind": "routine"});
-    ev(T - 300, None, "needs-decision", ask);
-    let card = json!({"thread": "t1", "id": "r1", "cmd": "git push origin --delete wip/x", "why": "Delete #9's wip snapshot",
-        "blast": "origin: 1 wip/ branch", "dir": "/tmp/sendmeter", "host": "main", "timeout": 60, "sha": "3b7e0c55a1d9".repeat(5)});
-    ev(T - 120, None, "run-card", card);
-    let r = OnShed::new(Fake::default());
-    r.1.lane("sendmeter-impl-12", "working", "/x");
-    (c, r)
-}
-
 fn working() -> OnShed {
     let r = OnShed::new(Fake::default());
     for name in ["sendmeter-impl-12", "sendmeter-rev-12-r2", "sendmeter-impl-17"] {
@@ -99,6 +46,14 @@ fn skeleton(v: &Value, at: &str, out: &mut BTreeSet<String>) {
         Value::Array(a) => a.iter().for_each(|x| skeleton(x, &format!("{at}[]"), out)),
         _ => {}
     }
+}
+
+fn ev_rows(v: &Value) -> Vec<Value> {
+    let blocks = v["blocks"].as_array().unwrap().iter();
+    let lists = blocks.filter(|b| b["id"].as_str().is_some_and(|i| i.starts_with("ev-")));
+    lists
+        .flat_map(|s| s["blocks"][0]["rows"].as_array().unwrap().clone())
+        .collect()
 }
 
 fn vocabulary() -> BTreeMap<String, BTreeSet<String>> {
@@ -241,7 +196,7 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
 
     let e = get("/screens/events");
     like(&e, "events", true);
-    let rows = find(&e, "ev")["rows"].as_array().unwrap();
+    let rows = &ev_rows(&e);
     let titles: Vec<&str> = rows.iter().map(|r| r["title"].as_str().unwrap()).collect();
     assert!(titles[0].contains("q7"), "{titles:?}");
     assert!(
@@ -253,7 +208,7 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
         .find(|r| r["tap"]["url"] == "https://github.com/jirathip-dev/sendmeter/pull/41");
     assert!(merged.is_some_and(|m| m["figure"]["state"] == "done"), "{rows:?}");
     let asks = get("/screens/events?kind=ask");
-    assert_eq!(find(&asks, "ev")["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(ev_rows(&asks).len(), 1);
     assert_eq!(asks["stream"], "/screens/events/stream?kind=ask");
 
     let f = get("/screens/fleets");
@@ -554,7 +509,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
     let filter = json!({"screen": "events", "block": "kind", "action": "filter", "values": {"kind": ["merge"]}});
     let (status, v) = post(filter, &ck);
     assert_eq!((status, &v["ops"][0]["op"]), (200, &json!("screen")), "{v}");
-    let rows = find(&v["ops"][0]["screen"], "ev")["rows"].as_array().unwrap().clone();
+    let rows = ev_rows(&v["ops"][0]["screen"]);
     assert_eq!(rows.len(), 1, "{rows:?}");
 
     let deny = json!({"screen": "cards", "block": "r1", "action": "run-card", "values": {"choice": "deny", "sha": "3b7e0c55a1d9"}});
@@ -934,11 +889,14 @@ fn parity_44_a_moving_row_shows_its_stage_strip_and_plant_a_stuck_one_its_state(
     assert_eq!(fix["badge"], json!({"text": "[▲ impl · fix] ◆ ◫", "tone": "working"}));
     assert_eq!(
         fix["figure"],
-        json!({"state": "working", "tool": "edit", "grow": "fix"})
+        json!({"state": "working", "act": "fix", "grow": "fix", "issue": 12})
     );
     assert!(fix["value"]["since"].is_string(), "{fix}");
     let stuck = find(&q, "q-sendmeter-5");
-    assert_eq!(stuck["figure"], json!({"state": "needs", "grow": "blocked"}));
+    assert_eq!(
+        stuck["figure"],
+        json!({"state": "needs", "act": "blocked", "grow": "blocked", "issue": 5})
+    );
     assert!(!stuck["badge"]["text"].as_str().unwrap().contains('['), "{stuck}");
 }
 

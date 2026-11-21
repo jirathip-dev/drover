@@ -6,6 +6,12 @@ use std::path::PathBuf;
 const EXCEPTIONS: &[(&str, &str, &str, &str)] = &[
     (
         "board.css",
+        ".av .asc",
+        "font",
+        "ascii lane avatar: 3-char figure in the 48 px box, 10 px as the old board",
+    ),
+    (
+        "board.css",
         ".av",
         "height",
         "lane avatar box: 48×40 px picture geometry",
