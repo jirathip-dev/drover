@@ -41,7 +41,6 @@ let_underscore_must_use = "deny"
 unsafe_code = "forbid"
 
 [workspace.dependencies]
-aes-gcm = "0.11.1"
 anyhow = "1"
 base64 = "0.23.1"
 clap = { version = "4", features = ["derive"] }
@@ -53,7 +52,6 @@ hkdf = "0.13.0"
 # #441: secrets in the main host's OS store (Keychain, Secret Service, Credential Manager); owner-approved.
 # #344: drover's state in one SQLite file (WAL); bundled, so no system libsqlite3.
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
-p256 = { version = "0.14.0", default-features = false, features = ["ecdh", "ecdsa", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11.1"
@@ -62,6 +60,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time"
 toml = "0.8"
 # #375: TS bindings for the board (assets/types/), behind the `ts` feature only: never in the release build.
 ts-rs = { version = "12", features = ["serde-json-impl"] }
+# #1473: web push (RFC 8291 + VAPID) through the maintained RustCrypto-based crate; owner-approved 2026-11-20.
+web-push-native = { version = "0.5.0", default-features = false, features = ["vapid"] }
 # #298, #455: shed's wire types only (serde, no I/O), pinned to shed main until it tags a release.
 shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "9b88eb5be5bc9ba8c5c75480483b9861ddc6e993" }
 # #1339: blocks' theme rules (Scheme, gate) and swag's built-in schemes, each pinned to a staging commit.

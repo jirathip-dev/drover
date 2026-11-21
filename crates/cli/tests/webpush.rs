@@ -1,106 +1,51 @@
 mod common;
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::Aes128Gcm;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
 use common::*;
 use drover::config::Config;
 use drover::events::{emit, read, Event};
 use drover::serve::Server;
 use drover::webpush;
-use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
-use p256::{PublicKey, SecretKey};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use web_push_native::jwt_simple::prelude::{ECDSAP256PublicKeyLike, ES256PublicKey, NoCustomClaims};
+use web_push_native::p256::SecretKey;
 
 const ADDR: &str = "127.0.0.1:7777";
-const PLAIN: &str = "When I grow up, I want to be a watermelon";
-const AS_PRIVATE: &str = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
 const UA_PRIVATE: &str = "q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94";
 const UA_PUBLIC: &str = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
-const SALT: &str = "DGv6ra1nlYgDCS1FRnbzlw";
 const AUTH: &str = "BTBZMqHH6r4Tts7J_aSIgg";
-const BODY: &str = "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN";
 
 fn d(s: &str) -> Vec<u8> {
     B64.decode(s).unwrap()
 }
 
 fn decrypt(body: &[u8], ua: &SecretKey, auth: &[u8]) -> Option<Vec<u8>> {
-    let (salt, idlen) = (&body[..16], body[20] as usize);
-    let as_pub = PublicKey::from_sec1_bytes(&body[21..21 + idlen]).ok()?;
-    let shared = p256::ecdh::diffie_hellman(ua.to_nonzero_scalar(), as_pub.as_affine());
-    let ua_pub = webpush::public(ua);
-    let info = [b"WebPush: info\0".as_slice(), &ua_pub, &body[21..21 + idlen]].concat();
-    let hk = |salt: &[u8], ikm: &[u8], info: &[u8], out: &mut [u8]| {
-        hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm)
-            .expand(info, out)
-            .unwrap();
-    };
-    let (mut ikm, mut cek, mut nonce) = ([0u8; 32], [0u8; 16], [0u8; 12]);
-    hk(auth, shared.raw_secret_bytes().as_slice(), &info, &mut ikm);
-    hk(salt, &ikm, b"Content-Encoding: aes128gcm\0", &mut cek);
-    hk(salt, &ikm, b"Content-Encoding: nonce\0", &mut nonce);
-    let mut pt = Aes128Gcm::new(&cek.into())
-        .decrypt(&nonce.into(), &body[21 + idlen..])
-        .ok()?;
-    (pt.pop() == Some(2)).then_some(pt)
+    let auth = web_push_native::Auth::from_exact_iter(auth.iter().copied())?;
+    web_push_native::decrypt(body.to_vec(), ua, &auth).ok()
 }
 
 #[test]
-fn rfc8291_vector_encrypts_and_decrypts_back() {
-    let (eph, ua) = (
-        SecretKey::from_slice(&d(AS_PRIVATE)).unwrap(),
-        SecretKey::from_slice(&d(UA_PRIVATE)).unwrap(),
-    );
-    assert_eq!(webpush::public(&ua), d(UA_PUBLIC));
-    let salt: [u8; 16] = d(SALT).try_into().unwrap();
-    let body = webpush::encrypt(&d(UA_PUBLIC), &d(AUTH), PLAIN.as_bytes(), &eph, &salt).unwrap();
-    assert_eq!(B64.encode(&body), BODY, "RFC 8291 Appendix A");
-    assert_eq!(decrypt(&body, &ua, &d(AUTH)).unwrap(), PLAIN.as_bytes());
-    assert_eq!(
-        decrypt(&body, &ua, &[0; 16]),
-        None,
-        "a wrong auth secret does not decrypt"
-    );
-}
-
-#[test]
-fn vapid_jwt_verifies_with_the_public_key() {
-    let dir = tmpdir("wp-jwt");
+fn an_existing_vapid_key_file_loads_as_the_same_key() {
+    let dir = tmpdir("wp-vapid");
     let log = dir.join("state/events.jsonl");
-    let k = webpush::vapid(&log).unwrap();
     let file = dir.join("state/webpush/vapid.key");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, format!("{UA_PRIVATE}\n")).unwrap();
+    assert_eq!(webpush::public(&webpush::vapid(&log).unwrap()), d(UA_PUBLIC));
+    std::fs::write(&file, "AAAA").unwrap();
+    assert!(webpush::vapid(&log).is_err(), "a short key is an error, not a panic");
+    std::fs::remove_file(&file).unwrap();
+    let k = webpush::vapid(&log).unwrap();
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     assert_eq!(
         webpush::vapid(&log).unwrap().to_bytes(),
         k.to_bytes(),
         "made once, then reused"
     );
-    let jwt = webpush::jwt(
-        &k,
-        "https://web.push.apple.com/QGuQyavXutnMH",
-        "mailto:owner@example.com",
-        1_000,
-    );
-    let (msg, sig) = jwt.rsplit_once('.').unwrap();
-    let vk = VerifyingKey::from_sec1_bytes(&webpush::public(&k)).unwrap();
-    vk.verify(msg.as_bytes(), &Signature::from_slice(&d(sig)).unwrap())
-        .expect("ES256 signature verifies");
-    let (h, c) = msg.split_once('.').unwrap();
-    let head: serde_json::Value = serde_json::from_slice(&d(h)).unwrap();
-    let claims: serde_json::Value = serde_json::from_slice(&d(c)).unwrap();
-    assert_eq!(head["alg"], "ES256");
-    assert_eq!(
-        claims,
-        serde_json::json!({"aud": "https://web.push.apple.com", "exp": 1_000 + 12 * 3600, "sub": "mailto:owner@example.com"})
-    );
 }
 
-fn sub_form(ua: &SecretKey, endpoint: &str) -> String {
-    format!(
-        "endpoint={endpoint}&p256dh={}&auth={AUTH}",
-        B64.encode(webpush::public(ua))
-    )
+fn sub_form(endpoint: &str) -> String {
+    format!("endpoint={endpoint}&p256dh={UA_PUBLIC}&auth={AUTH}")
 }
 
 fn post(s: &Server, path: &str, body: &str, extra: &str) -> String {
@@ -117,8 +62,7 @@ fn parity_8_subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     let c = ctx(&dir, CONFIG);
     let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
-    let form = sub_form(&ua, "https://web.push.apple.com/secret-endpoint");
+    let form = sub_form("https://web.push.apple.com/secret-endpoint");
     assert!(
         post(&s, "/push/subscribe", &form, "").starts_with("HTTP/1.1 401"),
         "unpaired"
@@ -189,7 +133,7 @@ fn delivery_201_sent_410_pruned_500_notify_failed() {
     let c = ctx(&dir, CONFIG);
     let cfg = Config::parse("[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n").unwrap();
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
-    let f: std::collections::BTreeMap<String, String> = sub_form(&ua, "https://push.example/ep")
+    let f: std::collections::BTreeMap<String, String> = sub_form("https://push.example/ep")
         .split('&')
         .map(|kv| kv.split_once('=').unwrap())
         .map(|(k, v)| (k.into(), v.into()))
@@ -219,12 +163,39 @@ fn delivery_201_sent_410_pruned_500_notify_failed() {
     let json: serde_json::Value = serde_json::from_slice(&decrypt(&body, &ua, &d(AUTH)).expect("decrypts")).unwrap();
     assert_eq!(json["url"], "/?issue=7#queue");
     assert!(json["body"].as_str().unwrap().contains("sendmeter #7 merged"));
+    assert_eq!(
+        decrypt(&body, &ua, &[0; 16]),
+        None,
+        "a wrong auth secret does not decrypt"
+    );
     let args = std::fs::read_to_string(dir.join("args")).unwrap();
     assert!(
         args.contains("--max-time 10")
-            && args.contains("Authorization: vapid t=")
+            && args.contains("content-encoding: aes128gcm")
             && args.ends_with("https://push.example/ep\n"),
         "{args}"
+    );
+    let (t, k) = args
+        .split_once("authorization: vapid t=")
+        .unwrap()
+        .1
+        .split_once(", k=")
+        .unwrap();
+    let k = k.split(' ').next().unwrap();
+    assert_eq!(d(k), webpush::public(&webpush::vapid(&c.state).unwrap()));
+    let claims = ES256PublicKey::from_bytes(&d(k))
+        .unwrap()
+        .verify_token::<NoCustomClaims>(t, None)
+        .expect("ES256 VAPID JWT verifies with the served key");
+    assert_eq!(
+        (
+            claims.audiences.unwrap().into_string().unwrap(),
+            claims.subject.unwrap()
+        ),
+        (
+            "https://push.example".to_string(),
+            "mailto:owner@example.com".to_string()
+        )
     );
 
     emit(
@@ -280,8 +251,7 @@ fn phones_hear_owner_asks_and_defaults_never_a_waiting_routine_ask() {
         sink.display()
     );
     let cfg = Config::parse(&toml).unwrap();
-    let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
-    let f: std::collections::BTreeMap<String, String> = sub_form(&ua, "https://push.example/ep")
+    let f: std::collections::BTreeMap<String, String> = sub_form("https://push.example/ep")
         .split('&')
         .map(|kv| kv.split_once('=').unwrap())
         .map(|(k, v)| (k.into(), v.into()))
@@ -326,7 +296,7 @@ fn needs_human_push_names_the_issue_the_reason_and_the_finding() {
     let c = ctx(&dir, CONFIG);
     let cfg = Config::parse(PUSH).unwrap();
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
-    let f: std::collections::BTreeMap<String, String> = sub_form(&ua, "https://push.example/ep")
+    let f: std::collections::BTreeMap<String, String> = sub_form("https://push.example/ep")
         .split('&')
         .map(|kv| kv.split_once('=').unwrap())
         .map(|(k, v)| (k.into(), v.into()))
@@ -376,19 +346,9 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let cookie = pair(&s, &c, "Mozilla (iPhone)", c.now) + "User-Agent: Mozilla (iPhone)\r\n";
     assert_eq!(host(&s, 1_000_000), "on · 0 devices · never sent");
-    let res = post(
-        &s,
-        "/push/subscribe",
-        &sub_form(&ua, "https://push.example/one"),
-        &cookie,
-    );
+    let res = post(&s, "/push/subscribe", &sub_form("https://push.example/one"), &cookie);
     assert!(res.ends_with("\r\n\r\nalerts on\n"), "{res}");
-    let res = post(
-        &s,
-        "/push/subscribe",
-        &sub_form(&ua, "https://push.example/two"),
-        &cookie,
-    );
+    let res = post(&s, "/push/subscribe", &sub_form("https://push.example/two"), &cookie);
     assert!(res.ends_with("\r\n\r\nalerts on\n"), "{res}");
     let calls = std::fs::read_to_string(dir.join("calls")).unwrap();
     let eps: Vec<_> = calls.lines().map(|l| l.rsplit(' ').next().unwrap()).collect();
@@ -457,9 +417,8 @@ fn check_warns_once_when_devices_are_subscribed_but_no_notifier_is() {
     let dir = tmpdir("wp-check");
     let c = ctx(&dir, CONFIG);
     let r = OnShed::new(Fake::default());
-    let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let f = |ep: &str| {
-        sub_form(&ua, ep)
+        sub_form(ep)
             .split('&')
             .map(|kv| kv.split_once('=').unwrap())
             .map(|(k, v)| (k.into(), v.into()))
@@ -494,7 +453,7 @@ fn push_titles_use_each_devices_theme_words() {
     let c = ctx(&dir, CONFIG);
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let form = |ep: &str, extra: &str| -> std::collections::BTreeMap<String, String> {
-        (sub_form(&ua, ep) + extra)
+        (sub_form(ep) + extra)
             .split('&')
             .map(|kv| kv.split_once('=').unwrap())
             .map(|(k, v)| (k.into(), v.into()))
@@ -566,7 +525,7 @@ fn a_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named() {
     let c = ctx(&dir, CONFIG);
     let cfg = Config::parse(PUSH).unwrap();
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
-    let f: std::collections::BTreeMap<String, String> = sub_form(&ua, "https://push.example/ep")
+    let f: std::collections::BTreeMap<String, String> = sub_form("https://push.example/ep")
         .split('&')
         .map(|kv| kv.split_once('=').unwrap())
         .map(|(k, v)| (k.into(), v.into()))
@@ -612,8 +571,7 @@ fn parity_9_no_push_for_the_thread_open_on_a_board() {
     std::fs::write(dir.join("code"), "201").unwrap();
     let c = ctx(&dir, CONFIG);
     let cfg = Config::parse(PUSH).unwrap();
-    let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
-    let f: std::collections::BTreeMap<String, String> = sub_form(&ua, "https://push.example/ep")
+    let f: std::collections::BTreeMap<String, String> = sub_form("https://push.example/ep")
         .split('&')
         .map(|kv| kv.split_once('=').unwrap())
         .map(|(k, v)| (k.into(), v.into()))

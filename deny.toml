@@ -8,7 +8,7 @@ yanked = "deny"
 
 [licenses]
 version = 2
-allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "Unicode-3.0", "Zlib"]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib"]
 confidence-threshold = 0.9
 
 [licenses.private]
@@ -19,6 +19,7 @@ multiple-versions = "deny"
 wildcards = "deny"
 allow-wildcard-paths = true
 skip = [{ crate = "syn@2.0.119", reason = "ts-rs-macros, and ratatui's strum and crossterm's derive_more macros (build time only); clap and serde use syn 3" }]
+skip-tree = [{ crate = "web-push-native@0.5.0", reason = "#1473: its p256 0.13, ece-native and jwt-simple (with superboring) pin the previous RustCrypto generation beside ours" }]
 
 [sources]
 unknown-registry = "deny"

@@ -136,8 +136,9 @@ sub = "mailto:you@example.com"   # the VAPID `sub` claim; required
 `Event::push`) and the kinds pushed before the flag (`crates/core/src/events/push.rs`, frozen: it only shrinks).
 
 It works per fleet too (`[[fleet.<name>.notify]]`), next to any command notifier, which is
-unchanged. Each event is encrypted per device (RFC 8291 aes128gcm), signed with an ES256 VAPID
-JWT (12 h) and sent once with `curl -sS --max-time 10 -X POST`, the body on stdin. A 404 or 410
+unchanged. Each event is encrypted per device (RFC 8291 aes128gcm) and signed with an ES256 VAPID
+JWT (12 h, the push TTL too) by the `web-push-native` crate (#1473), then sent once with
+`curl -sS --max-time 10 -X POST`, the body on stdin. A 404 or 410
 prunes that device; any other failure logs one `notify-failed` (no retry). Tapping an alert
 opens the page on its tab with the issue's row open. `drover push test` sends a test alert to
 every subscribed device.
@@ -156,8 +157,8 @@ Secrets: the VAPID key (`<state>/webpush/vapid.key`) and the subscriptions
 logged, printed or served; the page gets only the public key and each device's label.
 
 Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/thiserror, plus, for web
-push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
-client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
+push only, web-push-native (#1473, owner-approved: RFC 8291 and VAPID, pure-Rust RustCrypto, no async, no HTTP
+client) with hkdf, sha2 and base64, ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
 shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), blocks and swag (#1339: the
 theme rules and the built-in colour schemes, each pinned to a commit), and rusqlite (bundled SQLite)
 for the state database (#344, docs/architecture.md), keyring for the main host's secret store
