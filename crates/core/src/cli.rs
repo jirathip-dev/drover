@@ -2376,17 +2376,12 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
         hygiene: rules.hygiene,
     };
-    let cur = |d: &str| {
-        runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])
+    let git = |d: &str, a: &[&str]| {
+        runner::ok(r, "git", &[&["-C", d][..], a].concat())
             .ok()
             .map(|s| s.trim().to_string())
     };
-    let origin = |d: &str| {
-        runner::ok(r, "git", &["-C", d, "remote", "get-url", "origin"])
-            .ok()
-            .map(|s| s.trim().to_string())
-    };
-    if let Some(reason) = hook::decide(&input, &policy, &cur, &origin) {
+    if let Some(reason) = hook::decide(&input, &policy, &git) {
         if policy.deny.iter().any(|d| d.reason() == reason) {
             lane_event(ctx, "hook-denied", json!({"rule": reason}));
         }

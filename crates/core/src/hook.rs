@@ -207,13 +207,10 @@ pub fn pre_call(input: &Value) -> bool {
     ev.is_empty() || dialects().any(|d| d.pre == ev)
 }
 
-/// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `cur_branch` resolves HEAD, `origin` a dir's remote.
-pub fn decide(
-    input: &Value,
-    p: &Policy,
-    cur_branch: &dyn Fn(&str) -> Option<String>,
-    origin: &dyn Fn(&str) -> Option<String>,
-) -> Option<String> {
+/// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `git` runs git in a dir (its HEAD, its remote).
+pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<String> {
+    let cur_branch = |d: &str| git(d, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    let origin = |d: &str| git(d, &["remote", "get-url", "origin"]);
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let ti = tool_input(input);
     if dialects().any(|d| d.shell == tool) {
@@ -222,8 +219,8 @@ pub fn decide(
         let leak = p
             .hygiene
             .as_ref()
-            .and_then(|c| crate::hygiene::gh_text(c, cmd, cwd, origin));
-        return leak.or_else(|| bash(cmd, cwd, p, cur_branch));
+            .and_then(|c| crate::hygiene::gh_text(c, cmd, cwd, &origin));
+        return leak.or_else(|| bash(cmd, cwd, p, &cur_branch));
     }
     if !dialects().any(|d| d.edits.contains(&tool)) {
         return None;
