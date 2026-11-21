@@ -24,6 +24,7 @@ pub fn cache_path(ctx: &Ctx, kind: &str, fleet: &str, issue: u64) -> PathBuf {
 
 thread_local!(pub static FORCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
 thread_local!(pub static CATCHUP: std::cell::Cell<u64> = const { std::cell::Cell::new(0) });
+thread_local!(pub static PROBE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
 
 fn fresh(c: &Value, now: u64) -> bool {
     let ts = c["ts"].as_u64().unwrap_or(0);
@@ -182,7 +183,7 @@ thread_local!(static PASS: std::cell::RefCell<Kept> = std::cell::RefCell::defaul
 
 thread_local!(pub static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) });
 
-/// The fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says). The fast step skips it while `unchanged` says nothing moved since the last query.
+/// The fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says); in a pass, skipped while `unchanged` says nothing moved since the last query.
 pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Rc<Value>> {
     let p = cache_path(ctx, "prs", fleet, 0);
     let stamp = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
@@ -208,7 +209,7 @@ pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> 
         let age = now.saturating_sub(at);
         let on = || Config::load(&ctx.config).is_ok_and(|c| crate::webhook::secrets(&c).is_ok_and(|s| !s.is_empty()));
         let hooked = || settled && age < CATCHUP.get() && on();
-        let same = FORCE.get() && (hooked() || unchanged(r, f, &mut etags) && settled && age < PROBE_MAX);
+        let same = PROBE.get() && (hooked() || unchanged(r, f, &mut etags) && settled && age < PROBE_MAX);
         let c = if same {
             json!({"ts": now, "at": at, "prs": old.at("prs"), "etags": etags})
         } else {

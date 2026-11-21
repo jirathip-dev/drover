@@ -51,6 +51,7 @@
 3 done_gate
 3 drive
 4 drive_kicks
+2 drive_loops
 2 drive_sim
 4 dsh
 4 dsh_unit

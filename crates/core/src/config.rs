@@ -889,7 +889,7 @@ impl Default for Limits {
             crash_wave_minutes: 5,
             runtime_down_failures: 5,
             runtime_down_minutes: 30,
-            pass_max_secs: 120,
+            pass_max_secs: 60,
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
             ssh_call_secs: 20,
@@ -937,7 +937,7 @@ impl Default for Limits {
             slo_api_minutes: 10,
             slo_idle_minutes: 20,
             slo_tick_minutes: 10,
-            slo_pass_minutes: 30,
+            slo_pass_minutes: 5,
             stall_restart_hours: 2,
             self_update_wait_minutes: 45,
             self_update_lag_minutes: 30,
@@ -1029,7 +1029,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ("deny_commands", "commands the lane hook refuses (default: containers)"),
     (
         "fast_secs",
-        "the fast step (`drive --fast`) runs every this many seconds",
+        "the fast job (`drive`) starts every fleet's pass every this many seconds",
     ),
     ("slow_secs", "the slow tick runs every this many seconds"),
     ("form_categories", "the finding tags a `FAIL (form-only)` may carry"),
@@ -1104,7 +1104,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "pass_max_secs",
-        "a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock",
+        "a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over",
     ),
     ("ssh_connect_secs", "every host ssh's `-oConnectTimeout`"),
     (
@@ -1259,11 +1259,11 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "slo_tick_minutes",
-        "a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast step stops it",
+        "a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast job stops it",
     ),
     (
         "slo_pass_minutes",
-        "no slow drive pass of a fleet for this long shows on the board's drive-health line",
+        "no finished pass of a fleet for this long stops that fleet's pass (never another's) and shows on the board's drive-health line",
     ),
     (
         "stall_restart_hours",

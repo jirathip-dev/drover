@@ -74,7 +74,10 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     } else {
         std::fs::read_to_string(c.home.join(".config/systemd/user/dev.drover.fast.timer")).unwrap()
     };
-    assert!(fast.contains("--fast") && every.contains("60"), "{fast}\n{every}");
+    assert!(
+        fast.contains("drive") && !fast.contains("--fast") && every.contains("60"),
+        "{fast}\n{every}"
+    );
 
     let (code, out) = run(&c, &r, &["timer", "remove"]);
     assert_eq!(
@@ -132,13 +135,13 @@ fn tick_runs_check_then_drive_and_exits_zero_on_refusals() {
     let c = ctx(&tmpdir("timer-tick"), CONFIG);
     let _sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    let r = host(Fake::default().once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n"))
+    let r = host(Fake::default().reply("sysctl -n kern.memorystatus_vm_pressure_level", "4\n"))
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "");
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("sendmeter #12 start: REFUSED HOST_BUSY"), "{out}");
-    for w in ["check.at", "drive.at"] {
+    for w in ["check.at", "drive-sendmeter.last"] {
         assert_eq!(
             std::fs::read_to_string(c.state.with_file_name(w)).unwrap(),
             "1000000",

@@ -398,14 +398,9 @@ enum Cmd {
         cmd: PushCmd,
     },
     #[command(
-        about = "One pass of the loop for every unpaused fleet: do every step that's due, then exit; safe from cron"
+        about = "A fleet's pass: every step that's due, ended at pass_max_secs; with no fleet, each unpaused fleet's pass started as its own process; safe from cron"
     )]
-    Drive {
-        fleet: Option<String>,
-        #[arg(help = "#212: only record verdicts and merge PASS + green (the every-minute job); no lane starts")]
-        #[arg(long)]
-        fast: bool,
-    },
+    Drive { fleet: Option<String> },
     #[command(
         about = "Drive one issue's due steps now, detached (lane hooks and board taps run it); the timers stay the safety net"
     )]
@@ -1634,8 +1629,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Check => check::config(ctx)?,
                 _ => Config::load(&ctx.config)?,
             };
-            let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
-            let pass = if fast {
+            let pass = if matches!(cmd, Cmd::Drive { .. }) {
                 crate::hosts::Pass::fast(r)
             } else {
                 crate::hosts::Pass::new(r, None)
@@ -1862,7 +1856,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
-                Cmd::Drive { fleet, fast } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false, fast)?,
+                Cmd::Drive { fleet } => crate::drive::job(ctx, &cfg, r, out, fleet.as_deref())?,
                 Cmd::Kick {
                     fleet,
                     issue,
