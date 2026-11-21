@@ -107,6 +107,20 @@ fn guard_rules_see_inside_compound_and_wrapped_forms() {
 }
 
 #[test]
+fn an_ampersand_in_a_quoted_loop_argument_is_no_backgrounding() {
+    for cmd in [
+        "for m in 10 11; do gh api \"orgs/o/settings/billing/usage?year=2026&month=$m\" > /tmp/x/bill$m.json; done",
+        "for f in a b; do echo \"a&b\"; done",
+        "for x in 1; do curl 'u?a=1&b=2'; done",
+    ] {
+        assert_eq!(bash(cmd), None, "{cmd} allowed");
+    }
+    for cmd in ["for i in 1 2; do yes > /dev/null & done", "while true; do cmd & done"] {
+        assert!(bash(cmd).unwrap_or_default().contains("REFUSED HOST_STRESS"), "{cmd}");
+    }
+}
+
+#[test]
 fn swift_build_folders_outside_the_build_root_are_refused() {
     let d = tmpdir("hook-swift");
     std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
