@@ -119,3 +119,62 @@ fn queue_add_refuses_a_pull_request_number() {
     let ls = ok(&c, &r, &["queue", "sendmeter", "ls"]);
     assert!(!ls.contains("#828"), "{ls}");
 }
+
+fn stranded(c: &drover::Ctx, r: &Fake) -> Vec<Event> {
+    ok(c, r, &["check"]);
+    let all = read(&c.state).unwrap().to_vec().into_iter();
+    all.filter(|e| e.kind == "blocker-stranded").collect()
+}
+
+#[test]
+fn an_open_blocker_in_no_queue_alerts_once_with_the_command_to_queue_it() {
+    let (c, r, _sh) = setup("stranded-open", Fake::default());
+    ok(&c, &r, &["queue", "sendmeter", "add", "12"]);
+    ok(&c, &r, &["queue", "sendmeter", "block", "12", "--on", "drover#633"]);
+    let got = stranded(&c, &r);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!((got[0].fleet.as_str(), got[0].issue), ("sendmeter", Some(12)));
+    let why = got[0].str("reason").unwrap();
+    assert!(why.contains("drover#633"), "{why}");
+    assert!(why.contains("drover queue drover add 633"), "{why}");
+    assert_eq!(stranded(&c, &r).len(), 1, "a second pass raises none");
+}
+
+#[test]
+fn a_queued_or_laned_blocker_raises_nothing() {
+    let (c, r, _sh) = setup(
+        "stranded-none",
+        Fake::default().reply("gh issue view", r#"{"title":"t","body":"b"}"#),
+    );
+    ok(&c, &r, &["queue", "drover", "add", "633"]);
+    ok(&c, &r, &["queue", "sendmeter", "add", "12", "13"]);
+    ok(&c, &r, &["queue", "sendmeter", "block", "12", "--on", "drover#633"]);
+    ok(
+        &c,
+        &r,
+        &["queue", "sendmeter", "block", "13", "--on", "jirathip-dev/herdsman#700"],
+    );
+    let d = json!({"role": "impl", "agent": "drover-impl-700", "branch": "issue-700"});
+    append(&c.state, &Event::new(c.now, "drover", Some(700), "spawn", d)).unwrap();
+    assert!(stranded(&c, &r).is_empty());
+}
+
+#[test]
+fn a_closed_unmerged_blocker_alerts_once() {
+    let (c, r, _sh) = setup("stranded-closed", Fake::default());
+    ok(&c, &r, &["queue", "sendmeter", "add", "12"]);
+    ok(&c, &r, &["queue", "sendmeter", "block", "12", "--on", "720"]);
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-720", "branch": "issue-720"});
+    append(&c.state, &Event::new(c.now, "sendmeter", Some(720), "spawn", d)).unwrap();
+    append(
+        &c.state,
+        &Event::new(c.now, "sendmeter", Some(720), "closed", json!({})),
+    )
+    .unwrap();
+    let got = stranded(&c, &r);
+    assert_eq!(got.len(), 1, "{got:?}");
+    let why = got[0].str("reason").unwrap();
+    assert!(why.contains("#720") && why.contains("closed"), "{why}");
+    assert!(why.contains("drover queue sendmeter unblock 12 --on 720"), "{why}");
+    assert_eq!(stranded(&c, &r).len(), 1, "a second pass raises none");
+}
