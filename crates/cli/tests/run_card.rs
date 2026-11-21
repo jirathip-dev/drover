@@ -496,6 +496,10 @@ fn only_a_git_push_segment_with_a_force_flag_or_refspec_is_a_force_push() {
         "git push origin :x",
         "git push --mirror",
         "cd r && git push -f",
+        "bash -c 'git push -f origin x'",
+        "ssh h \"git push --force\"",
+        "sh -c \"git push origin :x\"",
+        "ssh h \"bash -c 'git push --mirror'\"",
     ] {
         assert_eq!(
             drover::card::forbidden(cmd),
