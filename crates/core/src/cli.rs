@@ -1292,6 +1292,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )
         }
         Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &crate::repo_path(&rules), out),
+        Cmd::Hygiene { cmd } => return crate::hygiene::run(ctx, r, out, cmd),
         Cmd::PrBody { file, head, base } => return crate::done::pr_body(r, &file, &head, &base, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
@@ -1803,9 +1804,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Wip {
                     cmd: WipCmd::Prune { fleet, dry_run },
                 } => check::prune(ctx, &cfg, r, out, &fleet, dry_run)?,
-                Cmd::Hygiene {
-                    cmd: crate::hygiene::Cmd::Scan { fleet },
-                } => crate::hygiene::scan(ctx, &cfg, r, out, &fleet)?,
                 Cmd::Secret { cmd } => match cmd {
                     SecretCmd::Request { thread, name, why } => {
                         crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
