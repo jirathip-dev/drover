@@ -724,6 +724,7 @@ pub struct Limits {
     pub effort: Option<String>,
     pub ask_default_minutes: u64,
     pub ask_expire_hours: u64,
+    pub thread_resend_minutes: u64,
     pub idle_reap_minutes: u64,
     pub done_close_minutes: u64,
     pub idle_merged_minutes: u64,
@@ -853,6 +854,7 @@ impl Default for Limits {
             effort: None,
             ask_default_minutes: 30,
             ask_expire_hours: 24,
+            thread_resend_minutes: 5,
             idle_reap_minutes: 10,
             done_close_minutes: 5,
             idle_merged_minutes: 15,
@@ -1003,6 +1005,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "ask_expire_hours",
         "an ask no live lane waits on expires after this many hours",
+    ),
+    (
+        "thread_resend_minutes",
+        "a new-thread send repeating a request id this soon gets the thread it made",
     ),
     (
         "idle_reap_minutes",

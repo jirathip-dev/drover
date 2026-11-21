@@ -32,7 +32,8 @@
       "placeholder": "message the orchestrator",
       "type": "composer",
       "values": {
-        "repo": "sendmeter"
+        "repo": "sendmeter",
+        "req": "sendmeter-1000000"
       }
     }
   ],
