@@ -208,3 +208,50 @@ fn a_missing_tool_names_itself_on_the_load_line() {
         "{out}"
     );
 }
+
+struct Held(Option<std::process::Child>);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        if let Some(mut c) = self.0.take() {
+            drover_sys::kill_group(c.id());
+            c.wait().unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_running_hold_shows_in_top_json_while_it_lasts() {
+    use std::os::unix::process::CommandExt;
+    let (c, _sh, f, _) = setup(
+        "top-hold",
+        "load_per_cpu = 1000.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n",
+    );
+    let dir = c.state.parent().unwrap().to_path_buf();
+    let job = "for i in $(seq 200); do [ -f go ] && break; sleep 0.05; done; [ -f go ]";
+    let child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .current_dir(&dir)
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .env("GITHUB_REPOSITORY", "acme/det")
+        .args(["hold", "--wait", "1", "--", "sh", "-c", job])
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let mut held = Held(Some(child));
+    let holds = || {
+        let (code, out) = run(&c, &f, &["top", "--json"]);
+        assert_eq!(code, 0, "{out}");
+        serde_json::from_str::<Value>(&out).unwrap()["holds"].clone()
+    };
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while holds()[0]["running"] != json!(true) {
+        assert!(std::time::Instant::now() < end, "no running hold: {}", holds());
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let h = holds()[0].clone();
+    assert_eq!((h["lane"].as_str(), h["kind"].as_str()), (Some("ci:det"), Some("ci")));
+    std::fs::write(dir.join("go"), "").unwrap();
+    assert!(held.0.take().unwrap().wait().unwrap().success());
+    assert_eq!(holds(), json!([]));
+}

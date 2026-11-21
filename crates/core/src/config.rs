@@ -791,6 +791,7 @@ pub struct Limits {
     pub lane_read_secs: u64,
     pub guard_secs: u64,
     pub poll_millis: u64,
+    pub hold_sample_secs: u64,
     pub tick_beat_secs: u64,
     pub orchestrator_idle_minutes: u64,
     pub orchestrator_reply_minutes: u64,
@@ -926,6 +927,7 @@ impl Default for Limits {
             lane_read_secs: 5,
             guard_secs: 180,
             poll_millis: 20,
+            hold_sample_secs: 10,
             tick_beat_secs: 60,
             orchestrator_idle_minutes: 30,
             orchestrator_reply_minutes: 10,
@@ -1189,6 +1191,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "poll_millis",
         "the pause between polls of a child process or disk probe",
+    ),
+    (
+        "hold_sample_secs",
+        "`drover hold` at the front of the heavy line samples the host's admission this often",
     ),
     ("tick_beat_secs", "a running tick writes `tick.beat` this often"),
     (

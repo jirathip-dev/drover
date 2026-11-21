@@ -350,6 +350,13 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    #[command(about = "#1492: a CI job's command in a heavy slot once the host passes spawn admission")]
+    Hold {
+        #[arg(long, help = "Minutes to wait, then exit 75 with the reason")]
+        wait: u64,
+        #[arg(last = true, required = true)]
+        cmd: Vec<String>,
+    },
     #[command(
         about = "File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)"
     )]
@@ -644,10 +651,8 @@ enum Cmd {
     )]
     #[command(hide = true)]
     LaneEvent { kind: String, data: String },
-    #[command(
-        hide = true,
-        about = "Run a lane's heavy check in a host slot, waiting in line for one (#909)"
-    )]
+    #[command(hide = true)]
+    #[command(about = "Run a lane's heavy check in a host slot, waiting in line for one (#909)")]
     Heavy {
         kind: String,
         #[arg(long)]
@@ -1315,23 +1320,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             wait,
             cmd,
         } => {
-            let me = crate::heavy::Ticket {
-                lane: crate::config::env("DROVER_LANE").unwrap_or_default(),
-                kind,
-                cmd,
-                since: crate::now(),
-                running: false,
-                kind_max,
+            let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
+            let me = crate::heavy::Ticket::new(lane, kind, cmd, kind_max);
+            let timeout = |t: &crate::heavy::Ticket, _: &str| {
+                let d = json!({"kind": t.kind, "cmd": t.cmd, "since": t.since});
+                lane_event(ctx, "heavy-timeout", d);
+                None
             };
-            let timeout = |t: &crate::heavy::Ticket| {
-                lane_event(
-                    ctx,
-                    "heavy-timeout",
-                    json!({"kind": t.kind, "cmd": t.cmd, "since": t.since}),
-                );
-            };
-            return crate::heavy::run(r, &ctx.state.with_file_name("heavy"), me, max, wait, timeout);
+            return crate::heavy::run(r, &ctx.state.with_file_name("heavy"), me, max, wait, &|| None, timeout);
         }
+        Cmd::Hold { wait, cmd } => return crate::heavy::hold(ctx, r, wait, &cmd),
         Cmd::Status(Scope { fleet, json }) => {
             let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
             let all = crate::events::states(&ctx.state)?;
