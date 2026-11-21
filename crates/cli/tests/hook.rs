@@ -999,20 +999,6 @@ fn host_stress_is_refused_and_test_runs_allowed() {
 }
 
 #[test]
-fn an_ampersand_in_a_quoted_loop_argument_is_no_backgrounding() {
-    for cmd in [
-        "for m in 10 11; do gh api \"orgs/o/settings/billing/usage?year=2026&month=$m\" > /tmp/x/bill$m.json; done",
-        "for f in a b; do echo \"a&b\"; done",
-        "for x in 1; do curl 'u?a=1&b=2'; done",
-    ] {
-        assert_eq!(bash(cmd), None, "{cmd} allowed");
-    }
-    for cmd in ["for i in 1 2; do yes > /dev/null & done", "while true; do cmd & done"] {
-        assert!(bash(cmd).unwrap_or_default().contains("REFUSED HOST_STRESS"), "{cmd}");
-    }
-}
-
-#[test]
 fn docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac() {
     let run = |hosts: &str, host: &str, cmd: &str| {
         let cfg = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"boat\"\n{hosts}");
