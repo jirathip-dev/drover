@@ -2940,3 +2940,28 @@ fn a_draft_pr_that_cannot_be_marked_ready_says_so_in_status() {
     assert!(out.contains("PR is a draft"), "{out}");
     assert!(!out.contains("merging"), "{out}");
 }
+
+#[test]
+fn a_disk_low_hold_lists_only_the_worktrees_there_now() {
+    let c = fanout("drive-disk-held", "", &["12"]);
+    for (n, name) in [(5, "issue-5"), (6, "issue-6")] {
+        let wt = c.worktrees.join("sendmeter").join(name);
+        std::fs::create_dir_all(&wt).unwrap();
+        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "worktree": wt});
+        append(&c.state, &Event::new(c.now - 900, "sendmeter", Some(n), "spawn", d)).unwrap();
+        let m = json!({"pr": "1", "merge_sha": "m", "into": "staging"});
+        append(&c.state, &Event::new(c.now - 800, "sendmeter", Some(n), "merged", m)).unwrap();
+    }
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/issue-6")).unwrap();
+    let why = "REFUSED DISK_LOW: local: 8.0 GB free < 10; `drover clean --yes` frees 2 lane worktree(s) there: issue-5, issue-6";
+    ev(
+        &c,
+        c.now - 60,
+        "driven",
+        json!({"step": "start", "code": "DISK_LOW", "result": why}),
+    );
+    let s = run(&c, &Fake::default(), &["status", "sendmeter"]).1;
+    let want =
+        "DISK_LOW (local: 8.0 GB free < 10; `drover clean --yes` frees 1 lane worktree(s) there: issue-5) · 60s ago";
+    assert!(s.contains(want), "{s}");
+}
