@@ -316,6 +316,46 @@ fn pr_body_applies_the_done_rule_to_a_file_with_no_fleet_config() {
 }
 
 #[test]
+fn a_ui_pr_in_a_repo_with_parity_rows_needs_a_parity_section() {
+    let repo = repo("done-parity");
+    std::fs::create_dir_all(repo.wt.join("docs")).unwrap();
+    std::fs::write(repo.wt.join("docs/parity.md"), "| 1 | row | parity_1 | kept |\n").unwrap();
+    g(&repo.wt, &["add", "."]);
+    g(&repo.wt, &["commit", "-qm", "docs: parity rows"]);
+    g(&repo.wt, &["push", "-q", "origin", "HEAD:staging"]);
+    g(&repo.wt, &["fetch", "-q", "origin"]);
+    let head = g(&repo.wt, &["rev-parse", "HEAD"]);
+    let file = repo.dir.join("body.md");
+    std::fs::write(&file, body(&head)).unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["pr-body", "--file", file.to_str().unwrap(), "--head", &head])
+        .env("HOME", repo.dir.join("home"))
+        .env("FLEET_CONFIG", repo.dir.join("none.toml"))
+        .current_dir(&repo.wt)
+        .output()
+        .unwrap();
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "a PR off the UI paths needs no section: {o:?}"
+    );
+    let (c, _sh) = lane(&repo);
+    std::fs::create_dir_all(repo.wt.join("web/src")).unwrap();
+    std::fs::write(repo.wt.join("web/src/main.ts"), "export {};\n").unwrap();
+    g(&repo.wt, &["add", "."]);
+    g(&repo.wt, &["commit", "-qm", "board: a ui change"]);
+    g(&repo.wt, &["push", "-q", "origin", "issue-12"]);
+    let head = g(&repo.wt, &["rev-parse", "HEAD"]);
+    let r = fake(&head);
+    let (out, e) = refused(&c, &Git::new(&r), "PR_BODY");
+    assert!(out.contains("no `## Parity` section"), "{out}");
+    assert_eq!(e.str("sha"), Some(head.as_str()));
+    let named = format!("{}\n\n## Parity\n\nnone", body(&head));
+    let (code, out) = run(&c, &Git::new(&fake_body(&head, &named)), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+}
+
+#[test]
 fn an_unpushed_commit_is_refused_push_first() {
     let repo = repo("done-unpushed");
     let (c, _sh) = lane(&repo);
