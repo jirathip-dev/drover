@@ -5,6 +5,8 @@ use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::time::Duration;
 
+const PROBE: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true";
+
 const NOW: u64 = 1_000_000;
 const WT: &str = "/Users/me/.local/share/drover/work/sendmeter/issue-9";
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
@@ -58,7 +60,7 @@ struct Hang {
 }
 
 fn air(prog: &str, args: &[String]) -> bool {
-    prog == "ssh" && args.iter().any(|a| a == "air")
+    prog == "ssh" && args[1] != "-O" && args.iter().any(|a| a == "air")
 }
 
 impl Runner for Hang {
@@ -113,10 +115,7 @@ fn a_host_that_never_answers_costs_one_retried_probe_and_drive_still_starts() {
     assert!(sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
-    assert_eq!(
-        to_air, ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"; 2],
-        "one probe and its one retry, nothing after them"
-    );
+    assert_eq!(to_air, [PROBE, PROBE], "one probe retried once, nothing after it");
     assert!(r.spent.get() <= 60, "{}s on the Air", r.spent.get());
     let mark = r.seen.borrow()[0].clone();
     assert!(mark.contains(r#""step":"check""#) && mark.contains("air"), "{mark}");
@@ -188,10 +187,7 @@ fn clean_reports_a_silent_disabled_host_offline_after_one_retried_probe() {
     assert!(out.contains("scratch: air: host offline (not cleaned)"), "{out}");
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
-    assert_eq!(
-        to_air, ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"; 2],
-        "one probe and its one retry, nothing after them"
-    );
+    assert_eq!(to_air, [PROBE, PROBE], "one probe retried once, nothing after it");
     assert!(r.spent.get() <= 10, "{}s on the Air", r.spent.get());
 }
 
