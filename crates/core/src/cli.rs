@@ -447,9 +447,7 @@ enum Cmd {
         #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
     },
-    #[command(
-        about = "`turn done`'s PR-body rule on --file: names --head (or a commit under its `Merge … <base>` catch-ups, read from git here), has `## For humans`, no \"Generated with\" line; exit 1 with the reason"
-    )]
+    #[command(about = "`turn done`'s PR_BODY rule on --file for the --head sha; exit 1 with the reason")]
     PrBody {
         #[arg(long)]
         file: PathBuf,
