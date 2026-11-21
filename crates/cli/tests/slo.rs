@@ -36,13 +36,13 @@ fn pass(c: &drover::Ctx, sh: &FakeShed, args: &[&str]) -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git ", "")
         .reply("sh -c nohup", "4321");
-    let (code, out) = run(c, &sh.on(&r), args);
+    let (code, out) = run_only(c, &sh.on(&r), args);
     assert_eq!(code, 0, "{out}");
     r
 }
 
 fn fast(c: &drover::Ctx, sh: &FakeShed) -> Fake {
-    pass(c, sh, &["drive", "--fast"])
+    pass(c, sh, &["drive"])
 }
 
 fn kinds(c: &drover::Ctx) -> Vec<String> {
@@ -189,34 +189,34 @@ fn late_and_erroring_drive_in_two_fleets_is_one_top_line_never_a_card_or_a_push(
         std::fs::write(c.state.with_file_name(format!("drive-{f}.last")), NOW.to_string()).unwrap();
     }
     pass_error(&c, "kiln", 0, true);
-    fast(&at(&c, 29 * 60), &sh);
+    fast(&at(&c, 4 * 60), &sh);
     assert_eq!(
-        health_line(&c, &sh, NOW + 29 * 60).as_deref(),
-        Some("pass error: 1 fleet · 29m")
+        health_line(&c, &sh, NOW + 4 * 60).as_deref(),
+        Some("pass error: 1 fleet · 4m")
     );
-    fast(&at(&c, 31 * 60), &sh);
-    fast(&at(&c, 36 * 60), &sh);
+    fast(&at(&c, 6 * 60), &sh);
+    fast(&at(&c, 11 * 60), &sh);
     assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "", "never a push");
-    assert_eq!(card(&c, &sh, NOW + 36 * 60), None, "never a card");
+    assert_eq!(card(&c, &sh, NOW + 11 * 60), None, "never a card");
     assert_eq!(
-        health_line(&c, &sh, NOW + 36 * 60).as_deref(),
-        Some("drive late: 2 fleets · pass error: 1 fleet · 36m")
+        health_line(&c, &sh, NOW + 11 * 60).as_deref(),
+        Some("drive late: 2 fleets · pass error: 1 fleet · 11m")
     );
-    let cards = screen(&c, &sh, "/screens/cards", NOW + 36 * 60);
+    let cards = screen(&c, &sh, "/screens/cards", NOW + 11 * 60);
     assert_eq!(cards[0]["rows"][0]["tap"], json!({"sheet": "/screens/drive-health"}));
-    let sheet = screen(&c, &sh, "/screens/drive-health", NOW + 36 * 60);
+    let sheet = screen(&c, &sh, "/screens/drive-health", NOW + 11 * 60);
     let rows: Vec<(String, String, String)> = (sheet["blocks"][0]["rows"].as_array().unwrap().iter())
         .map(|r| {
             let s = |k: &str| r[k].as_str().unwrap().to_string();
             (s("title"), s("subtitle"), s("value"))
         })
         .collect();
-    let row = |a: &str, b: &str| (a.to_string(), b.to_string(), "36m".to_string());
+    let row = |a: &str, b: &str| (a.to_string(), b.to_string(), "11m".to_string());
     assert_eq!(
         rows,
         [
-            row("kiln · drive late", "no drive pass for 31 min"),
-            row("sendmeter · drive late", "no drive pass for 31 min"),
+            row("kiln · drive late", "no drive pass for 6 min"),
+            row("sendmeter · drive late", "no drive pass for 6 min"),
             row("kiln · pass error", "drive's pass failed: config gone"),
         ]
     );
@@ -225,13 +225,13 @@ fn late_and_erroring_drive_in_two_fleets_is_one_top_line_never_a_card_or_a_push(
     for f in ["sendmeter", "kiln"] {
         std::fs::write(
             c.state.with_file_name(format!("drive-{f}.last")),
-            (NOW + 37 * 60).to_string(),
+            (NOW + 12 * 60).to_string(),
         )
         .unwrap();
     }
-    pass_error(&c, "kiln", 37 * 60, false);
-    fast(&at(&c, 37 * 60), &sh);
-    assert_eq!(health_line(&c, &sh, NOW + 37 * 60), None, "healthy: no line");
+    pass_error(&c, "kiln", 12 * 60, false);
+    fast(&at(&c, 12 * 60), &sh);
+    assert_eq!(health_line(&c, &sh, NOW + 12 * 60), None, "healthy: no line");
 }
 
 fn failing(c: &drover::Ctx, n: u64) {
@@ -371,7 +371,15 @@ fn pass_with(c: &drover::Ctx, sh: &FakeShed, pr: Option<&str>) -> Fake {
         .reply("git ", "")
         .reply("gh issue view 7", r#"{"title":"t","body":"b"}"#)
         .reply("sh -c nohup", "4321");
-    let (code, out) = run(c, &sh.on(&r), &["drive", "--fast"]);
+    if pr.is_some() {
+        let cfg = drover::config::Config::load(&c.config).unwrap();
+        let f = cfg.fleet("sendmeter").unwrap();
+        assert_eq!(
+            drover::gh::pr(c, &r, f, ("sendmeter", 7), "issue-7", c.now).unwrap()["number"],
+            34
+        );
+    }
+    let (code, out) = run_only(c, &sh.on(&r), &["drive"]);
     assert_eq!(code, 0, "{out}");
     r
 }

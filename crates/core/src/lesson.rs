@@ -100,6 +100,12 @@ pub fn run(
     file(ctx, cfg, r, out, (fleet, "lesson", by), (&title, &body))
 }
 
+/// Run `drover lesson <fleet>`: exit 4 when the lane's prompt was not confirmed.
+pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: Option<String>) -> Result<i32> {
+    let fleet = fleet.context("usage: drover lesson <FLEET> | drover lesson digest <FLEET>")?;
+    Ok(if run(ctx, cfg, r, out, &fleet, None)? { 0 } else { 4 })
+}
+
 pub(crate) fn file(
     ctx: &Ctx,
     cfg: &Config,
@@ -334,10 +340,38 @@ fn failing(r: &dyn Runner, dir: &std::path::Path, cs: Vec<LessonCheck>) -> Vec<(
     cs.into_iter().filter_map(run).collect()
 }
 
-/// `drover lesson-check` (CI, at the repo root): a shadow check that fails is reported as would-fail (stdout and `$GITHUB_STEP_SUMMARY`) and never fails the build; an active one that fails exits 1.
+fn malformed(rules: &str) -> Vec<String> {
+    let unenforced = |l: &str| {
+        let named = l.split_once("(enforced by: ").map(|x| x.1.trim_start());
+        !named.is_some_and(|n| !n.is_empty() && !n.starts_with(')'))
+    };
+    let lines: Vec<&str> = rules.lines().collect();
+    let mut bad: Vec<String> = (lines.iter().enumerate())
+        .filter(|(_, l)| l.starts_with("- ") && unenforced(l))
+        .map(|(i, _)| {
+            format!(
+                "line {} names no enforcer: end it `(enforced by: <check>)` or `(enforced by: none)`",
+                i + 1
+            )
+        })
+        .collect();
+    if lines.len() > 30 {
+        bad.push(format!(
+            "{} lines, over 30: delete the rules a check now enforces",
+            lines.len()
+        ));
+    }
+    bad
+}
+
+/// `drover lesson-check` (CI, at the repo root): a shadow check that fails is reported as would-fail (stdout and `$GITHUB_STEP_SUMMARY`) and never fails the build; an active one that fails exits 1, as does a rule line naming no enforcer or a file over 30 lines.
 pub fn ci(r: &dyn Runner, rules: &std::path::Path, out: &mut dyn Write) -> Result<i32> {
     let text = std::fs::read_to_string(rules).unwrap_or_default();
-    let (mut code, mut s) = (0, String::new());
+    let bad = malformed(&text);
+    let (mut code, mut s) = (i32::from(!bad.is_empty()), String::new());
+    for b in bad {
+        s += &format!("FAIL {}: {b}\n", rules.display());
+    }
     for (c, o) in failing(r, std::path::Path::new("."), checks(&text)) {
         let what = if c.active { "FAIL" } else { "would-fail (shadow)" };
         code |= i32::from(c.active);

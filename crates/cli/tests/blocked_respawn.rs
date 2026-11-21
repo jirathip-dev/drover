@@ -53,7 +53,8 @@ fn ok(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
 
 fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
-    let out = ok(c, r, &["drive"]);
+    let (code, out) = passes(c, r);
+    assert_eq!(code, 0, "{out}");
     let new = read(&c.state).unwrap().to_vec().split_off(before);
     let steps = new.iter().filter(|e| e.kind == "driven");
     (out, steps.map(|e| e.str("step").unwrap().to_string()).collect())
@@ -281,16 +282,14 @@ fn a_needs_human_issue_with_an_untrimmed_repair_in_its_history_drives_on() {
 }
 
 #[test]
-fn an_issue_closed_on_github_leaves_on_the_next_fast_pass_while_the_full_pass_hangs() {
+fn an_issue_closed_on_github_leaves_on_the_next_pass() {
     let (c, r, sh) = lane("gh-closed-fast", "t");
     let r = r.reply(
         "gh api graphql -f owner=jirathip-dev -f name=sendmeter -f query=",
         r#"{"data": {"repository": {"i12": {"state": "CLOSED"}}}}"#,
     );
     lane_ends(&c, 20);
-    let hung = drover::db::take(&c.state, "drive.lock", c.now, 3600, "", &|_| false);
-    assert!(hung.is_some(), "a full pass holds drive.lock");
-    ok(&at(&c, 60), &r, &["drive", "--fast"]);
+    ok(&at(&c, 60), &r, &["drive"]);
     assert_eq!(state(&c), "closed");
     let status = ok(&at(&c, 61), &r, &["status", "sendmeter"]);
     assert!(!status.contains("needs-human"), "{status}");

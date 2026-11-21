@@ -922,11 +922,72 @@ fn parity_59_the_lanes_sheets_stop_and_kill_run_the_verbs_and_log_via_the_screen
         (Some("stop"), Some(LANE), Some("cooee"))
     );
 
+    assert!(button("act-kill").get("confirm").is_none(), "Kill dry-runs first");
     let (status, v) = post(button("act-kill"));
+    assert_eq!((status.as_str(), &v["close"]), ("200", &json!(false)), "{v}");
+    assert!(
+        !sh.called("kill", LANE) && kinds(&c, "act") == 1,
+        "a dry run kills nothing"
+    );
+    let armed = v["ops"][0]["screen"]["blocks"][1].clone();
+    let line = format!("{LANE} · impl · nothing unpushed · pane closes, worktree kept");
+    assert_eq!(armed["confirm"]["message"], line, "{v}");
+    assert_eq!(armed["values"], json!({"agent": LANE, "confirm": "1"}));
+    let (status, v) = post(armed);
     assert_eq!(status, "200", "{v}");
     assert_eq!(v["close"], true, "{v}");
     assert!(closed(sh), "{:?}", sh.methods());
     assert_eq!(kinds(&c, "lane-killed"), 1);
     let e = last_act();
     assert_eq!((e.str("op"), e.str("device")), (Some("kill"), Some("cooee")));
+}
+
+fn action(s: &Server, ck: &str, name: &str, values: &serde_json::Value) -> serde_json::Value {
+    let body = json!({"screen": format!("lane-{LANE}"), "block": "", "action": name, "values": values}).to_string();
+    let res = s.respond(
+        &format!(
+            "POST /action HTTP/1.1\r\nHost: {ADDR}\r\n{ck}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+        T,
+    );
+    let res = String::from_utf8_lossy(&res).into_owned();
+    assert!(res.starts_with("HTTP/1.1 200"), "{res}");
+    serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+}
+
+#[test]
+fn parity_59_kill_and_clean_confirm_with_their_dry_run() {
+    let (c, wt, sh) = lane("cooee-dry");
+    sh.lane(LANE, "working", &wt);
+    let r = OnShed(git(&wt, "?? .brief.md\n M src/a.rs\n?? new.rs\n", "3\n", ""), sh);
+    let (s, sh) = (Server::new(&c, &r, Some(ADDR.into())), &r.1);
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let agent = json!({ "agent": LANE });
+
+    let v = action(&s, &ck, "kill", &agent);
+    let sheet = &v["ops"][0]["screen"];
+    assert_eq!(
+        (&sheet["type"], &sheet["title"]),
+        (&json!("sheet"), &json!(format!("Kill {LANE}?")))
+    );
+    let (said, armed) = (&sheet["blocks"][0]["markdown"], &sheet["blocks"][1]);
+    let want = format!("{LANE} · impl · 3 unpushed commit(s), 2 dirty file(s) → wip/{LANE}-20261031-120000-");
+    let msg = armed["confirm"]["message"].as_str().unwrap();
+    assert!(msg.starts_with(&want) && !msg.contains("dry run"), "{v}");
+    assert_eq!((said, &armed["action"]), (&json!(msg), &json!("kill")));
+    assert!(
+        !sh.called("kill", LANE) && kinds(&c, "act") == 0,
+        "a dry run changes nothing"
+    );
+
+    let v = action(&s, &ck, "clean", &agent);
+    let blocks = v["ops"][0]["screen"]["blocks"].as_array().unwrap();
+    let said = blocks[0]["markdown"].as_str().unwrap();
+    assert!(
+        said.contains("UNSAFE_CLEAN") && said.contains("only after merge"),
+        "{v}"
+    );
+    assert_eq!(blocks.len(), 1, "a refused clean offers no confirm: {v}");
+    assert_eq!(kinds(&c, "act"), 0);
 }

@@ -1542,7 +1542,7 @@ impl<'a> Server<'a> {
             }
             "drive" => {
                 let cfg = Config::kept(ctx)?;
-                crate::drive::drive(ctx, &cfg, &self.r, &mut out, Some(fleet), true, false)?;
+                crate::drive::drive(ctx, &cfg, &self.r, &mut out, fleet, true)?;
                 crate::drive::summary(fleet, &String::from_utf8_lossy(&out))
             }
             op @ ("override" | "extend" | "park") => {

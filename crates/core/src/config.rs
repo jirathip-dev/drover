@@ -469,7 +469,7 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// Fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<Premerge>>,
-    /// Commands `turn done` runs in the lane's worktree before any review; unset = `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
+    /// Commands `turn done` runs in the lane's worktree before any review; unset = `./.gatekeeper/run check` with `.gatekeeper/run`, else `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
     pub done_checks: Option<Vec<String>>,
     /// The repo's own line-cap script `drover cap` reads `N / cap M` lines from; unset = the first `premerge` check naming a cap, else the built-in Rust count.
     pub cap_script: Option<String>,
@@ -484,6 +484,8 @@ pub struct Fleet {
     pub hotspots: Option<String>,
     /// `weekly` has `tick` run `drover triage` every 7 days; unset or `off`: only on demand.
     pub triage: Option<String>,
+    /// `monthly` has `tick` run `drover deps` every 30 days and the advisory check daily; unset or `off`: only on demand.
+    pub deps: Option<String>,
     /// `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
     #[serde(default)]
     pub heavy: BTreeMap<String, Vec<String>>,
@@ -889,7 +891,7 @@ impl Default for Limits {
             crash_wave_minutes: 5,
             runtime_down_failures: 5,
             runtime_down_minutes: 30,
-            pass_max_secs: 120,
+            pass_max_secs: 60,
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
             ssh_call_secs: 20,
@@ -937,7 +939,7 @@ impl Default for Limits {
             slo_api_minutes: 10,
             slo_idle_minutes: 20,
             slo_tick_minutes: 10,
-            slo_pass_minutes: 30,
+            slo_pass_minutes: 5,
             stall_restart_hours: 2,
             self_update_wait_minutes: 45,
             self_update_lag_minutes: 30,
@@ -1029,7 +1031,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ("deny_commands", "commands the lane hook refuses (default: containers)"),
     (
         "fast_secs",
-        "the fast step (`drive --fast`) runs every this many seconds",
+        "the fast job (`drive`) starts every fleet's pass every this many seconds",
     ),
     ("slow_secs", "the slow tick runs every this many seconds"),
     ("form_categories", "the finding tags a `FAIL (form-only)` may carry"),
@@ -1104,7 +1106,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "pass_max_secs",
-        "a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock",
+        "a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over",
     ),
     ("ssh_connect_secs", "every host ssh's `-oConnectTimeout`"),
     (
@@ -1259,11 +1261,11 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "slo_tick_minutes",
-        "a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast step stops it",
+        "a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast job stops it",
     ),
     (
         "slo_pass_minutes",
-        "no slow drive pass of a fleet for this long shows on the board's drive-health line",
+        "no finished pass of a fleet for this long stops that fleet's pass (never another's) and shows on the board's drive-health line",
     ),
     (
         "stall_restart_hours",
@@ -1785,9 +1787,9 @@ impl Fleet {
             .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
     }
-    /// The configured role a lane runs as: a lesson or triage lane is impl's unless its own role is set.
+    /// The configured role a lane runs as: a lesson, triage or deps lane is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
-        if matches!(role, "lesson" | "triage") && !self.role.contains_key(role) {
+        if matches!(role, "lesson" | "triage" | "deps") && !self.role.contains_key(role) {
             "impl"
         } else {
             role
@@ -1865,6 +1867,7 @@ fn strings(key: &str, v: &toml::Value) -> Vec<(String, String)> {
 pub fn glob(g: &[u8], s: &[u8]) -> bool {
     match g {
         [] => s.is_empty(),
+        [b'*', b'*', b'/', rest @ ..] if glob(rest, s) => true,
         [b'*', b'*', rest @ ..] => (0..=s.len()).any(|i| glob(rest, s.get(i..).unwrap_or_default())),
         [b'*', rest @ ..] => (0..=s.len())
             .take_while(|&i| i == 0 || s.get(i - 1) != Some(&b'/'))
