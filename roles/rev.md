@@ -21,7 +21,7 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
   line in the PR body (editable), or an AI co-author trailer in a commit made by
   this round's lane (after the sha the last verdict reviewed). Trailers in older commits are not a
   finding: new commits only, never force-push. Never ask for a history rewrite.
-- UI PRs: confirm the `ui` job is green and open its `ui-390` screenshots. Any visual change not in the issue is a FAIL. (docs/ui.md)
+- UI PRs: confirm the `ui` job is green and open its `ui-390` screenshots; in a repo with `.gatekeeper/run` there is no `ui` job: the screenshots are a gate's kept files, under `files/ui-390/` in that job's one `gates-<leg>` artifact (`gh run download <run> -n gates-<leg> -D "$DROVER_SCRATCH_TARGET/gates-<leg>"`). Any visual change not in the issue is a FAIL. (docs/ui.md)
 - Parity (#1094), in a repo with `docs/parity.md`: a PR touching `web/`, `assets/`, `screens.rs` or `serve.rs`
   has a `## Parity` section in its body naming each parity row it changes or drops (or `none`); missing is a
   `blocking [parity]` finding. A row it drops, or a `parity_<row>` test it deletes, without an owner q-number on

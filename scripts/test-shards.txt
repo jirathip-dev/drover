@@ -41,6 +41,7 @@
 2 cooee_profiles
 4 cooee_screens
 1 cooee_token
+1 deps
 1 demo_export
 2 design_orphan
 4 design_stage

@@ -19,6 +19,7 @@ pub mod cloud;
 pub mod compact;
 pub mod config;
 pub mod db;
+pub mod deps;
 pub mod design;
 pub mod devices;
 pub mod diagram;
