@@ -156,8 +156,8 @@ Secrets: the VAPID key (`<state>/webpush/vapid.key`) and the subscriptions
 logged, printed or served; the page gets only the public key and each device's label.
 
 Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/thiserror, plus, for web
-push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
-client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
+push only, web-push-native (#1473, owner-approved: RFC 8291 encryption and VAPID signing; curl sends) with hkdf, sha2
+and base64 (no async, no HTTP client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
 shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), blocks and swag (#1339: the
 theme rules and the built-in colour schemes, each pinned to a commit), and rusqlite (bundled SQLite)
 for the state database (#344, docs/architecture.md), keyring for the main host's secret store

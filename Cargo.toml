@@ -41,7 +41,6 @@ let_underscore_must_use = "deny"
 unsafe_code = "forbid"
 
 [workspace.dependencies]
-aes-gcm = "0.11.1"
 anyhow = "1"
 base64 = "0.23.1"
 clap = { version = "4", features = ["derive"] }
@@ -53,13 +52,14 @@ hkdf = "0.13.0"
 # #441: secrets in the main host's OS store (Keychain, Secret Service, Credential Manager); owner-approved.
 # #344: drover's state in one SQLite file (WAL); bundled, so no system libsqlite3.
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
-p256 = { version = "0.14.0", default-features = false, features = ["ecdh", "ecdsa", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11.1"
 # #345: `drover service`'s runtime (crates/service only; owner-approved in #345's q355).
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "sync"] }
 toml = "0.8"
+# #1473: web push encryption (RFC 8291) and VAPID signing (RFC 8292); owner-approved 2026-11-20.
+web-push-native = { version = "0.5", default-features = false, features = ["vapid"] }
 # #375: TS bindings for the board (assets/types/), behind the `ts` feature only: never in the release build.
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 # #298, #455: shed's wire types only (serde, no I/O), pinned to shed main until it tags a release.

@@ -1,62 +1,70 @@
 mod common;
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::Aes128Gcm;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
 use common::*;
 use drover::config::Config;
 use drover::events::{emit, read, Event};
 use drover::serve::Server;
 use drover::webpush;
-use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
-use p256::{PublicKey, SecretKey};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use web_push_native::jwt_simple::prelude::{
+    ECDSAP256PublicKeyLike, ES256PublicKey, NoCustomClaims, VerificationOptions,
+};
+use web_push_native::p256::SecretKey;
+use web_push_native::Auth;
 
 const ADDR: &str = "127.0.0.1:7777";
-const PLAIN: &str = "When I grow up, I want to be a watermelon";
 const AS_PRIVATE: &str = "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw";
+const AS_PUBLIC: &str = "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
 const UA_PRIVATE: &str = "q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94";
-const UA_PUBLIC: &str = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
-const SALT: &str = "DGv6ra1nlYgDCS1FRnbzlw";
 const AUTH: &str = "BTBZMqHH6r4Tts7J_aSIgg";
-const BODY: &str = "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN";
 
 fn d(s: &str) -> Vec<u8> {
     B64.decode(s).unwrap()
 }
 
 fn decrypt(body: &[u8], ua: &SecretKey, auth: &[u8]) -> Option<Vec<u8>> {
-    let (salt, idlen) = (&body[..16], body[20] as usize);
-    let as_pub = PublicKey::from_sec1_bytes(&body[21..21 + idlen]).ok()?;
-    let shared = p256::ecdh::diffie_hellman(ua.to_nonzero_scalar(), as_pub.as_affine());
-    let ua_pub = webpush::public(ua);
-    let info = [b"WebPush: info\0".as_slice(), &ua_pub, &body[21..21 + idlen]].concat();
-    let hk = |salt: &[u8], ikm: &[u8], info: &[u8], out: &mut [u8]| {
-        hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm)
-            .expand(info, out)
-            .unwrap();
-    };
-    let (mut ikm, mut cek, mut nonce) = ([0u8; 32], [0u8; 16], [0u8; 12]);
-    hk(auth, shared.raw_secret_bytes().as_slice(), &info, &mut ikm);
-    hk(salt, &ikm, b"Content-Encoding: aes128gcm\0", &mut cek);
-    hk(salt, &ikm, b"Content-Encoding: nonce\0", &mut nonce);
-    let mut pt = Aes128Gcm::new(&cek.into())
-        .decrypt(&nonce.into(), &body[21 + idlen..])
-        .ok()?;
-    (pt.pop() == Some(2)).then_some(pt)
+    web_push_native::decrypt(body.to_vec(), ua, Auth::from_slice(auth)).ok()
 }
 
 #[test]
-fn rfc8291_vector_encrypts_and_decrypts_back() {
-    let (eph, ua) = (
-        SecretKey::from_slice(&d(AS_PRIVATE)).unwrap(),
-        SecretKey::from_slice(&d(UA_PRIVATE)).unwrap(),
+fn an_existing_vapid_key_signs_a_header_that_verifies() {
+    let dir = tmpdir("wp-jwt");
+    let _path = fake_curl(&dir);
+    std::fs::write(dir.join("code"), "201").unwrap();
+    let c = ctx(&dir, CONFIG);
+    let file = dir.join("state/webpush/vapid.key");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, format!("{AS_PRIVATE}\n")).unwrap();
+    assert_eq!(
+        B64.encode(webpush::public(&webpush::vapid(&c.state).unwrap())),
+        AS_PUBLIC
     );
-    assert_eq!(webpush::public(&ua), d(UA_PUBLIC));
-    let salt: [u8; 16] = d(SALT).try_into().unwrap();
-    let body = webpush::encrypt(&d(UA_PUBLIC), &d(AUTH), PLAIN.as_bytes(), &eph, &salt).unwrap();
-    assert_eq!(B64.encode(&body), BODY, "RFC 8291 Appendix A");
-    assert_eq!(decrypt(&body, &ua, &d(AUTH)).unwrap(), PLAIN.as_bytes());
+    let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
+    let f = form(&ua, "https://web.push.apple.com/QGuQyavXutnMH");
+    webpush::subscribe(&c.state, &f, "iPhone", 1, Some("mailto:owner@example.com")).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        format!("{AS_PRIVATE}\n"),
+        "kept, not rewritten"
+    );
+    let args = std::fs::read_to_string(dir.join("args")).unwrap();
+    let auth = args.split("authorization: vapid t=").nth(1).expect("a VAPID header");
+    let (t, rest) = auth.split_once(", k=").unwrap();
+    let k = rest.split(' ').next().unwrap();
+    assert_eq!(k, AS_PUBLIC);
+    let claims = ES256PublicKey::from_bytes(&d(k))
+        .unwrap()
+        .verify_token::<NoCustomClaims>(t, Some(VerificationOptions::default()))
+        .expect("ES256 signature verifies");
+    assert_eq!(claims.subject.as_deref(), Some("mailto:owner@example.com"));
+    assert!(claims.audiences.unwrap().contains(&std::collections::HashSet::from([
+        "https://web.push.apple.com".to_string()
+    ])));
+    assert!(args.contains("content-encoding: aes128gcm"), "{args}");
+    let body = std::fs::read(dir.join("body")).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&decrypt(&body, &ua, &d(AUTH)).expect("decrypts")).unwrap();
+    assert!(json["body"].as_str().unwrap().ends_with("alerts are on"), "{json}");
     assert_eq!(
         decrypt(&body, &ua, &[0; 16]),
         None,
@@ -65,8 +73,8 @@ fn rfc8291_vector_encrypts_and_decrypts_back() {
 }
 
 #[test]
-fn vapid_jwt_verifies_with_the_public_key() {
-    let dir = tmpdir("wp-jwt");
+fn vapid_key_is_made_once_0600() {
+    let dir = tmpdir("wp-key");
     let log = dir.join("state/events.jsonl");
     let k = webpush::vapid(&log).unwrap();
     let file = dir.join("state/webpush/vapid.key");
@@ -76,30 +84,21 @@ fn vapid_jwt_verifies_with_the_public_key() {
         k.to_bytes(),
         "made once, then reused"
     );
-    let jwt = webpush::jwt(
-        &k,
-        "https://web.push.apple.com/QGuQyavXutnMH",
-        "mailto:owner@example.com",
-        1_000,
-    );
-    let (msg, sig) = jwt.rsplit_once('.').unwrap();
-    let vk = VerifyingKey::from_sec1_bytes(&webpush::public(&k)).unwrap();
-    vk.verify(msg.as_bytes(), &Signature::from_slice(&d(sig)).unwrap())
-        .expect("ES256 signature verifies");
-    let (h, c) = msg.split_once('.').unwrap();
-    let head: serde_json::Value = serde_json::from_slice(&d(h)).unwrap();
-    let claims: serde_json::Value = serde_json::from_slice(&d(c)).unwrap();
-    assert_eq!(head["alg"], "ES256");
-    assert_eq!(
-        claims,
-        serde_json::json!({"aud": "https://web.push.apple.com", "exp": 1_000 + 12 * 3600, "sub": "mailto:owner@example.com"})
-    );
+}
+
+fn form(ua: &SecretKey, endpoint: &str) -> std::collections::BTreeMap<String, String> {
+    sub_form(ua, endpoint)
+        .split('&')
+        .map(|kv| kv.split_once('=').unwrap())
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect()
 }
 
 fn sub_form(ua: &SecretKey, endpoint: &str) -> String {
+    use web_push_native::p256::elliptic_curve::sec1::ToEncodedPoint;
     format!(
         "endpoint={endpoint}&p256dh={}&auth={AUTH}",
-        B64.encode(webpush::public(ua))
+        B64.encode(ua.public_key().to_encoded_point(false).as_bytes())
     )
 }
 
@@ -222,7 +221,7 @@ fn delivery_201_sent_410_pruned_500_notify_failed() {
     let args = std::fs::read_to_string(dir.join("args")).unwrap();
     assert!(
         args.contains("--max-time 10")
-            && args.contains("Authorization: vapid t=")
+            && args.contains("authorization: vapid t=")
             && args.ends_with("https://push.example/ep\n"),
         "{args}"
     );

@@ -1,18 +1,14 @@
-use crate::devices::{random, write0600};
+use crate::devices::write0600;
 use crate::events::{finding, plain, working, Event};
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::Aes128Gcm;
 use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
-use hkdf::Hkdf;
-use p256::ecdsa::{signature::Signer, Signature, SigningKey};
-use p256::elliptic_curve::sec1::ToSec1Point;
-use p256::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use web_push_native::jwt_simple::algorithms::{ECDSAP256PublicKeyLike, ES256KeyPair};
+use web_push_native::p256::PublicKey;
+use web_push_native::{Auth, WebPushBuilder};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Sub {
@@ -49,62 +45,20 @@ fn b64(s: &str) -> Result<Vec<u8>> {
     Ok(B64.decode(s.trim_end_matches('='))?)
 }
 
-fn key() -> Result<SecretKey> {
-    loop {
-        if let Ok(k) = SecretKey::from_slice(&random(32)?) {
-            return Ok(k);
-        }
-    }
-}
-
 /// The uncompressed public point (65 bytes).
-pub fn public(k: &SecretKey) -> Vec<u8> {
-    k.public_key().to_sec1_point(false).as_bytes().to_vec()
+pub fn public(k: &ES256KeyPair) -> Vec<u8> {
+    k.public_key().public_key().to_bytes_uncompressed()
 }
 
 /// The VAPID key, made on first use: `vapid.key`, 0600, the base64url scalar.
-pub fn vapid(log: &Path) -> Result<SecretKey> {
+pub fn vapid(log: &Path) -> Result<ES256KeyPair> {
     let p = dir(log).join("vapid.key");
     if p.exists() {
-        return Ok(SecretKey::from_slice(&b64(std::fs::read_to_string(&p)?.trim())?)?);
+        return ES256KeyPair::from_bytes(&b64(std::fs::read_to_string(&p)?.trim())?);
     }
-    let k = key()?;
+    let k = ES256KeyPair::generate();
     write0600(&p, B64.encode(k.to_bytes()).as_bytes())?;
     Ok(k)
-}
-
-/// RFC 8291 aes128gcm body for one subscription: a single record, `salt` and `eph`'s public key in its header.
-pub fn encrypt(p256dh: &[u8], auth: &[u8], plain: &[u8], eph: &SecretKey, salt: &[u8; 16]) -> Result<Vec<u8>> {
-    let ua = PublicKey::from_sec1_bytes(p256dh)?;
-    let shared = p256::ecdh::diffie_hellman(eph.to_nonzero_scalar(), ua.as_affine());
-    let as_pub = public(eph);
-    let info = [b"WebPush: info\0".as_slice(), p256dh, &as_pub].concat();
-    let hk = |salt: &[u8], ikm: &[u8], info: &[u8], out: &mut [u8]| {
-        Hkdf::<Sha256>::new(Some(salt), ikm)
-            .expand(info, out)
-            .map_err(|_| anyhow!("hkdf"))
-    };
-    let (mut ikm, mut cek, mut nonce) = ([0u8; 32], [0u8; 16], [0u8; 12]);
-    hk(auth, shared.raw_secret_bytes().as_slice(), &info, &mut ikm)?;
-    hk(salt, &ikm, b"Content-Encoding: aes128gcm\0", &mut cek)?;
-    hk(salt, &ikm, b"Content-Encoding: nonce\0", &mut nonce)?;
-    let ct = Aes128Gcm::new(&cek.into())
-        .encrypt(&nonce.into(), [plain, &[2]].concat().as_slice())
-        .map_err(|_| anyhow!("aes-gcm"))?;
-    Ok([salt.as_slice(), &4096u32.to_be_bytes(), &[65], &as_pub, &ct].concat())
-}
-
-/// The ES256 VAPID JWT for `endpoint`'s origin, valid 12 h.
-pub fn jwt(k: &SecretKey, endpoint: &str, sub: &str, now: u64) -> String {
-    let aud = endpoint.splitn(4, '/').take(3).collect::<Vec<_>>().join("/");
-    let claims = serde_json::json!({"aud": aud, "exp": now + 12 * 3600, "sub": sub}).to_string();
-    let msg = format!(
-        "{}.{}",
-        B64.encode(r#"{"typ":"JWT","alg":"ES256"}"#),
-        B64.encode(claims)
-    );
-    let sig: Signature = SigningKey::from(k).sign(msg.as_bytes());
-    format!("{msg}.{}", B64.encode(sig.to_bytes()))
 }
 
 /// What a subscribe says with no webpush notifier: the device is kept, nothing is sent.
@@ -156,13 +110,12 @@ pub fn remove(log: &Path, ids: &[String]) -> Result<usize> {
     Ok(n - all.len())
 }
 
-fn post(s: &Sub, k: &SecretKey, sub: &str, body: &[u8]) -> Result<u16> {
-    let auth = format!(
-        "Authorization: vapid t={}, k={}",
-        jwt(k, &s.endpoint, sub, crate::now()),
-        B64.encode(public(k))
-    );
-    let args = crate::runner::argv(&[
+fn post(s: &Sub, k: &ES256KeyPair, sub: &str, payload: &str) -> Result<u16> {
+    let auth = Auth::from_exact_iter(b64(&s.auth)?).ok_or_else(|| anyhow!("bad auth key"))?;
+    let req = WebPushBuilder::new(s.endpoint.parse()?, PublicKey::from_sec1_bytes(&b64(&s.p256dh)?)?, auth)
+        .with_vapid(k, sub)
+        .build(payload)?;
+    let mut args = crate::runner::argv(&[
         "-sS",
         "--max-time",
         "10",
@@ -174,20 +127,15 @@ fn post(s: &Sub, k: &SecretKey, sub: &str, body: &[u8]) -> Result<u16> {
         "%{http_code}",
         "--data-binary",
         "@-",
-        "-H",
-        &auth,
-        "-H",
-        "Content-Encoding: aes128gcm",
-        "-H",
-        "Content-Type: application/octet-stream",
-        "-H",
-        "TTL: 86400",
-        &s.endpoint,
     ]);
+    for (name, value) in req.headers().iter().filter(|(n, _)| *n != "content-length") {
+        args.extend(["-H".into(), format!("{name}: {}", value.to_str()?)]);
+    }
+    args.push(s.endpoint.clone());
     let o = crate::runner::Real.within(
         "curl",
         &args,
-        body,
+        req.body(),
         std::time::Duration::from_secs(crate::config::limits().notify_secs),
     )?;
     Ok(o.stdout.trim().parse().unwrap_or(0))
@@ -245,16 +193,7 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     let (mut sent, mut gone, mut errs) = (0, vec![], vec![]);
     for s in &all {
         let payload = pay(&s.words.get(wk).map_or(title.clone(), |w| format!("{w}: {said}")));
-        let one = || -> Result<u16> {
-            let salt: [u8; 16] = random(16)?.try_into().map_err(|_| anyhow!("salt"))?;
-            post(
-                s,
-                &k,
-                sub,
-                &encrypt(&b64(&s.p256dh)?, &b64(&s.auth)?, payload.as_bytes(), &key()?, &salt)?,
-            )
-        };
-        match one() {
+        match post(s, &k, sub, &payload) {
             Ok(200..=299) => sent += 1,
             Ok(404 | 410) => gone.push(s.id()),
             Ok(code) => errs.push(format!("{}: HTTP {code}", s.label)),

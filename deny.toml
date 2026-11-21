@@ -5,10 +5,11 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [{ id = "RUSTSEC-2023-0071", reason = "rsa comes in only through web-push-native's jwt-simple; drover signs VAPID with ES256 and never calls RSA (#1473)" }]
 
 [licenses]
 version = 2
-allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "Unicode-3.0", "Zlib"]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib"]
 confidence-threshold = 0.9
 
 [licenses.private]
@@ -18,6 +19,7 @@ ignore = true
 multiple-versions = "deny"
 wildcards = "deny"
 allow-wildcard-paths = true
+skip-tree = [{ crate = "web-push-native@0.5.0", reason = "#1473: its own tree mixes RustCrypto generations (aes-gcm 0.10 beside jwt-simple's 0.11, rand 0.8 beside 0.10)" }]
 skip = [{ crate = "syn@2.0.119", reason = "ts-rs-macros, and ratatui's strum and crossterm's derive_more macros (build time only); clap and serde use syn 3" }]
 
 [sources]
