@@ -18,6 +18,7 @@
 4 blocked_respawn
 1 board_errors
 4 board_fresh
+1 board_style
 2 board_tui
 3 boat
 2 brief_golden
