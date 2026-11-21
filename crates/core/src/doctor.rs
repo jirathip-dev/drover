@@ -448,6 +448,8 @@ pub fn serve_down(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<String> {
 }
 
 fn serve_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>, addr: &str) {
+    let device = (cfg.serve.device_addr()).map_or("off".into(), |a| format!("on {a}, the scene to the LAN"));
+    row(rows, true, '✗', &format!("scene device — {device}"));
     let line = format!("serve — listening on {addr} → drover serve --addr {addr}");
     let lsof = r.run("lsof", &argv(&["-nP", "-iTCP:7777", "-sTCP:LISTEN"]));
     if crate::runner::not_found(&lsof) {

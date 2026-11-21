@@ -375,6 +375,11 @@ pub struct Serve {
     pub tailscale_https_port: Option<u16>,
     /// The Funnel listener, `POST /hooks/github` only (default `127.0.0.1:7778`; `""`: off).
     pub hooks_addr: Option<String>,
+    /// The scene device's LAN listener, `GET /screens/scene` only (unset or `""`: off).
+    pub device_addr: Option<String>,
+    /// `Host` names the device listener answers besides IP literals.
+    #[serde(default)]
+    pub device_hosts: Vec<String>,
     /// The Herd's theme, `<config dir>/themes/<name>/` or built-in (default `farm`).
     pub theme: Option<String>,
     /// The 0600 file holding `GITHUB_WEBHOOK_SECRET` (unset: webhooks off).
@@ -387,6 +392,9 @@ impl Serve {
     }
     pub fn hooks_addr(&self) -> String {
         self.hooks_addr.clone().unwrap_or_else(|| "127.0.0.1:7778".into())
+    }
+    pub fn device_addr(&self) -> Option<&str> {
+        self.device_addr.as_deref().filter(|a| !a.is_empty())
     }
 }
 

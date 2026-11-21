@@ -3,7 +3,6 @@ use crate::events::{emit, status_line, working, Event, Json};
 use crate::runner::{self, Runner};
 use crate::{
     check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx, SERVE,
-    SERVICE,
 };
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -1628,7 +1627,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             board,
             install: true,
         } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
-        Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
+        Cmd::Service { api, board, .. } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         Cmd::Chat { thread } => anyhow::ensure!(crate::app(ctx, r, &crate::Open::Threads(thread))?, "needs a terminal"),
         cmd => {
             let cfg = match cmd {
