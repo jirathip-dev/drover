@@ -11,6 +11,10 @@ pub mod fake_shed;
 pub use fake_shed::{FakeShed, OnShed, OverSsh};
 /// The large board fixture the t141 performance tests share.
 pub mod large;
+/// The recorded sendmeter fleet the screen tests share.
+pub mod recorded;
+#[allow(unused_imports, reason = "not every test crate reads the recorded fleet")]
+pub use recorded::recorded;
 
 pub const CONFIG: &str = r#"# fleet config (test)
 [fleet.sendmeter]

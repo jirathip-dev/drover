@@ -87,6 +87,16 @@ and logs the error, never a full copy. The worktree budget and Host disk row cou
 apparent size. `clone_node_modules = true` is the old spelling of `clone_build = ["node_modules"]`, kept for
 one release.
 
+#1478: a Swift fleet sets `swift_build = true` in `[fleet.<n>]` (off by default: other fleets get no Swift folders and no
+new env). Each of its lanes then also gets `DROVER_DERIVED_DATA=<root>/.build/<agent>/xcode` and
+`DROVER_SWIFT_SCRATCH=<root>/.build/<agent>/swiftpm`, and its brief tells it to build with
+`xcodebuild -derivedDataPath "$DROVER_DERIVED_DATA"` and `swift build --scratch-path "$DROVER_SWIFT_SCRATCH"`.
+Both sit in the lane's own build folder, so the spawn's copy-on-write clone of the newest sibling carries them warm
+(`build-cloned` lists them; no sibling, nothing is cloned), `build_budget_gb` trims them oldest first and the sweep
+removes them with the lane's. A folder is never trimmed while xcodebuild holds its build database
+(`Build/Intermediates.noindex/XCBuildData/build.db`) or SwiftPM its `.lock`; on a `[hosts]` machine `lsof` tells.
+The hook refuses a `-derivedDataPath` or `--scratch-path` outside `<root>/.build` (`REFUSED SCRATCH_TARGET`).
+
 #630: a repo's optional `.drover/worktree-include` lists ignored files (one path per line, `#` comments), such as
 local env templates or tool config, that each new lane's worktree gets copied from the main checkout when missing.
 Never secrets: those stay in `secret:` env. `drover status`, the lane sheet and `/api/v1/lanes` (its `unsaved` list:
@@ -140,7 +150,9 @@ Issues are the spec, PRs the code. Lanes never comment: the Claude and Hermes ho
 `gh issue|pr comment` and `gh api` comment writes. Routing, queue, lane and verdict state
 live in the event log. `drover merge` writes the one closing comment (merge sha and
 verdict sha), then closes the issue's lane panes and reclaims their worktrees; a lane with
-uncommitted or unpushed work is kept and reported. Merging into drover's own repo ends by
+uncommitted or unpushed work is kept and reported. #1479: a PR body's `## Rollout` (fenced
+fleet.toml lines) becomes an open rollout in the filing thread until a config card applies it
+(docs/orchestrator.md, Rollouts). Merging into drover's own repo ends by
 printing the `cargo install` line to reinstall it (printed, not run).
 
 ## The lane hook

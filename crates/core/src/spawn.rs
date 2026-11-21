@@ -395,12 +395,20 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
 
 fn shared_target<'a>(root: &Path, f: &'a Fleet, agent: &str) -> impl Iterator<Item = (String, String)> + 'a {
     let b = root.join(crate::roots::BUILD);
-    let d = b.join(agent).display().to_string();
+    let d = b.join(agent);
     let s = b.join(SCRATCH).join(agent).display().to_string();
-    let vars = [("CARGO_TARGET_DIR".into(), d), ("DROVER_SCRATCH_TARGET".into(), s)];
+    let mut vars = vec![
+        ("CARGO_TARGET_DIR".into(), d.display().to_string()),
+        ("DROVER_SCRATCH_TARGET".into(), s),
+    ];
+    let swift = SWIFT.iter().filter(|_| f.swift_build);
+    vars.extend(swift.map(|(k, n)| ((*k).into(), d.join(n).display().to_string())));
     vars.into_iter()
         .filter(|v| !f.env.contains_key(&v.0) && !f.shared_cache.contains_key(&v.0))
 }
+
+/// #1478: a `swift_build` fleet's Swift build folders, each an env var naming a folder in the lane's `.build/<agent>`.
+pub const SWIFT: [(&str, &str); 2] = [("DROVER_DERIVED_DATA", "xcode"), ("DROVER_SWIFT_SCRATCH", "swiftpm")];
 
 /// The folder under a root's `.build` holding each lane's scratch.
 pub const SCRATCH: &str = ".scratch";
@@ -487,7 +495,12 @@ fn brief(
         (_, "rev", _) => include_str!("../roles/brief-refactor-rev.md"),
         _ => include_str!("../roles/brief-refactor-impl.md"),
     };
-    let contract = contract.trim_end().to_string() + "\n" + steps + play;
+    let swift = match p.family {
+        "design" | "architect" => "",
+        _ if f.swift_build => include_str!("../roles/brief-swift.md"),
+        _ => "",
+    };
+    let contract = contract.trim_end().to_string() + "\n" + steps + play + swift;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
     let rules = rules.map_or(String::new(), |r| {
@@ -881,8 +894,8 @@ fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Session])
     (!moved.is_empty()).then(|| json!({"dirs": moved, "from": prev}))
 }
 
-/// A new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there: one volume, so copy-on-write, never a full copy. The `build-cloned` data, if any.
-pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
+/// A new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there: one volume, so copy-on-write, never a full copy. The `build-cloned` data, if any, its `swift` folders listed.
+pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path, swift: bool) -> Option<Value> {
     let b = t.parent().filter(|b| b.ends_with(crate::roots::BUILD) && !t.exists())?;
     let mine = |e: &std::fs::DirEntry| {
         let n = e.file_name().to_string_lossy().into_owned();
@@ -902,7 +915,14 @@ pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     let res = res.and_then(|_| Ok(std::fs::rename(&tmp, t)?));
     let errs: Vec<String> = res.err().map(|e| first_lines(&e)).into_iter().collect();
     std::fs::remove_dir_all(&tmp).ok();
-    let dirs: Vec<String> = errs.is_empty().then(|| t.display().to_string()).into_iter().collect();
+    let swift = SWIFT
+        .iter()
+        .filter(|_| swift)
+        .map(|(_, n)| t.join(n))
+        .filter(|d| d.is_dir());
+    let dirs: Vec<String> = (errs.is_empty().then(|| t.to_path_buf()).into_iter().chain(swift))
+        .map(|d| d.display().to_string())
+        .collect();
     Some(json!({"dirs": dirs, "from": src, "secs": at.elapsed().as_secs(), "errors": errs}))
 }
 
@@ -1509,7 +1529,7 @@ pub fn spawn(
     }
     let (res, cloned) = std::thread::scope(|s| {
         let c = s.spawn(|| {
-            let warm = target.and_then(|t| clone_warm(r, fleet, Path::new(t)));
+            let warm = target.and_then(|t| clone_warm(r, fleet, Path::new(t), f.swift_build));
             [clone_build(r, dirs, &f.local_path(), &p.worktree), warm]
         });
         let res = (|| -> Result<bool> {

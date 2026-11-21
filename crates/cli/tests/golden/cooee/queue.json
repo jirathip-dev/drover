@@ -154,8 +154,9 @@
          "id": "q-722",
          "figure": {
           "state": "working",
-          "tool": "run",
-          "grow": "impl"
+          "act": "impl",
+          "grow": "impl",
+          "issue": 722
          },
          "title": "#722 spawn (shed): fix rounds fail git worktree add",
          "badge": {
@@ -186,7 +187,7 @@
          "id": "q-641",
          "figure": {
           "state": "working",
-          "tool": "edit"
+          "act": "fix"
          },
          "title": "#641 hosts bootstrap: an ambiguous machine label",
          "badge": {
@@ -206,7 +207,7 @@
          "id": "q-609",
          "figure": {
           "state": "working",
-          "tool": "read"
+          "act": "rev"
          },
          "title": "#609 api/v1 + CLI: every lane says where it runs",
          "badge": {

@@ -19,7 +19,7 @@ pub struct Policy {
     pub own: Option<String>,
     /// The capability groups an orchestrator has on (`[orchestrator] allow`).
     pub groups: Vec<String>,
-    /// The lane's `DROVER_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
+    /// The lane's `DROVER_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo and Swift build only under its `build_root`.
     pub scratch: Option<String>,
     /// An impl lane: `ci/cap.toml` is not its to write (but for the orchestrator-filed raise).
     pub cap: bool,
@@ -207,15 +207,20 @@ pub fn pre_call(input: &Value) -> bool {
     ev.is_empty() || dialects().any(|d| d.pre == ev)
 }
 
-/// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `cur_branch` resolves HEAD.
-pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+/// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `git` runs git in a dir (its HEAD, its remote).
+pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<String> {
+    let cur_branch = |d: &str| git(d, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    let origin = |d: &str| git(d, &["remote", "get-url", "origin"]);
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let ti = tool_input(input);
     if dialects().any(|d| d.shell == tool) {
         let cmd = ti["command"].as_str().unwrap_or_default();
         let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
-        let leak = p.hygiene.as_ref().and_then(|c| crate::hygiene::gh_text(c, cmd, cwd));
-        return leak.or_else(|| bash(cmd, cwd, p, cur_branch));
+        let leak = p
+            .hygiene
+            .as_ref()
+            .and_then(|c| crate::hygiene::gh_text(c, cmd, cwd, &origin));
+        return leak.or_else(|| bash(cmd, cwd, p, &cur_branch));
     }
     if !dialects().any(|d| d.edits.contains(&tool)) {
         return None;
@@ -288,7 +293,7 @@ fn own_file(file: &str, p: &Policy) -> bool {
     normal && !linked && rel.as_os_str() != "" && ![".brief.md", ".thread.md"].iter().any(|f| rel == Path::new(f))
 }
 
-fn resolve(w: &str, cwd: &str) -> String {
+pub(crate) fn resolve(w: &str, cwd: &str) -> String {
     use std::path::{Component, PathBuf};
     let w = expand_home(w.trim_start_matches(|c: char| c.is_ascii_digit() || c == '>'));
     let mut out = PathBuf::new();
@@ -549,28 +554,29 @@ fn dups(cmd: &str) -> String {
 fn target_dir(t: &[&str], p: &Policy) -> Option<String> {
     let s = p.scratch.as_deref()?;
     let root = std::path::Path::new(s).ancestors().nth(2)?.to_string_lossy();
+    let flags = ["--target-dir", "-derivedDataPath", "--scratch-path"];
     let dirs = t.iter().enumerate().filter_map(|(i, w)| {
-        let v = w
-            .strip_prefix("CARGO_TARGET_DIR=")
-            .or_else(|| w.strip_prefix("--target-dir="));
-        v.or_else(|| (*w == "--target-dir").then(|| t.get(i + 1).copied()).flatten())
+        let v = w.strip_prefix("CARGO_TARGET_DIR=");
+        let v = v.or_else(|| flags.iter().find_map(|f| w.strip_prefix(f)?.strip_prefix('=')));
+        v.or_else(|| flags.contains(w).then(|| t.get(i + 1).copied()).flatten())
     });
-    let vars = [
-        "$DROVER_SCRATCH_TARGET",
-        "${DROVER_SCRATCH_TARGET}",
-        "$HERDSMAN_SCRATCH_TARGET",
-        "${HERDSMAN_SCRATCH_TARGET}",
-        "$CARGO_TARGET_DIR",
-        "${CARGO_TARGET_DIR}",
-    ];
+    let mut vars: Vec<String> = ["DROVER_SCRATCH_TARGET", "HERDSMAN_SCRATCH_TARGET", "CARGO_TARGET_DIR"]
+        .map(String::from)
+        .into();
+    vars.extend(crate::spawn::SWIFT.map(|v| v.0.to_string()));
+    let vars: Vec<String> = vars
+        .iter()
+        .flat_map(|v| [format!("${{{v}}}"), format!("${v}")])
+        .collect();
     let ok = |d: &str| {
-        let d = vars.iter().fold(expand_home(d), |d, v| d.replace(v, &root));
+        let d = vars.iter().fold(expand_home(d), |d, v| d.replace(v.as_str(), &root));
         !d.contains("..") && (d == root || d.starts_with(&format!("{root}/")))
     };
     let bad = dirs.filter(|d| !d.is_empty()).find(|d| !ok(d))?;
     Some(format!(
         "REFUSED SCRATCH_TARGET: {bad} is outside {root}; build in your scratch dir: \
-         CARGO_TARGET_DIR=$DROVER_SCRATCH_TARGET/target ({s}/target), never /tmp or $TMPDIR"
+         CARGO_TARGET_DIR=$DROVER_SCRATCH_TARGET/target ({s}/target), never /tmp or $TMPDIR; \
+         Swift: -derivedDataPath \"$DROVER_DERIVED_DATA\", --scratch-path \"$DROVER_SWIFT_SCRATCH\""
     ))
 }
 
@@ -596,9 +602,13 @@ fn unquote(cmd: &str, args: bool) -> String {
                 });
                 let rest: Vec<&str> = i.map_or(vec![], |i| words.iter().skip(i + 1).map(String::as_str).collect());
                 let text = matches!(rest[..], ["thread", "reply" | "say", ..] | ["ask", ..]);
-                let runs =
-                    |w: &String| WRAPPERS.contains(&word(w)) || ["ssh", "watch", "parallel", "-c"].contains(&word(w));
-                let data = args && words.iter().any(|w| !w.contains('=')) && !words.iter().any(runs);
+                let keyword =
+                    |w: &String| matches!(word(w), "if" | "then" | "else" | "do" | "while" | "until" | "{" | "!");
+                let runs = |w: &String| {
+                    !keyword(w)
+                        && (WRAPPERS.contains(&word(w)) || ["ssh", "watch", "parallel", "-c"].contains(&word(w)))
+                };
+                let data = args && words.iter().any(|w| !w.contains('=') && !keyword(w)) && !words.iter().any(runs);
                 let text = text || data;
                 let ansi = c == '\'' && out.ends_with('$');
                 let target = out.trim_end().ends_with(['>', '<']);
@@ -785,14 +795,15 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if matches!(
         (r.first(), r.get(1)),
         (Some(&"config"), Some(&("apply" | "discard")))
+            | (Some(&"rollout"), Some(&"dismiss"))
             | (Some(&"secret"), Some(&("ls" | "rm")))
             | (Some(&"card"), Some(&("approve" | "deny" | "run")))
             | (Some(&"fleet"), Some(&"rename"))
             | (Some(&"baseline"), _)
     ) {
         return Some(
-            "REFUSED OWNER_ONLY: only the owner applies config, settles run cards, lists and removes secrets, \
-             renames a fleet or sets its history baseline, never a lane (#387, #935, #1099)"
+            "REFUSED OWNER_ONLY: only the owner applies config, dismisses a rollout, settles run cards, lists and \
+             removes secrets, renames a fleet or sets its history baseline, never a lane (#387, #935, #1099, #1479)"
                 .into(),
         );
     }
@@ -1002,13 +1013,19 @@ pub fn issue_filed(input: &Value) -> Option<String> {
         let end = rest.find(|c: char| q.map_or(c.is_whitespace(), |q| c == q));
         Some(rest[..end.unwrap_or(rest.len())].to_string()).filter(|t| !t.is_empty())
     });
-    let res = input["tool_response"].to_string() + &input["result"].to_string();
-    let n = res.split("/issues/").nth(1).and_then(|r| {
-        let d: String = r.chars().take_while(char::is_ascii_digit).collect();
-        d.parse().ok()
-    });
+    let n = filed_issue(input).map(|f| f.1);
     let head = n.map_or("filed".into(), |n: u64| format!("filed #{n}"));
     title.map(|t| format!("{head}: {t}")).or(n.map(|_| head))
+}
+
+/// A `gh issue create` that ran: the repo and number its printed issue URL names.
+pub fn filed_issue(input: &Value) -> Option<(String, u64)> {
+    fleet_cmd(input).filter(|c| after(input) && c.contains("gh issue create"))?;
+    let res = input["tool_response"].to_string() + &input["result"].to_string();
+    let (head, tail) = res.split_once("/issues/")?;
+    let repo = head.rsplit_once("github.com/")?.1;
+    let d: String = tail.chars().take_while(char::is_ascii_digit).collect();
+    Some((repo.into(), d.parse().ok()?))
 }
 
 /// The first `Co-Authored-By:` line in a commit log that names an AI.

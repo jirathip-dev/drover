@@ -1,8 +1,19 @@
 use super::{super::lock, working, Config, Ctx, Result, Server};
+use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Value};
 
 pub(super) const HOST_ACTIONS: [&str; 2] = ["host", "reap"];
+
+pub(super) fn weather(host: &crate::api::HerdHost) -> (&'static str, &'static str) {
+    let ratio = host.load.unwrap_or_default() / host.limit.max(0.01);
+    match host.pressure.as_deref() {
+        _ if host.gate.is_some() => ("storm", "held"),
+        Some("warn" | "critical") => ("fog", "busy"),
+        _ if ratio >= 0.5 => ("windy", "busy"),
+        _ => ("clear", "calm"),
+    }
+}
 
 fn plural(n: usize, w: &str) -> String {
     format!("{n} {w}{}", if n == 1 { "" } else { "s" })
@@ -46,6 +57,7 @@ impl Server<'_> {
     pub(super) fn hosts_sheet(&self, ctx: &Ctx) -> Option<Value> {
         let (cfg, ev) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
         let (left, proxy) = lock(&self.hosts_read).clone();
+        let (_, level) = weather(&super::super::herd_host(self.sample(), &cfg.limits));
         let rows: Vec<Value> = crate::hosts::cards(&cfg, &self.r)
             .into_iter()
             .map(|(name, h)| {
@@ -56,13 +68,17 @@ impl Server<'_> {
                     _ => "remote host",
                 };
                 let lanes = crate::hosts::lanes_on(&cfg, &ev, &name).len();
-                host_row(
+                let mut row = host_row(
                     &name,
                     kind,
                     h.is_none_or(|h| h.enabled),
                     lanes,
                     if main { left } else { 0 },
-                )
+                );
+                if main {
+                    row.put("figure", json!({"load": level}));
+                }
+                row
             })
             .collect();
         let mut blocks = vec![

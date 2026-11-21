@@ -438,6 +438,9 @@ pub struct Fleet {
     pub clone_build: Vec<String>,
     #[serde(default)]
     pub clone_node_modules: bool,
+    /// #1478: each lane also gets `DROVER_DERIVED_DATA` and `DROVER_SWIFT_SCRATCH` in its own build folder.
+    #[serde(default)]
+    pub swift_build: bool,
     /// Lanes' `DROVER_PORT` range, `lo-hi`; unset = `41000-41999`.
     pub port_range: Option<String>,
     /// Build folders freed besides `target`, `node_modules`, `.next` and `dist` (paths in the worktree).

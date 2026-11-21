@@ -8,7 +8,10 @@
             {
               "figure": {
                 "coat": "bay",
-                "state": "working"
+                "state": "working",
+                "act": "impl",
+                "grow": "impl",
+                "issue": 12
               },
               "id": "l-sendmeter-impl-12",
               "subtitle": "fix · local",
