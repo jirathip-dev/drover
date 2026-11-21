@@ -200,7 +200,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `idle_merged_minutes` | `15` | a merged or closed issue's idle lane has its pane closed after this long |
 | `transcript_days` | `30` | a lane's agent keeps its transcripts this many days |
 | `deny_commands` | `assets/deny_commands.toml` | commands the lane hook refuses (default: containers) |
-| `fast_secs` | `60` | the fast step (`drive --fast`) runs every this many seconds |
+| `fast_secs` | `60` | the fast job (`drive`) starts every fleet's pass every this many seconds |
 | `slow_secs` | `300` | the slow tick runs every this many seconds |
 | `form_categories` | `["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]` | the finding tags a `FAIL (form-only)` may carry |
 | `form_rounds` | `3` | form-only FAILs per issue that don't count as a review round |
@@ -221,7 +221,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `crash_wave_minutes` | `5` | 3+ lanes of one host dying by an adapter crash within it are one `lane-wave`: respawned together, one alert |
 | `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
 | `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
-| `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock |
+| `pass_max_secs` | `60` | a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over |
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
@@ -268,8 +268,8 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `slo_api_p95_ms` | `1000` | `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once |
 | `slo_api_minutes` | `10` | how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api` |
 | `slo_idle_minutes` | `20` | no lane working this long while the queue has spawnable work breaches `slo-idle` |
-| `slo_tick_minutes` | `10` | a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast step stops it |
-| `slo_pass_minutes` | `30` | no slow drive pass of a fleet for this long shows on the board's drive-health line |
+| `slo_tick_minutes` | `10` | a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast job stops it |
+| `slo_pass_minutes` | `5` | no finished pass of a fleet for this long stops that fleet's pass (never another's) and shows on the board's drive-health line |
 | `stall_restart_hours` | `2` | an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own) |
 | `self_update_wait_minutes` | `45` | a head with no release build this long alerts `self-update-waiting` |
 | `self_update_lag_minutes` | `30` | how long a rollout waits for an enabled host that is not staged before the rest swap |

@@ -8,11 +8,11 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 pub const TICK: &str = "dev.drover.tick";
-/// The every-minute `drive --fast` job, its own job so the slow tick never delays it.
+/// The every-minute `drive` job: it starts each fleet's pass, its own job so the slow tick never delays it.
 pub const FAST: &str = "dev.drover.fast";
 /// The build's own jobs (label, args); `install` derives each one's interval from its args. `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
 pub const SERVICE: &str = "dev.drover.service";
-pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
+pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive"])];
 /// The tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
 pub const TICK_STEPS: [(&str, &[&str]); 8] = [
     (
@@ -30,7 +30,7 @@ pub const TICK_STEPS: [(&str, &[&str]); 8] = [
             "token_refresh_minutes",
         ],
     ),
-    ("drive", &["pass_max_secs"]),
+    ("drive", &[]),
     ("clean", &[]),
     ("trim", &[]),
     ("lesson", &[]),
@@ -451,7 +451,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         pass.step("check");
         crate::check::check(ctx, cfg, &pass, out)?;
         pass.step("drive");
-        let driven = drive::drive(ctx, cfg, &pass, out, None, false, false);
+        let driven = drive::chores(ctx, cfg, &pass, out).and(drive::start(ctx, cfg, &pass, out));
         let over = pass.over();
         if over {
             writeln!(
@@ -622,7 +622,7 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
         Ok(()) => "✓ profiles synced".into(),
     };
     let tick = install(ctx, &cfg, r, TICK, &["tick"], load);
-    let fast = install(ctx, &cfg, r, FAST, &["drive", "--fast"], load);
+    let fast = install(ctx, &cfg, r, FAST, &["drive"], load);
     let [update, clean] = MORE.map(|(l, args)| install(ctx, &cfg, r, l, args, load));
     let labels = cfg
         .fleet

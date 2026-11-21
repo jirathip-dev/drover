@@ -214,7 +214,7 @@ fn drive_refuses_starts_over_budget() {
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#);
-    let (code, out) = run(&c, &r, &["drive"]);
+    let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains("sendmeter #1 start: REFUSED DISK_BUDGET: worktrees"),
