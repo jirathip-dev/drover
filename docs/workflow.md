@@ -107,6 +107,7 @@ flowchart TD
     d6 -.- k_review_rounds(["review_rounds = 3"])
     d6 -.- k_update_rounds(["update_rounds = 3"])
     other -.- k_overload_minutes(["overload_minutes = 10"])
+    other -.- k_thread_resend_minutes(["thread_resend_minutes = 5"])
     other -.- k_transcript_days(["transcript_days = 30"])
     other -.- k_crash_wave_minutes(["crash_wave_minutes = 5"])
     other -.- k_runtime_down_minutes(["runtime_down_minutes = 30"])

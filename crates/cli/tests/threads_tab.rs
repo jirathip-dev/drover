@@ -1143,3 +1143,46 @@ fn no_older_thread_sends_no_older_card() {
     let list = get(&s, "/screens/threads", "");
     assert!(!list.to_string().contains("older"), "{list}");
 }
+
+#[test]
+fn a_resent_new_thread_is_the_same_thread_and_a_new_request_id_is_another() {
+    let c = recorded("threads-once");
+    let r = OnShed::new(Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let send = |at: u64, id: &str| {
+        let a = json!({"screen": "thread-new-sendmeter", "block": "say", "action": "thread-new",
+            "values": {"repo": "sendmeter", "text": "Is it merged?", "req": id}});
+        let body = a.to_string();
+        let r = format!(
+            "POST /action HTTP/1.1\r\nHost: {ADDR}\r\n{ck}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let res = String::from_utf8_lossy(&s.respond(&r, at)).into_owned();
+        let (head, body) = res.split_once("\r\n\r\n").unwrap();
+        assert_eq!(&head[9..12], "200", "{body}");
+        let v: Value = serde_json::from_str(body).unwrap();
+        v["ops"][0]["screen"]["id"].as_str().unwrap().to_string()
+    };
+    let count = |kind: &str| {
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == kind && (kind == "thread-new" || e.str("text") == Some("Is it merged?")))
+            .count()
+    };
+    let (threads, msgs) = (count("thread-new"), count("thread-msg"));
+
+    let first = send(T, "r-1");
+    let again = send(T + 1, "r-1");
+    assert_eq!(first, again, "a resend answers with the thread it made");
+    assert_eq!(
+        (count("thread-new"), count("thread-msg")),
+        (threads + 1, msgs + 1),
+        "one thread, one first message"
+    );
+
+    let other = send(T + 2, "r-2");
+    assert_ne!(other, first, "another request id is a real second thread");
+    assert_eq!((count("thread-new"), count("thread-msg")), (threads + 2, msgs + 2));
+}
