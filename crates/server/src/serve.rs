@@ -37,6 +37,7 @@ mod jobs;
 mod screens;
 pub use screens::local::{Done, Local, Place};
 mod slo;
+mod tails;
 mod v1;
 mod wire;
 
@@ -219,6 +220,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             drover_core::clock::sleep(Duration::from_secs(60));
         });
         sc.spawn(move || s.hub.publish(s));
+        sc.spawn(move || s.feed_tails());
         w.tick();
         sc.spawn(move || loop {
             w.tick();
@@ -371,15 +373,6 @@ fn sse(e: &Event) -> String {
     )
 }
 
-fn window<T: std::fmt::Debug>(v: &[T], n: usize, kb: usize) -> &[T] {
-    let (mut size, mut k) = (0, 0);
-    for x in v.iter().rev().take(n) {
-        size += format!("{x:?}").len();
-        k += usize::from(k == 0 || size <= kb << 10);
-    }
-    v.get(v.len() - k..).unwrap_or_default()
-}
-
 pub struct Server<'a> {
     ctx: &'a Ctx,
     r: fresh::Fresh<'a>,
@@ -407,6 +400,7 @@ pub struct Server<'a> {
     hosts_read: Mutex<(usize, Option<Vec<String>>)>,
     streams: Mutex<BTreeMap<String, usize>>,
     hub: hub::Hub,
+    tails: tails::Tails,
 }
 
 fn hung_up(s: &TcpStream) -> bool {
@@ -792,6 +786,7 @@ impl<'a> Server<'a> {
             hosts_read: Mutex::default(),
             streams: Mutex::default(),
             hub: hub::Hub::new(),
+            tails: tails::Tails::default(),
         }
     }
 
@@ -809,6 +804,7 @@ impl<'a> Server<'a> {
             self.r.refresh(src, src.every(&l), now);
         }
         self.read_hosts(now);
+        self.feed(now);
     }
 
     fn one(&self, s: &mut TcpStream, buf: &[u8], over: bool) -> std::io::Result<bool> {
@@ -1449,7 +1445,7 @@ impl<'a> Server<'a> {
         };
         let all: Vec<String> = text.lines().map(lanes::mask).collect();
         let end = all.len().saturating_sub(before);
-        let page = window(all.get(..end).unwrap_or_default(), lines, 32);
+        let page = tails::window(all.get(..end).unwrap_or_default(), lines, 32);
         let Some(l) = l.filter(|l| l.session.is_some()) else {
             return serde_json::to_string(&Chat {
                 lines: page.to_vec(),
@@ -3139,6 +3135,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         host: Arc::new(Mutex::new(host::sample(r))),
         ..Server::new(ctx, r, demo.then(|| "demo".into()))
     };
+    s.feed(ctx.now);
     let page = s.page(ctx, &BTreeMap::new(), demo)?;
     let sw = SW.replace("@V", &format!("{VER:08x}"));
     let v = format!("a/{VER:08x}/");

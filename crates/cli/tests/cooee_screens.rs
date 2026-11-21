@@ -383,6 +383,7 @@ fn parity_50_the_lanes_screen_and_a_lanes_sheet_are_cooees_blocks() {
         "a transcript needs a paired device"
     );
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    s.refresh(T);
     let (status, v) = req(&s, T, "GET", sheet, "", &ck);
     assert_eq!(status, 200, "{v}");
     like(&v, "lane-sheet", true);

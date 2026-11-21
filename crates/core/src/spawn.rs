@@ -764,6 +764,8 @@ pub const OWN_FILES: &[&str] = &[
     "body.md",
     ".verify-browser.mjs",
     ".verify.md",
+    crate::outbox::FILE,
+    crate::outbox::ACKED,
 ];
 
 const OWN_REPO: [&str; 8] = [
@@ -922,10 +924,19 @@ pub fn copy_included(local: &Path, wt: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `git status --porcelain` in `wt`, drover's own files excluded: a folder holding only them (`.drover/`) never shows.
+pub fn status(r: &dyn Runner, wt: &str) -> Result<String> {
+    let own: Vec<String> = own_files().map(|f| format!(":(exclude,literal){f}")).collect();
+    let args = ["-C", wt, "status", "--porcelain", "--", "."]
+        .into_iter()
+        .chain(own.iter().map(String::as_str));
+    ok(r, "git", &args.collect::<Vec<_>>())
+}
+
 /// Worktree `wt`'s unsaved work, readable: its uncommitted files (`OWN_FILES` aside) and unpushed commits.
 pub fn unsaved(r: &dyn Runner, wt: &Path) -> Option<(u64, u64)> {
     let wt = wt.to_string_lossy();
-    let st = ok(r, "git", &["-C", &wt, "status", "--porcelain"]).ok()?;
+    let st = status(r, &wt).ok()?;
     let n = ok(
         r,
         "git",
@@ -944,7 +955,7 @@ pub fn unsaved_text(u: Option<(u64, u64)>) -> Option<String> {
 /// Why a worktree must not be reused or removed: uncommitted changes (`OWN_FILES` aside) or unpushed commits.
 pub fn dirty(r: &dyn Runner, wt: &Path) -> Option<String> {
     let wt = wt.to_string_lossy();
-    let st = match ok(r, "git", &["-C", &wt, "status", "--porcelain"]) {
+    let st = match status(r, &wt) {
         Ok(s) => s,
         Err(e) => return Some(format!("unreadable git status ({e:#})")),
     };

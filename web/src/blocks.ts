@@ -277,7 +277,7 @@ export const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
 };
 
 type Att = { name: string; type: string; data: string };
-type Draft = { files: Att[]; picks: Blk; q?: number; st?: string; steer?: boolean; stopping?: boolean };
+type Draft = { files: Att[]; picks: Blk; q?: number; req?: string; st?: string; steer?: boolean; stopping?: boolean };
 const drafts = new Map<string, Draft>();
 
 const read = (f: File) => new Promise<Att>(ok => {
@@ -308,14 +308,16 @@ function composer(blk: Blk, c: Ctx): HTMLElement {
   };
   const post = async (action: string, values: Blk, x?: HTMLElement) => c.act({ action, block: b.id, values: { ...obj(b.values), ...values } }, x);
   const send = async (steer = false) => {
-    if (!ta.value.trim() && !d.files.length) return;
+    if (d.st === 'sending' || (!ta.value.trim() && !d.files.length)) return;
     const queue = !steer && (b.working || d.q != null) ? act('queue') : '', action = steer ? act('steer') : queue || String(b.action);
     const v: Blk = { ...d.picks, text: ta.value, name: d.files.map(x => x.name).join('/'), data: d.files.map(x => x.data).join(',') };
     if (queue && d.q != null) v.q = d.q;
+    const req = obj(b.values).req;
+    if (req != null) v.req = d.req ??= `${String(req)}.${Math.random().toString(36).slice(2, 10)}`;
     [d.st, d.steer] = ['sending', false];
     draw();
     if (await post(action, v, steer ? undefined : go)) {
-      Object.assign(d, { files: [], q: undefined, st: 'sent' });
+      Object.assign(d, { files: [], q: undefined, req: undefined, st: 'sent' });
       ta.value = '';
       put(key, null);
       grow();

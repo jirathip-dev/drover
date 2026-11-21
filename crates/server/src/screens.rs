@@ -944,6 +944,35 @@ fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
         "fold": fold(Some(n), "needs-human", &i.why, age, &main.unwrap_or_default()), "blocks": blocks})
 }
 
+fn health_line(now: u64, ev: &[Event]) -> Option<Value> {
+    let h = crate::slo::drive_health(ev);
+    let oldest = now.saturating_sub(h.first()?.since) / 60;
+    let mut parts: Vec<String> = ["drive late", "idle", "pass error"]
+        .iter()
+        .filter_map(|w| {
+            let n = (h.iter().filter(|x| x.what == *w).map(|x| x.fleet)).collect::<std::collections::BTreeSet<_>>();
+            let s = if n.len() == 1 { "" } else { "s" };
+            (!n.is_empty()).then(|| format!("{w}: {} fleet{s}", n.len()))
+        })
+        .collect();
+    parts.push(format!("{oldest}m"));
+    let row = json!({"type": "row", "id": "drive-health", "title": parts.join(" · "), "figure": {"state": "blocked"},
+        "accessory": "chevron", "tap": {"sheet": "/screens/drive-health"}});
+    Some(json!({"type": "list", "id": "drive-health-list", "rows": [row]}))
+}
+
+fn health_sheet(now: u64, ev: &[Event]) -> Value {
+    let rows: Vec<Value> = (crate::slo::drive_health(ev).iter().enumerate())
+        .map(|(i, h)| {
+            json!({"type": "row", "id": format!("health-{i}"), "title": format!("{} · {}", h.fleet, h.what),
+                "subtitle": h.reason, "value": format!("{}m", now.saturating_sub(h.since) / 60)})
+        })
+        .collect();
+    let drive = json!({"type": "button", "id": "health-drive", "label": "Drive now", "style": "primary", "action": "drive-all"});
+    json!({"type": "sheet", "id": "drive-health", "title": "Drive health", "cancel": "Done",
+        "blocks": [{"type": "list", "id": "health-rows", "rows": rows}, drive]})
+}
+
 fn run_cards(now: u64, ev: &[Event]) -> Vec<Value> {
     let open = ev
         .iter()
@@ -1274,8 +1303,7 @@ fn lanes_screen(t: &LanesTab) -> Value {
     json!({"type": "screen", "id": "lanes", "title": "Lanes", "stream": "/screens/lanes/stream", "blocks": blocks})
 }
 
-pub(super) fn said(i: usize, b: &Block, lines: &[String]) -> Value {
-    let id = format!("t-{i}");
+pub(super) fn said(id: &str, b: &Block, lines: &[String]) -> Value {
     let text = |m: String| json!({"type": "text", "id": id, "markdown": m});
     match b {
         Block::Prompt { text: t } => text(format!("**›** {t}")),
@@ -1431,6 +1459,7 @@ impl Server<'_> {
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx, paired),
             "/screens/workflow" => workflow(ctx),
+            "/screens/drive-health" => health_sheet(ctx.now, &working(&ctx.state).ok()?),
             "/screens/scene" => scene_screen(&self.herd(ctx, None).ok()?),
             "/screens/hot" => self.on_row(ctx, q, |c, r| {
                 let f = &c.name;
@@ -1512,7 +1541,7 @@ impl Server<'_> {
                 json!({"type": "row", "id": "f-pr", "title": "PR", "value": format!("#{n}"), "tap": {"url": url}}),
             );
         }
-        let mut said = self.sheet_transcript(ctx, &l);
+        let mut said = self.tails.sheet(&l);
         said.extend(later::undelivered(&ev, agent));
         let values = json!({ "agent": agent });
         let other = l.role == "other";
@@ -1773,7 +1802,9 @@ impl Server<'_> {
             "config-card" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
             "thread-signin" => crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("name"), "web")?,
             n if THREAD_ACTIONS.contains(&n) || n == "secret-card" => {
-                let keys = ["text", "repo", "name", "act", "data", "q", "harness", "model", "effort"];
+                let keys = [
+                    "text", "repo", "name", "act", "data", "q", "harness", "model", "effort", "req",
+                ];
                 let mut f: Q = keys.into_iter().map(|k| (k.into(), s(k))).collect();
                 f.extend([
                     ("t".into(), s("thread")),

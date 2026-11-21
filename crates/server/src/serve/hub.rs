@@ -21,6 +21,7 @@ const READS: u8 = 1 << 2;
 const CONFIG: u8 = 1 << 3;
 const CLOCK: u8 = 1 << 5;
 const ALL: u8 = 0b11_1111;
+const TAIL: u8 = 1 << 6;
 
 type Q = BTreeMap<String, String>;
 type Frame = (u64, u64, Arc<str>);
@@ -52,13 +53,14 @@ impl Key {
     fn deps(&self) -> u8 {
         match self.path.as_str() {
             p if p == "/screens/threads" || p.starts_with("/screens/threads/") => LOG | READS | CONFIG | CLOCK,
+            p if p.starts_with("/screens/lanes/") => ALL | TAIL,
             _ => ALL,
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
-struct Signals([u64; 6]);
+struct Signals([u64; 7]);
 
 impl Signals {
     fn moved(self, now: Signals, deps: u8) -> bool {
@@ -145,7 +147,10 @@ impl Hub {
     }
 
     fn read(&self, s: &Server, ctx: &Ctx, k: &Key) -> Option<(u64, Arc<str>)> {
-        let now = s.signals(ctx);
+        if let Some(a) = k.path.strip_prefix("/screens/lanes/") {
+            s.tails.watch(a, ctx.now);
+        }
+        let now = s.signals(ctx, k);
         let mut m = lock(&self.keys);
         let old = loop {
             let e = m.entry(k.clone()).or_default();
@@ -313,7 +318,7 @@ impl Drop for StreamSlot<'_> {
 }
 
 impl Server<'_> {
-    fn signals(&self, ctx: &Ctx) -> Signals {
+    fn signals(&self, ctx: &Ctx, k: &Key) -> Signals {
         let at = |p: &std::path::Path| hash(&std::fs::metadata(p).and_then(|m| m.modified()).ok());
         let reads = if self.r.defer {
             self.r.changes.load(Relaxed)
@@ -327,6 +332,9 @@ impl Server<'_> {
             at(&ctx.config),
             at(&ctx.state.with_file_name("cache")),
             ctx.now / 30,
+            k.path
+                .strip_prefix("/screens/lanes/")
+                .map_or(0, |a| self.tails.version(a)),
         ])
     }
 
@@ -346,6 +354,14 @@ impl Server<'_> {
         let paired = plugin || auth.is_ok();
         if path.starts_with("/screens/lanes/") && !paired {
             return line("401 Unauthorized", "pair this device first");
+        }
+        if let Some(a) = path
+            .strip_prefix("/screens/lanes/")
+            .and_then(|p| p.strip_suffix("/older"))
+        {
+            let page = self.tails.page(a, form(query).get("before").map_or("", String::as_str));
+            let gone = || line("410 Gone", "the tail was read again: open the lane once more");
+            return page.map_or_else(gone, |v| ("200 OK", JSON, v.to_string().into_bytes()));
         }
         let Some((rev, json)) = self.hub.read(self, ctx, &Key::new(path, &form(query), paired)) else {
             return line("404 Not Found", "no such screen");

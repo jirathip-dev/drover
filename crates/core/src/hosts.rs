@@ -13,6 +13,7 @@ use std::cmp::Ordering::Equal;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -48,6 +49,8 @@ pub fn each<T: Send, U: Send>(items: impl IntoIterator<Item = T>, f: impl Fn(T) 
     })
 }
 
+/// The reason a call to a host found down earlier in this pass was not sent.
+pub const OFFLINE: &str = "host offline this pass";
 /// `On::existing`'s script: the paths on stdin, a line each.
 pub const EXISTS: &str = "while IFS= read -r p; do test -e \"$p\" && echo y || echo n; done";
 
@@ -214,15 +217,19 @@ impl Drop for Slot<'_> {
 }
 
 impl On<'_> {
-    fn remote(&self, m: &str, (p, a): (String, Vec<String>), input: &str, limit: std::time::Duration) -> Result<Out> {
+    fn remote(&self, m: &str, (p, a): (String, Vec<String>), input: &str, limit: Option<Duration>) -> Result<Out> {
         let _slot = Slot::take(m);
-        let mut o = self.r.run_for(&p, &a, input, limit)?;
+        let send = || match limit {
+            Some(l) => self.r.run_for(&p, &a, input, l),
+            None => self.r.run_in(&p, &a, input),
+        };
+        let mut o = send()?;
         for _ in 0..3 {
             if o.code != 255 || !o.stderr.contains(MUX_REFUSED) {
                 break;
             }
             self.r.sleep(crate::config::limits().ssh_retry_secs);
-            o = self.r.run_for(&p, &a, input, limit)?;
+            o = send()?;
         }
         Ok(o)
     }
@@ -232,21 +239,21 @@ impl Runner for On<'_> {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
         let (p, a) = self.wrap(prog, args);
         if let Some(m) = self.machine {
-            return self.remote(m, (p, a), "", crate::runner::limit(prog, args));
+            return self.remote(m, (p, a), "", None);
         }
         self.r.run(&p, &a)
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
         let (p, a) = self.wrap(prog, args);
         if let Some(m) = self.machine {
-            return self.remote(m, (p, a), input, crate::runner::limit(prog, args));
+            return self.remote(m, (p, a), input, None);
         }
         self.r.run_in(&p, &a, input)
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> Result<Out> {
         let (p, a) = self.wrap(prog, args);
         if let Some(m) = self.machine {
-            return self.remote(m, (p, a), input, limit);
+            return self.remote(m, (p, a), input, Some(limit));
         }
         self.r.run_for(&p, &a, input, limit)
     }
@@ -264,7 +271,7 @@ impl Runner for On<'_> {
     }
 }
 
-/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step, the child it waits on and `n`, the nanosecond of its last step or call (local calls too): the progress `slo-tick` watches.
+/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed at the limit its `run_for` names, else after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step, the child it waits on and `n`, the nanosecond of its last step or call (local calls too): the progress `slo-tick` watches.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
     probe: bool,
@@ -392,10 +399,13 @@ impl<'a> Pass<'a> {
         self.seen(m, u);
         u
     }
-    fn call(&self, prog: &str, args: &[String], input: Option<&str>) -> Result<Out> {
+    fn call(&self, prog: &str, args: &[String], input: Option<&str>, limit: Option<Duration>) -> Result<Out> {
         self.note(&quote(prog, args));
         let Some(m) = Self::host(prog, args) else {
-            return input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i));
+            return match limit {
+                Some(l) => self.r.run_for(prog, args, input.unwrap_or_default(), l),
+                None => input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i)),
+            };
         };
         let unknown = self.log.is_some_and(|(_, cfg)| !configured(cfg, m));
         if self.off.contains(m) || unknown {
@@ -413,11 +423,7 @@ impl<'a> Pass<'a> {
             lock(&self.late).insert(m.into());
         }
         if over || !self.up(m) {
-            let why = if over {
-                "the tick past its budget"
-            } else {
-                "host offline this pass"
-            };
+            let why = if over { "the tick past its budget" } else { OFFLINE };
             self.note("");
             self.unsent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let stderr = format!("{m}: not sent ({why})");
@@ -427,7 +433,7 @@ impl<'a> Pass<'a> {
                 ..Out::default()
             });
         }
-        let limit = std::time::Duration::from_secs(crate::config::limits().ssh_call_secs);
+        let limit = limit.unwrap_or(Duration::from_secs(crate::config::limits().ssh_call_secs));
         let input = input.unwrap_or_default();
         let refused =
             |o: &Out| o.code == 255 && (o.stderr.contains("connect to host") || o.stderr.contains(KEY_CHANGED));
@@ -538,10 +544,13 @@ pub fn idle_off(cfg: &Config, events: &[Event]) -> std::collections::BTreeSet<St
 
 impl Runner for Pass<'_> {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
-        self.call(prog, args, None)
+        self.call(prog, args, None, None)
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
-        self.call(prog, args, Some(input))
+        self.call(prog, args, Some(input), None)
+    }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> Result<Out> {
+        self.call(prog, args, Some(input), Some(limit))
     }
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);

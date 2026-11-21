@@ -332,7 +332,13 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   (`coat`, `state`), fleet and issue, role, host, now-line and age, and for a paired device the read-only `other in
   shed` section; a lane row (and a Queue row's live lane) opens `GET /screens/lanes/<agent>` (a paired device or the
   plugin token only), the lane sheet: its facts (issue, role, state, host, branch, port, PR), Stop/Kill/Clean (Close pane
-  for an Others agent), a Send line and the transcript (`/api/v1/lane/<agent>`'s blocks as text and row blocks). Each
+  for an Others agent), a Send line and the transcript. #1373: the transcript comes from serve's lane tails
+  (`serve/tails.rs`), never from shed on the request: one background feeder reads every lane's last 200 lines each 30 s,
+  local and remote, and an open sheet's lane up to 5,000 lines once, then each second (a remote lane each
+  `serve_remote_secs`) for 10 min. The sheet shows its last 200 lines (at most 32 KB) as blocks of 50 lines, each id
+  `t<gen>-<its first line's number>`, kept when a line arrives; `GET /screens/lanes/<agent>/older?before=t<gen>-<n>`
+  pages back 200 kept lines (`blocks`, `more`; 410 once the tail was read anew). A watched tail keeps 5,000 lines or
+  512 KB, another 200 lines, all of them 16 MB, unwatched lanes shrinking first. Each
   action runs the board's `act` (the CLI verb, `confirm`ed) or `send`, logged `act`/`prompt` with `device: cooee`;
   #1315: `send` replies once the `prompt` is logged and hands the line to shed after the reply; a failed delivery is
   logged `prompt-failed` (`agent`, `error`) and the sheet's transcript ends in a `✗ not delivered` row until the next prompt;
