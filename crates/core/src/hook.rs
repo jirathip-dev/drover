@@ -596,9 +596,13 @@ fn unquote(cmd: &str, args: bool) -> String {
                 });
                 let rest: Vec<&str> = i.map_or(vec![], |i| words.iter().skip(i + 1).map(String::as_str).collect());
                 let text = matches!(rest[..], ["thread", "reply" | "say", ..] | ["ask", ..]);
-                let runs =
-                    |w: &String| WRAPPERS.contains(&word(w)) || ["ssh", "watch", "parallel", "-c"].contains(&word(w));
-                let data = args && words.iter().any(|w| !w.contains('=')) && !words.iter().any(runs);
+                let keyword =
+                    |w: &String| matches!(word(w), "if" | "then" | "else" | "do" | "while" | "until" | "{" | "!");
+                let runs = |w: &String| {
+                    !keyword(w)
+                        && (WRAPPERS.contains(&word(w)) || ["ssh", "watch", "parallel", "-c"].contains(&word(w)))
+                };
+                let data = args && words.iter().any(|w| !w.contains('=') && !keyword(w)) && !words.iter().any(runs);
                 let text = text || data;
                 let ansi = c == '\'' && out.ends_with('$');
                 let target = out.trim_end().ends_with(['>', '<']);
