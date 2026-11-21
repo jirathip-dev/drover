@@ -142,6 +142,26 @@ impl<'a> Snap<'a> {
         }
         Ok(o)
     }
+    fn sent(
+        &self,
+        prog: &str,
+        args: &[String],
+        input: &str,
+        limit: Option<std::time::Duration>,
+    ) -> anyhow::Result<Out> {
+        let send = || match limit {
+            Some(l) => self.r.run_for(prog, args, input, l),
+            None if input.is_empty() => self.r.run(prog, args),
+            None => self.r.run_in(prog, args, input),
+        };
+        if input.is_empty() {
+            return self.missed(key(prog, args), prog, send);
+        }
+        if !remote(prog) {
+            return send();
+        }
+        self.missed(key_in(prog, args, input), prog, send)
+    }
 }
 
 impl Runner for Snap<'_> {
@@ -152,17 +172,10 @@ impl Runner for Snap<'_> {
         self.r.sleep(secs);
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
-        self.run_for(prog, args, input, crate::runner::limit(prog, args))
+        self.sent(prog, args, input, None)
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> anyhow::Result<Out> {
-        if input.is_empty() {
-            return self.run(prog, args);
-        }
-        if !remote(prog) {
-            return self.r.run_for(prog, args, input, limit);
-        }
-        let k = key_in(prog, args, input);
-        self.missed(k, prog, || self.r.run_for(prog, args, input, limit))
+        self.sent(prog, args, input, Some(limit))
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()

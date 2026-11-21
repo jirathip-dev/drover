@@ -315,7 +315,7 @@ fn restart(
             }
             crate::term::close(ctx, &on, e.str("pane").unwrap_or_default()).ok();
             let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?;
-            if crate::spawn::changes(&git(&["status", "--porcelain"])?) > 0 || ahead.trim() != "0" {
+            if crate::spawn::changes(&crate::spawn::status(&on, wt)?) > 0 || ahead.trim() != "0" {
                 let w = crate::check::wip_branch(ctx, &on, agent);
                 let w = match crate::check::save_wip(&on, wt, &w, "wip: eject snapshot") {
                     Ok(w) => w,

@@ -871,7 +871,13 @@ fn clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own() {
         p
     };
     let (ours, user) = (wt("issue-12", &[]), wt("issue-13", &["notes.txt"]));
-    for (ts, issue, p) in [(10, 12, &ours), (11, 13, &user)] {
+    let outbox = wt("issue-14", &[".drover/outbox.jsonl"]);
+    std::fs::write(
+        outbox.join(".drover/outbox.jsonl"),
+        "{\"args\":[\"turn\",\"blocked\",\"--why\",\"bazzite is slow\"]}\n",
+    )
+    .unwrap();
+    for (ts, issue, p) in [(10, 12, &ours), (11, 13, &user), (12, 14, &outbox)] {
         let w = p.to_str().unwrap();
         ev(
             &c,
@@ -893,6 +899,9 @@ fn clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own() {
     let (code, out) = run(&c, &r(), &["clean", "--lane", "impl-12", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(!ours.exists(), "{out}");
+    let (code, out) = run(&c, &r(), &["clean", "--lane", "impl-14", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!outbox.exists() && !out.contains("wip/"), "{out}");
     let (_, dry) = run(&c, &r(), &["clean"]);
     let user_s = user.display().to_string();
     assert!(
