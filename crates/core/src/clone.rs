@@ -15,12 +15,14 @@ const BROKEN: [&str; 4] = [
     "invalid index-pack output",
 ];
 
-/// `git -C <dir> fetch <args>` in a fleet clone, one drover process at a time. A fetch failing on a missing or bad object, or any fetch while an earlier heal is due, heals the clone first, logs it, and fetches again.
+const RACE: [&str; 2] = ["incorrect old value provided", "cannot lock ref"];
+
+/// `git -C <dir> fetch <args>` in a fleet clone, one drover process at a time; a fetch losing a ref race to another (a lane's, a remote host's) is logged and run again. A fetch failing on a missing or bad object, or any fetch while an earlier heal is due, heals the clone first, logs it, and fetches again.
 pub fn fetch(ctx: &Ctx, r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<String> {
     let _held = lock(r, dir)?;
     let key = format!("clone-heal:{}", dir.display());
     let due = crate::db::get::<String>(&ctx.state, &key).filter(|(_, e)| !e.is_empty());
-    let fetch = || git(r, dir, &[&["fetch"][..], args].concat());
+    let fetch = || raced(ctx, r, dir, args);
     let why = match (fetch(), &due) {
         (Err(e), _) if BROKEN.iter().any(|b| format!("{e:#}").contains(b)) => format!("{e:#}"),
         (_, Some((_, e))) => e.clone(),
@@ -47,6 +49,25 @@ pub fn fetch(ctx: &Ctx, r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<Str
         }
     }
     healed.and_then(|_| fetch())
+}
+
+fn raced(ctx: &Ctx, r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<String> {
+    let mut tries = 1;
+    loop {
+        match git(r, dir, &[&["fetch"][..], args].concat()) {
+            Err(e) if tries < 3 && RACE.iter().any(|x| format!("{e:#}").contains(x)) => {
+                log(
+                    ctx,
+                    dir,
+                    "fetch-retried",
+                    json!({"error": format!("{e:#}"), "try": tries}),
+                );
+                r.sleep(1);
+                tries += 1;
+            }
+            res => return res,
+        }
+    }
 }
 
 fn lock(r: &dyn Runner, dir: &Path) -> Result<Option<std::fs::File>> {
@@ -112,10 +133,10 @@ fn log(ctx: &Ctx, dir: &Path, kind: &str, mut d: Value) {
             "reason".into(),
             json!(format!(
                 "{clone}: {}",
-                if kind == "clone-broken" {
-                    "the fetch fails and the heal failed"
-                } else {
-                    "healed"
+                match kind {
+                    "clone-broken" => "the fetch fails and the heal failed",
+                    "fetch-retried" => "another fetch moved a ref under this one; fetching again",
+                    _ => "healed",
                 }
             )),
         );

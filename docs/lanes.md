@@ -218,6 +218,13 @@ first served (a kind at its own cap lets later kinds by); after `heavy_wait_minu
 and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its `lane`, `kind`, `cmd`,
 `since` and `running`. Other commands are unchanged.
 
+A CI job on a self-hosted runner that shares the main host runs its step as `drover hold --wait <minutes> -- <cmd>`
+(#1492): it waits until the host passes spawn admission (`MEM_LOW`, `HOST_BUSY`, …) and a slot is free by the main
+host's `heavy_max`, holds that slot as kind `ci` and holder `ci:<repo>` (from `GITHUB_REPOSITORY`) while the command
+runs, and exits with its code. Lanes' heavy commands wait behind it as behind each other; at the front of the line it
+samples admission every `[limits] hold_sample_secs` (default 10). Past the wait it never runs the command: it exits
+75 and names the reason on stderr. `drover top` lists it under `holds`.
+
 `drover top` (#910; `--json` for the same data) shows what each live lane is really doing: every process under its
 worktree as a tree with its CPU %, run time and heavy kind, and `waiting for heavy slot <kind> <age>` for each of its
 commands in line; the header gives the host's load per CPU against `load_per_cpu`, heavy slots used of `heavy_max` and
