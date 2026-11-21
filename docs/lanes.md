@@ -339,9 +339,11 @@ while the queue has spawnable work) and `slo-tick` (#1307: a tick with no step o
 tick or drive pid it can name gets SIGTERM, then SIGKILL after 10 s; a DISK_BUDGET hold is recounted and the
 queue's first spawn retried; drive's own pass already respawns a silent lane and marks a PASSed draft ready.
 #1183: a `stuck` (pushed once per fleet, and the owner's one `Drive is stuck` card per fleet) means drive itself is
-broken: a tick still hung a pass (`slow_secs`) after its heal, no slow drive pass of the fleet for
-`[limits] slo_pass_minutes` (30), drive's last pass of the fleet failing, or an issue's spawn failing the same way
-twice on the same head. A wait (a hold, CI, a spawn slot, HOST_BUSY, `slo-idle`, a missed promise) never makes one:
+broken: a tick still hung a pass (`slow_secs`) after its heal, or an issue's spawn failing the same way
+twice on the same head. #1502: drive's own health (no slow drive pass of the fleet for `[limits] slo_pass_minutes`
+(30), `slo-idle`, drive's last pass of the fleet failing) is never a card or a push: it is one line at the top of
+the board (`drive late: 5 fleets · 34m`, idle and pass-error counts beside it), hidden when every fleet is healthy;
+tapping it lists each fleet's reason and age with [Drive now]. A wait (a hold, CI, a spawn slot, HOST_BUSY, `slo-idle`, a missed promise) never makes one:
 its row names the wait. `slo-ok` ends the episode once it recovers, and the card clears; an issue's line goes as
 soon as its lane starts. The card's hint is `drover waiting <fleet>`, and each issue on it has a [force] that runs
 its `drover waiting` next command (a spawn) once with `--force`, past the load limit, logged `override` `by: owner`.
