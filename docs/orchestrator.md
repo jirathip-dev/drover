@@ -174,6 +174,20 @@ applied by owner, backup kept, doctor ✓` (the orchestrator gets it too). #460:
 its row in the list say `config c1 waiting` (a tap on the bar's scrolls to the card), and the thread's first page
 always carries it: past the last 30 messages it stays right under the older-messages marker.
 
+## Rollouts (#1479)
+
+A feature that adds a fleet.toml key does nothing until the config turns it on. Its PR body carries a `## Rollout`
+section: the exact fleet.toml lines in a fenced block and which fleets they go in (`none`, or no section, rolls out
+nothing). `drover merge` of such a PR logs `rollout-open` once and posts one row to the thread whose orchestrator
+filed the issue (the lane hook logs `issue-filed` on its `gh issue create`), else the repo's newest thread:
+`#<n> merged with a rollout, not applied yet:` with the snippet. That wakes the thread's orchestrator, which drafts the
+card at once with `drover config propose <thread> <file> --rollout <n>` (refused `NO_SUCH_ROLLOUT` unless #n's
+rollout is open), so the owner only taps [apply]. The apply logs `rollout-done` for #n and its line ends
+`, rollout #<n> done`. The owner may instead run `drover rollout dismiss <fleet> <n> [--by <who>]` (owner only; the
+lane hook refuses it, `OWNER_ONLY`), logged `rollout-dismissed` with `by`. Until either, `drover waiting` (and
+`--json`) lists it as the owner's: `<fleet> #<n> owner: rollout not applied (thread <t>) (<age>)`, its lane the
+thread's orchestrator. Nothing is ever applied by itself.
+
 ## Capability groups and run cards (#538)
 
 - **Groups:** `[orchestrator] allow = [...]` switches on owner-level drover verbs for orchestrators; the lane hook allows
