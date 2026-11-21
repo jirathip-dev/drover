@@ -255,7 +255,7 @@ pub fn verdict(
     let gone = match crate::spawn::dirty(r, Path::new(wt)) {
         Some(why) => Err(anyhow::anyhow!(why)),
         None => check::reap(ctx, cfg, r, Some(e), (fleet, Some(issue)), wt)
-            .and_then(|_| check::remove(r, cfg, fleet, wt, false))
+            .and_then(|_| check::remove(r, cfg, fleet, wt))
             .and_then(|()| term::close(ctx, r, pane).map(drop)),
     };
     let kind = if gone.is_ok() { "lane-closed" } else { "lane-kept" };
