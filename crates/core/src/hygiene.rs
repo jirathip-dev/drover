@@ -42,7 +42,7 @@ impl Check {
             "session-path".into()
         } else if uuid {
             "session-id".into()
-        } else if self.hosts.iter().any(|h| word(&low, h)) {
+        } else if self.hosts.iter().any(|h| hostname(&low, h)) {
             "host".into()
         } else {
             let i = self.private.iter().position(|p| word(&low, p))?;
@@ -53,12 +53,30 @@ impl Check {
 }
 
 fn word(low: &str, n: &str) -> bool {
+    word_where(low, n, |_, _| true)
+}
+
+fn word_where(low: &str, n: &str, used: impl Fn(&str, &str) -> bool) -> bool {
     let n = n.trim().to_lowercase();
     let edge = |c: Option<char>| !c.is_some_and(char::is_alphanumeric);
     !n.is_empty()
         && low.match_indices(&n).any(|(i, _)| {
-            edge(low.get(..i).and_then(|s| s.chars().next_back()))
-                && edge(low.get(i + n.len()..).and_then(|s| s.chars().next()))
+            let (b, a) = (low.get(..i).unwrap_or(""), low.get(i + n.len()..).unwrap_or(""));
+            edge(b.chars().next_back()) && edge(a.chars().next()) && used(b, a)
+        })
+}
+
+fn hostname(low: &str, n: &str) -> bool {
+    let then = |a: &str, c: char, ok: fn(&char) -> bool| {
+        a.strip_prefix(c).and_then(|r| r.chars().next()).is_some_and(|x| ok(&x))
+    };
+    n.contains(['@', '.']) && word(low, n)
+        || word_where(low, n, |b, a| {
+            ["@", "ssh ", "--host ", "--host=", "hosts."]
+                .iter()
+                .any(|p| b.ends_with(p))
+                || then(a, ':', |c| !c.is_whitespace())
+                || then(a, '.', char::is_ascii_alphanumeric)
         })
 }
 
