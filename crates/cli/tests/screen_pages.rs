@@ -48,6 +48,49 @@ fn pages(s: &Server, first: &str, id: &str, key: &str) -> Vec<Vec<String>> {
     out
 }
 
+fn ev_lists(v: &Value) -> Vec<&Value> {
+    let blocks = v["blocks"].as_array().unwrap().iter();
+    let groups = blocks.filter(|b| b["id"].as_str().is_some_and(|i| i.starts_with("ev-")));
+    groups.map(|g| &g["blocks"][0]).collect()
+}
+
+fn event_pages(s: &Server, first: &str) -> Vec<Vec<String>> {
+    let (mut out, mut path, mut into) = (vec![], Some(first.to_string()), None::<String>);
+    while let Some(p) = path {
+        let v = get(s, &p);
+        let lists = into
+            .as_ref()
+            .map_or_else(|| ev_lists(&v), |i| vec![find(&v, i).unwrap()]);
+        let ids: Vec<String> = (lists.iter().flat_map(|l| l["rows"].as_array().unwrap()))
+            .map(|r| r["id"].as_str().unwrap().to_string())
+            .collect();
+        for l in &lists {
+            let seqs: Vec<u64> = (l["rows"].as_array().unwrap().iter())
+                .map(|r| r["id"].as_str().unwrap()[2..].parse().unwrap())
+                .collect();
+            assert!(
+                seqs.windows(2).all(|w| w[0] > w[1]),
+                "newest first in a group: {seqs:?}"
+            );
+        }
+        let paged: Vec<&&Value> = lists.iter().filter(|l| l["more"].is_string()).collect();
+        assert!(
+            paged.len() <= 1 && paged.iter().all(|l| l["id"] == lists.last().unwrap()["id"]),
+            "{v}"
+        );
+        assert!(ids.len() <= 100, "{p}: {} rows", ids.len());
+        path = paged.first().map(|l| l["more"].as_str().unwrap().to_string());
+        into = paged.first().map(|l| l["id"].as_str().unwrap().to_string()).or(into);
+        if let Some(m) = &path {
+            assert!(m.contains("after=") && m.contains("&in="), "{m}");
+            assert_eq!(ids.len(), 100, "{p}: a page with more after it is full");
+        }
+        out.push(ids);
+        assert!(out.len() < 20, "endless pages");
+    }
+    out
+}
+
 fn whole(pages: &[Vec<String>]) -> Vec<String> {
     let all: Vec<String> = pages.concat();
     assert_eq!(
@@ -85,22 +128,24 @@ fn events_come_in_pages_of_100_by_cursor_with_no_gap_or_duplicate_and_filters_ho
     let f = Fake::default();
     let s = Server::new(&c, &f, Some("127.0.0.1:7777".into()));
 
-    let all = pages(&s, "/screens/events", "ev", "rows");
+    let all = event_pages(&s, "/screens/events");
     assert_eq!(all.iter().map(Vec::len).collect::<Vec<_>>(), [100, 100, 80]);
-    let ids = whole(&all);
-    let seqs: Vec<u64> = ids.iter().map(|i| i[2..].parse().unwrap()).collect();
-    assert!(seqs.windows(2).all(|w| w[0] > w[1]), "newest first: {seqs:?}");
+    assert_eq!(whole(&all).len(), 280);
 
-    let lanes = pages(&s, "/screens/events?kind=lane", "ev", "rows");
+    let lanes = event_pages(&s, "/screens/events?kind=lane");
     assert_eq!(whole(&lanes).len(), 30);
     let first = get(&s, "/screens/events?kind=merge,verdict");
-    let more = find(&first, "ev").unwrap()["more"].as_str().unwrap().to_string();
+    let more = ev_lists(&first).last().unwrap()["more"].as_str().unwrap().to_string();
     assert!(more.contains("kind=merge%2Cverdict"), "{more}");
-    let verdict = whole(&pages(&s, "/screens/events?kind=merge,verdict", "ev", "rows"));
+    let verdict = whole(&event_pages(&s, "/screens/events?kind=merge,verdict"));
     assert_eq!(verdict.len(), 250);
     let titles: Vec<Value> = [&first, &get(&s, &more)]
         .iter()
-        .flat_map(|v| find(v, "ev").unwrap()["rows"].as_array().unwrap().clone())
+        .flat_map(|v| {
+            ev_lists(v)
+                .into_iter()
+                .flat_map(|l| l["rows"].as_array().unwrap().clone())
+        })
         .collect();
     assert!(
         titles
@@ -173,7 +218,7 @@ fn next(r: &mut BufReader<std::net::TcpStream>) -> Vec<Value> {
 #[test]
 fn a_stream_delta_puts_a_new_event_on_top_and_drops_no_loaded_row() {
     let c = ctx(&tmpdir("pages-stream"), CONFIG);
-    write_log(&c, &verdicts(drover::now(), 150));
+    write_log(&c, &verdicts(drover::now() + 1_500, 150));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
@@ -183,10 +228,15 @@ fn a_stream_delta_puts_a_new_event_on_top_and_drops_no_loaded_row() {
     write!(s, "GET /screens/events/stream HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
     let mut r = BufReader::new(s);
     let ops = next(&mut r);
-    let ev = find(&ops[0]["screen"], "ev").unwrap().clone();
-    let rows = ev["rows"].as_array().unwrap();
+    let lists: Vec<Value> = ev_lists(&ops[0]["screen"]).into_iter().cloned().collect();
+    let rows: Vec<&Value> = lists.iter().flat_map(|l| l["rows"].as_array().unwrap()).collect();
     assert_eq!(rows.len(), 100);
-    let top = rows[0]["id"].clone();
+    let (top, into, paged) = (
+        rows[0]["id"].clone(),
+        lists[0]["id"].clone(),
+        lists.last().unwrap()["id"].clone(),
+    );
+    assert_eq!(into, "ev-hour-list", "the newest rows group under the last hour");
 
     let d = json!({"verdict": "PASS", "round": 2});
     append(&c.state, &Event::new(drover::now(), "sendmeter", Some(7), "verdict", d)).unwrap();
@@ -195,12 +245,12 @@ fn a_stream_delta_puts_a_new_event_on_top_and_drops_no_loaded_row() {
         ops.iter().all(|o| o["op"] != "remove" && o["op"] != "screen"),
         "{ops:?}"
     );
-    assert!(ops.iter().all(|o| o["id"] != "ev"), "the list's cursor stays: {ops:?}");
+    assert!(ops.iter().all(|o| o["id"] != paged), "the list's cursor stays: {ops:?}");
     let insert = ops
         .iter()
         .find(|o| o["op"] == "insert")
         .unwrap_or_else(|| panic!("{ops:?}"));
-    assert_eq!((&insert["into"], &insert["before"]), (&json!("ev"), &top), "{ops:?}");
+    assert_eq!((&insert["into"], &insert["before"]), (&into, &top), "{ops:?}");
     assert_eq!(insert["block"]["title"], "review PASS · round 2");
 }
 

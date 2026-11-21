@@ -72,6 +72,33 @@
     {
       "blocks": [
         {
+          "id": "disk-list",
+          "rows": [
+            {
+              "id": "disk-worktrees",
+              "title": "worktrees",
+              "type": "row",
+              "value": "not measured yet / 25 GB"
+            },
+            {
+              "id": "disk-orphans",
+              "subtitle": "under the worktree root, no fleet's",
+              "title": "orphan folders",
+              "type": "row",
+              "value": "0"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "footer": "The worktree total is drive's last walk.",
+      "header": "fleet disk",
+      "id": "disk-sec",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
           "id": "proxy-list",
           "rows": [
             {
