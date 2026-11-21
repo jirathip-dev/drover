@@ -21,6 +21,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod fire;
+mod stranded;
 mod sweep;
 
 use sweep::{disabled, sweep_off};
@@ -166,7 +167,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
-    crate::setup::reap(ctx, r, &events)?;
+    crate::setup::reap(ctx, r, &events).and_then(|()| stranded::alert(ctx, cfg, out, &events))?;
     match crate::runners::tick(ctx, cfg, r, &events) {
         Some(Ok((on, want))) => {
             let was = |e: &&Event| matches!(e.kind.as_str(), "runners-low" | "runners-ok");
