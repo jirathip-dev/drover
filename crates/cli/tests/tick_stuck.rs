@@ -94,7 +94,7 @@ impl Runner for Hang {
 }
 
 #[test]
-fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
+fn a_host_that_never_answers_costs_one_retried_probe_and_drive_still_starts() {
     let (c, sh) = setup("stuck-air", "");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "w8:p1", "workspace": "w8",
@@ -114,9 +114,8 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
     assert_eq!(
-        to_air,
-        ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"],
-        "one probe, nothing after it"
+        to_air, ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"; 2],
+        "one probe and its one retry, nothing after them"
     );
     assert!(r.spent.get() <= 60, "{}s on the Air", r.spent.get());
     let mark = r.seen.borrow()[0].clone();
@@ -171,7 +170,7 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
 }
 
 #[test]
-fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
+fn clean_reports_a_silent_disabled_host_offline_after_one_retried_probe() {
     let (c, _sh) = setup("stuck-disabled-silent", "enabled = false");
     let r = Hang {
         f: local(),
@@ -190,11 +189,10 @@ fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
     assert_eq!(
-        to_air,
-        ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"],
-        "one probe, nothing after it"
+        to_air, ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"; 2],
+        "one probe and its one retry, nothing after them"
     );
-    assert!(r.spent.get() <= 5, "{}s on the Air", r.spent.get());
+    assert!(r.spent.get() <= 10, "{}s on the Air", r.spent.get());
 }
 
 #[test]

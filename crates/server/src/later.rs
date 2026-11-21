@@ -1,4 +1,6 @@
-use super::{ask_card, ask_minutes, devices, needs_card, run_cards, working, BTreeMap, Ctx, Event, Result, Server};
+use super::{
+    ask_card, ask_minutes, devices, health_line, needs_card, run_cards, working, BTreeMap, Ctx, Event, Result, Server,
+};
 use crate::events::Json;
 use anyhow::Context;
 use serde_json::{json, Value};
@@ -88,7 +90,7 @@ impl Server<'_> {
         let hid = laters(&ev);
         let is_hid =
             |id: &str, row: &str, fp: &str| hid.get(&(id.to_string(), row.to_string())).is_some_and(|h| h == fp);
-        let (mut shown, mut later) = (vec![], vec![]);
+        let (mut shown, mut later): (Vec<Value>, _) = (health_line(ctx.now, &ev).into_iter().collect(), vec![]);
         for o in self.owner_cards(ctx, &ev, paired) {
             let whole = is_hid(&o.id, "", &o.fp);
             let (gone, kept): (Vec<&Line>, Vec<&Line>) =

@@ -25,14 +25,16 @@ slot of serve's 4 within a second). A sent
 thread message or lane line shows at once, grey until serve's reply, then until the stream brings it (once); a failed
 one keeps its text with [retry]. An answered ask leaves at once and stays gone unless the answer fails. A
 row's `tap` opens a sheet (`sheet`), another screen in the tab with `[‹ back]` (`open`) or a link (`url`). A sheet's
-`done` posts its fields' values. A row's `figure` (`state`, `tool`, `coat`) is the theme's sprite, as before: a
-lane's avatar in its coat, else the 24 px row sprite, else the state glyph (terminal).
+`done` posts its fields' values. A row's `figure` (`state`, `act`, a Queue row's `grow` and `issue`, a lane's `coat`, an
+Events row's `moment`, the main host's `load`) is drawn by the phone's style (#1306): `terminal` the state glyph, `ascii`
+the theme's figures, `pixel` its animated sprites (a Queue row's plant at its stage, a lane's avatar in its look, a
+Hosts row's load miniature); a row arriving with a moment plays it (merged hops, FAIL shakes, needs you pulses).
 
 The header has the sync dot (green: the open tab's stream is live, pulsing on a patch; amber: connecting; red:
-offline; blue in the demo), `[↻]` (read the tab and the cards again) and `[⚙]` (the menu-row screens, the theme and
-colours, and in the Home Screen app "enable alerts"). Each screen's last copy is kept on the phone (localStorage) and
+offline; blue in the demo), `[↻]` (read the tab and the cards again) and `[⚙]` (the menu-row screens, the theme, the style
+(terminal, ascii or pixel) and colours, and in the Home Screen app "enable alerts"). Each screen's last copy is kept on the phone (localStorage) and
 painted first, offline too, with `last update hh:mm · Nm ago` on the strip until a fresh read or a live stream
-replaces it. A read over 300 ms shows `↻ loading` on the strip. `crates/cli/tests/page.rs` taps through it in Chrome.
+replaces it. A read over 300 ms shows the style's loading art (the theme's sprite, its ascii frames, else `↻`) on the strip. `crates/cli/tests/page.rs` taps through it in Chrome.
 
 #895: every `[limits] serve_host_secs` serve hands its freed heap back to the OS and reads its own RSS; past
 `[limits] serve_mem_mb` (300) it logs `serve-mem-high` once and hands over to a fresh copy of itself (#894's handover,

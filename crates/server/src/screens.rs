@@ -83,22 +83,15 @@ pub(super) fn iso(t: u64) -> String {
     )
 }
 
-fn tool(role: &str) -> &'static str {
-    match role {
-        "rev" | "review" => "read",
-        "fix" | "update" => "edit",
-        _ => "run",
-    }
-}
-
 fn figure(act: &str, state: &str) -> Value {
-    match act {
-        "impl" | "fix" | "rev" | "update" => json!({"state": "working", "tool": tool(act)}),
-        "done" => json!({"state": "done"}),
-        "blocked" if state == "dead" || state == "blocked" => json!({"state": "fail"}),
-        "blocked" => json!({"state": "needs"}),
-        _ => json!({"state": "idle"}),
-    }
+    let state = match act {
+        "impl" | "fix" | "rev" | "update" => "working",
+        "done" => "done",
+        "blocked" if state == "dead" || state == "blocked" => "fail",
+        "blocked" => "needs",
+        _ => "idle",
+    };
+    json!({"state": state, "act": act})
 }
 
 fn badge_tone(fig: &Value) -> &str {
@@ -200,6 +193,7 @@ const LINE: usize = 48;
 fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<usize>, lane: Option<&Lane>) -> Value {
     let mut fig = figure(&r.act, &r.state);
     fig.put("grow", json!(r.grow));
+    fig.put("issue", json!(r.issue));
     let title = format!(
         "#{} {}",
         r.issue,
@@ -950,6 +944,35 @@ fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
         "fold": fold(Some(n), "needs-human", &i.why, age, &main.unwrap_or_default()), "blocks": blocks})
 }
 
+fn health_line(now: u64, ev: &[Event]) -> Option<Value> {
+    let h = crate::slo::drive_health(ev);
+    let oldest = now.saturating_sub(h.first()?.since) / 60;
+    let mut parts: Vec<String> = ["drive late", "idle", "pass error"]
+        .iter()
+        .filter_map(|w| {
+            let n = (h.iter().filter(|x| x.what == *w).map(|x| x.fleet)).collect::<std::collections::BTreeSet<_>>();
+            let s = if n.len() == 1 { "" } else { "s" };
+            (!n.is_empty()).then(|| format!("{w}: {} fleet{s}", n.len()))
+        })
+        .collect();
+    parts.push(format!("{oldest}m"));
+    let row = json!({"type": "row", "id": "drive-health", "title": parts.join(" · "), "figure": {"state": "blocked"},
+        "accessory": "chevron", "tap": {"sheet": "/screens/drive-health"}});
+    Some(json!({"type": "list", "id": "drive-health-list", "rows": [row]}))
+}
+
+fn health_sheet(now: u64, ev: &[Event]) -> Value {
+    let rows: Vec<Value> = (crate::slo::drive_health(ev).iter().enumerate())
+        .map(|(i, h)| {
+            json!({"type": "row", "id": format!("health-{i}"), "title": format!("{} · {}", h.fleet, h.what),
+                "subtitle": h.reason, "value": format!("{}m", now.saturating_sub(h.since) / 60)})
+        })
+        .collect();
+    let drive = json!({"type": "button", "id": "health-drive", "label": "Drive now", "style": "primary", "action": "drive-all"});
+    json!({"type": "sheet", "id": "drive-health", "title": "Drive health", "cancel": "Done",
+        "blocks": [{"type": "list", "id": "health-rows", "rows": rows}, drive]})
+}
+
 fn run_cards(now: u64, ev: &[Event]) -> Vec<Value> {
     let open = ev
         .iter()
@@ -1037,15 +1060,25 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
     let (mut rows, mut asks) = (vec![], None);
     for e in &list {
         let k = kind_of(&e.kind).unwrap_or_default();
-        let fig = match (k, e.tone.as_str()) {
-            ("lane", _) => {
-                json!({"state": "working", "tool": tool(e.data.get("role").and_then(Value::as_str).unwrap_or_default())})
-            }
-            (_, "g") => json!({"state": "done"}),
-            (_, "r") => json!({"state": "fail"}),
-            (_, "a") => json!({"state": "needs"}),
-            _ => json!({"state": "idle"}),
+        let role = e.data.get("role").and_then(Value::as_str).unwrap_or_default();
+        let mut fig = match (k, e.tone.as_str()) {
+            ("lane", _) => figure(super::act(role, "working"), ""),
+            (_, "g") => figure("done", ""),
+            (_, "r") => figure("blocked", "dead"),
+            (_, "a") => figure("blocked", ""),
+            _ => figure("idle", ""),
         };
+        if e.kind == "verdict" && e.tone != "r" {
+            fig.put("act", json!("rev"));
+        }
+        if let Some(m) = match e.kind.as_str() {
+            "merged" => Some("merged"),
+            "verdict" if e.tone == "r" => Some("fail"),
+            "needs-human" | "needs-decision" => Some("needs-you"),
+            _ => None,
+        } {
+            fig.put("moment", json!(m));
+        }
         let mut r = json!({"type": "row", "id": format!("e-{}", e.seq), "figure": fig, "title": e.text, "value": {"since": iso(e.ts)}});
         if let Some(t) = e.issue.and_then(|n| crate::gh::cached_title(ctx, &e.fleet, n)) {
             r.put("subtitle", json!(t));
@@ -1103,7 +1136,7 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
 
 const COATS: [&str; 5] = ["bay", "blk", "ch", "gry", "wht"];
 
-fn lane_figure(name: &str, state: &str) -> Value {
+fn lane_figure(name: &str, state: &str, act: &str) -> Value {
     let i = usize::from_str_radix(&devices::sha256(name.as_bytes())[..2], 16).unwrap_or(0) % COATS.len();
     let state = match state {
         "working" => "working",
@@ -1112,7 +1145,7 @@ fn lane_figure(name: &str, state: &str) -> Value {
         "dead" => "fail",
         _ => "idle",
     };
-    json!({"coat": COATS.get(i), "state": state})
+    json!({"coat": COATS.get(i), "state": state, "act": act})
 }
 
 fn lane_row(fleet: &str, l: &LaneRow) -> Value {
@@ -1123,7 +1156,12 @@ fn lane_row(fleet: &str, l: &LaneRow) -> Value {
         .into_iter()
         .filter(|s| !s.is_empty())
         .collect();
-    json!({"type": "row", "id": format!("l-{}", l.name), "figure": lane_figure(&l.name, &l.state), "title": title,
+    let mut fig = lane_figure(&l.name, &l.state, &l.act);
+    if let Some(n) = l.issue {
+        fig.put("grow", json!(l.grow));
+        fig.put("issue", json!(n));
+    }
+    json!({"type": "row", "id": format!("l-{}", l.name), "figure": fig, "title": title,
         "subtitle": sub.join(" · "), "value": l.ago, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
 }
 
@@ -1207,12 +1245,7 @@ fn scene_screen(h: &Herd) -> Value {
         Some("critical") => 2,
         _ => 0,
     };
-    let (sky, level) = match fog {
-        _ if host.gate.is_some() => ("storm", "held"),
-        1 | 2 => ("fog", "busy"),
-        _ if ratio >= 0.5 => ("windy", "busy"),
-        _ => ("clear", "calm"),
-    };
+    let (sky, level) = hosts::weather(host);
     let load = host.load.map_or("?".into(), |l| format!("{l:.2}"));
     let swap = host.swapouts.map_or("?".into(), |s| format!("{s:.0}"));
     let line = format!(
@@ -1426,6 +1459,7 @@ impl Server<'_> {
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx, paired),
             "/screens/workflow" => workflow(ctx),
+            "/screens/drive-health" => health_sheet(ctx.now, &working(&ctx.state).ok()?),
             "/screens/scene" => scene_screen(&self.herd(ctx, None).ok()?),
             "/screens/hot" => self.on_row(ctx, q, |c, r| {
                 let f = &c.name;

@@ -330,6 +330,12 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             "REFUSED CARD_FORBIDDEN: this command {w}; an orchestrator never runs it (#538)"
         ));
     }
+    let Some(inner) = wrapped(cmd) else {
+        return Some(OPAQUE_SHELL.into());
+    };
+    if let Some(r) = inner.iter().find_map(|i| bash(i, &cwd, p, cur_branch)) {
+        return Some(r);
+    }
     let runs = |c: &str| denied(cmd, &[Deny::Cmd(c.into())]).is_some();
     if runs("pgrep") && runs("kill") {
         return Some(NO_BROAD_KILL.into());
@@ -410,6 +416,95 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         }
     }
     None
+}
+
+/// A shell or `eval` whose inner text the guard cannot read: it never runs (#1481).
+pub const OPAQUE_SHELL: &str =
+    "REFUSED OPAQUE_SHELL: the guard cannot read what this shell or eval runs (a variable, a \
+                                decoded or downloaded script); run the command as plain text (#1481)";
+
+struct Word {
+    text: String,
+    live: bool,
+}
+
+fn commands(cmd: &str) -> Vec<(bool, Vec<Word>)> {
+    let mut out = vec![(false, Vec::<Word>::new())];
+    let (mut cur, mut live, mut quote) = (String::new(), false, None::<char>);
+    let mut cs = cmd.chars().peekable();
+    while let Some(c) = cs.next() {
+        let sep = quote.is_none() && (c.is_whitespace() || ";|&()`".contains(c));
+        if sep && !cur.is_empty() {
+            if let Some((_, ws)) = out.last_mut() {
+                ws.push(Word {
+                    text: std::mem::take(&mut cur),
+                    live: std::mem::take(&mut live),
+                });
+            }
+        }
+        match (quote, c) {
+            (_, c) if sep => {
+                if !c.is_whitespace() {
+                    let piped = c == '|' && cs.next_if_eq(&'|').is_none();
+                    out.push((piped, vec![]));
+                }
+            }
+            (Some(q), c) if c == q => quote = None,
+            (Some('\''), c) => cur.push(c),
+            (_, '\\') => cur.extend(cs.next()),
+            (None, '\'' | '"') => quote = Some(c),
+            (_, c) => {
+                live |= matches!(c, '$' | '`');
+                cur.push(c);
+            }
+        }
+    }
+    if let Some((_, ws)) = out.last_mut().filter(|_| !cur.is_empty()) {
+        ws.push(Word { text: cur, live });
+    }
+    out
+}
+
+fn head(ws: &[Word]) -> Option<(&Word, &[Word])> {
+    let prefix = |w: &Word| {
+        w.text.contains('=')
+            || w.text
+                .starts_with(['-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'])
+            || [
+                "env", "sudo", "exec", "command", "nohup", "time", "xargs", "nice", "timeout",
+            ]
+            .contains(&word(&w.text))
+    };
+    let i = ws.iter().position(|w| !prefix(w))?;
+    ws.get(i..)?.split_first()
+}
+
+fn wrapped(cmd: &str) -> Option<Vec<String>> {
+    let (mut inner, mut doc) = (vec![], false);
+    for (piped, ws) in commands(cmd) {
+        let fed = piped && !doc;
+        doc = ws.iter().any(|w| w.text.starts_with("<<"));
+        let Some((h, rest)) = head(&ws) else { continue };
+        match word(&h.text) {
+            "sh" | "bash" | "zsh" => {
+                let flags = rest.iter().take_while(|w| w.text.starts_with('-'));
+                let c = flags.clone().any(|w| !w.text.starts_with("--") && w.text.contains('c'));
+                match rest.iter().find(|w| !w.text.starts_with('-')) {
+                    Some(s) if c => inner.push(s.text.clone()),
+                    None if fed && !doc => return None,
+                    _ => {}
+                }
+            }
+            "eval" => inner.push(rest.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ")),
+            _ => {}
+        }
+    }
+    let opaque = |i: &String| {
+        commands(i)
+            .iter()
+            .any(|(_, ws)| head(ws).is_some_and(|(h, _)| h.live && h.text.starts_with(['$', '`'])))
+    };
+    (!inner.iter().any(opaque)).then_some(inner)
 }
 
 fn redirects(seg: &str) -> Vec<String> {
@@ -501,9 +596,13 @@ fn unquote(cmd: &str, args: bool) -> String {
                 });
                 let rest: Vec<&str> = i.map_or(vec![], |i| words.iter().skip(i + 1).map(String::as_str).collect());
                 let text = matches!(rest[..], ["thread", "reply" | "say", ..] | ["ask", ..]);
-                let runs =
-                    |w: &String| WRAPPERS.contains(&word(w)) || ["ssh", "watch", "parallel", "-c"].contains(&word(w));
-                let data = args && words.iter().any(|w| !w.contains('=')) && !words.iter().any(runs);
+                let keyword =
+                    |w: &String| matches!(word(w), "if" | "then" | "else" | "do" | "while" | "until" | "{" | "!");
+                let runs = |w: &String| {
+                    !keyword(w)
+                        && (WRAPPERS.contains(&word(w)) || ["ssh", "watch", "parallel", "-c"].contains(&word(w)))
+                };
+                let data = args && words.iter().any(|w| !w.contains('=') && !keyword(w)) && !words.iter().any(runs);
                 let text = text || data;
                 let ansi = c == '\'' && out.ends_with('$');
                 let target = out.trim_end().ends_with(['>', '<']);
@@ -690,14 +789,15 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if matches!(
         (r.first(), r.get(1)),
         (Some(&"config"), Some(&("apply" | "discard")))
+            | (Some(&"rollout"), Some(&"dismiss"))
             | (Some(&"secret"), Some(&("ls" | "rm")))
             | (Some(&"card"), Some(&("approve" | "deny" | "run")))
             | (Some(&"fleet"), Some(&"rename"))
             | (Some(&"baseline"), _)
     ) {
         return Some(
-            "REFUSED OWNER_ONLY: only the owner applies config, settles run cards, lists and removes secrets, \
-             renames a fleet or sets its history baseline, never a lane (#387, #935, #1099)"
+            "REFUSED OWNER_ONLY: only the owner applies config, dismisses a rollout, settles run cards, lists and \
+             removes secrets, renames a fleet or sets its history baseline, never a lane (#387, #935, #1099, #1479)"
                 .into(),
         );
     }
@@ -907,13 +1007,19 @@ pub fn issue_filed(input: &Value) -> Option<String> {
         let end = rest.find(|c: char| q.map_or(c.is_whitespace(), |q| c == q));
         Some(rest[..end.unwrap_or(rest.len())].to_string()).filter(|t| !t.is_empty())
     });
-    let res = input["tool_response"].to_string() + &input["result"].to_string();
-    let n = res.split("/issues/").nth(1).and_then(|r| {
-        let d: String = r.chars().take_while(char::is_ascii_digit).collect();
-        d.parse().ok()
-    });
+    let n = filed_issue(input).map(|f| f.1);
     let head = n.map_or("filed".into(), |n: u64| format!("filed #{n}"));
     title.map(|t| format!("{head}: {t}")).or(n.map(|_| head))
+}
+
+/// A `gh issue create` that ran: the repo and number its printed issue URL names.
+pub fn filed_issue(input: &Value) -> Option<(String, u64)> {
+    fleet_cmd(input).filter(|c| after(input) && c.contains("gh issue create"))?;
+    let res = input["tool_response"].to_string() + &input["result"].to_string();
+    let (head, tail) = res.split_once("/issues/")?;
+    let repo = head.rsplit_once("github.com/")?.1;
+    let d: String = tail.chars().take_while(char::is_ascii_digit).collect();
+    Some((repo.into(), d.parse().ok()?))
 }
 
 /// The first `Co-Authored-By:` line in a commit log that names an AI.

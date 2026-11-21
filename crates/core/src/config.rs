@@ -1260,7 +1260,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "slo_pass_minutes",
-        "no finished pass of a fleet for this long stops that fleet's pass (never another's), then shows the owner's `Drive is stuck` card",
+        "no finished pass of a fleet for this long stops that fleet's pass (never another's) and shows on the board's drive-health line",
     ),
     (
         "stall_restart_hours",

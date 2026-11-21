@@ -89,6 +89,7 @@ struct Change {
     hunk: usize,
     line: usize,
     added: bool,
+    created: bool,
     text: String,
 }
 
@@ -332,7 +333,10 @@ fn frozen_adds(a: &Arch, frozen: &[String], diff: &[Change]) -> Vec<String> {
     };
     let collected = |f: &str| a.collect.iter().any(|c| any(&[c.entries()], f));
     let mut hunks = BTreeMap::<usize, (Vec<&Change>, usize)>::new();
-    for c in diff.iter().filter(|c| any(frozen, &c.file) && !collected(&c.file)) {
+    for c in diff
+        .iter()
+        .filter(|c| !c.created && any(frozen, &c.file) && !collected(&c.file))
+    {
         let h = hunks.entry(c.hunk).or_default();
         if c.added {
             h.0.push(c);
@@ -491,14 +495,16 @@ fn fns(lines: &[&str], ext: &str) -> Vec<(String, usize, usize)> {
 
 fn changes(diff: &str) -> Vec<Change> {
     let (mut v, mut from, mut to, mut old, mut new, mut head, mut hunk) = (vec![], "", "", 0, 0, true, 0);
+    let mut created = false;
     for l in diff.lines() {
         if l.starts_with("diff --git ") {
-            head = true;
+            (head, created) = (true, false);
         } else if let Some(h) = l.strip_prefix("@@ -") {
             let num = |s: &str| s.split([',', ' ']).next().and_then(|n| n.parse().ok()).unwrap_or(0);
             let (o, n) = h.split_once(" +").unwrap_or_default();
             (old, new, head, hunk) = (num(o), num(n), false, hunk + 1);
         } else if head {
+            created |= l == "--- /dev/null";
             from = l.strip_prefix("--- a/").unwrap_or(from);
             to = l.strip_prefix("+++ b/").unwrap_or(to);
         } else if let Some((sign @ ("+" | "-"), text)) = l.split_at_checked(1) {
@@ -509,6 +515,7 @@ fn changes(diff: &str) -> Vec<Change> {
                 hunk,
                 line: *line,
                 added,
+                created,
                 text: text.into(),
             });
             *line += 1;

@@ -148,6 +148,11 @@ enum Cmd {
         #[arg(long, default_value = "owner")]
         by: String,
     },
+    #[command(about = "#1479: a merged issue's open rollout (`rollout dismiss`, owner only)")]
+    Rollout {
+        #[command(subcommand)]
+        cmd: crate::propose::Rollout,
+    },
     #[command(about = "Owner only: a rate-limited lane's [wait], one `continue` at shed's reset; logs `limit-picked`")]
     Limit(crate::limit::Pick),
     #[command(
@@ -740,7 +745,12 @@ enum ConfigCmd {
     #[command(
         about = "Propose <file> as the whole new fleet.toml in a thread: validated, its diff a card with [apply] [discard]"
     )]
-    Propose { thread: String, file: PathBuf },
+    Propose {
+        thread: String,
+        file: PathBuf,
+        #[arg(long, help = "The merged issue whose open rollout its apply closes")]
+        rollout: Option<u64>,
+    },
     #[command(about = "Owner only: apply a proposal (backup kept, doctor run)")]
     Apply { id: String },
     #[command(about = "Owner only: discard a proposal")]
@@ -1771,8 +1781,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Config { cmd } => {
                     let (id, apply) = match cmd {
                         ConfigCmd::Show => return crate::config::show(&cfg, out).map(|()| 0),
-                        ConfigCmd::Propose { thread, file } => {
-                            return crate::propose::propose(ctx, &cfg, out, &thread, &file).map(|()| 0)
+                        ConfigCmd::Propose { thread, file, rollout } => {
+                            return crate::propose::propose(ctx, &cfg, out, (&thread, &file), rollout).map(|()| 0)
                         }
                         ConfigCmd::Apply { id } => (id, true),
                         ConfigCmd::Discard { id } => (id, false),
@@ -1934,6 +1944,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             (w.who, w.what) = ("drive", l);
                         }
                     }
+                    rows.extend(crate::propose::rollout_rows(&events, fleet.as_deref()));
                     let slots = crate::drive::holders(ctx, &cfg, r);
                     if !json && !slots.is_empty() {
                         writeln!(out, "slots: {slots}")?;
@@ -2098,6 +2109,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
+                Cmd::Rollout { cmd } => writeln!(out, "{}", cmd.run(ctx, &cfg)?)?,
                 Cmd::Limit(p) => crate::limit::pick(ctx, r, out, &p)?,
                 Cmd::Unpark { fleet, issue, by } => gate::unpark(ctx, &cfg, out, (&fleet, issue), &by)?,
                 Cmd::Brief { fleet, issue } => {
@@ -2296,7 +2308,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     }
     let thread = crate::config::env("DROVER_THREAD").unwrap_or_default();
     if let Some(text) = hook::issue_filed(&input).filter(|_| !thread.is_empty()) {
-        if let Err(e) = Config::load(&ctx.config).and_then(|cfg| crate::orchestrator::flow(ctx, &cfg, &thread, &text)) {
+        if let Err(e) = Config::load(&ctx.config).and_then(|c| crate::propose::filed(ctx, &c, &thread, &text, &input)) {
             crate::stderr!("drover hook: {e:#}");
         }
     }
