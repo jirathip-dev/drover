@@ -3,7 +3,7 @@ use crate::events::{append, emit, fold, last_spawn, working, Event, Json};
 use crate::hosts::On;
 use crate::runner::{argv, json, Runner};
 use crate::Ctx;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::json;
 use std::io::Write;
 use std::path::Path;
@@ -146,6 +146,24 @@ pub fn body(
         }
     }
     Ok(())
+}
+
+/// `drover pr-body`: `body` on `file` against `head`, the merge walk read from git in the working directory; exit 1 with the reason.
+pub fn pr_body(r: &dyn Runner, file: &Path, head: &str, base: &str, out: &mut dyn Write) -> Result<i32> {
+    if head.len() < 7 || !head.bytes().all(|b| b.is_ascii_hexdigit()) {
+        anyhow::bail!("--head {head:?} is no commit sha: give at least 7 hex digits");
+    }
+    let text = std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
+    let git = |a: &[&str]| crate::runner::ok(r, "git", a).ok().map(|s| s.trim().to_string());
+    let subject = |c: &str| git(&["log", "-1", "--format=%s", c]);
+    let parent = |c: &str| git(&["rev-parse", &format!("{c}^1")]);
+    match body(&text, head, base, &subject, &parent) {
+        Ok(()) => Ok(0),
+        Err(e) => {
+            writeln!(out, "PR_BODY: {e}")?;
+            Ok(1)
+        }
+    }
 }
 
 pub(crate) fn ungated(
