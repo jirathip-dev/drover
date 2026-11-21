@@ -416,7 +416,9 @@ enum Cmd {
         #[arg(long)]
         id: Option<String>,
     },
-    #[command(about = "CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it")]
+    #[command(
+        about = "CI: lines of the `count` globs (less `exclude`) in --config, default src/**/*.rs, against its `line_cap` or a higher one in cap.d/; exit 1 over it"
+    )]
     #[command(hide = true)]
     CapCheck {
         #[arg(long)]

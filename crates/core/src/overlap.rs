@@ -144,7 +144,7 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
             == git(r, dir, &["rev-parse", &format!("{h}^{{tree}}")]).ok()
 }
 
-/// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` against the first `[fleet.<n>] line_cap` in `config`; under `warn_within` lines of headroom it warns and still passes. `web/src/**/*.ts` lines are reported, never capped. With `base`, every commit since it that edits the cap must carry a `Cap:` trailer.
+/// `drover cap-check`: the lines `config` names to count (`Counted`) against its first `line_cap`, top-level or `[fleet.<n>]`, or a higher one in `cap.d/`; under `warn_within` lines of headroom it warns and still passes. `web/src/**/*.ts` lines are reported, never capped. With `base`, every commit since it that edits the cap must carry a `Cap:` trailer.
 pub fn cap_check(r: &dyn Runner, config: &Path, base: Option<&str>, out: &mut dyn std::io::Write) -> Result<i32> {
     let mut bad = 0;
     if let Some(b) = base {
@@ -182,18 +182,20 @@ pub fn cap_check(r: &dyn Runner, config: &Path, base: Option<&str>, out: &mut dy
     let raises = files
         .iter()
         .map(|p| Ok((p.display().to_string(), std::fs::read_to_string(p)?)));
+    let text = std::fs::read_to_string(config)?;
+    let missing = || anyhow::anyhow!("no line_cap in {}", config.display());
     let Cap {
         lines: cap,
         warn_within: warn,
         from,
     } = highest(
         &config.display().to_string(),
-        &std::fs::read_to_string(config)?,
+        &text,
         raises.collect::<Result<Vec<_>>>()?,
     )
-    .ok_or_else(|| anyhow::anyhow!("no [fleet.<name>] line_cap in {}", config.display()))?;
-    let crates = std::fs::read_dir("crates").into_iter().flatten().flatten();
-    let n = lines(Path::new("src"), "rs") + crates.map(|c| lines(&c.path().join("src"), "rs")).sum::<usize>();
+    .ok_or_else(missing)?;
+    let rule: Counted = toml::Value::Table(cap_table(&text).ok_or_else(missing)?).try_into()?;
+    let n = rule.lines();
     writeln!(out, "src lines (formatted): {n} / cap {cap}")?;
     if from != config.display().to_string() {
         writeln!(out, "cap raised by {from}")?;
@@ -309,15 +311,75 @@ pub fn cap_at_sha(r: &dyn Runner, dir: &Path, sha: &str) -> Option<Cap> {
     highest("ci/cap.toml", &base, raises.collect())
 }
 
+fn cap_table(text: &str) -> Option<toml::Table> {
+    let v: toml::Table = toml::from_str(text).ok()?;
+    let fleets = v
+        .get("fleet")
+        .and_then(toml::Value::as_table)
+        .into_iter()
+        .flat_map(|f| f.values());
+    let fleets = fleets.filter_map(toml::Value::as_table);
+    std::iter::once(&v)
+        .chain(fleets)
+        .find(|t| t.contains_key("line_cap"))
+        .cloned()
+}
+
 fn limits(text: &str) -> Option<(i64, i64)> {
-    let v: toml::Value = toml::from_str(text).ok()?;
-    let t = v
-        .get("fleet")?
-        .as_table()?
-        .values()
-        .find(|t| t.get("line_cap").is_some())?;
+    let t = cap_table(text)?;
     let warn = t.get("warn_within").and_then(toml::Value::as_integer).unwrap_or(500);
-    Some((t["line_cap"].as_integer()?, warn))
+    Some((t.get("line_cap")?.as_integer()?, warn))
+}
+
+#[derive(serde::Deserialize)]
+struct Counted {
+    #[serde(default = "rust_globs")]
+    count: Vec<String>,
+    #[serde(default)]
+    exclude: Vec<String>,
+    #[serde(default)]
+    skip_blank: bool,
+    #[serde(default)]
+    stop_at_cfg_test: bool,
+}
+
+fn rust_globs() -> Vec<String> {
+    vec!["src/**/*.rs".into(), "crates/*/src/**/*.rs".into()]
+}
+
+impl Counted {
+    fn lines(&self) -> usize {
+        let hit = |gs: &[String], p: &str| gs.iter().any(|g| crate::config::glob(g.as_bytes(), p.as_bytes()));
+        let mut files = std::collections::BTreeSet::new();
+        for g in &self.count {
+            let root: Vec<&str> = g.split('/').take_while(|c| !c.contains(['*', '?'])).collect();
+            walk(&root.join("/"), &mut files);
+        }
+        let files = files
+            .into_iter()
+            .filter(|p| hit(&self.count, p) && !hit(&self.exclude, p));
+        files.map(|p| self.file_lines(&p)).sum()
+    }
+
+    fn file_lines(&self, p: &str) -> usize {
+        let cut = self.stop_at_cfg_test && Path::new(p).extension().is_some_and(|x| x == "rs");
+        let text = std::fs::read_to_string(p).unwrap_or_default();
+        let body = text
+            .lines()
+            .take_while(|l| !(cut && l.trim_start().starts_with("#[cfg(test)]")));
+        body.filter(|l| !(self.skip_blank && l.trim().is_empty())).count()
+    }
+}
+
+fn walk(p: &str, out: &mut std::collections::BTreeSet<String>) {
+    let dir = if p.is_empty() { "." } else { p };
+    if Path::new(dir).is_file() {
+        out.insert(p.to_string());
+    }
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        walk(&if p.is_empty() { name } else { format!("{p}/{name}") }, out);
+    }
 }
 
 /// `(sha, lines, cap, warn_within)` at the fleet's fetched integration head with a `ci/cap.toml`, by git alone; cached per sha (`serve`'s banner reads the cache).

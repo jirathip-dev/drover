@@ -1865,6 +1865,7 @@ fn strings(key: &str, v: &toml::Value) -> Vec<(String, String)> {
 pub fn glob(g: &[u8], s: &[u8]) -> bool {
     match g {
         [] => s.is_empty(),
+        [b'*', b'*', b'/', rest @ ..] if glob(rest, s) => true,
         [b'*', b'*', rest @ ..] => (0..=s.len()).any(|i| glob(rest, s.get(i..).unwrap_or_default())),
         [b'*', rest @ ..] => (0..=s.len())
             .take_while(|&i| i == 0 || s.get(i - 1) != Some(&b'/'))
