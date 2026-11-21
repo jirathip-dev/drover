@@ -30,6 +30,7 @@ mod chat;
 mod conn;
 #[path = "cooee.rs"]
 mod cooee;
+mod device;
 mod fresh;
 mod hub;
 mod jobs;
@@ -154,10 +155,17 @@ fn build<T>(f: impl FnOnce() -> T) -> T {
 }
 
 pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> Result<()> {
-    serve_with(ctx, r, l, read_only, None)
+    serve_with(ctx, r, l, read_only, None, None)
 }
 
-pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho: Option<&Handover>) -> Result<()> {
+pub fn serve_with(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    l: TcpListener,
+    read_only: bool,
+    ho: Option<&Handover>,
+    device: Option<&TcpListener>,
+) -> Result<()> {
     devices::cooee_token(ctx)?;
     let addr = (!read_only)
         .then(|| l.local_addr().map(|a| a.to_string()))
@@ -233,6 +241,9 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
                 }
             }
         });
+        if let Some(d) = device {
+            sc.spawn(move || s.device(d, ho));
+        }
         let sock = ho.and_then(Handover::ready);
         if let Some((h, sock)) = ho.zip(sock) {
             sc.spawn(move || h.control(&sock));
