@@ -63,7 +63,8 @@ fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role:
     let subject = |c: &str| git(&["log", "-1", "--format=%s", c]);
     let parent = |c: &str| git(&["rev-parse", &format!("{c}^1")]);
     let text = pr.at("body").as_str().unwrap_or_default();
-    if let Err(e) = body(text, &head, &f.integration, &subject, &parent) {
+    let ui = parity(&git, &head, &f.integration);
+    if let Err(e) = body(text, (&head, ui), &f.integration, &subject, &parent) {
         return refuse("PR_BODY", e);
     }
     let limit = Duration::from_secs(cfg.limits.gate_check_minutes * 60);
@@ -108,10 +109,18 @@ fn checks(f: &Fleet, on: &On, wt: &Path) -> Vec<String> {
         .collect()
 }
 
-/// `body` has `## For humans`, no "Generated with" line, and names `head` as `scripts/evidence-check.sh` does.
+fn parity(git: &dyn Fn(&[&str]) -> Option<String>, head: &str, base: &str) -> bool {
+    let ui = |p: &str| {
+        p.starts_with("web/") || p.starts_with("assets/") || p.ends_with("screens.rs") || p.ends_with("serve.rs")
+    };
+    git(&["cat-file", "-e", &format!("{head}:docs/parity.md")]).is_some()
+        && git(&["diff", "--name-only", &format!("origin/{base}...{head}")]).is_some_and(|d| d.lines().any(ui))
+}
+
+/// `body` has `## For humans`, a `## Parity` section when `ui`, no "Generated with" line, and names `head` as `scripts/evidence-check.sh` does.
 pub fn body(
     body: &str,
-    head: &str,
+    (head, ui): (&str, bool),
     base: &str,
     subject: &dyn Fn(&str) -> Option<String>,
     parent: &dyn Fn(&str) -> Option<String>,
@@ -119,6 +128,9 @@ pub fn body(
     let lines = || body.lines().map(str::trim);
     if !lines().any(|l| l.eq_ignore_ascii_case("## For humans")) {
         return Err("the PR body has no `## For humans` section: add 2-4 plain lines, `gh pr edit --body`".into());
+    }
+    if ui && !lines().any(|l| l.eq_ignore_ascii_case("## Parity")) {
+        return Err("the PR touches web/, assets/, screens.rs or serve.rs and the repo has docs/parity.md, but the body has no `## Parity` section: name each parity row it changes or drops (or `none`), `gh pr edit --body`".into());
     }
     let generated = |l: &str| {
         l.trim_start_matches(|c: char| !c.is_ascii_alphanumeric())
@@ -164,7 +176,8 @@ pub fn pr_body(r: &dyn Runner, file: &Path, head: &str, base: &str, out: &mut dy
     let git = |a: &[&str]| crate::runner::ok(r, "git", a).ok().map(|s| s.trim().to_string());
     let subject = |c: &str| git(&["log", "-1", "--format=%s", c]);
     let parent = |c: &str| git(&["rev-parse", &format!("{c}^1")]);
-    match body(&text, head, base, &subject, &parent) {
+    let ui = parity(&git, head, base);
+    match body(&text, (head, ui), base, &subject, &parent) {
         Ok(()) => Ok(0),
         Err(e) => {
             writeln!(out, "PR_BODY: {e}")?;
