@@ -415,6 +415,57 @@ fn a_check_that_cannot_start_or_times_out_refuses_the_done() {
     assert_eq!(kinds(&c, "done-refused").len(), 2);
 }
 
+fn gatekept(name: &str, code: i32) -> (Repo, drover::Ctx, FakeShed, PathBuf) {
+    let (repo, c, sh, bin) = checked(name, (0, 0));
+    let gk = repo.wt.join(".gatekeeper");
+    std::fs::create_dir_all(&gk).unwrap();
+    let ok = (1..=12).map(|i| format!("ok gate-{i}\n")).collect::<String>();
+    let say = format!("{ok}FAIL fmt: a.rs:2 unformatted\nFAIL arch: a.rs:2 comment");
+    tool(&gk, "run", code, &say);
+    (repo, c, sh, bin)
+}
+
+#[test]
+fn a_gatekeeper_wrapper_replaces_the_default_checks() {
+    let (repo, c, _sh, bin) = gatekept("done-gk-clean", 0);
+    let f = fake(&repo.head);
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    let wt = repo.wt.canonicalize().unwrap();
+    let ran = std::fs::read_to_string(repo.wt.join(".gatekeeper/ran.log")).unwrap();
+    assert_eq!(ran, format!("run check {}\n", wt.display()));
+    assert!(!bin.join("ran.log").exists(), "arch-check and fmt do not run");
+}
+
+#[test]
+fn a_failing_gatekeeper_run_is_refused_with_its_failing_gates() {
+    let (repo, c, _sh, bin) = gatekept("done-gk-fail", 1);
+    let f = fake(&repo.head);
+    let (out, _) = refused(&c, &ui(Git::new(&f), &bin, false), "DONE_CHECK");
+    assert!(out.contains("`./.gatekeeper/run check` failed (exit 1):"), "{out}");
+    assert!(
+        out.contains("FAIL fmt: a.rs:2 unformatted\nFAIL arch: a.rs:2 comment"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_fleets_done_checks_win_over_the_gatekeeper_wrapper() {
+    let (repo, c, _sh, bin) = gatekept("done-gk-set", 1);
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    let cfg = cfg.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\ndone_checks = [\"cargo fmt --check\"]",
+    );
+    std::fs::write(&c.config, cfg).unwrap();
+    let f = fake(&repo.head);
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!repo.wt.join(".gatekeeper/ran.log").exists());
+    let ran = std::fs::read_to_string(bin.join("ran.log")).unwrap();
+    assert!(ran.starts_with("cargo fmt --check "), "{ran}");
+}
+
 struct Ui<'a> {
     git: Git<'a>,
     bin: PathBuf,

@@ -469,7 +469,7 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// Fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<Premerge>>,
-    /// Commands `turn done` runs in the lane's worktree before any review; unset = `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
+    /// Commands `turn done` runs in the lane's worktree before any review; unset = `./.gatekeeper/run check` with `.gatekeeper/run`, else `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
     pub done_checks: Option<Vec<String>>,
     /// The repo's own line-cap script `drover cap` reads `N / cap M` lines from; unset = the first `premerge` check naming a cap, else the built-in Rust count.
     pub cap_script: Option<String>,
