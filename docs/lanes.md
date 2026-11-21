@@ -64,7 +64,9 @@ A fleet's `env` table is exported into every lane's shell. #630: every lane gets
 `CARGO_TARGET_DIR=<root>/.build/<agent>` under its workspace root (docs/hosts.md). At spawn it is cloned
 copy-on-write (`cp -c`, `--reflink=always`; a `build-cloned` event with `from`) from the newest build folder of the
 same fleet's lanes on that root, never across volumes, so a new lane skips a full rebuild and lanes never wait on
-each other's cargo lock. A fleet's own `CARGO_TARGET_DIR` in `env`
+each other's cargo lock. #1480: on a `[hosts]` machine the clone runs there, in one ssh call (`cp -cR` on macOS,
+`cp -R --reflink=always` elsewhere); with no sibling nothing is logged, and a filesystem without reflinks (ext4)
+skips with the error in `build-cloned.errors`, never a full copy. A fleet's own `CARGO_TARGET_DIR` in `env`
 or `shared_cache` (#361) replaces it. Over `[limits] build_budget_gb` (default 20), drive's pass removes the
 build folders' profiles (`<agent>/debug`, ...), oldest first, whose `.cargo-lock` no cargo holds, never one
 building nor a live lane's: on the main host

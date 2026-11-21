@@ -1518,19 +1518,16 @@ pub fn spawn(
     dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
     dirs.sort();
     dirs.dedup();
-    let dirs = if reopen || on.machine.is_some() {
-        &[][..]
-    } else {
-        &dirs[..]
-    };
+    dirs.retain(|_| !reopen && on.machine.is_none());
     let target = p.env.get("CARGO_TARGET_DIR").filter(|_| on.machine.is_none());
-    if let Some(d) = (p.family == "rev").then(|| reuse(&p, dirs, target, &agents)).flatten() {
+    if let Some(d) = (p.family == "rev").then(|| reuse(&p, &dirs, target, &agents)).flatten() {
         event("build-reused", d)?;
     }
     let (res, cloned) = std::thread::scope(|s| {
         let c = s.spawn(|| {
             let warm = target.and_then(|t| clone_warm(r, fleet, Path::new(t), f.swift_build));
-            [clone_build(r, dirs, &f.local_path(), &p.worktree), warm]
+            let warm = warm.or_else(|| crate::roots::clone_warm_on(&on, fleet, p.env.get("CARGO_TARGET_DIR")?));
+            [clone_build(r, &dirs, &f.local_path(), &p.worktree), warm]
         });
         let res = (|| -> Result<bool> {
             let kicked = match bt.0.acp {

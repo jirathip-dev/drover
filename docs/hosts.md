@@ -43,7 +43,8 @@ enabled = true          # false: no new lanes go there (see below)
 ## Workspace roots (#630)
 
 Everything drover makes on a host lives under its workspace root: worktrees at `<root>/<repo>/<lane>`, the
-each lane's Cargo build at `<root>/.build/<agent>` (cloned from its fleet's warmest one on the same root) and its
+each lane's Cargo build at `<root>/.build/<agent>` (cloned copy-on-write from its fleet's warmest one on the same root, on that host; no reflinks, e.g. ext4: it starts
+cold and `build-cloned` logs why) and its
 scratch under `<root>/.build/.scratch`.
 
 `roots = ["/Volumes/NVMe/drover", "~/.local/share/drover/work"]` lists several in order (an external drive
