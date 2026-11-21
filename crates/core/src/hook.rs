@@ -330,6 +330,12 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             "REFUSED CARD_FORBIDDEN: this command {w}; an orchestrator never runs it (#538)"
         ));
     }
+    let Some(inner) = wrapped(cmd) else {
+        return Some(OPAQUE_SHELL.into());
+    };
+    if let Some(r) = inner.iter().find_map(|i| bash(i, &cwd, p, cur_branch)) {
+        return Some(r);
+    }
     let runs = |c: &str| denied(cmd, &[Deny::Cmd(c.into())]).is_some();
     if runs("pgrep") && runs("kill") {
         return Some(NO_BROAD_KILL.into());
@@ -410,6 +416,95 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         }
     }
     None
+}
+
+/// A shell or `eval` whose inner text the guard cannot read: it never runs (#1481).
+pub const OPAQUE_SHELL: &str =
+    "REFUSED OPAQUE_SHELL: the guard cannot read what this shell or eval runs (a variable, a \
+                                decoded or downloaded script); run the command as plain text (#1481)";
+
+struct Word {
+    text: String,
+    live: bool,
+}
+
+fn commands(cmd: &str) -> Vec<(bool, Vec<Word>)> {
+    let mut out = vec![(false, Vec::<Word>::new())];
+    let (mut cur, mut live, mut quote) = (String::new(), false, None::<char>);
+    let mut cs = cmd.chars().peekable();
+    while let Some(c) = cs.next() {
+        let sep = quote.is_none() && (c.is_whitespace() || ";|&()`".contains(c));
+        if sep && !cur.is_empty() {
+            if let Some((_, ws)) = out.last_mut() {
+                ws.push(Word {
+                    text: std::mem::take(&mut cur),
+                    live: std::mem::take(&mut live),
+                });
+            }
+        }
+        match (quote, c) {
+            (_, c) if sep => {
+                if !c.is_whitespace() {
+                    let piped = c == '|' && cs.next_if_eq(&'|').is_none();
+                    out.push((piped, vec![]));
+                }
+            }
+            (Some(q), c) if c == q => quote = None,
+            (Some('\''), c) => cur.push(c),
+            (_, '\\') => cur.extend(cs.next()),
+            (None, '\'' | '"') => quote = Some(c),
+            (_, c) => {
+                live |= matches!(c, '$' | '`');
+                cur.push(c);
+            }
+        }
+    }
+    if let Some((_, ws)) = out.last_mut().filter(|_| !cur.is_empty()) {
+        ws.push(Word { text: cur, live });
+    }
+    out
+}
+
+fn head(ws: &[Word]) -> Option<(&Word, &[Word])> {
+    let prefix = |w: &Word| {
+        w.text.contains('=')
+            || w.text
+                .starts_with(['-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'])
+            || [
+                "env", "sudo", "exec", "command", "nohup", "time", "xargs", "nice", "timeout",
+            ]
+            .contains(&word(&w.text))
+    };
+    let i = ws.iter().position(|w| !prefix(w))?;
+    ws.get(i..)?.split_first()
+}
+
+fn wrapped(cmd: &str) -> Option<Vec<String>> {
+    let (mut inner, mut doc) = (vec![], false);
+    for (piped, ws) in commands(cmd) {
+        let fed = piped && !doc;
+        doc = ws.iter().any(|w| w.text.starts_with("<<"));
+        let Some((h, rest)) = head(&ws) else { continue };
+        match word(&h.text) {
+            "sh" | "bash" | "zsh" => {
+                let flags = rest.iter().take_while(|w| w.text.starts_with('-'));
+                let c = flags.clone().any(|w| !w.text.starts_with("--") && w.text.contains('c'));
+                match rest.iter().find(|w| !w.text.starts_with('-')) {
+                    Some(s) if c => inner.push(s.text.clone()),
+                    None if fed && !doc => return None,
+                    _ => {}
+                }
+            }
+            "eval" => inner.push(rest.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ")),
+            _ => {}
+        }
+    }
+    let opaque = |i: &String| {
+        commands(i)
+            .iter()
+            .any(|(_, ws)| head(ws).is_some_and(|(h, _)| h.live && h.text.starts_with(['$', '`'])))
+    };
+    (!inner.iter().any(opaque)).then_some(inner)
 }
 
 fn redirects(seg: &str) -> Vec<String> {

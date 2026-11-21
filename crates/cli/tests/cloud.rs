@@ -648,7 +648,10 @@ fn boot_fake(gh_in: bool) -> Fake {
 #[test]
 fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_terminal() {
     let (c, cfg) = running("cloud-boot");
-    let (r, here, cloud) = (boot_fake(false), FakeShed::new(), FakeShed::new());
+    let r = boot_fake(false)
+        .once(&step("command -v just"), 1, "")
+        .reply(&step("apt_ just"), "");
+    let (here, cloud) = (FakeShed::new(), FakeShed::new());
     let mut out = vec![];
     let there = on_cloud(&r, &cloud);
     let e = drover::cloud::bootstrap(&c, &cfg, &here.on(&there), "cloud1", &mut out).unwrap_err();
@@ -658,13 +661,14 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
     );
     let out = String::from_utf8(out).unwrap();
     assert!(
-        out.contains("✓ git — there") && out.contains("✓ gh — installed"),
+        out.contains("✓ git — there") && out.contains("✓ gh — installed") && out.contains("✓ just — installed"),
         "{out}"
     );
     assert!(out.contains("✓ drover — installed"), "{out}");
     let order = [
         "command -v git",
         "apt_ gh",
+        "apt_ just",
         "command -v claude",
         "command -v cargo",
         "grep -qx 'MaxSessions 32' /etc/ssh/sshd_config.d/10-drover.conf",
@@ -724,6 +728,10 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
     let out = String::from_utf8(out).unwrap();
     assert!(
         out.contains("✓ git over https — installed") && out.contains("bootstrapped"),
+        "{out}"
+    );
+    assert!(
+        out.contains("✓ just — there") && !r.0.called(&step("apt_ just")),
         "{out}"
     );
     let clone = "git clone --single-branch --branch 'staging' https://github.com/jirathip-dev/sendmeter.git \

@@ -71,6 +71,7 @@
 1 hermes_hooks
 2 history
 3 hook
+1 hook_wrapped
 3 host_deadline
 2 host_down
 1 host_history
@@ -192,6 +193,7 @@
 3 setup_neutral
 2 setup_terminal
 3 shed
+1 shed_batch
 4 shed_native
 4 shed_others
 4 shed_pin
