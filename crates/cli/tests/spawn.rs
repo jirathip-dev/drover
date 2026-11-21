@@ -833,31 +833,31 @@ fn claude_dry_run_names_every_role() {
 #[test]
 fn lane_title_strips_prefixes_and_cuts_at_words() {
     use drover::spawn::lane_title;
-    let h = "synergy · impl #2840";
+    let h = "tangelo · impl #2840";
     assert_eq!(
         lane_title(h, "M- prefix for Mango numbers"),
-        "synergy · impl #2840 · M- prefix for Mango numbers"
+        "tangelo · impl #2840 · M- prefix for Mango numbers"
     );
     assert_eq!(
         lane_title(h, "P0: feat(api)!: drop v1"),
-        "synergy · impl #2840 · drop v1"
+        "tangelo · impl #2840 · drop v1"
     );
     assert_eq!(
         lane_title(h, "spawn: informative titles"),
-        "synergy · impl #2840 · informative titles"
+        "tangelo · impl #2840 · informative titles"
     );
-    assert_eq!(lane_title(h, "Fix 10:30 cron"), "synergy · impl #2840 · Fix 10:30 cron");
+    assert_eq!(lane_title(h, "Fix 10:30 cron"), "tangelo · impl #2840 · Fix 10:30 cron");
     assert_eq!(lane_title(h, "  "), h);
     let long = lane_title(
         h,
         "spawn: informative lane titles instead of Claude auto-titles from the brief prompt",
     );
-    assert_eq!(long, "synergy · impl #2840 · informative lane titles instead of…");
+    assert_eq!(long, "tangelo · impl #2840 · informative lane titles instead of…");
     assert!(long.chars().count() <= 60);
-    assert_eq!(lane_title(h, "แก้ไขปุ่มชำระเงิน"), "synergy · impl #2840 · แก้ไขปุ่มชำระเงิน");
+    assert_eq!(lane_title(h, "แก้ไขปุ่มชำระเงิน"), "tangelo · impl #2840 · แก้ไขปุ่มชำระเงิน");
     let thai = lane_title(h, &"ภาษาไทย".repeat(10));
     assert!(thai.ends_with('…') && thai.chars().count() <= 60, "{thai}");
-    assert!(thai.starts_with("synergy · impl #2840 · ภาษาไทยภาษาไทย"));
+    assert!(thai.starts_with("tangelo · impl #2840 · ภาษาไทยภาษาไทย"));
 }
 
 #[test]

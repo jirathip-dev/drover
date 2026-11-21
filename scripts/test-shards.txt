@@ -220,7 +220,7 @@
 2 state_write
 1 store
 1 stream_quiet
-2 synergy
+2 tangelo
 2 term_adapter
 4 themes
 2 thread_handoff
