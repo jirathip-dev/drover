@@ -233,6 +233,18 @@ fn make(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch): Opt2,
         d.put("req", json!(r));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-new", d))?;
+    if role(cfg, repo).is_ok() {
+        let waiting = |a: &&Event| {
+            a.kind == "needs-decision"
+                && a.fleet == repo
+                && a.data.get("lane_ask").is_some()
+                && routed_to(&events, a).is_none()
+                && events::closed(&events, a).is_none()
+        };
+        for a in events.iter().filter(waiting) {
+            route_row(ctx, cfg, &id, a)?;
+        }
+    }
     Ok(id)
 }
 
@@ -528,6 +540,12 @@ pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a s
 
 /// Lane ask `a` typed into thread `id`'s orchestrator (started or resumed) as a system line the board hides.
 pub fn lane_ask(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, a: &Event) -> Result<String> {
+    let t = find(&working(&ctx.state)?, id)?.clone();
+    let text = route_row(ctx, cfg, id, a)?;
+    deliver(ctx, cfg, r, &t, &format!("[{id}] system: {text}"))
+}
+
+fn route_row(ctx: &Ctx, cfg: &Config, id: &str, a: &Event) -> Result<String> {
     let s = |k| a.str(k).unwrap_or_default();
     let rec = a.val("recommend").as_u64();
     let opts = a.val("options").as_array().into_iter().flatten().zip(1..);
@@ -549,10 +567,16 @@ pub fn lane_ask(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, a: &Event) ->
         a.fleet,
         s("id")
     );
-    let t = find(&working(&ctx.state)?, id)?.clone();
     let d = json!({"thread": id, "from": "system", "text": text, "lane_ask": a.str("id")});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
-    deliver(ctx, cfg, r, &t, &format!("[{id}] system: {text}"))
+    emit(&ctx.state, cfg, Event::new(ctx.now, &a.fleet, None, "thread-msg", d))?;
+    Ok(text)
+}
+
+/// The thread lane ask `a` was routed to: when asked, else its routing row in a thread opened after.
+pub fn routed_to<'a>(events: &'a [Event], a: &'a Event) -> Option<&'a str> {
+    let row = |e: &&Event| e.kind == "thread-msg" && e.fleet == a.fleet && e.str("lane_ask") == a.str("id");
+    a.str("routed")
+        .or_else(|| events.iter().find(row).and_then(|e| e.str("thread")))
 }
 
 /// Lane ask `a` put to the owner as a choice row in thread `id` (once), `rec` (else its own) recommended; it pushes as an ask.
