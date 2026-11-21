@@ -109,6 +109,30 @@ fn a_private_name_is_refused_by_its_list_index_and_hosts_by_kind() {
     assert!(!out.contains("PUBLIC_LEAK"), "whole names only: {out}");
 }
 
+#[test]
+fn a_host_name_is_a_leak_only_where_it_is_used_as_a_hostname() {
+    let d = dir("hygiene-host-word");
+    let out = bash(
+        &d,
+        "open",
+        "gh pr create --title t --body 'the Bazzite now sends a signed alive message; bazzite is idle.'",
+    );
+    assert!(!out.contains("PUBLIC_LEAK"), "a plain word: {out}");
+    for text in [
+        "ssh bazzite",
+        "me@bazzite",
+        "bazzite:/srv/x",
+        "bazzite:22",
+        "bazzite.local",
+        "--host bazzite",
+        "[hosts.bazzite]",
+        "me@bazzite.example",
+    ] {
+        let out = bash(&d, "open", &format!("gh pr create --title t --body '{text}'"));
+        assert!(out.contains("--body has a host"), "{text}: {out}");
+    }
+}
+
 fn repo(d: &Path, text: &str) -> String {
     let wt = d.join("wt");
     std::fs::create_dir_all(&wt).unwrap();
