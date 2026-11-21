@@ -100,6 +100,12 @@ pub fn run(
     file(ctx, cfg, r, out, (fleet, "lesson", by), (&title, &body))
 }
 
+/// Run `drover lesson <fleet>`: exit 4 when the lane's prompt was not confirmed.
+pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: Option<String>) -> Result<i32> {
+    let fleet = fleet.context("usage: drover lesson <FLEET> | drover lesson digest <FLEET>")?;
+    Ok(if run(ctx, cfg, r, out, &fleet, None)? { 0 } else { 4 })
+}
+
 pub(crate) fn file(
     ctx: &Ctx,
     cfg: &Config,

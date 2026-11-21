@@ -484,6 +484,8 @@ pub struct Fleet {
     pub hotspots: Option<String>,
     /// `weekly` has `tick` run `drover triage` every 7 days; unset or `off`: only on demand.
     pub triage: Option<String>,
+    /// `monthly` has `tick` run `drover deps` every 30 days and the advisory check daily; unset or `off`: only on demand.
+    pub deps: Option<String>,
     /// `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
     #[serde(default)]
     pub heavy: BTreeMap<String, Vec<String>>,
@@ -1791,9 +1793,9 @@ impl Fleet {
             .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
     }
-    /// The configured role a lane runs as: a lesson or triage lane is impl's unless its own role is set.
+    /// The configured role a lane runs as: a lesson, triage or deps lane is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
-        if matches!(role, "lesson" | "triage") && !self.role.contains_key(role) {
+        if matches!(role, "lesson" | "triage" | "deps") && !self.role.contains_key(role) {
             "impl"
         } else {
             role

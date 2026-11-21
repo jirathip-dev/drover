@@ -369,6 +369,8 @@ enum Cmd {
     },
     #[command(about = "#1100: file this week's triage issue and spawn its lane, or a triage lane's verb")]
     Triage(crate::triage::Args),
+    #[command(about = "#1488: file this month's deps issue, queue it and spawn its lane (orchestrators, owner)")]
+    Deps(crate::deps::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
     #[command(alias = "host")]
     Hosts {
@@ -1295,6 +1297,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )
         }
         Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &crate::repo_path(&rules), out),
+        Cmd::Hygiene { cmd } => return crate::hygiene::run(ctx, r, out, cmd),
         Cmd::PrBody { file, head, base } => return crate::done::pr_body(r, &file, &head, &base, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
@@ -1799,9 +1802,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Wip {
                     cmd: WipCmd::Prune { fleet, dry_run },
                 } => check::prune(ctx, &cfg, r, out, &fleet, dry_run)?,
-                Cmd::Hygiene {
-                    cmd: crate::hygiene::Cmd::Scan { fleet },
-                } => crate::hygiene::scan(ctx, &cfg, r, out, &fleet)?,
                 Cmd::Secret { cmd } => match cmd {
                     SecretCmd::Request { thread, name, why } => {
                         crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
@@ -1994,8 +1994,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
-                        check::strays(ctx, &cfg, out, yes)?;
-                        check::secrets_files(ctx, out, yes)?;
+                        check::strays(ctx, &cfg, out, yes).and_then(|()| check::secrets_files(ctx, out, yes))?;
                         check::remote_orphans(&cfg, r, out, (orphans && yes, yes))?;
                         for f in cfg.fleet.keys().filter(|f| fleet.as_ref().is_none_or(|x| x == *f)) {
                             if let Err(e) = check::prune(ctx, &cfg, r, out, f, !yes) {
@@ -2104,13 +2103,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(LessonCmd::Apply { fleet, rules }),
                     ..
                 } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?,
-                Cmd::Lesson { fleet, .. } => {
-                    let fleet = fleet.context("usage: drover lesson <FLEET> | drover lesson digest <FLEET>")?;
-                    if !crate::lesson::run(ctx, &cfg, r, out, &fleet, None)? {
-                        return Ok(4);
-                    }
-                }
+                Cmd::Lesson { fleet, .. } => return crate::lesson::cli(ctx, &cfg, r, out, fleet),
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
+                Cmd::Deps(a) => return crate::deps::cli(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
