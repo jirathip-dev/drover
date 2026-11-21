@@ -1717,7 +1717,6 @@ pub(crate) fn owner_refusal(code: &str) -> bool {
     let owner = [
         "RESPAWN_LOOP",
         "DESIGN_MAIN_ONLY",
-        "HOST_OFFLINE",
         "MCP_FORBIDDEN",
         "ACP_UNGUARDED",
         "ACCOUNT_ENV",
@@ -2143,6 +2142,8 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
             None => (format!("error: {e:#}"), Some("ERROR")),
         },
     };
+    let offline = matches!(code, Some("EXIT" | "ERROR")) && result.contains(crate::hosts::OFFLINE);
+    let code = if offline { Some("HOST_OFFLINE") } else { code };
     if let Some(n) = issue.filter(|_| code.is_some() && c.first() == Some(&"spawn") && SLOT.get()) {
         crate::db::release(&ctx.state, &format!("spawn-{fleet}-{n}.pending"), None);
     }
