@@ -2,16 +2,52 @@ mod common;
 use common::*;
 use drover::events::{append, read, Event};
 use drover::runner::{Out, Runner};
+use drover::sim::Point;
 use serde_json::json;
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::sync::{Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const NOW: u64 = 1_000_000;
-const HOLD: Duration = Duration::from_secs(20);
+const COST_MS: u64 = 700;
+const PREMERGE_MS: u64 = 600_000;
+const SPAWN_MS: u64 = 180_000;
+const GUARD: Duration = Duration::from_secs(60);
+
+thread_local!(static SPENT: Cell<u64> = const { Cell::new(0) });
+thread_local!(static START: Cell<u64> = const { Cell::new(0) });
+static VERDICT: Mutex<Option<u64>> = Mutex::new(None);
+
+fn clock(at_ms: u64) {
+    SPENT.set(at_ms);
+    drover::sim::set(Some(drover::sim::Hooks {
+        now: Box::new(|| NOW + SPENT.get() / 1000),
+        pid: std::process::id(),
+        point: Box::new(|p| {
+            if matches!(p, Point::Append(e) if e.is("verdict", "sendmeter", 3)) {
+                VERDICT.lock().unwrap().get_or_insert(SPENT.get());
+            }
+        }),
+    }));
+}
+
+fn charge(ms: u64, line: &str) {
+    SPENT.set(SPENT.get() + ms);
+    if line.contains("issue-2") {
+        START.set(START.get() + ms);
+    }
+}
 
 fn head(n: u64) -> String {
     format!("{n}{}", "a".repeat(39))
+}
+
+#[derive(Default)]
+struct Held {
+    what: Vec<&'static str>,
+    released: bool,
+    settled: usize,
 }
 
 struct Boats {
@@ -19,34 +55,49 @@ struct Boats {
     local: &'static FakeShed,
     remote: Mutex<Vec<String>>,
     detached: Mutex<Vec<Vec<String>>>,
-    held: Mutex<(Vec<&'static str>, bool)>,
+    held: Mutex<Held>,
     moved: Condvar,
 }
 
 impl Boats {
     fn hold(&self, line: &str) {
-        let job2 = std::thread::current().name() == Some("job-2");
-        let what = match () {
-            () if line.contains("slow-premerge") => "premerge",
-            () if job2 && line.contains("issue-2") => "spawn",
+        let (what, ms) = match () {
+            () if line.contains("slow-premerge") => ("premerge", PREMERGE_MS),
+            () if line.contains("rev-parse --verify --quiet issue-2") => ("spawn", SPAWN_MS),
             () => return,
         };
+        charge(ms, line);
+        if !std::thread::current().name().is_some_and(|n| n.starts_with("job-")) {
+            return;
+        }
         let mut g = self.held.lock().unwrap();
-        g.0.push(what);
+        g.what.push(what);
+        g.settled += 1;
         self.moved.notify_all();
-        let _ = self.moved.wait_timeout_while(g, HOLD, |g| !g.1).unwrap();
+        let (_g, t) = self.moved.wait_timeout_while(g, GUARD, |g| !g.released).unwrap();
+        assert!(!t.timed_out(), "{what} never released");
     }
     fn holding(&self, what: &str) -> usize {
-        self.held.lock().unwrap().0.iter().filter(|w| **w == what).count()
+        self.held.lock().unwrap().what.iter().filter(|w| **w == what).count()
+    }
+    fn settled(&self) {
+        self.held.lock().unwrap().settled += 1;
+        self.moved.notify_all();
+    }
+    fn settle(&self, jobs: usize) {
+        let g = self.held.lock().unwrap();
+        let (_g, t) = self.moved.wait_timeout_while(g, GUARD, |g| g.settled < jobs).unwrap();
+        assert!(!t.timed_out(), "a job neither ended nor reached its hold");
     }
     fn release(&self) {
-        self.held.lock().unwrap().1 = true;
+        self.held.lock().unwrap().released = true;
         self.moved.notify_all();
     }
     fn call(&self, prog: &str, args: &[String]) {
-        self.hold(&format!("{prog} {}", args.join(" ")));
+        let line = format!("{prog} {}", args.join(" "));
+        self.hold(&line);
         if let Some(end) = args.iter().position(|a| a == "--").filter(|_| prog == "ssh") {
-            std::thread::sleep(Duration::from_millis(700));
+            charge(COST_MS, &line);
             self.remote.lock().unwrap().push(args[end - 1].clone());
         }
     }
@@ -61,7 +112,9 @@ impl Runner for Boats {
         self.call(prog, args);
         self.o.run_in(prog, args, input)
     }
-    fn sleep(&self, _: u64) {}
+    fn sleep(&self, secs: u64) {
+        charge(secs * 1000, "");
+    }
     fn shed(&self) -> Option<drover::shed::Shed> {
         Some(self.local.shed())
     }
@@ -177,79 +230,82 @@ fn issue_of(a: &[String]) -> String {
 #[test]
 fn with_a_long_premerge_and_spawn_in_flight_every_pass_ends_under_5s_and_a_verdict_lands_within_5s() {
     let (c, r, rev) = fixture();
-    let verdict = || read(&c.state).unwrap().iter().any(|e| e.is("verdict", "sendmeter", 3));
-    let (mut passes, mut waited) = (vec![], Duration::ZERO);
+    clock(0);
+    let (mut passes, mut waited, mut start) = (vec![], None, 0);
     std::thread::scope(|s| {
-        let jobs = || {
+        let mut jobs = 0;
+        let mut run_jobs = || {
+            let at = SPENT.get();
             for a in std::mem::take(&mut *r.detached.lock().unwrap()) {
                 let (c, r) = (&c, &r);
+                jobs += 1;
                 std::thread::Builder::new()
                     .name(format!("job-{}", issue_of(&a)))
                     .spawn_scoped(s, move || {
+                        clock(at);
                         let a: Vec<&str> = a.iter().map(String::as_str).collect();
-                        run_only(c, r, &a)
+                        run_only(c, r, &a);
+                        r.settled();
                     })
                     .unwrap();
             }
+            r.settle(jobs);
+        };
+        let mut pass = || {
+            let t = SPENT.get();
+            let (code, out) = run_only(&c, &r, &["drive", "sendmeter"]);
+            assert_eq!(code, 0, "{out}");
+            passes.push(SPENT.get() - t);
         };
         look(&c, &r);
         r.remote.lock().unwrap().clear();
-        let first = s.spawn(|| {
-            let t = Instant::now();
-            let (code, out) = run_only(&c, &r, &["drive", "sendmeter"]);
-            (t.elapsed(), code, out)
-        });
-        let t = Instant::now();
-        while (r.holding("premerge") == 0 || r.holding("spawn") == 0) && t.elapsed() < Duration::from_secs(30) {
-            jobs();
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert_eq!(
-            (r.holding("premerge"), r.holding("spawn")),
-            (1, 1),
-            "a merge and a start in flight"
-        );
+        START.set(0);
+        pass();
+        start = START.get();
+        run_jobs();
+        let in_flight = (r.holding("premerge"), r.holding("spawn"));
         std::fs::write(rev.join("verdict.md"), "PASS\nall good\n").unwrap();
-        let t = Instant::now();
-        while !verdict() && t.elapsed() < Duration::from_secs(40) {
-            let p = Instant::now();
-            let (code, out) = run_only(&c, &r, &["drive", "sendmeter"]);
-            passes.push(p.elapsed());
-            assert_eq!(code, 0, "{out}");
-            jobs();
-            let p = Instant::now();
-            while !verdict() && p.elapsed() < Duration::from_secs(1) {
-                std::thread::sleep(Duration::from_millis(20));
+        let t = SPENT.get();
+        for _ in 0..10 {
+            pass();
+            run_jobs();
+            if let Some(v) = *VERDICT.lock().unwrap() {
+                waited = Some(v.saturating_sub(t));
+                break;
             }
         }
-        waited = t.elapsed();
-        let in_flight = (r.holding("premerge"), r.holding("spawn"), r.held.lock().unwrap().1);
-        let (secs, code, out) = first.join().unwrap();
-        passes.push(secs);
-        assert_eq!(code, 0, "{out}");
+        let still = (
+            r.holding("premerge"),
+            r.holding("spawn"),
+            r.held.lock().unwrap().released,
+        );
         r.release();
-        let max = passes.iter().max().copied().unwrap_or_default().as_secs_f64();
+        let max = passes.iter().max().copied().unwrap_or_default();
         eprintln!(
-            "#1321 perf (a premerge and a spawn held in flight, +700 ms per remote call): longest pass {max:.1} s over {} passes, verdict recorded {:.1} s after it was written, remote calls {:?}",
+            "#1321 perf (test clock: a 10 min premerge and a 3 min start in flight, 700 ms per remote call): longest pass {:.1} s over {} passes, verdict recorded {:.1} s after it was written, the first pass's start {:.1} s, remote calls {:?}",
+            ms_secs(max),
             passes.len(),
-            waited.as_secs_f64(),
+            waited.map_or(f64::NAN, ms_secs),
+            ms_secs(start),
             r.remote.lock().unwrap()
         );
-        assert_eq!(in_flight, (1, 1, false), "both still in flight when the verdict landed");
-        assert!(max < 5.0, "the longest pass took {max:.1} s (target < 5)");
-        assert!(waited.as_secs_f64() < 5.0, "the verdict took {waited:?} (target < 5 s)");
+        assert_eq!(in_flight, (1, 1), "a merge and a start in flight");
+        assert_eq!(still, (1, 1, false), "both still in flight when the verdict landed");
+        assert!(max < 5_000, "the longest pass took {max} ms (target < 5 s)");
+        assert!(
+            waited.is_some_and(|w| w < 5_000),
+            "the verdict took {waited:?} ms (target < 5 s)"
+        );
+        assert!(start < 1_000, "a start held the plan {start} ms (target < 1 s)");
     });
     let ev = read(&c.state).unwrap();
-    let plan = ev
-        .iter()
-        .find(|e| e.kind == "drive-pass" && e.val("kick").is_null())
-        .unwrap();
     let refused =
         |e: &&Event| e.kind == "driven" && e.str("step") == Some("merge") && e.str("code") == Some("IN_FLIGHT");
     assert!(ev.iter().any(|e| refused(&e)), "a second merge waited for the lease");
-    let start = plan.val("steps")["spawns"].as_f64().unwrap();
-    eprintln!("#1321 perf: the first pass's start step took {start:.1} s");
-    assert!(start < 1.0, "a start held the plan {start:.1} s (target < 1)");
+}
+
+fn ms_secs(ms: u64) -> f64 {
+    Duration::from_millis(ms).as_secs_f64()
 }
 
 #[test]
