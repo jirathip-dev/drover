@@ -168,6 +168,7 @@
 2 respawn_pace
 2 retired_keys
 1 rev_no_verdict
+2 rollout
 4 roots
 2 round_images
 1 run_card
