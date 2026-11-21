@@ -182,6 +182,7 @@
 1 sbin_path
 1 schemes
 4 scratch
+3 scene_device
 2 screen_hub
 2 screen_pages
 3 screens_parity

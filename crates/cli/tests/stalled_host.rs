@@ -25,7 +25,7 @@ impl Runner for Stall {
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
-        let remote = prog == "ssh" && args[0] != "-G" && args.iter().any(|a| a == self.far);
+        let remote = prog == "ssh" && args[0] != "-G" && args[1] != "-O" && args.iter().any(|a| a == self.far);
         if !remote || line == PROBE {
             return self.f.run_in(prog, args, input);
         }

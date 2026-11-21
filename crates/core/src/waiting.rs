@@ -382,8 +382,17 @@ fn waits(
     if s.state == "merged" || pr["state"] == "MERGED" && !s.state.starts_with("fix") {
         return w("none", "nothing to do (merged): clean me", s.last_ts, None);
     }
-    if s.state == "closed" || pr["state"] == "CLOSED" {
+    if s.state == "closed" {
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
+    }
+    if pr["state"] == "CLOSED" {
+        let what = "PR closed outside drover: reopen it, respawn impl or drop the issue from the queue";
+        return w(
+            "owner",
+            what,
+            s.last_ts,
+            cmd("spawn", &format!(" {} --supersede", p.start())),
+        );
     }
     let mut on = crate::events::held_on(events, s);
     on.retain(|b| {
