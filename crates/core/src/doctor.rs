@@ -33,6 +33,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
         Ok(cfg) if config_only => config_rows(ctx, &cfg, r, &mut rows),
         Ok(cfg) => {
             checks(ctx, &cfg, r, &mut rows);
+            rows.extend(just_rows(ctx, &cfg, r));
             rows.extend(crate::status::doctor(ctx, &cfg));
         }
         Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
@@ -377,6 +378,27 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             rows.push(format!("! stale fleet.toml on {name}: no longer read → rm {conf}"));
         }
     }
+}
+
+fn just_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<String> {
+    let mut rows = vec![];
+    for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
+        let on = crate::hosts::On::new(r, h.machine.as_deref());
+        let (path, fix) = match on.machine {
+            Some(_) => (crate::cloud::SH.to_string(), format!("drover hosts bootstrap {name}")),
+            None => (
+                format!("export PATH='{}'; ", crate::timer::job_path(ctx, cfg, r)),
+                "install just into a folder on the timer's PATH (apt-get install just, brew install just)".into(),
+            ),
+        };
+        let code = on
+            .run("sh", &argv(&["-c", &format!("{path}command -v just")]))
+            .map_or(255, |o| o.code);
+        if code != 0 && code != 255 {
+            rows.push(format!("! just — missing on {name} → {fix}"));
+        }
+    }
+    rows
 }
 
 fn host_rows(ctx: &Ctx, cfg: &Config, on: &crate::hosts::On, tags: &[String], home: &str) -> Vec<String> {
