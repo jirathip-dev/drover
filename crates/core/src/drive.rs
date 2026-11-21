@@ -714,6 +714,9 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             writeln!(out, "redeliver: {e:#}")?;
         }
     }
+    if let Err(e) = crate::secret::secrets_left(ctx, r, &events) {
+        writeln!(out, "secrets files: {e:#}")?;
+    }
     if let Err(e) = crate::roots::watch(ctx, cfg, r, out) {
         writeln!(out, "roots: {e:#}")?;
     }

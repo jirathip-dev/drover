@@ -1997,7 +1997,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes)?;
-                        check::remote_orphans(&cfg, r, out, orphans && yes)?;
+                        check::secrets_files(ctx, out, yes)?;
+                        check::remote_orphans(&cfg, r, out, (orphans && yes, yes))?;
                         for f in cfg.fleet.keys().filter(|f| fleet.as_ref().is_none_or(|x| x == *f)) {
                             if let Err(e) = check::prune(ctx, &cfg, r, out, f, !yes) {
                                 writeln!(out, "{f}: wip prune failed: {e:#}")?;

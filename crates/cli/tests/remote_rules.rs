@@ -322,3 +322,179 @@ fn a_remote_cap_lane_may_write_the_cap_file_and_no_other_lane_may() {
         assert!(!board.contains("rules stale"), "{board}");
     }
 }
+
+struct Disk<'a> {
+    o: OverSsh<'a>,
+    root: std::path::PathBuf,
+    rm_fails: std::sync::atomic::AtomicUsize,
+}
+
+impl Disk<'_> {
+    fn at(&self, p: &str) -> std::path::PathBuf {
+        self.root.join(p.trim_start_matches('/'))
+    }
+    fn file(&self, args: &[String], input: &str) -> Option<anyhow::Result<drover::runner::Out>> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let last = args.last()?;
+        if let Some(p) = last.strip_prefix("'rm' '-f' '").and_then(|p| p.strip_suffix('\'')) {
+            self.o.f.calls.borrow_mut().push(format!("ssh {}", args.join(" ")));
+            if self.rm_fails.load(SeqCst) > 0 {
+                self.rm_fails.fetch_sub(1, SeqCst);
+                return Some(Ok(drover::runner::Out {
+                    code: 255,
+                    stderr: "Connection closed by remote host".into(),
+                    ..Default::default()
+                }));
+            }
+            let _ = std::fs::remove_file(self.at(p));
+            return Some(Ok(drover::runner::Out::default()));
+        }
+        if last.starts_with("'sh' '-c' 'umask 077") {
+            let p = last.rsplit_once("' '")?.1.strip_suffix('\'')?;
+            let f = self.at(p);
+            std::fs::create_dir_all(f.parent()?).unwrap();
+            std::fs::write(&f, input).unwrap();
+        }
+        None
+    }
+}
+
+impl drover::runner::Runner for Disk<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        let mine = (prog == "ssh").then(|| self.file(args, "")).flatten();
+        mine.unwrap_or_else(|| self.o.run(prog, args))
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        let mine = (prog == "ssh").then(|| self.file(args, input)).flatten();
+        mine.unwrap_or_else(|| self.o.run_in(prog, args, input))
+    }
+    fn sleep(&self, secs: u64) {
+        self.o.sleep(secs);
+    }
+}
+
+fn secret_spawn(name: &str, rm_fails: usize) -> (drover::Ctx, Fake, FakeShed, std::path::PathBuf) {
+    let (c, _sh) = setup(name);
+    let extra = "\n[fleet.sendmeter.env]\nAPI = \"secret:API_KEY\"\n";
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, text + extra).unwrap();
+    secret_file(&c, "API_KEY", "tok-VALUE-123", 0o600);
+    let (r, bazzite, root) = (remote_fake(), FakeShed::new(), tmpdir(&format!("{name}-disk")));
+    {
+        let d = Disk {
+            o: OverSsh {
+                f: &r,
+                hosts: vec![("bazzite", &bazzite)],
+            },
+            root: root.clone(),
+            rm_fails: rm_fails.into(),
+        };
+        let (code, out) = run(&c, &d, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+        assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+    }
+    (c, r, bazzite, root)
+}
+
+const ENV_FILE: &str = "/home/me/.local/share/drover/work/sendmeter/issue-12.env";
+
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<drover::events::Event> {
+    let log = drover::events::read(&c.state).unwrap();
+    log.iter().filter(|e| e.kind == kind).cloned().collect()
+}
+
+#[test]
+fn after_a_remote_spawn_its_host_has_no_secrets_file() {
+    let (_c, r, _b, root) = secret_spawn("remote-secrets-gone", 0);
+    assert!(
+        r.called(&format!("{SSH}'sh' '-c' 'umask 077")),
+        "{:?}",
+        r.calls.borrow()
+    );
+    let f = root.join(ENV_FILE.trim_start_matches('/'));
+    assert!(f.parent().unwrap().exists() && !f.exists(), "{}", f.display());
+}
+
+#[test]
+fn a_remote_spawn_whose_remove_fails_leaves_no_file_once_the_retry_runs() {
+    let (c, r, bazzite, root) = secret_spawn("remote-secrets-retry", 1);
+    let f = root.join(ENV_FILE.trim_start_matches('/'));
+    assert!(f.exists(), "the failed remove left it");
+    let left = kinds(&c, "secrets-left");
+    assert_eq!(left.len(), 1, "logged once");
+    assert_eq!(left[0].str("path"), Some(ENV_FILE));
+    assert_eq!(left[0].str("machine"), Some("bazzite"));
+    let log = drover::events::read(&c.state).unwrap();
+    assert!(log
+        .iter()
+        .all(|e| !serde_json::to_string(e).unwrap().contains("tok-VALUE-123")));
+    let d = Disk {
+        o: OverSsh {
+            f: &r,
+            hosts: vec![("bazzite", &bazzite)],
+        },
+        root: root.clone(),
+        rm_fails: 0.into(),
+    };
+    run(&c, &d, &["drive"]);
+    assert!(!f.exists(), "the next pass removed it");
+    assert_eq!(kinds(&c, "secrets-removed").len(), 1);
+    let rm = format!("{SSH}'rm' '-f' '{ENV_FILE}'");
+    let tries = r.count(&rm);
+    run(&c, &d, &["drive"]);
+    assert_eq!(r.count(&rm), tries, "a removed file is not retried");
+}
+
+#[test]
+fn the_lanes_shell_removes_its_secrets_file_once_it_has_sourced_it() {
+    let (_c, _r, bazzite, root) = secret_spawn("remote-secrets-shell", usize::MAX);
+    let f = root.join(ENV_FILE.trim_start_matches('/'));
+    assert!(f.exists(), "spawn could not remove it");
+    let sent = bazzite.sent("sendmeter-impl-12");
+    let export = sent.iter().find(|t| t.starts_with("export ")).unwrap();
+    let line = export.trim_end().replace(ENV_FILE, &f.display().to_string());
+    let o = Command::new("sh")
+        .args(["-c", &format!("{line} && printf %s \"$API\"")])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&o.stdout), "tok-VALUE-123", "{line}");
+    assert!(!f.exists(), "{line}");
+}
+
+#[test]
+fn clean_lists_leftover_secrets_files_and_removes_them_with_yes() {
+    let (c, _sh) = setup("remote-secrets-clean");
+    let ours = c.worktrees.join("sendmeter/issue-9");
+    std::fs::create_dir_all(&ours).unwrap();
+    let beside = c.worktrees.join("sendmeter/issue-9.env");
+    let alone = c.worktrees.join("oldproj/issue-3.env");
+    std::fs::create_dir_all(alone.parent().unwrap()).unwrap();
+    for p in [&beside, &alone] {
+        std::fs::write(p, "export X='v'\n").unwrap();
+    }
+    let gone = "/home/me/.local/share/drover/work/sendmeter/issue-4.env";
+    let r = remote_fake().reply(&format!("{SSH}'sh' '-c' 'cd && cd"), &format!("env\t{gone}\n"));
+    let bazzite = FakeShed::new();
+    let o = OverSsh {
+        f: &r,
+        hosts: vec![("bazzite", &bazzite)],
+    };
+    let (code, dry) = run(&c, &o, &["clean"]);
+    assert_eq!(code, 0, "{dry}");
+    for p in [
+        beside.display().to_string(),
+        alone.display().to_string(),
+        format!("bazzite:{gone}"),
+    ] {
+        assert!(dry.contains(&format!("secrets file {p}\n")), "{p}: {dry}");
+    }
+    let rm = format!("{SSH}'rm' '-f' '{gone}'");
+    assert!(
+        beside.exists() && alone.exists() && !r.called(&rm),
+        "dry run removes nothing"
+    );
+    let (code, out) = run(&c, &o, &["clean", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!beside.exists() && !alone.exists() && ours.exists(), "{out}");
+    assert!(r.called(&rm), "{:?}", r.calls.borrow());
+    assert!(out.contains(&format!("removed secrets file bazzite:{gone}")), "{out}");
+}
