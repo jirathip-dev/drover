@@ -19,7 +19,7 @@ pub struct Policy {
     pub own: Option<String>,
     /// The capability groups an orchestrator has on (`[orchestrator] allow`).
     pub groups: Vec<String>,
-    /// The lane's `DROVER_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
+    /// The lane's `DROVER_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo and Swift build only under its `build_root`.
     pub scratch: Option<String>,
     /// An impl lane: `ci/cap.toml` is not its to write (but for the orchestrator-filed raise).
     pub cap: bool,
@@ -549,28 +549,29 @@ fn dups(cmd: &str) -> String {
 fn target_dir(t: &[&str], p: &Policy) -> Option<String> {
     let s = p.scratch.as_deref()?;
     let root = std::path::Path::new(s).ancestors().nth(2)?.to_string_lossy();
+    let flags = ["--target-dir", "-derivedDataPath", "--scratch-path"];
     let dirs = t.iter().enumerate().filter_map(|(i, w)| {
-        let v = w
-            .strip_prefix("CARGO_TARGET_DIR=")
-            .or_else(|| w.strip_prefix("--target-dir="));
-        v.or_else(|| (*w == "--target-dir").then(|| t.get(i + 1).copied()).flatten())
+        let v = w.strip_prefix("CARGO_TARGET_DIR=");
+        let v = v.or_else(|| flags.iter().find_map(|f| w.strip_prefix(f)?.strip_prefix('=')));
+        v.or_else(|| flags.contains(w).then(|| t.get(i + 1).copied()).flatten())
     });
-    let vars = [
-        "$DROVER_SCRATCH_TARGET",
-        "${DROVER_SCRATCH_TARGET}",
-        "$HERDSMAN_SCRATCH_TARGET",
-        "${HERDSMAN_SCRATCH_TARGET}",
-        "$CARGO_TARGET_DIR",
-        "${CARGO_TARGET_DIR}",
-    ];
+    let mut vars: Vec<String> = ["DROVER_SCRATCH_TARGET", "HERDSMAN_SCRATCH_TARGET", "CARGO_TARGET_DIR"]
+        .map(String::from)
+        .into();
+    vars.extend(crate::spawn::SWIFT.map(|v| v.0.to_string()));
+    let vars: Vec<String> = vars
+        .iter()
+        .flat_map(|v| [format!("${{{v}}}"), format!("${v}")])
+        .collect();
     let ok = |d: &str| {
-        let d = vars.iter().fold(expand_home(d), |d, v| d.replace(v, &root));
+        let d = vars.iter().fold(expand_home(d), |d, v| d.replace(v.as_str(), &root));
         !d.contains("..") && (d == root || d.starts_with(&format!("{root}/")))
     };
     let bad = dirs.filter(|d| !d.is_empty()).find(|d| !ok(d))?;
     Some(format!(
         "REFUSED SCRATCH_TARGET: {bad} is outside {root}; build in your scratch dir: \
-         CARGO_TARGET_DIR=$DROVER_SCRATCH_TARGET/target ({s}/target), never /tmp or $TMPDIR"
+         CARGO_TARGET_DIR=$DROVER_SCRATCH_TARGET/target ({s}/target), never /tmp or $TMPDIR; \
+         Swift: -derivedDataPath \"$DROVER_DERIVED_DATA\", --scratch-path \"$DROVER_SWIFT_SCRATCH\""
     ))
 }
 

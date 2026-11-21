@@ -758,7 +758,7 @@ fn a_remote_trim_that_times_out_says_so_and_the_ended_lane_still_goes() {
     air_spawn(&c, 12, "impl", "sendmeter-impl-12");
     merged(&c, 12);
     let ended = locked(b, "sendmeter-impl-12", 64);
-    let (_, out) = tick_hanging(&c, &home, &[], 200 * 1_048_576, Some("cargo is building"));
+    let (_, out) = tick_hanging(&c, &home, &[], 200 * 1_048_576, Some("is building"));
     assert!(
         out.contains(&format!("builds: air: trim of {AIR_ROOT}/.build timed out")),
         "{out}"

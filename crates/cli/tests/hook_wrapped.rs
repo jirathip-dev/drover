@@ -119,3 +119,46 @@ fn an_ampersand_in_a_quoted_loop_argument_is_no_backgrounding() {
         assert!(bash(cmd).unwrap_or_default().contains("REFUSED HOST_STRESS"), "{cmd}");
     }
 }
+
+#[test]
+fn swift_build_folders_outside_the_build_root_are_refused() {
+    let d = tmpdir("hook-swift");
+    std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
+    let hook = |cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": std::env::temp_dir(),
+            "tool_input": {"command": cmd}});
+        let mut child = Command::new(env!("CARGO_BIN_EXE_drover"))
+            .args(["hook", "--role", "impl"])
+            .env("DROVER_SCRATCH_TARGET", "/c/builds/.scratch/sendmeter-impl-24")
+            .env("DROVER_LANE", "sendmeter:24:impl")
+            .env("FLEET_CONFIG", d.join("fleet.toml"))
+            .env("FLEET_STATE", d.join("state/events.jsonl"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(input.to_string().as_bytes()).unwrap();
+        drop(stdin);
+        String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+    };
+    for cmd in [
+        "xcodebuild -scheme App -derivedDataPath /tmp/dd build",
+        "swift build --scratch-path ~/Library/sw",
+        "swift test --scratch-path=/tmp/spm",
+    ] {
+        let out = hook(cmd);
+        assert!(
+            out.contains("REFUSED SCRATCH_TARGET: ") && out.contains("$DROVER_DERIVED_DATA"),
+            "{cmd}: {out}"
+        );
+    }
+    for cmd in [
+        "xcodebuild -scheme App -derivedDataPath \"$DROVER_DERIVED_DATA\" build",
+        "swift build --scratch-path ${DROVER_SWIFT_SCRATCH}",
+        "swift test --scratch-path=$DROVER_SCRATCH_TARGET/spm",
+        "xcodebuild -derivedDataPath /c/builds/sendmeter-impl-24/xcode test",
+    ] {
+        assert!(!hook(cmd).contains("REFUSED"), "{cmd}");
+    }
+}

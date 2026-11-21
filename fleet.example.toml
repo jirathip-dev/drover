@@ -68,6 +68,7 @@ merge_label = "merge-ready"   # the full CI runs only with this label; drover ad
 # max_rev = 2
 # notify_global = true   # also send this fleet's events to the global [[notify]]
 # clone_build = ["target"]   # cp -cR (APFS clone) these local folders into a new lane when the lockfile matches
+# swift_build = true   # #1478: each lane gets DROVER_DERIVED_DATA (xcodebuild -derivedDataPath) and DROVER_SWIFT_SCRATCH (swift build --scratch-path), cloned warm in <root>/.build/<agent> (docs/lanes.md)
 # build_dirs = ["ios/build"]   # freed with target, node_modules, .next and dist when a lane finishes or over budget
 # env = { npm_config_cache = "~/.cache/drover/npm" }   # npm fleets: one shared cache (pnpm's store already is)
 # env = { PORT = "$DROVER_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers

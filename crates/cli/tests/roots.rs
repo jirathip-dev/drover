@@ -248,7 +248,15 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         sent.iter().any(|c| c.contains("TARGET_DIR=") && c.contains(&target)),
         "{target} {sent:?}"
     );
+    assert!(
+        !sent
+            .iter()
+            .any(|c| c.contains("DROVER_DERIVED_DATA") || c.contains("SWIFT_SCRATCH")),
+        "{sent:?}"
+    );
     let wt = r.nvme.join("sendmeter/issue-12");
+    let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    assert!(!brief.contains("derivedDataPath"), "{brief}");
     assert_eq!(
         std::fs::read_to_string(wt.join(".drover-ignored.env")).unwrap(),
         "PORT=1\n"
@@ -276,6 +284,63 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         (u, drover::spawn::unsaved_text(u).as_deref()),
         (Some((1, 1)), Some("+1 ⇡1"))
     );
+}
+
+#[test]
+fn a_swift_fleets_lane_gets_its_own_xcode_and_swiftpm_folders_cloned_warm() {
+    let r = repo("roots-swift");
+    let cfg = std::fs::read_to_string(&r.c.config).unwrap();
+    let cfg = cfg.replacen(
+        "[fleet.sendmeter.role.impl]",
+        "swift_build = true\n\n[fleet.sendmeter.role.impl]",
+        1,
+    );
+    std::fs::write(&r.c.config, cfg).unwrap();
+    let b = r.nvme.join(".build");
+    let dd = b.join("sendmeter-rev-11-r1/xcode/Build");
+    std::fs::create_dir_all(&dd).unwrap();
+    std::fs::write(dd.join("warm"), "w").unwrap();
+    let f = spawnable();
+    let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let (xcode, spm) = (b.join(AGENT).join("xcode"), b.join(AGENT).join("swiftpm"));
+    let sent = r.sh.sent(AGENT).join("\n");
+    for (k, d) in [("DROVER_DERIVED_DATA", &xcode), ("DROVER_SWIFT_SCRATCH", &spm)] {
+        assert!(sent.contains(&format!("{k}='{}'", d.display())), "{k}: {sent}");
+    }
+    let ev = read(&r.c.state).unwrap();
+    let cl = ev.iter().find(|e| e.kind == "build-cloned").unwrap();
+    assert_eq!(cl.str("from"), Some(&*b.join("sendmeter-rev-11-r1").to_string_lossy()));
+    let dirs: Vec<&str> = (cl.val("dirs").as_array().unwrap().iter())
+        .filter_map(|d| d.as_str())
+        .collect();
+    if reflinks(&b) {
+        assert!(xcode.join("Build/warm").is_file(), "{out}");
+        assert_eq!(dirs, [b.join(AGENT).display().to_string(), xcode.display().to_string()]);
+    } else {
+        assert!(dirs.is_empty() && !xcode.exists(), "{dirs:?}");
+    }
+    let brief = std::fs::read_to_string(r.nvme.join("sendmeter/issue-12/.brief.md")).unwrap();
+    assert!(brief.contains("-derivedDataPath \"$DROVER_DERIVED_DATA\""), "{brief}");
+}
+
+#[test]
+fn a_swift_fleets_first_lane_clones_nothing_and_still_starts() {
+    let r = repo("roots-swift-cold");
+    let cfg = std::fs::read_to_string(&r.c.config).unwrap();
+    let cfg = cfg.replacen(
+        "[fleet.sendmeter.role.impl]",
+        "swift_build = true\n\n[fleet.sendmeter.role.impl]",
+        1,
+    );
+    std::fs::write(&r.c.config, cfg).unwrap();
+    let f = spawnable();
+    let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let ev = read(&r.c.state).unwrap();
+    assert!(ev.iter().all(|e| e.kind != "build-cloned"), "{out}");
+    assert!(ev.iter().any(|e| e.kind == "spawn"), "{out}");
+    assert!(!r.nvme.join(".build").join(AGENT).exists());
 }
 
 fn reflinks(d: &std::path::Path) -> bool {
