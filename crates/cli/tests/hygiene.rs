@@ -93,7 +93,7 @@ fn a_private_name_is_refused_by_its_list_index_and_hosts_by_kind() {
         "{out}"
     );
     assert!(!out.to_lowercase().contains("acme"), "{out}");
-    let out = bash(&d, "open", "gh pr create --title 'runs on bazzite' --body ok");
+    let out = bash(&d, "open", "gh pr create --title 'ssh bazzite' --body ok");
     assert!(out.contains("gh pr create --title has a host"), "{out}");
     let out = bash(
         &d,
@@ -107,6 +107,30 @@ fn a_private_name_is_refused_by_its_list_index_and_hosts_by_kind() {
         "gh pr create --title t --body 'Acme is a placeholder, as is Globexx'",
     );
     assert!(!out.contains("PUBLIC_LEAK"), "whole names only: {out}");
+}
+
+#[test]
+fn a_host_name_is_a_leak_only_where_it_is_used_as_a_hostname() {
+    let d = dir("hygiene-host-word");
+    let out = bash(
+        &d,
+        "open",
+        "gh pr create --title t --body 'the Bazzite now sends a signed alive message; bazzite is idle.'",
+    );
+    assert!(!out.contains("PUBLIC_LEAK"), "a plain word: {out}");
+    for text in [
+        "ssh bazzite",
+        "me@bazzite",
+        "bazzite:/srv/x",
+        "bazzite:22",
+        "bazzite.local",
+        "--host bazzite",
+        "[hosts.bazzite]",
+        "me@bazzite.example",
+    ] {
+        let out = bash(&d, "open", &format!("gh pr create --title t --body '{text}'"));
+        assert!(out.contains("--body has a host"), "{text}: {out}");
+    }
 }
 
 fn repo(d: &Path, text: &str) -> String {
@@ -138,7 +162,7 @@ fn push(d: &Path, fleet: &str, sha: &str) -> (i32, String) {
 #[test]
 fn a_pushed_commit_naming_a_fleet_host_is_refused_only_in_a_public_fleet() {
     let d = dir("hygiene-push");
-    let sha = repo(&d, "# Hosts\n\nThe lanes run on bazzite.\n");
+    let sha = repo(&d, "# Hosts\n\nThe lanes run on me@bazzite.\n");
     let (code, out) = push(&d, "open", &sha);
     assert_eq!(code, 1, "{out}");
     assert!(
@@ -220,9 +244,9 @@ fn merges_squash_message_and_closing_comment_go_through_the_check() {
     );
     assert!(!r.called("gh pr merge") && !out.contains("alice"), "{out}");
 
-    let config = CONFIG.replace("integration = \"staging\"", "integration = \"bazzite\"") + HOSTS;
+    let config = CONFIG.replace("integration = \"staging\"", "integration = \"hosts.bazzite\"") + HOSTS;
     let c = merge_setup("hygiene-merge-comment", &config);
-    let r = merge_fake("bazzite", "## For humans\nThe meter counts.\n");
+    let r = merge_fake("hosts.bazzite", "## For humans\nThe meter counts.\n");
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_ne!(code, 0, "{out}");
     assert!(r.called("gh pr merge 34"), "the squash text passed");
@@ -318,7 +342,7 @@ fn doctor_warns_once_for_public_fleets_with_no_private_names() {
 #[test]
 fn scan_lists_hits_by_pattern_with_links_and_changes_nothing() {
     let c = ctx(&tmpdir("hygiene-scan"), &fleets());
-    let issues = json!([{"title": "t", "body": "runs on bazzite", "url": "https://github.com/o/open/issues/1",
+    let issues = json!([{"title": "t", "body": "runs on bazzite:22", "url": "https://github.com/o/open/issues/1",
         "comments": [{"body": "see /Users/alice/x", "url": "https://github.com/o/open/issues/1#c2"}]}]);
     let prs = json!([{"title": "Globex port", "body": "", "url": "https://github.com/o/open/pull/2", "comments": []}]);
     let sha = "a".repeat(40);
