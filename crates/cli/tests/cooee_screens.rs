@@ -48,6 +48,14 @@ fn skeleton(v: &Value, at: &str, out: &mut BTreeSet<String>) {
     }
 }
 
+fn ev_rows(v: &Value) -> Vec<Value> {
+    let blocks = v["blocks"].as_array().unwrap().iter();
+    let lists = blocks.filter(|b| b["id"].as_str().is_some_and(|i| i.starts_with("ev-")));
+    lists
+        .flat_map(|s| s["blocks"][0]["rows"].as_array().unwrap().clone())
+        .collect()
+}
+
 fn vocabulary() -> BTreeMap<String, BTreeSet<String>> {
     fn walk(v: &Value, parent: &str, out: &mut BTreeMap<String, BTreeSet<String>>) {
         match v {
@@ -188,7 +196,7 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
 
     let e = get("/screens/events");
     like(&e, "events", true);
-    let rows = find(&e, "ev")["rows"].as_array().unwrap();
+    let rows = &ev_rows(&e);
     let titles: Vec<&str> = rows.iter().map(|r| r["title"].as_str().unwrap()).collect();
     assert!(titles[0].contains("q7"), "{titles:?}");
     assert!(
@@ -200,7 +208,7 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
         .find(|r| r["tap"]["url"] == "https://github.com/jirathip-dev/sendmeter/pull/41");
     assert!(merged.is_some_and(|m| m["figure"]["state"] == "done"), "{rows:?}");
     let asks = get("/screens/events?kind=ask");
-    assert_eq!(find(&asks, "ev")["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(ev_rows(&asks).len(), 1);
     assert_eq!(asks["stream"], "/screens/events/stream?kind=ask");
 
     let f = get("/screens/fleets");
@@ -501,7 +509,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
     let filter = json!({"screen": "events", "block": "kind", "action": "filter", "values": {"kind": ["merge"]}});
     let (status, v) = post(filter, &ck);
     assert_eq!((status, &v["ops"][0]["op"]), (200, &json!("screen")), "{v}");
-    let rows = find(&v["ops"][0]["screen"], "ev")["rows"].as_array().unwrap().clone();
+    let rows = ev_rows(&v["ops"][0]["screen"]);
     assert_eq!(rows.len(), 1, "{rows:?}");
 
     let deny = json!({"screen": "cards", "block": "r1", "action": "run-card", "values": {"choice": "deny", "sha": "3b7e0c55a1d9"}});
