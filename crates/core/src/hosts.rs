@@ -381,9 +381,18 @@ impl<'a> Pass<'a> {
             return true;
         }
         let secs = crate::config::limits().ssh_quick_secs;
+        let limit = std::time::Duration::from_secs(secs);
+        let master = self.r.run_for("ssh", &argv(&[CM[1], "-O", "check", m]), "", limit);
+        if master.is_ok_and(|o| o.code == 0) {
+            self.seen(m, true);
+            return true;
+        }
         let connect = format!("-oConnectTimeout={secs}");
         let probe = argv(&["-oBatchMode=yes", &connect, "-oControlPath=none", m, "--", "true"]);
-        let o = self.r.run_for("ssh", &probe, "", std::time::Duration::from_secs(secs));
+        let mut o = self.r.run_for("ssh", &probe, "", limit);
+        if o.as_ref().is_ok_and(|o| o.code == 124) {
+            o = self.r.run_for("ssh", &probe, "", limit);
+        }
         if let Ok(o) = &o {
             self.key_changed(m, o);
         }

@@ -28,7 +28,8 @@ impl Runner for Dropped {
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, _limit: Duration) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
-        let air = prog == "ssh" && args.iter().any(|a| a == "air") && args[0] != "-G";
+        let air =
+            prog == "ssh" && args.iter().any(|a| a == "air") && args[0] != "-G" && !args.iter().any(|a| a == "-O");
         if !air || line == PROBE {
             return self.0.run_in(prog, args, input);
         }

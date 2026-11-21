@@ -425,7 +425,7 @@ const PROBE: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none b
 fn pass_call(c: &drover::Ctx, r: &dyn drover::runner::Runner) -> drover::runner::Out {
     use drover::runner::Runner;
     let cfg = Config::load(&c.config).unwrap();
-    let pass = drover::hosts::Pass::new(r, None).sparing(Default::default(), Some((c, &cfg)));
+    let pass = drover::hosts::Pass::new(r, None).sparing(std::collections::BTreeSet::default(), Some((c, &cfg)));
     pass.run("ssh", &drover::runner::argv(&["bazzite", "--", "echo", "hi"]))
         .unwrap()
 }
