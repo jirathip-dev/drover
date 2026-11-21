@@ -817,6 +817,9 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover lesson` (#419)".into());
     }
+    if !orchestrator && r.first() == Some(&"deps") {
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover deps` (#1488)".into());
+    }
     let triage = lane.split(':').nth(2) == Some("triage");
     let acts = matches!(r.get(1), Some(&("close" | "fold" | "label" | "docs")));
     if !orchestrator && r.first() == Some(&"triage") && !(acts && triage) {

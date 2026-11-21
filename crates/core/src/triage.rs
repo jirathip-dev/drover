@@ -99,7 +99,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
 pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let on = |f: &crate::config::Fleet| f.triage.as_deref() == Some("weekly") && !f.paused;
     for name in cfg.fleet.iter().filter(|(_, f)| on(f)).map(|x| x.0) {
-        if !crate::timer::weekly_due(ctx, &format!("triage-{name}"))? {
+        if !crate::timer::due(ctx, &format!("triage-{name}"), 7 * 86400)? {
             continue;
         }
         if let Err(e) = run(ctx, cfg, r, out, name) {

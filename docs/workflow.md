@@ -60,8 +60,9 @@ flowchart TD
     t3["trim"] --> t4
     t4["lesson"] --> t5
     t5["triage"] --> t6
-    t6["hotspots"] --> t7
-    t7["compact"]
+    t6["deps"] --> t7
+    t7["hotspots"] --> t8
+    t8["compact"]
     d0["look, repair"] --> d1
     d1["closed issues"] --> d2
     d2["spawns"] --> d3
