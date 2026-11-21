@@ -1,7 +1,8 @@
-use super::screens::{line, ops, pages, Res};
+use super::screens::{line, pages, Res};
 use super::{form, hash, header, hung_up, lock, sent, wire, Auth, Ctx, Server, JSON, VER};
 use crate::api::ScreenKey;
 use crate::events::Json;
+use blocks::{Block, Op, Put, Shelf};
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
 use std::io::Write;
@@ -120,6 +121,7 @@ pub struct Hub {
     slots: (Mutex<()>, Mutex<()>),
     kicked: (Mutex<bool>, Condvar),
     epoch: String,
+    shelf: Mutex<Shelf<Key>>,
 }
 
 fn wait<'m, T>(c: &Condvar, g: MutexGuard<'m, T>) -> MutexGuard<'m, T> {
@@ -137,6 +139,7 @@ impl Hub {
                 "{:08x}",
                 hash(&(drover_core::clock::instant(), crate::now())) & 0xffff_ffff
             ),
+            shelf: Mutex::default(),
         }
     }
 
@@ -152,7 +155,7 @@ impl Hub {
         }
         let now = s.signals(ctx, k);
         let mut m = lock(&self.keys);
-        let old = loop {
+        loop {
             let e = m.entry(k.clone()).or_default();
             e.read_at = ctx.now;
             if e.built && !e.seen.moved(now, k.deps()) {
@@ -160,16 +163,16 @@ impl Hub {
             }
             if !e.building {
                 e.building = true;
-                break e.json.clone();
+                break;
             }
             m = wait(&self.built, m);
-        };
-        Self::trim(&mut m, ctx.now);
+        }
+        self.trim(&mut m, ctx.now);
         drop(m);
-        self.build(s, ctx, k, now, old.as_deref())
+        self.build(s, ctx, k, now)
     }
 
-    fn build(&self, s: &Server, ctx: &Ctx, k: &Key, now: Signals, old: Option<&str>) -> Option<(u64, Arc<str>)> {
+    fn build(&self, s: &Server, ctx: &Ctx, k: &Key, now: Signals) -> Option<(u64, Arc<str>)> {
         let new = {
             let s0 = || lock(&self.slots.0);
             let _slot = self
@@ -181,22 +184,22 @@ impl Hub {
             crate::runner::request(|| super::build(|| s.build_screen(ctx, &k.path, &k.q, k.paired)))
         };
         let text: Option<Arc<str>> = new.as_ref().map(|v| v.to_string().into());
-        let delta = old.zip(new.as_ref()).filter(|(o, _)| Some(*o) != text.as_deref());
-        let delta = delta.and_then(|(o, new)| {
-            let o: Value = serde_json::from_str(o).ok()?;
-            let mut d = ops(&o, new);
-            let badge = new.at("badge").as_u64().filter(|n| Some(*n) != o.at("badge").as_u64());
-            d.extend(badge.map(|n| serde_json::json!({"op": "badge", "count": n})));
-            Some(d).filter(|d| !d.is_empty())
+        let put = new.and_then(|v| {
+            let b: Block = serde_json::from_value(v).ok()?;
+            let p = lock(&self.shelf).put(k, &k.wire(), &b).ok()?;
+            Some((p, b))
         });
         let mut m = lock(&self.keys);
         let e = m.entry(k.clone()).or_default();
         (e.built, e.building, e.seen, e.builds) = (true, false, now, e.builds + 1);
-        if e.json.is_none() && text.is_some() || delta.is_some() {
-            e.rev += 1;
-        }
-        if let Some(d) = delta {
-            let f: Frame = (e.rev - 1, e.rev, Value::Array(d).to_string().into());
+        let rev = if matches!(put, Some((Put::First, _))) { 1 } else { e.rev };
+        let f: Option<Frame> = match (put, &text) {
+            (Some((Put::Changed(d), b)), Some(j)) => Some((d.from, d.rev, old_ops(&d.frame, &b, j))),
+            (None, Some(j)) if e.json.as_ref() != Some(j) => Some((e.rev, e.rev + 1, whole(j).into())),
+            _ => None,
+        };
+        e.rev = f.as_ref().map_or(rev, |f| f.1);
+        if let Some(f) = f.filter(|f| f.0 > 0) {
             e.holders.retain(|h| h.upgrade().map(|q| q.push(f.clone())).is_some());
         }
         e.json.clone_from(&text);
@@ -207,17 +210,20 @@ impl Hub {
         out
     }
 
-    fn trim(m: &mut BTreeMap<Key, Entry>, now: u64) {
+    fn trim(&self, m: &mut BTreeMap<Key, Entry>, now: u64) {
         let idle = |e: &Entry| e.holders.is_empty() && !e.building;
-        m.retain(|_, e| !idle(e) || e.read_at + UNHELD_SECS >= now);
         let mut unheld: Vec<(u64, Key)> = m
             .iter()
             .filter(|e| idle(e.1))
             .map(|(k, e)| (e.read_at, k.clone()))
             .collect();
         unheld.sort();
-        for (_, k) in unheld.iter().rev().skip(UNHELD) {
-            m.remove(k);
+        let mut shelf = lock(&self.shelf);
+        for (i, (at, k)) in unheld.iter().rev().enumerate() {
+            if i >= UNHELD || at + UNHELD_SECS < now {
+                m.remove(k);
+                shelf.forget(k);
+            }
         }
     }
 
@@ -236,7 +242,7 @@ impl Hub {
         let mut held: Vec<(usize, Key)> = {
             let mut m = lock(&self.keys);
             m.values_mut().for_each(|e| e.holders.retain(|h| h.strong_count() > 0));
-            Self::trim(&mut m, ctx.now);
+            self.trim(&mut m, ctx.now);
             m.iter()
                 .map(|(k, e)| (e.holders.len(), k.clone()))
                 .filter(|h| h.0 > 0)
@@ -282,6 +288,15 @@ impl Hub {
 
 fn frame(seq: u64, ops: &str) -> String {
     format!("id: {seq}\ndata: {{\"build\":\"{VER:08x}\",\"ops\":{ops},\"seq\":{seq}}}\n\n")
+}
+
+fn old_ops(frame: &str, b: &Block, j: &str) -> Arc<str> {
+    let ops = serde_json::from_str::<blocks::Frame>(frame).ok().and_then(|f| f.ops);
+    let ops = ops.map(|o| blocks::wire::old(o, b));
+    let ops = ops.filter(|o| !matches!(o.first(), None | Some(Op::Screen { .. })));
+    ops.and_then(|o| serde_json::to_string(&o).ok())
+        .unwrap_or_else(|| whole(j))
+        .into()
 }
 
 fn whole(j: &str) -> String {

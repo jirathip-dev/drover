@@ -3062,7 +3062,7 @@ pub(crate) fn schemes(ctx: &Ctx) -> (BTreeMap<String, Scheme>, Vec<String>) {
         let misses = serde_json::from_slice::<Scheme>(&j)
             .map_err(|e| e.to_string())
             .and_then(|s| {
-                let m = blocks::theme::gate(&s);
+                let m = blocks::theme::gate(&s, blocks::theme::Fills::Tint);
                 m.is_empty().then_some(s).ok_or_else(|| {
                     let m = m.iter().map(|m| format!("{} {:.2} < {}", m.what, m.got, m.min));
                     m.collect::<Vec<_>>().join("; ")

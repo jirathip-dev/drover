@@ -6,7 +6,7 @@ use crate::access::{civil_month_day, civil_year};
 use crate::api::{Block, Herd, HerdFleet, HerdLane, Lane};
 use crate::events::Json;
 use anyhow::Context;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use std::sync::atomic::Ordering::Relaxed;
 
 #[path = "later.rs"]
@@ -1329,80 +1329,6 @@ pub(super) fn said(id: &str, b: &Block, lines: &[String]) -> Value {
         )),
         Block::Screen => text(format!("```\n{}\n```", lines.join("\n"))),
     }
-}
-
-fn own(v: &Value) -> Map<String, Value> {
-    let mut m = v.as_object().cloned().unwrap_or_default();
-    m.remove("blocks");
-    m.remove("rows");
-    m
-}
-
-fn kids(v: &Value) -> &[Value] {
-    v.as_array()
-        .or_else(|| v.get("blocks").or_else(|| v.get("rows")).and_then(Value::as_array))
-        .map_or(&[], Vec::as_slice)
-}
-
-fn walk(a: &Value, b: &Value, out: &mut Vec<Value>) -> bool {
-    let (id, mark) = (b["id"].as_str(), out.len());
-    let (oa, ob) = (own(a), own(b));
-    if oa != ob {
-        let Some(id) = id else { return false };
-        if oa.keys().any(|k| !ob.contains_key(k)) {
-            out.push(json!({"op": "replace", "id": id, "block": b}));
-            return true;
-        }
-        let fields: Map<String, Value> = ob.into_iter().filter(|(k, v)| oa.get(k) != Some(v)).collect();
-        out.push(json!({"op": "merge", "id": id, "fields": fields}));
-    }
-    if children(id, kids(a), kids(b), out) {
-        return true;
-    }
-    out.truncate(mark);
-    id.is_some_and(|id| (out.push(json!({"op": "replace", "id": id, "block": b})), true).1)
-}
-
-fn children(into: Option<&str>, ka: &[Value], kb: &[Value], out: &mut Vec<Value>) -> bool {
-    fn ids(k: &[Value]) -> Option<Vec<&str>> {
-        k.iter().map(|c| c["id"].as_str()).collect()
-    }
-    fn both<'a>(x: &[&'a str], y: &[&str]) -> Vec<&'a str> {
-        x.iter().filter(|i| y.contains(i)).copied().collect()
-    }
-    let (Some(into), Some(ia), Some(ib)) = (into, ids(ka), ids(kb)) else {
-        return ka.len() == kb.len() && ka.iter().zip(kb).all(|(x, y)| x["id"] == y["id"] && walk(x, y, out));
-    };
-    if both(&ia, &ib) != both(&ib, &ia) {
-        return false;
-    }
-    out.extend(
-        ia.iter()
-            .filter(|i| !ib.contains(i))
-            .map(|i| json!({"op": "remove", "id": i})),
-    );
-    for (k, (i, c)) in ib.iter().zip(kb).enumerate() {
-        if let Some(p) = ia.iter().position(|x| x == i).and_then(|p| ka.get(p)) {
-            walk(p, c, out);
-            continue;
-        }
-        let mut op = json!({"op": "insert", "into": into, "block": c});
-        if let Some(next) = ib.iter().skip(k + 1).find(|x| ia.contains(x)) {
-            op.put("before", json!(next));
-        }
-        out.push(op);
-    }
-    true
-}
-
-/// The ops that turn screen `a` into `b`, by block id (removes first); a change no id can address: the whole screen.
-pub fn ops(a: &Value, b: &Value) -> Vec<Value> {
-    let mut out = vec![];
-    if a["id"] != b["id"] || !walk(a, b, &mut out) || out.iter().any(|o| o["id"] == b["id"] && o["op"] == "replace") {
-        return vec![json!({"op": "screen", "screen": b})];
-    }
-    out.sort_by_key(|o| o["op"] != "remove");
-    out
 }
 
 fn sheets(v: &Value, out: &mut Vec<String>) {
