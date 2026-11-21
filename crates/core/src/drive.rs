@@ -428,6 +428,7 @@ pub(crate) fn failures<'a>(ev: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Even
     let mut v: Vec<&Event> = mine
         .take_while(|e| e.kind != "spawn")
         .filter(|e| e.kind == "spawn-error" && !crate::slo::cwd_gone(e.str("error")))
+        .filter(|e| !e.str("error").is_some_and(|x| x.contains(crate::hosts::OFFLINE)))
         .collect();
     v.reverse();
     v
