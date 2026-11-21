@@ -800,7 +800,7 @@ fn a_blocked_live_lane_is_held_shown_held_and_never_stalls() {
             "sendmeter",
             None,
             "queue",
-            json!({"op": "add", "issues": [12]}),
+            json!({"op": "add", "issues": [11, 12]}),
         ),
     )
     .unwrap();

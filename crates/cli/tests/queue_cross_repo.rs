@@ -178,3 +178,15 @@ fn a_closed_unmerged_blocker_alerts_once() {
     assert!(why.contains("drover queue sendmeter unblock 12 --on 720"), "{why}");
     assert_eq!(stranded(&c, &r).len(), 1, "a second pass raises none");
 }
+
+#[test]
+fn waiting_names_the_command_that_frees_a_stranded_block() {
+    let (c, r, _sh) = setup("stranded-waiting", Fake::default());
+    ok(&c, &r, &["queue", "sendmeter", "add", "12"]);
+    ok(&c, &r, &["queue", "sendmeter", "block", "12", "--on", "drover#633"]);
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
+    append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let out = ok(&c, &r, &["waiting", "sendmeter"]);
+    assert!(out.contains("blocked by drover#633"), "{out}");
+    assert!(out.contains("drover queue drover add 633"), "{out}");
+}
