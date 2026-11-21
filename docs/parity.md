@@ -76,7 +76,7 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 57 | Reply box to a lane (rate limit, paused/reviewer refusals) | — | open |
 | 58 | "/" command menu in the reply box | — | open |
 | 59 | Stop, Kill with dry-run confirm, Clean with reasons | parity_59 | kept |
-| 60 | Lane figures animated by state (sprite, ascii, glyph) | — | open |
+| 60 | Lane figures animated by state (sprite, ascii, glyph) | parity_60 | kept |
 | 61 | Herd scene: per-repo ranch, state bands, queued at gate | — | open #1092 |
 | 62 | Scene weather from host load, day/night, repo switching | — | open #1092 |
 | 63 | Needs-you cards above every tab: options, free text, count badge | parity_63 | kept |
