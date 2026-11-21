@@ -1270,8 +1270,7 @@ fn lanes_screen(t: &LanesTab) -> Value {
     json!({"type": "screen", "id": "lanes", "title": "Lanes", "stream": "/screens/lanes/stream", "blocks": blocks})
 }
 
-pub(super) fn said(i: usize, b: &Block, lines: &[String]) -> Value {
-    let id = format!("t-{i}");
+pub(super) fn said(id: &str, b: &Block, lines: &[String]) -> Value {
     let text = |m: String| json!({"type": "text", "id": id, "markdown": m});
     match b {
         Block::Prompt { text: t } => text(format!("**›** {t}")),
@@ -1508,7 +1507,7 @@ impl Server<'_> {
                 json!({"type": "row", "id": "f-pr", "title": "PR", "value": format!("#{n}"), "tap": {"url": url}}),
             );
         }
-        let mut said = self.sheet_transcript(ctx, &l);
+        let mut said = self.tails.sheet(&l);
         said.extend(later::undelivered(&ev, agent));
         let values = json!({ "agent": agent });
         let other = l.role == "other";
@@ -1769,7 +1768,9 @@ impl Server<'_> {
             "config-card" => self.form_op(ctx, "config", &[("id", s("id")), ("act", s("act"))])?,
             "thread-signin" => crate::setup::start(ctx, &cfg, &self.r, &s("host"), &s("name"), "web")?,
             n if THREAD_ACTIONS.contains(&n) || n == "secret-card" => {
-                let keys = ["text", "repo", "name", "act", "data", "q", "harness", "model", "effort"];
+                let keys = [
+                    "text", "repo", "name", "act", "data", "q", "harness", "model", "effort", "req",
+                ];
                 let mut f: Q = keys.into_iter().map(|k| (k.into(), s(k))).collect();
                 f.extend([
                     ("t".into(), s("thread")),

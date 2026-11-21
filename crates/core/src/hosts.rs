@@ -48,6 +48,8 @@ pub fn each<T: Send, U: Send>(items: impl IntoIterator<Item = T>, f: impl Fn(T) 
     })
 }
 
+/// The reason a call to a host found down earlier in this pass was not sent.
+pub const OFFLINE: &str = "host offline this pass";
 /// `On::existing`'s script: the paths on stdin, a line each.
 pub const EXISTS: &str = "while IFS= read -r p; do test -e \"$p\" && echo y || echo n; done";
 
@@ -413,11 +415,7 @@ impl<'a> Pass<'a> {
             lock(&self.late).insert(m.into());
         }
         if over || !self.up(m) {
-            let why = if over {
-                "the tick past its budget"
-            } else {
-                "host offline this pass"
-            };
+            let why = if over { "the tick past its budget" } else { OFFLINE };
             self.note("");
             self.unsent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let stderr = format!("{m}: not sent ({why})");
