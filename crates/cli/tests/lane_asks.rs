@@ -1,5 +1,4 @@
 mod common;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
 use common::*;
 use drover::events::{append, read, Event};
 use drover::serve::Server;
@@ -10,7 +9,7 @@ use std::sync::{Mutex, MutexGuard};
 
 const NOW: u64 = 1_000_000;
 const ADDR: &str = "127.0.0.1:7777";
-const UA_PRIVATE: &str = "q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94";
+const UA_PUBLIC: &str = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
 const LANE: &str = "sendmeter-impl-36";
 const SPEC: &str = "Split the sender.\n\nKeep the old sender behind a flag\nuntil the owner says so.";
 
@@ -75,10 +74,9 @@ fn setup(name: &str, extra: &str, threads: &[&str]) -> (drover::Ctx, FakeShed) {
     std::fs::set_permissions(bin.join("curl"), std::fs::Permissions::from_mode(0o755)).unwrap();
     let path = std::env::var("PATH").unwrap_or_default();
     std::env::set_var("PATH", format!("{}:{path}", bin.display()));
-    let ua = p256::SecretKey::from_slice(&B64.decode(UA_PRIVATE).unwrap()).unwrap();
     let f = [
         ("endpoint", "https://push.example/ep".to_string()),
-        ("p256dh", B64.encode(webpush::public(&ua))),
+        ("p256dh", UA_PUBLIC.into()),
         ("auth", "BTBZMqHH6r4Tts7J_aSIgg".into()),
     ];
     let f = f.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
