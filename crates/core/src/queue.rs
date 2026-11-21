@@ -565,10 +565,10 @@ pub fn skipped(
     let merged = |m: &Event| m.kind == "merged" && m.fleet == fleet && m.ts > e.ts && m.issue.is_some_and(mine);
     (!events.iter().any(merged)).then_some(())?;
     let why = e.str("result")?.split_once(": ").map_or("", |w| w.1);
-    let why = if code == "SPAWN_PENDING" {
-        Some(slots).filter(|s| !s.is_empty())?
-    } else {
-        why
+    let why = match code {
+        "SPAWN_PENDING" => Some(slots).filter(|s| !s.is_empty())?.to_string(),
+        "DISK_LOW" => crate::hosts::disk_low_now(events, why),
+        _ => why.to_string(),
     };
     let ago = age(now.saturating_sub(e.ts));
     Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))

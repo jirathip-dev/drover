@@ -429,7 +429,10 @@ fn clean_reclaims_merged_lanes() {
         .reply("git -C", "");
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["clean"], "{out}");
-    let rm = format!("git -C /tmp/does-not-matter/sendmeter worktree remove {}", wt.display());
+    let rm = format!(
+        "git -C /tmp/does-not-matter/sendmeter worktree remove --force {}",
+        wt.display()
+    );
     assert!(r.called(&rm), "{:?}", r.calls.borrow());
     std::fs::remove_dir_all(&wt).unwrap();
     idle(&c, &r);
@@ -509,7 +512,7 @@ fn a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip() 
             .starts_with("wip/sendmeter-impl-12-20261107-120000-"),
         "{e:?}"
     );
-    let rm = format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}");
+    let rm = format!("git -C /tmp/does-not-matter/sendmeter worktree remove --force {w}");
     assert!(close < r1.at(&rm).expect("removed"));
 }
 
@@ -620,7 +623,10 @@ fn a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned() {
     assert_eq!(state(&c), "merged");
     assert!(!r.called("gh pr merge") && !r.called("gh issue comment") && !r.called("gh issue close"));
     assert_eq!(steps, ["clean"], "{out}");
-    let rm = format!("git -C /tmp/does-not-matter/sendmeter worktree remove {}", wt.display());
+    let rm = format!(
+        "git -C /tmp/does-not-matter/sendmeter worktree remove --force {}",
+        wt.display()
+    );
     assert!(r.called(&rm), "{:?}", r.calls.borrow());
     std::fs::remove_dir_all(&wt).unwrap();
     assert!(!run(&c, &r, &["waiting", "sendmeter"]).1.contains("#12"));

@@ -266,7 +266,7 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         r.calls
             .borrow()
             .iter()
-            .any(|l| l.ends_with(&format!("worktree remove {w}")))
+            .any(|l| l.ends_with(&format!("worktree remove --force {w}")))
     };
     let r = || {
         Fake::default()
@@ -585,7 +585,7 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
         r.calls
             .borrow()
             .iter()
-            .any(|l| l.ends_with(&format!("worktree remove {w}")))
+            .any(|l| l.ends_with(&format!("worktree remove --force {w}")))
     };
     let r0 = r();
     let (code, dry) = run(&c, &r0, &["clean"]);
@@ -717,7 +717,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
             .calls
             .borrow()
             .iter()
-            .any(|l| l.ends_with(&format!("worktree remove {w}")));
+            .any(|l| l.ends_with(&format!("worktree remove --force {w}")));
         assert_eq!(removed, gone, "{out}");
         if kind == "verdict" {
             continue;
