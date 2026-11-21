@@ -2381,7 +2381,12 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             .ok()
             .map(|s| s.trim().to_string())
     };
-    if let Some(reason) = hook::decide(&input, &policy, &cur) {
+    let origin = |d: &str| {
+        runner::ok(r, "git", &["-C", d, "remote", "get-url", "origin"])
+            .ok()
+            .map(|s| s.trim().to_string())
+    };
+    if let Some(reason) = hook::decide(&input, &policy, &cur, &origin) {
         if policy.deny.iter().any(|d| d.reason() == reason) {
             lane_event(ctx, "hook-denied", json!({"rule": reason}));
         }

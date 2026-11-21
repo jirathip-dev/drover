@@ -207,14 +207,22 @@ pub fn pre_call(input: &Value) -> bool {
     ev.is_empty() || dialects().any(|d| d.pre == ev)
 }
 
-/// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `cur_branch` resolves HEAD.
-pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+/// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `cur_branch` resolves HEAD, `origin` a dir's remote.
+pub fn decide(
+    input: &Value,
+    p: &Policy,
+    cur_branch: &dyn Fn(&str) -> Option<String>,
+    origin: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let ti = tool_input(input);
     if dialects().any(|d| d.shell == tool) {
         let cmd = ti["command"].as_str().unwrap_or_default();
         let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
-        let leak = p.hygiene.as_ref().and_then(|c| crate::hygiene::gh_text(c, cmd, cwd));
+        let leak = p
+            .hygiene
+            .as_ref()
+            .and_then(|c| crate::hygiene::gh_text(c, cmd, cwd, origin));
         return leak.or_else(|| bash(cmd, cwd, p, cur_branch));
     }
     if !dialects().any(|d| d.edits.contains(&tool)) {
@@ -288,7 +296,7 @@ fn own_file(file: &str, p: &Policy) -> bool {
     normal && !linked && rel.as_os_str() != "" && ![".brief.md", ".thread.md"].iter().any(|f| rel == Path::new(f))
 }
 
-fn resolve(w: &str, cwd: &str) -> String {
+pub(crate) fn resolve(w: &str, cwd: &str) -> String {
     use std::path::{Component, PathBuf};
     let w = expand_home(w.trim_start_matches(|c: char| c.is_ascii_digit() || c == '>'));
     let mut out = PathBuf::new();
