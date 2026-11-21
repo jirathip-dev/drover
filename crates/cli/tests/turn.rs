@@ -79,7 +79,7 @@ fn turn(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
 
 fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
-    let (code, out) = run(c, r, &["drive"]);
+    let (code, out) = passes(c, r);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let new = read(&c.state).unwrap().to_vec().split_off(before);
     let steps = new.iter().filter(|e| e.kind == "driven");

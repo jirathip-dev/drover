@@ -1189,3 +1189,110 @@ fn a_second_pass_with_nothing_moved_starts_no_worktree() {
         .iter()
         .all(|e| e.kind != "auto-updated" && e.kind != "driven"));
 }
+
+fn cap_in(d: &Path, toml: &str) -> (i32, String) {
+    std::fs::create_dir_all(d.join("ci")).unwrap();
+    std::fs::write(d.join("ci/cap.toml"), toml).unwrap();
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+        .args(["cap-check", "--config", "ci/cap.toml"])
+        .current_dir(d)
+        .output()
+        .unwrap();
+    (
+        o.status.code().unwrap(),
+        String::from_utf8_lossy(&o.stdout).into_owned(),
+    )
+}
+
+fn tree(d: &Path, files: &[(&str, usize)]) {
+    for (f, n) in files {
+        let p = d.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, "x\n".repeat(*n)).unwrap();
+    }
+}
+
+type Case<'a> = (&'a str, &'a [(&'a str, usize)], &'a str, usize);
+
+#[test]
+fn cap_check_counts_the_globs_named_in_cap_toml() {
+    let noise = [("src/lib.rs", 100), ("crates/a/src/lib.rs", 100), ("README.md", 100)];
+    let cases: [Case; 3] = [
+        (
+            "ts",
+            &[
+                ("web/src/a.ts", 7),
+                ("web/src/deep/b.ts", 5),
+                ("web/src/a.test.ts", 50),
+                ("web/src/gen/t.ts", 40),
+            ],
+            r#"count = ["web/src/**/*.ts"]
+exclude = ["**/*.test.ts", "web/src/gen/**"]"#,
+            12,
+        ),
+        (
+            "swift",
+            &[
+                ("app/Sources/A.swift", 9),
+                ("app/Sources/V/B.swift", 4),
+                ("app/AppTests/T.swift", 30),
+            ],
+            r#"count = ["app/**/*.swift"]
+exclude = ["**Tests/**"]"#,
+            13,
+        ),
+        (
+            "mixed",
+            &[
+                ("crates/b/src/x.rs", 3),
+                ("web/ts/a.ts", 6),
+                ("swift/Sources/C.swift", 2),
+                ("swift/Sources/Gen/G.swift", 9),
+            ],
+            r#"count = ["crates/*/src/**/*.rs", "web/ts/*.ts", "swift/Sources/**/*.swift"]
+exclude = ["swift/Sources/Gen/**", "crates/a/**"]"#,
+            11,
+        ),
+    ];
+    for (name, files, globs, want) in cases {
+        let d = tmpdir(&format!("cap-globs-{name}"));
+        tree(&d, &noise);
+        tree(&d, files);
+        for (cap, code) in [(want, 0), (want - 1, 1)] {
+            let (got, out) = cap_in(&d, &format!("[fleet.x]\nline_cap = {cap}\n{globs}\n"));
+            assert_eq!(got, code, "{name}: {out}");
+            assert!(
+                out.contains(&format!("formatted): {want} / cap {cap}\n")),
+                "{name}: {out}"
+            );
+        }
+    }
+}
+
+#[test]
+fn cap_check_leaves_out_blank_lines_and_the_cfg_test_tail_on_request() {
+    let d = tmpdir("cap-non-test");
+    std::fs::create_dir_all(d.join("crates/a/src")).unwrap();
+    let rs = "fn a() {}\n\n   \nfn b() {}\n  #[cfg(test)]\nmod tests {}\n";
+    std::fs::write(d.join("crates/a/src/lib.rs"), rs).unwrap();
+    std::fs::write(d.join("crates/a/src/m.swift"), "a\n\nb\n#[cfg(test)]\nc\n").unwrap();
+    let base = "line_cap = 1000\ncount = [\"crates/*/src/**\"]\n";
+    for (opts, want) in [
+        ("", 11),
+        ("skip_blank = true\n", 8),
+        ("stop_at_cfg_test = true\n", 9),
+        ("skip_blank = true\nstop_at_cfg_test = true\n", 6),
+    ] {
+        let (code, out) = cap_in(&d, &format!("{base}{opts}"));
+        assert_eq!(code, 0, "{opts}: {out}");
+        assert!(
+            out.contains(&format!("formatted): {want} / cap 1000\n")),
+            "{opts}: {out}"
+        );
+    }
+    let both = "line_cap = 5\ncount = [\"crates/*/src/**\"]\nskip_blank = true\nstop_at_cfg_test = true\n";
+    let (code, out) = cap_in(&d, both);
+    assert_eq!(code, 1, "{out}");
+    let (code, out) = cap_in(&d, "line_cap = 10\ncount = \"src\"\n");
+    assert_ne!(code, 0, "{out}");
+}

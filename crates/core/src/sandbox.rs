@@ -64,7 +64,8 @@ pub fn settings(ctx: &Ctx, f: &Fleet, p: &Plan, local: bool) -> Value {
     let h = home();
     let at = |r: &[&str]| r.iter().map(|d| h.join(d)).collect::<Vec<_>>();
     let needs = providers::get(&p.harness).sandbox(ctx, &p.profile);
-    let build = ["CARGO_TARGET_DIR", "DROVER_SCRATCH_TARGET"].into_iter();
+    let swift = crate::spawn::SWIFT.map(|v| v.0);
+    let build = ["CARGO_TARGET_DIR", "DROVER_SCRATCH_TARGET"].into_iter().chain(swift);
     let build = build.filter_map(|k| Some(expand(p.env.get(k)?)));
     let repo = expand(&f.local);
     let mut write: Vec<PathBuf> = [p.worktree.clone(), repo.join(".git"), tmp(p), SOCKETS.into()].into();

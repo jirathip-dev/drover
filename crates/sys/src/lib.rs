@@ -67,6 +67,46 @@ pub fn rusage() -> Option<[i64; 18]> {
     (unsafe { getrusage(0, &raw mut u) } == 0).then_some(u)
 }
 
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct Flock {
+    start: i64,
+    len: i64,
+    pid: i32,
+    ty: i16,
+    whence: i16,
+}
+
+#[cfg(not(target_os = "macos"))]
+#[repr(C)]
+struct Flock {
+    ty: i16,
+    whence: i16,
+    start: i64,
+    len: i64,
+    pid: i32,
+}
+
+#[cfg(target_os = "macos")]
+const GETLK_WRLCK: (i32, i16) = (7, 3);
+#[cfg(not(target_os = "macos"))]
+const GETLK_WRLCK: (i32, i16) = (5, 1);
+
+/// Another process holds a POSIX record lock (`fcntl`, as SQLite takes) on some byte of `f`.
+pub fn record_locked(f: &std::fs::File) -> bool {
+    let (getlk, wrlck) = GETLK_WRLCK;
+    let mut lk = Flock {
+        start: 0,
+        len: 0,
+        pid: 0,
+        ty: wrlck,
+        whence: 0,
+    };
+    // SAFETY: F_GETLK reads and writes the one `struct flock` passed, laid out as this OS declares it.
+    let rc = unsafe { fcntl(f.as_raw_fd(), getlk, &raw mut lk) };
+    rc != -1 && lk.ty != 2
+}
+
 /// The APFS clone id of `p` when it shares its blocks with another file.
 #[cfg(target_os = "macos")]
 pub fn clone_id(p: &Path) -> Option<u64> {

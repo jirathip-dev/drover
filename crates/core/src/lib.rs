@@ -430,6 +430,9 @@ pub fn ask(
         .next()
         .is_some_and(|r| !r.is_empty() && !orchestrator::is_role(r));
     let routed = orchestrator::route(cfg, &events, fleet).filter(|_| from_lane && thread.is_none());
+    if from_lane && thread.is_none() {
+        d.put("lane_ask", json!(true));
+    }
     if let Some(t) = routed {
         d.put("routed", json!(t));
     }
@@ -470,8 +473,11 @@ pub fn orchestrator_answer(
     let events = working(&ctx.state)?;
     let by = format!("orchestrator-{t}");
     let ask = the_ask(&events, (fleet, id), &|e| in_thread(e, &by))?;
-    let mine = ask.str("routed").is_some() || crate::design::is_ask(ask) || ask.data.get("extend").is_some();
-    if !mine || orchestrator::fleet_of(&events, t)? != ask.fleet {
+    let mine = orchestrator::routed_to(&events, ask).is_some() || crate::design::is_ask(ask);
+    if !mine && ask.data.get("extend").is_none() {
+        return gate::refused("OWNER_ASK", format!("{id} was routed to no thread; ask the owner"));
+    }
+    if orchestrator::fleet_of(&events, t)? != ask.fleet {
         return gate::refused("OWNER_ASK", format!("{id} is no lane ask on {t}'s repo; ask the owner"));
     }
     let text = chosen(ask, choice);
@@ -579,7 +585,8 @@ pub fn answer_typed(
         .filter(|e| is(e, "needs-decision") || is(e, "ask-owner"))
         .flat_map(|e| {
             let own = on.filter(|_| crate::design::is_ask(e));
-            e.str("thread").into_iter().chain(own).map(|t| (t, e.seq))
+            let routed = orchestrator::routed_to(&events, e);
+            e.str("thread").into_iter().chain(own).chain(routed).map(|t| (t, e.seq))
         })
         .collect();
     let said: Vec<&Event> = (events.iter())
@@ -614,7 +621,8 @@ pub fn answer_typed(
     }
     let typed_in = |e: &Event| {
         let own = on.filter(|_| crate::design::is_ask(e));
-        let t = |m: &&&Event| m.str("thread") == e.str("thread") || m.str("thread") == own;
+        let routed = orchestrator::routed_to(&events, e);
+        let t = |m: &&&Event| [e.str("thread"), own, routed].contains(&m.str("thread"));
         said.iter().filter(t).any(|m| m.seq > e.seq)
     };
     let ask = the_ask(&events, (fleet, id), &typed_in)?;

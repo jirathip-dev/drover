@@ -57,7 +57,7 @@ fn rows_are_appended_per_host_per_step() {
         f: &r,
         hosts: vec![("bazzite", &bazzite)],
     };
-    let (code, out) = run(&c, &over, &["drive", "--fast"]);
+    let (code, out) = run(&c, &over, &["drive"]);
     assert_eq!(code, 0, "{out}");
     survey(&c, &cfg, &sh.on(&over), false);
     let rows = history(&c);
@@ -206,13 +206,13 @@ fn watched_fake(len: usize) -> Fake {
 fn no_process_table_walk_while_nobody_watches() {
     let (c, _sh) = two_hosts("history-idle");
     let r = watched_fake(10);
-    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(r.count("ps -axo rss=,command="), 0, "{:?}", r.calls.borrow());
     let rows = history(&c);
     assert!(rows.len() == 1 && rows[0].procs.is_none(), "{rows:?}");
     std::fs::write(c.state.with_file_name("host-watch.at"), (NOW - 180).to_string()).unwrap();
-    run(&c, &r, &["drive", "--fast"]);
+    run(&c, &r, &["drive"]);
     assert_eq!(r.count("ps -axo rss=,command="), 0);
 }
 
@@ -237,7 +237,7 @@ fn sampling_resumes_once_the_host_tab_is_open() {
     let at: u64 = std::fs::read_to_string(&watch).unwrap().parse().unwrap();
     c.now = at + 60;
     let r = watched_fake(10);
-    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(r.count("ps -axo rss=,command="), 1);
     assert_eq!(history(&c)[0].procs, Some([200, 100, 50, 10, 20]));

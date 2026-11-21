@@ -408,7 +408,52 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
     }
 }
 
+/// `args` run in this process. `drive` (the fast job) and `tick` start each fleet's pass as its own process; here a fleet whose pass logged nothing during them runs after them, in its stead.
 pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
+    let passes = |f: &str| {
+        std::fs::metadata(ctx.state.with_file_name(format!("drive-{f}.last")))
+            .and_then(|m| m.modified())
+            .ok()
+    };
+    let cfg = drover::config::Config::load(&ctx.config);
+    let fleets = cfg.map(|c| c.fleet.into_keys().collect::<Vec<_>>()).unwrap_or_default();
+    let before: Vec<_> = fleets.iter().map(|f| passes(f)).collect();
+    let (mut code, o) = run_only(ctx, r, args);
+    if args != ["drive"] && args != ["tick"] {
+        return (code, o);
+    }
+    let started = |l: &&str| {
+        fleets
+            .iter()
+            .any(|f| l.starts_with(&format!("{f}: pass not started: ")))
+    };
+    let mut out: String = o.lines().filter(|l| !started(l)).map(|l| format!("{l}\n")).collect();
+    for (f, n) in fleets.iter().zip(before) {
+        if passes(f) > n {
+            continue;
+        }
+        let (k, o) = run_only(ctx, r, &["drive", f]);
+        code = code.max(k);
+        out += &o;
+    }
+    (code, out)
+}
+
+/// Every fleet's pass alone, every host polled first: what a pass sees after the fast job that starts it.
+pub fn passes(ctx: &Ctx, r: &dyn Runner) -> (i32, String) {
+    look(ctx, r);
+    let cfg = drover::config::Config::load(&ctx.config);
+    let (mut code, mut out) = (0, String::new());
+    for f in cfg.map(|c| c.fleet.into_keys().collect::<Vec<_>>()).unwrap_or_default() {
+        let (k, o) = run_only(ctx, r, &["drive", &f]);
+        code = code.max(k);
+        out += &o;
+    }
+    (code, out)
+}
+
+/// `args` run in this process, alone.
+pub fn run_only(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
     without_lane_env();
     let mut out = Vec::new();
     let mut cmd = vec!["drover".to_string()];

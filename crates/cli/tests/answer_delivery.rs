@@ -130,17 +130,17 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
 
     let asked = || sh.all("get").iter().filter(|p| p["name"] == LANE).count();
     let before = asked();
-    run(&c, &Fake::default(), &["drive", "--fast"]);
+    run(&c, &Fake::default(), &["drive"]);
     assert!(asked() > before, "{:?}", sh.methods());
     assert_eq!(kinds(&c, "answer-undelivered").len(), 1);
 
     sh.lane(LANE, "idle", "/x");
-    run(&c, &Fake::default(), &["drive", "--fast"]);
+    run(&c, &Fake::default(), &["drive"]);
     assert!(typed(&sh, LANE, "DECISION q1: yes"), "{:?}", sh.methods());
     assert_eq!(kinds(&c, "answer-delivered")[0].str("agent"), Some(LANE));
     assert!(!page(&Fake::default()).contains("not delivered"));
     let tries = sh.sent(LANE).len();
-    run(&c, &Fake::default(), &["drive", "--fast"]);
+    run(&c, &Fake::default(), &["drive"]);
     assert_eq!(sh.sent(LANE).len(), tries, "typed once: {:?}", sh.sent(LANE));
 
     let c = ctx(&tmpdir("deliver-gone"), CONFIG);
@@ -153,7 +153,7 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     append(&c.state, &closed).unwrap();
     sh.lane(LANE, "idle", "/x");
     let tries = sh.sent(LANE).len();
-    run(&c, &Fake::default(), &["drive", "--fast"]);
+    run(&c, &Fake::default(), &["drive"]);
     assert_eq!(sh.sent(LANE).len(), tries, "{:?}", sh.methods());
 }
 
@@ -177,9 +177,9 @@ fn a_sleeping_lanes_answer_waits_for_room_then_lands() {
     let u = kinds(&c, "answer-undelivered");
     assert_eq!(u.len(), 1);
     assert!(u[0].str("reason").unwrap().contains("HOST_BUSY"), "{u:?}");
-    run(&c, &host("50.00"), &["drive", "--fast"]);
+    run(&c, &host("50.00"), &["drive"]);
     assert!(sh.sent(LANE).is_empty(), "held while busy: {:?}", sh.methods());
-    run(&c, &host("1.50"), &["drive", "--fast"]);
+    run(&c, &host("1.50"), &["drive"]);
     assert!(typed(&sh, LANE, "DECISION q1: yes"), "{:?}", sh.methods());
     assert_eq!(kinds(&c, "answer-delivered").len(), 1);
 }

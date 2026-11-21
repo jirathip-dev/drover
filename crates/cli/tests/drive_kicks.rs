@@ -64,7 +64,7 @@ fn marker(c: &drover::Ctx, n: u64) -> Option<drover::db::Lease> {
 }
 
 fn pass(c: &drover::Ctx, r: &Fake) -> serde_json::Value {
-    let (code, out) = run(c, r, &["drive"]);
+    let (code, out) = passes(c, r);
     assert_eq!(code, 0, "{out}");
     let ev = read(&c.state).unwrap();
     serde_json::Value::Object(ev.iter().rfind(|e| e.kind == "drive-pass").unwrap().data.clone())
@@ -457,6 +457,9 @@ impl drover::runner::Runner for Inline {
     }
     fn sleep(&self, _: u64) {}
     fn detach(&self, _: &str, args: &[String], _: &std::path::Path) -> anyhow::Result<u32> {
+        if args.first().is_none_or(|a| a != "kick") {
+            return Ok(0);
+        }
         let (c, a, load) = (self.1.clone(), args.to_vec(), self.2);
         std::thread::spawn(move || {
             let a: Vec<&str> = a.iter().map(String::as_str).collect();
@@ -780,7 +783,7 @@ fn waiting_names_a_slot_wait_not_a_stuck_tick() {
         (c.now - 1200).to_string(),
     )
     .unwrap();
-    std::fs::write(c.state.with_file_name("drive.at"), (c.now - 60).to_string()).unwrap();
+    std::fs::write(c.state.with_file_name("drive-fast.at"), (c.now - 60).to_string()).unwrap();
     fail_kick(
         &drover::Ctx {
             now: c.now - 100,
@@ -896,8 +899,13 @@ impl drover::runner::Runner for SlowAlpha {
 fn a_fleet_whose_gh_hangs_never_holds_another_fleets_pass_or_its_spawn() {
     let (c, sh) = fleets("kicks-896-slow", &["alpha", "beta"], 0, 1);
     let r = SlowAlpha(fake("1.0"), c.clone(), Shared::default());
-    let (code, out) = run(&c, &r, &["drive"]);
-    assert_eq!(code, 0, "{out}");
+    look(&c, &r);
+    std::thread::scope(|s| {
+        for f in ["alpha", "beta"] {
+            let (c, r) = (&c, &r);
+            s.spawn(move || assert_eq!(run_only(c, r, &["drive", f]).0, 0, "{f}"));
+        }
+    });
     let waits = r.2.borrow().clone();
     assert!(
         !waits.is_empty() && waits.iter().all(|d| *d),
@@ -1026,11 +1034,11 @@ fn a_fast_pass_starts_a_queued_issue_once_a_slot_frees() {
             .reply("ps -o etime= -p 4242", "  00:10\n")
     };
     let r = alive();
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     assert_eq!(launched(&r, 1), 0, "no slot free yet");
     drover::db::release(&c.state, "spawn-sendmeter-9.pending", None);
     let r = alive();
-    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!((launched(&r, 1), launched(&r, 2)), (1, 0), "{out}");
 }
@@ -1277,7 +1285,7 @@ impl drover::runner::Runner for Kicked {
             let alive = r()
                 .reply(&format!("kill -0 {pid}"), "")
                 .reply(&format!("ps -o etime= -p {pid}"), "  00:01\n");
-            run(&c, &alive, &a)
+            run(&c, &Kicked(alive, c.clone(), r), &a)
         })
         .join()
         .unwrap();

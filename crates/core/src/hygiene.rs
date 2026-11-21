@@ -18,6 +18,8 @@ pub struct Check {
     pub hosts: Vec<String>,
     pub private: Vec<String>,
     pub dirs: Vec<String>,
+    #[serde(default)]
+    pub private_repos: Vec<String>,
 }
 
 impl Check {
@@ -133,6 +135,10 @@ pub fn of(ctx: &Ctx, r: Option<&dyn Runner>, cfg: &Config, name: &str) -> Option
         hosts: hosts.collect(),
         private: f.private_names.clone(),
         dirs: vec![rel(state), rel(&crate::orchestrator::dir(ctx, cfg, ""))],
+        private_repos: (cfg.fleet.iter())
+            .filter(|(n, _)| !public(ctx, None, cfg, n))
+            .map(|(_, f)| slug(&f.repo))
+            .collect(),
     })
 }
 
@@ -214,9 +220,22 @@ pub enum Cmd {
     Scan { fleet: String },
 }
 
-/// The hook's check of a lane's `gh issue|pr create|edit|comment|review|close` or writing `gh api`: its title, body and body file.
-pub fn gh_text(c: &Check, cmd: &str, cwd: &str) -> Option<String> {
+fn slug(repo: &str) -> String {
+    let r = repo.trim().trim_end_matches('/').trim_end_matches(".git");
+    let mut parts = r.rsplit(['/', ':']);
+    let (name, owner) = (parts.next().unwrap_or_default(), parts.next().unwrap_or_default());
+    format!("{owner}/{name}").to_lowercase()
+}
+
+/// The hook's check of a lane's `gh issue|pr create|edit|comment|review|close` or writing `gh api`: its title, body and body file, bound for `--repo`/`-R`, else `origin`'s remote of the dir after any `cd`, else the fleet's repo.
+pub fn gh_text(c: &Check, cmd: &str, cwd: &str, origin: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    let mut dir = cwd.to_string();
     for seg in segments(cmd) {
+        if let [cd, to, ..] = seg.as_slice() {
+            if cd == "cd" || cd == "pushd" {
+                dir = crate::hook::resolve(to, &dir);
+            }
+        }
         let Some(i) = seg.iter().position(|w| w == "gh" || w.ends_with("/gh")) else {
             continue;
         };
@@ -229,6 +248,16 @@ pub fn gh_text(c: &Check, cmd: &str, cwd: &str) -> Option<String> {
         let writes =
             matches!(sub, "issue" | "pr") && matches!(verb, "create" | "edit" | "comment" | "review" | "close");
         if !(api || writes) {
+            continue;
+        }
+        let flagged = rest.iter().enumerate().find_map(|(j, w)| match w.as_str() {
+            "-R" | "--repo" => rest.get(j + 1).cloned(),
+            w => w.strip_prefix("--repo=").map(String::from),
+        });
+        let repo = flagged
+            .or_else(|| origin(&dir))
+            .map_or_else(|| c.repo.clone(), |r| slug(&r));
+        if c.private_repos.contains(&slug(&repo)) {
             continue;
         }
         for (j, w) in rest.iter().enumerate() {
@@ -250,7 +279,7 @@ pub fn gh_text(c: &Check, cmd: &str, cwd: &str) -> Option<String> {
                 _ => continue,
             };
             if let Some(p) = c.find(&text) {
-                return Some(why(&c.repo, &format!("gh {sub} {verb} {flag}"), &p));
+                return Some(why(&repo, &format!("gh {sub} {verb} {flag}"), &p));
             }
         }
     }

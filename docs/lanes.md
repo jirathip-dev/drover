@@ -87,6 +87,16 @@ and logs the error, never a full copy. The worktree budget and Host disk row cou
 apparent size. `clone_node_modules = true` is the old spelling of `clone_build = ["node_modules"]`, kept for
 one release.
 
+#1478: a Swift fleet sets `swift_build = true` in `[fleet.<n>]` (off by default: other fleets get no Swift folders and no
+new env). Each of its lanes then also gets `DROVER_DERIVED_DATA=<root>/.build/<agent>/xcode` and
+`DROVER_SWIFT_SCRATCH=<root>/.build/<agent>/swiftpm`, and its brief tells it to build with
+`xcodebuild -derivedDataPath "$DROVER_DERIVED_DATA"` and `swift build --scratch-path "$DROVER_SWIFT_SCRATCH"`.
+Both sit in the lane's own build folder, so the spawn's copy-on-write clone of the newest sibling carries them warm
+(`build-cloned` lists them; no sibling, nothing is cloned), `build_budget_gb` trims them oldest first and the sweep
+removes them with the lane's. A folder is never trimmed while xcodebuild holds its build database
+(`Build/Intermediates.noindex/XCBuildData/build.db`) or SwiftPM its `.lock`; on a `[hosts]` machine `lsof` tells.
+The hook refuses a `-derivedDataPath` or `--scratch-path` outside `<root>/.build` (`REFUSED SCRATCH_TARGET`).
+
 #630: a repo's optional `.drover/worktree-include` lists ignored files (one path per line, `#` comments), such as
 local env templates or tool config, that each new lane's worktree gets copied from the main checkout when missing.
 Never secrets: those stay in `secret:` env. `drover status`, the lane sheet and `/api/v1/lanes` (its `unsaved` list:
@@ -140,7 +150,9 @@ Issues are the spec, PRs the code. Lanes never comment: the Claude and Hermes ho
 `gh issue|pr comment` and `gh api` comment writes. Routing, queue, lane and verdict state
 live in the event log. `drover merge` writes the one closing comment (merge sha and
 verdict sha), then closes the issue's lane panes and reclaims their worktrees; a lane with
-uncommitted or unpushed work is kept and reported. Merging into drover's own repo ends by
+uncommitted or unpushed work is kept and reported. #1479: a PR body's `## Rollout` (fenced
+fleet.toml lines) becomes an open rollout in the filing thread until a config card applies it
+(docs/orchestrator.md, Rollouts). Merging into drover's own repo ends by
 printing the `cargo install` line to reinstall it (printed, not run).
 
 ## The lane hook
@@ -279,10 +291,13 @@ next pass. Starts fan out: a pass tries every startable item in queue order, eac
 afresh. An item-specific refusal (`SERIAL_BUSY`, `MCP_FORBIDDEN`, …) skips that item for the pass; it keeps
 its queue place and status reads `skipped this pass: <CODE> (<why>)` (board lane `skip <CODE>`). `CAP` ends
 the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end that fleet's starts in the pass. Every action logs a passive `driven` event (step, command, result).
-#896: each fleet's pass runs on its own thread under its own `drive-<fleet>.lock` lease (`drive-fast-<fleet>.lock` for
-the fast step; #344: taken over once its pid is gone, or after an hour), so cron and the button never overlap on one
-fleet and a slow fleet never holds another. The steps every fleet shares (the look, orphans, repair, checkpoint) run
-under `drive.lock`; a pass that finds it held skips them. A spawn's admission (slot count, host room, its marker) runs
+#1320: each fleet's pass is its own process, `drover drive <fleet>`, under its own `drive-<fleet>.lock` lease (2 ×
+`[limits] pass_max_secs`; taken over once its pid is gone, or once it runs out: `pass-stuck`, that pid stopped), so cron,
+the service and the button never overlap on one fleet and a slow fleet never holds another. A pass ends itself at
+`pass_max_secs` (60) and logs `pass-slow` naming the step it was in. The fast job (`drover drive`, every `fast_secs`)
+and the tick poll every host with no fresh word, then start each fleet's pass and wait for none; the service runs a
+loop per fleet instead, started at once by a wake. The tick's slow chores (disk budget, roots, offline hosts, orphans,
+repair, the runtime canary, stale panes, each fleet's closed issues, hotspots and backlog) run beside them. A spawn's admission (slot count, host room, its marker) runs
 under the short `admit.lock`, so two fleets' passes never both take the last slot. The board shows each fleet's
 `⟳ driving…` and its last pass's length.
 
@@ -334,12 +349,13 @@ notifier can subscribe to it) with the reason drive sees then, and `waiting`, `s
 #855: the fast step also checks two fleet SLOs: `slo-idle` (no lane working for `[limits] slo_idle_minutes` (20)
 while the queue has spawnable work) and `slo-tick` (#1307: a tick with no step or call for `slo_tick_minutes` (10), however long it has run; replacing
 `tick-stuck`). On a breach drive first tries the known heal and logs `self-heal`: a drover
-tick or drive pid it can name gets SIGTERM, then SIGKILL after 10 s; a DISK_BUDGET hold is recounted and the
+tick pid it can name, or the stuck pass of the one fleet with no finished pass for `slo_pass_minutes`, gets SIGTERM,
+then SIGKILL after 10 s (never another fleet's); a DISK_BUDGET hold is recounted and the
 queue's first spawn retried; drive's own pass already respawns a silent lane and marks a PASSed draft ready.
 #1183: a `stuck` (pushed once per fleet, and the owner's one `Drive is stuck` card per fleet) means drive itself is
 broken: a tick still hung a pass (`slow_secs`) after its heal, or an issue's spawn failing the same way
-twice on the same head. #1502: drive's own health (no slow drive pass of the fleet for `[limits] slo_pass_minutes`
-(30), `slo-idle`, drive's last pass of the fleet failing) is never a card or a push: it is one line at the top of
+twice on the same head. #1502: drive's own health (no finished pass of the fleet for `[limits] slo_pass_minutes`
+(5), `slo-idle`, drive's last pass of the fleet failing) is never a card or a push: it is one line at the top of
 the board (`drive late: 5 fleets · 34m`, idle and pass-error counts beside it), hidden when every fleet is healthy;
 tapping it lists each fleet's reason and age with [Drive now]. A wait (a hold, CI, a spawn slot, HOST_BUSY, `slo-idle`, a missed promise) never makes one:
 its row names the wait. `slo-ok` ends the episode once it recovers, and the card clears; an issue's line goes as

@@ -148,6 +148,11 @@ enum Cmd {
         #[arg(long, default_value = "owner")]
         by: String,
     },
+    #[command(about = "#1479: a merged issue's open rollout (`rollout dismiss`, owner only)")]
+    Rollout {
+        #[command(subcommand)]
+        cmd: crate::propose::Rollout,
+    },
     #[command(about = "Owner only: a rate-limited lane's [wait], one `continue` at shed's reset; logs `limit-picked`")]
     Limit(crate::limit::Pick),
     #[command(
@@ -393,14 +398,9 @@ enum Cmd {
         cmd: PushCmd,
     },
     #[command(
-        about = "One pass of the loop for every unpaused fleet: do every step that's due, then exit; safe from cron"
+        about = "A fleet's pass: every step that's due, ended at pass_max_secs; with no fleet, each unpaused fleet's pass started as its own process; safe from cron"
     )]
-    Drive {
-        fleet: Option<String>,
-        #[arg(help = "#212: only record verdicts and merge PASS + green (the every-minute job); no lane starts")]
-        #[arg(long)]
-        fast: bool,
-    },
+    Drive { fleet: Option<String> },
     #[command(
         about = "Drive one issue's due steps now, detached (lane hooks and board taps run it); the timers stay the safety net"
     )]
@@ -417,7 +417,7 @@ enum Cmd {
         id: Option<String>,
     },
     #[command(
-        about = "CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it or a --rules file over 30 lines"
+        about = "CI: lines of the `count` globs (less `exclude`) in --config, default src/**/*.rs, against its `line_cap` or a higher one in cap.d/; exit 1 over it or a --rules file over 30 lines"
     )]
     #[command(hide = true)]
     CapCheck {
@@ -745,7 +745,12 @@ enum ConfigCmd {
     #[command(
         about = "Propose <file> as the whole new fleet.toml in a thread: validated, its diff a card with [apply] [discard]"
     )]
-    Propose { thread: String, file: PathBuf },
+    Propose {
+        thread: String,
+        file: PathBuf,
+        #[arg(long, help = "The merged issue whose open rollout its apply closes")]
+        rollout: Option<u64>,
+    },
     #[command(about = "Owner only: apply a proposal (backup kept, doctor run)")]
     Apply { id: String },
     #[command(about = "Owner only: discard a proposal")]
@@ -1624,8 +1629,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Check => check::config(ctx)?,
                 _ => Config::load(&ctx.config)?,
             };
-            let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
-            let pass = if fast {
+            let pass = if matches!(cmd, Cmd::Drive { .. }) {
                 crate::hosts::Pass::fast(r)
             } else {
                 crate::hosts::Pass::new(r, None)
@@ -1777,8 +1781,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Config { cmd } => {
                     let (id, apply) = match cmd {
                         ConfigCmd::Show => return crate::config::show(&cfg, out).map(|()| 0),
-                        ConfigCmd::Propose { thread, file } => {
-                            return crate::propose::propose(ctx, &cfg, out, &thread, &file).map(|()| 0)
+                        ConfigCmd::Propose { thread, file, rollout } => {
+                            return crate::propose::propose(ctx, &cfg, out, (&thread, &file), rollout).map(|()| 0)
                         }
                         ConfigCmd::Apply { id } => (id, true),
                         ConfigCmd::Discard { id } => (id, false),
@@ -1852,7 +1856,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
-                Cmd::Drive { fleet, fast } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false, fast)?,
+                Cmd::Drive { fleet } => crate::drive::job(ctx, &cfg, r, out, fleet.as_deref())?,
                 Cmd::Kick {
                     fleet,
                     issue,
@@ -1940,6 +1944,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             (w.who, w.what) = ("drive", l);
                         }
                     }
+                    rows.extend(crate::propose::rollout_rows(&events, fleet.as_deref()));
                     let slots = crate::drive::holders(ctx, &cfg, r);
                     if !json && !slots.is_empty() {
                         writeln!(out, "slots: {slots}")?;
@@ -2104,6 +2109,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
+                Cmd::Rollout { cmd } => writeln!(out, "{}", cmd.run(ctx, &cfg)?)?,
                 Cmd::Limit(p) => crate::limit::pick(ctx, r, out, &p)?,
                 Cmd::Unpark { fleet, issue, by } => gate::unpark(ctx, &cfg, out, (&fleet, issue), &by)?,
                 Cmd::Brief { fleet, issue } => {
@@ -2302,7 +2308,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     }
     let thread = crate::config::env("DROVER_THREAD").unwrap_or_default();
     if let Some(text) = hook::issue_filed(&input).filter(|_| !thread.is_empty()) {
-        if let Err(e) = Config::load(&ctx.config).and_then(|cfg| crate::orchestrator::flow(ctx, &cfg, &thread, &text)) {
+        if let Err(e) = Config::load(&ctx.config).and_then(|c| crate::propose::filed(ctx, &c, &thread, &text, &input)) {
             crate::stderr!("drover hook: {e:#}");
         }
     }
@@ -2364,12 +2370,12 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
         hygiene: rules.hygiene,
     };
-    let cur = |d: &str| {
-        runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])
+    let git = |d: &str, a: &[&str]| {
+        runner::ok(r, "git", &[&["-C", d][..], a].concat())
             .ok()
             .map(|s| s.trim().to_string())
     };
-    if let Some(reason) = hook::decide(&input, &policy, &cur) {
+    if let Some(reason) = hook::decide(&input, &policy, &git) {
         if policy.deny.iter().any(|d| d.reason() == reason) {
             lane_event(ctx, "hook-denied", json!({"rule": reason}));
         }

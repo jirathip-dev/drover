@@ -372,3 +372,60 @@ fn scan_lists_hits_by_pattern_with_links_and_changes_nothing() {
     );
     assert_eq!(calls.len(), 3);
 }
+
+#[test]
+fn the_check_targets_gh_repo_then_the_checkouts_remote_then_the_fleet() {
+    let d = dir("hygiene-target");
+    let f = d.join("f.md");
+    std::fs::write(&f, "for the Globex screens\n").unwrap();
+    let co = d.join("co");
+    std::fs::create_dir(&co).unwrap();
+    for args in [
+        &["init", "-q"][..],
+        &["remote", "add", "origin", "git@github.com:o/closed.git"],
+    ] {
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(&co)
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    }
+    let f = f.display();
+    for cmd in [
+        format!("gh issue create --repo o/closed --title t --body-file {f}"),
+        format!("gh issue create --repo=O/Closed --title t --body-file {f}"),
+        format!("gh issue create -R github.com/o/closed --title t --body-file {f}"),
+        format!("cd co && gh issue create --title t --body-file {f}"),
+    ] {
+        let out = bash(&d, "open", &cmd);
+        assert!(
+            !out.contains("PUBLIC_LEAK"),
+            "a private target is not checked: {cmd}: {out}"
+        );
+    }
+    let out = bash(
+        &d,
+        "open",
+        &format!("gh issue create --repo o/other --title t --body-file {f}"),
+    );
+    assert!(
+        out.contains("REFUSED PUBLIC_LEAK") && out.contains("private-name #1, and o/other is public"),
+        "{out}"
+    );
+    let out = bash(
+        &d,
+        "open",
+        &format!("cd co && gh issue create -R o/other --title t --body-file {f}"),
+    );
+    assert!(
+        out.contains("and o/other is public"),
+        "--repo wins over the checkout: {out}"
+    );
+    let out = bash(&d, "open", &format!("gh issue create --title t --body-file {f}"));
+    assert!(
+        out.contains("private-name #1, and o/open is public"),
+        "no checkout: the fleet's repo: {out}"
+    );
+}

@@ -78,7 +78,7 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     .unwrap();
     let f = Fake::default();
     let r = Air::new(&f, &air);
-    run(&main, &r, &["drive", "--fast"]);
+    run(&main, &r, &["drive"]);
     let ev = read(&main.state).unwrap().to_vec();
     let asks: Vec<_> = ev.iter().filter(|e| e.kind == "needs-decision").collect();
     assert_eq!(asks.len(), 1, "{ev:?}");
@@ -95,7 +95,7 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     assert_eq!(run(&main, &Fake::default(), &["answer", "sendmeter", "q1", "1"]).0, 0);
     assert_eq!(ev_count(&main, "answer-undelivered"), 1);
     let f = Fake::default();
-    run(&main, &Air::new(&f, &air), &["drive", "--fast"]);
+    run(&main, &Air::new(&f, &air), &["drive"]);
     assert_eq!(air.sent("sendmeter-impl-12"), ["DECISION q1: a"], "{:?}", air.methods());
     assert_eq!(air.last("keys")["keys"], json!(["Enter"]));
     assert!(
