@@ -249,6 +249,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |
 | `guard_secs` | `180` | `turn done`'s UI check (`just guard`) runs this long at most; past it the turn ends and `ui-check` logs a timeout |
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
+| `hold_sample_secs` | `10` | `drover hold` at the front of the heavy line samples the host's admission this often |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
 | `orchestrator_reply_minutes` | `10` | an owner message with no orchestrator reply this long gets a `no reply yet` row |
