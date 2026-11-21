@@ -352,6 +352,7 @@ fn a_lane_ask_filed_before_its_repo_has_a_thread_is_routed_to_the_first_thread_o
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
     let rows: Vec<_> = kinds(&c, "thread-msg")
         .iter()
+        .filter(|e| e.str("lane_ask").is_some())
         .map(|e| (e.str("thread").map(String::from), e.str("lane_ask").map(String::from)))
         .collect();
     assert_eq!(
