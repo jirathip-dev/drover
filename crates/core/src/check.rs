@@ -2304,9 +2304,9 @@ fn save_on(
 /// A superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any. A rev-family lane's scratch stays local.
 pub fn save_lane(
     ctx: &Ctx,
-    (cfg, fleet): (&Config, &str),
+    (cfg, fleet, family): (&Config, &str, &str),
     on: &On,
-    (agent, family): (&str, &str),
+    agent: &str,
     wt: &str,
 ) -> Result<Option<String>> {
     if family == "rev" || !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
