@@ -6,6 +6,7 @@ use drover::hosts::place;
 use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::path::Path;
 
 const NOW: u64 = 1_000_000;
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m cloud1 -- ";
@@ -1283,9 +1284,8 @@ fn a_failing_status_is_not_gone() {
     assert_eq!(drover::cloud::state(&read(&c.state).unwrap(), "cloud1"), "running");
 }
 
-#[test]
-fn bootstrap_writes_the_oom_policy_drop_in_before_it_enables_the_shed_job() {
-    let (c, cfg) = running("cloud-oom");
+fn shed_job_lines(name: &str) -> (String, String) {
+    let (c, cfg) = running(name);
     let r = boot_fake(false)
         .once(&step("shed doctor"), 1, "")
         .reply(&step("shed install --force"), "");
@@ -1298,27 +1298,46 @@ fn bootstrap_writes_the_oom_policy_drop_in_before_it_enables_the_shed_job() {
         let s = line.strip_prefix(&format!("{SSH}'sh' '-c' '")).unwrap();
         s.strip_suffix('\'').unwrap().replace("'\\''", "'")
     };
-    let (check, install) = (sent("shed doctor"), sent("shed install --force"));
-    let home = tmpdir("cloud-oom-home");
-    let bin = home.join(".local/bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let log =
-        "echo \"$*|$(cat \"$HOME/.config/systemd/user/shed.service.d/drover.conf\" 2>/dev/null)\" >> \"$HOME/log\"";
-    for (tool, body) in [("shed", "exit 0"), ("sudo", "exit 0"), ("systemctl", log)] {
+    (sent("shed doctor"), sent("shed install --force"))
+}
+
+fn stub_tools(bin: &Path, tools: &[(&str, &str)]) {
+    std::fs::create_dir_all(bin).unwrap();
+    for (tool, body) in tools {
         let p = bin.join(tool);
         std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
         let mut m = std::fs::metadata(&p).unwrap().permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut m, 0o755);
         std::fs::set_permissions(&p, m).unwrap();
     }
-    let sh = |s: &str| {
-        let o = std::process::Command::new("sh")
-            .args(["-c", s])
-            .env("HOME", &home)
-            .output()
-            .unwrap();
-        (o.status.code(), String::from_utf8_lossy(&o.stderr).into_owned())
-    };
+}
+
+fn sh_at(home: &Path, path: Option<&str>, s: &str) -> (Option<i32>, String) {
+    let mut cmd = std::process::Command::new("/bin/sh");
+    cmd.args(["-c", s]).env("HOME", home);
+    if let Some(p) = path {
+        cmd.env("PATH", p);
+    }
+    let o = cmd.output().unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr)
+    );
+    (o.status.code(), text)
+}
+
+#[test]
+fn bootstrap_writes_the_oom_policy_drop_in_before_it_enables_the_shed_job() {
+    let (check, install) = shed_job_lines("cloud-oom");
+    let home = tmpdir("cloud-oom-home");
+    let log =
+        "echo \"$*|$(cat \"$HOME/.config/systemd/user/shed.service.d/drover.conf\" 2>/dev/null)\" >> \"$HOME/log\"";
+    stub_tools(
+        &home.join(".local/bin"),
+        &[("shed", "exit 0"), ("sudo", "exit 0"), ("systemctl", log)],
+    );
+    let sh = |s: &str| sh_at(&home, None, s);
     assert_ne!(sh(&check).0, Some(0), "a job without the drop-in is not there yet");
     assert_eq!(sh(&install).0, Some(0), "{}", sh(&install).1);
     let calls = std::fs::read_to_string(home.join("log")).unwrap();
@@ -1329,6 +1348,36 @@ fn bootstrap_writes_the_oom_policy_drop_in_before_it_enables_the_shed_job() {
         "{calls}"
     );
     assert_eq!(sh(&check).0, Some(0), "the job with its drop-in is there");
+}
+
+#[test]
+fn the_shed_job_step_passes_on_macos_once_shed_install_loaded_the_job() {
+    let (check, install) = shed_job_lines("cloud-mac");
+    let home = tmpdir("cloud-mac-home");
+    let plist = "$HOME/Library/LaunchAgents/dev.shed.serve.plist";
+    let shed = format!(
+        "[ \"$1\" = doctor ] && exit 0; mkdir -p \"$HOME/Library/LaunchAgents\" && touch \"{plist}\" \"$HOME/loaded\""
+    );
+    let launchctl = "echo \"$*\" >> \"$HOME/log\"; case \"$1\" in print) [ -f \"$HOME/loaded\" ];; \
+                     bootstrap) [ -f \"$HOME/loaded\" ] && { echo 'Bootstrap failed: 5: Input/output error' >&2; exit 5; }; touch \"$HOME/loaded\";; esac";
+    let sys = home.join("sys");
+    std::fs::create_dir_all(&sys).unwrap();
+    for t in ["sh", "mkdir", "touch", "id", "grep", "cat", "printf"] {
+        let found = ["/bin", "/usr/bin"]
+            .iter()
+            .map(|d| Path::new(d).join(t))
+            .find(|p| p.exists());
+        std::os::unix::fs::symlink(found.unwrap(), sys.join(t)).unwrap();
+    }
+    stub_tools(&home.join(".local/bin"), &[("shed", &shed), ("launchctl", launchctl)]);
+    let path = sys.display().to_string();
+    let sh = |s: &str| sh_at(&home, Some(&path), s);
+    assert_ne!(sh("command -v systemctl").0, Some(0), "no systemd on this host");
+    assert_ne!(sh(&check).0, Some(0), "no job yet");
+    let (code, text) = sh(&install);
+    let calls = std::fs::read_to_string(home.join("log")).unwrap_or_default();
+    assert_eq!(code, Some(0), "{text}\nlaunchctl: {calls}");
+    assert_eq!(sh(&check).0, Some(0), "the loaded job is there");
 }
 
 #[test]
