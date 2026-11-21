@@ -15,6 +15,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod probe;
+
 fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -377,36 +379,6 @@ impl<'a> Pass<'a> {
         let end = args.iter().position(|a| a == "--").filter(|_| prog == "ssh")?;
         let last = args.get(end.checked_sub(1)?)?;
         Some(last.as_str()).filter(|m| !m.starts_with('-'))
-    }
-    fn up(&self, m: &str) -> bool {
-        if let Some(&u) = lock(&self.up).get(m) {
-            return u;
-        }
-        if !self.probe {
-            return true;
-        }
-        let secs = crate::config::limits().ssh_quick_secs;
-        let limit = std::time::Duration::from_secs(secs);
-        let master = self.r.run_for("ssh", &argv(&[CM[1], "-O", "check", m]), "", limit);
-        if master.is_ok_and(|o| o.code == 0) {
-            self.seen(m, true);
-            return true;
-        }
-        let connect = format!("-oConnectTimeout={secs}");
-        let probe = argv(&["-oBatchMode=yes", &connect, "-oControlPath=none", m, "--", "true"]);
-        let mut o = self.r.run_for("ssh", &probe, "", limit);
-        if o.as_ref().is_ok_and(|o| o.code == 124) {
-            o = self.r.run_for("ssh", &probe, "", limit);
-        }
-        if let Ok(o) = &o {
-            self.key_changed(m, o);
-        }
-        if o.as_ref().is_ok_and(|o| o.code == 124) {
-            lock(&self.late).insert(m.into());
-        }
-        let u = o.is_ok_and(|o| !matches!(o.code, 124 | 255));
-        self.seen(m, u);
-        u
     }
     fn call(&self, prog: &str, args: &[String], input: Option<&str>, limit: Option<Duration>) -> Result<Out> {
         self.note(&quote(prog, args));

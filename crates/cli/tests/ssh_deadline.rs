@@ -40,7 +40,7 @@ fn every_ssh_drover_starts_is_bounded_by_a_deadline() {
         }
     }
     let probe =
-        "core/src/hosts.rs: let o = self.r.run_for(\"ssh\", &probe, \"\", std::time::Duration::from_secs(secs));";
+        "core/src/hosts/probe.rs: let ssh = |a: Vec<String>| self.r.run_for(\"ssh\", &a, \"\", Duration::from_secs(secs));";
     let config = "core/src/hosts.rs: let g = ok(self.r, \"ssh\", &[\"-G\", CM[1], m]).unwrap_or_default();";
     let tunnel =
         "core/src/proxy.rs: let n = r.detach(\"ssh\", &a, &ctx.state.with_file_name(format!(\"tunnel-{name}.log\")))?;";
