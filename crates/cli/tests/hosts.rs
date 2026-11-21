@@ -1280,7 +1280,7 @@ fn trim_setup(name: &str, extra: &str) -> drover::Ctx {
     c
 }
 
-const TRIMMED: &str = "trimmed /home/me/.cache/drover/target/synergy/debug/ (9 KB)";
+const TRIMMED: &str = "trimmed /home/me/.cache/drover/target/tangelo/debug/ (9 KB)";
 
 #[test]
 fn remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pass() {
