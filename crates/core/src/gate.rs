@@ -860,6 +860,7 @@ pub fn merge(
         writeln!(out, "already merged → {} (PR #{})", s("merge_sha"), s("pr"))?;
         return Ok(());
     }
+    let _one = crate::drive::job::merging(ctx, cfg, r, fleet, issue)?;
     let landed = |num: &str| -> Result<bool> {
         Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?.at("state") == "MERGED")
     };
