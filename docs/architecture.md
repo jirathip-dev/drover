@@ -180,6 +180,9 @@ TS: it imports them from `assets/types/api.d.ts`.
   commit that edits `ci/cap.toml` (or adds a `ci/cap.d/*.toml` raise; the highest `line_cap` wins) carries
   `Cap: <old> → <new> (#issue, q<N>)`; on a PR, `cap-check --base` refuses a cap commit without it. `drover cap log`
   prints the history from git.
+- **Rules file and PR body (#1484):** `drover lesson-check` fails a `.drover/rules.md` line that names no enforcer
+  and a file over 30 lines (`cap-check` no longer takes `rules`). `drover pr-body --file <body> --head <sha> [--base staging]`
+  applies `turn done`'s `PR_BODY` rule to a file and exits 1 with the reason; neither needs a fleet config.
 - **Drive over time (#856):** a fix for a bug that shows only as drive runs pass after pass (a stuck tick, a lane
   never replaced, a hold that never lifts) adds its scenario to `crates/cli/tests/drive_sim.rs`: a fake clock,
   GitHub, shed terminals, hosts and processes, `tick` every 5 minutes and `drive` every minute, asserted on the

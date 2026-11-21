@@ -297,43 +297,34 @@ fn rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine() {
 }
 
 #[test]
-fn a_rules_file_over_30_lines_fails_the_check() {
-    let d = tmpdir("lesson-cap");
-    let (c, r) = (ctx(&d, CONFIG), Fake::default());
-    let cap = d.join("cap.toml");
-    std::fs::write(&cap, "[fleet.x]\nline_cap = 100000000\n").unwrap();
-    let rules = d.join("rules.md");
-    let check = |n: usize| {
-        std::fs::write(&rules, "- don't X (enforced by: none)\n".repeat(n)).unwrap();
-        run(
-            &c,
-            &r,
-            &[
-                "cap-check",
-                "--config",
-                cap.to_str().unwrap(),
-                "--rules",
-                rules.to_str().unwrap(),
-            ],
+fn lesson_check_fails_a_rule_naming_no_enforcer_and_a_file_over_30_lines_with_no_fleet_config() {
+    let d = tmpdir("lesson-format");
+    std::fs::create_dir_all(d.join(".drover")).unwrap();
+    let check = |rules: String| {
+        std::fs::write(d.join(".drover/rules.md"), rules).unwrap();
+        let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
+            .arg("lesson-check")
+            .env("HOME", d.join("home"))
+            .env("FLEET_CONFIG", d.join("none.toml"))
+            .current_dir(&d)
+            .output()
+            .unwrap();
+        (
+            o.status.code().unwrap(),
+            String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr),
         )
     };
-    assert_eq!(check(30).0, 0);
-    let (code, out) = check(31);
+    let ok = "- don't X (enforced by: none)\n";
+    assert_eq!(check(ok.repeat(30)), (0, String::new()));
+    let (code, out) = check(ok.repeat(31));
     assert_eq!(code, 1, "{out}");
     assert!(out.contains("31 lines, over 30"), "{out}");
-    let none = d.join("none.md");
-    let (code, out) = run(
-        &c,
-        &r,
-        &[
-            "cap-check",
-            "--config",
-            cap.to_str().unwrap(),
-            "--rules",
-            none.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(code, 0, "{out}");
+    for bare in ["- don't Y\n", "- don't Y (enforced by: )\n"] {
+        let (code, out) = check(format!("# Rules\n{ok}{bare}"));
+        assert_eq!(code, 1, "{bare}: {out}");
+        assert!(out.contains("line 3 names no enforcer"), "{out}");
+        assert!(!out.contains("line 2") && !out.contains("line 1 "), "{out}");
+    }
 }
 
 #[test]

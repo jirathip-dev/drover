@@ -124,8 +124,9 @@ counts those starting. Drive gives the free slots to the queue in order; the kic
 
 `turn done` is a hard gate: before any review it checks, in the lane's worktree on its host, that `HEAD` is the pushed PR
 head, that the PR body names it (`PR_BODY`), and runs each `done_checks` command (`[fleet.<n>] done_checks = ["…"]`),
-each killed after `gate_check_minutes`. Unset = `drover arch-check` where the repo has `.drover/arch.toml` and
-`cargo fmt --check` where it has a `Cargo.toml`. A check only checks; one that fails, cannot start or times out
+each killed after `gate_check_minutes`. Unset = `./.gatekeeper/run check` where the repo has `.gatekeeper/run` (the
+wrapper fetches gatekeeper, so no host installs it), else `drover arch-check` where the repo has `.drover/arch.toml`
+and `cargo fmt --check` where it has a `Cargo.toml`. A check only checks; one that fails, cannot start or times out
 refuses the `done` (`DONE_CHECK`, with its output tail). CI still runs format and arch-check.
 
 ## Hygiene (#1101)
@@ -162,11 +163,18 @@ the pattern (`home-path`, `host`, `session-path`, `session-id`, `private-name #N
 | key | default | what |
 |---|---|---|
 | `[fleet.<n>] public` | GitHub's visibility, read at most once a day (spawn, merge, doctor) and cached; the hook reads only the cache | `true` checks, `false` skips; the flag wins |
-| `[fleet.<n>] private_names` | `[]` | names (private repos, clients) never sent to the repo; the list stays in fleet.toml |
+| `[fleet.<n>] private_names` | `[]` | names (private repos, clients) never sent to the repo; the list stays in fleet.toml and, for CI, the repo's `PRIVATE_NAMES` secret |
 
 `drover doctor` prints one `! hygiene` line naming the public fleets with no `private_names`. `drover hygiene scan
 <fleet>` lists the hits already in the repo's issues, PR bodies, comments and integration history, by pattern with
 their links; it changes nothing.
+
+`drover hygiene check [<fleet>] [--base <rev>] [--pr-body <file>]` is the gate (#1483): the tracked files, the commit
+messages since `--base` and the PR body against the names list, exit 1 on a hit, each printed `private-name #N at
+file:line`, never the name. The list is `$DROVER_PRIVATE_NAMES` (one name a line; CI passes its `private-names`
+secret), else the fleet's `private_names` (the argument, else the lane's fleet); a private fleet passes, and no list
+fails `list-missing`. It needs no fleet.toml. `drover hygiene push <fleet>` (owner only; an orchestrator posts a run
+card) writes the fleet's list as its public repo's `PRIVATE_NAMES` Actions secret and never prints it.
 
 ## Limits (#844)
 
@@ -248,6 +256,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |
 | `guard_secs` | `180` | `turn done`'s UI check (`just guard`) runs this long at most; past it the turn ends and `ui-check` logs a timeout |
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
+| `hold_sample_secs` | `10` | `drover hold` at the front of the heavy line samples the host's admission this often |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
 | `orchestrator_reply_minutes` | `10` | an owner message with no orchestrator reply this long gets a `no reply yet` row |

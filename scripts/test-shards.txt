@@ -41,6 +41,7 @@
 2 cooee_profiles
 4 cooee_screens
 1 cooee_token
+1 deps
 1 demo_export
 2 design_orphan
 4 design_stage
@@ -182,8 +183,10 @@
 1 sbin_path
 1 schemes
 4 scratch
+3 scene_device
 2 screen_hub
 2 screen_pages
+3 screens_parity
 3 self_update
 3 serial_groups
 1 serve_conn

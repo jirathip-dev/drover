@@ -375,6 +375,11 @@ pub struct Serve {
     pub tailscale_https_port: Option<u16>,
     /// The Funnel listener, `POST /hooks/github` only (default `127.0.0.1:7778`; `""`: off).
     pub hooks_addr: Option<String>,
+    /// The scene device's LAN listener, `GET /screens/scene` only (unset or `""`: off).
+    pub device_addr: Option<String>,
+    /// `Host` names the device listener answers besides IP literals.
+    #[serde(default)]
+    pub device_hosts: Vec<String>,
     /// The Herd's theme, `<config dir>/themes/<name>/` or built-in (default `farm`).
     pub theme: Option<String>,
     /// The 0600 file holding `GITHUB_WEBHOOK_SECRET` (unset: webhooks off).
@@ -387,6 +392,9 @@ impl Serve {
     }
     pub fn hooks_addr(&self) -> String {
         self.hooks_addr.clone().unwrap_or_else(|| "127.0.0.1:7778".into())
+    }
+    pub fn device_addr(&self) -> Option<&str> {
+        self.device_addr.as_deref().filter(|a| !a.is_empty())
     }
 }
 
@@ -469,7 +477,7 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// Fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<Premerge>>,
-    /// Commands `turn done` runs in the lane's worktree before any review; unset = `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
+    /// Commands `turn done` runs in the lane's worktree before any review; unset = `./.gatekeeper/run check` with `.gatekeeper/run`, else `drover arch-check` with `.drover/arch.toml`, `cargo fmt --check` with `Cargo.toml`.
     pub done_checks: Option<Vec<String>>,
     /// The repo's own line-cap script `drover cap` reads `N / cap M` lines from; unset = the first `premerge` check naming a cap, else the built-in Rust count.
     pub cap_script: Option<String>,
@@ -484,6 +492,8 @@ pub struct Fleet {
     pub hotspots: Option<String>,
     /// `weekly` has `tick` run `drover triage` every 7 days; unset or `off`: only on demand.
     pub triage: Option<String>,
+    /// `monthly` has `tick` run `drover deps` every 30 days and the advisory check daily; unset or `off`: only on demand.
+    pub deps: Option<String>,
     /// `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
     #[serde(default)]
     pub heavy: BTreeMap<String, Vec<String>>,
@@ -781,6 +791,7 @@ pub struct Limits {
     pub lane_read_secs: u64,
     pub guard_secs: u64,
     pub poll_millis: u64,
+    pub hold_sample_secs: u64,
     pub tick_beat_secs: u64,
     pub orchestrator_idle_minutes: u64,
     pub orchestrator_reply_minutes: u64,
@@ -917,6 +928,7 @@ impl Default for Limits {
             lane_read_secs: 5,
             guard_secs: 180,
             poll_millis: 20,
+            hold_sample_secs: 10,
             tick_beat_secs: 60,
             orchestrator_idle_minutes: 30,
             orchestrator_reply_minutes: 10,
@@ -1181,6 +1193,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "poll_millis",
         "the pause between polls of a child process or disk probe",
+    ),
+    (
+        "hold_sample_secs",
+        "`drover hold` at the front of the heavy line samples the host's admission this often",
     ),
     ("tick_beat_secs", "a running tick writes `tick.beat` this often"),
     (
@@ -1788,9 +1804,9 @@ impl Fleet {
             .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
     }
-    /// The configured role a lane runs as: a lesson or triage lane is impl's unless its own role is set.
+    /// The configured role a lane runs as: a lesson, triage or deps lane is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
-        if matches!(role, "lesson" | "triage") && !self.role.contains_key(role) {
+        if matches!(role, "lesson" | "triage" | "deps") && !self.role.contains_key(role) {
             "impl"
         } else {
             role

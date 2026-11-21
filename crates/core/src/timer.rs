@@ -14,7 +14,7 @@ pub const FAST: &str = "dev.drover.fast";
 pub const SERVICE: &str = "dev.drover.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive"])];
 /// The tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
-pub const TICK_STEPS: [(&str, &[&str]); 8] = [
+pub const TICK_STEPS: [(&str, &[&str]); 9] = [
     (
         "check",
         &[
@@ -35,6 +35,7 @@ pub const TICK_STEPS: [(&str, &[&str]); 8] = [
     ("trim", &[]),
     ("lesson", &[]),
     ("triage", &[]),
+    ("deps", &[]),
     ("hotspots", &[]),
     ("compact", &[]),
 ];
@@ -456,7 +457,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         if over {
             writeln!(
                 out,
-                "tick: past its {budget} s budget; skipped: clean, lesson, triage, hotspots, compact"
+                "tick: past its {budget} s budget; skipped: clean, lesson, triage, deps, hotspots, compact"
             )?;
         }
         let at = ctx.state.with_file_name("clean.at");
@@ -481,6 +482,8 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         crate::lesson::weekly(ctx, cfg, &pass, out)?;
         pass.step("triage");
         crate::triage::weekly(ctx, cfg, &pass, out)?;
+        pass.step("deps");
+        crate::deps::monthly(ctx, cfg, &pass, out)?;
         pass.step("hotspots");
         crate::hotspots::daily(ctx, cfg, &pass, out)?;
         pass.step("compact");
@@ -776,13 +779,13 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     rows
 }
 
-/// Whether `<state dir>/<key>.at` is a week old or missing; a due run stamps it now.
-pub fn weekly_due(ctx: &Ctx, key: &str) -> Result<bool> {
+/// Whether `<state dir>/<key>.at` is `every` seconds old or missing; a due run stamps it now.
+pub fn due(ctx: &Ctx, key: &str, every: u64) -> Result<bool> {
     let at = ctx.state.with_file_name(format!("{key}.at"));
     let last = std::fs::read_to_string(&at)
         .ok()
         .and_then(|t| t.trim().parse::<u64>().ok());
-    if last.is_some_and(|t| ctx.now < t + 7 * 86400) {
+    if last.is_some_and(|t| ctx.now < t + every) {
         return Ok(false);
     }
     std::fs::write(&at, ctx.now.to_string())?;

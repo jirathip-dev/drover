@@ -145,13 +145,7 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
 }
 
 /// `drover cap-check`: the lines `config` names to count (`Counted`) against its first `line_cap`, top-level or `[fleet.<n>]`, or a higher one in `cap.d/`; under `warn_within` lines of headroom it warns and still passes. `web/src/**/*.ts` lines are reported, never capped. With `base`, every commit since it that edits the cap must carry a `Cap:` trailer.
-pub fn cap_check(
-    r: &dyn Runner,
-    config: &Path,
-    rules: &Path,
-    base: Option<&str>,
-    out: &mut dyn std::io::Write,
-) -> Result<i32> {
+pub fn cap_check(r: &dyn Runner, config: &Path, base: Option<&str>, out: &mut dyn std::io::Write) -> Result<i32> {
     let mut bad = 0;
     if let Some(b) = base {
         let range = format!("{b}..HEAD");
@@ -215,15 +209,7 @@ pub fn cap_check(
     if (0..warn).contains(&left) {
         writeln!(out, "WARN: {left} lines of headroom (< {warn})")?;
     }
-    let over = std::fs::read_to_string(rules).map_or(0, |t| t.lines().count());
-    if over > 30 {
-        writeln!(
-            out,
-            "{}: {over} lines, over 30: delete the rules a check now enforces",
-            rules.display()
-        )?;
-    }
-    Ok(i32::from(left < 0 || over > 30 || bad > 0))
+    Ok(i32::from(left < 0 || bad > 0))
 }
 
 const CAP_PATHS: [&str; 2] = ["ci/cap.toml", "ci/cap.d"];

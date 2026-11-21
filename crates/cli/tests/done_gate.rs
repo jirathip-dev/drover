@@ -276,6 +276,46 @@ fn a_pr_body_without_the_heads_evidence_is_refused_and_ends_no_turn() {
 }
 
 #[test]
+fn pr_body_applies_the_done_rule_to_a_file_with_no_fleet_config() {
+    let repo = repo("pr-body-verb");
+    let file = repo.dir.join("body.md");
+    let verb = |b: &str, head: &str| {
+        std::fs::write(&file, b).unwrap();
+        let o = Command::new(env!("CARGO_BIN_EXE_drover"))
+            .args(["pr-body", "--file", file.to_str().unwrap(), "--head", head])
+            .env("HOME", repo.dir.join("home"))
+            .env("FLEET_CONFIG", repo.dir.join("none.toml"))
+            .current_dir(&repo.wt)
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr);
+        (o.status.code().unwrap(), out)
+    };
+    assert_eq!(verb(&body(&repo.head), &repo.head), (0, String::new()));
+    let base = g(&repo.wt, &["rev-parse", "HEAD^1"]);
+    for (b, why) in [
+        (body(&base), "names no sha of head"),
+        (
+            format!("## Evidence (head {})", repo.head),
+            "no `## For humans` section",
+        ),
+        (
+            format!("{}\n\nGenerated with x", body(&repo.head)),
+            "carries `Generated with x`",
+        ),
+    ] {
+        let (code, out) = verb(&b, &repo.head);
+        assert_eq!(code, 1, "{why}: {out}");
+        assert!(out.contains("PR_BODY: ") && out.contains(why), "{why}: {out}");
+    }
+    let merged = "Merge remote-tracking branch 'origin/staging' into issue-12";
+    g(&repo.wt, &["commit", "-q", "--allow-empty", "-m", merged]);
+    let top = g(&repo.wt, &["rev-parse", "HEAD"]);
+    assert_eq!(verb(&body(&repo.head), &top).0, 0);
+    assert_eq!(verb(&body(&repo.head), "nothex").0, 1);
+}
+
+#[test]
 fn an_unpushed_commit_is_refused_push_first() {
     let repo = repo("done-unpushed");
     let (c, _sh) = lane(&repo);
@@ -373,6 +413,57 @@ fn a_check_that_cannot_start_or_times_out_refuses_the_done() {
         "{out}"
     );
     assert_eq!(kinds(&c, "done-refused").len(), 2);
+}
+
+fn gatekept(name: &str, code: i32) -> (Repo, drover::Ctx, FakeShed, PathBuf) {
+    let (repo, c, sh, bin) = checked(name, (0, 0));
+    let gk = repo.wt.join(".gatekeeper");
+    std::fs::create_dir_all(&gk).unwrap();
+    let ok = (1..=12).map(|i| format!("ok gate-{i}\n")).collect::<String>();
+    let say = format!("{ok}FAIL fmt: a.rs:2 unformatted\nFAIL arch: a.rs:2 comment");
+    tool(&gk, "run", code, &say);
+    (repo, c, sh, bin)
+}
+
+#[test]
+fn a_gatekeeper_wrapper_replaces_the_default_checks() {
+    let (repo, c, _sh, bin) = gatekept("done-gk-clean", 0);
+    let f = fake(&repo.head);
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    let wt = repo.wt.canonicalize().unwrap();
+    let ran = std::fs::read_to_string(repo.wt.join(".gatekeeper/ran.log")).unwrap();
+    assert_eq!(ran, format!("run check {}\n", wt.display()));
+    assert!(!bin.join("ran.log").exists(), "arch-check and fmt do not run");
+}
+
+#[test]
+fn a_failing_gatekeeper_run_is_refused_with_its_failing_gates() {
+    let (repo, c, _sh, bin) = gatekept("done-gk-fail", 1);
+    let f = fake(&repo.head);
+    let (out, _) = refused(&c, &ui(Git::new(&f), &bin, false), "DONE_CHECK");
+    assert!(out.contains("`./.gatekeeper/run check` failed (exit 1):"), "{out}");
+    assert!(
+        out.contains("FAIL fmt: a.rs:2 unformatted\nFAIL arch: a.rs:2 comment"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_fleets_done_checks_win_over_the_gatekeeper_wrapper() {
+    let (repo, c, _sh, bin) = gatekept("done-gk-set", 1);
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    let cfg = cfg.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\ndone_checks = [\"cargo fmt --check\"]",
+    );
+    std::fs::write(&c.config, cfg).unwrap();
+    let f = fake(&repo.head);
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!repo.wt.join(".gatekeeper/ran.log").exists());
+    let ran = std::fs::read_to_string(bin.join("ran.log")).unwrap();
+    assert!(ran.starts_with("cargo fmt --check "), "{ran}");
 }
 
 struct Ui<'a> {

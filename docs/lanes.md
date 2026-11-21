@@ -64,7 +64,9 @@ A fleet's `env` table is exported into every lane's shell. #630: every lane gets
 `CARGO_TARGET_DIR=<root>/.build/<agent>` under its workspace root (docs/hosts.md). At spawn it is cloned
 copy-on-write (`cp -c`, `--reflink=always`; a `build-cloned` event with `from`) from the newest build folder of the
 same fleet's lanes on that root, never across volumes, so a new lane skips a full rebuild and lanes never wait on
-each other's cargo lock. A fleet's own `CARGO_TARGET_DIR` in `env`
+each other's cargo lock. #1480: on a `[hosts]` machine the clone runs there, in one ssh call (`cp -cR` on macOS,
+`cp -R --reflink=always` elsewhere); with no sibling nothing is logged, and a filesystem without reflinks (ext4)
+skips with the error in `build-cloned.errors`, never a full copy. A fleet's own `CARGO_TARGET_DIR` in `env`
 or `shared_cache` (#361) replaces it. Over `[limits] build_budget_gb` (default 20), drive's pass removes the
 build folders' profiles (`<agent>/debug`, ...), oldest first, whose `.cargo-lock` no cargo holds, never one
 building nor a live lane's: on the main host
@@ -215,6 +217,13 @@ takes one of the host's slots first and frees it when the command exits or its h
 first served (a kind at its own cap lets later kinds by); after `heavy_wait_minutes` (default 30) it runs anyway
 and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its `lane`, `kind`, `cmd`,
 `since` and `running`. Other commands are unchanged.
+
+A CI job on a self-hosted runner that shares the main host runs its step as `drover hold --wait <minutes> -- <cmd>`
+(#1492): it waits until the host passes spawn admission (`MEM_LOW`, `HOST_BUSY`, …) and a slot is free by the main
+host's `heavy_max`, holds that slot as kind `ci` and holder `ci:<repo>` (from `GITHUB_REPOSITORY`) while the command
+runs, and exits with its code. Lanes' heavy commands wait behind it as behind each other; at the front of the line it
+samples admission every `[limits] hold_sample_secs` (default 10). Past the wait it never runs the command: it exits
+75 and names the reason on stderr. `drover top` lists it under `holds`.
 
 `drover top` (#910; `--json` for the same data) shows what each live lane is really doing: every process under its
 worktree as a tree with its CPU %, run time and heavy kind, and `waiting for heavy slot <kind> <age>` for each of its

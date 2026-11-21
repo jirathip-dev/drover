@@ -9,6 +9,10 @@ use std::io::Write;
 use std::path::Path;
 
 pub const CODE: &str = "PUBLIC_LEAK";
+/// CI's names list for `hygiene check`, one name a line: gatekeeper passes its `private-names` secret here.
+pub const NAMES_ENV: &str = "DROVER_PRIVATE_NAMES";
+/// The Actions secret `hygiene push` writes in a fleet's public repo.
+pub const NAMES_SECRET: &str = "PRIVATE_NAMES";
 const VISIBILITY_SECS: u64 = 86_400;
 
 /// A public fleet's patterns beyond the built-in home paths and session ids: its hosts, private names and session folders.
@@ -47,11 +51,15 @@ impl Check {
         } else if self.hosts.iter().any(|h| hostname(&low, h)) {
             "host".into()
         } else {
-            let i = self.private.iter().position(|p| word(&low, p))?;
-            format!("private-name #{}", i + 1)
+            named(&self.private, &low)?
         };
         Some(hit)
     }
+}
+
+fn named(names: &[String], low: &str) -> Option<String> {
+    let i = names.iter().position(|p| word(low, p))?;
+    Some(format!("private-name #{}", i + 1))
 }
 
 fn word(low: &str, n: &str) -> bool {
@@ -218,6 +226,21 @@ pub enum Cmd {
         about = "Report only: hits in the repo's issues, PR bodies, comments and history, by pattern with links"
     )]
     Scan { fleet: String },
+    #[command(
+        about = "#1483: the tree, the commit messages since --base and the --pr-body against the private-names list (the fleet's, else $DROVER_PRIVATE_NAMES); exit 1 on a hit"
+    )]
+    Check {
+        #[arg(help = "The fleet whose private_names to read (default: the lane's)")]
+        fleet: Option<String>,
+        #[arg(long, help = "The PR's base revision: the commit messages since it are checked")]
+        base: Option<String>,
+        #[arg(long, help = "A file holding the PR's body")]
+        pr_body: Option<std::path::PathBuf>,
+    },
+    #[command(
+        about = "#1483: Owner only (a run card): write the fleet's private_names as its public repo's PRIVATE_NAMES Actions secret; never printed"
+    )]
+    Push { fleet: String },
 }
 
 fn slug(repo: &str) -> String {
@@ -392,4 +415,113 @@ pub fn scan(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, name: 
         writeln!(out, "{p} · {link}")?;
     }
     Ok(writeln!(out, "{} hit(s) in {}; nothing changed", rows.len(), f.repo)?)
+}
+
+/// `drover hygiene`'s verbs; `check` needs no fleet.toml.
+pub fn run(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, cmd: Cmd) -> Result<i32> {
+    match cmd {
+        Cmd::Check { fleet, base, pr_body } => {
+            check(ctx, r, out, fleet.as_deref(), base.as_deref(), pr_body.as_deref())
+        }
+        Cmd::Scan { fleet } => scan(ctx, &Config::load(&ctx.config)?, r, out, &fleet).map(|()| 0),
+        Cmd::Push { fleet } => push(ctx, &Config::load(&ctx.config)?, r, out, &fleet).map(|()| 0),
+    }
+}
+
+/// `drover hygiene check`: each private name in the tracked files, the commit messages since `base` and the PR body, as `private-name #N at file:line`; 1 on a hit, or `list-missing` for a public repo with no list.
+pub fn check(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleet: Option<&str>,
+    base: Option<&str>,
+    body: Option<&Path>,
+) -> Result<i32> {
+    let cfg = Config::load(&ctx.config).ok();
+    let lane = crate::config::env("DROVER_LANE");
+    let fleet = fleet.or_else(|| lane.as_deref()?.split(':').next());
+    let own = cfg.as_ref().zip(fleet).and_then(|(c, n)| Some((c, n, c.fleet.get(n)?)));
+    if let Some((_, n, f)) = own.filter(|(c, n, _)| !public(ctx, Some(r), c, n)) {
+        writeln!(out, "{} ({n}) is private: nothing to check", f.repo)?;
+        return Ok(0);
+    }
+    let list = |l: &str| {
+        l.lines()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(String::from)
+            .collect::<Vec<_>>()
+    };
+    let names = crate::config::env(NAMES_ENV)
+        .map(|v| list(&v))
+        .filter(|v| !v.is_empty())
+        .or_else(|| own.map(|(_, _, f)| list(&f.private_names.join("\n"))))
+        .unwrap_or_default();
+    if names.is_empty() {
+        writeln!(
+            out,
+            "list-missing: no private-names list for a public repo: set ${NAMES_ENV} (CI) or [fleet.<n>] private_names"
+        )?;
+        return Ok(1);
+    }
+    let find = |l: &str| named(&names, &l.to_lowercase());
+    let mut rows = vec![];
+    for p in ok(r, "git", &["ls-files", "-z"])?.split('\0').filter(|p| !p.is_empty()) {
+        let text = std::fs::read_to_string(p).unwrap_or_default();
+        rows.extend((text.lines().zip(1..)).filter_map(|(l, n)| Some(format!("{} at {p}:{n}", find(l)?))));
+    }
+    if let Some(b) = base {
+        let log = ok(r, "git", &["log", &format!("{b}..HEAD")])?;
+        rows.extend(
+            hits(&log, find)
+                .into_iter()
+                .map(|(s, _, h)| format!("{h} at commit {s:.7} message")),
+        );
+    }
+    if let Some(b) = body {
+        let text = std::fs::read_to_string(b).map_err(|e| anyhow::anyhow!("{}: {e}", b.display()))?;
+        rows.extend((text.lines().zip(1..)).filter_map(|(l, n)| Some(format!("{} at PR body:{n}", find(l)?))));
+    }
+    for row in &rows {
+        writeln!(out, "{row}")?;
+    }
+    writeln!(
+        out,
+        "{} hit(s) of {} private name(s); names are never printed",
+        rows.len(),
+        names.len()
+    )?;
+    Ok(i32::from(!rows.is_empty()))
+}
+
+/// `drover hygiene push`: fleet `name`'s `private_names` as its public repo's [`NAMES_SECRET`], sent on stdin, never printed.
+pub fn push(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, name: &str) -> Result<()> {
+    let f = cfg.fleet(name)?;
+    anyhow::ensure!(
+        public(ctx, Some(r), cfg, name),
+        "{} is private: it needs no {NAMES_SECRET} secret",
+        f.repo
+    );
+    let names: Vec<&str> = (f.private_names.iter())
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty())
+        .collect();
+    anyhow::ensure!(
+        !names.is_empty(),
+        "[fleet.{name}] has no private_names: nothing to push"
+    );
+    let args = crate::runner::argv(&["secret", "set", NAMES_SECRET, "-R", &f.repo]);
+    let o = r.run_in("gh", &args, &names.join("\n"))?;
+    anyhow::ensure!(
+        o.code == 0,
+        "gh secret set {NAMES_SECRET} -R {} failed ({})",
+        f.repo,
+        o.code
+    );
+    Ok(writeln!(
+        out,
+        "wrote {} name(s) to {}'s {NAMES_SECRET} secret",
+        names.len(),
+        f.repo
+    )?)
 }

@@ -797,13 +797,15 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
         (Some(&"config"), Some(&("apply" | "discard")))
             | (Some(&"rollout"), Some(&"dismiss"))
             | (Some(&"secret"), Some(&("ls" | "rm")))
+            | (Some(&"hygiene"), Some(&"push"))
             | (Some(&"card"), Some(&("approve" | "deny" | "run")))
             | (Some(&"fleet"), Some(&"rename"))
             | (Some(&"baseline"), _)
     ) {
         return Some(
             "REFUSED OWNER_ONLY: only the owner applies config, dismisses a rollout, settles run cards, lists and \
-             removes secrets, renames a fleet or sets its history baseline, never a lane (#387, #935, #1099, #1479)"
+             removes secrets, pushes the private-names secret, renames a fleet or sets its history baseline, never a lane \
+             (#387, #935, #1099, #1479, #1483)"
                 .into(),
         );
     }
@@ -816,6 +818,9 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     }
     if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover lesson` (#419)".into());
+    }
+    if !orchestrator && r.first() == Some(&"deps") {
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover deps` (#1488)".into());
     }
     let triage = lane.split(':').nth(2) == Some("triage");
     let acts = matches!(r.get(1), Some(&("close" | "fold" | "label" | "docs")));

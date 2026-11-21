@@ -60,8 +60,9 @@ flowchart TD
     t3["trim"] --> t4
     t4["lesson"] --> t5
     t5["triage"] --> t6
-    t6["hotspots"] --> t7
-    t7["compact"]
+    t6["deps"] --> t7
+    t7["hotspots"] --> t8
+    t8["compact"]
     d0["look, repair"] --> d1
     d1["closed issues"] --> d2
     d2["spawns"] --> d3
@@ -126,6 +127,7 @@ flowchart TD
     other -.- k_lane_read_secs(["lane_read_secs = 5"])
     other -.- k_guard_secs(["guard_secs = 180"])
     other -.- k_poll_millis(["poll_millis = 20"])
+    other -.- k_hold_sample_secs(["hold_sample_secs = 10"])
     other -.- k_tick_beat_secs(["tick_beat_secs = 60"])
     other -.- k_orchestrator_idle_minutes(["orchestrator_idle_minutes = 30"])
     other -.- k_orchestrator_reply_minutes(["orchestrator_reply_minutes = 10"])
