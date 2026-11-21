@@ -44,10 +44,13 @@ pub fn default_socket() -> PathBuf {
     PathBuf::from(crate::config::env("XDG_RUNTIME_DIR").unwrap_or_default()).join("shed.sock")
 }
 
-fn lines(m: Method, params: Value) -> String {
-    let hello = json!(Hello::ours());
-    let [a, b] = [Request::new(0, Method::Hello, hello), Request::new(1, m, params)].map(|q| json!(q).to_string());
-    format!("{a}\n{b}\n")
+fn lines(qs: &[(Method, Value)]) -> String {
+    let hello = Request::new(0, Method::Hello, json!(Hello::ours()));
+    let qs = qs.iter().zip(1..).map(|((m, p), id)| Request::new(id, *m, p.clone()));
+    std::iter::once(hello)
+        .chain(qs)
+        .map(|q| json!(q).to_string() + "\n")
+        .collect()
 }
 
 fn short(h: &Hello) -> String {
@@ -62,7 +65,7 @@ fn accepted(h: &Hello) -> bool {
     h.product == "shed" && h.protocol >= MIN_PROTOCOL
 }
 
-fn answer(text: &str) -> Result<(Hello, Value)> {
+fn answer(text: &str, n: usize) -> Result<(Hello, Vec<Result<Value>>)> {
     let mut it = text.lines().map(serde_json::from_str::<Response>);
     let mut next = || -> Result<Response> { Ok(it.next().context("shed: connection closed")??) };
     let hello = next()?;
@@ -75,16 +78,22 @@ fn answer(text: &str) -> Result<(Hello, Value)> {
         "SHED_VERSION: shed serve is {}, drover needs shed protocol {MIN_PROTOCOL} or newer → {UPDATE}",
         theirs.as_ref().map_or("?".into(), side)
     );
-    match next()? {
+    let each = (0..n).map(|_| match next()? {
         Response { error: Some(e), .. } => bail!("{}", e.message),
-        Response { result: Some(v), .. } => Ok((theirs.unwrap_or_else(Hello::ours), v)),
+        Response { result: Some(v), .. } => Ok(v),
         _ => bail!("shed: neither result nor error"),
-    }
+    });
+    Ok((theirs.unwrap_or_else(Hello::ours), each.collect()))
+}
+
+fn one(text: &str) -> Result<(Hello, Value)> {
+    let (h, mut got) = answer(text, 1)?;
+    Ok((h, got.pop().context("shed: connection closed")??))
 }
 
 /// Doctor's `shed` line for the server on `w`: its version and protocol against drover's minimum, `✗` under it, `!` when it does not answer.
 pub fn line(r: &dyn Runner, w: &Wire) -> String {
-    let theirs = exchange(r, w, Method::Ls, json!(proto::LsParams::default())).and_then(|t| answer(&t));
+    let theirs = exchange(r, w, &[(Method::Ls, json!(proto::LsParams::default()))]).and_then(|t| one(&t));
     match theirs {
         Ok(_) if unit(r).is_some_and(|a| a != "active") => {
             "✗ shed — server outside its service (shed.service not active) \
@@ -124,7 +133,7 @@ fn on_path(r: &dyn Runner) -> Option<Hello> {
 }
 
 fn hello(r: &dyn Runner, w: &Wire) -> Result<(Hello, Value)> {
-    answer(&exchange(r, w, Method::Hello, json!(Hello::ours()))?)
+    one(&exchange(r, w, &[(Method::Hello, json!(Hello::ours()))])?)
 }
 
 /// `shed on PATH <build>, serve <build>` as `r` reads them, `?` for one it cannot.
@@ -173,21 +182,26 @@ pub fn version_alert<T>(ctx: &Ctx, cfg: &Config, res: &Result<T>) -> Result<bool
 
 /// One call on a fresh connection (`hello`, then `m`): its result.
 pub fn call(r: &dyn Runner, w: &Wire, m: Method, params: Value) -> Result<Value> {
-    answer(&exchange(r, w, m, params)?).map(|x| x.1)
+    one(&exchange(r, w, &[(m, params)])?).map(|x| x.1)
 }
 
-fn exchange(r: &dyn Runner, w: &Wire, m: Method, params: Value) -> Result<String> {
+/// Independent calls on one connection (`hello`, then each of `qs` in order): each one's result; a lost link or a refused `hello` fails them all.
+pub fn calls(r: &dyn Runner, w: &Wire, qs: &[(Method, Value)]) -> Result<Vec<Result<Value>>> {
+    answer(&exchange(r, w, qs)?, qs.len()).map(|x| x.1)
+}
+
+fn exchange(r: &dyn Runner, w: &Wire, qs: &[(Method, Value)]) -> Result<String> {
     Ok(match w {
         Wire::Socket(p) => {
             let mut s = UnixStream::connect(p).with_context(|| format!("no shed server on {}", p.display()))?;
-            s.write_all(lines(m, params).as_bytes())?;
+            s.write_all(lines(qs).as_bytes())?;
             let (mut rd, mut text) = (BufReader::new(s), String::new());
-            for _ in 0..2 {
+            for _ in 0..=qs.len() {
                 rd.read_line(&mut text)?;
             }
             text
         }
-        Wire::Connect => connect(r, &lines(m, params))?,
+        Wire::Connect => connect(r, &lines(qs))?,
     })
 }
 
@@ -297,13 +311,13 @@ pub fn follow(
         since: Some(since),
         ..Default::default()
     };
-    s.write_all(lines(Method::Events, json!(params)).as_bytes())?;
+    s.write_all(lines(&[(Method::Events, json!(params))]).as_bytes())?;
     s.set_read_timeout(quiet)?;
     let (mut rd, mut head) = (BufReader::new(s), String::new());
     for _ in 0..2 {
         rd.read_line(&mut head)?;
     }
-    answer(&head)?;
+    one(&head)?;
     f(None);
     let mut l = String::new();
     while rd.read_line(&mut l).is_ok_and(|n| n > 0) {

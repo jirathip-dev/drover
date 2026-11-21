@@ -2207,7 +2207,7 @@ pub fn unhog(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, agent: &str) -> Res
 
 fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
     let git = |a: &[&str]| ok(on, "git", &[&["-C", wt][..], a].concat());
-    let dirty = changes(&git(&["status", "--porcelain"])?);
+    let dirty = changes(&crate::spawn::status(on, wt)?);
     let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?;
     Ok((dirty, ahead.trim().parse().unwrap_or(0)))
 }
