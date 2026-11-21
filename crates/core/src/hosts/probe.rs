@@ -28,7 +28,7 @@ impl Pass<'_> {
         let mut o = ssh(argv(&[CM[1], "-O", "check", m]));
         if !o.as_ref().is_ok_and(|o| o.code == 0) {
             o = probe();
-            if late(&o) {
+            if !o.as_ref().is_ok_and(|o| o.code != 124) {
                 o = probe();
             }
         }
