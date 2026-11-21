@@ -245,7 +245,13 @@ fn every_case_has_its_who_what_and_next_command() {
             NOW - 2390,
             s("spawn sendmeter 12 rev --supersede"),
         ),
-        (13, "none", "nothing to do (closed): clean me", t, None),
+        (
+            13,
+            "owner",
+            "PR closed outside drover: reopen it, respawn impl or drop the issue from the queue",
+            t,
+            s("spawn sendmeter 13 impl --supersede"),
+        ),
         (
             14,
             "drive",
@@ -294,6 +300,23 @@ fn every_case_has_its_who_what_and_next_command() {
             "{cmd}"
         );
     }
+}
+
+#[test]
+fn clean_me_only_for_a_closed_issue_never_for_a_closed_pr() {
+    let (c, r) = fixture("waiting-closed");
+    spawn(&c, NOW - 1500, 15, "impl", "sendmeter-impl-15");
+    ev(&c, NOW - 1400, Some(15), "closed", json!({}));
+    let all = waits(&c, &r, &[]);
+    let what = |n: u64| {
+        all.iter()
+            .find(|w| w.issue == n)
+            .map(|w| (w.what.as_str(), w.next_cmd.clone()))
+    };
+    assert_eq!(what(15), Some(("nothing to do (closed): clean me", None)));
+    let (pr_closed, next) = what(13).unwrap();
+    assert!(pr_closed.starts_with("PR closed outside drover") && !pr_closed.contains("clean me"));
+    assert_eq!(next.as_deref(), Some("drover spawn sendmeter 13 impl --supersede"));
 }
 
 #[test]
