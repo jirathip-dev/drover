@@ -768,3 +768,25 @@ fn a_remote_trim_that_times_out_says_so_and_the_ended_lane_still_goes() {
         "the sweep runs before the trim: {out}"
     );
 }
+
+#[test]
+fn reclaim_removes_a_merged_lanes_clone_folder_and_keeps_a_live_ones() {
+    let (c, s) = setup("reclaim-clone", 1 << 40);
+    let root = s.parent().unwrap().to_path_buf();
+    spawn(&c, 12, "impl", "sendmeter-impl-12");
+    merged(&c, 12);
+    spawn(&c, 13, "impl", "sendmeter-impl-13");
+    let done = blob(&root, ".sendmeter-impl-12.clone/debug");
+    let live = blob(&root, ".sendmeter-impl-13.clone/debug");
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane("sendmeter-impl-13", "idle", "/x");
+    let r = Fake::default().reply("lsof", "");
+    let (code, dry) = run(&c, &r, &["reclaim"]);
+    assert_eq!(code, 0, "{dry}");
+    assert!(dry.contains(".sendmeter-impl-12.clone") && done.exists(), "{dry}");
+    let (code, out) = run(&c, &r, &["reclaim", "--apply"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!done.exists(), "the merged lane's clone goes: {out}");
+    assert!(live.join("blob").exists(), "the live lane's clone stays: {out}");
+}
