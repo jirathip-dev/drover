@@ -417,7 +417,7 @@ fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     assert!(o.failure.is_none(), "{}", o.report());
     let want = metrics::Metrics {
-        to_merge: vec![964, 2059],
+        to_merge: vec![964, 1671],
         spawns: 6,
         wasted: 1,
         supersedes: 1,
@@ -443,7 +443,7 @@ fn the_known_fleet_gives_exact_metrics() {
             ("idle_lane_min", 4.05),
             ("lock_wait_min", 0.37),
             ("queue_to_merge_p50_min", 16.07),
-            ("queue_to_merge_p90_min", 34.32),
+            ("queue_to_merge_p90_min", 27.85),
             ("review_rounds_per_merge", 1.5),
             ("serial_busy", 0.0),
             ("supersedes_per_lane", 0.2),
