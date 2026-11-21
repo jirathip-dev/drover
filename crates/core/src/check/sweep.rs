@@ -237,7 +237,7 @@ const SCRATCH: &str = r#"b=$1; shift; case $b in "~/"*) b=$HOME/${b#"~/"};; esac
 cd "$b" 2>/dev/null || exit 0
 [ $# -eq 0 ] && { for d in */; do [ -d "$d" ] && echo "${d%/}"; done; exit 0; }
 du -sk -- "$@" 2>/dev/null | sort -rn | while read -r s d; do
-  l=$(find "$d" -maxdepth 4 -name .cargo-lock 2>/dev/null)
+  l=$(find "$d" -maxdepth 5 \( -name .cargo-lock -o -name .lock -o -name build.db \) 2>/dev/null)
   [ -n "$l" ] && command -v lsof >/dev/null && [ -n "$(lsof $l 2>/dev/null)" ] && continue
   rm -rf "./${d:?}" && echo "$s $d"
 done

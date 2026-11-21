@@ -213,7 +213,7 @@ fn concurrent_full_fast_and_kick_passes_over_one_finished_design_lane_post_one_a
     };
     let passes: [&[&str]; 3] = [
         &["drive"],
-        &["drive", "--fast"],
+        &["drive"],
         &["kick", "sendmeter", "12", "--why", "drive", "--now"],
     ];
     std::thread::scope(|s| {

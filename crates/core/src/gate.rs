@@ -1032,7 +1032,11 @@ fn merged(
     (num, head, over, secs, fast): (&str, &str, bool, Option<u64>, bool),
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let mc = json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "mergeCommit"])?;
+    let mc = json(
+        r,
+        "gh",
+        &["pr", "view", num, "-R", &f.repo, "--json", "mergeCommit,body"],
+    )?;
     let merge_sha = mc.at("mergeCommit").at("oid").as_str().unwrap_or("?").to_string();
     let mut d = json!({"pr": num, "merge_sha": merge_sha, "verdict_sha": head, "into": f.integration});
     if let Some(s) = secs {
@@ -1042,6 +1046,8 @@ fn merged(
         d.put("by", json!("owner")).put("override", json!("ROUND_LIMIT"));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
+    let body = mc.at("body").as_str().unwrap_or_default();
+    crate::propose::open_rollout(ctx, cfg, r, (fleet, issue), body)?;
     if over {
         let desc = format!("ROUND_LIMIT overridden at {head:.7} · by: owner");
         crate::status::post(

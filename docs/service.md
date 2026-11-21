@@ -12,7 +12,9 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
 - **Local socket** `service.sock` beside `state.db` (mode 0600). A kick (a lane's push, stop or ask, a verdict, an
   answer, a board tap) goes there and is driven in the service's process at once, not as a detached `kick --now`.
   With no service listening, every command goes on in today's direct mode: nothing is ever stuck on it.
-- **GitHub** is polled by the fast step (`drive --fast`) every 15 s inside the service; the `dev.drover.fast` job
+- **A loop per fleet** runs `drover drive <fleet>` as its own process every `fast_secs`, and at once on a wake (a
+  `{"wake": <fleet>}` line, or a kick for one of its issues); a wake while its pass runs is one more pass after it.
+- **GitHub** is polled by the fast job (`drive`) every 15 s inside the service; the `dev.drover.fast` job
   is no longer needed while it runs (`timer` doesn't reinstall it, `doctor` shows it "by the service"). The slow
   `tick` stays as the safety net. #530: each fleet's open PRs, check rollups and labels come in one GraphQL query; a
   fast step first sends three conditional REST reads (open PRs latest-updated first, Actions runs, integration's

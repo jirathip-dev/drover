@@ -249,7 +249,7 @@ fn a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once() {
             .filter(|e| e.kind == k)
             .collect()
     };
-    let drive = |c: &drover::Ctx| assert_eq!(run(c, &local(), &["drive", "--fast"]).0, 0);
+    let drive = |c: &drover::Ctx| assert_eq!(run(c, &local(), &["drive"]).0, 0);
     std::fs::write(
         &mark,
         json!({"since": NOW - 300, "step": "clean", "child": child}).to_string(),
@@ -299,15 +299,11 @@ fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self
         json!({"since": NOW - 700, "step": "drive", "child": "", "pid": 4242}).to_string(),
     )
     .unwrap();
-    drover::db::take(&c.state, "drive-sendmeter.lock", NOW - 650, 3600, "sendmeter", &|_| {
-        false
-    })
-    .unwrap();
     let r = local()
         .once("kill -0 4242", 0, "")
         .reply("ps -o command= -p 4242", "/Users/me/.local/bin/drover tick\n")
         .reply("kill -TERM 4242", "");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     assert_eq!(r.count("kill -TERM 4242"), 1);
     assert!(!r.called("kill -KILL"), "it ended on SIGTERM");
     let ev = read(&c.state).unwrap();
@@ -315,14 +311,16 @@ fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self
     assert_eq!(heal.len(), 1, "{heal:?}");
     assert_eq!(heal[0].str("did"), Some("stopped tick pid 4242 (SIGTERM)"));
     let why = heal[0].str("reason").unwrap();
-    assert!(why.starts_with("tick running 11 min, in drive · sendmeter;"), "{why}");
+    assert!(why.starts_with("tick running 11 min, in drive;"), "{why}");
     assert_eq!(ev.iter().filter(|e| e.kind == "slo-tick").count(), 1);
     let later = drover::Ctx {
         now: NOW + 600,
         ..c.clone()
     };
+    let last = c.state.parent().unwrap().join("drive-sendmeter.last");
+    std::fs::write(last, (NOW + 540).to_string()).unwrap();
     let r = local().reply("ps -o command= -p 4242", "/Users/me/.local/bin/drover tick\n");
-    assert_eq!(run(&later, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&later, &r, &["drive"]).0, 0);
     assert!(!r.called("kill -TERM"), "a stopped tick is not stopped again");
     let kinds: Vec<String> = read(&c.state)
         .unwrap()
@@ -350,7 +348,7 @@ fn a_process_that_is_no_drover_tick_is_never_killed() {
     let r = local()
         .reply("kill -0 4243", "")
         .reply("ps -o command= -p 4243", "/usr/bin/vim notes.txt\n");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     assert!(
         !r.called("kill -TERM") && !r.called("kill -KILL"),
         "{:?}",
@@ -377,7 +375,7 @@ fn a_tick_that_ignores_sigterm_is_killed_after_10_s() {
         .reply("ps -o command= -p 4244", "drover drive\n")
         .reply("kill -TERM 4244", "")
         .reply("kill -KILL 4244", "");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     assert_eq!(
         (
             r.count("kill -TERM 4244"),

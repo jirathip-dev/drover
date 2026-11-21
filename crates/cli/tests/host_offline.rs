@@ -374,7 +374,7 @@ fn a_start_on_a_host_offline_this_pass_waits_for_it_with_no_card_or_backoff() {
         let a = acts.into_iter().find(|a| a["issue"] == 13).unwrap();
         a["why"].as_str().unwrap_or_default().to_string()
     };
-    for k in [0, 400] {
+    for k in [0, 240] {
         let (f, bazzite) = (
             remote(mini_only()).once_err(&format!("{ssh} 'df'"), 124, "no answer"),
             FakeShed::new(),
@@ -514,9 +514,10 @@ fn linux_start(f: Fake) -> Fake {
 }
 
 fn down() -> Fake {
-    let mut f = mini_only();
+    let mut f = linux_start(mini_only());
     f.replies.insert(0, (PROBE.into(), timed_out()));
-    linux_start(f)
+    f.replies.insert(0, (MUX.into(), timed_out()));
+    f
 }
 
 fn queue_linux(c: &drover::Ctx) {

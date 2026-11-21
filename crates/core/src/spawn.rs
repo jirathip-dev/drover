@@ -25,6 +25,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         ),
         "lesson" => include_str!("../roles/lesson.md"),
         "triage" => include_str!("../roles/triage.md"),
+        "deps" => concat!(include_str!("../roles/impl.md"), "\n", include_str!("../roles/deps.md")),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
     }
@@ -40,7 +41,7 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
 }
 
 fn prompt_kind<'a>(f: &'a Fleet, role: &'a str) -> &'a str {
-    let own = matches!(role, "lesson" | "triage") || role == "verify" && f.family(role) == "rev";
+    let own = matches!(role, "lesson" | "triage" | "deps") || role == "verify" && f.family(role) == "rev";
     if own {
         role
     } else {
@@ -172,7 +173,7 @@ impl Plan {
         }
         if self.sources_secrets() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
-            c.push(format!("&& . '{f}'"));
+            c.push(format!("&& . '{f}' && rm -f '{f}'"));
         }
         c.extend(self.qos().map(|_| BACKGROUND.to_string()));
         c
@@ -220,7 +221,7 @@ impl Plan {
 }
 
 /// The lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`) and
-pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<Delivered<'a>> {
+pub fn deliver<'a>(ctx: &'a Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<crate::secret::Delivered<'a>> {
     let mut text = String::new();
     for (var, _, name) in p.secrets() {
         let f = crate::secret::path(ctx, &name);
@@ -241,18 +242,12 @@ pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<
     if let Some(f) = &file {
         on.write_private(f, &text)?;
     }
-    Ok(Delivered(on, file))
-}
-
-/// The secrets file `deliver` wrote; removed on drop (the lane's shell has read it by then).
-pub struct Delivered<'a>(&'a crate::hosts::On<'a>, Option<PathBuf>);
-
-impl Drop for Delivered<'_> {
-    fn drop(&mut self) {
-        if let Some(f) = &self.1 {
-            self.0.remove(f).ok();
-        }
-    }
+    Ok(crate::secret::Delivered {
+        ctx,
+        on,
+        lane: p.lane.clone(),
+        file,
+    })
 }
 
 const TITLE_MAX: usize = 60;
@@ -395,12 +390,20 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
 
 fn shared_target<'a>(root: &Path, f: &'a Fleet, agent: &str) -> impl Iterator<Item = (String, String)> + 'a {
     let b = root.join(crate::roots::BUILD);
-    let d = b.join(agent).display().to_string();
+    let d = b.join(agent);
     let s = b.join(SCRATCH).join(agent).display().to_string();
-    let vars = [("CARGO_TARGET_DIR".into(), d), ("DROVER_SCRATCH_TARGET".into(), s)];
+    let mut vars = vec![
+        ("CARGO_TARGET_DIR".into(), d.display().to_string()),
+        ("DROVER_SCRATCH_TARGET".into(), s),
+    ];
+    let swift = SWIFT.iter().filter(|_| f.swift_build);
+    vars.extend(swift.map(|(k, n)| ((*k).into(), d.join(n).display().to_string())));
     vars.into_iter()
         .filter(|v| !f.env.contains_key(&v.0) && !f.shared_cache.contains_key(&v.0))
 }
+
+/// #1478: a `swift_build` fleet's Swift build folders, each an env var naming a folder in the lane's `.build/<agent>`.
+pub const SWIFT: [(&str, &str); 2] = [("DROVER_DERIVED_DATA", "xcode"), ("DROVER_SWIFT_SCRATCH", "swiftpm")];
 
 /// The folder under a root's `.build` holding each lane's scratch.
 pub const SCRATCH: &str = ".scratch";
@@ -487,7 +490,12 @@ fn brief(
         (_, "rev", _) => include_str!("../roles/brief-refactor-rev.md"),
         _ => include_str!("../roles/brief-refactor-impl.md"),
     };
-    let contract = contract.trim_end().to_string() + "\n" + steps + play;
+    let swift = match p.family {
+        "design" | "architect" => "",
+        _ if f.swift_build => include_str!("../roles/brief-swift.md"),
+        _ => "",
+    };
+    let contract = contract.trim_end().to_string() + "\n" + steps + play + swift;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
     let rules = rules.map_or(String::new(), |r| {
@@ -881,8 +889,8 @@ fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Session])
     (!moved.is_empty()).then(|| json!({"dirs": moved, "from": prev}))
 }
 
-/// A new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there: one volume, so copy-on-write, never a full copy. The `build-cloned` data, if any.
-pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
+/// A new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there: one volume, so copy-on-write, never a full copy. The `build-cloned` data, if any, its `swift` folders listed.
+pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path, swift: bool) -> Option<Value> {
     let b = t.parent().filter(|b| b.ends_with(crate::roots::BUILD) && !t.exists())?;
     let mine = |e: &std::fs::DirEntry| {
         let n = e.file_name().to_string_lossy().into_owned();
@@ -902,7 +910,14 @@ pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     let res = res.and_then(|_| Ok(std::fs::rename(&tmp, t)?));
     let errs: Vec<String> = res.err().map(|e| first_lines(&e)).into_iter().collect();
     std::fs::remove_dir_all(&tmp).ok();
-    let dirs: Vec<String> = errs.is_empty().then(|| t.display().to_string()).into_iter().collect();
+    let swift = SWIFT
+        .iter()
+        .filter(|_| swift)
+        .map(|(_, n)| t.join(n))
+        .filter(|d| d.is_dir());
+    let dirs: Vec<String> = (errs.is_empty().then(|| t.to_path_buf()).into_iter().chain(swift))
+        .map(|d| d.display().to_string())
+        .collect();
     Some(json!({"dirs": dirs, "from": src, "secs": at.elapsed().as_secs(), "errors": errs}))
 }
 
@@ -1498,19 +1513,16 @@ pub fn spawn(
     dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
     dirs.sort();
     dirs.dedup();
-    let dirs = if reopen || on.machine.is_some() {
-        &[][..]
-    } else {
-        &dirs[..]
-    };
+    dirs.retain(|_| !reopen && on.machine.is_none());
     let target = p.env.get("CARGO_TARGET_DIR").filter(|_| on.machine.is_none());
-    if let Some(d) = (p.family == "rev").then(|| reuse(&p, dirs, target, &agents)).flatten() {
+    if let Some(d) = (p.family == "rev").then(|| reuse(&p, &dirs, target, &agents)).flatten() {
         event("build-reused", d)?;
     }
     let (res, cloned) = std::thread::scope(|s| {
         let c = s.spawn(|| {
-            let warm = target.and_then(|t| clone_warm(r, fleet, Path::new(t)));
-            [clone_build(r, dirs, &f.local_path(), &p.worktree), warm]
+            let warm = target.and_then(|t| clone_warm(r, fleet, Path::new(t), f.swift_build));
+            let warm = warm.or_else(|| crate::roots::clone_warm_on(&on, fleet, p.env.get("CARGO_TARGET_DIR")?));
+            [clone_build(r, &dirs, &f.local_path(), &p.worktree), warm]
         });
         let res = (|| -> Result<bool> {
             let kicked = match bt.0.acp {

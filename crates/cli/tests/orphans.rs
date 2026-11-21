@@ -39,7 +39,7 @@ fn fake() -> Fake {
 }
 
 fn fast(c: &drover::Ctx, r: &dyn drover::runner::Runner) -> String {
-    let (code, out) = run(c, r, &["drive", "--fast"]);
+    let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     out
 }
@@ -327,7 +327,7 @@ fn a_lane_spawned_during_the_remote_listing_is_not_adopted() {
         f: &f,
         hosts: vec![("bazzite", &baz)],
     };
-    let (code, out) = run(&c, &Racing(&over, &c, wt), &["drive", "--fast"]);
+    let (code, out) = run(&c, &Racing(&over, &c, wt), &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(kinds(&c, "spawn-started").len(), 1, "logged during the listing");
     assert!(!baz.called("get", "sendmeter-impl-12"), "{:?}", baz.methods());
