@@ -172,7 +172,7 @@ impl Plan {
         }
         if self.sources_secrets() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
-            c.push(format!("&& . '{f}'"));
+            c.push(format!("&& . '{f}' && rm -f '{f}'"));
         }
         c.extend(self.qos().map(|_| BACKGROUND.to_string()));
         c
@@ -220,7 +220,7 @@ impl Plan {
 }
 
 /// The lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`) and
-pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<Delivered<'a>> {
+pub fn deliver<'a>(ctx: &'a Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<crate::secret::Delivered<'a>> {
     let mut text = String::new();
     for (var, _, name) in p.secrets() {
         let f = crate::secret::path(ctx, &name);
@@ -241,18 +241,12 @@ pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<
     if let Some(f) = &file {
         on.write_private(f, &text)?;
     }
-    Ok(Delivered(on, file))
-}
-
-/// The secrets file `deliver` wrote; removed on drop (the lane's shell has read it by then).
-pub struct Delivered<'a>(&'a crate::hosts::On<'a>, Option<PathBuf>);
-
-impl Drop for Delivered<'_> {
-    fn drop(&mut self) {
-        if let Some(f) = &self.1 {
-            self.0.remove(f).ok();
-        }
-    }
+    Ok(crate::secret::Delivered {
+        ctx,
+        on,
+        lane: p.lane.clone(),
+        file,
+    })
 }
 
 const TITLE_MAX: usize = 60;
