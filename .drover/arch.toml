@@ -188,6 +188,11 @@ except = ["crates/core/src/clock.rs"]
 reason = "#809: time is read and waited on only in core's clock (crate::clock::instant)"
 
 [[ban]]
+pattern = "json!"
+paths = ["crates/server/src/screens.rs", "crates/server/src/screens_kit.rs", "crates/server/src/screens_lanes.rs", "crates/server/src/serve/chat.rs"]
+reason = "#1342 (q2063): screens are built through blocks' typed kinds and ops, never a hand-written json! literal"
+
+[[ban]]
 pattern = "ratatui"
 paths = ["crates/*/src/**"]
 except = ["crates/chat/src/**"]

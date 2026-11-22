@@ -64,8 +64,8 @@ toml = "0.8"
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 # #298, #455: shed's wire types only (serde, no I/O), pinned to shed main until it tags a release.
 shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "9b88eb5be5bc9ba8c5c75480483b9861ddc6e993" }
-# #1339: blocks' theme rules (Scheme, gate) and swag's built-in schemes, each pinned to a staging commit.
-blocks = { git = "https://github.com/jirathip-dev/blocks", rev = "d800ee2ab451f09bc19029e706b8b346e812675b" }
+# #1339: blocks' theme rules (Scheme, gate), #1342: its typed kinds and ops; swag's built-in schemes; each pinned to a staging commit.
+blocks = { git = "https://github.com/jirathip-dev/blocks", rev = "e823e0b1987b59059a77e56266d06749ba4d860d" }
 swag = { git = "https://github.com/jirathip-dev/swag", rev = "bf9a2c6b5cb837db1e844e4746fe166cbaa06b91" }
 drover-sys = { path = "crates/sys" }
 drover-core = { path = "crates/core" }
