@@ -16,9 +16,13 @@ macro_rules! kinds {
     };
 }
 
-kinds!(
-    Screen, Sheet, Section, List, Row, Card, Choice, Run, Button, Chips, Stat, Text, Images, Diagram, Composer, Scene
-);
+kinds!(Screen, Section, List, Row, Card, Choice, Run, Button, Chips, Stat, Text, Images, Diagram, Composer, Scene);
+
+impl Kind for k::Modal {
+    fn block(self) -> k::Block {
+        k::Block::Sheet(Box::new(self))
+    }
+}
 
 impl Kind for k::Form {
     fn block(self) -> k::Block {

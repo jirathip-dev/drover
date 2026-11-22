@@ -1,6 +1,6 @@
 use super::{
-    devices, figured, hosts, k, plain, rows_list, section, sheet, state, text, titled, wire, word, Block, Figure, Herd,
-    HerdFleet, HerdLane, Kind, LaneRow, LanesTab, Map, Tone, Value,
+    devices, hosts, k, plain, rows_list, section, sheet, state, text, titled, wire, word, Block, Figure, Herd,
+    HerdFleet, HerdLane, Kind, LaneRow, LanesTab, Tone, Value,
 };
 
 const COATS: [&str; 5] = ["bay", "blk", "ch", "gry", "wht"];
@@ -31,16 +31,15 @@ fn lane_row(fleet: &str, l: &LaneRow) -> k::Block {
         .filter(|s| !s.is_empty())
         .collect();
     let mut fig = lane_figure(&l.name, &l.state, &l.act);
-    let mut extra = Map::new();
-    if let Some(n) = l.issue {
+    if l.issue.is_some() {
         fig.grow = Some(l.grow.clone());
-        extra.insert("issue".into(), n.into());
+        fig.issue = l.issue;
     }
     let row = titled(format!("l-{}", l.name), title)
         .subtitle(plain(sub.join(" · ")))
         .value(l.ago.as_str())
         .tap(sheet(format!("/screens/lanes/{}", l.name)));
-    figured(row, fig, extra).block()
+    row.figure(fig).block()
 }
 
 const BANDS: [(&str, &[&str]); 4] = [

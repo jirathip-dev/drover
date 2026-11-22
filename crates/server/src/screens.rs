@@ -11,7 +11,7 @@ use crate::events::Json;
 use anyhow::Context;
 use blocks as k;
 use k::{Act, Confirm, Figure, Label, Shown, Tap, Tile, Time, Tone, Toned};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::sync::atomic::Ordering::Relaxed;
 
 #[path = "screens_lanes.rs"]
@@ -166,21 +166,6 @@ pub(super) fn state(t: Tone) -> Figure {
     }
 }
 
-// TODO(#1342): blocks' Figure has no `issue` or `moment` yet; they ride in the row's own fields until it does.
-fn figured(row: k::Row, fig: Figure, extra: k::Fields) -> k::Row {
-    if extra.is_empty() {
-        return row.figure(fig);
-    }
-    let mut f = match wire(&fig) {
-        Value::Object(m) => m,
-        _ => Map::new(),
-    };
-    f.extend(extra);
-    let mut row = row;
-    row.more.insert("figure".into(), Value::Object(f));
-    row
-}
-
 fn badge_tone(fig: &Figure) -> Tone {
     fig.state.clone().filter(|s| *s != Tone::Idle).unwrap_or(Tone::Mute)
 }
@@ -296,7 +281,10 @@ fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<u
         None => label(state, badge_tone(&fig)),
     };
     let v = titled(format!("q-{f}-{}", r.issue), cut(title.trim_end(), LINE)).badge(badge);
-    let mut v = figured(v, fig, fields([("issue", r.issue.into())]));
+    let mut v = v.figure(Figure {
+        issue: Some(r.issue),
+        ..fig
+    });
     let mut sub = rounds(ev, f, r.issue).join(" · ");
     if let Some(pr) = r.pr.pr {
         sub = format!("{sub} · PR #{pr}");
@@ -682,7 +670,7 @@ fn backlog(now: u64, c: &QueueCard, q: &Q) -> Option<k::Block> {
     };
     let title = format!("{f} backlog · {} open", b.issues.len());
     Some(
-        k::Sheet::new(title, vec![chips.block(), issues.block()])
+        k::Modal::new(title, vec![chips.block(), issues.block()])
             .id(format!("backlog-{f}"))
             .cancel("Cancel")
             .done(done)
@@ -888,7 +876,7 @@ fn issue_sheet(
         spec.or_else(|| r.title.clone().filter(|_| r.state == "merged"))
             .unwrap_or_default()
     );
-    k::Sheet::new(title.trim_end(), blocks)
+    k::Modal::new(title.trim_end(), blocks)
         .id(format!("issue-{f}-{n}"))
         .cancel("Done")
         .block()
@@ -906,7 +894,7 @@ fn verdict_sheet(ev: &[Event], q: &Q) -> Option<k::Block> {
     let (stage, word) = (v.str("stage").unwrap_or("rev"), v.str("verdict").unwrap_or("?"));
     let body = v.str("body").unwrap_or("no verdict.md text was logged");
     Some(
-        k::Sheet::new(format!("#{n} {stage} {word}"), vec![text("verdict-body", body)])
+        k::Modal::new(format!("#{n} {stage} {word}"), vec![text("verdict-body", body)])
             .id(format!("verdict-{f}-{n}-{seq}"))
             .cancel("Done")
             .block(),
@@ -1128,7 +1116,7 @@ fn ask_sheet(ctx: &Ctx, q: &Q) -> Option<k::Block> {
     };
     let id = a.str("id").unwrap_or_default();
     Some(
-        k::Sheet::new(format!("{} · {id}", a.fleet), blocks)
+        k::Modal::new(format!("{} · {id}", a.fleet), blocks)
             .id(format!("asks-{seq}"))
             .cancel("Done")
             .block(),
@@ -1229,7 +1217,7 @@ fn health_sheet(now: u64, ev: &[Event]) -> k::Block {
         .id("health-drive")
         .style(k::ButtonStyle::Primary)
         .action("drive-all");
-    k::Sheet::new("Drive health", vec![rows_list("health-rows", rows), drive.block()])
+    k::Modal::new("Drive health", vec![rows_list("health-rows", rows), drive.block()])
         .id("drive-health")
         .cancel("Done")
         .block()
@@ -1382,12 +1370,10 @@ fn events_screen(ctx: &Ctx, q: &Q) -> k::Block {
             "needs-human" | "needs-decision" => Some("needs-you"),
             _ => None,
         };
-        let extra = moment.map_or_else(Map::new, |m| fields([("moment", m.into())]));
-        let mut r = figured(
-            titled(format!("e-{}", e.seq), e.text.as_str()).value(since(e.ts)),
-            fig,
-            extra,
-        );
+        fig.moment = moment.map(Into::into);
+        let mut r = titled(format!("e-{}", e.seq), e.text.as_str())
+            .value(since(e.ts))
+            .figure(fig);
         if let Some(t) = e.issue.and_then(|n| crate::gh::cached_title(ctx, &e.fleet, n)) {
             r = r.subtitle(plain(t));
         }
@@ -1507,7 +1493,7 @@ impl Server<'_> {
                     .map(|(i, p)| titled(format!("hot-{i}"), *p).block())
                     .collect();
                 let title = format!("#{} · 🔒 hot ×{}", r.issue, rows.len());
-                k::Sheet::new(title, vec![rows_list("hot-paths", rows)])
+                k::Modal::new(title, vec![rows_list("hot-paths", rows)])
                     .id(format!("hot-{f}-{}", r.issue))
                     .cancel("Done")
                     .block()
@@ -1620,7 +1606,7 @@ impl Server<'_> {
             }
             b.block()
         }));
-        let mut v = k::Sheet::new(agent, vec![]).id(format!("lane-{agent}")).cancel("Close");
+        let mut v = k::Modal::new(agent, vec![]).id(format!("lane-{agent}")).cancel("Close");
         if !other {
             let field = k::TextField::new("text")
                 .label("Say")
@@ -1671,7 +1657,7 @@ impl Server<'_> {
                     .block(),
             );
         }
-        let sheet = k::Sheet::new(format!("{label} {agent}?"), blocks)
+        let sheet = k::Modal::new(format!("{label} {agent}?"), blocks)
             .id(format!("{op}-{agent}"))
             .cancel("Back");
         Reply {

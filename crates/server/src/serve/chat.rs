@@ -1008,10 +1008,10 @@ fn secret_body(key: &str, id: &str, m: &Msg, paired: bool, age: k::Time) -> k::C
     let mut blocks = vec![text("t", &m.text)];
     let mut buttons = vec![];
     if paired {
-        let mut field = k::SecretField::new("text")
+        let field = k::SecretField::new("text")
             .label("")
-            .placeholder(format!("value of {}", m.from));
-        field.more.insert("value".into(), "".into());
+            .placeholder(format!("value of {}", m.from))
+            .value("");
         let submit = k::Submit {
             label: "save".into(),
             action: "secret-card".into(),
