@@ -61,6 +61,12 @@ fn a_orchestrator_copies_from_the_state_dir_into_its_own_folder() {
         (&own, format!("cat {s}/events.jsonl > {other}/x")),
         (&own, format!("cat {s}/events.jsonl > {o}/x > {s}/y")),
         (&own, format!("cat a > {o}/.brief.md")),
+        (&own, format!("cp a {s}/fleet.toml > {o}/x")),
+        (&own, format!("touch {s}/fleet.toml > {o}/x")),
+        (&own, format!("rsync a {s}/fleet.toml > {o}/x")),
+        (&own, format!("curl -o {s}/fleet.toml u > {o}/x")),
+        (&own, format!("wget -O {s}/fleet.toml u > {o}/x")),
+        (&own, format!("sort -o {s}/fleet.toml a > {o}/x")),
         (&st, "cp /w/a.png ./a.png".to_string()),
         (&st, "echo x > a".to_string()),
     ] {

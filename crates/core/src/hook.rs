@@ -409,8 +409,15 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             && (t.iter().filter_map(|w| w.strip_prefix('-')))
                 .all(|o| !o.is_empty() && o.chars().all(|c| "rRpvfn".contains(c)));
         let into_own = |w: &str| own(&resolve(w, &cwd));
-        let reads_only = targets.iter().all(|w| into_own(w))
-            && (!writer && !targets.is_empty() || plain_cp && t.len() > 2 && t.last().is_some_and(|w| into_own(w)));
+        let reader = matches!(
+            t.first(),
+            Some(&("cat" | "grep" | "head" | "tail" | "jq" | "wc" | "echo" | "printf"))
+        );
+        let reads_only = if targets.is_empty() {
+            plain_cp && t.len() > 2 && t.last().is_some_and(|w| into_own(w))
+        } else {
+            reader && !writer && targets.iter().all(|w| into_own(w))
+        };
         let written = |w: &&&str| !reads_only || w.starts_with('-');
         let hit = (t.iter().filter(written).flat_map(|w| paths(w)))
             .find_map(|f| p.paths.iter().find(|pp| f.starts_with(pp.as_str()) && !own(&f)))
