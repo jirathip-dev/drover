@@ -177,9 +177,6 @@ That host's own log (#344: its own `state.db`) is never written by a lane. Each
 `check` imports the asks a lane left in a remote host's own log (lanes started before this; read through its
 `drover events --jsonl`, or its `events.jsonl` on an older build) under a new id, with `from` naming the old one.
 
-#345: with `[service] url` set, a remote lane gets `DROVER_SERVICE` and its own token instead of the outbox, and reports over
-HTTP to `drover service` (docs/service.md); no ssh back to the main host.
-
 An answer reaches a remote lane through that host's shed (`send`, then Enter).
 
 ## Turn a host off

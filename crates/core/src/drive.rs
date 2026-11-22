@@ -253,7 +253,7 @@ pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Op
 pub fn kick_once(ctx: &Ctx, r: &dyn Runner, (fleet, issue): (&str, u64), why: &str, id: Option<&str>) -> Option<u32> {
     let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
     a.extend(id.into_iter().flat_map(|i| ["--id".to_string(), i.into()]));
-    if IN_ACT.get() || crate::outbox::lane().is_some() || crate::cli::forward(r, &a).is_some() {
+    if IN_ACT.get() || crate::outbox::lane().is_some() {
         return None;
     }
     if why != "drive" && kicks::coalesced(ctx, r, (fleet, issue), why) {
@@ -1938,7 +1938,19 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         let design = n.parse().ok().and_then(|n| queue::wants_design(&events, fleet, n));
         let again = n.parse().is_ok_and(|n| crate::pending::requeued(&events, fleet, n));
         let f = cfg.fleet(fleet)?;
-        let c = ["spawn", fleet, &n, design.unwrap_or(f.flow().start()), "--supersede"];
+        let own = n.parse().ok().and_then(|n| {
+            let sp = crate::events::of_issue(&events, fleet, n)
+                .into_iter()
+                .rfind(|e| e.kind == "spawn")?;
+            sp.str("role").filter(|r| matches!(*r, "lesson" | "triage" | "deps"))
+        });
+        let c = [
+            "spawn",
+            fleet,
+            &n,
+            design.or(own).unwrap_or(f.flow().start()),
+            "--supersede",
+        ];
         let code = match act(
             ctx,
             cfg,
