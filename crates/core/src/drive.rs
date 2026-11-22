@@ -1393,14 +1393,14 @@ fn pass(
             if let Some((old, mins)) = stale.filter(|_| code.is_none()) {
                 stale_replaced(ctx, cfg, out, (fleet, s.issue), arg(3), old, mins)?;
             }
-            if let Some((hash, _)) = repro.filter(|_| code == Some("NO_REPRO")) {
+            if let Some(((hash, _), c)) = repro.zip(code.filter(|c| ["NO_REPRO", "NO_BASELINE"].contains(c))) {
                 repro_refused(
                     ctx,
                     cfg,
                     (r, out),
                     (&events, &agents),
                     (fleet, s.issue, &w.lane),
-                    (&args, &hash),
+                    (&args, &hash, c),
                 )?;
             }
             if let Some((why, _)) = gone.filter(|_| code.is_none()) {
@@ -1622,9 +1622,9 @@ fn repro_stuck(
     let Some(e) = ev.iter().rfind(told).filter(|e| e.ts + mins * 60 <= ctx.now) else {
         return Ok(());
     };
-    let why = e.str("why").unwrap_or_default();
-    let why = format!("verdict refused NO_REPRO, not corrected {mins} min after the re-prompt: {why}");
-    escalate(ctx, cfg, out, (fleet, n), (lane, None), "NO_REPRO", &why)
+    let (why, code) = (e.str("why").unwrap_or_default(), e.str("code").unwrap_or("NO_REPRO"));
+    let why = format!("verdict refused {code}, not corrected {mins} min after the re-prompt: {why}");
+    escalate(ctx, cfg, out, (fleet, n), (lane, None), code, &why)
 }
 
 fn repro_refused(
@@ -1633,7 +1633,7 @@ fn repro_refused(
     (r, out): (&dyn Runner, &mut dyn Write),
     (ev, agents): (&[Event], &[Session]),
     (fleet, n, lane): (&str, u64, &str),
-    (args, hash): (&[&str], &str),
+    (args, hash, code): (&[&str], &str, &str),
 ) -> Result<()> {
     let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
     let on = crate::hosts::On::of(r, sp);
@@ -1645,14 +1645,15 @@ fn repro_refused(
     let pane = sp
         .and_then(|e| e.str("pane"))
         .filter(|_| !told && agents.iter().any(|a| a.name == lane));
-    let text = format!("drover verdict refused your verdict.md: REFUSED NO_REPRO: {why}. Fix the Repro block.");
+    let block = if code == "NO_REPRO" { "Repro" } else { "Perf" };
+    let text = format!("drover verdict refused your verdict.md: REFUSED {code}: {why}. Fix the {block} block.");
     let tell = |p| crate::term::reply(&on, false, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
     let prompted = pane.is_some_and(tell);
-    let d = json!({"sha": args.get(5), "hash": hash, "agent": lane, "why": why, "prompted": prompted});
+    let d = json!({"sha": args.get(5), "hash": hash, "agent": lane, "why": why, "prompted": prompted, "code": code});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "repro-refused", d))?;
     if told {
-        let why = format!("verdict refused NO_REPRO again after the re-prompt: {why}");
-        escalate(ctx, cfg, out, (fleet, n), (lane, None), "NO_REPRO", &why)?;
+        let why = format!("verdict refused {code} again after the re-prompt: {why}");
+        escalate(ctx, cfg, out, (fleet, n), (lane, None), code, &why)?;
     }
     Ok(())
 }

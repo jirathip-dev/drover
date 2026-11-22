@@ -1,4 +1,6 @@
 mod common;
+#[path = "drive/no_baseline.rs"]
+mod no_baseline;
 #[path = "drive/remote_unlisted.rs"]
 mod remote_unlisted;
 #[path = "drive/rev_unlisted.rs"]
