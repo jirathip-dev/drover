@@ -1,5 +1,6 @@
 use super::{
-    ask_card, ask_minutes, devices, health_line, needs_card, run_cards, working, BTreeMap, Ctx, Event, Result, Server,
+    ask_card, ask_minutes, devices, health_line, needs_card, run_cards, wire, working, BTreeMap, Ctx, Event, Kind,
+    Result, Server,
 };
 use crate::events::Json;
 use anyhow::Context;
@@ -90,7 +91,7 @@ impl Server<'_> {
         let hid = laters(&ev);
         let is_hid =
             |id: &str, row: &str, fp: &str| hid.get(&(id.to_string(), row.to_string())).is_some_and(|h| h == fp);
-        let (mut shown, mut later): (Vec<Value>, _) = (health_line(ctx.now, &ev).into_iter().collect(), vec![]);
+        let (mut shown, mut later): (Vec<Value>, _) = (health_line(ctx.now, &ev).iter().map(wire).collect(), vec![]);
         for o in self.owner_cards(ctx, &ev, paired) {
             let whole = is_hid(&o.id, "", &o.fp);
             let (gone, kept): (Vec<&Line>, Vec<&Line>) =
@@ -115,7 +116,7 @@ impl Server<'_> {
 
     fn owner_cards(&self, ctx: &Ctx, ev: &crate::events::Log, paired: bool) -> Vec<Owned> {
         let tab = self.needs_tab(ctx, true);
-        let mut cards = run_cards(ctx.now, ev);
+        let mut cards: Vec<Value> = run_cards(ctx.now, ev).iter().map(wire).collect();
         cards.retain(|c| {
             !self.flying(&[
                 ("op", "card"),
@@ -162,7 +163,7 @@ impl Server<'_> {
             .filter(|a| !self.flying(&[("op", "answer"), ("fleet", &a.ask.fleet), ("id", &a.ask.id)]))
             .map(|a| {
                 let at = a.ask.issue.map(|n| (a.ask.fleet.as_str(), n));
-                let mut card = ask_card(ctx.now, ask_minutes(ctx), a);
+                let mut card = wire(&ask_card(ctx.now, ask_minutes(ctx), a).block());
                 let tap = [("op", "answer"), ("fleet", &a.ask.fleet), ("id", &a.ask.id)];
                 refusal(&mut card, self.refusal(&tap));
                 Owned::of(ctx, ev, card, at)
@@ -176,7 +177,7 @@ impl Server<'_> {
                     .any(|op| self.flying(&[("op", op), ("fleet", &i.fleet), ("issue", &n)]))
             })
             .map(|i| {
-                let (mut card, n) = (needs_card(i, ev), i.issue.to_string());
+                let (mut card, n) = (wire(&needs_card(i, ev)), i.issue.to_string());
                 let taps = ["extend", "override", "park"].map(|op| [("op", op), ("fleet", &i.fleet), ("issue", &n)]);
                 refusal(&mut card, taps.iter().find_map(|t| self.refusal(t)));
                 Owned::of(ctx, ev, card, Some((&i.fleet, i.issue)))
@@ -213,14 +214,14 @@ fn refusal(card: &mut Value, why: Option<String>) {
     }
 }
 
-pub(super) fn gone_ops(name: &str, block: &str, fleet: &str, issue: &str) -> Vec<Value> {
+pub(super) fn gone_ops(name: &str, block: &str, fleet: &str, issue: &str) -> Vec<blocks::Op> {
     let gone = match name {
         "answer" => format!("ask-{block}"),
         "needs-human" => format!("nhc-{fleet}-{issue}"),
         "run-card" => format!("run-{block}"),
         _ => return vec![],
     };
-    vec![json!({"op": "remove", "id": gone})]
+    vec![blocks::Op::Remove { id: gone }]
 }
 
 pub(super) fn undelivered(ev: &[Event], agent: &str) -> Option<Value> {
