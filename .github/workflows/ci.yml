@@ -5,7 +5,8 @@ on:
   pull_request:
 
 jobs:
-  rust:
+  # #1586: the rust job's checks, beside release-tests; `rust` below is the one check that names both.
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,8 +20,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: build
-        run: cargo build --release --locked
       - name: fmt
         run: cargo fmt --check
       - name: "clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/; #809: banned APIs in non-test code)"
@@ -33,17 +32,8 @@ jobs:
         run: scripts/lint-fixtures.sh rust
       - name: "test shards (#1162: every test target is in exactly one shard of scripts/test-shards.txt)"
         run: scripts/test-shards.sh check
-      - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events; #954: a drive pass over 30,000 events and 150 done issues; #962: stats autonomy on 150,000 events; #1313: the screens on a live-shaped gh cache)"
-        run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests the_state_read_stays_under_300ms a_pass_over_30k_events_and_150_done_issues_stays_fast stats_autonomy_on_a_150k screens_on_a_live_shaped_fixture --nocapture --test-threads=1
-      - name: "screen hub in release (#1372: one build per change for every reader, fresh data under 150 ms p95, 30 streams with no 503, ETag and 304)"
-        run: cargo test --release --locked --test screen_hub -- --nocapture --test-threads=1
-      - name: "soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)"
-        if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
-        run: cargo test --release --locked --test soak -- --ignored --nocapture --test-threads=1
-      - name: demo export (#39, synthetic data in demo/)
-        run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
-      - name: leak gate (no ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the exported demo)
-        run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/ site/"
+      - name: "leak gate (no ts.net hostname, chat ID or /Users/ path in docs/ or demo/; release-tests greps the exported demo)"
+        run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/"
       - name: deps gate (direct deps ⊆ the allow-list in docs/serve.md)
         run: |
           extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|flate2|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|shed-proto|blocks|swag|rusqlite|keyring|tokio|ratatui|drover-sys|drover-core|drover-server|drover-service|drover-chat' || true)
@@ -73,8 +63,10 @@ jobs:
         run: scripts/timing-check.sh
       - name: "parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`"
         run: scripts/parity-check.sh HEAD^1
+      - name: "build (debug: the cap, arch and lesson checks below run it; the release build is release-tests' only)"
+        run: cargo build --locked --bin drover
       - name: "line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; a PR's cap edit carries a `Cap:` trailer)"
-        run: ./target/release/drover cap-check --config ci/cap.toml ${BASE:+--base "$BASE"}
+        run: ./target/debug/drover cap-check --config ci/cap.toml ${BASE:+--base "$BASE"}
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
       - name: "arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)"
@@ -85,16 +77,57 @@ jobs:
             printf '%s' "$BODY" > "$RUNNER_TEMP/pr-body.md"
             set -- --base HEAD^1 --pr-body "$RUNNER_TEMP/pr-body.md"
           fi
-          ./target/release/drover arch-check "$@"
+          ./target/debug/drover arch-check "$@"
       - name: "lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)"
-        run: ./target/release/drover lesson-check
+        run: ./target/debug/drover lesson-check
       - name: assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
         run: |
           n=$(cat assets/*.js assets/*.css | wc -l)
           echo "assets JS/CSS lines: $n"
           test "$n" -le 1500 || echo "::warning::assets JS/CSS is $n lines, over the 1500 soft budget"
 
-  # #957: the debug suite beside the rust job's release half; #1162: in 4 shards side by side (scripts/test-shards.txt).
+  # #1586: the release build and what runs on it; on a PR only when it touches what they cover (scripts/ci-changes.sh).
+  release-tests:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@v2
+      # #266: the tests run web/src/events.ts under node (type stripping: node 24).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: build
+        run: cargo build --release --locked
+      - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events; #954: a drive pass over 30,000 events and 150 done issues; #962: stats autonomy on 150,000 events; #1313: the screens on a live-shaped gh cache)"
+        run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests the_state_read_stays_under_300ms a_pass_over_30k_events_and_150_done_issues_stays_fast stats_autonomy_on_a_150k screens_on_a_live_shaped_fixture --nocapture --test-threads=1
+      - name: "screen hub in release (#1372: one build per change for every reader, fresh data under 150 ms p95, 30 streams with no 503, ETag and 304)"
+        run: cargo test --release --locked --test screen_hub -- --nocapture --test-threads=1
+      - name: "soak (#895: serve's RSS under 8 /live streams, reads and drive passes stays under 300 MB and stops growing; a planted leak fails it; #1162: on a push to staging only)"
+        if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+        run: cargo test --release --locked --test soak -- --ignored --nocapture --test-threads=1
+      - name: demo export (#39, synthetic data in demo/)
+        run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
+      - name: leak gate (no ts.net hostname, chat ID or /Users/ path in the exported demo)
+        run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' site/"
+
+  # #1586: the `rust` check branch protection names, green when lint is and release-tests passed or was skipped by its paths.
+  rust:
+    needs: [changes, lint, release-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "$CHANGES" = success && test "$LINT" = success && [[ "$RELEASE" =~ ^(success|skipped)$ ]]
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          LINT: ${{ needs.lint.result }}
+          RELEASE: ${{ needs.release-tests.result }}
+
+  # #957: the debug suite beside release-tests; #1162: in 4 shards side by side (scripts/test-shards.txt).
   test-shard:
     name: test (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
@@ -179,7 +212,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@v2
-      - name: build (debug, the profile its tests build; the release build is the rust job's only)
+      - name: build (debug, the profile its tests build; the release build is release-tests' only)
         run: cargo build --locked
       - name: demo export
         run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/debug/drover serve --export site --demo
@@ -224,11 +257,13 @@ jobs:
         env:
           FLAKY: ${{ needs.ui.outputs.flaky }}
 
-  # #862: on a PR, ui-webkit runs only when the diff touches the page (#927: web/, assets/; #1312: crates/server/) or its own tests; #1423: every staging push runs it.
+  # #862: on a PR, ui-webkit runs only when the diff touches the page or its own tests, #1586: release-tests when it touches
+  # what they cover (scripts/ci-changes.sh); #1423: every staging push runs ui-webkit, every push release-tests.
   changes:
     runs-on: ubuntu-latest
     outputs:
       webkit: ${{ steps.diff.outputs.webkit }}
+      release: ${{ steps.diff.outputs.release }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -240,12 +275,10 @@ jobs:
           REF: ${{ github.ref }}
         run: |
           if [ "$REF" = refs/heads/staging ] || [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            echo "webkit=true" >> "$GITHUB_OUTPUT"; exit 0
+            printf 'webkit=true\nrelease=true\n' >> "$GITHUB_OUTPUT"; exit 0
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
-          webkit=false
-          grep -qE '^(web/|assets/|crates/server/|crates/cli/tests/(support/webview\.mjs|perf\.rs|url_links\.rs|parity_webkit\.rs|page_drafts\.rs|keyboard_webkit\.rs|ui/(build|drafts|repaint|compose|timings|keyboard|answered|optimistic|settled|pages|revive)\.mjs|threads_tab\.rs|herd\.rs|issue_sheet_webkit\.rs|phone_timings\.rs|screen_pages\.rs|common/large\.rs))' changed.txt && webkit=true
-          echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
+          scripts/ci-changes.sh < changed.txt | tee -a "$GITHUB_OUTPUT"
 
   # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.
   ui-webkit:
