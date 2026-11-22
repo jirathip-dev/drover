@@ -1622,7 +1622,12 @@ fn repro_stuck(
         return Ok(());
     };
     let (code, why) = (e.str("code").unwrap_or("NO_REPRO"), e.str("why").unwrap_or_default());
-    let why = format!("verdict refused {code}, not corrected {mins} min after the re-prompt: {why}");
+    let since = if e.val("prompted") == true {
+        "the re-prompt"
+    } else {
+        "it (the reviewer could not be told)"
+    };
+    let why = format!("verdict refused {code}, not corrected {mins} min after {since}: {why}");
     escalate(ctx, cfg, out, (fleet, n), (lane, None), code, &why)
 }
 
