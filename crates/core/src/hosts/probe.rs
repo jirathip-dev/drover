@@ -4,6 +4,14 @@ use anyhow::Result;
 use std::time::Duration;
 
 impl Pass<'_> {
+    /// The fast step's poll: every host is tried afresh, never held offline by an earlier pass's shared mark.
+    #[must_use]
+    pub fn own(mut self) -> Self {
+        if let Ok(up) = self.up.get_mut() {
+            up.clear();
+        }
+        self
+    }
     pub(super) fn up(&self, m: &str) -> bool {
         if let Some(&u) = lock(&self.up).get(m) {
             return u;

@@ -163,6 +163,58 @@ fn a_verdict_md_in_the_hosts_report_is_recorded_in_the_same_pass() {
     assert!(kinds(&c, "verdict-pickup-failed").is_empty(), "{out}");
 }
 
+fn fix_due(c: &drover::Ctx, n: u64) {
+    let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
+    std::fs::create_dir_all(&wt).unwrap();
+    let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("sendmeter-impl-{n}"),
+        "worktree": wt, "branch": format!("issue-{n}")});
+    let at = |kind, d| Event::new(NOW - 1200, "sendmeter", Some(n), kind, d);
+    append(&c.state, &at("spawn", d)).unwrap();
+    let v = json!({"verdict": "FAIL", "sha": "c".repeat(40), "body": "FAIL\nsrc/x.rs:3 off by one"});
+    append(&c.state, &at("verdict", v)).unwrap();
+}
+
+#[test]
+fn a_later_step_failing_on_a_full_disk_leaves_the_verdict_and_the_fix_round_done() {
+    let (c, rev) = setup("remote-verdict-disk-full");
+    fix_due(&c, 21);
+    for a in [
+        &["queue", "sendmeter", "add", "40"][..],
+        &["queue", "sendmeter", "block", "--on", "41", "40"],
+    ] {
+        assert_eq!(run(&c, &Fake::default(), a).0, 0);
+    }
+    let db = rusqlite::Connection::open(c.state.with_file_name("state.db")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER full BEFORE INSERT ON events WHEN NEW.type = 'blocker-closed' \
+         BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END;",
+    )
+    .unwrap();
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", &rev);
+    bazzite.exit(LANE);
+    let verdict = format!("PASS\n\nReviewed head: {}\n", head());
+    let f = boat(&rev, Ok(&verdict)).reply("gh issue view 41", r#"{"state":"CLOSED"}"#);
+    let (_, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    let v = kinds(&c, "verdict");
+    assert!(
+        v.iter()
+            .any(|e| e.issue == Some(12) && e.str("verdict") == Some("PASS")),
+        "the remote verdict is recorded: {out}"
+    );
+    let fix = kinds(&c, "driven");
+    assert!(
+        fix.iter().any(|e| e.issue == Some(21)
+            && e.str("cmd")
+                .is_some_and(|c| c.starts_with("drover spawn sendmeter 21 impl"))),
+        "the fix round is started: {out}"
+    );
+    assert!(
+        out.contains("database or disk is full"),
+        "the failed step is logged: {out}"
+    );
+}
+
 fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
     OverSsh {
         f,

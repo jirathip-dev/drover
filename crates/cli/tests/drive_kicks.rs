@@ -370,15 +370,19 @@ fn fix_due(c: &drover::Ctx, n: u64) {
 }
 
 #[test]
-fn starts_run_before_the_pr_reads_and_keep_one_slot_for_a_fix_round() {
+fn due_fix_rounds_run_before_the_starts() {
     let (c, _sh) = fleet("kicks-order", 6, 10);
     (21..=22).for_each(|n| fix_due(&c, n));
     let r = fake("1.0");
     let d = pass(&c, &r);
     let at = |n: u64| r.index(&format!("sh -c nohup '/opt/drover/bin/drover' kick sendmeter {n} "));
     let starts = (1..=10).filter_map(at).collect::<Vec<_>>();
-    assert!(at(21).is_some_and(|f| starts.iter().all(|s| *s < f)), "{d}");
-    assert_eq!((starts.len(), at(22), pending(&d)), (5, None, 6), "{d}");
+    let fixes = [at(21), at(22)];
+    assert!(
+        fixes.iter().all(|f| f.is_some_and(|f| starts.iter().all(|s| f < *s))),
+        "{d}"
+    );
+    assert_eq!((starts.len(), pending(&d)), (3, 5), "{d}");
 }
 
 #[test]
@@ -452,12 +456,12 @@ fn review_due(c: &drover::Ctx, n: u64, f: Fake) -> Fake {
 }
 
 #[test]
-fn the_kept_slot_goes_to_the_review_before_a_fix_round() {
+fn the_slots_go_to_the_review_and_the_fix_round_before_a_start() {
     let (c, _sh) = fleet("kicks-review-first", 2, 1);
     fix_due(&c, 21);
     let r = fake_with("1.0", review_due(&c, 22, Fake::default()));
     let d = pass(&c, &r);
-    assert_eq!((launched(&r, 22), launched(&r, 21), launched(&r, 1)), (1, 0, 1), "{d}");
+    assert_eq!((launched(&r, 22), launched(&r, 21), launched(&r, 1)), (1, 1, 0), "{d}");
 }
 
 #[test]
@@ -473,12 +477,12 @@ fn a_busy_host_holds_every_spawn_and_stops_the_starts() {
     let r = fake_with("1.0", review_due(&c, 22, Fake::default()));
     pass(&c, &r);
     let at = |n: u64| r.index(&format!("sh -c nohup '/opt/drover/bin/drover' kick sendmeter {n} "));
-    assert!(at(1).is_some() && at(1) < at(22), "{:?}", r.calls.borrow());
+    assert!(at(22).is_some() && at(22) < at(1), "{:?}", r.calls.borrow());
 }
 
 #[test]
 fn waiting_names_the_reviews_ahead() {
-    let (c, _sh) = fleet("kicks-review-order", 2, 1);
+    let (c, _sh) = fleet("kicks-review-order", 1, 1);
     let f = (21..=23).fold(Fake::default(), |f, n| review_due(&c, n, f));
     let r = fake_with("1.0", f);
     pass(&c, &r);
