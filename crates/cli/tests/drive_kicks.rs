@@ -247,6 +247,21 @@ fn six_dead_markers_never_hold_a_new_spawn() {
     assert!((11..=16).all(|n| marker(&c, n).is_none()));
 }
 
+#[test]
+fn a_dead_passs_admit_lock_and_marker_never_refuse_the_next_spawn() {
+    let (c, _sh) = fleet("kicks-dead-admit", 6, 1);
+    let keys: Vec<String> = ["local", "mini"].iter().map(|h| format!("admit-{h}.lock")).collect();
+    for k in &keys {
+        lease_as(&c, k, 4242, drover::now() - 5, 60);
+    }
+    mark(&c, 2, 4242, 10);
+    let r = fake("1.0");
+    let d = pass(&c, &r);
+    assert!(!codes(&d).iter().any(|c| c == "SPAWN_PENDING"), "{d}");
+    assert_eq!((launched(&r, 1), pending(&d)), (1, 1), "{d}");
+    assert!(!r.called("sleep"), "no wait on a dead holder: {:?}", r.calls.borrow());
+}
+
 struct Panics(Fake);
 impl drover::runner::Runner for Panics {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {

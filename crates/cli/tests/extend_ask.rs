@@ -193,3 +193,28 @@ fn an_answered_extend_ask_stays_answered_after_a_new_lane() {
     let row = all.lines().find(|l| l.contains("q5")).unwrap_or_default();
     assert!(row.contains("answered") && !row.contains("lane gone"), "{all}");
 }
+
+#[test]
+fn a_requeued_lessons_issue_starts_its_lesson_lane_never_impl() {
+    let c = ctx(&tmpdir("extend-lesson-role"), CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = runner();
+    ok(&c, &r, &["queue", "sendmeter", "add", "12"]);
+    let d = json!({"role": "lesson", "agent": "sendmeter-lesson-12", "pane": "sendmeter-lesson-12"});
+    ev(&c, 10, "spawn", d);
+    ev(&c, 11, drover::pending::REQUEUED, json!({"by": "owner"}));
+    assert_eq!(state(&c), "queued");
+    run(&c, &r, &["drive"]);
+    let ev = read(&c.state).unwrap();
+    let tried: Vec<&str> = ev
+        .iter()
+        .filter(|e| e.kind == "driven" && e.str("step") == Some("start") || e.kind == "intent")
+        .filter_map(|e| e.str("cmd").or(e.str("action_id")))
+        .collect();
+    assert!(!tried.is_empty(), "drive tried a start");
+    assert!(
+        tried.iter().all(|t| t.contains("lesson") && !t.contains("impl")),
+        "{tried:?}"
+    );
+}

@@ -55,6 +55,7 @@ pub mod queue;
 pub mod release;
 pub mod rename;
 pub mod report;
+pub mod respawn;
 pub mod roots;
 pub mod runner;
 pub mod runners;

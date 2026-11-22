@@ -341,12 +341,10 @@ fn reap_at_exit(d: &Path) {
     writeln!(reaper.stdin.as_mut().unwrap(), "{}", d.display()).unwrap();
 }
 
-const LANE_ENV: [&str; 10] = [
+const LANE_ENV: [&str; 8] = [
     "DROVER_LANE",
     "DROVER_HOST",
     "DROVER_OUTBOX",
-    "DROVER_SERVICE",
-    "DROVER_TOKEN",
     "DROVER_RULES",
     "DROVER_THREAD",
     "DROVER_ORCHESTRATOR",

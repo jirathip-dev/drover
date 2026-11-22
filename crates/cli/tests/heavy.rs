@@ -31,7 +31,6 @@ fn in_lane(prog: &str, d: &Path) -> Command {
     for k in [
         "DROVER_SCRATCH_TARGET",
         "DROVER_RULES",
-        "DROVER_SERVICE",
         "DROVER_OUTBOX",
         "DROVER_THREAD",
     ] {
