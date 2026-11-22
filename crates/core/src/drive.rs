@@ -256,6 +256,9 @@ pub fn kick_once(ctx: &Ctx, r: &dyn Runner, (fleet, issue): (&str, u64), why: &s
     if IN_ACT.get() || crate::outbox::lane().is_some() || crate::cli::forward(r, &a).is_some() {
         return None;
     }
+    if why != "drive" && kicks::coalesced(ctx, r, (fleet, issue), why) {
+        return None;
+    }
     if let Some(pid) = crate::service::kick(ctx, fleet, issue, why, id) {
         return Some(pid);
     }
