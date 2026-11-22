@@ -15,6 +15,7 @@ pub(crate) mod job;
 mod kicks;
 mod pickup;
 mod remote;
+mod undriven;
 
 /// A fleet pass's steps in order (`drive-<fleet>.lock.step` names the running one, `pass-slow` the one its deadline hit) and the `[limits]` keys that time them.
 pub const STEPS: [(&str, &[&str]); 4] = [
@@ -35,6 +36,7 @@ pub const STEPS: [(&str, &[&str]); 4] = [
             "start_max",
             "start_release",
             "spawn_pending_max_secs",
+            "admit_wait_secs",
             "respawn_max",
             "respawn_window_minutes",
             "overflow_after_minutes",
@@ -251,7 +253,7 @@ pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Op
 pub fn kick_once(ctx: &Ctx, r: &dyn Runner, (fleet, issue): (&str, u64), why: &str, id: Option<&str>) -> Option<u32> {
     let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
     a.extend(id.into_iter().flat_map(|i| ["--id".to_string(), i.into()]));
-    if IN_ACT.get() || crate::outbox::lane().is_some() || crate::cli::forward(r, &a).is_some() {
+    if IN_ACT.get() || crate::outbox::lane().is_some() {
         return None;
     }
     if let Some(pid) = crate::service::kick(ctx, fleet, issue, why, id) {
@@ -282,11 +284,14 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
         flag();
         return kicks::in_flight(ctx, out, (fleet, n), why);
     };
-    let Some(_slot) = job::slot(ctx, cfg, r, fleet) else {
-        return Ok(writeln!(
-            out,
-            "kick {fleet} #{n}: every job_max slot of {fleet} is busy; not driven"
-        )?);
+    let _slot = match pending.is_none().then(|| job::slot(ctx, cfg, r, fleet)) {
+        Some(None) => {
+            return Ok(writeln!(
+                out,
+                "kick {fleet} #{n}: every job_max slot of {fleet} is busy; not driven"
+            )?)
+        }
+        slot => slot.flatten(),
     };
     let start = crate::now();
     for _ in 0..30 {
@@ -339,7 +344,7 @@ fn launch(
     c: &[&str],
     start: bool,
 ) -> Result<i32> {
-    let (l, mut d, _admit) = admitted(ctx, cfg, r, ev, (fleet, n), c, start)?;
+    let (l, mut d) = admitted(ctx, cfg, r, ev, (fleet, n), c, start)?;
     let ev = |d: &Value| serde_json::to_string(&Event::new(ctx.now, fleet, Some(n), "spawn", d.clone()));
     let pid = kick(ctx, r, fleet, n, "drive");
     d.put("pid", pid.into());
@@ -357,7 +362,7 @@ fn admitted(
     (fleet, n): (&str, u64),
     c: &[&str],
     start: bool,
-) -> Result<(crate::db::Lease, Value, (Lock, Admitting))> {
+) -> Result<(crate::db::Lease, Value)> {
     let p: &dyn Runner = &remote::Memo::here(r);
     let role = c.get(3).copied().unwrap_or_default();
     markers(ctx, cfg, r, true);
@@ -373,27 +378,41 @@ fn admitted(
         .map(|p| (p.fleet, p.issue))
         .collect();
     let others = crate::starts::others(ctx, cfg, ev, fleet);
-    let admit = admit(ctx, r)?;
-    let all = pending(ctx, cfg, r);
     let counts = |p: &&Event| !full.iter().any(|f| f.0 == p.fleet && f.1 == p.issue);
-    let live: Vec<&Event> = all.iter().filter(counts).collect();
     let me = (fleet, cfg.fleet(fleet)?.weight.unwrap_or(1).max(1), others);
     let by = || {
         Some(held_by(ctx, cfg, r))
             .filter(|b| !b.is_empty())
             .map(|b| format!(": {b}"))
+            .unwrap_or_default()
     };
-    if all.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
-        return crate::gate::refused("SPAWN_PENDING", format!("#{n} is starting{}", by().unwrap_or_default()));
-    }
+    let starting = |all: &[Event]| {
+        if all.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
+            return crate::gate::refused("SPAWN_PENDING", format!("#{n} is starting{}", by()));
+        }
+        Ok(())
+    };
+    let skip = |all: &[Event], h: &str| {
+        let live: Vec<&Event> = all.iter().filter(counts).collect();
+        crate::starts::skip(ctx, (cfg, p), ev, (all, &live), (me, start, n, role), h)
+    };
+    let all = pending(ctx, cfg, r);
+    starting(&all)?;
+    let live: Vec<&Event> = all.iter().filter(counts).collect();
     if let Some(held) = crate::starts::every_full(cfg, &live, me, start) {
-        return crate::gate::refused("SPAWN_PENDING", held + &by().unwrap_or_default());
+        return crate::gate::refused("SPAWN_PENDING", held + &by());
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, (fleet, n, role), false)?;
-    let skip = |h: &str| crate::starts::skip(ctx, (cfg, r), ev, (&all, &live), (me, start, n, role), h);
-    let placed = crate::hosts::place(ctx, cfg, p, ev, (fleet, n, role), (None, &skip))?;
+    let placed = crate::hosts::place(ctx, cfg, p, ev, (fleet, n, role), (None, &|h| skip(&all, h)))?;
     if let Some((code, why)) = room(ctx, cfg, r) {
         return crate::gate::refused(code, why);
+    }
+    let host = placed.as_ref().map_or("local", |p| p.name.as_str());
+    let _admit = admit(ctx, cfg, r, host)?;
+    let all = pending(ctx, cfg, r);
+    starting(&all)?;
+    if let Some((code, why)) = skip(&all, host) {
+        return crate::gate::refused(code, why + &by());
     }
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
     if let Some(p) = placed {
@@ -403,7 +422,7 @@ fn admitted(
     let ev = |d: &Value| serde_json::to_string(&Event::new(ctx.now, fleet, Some(n), "spawn", d.clone()));
     let l = crate::db::take(&ctx.state, &key, ctx.now, ttl, &ev(&d)?, &|_| true);
     let l = l.ok_or_else(|| anyhow::anyhow!("cannot lease {key}"))?;
-    Ok((l, d, admit))
+    Ok((l, d))
 }
 
 /// The spawn marker this kick holds for `fleet` #`n`, if it holds one.
@@ -411,7 +430,7 @@ pub fn own_marker(ctx: &Ctx, fleet: &str, n: u64) -> Option<crate::db::Lease> {
     held(ctx, &format!("spawn-{fleet}-{n}.pending")).filter(|_| SLOT.get())
 }
 
-type Admitter = (std::path::PathBuf, u32);
+type Admitter = (std::path::PathBuf, u32, String);
 static ADMITTING: std::sync::Mutex<std::collections::BTreeSet<Admitter>> =
     std::sync::Mutex::new(std::collections::BTreeSet::new());
 static ADMITTED: std::sync::Condvar = std::sync::Condvar::new();
@@ -427,18 +446,24 @@ impl Drop for Admitting {
     }
 }
 
-fn admit(ctx: &Ctx, r: &dyn Runner) -> Result<(Lock, Admitting)> {
-    let me = (ctx.state.clone(), crate::sim::pid());
+fn admit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str) -> Result<(Lock, Admitting)> {
+    let me = (ctx.state.clone(), crate::sim::pid(), host.to_string());
     let held = ADMITTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut held = (ADMITTED.wait_while(held, |h| h.contains(&me))).unwrap_or_else(std::sync::PoisonError::into_inner);
     held.insert(me.clone());
     drop(held);
     let me = Admitting(me);
-    let now = crate::now();
-    match crate::db::take(&ctx.state, "admit.lock", now, 60, "", &|l| gone(r, l, now)) {
-        Some(l) => Ok((Lock(ctx.state.clone(), l), me)),
-        None => crate::gate::refused("SPAWN_PENDING", "another pass is admitting a spawn"),
+    let key = format!("admit-{host}.lock");
+    for left in (0..=cfg.limits.admit_wait_secs).rev() {
+        let now = crate::now();
+        if let Some(l) = crate::db::take(&ctx.state, &key, now, 60, "", &|l| gone(r, l, now)) {
+            return Ok((Lock(ctx.state.clone(), l), me));
+        }
+        if left > 0 {
+            r.sleep(1);
+        }
     }
+    crate::gate::refused("SPAWN_PENDING", format!("another pass is admitting a spawn on {host}"))
 }
 
 pub(crate) fn failures<'a>(ev: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> {
@@ -725,7 +750,12 @@ fn deadline(ctx: &Ctx, cfg: &Config, fleet: &str) -> std::sync::mpsc::Sender<()>
             return;
         }
         let mark = state.with_file_name(format!("drive-{fleet}.lock.step"));
-        let step = std::fs::read_to_string(mark).unwrap_or_default();
+        let step = std::fs::read_to_string(&mark).unwrap_or_default();
+        std::fs::write(
+            mark.with_file_name(format!("drive-{fleet}.last")),
+            crate::now().to_string(),
+        )
+        .ok();
         let d = json!({"secs": secs, "step": step.trim(), "ended": true});
         append(&state, &Event::new(crate::now(), &fleet, None, "pass-slow", d)).ok();
         crate::runner::exit(124);
@@ -823,6 +853,7 @@ fn one(
     }
     laps.lap("closed issues");
     ACTS.with_borrow_mut(BTreeMap::clear);
+    undriven::clear();
     ROOM.set((false, None));
     let one_slot = cfg.limits.max_parallel_spawns == 1 && crate::starts::fix_due(&working(&ctx.state)?, name);
     let early = cfg.limits.max_parallel_spawns > 0 && KICK.get().is_none() && !one_slot;
@@ -834,6 +865,10 @@ fn one(
     laps.lap("PR reads, gates, steps");
     mark("spawns");
     let res = res.and_then(|()| starts(ctx, cfg, r, out, name));
+    let res = res.and_then(|()| match KICK.get() {
+        None => undriven::cards(ctx, cfg, out, name),
+        Some(_) => Ok(()),
+    });
     laps.lap("spawns");
     if let Err(e) = &res {
         let a = json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": format!("failed: {e:#}")});
@@ -1196,14 +1231,17 @@ fn pass(
     let verdict = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover verdict "));
     let merge = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover merge "));
     waits.sort_by_key(|(s, w)| (!verdict(w), !merge(w), !rev(w), conflicts.contains_key(&s.issue)));
-    let (mut updated, mut spawns_held) = (false, false);
+    let (mut updated, mut spawns_held): (bool, Code) = (false, None);
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && !s.done() && s.lane.as_ref() == Some(&w.lane))
     {
+        undriven::skip(s.issue, format!("no step of drive's pass ran on \"{}\"", w.what));
         let lock = format!("drive-{fleet}-{}.lock", s.issue);
         let mine = take(ctx, r, &lock, STALE_LOCK_SECS, fleet);
         if mine.is_none() && !SLOT.get() {
+            let by = held(ctx, &lock).map_or(String::new(), |l| format!(" by pid {}", l.pid));
+            undriven::skip(s.issue, format!("skipped: {lock} is held{by}"));
             continue;
         }
         let mut pr = gh::cached_pr(ctx, fleet, s.issue);
@@ -1221,7 +1259,10 @@ fn pass(
             continue;
         }
         let fetched = match pickup::fetch(ctx, cfg, r, out, &events, (s, w), &pr)? {
-            pickup::Picked::Held => continue,
+            pickup::Picked::Held => {
+                undriven::skip(s.issue, "skipped: its verdict pickup is held".into());
+                continue;
+            }
             pickup::Picked::Fetched(x) => Some(x),
             pickup::Picked::No => None,
         };
@@ -1299,7 +1340,8 @@ fn pass(
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
             let arg = |i: usize| args.get(i).copied().unwrap_or_default();
-            if spawns_held && arg(0) == "spawn" {
+            if let Some(c) = spawns_held.filter(|_| arg(0) == "spawn") {
+                undriven::skip(s.issue, format!("skipped: an earlier spawn this pass was refused {c}"));
                 continue;
             }
             let step = match (arg(0), args.get(3).copied()) {
@@ -1336,7 +1378,9 @@ fn pass(
                 save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
-            spawns_held |= arg(0) == "spawn" && crate::starts::stops(code);
+            if arg(0) == "spawn" && crate::starts::stops(code) {
+                spawns_held = spawns_held.or(code);
+            }
             pickup::after(ctx, out, &events, (w, step), code)?;
             let stale = (code == Some("LANE_LIVE") && step == "review")
                 .then(|| s.lanes.get(arg(3)))
@@ -1443,13 +1487,7 @@ fn pass(
             let d = json!({"why": w.what});
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "no-action", d))?;
         } else if s.state == "ready" && (ci == "failed" || gone.is_some()) {
-            let head = pr.at("headRefOid").as_str().unwrap_or_default();
-            let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
-            let gone = gone.map(|m| format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"));
-            std::fs::write(&file, gone.unwrap_or_else(|| ci_findings(r, f, &pr, head)))?;
-            let file = file.to_string_lossy();
-            let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
-            act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
+            ci_red(ctx, cfg, (r, seen), out, (&events, &agents), s, (&pr, gone.as_deref()))?;
         } else if s.state == "ready" && ci == "pending" {
             gh::unstick(ctx, cfg, r, out, (fleet, s.issue), &events, &pr)?;
         }
@@ -1458,6 +1496,35 @@ fn pass(
         catch_up(ctx, cfg, r, out, fleet)?;
     }
     Ok(())
+}
+
+fn ci_red(
+    ctx: &Ctx,
+    cfg: &Config,
+    (r, seen): (&dyn Runner, &dyn Runner),
+    out: &mut dyn Write,
+    (events, agents): (&[Event], &[Session]),
+    s: &IssueState,
+    (pr, gone): (&Value, Option<&str>),
+) -> Result<()> {
+    let (fleet, n, f) = (s.fleet.as_str(), s.issue.to_string(), cfg.fleet(&s.fleet)?);
+    let head = pr.at("headRefOid").as_str().unwrap_or_default();
+    let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
+    let gone = gone.map(|m| format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"));
+    std::fs::write(&file, gone.unwrap_or_else(|| ci_findings(r, f, pr, head)))?;
+    let file = file.to_string_lossy();
+    let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
+    if act(ctx, cfg, r, out, events, (fleet, Some(s.issue), "ci-red"), &args)?.is_some() {
+        return Ok(());
+    }
+    let ev = working(&ctx.state)?;
+    let this = |x: &IssueState| x.fleet == fleet && x.issue == s.issue;
+    let row = waiting::scan_where(ctx, cfg, seen, (&ev, agents), false, this).pop();
+    let Some(c) = row.and_then(|x| x.1.next_cmd).filter(|c| c.ends_with(" --supersede")) else {
+        return Ok(());
+    };
+    let a: Vec<&str> = c.split_whitespace().skip(1).collect();
+    act(ctx, cfg, r, out, &ev, (fleet, Some(s.issue), "fix"), &a).map(drop)
 }
 
 fn no_proof(
@@ -1868,7 +1935,19 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         let design = n.parse().ok().and_then(|n| queue::wants_design(&events, fleet, n));
         let again = n.parse().is_ok_and(|n| crate::pending::requeued(&events, fleet, n));
         let f = cfg.fleet(fleet)?;
-        let c = ["spawn", fleet, &n, design.unwrap_or(f.flow().start()), "--supersede"];
+        let own = n.parse().ok().and_then(|n| {
+            let sp = crate::events::of_issue(&events, fleet, n)
+                .into_iter()
+                .rfind(|e| e.kind == "spawn")?;
+            sp.str("role").filter(|r| matches!(*r, "lesson" | "triage" | "deps"))
+        });
+        let c = [
+            "spawn",
+            fleet,
+            &n,
+            design.or(own).unwrap_or(f.flow().start()),
+            "--supersede",
+        ];
         let code = match act(
             ctx,
             cfg,
@@ -2016,8 +2095,7 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
         (None, None, Some(n)) => launch(ctx, cfg, r, ev, (fleet, n), c, step == "start"),
         (None, None, None) => match (full(), marked) {
             (Some(why), _) => crate::gate::refused("HOST_FULL", why),
-            (None, Some(n)) => admitted(ctx, cfg, r, ev, (fleet, n), c, false).and_then(|(l, _, admit)| {
-                drop(admit);
+            (None, Some(n)) => admitted(ctx, cfg, r, ev, (fleet, n), c, false).and_then(|(l, _)| {
                 let _marker = Lock(ctx.state.clone(), l);
                 SLOT.set(true);
                 let res = crate::cli::run(c, ctx, r, &mut buf);

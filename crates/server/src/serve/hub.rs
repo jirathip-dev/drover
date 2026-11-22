@@ -1,4 +1,5 @@
-use super::screens::{line, ops, pages, Res};
+use super::kit::ops;
+use super::screens::{line, pages, Res};
 use super::{form, hash, header, hung_up, lock, sent, wire, Auth, Ctx, Server, JSON, VER};
 use crate::api::ScreenKey;
 use crate::events::Json;
@@ -186,7 +187,7 @@ impl Hub {
             let o: Value = serde_json::from_str(o).ok()?;
             let mut d = ops(&o, new);
             let badge = new.at("badge").as_u64().filter(|n| Some(*n) != o.at("badge").as_u64());
-            d.extend(badge.map(|n| serde_json::json!({"op": "badge", "count": n})));
+            d.extend(badge.map(|count| super::kit::wire(&blocks::Op::Badge { count })));
             Some(d).filter(|d| !d.is_empty())
         });
         let mut m = lock(&self.keys);

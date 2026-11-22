@@ -18,10 +18,8 @@ mod loops;
 
 const JOBS: usize = 16;
 const CONNS: usize = 64;
-const BODY: usize = 4 << 20;
 const REPLAY: usize = 500;
 const KICK_SECS: u64 = 900;
-const CMD_SECS: u64 = 150;
 const POLL_SECS: u64 = 15;
 const STALL_SECS: u64 = 30;
 
@@ -209,7 +207,7 @@ impl Service {
             c.write_all(&reply(503, &json!({"error": "busy"}))).await.ok();
             return;
         };
-        let Ok(Ok(Some((head, body)))) = timeout(Duration::from_secs(10), request(&mut c)).await else {
+        let Ok(Ok(Some(head))) = timeout(Duration::from_secs(10), request(&mut c)).await else {
             return;
         };
         let mut w = head.split(' ');
@@ -227,7 +225,6 @@ impl Service {
                 return self.stream(c, after.unwrap_or(0)).await;
             }
             ("GET", "/api/v1/events") => reply(403, &json!({"error": "pair this device first"})),
-            ("POST", "/api/v1/cmd") => self.cmd(&body).await,
             _ => reply(404, &json!({"error": "no such path"})),
         };
         c.write_all(&out).await.ok();
@@ -273,89 +270,15 @@ impl Service {
             }
         }
     }
-
-    async fn cmd(self: &Arc<Self>, body: &[u8]) -> Vec<u8> {
-        let v: Value = serde_json::from_slice(body).unwrap_or_default();
-        let token = v.at("token").as_str().unwrap_or_default().to_string();
-        let mut args: Vec<String> = v
-            .at("args")
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|a| a.as_str().map(String::from))
-            .collect();
-        let (ctx, r, files) = (self.ctx.clone(), self.r, v.at("files").clone());
-        let run = move || -> Result<(u16, Value)> {
-            let ctx = Ctx {
-                now: drover_core::now(),
-                ..ctx
-            };
-            let cfg = Config::load(&ctx.config)?;
-            let lane = match service::authorize(&ctx, &cfg, &token, &args) {
-                Ok(l) => l,
-                Err(e) => return Ok((403, json!({"code": 3, "stdout": format!("{e}\n"), "stderr": ""}))),
-            };
-            let dir = ctx.state.with_file_name("service-files");
-            for i in 1..args.len() {
-                let Some([prev, arg]) = args.get_mut(i - 1..=i) else {
-                    continue;
-                };
-                if *prev == "--file" {
-                    let Some(text) = files.at(arg.as_str()).as_str() else {
-                        let e = format!("drover: --file {arg} came without its text\n");
-                        return Ok((400, json!({"code": 2, "stdout": "", "stderr": e})));
-                    };
-                    std::fs::create_dir_all(&dir)?;
-                    let p = dir.join(drover_core::devices::sha256(text.as_bytes()) + ".md");
-                    std::fs::write(&p, text)?;
-                    *arg = p.display().to_string();
-                }
-            }
-            let a = [argv(&[&format!("DROVER_LANE={lane}"), &ctx.exe]), args].concat();
-            let o = r.run("env", &a)?;
-            Ok((200, json!({"code": o.code, "stdout": o.stdout, "stderr": o.stderr})))
-        };
-        let Ok(_slot) = self.jobs.acquire().await else {
-            return reply(503, &json!({"error": "closing"}));
-        };
-        match timeout(Duration::from_secs(CMD_SECS), tokio::task::spawn_blocking(run)).await {
-            Ok(Ok(Ok((status, v)))) => reply(status, &v),
-            Ok(Ok(Err(e))) => reply(
-                500,
-                &json!({"code": 1, "stdout": "", "stderr": format!("drover: {e:#}\n")}),
-            ),
-            _ => reply(
-                504,
-                &json!({"code": 1, "stdout": "", "stderr": "drover service: timed out\n"}),
-            ),
-        }
-    }
 }
 
-async fn request(c: &mut TcpStream) -> std::io::Result<Option<(String, Vec<u8>)>> {
+async fn request(c: &mut TcpStream) -> std::io::Result<Option<String>> {
     let (mut buf, mut chunk) = (vec![], [0u8; 8192]);
     loop {
         if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-            let head = String::from_utf8_lossy(buf.get(..i).unwrap_or_default()).into_owned();
-            let len = head.lines().find_map(|l| {
-                let (k, v) = l.split_once(':')?;
-                k.eq_ignore_ascii_case("content-length")
-                    .then(|| v.trim().parse::<usize>().ok())?
-            });
-            let len = len.unwrap_or(0);
-            if len > BODY {
-                return Ok(None);
-            }
-            let mut body = buf.split_off(i + 4);
-            while body.len() < len {
-                let n = c.read(&mut chunk).await?;
-                if n == 0 {
-                    return Ok(None);
-                }
-                body.extend_from_slice(chunk.get(..n).unwrap_or_default());
-            }
-            body.truncate(len);
-            return Ok(Some((head, body)));
+            return Ok(Some(
+                String::from_utf8_lossy(buf.get(..i).unwrap_or_default()).into_owned(),
+            ));
         }
         let n = c.read(&mut chunk).await?;
         if n == 0 || buf.len() > 64 << 10 {

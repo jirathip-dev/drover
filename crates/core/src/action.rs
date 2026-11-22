@@ -44,6 +44,14 @@ impl Intent {
         self.open = false;
         finish(&self.state, self.ev.ts, &self.ev, "done", d).map(drop)
     }
+
+    /// Log `failed` with `e` and its refusal code (`ERROR` for a plain error), beside the intent's role.
+    pub fn fail(mut self, e: &anyhow::Error) -> Result<()> {
+        self.open = false;
+        let code = e.downcast_ref::<Refusal>().map_or("ERROR", |r| r.code);
+        let d = json!({"error": format!("{e:#}"), "code": code, "role": self.ev.str("role")});
+        finish(&self.state, self.ev.ts, &self.ev, "failed", d).map(drop)
+    }
 }
 
 impl Drop for Intent {

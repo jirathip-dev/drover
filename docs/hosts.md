@@ -125,7 +125,8 @@ own steps just released. With `max_parallel_spawns = 0` (spawns in the pass) onl
 #1321: a pass only plans. Each issue with a step due (a verdict, a merge, a prompt) is handed to its own job, a detached
 `kick --why plan`, at most `[limits] job_max` (4) of a fleet at once; the pass waits for none, and a start returns as
 soon as its marker is taken. A spawn a job makes itself (a review, fix or respawn) takes a start-slot marker through the
-same admission first. A fleet merges one PR at a time under `merge-<fleet>.lock`; a second merge is refused `IN_FLIGHT`
+same admission first. A start's own kick holds a start slot, not a job slot (#1583), so a verdict or merge job never
+waits behind starts in flight. A fleet merges one PR at a time under `merge-<fleet>.lock`; a second merge is refused `IN_FLIGHT`
 and tried again by a later pass.
 `max_working` and the heavy-slot gate still bound the running load.
 
@@ -175,9 +176,6 @@ line has not run for over 5 min. So the main host's log is the only one written 
 That host's own log (#344: its own `state.db`) is never written by a lane. Each
 `check` imports the asks a lane left in a remote host's own log (lanes started before this; read through its
 `drover events --jsonl`, or its `events.jsonl` on an older build) under a new id, with `from` naming the old one.
-
-#345: with `[service] url` set, a remote lane gets `DROVER_SERVICE` and its own token instead of the outbox, and reports over
-HTTP to `drover service` (docs/service.md); no ssh back to the main host.
 
 An answer reaches a remote lane through that host's shed (`send`, then Enter).
 

@@ -16,10 +16,10 @@ fn the_scene_sends_the_load_level_of_the_host() {
             gate: gate.map(Into::into),
             ..HerdHost::default()
         };
-        let s = scene_screen(&Herd {
+        let s = wire(&scene_screen(&Herd {
             host,
             ..Herd::default()
-        });
+        }));
         assert_eq!(s["blocks"][0]["load"], want, "load {load}, gate {gate:?}");
     }
     let host = HerdHost {
@@ -29,10 +29,10 @@ fn the_scene_sends_the_load_level_of_the_host() {
         ..HerdHost::default()
     };
     assert_eq!(
-        scene_screen(&Herd {
+        wire(&scene_screen(&Herd {
             host,
             ..Herd::default()
-        })["blocks"][0]["load"],
+        }))["blocks"][0]["load"],
         "busy"
     );
 }

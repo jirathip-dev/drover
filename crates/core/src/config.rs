@@ -35,8 +35,6 @@ pub struct Config {
     pub old_names: bool,
     /// The Telegram bridge is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
     pub telegram: Option<toml::Value>,
-    /// `[service] url`, where lanes on other hosts reach `drover service`'s API (docs/service.md).
-    pub service: ServiceCfg,
     /// `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
     /// `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
@@ -115,11 +113,6 @@ pub struct CiRunners {
 
 fn ci_service() -> String {
     "ci-runner".into()
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-pub struct ServiceCfg {
-    pub url: Option<String>,
 }
 
 /// The harness, model and effort a new thread's orchestrator starts on; each unset one is the role's.
@@ -754,6 +747,7 @@ pub struct Limits {
     pub start_max: usize,
     pub start_release: StartRelease,
     pub spawn_pending_max_secs: u64,
+    pub admit_wait_secs: u64,
     pub acp_start_minutes: u64,
     pub webhook_poll_minutes: u64,
     pub keychain_readers: usize,
@@ -891,6 +885,7 @@ impl Default for Limits {
             start_max: 2,
             start_release: StartRelease::Started,
             spawn_pending_max_secs: 300,
+            admit_wait_secs: 5,
             acp_start_minutes: 3,
             webhook_poll_minutes: 10,
             keychain_readers: 3,
@@ -1078,6 +1073,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "spawn_pending_max_secs",
         "a spawn marker older than this is stale",
+    ),
+    (
+        "admit_wait_secs",
+        "a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING`",
     ),
     (
         "acp_start_minutes",
