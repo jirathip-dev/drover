@@ -97,6 +97,7 @@ flowchart TD
     d3 -.- k_start_max(["start_max = 2"])
     d3 -.- k_start_release(["start_release = "started""])
     d3 -.- k_spawn_pending_max_secs(["spawn_pending_max_secs = 300"])
+    d3 -.- k_admit_wait_secs(["admit_wait_secs = 5"])
     d3 -.- k_respawn_max(["respawn_max = 3"])
     d3 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
     d3 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])

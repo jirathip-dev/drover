@@ -331,3 +331,64 @@ fn a_kick_with_every_job_slot_of_its_fleet_busy_drives_nothing() {
         "{out}"
     );
 }
+
+#[test]
+fn a_finished_review_is_recorded_at_once_while_a_spawn_holds_its_start_and_the_fleets_only_job_slot() {
+    static AT: Mutex<Option<u64>> = Mutex::new(None);
+    let (c, r, rev) = fixture();
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, cfg.replace("[limits]", "[limits]\njob_max = 1")).unwrap();
+    let clock = |at: u64| {
+        SPENT.set(at);
+        drover::sim::set(Some(drover::sim::Hooks {
+            now: Box::new(|| NOW + SPENT.get() / 1000),
+            pid: std::process::id(),
+            point: Box::new(|p| {
+                if matches!(p, Point::Append(e) if e.is("verdict", "sendmeter", 3)) {
+                    AT.lock().unwrap().get_or_insert(SPENT.get());
+                }
+            }),
+        }));
+    };
+    clock(0);
+    std::thread::scope(|s| {
+        let mut jobs = 0;
+        let mut run = |keep: &dyn Fn(&[String]) -> bool| {
+            let at = SPENT.get();
+            for a in std::mem::take(&mut *r.detached.lock().unwrap())
+                .into_iter()
+                .filter(|a| keep(a))
+            {
+                let (c, r) = (&c, &r);
+                jobs += 1;
+                std::thread::Builder::new()
+                    .name(format!("job-{}", issue_of(&a)))
+                    .spawn_scoped(s, move || {
+                        clock(at);
+                        let a: Vec<&str> = a.iter().map(String::as_str).collect();
+                        run_only(c, r, &a);
+                        r.settled();
+                    })
+                    .unwrap();
+            }
+            r.settle(jobs);
+        };
+        let (code, out) = run_only(&c, &r, &["drive", "sendmeter"]);
+        assert_eq!(code, 0, "{out}");
+        run(&|a| issue_of(a) == "2" && a.iter().any(|x| x == "drive"));
+        assert_eq!(r.holding("spawn"), 1, "the start of #2 is in flight");
+        std::fs::write(rev.join("verdict.md"), "PASS\nall good\n").unwrap();
+        let (code, out) = run_only(&c, &r, &["drive", "sendmeter"]);
+        assert_eq!(code, 0, "{out}");
+        let t = SPENT.get();
+        run(&|a| issue_of(a) == "3");
+        let still = (r.holding("spawn"), r.held.lock().unwrap().released);
+        r.release();
+        assert_eq!(still, (1, false), "the start was still in flight");
+        let waited = AT.lock().unwrap().map(|v| v.saturating_sub(t));
+        assert!(
+            waited.is_some_and(|w| w < 5_000),
+            "the verdict of #3 took {waited:?} ms behind the start of #2 (target < 5 s)"
+        );
+    });
+}

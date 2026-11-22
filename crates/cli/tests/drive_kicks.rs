@@ -1377,3 +1377,104 @@ fn a_ci_only_fail_starts_its_fix_round_past_a_live_idle_impl_lane() {
     let (c, sh, r) = ci_red_after_pass("kicks-ci-fail-live", true);
     fix_round_starts(&c, &sh, &r);
 }
+
+struct Admitting {
+    c: drover::Ctx,
+    f: Fake,
+    beta: Shared<Option<Result<(i32, String), std::sync::mpsc::RecvTimeoutError>>>,
+}
+
+impl Admitting {
+    fn hook(&self) {
+        let alpha = std::thread::current().name() != Some("beta");
+        if !alpha || self.beta.borrow().is_some() || drover::db::leases(&self.c.state, "admit").is_empty() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let c = self.c.clone();
+        std::thread::Builder::new()
+            .name("beta".into())
+            .spawn(move || tx.send(run_only(&c, &boats(), &["drive", "beta"])).ok())
+            .unwrap();
+        *self.beta.borrow_mut() = Some(rx.recv_timeout(std::time::Duration::from_secs(10)));
+    }
+}
+
+impl drover::runner::Runner for Admitting {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        self.hook();
+        self.f.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        self.hook();
+        self.f.run_in(prog, args, input)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+fn boats() -> Fake {
+    fake_with("1.0", Fake::default().reply("ssh ", ""))
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "  00:10\n")
+}
+
+#[test]
+fn two_fleets_admit_their_spawns_on_different_hosts_at_once() {
+    let (fleet, limits) = CONFIG.split_once("[limits]").unwrap();
+    let pinned = |(n, h): (&str, &str)| {
+        fleet.replace("sendmeter", n).replace(
+            "profile = \"fleet-impl\"",
+            &format!("profile = \"fleet-impl\"\nhost = \"{h}\""),
+        )
+    };
+    let all: String = [("alpha", "boat1"), ("beta", "boat2")]
+        .into_iter()
+        .map(pinned)
+        .collect();
+    let limits = limits.replace("max_parallel_spawns = 0", "max_parallel_spawns = 6");
+    let hosts = "\n[hosts.mini]\nstart_max = 0\n\n[hosts.boat1]\nmachine = \"boat1\"\nstart_max = 1\n\n[hosts.boat2]\nmachine = \"boat2\"\nstart_max = 1\n";
+    let c = ctx(&tmpdir("kicks-1583-hosts"), &format!("{all}[limits]{limits}{hosts}"));
+    for f in ["alpha", "beta"] {
+        assert_eq!(run(&c, &Fake::default(), &["queue", f, "add", "1"]).0, 0);
+    }
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let e = serde_json::json!({"ts": 1, "fleet": "alpha", "issue": 9, "type": "spawn", "role": "impl", "host": "mini"});
+    let l = drover::db::take(
+        &c.state,
+        "spawn-alpha-9.pending",
+        c.now - 10,
+        300,
+        &e.to_string(),
+        &|_| true,
+    )
+    .unwrap();
+    assert!(drover::db::renew(
+        &c.state,
+        &l,
+        &drover::db::Lease { pid: 4242, ..l.clone() }
+    ));
+    let r = Admitting {
+        c: c.clone(),
+        f: boats(),
+        beta: Shared::default(),
+    };
+    let (code, out) = run_only(&c, &r, &["drive", "alpha"]);
+    assert_eq!(code, 0, "{out}");
+    let beta = r.beta.borrow().clone();
+    let (code, beta) = beta
+        .expect("alpha's admission ran")
+        .expect("beta's pass waited for alpha's admission on another host");
+    assert_eq!(code, 0, "{beta}");
+    let on = starting_on(&c);
+    assert_eq!(
+        on.get("boat1"),
+        Some(&vec!["alpha".to_string()]),
+        "{on:?}\n{out}\n{beta}"
+    );
+    assert_eq!(
+        on.get("boat2"),
+        Some(&vec!["beta".to_string()]),
+        "{on:?}\n{out}\n{beta}"
+    );
+}
