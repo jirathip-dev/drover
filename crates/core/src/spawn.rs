@@ -742,11 +742,6 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
                 .map(|a| sent("shed", shown(a))),
         );
     }
-    if let Some(t) = p.env.get("DROVER_TOKEN") {
-        cmds.iter_mut()
-            .flatten()
-            .for_each(|w| *w = w.replace(t.as_str(), "•••"));
-    }
     json!({
         "agent": p.agent, "role": p.role, "harness": p.harness, "profile": p.profile, "machine": on.machine,
         "model": p.model, "effort": p.effort, "branch": p.branch, "base": p.base,
@@ -1116,10 +1111,7 @@ pub fn spawn(
         p.at(&pl.root, f);
         p.env.insert("DROVER_HOST".into(), pl.name.clone());
         if pl.machine.is_some() {
-            match &cfg.service.url {
-                Some(url) => p.env.insert("DROVER_SERVICE".into(), url.clone()),
-                None => p.env.insert("DROVER_OUTBOX".into(), "1".into()),
-            };
+            p.env.insert("DROVER_OUTBOX".into(), "1".into());
             p.env
                 .insert("DROVER_RULES".into(), p.rules_file().display().to_string());
         }
@@ -1161,17 +1153,6 @@ pub fn spawn(
     }
     if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
         return refused("HOST_OFFLINE", why);
-    }
-    if p.env.contains_key("DROVER_SERVICE") {
-        let g = crate::service::Grant {
-            fleet: fleet.into(),
-            issue,
-            role: role.into(),
-            agent: p.agent.clone(),
-            lane: p.lane.clone(),
-            at: ctx.now,
-        };
-        p.env.insert("DROVER_TOKEN".into(), crate::service::grant(ctx, &g)?);
     }
     let h = providers::get(&p.harness);
     h.ready(ctx, r, &p)?;

@@ -96,10 +96,7 @@ fn hook_there(env: &BTreeMap<String, String>, remote: &Path, toml: Option<&str>,
     for k in ["DROVER_LANE", "DROVER_HOST", "DROVER_RULES"] {
         c.env_remove(k);
     }
-    for (k, v) in env
-        .iter()
-        .filter(|(k, _)| !["DROVER_OUTBOX", "DROVER_SERVICE"].contains(&k.as_str()))
-    {
+    for (k, v) in env.iter().filter(|(k, _)| k != "DROVER_OUTBOX") {
         c.env(k, v);
     }
     let mut child = c

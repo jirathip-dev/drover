@@ -304,7 +304,7 @@ fn hook_there(env: &BTreeMap<String, String>, dir: &Path, cmd: &str) -> String {
     }
     let keep = env
         .iter()
-        .filter(|(k, _)| k.starts_with("DROVER_") && !["DROVER_OUTBOX", "DROVER_SERVICE"].contains(&k.as_str()));
+        .filter(|(k, _)| k.starts_with("DROVER_") && k != "DROVER_OUTBOX");
     let mut child = ch
         .envs(keep)
         .args(["hook", "--role", "impl"])
