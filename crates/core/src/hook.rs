@@ -405,10 +405,31 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
                 && !f.contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\'])
                 && (own_file(f, p) || folder(f))
         };
-        let hit = (t.iter().flat_map(|w| paths(w)))
+        let plain_cp = t.first() == Some(&"cp")
+            && (t.iter().filter_map(|w| w.strip_prefix('-')))
+                .all(|o| !o.is_empty() && o.chars().all(|c| "rRpvfn".contains(c)));
+        let into_own = |w: &str| own(&resolve(w, &cwd));
+        let reader = matches!(
+            t.first(),
+            Some(&("cat" | "grep" | "head" | "tail" | "jq" | "wc" | "echo" | "printf"))
+        );
+        let reads_only = if targets.is_empty() {
+            plain_cp
+                && t.len() > 2
+                && t.last().is_some_and(|w| into_own(w))
+                && (t.iter().skip(1).take(t.len() - 2).filter(|w| !w.starts_with('-'))).all(|w| {
+                    w.rsplit('/')
+                        .next()
+                        .is_some_and(|n| !["", ".", "..", ".brief.md", ".thread.md"].contains(&n))
+                })
+        } else {
+            reader && !writer && targets.iter().all(|w| into_own(w))
+        };
+        let written = |w: &&&str| !reads_only || w.starts_with('-');
+        let hit = (t.iter().filter(written).flat_map(|w| paths(w)))
             .find_map(|f| p.paths.iter().find(|pp| f.starts_with(pp.as_str()) && !own(&f)))
             .map(String::as_str);
-        let rest: Vec<&str> = (t.iter().copied())
+        let rest: Vec<&str> = (t.iter().filter(written).copied())
             .filter(|w| !paths(w).iter().any(|f| own(f)))
             .collect();
         let seg_hit = protected_path(&rest.join(" "), p);

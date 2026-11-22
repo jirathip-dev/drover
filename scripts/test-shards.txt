@@ -75,6 +75,7 @@
 1 hermes_hooks
 2 history
 3 hook
+4 hook_own_folder
 1 hook_wrapped
 3 host_deadline
 2 host_down
