@@ -15,6 +15,7 @@ pub(crate) mod job;
 mod kicks;
 mod pickup;
 mod remote;
+mod undriven;
 
 /// A fleet pass's steps in order (`drive-<fleet>.lock.step` names the running one, `pass-slow` the one its deadline hit) and the `[limits]` keys that time them.
 pub const STEPS: [(&str, &[&str]); 4] = [
@@ -823,6 +824,7 @@ fn one(
     }
     laps.lap("closed issues");
     ACTS.with_borrow_mut(BTreeMap::clear);
+    undriven::clear();
     ROOM.set((false, None));
     let one_slot = cfg.limits.max_parallel_spawns == 1 && crate::starts::fix_due(&working(&ctx.state)?, name);
     let early = cfg.limits.max_parallel_spawns > 0 && KICK.get().is_none() && !one_slot;
@@ -834,6 +836,10 @@ fn one(
     laps.lap("PR reads, gates, steps");
     mark("spawns");
     let res = res.and_then(|()| starts(ctx, cfg, r, out, name));
+    let res = res.and_then(|()| match KICK.get() {
+        None => undriven::cards(ctx, cfg, out, name),
+        Some(_) => Ok(()),
+    });
     laps.lap("spawns");
     if let Err(e) = &res {
         let a = json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": format!("failed: {e:#}")});
@@ -1196,14 +1202,17 @@ fn pass(
     let verdict = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover verdict "));
     let merge = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover merge "));
     waits.sort_by_key(|(s, w)| (!verdict(w), !merge(w), !rev(w), conflicts.contains_key(&s.issue)));
-    let (mut updated, mut spawns_held) = (false, false);
+    let (mut updated, mut spawns_held): (bool, Code) = (false, None);
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && !s.done() && s.lane.as_ref() == Some(&w.lane))
     {
+        undriven::skip(s.issue, format!("no step of drive's pass ran on \"{}\"", w.what));
         let lock = format!("drive-{fleet}-{}.lock", s.issue);
         let mine = take(ctx, r, &lock, STALE_LOCK_SECS, fleet);
         if mine.is_none() && !SLOT.get() {
+            let by = held(ctx, &lock).map_or(String::new(), |l| format!(" by pid {}", l.pid));
+            undriven::skip(s.issue, format!("skipped: {lock} is held{by}"));
             continue;
         }
         let mut pr = gh::cached_pr(ctx, fleet, s.issue);
@@ -1221,7 +1230,10 @@ fn pass(
             continue;
         }
         let fetched = match pickup::fetch(ctx, cfg, r, out, &events, (s, w), &pr)? {
-            pickup::Picked::Held => continue,
+            pickup::Picked::Held => {
+                undriven::skip(s.issue, "skipped: its verdict pickup is held".into());
+                continue;
+            }
             pickup::Picked::Fetched(x) => Some(x),
             pickup::Picked::No => None,
         };
@@ -1299,7 +1311,8 @@ fn pass(
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
             let arg = |i: usize| args.get(i).copied().unwrap_or_default();
-            if spawns_held && arg(0) == "spawn" {
+            if let Some(c) = spawns_held.filter(|_| arg(0) == "spawn") {
+                undriven::skip(s.issue, format!("skipped: an earlier spawn this pass was refused {c}"));
                 continue;
             }
             let step = match (arg(0), args.get(3).copied()) {
@@ -1336,7 +1349,9 @@ fn pass(
                 save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
-            spawns_held |= arg(0) == "spawn" && crate::starts::stops(code);
+            if arg(0) == "spawn" && crate::starts::stops(code) {
+                spawns_held = spawns_held.or(code);
+            }
             pickup::after(ctx, out, &events, (w, step), code)?;
             let stale = (code == Some("LANE_LIVE") && step == "review")
                 .then(|| s.lanes.get(arg(3)))
@@ -1443,13 +1458,7 @@ fn pass(
             let d = json!({"why": w.what});
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "no-action", d))?;
         } else if s.state == "ready" && (ci == "failed" || gone.is_some()) {
-            let head = pr.at("headRefOid").as_str().unwrap_or_default();
-            let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
-            let gone = gone.map(|m| format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"));
-            std::fs::write(&file, gone.unwrap_or_else(|| ci_findings(r, f, &pr, head)))?;
-            let file = file.to_string_lossy();
-            let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
-            act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
+            ci_red(ctx, cfg, (r, seen), out, (&events, &agents), s, (&pr, gone.as_deref()))?;
         } else if s.state == "ready" && ci == "pending" {
             gh::unstick(ctx, cfg, r, out, (fleet, s.issue), &events, &pr)?;
         }
@@ -1458,6 +1467,35 @@ fn pass(
         catch_up(ctx, cfg, r, out, fleet)?;
     }
     Ok(())
+}
+
+fn ci_red(
+    ctx: &Ctx,
+    cfg: &Config,
+    (r, seen): (&dyn Runner, &dyn Runner),
+    out: &mut dyn Write,
+    (events, agents): (&[Event], &[Session]),
+    s: &IssueState,
+    (pr, gone): (&Value, Option<&str>),
+) -> Result<()> {
+    let (fleet, n, f) = (s.fleet.as_str(), s.issue.to_string(), cfg.fleet(&s.fleet)?);
+    let head = pr.at("headRefOid").as_str().unwrap_or_default();
+    let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
+    let gone = gone.map(|m| format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"));
+    std::fs::write(&file, gone.unwrap_or_else(|| ci_findings(r, f, pr, head)))?;
+    let file = file.to_string_lossy();
+    let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
+    if act(ctx, cfg, r, out, events, (fleet, Some(s.issue), "ci-red"), &args)?.is_some() {
+        return Ok(());
+    }
+    let ev = working(&ctx.state)?;
+    let this = |x: &IssueState| x.fleet == fleet && x.issue == s.issue;
+    let row = waiting::scan_where(ctx, cfg, seen, (&ev, agents), false, this).pop();
+    let Some(c) = row.and_then(|x| x.1.next_cmd).filter(|c| c.ends_with(" --supersede")) else {
+        return Ok(());
+    };
+    let a: Vec<&str> = c.split_whitespace().skip(1).collect();
+    act(ctx, cfg, r, out, &ev, (fleet, Some(s.issue), "fix"), &a).map(drop)
 }
 
 fn no_proof(

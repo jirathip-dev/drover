@@ -9,7 +9,7 @@ use crate::hygiene::Check;
 use crate::lanes::Health;
 use crate::runner::{ok, Runner};
 use crate::session::{Session, Status};
-use crate::spawn::{changes, dirty, own_files, SHOT_DIRS};
+use crate::spawn::{changes, dirty, dirty_past, own_files, SHOT_DIRS};
 use crate::Ctx;
 use crate::{gh, term};
 use anyhow::{Context, Result};
@@ -21,6 +21,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod fire;
+mod stranded;
 mod sweep;
 
 use sweep::{disabled, sweep_off};
@@ -166,7 +167,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
-    crate::setup::reap(ctx, r, &events)?;
+    crate::setup::reap(ctx, r, &events).and_then(|()| stranded::alert(ctx, cfg, out, &events))?;
     match crate::runners::tick(ctx, cfg, r, &events) {
         Some(Ok((on, want))) => {
             let was = |e: &&Event| matches!(e.kind.as_str(), "runners-low" | "runners-ok");
@@ -1006,8 +1007,9 @@ pub fn clean_all(
             continue;
         }
         let agent = e.str("agent").unwrap_or_default();
+        let kept = (why == "merged").then(|| pr_head(&events, &e.fleet, n)).flatten();
         let here: Vec<&Session> = (agents.live())
-            .filter(|a| a.host.as_deref() == away && a.in_dir(agent, Path::new(wt)))
+            .filter(|a| !a.hollow() && a.host.as_deref() == away && a.in_dir(agent, Path::new(wt)))
             .collect();
         let own = |a: &&Session| a.name == agent && !a.busy();
         let key = format!("merged-idle:{agent}:{}", e.ts);
@@ -1052,7 +1054,7 @@ pub fn clean_all(
                     freed += purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
                 }
             }
-            dirty(&on, Path::new(wt))
+            dirty_past(&on, Path::new(wt), kept)
         };
         let saved = keep.is_some() && yes && !live && lane.is_none();
         let keep = match keep {
@@ -1060,7 +1062,7 @@ pub fn clean_all(
                 writeln!(out, "would save {shown} to wip/ ({why}), then remove it")?;
                 continue;
             }
-            Some(_) if saved => save(ctx, cfg, &on, out, &events, e, wt)?,
+            Some(_) if saved => save(ctx, cfg, &on, out, (&events, kept), e, wt)?,
             k => k,
         };
         if let Some(reason) = keep {
@@ -1075,7 +1077,7 @@ pub fn clean_all(
             writeln!(out, "would remove {shown} (pane {pane}, {}#{n} {why})", e.fleet)?;
             continue;
         }
-        if let Err(err) = remove(&on, cfg, &e.fleet, wt, saved) {
+        if let Err(err) = remove(&on, cfg, &e.fleet, wt) {
             tally(out, &shown, e, &err, &mut tallies)?;
             continue;
         }
@@ -1151,6 +1153,11 @@ pub fn clean_all(
     }
     anyhow::ensure!(tallies.1 == 0, "{} worktree(s) not removed; see above", tallies.1);
     Ok(tallies.0)
+}
+
+fn pr_head<'a>(events: &'a [Event], fleet: &str, n: u64) -> Option<&'a str> {
+    let m = events.iter().rfind(|m| m.is("merged", fleet, n))?;
+    m.str("verdict_sha").filter(|s| !s.is_empty())
 }
 
 fn tally(out: &mut dyn Write, shown: &str, e: &Event, err: &anyhow::Error, tallies: &mut (usize, usize)) -> Result<()> {
@@ -1274,7 +1281,7 @@ fn save(
     cfg: &Config,
     r: &On,
     out: &mut dyn Write,
-    events: &[Event],
+    (events, kept): (&[Event], Option<&str>),
     e: &Event,
     wt: &str,
 ) -> Result<Option<String>> {
@@ -1285,7 +1292,7 @@ fn save(
         r,
         wt,
         (&wip_branch(ctx, r, agent), "wip: auto-saved by drover"),
-        chk.as_ref(),
+        (chk.as_ref(), kept),
     ) {
         Err(Snap::Secret(hit) | Snap::Leak(hit)) => {
             let why = if hit.starts_with("REFUSED") {
@@ -1465,7 +1472,7 @@ pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     let events = working(&ctx.state)?;
     let spawned = (events.iter().filter(|e| e.kind == "spawn" && e.ts >= since)).filter_map(|e| e.str("agent"));
     let agents = crate::session::live_on(r)?;
-    let names = agents.iter().map(|a| a.name.as_str());
+    let names = agents.iter().filter(|a| !a.hollow()).map(|a| a.name.as_str());
     Ok(names.chain(spawned).map(String::from).collect())
 }
 
@@ -1656,7 +1663,9 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
             continue;
         }
         let why = match touched(r, wt).map(|t| ctx.now.saturating_sub(t)) {
-            _ if agents.iter().any(|a| a.in_dir(e.str("agent").unwrap_or("\0"), wt)) => "a live lane".into(),
+            _ if (agents.iter()).any(|a| !a.hollow() && a.in_dir(e.str("agent").unwrap_or("\0"), wt)) => {
+                "a live lane".into()
+            }
             _ if !host::inside(&ps, wt).is_empty() => "a process runs there".into(),
             Some(a) if a >= 7 * 86_400 => String::new(),
             Some(a) => format!("touched {} ago", age(a)),
@@ -1891,10 +1900,8 @@ fn closed_in<'a>(
     })
 }
 
-pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, saved: bool) -> Result<()> {
-    if let Some(why) = dirty(r, Path::new(wt)).filter(|_| !saved) {
-        anyhow::bail!("{why}");
-    }
+/// Remove worktree `wt`, forced: its caller found nothing unsaved there, or saved it to `wip/`; what is left is lane scratch.
+pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str) -> Result<()> {
     for f in own_files() {
         r.remove(&Path::new(wt).join(f)).context(format!("removing {f}"))?;
     }
@@ -1909,11 +1916,7 @@ pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, saved: bool) -> Resul
         None => cfg.fleet(fleet)?.local_path().to_string_lossy().into_owned(),
         Some(_) => wt.into(),
     };
-    let mut args = vec!["-C", &local, "worktree", "remove", wt];
-    if saved {
-        args.insert(4, "--force");
-    }
-    ok(r, "git", &args)?;
+    ok(r, "git", &["-C", &local, "worktree", "remove", "--force", wt])?;
     Ok(())
 }
 
@@ -2277,7 +2280,7 @@ fn save_on(
     (w, msg): (&str, &str),
     chk: Option<&Check>,
 ) -> Result<(String, Vec<String>)> {
-    match snapshot(on, wt, (w, msg), chk) {
+    match snapshot(on, wt, (w, msg), (chk, None)) {
         Err(Snap::Failed(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
             format!("{agent}: wip snapshot failed ({e:#}); index restored, nothing pushed, pane kept"),
@@ -2333,11 +2336,13 @@ fn tag(seed: &str) -> String {
 
 /// Push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first); the branch it went to.
 pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<String> {
-    snapshot(r, wt, (w, msg), None).map(|(w, _)| w).map_err(|e| match e {
-        Snap::Secret(hit) => anyhow::anyhow!("a secret in the diff ({hit})"),
-        Snap::Leak(why) => anyhow::anyhow!("{why}"),
-        Snap::Failed(e) | Snap::Push(e) => e,
-    })
+    snapshot(r, wt, (w, msg), (None, None))
+        .map(|(w, _)| w)
+        .map_err(|e| match e {
+            Snap::Secret(hit) => anyhow::anyhow!("a secret in the diff ({hit})"),
+            Snap::Leak(why) => anyhow::anyhow!("{why}"),
+            Snap::Failed(e) | Snap::Push(e) => e,
+        })
 }
 
 enum Snap {
@@ -2349,6 +2354,20 @@ enum Snap {
 
 const NO_WIP: [&str; 3] = ["target*", "node_modules", ".lane-logs"];
 const CAPS: (u64, u64) = (5 << 20, 50 << 20);
+const UNPUSHED: [&str; 7] = [
+    "log",
+    "-p",
+    "--format=",
+    "--ignore-missing",
+    "HEAD",
+    "--not",
+    "--remotes",
+];
+const FIXTURES: [&str; 2] = ["fixtures", "testdata"];
+fn unscanned(at: &str) -> bool {
+    let file = at.rsplit_once(':').map_or(at, |a| a.0);
+    (file.split('/').rev().skip(1)).any(|c| c.starts_with("target") || BUILD_DIRS.contains(&c) || FIXTURES.contains(&c))
+}
 fn build(p: &str) -> bool {
     (p.split('/').rev().skip(1)).any(|c| c.starts_with("target") || NO_WIP[1..].contains(&c))
 }
@@ -2429,7 +2448,7 @@ fn snapshot(
     r: &dyn Runner,
     wt: &str,
     (w, msg): (&str, &str),
-    chk: Option<&Check>,
+    (chk, kept): (Option<&Check>, Option<&str>),
 ) -> std::result::Result<(String, Vec<String>), Snap> {
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
     let undo = |e: anyhow::Error| {
@@ -2469,14 +2488,17 @@ fn snapshot(
         }
         Ok((
             git(&["diff", "--cached"])?,
-            git(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"])?,
+            git(&[&UNPUSHED[..], kept.as_slice()].concat())?,
         ))
     };
     let (staged, log) = snap().map_err(undo)?;
     let diff = format!("{staged}\n{log}");
     let secret = |a: &str| Some(crate::lanes::redact(a.trim())).filter(|m| m != a.trim());
     let leak = chk.and_then(|c| Some((c, crate::hygiene::hits(&diff, |l| c.find(l)).into_iter().next()?)));
-    let hit = match crate::hygiene::hits(&diff, secret).into_iter().next() {
+    let hit = match crate::hygiene::hits(&diff, secret)
+        .into_iter()
+        .find(|h| !unscanned(&h.1))
+    {
         Some((_, at, m)) => Some(Snap::Secret(format!("{at}: {m}"))),
         None => leak.map(|(c, (_, at, p))| Snap::Leak(crate::hygiene::why(&c.repo, &at, &p))),
     };
