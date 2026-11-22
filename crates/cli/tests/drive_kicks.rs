@@ -251,7 +251,9 @@ fn six_dead_markers_never_hold_a_new_spawn() {
 fn a_dead_passs_admit_lock_and_marker_never_refuse_the_next_spawn() {
     let (c, _sh) = fleet("kicks-dead-admit", 6, 1);
     let keys: Vec<String> = ["local", "mini"].iter().map(|h| format!("admit-{h}.lock")).collect();
-    keys.iter().for_each(|k| lease_as(&c, k, 4242, drover::now() - 5, 60));
+    for k in &keys {
+        lease_as(&c, k, 4242, drover::now() - 5, 60);
+    }
     mark(&c, 2, 4242, 10);
     let r = fake("1.0");
     let d = pass(&c, &r);
@@ -740,7 +742,16 @@ fn a_failing_spawn_backs_off_and_a_kick_retries_it_at_once() {
     let r = fake("1.0");
     let (code, out) = run(&at(311), &r, &["kick", "sendmeter", "1", "--why", "owner", "--now"]);
     assert_eq!(code, 0, "{out}");
-    assert!(started(&sh), "{out}");
+    assert!(!started(&sh), "a third alike failure is the owner's: {out}");
+    let ev = read(&c.state).unwrap();
+    let asks: Vec<_> = ev.iter().filter(|e| e.kind == "needs-decision").collect();
+    assert_eq!(asks.len(), 1, "{asks:?}");
+    assert!(
+        asks[0]
+            .str("question")
+            .is_some_and(|q| q.contains("already used by worktree")),
+        "{asks:?}"
+    );
 }
 
 #[test]
