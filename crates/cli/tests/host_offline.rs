@@ -600,3 +600,88 @@ fn an_extended_round_held_only_by_its_offline_host_raises_no_card_and_starts_onc
     );
     assert!(kinds(&c, "needs-human").iter().all(|e| e.issue != Some(13)));
 }
+
+struct SlowShed<'a>(&'a dyn drover::runner::Runner, std::sync::atomic::AtomicUsize);
+
+impl SlowShed<'_> {
+    fn slow(&self, prog: &str, args: &[String]) -> Option<drover::runner::Out> {
+        let line = format!("{prog} {}", args.join(" "));
+        let listing = prog == "ssh" && line.contains("bazzite") && line.contains("'hosts' 'report'");
+        let sc = std::sync::atomic::Ordering::SeqCst;
+        let once = listing && self.1.fetch_update(sc, sc, |n| n.checked_sub(1)).is_ok();
+        once.then(timed_out)
+    }
+}
+
+impl drover::runner::Runner for SlowShed<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        self.run_in(prog, args, "")
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        self.slow(prog, args)
+            .map_or_else(|| self.0.run_in(prog, args, input), Ok)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+}
+
+#[test]
+fn a_slow_shed_listing_that_answers_is_read_not_unreadable() {
+    let (c, _sh) = setup("slow-listing");
+    remote_spawn(&c);
+    let (f, bazzite) = (mini_only(), FakeShed::new());
+    bazzite.lane(IMPL, "idle", WT);
+    let over = with_bazzite(&f, &bazzite);
+    let r = SlowShed(&over, std::sync::atomic::AtomicUsize::new(1));
+    let (code, out) = run(&c, &r, &["waiting", "--json"]);
+    assert_eq!(code, 0, "{out}");
+    let w: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let row = w
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["issue"] == 12)
+        .unwrap()
+        .to_string();
+    assert!(!row.contains("lane unknown"), "{row}");
+    assert!(!row.contains("host offline"), "{row}");
+    assert_eq!(
+        r.1.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the slow listing was sent: {:?}",
+        f.calls.borrow()
+    );
+    assert!(!drover::hosts::down(&c).contains_key("bazzite"));
+}
+
+#[test]
+fn a_start_held_by_a_slow_probes_offline_mark_goes_ahead_in_the_same_pass() {
+    let (c, _sh) = setup("slow-probe-extend");
+    queue_linux(&c);
+    let ev13 = |ts: u64, kind: &str, d: serde_json::Value| {
+        append(&c.state, &Event::new(ts, "sendmeter", Some(13), kind, d)).unwrap();
+    };
+    ev13(NOW - 3600, "round-extended", json!({"by": "owner", "queued": true}));
+    let slow = mini_only()
+        .once_err(PROBE, 124, "no answer")
+        .once_err(PROBE, 124, "no answer");
+    assert_eq!(run(&c, &slow, &["check"]).0, 0);
+    assert!(
+        drover::hosts::down(&c).contains_key("bazzite"),
+        "the slow probe marked it down"
+    );
+
+    let (f, bazzite) = (linux_start(mini_only()), FakeShed::new());
+    let (code, out) = run(&c, &with_bazzite(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_ne!(last_code(&c), "HOST_OFFLINE", "{out}");
+    assert!(
+        bazzite.called("run", "sendmeter-impl-13"),
+        "{out} {:?}",
+        bazzite.methods()
+    );
+    assert!(!drover::hosts::down(&c).contains_key("bazzite"));
+    let p = drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 13);
+    assert!(p.is_none(), "{p:?}");
+}
