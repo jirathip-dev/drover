@@ -5,6 +5,8 @@ mod no_baseline;
 mod remote_unlisted;
 #[path = "drive/rev_unlisted.rs"]
 mod rev_unlisted;
+#[path = "drive/shed_machines.rs"]
+mod shed_machines;
 #[path = "drive/undriven.rs"]
 mod undriven;
 #[path = "drive/update_limit.rs"]
