@@ -1,0 +1,4 @@
+# #1586: the sim hunt is the longest single test (105-170 s on CI); started first, it ends with its shard instead of after it.
+[[profile.default.overrides]]
+filter = 'binary(sim) & test(the_hunt_finds)'
+priority = 100
