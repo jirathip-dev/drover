@@ -1450,10 +1450,10 @@ fn five_fleets_with_40_lanes_on_4_boats_at_700ms_a_call_end_every_pass_within_10
     assert!(secs < 10.0, "every pass done in {secs:.1} s (target < 10)");
 }
 
-fn idle_serve_cpu(secs: u64) -> f64 {
+fn idle_serve_cpu(secs: u64, rate: u64, held: &str) -> f64 {
     let o = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["idle_serve_child", "--exact", "--nocapture"])
-        .env("DROVER_PERF_1588", secs.to_string())
+        .env("DROVER_PERF_1588", format!("{secs} {rate} {held}"))
         .output()
         .unwrap();
     let err = String::from_utf8_lossy(&o.stderr);
@@ -1463,9 +1463,11 @@ fn idle_serve_cpu(secs: u64) -> f64 {
 
 #[test]
 fn idle_serve_child() {
-    let Ok(secs) = std::env::var("DROVER_PERF_1588") else {
+    let Ok(spec) = std::env::var("DROVER_PERF_1588") else {
         return;
     };
+    let v: Vec<&str> = spec.splitn(3, ' ').collect();
+    let (secs, rate): (u64, u64) = (v[0].parse().unwrap(), v[1].parse().unwrap());
     let (c, f) = huge();
     let sh = shed();
     sh.attach(&c);
@@ -1473,33 +1475,57 @@ fn idle_serve_child() {
         .iter()
         .flat_map(|f| (1..=40).map(move |n| format!("{f}-impl-{n}")))
         .collect();
-    let screen = |a: &str, i: u64| (0..300).map(|l| format!("{a} {i} line {l} ⏺ Working on it\n")).collect::<String>();
+    let screen = |a: &str, i: u64| {
+        (0..300)
+            .map(|l| format!("{a} {i} line {l} ⏺ Working on it\n"))
+            .collect::<String>()
+    };
     for a in &agents {
         sh.lane(a, "working", &format!("/wt/{a}"));
         sh.screen(a, &screen(a, 0));
     }
-    let _ = serve(c, f);
+    let state = c.state.clone();
+    let (_, _, addr) = serve(c, f);
+    for path in v[2].split(',').filter(|p| !p.is_empty()) {
+        let mut s = std::net::TcpStream::connect(addr).unwrap();
+        s.write_all(format!("GET {path}/stream HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
+            .unwrap();
+        std::thread::spawn(move || std::io::copy(&mut s, &mut std::io::sink()));
+    }
     std::thread::sleep(Duration::from_secs(5));
     let t = cpu_ms();
-    for i in 1..=secs.parse().unwrap() {
+    for i in 1..=secs {
         for a in &agents {
             sh.screen(a, &screen(a, i));
         }
-        std::thread::sleep(Duration::from_secs(1));
+        for k in 0..rate {
+            let d = json!({"step": "review", "result": "ok"});
+            let n = 1 + (i * rate + k) % 40;
+            append(&state, &Event::new(NOW + i, "alpha", Some(n), "driven", d)).unwrap();
+            std::thread::sleep(Duration::from_millis(1000 / rate));
+        }
+        if rate == 0 {
+            std::thread::sleep(Duration::from_secs(1));
+        }
     }
     eprintln!("#1588 cpu {}", cpu_ms() - t);
 }
 
 #[test]
-fn an_idle_serve_on_a_live_sized_fleet_stays_under_3_percent_cpu() {
+fn serve_stays_light_idle_and_with_the_board_open_through_a_passs_event_burst() {
     if cfg!(debug_assertions) {
         return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
     }
     let secs = 60;
-    let cpu = idle_serve_cpu(secs);
-    let pct = cpu / (secs as f64 * 10.0);
+    let pct = |cpu: f64| cpu / (secs as f64 * 10.0);
+    let idle = pct(idle_serve_cpu(secs, 0, ""));
+    let board = pct(idle_serve_cpu(secs, 20, "/screens/lanes,/screens/cards"));
     report(&format!(
-        "#1588 perf (5 fleets, 200 working lanes, 150,000 events, no requests): serve {cpu:.0} ms of CPU in {secs} s, {pct:.2}%"
+        "#1588 perf (5 fleets, 200 working lanes, 150,000 events, {secs} s): no requests {idle:.2}% CPU; the board open through 20 events/s {board:.2}% CPU"
     ));
-    assert!(pct < 3.0, "an idle serve used {pct:.2}% CPU over {secs} s (budget 3%)");
+    assert!(idle < 3.0, "an idle serve used {idle:.2}% CPU (budget 3%)");
+    assert!(
+        board < 15.0,
+        "serve with the board open used {board:.2}% CPU through 20 events/s (budget 15%)"
+    );
 }
