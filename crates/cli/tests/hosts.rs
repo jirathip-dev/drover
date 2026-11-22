@@ -361,7 +361,7 @@ fn clean_removes_a_remote_worktree_over_its_host() {
         out.contains(&format!("removed bazzite:{WT} (sendmeter#12 merged)")),
         "{out}"
     );
-    assert!(r.called(&format!("{SSH}{GIT} '-C' '{WT}' 'worktree' 'remove' '{WT}'")));
+    assert!(r.called(&format!("{SSH}{GIT} '-C' '{WT}' 'worktree' 'remove' '--force' '{WT}'")));
     assert!(
         bazzite.called("kill", IMPL) && !sh.called("kill", IMPL),
         "its pane closes on bazzite"

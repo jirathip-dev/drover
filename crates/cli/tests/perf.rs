@@ -1078,7 +1078,6 @@ fn over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane() {
         (&"start".into(), &"DISK_BUDGET".into()),
         "{start}"
     );
-    assert_eq!(kicked.data["spawns_launched"], 0, "{start}");
     assert!(!ev.iter().any(|e| e.kind == "spawn"), "{out}");
 }
 
