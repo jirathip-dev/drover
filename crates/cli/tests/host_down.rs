@@ -26,7 +26,10 @@ impl Dead {
 }
 
 fn air(prog: &str, args: &[String]) -> bool {
-    prog == "ssh" && args.first().is_none_or(|a| a != "-G") && args.iter().any(|a| a == "air")
+    prog == "ssh"
+        && args.first().is_none_or(|a| a != "-G")
+        && !args.iter().any(|a| a == "-O")
+        && args.iter().any(|a| a == "air")
 }
 
 impl Runner for Dead {

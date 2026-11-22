@@ -124,8 +124,9 @@ counts those starting. Drive gives the free slots to the queue in order; the kic
 
 `turn done` is a hard gate: before any review it checks, in the lane's worktree on its host, that `HEAD` is the pushed PR
 head, that the PR body names it (`PR_BODY`), and runs each `done_checks` command (`[fleet.<n>] done_checks = ["…"]`),
-each killed after `gate_check_minutes`. Unset = `drover arch-check` where the repo has `.drover/arch.toml` and
-`cargo fmt --check` where it has a `Cargo.toml`. A check only checks; one that fails, cannot start or times out
+each killed after `gate_check_minutes`. Unset = `./.gatekeeper/run check` where the repo has `.gatekeeper/run` (the
+wrapper fetches gatekeeper, so no host installs it), else `drover arch-check` where the repo has `.drover/arch.toml`
+and `cargo fmt --check` where it has a `Cargo.toml`. A check only checks; one that fails, cannot start or times out
 refuses the `done` (`DONE_CHECK`, with its output tail). CI still runs format and arch-check.
 
 ## Hygiene (#1101)
@@ -162,11 +163,18 @@ the pattern (`home-path`, `host`, `session-path`, `session-id`, `private-name #N
 | key | default | what |
 |---|---|---|
 | `[fleet.<n>] public` | GitHub's visibility, read at most once a day (spawn, merge, doctor) and cached; the hook reads only the cache | `true` checks, `false` skips; the flag wins |
-| `[fleet.<n>] private_names` | `[]` | names (private repos, clients) never sent to the repo; the list stays in fleet.toml |
+| `[fleet.<n>] private_names` | `[]` | names (private repos, clients) never sent to the repo; the list stays in fleet.toml and, for CI, the repo's `PRIVATE_NAMES` secret |
 
 `drover doctor` prints one `! hygiene` line naming the public fleets with no `private_names`. `drover hygiene scan
 <fleet>` lists the hits already in the repo's issues, PR bodies, comments and integration history, by pattern with
 their links; it changes nothing.
+
+`drover hygiene check [<fleet>] [--base <rev>] [--pr-body <file>]` is the gate (#1483): the tracked files, the commit
+messages since `--base` and the PR body against the names list, exit 1 on a hit, each printed `private-name #N at
+file:line`, never the name. The list is `$DROVER_PRIVATE_NAMES` (one name a line; CI passes its `private-names`
+secret), else the fleet's `private_names` (the argument, else the lane's fleet); a private fleet passes, and no list
+fails `list-missing`. It needs no fleet.toml. `drover hygiene push <fleet>` (owner only; an orchestrator posts a run
+card) writes the fleet's list as its public repo's `PRIVATE_NAMES` Actions secret and never prints it.
 
 ## Limits (#844)
 
@@ -200,7 +208,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `idle_merged_minutes` | `15` | a merged or closed issue's idle lane has its pane closed after this long |
 | `transcript_days` | `30` | a lane's agent keeps its transcripts this many days |
 | `deny_commands` | `assets/deny_commands.toml` | commands the lane hook refuses (default: containers) |
-| `fast_secs` | `60` | the fast step (`drive --fast`) runs every this many seconds |
+| `fast_secs` | `60` | the fast job (`drive`) starts every fleet's pass every this many seconds |
 | `slow_secs` | `300` | the slow tick runs every this many seconds |
 | `form_categories` | `["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]` | the finding tags a `FAIL (form-only)` may carry |
 | `form_rounds` | `3` | form-only FAILs per issue that don't count as a review round |
@@ -211,6 +219,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
 | `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
 | `spawn_pending_max_secs` | `300` | a spawn marker older than this is stale |
+| `admit_wait_secs` | `5` | a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING` |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |
 | `keychain_readers` | `3` | more Keychain readers up over 60 s alert `keychain-jammed` |
@@ -221,7 +230,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `crash_wave_minutes` | `5` | 3+ lanes of one host dying by an adapter crash within it are one `lane-wave`: respawned together, one alert |
 | `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
 | `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
-| `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock |
+| `pass_max_secs` | `60` | a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over |
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
@@ -248,6 +257,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |
 | `guard_secs` | `180` | `turn done`'s UI check (`just guard`) runs this long at most; past it the turn ends and `ui-check` logs a timeout |
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
+| `hold_sample_secs` | `10` | `drover hold` at the front of the heavy line samples the host's admission this often |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
 | `orchestrator_reply_minutes` | `10` | an owner message with no orchestrator reply this long gets a `no reply yet` row |
@@ -257,7 +267,8 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `outbox_stale_minutes` | `5` | a remote lane's outbox line undelivered this long alerts `outbox-stale` |
 | `host_offline_minutes` | `15` | a remote host unreachable this long has its open lanes restarted on the main host |
 | `host_down_secs` | `60` | a host a pass could not reach gets no ssh from any drover command this long |
-| `kick_max_secs` | `300` | a kick running this long is ended by the next tick and logged `kick-killed` |
+| `kick_max_secs` | `300` | a kick running this long is ended by the next tick and logged `kick-killed` (a merge's: `gate_check_minutes`) |
+| `job_max` | `4` | issue jobs of one fleet running at once |
 | `promise_passes` | `{}` | drive passes a promise of each kind may stay open before `promise-missed` (default 2) |
 | `serve_shed_secs` | `5` | serve re-reads shed's lanes in the background this often |
 | `serve_remote_secs` | `10` | serve re-reads the remote hosts (ssh) in the background this often |
@@ -268,8 +279,8 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `slo_api_p95_ms` | `1000` | `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once |
 | `slo_api_minutes` | `10` | how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api` |
 | `slo_idle_minutes` | `20` | no lane working this long while the queue has spawnable work breaches `slo-idle` |
-| `slo_tick_minutes` | `10` | a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast step stops it |
-| `slo_pass_minutes` | `30` | no slow drive pass of a fleet for this long shows on the board's drive-health line |
+| `slo_tick_minutes` | `10` | a tick with no progress (no step or call) for this long breaches `slo-tick`; the next fast job stops it |
+| `slo_pass_minutes` | `5` | no finished pass of a fleet for this long stops that fleet's pass (never another's) and shows on the board's drive-health line |
 | `stall_restart_hours` | `2` | an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own) |
 | `self_update_wait_minutes` | `45` | a head with no release build this long alerts `self-update-waiting` |
 | `self_update_lag_minutes` | `30` | how long a rollout waits for an enabled host that is not staged before the rest swap |

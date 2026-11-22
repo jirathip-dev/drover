@@ -202,6 +202,55 @@ pub fn released(events: &[Event], st: &States, b: &str) -> bool {
             .any(|e| e.kind == "blocker-closed" && e.str("ref") == Some(b))
 }
 
+/// A queued issue's blocker nothing will satisfy: open in no queue and with no lane, or closed unmerged.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stranded {
+    pub fleet: String,
+    pub issue: u64,
+    pub blocker: String,
+    pub closed: bool,
+    pub next: String,
+}
+
+/// Every configured fleet's queued issues' stranded blockers; another repo's maps to its fleet, else it is skipped.
+pub fn stranded(events: &[Event], st: &States, cfg: &crate::config::Config) -> Vec<Stranded> {
+    let fleets: Vec<(&str, &str)> = cfg.fleet.iter().map(|(n, f)| (n.as_str(), f.repo.as_str())).collect();
+    let queues: std::collections::BTreeMap<&str, Vec<Item>> =
+        fleets.iter().map(|&(f, _)| (f, view(events, st, f))).collect();
+    let mut out = vec![];
+    for (&fleet, q) in &queues {
+        for i in q {
+            let own = i.blockers.iter().map(|&b| (b.to_string(), format!("#{b}"), fleet, b));
+            let ext = i.ext.iter().filter_map(|r| {
+                let (on, n) = r.rsplit_once('#')?;
+                let bf = fleets.iter().find(|f| f.0 == on || f.1 == on)?.0;
+                Some((r.clone(), r.clone(), bf, n.parse().ok()?))
+            });
+            for (on, blocker, bf, bn) in own.chain(ext) {
+                let closed = state(st, bf, bn) == "closed";
+                let in_queue = queues.get(bf).is_some_and(|q| q.iter().any(|x| x.issue == bn));
+                if !closed && (in_queue || st.contains_key(&(bf.to_string(), bn))) {
+                    continue;
+                }
+                let next = if closed {
+                    format!("drover queue {fleet} unblock {} --on {on}", i.issue)
+                } else {
+                    format!("drover queue {bf} add {bn}")
+                };
+                let (fleet, issue) = (fleet.to_string(), i.issue);
+                out.push(Stranded {
+                    fleet,
+                    issue,
+                    blocker,
+                    closed,
+                    next,
+                });
+            }
+        }
+    }
+    out
+}
+
 /// `#N, drover#N, cooee#N`: the item's open blockers, another repo's by its name.
 pub fn labels(i: &Item) -> String {
     let ext = i.ext.iter().map(|b| b.rsplit('/').next().unwrap_or(b).to_string());
@@ -516,10 +565,10 @@ pub fn skipped(
     let merged = |m: &Event| m.kind == "merged" && m.fleet == fleet && m.ts > e.ts && m.issue.is_some_and(mine);
     (!events.iter().any(merged)).then_some(())?;
     let why = e.str("result")?.split_once(": ").map_or("", |w| w.1);
-    let why = if code == "SPAWN_PENDING" {
-        Some(slots).filter(|s| !s.is_empty())?
-    } else {
-        why
+    let why = match code {
+        "SPAWN_PENDING" => Some(slots).filter(|s| !s.is_empty())?.to_string(),
+        "DISK_LOW" => crate::hosts::disk_low_now(events, why),
+        _ => why.to_string(),
     };
     let ago = age(now.saturating_sub(e.ts));
     Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))

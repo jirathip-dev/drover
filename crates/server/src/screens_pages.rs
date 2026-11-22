@@ -1,6 +1,5 @@
 use super::{form, Q};
-use crate::events::Json;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 const PAGE: usize = 100;
 
@@ -24,13 +23,6 @@ pub(super) fn page<T>(path: &str, q: &Q, rows: impl IntoIterator<Item = ((u64, u
         format!("{path}?{}", q.join("&"))
     });
     (rows.into_iter().map(|r| r.1).collect(), next)
-}
-
-pub(super) fn paged(mut block: Value, more: Option<String>) -> Value {
-    if let Some(m) = more {
-        block.put("more", json!(m));
-    }
-    block
 }
 
 pub(in crate::serve) fn window(mut q: Q, first: &Value) -> Q {

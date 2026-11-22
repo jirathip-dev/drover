@@ -62,7 +62,7 @@ fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
         0o600,
     );
     write(&st.join("webpush/subs.json"), SUB, 0o600);
-    for w in ["check", "drive"] {
+    for w in ["check", "drive-fast"] {
         write(&st.join(format!("{w}.at")), &(c.now - 60).to_string(), 0o644);
     }
     assert_eq!(run(&c, &good(), &["timer", "install", "--no-load"]).0, 0);
@@ -299,7 +299,11 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         ),
         (
             |c, _, r| {
-                write(&c.state.with_file_name("drive.at"), &(c.now - 3600).to_string(), 0o644);
+                write(
+                    &c.state.with_file_name("drive-fast.at"),
+                    &(c.now - 3600).to_string(),
+                    0o644,
+                );
                 r
             },
             "watchdog drive",
@@ -663,11 +667,30 @@ fn a_missing_tool_is_unknown_with_its_name_and_leaves_the_exit_code() {
 #[test]
 fn watchdog_drive_shows_never_without_a_record_and_no_huge_age_for_a_stamp_past_its_clock() {
     let (c, _) = setup("doc-watch-age", "claude");
-    std::fs::remove_file(c.state.with_file_name("drive.at")).unwrap();
+    std::fs::remove_file(c.state.with_file_name("drive-fast.at")).unwrap();
     let (_, out) = run(&c, &good(), &["doctor"]);
     assert!(line(&out, "watchdog drive").contains("ran never"), "{out}");
-    write(&c.state.with_file_name("drive.at"), &(c.now + 5).to_string(), 0o644);
+    write(
+        &c.state.with_file_name("drive-fast.at"),
+        &(c.now + 5).to_string(),
+        0o644,
+    );
     let (_, out) = run(&c, &good(), &["doctor"]);
     let row = line(&out, "watchdog drive");
     assert!(row.starts_with('✓') && row.contains("ran 0s"), "{out}");
+}
+
+#[test]
+fn the_scene_device_line_says_off_by_default_and_on_with_its_address() {
+    let (c, d) = setup("doc-device", "claude");
+    let (_, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(line(&out, "scene device"), "✓ scene device — off", "{out}");
+    let on = config(&d, "claude").replace("[serve]\n", "[serve]\ndevice_addr = \"0.0.0.0:7779\"\n");
+    std::fs::write(&c.config, on).unwrap();
+    let (_, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(
+        line(&out, "scene device"),
+        "✓ scene device — on 0.0.0.0:7779, the scene to the LAN",
+        "{out}"
+    );
 }

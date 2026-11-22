@@ -93,14 +93,14 @@ rows; each of them names it. A UI PR's body carries a `## Parity` section naming
 | 74 | Host health and services: herdr, ssh, logins, version, drift, timers | — | dropped q1784 |
 | 75 | Turn a host on or off | parity_75 | page-only |
 | 76 | Host tags; cloud host spend and budget | — | dropped q1784 |
-| 77 | Fleet disk: budget, orphan folders, leftovers, [reap] | — | open |
+| 77 | Fleet disk: budget, orphan folders, leftovers, [reap] | parity_77 | kept |
 | 78 | Agent providers: account 5h/7d meters, caps, DeepSeek balance | — | dropped q1784 |
 | 79 | Provider sign-in terminal, add key, [use] to switch | — | open |
 | 80 | Fleets: per-repo config sheet with pipeline graph | parity_80 | kept |
 | 81 | Role model/effort pickers | parity_81 | kept |
 | 82 | Conductor role and new-thread chat defaults | — | open |
 | 83 | Activity: time groups, kind glyphs, [important] filter, older | parity_83 | kept |
-| 84 | Notifiers list and Telegram bridge status | — | open |
+| 84 | Notifiers list and Telegram bridge status | parity_84 | kept |
 | 85 | Real config load errors shown plainly | parity_85 | kept |
 | 86 | Host and Events as tabs; [◐] look button (drop? in #553) | — | open |
 | 87 | Lanes mode button; fixed Corral horse art (drop? in #553) | — | open |

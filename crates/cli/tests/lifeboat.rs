@@ -66,7 +66,7 @@ fn an_unpaired_device_sees_the_pair_hint_and_nothing_else() {
 #[test]
 fn a_paired_device_sees_queue_lanes_asks_and_cards_and_a_load_runs_no_subprocess() {
     let (c, r) = fixture("lifeboat-paired");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let before = r.calls.borrow().len();
@@ -153,7 +153,7 @@ fn the_page_for_the_ui_audit() {
         return;
     };
     let (c, r) = fixture("lifeboat-ui");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let page = req(

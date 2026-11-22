@@ -56,9 +56,9 @@ fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     let sh = FakeShed::new();
     sh.attach(&c);
     let r = Fake::default().once(READ, 0, &first_read());
-    run(&c, &r, &["drive", "--fast"]);
+    run(&c, &r, &["drive"]);
     assert_eq!(r.count(READ), 0, "a fast step reads no backlog");
-    assert_eq!(run(&c, &r, &["drive"]).0, 0);
+    assert_eq!(run(&c, &r, &["tick"]).0, 0);
     let first: Vec<_> = r
         .calls
         .borrow()
@@ -83,7 +83,7 @@ fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
         issue(30, "OPEN", "1970-04-26T02:00:00Z", &[], false, false),
     ];
     let r = Fake::default().once(READ, 0, &next.concat());
-    assert_eq!(run(&c, &r, &["drive"]).0, 0);
+    assert_eq!(run(&c, &r, &["tick"]).0, 0);
     let call = r.calls.borrow().iter().find(|l| l.starts_with(READ)).cloned().unwrap();
     assert!(
         call.contains("issues(states:[OPEN,CLOSED],") && call.ends_with("-f since=1970-04-25T00:00:00Z"),
@@ -98,7 +98,7 @@ fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     assert_eq!(b["since"], "1970-04-26T02:00:00Z");
 
     let r = Fake::default().once_err(READ, 1, "HTTP 502");
-    assert_eq!(run(&c, &r, &["drive"]).0, 0, "a failed read never fails the pass");
+    assert_eq!(run(&c, &r, &["tick"]).0, 0, "a failed read never fails the pass");
     assert_eq!(r.count(READ), 1);
     assert_eq!(cache(&c)["issues"], b["issues"], "the last read kept");
 }
@@ -112,7 +112,7 @@ fn the_reads_jq_flattens_each_issue() {
     let sh = FakeShed::new();
     sh.attach(&c);
     let r = Fake::default();
-    run(&c, &r, &["drive"]);
+    run(&c, &r, &["tick"]);
     let call = r.calls.borrow().iter().find(|l| l.starts_with(READ)).cloned().unwrap();
     let jq = &call[call.find("--jq ").unwrap() + 5..call.find(" -f owner=").unwrap()];
     let node = |n: u64, body: &str, labels: &[&str], refs: Value| {
@@ -169,7 +169,7 @@ fn the_queue_api_carries_the_backlog_from_the_last_read_with_no_github_call() {
         Value::Null,
         "never read: no backlog section"
     );
-    assert_eq!(run(&c, &Fake::default().once(READ, 0, &first_read()), &["drive"]).0, 0);
+    assert_eq!(run(&c, &Fake::default().once(READ, 0, &first_read()), &["tick"]).0, 0);
     for q in [queue(&s, &cookie), queue(&s, "")] {
         let bl = &q["fleets"][0]["backlog"]["issues"];
         assert_eq!(keys(bl), ["12", "15", "17"], "#20 queued and #21 with a lane left out");

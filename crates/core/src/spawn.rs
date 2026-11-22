@@ -25,6 +25,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         ),
         "lesson" => include_str!("../roles/lesson.md"),
         "triage" => include_str!("../roles/triage.md"),
+        "deps" => concat!(include_str!("../roles/impl.md"), "\n", include_str!("../roles/deps.md")),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
     }
@@ -40,7 +41,7 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
 }
 
 fn prompt_kind<'a>(f: &'a Fleet, role: &'a str) -> &'a str {
-    let own = matches!(role, "lesson" | "triage") || role == "verify" && f.family(role) == "rev";
+    let own = matches!(role, "lesson" | "triage" | "deps") || role == "verify" && f.family(role) == "rev";
     if own {
         role
     } else {
@@ -172,7 +173,7 @@ impl Plan {
         }
         if self.sources_secrets() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
-            c.push(format!("&& . '{f}'"));
+            c.push(format!("&& . '{f}' && rm -f '{f}'"));
         }
         c.extend(self.qos().map(|_| BACKGROUND.to_string()));
         c
@@ -220,7 +221,7 @@ impl Plan {
 }
 
 /// The lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`) and
-pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<Delivered<'a>> {
+pub fn deliver<'a>(ctx: &'a Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<crate::secret::Delivered<'a>> {
     let mut text = String::new();
     for (var, _, name) in p.secrets() {
         let f = crate::secret::path(ctx, &name);
@@ -241,18 +242,12 @@ pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<
     if let Some(f) = &file {
         on.write_private(f, &text)?;
     }
-    Ok(Delivered(on, file))
-}
-
-/// The secrets file `deliver` wrote; removed on drop (the lane's shell has read it by then).
-pub struct Delivered<'a>(&'a crate::hosts::On<'a>, Option<PathBuf>);
-
-impl Drop for Delivered<'_> {
-    fn drop(&mut self) {
-        if let Some(f) = &self.1 {
-            self.0.remove(f).ok();
-        }
-    }
+    Ok(crate::secret::Delivered {
+        ctx,
+        on,
+        lane: p.lane.clone(),
+        file,
+    })
 }
 
 const TITLE_MAX: usize = 60;
@@ -974,6 +969,11 @@ pub fn unsaved_text(u: Option<(u64, u64)>) -> Option<String> {
 
 /// Why a worktree must not be reused or removed: uncommitted changes (`OWN_FILES` aside) or unpushed commits.
 pub fn dirty(r: &dyn Runner, wt: &Path) -> Option<String> {
+    dirty_past(r, wt, None)
+}
+
+/// `dirty`, with the commits reachable from `kept` (a merged PR's head, which its PR ref keeps) counted as pushed.
+pub fn dirty_past(r: &dyn Runner, wt: &Path, kept: Option<&str>) -> Option<String> {
     let wt = wt.to_string_lossy();
     let st = match status(r, &wt) {
         Ok(s) => s,
@@ -983,10 +983,12 @@ pub fn dirty(r: &dyn Runner, wt: &Path) -> Option<String> {
     if changed > 0 {
         return Some(format!("{changed} uncommitted change(s)"));
     }
+    let args = ["-C", &wt, "rev-list", "--count", "HEAD", "--not", "--remotes"];
+    let past = kept.map(|k| ["--ignore-missing", k]);
     match ok(
         r,
         "git",
-        &["-C", &wt, "rev-list", "--count", "HEAD", "--not", "--remotes"],
+        &[&args[..], past.as_ref().map_or(&[][..], |p| &p[..])].concat(),
     ) {
         Ok(n) if n.trim() == "0" => None,
         Ok(n) => Some(format!("{} unpushed commit(s)", n.trim())),
@@ -1518,19 +1520,16 @@ pub fn spawn(
     dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
     dirs.sort();
     dirs.dedup();
-    let dirs = if reopen || on.machine.is_some() {
-        &[][..]
-    } else {
-        &dirs[..]
-    };
+    dirs.retain(|_| !reopen && on.machine.is_none());
     let target = p.env.get("CARGO_TARGET_DIR").filter(|_| on.machine.is_none());
-    if let Some(d) = (p.family == "rev").then(|| reuse(&p, dirs, target, &agents)).flatten() {
+    if let Some(d) = (p.family == "rev").then(|| reuse(&p, &dirs, target, &agents)).flatten() {
         event("build-reused", d)?;
     }
     let (res, cloned) = std::thread::scope(|s| {
         let c = s.spawn(|| {
             let warm = target.and_then(|t| clone_warm(r, fleet, Path::new(t), f.swift_build));
-            [clone_build(r, dirs, &f.local_path(), &p.worktree), warm]
+            let warm = warm.or_else(|| crate::roots::clone_warm_on(&on, fleet, p.env.get("CARGO_TARGET_DIR")?));
+            [clone_build(r, &dirs, &f.local_path(), &p.worktree), warm]
         });
         let res = (|| -> Result<bool> {
             let kicked = match bt.0.acp {

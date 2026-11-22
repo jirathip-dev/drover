@@ -52,10 +52,7 @@ pub fn forbidden(cmd: &str) -> Option<&'static str> {
     if (has("terraform") && has("destroy")) || c.contains("drop database") || (wipe && any(&prod)) {
         return Some("deletes production data");
     }
-    let force = any(&|x| {
-        ["-f", "-d", "--delete", "--mirror"].contains(&x) || x.starts_with("--force") || x.starts_with(['+', ':'])
-    });
-    if has("filter-branch") || has("filter-repo") || (has("git") && has("push") && force) {
+    if has("filter-branch") || has("filter-repo") || force_push(&c) {
         return Some("force-pushes or rewrites history");
     }
     let del = has("delete") || has("-xdelete") || has("--method=delete");
@@ -67,6 +64,46 @@ pub fn forbidden(cmd: &str) -> Option<&'static str> {
         return Some("turns off branch protection or drover's gates");
     }
     None
+}
+
+fn force_push(c: &str) -> bool {
+    let force = |x: &String| {
+        ["-f", "-d", "--delete", "--mirror"].contains(&x.as_str())
+            || x.starts_with("--force")
+            || x.starts_with(['+', ':'])
+    };
+    segments(c).iter().any(|s| {
+        s.iter()
+            .skip_while(|x| *x != "git")
+            .skip_while(|x| *x != "push")
+            .skip(1)
+            .any(force)
+            || s.iter().any(|w| w.contains(char::is_whitespace) && force_push(w))
+    })
+}
+
+fn segments(c: &str) -> Vec<Vec<String>> {
+    let (mut segs, mut seg, mut word, mut quote) = (vec![], vec![], String::new(), None);
+    for ch in c.chars() {
+        match quote {
+            Some(q) if ch == q => quote = None,
+            None if ch == '\'' || ch == '"' => quote = Some(ch),
+            None if ch.is_whitespace() || ";|&()`".contains(ch) => {
+                if !word.is_empty() {
+                    seg.push(std::mem::take(&mut word));
+                }
+                if ch == '\n' || !ch.is_whitespace() {
+                    segs.push(std::mem::take(&mut seg));
+                }
+            }
+            _ => word.push(ch),
+        }
+    }
+    if !word.is_empty() {
+        seg.push(word);
+    }
+    segs.push(seg);
+    segs
 }
 
 /// `drover card post`: log card `r<n>` in `thread`; its id.

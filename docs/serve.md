@@ -189,6 +189,19 @@ for the issue at once (200); anything else is ignored with 202. While a fleet ha
 becomes a catch-up poll every `[limits] webhook_poll_minutes` (default 10), for what a sleeping Mac or a down Funnel
 missed.
 
+## Scene device listener (#1497)
+
+`[serve] device_addr` (e.g. `"0.0.0.0:7779"`; unset or `""`, the default, is off; a `--read-only` serve has none)
+opens a second listener for a LAN device such as the scene-esp32 companion, which cannot join the tailnet. It answers
+`GET /screens/scene` only, with the JSON the main listener gives an unpaired device; any other path is a 404 and any
+other method (a `POST /action` included) a 405. It reads no cookies, pairs nothing, runs no action and has no
+`/stream`: the device polls. Against DNS rebinding its `Host` header must be an IP literal (with an optional port)
+or a name in `[serve] device_hosts`, else 403; it sends no CORS headers. `drover doctor` shows `scene device — off`
+or `on <addr>`.
+
+Anyone on the LAN can read what the scene shows: each fleet's lane names and states and the host's load, memory
+pressure and swap. Leave it off on a network you do not trust.
+
 ## Serve health (#898)
 
 Each minute serve writes its own numbers to `serve-health.json` in the state dir, and `GET /api/v1/health` returns
@@ -226,7 +239,7 @@ listener is not the job's pid.
 | `serve-slow` | `/api/v1` p95 over 200 ms for 5 min |
 | `phone-slow` | a phone kind's p95 (tap, sheet, tab, send, answer, delta) over 150 ms for `slo_api_minutes` |
 | `serve-503` | any read answered 503 in the last minute |
-| `drive-slow` | a fleet's last pass over `pass_max_secs` (120 s); names the fleet, its slowest step (closed issues, spawns, PR reads, settle) and each host's remote-call count and seconds |
+| `drive-slow` | a fleet's last pass over `pass_max_secs` (60 s); names the fleet, its slowest step (spawns, PR reads) and each host's remote-call count and seconds |
 
 CI's gates are `crates/cli/tests/serve_health.rs`: the request-path guard (every read answers with the db write-locked,
 and none calls git, gh or ssh) and the bench (each route group's p95 within 50 ms on the fixture state).
@@ -316,15 +329,20 @@ Events chips, its chat cards, the drover menu row) and `[permissions]`. cooee ru
 device work too (the phone page draws the same screens, #927). Beside `/api/v1` it answers JSON made of cooee's blocks
 (cooee#125's screens-as-data design):
 
-- `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
-  `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues, run
+- `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `imp` for the
+  [important] chip: only events the feed marks `imp`; `?before=<unix time>`; #1378: rows in sections by time, `last
+  hour`, `today`, `yesterday`, `earlier`, each `ev-<group>` with its list `ev-<group>-list`),
+  `/screens/fleets` (the Fleets sheet: per fleet, a model and an effort picker for every role it configures, efforts
+  from the role's harness; Save writes the role's model and effort, logged `set` via cooee; and its Hosts and
+  Notifications rows, `GET /screens/notify`: each `[[notify]]` and per-fleet notifier, its kind, target and events,
+  and the removed Telegram bridge as off) and `/screens/cards` (the open asks, design reviews, needs-human issues, run
   cards and #1066 config proposals and secret requests as chat cards); #977: each full screen (not a sheet) shows the step's snapshot age, `as of 3m ago` (`as of: not yet known` before
   one; #1310: sent as `{since, label}`, the label's `{}` the age the client ticks, as are a thread's message ages and the threads list's), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age` section's row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
   and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
   shows until a tap opens the full card; a second tap folds it again;
 - #1172: `GET /screens/queue/done?repo=<fleet>`, opened from the Queue's `done today` row (its value: the list's length): the fleet's merges of the last 24 h, newest first, each `#N title`, `merged HH:MM UTC · <sha>`, its `title`, `t` and `sha` from `done`; a row opens `/screens/issue` for it.
 - #1316: Events, `/screens/queue/done` and `/screens/backlog` send their first 100 rows; the list (the backlog's form) then carries
-  `more`, the next page's path with its filters and `after=<cursor>` (the last row's key: event seq, merge time and issue,
+  `more`, the next page's path with its filters and `after=<cursor>` (Events: on its last group's list, with `in=<group>`: the next page's rows all go in that list) (the last row's key: event seq, merge time and issue,
   issue number), no duplicate and no gap. The page fetches it when scrolled within a screen of the end and appends the rows
   in place. An Events stream keeps the window it opened with (`to=<cursor>`): a delta adds rows on top or changes loaded
   ones, never drops one.
@@ -340,11 +358,14 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   pages back 200 kept lines (`blocks`, `more`; 410 once the tail was read anew). A watched tail keeps 5,000 lines or
   512 KB, another 200 lines, all of them 16 MB, unwatched lanes shrinking first. Each
   action runs the board's `act` (the CLI verb, `confirm`ed) or `send`, logged `act`/`prompt` with `device: cooee`;
+  #1378: Kill and Clean run `act`'s dry run first and answer a sheet whose button's `confirm.message` is its line (what
+  goes to `wip/`, or Clean's reasons); that button sends `confirm: "1"`; a refused dry run (UNSAFE_CLEAN) shows its line, no button;
   #1315: `send` replies once the `prompt` is logged and hands the line to shed after the reply; a failed delivery is
   logged `prompt-failed` (`agent`, `error`) and the sheet's transcript ends in a `✗ not delivered` row until the next prompt;
 - #1091: `GET /screens/hosts`, the page's Hosts sheet (a [⚙] row, not cooee's): one row per host, main first, then
   A→Z, with its kind, on/off and live lane count; a remote host's [Off]/[On] runs `host` (`host-off`/`host-on`) and
-  the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token
+  the main host's [Reap N], shown while leftovers exist, runs `reap`, each confirmed; #1378: a fleet disk section shows
+  the worktree total (drive's last walk) against `worktree_budget_gb` and the orphan folders, [Remove N] running `orphans`. No gauges or charts (Beacon's). #1131: with a `shed-acp` host, a Token
   proxy section under it holds doctor's proxy facts and [How to set], `GET /screens/proxy-token`, the token's steps.
   #1313: the leftover count and the proxy facts are read off the request (the host sampler, `refresh`; never by a host action);
 - #1305: `GET /screens/scene` (and its `/stream`), the page's Scene (page-only; the header's `[scene]` swaps the whole

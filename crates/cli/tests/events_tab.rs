@@ -216,14 +216,10 @@ fn an_open_ask_row_opens_its_choice_recommended_first_and_an_answered_one_offers
     let rows = |kind: &str| {
         let (status, v) = screen(&s, "GET", &format!("/screens/events{kind}"), "", "");
         assert_eq!(status, 200, "{v}");
-        let ev = v["blocks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|b| b["id"] == "today")
-            .unwrap();
-        let rows = ev["blocks"][0]["rows"].as_array().unwrap().clone();
-        rows.into_iter()
+        let groups = v["blocks"].as_array().unwrap().iter();
+        let groups = groups.filter(|b| b["id"].as_str().is_some_and(|i| i.starts_with("ev-")));
+        groups
+            .flat_map(|g| g["blocks"][0]["rows"].as_array().unwrap().clone())
             .filter(|r| r["title"].as_str().unwrap().starts_with("asks you"))
             .collect::<Vec<_>>()
     };

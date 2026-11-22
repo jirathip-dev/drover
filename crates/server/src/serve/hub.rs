@@ -353,6 +353,11 @@ impl Server<'_> {
         ])
     }
 
+    pub(super) fn scene(&self, ctx: &Ctx) -> Option<Arc<str>> {
+        let k = Key::new("/screens/scene", &Q::new(), false);
+        self.hub.read(self, ctx, &k).map(|(_, j)| j)
+    }
+
     pub(super) fn screen_get(
         &self,
         ctx: &Ctx,

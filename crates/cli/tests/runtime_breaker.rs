@@ -129,7 +129,7 @@ fn a_passing_canary_closes_the_breaker_and_the_held_lanes_respawn_paced_by_admis
     let r = fake();
     let out = drive(&late, &r);
     assert!(out.contains("canary failed"), "{out}");
-    assert_eq!(r.count("sh -c nohup"), 0, "{out}");
+    assert_eq!(r.count("sh -c nohup '/opt/drover/bin/drover' kick"), 0, "{out}");
     assert!(kinds(&c, "needs-human").is_empty(), "{out}");
     sh.lock().waits.clear();
     let r = fake();

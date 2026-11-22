@@ -3,7 +3,6 @@ use crate::events::{emit, status_line, working, Event, Json};
 use crate::runner::{self, Runner};
 use crate::{
     check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx, SERVE,
-    SERVICE,
 };
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -351,6 +350,13 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    #[command(about = "#1492: a CI job's command in a heavy slot once the host passes spawn admission")]
+    Hold {
+        #[arg(long, help = "Minutes to wait, then exit 75 with the reason")]
+        wait: u64,
+        #[arg(last = true, required = true)]
+        cmd: Vec<String>,
+    },
     #[command(
         about = "File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)"
     )]
@@ -362,6 +368,8 @@ enum Cmd {
     },
     #[command(about = "#1100: file this week's triage issue and spawn its lane, or a triage lane's verb")]
     Triage(crate::triage::Args),
+    #[command(about = "#1488: file this month's deps issue, queue it and spawn its lane (orchestrators, owner)")]
+    Deps(crate::deps::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
     #[command(alias = "host")]
     Hosts {
@@ -398,14 +406,9 @@ enum Cmd {
         cmd: PushCmd,
     },
     #[command(
-        about = "One pass of the loop for every unpaused fleet: do every step that's due, then exit; safe from cron"
+        about = "A fleet's pass: every step that's due, ended at pass_max_secs; with no fleet, each unpaused fleet's pass started as its own process; safe from cron"
     )]
-    Drive {
-        fleet: Option<String>,
-        #[arg(help = "#212: only record verdicts and merge PASS + green (the every-minute job); no lane starts")]
-        #[arg(long)]
-        fast: bool,
-    },
+    Drive { fleet: Option<String> },
     #[command(
         about = "Drive one issue's due steps now, detached (lane hooks and board taps run it); the timers stay the safety net"
     )]
@@ -422,14 +425,12 @@ enum Cmd {
         id: Option<String>,
     },
     #[command(
-        about = "CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it or a --rules file over 30 lines"
+        about = "CI: lines of the `count` globs (less `exclude`) in --config, default src/**/*.rs, against its `line_cap` or a higher one in cap.d/; exit 1 over it"
     )]
     #[command(hide = true)]
     CapCheck {
         #[arg(long)]
         config: std::path::PathBuf,
-        #[arg(long, default_value = ".drover/rules.md")]
-        rules: std::path::PathBuf,
         #[arg(long)]
         base: Option<String>,
     },
@@ -447,12 +448,21 @@ enum Cmd {
         pr_body: Option<PathBuf>,
     },
     #[command(
-        about = "CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1"
+        about = "CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1, as does a rule naming no enforcer or a file over 30 lines"
     )]
     #[command(hide = true)]
     LessonCheck {
         #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
+    },
+    #[command(about = "`turn done`'s PR_BODY rule on --file for the --head sha; exit 1 with the reason")]
+    PrBody {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        head: String,
+        #[arg(long, default_value = "staging")]
+        base: String,
     },
     #[command(
         about = "Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun. `setup <host> <name>` (#303): run that configured login in a shed terminal on the host instead"
@@ -641,10 +651,8 @@ enum Cmd {
     )]
     #[command(hide = true)]
     LaneEvent { kind: String, data: String },
-    #[command(
-        hide = true,
-        about = "Run a lane's heavy check in a host slot, waiting in line for one (#909)"
-    )]
+    #[command(hide = true)]
+    #[command(about = "Run a lane's heavy check in a host slot, waiting in line for one (#909)")]
     Heavy {
         kind: String,
         #[arg(long)]
@@ -1152,7 +1160,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             | Cmd::Help { .. }
     ) || matches!(
         cli.cmd,
-        Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. }
+        Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. } | Cmd::PrBody { .. }
     );
     if !quiet && args.first().is_some_and(|a| a.ends_with("herdsman")) {
         crate::stderr!("herdsman is now drover: the old name works for one more release");
@@ -1270,9 +1278,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
-        Cmd::CapCheck { config, rules, base } => {
-            return crate::overlap::cap_check(r, &config, &crate::repo_path(&rules), base.as_deref(), out)
-        }
+        Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
         Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
         Cmd::ArchCheck {
             config,
@@ -1290,6 +1296,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )
         }
         Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &crate::repo_path(&rules), out),
+        Cmd::Hygiene { cmd } => return crate::hygiene::run(ctx, r, out, cmd),
+        Cmd::PrBody { file, head, base } => return crate::done::pr_body(r, &file, &head, &base, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hosts {
@@ -1312,23 +1320,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             wait,
             cmd,
         } => {
-            let me = crate::heavy::Ticket {
-                lane: crate::config::env("DROVER_LANE").unwrap_or_default(),
-                kind,
-                cmd,
-                since: crate::now(),
-                running: false,
-                kind_max,
+            let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
+            let me = crate::heavy::Ticket::new(lane, kind, cmd, kind_max);
+            let timeout = |t: &crate::heavy::Ticket, _: &str| {
+                let d = json!({"kind": t.kind, "cmd": t.cmd, "since": t.since});
+                lane_event(ctx, "heavy-timeout", d);
+                None
             };
-            let timeout = |t: &crate::heavy::Ticket| {
-                lane_event(
-                    ctx,
-                    "heavy-timeout",
-                    json!({"kind": t.kind, "cmd": t.cmd, "since": t.since}),
-                );
-            };
-            return crate::heavy::run(r, &ctx.state.with_file_name("heavy"), me, max, wait, timeout);
+            return crate::heavy::run(r, &ctx.state.with_file_name("heavy"), me, max, wait, &|| None, timeout);
         }
+        Cmd::Hold { wait, cmd } => return crate::heavy::hold(ctx, r, wait, &cmd),
         Cmd::Status(Scope { fleet, json }) => {
             let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
             let all = crate::events::states(&ctx.state)?;
@@ -1627,15 +1628,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             board,
             install: true,
         } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
-        Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
+        Cmd::Service { api, board, .. } => (crate::SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         Cmd::Chat { thread } => anyhow::ensure!(crate::app(ctx, r, &crate::Open::Threads(thread))?, "needs a terminal"),
         cmd => {
             let cfg = match cmd {
                 Cmd::Check => check::config(ctx)?,
                 _ => Config::load(&ctx.config)?,
             };
-            let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
-            let pass = if fast {
+            let pass = if matches!(cmd, Cmd::Drive { .. }) {
                 crate::hosts::Pass::fast(r)
             } else {
                 crate::hosts::Pass::new(r, None)
@@ -1801,9 +1801,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Wip {
                     cmd: WipCmd::Prune { fleet, dry_run },
                 } => check::prune(ctx, &cfg, r, out, &fleet, dry_run)?,
-                Cmd::Hygiene {
-                    cmd: crate::hygiene::Cmd::Scan { fleet },
-                } => crate::hygiene::scan(ctx, &cfg, r, out, &fleet)?,
                 Cmd::Secret { cmd } => match cmd {
                     SecretCmd::Request { thread, name, why } => {
                         crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
@@ -1862,7 +1859,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
-                Cmd::Drive { fleet, fast } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false, fast)?,
+                Cmd::Drive { fleet } => crate::drive::job(ctx, &cfg, r, out, fleet.as_deref())?,
                 Cmd::Kick {
                     fleet,
                     issue,
@@ -1996,8 +1993,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
-                        check::strays(ctx, &cfg, out, yes)?;
-                        check::remote_orphans(&cfg, r, out, orphans && yes)?;
+                        check::strays(ctx, &cfg, out, yes).and_then(|()| check::secrets_files(ctx, out, yes))?;
+                        check::remote_orphans(&cfg, r, out, (orphans && yes, yes))?;
                         for f in cfg.fleet.keys().filter(|f| fleet.as_ref().is_none_or(|x| x == *f)) {
                             if let Err(e) = check::prune(ctx, &cfg, r, out, f, !yes) {
                                 writeln!(out, "{f}: wip prune failed: {e:#}")?;
@@ -2105,13 +2102,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(LessonCmd::Apply { fleet, rules }),
                     ..
                 } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?,
-                Cmd::Lesson { fleet, .. } => {
-                    let fleet = fleet.context("usage: drover lesson <FLEET> | drover lesson digest <FLEET>")?;
-                    if !crate::lesson::run(ctx, &cfg, r, out, &fleet, None)? {
-                        return Ok(4);
-                    }
-                }
+                Cmd::Lesson { fleet, .. } => return crate::lesson::cli(ctx, &cfg, r, out, fleet),
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
+                Cmd::Deps(a) => return crate::deps::cli(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
