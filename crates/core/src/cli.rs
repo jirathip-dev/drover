@@ -1643,6 +1643,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let spare = matches!(cmd, Cmd::Check | Cmd::Drive { .. } | Cmd::Kick { .. } | Cmd::Waiting(_));
             let off = crate::hosts::disabled(&cfg).into_iter().filter(|_| spare).collect();
             let pass = pass.sparing(off, Some((ctx, &cfg)));
+            let pass = if matches!(cmd, Cmd::Drive { fleet: None }) {
+                pass.own()
+            } else {
+                pass
+            };
             let paced = spare || matches!(cmd, Cmd::Clean { .. } | Cmd::Reclaim { .. });
             let r: &dyn Runner = if paced { &pass } else { r };
             let kick = |f: &str, n, why| {

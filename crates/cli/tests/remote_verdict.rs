@@ -204,7 +204,9 @@ fn a_later_step_failing_on_a_full_disk_leaves_the_verdict_and_the_fix_round_done
     );
     let fix = kinds(&c, "driven");
     assert!(
-        fix.iter().any(|e| e.issue == Some(21) && e.str("step") == Some("fix")),
+        fix.iter().any(|e| e.issue == Some(21)
+            && e.str("cmd")
+                .is_some_and(|c| c.starts_with("drover spawn sendmeter 21 impl"))),
         "the fix round is started: {out}"
     );
     assert!(

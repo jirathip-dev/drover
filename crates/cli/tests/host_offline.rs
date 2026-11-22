@@ -345,25 +345,46 @@ fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
     assert!(bazzite.all("run").is_empty(), "{:?}", bazzite.methods());
 }
 
+const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite --";
+
+fn remote(mut f: Fake) -> Fake {
+    let fresh = format!("{SSH} 'sh' '-c' 'test -e \"$1\"' 'sh' '/home/me/.local/share/drover/work/sendmeter/issue-13'");
+    let no = drover::runner::Out {
+        code: 1,
+        ..Default::default()
+    };
+    f.replies.push((fresh, no));
+    f.reply(&format!("{SSH} 'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH} 'git'"), "")
+        .reply(&format!("{SSH} '/opt/drover/bin/drover' 'profiles' 'sync'"), "")
+        .reply(&format!("{SSH} 'sh' '-c' 'mkdir"), "")
+}
+
+#[test]
+fn a_host_an_earlier_pass_found_down_takes_its_start_when_it_answers_this_pass() {
+    let (c, _sh) = setup("offline-earlier-pass");
+    let q = ["queue", "sendmeter", "add", "13", "--needs", "os:linux"];
+    assert_eq!(run(&c, &Fake::default(), &q).0, 0);
+    let down = c.state.with_file_name("hosts.down");
+    std::fs::write(&down, json!({"bazzite": [NOW - 600, NOW - 10]}).to_string()).unwrap();
+    let (f, bazzite) = (remote(mini_only()), FakeShed::new());
+    let (code, out) = run(&c, &with_bazzite(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let pass = kinds(&c, "drive-pass").into_iter().last().unwrap();
+    assert!(!pass.val("actions").to_string().contains("HOST_OFFLINE"), "{out}");
+    assert!(
+        bazzite.called("run", "sendmeter-impl-13"),
+        "{out} {:?}",
+        bazzite.methods()
+    );
+}
+
 #[test]
 fn a_start_on_a_host_offline_this_pass_waits_for_it_with_no_card_or_backoff() {
     let (c, _sh) = setup("offline-start");
     let q = ["queue", "sendmeter", "add", "13", "--needs", "os:linux"];
     assert_eq!(run(&c, &Fake::default(), &q).0, 0);
-    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite --";
-    let remote = |mut f: Fake| {
-        let fresh =
-            format!("{ssh} 'sh' '-c' 'test -e \"$1\"' 'sh' '/home/me/.local/share/drover/work/sendmeter/issue-13'");
-        let no = drover::runner::Out {
-            code: 1,
-            ..Default::default()
-        };
-        f.replies.push((fresh, no));
-        f.reply(&format!("{ssh} 'sh' '-c' 'test -e"), "")
-            .reply(&format!("{ssh} 'git'"), "")
-            .reply(&format!("{ssh} '/opt/drover/bin/drover' 'profiles' 'sync'"), "")
-            .reply(&format!("{ssh} 'sh' '-c' 'mkdir"), "")
-    };
+    let ssh = SSH;
     let at = |k: u64| drover::Ctx {
         now: NOW + k,
         ..c.clone()

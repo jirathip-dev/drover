@@ -303,7 +303,7 @@ the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end that fleet's starts in th
 #1320: each fleet's pass is its own process, `drover drive <fleet>`, under its own `drive-<fleet>.lock` lease (2 ×
 `[limits] pass_max_secs`; taken over once its pid is gone, or once it runs out: `pass-stuck`, that pid stopped), so cron,
 the service and the button never overlap on one fleet and a slow fleet never holds another. A pass ends itself at
-`pass_max_secs` (60) and logs `pass-slow` naming the step it was in. The fast job (`drover drive`, every `fast_secs`)
+`pass_max_secs` (60) and logs `pass-slow` naming the step it was in. #1558: after the closed issues, a pass runs its due steps (verdicts, fix rounds, respawns) before its starts; a step that fails logs its error and the rest still run, and a host is offline to a pass only after a call in that pass failed. The fast job (`drover drive`, every `fast_secs`)
 and the tick poll every host with no fresh word, then start each fleet's pass and wait for none; the service runs a
 loop per fleet instead, started at once by a wake. The tick's slow chores (disk budget, roots, offline hosts, orphans,
 repair, the runtime canary, stale panes, each fleet's closed issues, hotspots and backlog) run beside them. A spawn's admission (slot count, host room, its marker) runs

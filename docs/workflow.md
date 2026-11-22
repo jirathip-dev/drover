@@ -65,8 +65,8 @@ flowchart TD
     t8["compact"]
     d0["look, repair"] --> d1
     d1["closed issues"] --> d2
-    d2["spawns"] --> d3
-    d3["PR reads, gates, steps"]
+    d2["PR reads, gates, steps"] --> d3
+    d3["spawns"]
     t1 --> d0
     other["other timers: serve, hosts, store"]
     j0 -.- k_slow_secs(["slow_secs = 300"])
@@ -85,21 +85,21 @@ flowchart TD
     d0 -.- k_ssh_quick_secs(["ssh_quick_secs = 5"])
     d0 -.- k_ssh_call_secs(["ssh_call_secs = 20"])
     d0 -.- k_import_max_age_hours(["import_max_age_hours = 24"])
-    d2 -.- k_max_parallel_spawns(["max_parallel_spawns = 6"])
-    d2 -.- k_start_max(["start_max = 2"])
-    d2 -.- k_start_release(["start_release = "started""])
-    d2 -.- k_spawn_pending_max_secs(["spawn_pending_max_secs = 300"])
-    d2 -.- k_respawn_max(["respawn_max = 3"])
-    d2 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
-    d2 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])
-    d3 -.- k_webhook_poll_minutes(["webhook_poll_minutes = 10"])
-    d3 -.- k_silent_minutes(["silent_minutes = 10"])
-    d3 -.- k_ci_start_minutes(["ci_start_minutes = 10"])
-    d3 -.- k_ci_stuck_minutes(["ci_stuck_minutes = 30"])
-    d3 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
-    d3 -.- k_review_rounds(["review_rounds = 3"])
-    d3 -.- k_update_rounds(["update_rounds = 3"])
-    d3 -.- k_job_max(["job_max = 4"])
+    d2 -.- k_webhook_poll_minutes(["webhook_poll_minutes = 10"])
+    d2 -.- k_silent_minutes(["silent_minutes = 10"])
+    d2 -.- k_ci_start_minutes(["ci_start_minutes = 10"])
+    d2 -.- k_ci_stuck_minutes(["ci_stuck_minutes = 30"])
+    d2 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
+    d2 -.- k_review_rounds(["review_rounds = 3"])
+    d2 -.- k_update_rounds(["update_rounds = 3"])
+    d2 -.- k_job_max(["job_max = 4"])
+    d3 -.- k_max_parallel_spawns(["max_parallel_spawns = 6"])
+    d3 -.- k_start_max(["start_max = 2"])
+    d3 -.- k_start_release(["start_release = "started""])
+    d3 -.- k_spawn_pending_max_secs(["spawn_pending_max_secs = 300"])
+    d3 -.- k_respawn_max(["respawn_max = 3"])
+    d3 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
+    d3 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])
     other -.- k_overload_minutes(["overload_minutes = 10"])
     other -.- k_thread_resend_minutes(["thread_resend_minutes = 5"])
     other -.- k_transcript_days(["transcript_days = 30"])

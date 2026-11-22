@@ -307,7 +307,7 @@ impl<'a> Pass<'a> {
             log: None,
         }
     }
-    /// Never contact the machines `off`; with `log`, a host's changed key logs `host-key-changed` once and a fresh shared offline mark holds but in the tick, which probes afresh.
+    /// Never contact the machines `off`; with `log`, a host's changed key logs `host-key-changed` once and a fresh shared offline mark holds but in the tick and the fast step's `own` poll.
     #[must_use]
     pub fn sparing(mut self, off: std::collections::BTreeSet<String>, log: Option<(&'a Ctx, &'a Config)>) -> Self {
         if let (Some((ctx, cfg)), Ok(up), None) = (log, self.up.get_mut(), &self.mark) {
