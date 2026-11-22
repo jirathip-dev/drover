@@ -189,7 +189,7 @@ fn a_hung_host_is_logged_over_budget_and_the_other_hosts_spawn_goes_ahead() {
     );
     let sent = r.sent.borrow();
     assert!(
-        sent.len() <= 2,
-        "one call and its retry without the shared connection: {sent:#?}"
+        sent.len() <= 3,
+        "one call, its retry without the shared connection and the one retry of a killed call: {sent:#?}"
     );
 }

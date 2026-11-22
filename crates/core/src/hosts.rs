@@ -273,7 +273,7 @@ impl Runner for On<'_> {
     }
 }
 
-/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed at the limit its `run_for` names, else after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step, the child it waits on and `n`, the nanosecond of its last step or call (local calls too): the progress `slo-tick` watches.
+/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed at the limit its `run_for` names, else after `ssh_call_secs`; a second one killed takes its host offline for the rest of the pass, and `recheck` reaches an offline host once more; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step, the child it waits on and `n`, the nanosecond of its last step or call (local calls too): the progress `slo-tick` watches.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
     probe: bool,
@@ -283,6 +283,8 @@ pub struct Pass<'a> {
     t0: std::time::Instant,
     pub until: Option<std::time::Instant>,
     late: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    slow: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    rechecked: std::sync::Mutex<std::collections::BTreeSet<String>>,
     unsent: std::sync::atomic::AtomicU64,
     slowest: std::sync::Mutex<(String, u64)>,
     off: std::collections::BTreeSet<String>,
@@ -301,6 +303,8 @@ impl<'a> Pass<'a> {
             t0: crate::clock::instant(),
             until: None,
             late: std::sync::Mutex::default(),
+            slow: std::sync::Mutex::default(),
+            rechecked: std::sync::Mutex::default(),
             unsent: std::sync::atomic::AtomicU64::new(0),
             slowest: std::sync::Mutex::default(),
             off: std::collections::BTreeSet::new(),
@@ -346,7 +350,7 @@ impl<'a> Pass<'a> {
             done
         }
     }
-    /// The fast step's one remote call per host, no probe; a call killed at 15 s marks its host down.
+    /// The fast step's one remote call per host, no probe; a second call killed at its limit marks its host down.
     pub fn fast(r: &'a dyn Runner) -> Self {
         Pass {
             probe: false,
@@ -435,7 +439,8 @@ impl<'a> Pass<'a> {
             o = self.r.run_for(prog, &bare, input, limit)?;
         }
         self.key_changed(m, &o);
-        if matches!(o.code, 124 | 255) {
+        let first_slow = o.code == 124 && lock(&self.slow).insert(m.into());
+        if matches!(o.code, 124 | 255) && !first_slow {
             self.seen(m, false);
         } else if lock(&self.up).get(m).is_none() {
             self.seen(m, true);
@@ -445,31 +450,6 @@ impl<'a> Pass<'a> {
         }
         self.note("");
         Ok(o)
-    }
-    fn key_changed(&self, m: &str, o: &Out) {
-        if !o.stderr.contains(KEY_CHANGED) {
-            return;
-        }
-        let Some((ctx, cfg)) = self.log else {
-            return;
-        };
-        let host = cfg
-            .hosts
-            .iter()
-            .find(|h| h.1.machine.as_deref() == Some(m))
-            .map_or(m, |h| h.0.as_str());
-        let events = working(&ctx.state).unwrap_or_default();
-        let kinds = ["host-key-changed", "host-online"];
-        let last = events
-            .iter()
-            .rev()
-            .find(|e| e.str("host") == Some(host) && kinds.contains(&e.kind.as_str()));
-        if last.is_some_and(|e| e.kind == kinds[0]) {
-            return;
-        }
-        let why = format!("host-key-changed {host}: ssh refuses its new host key; check it, then `ssh-keygen -R {m}`");
-        let d = json!({"host": host, "reason": why});
-        emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kinds[0], d)).ok();
     }
 }
 
@@ -538,6 +518,9 @@ impl Runner for Pass<'_> {
     }
     fn detach(&self, exe: &str, args: &[String], log: &Path) -> Result<u32> {
         self.r.detach(exe, args, log)
+    }
+    fn recheck(&self) -> bool {
+        self.reach_held()
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()
