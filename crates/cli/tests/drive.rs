@@ -403,7 +403,7 @@ fn red_ci_after_pass_is_a_fail_with_the_log_tail() {
         )
         .reply("git -C", "");
     let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["ci-red"], "{out}");
+    assert_eq!(steps, ["ci-red", "fix"], "{out}");
     let all = read(&c.state).unwrap();
     let v = all.iter().rev().find(|e| e.kind == "verdict").unwrap();
     assert_eq!(v.str("verdict"), Some("FAIL"));
@@ -2196,7 +2196,7 @@ fn a_workflow_that_never_started_is_ci_broken_and_gets_a_fix_round() {
         )
         .reply("git -C", "");
     let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["ci-red"], "{out}");
+    assert_eq!(steps, ["ci-red", "fix"], "{out}");
     let all = read(&c.state).unwrap();
     let v = all.iter().rev().find(|e| e.kind == "verdict").unwrap();
     assert_eq!(v.str("verdict"), Some("FAIL"));
