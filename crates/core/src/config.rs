@@ -802,6 +802,7 @@ pub struct Limits {
     pub host_offline_minutes: u64,
     pub host_down_secs: u64,
     pub kick_max_secs: u64,
+    pub job_max: usize,
     pub promise_passes: std::collections::BTreeMap<crate::promise::Kind, u64>,
     pub serve_shed_secs: u64,
     pub serve_remote_secs: u64,
@@ -938,6 +939,7 @@ impl Default for Limits {
             host_offline_minutes: 15,
             host_down_secs: 60,
             kick_max_secs: 300,
+            job_max: 4,
             promise_passes: std::collections::BTreeMap::new(),
             serve_shed_secs: 5,
             serve_remote_secs: 10,
@@ -1231,8 +1233,9 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "kick_max_secs",
-        "a kick running this long is ended by the next tick and logged `kick-killed`",
+        "a kick running this long is ended by the next tick and logged `kick-killed` (a merge's: `gate_check_minutes`)",
     ),
+    ("job_max", "issue jobs of one fleet running at once"),
     (
         "promise_passes",
         "drive passes a promise of each kind may stay open before `promise-missed` (default 2)",
