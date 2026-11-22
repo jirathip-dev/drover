@@ -234,9 +234,17 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
             Health::Fine
         };
     }
-    let since = stamp::since(events, lane).unwrap_or(sp.ts).max(sp.ts);
-    let turned = crate::waiting::turn(events, s).is_some();
-    if live.quiet() && !turned && ctx.now >= since + cfg.limits.stall_minutes * 60 {
+    let turn = crate::waiting::turn(events, s);
+    let told = |t: &Event| {
+        let p = |e: &&Event| e.kind == "turn-prompted" && e.str("agent") == Some(lane) && e.ts >= t.ts;
+        events.iter().rfind(p).map(|e| e.ts)
+    };
+    let prompted = turn.filter(|t| t.str("state") == Some("working")).and_then(told);
+    let since = stamp::since(events, lane)
+        .unwrap_or(sp.ts)
+        .max(sp.ts)
+        .max(prompted.unwrap_or(0));
+    if live.quiet() && (turn.is_none() || prompted.is_some()) && ctx.now >= since + cfg.limits.stall_minutes * 60 {
         return Health::Stalled { since };
     }
     Health::Fine

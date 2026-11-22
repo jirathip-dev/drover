@@ -243,3 +243,27 @@ fn a_remote_spawn_makes_a_worktree_whose_branch_tracks_origin_issue_n() {
         "{calls:?}"
     );
 }
+
+const QUICK: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
+
+fn trimmed_args(name: &str, t0: u64) -> String {
+    let (c, bazzite, f) = impl_lane(name, t0);
+    let f = f
+        .reply(&format!("{QUICK}'sh' '-c' 'b=$1;"), "")
+        .reply(&format!("{QUICK}'sh' '-c' 'o=$1 b=$2;"), "total 0 freed 0\n");
+    let (sh, cfg) = (FakeShed::attached(&c), drover::config::Config::load(&c.config).unwrap());
+    let mut out = Vec::new();
+    drover::check::trim_hosts(&c, &cfg, &sh.on(&two(&f, &bazzite)), &mut out).unwrap();
+    let calls = f.calls.borrow();
+    let trim = calls.iter().find(|l| l.contains("'o=$1 b=$2;"));
+    trim.cloned()
+        .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(&out)))
+}
+
+#[test]
+fn build_trim_keeps_a_lane_just_done_but_not_one_done_past_the_stall_threshold() {
+    let fresh = trimmed_args("done-trim-fresh", NOW - 120);
+    assert!(fresh.ends_with(&format!("'{IMPL}'")), "{fresh}");
+    let old = trimmed_args("done-trim-old", NOW - 2 * STALL);
+    assert!(!old.contains(IMPL), "{old}");
+}

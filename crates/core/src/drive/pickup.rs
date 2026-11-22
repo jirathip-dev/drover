@@ -118,7 +118,7 @@ pub(super) fn after(
     (w, step): (&Waiting, &str),
     code: super::Code,
 ) -> Result<()> {
-    if step == "verdict" && matches!(code, Some("ERROR" | "EXIT")) {
+    if step == "verdict" && code.is_some() {
         let why = super::last_why(&w.fleet).unwrap_or_default();
         failed(ctx, out, (&w.fleet, w.issue, &w.lane), &why)?;
     }

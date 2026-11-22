@@ -145,6 +145,14 @@ fn log(ctx: &Ctx, dir: &Path, kind: &str, mut d: Value) {
     emit(&ctx.state, &cfg, if kind == "clone-broken" { e.push() } else { e }).ok();
 }
 
+/// Branch `b` (if any) of clone `dir` pushes to and pulls from `origin/<b>`, so a plain `git push` from its worktree works.
+pub fn track(r: &dyn Runner, dir: &str, b: Option<&str>) -> Result<()> {
+    let Some(b) = b else { return Ok(()) };
+    let set = |k: &str, v: &str| crate::runner::ok(r, "git", &["-C", dir, "config", &format!("branch.{b}.{k}"), v]);
+    set("remote", "origin")?;
+    set("merge", &format!("refs/heads/{b}")).map(drop)
+}
+
 /// `doctor`'s row for `name`'s clone: connectivity ok, or the first missing object and the commands that heal it.
 pub fn doctor(r: &dyn Runner, name: &str, dir: &Path) -> String {
     let o = r.run(

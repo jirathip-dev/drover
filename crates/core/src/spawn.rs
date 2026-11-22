@@ -1076,6 +1076,7 @@ fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygien
     let verify = argv(&["-C", local, "rev-parse", "--verify", "--quiet", &p.branch]);
     let have = r.run("git", &verify)?.code == 0;
     ok(r, "git", &worktree_add(local, p, have))?;
+    crate::clone::track(r, local, (p.family == "impl").then_some(p.branch.as_str()))?;
     let deny = h.docs_trust.clone().unwrap_or_default();
     if !deny.is_empty() {
         let pats = deny.iter().map(|d| format!("!/{}", d.trim_start_matches('/')));
