@@ -2,7 +2,7 @@
 
 Read on staging `d989c5beb`. **keep**: stays in drover, in the module named. **cooee**: the job moves to cooee and
 drover's code is deleted in D4. **delete**: nobody needs it after the cut. Until D4 every function runs as today for
-drover-hosted threads.
+drover-hosted threads. D1 does the moves into `core::thread` and `thread::route`; the deletions are D4's.
 
 ## `crates/core/src/orchestrator.rs` (1,520 lines) and its two files
 
@@ -17,7 +17,7 @@ drover-hosted threads.
 | `items`, `render`, `link`, `handoff_text`, `forwarded`, `text_ok`, `log` | keep | `core::thread`: `items` becomes the typed `rows`; `render` is `thread show`'s text |
 | `unread`, `mark_read`, `show`, `ls` | keep | `core::thread`: drover's own read mark and the CLI's two reads |
 | `say`, `post` | keep | `core::thread::say`, one function: logs the `said` row with its `prompt`; no delivery |
-| `route` | keep | `thread::route::home`: by thread id, else the repo's desk (#1609) |
+| `route` | keep | `thread::route::home`: moved in D1; by thread id, else the repo's desk, from #1609 |
 | `lane_ask`, `route_row`, `routed_to`, `to_owner`, `lane_of`, `flow`, `tell` | keep | `thread::route`: each emits a row; `lane_ask` and `tell` set `prompt` where they delivered |
 | `handoff`, `send`, `forwards` | keep | `thread::route`: a handoff row to a thread id or a desk; no new thread, no pick ask (#1610) |
 | `land` | delete | the handoff pick goes with #1610; `handoff-move` re-targets |
@@ -62,7 +62,7 @@ drover-hosted threads.
 |---|---|
 | `crates/core/src/webpush.rs`, `/push/subscribe` and `/push/unsubscribe`, the VAPID key, the alert devices list of `GET host`, `drover push test`, the page's push handler, `[[notify]] type = "webpush"` | delete in D4 (cooee sends) |
 | `events::notify`'s push rules (which kinds, routine and routed asks, a watched thread) | keep, as `thread::route`'s `push` rule; "watched" is cooee's |
-| `crates/server/src/serve/device.rs` | keep (open question 2) |
+| `crates/server/src/serve/device.rs` | keep (the owner's q3122): it serves the scene to a companion device, not alerts |
 | `crates/server/src/cooee.rs` | keep `GET /cooee/profiles`; `POST /cooee/thread-started` deleted in D4 |
 | `POST /api/v1/orchestrator-attach`, `orchestrator-detach`, `conductor-*`, `chat`, `chat-about` | delete in D4; `chat-about` becomes a `said` row to the repo's desk |
 | `drover thread new|title|reply|archive|restore` | delete in D4; `thread say|show|ls|handoff` stay |

@@ -1,7 +1,8 @@
 # cooee-threads: the row and action contract (#1571)
 
 The payload types live in `crates/server/src/api.rs` and reach `assets/types/api.d.ts` through `just types`. The row's
-data without its block lives in `crates/core/src/thread/` so the terminal reads it with no server.
+data without its block lives in `core::thread` (a new `thread/` folder in `crates/core/src/`) so the terminal reads it
+with no server.
 
 ## Routes
 
@@ -110,7 +111,9 @@ What each kind is, and what it replaces today:
 | `said` | an owner message typed on a drover surface | its thread | the message | none |
 
 The issue's home is `thread::route::home`: the thread whose orchestrator filed or queued the issue, when that thread is
-open and its profile is not `none`; else `desk` of the fleet. A `none` thread gets only rows about itself (its own
+open, drover hosts it or cooee has `PUT` it, and its profile is not `none`; else `desk` of the fleet. While the repo
+has no desk thread (no `thread-facts` with `desk`), a `desk` row is an owner card as today: `open`, pushed, no
+`prompt`. A `none` thread gets only rows about itself (its own
 asks, cards and their settle lines). `to` is fixed by the log up to the row's seq, so a replay gives the same target.
 
 Delivery is at least once. Cooee keeps the last seq it applied; a replayed row is harmless for drawing (`key`), and
@@ -183,8 +186,8 @@ No new store: a row is a pure function of the event log, as the Events feed is t
 | `thread-msg` with `item` (cooee's id) | `POST …/said` | the same event written by `say` and `thread reply` |
 | `thread-msg` with `via: "drover"` | `thread::say` | the same, delivered by drover |
 
-Every event an orchestrator's command logs carries `thread` (from `DROVER_THREAD`) beside today's `orchestrator`
-stamp; `home` reads it. Old events stay readable: a `thread-new` thread is a drover-hosted one, an
+From D1, every event an orchestrator's command logs carries `thread` (from `DROVER_THREAD`) beside today's
+`orchestrator` stamp; `home` reads it. An issue filed before D1 has no stamp and goes to the desk. Old events stay readable: a `thread-new` thread is a drover-hosted one, an
 `orchestrator-attached` one is a cooee thread opened before this contract.
 
 ## `[limits]`

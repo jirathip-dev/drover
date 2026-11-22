@@ -5,12 +5,12 @@
 Decision: drover serves a list of thread rows (asks, cards, handoffs, system lines, merges, alerts), each with what to
 draw, the line to tell the agent and whether to notify. Cooee shows them in the thread or the repo's desk thread, runs
 the agent and sends all notifications; it copies message text to drover, so drover's page and terminal still work.
-Slices: 4 new drover issues around #1609, #1610 and #1608, and 6 cooee issues, in a fixed order.
-Open questions: (1) at the cut drover's own chat loses queue, steer, stop, model picks, uploads, new and archive:
-accept, relay or keep its engine? (2) keep the scene device listener the amendment names? (3) drop extra seats?
+Slices: 4 new drover issues and 6 cooee issues around #1609, #1610 and #1608, in a fixed order. #1609 follows the
+first drover slice, before any cooee work; only its desk part waits, and turns on when cooee's desk thread exists.
+Open questions: none (the owner settled the three in q3122).
 
-Status: proposed (architect lane, 2026-11-22). Read [README.md](README.md) first, then this, [shapes.md](shapes.md),
-[boundaries.md](boundaries.md), [owners.md](owners.md).
+Status: revised after the owner's q3122 (architect lane, 2026-11-22). Read [README.md](README.md) first, then this,
+[shapes.md](shapes.md), [boundaries.md](boundaries.md), [owners.md](owners.md).
 
 ## Question
 
@@ -73,7 +73,8 @@ drover's own page, terminal and CLI still working?
 3. Drover reads the agent's session through shed. Works only while the session is awake, and depends on how cooee
    names and keeps sessions.
 4. **Cooee copies each message's text into drover, and drover's `say` is a row with a prompt (chosen).** Two small
-   writes keep the list, the conversation, send, every card and `--typed`. What is the engine's goes (open question 1).
+   writes keep the list, the conversation, send, every card and `--typed`. What is the engine's goes at D4; the owner
+   accepted those cuts (q3122, listed in [README.md](README.md)).
 5. Keep drover's engine for threads drover hosts. Nothing is cut and nothing is deleted.
 
 **Where a thread's repo lives**
@@ -95,15 +96,19 @@ drover's own page, terminal and CLI still working?
   row's `prompt`. Drover starts, resumes, stops and types into no thread agent.
 - **Routing.** `home(fleet, issue)`: the open thread whose orchestrator filed or queued the issue, unless its profile
   is `none`; else the repo's desk. Rows about a thread itself (its own asks and cards) go to that thread.
+- **No agent, no orchestrator first.** A thread counts only if drover hosts it or cooee has `PUT` it. A desk row for a
+  repo whose desk cooee has not `PUT` yet is an owner card as today: open, pushed, on the board, no `prompt`. So #1609
+  needs only D1, and its desk part turns on per repo with C3's first `PUT`, with no further drover change.
 - **Role, brief, permissions.** Stay drover's, served by `GET /cooee/profiles`, one profile per repo. The thread brief
-  goes; the chat brief gains the handoff and `--typed` lines.
+  goes; the chat brief gains the handoff and `--typed` lines. `[orchestrator.<id>]` seats beyond the default stop
+  being served to cooee at D4, with a config warning (q3122).
 - **Push.** A row's `push` is the notification. While fleet.toml has a web push notifier drover sends and `push` is
   null; the owner's config card that removes it switches to cooee. `[[notify]]` command notifiers stay: they are how
   drover hands an event to a script, and how `rows-stale` is heard when cooee is down.
 - **Drover's surfaces.** The page, `drover chat`, `thread show|ls|say` and the board read `core::thread`, the same
   rows the routes serve. `chat`, `thread/<t>` and `repo/<fleet>/threads` keep their shapes for the page.
-- **Migration.** Five running states, then the cut ([boundaries.md](boundaries.md)). History is imported by cooee from
-  `thread/<id>/rows`; the old thread turns read-only and its open rows follow the new id.
+- **Migration.** A chain of running states, then the cut ([boundaries.md](boundaries.md)). History is imported by
+  cooee from `thread/<id>/rows`; the old thread turns read-only and its open rows follow the new id.
 
 ## Consequences
 
@@ -113,6 +118,8 @@ drover's own page, terminal and CLI still working?
 - A message's text is in two places. Cooee's is the truth; drover's copy is for its surfaces and `--typed`. File bytes
   are only in cooee, so drover shows a chat file's name and size.
 - Lane asks, `DECISION` lines and handoffs reach a cooee chat, which they do not today.
+- Between #1609 and C2, orchestrator first works for the threads drover hosts. An issue filed from a cooee chat, or
+  from no thread, still gets an owner card until cooee has `PUT` that thread or the repo's desk.
 - A cooee chat's cards appear once, in their thread, not under every chat. C1 hides the `chat-cards` deck for a plugin
   that has a `[threads]` table; D4 removes the place.
 - `all` and `none` become reserved fleet names (refused at config load).
@@ -128,39 +135,44 @@ drover's own page, terminal and CLI still working?
 
 Drover, new in D1:
 
-- `crates/cli/tests/golden/contract/v1/`: one `<name>.json` (a recorded answer or body) and one `<name>.keys` per route,
-  row kind and action. A `.keys` file is the flattened shape, one sorted line each: `rows[].to.k = "desk"`,
-  `rows[].push.tag: string`.
-- `crates/cli/tests/contract_v1.rs` drives the real server, flattens each answer and compares it with the `.keys`
-  file. A difference fails. `BLESS=1` writes added lines only.
+- `crates/cli/tests/golden/contract/v1/<name>.json` (a recorded answer or body) and a `<name>.keys` beside it, per
+  route, row kind and action. A `.keys` file is the flattened shape, one sorted line each:
+  `rows[].to.k = "desk"`, `rows[].push.tag: string`.
+- `contract_v1.rs`, a new test beside `crates/cli/tests/api_v1_contract.rs`, drives the real server, flattens each
+  answer and compares it with the `.keys` file. A difference fails. `BLESS=1` writes added lines only.
 - `drover arch-check` gains `append_only`: a PR that removes or changes a line of a listed file fails. So a key, a
   kind or an action can be added by a lane and never removed or retyped; that takes `/api/v2`.
 
 Cooee, new in C1:
 
-- `crates/cooee/tests/fixtures/drover-contract/` is a copy of that folder at the drover commit cooee's plugin index
-  pins, written by `just drover-contract` and listed `generated`, so it is never edited by hand.
-- `crates/cooee/tests/drover_contract.rs` parses every sample with cooee's own row, target and action types and fails
-  on a key it reads that is missing. A drover bump that would break cooee fails in cooee's CI at the bump.
+- `<cooee>/crates/cooee/tests/fixtures/drover-contract/` (in cooee's repo) is a copy of that folder at the drover
+  commit cooee's plugin index pins, written by `just drover-contract` and listed `generated`, so it is never edited
+  by hand.
+- `<cooee>/crates/cooee/tests/drover_contract.rs` parses every sample with cooee's own row, target and action types
+  and fails on a key it reads that is missing. A drover bump that would break cooee fails in cooee's CI at the bump.
 
 ## The issues to file, in order
 
 | # | Repo | Issue | Needs |
 |---|---|---|---|
-| D1 | drover | rows: `core::thread` rows from the log, the three read routes, the contract folder, its test and `append_only` | this ADR |
-| C1 | cooee | read a plugin's rows: the `[threads]` manifest table, the follower and its cursor, draw by key, type `prompt`, send `push`, post actions; the contract copy and its test | D1 |
-| D2 | drover | threads are cooee's to open: `PUT thread`, `said`, `say` as a row, a profile per repo, the `thread` stamp, emitters set `prompt` instead of delivering to a cooee thread, `rows-stale`; the manifest generated, with `[threads]` | D1, C1 released |
-| C2 | cooee | one Orchestrator: [New] picks a repo, all or none (the profile), the repo filter, `PUT thread` and `said` | D2 |
-| C3 | cooee | the desk thread: one per repo, made on first use, where `to: desk` rows land | C2 |
-| #1609 | drover | cards to the orchestrator first, by thread id or desk; judgment; quiet decisions; the digest (all as rows) | D2, C3 |
-| C4 | cooee | [chat] on an owner card: opens the card's thread with the row's `text` quoted | C3 |
-| #1610 | drover | handoffs go to the desk at once; the `handoff-move` action | #1609 |
-| C5 | cooee | [move] on a handoff row: posts `handoff-move` | #1610 |
+| D1 | drover | rows: `core::thread` (the registry, `thread-facts` read too; rows from the log) and `thread::route` (`home`, the emitters moved, delivering as today); the `thread` stamp on an orchestrator's events; the three read routes; the contract folder, its test and `append_only` | this ADR |
+| #1609 | drover | cards to the orchestrator first, by thread id, else the desk (an owner card until the repo has one); judgment; quiet decisions; the digest (all as rows) | D1 |
 | #1608 | drover | cap raises within 5% are the orchestrator's, a quiet row | #1609 |
+| C1 | cooee | read a plugin's rows: the `[threads]` manifest table, the follower and its cursor, draw by key, type `prompt`, send `push`, post actions; the contract copy and its test | D1 |
+| D2 | drover | threads are cooee's to open: `PUT thread`, `said`, `say` as a row, a profile per repo, emitters set `prompt` instead of delivering to a cooee thread, `rows-stale`; the manifest generated, with `[threads]` | D1, C1 released |
+| C2 | cooee | one Orchestrator: [New] picks a repo, all or none (the profile), the repo filter, `PUT thread` and `said` | D2 |
+| C3 | cooee | the desk thread: one per repo, made when cooee first reads the repo's profile and `PUT` with `desk: true`, where `to: desk` rows land; this turns #1609's desk part on | C2 |
+| C4 | cooee | [chat] on an owner card: opens the card's thread with the row's `text` quoted | C3 |
+| #1610 | drover | handoffs go to the desk at once; the `handoff-move` action | #1609, C3 |
+| C5 | cooee | [move] on a handoff row: posts `handoff-move` | #1610 |
 | — | owner | the config card that removes the web push notifier (cooee now notifies) | C3 live |
 | C6 | cooee | import: each open drover thread into a cooee thread, then `PUT` with `from` | C2 |
 | D3 | drover | no new drover-hosted thread: `thread new`, the page's new thread and `chat-about` send to the repo's desk | C6 run |
-| D4 | drover | the cut: delete the engine, web push, the `[chat]` table, the old attach routes and the `chat-cards` place; the bans | D3, open question 1 answered |
+| D4 | drover | the cut: delete the engine, web push, the `[chat]` table, the old attach routes and the `chat-cards` place; stop serving extra seats; the bans | D3 |
+
+#1609 lands before C1 (the owner's q3122): its judgment, quiet decisions and routing to the filing thread read only
+D1's rows and `home`. C1 and #1609 can be built side by side. `serve/device.rs` stays: it serves the scene to a
+companion device, not alerts (q3122).
 
 ## The rules lines
 
@@ -204,9 +216,9 @@ Files this design touches that 5 or more merged PRs touched in 14 days:
 | File | PRs | Class | Here |
 |---|---|---|---|
 | `crates/core/src/orchestrator.rs` | 26 | large module | splits: `core/src/thread/` (registry, rows, route) is new, the engine is deleted, about 300 lines stay |
-| `cooee-plugin.toml` | 11 | central list (the actions line) | generated in D2 from `templates/cooee-plugin.toml` and the server's action table |
+| `cooee-plugin.toml` | 11 | central list (the actions line) | generated in D2 from a new template of the same name in `templates/` and the server's action table |
 | `crates/server/src/screens.rs` | 62 | central list (the action match) | +1 arm once in D1: thread actions go to `serve/rows.rs`'s own table, so #1609 and #1610 add none here |
-| `docs/serve.md`, `docs/orchestrator.md` | 55, 15 | docs per area | the contract is a new `docs/rows.md`; the two lose their thread routes and engine sections, and gain one link |
+| `docs/serve.md`, `docs/orchestrator.md` | 55, 15 | docs per area | the contract is a new `rows.md` in `docs/`; the two lose their thread routes and engine sections, and gain one link |
 | `.drover/rules.md` | 9 | central list, capped at 30 lines | two lines replaced, none added |
 | `crates/cli/tests/api_v1_contract.rs` | 12 | tests | untouched: the contract has its own test file and a folder of one file per route |
 | `serve.rs`, `serve/v1.rs`, `serve/chat.rs`, `api.rs`, `events.rs`, `lib.rs`, `cli.rs` | 24 to 88 | already `shared` | new routes and types go in `serve/rows.rs` and `core/src/thread/`; `v1.rs` gets one arm |

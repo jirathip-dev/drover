@@ -5,15 +5,16 @@
 Decision: drover serves a list of thread rows (asks, cards, handoffs, system lines, merges, alerts), each with what to
 draw, the line to tell the agent and whether to notify. Cooee shows them in the thread or the repo's desk thread, runs
 the agent and sends all notifications; it copies message text to drover, so drover's page and terminal still work.
-Slices: 4 new drover issues around #1609, #1610 and #1608, and 6 cooee issues, in a fixed order.
-Open questions: (1) at the cut drover's own chat loses queue, steer, stop, model picks, uploads, new and archive:
-accept, relay or keep its engine? (2) keep the scene device listener the amendment names? (3) drop extra seats?
+Slices: 4 new drover issues and 6 cooee issues around #1609, #1610 and #1608, in a fixed order. #1609 follows the
+first drover slice, before any cooee work; only its desk part waits, and turns on when cooee's desk thread exists.
+Open questions: none (the owner settled the three in q3122).
 
-Status: proposed (architect lane, 2026-11-22). Read on drover staging `d989c5beb`, cooee staging `877cd75c8`.
+Status: revised after the owner's q3122 (architect lane, 2026-11-22). Read on drover staging `d989c5beb`, cooee
+staging `877cd75c8`.
 
 | File | What |
 |---|---|
-| this page | how the callers read, the design on one screen, the open questions |
+| this page | how the callers read, the design on one screen, what the owner settled |
 | [adr.md](adr.md) | question, options, decision, consequences, the contract test, the issues in order, the rules lines, the `arch.toml` lines |
 | [shapes.md](shapes.md) | the row and action contract as types |
 | [boundaries.md](boundaries.md) | which module may call which; the migration, thread and row statecharts |
@@ -104,25 +105,24 @@ for route in contract::ROUTES {
 | The orchestrator's role text, brief, hook and permissions | drover (`GET /cooee/profiles`, one profile per repo) | cooee starts the agent with them |
 | Asks, cards, handoffs, system lines, merge and rollout rows, decisions, digest | drover (rows) | cooee draws the block |
 | Answer, approve or deny, apply or discard, secret, handoff move | drover (actions) | cooee posts the tap |
-| Which thread a row goes to | drover names a thread id or a repo's desk | cooee owns the desk thread |
+| Which thread a row goes to | drover names a thread id or a repo's desk | cooee owns the desk thread; until it has `PUT` one, a desk row is an owner card as today |
 | Waking the agent with a workflow line | drover sets `prompt` | cooee types it in |
 | Notifications | drover sets `push` | cooee sends; drover's web push is deleted |
 
 One direction: every arrow is cooee calling drover. Drover has no cooee address, client or token.
 
-## Open questions
+## Settled by the owner (q3122)
 
-1. **Drover's own chat after the cut.** With cooee running the agent, drover's page and `drover chat` keep the thread
+1. **#1609 lands early.** Its judgment, quiet decisions and routing to the filing thread need only D1, so it follows
+   D1 and lands before C1. Only its desk fallback waits for C3: until cooee has `PUT` a repo's desk thread, a card
+   with no filing thread is an owner card as today, and the first `PUT` turns orchestrator first on for that repo.
+2. **The cuts at D4 are accepted.** With cooee running the agent, drover's page and its terminal chat keep the thread
    list, the conversation as text, send, and every card with its buttons. They lose what is the engine's: queue, steer,
    stop, the model, effort and harness chips, file upload and inline chat images, new thread (it becomes a message to
-   the repo's desk thread), archive and restore, and the [chat] defaults in the config sheet. This is the one place
-   the issue's "nothing visible is cut" cannot hold without tangling the repos. Options: (a) accept these cuts
-   (recommended); (b) relay each as a command row cooee runs, about nine more contract entries and file bytes copied
-   both ways; (c) keep drover's engine for threads drover hosts, which deletes nothing. Until the last slice nothing is
-   cut, so the answer is needed before D4 only.
-2. **The devices file.** The amendment lists `crates/server/src/serve/device.rs` for removal. That file is the LAN
-   listener that serves the scene to a companion device (#1497), not alert devices. Recommended: keep it. The alert
-   code that goes is `webpush.rs`, the `/push/*` routes, the alert devices list on the hosts view and
-   `drover push test`.
-3. **Extra orchestrator seats.** Profiles become one per repo for the one Orchestrator. Recommended: the
-   `[orchestrator.<id>]` tables beyond the default stop being served to cooee at the cut, with a config warning.
+   the repo's desk thread), archive and restore, and the [chat] defaults in the config sheet. Until D4 nothing is cut.
+3. **The devices file stays.** `crates/server/src/serve/device.rs` is the LAN listener that serves the scene to a
+   companion device (#1497), not alert devices. The alert code that goes is `webpush.rs`, the `/push/*` routes, the
+   alert devices list on the hosts view and `drover push test`.
+4. **Extra orchestrator seats go.** Profiles become one per repo for the one Orchestrator. The `[orchestrator.<id>]`
+   tables beyond the default stop being served to cooee at D4, with a config warning.
+
