@@ -63,7 +63,7 @@ jobs:
         run: scripts/timing-check.sh
       - name: "parity (#1094): each docs/parity.md row's test exists; a parity test or row deleted needs `dropped q<N>`"
         run: scripts/parity-check.sh HEAD^1
-      - name: "build (debug: line cap, arch-check and lesson checks run it; the release build is release-tests' only)"
+      - name: "build (debug: the cap, arch and lesson checks below run it; the release build is release-tests' only)"
         run: cargo build --locked --bin drover
       - name: "line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; a PR's cap edit carries a `Cap:` trailer)"
         run: ./target/debug/drover cap-check --config ci/cap.toml ${BASE:+--base "$BASE"}
