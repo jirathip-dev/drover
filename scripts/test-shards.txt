@@ -16,7 +16,7 @@
 1 backlog
 4 baseline
 4 blocked_respawn
-2 board_errors
+1 board_errors
 3 board_fresh
 2 board_style
 4 board_tui
@@ -57,8 +57,8 @@
 1 drive_loops
 3 drive_sim
 2 dsh
-4 dsh_unit
-2 empty_env
+3 dsh_unit
+4 empty_env
 3 events_log
 2 events_tab
 1 extend_ask
@@ -76,6 +76,7 @@
 3 hermes_hooks
 1 history
 4 hook
+4 hook_own_folder
 4 hook_wrapped
 3 host_deadline
 3 host_down
@@ -88,7 +89,7 @@
 3 hosts_screen
 3 host_sync
 4 host_tab
-4 host_words
+3 host_words
 2 hotspots
 2 hung_read
 4 hung_root
@@ -135,7 +136,7 @@
 4 outbox
 4 overlap
 4 owner_extend
-3 page
+4 page
 4 page_drafts
 3 pair_status
 3 parity_check
@@ -143,7 +144,7 @@
 3 parked
 3 pass_budget
 1 pass_profile
-2 pass_run_for
+3 pass_run_for
 3 paused_delivery
 1 pending_actions
 4 perf
@@ -244,9 +245,9 @@
 4 ui_tokens
 1 unit
 4 update_worktree
-4 url_links
+2 url_links
 1 usage
-1 verify_browser
+4 verify_browser
 3 verify_stage
 4 waiting
 3 webhook
