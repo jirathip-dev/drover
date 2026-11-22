@@ -116,3 +116,47 @@ fn try_again_lets_a_start_through_and_a_push_resets_the_count() {
     assert_eq!(code, 4, "2 failed starts since the push: {out}");
     assert_eq!(respawn(&c, &r, 30).0, 3, "the third since the push trips it");
 }
+
+#[test]
+fn a_supersede_that_errors_logs_why_and_three_alike_raise_one_owner_ask() {
+    let c = ctx(&tmpdir("respawn-supersede-error"), CONFIG);
+    let _sh = FakeShed::attached(&c);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let r = Fake::default()
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+        .reply("git -C", "");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let d = json!({"by": "owner"});
+    append(
+        &c.state,
+        &Event::new(c.now + 60, "sendmeter", Some(12), "round-extended", d),
+    )
+    .unwrap();
+    let r = Fake::default()
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply(&format!("git -C {} rev-list", wt.display()), "1\n")
+        .reply("git -C", "");
+    for m in [5, 10, 15] {
+        let (code, out) = respawn(&c, &r, m);
+        assert_eq!(code, 1, "{out}");
+    }
+    let ev = read(&c.state).unwrap().to_vec();
+    let failed: Vec<&Event> = ev.iter().filter(|e| e.kind == "failed").collect();
+    assert_eq!(failed.len(), 3, "{failed:?}");
+    for f in &failed {
+        assert_eq!(f.str("step"), Some("supersede"));
+        assert!(f.str("error").is_some_and(|e| e.contains("gh issue view")), "{f:?}");
+    }
+    let (code, out) = respawn(&c, &r, 20);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED RESPAWN_LOOP"), "{out}");
+    assert!(out.contains("gh issue view"), "the card names the error: {out}");
+    assert_eq!(respawn(&c, &r, 25).0, 3);
+    let a = asks(&c);
+    assert_eq!(a.len(), 1, "{a:?}");
+    assert_eq!(a[0].str("kind"), Some("owner"));
+}

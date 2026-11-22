@@ -1935,7 +1935,19 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         let design = n.parse().ok().and_then(|n| queue::wants_design(&events, fleet, n));
         let again = n.parse().is_ok_and(|n| crate::pending::requeued(&events, fleet, n));
         let f = cfg.fleet(fleet)?;
-        let c = ["spawn", fleet, &n, design.unwrap_or(f.flow().start()), "--supersede"];
+        let own = n.parse().ok().and_then(|n| {
+            let sp = crate::events::of_issue(&events, fleet, n)
+                .into_iter()
+                .rfind(|e| e.kind == "spawn")?;
+            sp.str("role").filter(|r| matches!(*r, "lesson" | "triage" | "deps"))
+        });
+        let c = [
+            "spawn",
+            fleet,
+            &n,
+            design.or(own).unwrap_or(f.flow().start()),
+            "--supersede",
+        ];
         let code = match act(
             ctx,
             cfg,
