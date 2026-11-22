@@ -1744,7 +1744,7 @@ pub fn shown(enabled: bool, s: &Seen, lanes: usize, now: u64) -> (&'static str, 
     match (enabled, lanes) {
         (false, 0) => ("m", "off · not used for lanes".into()),
         (false, n) => ("m", format!("off · draining {n} lane{}", if n == 1 { "" } else { "s" })),
-        _ => match (sick('✗'), sick('!')) {
+        _ => match (sick('✗'), host::disk_low(s.disk).as_deref().or(sick('!'))) {
             (Some(w), _) => ("r", format!("unhealthy · {w}")),
             (_, Some(w)) => ("a", format!("up · {w}")),
             _ => ("g", "up".into()),

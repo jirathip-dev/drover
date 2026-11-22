@@ -1472,7 +1472,13 @@ pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     let events = working(&ctx.state)?;
     let spawned = (events.iter().filter(|e| e.kind == "spawn" && e.ts >= since)).filter_map(|e| e.str("agent"));
     let agents = crate::session::live_on(r)?;
-    let names = agents.iter().filter(|a| !a.hollow()).map(|a| a.name.as_str());
+    let ended = |a: &Session| {
+        a.status() == Some(Status::Done) && crate::session::stamp::since(&events, &a.name).is_some_and(|t| t <= since)
+    };
+    let names = agents
+        .iter()
+        .filter(|a| !a.hollow() && !ended(a))
+        .map(|a| a.name.as_str());
     Ok(names.chain(spawned).map(String::from).collect())
 }
 

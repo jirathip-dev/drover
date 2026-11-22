@@ -709,8 +709,27 @@ fn worktree_add(local: &str, p: &Plan, have: bool) -> Vec<String> {
     if have {
         argv(&["-C", local, "worktree", "add", &wt, &p.branch])
     } else {
-        argv(&["-C", local, "worktree", "add", "-b", &p.branch, &wt, &p.base])
+        argv(&[
+            "-C",
+            local,
+            "worktree",
+            "add",
+            "-b",
+            &p.branch,
+            "--no-track",
+            &wt,
+            &p.base,
+        ])
     }
+}
+
+fn track(local: &str, branch: &str) -> [Vec<String>; 2] {
+    let (remote, merge) = (format!("branch.{branch}.remote"), format!("branch.{branch}.merge"));
+    let head = format!("refs/heads/{branch}");
+    [
+        argv(&["-C", local, "config", &remote, "origin"]),
+        argv(&["-C", local, "config", &merge, &head]),
+    ]
 }
 
 fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str, bool), rt: Runtime) -> Value {
@@ -724,7 +743,10 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         "git",
         argv(&["-C", local, "fetch", "origin", p.base.trim_start_matches("origin/")]),
     )];
-    cmds.extend((!reopen).then(|| sent("git", worktree_add(local, p, false))));
+    if !reopen {
+        cmds.push(sent("git", worktree_add(local, p, false)));
+        cmds.extend(track(local, &p.branch).map(|a| sent("git", a)));
+    }
     if bt.0.acp.is_some() {
         let run = bt.acp_argv(&p.agent, labels, &p.worktree.to_string_lossy(), acp);
         cmds.push(sent("shed", run));
@@ -1071,6 +1093,9 @@ fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygien
     let verify = argv(&["-C", local, "rev-parse", "--verify", "--quiet", &p.branch]);
     let have = r.run("git", &verify)?.code == 0;
     ok(r, "git", &worktree_add(local, p, have))?;
+    for a in track(local, &p.branch) {
+        ok(r, "git", &a)?;
+    }
     let deny = h.docs_trust.clone().unwrap_or_default();
     if !deny.is_empty() {
         let pats = deny.iter().map(|d| format!("!/{}", d.trim_start_matches('/')));

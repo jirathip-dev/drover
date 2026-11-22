@@ -185,6 +185,14 @@ pub fn turn<'a>(events: &'a [Event], s: &IssueState) -> Option<&'a Event> {
         .find(role)
 }
 
+fn done_working(ctx: &Ctx, cfg: &Config, events: &[Event], session: Option<&Session>, t: &Event) -> bool {
+    let Some(a) = session.filter(|a| a.status() == Some(crate::session::Status::Done)) else {
+        return false;
+    };
+    let since = crate::session::stamp::since(events, &a.name).unwrap_or(t.ts).max(t.ts);
+    t.str("state") == Some("working") && ctx.now >= since + cfg.limits.stall_minutes * 60
+}
+
 fn turned(events: &[Event], t: &Event, lane: &str, now: u64, stall: u64) -> (Who, String) {
     let why = t.str("why").map_or(String::new(), |y| format!(" ({y})"));
     let state = t.str("state").unwrap_or_default();
@@ -841,6 +849,8 @@ pub fn scan_where(
                 _ => None,
             });
         let waiting_turn = turn(mine, &s);
+        let quiet = |t: &Event| done_working(ctx, cfg, mine, session, t);
+        let ended = ended.or(waiting_turn.filter(|t| idle && quiet(t)).map(|_| "done"));
         if idle && crate::lesson::no_pr(s.build.as_deref()) && settled() {
             let asked = mine
                 .iter()
@@ -857,7 +867,7 @@ pub fn scan_where(
                 _ => LESSON_CLOSE.into(),
             };
         } else if let Some(t) =
-            waiting_turn.filter(|t| idle && (!gone && !unconfirmed || t.str("state") == Some("blocked")))
+            waiting_turn.filter(|t| idle && !quiet(t) && (!gone && !unconfirmed || t.str("state") == Some("blocked")))
         {
             (w.who, w.what) = turned(mine, t, &built, ctx.now, cfg.limits.stall_minutes * 60);
             (w.lane, w.since) = (built, t.ts);

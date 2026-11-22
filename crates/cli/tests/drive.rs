@@ -174,7 +174,7 @@ fn review_spawns_rev_at_the_pushed_head() {
     assert_eq!(steps, ["review"], "{out}");
     let rev = c.worktrees.join("sendmeter/rev-12-r1");
     let add = format!(
-        "git -C /tmp/does-not-matter/sendmeter worktree add -b rev-12-r1 {} origin/issue-12",
+        "git -C /tmp/does-not-matter/sendmeter worktree add -b rev-12-r1 --no-track {} origin/issue-12",
         rev.display()
     );
     assert!(r.called(&add), "{:?}", r.calls.borrow());
