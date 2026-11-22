@@ -219,6 +219,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
 | `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
 | `spawn_pending_max_secs` | `300` | a spawn marker older than this is stale |
+| `admit_wait_secs` | `5` | a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING` |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |
 | `keychain_readers` | `3` | more Keychain readers up over 60 s alert `keychain-jammed` |
