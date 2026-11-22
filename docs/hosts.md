@@ -122,6 +122,12 @@ confirmed. `spawn_pending_max_secs` stays the stale backstop: a start that has n
 `stale-marker`), its slot is free again and its issue keeps its queue place, so the next pass starts it first (#1371). Every pass, the fast step too, runs the start step
 before its PR reads, while some host has a free start slot; a full pass tries once more at its end for the issues its
 own steps just released. With `max_parallel_spawns = 0` (spawns in the pass) only that end-of-pass step runs.
+#1321: a pass only plans. Each issue with a step due (a verdict, a merge, a prompt) is handed to its own job, a detached
+`kick --why plan`, at most `[limits] job_max` (4) of a fleet at once; the pass waits for none, and a start returns as
+soon as its marker is taken. A spawn a job makes itself (a review, fix or respawn) takes a start-slot marker through the
+same admission first. A start's own kick holds a start slot, not a job slot (#1583), so a verdict or merge job never
+waits behind starts in flight. A fleet merges one PR at a time under `merge-<fleet>.lock`; a second merge is refused `IN_FLIGHT`
+and tried again by a later pass.
 `max_working` and the heavy-slot gate still bound the running load.
 
 ### Working-lane and simulator slots (#984)

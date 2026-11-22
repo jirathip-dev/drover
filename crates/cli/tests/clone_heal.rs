@@ -382,3 +382,58 @@ fn a_remote_hosts_clone_gets_the_same_heal() {
         Some(json!(["refs/remotes/origin/issue-9"]))
     );
 }
+
+#[test]
+fn a_remote_fetch_racing_another_on_staging_is_retried_and_the_spawn_starts() {
+    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let c = ctx(
+        &tmpdir("fetch-race-remote"),
+        &format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n"),
+    );
+    let st = c.state.parent().unwrap();
+    std::fs::create_dir_all(st).unwrap();
+    let cache = json!({
+        "mini": {"tags": ["os:macos"], "home": "/Users/me", "probed": 1_000_000, "seen": 1_000_000, "up": true},
+        "bazzite": {"tags": ["os:linux"], "home": "/home/me", "probed": 1_000_000, "seen": 1_000_000, "up": true,
+                    "load": 0.1, "mem": 12.0, "disk": 200.0},
+    });
+    std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let _sh = FakeShed::attached(&c);
+    let fetch =
+        format!("{SSH}'git' '--no-replace-objects' '-C' '/tmp/does-not-matter/sendmeter' 'fetch' 'origin' 'staging'");
+    let race = "error: fetching ref refs/remotes/origin/staging failed: incorrect old value provided";
+    let r = Fake::default()
+        .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
+        .reply("sysctl -n hw.ncpu", "4")
+        .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
+        .reply(&format!("{SSH}'nproc'"), "4")
+        .reply(
+            &format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile'"),
+            "",
+        )
+        .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .once_err(&fetch, 1, race)
+        .reply(&format!("{SSH}'git'"), "")
+        .reply(&format!("{SSH}'sh' '-c' 'git clone"), "")
+        .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
+        .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
+        .reply(&format!("{SSH}'rm' '-f'"), "")
+        .reply("which shed", "/opt/shed/bin/shed\n");
+    let bazzite = FakeShed::new();
+    let o = OverSsh {
+        f: &r,
+        hosts: vec![("bazzite", &bazzite)],
+    };
+    let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+    assert_eq!(code, 0, "{out} {:#?}", r.calls.borrow());
+    assert!(r.count(&fetch) >= 2, "{:#?}", r.calls.borrow());
+    let ev = read(&c.state).unwrap().to_vec();
+    let retried: Vec<&Event> = ev.iter().filter(|e| e.kind == "fetch-retried").collect();
+    assert_eq!(retried.len(), 1, "{ev:#?}");
+    assert!(retried[0]
+        .str("error")
+        .is_some_and(|e| e.contains("incorrect old value provided")));
+    assert_eq!(retried[0].str("clone"), Some("/tmp/does-not-matter/sendmeter"));
+    assert!(ev.iter().any(|e| e.kind == "spawn"), "{ev:#?}");
+}

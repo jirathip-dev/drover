@@ -189,6 +189,19 @@ for the issue at once (200); anything else is ignored with 202. While a fleet ha
 becomes a catch-up poll every `[limits] webhook_poll_minutes` (default 10), for what a sleeping Mac or a down Funnel
 missed.
 
+## Scene device listener (#1497)
+
+`[serve] device_addr` (e.g. `"0.0.0.0:7779"`; unset or `""`, the default, is off; a `--read-only` serve has none)
+opens a second listener for a LAN device such as the scene-esp32 companion, which cannot join the tailnet. It answers
+`GET /screens/scene` only, with the JSON the main listener gives an unpaired device; any other path is a 404 and any
+other method (a `POST /action` included) a 405. It reads no cookies, pairs nothing, runs no action and has no
+`/stream`: the device polls. Against DNS rebinding its `Host` header must be an IP literal (with an optional port)
+or a name in `[serve] device_hosts`, else 403; it sends no CORS headers. `drover doctor` shows `scene device — off`
+or `on <addr>`.
+
+Anyone on the LAN can read what the scene shows: each fleet's lane names and states and the host's load, memory
+pressure and swap. Leave it off on a network you do not trust.
+
 ## Serve health (#898)
 
 Each minute serve writes its own numbers to `serve-health.json` in the state dir, and `GET /api/v1/health` returns
@@ -226,7 +239,7 @@ listener is not the job's pid.
 | `serve-slow` | `/api/v1` p95 over 200 ms for 5 min |
 | `phone-slow` | a phone kind's p95 (tap, sheet, tab, send, answer, delta) over 150 ms for `slo_api_minutes` |
 | `serve-503` | any read answered 503 in the last minute |
-| `drive-slow` | a fleet's last pass over `pass_max_secs` (60 s); names the fleet, its slowest step (spawns, PR reads, settle) and each host's remote-call count and seconds |
+| `drive-slow` | a fleet's last pass over `pass_max_secs` (60 s); names the fleet, its slowest step (spawns, PR reads) and each host's remote-call count and seconds |
 
 CI's gates are `crates/cli/tests/serve_health.rs`: the request-path guard (every read answers with the db write-locked,
 and none calls git, gh or ssh) and the bench (each route group's p95 within 50 ms on the fixture state).

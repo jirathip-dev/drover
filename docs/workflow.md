@@ -66,8 +66,7 @@ flowchart TD
     d0["look, repair"] --> d1
     d1["closed issues"] --> d2
     d2["spawns"] --> d3
-    d3["PR reads, gates, steps"] --> d4
-    d4["settle"]
+    d3["PR reads, gates, steps"]
     t1 --> d0
     other["other timers: serve, hosts, store"]
     j0 -.- k_slow_secs(["slow_secs = 300"])
@@ -82,6 +81,7 @@ flowchart TD
     t0 -.- k_done_close_minutes(["done_close_minutes = 5"])
     t0 -.- k_idle_merged_minutes(["idle_merged_minutes = 15"])
     t0 -.- k_token_refresh_minutes(["token_refresh_minutes = 30"])
+    d0 -.- k_pass_max_secs(["pass_max_secs = 60"])
     d0 -.- k_ssh_quick_secs(["ssh_quick_secs = 5"])
     d0 -.- k_ssh_call_secs(["ssh_call_secs = 20"])
     d0 -.- k_import_max_age_hours(["import_max_age_hours = 24"])
@@ -89,6 +89,7 @@ flowchart TD
     d2 -.- k_start_max(["start_max = 2"])
     d2 -.- k_start_release(["start_release = "started""])
     d2 -.- k_spawn_pending_max_secs(["spawn_pending_max_secs = 300"])
+    d2 -.- k_admit_wait_secs(["admit_wait_secs = 5"])
     d2 -.- k_respawn_max(["respawn_max = 3"])
     d2 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
     d2 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])
@@ -99,7 +100,7 @@ flowchart TD
     d3 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
     d3 -.- k_review_rounds(["review_rounds = 3"])
     d3 -.- k_update_rounds(["update_rounds = 3"])
-    d4 -.- k_pass_max_secs(["pass_max_secs = 60"])
+    d3 -.- k_job_max(["job_max = 4"])
     other -.- k_overload_minutes(["overload_minutes = 10"])
     other -.- k_thread_resend_minutes(["thread_resend_minutes = 5"])
     other -.- k_transcript_days(["transcript_days = 30"])
@@ -127,6 +128,7 @@ flowchart TD
     other -.- k_lane_read_secs(["lane_read_secs = 5"])
     other -.- k_guard_secs(["guard_secs = 180"])
     other -.- k_poll_millis(["poll_millis = 20"])
+    other -.- k_hold_sample_secs(["hold_sample_secs = 10"])
     other -.- k_tick_beat_secs(["tick_beat_secs = 60"])
     other -.- k_orchestrator_idle_minutes(["orchestrator_idle_minutes = 30"])
     other -.- k_orchestrator_reply_minutes(["orchestrator_reply_minutes = 10"])

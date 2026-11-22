@@ -48,7 +48,6 @@ fn fake_with(load: &str, f: Fake) -> Fake {
 }
 
 fn pending(d: &serde_json::Value) -> u64 {
-    assert_eq!(d["spawns_launched"], 0, "{d}");
     let a = d["actions"].as_array().unwrap();
     a.iter().filter(|a| a["outcome"] == "pending").count() as u64
 }
@@ -381,6 +380,34 @@ fn a_due_fix_round_takes_the_reserved_slot() {
 }
 
 #[test]
+fn a_kicks_own_spawn_takes_a_start_slot_like_a_start() {
+    let (c, sh) = fleet("kicks-own-marker", 6, 1);
+    (11..=16).for_each(|n| mark(&c, n, 4242, 10));
+    fix_due(&c, 21);
+    let r = fake("1.0")
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "  00:30\n");
+    let kick = ["kick", "sendmeter", "21", "--why", "webhook", "--now"];
+    let (code, out) = run(&c, &r, &kick);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("sendmeter #21 respawn: REFUSED SPAWN_PENDING: local 6/6"),
+        "{out}"
+    );
+    assert!(!started(&sh) && marker(&c, 21).is_none(), "{out}");
+    for n in 11..=16 {
+        assert!(drover::db::release(
+            &c.state,
+            &format!("spawn-sendmeter-{n}.pending"),
+            None
+        ));
+    }
+    let (code, out) = run(&c, &r, &kick);
+    assert_eq!(code, 0, "{out}");
+    assert!(started(&sh) && marker(&c, 21).is_none(), "{out}");
+}
+
+#[test]
 fn one_slot_and_nothing_in_flight_still_starts() {
     let (c, _sh) = fleet("kicks-one", 1, 2);
     let r = fake("1.0");
@@ -482,65 +509,34 @@ fn act(d: &serde_json::Value, n: u64) -> serde_json::Value {
 }
 
 #[test]
-fn a_kick_refused_host_busy_is_logged_refused_not_launched() {
+fn a_kick_refused_host_busy_is_logged_by_its_kick_and_the_pass_never_waits_or_rewrites() {
     let (c, _sh) = fleet("kicks-604-busy", 6, 1);
     let r = Inline(fake("1.0"), c.clone(), "40.0");
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("sendmeter #1 start: REFUSED HOST_BUSY: "), "{out}");
-    assert!(!out.contains("launched") && !out.contains("pending"), "{out}");
+    assert!(out.contains("sendmeter #1 start: pending"), "{out}");
     let ev = read(&c.state).unwrap();
-    let d = serde_json::Value::Object(ev.iter().rfind(|e| e.kind == "drive-pass").unwrap().data.clone());
-    let a = act(&d, 1);
+    let pass = |kick: serde_json::Value| {
+        let e = ev
+            .iter()
+            .rfind(|e| e.kind == "drive-pass" && e.data.get("kick") == Some(&kick));
+        serde_json::Value::Object(e.unwrap().data.clone())
+    };
+    let (plan, job) = (pass(serde_json::Value::Null), pass(serde_json::json!(1)));
+    assert_eq!(act(&plan, 1)["outcome"], "pending", "{plan}");
+    let a = act(&job, 1);
     assert_eq!(
         (&a["outcome"], &a["code"]),
         (&serde_json::json!("waiting"), &serde_json::json!("HOST_BUSY")),
-        "{d}"
+        "{job}"
     );
-    assert_eq!(d["spawns_launched"], 0, "{d}");
-    let e = ev.iter().rfind(|e| e.kind == "drive-pass").unwrap();
-    assert!(!drover::drive::result(e).1.contains("started 1"), "{d}");
+    let e = ev
+        .iter()
+        .rfind(|e| e.kind == "drive-pass" && e.data.get("kick") == Some(&serde_json::Value::Null));
+    assert!(!drover::drive::result(e.unwrap()).1.contains("started 1"), "{plan}");
     let (code, out) = run(&c, &fake("1.0"), &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("HOST_BUSY"), "{out}");
-}
-
-#[test]
-fn a_kick_running_past_its_pass_is_pending_then_updated() {
-    let (c, _sh) = fleet("kicks-604-pending", 6, 1);
-    let (code, out) = run(&c, &fake("1.0"), &["drive"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(
-        out.contains("sendmeter #1 start: pending") && !out.contains("launched"),
-        "{out}"
-    );
-    let last = || {
-        let ev = read(&c.state).unwrap();
-        let e = ev
-            .iter()
-            .rfind(|e| e.kind == "drive-pass" && e.data.get("kick").is_none_or(serde_json::Value::is_null));
-        serde_json::Value::Object(e.unwrap().data.clone())
-    };
-    let d = last();
-    assert_eq!(
-        (&act(&d, 1)["outcome"], &d["spawns_launched"]),
-        (&serde_json::json!("pending"), &serde_json::json!(0)),
-        "{d}"
-    );
-    let (code, out) = run(
-        &c,
-        &fake("40.0"),
-        &["kick", "sendmeter", "1", "--why", "drive", "--now"],
-    );
-    assert_eq!(code, 0, "{out}");
-    let d = last();
-    let a = act(&d, 1);
-    assert_eq!(
-        (&a["outcome"], &a["code"]),
-        (&serde_json::json!("waiting"), &serde_json::json!("HOST_BUSY")),
-        "{d}"
-    );
-    assert_eq!(d["spawns_launched"], 0, "{d}");
 }
 
 #[test]
@@ -570,19 +566,15 @@ fn every_start_refused_by_one_host_gate_for_30_min_alerts_once() {
 }
 
 #[test]
-fn a_kick_that_spawns_inside_its_pass_counts_as_launched() {
+fn a_start_returns_pending_and_its_kick_logs_the_spawn() {
     let (c, _sh) = fleet("kicks-604-ok", 6, 1);
     let (code, out) = run(&c, &Inline(fake("1.0"), c.clone(), "1.0"), &["drive"]);
     assert_eq!(code, 0, "{out}");
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().any(|e| e.is("spawn", "sendmeter", 1)), "{out}");
     let d = serde_json::Value::Object(ev.iter().rfind(|e| e.kind == "drive-pass").unwrap().data.clone());
-    assert_eq!(
-        (&act(&d, 1)["outcome"], &d["spawns_launched"]),
-        (&serde_json::json!("started"), &serde_json::json!(1)),
-        "{d}"
-    );
-    assert!(out.contains("sendmeter #1 start: started"), "{out}");
+    assert_eq!(act(&d, 1)["outcome"], "pending", "{d}");
+    assert!(out.contains("sendmeter #1 start: pending"), "{out}");
 }
 
 fn fleets(dir: &str, names: &[&str], max: usize, issues: u64) -> (drover::Ctx, FakeShed) {
@@ -1380,4 +1372,105 @@ fn a_ci_only_fail_after_a_pass_starts_its_fix_round_on_the_next_pass() {
 fn a_ci_only_fail_starts_its_fix_round_past_a_live_idle_impl_lane() {
     let (c, sh, r) = ci_red_after_pass("kicks-ci-fail-live", true);
     fix_round_starts(&c, &sh, &r);
+}
+
+struct Admitting {
+    c: drover::Ctx,
+    f: Fake,
+    beta: Shared<Option<Result<(i32, String), std::sync::mpsc::RecvTimeoutError>>>,
+}
+
+impl Admitting {
+    fn hook(&self) {
+        let alpha = std::thread::current().name() != Some("beta");
+        if !alpha || self.beta.borrow().is_some() || drover::db::leases(&self.c.state, "admit").is_empty() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let c = self.c.clone();
+        std::thread::Builder::new()
+            .name("beta".into())
+            .spawn(move || tx.send(run_only(&c, &boats(), &["drive", "beta"])).ok())
+            .unwrap();
+        *self.beta.borrow_mut() = Some(rx.recv_timeout(std::time::Duration::from_secs(10)));
+    }
+}
+
+impl drover::runner::Runner for Admitting {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        self.hook();
+        self.f.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        self.hook();
+        self.f.run_in(prog, args, input)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+fn boats() -> Fake {
+    fake_with("1.0", Fake::default().reply("ssh ", ""))
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "  00:10\n")
+}
+
+#[test]
+fn two_fleets_admit_their_spawns_on_different_hosts_at_once() {
+    let (fleet, limits) = CONFIG.split_once("[limits]").unwrap();
+    let pinned = |(n, h): (&str, &str)| {
+        fleet.replace("sendmeter", n).replace(
+            "profile = \"fleet-impl\"",
+            &format!("profile = \"fleet-impl\"\nhost = \"{h}\""),
+        )
+    };
+    let all: String = [("alpha", "boat1"), ("beta", "boat2")]
+        .into_iter()
+        .map(pinned)
+        .collect();
+    let limits = limits.replace("max_parallel_spawns = 0", "max_parallel_spawns = 6");
+    let hosts = "\n[hosts.mini]\nstart_max = 0\n\n[hosts.boat1]\nmachine = \"boat1\"\nstart_max = 1\n\n[hosts.boat2]\nmachine = \"boat2\"\nstart_max = 1\n";
+    let c = ctx(&tmpdir("kicks-1583-hosts"), &format!("{all}[limits]{limits}{hosts}"));
+    for f in ["alpha", "beta"] {
+        assert_eq!(run(&c, &Fake::default(), &["queue", f, "add", "1"]).0, 0);
+    }
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let e = serde_json::json!({"ts": 1, "fleet": "alpha", "issue": 9, "type": "spawn", "role": "impl", "host": "mini"});
+    let l = drover::db::take(
+        &c.state,
+        "spawn-alpha-9.pending",
+        c.now - 10,
+        300,
+        &e.to_string(),
+        &|_| true,
+    )
+    .unwrap();
+    assert!(drover::db::renew(
+        &c.state,
+        &l,
+        &drover::db::Lease { pid: 4242, ..l.clone() }
+    ));
+    let r = Admitting {
+        c: c.clone(),
+        f: boats(),
+        beta: Shared::default(),
+    };
+    let (code, out) = run_only(&c, &r, &["drive", "alpha"]);
+    assert_eq!(code, 0, "{out}");
+    let beta = r.beta.borrow().clone();
+    let (code, beta) = beta
+        .expect("alpha's admission ran")
+        .expect("beta's pass waited for alpha's admission on another host");
+    assert_eq!(code, 0, "{beta}");
+    let on = starting_on(&c);
+    assert_eq!(
+        on.get("boat1"),
+        Some(&vec!["alpha".to_string()]),
+        "{on:?}\n{out}\n{beta}"
+    );
+    assert_eq!(
+        on.get("boat2"),
+        Some(&vec!["beta".to_string()]),
+        "{on:?}\n{out}\n{beta}"
+    );
 }

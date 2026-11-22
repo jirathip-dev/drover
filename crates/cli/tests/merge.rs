@@ -387,7 +387,7 @@ fn merge_tears_down_clean_lanes_and_keeps_unpushed_ones() {
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     assert!(sh.called("kill", "impl-12") && !sh.has("impl-12"), "{:?}", sh.methods());
-    let remove = |w: &str| format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}");
+    let remove = |w: &str| format!("git -C /tmp/does-not-matter/sendmeter worktree remove --force {w}");
     assert!(r.called(&remove(&imp)), "{:?}", r.calls.borrow());
     assert!(out.contains(&format!("removed {imp}")), "{out}");
     assert!(

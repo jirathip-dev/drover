@@ -1108,14 +1108,33 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     let there = on.existing(&wts);
     wts.retain(|w| there.contains(w));
     let names: Vec<&str> = wts.iter().filter_map(|w| w.rsplit('/').next()).collect();
-    let free = match names.len() {
+    Some(format!("{gb:.1} GB free < {min}; {}", cleanable(&names)))
+}
+
+const CLEAN: &str = "`drover clean --yes` frees ";
+fn cleanable(names: &[&str]) -> String {
+    match names.len() {
         0 => "nothing for `drover clean --yes` there; `drover reclaim --apply` frees idle and finished lanes' build folders".into(),
-        n => format!(
-            "`drover clean --yes` frees {n} lane worktree(s) there: {}",
-            names.join(", ")
-        ),
+        n => format!("{CLEAN}{n} lane worktree(s) there: {}", names.join(", ")),
+    }
+}
+
+/// A `DISK_LOW` reason as it reads now: its `drover clean --yes` list cut to the worktrees still there (another host's kept as logged).
+pub fn disk_low_now(events: &[Event], why: &str) -> String {
+    let Some((head, list)) = why
+        .split_once(CLEAN)
+        .and_then(|(h, t)| Some((h, t.split_once("there: ")?.1)))
+    else {
+        return why.into();
     };
-    Some(format!("{gb:.1} GB free < {min}; {free}"))
+    let lanes = crate::events::lanes(events);
+    let there = |name: &&str| {
+        (lanes.iter())
+            .filter(|e| e.str("worktree").and_then(|w| w.rsplit('/').next()) == Some(*name))
+            .any(|e| e.str("machine").is_some() || e.str("worktree").is_some_and(|w| Path::new(w).exists()))
+    };
+    let names: Vec<&str> = list.split(", ").filter(there).collect();
+    format!("{head}{}", cleanable(&names))
 }
 
 /// Where a lane goes: its host's name and machine, the worktree root and repo checkout there, the remote `$HOME`, and the host's admission refusal (spawn refuses it, or `--force`s a `HOST_BUSY`).
