@@ -3,6 +3,8 @@ mod common;
 mod remote_unlisted;
 #[path = "drive/rev_unlisted.rs"]
 mod rev_unlisted;
+#[path = "drive/undriven.rs"]
+mod undriven;
 #[path = "drive/update_limit.rs"]
 mod update_limit;
 use common::*;
