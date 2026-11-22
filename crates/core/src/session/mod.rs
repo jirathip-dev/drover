@@ -19,6 +19,7 @@ pub struct Session {
     pub acp: bool,
     pub pid: Option<i32>,
     pub cpu_pct: Option<u64>,
+    pub rss_mb: Option<u64>,
     pub life: Life,
     pub note: Option<String>,
     pub host: Option<String>,
@@ -118,7 +119,8 @@ impl From<TerminalInfo> for Session {
             cwd: t.cwd,
             acp: t.acp.is_some(),
             pid: t.pid,
-            cpu_pct: t.resources.map(|u| u.cpu_pct),
+            cpu_pct: t.resources.as_ref().map(|u| u.cpu_pct),
+            rss_mb: t.resources.map(|u| u.rss_mb),
             life,
             host: None,
             machine: None,
@@ -141,6 +143,10 @@ impl Session {
     /// It runs and shed says it works.
     pub fn busy(&self) -> bool {
         self.status().is_some_and(Status::busy)
+    }
+    /// An ACP bridge shed lists as running whose sampled process tree holds no memory: its agent is gone.
+    pub fn hollow(&self) -> bool {
+        self.acp && self.running() && self.rss_mb == Some(0)
     }
     /// A lane's or conductor's session: drover labelled it with a fleet.
     pub fn lane(&self) -> bool {

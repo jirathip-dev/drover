@@ -158,6 +158,10 @@ fn clean_reaches_adopted_lanes_of_merged_issues() {
         killed.contains(&json!("w7")) && !killed.contains(&json!("wOld")),
         "{killed:?}"
     );
-    let removed = |w: &str| r.called(&format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}"));
+    let removed = |w: &str| {
+        r.called(&format!(
+            "git -C /tmp/does-not-matter/sendmeter worktree remove --force {w}"
+        ))
+    };
     assert!(removed(&w13) && removed(&w14), "{:?}", r.calls.borrow());
 }
