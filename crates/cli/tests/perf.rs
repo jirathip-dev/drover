@@ -1449,3 +1449,57 @@ fn five_fleets_with_40_lanes_on_4_boats_at_700ms_a_call_end_every_pass_within_10
     assert_eq!(passes, one, "the fast job starts each fleet's pass as its own process");
     assert!(secs < 10.0, "every pass done in {secs:.1} s (target < 10)");
 }
+
+fn idle_serve_cpu(secs: u64) -> f64 {
+    let o = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["idle_serve_child", "--exact", "--nocapture"])
+        .env("DROVER_PERF_1588", secs.to_string())
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    let cpu = err.lines().find_map(|l| l.strip_prefix("#1588 cpu "));
+    cpu.and_then(|v| v.parse().ok()).unwrap_or_else(|| panic!("{err}"))
+}
+
+#[test]
+fn idle_serve_child() {
+    let Ok(secs) = std::env::var("DROVER_PERF_1588") else {
+        return;
+    };
+    let (c, f) = huge();
+    let sh = shed();
+    sh.attach(&c);
+    let agents: Vec<String> = FLEETS
+        .iter()
+        .flat_map(|f| (1..=40).map(move |n| format!("{f}-impl-{n}")))
+        .collect();
+    let screen = |a: &str, i: u64| (0..300).map(|l| format!("{a} {i} line {l} ⏺ Working on it\n")).collect::<String>();
+    for a in &agents {
+        sh.lane(a, "working", &format!("/wt/{a}"));
+        sh.screen(a, &screen(a, 0));
+    }
+    let _ = serve(c, f);
+    std::thread::sleep(Duration::from_secs(5));
+    let t = cpu_ms();
+    for i in 1..=secs.parse().unwrap() {
+        for a in &agents {
+            sh.screen(a, &screen(a, i));
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    eprintln!("#1588 cpu {}", cpu_ms() - t);
+}
+
+#[test]
+fn an_idle_serve_on_a_live_sized_fleet_stays_under_3_percent_cpu() {
+    if cfg!(debug_assertions) {
+        return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
+    }
+    let secs = 60;
+    let cpu = idle_serve_cpu(secs);
+    let pct = cpu / (secs as f64 * 10.0);
+    report(&format!(
+        "#1588 perf (5 fleets, 200 working lanes, 150,000 events, no requests): serve {cpu:.0} ms of CPU in {secs} s, {pct:.2}%"
+    ));
+    assert!(pct < 3.0, "an idle serve used {pct:.2}% CPU over {secs} s (budget 3%)");
+}
