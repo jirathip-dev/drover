@@ -792,3 +792,66 @@ fn a_merged_verify_lane_with_only_shots_and_scratch_is_removed() {
     assert!(out.contains(&format!("removed {}", wt.display())), "{out}");
     assert!(!wt.exists(), "{out}");
 }
+
+fn clean_dry(c: &drover::Ctx) -> String {
+    let r = GitHerdr(Fake::default().reply("date -r", "20261102-072000\n"));
+    let (code, out) = run(c, &r, &["clean"]);
+    assert_eq!(code, 0, "{out}");
+    out
+}
+
+#[test]
+fn a_merged_lane_with_only_an_untracked_log_is_removed_as_its_dry_run_says() {
+    let (c, origin, local) = repo("clean-log-only", "");
+    let _sh = FakeShed::attached(&c);
+    let wt = worktree(&c, &local, 23, "impl");
+    put(&wt, "line-cap.log", "src/ net +12\n");
+    merged(&c, 23, "");
+    let dry = clean_dry(&c);
+    let would = format!(
+        "would remove {} (pane sendmeter-impl-23, sendmeter#23 merged)",
+        wt.display()
+    );
+    assert!(dry.contains(&would), "{dry}");
+    assert!(wt.exists(), "{dry}");
+    let out = clean_yes(&c);
+    assert!(
+        out.contains(&format!("removed {} (sendmeter#23 merged)", wt.display())),
+        "{out}"
+    );
+    assert!(!wt.exists(), "{out}");
+    assert!(!git(&origin, &["branch", "--list", "wip/*"]).contains("wip/"), "{out}");
+}
+
+#[test]
+fn an_unpushed_minified_dist_bundle_is_saved_and_removed_not_kept_as_a_secret() {
+    let (c, origin, local) = repo("clean-dist-css", "");
+    let _sh = FakeShed::attached(&c);
+    let (wt, src) = (worktree(&c, &local, 24, "impl"), worktree(&c, &local, 25, "impl"));
+    let css = format!(
+        "@layer blocks{{:root{{--k:gh{}}}.board{{display:grid;grid-template-columns:repeat(3,1fr)}}{}}}\n",
+        "p_abcdefghijklmnopqrstu1234",
+        ".c{margin:0}".repeat(400)
+    );
+    put(&wt, "web/dist/blocks.css", &css);
+    put(&src, "web/src/blocks.css", &css);
+    for w in [&wt, &src] {
+        git(w, &["add", "-A"]);
+        git(w, &["commit", "-q", "-m", "bundle"]);
+    }
+    merged(&c, 24, "");
+    merged(&c, 25, "");
+    let dry = clean_dry(&c);
+    assert!(dry.contains(&format!("would save {} to wip/", wt.display())), "{dry}");
+    let out = clean_yes(&c);
+    assert!(out.contains(&format!("saved {} to wip/", wt.display())), "{out}");
+    assert!(!wt.exists(), "{out}");
+    assert!(git(&origin, &["branch", "--list", "wip/*"]).contains("wip/"), "{out}");
+    assert!(
+        out.contains(&format!(
+            "keep {}: unsaved work has a secret (web/src/blocks.css:1",
+            src.display()
+        )),
+        "the same line in source is still a secret: {out}"
+    );
+}

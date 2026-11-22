@@ -1680,17 +1680,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
     }
     total += trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, o, !yes)?;
     total += sweep_off(ctx, cfg, r, o, &disabled(cfg, r), !yes)?;
-    let how = if yes { Sweep::Apply } else { Sweep::Preview };
-    let mut tried = std::collections::BTreeSet::new();
-    let hosts = cfg.hosts.iter().filter(|h| h.1.enabled);
-    for (name, m) in hosts.filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
-        if tried.insert(m) {
-            match sweep(ctx, cfg, &On::new(r, Some(m)), name, o, how) {
-                Ok(b) => total += b,
-                Err(e) => writeln!(o, "scratch: {name}: {e:#}")?,
-            }
-        }
-    }
+    total += sweep::hosts(ctx, cfg, r, o, if yes { Sweep::Apply } else { Sweep::Preview })?;
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {
