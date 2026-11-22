@@ -414,7 +414,14 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             Some(&("cat" | "grep" | "head" | "tail" | "jq" | "wc" | "echo" | "printf"))
         );
         let reads_only = if targets.is_empty() {
-            plain_cp && t.len() > 2 && t.last().is_some_and(|w| into_own(w))
+            plain_cp
+                && t.len() > 2
+                && t.last().is_some_and(|w| into_own(w))
+                && (t.iter().skip(1).take(t.len() - 2).filter(|w| !w.starts_with('-'))).all(|w| {
+                    w.rsplit('/')
+                        .next()
+                        .is_some_and(|n| !["", ".", "..", ".brief.md", ".thread.md"].contains(&n))
+                })
         } else {
             reader && !writer && targets.iter().all(|w| into_own(w))
         };
