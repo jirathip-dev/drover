@@ -969,6 +969,11 @@ pub fn unsaved_text(u: Option<(u64, u64)>) -> Option<String> {
 
 /// Why a worktree must not be reused or removed: uncommitted changes (`OWN_FILES` aside) or unpushed commits.
 pub fn dirty(r: &dyn Runner, wt: &Path) -> Option<String> {
+    dirty_past(r, wt, None)
+}
+
+/// `dirty`, with the commits reachable from `kept` (a merged PR's head, which its PR ref keeps) counted as pushed.
+pub fn dirty_past(r: &dyn Runner, wt: &Path, kept: Option<&str>) -> Option<String> {
     let wt = wt.to_string_lossy();
     let st = match status(r, &wt) {
         Ok(s) => s,
@@ -978,10 +983,12 @@ pub fn dirty(r: &dyn Runner, wt: &Path) -> Option<String> {
     if changed > 0 {
         return Some(format!("{changed} uncommitted change(s)"));
     }
+    let args = ["-C", &wt, "rev-list", "--count", "HEAD", "--not", "--remotes"];
+    let past = kept.map(|k| ["--ignore-missing", k]);
     match ok(
         r,
         "git",
-        &["-C", &wt, "rev-list", "--count", "HEAD", "--not", "--remotes"],
+        &[&args[..], past.as_ref().map_or(&[][..], |p| &p[..])].concat(),
     ) {
         Ok(n) if n.trim() == "0" => None,
         Ok(n) => Some(format!("{} unpushed commit(s)", n.trim())),

@@ -75,9 +75,16 @@ pub fn board(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool, handover: b
             .map_or_else(|| TcpListener::bind(&hooks), Ok)
             .map_err(|e| (hooks, e))
     });
+    let device = Config::kept(ctx)
+        .ok()
+        .and_then(|c| c.serve.device_addr().map(String::from));
+    let device = device
+        .filter(|_| !read_only)
+        .map(|d| got.next().map_or_else(|| TcpListener::bind(&d), Ok).map_err(|e| (d, e)));
     drop(got);
     let ls: Vec<_> = std::iter::once(&l)
         .chain(hooks.as_ref().and_then(|h| h.as_ref().ok()))
+        .chain(device.as_ref().and_then(|d| d.as_ref().ok()))
         .collect();
     let ho = handover.then(|| Handover::new(ctx, &ls, inherited)).transpose()?;
     let ho = ho.as_ref();
@@ -93,7 +100,18 @@ pub fn board(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool, handover: b
         if let Some(h) = ho {
             sc.spawn(move || h.watch_mem(ctx, r));
         }
-        crate::serve::serve_with(ctx, r, l, read_only, ho)
+        let device = match device {
+            Some(Ok(d)) => {
+                drover_core::stderr!("drover serve: scene device on http://{}/screens/scene", d.local_addr()?);
+                Some(d)
+            }
+            Some(Err((a, e))) => {
+                drover_core::stderr!("drover serve: no scene device: {a}: {e}");
+                None
+            }
+            None => None,
+        };
+        crate::serve::serve_with(ctx, r, l, read_only, ho, device.as_ref())
     })
 }
 
@@ -123,15 +141,9 @@ pub fn listen(ctx: &Ctx, r: &dyn Runner, l: &TcpListener, ho: Option<&Handover>)
 
 /// The response to the one request read from `s`. A body over GitHub's 25 MB is refused from its `Content-Length` before any of it is read.
 pub fn reply(ctx: &Ctx, r: &dyn Runner, s: &mut dyn Read) -> Vec<u8> {
-    let (mut buf, mut chunk) = (vec![], [0u8; 8192]);
-    let end = loop {
-        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-            break i;
-        }
-        match s.read(&mut chunk) {
-            Ok(n) if n > 0 && buf.len() < 16_384 => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
-            _ => return status(400, "bad request"),
-        }
+    let (mut buf, end) = match read_head(s) {
+        Ok(h) => h,
+        Err(e) => return e,
     };
     let head = String::from_utf8_lossy(buf.get(..end).unwrap_or_default()).into_owned();
     let mut w = head.split_whitespace();
@@ -161,6 +173,25 @@ pub fn reply(ctx: &Ctx, r: &dyn Runner, s: &mut dyn Read) -> Vec<u8> {
     let (event, sig) = (header(&head, "x-github-event"), header(&head, "x-hub-signature-256"));
     let (code, msg) = webhook::deliver(&ctx, r, event.unwrap_or_default(), sig, &body);
     status(code, &msg)
+}
+
+/// The request head read from `s` (at most 16 KB), else the 400 to send.
+pub fn head(s: &mut dyn Read) -> Result<String, Vec<u8>> {
+    let (buf, end) = read_head(s)?;
+    Ok(String::from_utf8_lossy(buf.get(..end).unwrap_or_default()).into_owned())
+}
+
+fn read_head(s: &mut dyn Read) -> Result<(Vec<u8>, usize), Vec<u8>> {
+    let (mut buf, mut chunk) = (vec![], [0u8; 8192]);
+    loop {
+        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            return Ok((buf, i));
+        }
+        match s.read(&mut chunk) {
+            Ok(n) if n > 0 && buf.len() < 16_384 => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
+            _ => return Err(status(400, "bad request")),
+        }
+    }
 }
 
 fn status(code: u16, msg: &str) -> Vec<u8> {

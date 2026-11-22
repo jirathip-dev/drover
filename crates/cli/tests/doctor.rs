@@ -679,3 +679,18 @@ fn watchdog_drive_shows_never_without_a_record_and_no_huge_age_for_a_stamp_past_
     let row = line(&out, "watchdog drive");
     assert!(row.starts_with('✓') && row.contains("ran 0s"), "{out}");
 }
+
+#[test]
+fn the_scene_device_line_says_off_by_default_and_on_with_its_address() {
+    let (c, d) = setup("doc-device", "claude");
+    let (_, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(line(&out, "scene device"), "✓ scene device — off", "{out}");
+    let on = config(&d, "claude").replace("[serve]\n", "[serve]\ndevice_addr = \"0.0.0.0:7779\"\n");
+    std::fs::write(&c.config, on).unwrap();
+    let (_, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(
+        line(&out, "scene device"),
+        "✓ scene device — on 0.0.0.0:7779, the scene to the LAN",
+        "{out}"
+    );
+}

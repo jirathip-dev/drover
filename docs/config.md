@@ -219,6 +219,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
 | `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
 | `spawn_pending_max_secs` | `300` | a spawn marker older than this is stale |
+| `admit_wait_secs` | `5` | a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING` |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |
 | `keychain_readers` | `3` | more Keychain readers up over 60 s alert `keychain-jammed` |
@@ -256,6 +257,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |
 | `guard_secs` | `180` | `turn done`'s UI check (`just guard`) runs this long at most; past it the turn ends and `ui-check` logs a timeout |
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
+| `hold_sample_secs` | `10` | `drover hold` at the front of the heavy line samples the host's admission this often |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
 | `orchestrator_reply_minutes` | `10` | an owner message with no orchestrator reply this long gets a `no reply yet` row |
@@ -265,7 +267,8 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `outbox_stale_minutes` | `5` | a remote lane's outbox line undelivered this long alerts `outbox-stale` |
 | `host_offline_minutes` | `15` | a remote host unreachable this long has its open lanes restarted on the main host |
 | `host_down_secs` | `60` | a host a pass could not reach gets no ssh from any drover command this long |
-| `kick_max_secs` | `300` | a kick running this long is ended by the next tick and logged `kick-killed` |
+| `kick_max_secs` | `300` | a kick running this long is ended by the next tick and logged `kick-killed` (a merge's: `gate_check_minutes`) |
+| `job_max` | `4` | issue jobs of one fleet running at once |
 | `promise_passes` | `{}` | drive passes a promise of each kind may stay open before `promise-missed` (default 2) |
 | `serve_shed_secs` | `5` | serve re-reads shed's lanes in the background this often |
 | `serve_remote_secs` | `10` | serve re-reads the remote hosts (ssh) in the background this often |

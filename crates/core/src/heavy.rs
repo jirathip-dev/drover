@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -68,6 +68,21 @@ pub struct Ticket {
     pub kind_max: Option<usize>,
 }
 
+impl Ticket {
+    /// Holder `lane`'s `kind` command, in line from now.
+    pub fn new(lane: String, kind: String, cmd: String, kind_max: Option<usize>) -> Self {
+        let since = crate::now();
+        Ticket {
+            lane,
+            kind,
+            cmd,
+            since,
+            running: false,
+            kind_max,
+        }
+    }
+}
+
 /// Every live command in the slot folder `dir`, in line order; a dead holder's file (its lock gone) is removed.
 pub fn line(dir: &Path) -> Vec<(String, Ticket)> {
     let mut all: Vec<(String, Ticket)> = (std::fs::read_dir(dir).into_iter().flatten().flatten())
@@ -106,14 +121,15 @@ fn admitted(dir: &Path, me: &str, max: usize) -> bool {
     false
 }
 
-/// Wait in `dir`'s line as `me` (past `wait_minutes`: `late`, then run anyway), run its command, free the slot on exit.
+/// Wait in `dir`'s line as `me` until a slot is free and `busy` names no reason, run its command, free the slot on exit; past `wait_minutes` `late` gets the reason and its `Some(code)` ends the wait without running.
 pub fn run(
     r: &dyn crate::runner::Runner,
     dir: &Path,
     mut me: Ticket,
     max: usize,
     wait_minutes: u64,
-    late: impl FnOnce(&Ticket),
+    busy: &dyn Fn() -> Option<String>,
+    late: impl FnOnce(&Ticket, &str) -> Option<i32>,
 ) -> Result<i32> {
     std::fs::create_dir_all(dir)?;
     let guard = File::create(dir.join(".lock"))?;
@@ -130,24 +146,80 @@ pub fn run(
     };
     save(&mut mine, &me)?;
     guard.unlock()?;
-    let timed_out = loop {
+    let limits = crate::config::limits();
+    let mut late = Some(late);
+    loop {
         guard.lock()?;
-        let go = admitted(dir, &name, max);
-        let timed_out = !go && crate::now() >= me.since + wait_minutes * 60;
+        let free = admitted(dir, &name, max);
+        guard.unlock()?;
+        let why = if free {
+            busy()
+        } else {
+            Some(format!("every heavy slot is taken ({max} on this host)"))
+        };
+        let timed_out = crate::now() >= me.since + wait_minutes * 60;
+        guard.lock()?;
+        let go = why.is_none() && admitted(dir, &name, max);
+        if !go && timed_out {
+            if let Some(code) = late.take().and_then(|f| f(&me, why.as_deref().unwrap_or_default())) {
+                guard.unlock()?;
+                std::fs::remove_file(&path).ok();
+                return Ok(code);
+            }
+        }
         if go || timed_out {
             me.running = true;
             save(&mut mine, &me)?;
+            guard.unlock()?;
+            break;
         }
         guard.unlock()?;
-        if go || timed_out {
-            break timed_out;
-        }
-        crate::clock::sleep(std::time::Duration::from_millis(crate::config::limits().poll_millis));
-    };
-    if timed_out {
-        late(&me);
+        let pause = if free && why.is_some() {
+            std::time::Duration::from_secs(limits.hold_sample_secs)
+        } else {
+            std::time::Duration::from_millis(limits.poll_millis)
+        };
+        crate::clock::sleep(pause);
     }
     let code = r.attached("bash", &["-c".into(), me.cmd.clone()]);
     std::fs::remove_file(&path).ok();
     code
+}
+
+/// `drover hold`: run `cmd` as holder `ci:<repo>` once the main host passes spawn admission and a heavy slot is free; 75 past `wait` minutes.
+pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[String]) -> Result<i32> {
+    let (prog, args) = cmd.split_first().context("hold: no command")?;
+    let cfg = crate::config::Config::load(&ctx.config)?;
+    let host = crate::hosts::cards(&cfg, r).into_iter().next().and_then(|c| c.1);
+    let repo = crate::config::env("GITHUB_REPOSITORY")
+        .and_then(|g| g.rsplit('/').next().map(String::from))
+        .or_else(|| {
+            Some(
+                std::env::current_dir()
+                    .ok()?
+                    .file_name()?
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        })
+        .unwrap_or_default();
+    let kind_max = host.and_then(|h| h.heavy_kind_max.get("ci").copied());
+    let me = Ticket::new(
+        format!("ci:{repo}"),
+        "ci".into(),
+        crate::hosts::quote(prog, args),
+        kind_max,
+    );
+    let max = host.and_then(|h| h.heavy_max).unwrap_or(3);
+    let on = crate::hosts::On::new(r, None);
+    let busy = || {
+        crate::hosts::gate(ctx, &cfg, &on)
+            .1
+            .map(|(code, why)| format!("{code}: {why}"))
+    };
+    let dir = ctx.state.with_file_name("heavy");
+    run(r, &dir, me, max, wait, &busy, |_, why| {
+        crate::stderr!("drover hold: waited {wait} min, not run: {why}");
+        Some(75)
+    })
 }

@@ -216,7 +216,7 @@ fn a_pass_stuck_past_twice_pass_max_secs_is_logged_stopped_and_its_lock_taken_ov
     assert_eq!(stuck.len(), 1, "{stuck:#?}");
     assert_eq!(
         (stuck[0].str("step"), stuck[0].val("stopped")),
-        (Some("after settle"), &json!(true)),
+        (Some("after spawns"), &json!(true)),
         "{stuck:#?}"
     );
     assert!(f.called("kill -KILL 4242"), "only that pass is stopped");

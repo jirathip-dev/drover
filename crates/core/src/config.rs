@@ -375,6 +375,11 @@ pub struct Serve {
     pub tailscale_https_port: Option<u16>,
     /// The Funnel listener, `POST /hooks/github` only (default `127.0.0.1:7778`; `""`: off).
     pub hooks_addr: Option<String>,
+    /// The scene device's LAN listener, `GET /screens/scene` only (unset or `""`: off).
+    pub device_addr: Option<String>,
+    /// `Host` names the device listener answers besides IP literals.
+    #[serde(default)]
+    pub device_hosts: Vec<String>,
     /// The Herd's theme, `<config dir>/themes/<name>/` or built-in (default `farm`).
     pub theme: Option<String>,
     /// The 0600 file holding `GITHUB_WEBHOOK_SECRET` (unset: webhooks off).
@@ -387,6 +392,9 @@ impl Serve {
     }
     pub fn hooks_addr(&self) -> String {
         self.hooks_addr.clone().unwrap_or_else(|| "127.0.0.1:7778".into())
+    }
+    pub fn device_addr(&self) -> Option<&str> {
+        self.device_addr.as_deref().filter(|a| !a.is_empty())
     }
 }
 
@@ -746,6 +754,7 @@ pub struct Limits {
     pub start_max: usize,
     pub start_release: StartRelease,
     pub spawn_pending_max_secs: u64,
+    pub admit_wait_secs: u64,
     pub acp_start_minutes: u64,
     pub webhook_poll_minutes: u64,
     pub keychain_readers: usize,
@@ -783,6 +792,7 @@ pub struct Limits {
     pub lane_read_secs: u64,
     pub guard_secs: u64,
     pub poll_millis: u64,
+    pub hold_sample_secs: u64,
     pub tick_beat_secs: u64,
     pub orchestrator_idle_minutes: u64,
     pub orchestrator_reply_minutes: u64,
@@ -793,6 +803,7 @@ pub struct Limits {
     pub host_offline_minutes: u64,
     pub host_down_secs: u64,
     pub kick_max_secs: u64,
+    pub job_max: usize,
     pub promise_passes: std::collections::BTreeMap<crate::promise::Kind, u64>,
     pub serve_shed_secs: u64,
     pub serve_remote_secs: u64,
@@ -881,6 +892,7 @@ impl Default for Limits {
             start_max: 2,
             start_release: StartRelease::Started,
             spawn_pending_max_secs: 300,
+            admit_wait_secs: 5,
             acp_start_minutes: 3,
             webhook_poll_minutes: 10,
             keychain_readers: 3,
@@ -918,6 +930,7 @@ impl Default for Limits {
             lane_read_secs: 5,
             guard_secs: 180,
             poll_millis: 20,
+            hold_sample_secs: 10,
             tick_beat_secs: 60,
             orchestrator_idle_minutes: 30,
             orchestrator_reply_minutes: 10,
@@ -928,6 +941,7 @@ impl Default for Limits {
             host_offline_minutes: 15,
             host_down_secs: 60,
             kick_max_secs: 300,
+            job_max: 4,
             promise_passes: std::collections::BTreeMap::new(),
             serve_shed_secs: 5,
             serve_remote_secs: 10,
@@ -1068,6 +1082,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a spawn marker older than this is stale",
     ),
     (
+        "admit_wait_secs",
+        "a spawn's admission waits this long for another admission on its host before `SPAWN_PENDING`",
+    ),
+    (
         "acp_start_minutes",
         "an ACP lane with no event back this long after its first turn is a failed start",
     ),
@@ -1182,6 +1200,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "poll_millis",
         "the pause between polls of a child process or disk probe",
     ),
+    (
+        "hold_sample_secs",
+        "`drover hold` at the front of the heavy line samples the host's admission this often",
+    ),
     ("tick_beat_secs", "a running tick writes `tick.beat` this often"),
     (
         "orchestrator_idle_minutes",
@@ -1217,8 +1239,9 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "kick_max_secs",
-        "a kick running this long is ended by the next tick and logged `kick-killed`",
+        "a kick running this long is ended by the next tick and logged `kick-killed` (a merge's: `gate_check_minutes`)",
     ),
+    ("job_max", "issue jobs of one fleet running at once"),
     (
         "promise_passes",
         "drive passes a promise of each kind may stay open before `promise-missed` (default 2)",

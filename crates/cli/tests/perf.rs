@@ -1078,7 +1078,6 @@ fn over_budget_at_the_last_slow_pass_a_fast_pass_starts_no_lane() {
         (&"start".into(), &"DISK_BUDGET".into()),
         "{start}"
     );
-    assert_eq!(kicked.data["spawns_launched"], 0, "{start}");
     assert!(!ev.iter().any(|e| e.kind == "spawn"), "{out}");
 }
 
@@ -1289,9 +1288,14 @@ fn boats_in(queued: bool, fleets: &str, lanes: &[(String, u64)]) -> (drover::Ctx
         append(&c.state, &Event::new(NOW - 900, fleet, Some(*n), "spawn", d)).unwrap();
         sh.lane(&agent, "working", &wt);
     }
-    let f = Fake::default()
-        .reply("sh -c nohup", "4242\n")
-        .reply("ssh", &format!("{} {}\n", "a".repeat(40), NOW - 600));
+    let mut f = Fake::default().reply("sh -c nohup", "4242\n");
+    let no_master = Out {
+        code: 255,
+        ..Out::default()
+    };
+    f.replies
+        .push(("ssh -oControlPath=/tmp/drover-ssh-%C -O check".into(), no_master));
+    let f = f.reply("ssh", &format!("{} {}\n", "a".repeat(40), NOW - 600));
     let o = OverSsh {
         f: Box::leak(Box::new(f)),
         hosts: sheds,

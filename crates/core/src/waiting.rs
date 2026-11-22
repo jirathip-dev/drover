@@ -275,6 +275,8 @@ pub struct Log<'a> {
     pub asks: Vec<&'a Event>,
     /// Each queued issue's blockers not merged yet (another repo's too), as `#N, cooee#N`.
     pub blocked: Vec<(&'a str, u64, String)>,
+    /// Blockers nothing will satisfy, each with the command that frees its issue (`scan` fills it from the config).
+    pub stranded: Vec<crate::queue::Stranded>,
 }
 
 impl<'a> Log<'a> {
@@ -295,6 +297,7 @@ impl<'a> Log<'a> {
             all,
             asks: open_asks(all),
             blocked,
+            stranded: vec![],
         }
     }
 
@@ -302,6 +305,12 @@ impl<'a> Log<'a> {
     pub fn blockers(&self, fleet: &str, n: u64) -> &str {
         let i = self.blocked.iter().find(|i| i.0 == fleet && i.1 == n);
         i.map_or("", |i| &i.2)
+    }
+
+    /// Who frees `fleet` #`n`'s block: the owner with the command when a blocker is stranded, else drive.
+    pub fn unblock(&self, fleet: &str, n: u64) -> (&'static str, Option<String>) {
+        let next = self.stranded.iter().find(|x| x.fleet == fleet && x.issue == n);
+        next.map_or(("drive", None), |x| ("owner", Some(x.next.clone())))
     }
 }
 
@@ -382,8 +391,17 @@ fn waits(
     if s.state == "merged" || pr["state"] == "MERGED" && !s.state.starts_with("fix") {
         return w("none", "nothing to do (merged): clean me", s.last_ts, None);
     }
-    if s.state == "closed" || pr["state"] == "CLOSED" {
+    if s.state == "closed" {
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
+    }
+    if pr["state"] == "CLOSED" {
+        let what = "PR closed outside drover: reopen it, respawn impl or drop the issue from the queue";
+        return w(
+            "owner",
+            what,
+            s.last_ts,
+            cmd("spawn", &format!(" {} --supersede", p.start())),
+        );
     }
     let mut on = crate::events::held_on(events, s);
     on.retain(|b| {
@@ -405,8 +423,8 @@ fn waits(
     }
     let on = log.blockers(f, n);
     if !on.is_empty() {
-        let what = format!("blocked by {on}");
-        return w("drive", &what, s.last_ts, None);
+        let (who, next) = log.unblock(f, n);
+        return w(who, &format!("blocked by {on}"), s.last_ts, next);
     }
     let pushed = pr["headRefOid"].as_str().unwrap_or_default();
     let mut base = pushed;
@@ -653,7 +671,8 @@ pub fn scan_where(
     live: bool,
     keep: impl Fn(&IssueState) -> bool,
 ) -> Vec<(IssueState, Waiting)> {
-    let (mut out, log) = (vec![], Log::new(events));
+    let (mut out, mut log) = (vec![], Log::new(events));
+    log.stranded = crate::events::with_states(events, |st| crate::queue::stranded(events, st, cfg));
     let view = crate::link::view::View::load(ctx, cfg).ok();
     let listed = view.as_ref().map(crate::link::view::View::sessions).unwrap_or_default();
     let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());

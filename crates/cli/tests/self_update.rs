@@ -561,12 +561,16 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_o
     assert!(out.contains(&format!("keep {dirty}: wip save failed")), "{out}");
     for w in &cleaned {
         assert!(
-            r.called(&format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}")),
+            r.called(&format!(
+                "git -C /tmp/does-not-matter/sendmeter worktree remove --force {w}"
+            )),
             "{out}"
         );
     }
     assert!(
-        !r.called(&format!("git -C /tmp/does-not-matter/sendmeter worktree remove {live}")),
+        !r.called(&format!(
+            "git -C /tmp/does-not-matter/sendmeter worktree remove --force {live}"
+        )),
         "{out}"
     );
     assert!(kinds(&c, "clean-failed").is_empty(), "a passing run alerts nothing");
@@ -705,7 +709,7 @@ fn scheduled_clean_lists_a_worktree_git_kept_dirty_and_exits_zero_but_fails_on_a
         w
     };
     let (kept, gone) = (lane(1), lane(2));
-    let remove = |w: &str| format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}");
+    let remove = |w: &str| format!("git -C /tmp/does-not-matter/sendmeter worktree remove --force {w}");
     let git = |f: Fake| {
         [&kept, &gone]
             .iter()

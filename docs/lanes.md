@@ -218,6 +218,13 @@ first served (a kind at its own cap lets later kinds by); after `heavy_wait_minu
 and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its `lane`, `kind`, `cmd`,
 `since` and `running`. Other commands are unchanged.
 
+A CI job on a self-hosted runner that shares the main host runs its step as `drover hold --wait <minutes> -- <cmd>`
+(#1492): it waits until the host passes spawn admission (`MEM_LOW`, `HOST_BUSY`, …) and a slot is free by the main
+host's `heavy_max`, holds that slot as kind `ci` and holder `ci:<repo>` (from `GITHUB_REPOSITORY`) while the command
+runs, and exits with its code. Lanes' heavy commands wait behind it as behind each other; at the front of the line it
+samples admission every `[limits] hold_sample_secs` (default 10). Past the wait it never runs the command: it exits
+75 and names the reason on stderr. `drover top` lists it under `holds`.
+
 `drover top` (#910; `--json` for the same data) shows what each live lane is really doing: every process under its
 worktree as a tree with its CPU %, run time and heavy kind, and `waiting for heavy slot <kind> <age>` for each of its
 commands in line; the header gives the host's load per CPU against `load_per_cpu`, heavy slots used of `heavy_max` and
@@ -296,11 +303,13 @@ the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end that fleet's starts in th
 #1320: each fleet's pass is its own process, `drover drive <fleet>`, under its own `drive-<fleet>.lock` lease (2 ×
 `[limits] pass_max_secs`; taken over once its pid is gone, or once it runs out: `pass-stuck`, that pid stopped), so cron,
 the service and the button never overlap on one fleet and a slow fleet never holds another. A pass ends itself at
-`pass_max_secs` (60) and logs `pass-slow` naming the step it was in. The fast job (`drover drive`, every `fast_secs`)
+`pass_max_secs` (60) and logs `pass-slow` naming the step it was in; it still stamps the fleet's `last pass`, so
+only a pass that never ends leaves it stale. The fast job (`drover drive`, every `fast_secs`)
 and the tick poll every host with no fresh word, then start each fleet's pass and wait for none; the service runs a
 loop per fleet instead, started at once by a wake. The tick's slow chores (disk budget, roots, offline hosts, orphans,
-repair, the runtime canary, stale panes, each fleet's closed issues, hotspots and backlog) run beside them. A spawn's admission (slot count, host room, its marker) runs
-under the short `admit.lock`, so two fleets' passes never both take the last slot. The board shows each fleet's
+repair, the runtime canary, stale panes, each fleet's closed issues, hotspots and backlog) run beside them. A spawn's admission places it first (host probes, no lock), then recounts that host's slots and takes its marker
+under the host's short `admit-<host>.lock` (#1583): two fleets' passes never both take a host's last slot, admissions
+on different hosts run at once, and a busy lock is waited for up to `[limits] admit_wait_secs` before `SPAWN_PENDING`. The board shows each fleet's
 `⟳ driving…` and its last pass's length.
 
 A fix lane may push back on a finding in its report with file:line proof; that is not a fix,

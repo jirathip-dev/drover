@@ -51,6 +51,8 @@ pub struct Top {
     pub heavy_max: usize,
     pub respawns_held: usize,
     pub lanes: Vec<Lane>,
+    /// `drover hold` jobs (holder `ci:<repo>`) running or waiting in the heavy line.
+    pub holds: Vec<crate::heavy::Ticket>,
 }
 
 fn ps(r: &dyn Runner, cfg: &Config) -> Vec<Proc> {
@@ -170,6 +172,10 @@ pub fn top(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Top> {
         heavy_max: main.and_then(|h| h.heavy_max).unwrap_or(3),
         respawns_held: held.filter(|a| a["code"] == "RESPAWN_PACED").count(),
         lanes,
+        holds: (line.iter())
+            .filter(|(_, t)| t.lane.starts_with("ci:"))
+            .map(|(_, t)| t.clone())
+            .collect(),
     })
 }
 
@@ -195,6 +201,10 @@ pub fn print(t: &Top, out: &mut dyn Write) -> Result<()> {
         for w in &l.waits {
             writeln!(out, "  waiting for heavy slot {} {}: {}", w.kind, age(w.secs), w.cmd)?;
         }
+    }
+    for h in &t.holds {
+        let at = if h.running { "running" } else { "waiting" };
+        writeln!(out, "{} {at}: {}", h.lane, h.cmd)?;
     }
     Ok(())
 }
