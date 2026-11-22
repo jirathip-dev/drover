@@ -18,7 +18,7 @@ pub(super) fn fire(
     fire_event(ctx, cfg, out, events, Event::new(ctx.now, fleet, issue, kind, d))
 }
 
-fn fire_event(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event], ev: Event) -> Result<()> {
+pub(super) fn fire_event(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event], ev: Event) -> Result<()> {
     let key = ev.data.get("key");
     if (events.iter())
         .any(|e| e.kind == ev.kind && e.fleet == ev.fleet && e.issue == ev.issue && e.data.get("key") == key)

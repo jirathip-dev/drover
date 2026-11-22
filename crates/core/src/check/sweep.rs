@@ -95,6 +95,21 @@ pub fn sweep(ctx: &Ctx, cfg: &Config, on: &On, host: &str, out: &mut dyn Write, 
     Ok(freed)
 }
 
+pub(super) fn hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, how: Sweep) -> Result<u64> {
+    let mut total = sweep(ctx, cfg, &On::new(r, None), "local", out, how)?;
+    let mut tried = std::collections::BTreeSet::new();
+    let hosts = cfg.hosts.iter().filter(|h| h.1.enabled);
+    for (name, m) in hosts.filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
+        if tried.insert(m) {
+            match sweep(ctx, cfg, &On::new(r, Some(m)), name, out, how) {
+                Ok(b) => total += b,
+                Err(e) => writeln!(out, "scratch: {name}: {e:#}")?,
+            }
+        }
+    }
+    Ok(total)
+}
+
 pub(super) fn reported(ctx: &Ctx, cfg: &Config, on: &On) -> Result<()> {
     let view = on.machine.and_then(|_| crate::link::view::View::load(ctx, cfg).ok());
     match view.and_then(|v| v.failing(on.machine)) {
@@ -132,10 +147,10 @@ fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, (host, b): (&str, &str), out: &mut
     let scr = b.ends_with(crate::spawn::SCRATCH);
     let (agents, events) = (crate::session::live_on(on)?, working(&ctx.state)?);
     let states = fold(&events);
-    let agent = |n: &str| agents.iter().find(|a| a.name == n);
+    let agent = |n: &str| agents.iter().find(|a| a.name == lane(n));
     let lanes = lanes(&events);
-    let spawn = |n: &str| last_spawn(&events, n);
-    let spawned = |n: &str| (lanes.iter()).any(|e| e.kind.starts_with("spawn") && e.str("agent") == Some(n));
+    let spawn = |n: &str| last_spawn(&events, lane(n));
+    let spawned = |n: &str| (lanes.iter()).any(|e| e.kind.starts_with("spawn") && e.str("agent") == Some(lane(n)));
     let low = how == Sweep::Tick && host::free_gb(on).is_some_and(|g| g < cfg.limits.min_free_gb);
     let (mut why, total) = (BTreeMap::new(), names.len());
     for (n, _) in names {
@@ -168,7 +183,7 @@ fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, (host, b): (&str, &str), out: &mut
         let w = why.get(n).copied().unwrap_or_default();
         writeln!(out, "{what}: {host}: removed {b}/{n} {:.2} GB ({})", gb(*bytes), w)?;
         if let Some(sp) = spawn(n) {
-            let d = json!({"agent": n, "bytes": bytes, "why": w, "host": host, "path": format!("{b}/{n}")});
+            let d = json!({"agent": lane(n), "bytes": bytes, "why": w, "host": host, "path": format!("{b}/{n}")});
             emit(
                 &ctx.state,
                 cfg,
@@ -204,6 +219,12 @@ pub fn drop_scratch(r: &dyn Runner, sp: &Event, out: &mut dyn Write) -> Result<(
     Ok(())
 }
 
+fn lane(dir: &str) -> &str {
+    dir.strip_prefix('.')
+        .and_then(|d| d.strip_suffix(".clone"))
+        .unwrap_or(dir)
+}
+
 fn scratch(on: &On, b: &str, rm: &[String]) -> Result<Vec<(String, u64)>> {
     if on.machine.is_some() {
         let args = crate::runner::argv(&["-c", SCRATCH, "sh", b]);
@@ -219,8 +240,10 @@ fn scratch(on: &On, b: &str, rm: &[String]) -> Result<Vec<(String, u64)>> {
     let root = crate::config::expand(b);
     let ls = std::fs::read_dir(&root).into_iter().flatten().flatten();
     let all = ls
-        .filter(|e| e.path().is_dir() && !e.file_name().as_encoded_bytes().starts_with(b"."))
-        .map(|e| (e.file_name().to_string_lossy().into_owned(), 0));
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.starts_with('.') || lane(n) != n)
+        .map(|n| (n, 0));
     if rm.is_empty() {
         return Ok(all.collect());
     }
@@ -235,9 +258,9 @@ fn scratch(on: &On, b: &str, rm: &[String]) -> Result<Vec<(String, u64)>> {
 
 const SCRATCH: &str = r#"b=$1; shift; case $b in "~/"*) b=$HOME/${b#"~/"};; esac
 cd "$b" 2>/dev/null || exit 0
-[ $# -eq 0 ] && { for d in */; do [ -d "$d" ] && echo "${d%/}"; done; exit 0; }
+[ $# -eq 0 ] && { for d in */ .?*.clone/; do [ -d "$d" ] && echo "${d%/}"; done; exit 0; }
 du -sk -- "$@" 2>/dev/null | sort -rn | while read -r s d; do
-  l=$(find "$d" -maxdepth 4 -name .cargo-lock 2>/dev/null)
+  l=$(find "$d" -maxdepth 5 \( -name .cargo-lock -o -name .lock -o -name build.db \) 2>/dev/null)
   [ -n "$l" ] && command -v lsof >/dev/null && [ -n "$(lsof $l 2>/dev/null)" ] && continue
   rm -rf "./${d:?}" && echo "$s $d"
 done

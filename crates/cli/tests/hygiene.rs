@@ -372,3 +372,184 @@ fn scan_lists_hits_by_pattern_with_links_and_changes_nothing() {
     );
     assert_eq!(calls.len(), 3);
 }
+
+#[test]
+fn the_check_targets_gh_repo_then_the_checkouts_remote_then_the_fleet() {
+    let d = dir("hygiene-target");
+    let f = d.join("f.md");
+    std::fs::write(&f, "for the Globex screens\n").unwrap();
+    let co = d.join("co");
+    std::fs::create_dir(&co).unwrap();
+    for args in [
+        &["init", "-q"][..],
+        &["remote", "add", "origin", "git@github.com:o/closed.git"],
+    ] {
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(&co)
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    }
+    let f = f.display();
+    for cmd in [
+        format!("gh issue create --repo o/closed --title t --body-file {f}"),
+        format!("gh issue create --repo=O/Closed --title t --body-file {f}"),
+        format!("gh issue create -R github.com/o/closed --title t --body-file {f}"),
+        format!("cd co && gh issue create --title t --body-file {f}"),
+    ] {
+        let out = bash(&d, "open", &cmd);
+        assert!(
+            !out.contains("PUBLIC_LEAK"),
+            "a private target is not checked: {cmd}: {out}"
+        );
+    }
+    let out = bash(
+        &d,
+        "open",
+        &format!("gh issue create --repo o/other --title t --body-file {f}"),
+    );
+    assert!(
+        out.contains("REFUSED PUBLIC_LEAK") && out.contains("private-name #1, and o/other is public"),
+        "{out}"
+    );
+    let out = bash(
+        &d,
+        "open",
+        &format!("cd co && gh issue create -R o/other --title t --body-file {f}"),
+    );
+    assert!(
+        out.contains("and o/other is public"),
+        "--repo wins over the checkout: {out}"
+    );
+    let out = bash(&d, "open", &format!("gh issue create --title t --body-file {f}"));
+    assert!(
+        out.contains("private-name #1, and o/open is public"),
+        "no checkout: the fleet's repo: {out}"
+    );
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-C"])
+        .arg(dir)
+        .args(args)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "git {args:?}");
+}
+
+fn check(d: &Path, env: &[(&str, &str)], args: &[&str]) -> (i32, String) {
+    let o = Command::new(env!("CARGO_BIN_EXE_drover"))
+        .env_remove("DROVER_PRIVATE_NAMES")
+        .env_remove("DROVER_LANE")
+        .env("HOME", d)
+        .env("FLEET_CONFIG", d.join("none.toml"))
+        .env("FLEET_STATE", d.join("state/events.jsonl"))
+        .envs(env.iter().copied())
+        .args([&["hygiene", "check"][..], args].concat())
+        .current_dir(d.join("repo"))
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr);
+    (o.status.code().unwrap(), s)
+}
+
+fn checkout(name: &str) -> std::path::PathBuf {
+    let d = tmpdir(name);
+    let repo = d.join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("a.md"), "intro\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-qm", "base"]);
+    std::fs::write(repo.join("a.md"), "intro\nports the globex screens\n").unwrap();
+    std::fs::write(repo.join("untracked.md"), "Acme Corp\n").unwrap();
+    git(&repo, &["add", "a.md"]);
+    git(&repo, &["commit", "-qm", "work for Acme Corp"]);
+    std::fs::write(d.join("body.md"), "## For humans\n\nfor Globex\n").unwrap();
+    d
+}
+
+#[test]
+fn check_fails_on_a_name_in_the_tree_a_commit_message_and_the_pr_body_never_printing_it() {
+    let d = checkout("hygiene-check");
+    let body = d.join("body.md");
+    let env = [("DROVER_PRIVATE_NAMES", "Globex\n\n  Acme Corp \n")];
+    let (code, out) = check(&d, &env, &["--base", "main~1", "--pr-body", body.to_str().unwrap()]);
+    assert_eq!(code, 1, "{out}");
+    let sha = Command::new("git")
+        .arg("-C")
+        .arg(d.join("repo"))
+        .args(["rev-parse", "--short=7", "HEAD"])
+        .output();
+    let sha = String::from_utf8(sha.unwrap().stdout).unwrap();
+    assert_eq!(
+        out,
+        format!(
+            "private-name #1 at a.md:2\nprivate-name #2 at commit {} message\nprivate-name #1 at PR body:3\n\
+             3 hit(s) of 2 private name(s); names are never printed\n",
+            sha.trim()
+        )
+    );
+    let (code, out) = check(&d, &[("DROVER_PRIVATE_NAMES", "Initech")], &["--base", "main~1"]);
+    assert_eq!(code, 0, "{out}");
+}
+
+#[test]
+fn check_with_no_list_fails_list_missing_and_reads_the_lanes_fleet_list_on_its_host() {
+    let d = checkout("hygiene-check-list");
+    for env in [&[][..], &[("DROVER_PRIVATE_NAMES", " \n")]] {
+        let (code, out) = check(&d, env, &[]);
+        assert_eq!(code, 1, "{out}");
+        assert!(out.starts_with("list-missing: "), "{out}");
+    }
+    std::fs::write(d.join("none.toml"), fleets()).unwrap();
+    let (code, out) = check(&d, &[("DROVER_LANE", "open:24:impl")], &[]);
+    assert_eq!(
+        (code, out.as_str()),
+        (
+            1,
+            "private-name #1 at a.md:2\n1 hit(s) of 2 private name(s); names are never printed\n"
+        )
+    );
+    let (code, out) = check(&d, &[], &["closed"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "o/closed (closed) is private: nothing to check\n")
+    );
+}
+
+#[test]
+fn push_writes_the_list_as_the_repos_secret_on_stdin_and_never_prints_it() {
+    let c = ctx(&tmpdir("hygiene-push-secret"), &fleets());
+    let r = Fake::default().reply("gh secret set", "");
+    let (code, out) = run(&c, &r, &["hygiene", "push", "open"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "wrote 2 name(s) to o/open's PRIVATE_NAMES secret\n")
+    );
+    assert_eq!(
+        *r.inputs.borrow(),
+        [(
+            "gh secret set PRIVATE_NAMES -R o/open".to_string(),
+            "Globex\nAcme Corp".to_string()
+        )]
+    );
+    assert!(r.calls.borrow().iter().all(|l| !l.contains("Globex")));
+    let (code, _) = run(&c, &r, &["hygiene", "push", "closed"]);
+    assert_eq!((code, r.inputs.borrow().len()), (1, 1));
+}
+
+#[test]
+fn push_is_the_owners_never_a_lanes_or_an_orchestrators() {
+    let d = dir("hygiene-push-hook");
+    let cmd = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "drover hygiene push open"}, "cwd": d});
+    for lane in ["open:24:impl", "open:-:orchestrator"] {
+        let out = hook(&d, &d, lane, &[], &cmd.to_string()).1;
+        assert!(out.contains("REFUSED OWNER_ONLY"), "{lane}: {out}");
+    }
+    assert!(!bash(&d, "open", "drover hygiene check --base origin/staging").contains("REFUSED"));
+}

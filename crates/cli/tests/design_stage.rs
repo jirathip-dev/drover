@@ -113,7 +113,9 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "approve"]).0, 0);
     assert_eq!(kinds(&c, "design-approved").len(), 1);
     assert!(sh.called("kill", "sendmeter-design-12"), "the design pane goes");
-    let busy = fake(&c, HEAD).once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
+    let busy = fake(&c, HEAD)
+        .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n")
+        .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
     drive(&c, &busy);
     let p = drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
     assert_eq!((p.action.as_str(), p.reason.as_deref()), ("approve", Some("HOST_BUSY")));

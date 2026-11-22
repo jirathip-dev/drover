@@ -1,0 +1,8 @@
+This month's dependency update for `{fleet}`, worked by a `deps` lane (#1488).
+
+1. Bump every direct dependency of every ecosystem in the repo (Cargo, pnpm or npm, SwiftPM, GitHub Actions pinned
+   by sha, the repo's pinned tools) to its latest release, in one PR.
+2. Fix what breaks. A bump you cannot make green: leave it out and list it in the PR body with the reason.
+3. Add no dependency and remove none.
+4. The PR body carries a table: each dependency, its old and new version, and each lockfile's package count before
+   and after.

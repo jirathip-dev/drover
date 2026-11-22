@@ -40,6 +40,10 @@ You talk with the owner in one drover chat thread; your `.brief.md` names the th
 - A config change: copy fleet.toml into your folder, edit the copy, then `drover config propose <thread> <copy>`
   (`[orchestrator] allow` too): the owner gets its diff with [apply] [discard], and a `system` line tells you how it
   settled.
+- #1479: an issue that adds a fleet.toml key gets the AC "PR body has a `## Rollout` section with the exact lines"
+  (fenced, and which fleets they go in). When its merge row `#<n> merged with a rollout, not applied yet` arrives,
+  draft the card at once: `drover config propose <thread> <copy> --rollout <n>`; the owner's apply closes the
+  rollout (`rollout-done`), or the owner dismisses it (`drover rollout dismiss <fleet> <n>`).
 - A secret the work needs (an API key): `drover secret request <thread> <NAME> --why "<what for>"`. The owner
   enters it on a paired device; it goes to the keychain and you get `secret <NAME> set ✓`. Fleet `env` refers to it
   as `secret:<NAME>` (propose that like any config change).

@@ -42,6 +42,11 @@ pub fn kick(ctx: &Ctx, fleet: &str, issue: u64, why: &str, id: Option<&str>) -> 
     v.at("pid").as_u64().and_then(|p| u32::try_from(p).ok())
 }
 
+/// Fleet `fleet`'s pass started by the running service's loop for it, at once or right after the one it runs; false: no service listens.
+pub fn wake(ctx: &Ctx, fleet: &str) -> bool {
+    call(ctx, &json!({"wake": fleet})).is_some()
+}
+
 /// A lane on another host: `args` run by the service at `url` (`DROVER_SERVICE`) as the token's lane; a `--file` travels as its text. The token rides in the body, never in argv.
 pub fn post(r: &dyn Runner, url: &str, token: &str, args: &[String]) -> Result<Out> {
     let mut files = serde_json::Map::new();

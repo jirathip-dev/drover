@@ -24,7 +24,7 @@ impl Runner for Dead {
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
-        let air = prog == "ssh" && args.iter().any(|a| a == "air") && args[0] != "-G";
+        let air = prog == "ssh" && args.iter().any(|a| a == "air") && args[0] != "-G" && args[1] != "-O";
         if !air || (self.probe_ok && line == PROBE) {
             return self.f.run_in(prog, args, input);
         }

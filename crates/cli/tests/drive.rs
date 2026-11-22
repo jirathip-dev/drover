@@ -3,6 +3,8 @@ mod common;
 mod remote_unlisted;
 #[path = "drive/rev_unlisted.rs"]
 mod rev_unlisted;
+#[path = "drive/undriven.rs"]
+mod undriven;
 #[path = "drive/update_limit.rs"]
 mod update_limit;
 use common::*;
@@ -109,7 +111,8 @@ fn fake<A: AsRef<str>, B: AsRef<str>, C: AsRef<str>>(live: &[(A, B, C)]) -> Fake
 
 fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
-    let (code, out) = run(c, r, &["drive"]);
+    look(c, r);
+    let (code, out) = run(c, r, &["drive", "sendmeter"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let new = read(&c.state).unwrap().to_vec().split_off(before);
     (
@@ -400,7 +403,7 @@ fn red_ci_after_pass_is_a_fail_with_the_log_tail() {
         )
         .reply("git -C", "");
     let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["ci-red"], "{out}");
+    assert_eq!(steps, ["ci-red", "fix"], "{out}");
     let all = read(&c.state).unwrap();
     let v = all.iter().rev().find(|e| e.kind == "verdict").unwrap();
     assert_eq!(v.str("verdict"), Some("FAIL"));
@@ -428,7 +431,10 @@ fn clean_reclaims_merged_lanes() {
         .reply("git -C", "");
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["clean"], "{out}");
-    let rm = format!("git -C /tmp/does-not-matter/sendmeter worktree remove {}", wt.display());
+    let rm = format!(
+        "git -C /tmp/does-not-matter/sendmeter worktree remove --force {}",
+        wt.display()
+    );
     assert!(r.called(&rm), "{:?}", r.calls.borrow());
     std::fs::remove_dir_all(&wt).unwrap();
     idle(&c, &r);
@@ -508,7 +514,7 @@ fn a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip() 
             .starts_with("wip/sendmeter-impl-12-20261107-120000-"),
         "{e:?}"
     );
-    let rm = format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}");
+    let rm = format!("git -C /tmp/does-not-matter/sendmeter worktree remove --force {w}");
     assert!(close < r1.at(&rm).expect("removed"));
 }
 
@@ -619,7 +625,10 @@ fn a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned() {
     assert_eq!(state(&c), "merged");
     assert!(!r.called("gh pr merge") && !r.called("gh issue comment") && !r.called("gh issue close"));
     assert_eq!(steps, ["clean"], "{out}");
-    let rm = format!("git -C /tmp/does-not-matter/sendmeter worktree remove {}", wt.display());
+    let rm = format!(
+        "git -C /tmp/does-not-matter/sendmeter worktree remove --force {}",
+        wt.display()
+    );
     assert!(r.called(&rm), "{:?}", r.calls.borrow());
     std::fs::remove_dir_all(&wt).unwrap();
     assert!(!run(&c, &r, &["waiting", "sendmeter"]).1.contains("#12"));
@@ -672,7 +681,9 @@ fn paused_fleets_and_host_busy_are_no_ops() {
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     assert_eq!(run(&c, &Fake::default(), &["pause", "sendmeter"]).0, 0);
     let r = fake(NONE).reply("git -C", "");
-    idle(&c, &r);
+    let before = read(&c.state).unwrap().len();
+    assert_eq!(run(&c, &r, &["drive", "sendmeter"]), (0, String::new()));
+    assert_eq!(read(&c.state).unwrap().len(), before);
     assert!(sh().methods().iter().all(|m| m == "events"), "{:?}", sh().methods());
     assert_eq!(
         drover::drive::last_pass(&c, "sendmeter"),
@@ -790,9 +801,13 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     );
     assert_ne!(started("sendmeter-impl-12"), [] as [std::string::String; 0]);
     let drive = get(&s)["fleets"][0]["drive"].clone();
+    let line = drive["line"].as_str().unwrap_or_default();
     assert_eq!(
-        (&drive["tone"], &drive["line"]),
-        (&json!("g"), &json!("drive · 0s ago · started 1 · merged 0 · 0 s")),
+        (
+            &drive["tone"],
+            line.starts_with("drive · 0s ago · started 1 · merged 0 · ") && line.ends_with(" s")
+        ),
+        (&json!("g"), true),
         "{drive}"
     );
 }
@@ -1442,7 +1457,7 @@ fn every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_
     let mut out = vec![];
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let (f, shed) = (busy(), sh());
-    drover::drive::drive(&c, &cfg, &shed.on(&f), &mut out, Some("sendmeter"), true, false).unwrap();
+    drover::drive::drive(&c, &cfg, &shed.on(&f), &mut out, "sendmeter", true).unwrap();
     let p = passes(&c);
     assert_eq!(p.len(), 2, "{p:?}");
     assert_eq!((p[0].str("by"), p[1].str("by")), (Some("auto"), Some("manual")));
@@ -1499,7 +1514,7 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
     assert!(drover::drive::running(&c, "sendmeter"));
     let (f, mut out) = (fake(NONE).reply("git -C", "").reply("kill -0 4242", ""), vec![]);
     let (r, shed) = (Other(&f, &c, 0.into()), sh());
-    drover::drive::drive(&c, &cfg, &shed.on(&r), &mut out, Some("sendmeter"), true, false).unwrap();
+    drover::drive::drive(&c, &cfg, &shed.on(&r), &mut out, "sendmeter", true).unwrap();
     let out = String::from_utf8(out).unwrap();
     assert_eq!(
         out,
@@ -1519,7 +1534,7 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
 
     lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let mut out = vec![];
-    drover::drive::drive(&c, &cfg, &shed.on(&f), &mut out, Some("sendmeter"), true, false).unwrap();
+    drover::drive::drive(&c, &cfg, &shed.on(&f), &mut out, "sendmeter", true).unwrap();
     assert_eq!(
         String::from_utf8(out).unwrap(),
         "drive: still driving · result will appear here\n"
@@ -1638,51 +1653,11 @@ fn under_limited_admission_a_review_goes_before_the_fleets_new_start() {
 
 fn fast(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
-    let (code, out) = run(c, r, &["drive", "--fast"]);
+    let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let new = read(&c.state).unwrap().to_vec().split_off(before);
     let steps = new.iter().filter(|e| e.kind == "driven");
     (out, steps.map(|e| e.str("step").unwrap().to_string()).collect())
-}
-
-#[test]
-fn the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane() {
-    let c = setup("drive-fast-merge");
-    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
-    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
-    let rev = lane(&c, 20, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
-    std::fs::write(rev.join("verdict.md"), "PASS\nall good\n").unwrap();
-    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
-    let head = sha("abc");
-    let r = fake(NONE)
-        .reply("kill -0 4242", "")
-        .reply("gh pr view issue-12", &pr(&head, "green"))
-        .reply(
-            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
-            &format!("{head}\n"),
-        )
-        .reply(&format!("git -C {} log", rev.display()), &format!("{head} 20"))
-        .reply("git -C", "")
-        .reply("gh pr merge 100", "")
-        .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
-        .reply("gh issue", "");
-    lease_as(&c, "drive-sendmeter-12.lock", 4242, c.now, 3600);
-    assert_eq!(fast(&c, &r).1, Vec::<String>::new());
-    assert!(drover::db::release(&c.state, "drive-sendmeter-12.lock", None));
-    let (out, steps) = fast(&c, &r);
-    assert_eq!(steps, ["verdict", "merge"], "{out}");
-    assert_eq!(state(&c), "merged");
-    assert!(started("").is_empty() && !r.called("git -C /tmp/does-not-matter/sendmeter fetch"));
-    assert_eq!(
-        lease_on(&c, "drive-sendmeter.lock").unwrap().pid,
-        4242,
-        "the slow lock stays"
-    );
-    assert_eq!(drover::drive::last_pass(&c, "sendmeter"), None, "no slow pass ran");
-    assert!(
-        lease_on(&c, "drive-sendmeter-12.lock").is_none(),
-        "the issue lock is released"
-    );
 }
 
 #[test]
@@ -2221,7 +2196,7 @@ fn a_workflow_that_never_started_is_ci_broken_and_gets_a_fix_round() {
         )
         .reply("git -C", "");
     let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["ci-red"], "{out}");
+    assert_eq!(steps, ["ci-red", "fix"], "{out}");
     let all = read(&c.state).unwrap();
     let v = all.iter().rev().find(|e| e.kind == "verdict").unwrap();
     assert_eq!(v.str("verdict"), Some("FAIL"));
@@ -2719,7 +2694,7 @@ fn the_replayed_cooee_1_log_recovers_in_one_pass() {
 fn passes_follow_a_fleet_added_then_removed_in_fleet_toml() {
     let c = setup("drive-fleets");
     let r = fake(NONE).reply("git -C", "");
-    drive(&c, &r);
+    fast(&c, &r);
     let passes = || {
         let e = read(&c.state).unwrap();
         e.iter()
@@ -2739,12 +2714,12 @@ fn passes_follow_a_fleet_added_then_removed_in_fleet_toml() {
             && out.contains("→ drive hasn't passed this fleet yet: drover drive drover"),
         "{out}"
     );
-    let (out, _) = drive(&c, &r);
+    let (out, _) = fast(&c, &r);
     assert!(out.contains("drover #12 start: "), "{out}");
     assert!(!started("drover-impl-12").is_empty(), "{out}");
     assert_eq!(passes(), 1);
     reconfig(&c, CONFIG);
-    drive(&c, &r);
+    fast(&c, &r);
     assert_eq!(passes(), 1, "a removed fleet gets no pass");
 }
 
@@ -2972,4 +2947,29 @@ fn a_draft_pr_that_cannot_be_marked_ready_says_so_in_status() {
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("PR is a draft"), "{out}");
     assert!(!out.contains("merging"), "{out}");
+}
+
+#[test]
+fn a_disk_low_hold_lists_only_the_worktrees_there_now() {
+    let c = fanout("drive-disk-held", "", &["12"]);
+    for (n, name) in [(5, "issue-5"), (6, "issue-6")] {
+        let wt = c.worktrees.join("sendmeter").join(name);
+        std::fs::create_dir_all(&wt).unwrap();
+        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "worktree": wt});
+        append(&c.state, &Event::new(c.now - 900, "sendmeter", Some(n), "spawn", d)).unwrap();
+        let m = json!({"pr": "1", "merge_sha": "m", "into": "staging"});
+        append(&c.state, &Event::new(c.now - 800, "sendmeter", Some(n), "merged", m)).unwrap();
+    }
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/issue-6")).unwrap();
+    let why = "REFUSED DISK_LOW: local: 8.0 GB free < 10; `drover clean --yes` frees 2 lane worktree(s) there: issue-5, issue-6";
+    ev(
+        &c,
+        c.now - 60,
+        "driven",
+        json!({"step": "start", "code": "DISK_LOW", "result": why}),
+    );
+    let s = run(&c, &Fake::default(), &["status", "sendmeter"]).1;
+    let want =
+        "DISK_LOW (local: 8.0 GB free < 10; `drover clean --yes` frees 1 lane worktree(s) there: issue-5) · 60s ago";
+    assert!(s.contains(want), "{s}");
 }

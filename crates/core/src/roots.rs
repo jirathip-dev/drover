@@ -362,3 +362,35 @@ fn forget(local: &Path, wt: &Path, branch: &str) -> Result<()> {
     }
     Ok(())
 }
+
+const WARM: &str = r#"b=$1 t=$2 f=$3
+[ -e "$t" ] && exit 0
+s=$(ls -td "$b/$f"-*/ 2>/dev/null | head -n 1)
+[ -n "$s" ] || exit 0
+s=${s%/} tmp="$b/.${t##*/}.clone"
+printf '%s\n' "$s"
+case $(uname -s) in Darwin) cp -cR "$s" "$tmp" ;; *) cp -R --reflink=always "$s" "$tmp" ;; esac && [ ! -e "$t" ] && mv "$tmp" "$t" && exit 0
+rm -rf "$tmp"
+exit 1"#;
+
+/// `spawn::clone_warm` on a remote host: lane build folder `t` cloned there, in one call, from the newest of its fleet's lanes' beside it; the `build-cloned` data, if any.
+pub fn clone_warm_on(on: &On, fleet: &str, t: &str) -> Option<serde_json::Value> {
+    on.machine?;
+    let (t, d) = (Path::new(t), t);
+    let b = t.parent().filter(|b| b.ends_with(BUILD))?.to_string_lossy();
+    let at = crate::clock::instant();
+    let (from, err) = match on.run("sh", &crate::runner::argv(&["-c", WARM, "sh", &b, d, fleet])) {
+        Ok(o) if o.code == 0 && o.stdout.trim().is_empty() => return None,
+        Ok(o) => (
+            o.stdout.lines().next().map(str::to_owned),
+            (o.code != 0).then_some(o.stderr),
+        ),
+        Err(e) => (None, Some(format!("{e:#}"))),
+    };
+    let errs: Vec<String> = err
+        .map(|e| e.trim().lines().take(5).collect::<Vec<_>>().join("\n"))
+        .into_iter()
+        .collect();
+    let dirs: Vec<&str> = errs.is_empty().then_some(d).into_iter().collect();
+    Some(json!({"dirs": dirs, "from": from, "secs": at.elapsed().as_secs(), "errors": errs}))
+}

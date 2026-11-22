@@ -28,7 +28,8 @@ impl Runner for Dropped {
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, _limit: Duration) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
-        let air = prog == "ssh" && args.iter().any(|a| a == "air") && args[0] != "-G";
+        let air =
+            prog == "ssh" && args.iter().any(|a| a == "air") && args[0] != "-G" && !args.iter().any(|a| a == "-O");
         if !air || line == PROBE {
             return self.0.run_in(prog, args, input);
         }
@@ -167,7 +168,7 @@ fn a_tick_past_its_budget_still_pushes_a_remote_lanes_commits_every_pass() {
             "pass {pass}: {out}"
         );
         assert!(
-            out.contains("tick: past its 0 s budget; skipped: clean, lesson, triage, hotspots, compact"),
+            out.contains("tick: past its 0 s budget; skipped: clean, lesson, triage, deps, hotspots, compact"),
             "pass {pass}: {out}"
         );
     }

@@ -214,7 +214,7 @@ fn drive_refuses_starts_over_budget() {
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#);
-    let (code, out) = run(&c, &r, &["drive"]);
+    let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains("sendmeter #1 start: REFUSED DISK_BUDGET: worktrees"),
@@ -661,4 +661,197 @@ fn a_verdict_frees_its_reviewers_scratch() {
     assert!(!rev.exists(), "{out}");
     assert!(imp.exists(), "the builder's scratch stays: {out}");
     assert!(out.contains("(verdict recorded)"), "{out}");
+}
+
+fn repo(name: &str, extra: &str) -> (drover::Ctx, PathBuf, PathBuf) {
+    let d = tmpdir(name);
+    let (origin, local) = (d.join("origin.git"), d.join("local"));
+    git(&d, &["init", "-q", "--bare", origin.to_str().unwrap()]);
+    git(&d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
+    git(&local, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&local, &["push", "-q", "origin", "HEAD"]);
+    let config = CONFIG
+        .replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap())
+        .replace(
+            "integration = \"staging\"   # never main",
+            &format!("integration = \"staging\"\n{extra}"),
+        );
+    (ctx(&d, &config), origin, local)
+}
+
+fn worktree(c: &drover::Ctx, local: &Path, n: u64, role: &str) -> PathBuf {
+    let p = c.worktrees.join("sendmeter").join(format!("{role}-{n}"));
+    let b = format!("issue-{n}-{role}");
+    git(local, &["worktree", "add", "-q", "-b", &b, p.to_str().unwrap()]);
+    std::fs::write(p.join(".brief.md"), "brief").unwrap();
+    let agent = format!("sendmeter-{role}-{n}");
+    let d = json!({"role": role, "agent": agent, "worktree": p, "pane": agent, "workspace": ""});
+    ev(c, 10, n, "spawn", d);
+    p
+}
+
+fn merged(c: &drover::Ctx, n: u64, head: &str) {
+    let d = json!({"pr": "1", "merge_sha": "m", "verdict_sha": head, "into": "staging"});
+    ev(c, 50, n, "merged", d);
+}
+
+fn put(wt: &Path, file: &str, body: &str) {
+    let p = wt.join(file);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, body).unwrap();
+}
+
+const TOKEN: &str = concat!("TOKEN=gh", "p_abcdefghijklmnopqrstu1234\n");
+
+fn clean_yes(c: &drover::Ctx) -> String {
+    let r = GitHerdr(Fake::default().reply("date -r", "20261102-072000\n"));
+    let (code, out) = run(c, &r, &["clean", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    out
+}
+
+#[test]
+fn a_merged_lane_under_a_bridge_whose_agent_is_gone_is_removed_a_live_one_kept() {
+    let (c, _, local) = repo("clean-hollow", "");
+    let sh = FakeShed::attached(&c);
+    let (gone, live) = (worktree(&c, &local, 15, "impl"), worktree(&c, &local, 16, "impl"));
+    for (n, wt, rss) in [(15, &gone, 0), (16, &live, 90)] {
+        merged(&c, n, "");
+        let name = format!("sendmeter-impl-{n}");
+        sh.lane(&name, "idle", wt.to_str().unwrap());
+        sh.set(&name, |t| {
+            (t["acp"], t["resources"]) = (json!("claude"), json!({"rss_mb": rss, "cpu_pct": 0}));
+        });
+    }
+    let out = clean_yes(&c);
+    assert!(out.contains(&format!("removed {}", gone.display())), "{out}");
+    assert!(!gone.exists(), "{out}");
+    assert!(out.contains(&format!("keep {}: live agent", live.display())), "{out}");
+    assert!(live.exists(), "a live agent's lane is never removed: {out}");
+}
+
+#[test]
+fn a_merged_lanes_pr_commits_need_no_wip_save() {
+    let (c, origin, local) = repo("clean-merged-head", "public = true\nprivate_names = [\"Initech\"]");
+    let _sh = FakeShed::attached(&c);
+    let wt = worktree(&c, &local, 14, "impl");
+    put(&wt, "SignIn.swift", "let org = \"Initech\"\n");
+    git(&wt, &["add", "SignIn.swift"]);
+    git(&wt, &["commit", "-q", "-m", "sign in"]);
+    git(&wt, &["push", "-q", "origin", "HEAD:refs/heads/issue-14-impl"]);
+    let head = git(&wt, &["rev-parse", "HEAD"]).trim().to_string();
+    git(&wt, &["push", "-q", "origin", "--delete", "issue-14-impl"]);
+    merged(&c, 14, &head);
+    let out = clean_yes(&c);
+    assert!(out.contains(&format!("removed {}", wt.display())), "{out}");
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
+    assert!(
+        !git(&origin, &["branch", "--list", "wip/*"]).contains("wip/"),
+        "nothing to save"
+    );
+}
+
+#[test]
+fn build_output_and_fixtures_are_no_secret_but_source_is() {
+    let (c, _, local) = repo("clean-fixtures", "");
+    let _sh = FakeShed::attached(&c);
+    let freed = worktree(&c, &local, 17, "impl");
+    let kept = worktree(&c, &local, 18, "impl");
+    let open = worktree(&c, &local, 19, "impl");
+    for wt in [&freed, &kept, &open] {
+        put(wt, "web/dist/blocks.js", TOKEN);
+        put(wt, "cli/tests/fixtures/tls/key.pem", TOKEN);
+    }
+    put(&kept, "src/env.rs", TOKEN);
+    put(&open, "src/env.rs", TOKEN);
+    merged(&c, 17, "");
+    merged(&c, 18, "");
+    let out = clean_yes(&c);
+    assert!(out.contains(&format!("saved {} to wip/", freed.display())), "{out}");
+    assert!(!freed.exists(), "{out}");
+    let keep = format!(
+        "keep {}: unsaved work has a secret (src/env.rs:1: TOKEN=•••)",
+        kept.display()
+    );
+    assert!(out.contains(&keep), "{out}");
+    assert!(
+        kept.join("src/env.rs").exists() && open.join("src/env.rs").exists(),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_merged_verify_lane_with_only_shots_and_scratch_is_removed() {
+    let (c, _, local) = repo("clean-verify", "");
+    let _sh = FakeShed::attached(&c);
+    let wt = worktree(&c, &local, 22, "verify");
+    put(&wt, "shots/home-390.png", "png");
+    put(&wt, "verify.log", "ran\n");
+    merged(&c, 22, "");
+    let out = clean_yes(&c);
+    assert!(out.contains(&format!("removed {}", wt.display())), "{out}");
+    assert!(!wt.exists(), "{out}");
+}
+
+fn clean_dry(c: &drover::Ctx) -> String {
+    let r = GitHerdr(Fake::default().reply("date -r", "20261102-072000\n"));
+    let (code, out) = run(c, &r, &["clean"]);
+    assert_eq!(code, 0, "{out}");
+    out
+}
+
+#[test]
+fn a_merged_lane_with_only_an_untracked_log_is_removed_as_its_dry_run_says() {
+    let (c, origin, local) = repo("clean-log-only", "");
+    let _sh = FakeShed::attached(&c);
+    let wt = worktree(&c, &local, 23, "impl");
+    put(&wt, "line-cap.log", "src/ net +12\n");
+    merged(&c, 23, "");
+    let dry = clean_dry(&c);
+    let would = format!(
+        "would remove {} (pane sendmeter-impl-23, sendmeter#23 merged)",
+        wt.display()
+    );
+    assert!(dry.contains(&would), "{dry}");
+    assert!(wt.exists(), "{dry}");
+    let out = clean_yes(&c);
+    assert!(
+        out.contains(&format!("removed {} (sendmeter#23 merged)", wt.display())),
+        "{out}"
+    );
+    assert!(!wt.exists(), "{out}");
+    assert!(!git(&origin, &["branch", "--list", "wip/*"]).contains("wip/"), "{out}");
+}
+
+#[test]
+fn an_unpushed_minified_dist_bundle_is_saved_and_removed_not_kept_as_a_secret() {
+    let (c, origin, local) = repo("clean-dist-css", "");
+    let _sh = FakeShed::attached(&c);
+    let (wt, src) = (worktree(&c, &local, 24, "impl"), worktree(&c, &local, 25, "impl"));
+    let css = format!(
+        "@layer blocks{{:root{{--k:gh{}}}.board{{display:grid;grid-template-columns:repeat(3,1fr)}}{}}}\n",
+        "p_abcdefghijklmnopqrstu1234",
+        ".c{margin:0}".repeat(400)
+    );
+    put(&wt, "web/dist/blocks.css", &css);
+    put(&src, "web/src/blocks.css", &css);
+    for w in [&wt, &src] {
+        git(w, &["add", "-A"]);
+        git(w, &["commit", "-q", "-m", "bundle"]);
+    }
+    merged(&c, 24, "");
+    merged(&c, 25, "");
+    let dry = clean_dry(&c);
+    assert!(dry.contains(&format!("would save {} to wip/", wt.display())), "{dry}");
+    let out = clean_yes(&c);
+    assert!(out.contains(&format!("saved {} to wip/", wt.display())), "{out}");
+    assert!(!wt.exists(), "{out}");
+    assert!(git(&origin, &["branch", "--list", "wip/*"]).contains("wip/"), "{out}");
+    assert!(
+        out.contains(&format!(
+            "keep {}: unsaved work has a secret (web/src/blocks.css:1",
+            src.display()
+        )),
+        "the same line in source is still a secret: {out}"
+    );
 }

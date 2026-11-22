@@ -16,7 +16,7 @@ pub(super) fn in_flight(ctx: &Ctx, out: &mut dyn Write, (fleet, n): (&str, u64),
 }
 
 pub(super) fn overdue(ctx: &Ctx, cfg: &Config, r: &dyn Runner, l: &crate::db::Lease, remove: bool) -> bool {
-    let (age, max) = (ctx.now.saturating_sub(l.at), cfg.limits.kick_max_secs);
+    let (age, max) = (ctx.now.saturating_sub(l.at), super::job::limit(ctx, cfg, l));
     let id = l.key.strip_prefix("kick-").and_then(|k| k.strip_suffix(".lock"));
     let Some((fleet, n)) = id.and_then(|i| i.rsplit_once('-')).filter(|_| age > max) else {
         return false;

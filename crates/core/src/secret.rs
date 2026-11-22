@@ -147,3 +147,48 @@ pub fn retired(state: &Path, out: &mut dyn Write) -> Result<()> {
     writeln!(out, "  (list any others: security dump-keychain | grep '\"herdsman/')")?;
     Ok(())
 }
+
+/// The secrets file `deliver` wrote; removed on drop (the lane's shell has read it by then), else `secrets-left`.
+pub struct Delivered<'a> {
+    pub(crate) ctx: &'a Ctx,
+    pub(crate) on: &'a crate::hosts::On<'a>,
+    pub(crate) lane: String,
+    pub(crate) file: Option<PathBuf>,
+}
+
+impl Drop for Delivered<'_> {
+    fn drop(&mut self) {
+        let Some(f) = self.file.as_ref().filter(|f| self.on.remove(f).is_err()) else {
+            return;
+        };
+        let mut lane = self.lane.split(':');
+        let (fleet, issue) = (
+            lane.next().unwrap_or_default(),
+            lane.next().and_then(|n| n.parse().ok()),
+        );
+        let d = json!({"path": f, "machine": self.on.machine});
+        let e = Event::new(self.ctx.now, fleet, issue, "secrets-left", d).passive();
+        crate::events::append(&self.ctx.state, &e).ok();
+    }
+}
+
+/// Removes each secrets file a spawn could not (`secrets-left`, the latest per host and path); `secrets-removed` once gone.
+pub fn secrets_left(ctx: &Ctx, r: &dyn Runner, events: &[Event]) -> Result<()> {
+    let mut seen = std::collections::BTreeSet::new();
+    let tries = crate::events::of_kind(events, &["secrets-left", "secrets-removed"]);
+    let last = tries
+        .into_iter()
+        .rev()
+        .filter(|e| seen.insert((e.str("machine"), e.str("path"))));
+    for e in last.filter(|e| e.kind == "secrets-left") {
+        let (Some(p), machine) = (e.str("path"), e.str("machine")) else {
+            continue;
+        };
+        if crate::hosts::On::quick(r, machine).remove(Path::new(p)).is_ok() {
+            let d = json!({"path": p, "machine": machine});
+            let done = Event::new(ctx.now, &e.fleet, e.issue, "secrets-removed", d).passive();
+            crate::events::append(&ctx.state, &done)?;
+        }
+    }
+    Ok(())
+}

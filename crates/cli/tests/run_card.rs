@@ -486,3 +486,32 @@ fn a_card_tapped_twice_on_the_board_is_one_job_and_runs_once() {
     );
     assert!(unpaired.starts_with("HTTP/1.1 401"), "{unpaired}");
 }
+
+#[test]
+fn only_a_git_push_segment_with_a_force_flag_or_refspec_is_a_force_push() {
+    for cmd in [
+        "git push --force",
+        "git push -f origin x",
+        "git push origin +x",
+        "git push origin :x",
+        "git push --mirror",
+        "cd r && git push -f",
+        "bash -c 'git push -f origin x'",
+        "ssh h \"git push --force\"",
+        "sh -c \"git push origin :x\"",
+        "ssh h \"bash -c 'git push --mirror'\"",
+    ] {
+        assert_eq!(
+            drover::card::forbidden(cmd),
+            Some("force-pushes or rewrites history"),
+            "{cmd}"
+        );
+    }
+    for cmd in [
+        "cd /srv/app && git show origin/staging:.github/workflows/ci.yml | grep -nE '^    (name|runs-on|needs|if|timeout-minutes):|^  (pull_request|push|merge_group)' | head",
+        "echo push -f; git status",
+        "grep -e push file",
+    ] {
+        assert_eq!(drover::card::forbidden(cmd), None, "{cmd}");
+    }
+}

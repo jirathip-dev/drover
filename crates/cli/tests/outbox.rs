@@ -88,7 +88,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     )
     .unwrap();
     let r = Air(Fake::default());
-    run(&main, &r, &["drive", "--fast"]);
+    run(&main, &r, &["drive"]);
     let ev = read(&main.state).unwrap().to_vec();
     let asks: Vec<_> = ev.iter().filter(|e| e.kind == "needs-decision").collect();
     assert_eq!(asks.len(), 1, "{ev:?}");
@@ -142,7 +142,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     let (_, asked) = run(&main, &r, &["asks", "sendmeter"]);
     assert!(asked.contains("q1 #12") && asked.contains("Which way?"), "{asked}");
 
-    run(&main, &r, &["drive", "--fast"]);
+    run(&main, &r, &["drive"]);
     let ev = read(&main.state).unwrap();
     assert_eq!(ev.iter().filter(|e| e.kind == "needs-decision").count(), 1);
     assert_eq!(ev.iter().filter(|e| e.kind == "outbox").count(), 5);

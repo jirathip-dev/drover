@@ -49,8 +49,8 @@ fn pass(c: &drover::Ctx, r: &Fake, secs: u64) {
         now: c.now + secs,
         ..c.clone()
     };
-    run(&at, r, &["drive", "--fast"]);
     run(&at, r, &["drive"]);
+    run(&at, r, &["tick"]);
 }
 
 #[test]

@@ -316,7 +316,7 @@ fn the_service_links_every_host_and_a_pass_on_live_links_calls_none() {
     let all = || std::iter::once(&"mini").chain(BOATS.iter()).all(|h| f.live(h));
     until("the service's link to the main host and each boat is live", 10, all);
     let before = f.r.calls();
-    let (code, out) = run(&f.now(), f.r, &["drive", "--fast"]);
+    let (code, out) = run(&f.now(), f.r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(f.r.calls(), before, "a pass on live links calls no host");
     let cfg = drover::config::Config::load(&f.c.config).unwrap();
@@ -407,7 +407,7 @@ fn with_a_link_down_a_pass_polls_that_host_as_before() {
     std::thread::sleep(Duration::from_secs(2));
     assert!(f.ran().is_empty(), "no link carries boat-2's line");
     let before = f.r.calls();
-    let (code, out) = run(&f.now(), f.r, &["drive", "--fast"]);
+    let (code, out) = run(&f.now(), f.r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(f.ran().len(), 1, "the pass polled boat-2 and ran its line");
     let after = f.r.calls();

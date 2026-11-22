@@ -415,6 +415,7 @@ grep -qx OOMPolicy=continue \"$HOME/.config/systemd/user/shed.service.d/drover.c
 { { mkdir -p \"$HOME/.config/systemd/user/shed.service.d\" && \
 printf '[Service]\\nOOMPolicy=continue\\n' > \"$HOME/.config/systemd/user/shed.service.d/drover.conf\" && \
 systemctl --user daemon-reload && systemctl --user enable --now shed.service && { sudo loginctl enable-linger \"$USER\" || true; }; } 2>/dev/null || \
+launchctl print gui/$(id -u)/dev.shed.serve >/dev/null 2>&1 || \
 launchctl bootstrap gui/$(id -u) \"$HOME/Library/LaunchAgents/dev.shed.serve.plist\"; }";
 const ACP: &str = "node\tcommand -v node && command -v npx\tapt_ nodejs npm
 {acp}\tshed agents --json | tr '{' '\\n' | grep '\"id\": *\"{acp}\"' | grep -q '\"cmd\": *\\['\tshed agents add {acp}";

@@ -9,10 +9,17 @@ use std::time::{Duration, Instant};
 
 const JOB: &str = "echo $$ > \"pid-$1\"; echo \"start $1\" >> log; for i in $(seq 200); do [ -f \"go-$1\" ] || [ ! -f \"$0\" ] && break; sleep 0.05; done; [ -f \"go-$1\" ] || exit 1; echo \"end $1\" >> log\n";
 
+const IDLE: &str = "load_per_cpu = 1000.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n";
+
 fn lane(host: &str) -> PathBuf {
+    host_with(IDLE, host)
+}
+
+fn host_with(limits: &str, host: &str) -> PathBuf {
     let d = tmpdir("heavy");
     let heavy = "\n[fleet.sendmeter.heavy]\nlint = [\"sh lint.sh*\"]\ntest = [\"*test.sh*\"]\n";
-    let cfg = format!("{CONFIG}{heavy}\n[hosts.mini]\nheavy_max = 2\n{host}\n");
+    let conf = CONFIG.replace("[limits]\n", &format!("[limits]\n{limits}"));
+    let cfg = format!("{conf}{heavy}\n[hosts.mini]\nheavy_max = 2\n{host}\n");
     std::fs::write(d.join("fleet.toml"), cfg).unwrap();
     std::fs::write(d.join("lint.sh"), JOB).unwrap();
     std::fs::write(d.join("test.sh"), JOB).unwrap();
@@ -228,4 +235,76 @@ fn a_dropped_job_ends_with_its_harness() {
     let gone = !alive(&pid);
     Command::new("kill").args(["-9", pid.trim()]).status().unwrap();
     assert!(gone, "job {} outlived its harness", pid.trim());
+}
+
+fn hold(d: &Path, wait: &str, cmd: &[&str]) -> Command {
+    let mut c = in_lane(env!("CARGO_BIN_EXE_drover"), d);
+    c.env_remove("DROVER_LANE")
+        .env_remove("DROVER_HOST")
+        .env("GITHUB_REPOSITORY", "acme/det")
+        .args(["hold", "--wait", wait, "--"])
+        .args(cmd);
+    c
+}
+
+fn refused(d: &Path) -> String {
+    let out = hold(d, "0", &["sh", "test.sh", "h"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(75), "{out:?}");
+    assert!(!log(d).contains("start h"), "{}", log(d));
+    String::from_utf8(out.stderr).unwrap()
+}
+
+#[test]
+fn hold_runs_its_command_and_returns_its_exit_code() {
+    let d = lane("");
+    assert_eq!(hold(&d, "1", &["true"]).status().unwrap().code(), Some(0));
+    let seven = hold(&d, "1", &["sh", "-c", "exit 7"]).status().unwrap();
+    assert_eq!(seven.code(), Some(7));
+    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+}
+
+#[test]
+fn hold_with_every_slot_taken_gives_up_with_75_and_the_reason() {
+    let d = lane("");
+    let kids = ["a", "b"].map(|j| start(&d, &format!("sh test.sh {j}")));
+    until("two running", || log(&d).lines().count() == 2);
+    let why = refused(&d);
+    assert!(why.contains("every heavy slot is taken"), "{why}");
+    assert_eq!(tickets(&d).len(), 2);
+    for j in ["a", "b"] {
+        go(&d, j);
+    }
+    finish(kids.into());
+}
+
+#[test]
+fn hold_on_a_host_over_its_admission_limits_gives_up_with_75_and_the_reason() {
+    let d = host_with("load_per_cpu = -1.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n", "");
+    let why = refused(&d);
+    assert!(why.contains("HOST_BUSY") && why.contains("load/cpu"), "{why}");
+    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+}
+
+#[test]
+fn a_lanes_heavy_command_waits_behind_a_running_hold() {
+    let d = lane("");
+    let child = hold(&d, "1", &["sh", "test.sh", "h"]).process_group(0).spawn().unwrap();
+    let h = Job(Some(child));
+    until("h's start", || log(&d).contains("start h"));
+    let t = tickets(&d);
+    assert_eq!(
+        (t[0].lane.as_str(), t[0].kind.as_str(), t[0].running),
+        ("ci:det", "ci", true)
+    );
+    let a = start(&d, "sh test.sh a");
+    until("a's start", || log(&d).contains("start a"));
+    let b = start(&d, "sh test.sh b");
+    std::thread::sleep(Duration::from_millis(600));
+    assert!(!log(&d).contains("start b"), "{}", log(&d));
+    go(&d, "h");
+    until("b's start", || log(&d).contains("start b"));
+    for j in ["a", "b"] {
+        go(&d, j);
+    }
+    finish(vec![h, a, b]);
 }
