@@ -1,4 +1,6 @@
 mod common;
+#[path = "drive/done_lanes.rs"]
+mod done_lanes;
 #[path = "drive/remote_unlisted.rs"]
 mod remote_unlisted;
 #[path = "drive/rev_unlisted.rs"]
