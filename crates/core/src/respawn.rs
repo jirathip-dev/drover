@@ -5,7 +5,7 @@ use crate::Ctx;
 use anyhow::Result;
 use serde_json::json;
 
-/// `RESPAWN_LOOP`: `respawn_max` failed starts of `role` (a lane dead or killed at start, a prompt never landed, a start that errored) within the window refuse the next, behind one owner ask.
+/// `RESPAWN_LOOP`: `respawn_max` failed starts of `role` (a lane dead or killed at start, a prompt never landed, a start that errored, once a pass) within the window refuse the next, behind one owner ask.
 pub fn guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue, role): (&str, u64, &str)) -> Result<()> {
     let l = &cfg.limits;
     let (v, asked) = starts(events, fleet, issue, role);
@@ -66,7 +66,9 @@ fn starts<'a>(
                 if mine && agent.is_some_and(|a| e.val("killed").as_array().is_some_and(|k| k.contains(&json!(a)))) => {
             }
             "supersede" | "lane-killed" if mine => fail(&mut v, "killed"),
-            "failed" if mine && e.str("error").is_some() => v.push((e.ts, e.str("error"))),
+            "failed" if mine && e.str("error").is_some() && v.last().map(|s| s.0) != Some(e.ts) => {
+                v.push((e.ts, e.str("error")));
+            }
             "needs-decision" if e.str("respawn_loop") == Some(role) => {
                 asks.extend(e.str("id"));
                 asked = e.str("id");

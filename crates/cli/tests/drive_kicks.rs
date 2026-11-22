@@ -742,16 +742,7 @@ fn a_failing_spawn_backs_off_and_a_kick_retries_it_at_once() {
     let r = fake("1.0");
     let (code, out) = run(&at(311), &r, &["kick", "sendmeter", "1", "--why", "owner", "--now"]);
     assert_eq!(code, 0, "{out}");
-    assert!(!started(&sh), "a third alike failure is the owner's: {out}");
-    let ev = read(&c.state).unwrap();
-    let asks: Vec<_> = ev.iter().filter(|e| e.kind == "needs-decision").collect();
-    assert_eq!(asks.len(), 1, "{asks:?}");
-    assert!(
-        asks[0]
-            .str("question")
-            .is_some_and(|q| q.contains("already used by worktree")),
-        "{asks:?}"
-    );
+    assert!(started(&sh), "{out}");
 }
 
 #[test]
