@@ -914,14 +914,14 @@ fn live_cpu(c: drover::Ctx, secs: u64, feed: impl Fn(&drover::Ctx, u64)) -> f64 
     cpu_ms() - t
 }
 
-fn serve_cpu_in_a_child(spec: &str) -> f64 {
+fn cpu_in_a_child(test: &str, issue: u32, spec: &str) -> f64 {
     let o = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["serve_cpu_child", "--exact", "--nocapture"])
-        .env("DROVER_PERF_971", spec)
+        .args([test, "--exact", "--nocapture"])
+        .env(format!("DROVER_PERF_{issue}"), spec)
         .output()
         .unwrap();
     let err = String::from_utf8_lossy(&o.stderr);
-    let cpu = err.lines().find_map(|l| l.strip_prefix("#971 cpu "));
+    let cpu = err.lines().find_map(|l| l.strip_prefix(&format!("#{issue} cpu ")));
     cpu.and_then(|v| v.parse().ok()).unwrap_or_else(|| panic!("{err}"))
 }
 
@@ -949,11 +949,11 @@ fn a_new_event_costs_the_same_on_a_log_twice_as_long() {
     if cfg!(debug_assertions) {
         return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
     }
-    let idle = serve_cpu_in_a_child("150000,0,0");
+    let idle = cpu_in_a_child("serve_cpu_child", 971, "150000,0,0");
     let mut cpu = [f64::MAX; 2];
     for _ in 0..3 {
         for (k, spec) in ["150000,0,1", "300000,150000,1"].into_iter().enumerate() {
-            cpu[k] = cpu[k].min(serve_cpu_in_a_child(spec));
+            cpu[k] = cpu[k].min(cpu_in_a_child("serve_cpu_child", 971, spec));
         }
     }
     report(&format!(
@@ -1450,63 +1450,36 @@ fn five_fleets_with_40_lanes_on_4_boats_at_700ms_a_call_end_every_pass_within_10
     assert!(secs < 10.0, "every pass done in {secs:.1} s (target < 10)");
 }
 
-fn idle_serve_cpu(secs: u64, rate: u64, held: &str) -> f64 {
-    let o = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["idle_serve_child", "--exact", "--nocapture"])
-        .env("DROVER_PERF_1588", format!("{secs} {rate} {held}"))
-        .output()
-        .unwrap();
-    let err = String::from_utf8_lossy(&o.stderr);
-    let cpu = err.lines().find_map(|l| l.strip_prefix("#1588 cpu "));
-    cpu.and_then(|v| v.parse().ok()).unwrap_or_else(|| panic!("{err}"))
-}
-
 #[test]
 fn idle_serve_child() {
-    let Ok(spec) = std::env::var("DROVER_PERF_1588") else {
+    let Ok(rate) = std::env::var("DROVER_PERF_1588") else {
         return;
     };
-    let v: Vec<&str> = spec.splitn(3, ' ').collect();
-    let (secs, rate): (u64, u64) = (v[0].parse().unwrap(), v[1].parse().unwrap());
-    let (c, f) = huge();
-    let sh = shed();
+    let (rate, (c, f), sh): (u64, _, _) = (rate.parse().unwrap(), huge(), shed());
     sh.attach(&c);
-    let agents: Vec<String> = FLEETS
-        .iter()
-        .flat_map(|f| (1..=40).map(move |n| format!("{f}-impl-{n}")))
-        .collect();
-    let screen = |a: &str, i: u64| {
-        (0..300)
-            .map(|l| format!("{a} {i} line {l} ⏺ Working on it\n"))
-            .collect::<String>()
-    };
-    for a in &agents {
-        sh.lane(a, "working", &format!("/wt/{a}"));
-        sh.screen(a, &screen(a, 0));
+    let agent = |n: usize| format!("{}-impl-{}", FLEETS[n % 5], 1 + n / 5);
+    for a in (0..200).map(agent) {
+        sh.lane(&a, "working", &format!("/wt/{a}"));
     }
-    let state = c.state.clone();
-    let (_, _, addr) = serve(c, f);
-    for path in v[2].split(',').filter(|p| !p.is_empty()) {
+    let (c, _, addr) = serve(c, f);
+    for path in ["/screens/lanes", "/screens/cards"].iter().filter(|_| rate > 0) {
         let mut s = std::net::TcpStream::connect(addr).unwrap();
-        s.write_all(format!("GET {path}/stream HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
-            .unwrap();
+        write!(s, "GET {path}/stream HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
         std::thread::spawn(move || std::io::copy(&mut s, &mut std::io::sink()));
     }
     std::thread::sleep(Duration::from_secs(5));
     let t = cpu_ms();
-    for i in 1..=secs {
-        for a in &agents {
-            sh.screen(a, &screen(a, i));
+    for i in 0..60 * rate.max(1) {
+        if i % rate.max(1) == 0 {
+            for a in (0..200).map(agent) {
+                sh.screen(&a, &format!("{a} {i} ⏺ Working on it\n").repeat(300));
+            }
         }
-        for k in 0..rate {
+        if rate > 0 {
             let d = json!({"step": "review", "result": "ok"});
-            let n = 1 + (i * rate + k) % 40;
-            append(&state, &Event::new(NOW + i, "alpha", Some(n), "driven", d)).unwrap();
-            std::thread::sleep(Duration::from_millis(1000 / rate));
+            append(&c.state, &Event::new(NOW + i, "alpha", Some(1 + i % 40), "driven", d)).unwrap();
         }
-        if rate == 0 {
-            std::thread::sleep(Duration::from_secs(1));
-        }
+        std::thread::sleep(Duration::from_millis(1000 / rate.max(1)));
     }
     eprintln!("#1588 cpu {}", cpu_ms() - t);
 }
@@ -1516,16 +1489,11 @@ fn serve_stays_light_idle_and_with_the_board_open_through_a_passs_event_burst() 
     if cfg!(debug_assertions) {
         return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
     }
-    let secs = 60;
-    let pct = |cpu: f64| cpu / (secs as f64 * 10.0);
-    let idle = pct(idle_serve_cpu(secs, 0, ""));
-    let board = pct(idle_serve_cpu(secs, 20, "/screens/lanes,/screens/cards"));
+    let pct = |rate: &str| cpu_in_a_child("idle_serve_child", 1588, rate) / 600.0;
+    let (idle, board) = (pct("0"), pct("20"));
     report(&format!(
-        "#1588 perf (5 fleets, 200 working lanes, 150,000 events, {secs} s): no requests {idle:.2}% CPU; the board open through 20 events/s {board:.2}% CPU"
+        "#1588 perf (5 fleets, 200 working lanes, 150,000 events, 60 s): no requests {idle:.2}% CPU; the board open through 20 events/s {board:.2}% CPU"
     ));
     assert!(idle < 3.0, "an idle serve used {idle:.2}% CPU (budget 3%)");
-    assert!(
-        board < 15.0,
-        "serve with the board open used {board:.2}% CPU through 20 events/s (budget 15%)"
-    );
+    assert!(board < 15.0, "the board open: {board:.2}% CPU (budget 15%)");
 }
