@@ -2083,6 +2083,9 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     if let Some(n) = issue.filter(|_| code.is_some() && c.first() == Some(&"spawn") && SLOT.get()) {
         crate::db::release(&ctx.state, &format!("spawn-{fleet}-{n}.pending"), None);
     }
+    if spawn.is_some() && code == Some("HOST_OFFLINE") && r.recheck() {
+        return act(ctx, cfg, r, out, ev, at, c);
+    }
     if let Some(n) = spawn.filter(|_| matches!(code, Some("EXIT" | "ERROR"))) {
         let why = result
             .split_once(": ")

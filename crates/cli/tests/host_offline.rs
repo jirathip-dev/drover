@@ -375,10 +375,8 @@ fn a_start_on_a_host_offline_this_pass_waits_for_it_with_no_card_or_backoff() {
         a["why"].as_str().unwrap_or_default().to_string()
     };
     for k in [0, 240] {
-        let (f, bazzite) = (
-            remote(mini_only()).once_err(&format!("{ssh} 'df'"), 124, "no answer"),
-            FakeShed::new(),
-        );
+        let (mut f, bazzite) = (remote(mini_only()), FakeShed::new());
+        f.replies.insert(0, (ssh.into(), timed_out()));
         let (code, out) = run(&at(k), &with_bazzite(&f, &bazzite), &["drive"]);
         assert_eq!(code, 0, "{out}");
         assert!(
@@ -608,7 +606,7 @@ impl SlowShed<'_> {
         let line = format!("{prog} {}", args.join(" "));
         let listing = prog == "ssh" && line.contains("bazzite") && line.contains("'hosts' 'report'");
         let sc = std::sync::atomic::Ordering::SeqCst;
-        let once = listing && self.1.fetch_update(sc, sc, |n| n.checked_sub(1)).is_ok();
+        let once = listing && self.1.try_update(sc, sc, |n| n.checked_sub(1)).is_ok();
         once.then(timed_out)
     }
 }
