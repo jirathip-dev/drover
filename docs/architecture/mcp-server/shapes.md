@@ -1,7 +1,7 @@
 # mcp-server: the data shapes (#1627)
 
-Everything here is new unless it says "today". Names are the ones `usage.md` uses. Paths under `api/src/` are
-#1645's API crate (after its S1), written here as they will be in the tree.
+Everything here is new unless it says "today" or "#1645's". Names are the ones `usage.md` uses. Paths under
+`api/src/` are #1645's API crate, and `Viewer`, `Who`, `Id` and `Relayed` are its types after its S2 (d4863aa).
 
 ## core: a key
 
@@ -27,8 +27,10 @@ pub struct Key {
 pub fn add(ctx: &Ctx, name: &str, scope: Scope) -> Result<String>;
 /// That key stops at once. `NO_SUCH_KEY`; a second revoke is a no-op.
 pub fn revoke(ctx: &Ctx, name: &str) -> Result<()>;
-/// The live key a bearer value names, else why not: `no key`, `unknown key`, `revoked`, `expired`, `db error: …`.
-pub fn check(ctx: &Ctx, bearer: &str) -> Result<Key, String>;
+/// The sha256 of a `dmcp_` bearer, as the table keeps it and the edge sends it; None for any other value.
+pub fn hashed(bearer: &str) -> Option<String>;
+/// The live key a hash names, else why not: `no key`, `unknown key`, `revoked`, `expired`, `db error: …`.
+pub fn check(ctx: &Ctx, hash: &str) -> Result<Key, String>;
 pub fn list(ctx: &Ctx) -> Vec<Key>;
 
 /// The log's `by` for a key: the only place the prefix is written.
@@ -67,45 +69,45 @@ That is the data of a `needs-decision` event on the fleet and issue; `queue` mar
 
 ## API: a caller
 
+The caller is #1645's `Viewer` (`Open`, `Device`, `Agent`, `Plugin`, `Local`). #1645 reserves `Agent`; this issue
+gives it its scope and everything it may do. There is no second caller type.
+
 ```rust
-// crates/api/src/serve/caller.rs
-/// Who a request is from: what it may reach, and what the log's `by` says.
-#[derive(Clone)]
-pub enum Caller {
-    Device(devices::Device),   // a paired device: the owner's hand
-    Agent(callers::Key),       // an MCP key: an outside agent, never the owner
+// crates/api/src/: #1645's enum, the one variant this issue fills in
+pub enum Viewer {
+    /// A key the `callers` table knows: through the edge as `Drover-Key`, or on loopback as the bearer itself.
+    Agent { key: String, label: String, scope: callers::Scope, ip: String },   // key: the hash; label: the key's name
 }
 
-impl Caller {
-    pub fn by(&self) -> String;            // "owner" | "mcp-<name>"
-    pub fn via(&self) -> &'static str;     // "web"   | "mcp"
-    pub fn label(&self) -> &str;           // the device's label | the key's name
-    pub fn hash(&self) -> &str;            // the rate limiter's key
-    pub fn owner(&self) -> bool;           // a device: the routes kept for a paired device
-    /// Why this caller may not call the route: `OWNER_ONLY` or `READ_ONLY`; None for a device.
+// crates/api/src/serve/caller.rs
+impl Viewer {
+    pub fn by(&self) -> String;            // an agent: "mcp-<label>"; any other writer: "owner", as today
+    pub fn via(&self) -> &'static str;     // an agent: "mcp"; any other: "web", as today
+    /// Why this viewer may not call the route: `OWNER_ONLY` or `READ_ONLY`; None for any viewer but an agent.
     pub fn refused(&self, method: &str, route: &str) -> Option<(&'static str, String)>;
 }
 
 const AGENT_READS: &[&str] = &["state", "queue", "waiting", "needs", "repo/", "thread/", "job/"];
 const AGENT_ACTS: &[&str] = &["answer", "bqueue", "say", "issue"];
 
-/// The op's fields with the caller's `by` and `via`, and for an agent the current `mtime`; a body's own are dropped.
-pub fn stamped(f: BTreeMap<String, String>, op: &str, who: Option<&Caller>) -> BTreeMap<String, String>;
+/// The op's fields with the viewer's `by` and `via`, and for an agent the current `mtime`; a body's own are dropped.
+pub fn stamped(f: BTreeMap<String, String>, op: &str, who: &Viewer) -> BTreeMap<String, String>;
 
 impl Server<'_> {
-    /// The agent a request's `Authorization: Bearer dmcp_…` names (`callers::check`); read at `/mcp` only.
-    pub(super) fn keyed(&self, ctx: &Ctx, head: &str) -> Result<Caller, String>;
+    /// The agent a `/mcp` request names, by its key's hash (`callers::check`); 401's reason otherwise.
+    pub(super) fn keyed(&self, ctx: &Ctx, head: &str) -> Result<Viewer, String>;
 }
 ```
 
-```rust
-// serve.rs, today: type Auth = Result<devices::Device, String>;
-type Auth = std::result::Result<Caller, String>;
-```
+`keyed` is the only place a key is read, and `/mcp` the only path that calls it (q3311 (2)):
 
-The cookie yields only `Caller::Device`; the bearer key yields only `Caller::Agent`. Once #1645's S2 has its
-`Viewer` (`Open`, `Device`, `Plugin`, `Local`), the agent is its fifth variant, `Agent { name, scope }`, and
-`caller.rs` keeps the two lists, `refused` and `stamped` over it. There is one such type at any time.
+| The request carries | The hash is | Else |
+|---|---|---|
+| `Authorization: Bearer <serve-token>` and `Drover-Key` | the header's value, 64 hex | no `Drover-Key`: 401. With `Drover-Device` too: 400 (#1645's rule) |
+| `Authorization: Bearer dmcp_…`, from a loopback peer (the address the API's own listener saw, today's `X-Peer`) | `callers::hashed` of the bearer | another peer: 401, and the reason logged is `key off loopback` |
+| `Drover-Key` beside any other token, or none | none | 400 (#1645's rule) |
+
+`ip` is `Drover-Ip` in the first row and the peer in the second. The rate limiter's key is the hash.
 
 ## API: the tool table (q3299 (c))
 
@@ -154,24 +156,58 @@ const TOOLS: &[Tool] = &[/* one entry a tool, in this order */];
 An argument named in the route fills it. The rest are the query of a `GET` and the JSON body of a `POST`. The
 `inputSchema` of `tools/list` is built from `args`.
 
-## The edge: the relay lines (#1645's `server/src/relay.rs`)
+## The edge: one line (#1645's `server/src/relay.rs` and `engine.rs`; q3311 (1))
+
+Slice 3 adds, in one PR, what #1645's `shapes.md` says arrives with this line:
 
 ```rust
-pub struct Relayed {
-    pub method: Method,
-    pub path: &'static str,
-    pub stream: bool,
-    pub until: Option<&'static str>,
-    /// The caller holds its own key: the request goes on whole with its `Authorization`, without the edge's token, a cookie or a `Drover-*` header.
-    pub keyed: bool,
+// relay.rs
+pub enum Who {
+    Device,   // #1645's
+    /// An agent: its bearer, hashed into `Drover-Key`. A cookie is dropped.
+    Key,
 }
 
-Relayed { method: Post, path: "/mcp", stream: false, until: None, keyed: true },
-Relayed { method: Get,  path: "/mcp", stream: false, until: None, keyed: true },
+Relayed { methods: &[Get, Post, Delete], path: "/mcp", stream: true, who: Key, until: None },
+
+// engine.rs
+pub enum Id {
+    Device(String),   // #1645's
+    /// Of the caller's bearer on a `Who::Key` line: sent as `Drover-Key`.
+    Key(String),
+}
+
+pub enum Method { Get, Post, Put, Delete }   // Delete is new
+
+const FORWARDED: [&str; 10] = [
+    "accept", "accept-encoding", "content-type", "if-none-match", "last-event-id", "user-agent",
+    "mcp-session-id", "mcp-protocol-version", "mcp-method", "mcp-name",
+];
 ```
 
-`keyed` is false on every other line. "Whole" is every request header but `Cookie`, `Host` and any `Drover-*`, so
-the MCP headers arrive. The API accepts a `dmcp_` bearer at `/mcp` only: elsewhere it is an unknown token (401).
+`mcp-method` and `mcp-name` are not in #1645's list of eight. Revision 2026-07-28 requires both to reach the
+server that reads the body, so they come with the line.
+
+What the API receives for an agent's `POST /mcp` with `Authorization: Bearer dmcp_5f0c…e91a`:
+
+```
+POST /mcp HTTP/1.1
+Authorization: Bearer <serve-token>
+Drover-Key: 77c2…0e                          64 hex: sha256 of the bearer the agent sent the edge
+Drover-Ip: 100.64.0.9
+MCP-Protocol-Version: 2026-07-28
+Mcp-Method: tools/call
+Mcp-Name: status
+```
+
+The edge hashes whatever bearer the line's caller sent; it does not know the `dmcp_` prefix, a tool or a key.
+With no bearer it sends no `Drover-Key`, and the API's 401 goes back as it is. It never copies a `Drover-*` header
+or a cookie from the client. Until #1645's S7 the plugin pass-through still exists; the `/mcp` line is matched
+first, so a key never rides it.
+
+The line's contract file is `mcp.json` with `mcp.keys` in #1571's frozen folder
+(`crates/cli/tests/golden/contract/v1/*.keys`): the recorded answer to `tools/list` for an act key. A tool's name
+and its arguments are then append-only.
 
 ## The three new `/api/v1` routes
 
@@ -213,8 +249,9 @@ No session id is ever sent.
 |---|---|---|
 | 403 | none | the edge: a foreign Host or Origin |
 | 503 `BUSY` | none | the edge: the API is away |
-| 401, `WWW-Authenticate: Bearer` | none | no key, unknown, revoked or expired; at most one log line a minute with the reason |
-| 405 | none | `GET` |
+| 401, `WWW-Authenticate: Bearer` | none | no key, unknown, revoked, expired, or a bearer off loopback; at most one log line a minute with the reason |
+| 400 | none | `Drover-Key` beside a token that is not the edge's, or with `Drover-Device` (#1645's rule) |
+| 405 | none | `GET`, `DELETE` |
 | 400 | -32700, -32600 | not JSON; not a JSON-RPC message |
 | 400 | -32022, with `supported` and `requested` | a version outside `VERSIONS` |
 | 400 | -32020 | modern: `MCP-Protocol-Version`, `Mcp-Method` or `Mcp-Name` missing or unlike the body |

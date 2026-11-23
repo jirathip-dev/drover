@@ -3,13 +3,14 @@
 ## Summary
 
 Decision: drover's API gains one MCP address over HTTP (no stdio); the page's server only passes it on. Each outside
-agent gets a named key the owner makes and revokes; every act is logged under the agent's name. An agent is never the
-owner: it answers routine asks only, an issue it queues waits for the owner's tap, and its line in a thread cannot
-make an orchestrator use an owner power.
-Slices: keys and the rules (core, now); then, after #1645's API crate: the caller through the API, the MCP address, docs.
+agent gets a named key the owner makes and revokes; every act is logged under its name. An agent is never the owner:
+it answers routine asks only, an issue it queues waits for the owner's tap, and its thread line gives no owner power.
+Slices: keys and the rules (core, now); then, after #1645's S2 and #1571's contract folder: the caller through the
+API, the MCP address with its one line in the page's server, docs.
 Open questions: an orchestrator that queues or spawns because an agent asked also waits for the owner (decided yes)?
 
-Status: revised after the owner's q3299 (2026-11-23). What changed is marked "q3299 (a)" to "(d)".
+Status: revised after the owner's q3299 and q3311 (2026-11-23). What changed is marked "q3299 (a)" to "(d)" and
+"q3311 (1)" to "(4)". The edge's part is #1645's as approved at d4863aa.
 
 ## The question
 
@@ -18,7 +19,8 @@ log says who acted, the owner's decisions stay the owner's, and no second copy o
 
 ## Facts
 
-Read on staging 7c0a28c1c, and on #1645's and #1571's ADRs as proposed (`serve-split`, `cooee-threads`).
+Read on staging 7c0a28c1c, on #1645's ADR as approved (`serve-split`, d4863aa) and on #1571's as proposed
+(`cooee-threads`).
 
 - **A caller is unpaired or a paired device, and a paired device is the owner.** `Auth` is a device or an error
   (`crates/server/src/serve.rs:129`). There is no third kind.
@@ -34,12 +36,16 @@ Read on staging 7c0a28c1c, and on #1645's and #1571's ADRs as proposed (`serve-s
   verbs and `spawn --force` pass the lane hook (`hook.rs`), which knows the thread from `DROVER_THREAD`.
 - **`gh` never runs on a request.** An op that needs it is a job (`serve/jobs.rs`), answered 202 and read by id.
 - **#1645 cuts the server in two.** `drover-api` (new crate, links core) holds `Server`, `route`, `v1.rs`, `chat.rs`
-  and the jobs from its slice S1; `crates/server` becomes the edge, which checks Host and Origin and relays the
-  paths of one table (`relay.rs`) with its own token. The API checks neither Host nor Origin.
+  and the jobs from its slice S1. `crates/server` becomes the edge: it checks Host and Origin and relays the paths
+  of one table (`relay.rs`). From S2 it sends the API its own token and the caller as a hash (`Drover-Device`),
+  and the API has one type for who asks, `Viewer`. The API checks neither Host nor Origin.
+- **#1645 fixes how a key travels.** One `/mcp` line with `who: Key`: the edge hashes the caller's bearer into
+  `Drover-Key`. It reserves `Viewer::Agent` and leaves the tools, the verbs and the key store to this ADR.
 - **#1571 keeps `say` in drover** as `core::thread::say(…, from, text)`, a row cooee types into the agent.
-- **MCP changed shape in 2026.** Revision 2026-07-28 has no handshake and no session: each POST carries its
-  version and is answered alone, and `server/discover` is required. Revisions up to 2025-11-25 open with
-  `initialize`. A server may serve both on one address and may always answer with plain JSON.
+- **MCP changed shape in 2026.** Revision 2026-07-28 has no handshake, no session and no `GET` stream: each POST
+  carries its version and is answered alone, `server/discover` is required, and the headers `MCP-Protocol-Version`,
+  `Mcp-Method` and `Mcp-Name` must match the body. Revisions up to 2025-11-25 open with `initialize`. A server may
+  serve both on one address and may always answer with plain JSON.
 
 ## Options and choices
 
@@ -50,13 +56,20 @@ Read on staging 7c0a28c1c, and on #1645's and #1571's ADRs as proposed (`serve-s
 | stdio: a drover process the client starts | No. The callers the issue names are bots in a cloud. It would also be a second server, outside the job order and the rate limits |
 | **Streamable HTTP, one address (chosen)** | One route arm in the API; one JSON answer a request, no stream, no session |
 
-### 2. Where it sits (q3299 (a))
+### 2. Where it sits (q3299 (a), q3311 (1) and (2))
 
 | Option | Verdict |
 |---|---|
 | In the page's server | No. After #1645 it holds no state and may not call drover's code |
 | A third listener | No. One more port, one more Host rule, for one route |
-| **In `drover-api`, relayed by the edge (chosen)** | `mcp.rs`, `caller.rs` and the key check sit behind `Server::route`. The edge's relay table gets the `/mcp` line: Host and Origin checked, then the request passed on with its own `Authorization`, never the edge's token |
+| **In `drover-api`, relayed by the edge (chosen)** | `mcp.rs`, `caller.rs` and the key check sit behind `Server::route`. The edge's relay table gets #1645's one `/mcp` line |
+
+How the key reaches the API:
+
+| Option | Verdict |
+|---|---|
+| The edge passes the caller's `Authorization` on whole (the first revision) | No. The API would answer a second kind of bearer from the edge, and #1645's S7 ends every passed-on bearer |
+| **The edge hashes it into `Drover-Key` (chosen; #1645's rule)** | Beside the edge's token and `Drover-Ip`, as a cookie becomes `Drover-Device`. The client's `Authorization` is dropped. The API looks the hash up |
 
 ### 3. Who the caller is
 
@@ -118,15 +131,24 @@ methods over JSON the API already parses, so no SDK crate.
 
 ## Decision
 
-1. **`POST /mcp` in `drover-api`** speaks MCP over HTTP, statelessly, to both eras. `GET` answers 405.
-2. **The edge relays it.** Two lines in `relay.rs` (`POST` and `GET /mcp`), marked `keyed`: the request goes on
-   whole, with its own `Authorization` and MCP headers, without the cookie and without a `Drover-*` header. Host
-   and Origin are the edge's check, as for every relayed path.
+1. **`POST /mcp` in `drover-api`** speaks MCP over HTTP, statelessly, to both eras. `GET` and `DELETE` answer 405:
+   there is no stream to open and no session to end.
+2. **The edge relays it on one line** (q3311 (1)), #1645's:
+   `Relayed { methods: &[Get, Post, Delete], path: "/mcp", stream: true, who: Key, until: None }`. After its Host
+   and Origin check the edge hashes the caller's bearer into `Drover-Key`, sends it beside its own `serve-token`
+   and `Drover-Ip`, and drops the client's `Authorization`, the cookie and any `Drover-*` the client sent. It
+   pipes the answer and reads none of it. The line is wider than what the API answers today, so a later stream
+   needs no change in the edge.
+   With the line the edge forwards four `mcp-` headers: #1645's `mcp-protocol-version` and `mcp-session-id`,
+   and `mcp-method` and `mcp-name`, which revision 2026-07-28 requires and #1645's list lacks.
 3. **A key per agent.** `serve keys add|revoke` and the list, owner only. Name, scope, hash; the secret is shown
-   once. The API checks the table on every request, so a revoke stops the next call. A key is a credential at
-   `/mcp` only; on any other path it is an unknown token.
-4. **A caller is a device or an agent**, one type in the API (`caller.rs`). An agent's `by` is `mcp-<name>`, its
-   `via` is `mcp`, stamped on an op's fields at the route; a request body cannot set them.
+   once. The API looks the hash up on every request, so a revoke stops the next call (q3311 (2)):
+   - `Drover-Key` counts only beside the edge's `serve-token`; beside another token or with `Drover-Device` it is
+     400, as #1645 has it;
+   - the `dmcp_` bearer itself counts only from a loopback peer, straight at the API's own listener (from S4);
+   - both are read at `/mcp` only. On any other path a key is an unknown token.
+4. **A caller is #1645's `Viewer`**; this issue fills in its `Agent`. An agent's `by` is `mcp-<name>`, its `via`
+   is `mcp`, stamped on an op's fields at the route (`caller.rs`); a request body cannot set them.
 5. **One guard in `api()`** refuses an agent on any route outside its list (`OWNER_ONLY`) and a read key on an act
    (`READ_ONLY`). An agent reads what an unpaired browser reads, plus its jobs.
 6. **Three rules in core**, where every caller passes:
@@ -140,25 +162,26 @@ methods over JSON the API already parses, so no SDK crate.
 9. **The board names the agent** in the Events line, the ask and the thread message. Words in rows that exist; no
    screen changes, so no design stage.
 
-## Order with #1645 (q3299 (a): which lands first)
+## Order with #1645 (q3299 (a), q3311 (3))
 
 | Order | Slice | Waits for |
 |---|---|---|
 | first | **1. Keys and the rules.** All in `crates/core` and the CLI, files #1645 never moves | nothing; it lands now, the guards before the door |
-| then | #1645's S0 and **S1** (the API crate, the edge and its relay table) | #1645's approval |
-| then | **2. The caller through the API**, **3. the MCP address**, **4. words**: written in the API crate's `serve/` folder, plus the relay lines | S1 only |
+| then | #1645's S0, S1 and **S2** (the API crate; the edge's relay table, `Who`, `Viewer` and the token beside an identity header); #1571's **D1** (the frozen contract folder and its test) | their own issues |
+| then | **2. The caller through the API**, **3. the MCP address**, **4. words** | S2 for all three; slice 3 also D1 |
 
-So #1645's S1 lands before any MCP code in the server; nothing of this issue is moved or carved by it. Slices 2 to
-4 wait for no later #1645 slice. What those then do:
+Slice 3 is one PR (q3311 (3)): `mcp.rs`, the `/mcp` relay line, `Who::Key` and `Id::Key`, the line's headers and
+methods in the edge, and `/mcp`'s contract file. None of that is left to #1645's S4.
 
-- **S2** makes the API's `Viewer`. If slice 2 landed first, S2 folds `Caller::Agent` into it as one more variant
-  and `caller.rs` keeps the lists and the stamp; if S2 landed first, slice 2 adds the variant itself.
-- **S4** puts the door on a socket: the `keyed` lines pass through its HTTP client unchanged, and `/mcp` gets its
-  shape file in the contract folder with the other relayed paths.
-- **S7** deletes the plugin pass-through, never the `keyed` lines.
+#1645 also allows the MCP PR before S2, with the bearer checked in the one server and S2 moving it behind the
+header. Not taken: the key check would be built twice. What #1645's later slices then do:
 
-The orchestrator files slice 1 as its own issue; #1627 keeps slices 2 to 4, blocked on S1's issue. If #1645 is
-rejected, the same files go in `crates/server/src/serve/` and nothing else here changes.
+- **S4** puts the door on a socket. The line and the request text are the same, so nothing of MCP changes. The
+  API gets its own loopback listener there, which is when the bearer's direct way (decision 3) can first be reached.
+- **S7** deletes the plugin pass-through. `/mcp` never used it: its line is matched first. The `Who::Key` half of
+  S7's `edge.rs` check lands with slice 3.
+
+The orchestrator files slice 1 as its own issue; #1627 keeps slices 2 to 4, blocked on S2's issue and on D1's.
 
 ## Consequences
 
@@ -167,8 +190,12 @@ rejected, the same files go in `crates/server/src/serve/` and nothing else here 
 - An agent's line holds its thread: that thread's orchestrator sends its lane asks to the owner until the owner
   writes there. Safe, and slower. An agent belongs in a thread of its own, not a repo's working thread.
 - A cloud bot reaches the page's server only at a public address. That is a host change, the owner's, and no part
-  of this issue. There the key is the only gate: 256 random bits, hashed at rest, compared in constant time,
-  never logged. On the host, a local client may call the API's loopback address directly with its key.
+  of this issue. There the key is the only gate: 256 random bits, never logged, kept and passed on only as its
+  hash. On the host, a local client may call the API's loopback address directly with its key, from S4.
+- The edge holds no key and no list. A revoke is one row in the API's table, and the edge's next relayed call is
+  answered 401.
+- MCP in the server waits for three #1645 slices and one of #1571's. Until then slice 1's rules have no caller
+  but the CLI's `--by`.
 - Clients that accept only OAuth cannot connect, and a stdio-only client needs a bridge.
 - Reads are the board's payloads. One too big for an agent gets a slimmer `/api/v1` route; `mcp.rs` never trims.
 - The tool table is a list in one file. With eleven tools and a new one rare, it is not split (q3299 (c)).
@@ -184,11 +211,13 @@ rejected, the same files go in `crates/server/src/serve/` and nothing else here 
    `--by mcp-x` answer to an owner ask refused; an agent's add leaves the queue as it was and one ask open, whose
    [queue] queues; in a held thread an orchestrator's answer goes to the owner and `hosts off` is refused, and
    both work again after an owner line.
-2. **The caller through the API.** `Caller`, the stamp, the guard, the three routes with their fixtures, the one
-   issue-filing helper, the board's words. Proved by: every POST fixture called with an act key is `OWNER_ONLY`
-   but the four.
-3. **The MCP address.** `mcp.rs` with its table, both eras, the job wait; the relay lines. Proved by the test in
-   `usage.md` (the issue's AC, line by line) and one case in the edge's test.
+2. **The caller through the API.** `Viewer::Agent` and `keyed` (`caller.rs`), the stamp, the guard, the three
+   routes with their fixtures, the one issue-filing helper, the board's words. Proved by: every POST fixture
+   called as an agent with an act key is `OWNER_ONLY` but the four; a `Drover-Key` beside another token is 400,
+   and a bearer key off loopback 401.
+3. **The MCP address.** `mcp.rs` with its table, both eras, the job wait; the relay line, `Who::Key` and the
+   contract file. Proved by the test in `usage.md` (the issue's AC, line by line) and the `Who::Key` cases in
+   #1645's `edge.rs`.
 4. **Words.** The serve docs' new section, the refusal lines, the orchestrator prompt's line on `mcp-<name>`.
 
 ## Open question
@@ -202,8 +231,8 @@ rejected, the same files go in `crates/server/src/serve/` and nothing else here 
 | File | Class | Here |
 |---|---|---|
 | the tool table in `mcp.rs` (new) | central list | kept as one const by q3299 (c); a tool is one line |
-| the edge's `relay.rs` (#1645's) | central list of prefixes | two lines, once |
-| `crates/cli/tests/golden/contract/v1/*.keys` (#1571's) | collected folder | new files, none edited |
+| the edge's `relay.rs` (#1645's) | central list of prefixes | one line, once |
+| `crates/cli/tests/golden/contract/v1/*.keys` (#1571's) | collected folder, `append_only` | new files (`mcp.json`, `mcp.keys`), none edited |
 | `serve.rs`, `v1.rs` (`shared`, in `drover-api` after S1) | large modules | single-line arms into `caller.rs` and `mcp.rs` |
 | `docs/serve/*.md` | docs per area | one new file, `mcp.md` |
 
@@ -221,4 +250,5 @@ paths = ["crates/api/src/serve/mcp.rs"]
 reason = "#1627: an MCP tool is an /api/v1 route called through Server::api; the module holds no drover logic"
 ```
 
-No `[[collect]]`, `frozen` or `generated` line: there is no folder, no old list and no generated file.
+No `[[collect]]`, `frozen` or `generated` line: there is no folder, no old list and no generated file. #1571's
+`append_only` glob already covers `mcp.keys`.

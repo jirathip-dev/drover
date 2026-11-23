@@ -3,24 +3,26 @@
 ## Who may call whom
 
 ```
- agent ─HTTP─▶ server (the edge) ── relay.rs, a keyed line ──▶ the door ──▶ api: Server::route()
-                Host, Origin                                                  │
- a client on the host ─HTTP, the API's loopback address ─────────────────────▶│
-                                                                              ├─ cookie or Drover-Device ─▶ Caller::Device ─┐
-                                                                              └─ /mcp ─▶ mcp.rs ─▶ Caller::Agent ───────────┤
-                                                                                           └─ TOOLS (a const)               ▼
-                                                              v1.rs api() (the guard) ─▶ jobs, write(), chat::post ─▶ core
- the orchestrator's shell ─▶ the lane hook ─▶ callers::asked ◀─ orchestrator_answer          (answer_with, queue_change)
+ agent ─/mcp, its key─▶ server (the edge) ── relay.rs, the Who::Key line ──▶ the door ──▶ api: Server::route()
+                         Host, Origin; the key hashed into Drover-Key,                      │
+                         beside serve-token and Drover-Ip                                   │
+ an agent on the host ─/mcp, its key as the bearer, the API's loopback address (S4) ───────▶│
+                                                                                            ├─ Drover-Device ─▶ Viewer::Device ─┐
+                                                                                            └─ /mcp ─▶ mcp.rs ─▶ Viewer::Agent ─┤
+                                                                                                         └─ TOOLS (a const)     ▼
+                                                                  v1.rs api() (the guard) ─▶ jobs, write(), chat::post ─▶ core
+ the orchestrator's shell ─▶ the lane hook ─▶ callers::asked ◀─ orchestrator_answer              (answer_with, queue_change)
 ```
 
 New code goes in new files; the `shared` files gain single-line arms and stay under their baselines.
 
 ```
-crates/core/src/callers.rs            Key, Scope: the table, add, revoke, check, the `mcp-` prefix, asked
-crates/api/src/serve/caller.rs        Caller, the agent's route list, the stamp, keyed
+crates/core/src/callers.rs            Key, Scope: the table, add, revoke, hashed, check, the `mcp-` prefix, asked
+crates/api/src/serve/caller.rs        what a Viewer::Agent may reach, the stamp, keyed
 crates/api/src/serve/mcp.rs           JSON-RPC framing, both eras, the tool table, the job wait
-crates/server/src/relay.rs            two lines and the `keyed` field (#1645's file)
+crates/server/src/relay.rs            one line and Who::Key (#1645's file); engine.rs: Id::Key, Delete, four headers
 crates/cli/tests/mcp.rs               the AC, through Server::respond
+crates/cli/tests/golden/contract/v1/  mcp.json, mcp.keys (#1571's folder)
 ```
 
 | Module | Owns | May call | Must not |
@@ -31,15 +33,16 @@ crates/cli/tests/mcp.rs               the AC, through Server::respond
 | `core` `orchestrator_answer` (kept, one rule more) | an orchestrator's `answer` and `extend` in a held thread go to the owner | `callers::asked`, `to_owner` | accept a `--basis` there |
 | the lane hook (kept, lines more) | `OWNER_ONLY` for a lane running `serve keys`; for a held thread's orchestrator running a group verb or a `spawn` | `callers::asked`, once, only for an orchestrator's drover verb | read the log for any other call |
 | `core::cli` `queue add` (kept) | an orchestrator's add from a held thread is stamped the agent's | `callers::asked` | — |
-| `api` `serve::caller` (new) | `Caller`, `AGENT_READS`, `AGENT_ACTS`, `stamped`, `keyed` | `devices`, `callers` | read the tool table: the route list is its own, reviewed as code |
+| `api` `serve::caller` (new) | what `Viewer::Agent` may reach: `AGENT_READS`, `AGENT_ACTS`, `refused`, `stamped`; `keyed`, the one reader of a key | `callers::check`, `callers::hashed` | read the tool table: the route list is its own, reviewed as code. Read `Drover-Key` beside any token but the edge's, a bearer key from a peer off loopback, or either on a path other than `/mcp` |
 | `api` `serve::v1` `api()` (kept) | every `/api/v1` route, the guard | as today | name an actor as a literal: `by` and `via` come from the stamp |
 | `api` `write`, `chat::post` (kept) | the ops | as today | the same |
 | `api` `serve::mcp` (new) | the wire: parse, answer, list, call, await a job, map the answer; `TOOLS` | `Server::api`, `Server::keyed`, `Server::job`, serde | call core, write an event, branch on a tool's name, check Host or Origin |
-| `server` `relay.rs` (#1645's) | that `/mcp` is relayed, keyed | the door | read the key, parse the body, send its own token or a `Drover-*` header on a keyed line |
+| `server` `relay.rs`, `engine.rs` (#1645's) | that `/mcp` is relayed, and its caller's bearer hashed into `Drover-Key` | the door, its own sha256 | keep a key or a list of them, parse the body, pass a client's `Authorization`, cookie or `Drover-*` on, know a tool |
 | `crates/cli` | the `serve keys` verb | `core::callers` | — |
 
-Two tests hold the edges. Every tool's route is in the agent's list and has a contract fixture. Every `/api/v1`
-POST fixture, called with an act key, is `OWNER_ONLY` unless it is one of the four acts.
+Three tests hold the edges. Every tool's route is in the agent's list and has a contract fixture. Every `/api/v1`
+POST fixture, called with an act key, is `OWNER_ONLY` unless it is one of the four acts. And #1645's `edge.rs`,
+its `Who::Key` half: a client's `Authorization` reaches the door only as `Drover-Key`, on `/mcp` alone.
 
 ## Who may reach which route
 
@@ -53,7 +56,8 @@ POST fixture, called with an act key, is `OWNER_ONLY` unless it is one of the fo
 | `say`, `issue` | `UNPAIRED` | `READ_ONLY` | yes | yes, as the owner |
 | a lane's transcript, `shed`, `config`, every other POST | as today | `OWNER_ONLY` | `OWNER_ONLY` | as today |
 
-A key is read only at `/mcp`. Sent to any other path, or as the device cookie, it is no credential.
+A key is read only at `/mcp`: as `Drover-Key` beside the edge's token, or as the bearer from a loopback peer.
+Sent to any other path, or as the device cookie, it is no credential.
 
 ## A key
 
@@ -70,8 +74,8 @@ A key is read only at `/mcp`. Sent to any other path, or as the device cookie, i
  add with a name in any state: REFUSED KEY_EXISTS
 ```
 
-There is no cache between a call and the table, in the edge or the API, and no session to end: the call after a
-revoke is refused.
+The edge knows no key: it hashes and passes on. There is no cache between a call and the table and no session
+to end, so the call after a revoke is refused.
 
 ## A call
 
@@ -79,9 +83,11 @@ revoke is refused.
  POST /mcp at the edge
    ├─ a foreign Host or Origin ────────────────────────────▶ 403
    ├─ the API is away ─────────────────────────────────────▶ 503 BUSY
-   ▼ relayed whole, its Authorization untouched
- POST /mcp at the API
-   ├─ no live key ─────────────────────────────────────────▶ 401
+   ▼ the bearer hashed into Drover-Key, beside serve-token and Drover-Ip; the client's Authorization dropped
+ POST /mcp at the API (straight there: the bearer itself, from a loopback peer)
+   ├─ GET, DELETE ─────────────────────────────────────────▶ 405
+   ├─ Drover-Key beside another token, or with Drover-Device ▶ 400
+   ├─ no live key for the hash · a bearer off loopback ────▶ 401
    ├─ not a message · a bad version · headers unlike body ─▶ 400 with its JSON-RPC error
    ▼
  [framed] ─ initialize · server/discover · ping · tools/list ─▶ answered from the table alone

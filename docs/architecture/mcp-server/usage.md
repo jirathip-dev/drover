@@ -2,7 +2,7 @@
 
 Read this first. These are the call sites after the change; `adr.md` says why, `shapes.md` has the types and
 `boundaries.md` the rules. Everything new is in a code block, because it does not exist yet. Paths under
-`api/src/` are #1645's API crate.
+`api/src/` are #1645's API crate; `Viewer`, `Who` and `Relayed` are its types after its S2.
 
 ## The owner: one key per agent, made on the host
 
@@ -31,7 +31,8 @@ the log is always the same key. A lane running these is refused `OWNER_ONLY` by 
                               "headers": { "Authorization": "Bearer dmcp_5f0c…e91a" } } } }
 ```
 
-It lists the tools its key allows (a read key sees the seven reads) and calls them:
+An agent on the host itself may use the API's loopback address instead (`[serve] api`, from #1645's S4), with the
+same header. Either way it lists the tools its key allows (a read key sees the seven reads) and calls them:
 
 ```
 tools/call status   {}                                       → the board in one read, as JSON
@@ -121,10 +122,10 @@ impl Server<'_> {
         }
     }
 
-    fn call(&self, ctx: &Ctx, head: &str, who: &Caller, msg: &Message) -> Called {
+    fn call(&self, ctx: &Ctx, head: &str, who: &Viewer, msg: &Message) -> Called {
         let tool = tool(msg.name())?;
         let (path, query, body) = tool.request(msg.arguments())?;
-        let res = self.api(ctx, head, (tool.method, &path), &query, &body, &Ok(who.clone()));
+        let res = self.api(ctx, head, (tool.method, &path), &query, &body, who);
         self.settled(res)
     }
 }
@@ -132,6 +133,22 @@ impl Server<'_> {
 
 `call` knows nothing about any one tool. `settled` turns the route's answer into the tool's text, and reads a
 202's job until it ends. There is no Host or Origin check here: that is the edge's.
+
+```rust
+// crates/api/src/serve/caller.rs: the one place a key is read
+pub(super) fn keyed(&self, ctx: &Ctx, head: &str) -> Result<Viewer, String> {
+    let hash = match (self.edge(head), header(head, "drover-key"), bearer(head)) {
+        (true, Some(hash), _) => hash.to_string(),
+        (false, None, Some(key)) if loopback(head) => callers::hashed(key).ok_or("unknown key")?,
+        _ => return Err("no key".into()),
+    };
+    let key = callers::check(ctx, &hash)?;
+    Ok(Viewer::Agent { key: key.hash, label: key.name, scope: key.scope, ip: ip(head) })
+}
+```
+
+`edge` is #1645's check that the request carries the `serve-token`; its 400 for an identity header beside any
+other token comes before this.
 
 ## API: a tool is a line of one table
 
@@ -156,22 +173,27 @@ const TOOLS: &[Tool] = &[
 A new tool is a new entry and, when the route is new, a route with its contract fixture and a name in
 `caller.rs`'s list.
 
-## The edge: two lines
+## The edge: one line
 
 ```rust
 // crates/server/src/relay.rs (#1645's table)
-Relayed { method: Post, path: "/mcp", stream: false, until: None, keyed: true },
-Relayed { method: Get,  path: "/mcp", stream: false, until: None, keyed: true },
+Relayed { methods: &[Get, Post, Delete], path: "/mcp", stream: true, who: Key, until: None },
+
+// where the edge builds the door's request from a line (#1645's `forward`)
+id: match line.who {
+    Who::Device => cookie(&req, "hd").map(|c| Id::Device(sha256(c))),
+    Who::Key => bearer(&req).map(|k| Id::Key(sha256(k))),
+},
 ```
 
-On a keyed line the edge, after its Host and Origin check, sends the request on with the caller's own
-`Authorization`. It adds no token and no `Drover-Device`, and it drops the cookie.
+After its Host and Origin check the edge sends the request on with its own `serve-token`, the hash as
+`Drover-Key` and the caller's address as `Drover-Ip`. The client's `Authorization` and cookie stop at the edge.
 
 ## API: the caller reaches the acts
 
 ```rust
 // crates/api/src/serve/v1.rs, api(): one guard for every route, before any work
-_ if who.is_some_and(|c| c.refused(method, x).is_some()) => refusal(who, method, x),
+_ if who.refused(method, x).is_some() => refusal(who, method, x),
 
 // the caller is stamped on the fields at the route; a body's own `by`, `via` or `mtime` is dropped for an agent
 let f = stamped(fields(body), op, who);
@@ -220,7 +242,8 @@ let d = match callers::asked(&events, &thread) { Some(agent) => d.with("by", age
 ## The test
 
 ```rust
-// crates/cli/tests/mcp.rs: the API's real entry, Server::respond, with a raw POST /mcp
+// crates/cli/tests/mcp.rs: the API's real entry, Server::respond, with a raw POST /mcp as the edge sends it:
+// the serve-token, Drover-Key: sha256(key), Drover-Ip
 let (c, s) = board("mcp");
 let key = keys_add(&c, "grok", Scope::Act);
 
@@ -248,9 +271,25 @@ for route in every_post_fixture().filter(|r| !AGENT_ACTS.contains(r)) {
     assert_eq!(api_as(&s, &key, route)["code"], "OWNER_ONLY");
 }
 
+assert!(bearer(&s, &key, "127.0.0.1", "tools/list").starts_with("HTTP/1.1 200"));
+assert!(bearer(&s, &key, "100.64.0.9", "tools/list").starts_with("HTTP/1.1 401"));
+assert!(raw(&s, COOEE_TOKEN, &sha256(&key), "tools/list").starts_with("HTTP/1.1 400"));
+
 run(&c, &["serve", "keys", "revoke", "grok"]);
-assert!(raw(&s, &key, "tools/list").starts_with("HTTP/1.1 401"));
+assert!(raw(&s, SERVE_TOKEN, &sha256(&key), "tools/list").starts_with("HTTP/1.1 401"));
+assert!(bearer(&s, &key, "127.0.0.1", "tools/list").starts_with("HTTP/1.1 401"));
 ```
 
-Run: `cargo test -p drover --test mcp`, exit 0. The edge's part is one case in #1645's `cli/tests/edge.rs`: a
-`POST /mcp` with a key and a cookie reaches the door with the same `Authorization`, no cookie and no `Drover-*`.
+Run: `cargo test -p drover --test mcp`, exit 0. `bearer` sends the key itself as `Authorization` from the given
+peer; `raw` sends a token and a `Drover-Key`.
+
+The edge's part is the `Who::Key` half of #1645's `cli/tests/edge.rs`, in the same PR:
+
+```rust
+let got = door.saw(edge.post("/mcp", &[("authorization", "Bearer dmcp_k"), ("cookie", "hd=c"), ("drover-key", "forged")]));
+assert_eq!(got.header("authorization"), Some("Bearer <serve-token>"));
+assert_eq!(got.header("drover-key"), Some(sha256("dmcp_k").as_str()));
+assert!(got.header("cookie").is_none() && got.header("drover-device").is_none() && got.header("drover-ip").is_some());
+```
+
+and its existing rule, that every `RELAYED` line with no `until` has a contract file, now holds `mcp.keys`.
