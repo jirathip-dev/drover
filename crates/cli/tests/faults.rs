@@ -9,15 +9,18 @@ const BOUND: Duration = Duration::from_secs(20);
 
 fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || drop(tx.send(f())));
-    rx.recv_timeout(BOUND)
-        .unwrap_or_else(|_| panic!("{what} still blocked after {} s", BOUND.as_secs()))
+    let h = std::thread::spawn(move || drop(tx.send(f())));
+    match rx.recv_timeout(BOUND) {
+        Ok(v) => v,
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => std::panic::resume_unwind(h.join().unwrap_err()),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("{what} still blocked after {} s", BOUND.as_secs()),
+    }
 }
 
 fn base() -> String {
     CONFIG
         .replace("harness  =  \"hermes\"", "harness = \"claude\"")
-        .replace("[limits]\n", "[limits]\nshed_call_secs = 1\n")
+        .replace("[limits]\n", "[limits]\nshed_call_secs = 1\nssh_sessions = 64\n")
 }
 
 fn config(sh: &FakeShed) -> String {
@@ -302,22 +305,22 @@ fn pickup_through(fault: Ssh) {
 
 #[test]
 fn a_verdict_behind_a_host_whose_address_changed_is_kept_and_recorded_once_it_answers() {
-    pickup_through(Ssh::Moved);
+    within("verdict pickup", || pickup_through(Ssh::Moved));
 }
 
 #[test]
 fn a_verdict_behind_a_host_whose_key_changed_is_kept_and_recorded_once_it_answers() {
-    pickup_through(Ssh::Rekeyed);
+    within("verdict pickup", || pickup_through(Ssh::Rekeyed));
 }
 
 #[test]
 fn a_verdict_on_a_host_that_vanished_mid_lane_is_kept_and_recorded_once_it_is_back() {
-    pickup_through(Ssh::Gone);
+    within("verdict pickup", || pickup_through(Ssh::Gone));
 }
 
 #[test]
 fn a_verdict_behind_a_hung_ssh_link_is_kept_and_recorded_once_it_answers() {
-    pickup_through(Ssh::Hang);
+    within("verdict pickup", || pickup_through(Ssh::Hang));
 }
 
 struct Here(Fake);
@@ -403,22 +406,22 @@ fn drain_through(fault: Ssh) {
 
 #[test]
 fn an_outbox_behind_a_host_whose_address_changed_is_drained_once_it_answers() {
-    drain_through(Ssh::Moved);
+    within("outbox drain", || drain_through(Ssh::Moved));
 }
 
 #[test]
 fn an_outbox_behind_a_host_whose_key_changed_is_drained_once_it_answers() {
-    drain_through(Ssh::Rekeyed);
+    within("outbox drain", || drain_through(Ssh::Rekeyed));
 }
 
 #[test]
 fn an_outbox_on_a_host_that_vanished_mid_lane_is_drained_once_it_is_back() {
-    drain_through(Ssh::Gone);
+    within("outbox drain", || drain_through(Ssh::Gone));
 }
 
 #[test]
 fn an_outbox_behind_a_hung_ssh_link_is_drained_once_it_answers() {
-    drain_through(Ssh::Hang);
+    within("outbox drain", || drain_through(Ssh::Hang));
 }
 
 fn soak_ssh(host: &str) -> String {
