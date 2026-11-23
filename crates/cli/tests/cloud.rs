@@ -380,9 +380,15 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
             &json!({"name": "x", "status": "working", "labels": {"fleet": "sendmeter"}}),
         )]),
     )]);
-    assert_eq!(tick(&c, &cfg, &lane_fake(), &live), [] as [std::string::String; 0]);
+    assert_eq!(
+        tick(&c, &cfg, &lane_fake(), &live),
+        <[std::string::String; 0]>::default()
+    );
     let soon = drover::Ctx { now: NOW - 1000, ..c };
-    assert_eq!(tick(&soon, &cfg, &lane_fake(), &idle()), [] as [std::string::String; 0]);
+    assert_eq!(
+        tick(&soon, &cfg, &lane_fake(), &idle()),
+        <[std::string::String; 0]>::default()
+    );
 }
 
 #[test]
@@ -1001,7 +1007,7 @@ fn boot_with_shed(name: &str, version: &str) -> (Fake, String) {
     std::fs::set_permissions(bin.join("shed"), std::fs::Permissions::from_mode(0o755)).unwrap();
     let f = boot_fake(true);
     let mut out = vec![];
-    let _ = drover::cloud::bootstrap(&c, &cfg, &ShedThere(&f, home), "cloud1", &mut out);
+    drover::cloud::bootstrap(&c, &cfg, &ShedThere(&f, home), "cloud1", &mut out).ok();
     (f, String::from_utf8(out).unwrap())
 }
 
@@ -1063,7 +1069,7 @@ fn bootstrap_installs_and_checks_the_real_exe_the_guard_runs_not_its_symlink() {
     );
     drop(calls);
     let on = drover::hosts::On::new(&f, Some("cloud1"));
-    let _ = drover::hosts::acp_guard(&c, &on, "/home/me", ("fleet-impl", "claude", "x"));
+    drover::hosts::acp_guard(&c, &on, "/home/me", ("fleet-impl", "claude", "x")).ok();
     assert!(f.called(&format!("{SSH}'{exe}' '--version'")), "{:?}", f.calls.borrow());
 }
 
@@ -1191,7 +1197,7 @@ fn tick_logs_a_vm_deleted_outside_drover_gone_once_and_stops_counting_its_spend(
         ..c.clone()
     };
     let r = Fake::default().reply(&rc("status"), "");
-    assert_eq!(tick(&later, &cfg, &r, &idle()), [] as [String; 0]);
+    assert_eq!(tick(&later, &cfg, &r, &idle()), <[String; 0]>::default());
     assert!(!r.called(&rc("stop")) && gone_stops(&c).len() == 1);
     let events = read(&c.state).unwrap();
     let spend = |c: &drover::Ctx| drover::cloud::spend(c, &cfg, &events, "cloud1").unwrap();
@@ -1263,7 +1269,7 @@ fn tick_logs_a_vm_stopped_outside_drover_once_and_stops_counting_its_spend() {
         ..c.clone()
     };
     let r = Fake::default().reply(&rc("status"), "stopped\n");
-    assert_eq!(tick(&later, &cfg, &r, &idle()), [] as [String; 0]);
+    assert_eq!(tick(&later, &cfg, &r, &idle()), <[String; 0]>::default());
     assert!(!r.called(&rc("stop")) && outside_stops(&c) == 1);
     let events = read(&c.state).unwrap();
     let spend = |c: &drover::Ctx| drover::cloud::spend(c, &cfg, &events, "cloud1").unwrap();
@@ -1274,11 +1280,11 @@ fn tick_logs_a_vm_stopped_outside_drover_once_and_stops_counting_its_spend() {
 fn a_failing_status_is_not_gone() {
     let (c, cfg) = running("cloud-gone-err");
     let r = lane_fake().once_err(&rc("status"), 1, "network unreachable");
-    assert_eq!(tick(&c, &cfg, &r, &BTreeMap::new()), [] as [String; 0]);
+    assert_eq!(tick(&c, &cfg, &r, &BTreeMap::new()), <[String; 0]>::default());
     let (here, cloud) = (FakeShed::new(), FakeShed::new());
     let r = boot_fake(false);
     let there = on_cloud(&r, &cloud);
-    let _ = drover::cloud::bootstrap(&c, &cfg, &here.on(&there), "cloud1", &mut vec![]);
+    drover::cloud::bootstrap(&c, &cfg, &here.on(&there), "cloud1", &mut vec![]).ok();
     assert!(r.called(&rc("status")) && !r.called(&rc("create")) && !r.called(&rc("start")));
     assert!(gone_stops(&c).is_empty() && outside_stops(&c) == 0);
     assert_eq!(drover::cloud::state(&read(&c.state).unwrap(), "cloud1"), "running");
@@ -1290,7 +1296,7 @@ fn shed_job_lines(name: &str) -> (String, String) {
         .once(&step("shed doctor"), 1, "")
         .reply(&step("shed install --force"), "");
     let (here, cloud) = (FakeShed::new(), FakeShed::new());
-    let _ = drover::cloud::bootstrap(&c, &cfg, &here.on(&on_cloud(&r, &cloud)), "cloud1", &mut vec![]);
+    drover::cloud::bootstrap(&c, &cfg, &here.on(&on_cloud(&r, &cloud)), "cloud1", &mut vec![]).ok();
     let sent = |p: &str| {
         let calls = r.calls.borrow();
         let line = calls.iter().find(|l| l.starts_with(&step(p))).cloned();

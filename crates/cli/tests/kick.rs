@@ -130,7 +130,7 @@ fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
         let argv = ["drover", "hook", "--role", "impl"].map(String::from).to_vec();
         let mut out = vec![];
         assert_eq!(drover::main_with(argv, &c, r, &mut out, &mut stop.as_bytes()), 0);
-        assert_eq!(out, [] as [u8; 0]);
+        assert_eq!(out, <[u8; 0]>::default());
     };
     std::env::remove_var("DROVER_OUTBOX");
     std::env::remove_var("DROVER_LANE");

@@ -168,7 +168,7 @@ fn extra_commands_wait_first_come_first_served_and_all_finish() {
         "{l}"
     );
     assert_eq!(l.matches("end ").count(), 4);
-    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+    assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default());
 }
 
 #[test]
@@ -259,7 +259,7 @@ fn hold_runs_its_command_and_returns_its_exit_code() {
     assert_eq!(hold(&d, "1", &["true"]).status().unwrap().code(), Some(0));
     let seven = hold(&d, "1", &["sh", "-c", "exit 7"]).status().unwrap();
     assert_eq!(seven.code(), Some(7));
-    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+    assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default());
 }
 
 #[test]
@@ -281,7 +281,7 @@ fn hold_on_a_host_over_its_admission_limits_gives_up_with_75_and_the_reason() {
     let d = host_with("load_per_cpu = -1.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n", "");
     let why = refused(&d);
     assert!(why.contains("HOST_BUSY") && why.contains("load/cpu"), "{why}");
-    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
+    assert_eq!(tickets(&d), <[drover::heavy::Ticket; 0]>::default());
 }
 
 #[test]

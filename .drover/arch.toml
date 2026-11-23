@@ -1,4 +1,4 @@
-frozen = ["ci/cap.toml", "crates/core/src/events/passive.rs", "crates/core/src/events/push.rs"]
+frozen = [".github/workflows/ci.yml", "ci/cap.toml", "crates/core/src/events/passive.rs", "crates/core/src/events/push.rs"]
 generated = [
     "assets/types/api.d.ts",
     "web/dist/board.js",
@@ -12,7 +12,7 @@ generated = [
     "crates/cli/tests/golden/briefs/rev.md",
     "crates/cli/tests/golden/briefs/rev-repro.md",
 ]
-generate = "just gen"
+generate = "sh scripts/arch-gen.sh"
 shared = [
     "crates/core/src/check.rs",
     "crates/core/src/cli.rs",
@@ -40,9 +40,13 @@ shared = [
 dir = "ci/cap.d"
 glob = "*.toml"
 
+[[collect]]
+dir = ".gatekeeper/gates"
+glob = "*.toml"
+
 [comments]
 policy = "strict"
-except = ["assets/types/**", "web/dist/**", "web/lint-fixtures/**"]
+except = ["assets/types/**", "web/dist/**"]
 
 [docs]
 paths = ["docs/**/*.md", "README.md"]

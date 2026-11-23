@@ -97,7 +97,7 @@ fn the_tables_match_the_events_and_a_rebuild_gives_identical_rows() {
         let p = c.state.clone();
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         let ev = log(seed, 300, 1_000);
-        let cut = (seed * 13 % 300) as usize;
+        let cut = usize::try_from(seed * 13 % 300).unwrap();
         write(&p, &ev[..cut]);
         ev[cut..].iter().for_each(|e| append(&p, e).unwrap());
         same(&states(&p).unwrap(), &fold(&history(&p).unwrap()));

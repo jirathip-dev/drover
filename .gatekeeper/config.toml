@@ -1,0 +1,31 @@
+packs = ["core", "rust", "ts"]
+integration = "staging"
+
+[pin]
+version = "1.1.0"
+x86_64-unknown-linux-gnu = "5cc4e98a0140ee0e190752bd141d74cf7790c943e7846078fbba4dddeaca85e4"
+aarch64-apple-darwin = "61be2d06fb38d761348f289c4b5c8e1c43be4b346c3fc00f22b5019e2fa9d959"
+
+[cache]
+
+[tools]
+drover = "scripts/drover.sh"
+
+[ts]
+projects = ["web"]
+install = "npm --prefix web ci --no-audit --no-fund"
+
+[budgets]
+"core/arch" = 600
+
+[legs.release]
+platform = "linux"
+
+[legs.test]
+platform = "linux"
+
+[legs.ui]
+platform = "linux"
+
+[legs.ui-webkit]
+platform = "linux"

@@ -142,7 +142,7 @@ fn an_ssh_that_never_returns_costs_one_retried_deadline_and_drive_still_starts()
                 });
                 assert!(gone, "{name}: the ssh's process group is killed with it");
             } else {
-                let _ = std::process::Command::new("kill").arg(pid).status();
+                std::process::Command::new("kill").arg(pid).status().ok();
             }
         }
     }
@@ -285,7 +285,7 @@ fn a_hung_shed_connect_on_one_remote_host_costs_one_deadline_and_another_remote_
         let took = t.elapsed();
         let pids = std::fs::read_to_string(dir.join("pids")).unwrap_or_default();
         for pid in pids.lines() {
-            let _ = std::process::Command::new("kill").arg(pid).status();
+            std::process::Command::new("kill").arg(pid).status().ok();
         }
         assert_eq!(code, 0, "{name}: {out}");
         assert!(

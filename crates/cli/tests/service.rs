@@ -59,17 +59,18 @@ struct Proc(std::process::Child, std::path::PathBuf);
 
 impl Drop for Proc {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        self.0.kill().ok();
+        self.0.wait().ok();
         for _ in 0..10 {
             let passes = drover::db::leases(&self.1, "drive-").into_iter();
             for l in passes.filter(|l| !l.key.trim_end_matches(".lock").ends_with(|c: char| c.is_ascii_digit())) {
                 if l.pid == 0 || l.pid == std::process::id() {
                     continue;
                 }
-                let _ = std::process::Command::new("kill")
+                std::process::Command::new("kill")
                     .args(["-9", &l.pid.to_string()])
-                    .status();
+                    .status()
+                    .ok();
                 drover::db::release(&self.1, &l.key, Some(&l));
             }
             std::thread::sleep(std::time::Duration::from_millis(100));

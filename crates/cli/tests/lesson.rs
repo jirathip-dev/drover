@@ -339,7 +339,7 @@ fn a_failing_shadow_check_passes_ci_and_the_summary_shows_would_fail() {
              - don't hand (enforced by: hand `echo hand-ran; false`)\n"
         );
         std::fs::write(d.join(".drover/rules.md"), rules).unwrap();
-        let _ = std::fs::remove_file(&summary);
+        std::fs::remove_file(&summary).ok();
         let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
             .arg("lesson-check")
             .env("GITHUB_STEP_SUMMARY", &summary)

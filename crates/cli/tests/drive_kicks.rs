@@ -49,7 +49,7 @@ fn fake_with(load: &str, f: Fake) -> Fake {
 
 fn pending(d: &serde_json::Value) -> u64 {
     let a = d["actions"].as_array().unwrap();
-    a.iter().filter(|a| a["outcome"] == "pending").count() as u64
+    u64::try_from(a.iter().filter(|a| a["outcome"] == "pending").count()).unwrap()
 }
 
 fn launched(r: &Fake, n: u64) -> usize {
@@ -937,7 +937,7 @@ impl drover::runner::Runner for Meet {
             std::thread::scope(|s| {
                 s.spawn(|| {
                     self.1.wait();
-                    let _ = tx.send(());
+                    tx.send(()).ok();
                 });
                 if rx.recv_timeout(std::time::Duration::from_secs(2)).is_err() {
                     self.1.wait();

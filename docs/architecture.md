@@ -146,7 +146,7 @@ board shows (`Event` for events and asks, `IssueState`, `Waiting`, `HostSeen`, `
 `just types` writes it (`cargo test -p drover-server --features ts export_bindings`). The types follow serde's JSON:
 u64 is `number`, `Option<T>` is `field?: T | null`, `rename` and `flatten` as serde does them. CI regenerates the file
 and fails on any diff, then `serde_json_fits_the_types` type-checks the demo export's real payloads and each type's
-default with `tsc --noEmit --strict`, and `just types-lint` fails a hand-written copy of a generated type in the board's
+default with `tsc --noEmit --strict`, and local/ts-types (`.gatekeeper/gates/ts-types.toml`) fails a hand-written copy of a generated type in the board's
 TS: it imports them from `assets/types/api.d.ts`.
 
 ## Code rules
@@ -171,9 +171,9 @@ TS: it imports them from `assets/types/api.d.ts`.
   `#[must_use]` value and an `#[allow]` without a `reason`; `unsafe_code` is forbidden in every crate but
   `crates/sys` (`drover-sys`), which holds each OS call std has no safe form for, and the event log's shared
   append buffer, behind safe fns (`// SAFETY:` on each block, `unsafe_op_in_unsafe_fn` denied). Tests may unwrap, index and
-  print (`clippy.toml`; CI's second clippy pass allows them in test targets). `.drover/arch.toml` keeps processes in
-  `runner.rs`, the environment in `config.rs` and the clock and sleeps in `clock.rs`. Each ban has a fixture CI must
-  see fail: `scripts/lint-fixtures.sh rust|ts` (`ci/lint-fixtures/rust/`, `web/lint-fixtures/`).
+  print (gatekeeper's rust/clippy, with its pack's `clippy.toml`, allows them in test targets). `.drover/arch.toml` keeps
+  processes in `runner.rs`, the environment in `config.rs` and the clock and sleeps in `clock.rs`. gatekeeper's rust/bans
+  and ts/oxlint hold each ban's fixture (#1587).
 - **Size cap:** at most `line_cap` (in `ci/cap.toml`) formatted lines of non-test Rust under `src/` and `crates/*/src/` (tests
   live in `crates/cli/tests/`), counted after `cargo fmt`. CI runs `drover cap-check --config ci/cap.toml`; a fleet can set its own
   `line_cap` under `[fleet.<name>]`. Raising the cap needs the owner's OK in the cap issue (its q-number). The

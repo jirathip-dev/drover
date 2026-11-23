@@ -243,7 +243,7 @@ fn threads(name: &str, b: &FakeShed) -> drover::Ctx {
         "Release",
     ];
     for (i, t) in titles.iter().enumerate() {
-        let n = i as u64 + 2;
+        let n = u64::try_from(i).unwrap() + 2;
         let at = drover::Ctx {
             now: c.now + n * 60,
             ..c.clone()

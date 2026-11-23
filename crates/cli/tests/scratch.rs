@@ -53,7 +53,10 @@ fn setup(name: &str, budget_bytes: u64) -> (drover::Ctx, PathBuf) {
     let root = d.join("worktrees/.build");
     let cfg = CONFIG.replace(
         "build_root = \"\"",
-        &format!("build_budget_gb = {}", budget_bytes as f64 / 1_073_741_824.0),
+        &format!(
+            "build_budget_gb = {}",
+            budget_bytes.to_string().parse::<f64>().unwrap() / 1_073_741_824.0
+        ),
     );
     (ctx(&d, &cfg), root.join(".scratch"))
 }

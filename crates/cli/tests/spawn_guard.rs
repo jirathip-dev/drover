@@ -340,7 +340,7 @@ fn an_orch_spawn_is_refused_and_every_lane_takes_an_issue() {
     assert!(read(&c.state).unwrap_or_default().is_empty());
     assert_eq!(run(&c, &r, &["spawn", "sendmeter", "-", "impl"]).0, 1);
     assert_eq!(run(&c, &r, &["spawn", "sendmeter", "12", "boss"]).0, 1);
-    assert_eq!(sh.all("run"), [] as [serde_json::Value; 0]);
+    assert_eq!(sh.all("run"), <[serde_json::Value; 0]>::default());
 }
 
 #[test]

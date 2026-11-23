@@ -357,7 +357,8 @@ fn reflinks(d: &std::path::Path) -> bool {
         .arg(&dst)
         .status()
         .is_ok_and(|s| s.success());
-    let _ = (std::fs::remove_file(&src), std::fs::remove_file(&dst));
+    std::fs::remove_file(&src).ok();
+    std::fs::remove_file(&dst).ok();
     ok
 }
 
@@ -471,7 +472,7 @@ fn eject_of_a_hung_root_returns_at_once_skips_the_saves_and_restarts_on_the_next
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let dir = r.nvme.to_string_lossy().into_owned();
     assert!(drover::runner::hung(&dir, std::time::Duration::ZERO, move |_| {
-        let _ = rx.recv();
+        rx.recv().ok();
         None
     }));
     let f = fake(&r, &r.nvme);

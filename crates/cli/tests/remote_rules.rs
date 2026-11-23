@@ -87,7 +87,7 @@ fn lane_env(r: &Fake, bazzite: &FakeShed, remote: &Path) -> BTreeMap<String, Str
 
 fn hook_there(env: &BTreeMap<String, String>, remote: &Path, toml: Option<&str>, cmd: &str) -> String {
     let conf = remote.join("fleet.toml");
-    let _ = std::fs::remove_file(&conf);
+    std::fs::remove_file(&conf).ok();
     if let Some(t) = toml {
         std::fs::write(&conf, t).unwrap();
     }
@@ -161,7 +161,7 @@ fn a_missing_or_unreadable_rules_file_fails_closed_naming_it() {
     let remote = tmpdir("remote-rules-closed");
     let rules = remote.join("issue-12.rules.json");
     for text in [None, Some("not json"), Some("{\"branches\": 3}")] {
-        let _ = std::fs::remove_file(&rules);
+        std::fs::remove_file(&rules).ok();
         if let Some(t) = text {
             std::fs::write(&rules, t).unwrap();
         }
@@ -343,7 +343,7 @@ impl Disk<'_> {
                     ..Default::default()
                 }));
             }
-            let _ = std::fs::remove_file(self.at(p));
+            std::fs::remove_file(self.at(p)).ok();
             return Some(Ok(drover::runner::Out::default()));
         }
         if last.starts_with("'sh' '-c' 'umask 077") {

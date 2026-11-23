@@ -24,6 +24,7 @@ impl Runner for RealClone<'_> {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn reflinks(d: &std::path::Path) -> bool {
     let (src, dst) = (d.join(".probe"), d.join(".probe-clone"));
     std::fs::write(&src, "p").unwrap();

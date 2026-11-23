@@ -1,0 +1,6 @@
+about = "a commit that edits ci/cap.toml or adds a ci/cap.d raise carries a `Cap:` trailer (core/cap counts the lines)"
+fix = "the raise is its own issue: put `Cap: <old> → <new> (#issue, q<N>)` in the commit message"
+budget_secs = 600
+setup = ["rust"]
+paths = ["ci/cap.toml", "ci/cap.d/**"]
+run = "{tool:drover} cap-check --config ci/cap.toml {--base}"

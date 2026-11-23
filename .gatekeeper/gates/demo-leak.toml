@@ -1,0 +1,11 @@
+about = "the demo exports (#39, synthetic data in demo/) and the export has no ts.net hostname, chat ID or /Users/ path"
+fix = "fix the export error, or replace the hostname, chat ID or home path in demo/ or the page with a placeholder"
+budget_secs = 600
+setup = ["rust"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "assets/**", "demo/**", "web/dist/**"]
+run = '''
+set -eu
+rm -rf target/demo-site
+DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl {tool:drover} serve --export target/demo-site --demo
+if grep -rnE '[A-Za-z0-9-]\.ts\.net|telegram:-?[0-9]|/Users/' target/demo-site/; then exit 1; fi
+'''

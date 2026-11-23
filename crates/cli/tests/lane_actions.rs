@@ -745,12 +745,12 @@ fn wip_prune_dry_run_lists_and_deletes_nothing() {
     let wip = |name: &str, file: &str| {
         git(&["-C", &l, "checkout", "-q", "--detach", "origin/staging"]);
         std::fs::create_dir_all(local.join(file).parent().unwrap()).unwrap();
-        let mut x = file.len() as u64;
+        let mut x = u64::try_from(file.len()).unwrap();
         let bytes: Vec<u8> = (0..2 << 20)
             .map(|_| {
                 (
                     x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1),
-                    (x >> 56) as u8,
+                    u8::try_from(x >> 56).unwrap(),
                 )
                     .1
             })

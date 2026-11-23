@@ -308,7 +308,7 @@ impl Sim {
             let running = self.w.procs.borrow().contains_key(&TICK_PID);
             if (self.w.now() - T0).is_multiple_of(300) && !running {
                 if let Some(h) = self.tick.take() {
-                    let _ = h.join();
+                    h.join().ok();
                 }
                 self.start(&["tick"], TICK_PID);
             }

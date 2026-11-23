@@ -1,0 +1,7 @@
+about = "parity rows red until their fix (#1094: each #[ignore] names its issue): reported, never failing"
+fix = "nothing to fix here: each ignored row's own issue fixes it"
+budget_secs = 600
+leg = "ui-webkit"
+setup = ["rust", "node"]
+paths = ["web/**", "assets/**", "crates/server/**", "crates/cli/tests/support/webview.mjs", "scripts/webkit.sh", "crates/cli/tests/parity_webkit.rs"]
+run = "if ! scripts/webkit.sh cargo test --locked --test parity_webkit -- --ignored --nocapture; then echo \"warning: ignored parity rows still red (soft)\"; fi"

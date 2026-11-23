@@ -427,7 +427,10 @@ fn the_model_chip_offers_the_models_list_and_a_pick_from_it_is_taken() {
         drover::orchestrator::harness_models(&m, "claude"),
         ["claude-opus-5-5", "fable", "opus"]
     );
-    assert_eq!(drover::orchestrator::harness_models(&m, "hermes"), [] as [&str; 0]);
+    assert_eq!(
+        drover::orchestrator::harness_models(&m, "hermes"),
+        <[&str; 0]>::default()
+    );
     let c = ctx(&tmpdir("pick-listed"), &listed("\"opus\", \"fable\""));
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
     pick_fable(&c);

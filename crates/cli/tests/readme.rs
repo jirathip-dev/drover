@@ -198,8 +198,8 @@ fn quick_start_runs_as_written() {
         assert!(Instant::now() < deadline, "serve never listened on {addr}");
         std::thread::sleep(Duration::from_millis(100));
     };
-    let _ = child.kill();
-    let _ = child.wait();
+    child.kill().ok();
+    child.wait().ok();
     assert!(body.starts_with("HTTP/1.") && body.contains(" 200 "), "{body}");
 }
 

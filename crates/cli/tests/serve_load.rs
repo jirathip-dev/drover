@@ -39,7 +39,8 @@ fn get(addr: SocketAddr, path: &str, cookie: &str, want: usize) -> (String, Dura
     let t = Instant::now();
     let mut s = TcpStream::connect(addr).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-    let _ = s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n").as_bytes());
+    s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n").as_bytes())
+        .ok();
     let (mut out, mut b) = (vec![], vec![0u8; 65_536]);
     while let Ok(n @ 1..) = s.read(&mut b) {
         out.extend_from_slice(&b[..n]);

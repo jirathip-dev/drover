@@ -729,11 +729,12 @@ fn upstream_with(status: &'static str) -> (u16, std::sync::Arc<std::sync::Mutex<
             rd.read_exact(&mut body).unwrap();
             s2.lock().unwrap().push(head + &String::from_utf8(body).unwrap());
             let b = "event: message_start\ndata: {}\n\nevent: message_stop\ndata: {}\n\n";
-            let _ = write!(
+            write!(
                 c,
                 "HTTP/1.1 {status}\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\n\r\n{b}",
                 b.len()
-            );
+            )
+            .ok();
         }
     });
     (port, seen)

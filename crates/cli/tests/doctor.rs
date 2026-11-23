@@ -489,7 +489,7 @@ fn spawns_row_dedupes_stale_names() {
     names.extend(std::iter::repeat_n("spawn-demo-1.pending".to_string(), 299));
     for (i, f) in names.iter().enumerate() {
         let ev = drover::events::Event::new(
-            c.now - 600 + i as u64,
+            c.now - 600 + u64::try_from(i).unwrap(),
             "demo",
             Some(1),
             "stale-marker",

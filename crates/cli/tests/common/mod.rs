@@ -317,7 +317,7 @@ struct Made(std::cell::RefCell<Vec<PathBuf>>);
 impl Drop for Made {
     fn drop(&mut self) {
         for d in self.0.borrow().iter() {
-            let _ = std::fs::remove_dir_all(d);
+            std::fs::remove_dir_all(d).ok();
         }
     }
 }
@@ -372,7 +372,7 @@ pub fn tmpdir(name: &str) -> PathBuf {
         std::process::id(),
         N.fetch_add(1, Ordering::SeqCst)
     ));
-    let _ = std::fs::remove_dir_all(&d);
+    std::fs::remove_dir_all(&d).ok();
     reap_at_exit(&d);
     std::fs::create_dir_all(&d).unwrap();
     MADE.with(|m| m.0.borrow_mut().push(d.clone()));
@@ -472,7 +472,7 @@ pub fn webview() -> std::process::Command {
             for mut st in l.incoming().flatten() {
                 let mut buf = [0u8; 4096];
                 let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
-                let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), 1));
+                std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), 1)).ok();
             }
         });
         base
@@ -635,7 +635,7 @@ pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &
 /// Replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read imports `text`. Leases, devices and snapshots go with it.
 pub fn rewrite_log(state: &Path, text: &str) {
     for f in ["state.db", "state.db-wal", "state.db-shm"] {
-        let _ = std::fs::remove_file(state.with_file_name(f));
+        std::fs::remove_file(state.with_file_name(f)).ok();
     }
     std::fs::create_dir_all(state.parent().unwrap()).unwrap();
     std::fs::write(state, text).unwrap();
