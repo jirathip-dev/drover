@@ -1,13 +1,6 @@
 use std::path::{Path, PathBuf};
 
-const WORDS: [&str; 6] = [
-    "jirathip",
-    "synergy",
-    "sendmeter",
-    "claude-accounts",
-    "tail8c3301",
-    "hermes-brain",
-];
+const WORDS: [&str; 5] = ["jirathip", "sendmeter", "claude-accounts", "tail8c3301", "hermes-brain"];
 
 const EXCEPTIONS: [(&str, &str, &str); 10] = [
     (
