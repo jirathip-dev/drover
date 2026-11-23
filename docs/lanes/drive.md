@@ -68,7 +68,7 @@ and the tick poll every host with no fresh word, then start each fleet's pass an
 loop per fleet instead, started at once by a wake. The tick's slow chores (disk budget, roots, offline hosts, orphans,
 repair, the runtime canary, stale panes, each fleet's closed issues, hotspots and backlog) run beside them. A spawn's admission places it first (host probes, no lock), then recounts that host's slots and takes its marker
 under the host's short `admit-<host>.lock` (#1583): two fleets' passes never both take a host's last slot, admissions
-on different hosts run at once, and a busy lock is waited for up to `[limits] admit_wait_secs` before `SPAWN_PENDING`. The board shows each fleet's
+on different hosts run at once, and a busy lock is waited for up to `[limits] admit_wait_secs` before `SPAWN_PENDING`. #1625: no in-process wait sits in front of it, so an admission whose pass hung or died holds a host's starts for at most the lock's 60 s; the next admission takes it over and logs `admission-dropped`. A fleet whose last pass is older than 2 × `pass_max_secs` + `fast_secs` gets its pass started as a process even when a service answers the wake, and `drover check` alerts `spawn-stuck` once when drive tried starts for an hour with no spawn while issues are startable. The board shows each fleet's
 `⟳ driving…` and its last pass's length.
 
 A fix lane may push back on a finding in its report with file:line proof; that is not a fix,
