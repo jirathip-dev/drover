@@ -44,7 +44,7 @@ fn ssh_connect_secs_sets_the_connect_timeout_a_spawn_plan_prints() {
 }
 
 #[test]
-fn config_show_lists_every_limit_and_docs_table_matches() {
+fn config_show_lists_every_limit_and_md_prints_the_defaults_table() {
     let c = ctx(
         &tmpdir("limits-show"),
         &CONFIG.replace("[limits]\n", "[limits]\ndb_busy_secs = 7\n"),
@@ -58,20 +58,21 @@ fn config_show_lists_every_limit_and_docs_table_matches() {
         assert!(shown.contains(&k.as_str()), "`config show` lacks {k}: {out}");
     }
     assert_eq!(shown.len(), drover::config::LIMIT_DOCS.len());
-    let docs = std::fs::read_to_string(root().join("docs/config.md")).unwrap();
-    let c = ctx(&tmpdir("limits-defaults"), "");
-    let (_, defaults) = run(&c, &Fake::default(), &["config", "show"]);
-    for l in defaults.lines() {
-        let (k, rest) = l.split_once(" = ").unwrap();
-        let (v, doc) = rest.split_once("  # ").unwrap();
-        let v = if k == "deny_commands" {
-            "assets/deny_commands.toml"
-        } else {
-            v
-        };
-        let row = format!("| `{k}` | `{v}` | {doc} |");
-        assert!(docs.contains(&row), "docs/config.md lacks the row {row}");
+    let c = ctx(&tmpdir("limits-md"), "");
+    std::fs::remove_file(&c.config).unwrap();
+    let (code, md) = run(&c, &Fake::default(), &["config", "show", "--md"]);
+    assert_eq!(code, 0, "{md}");
+    for (k, doc) in drover::config::LIMIT_DOCS {
+        assert!(
+            md.contains(&format!("| `{k}` | `")) && md.contains(doc),
+            "`config show --md` lacks {k}: {md}"
+        );
     }
+    assert!(md.contains("| `deny_commands` | `assets/deny_commands.toml` |"), "{md}");
+    assert!(
+        md.contains("| `db_busy_secs` | `60` | the SQLite busy timeout |"),
+        "{md}"
+    );
 }
 
 fn timing_check(files: &[(&str, &str)]) -> (Option<i32>, String) {

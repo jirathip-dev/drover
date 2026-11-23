@@ -1,0 +1,1 @@
+# hygiene = { merge = "merge", docs_trust = [] }   # #1101: this fleet's keys over [hygiene]'s (docs/config.md#hygiene-1101); "off" opts a key out

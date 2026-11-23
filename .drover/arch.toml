@@ -11,6 +11,8 @@ generated = [
     "crates/cli/tests/golden/briefs/impl-update.md",
     "crates/cli/tests/golden/briefs/rev.md",
     "crates/cli/tests/golden/briefs/rev-repro.md",
+    "docs/config/limits.md",
+    "fleet.example.toml",
 ]
 generate = "just gen"
 shared = [

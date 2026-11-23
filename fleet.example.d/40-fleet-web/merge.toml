@@ -1,0 +1,1 @@
+# merge = "merge"   # #1097: default "squash": one commit per PR, lane branch deleted; "merge" keeps every commit
