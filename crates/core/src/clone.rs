@@ -22,6 +22,14 @@ pub fn refspec(branch: &str) -> String {
     format!("+refs/heads/{branch}:refs/remotes/origin/{branch}")
 }
 
+/// The refspec writing every `origin/<branch>`.
+pub const ALL: &str = "+refs/heads/*:refs/remotes/origin/*";
+
+/// `git -C <dir> fetch -q origin` of every branch but `wip/*` by explicit refspec, so each `origin/<branch>` exists whatever the clone's own `remote.origin.fetch`.
+pub fn fetch_branches(ctx: &Ctx, r: &dyn Runner, dir: &Path) -> Result<String> {
+    fetch(ctx, r, dir, &["-q", "origin", ALL, "^refs/heads/wip/*"])
+}
+
 /// `git -C <dir> fetch <args>` in a fleet clone, one drover process at a time; a fetch losing a ref race to another (a lane's, a remote host's) is logged and run again. A fetch failing on a missing or bad object, or any fetch while an earlier heal is due, heals the clone first, logs it, and fetches again.
 pub fn fetch(ctx: &Ctx, r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<String> {
     let _held = lock(r, dir)?;

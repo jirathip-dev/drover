@@ -143,3 +143,15 @@ fn a_lane_moved_off_a_host_respawns_from_its_pushed_head_in_a_narrow_clone() {
     let wt = r.c.worktrees.join("sendmeter/issue-12");
     assert_eq!(git(&wt, &["rev-parse", "HEAD"]), r.head, "{:#?}", f.calls.borrow());
 }
+
+#[test]
+fn the_conflict_preview_in_a_narrow_clone_reads_each_pushed_issue_branch() {
+    let r = repo("narrow-overlap", "");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
+    append(&r.c.state, &Event::new(NOW - 900, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let events = drover::events::working(&r.c.state).unwrap();
+    let cfg = drover::config::Config::load(&r.c.config).unwrap();
+    let f = fake();
+    drover::overlap::preview(&r.c, &cfg, &Git(&f, &f, dirs(&r)), "sendmeter", &events).unwrap();
+    assert_eq!(git(&r.local, &["rev-parse", "origin/issue-12"]), r.head);
+}
