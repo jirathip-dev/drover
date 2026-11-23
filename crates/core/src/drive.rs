@@ -647,7 +647,7 @@ fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &str, fleet: &str)
     Ok(())
 }
 
-/// `drover drive`, the fast job and the tick's: roots, offline hosts, every host with no fresh word polled at once, the runtime canary, stale panes, duplicates and the SLOs, then each fleet's pass started as its own process; it waits for none.
+/// `drover drive`, the fast job and the tick's: each `[hosts]` machine added to shed, roots, offline hosts, every host with no fresh word polled at once, the runtime canary, stale panes, duplicates and the SLOs, then each fleet's pass started as its own process; it waits for none.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let t0 = crate::clock::instant();
     std::fs::create_dir_all(state_dir(ctx))?;
@@ -665,6 +665,12 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         writeln!(out, "host history: {e:#}")?;
     }
     if let Some(b) = r.shed() {
+        match crate::shed::add_machines(cfg, r) {
+            Ok(added) => added
+                .iter()
+                .try_for_each(|m| writeln!(out, "shed: machine {m} added"))?,
+            Err(e) => writeln!(out, "shed machines: {e:#}")?,
+        }
         let res = crate::session::stamp::intake(ctx, cfg, &b.wire);
         if let (false, Err(e)) = (crate::shed::version_alert(ctx, cfg, &res)?, &res) {
             writeln!(out, "shed events: {e:#}")?;
