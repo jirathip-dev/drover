@@ -14,12 +14,13 @@ machine = "user@box.example"       # unchanged key and value: now also the targe
 |---|---|
 | name | the `[hosts]` key is the shed machine's name. shed takes letters, digits, `-` and `_`; `Config::load` refuses any other key that has a `machine` |
 | target | the `machine` value, as written: `[user@]host` or an ssh alias |
-| when | `hosts::register`, at the start of the tick's check step and of `drover hosts refresh`: one `machine.links`, then `machine.add` for each enabled host it does not list. Twice is once |
+| today | #1616, on staging: every drive pass runs `shed machine add <machine> <machine>` for each enabled host shed does not list, so the name is the `machine` value. The first of D2b and D1 to land names it by the key. Where key and value are equal nothing changes; where they differ, that PR's rollout has the owner's `shed machine rm <old name>` line |
+| when | `hosts::register`, at the start of every drive pass, as today, and of `drover hosts refresh`: one `machine.links`, then `machine.add` for each enabled host it does not list. Twice is once |
 | a taken name | shed answers `INVALID_PARAMS` for another target under the same name. drover logs `host-refused` once, doctor's row is `✗ host box: shed's machine box has another target → shed machine rm box`, and no lane goes there |
-| removal | never by drover. A host removed from fleet.toml is sent nothing; the machine stays in shed (cooee and the owner may use it). A cloud host's end is `vm.destroy`, from D6 |
+| removal | never by drover. A host removed from fleet.toml is sent nothing; the machine stays in shed (cooee and the owner may use it). A rented VM's machine is added and removed by shed's helper (#1644) |
 | the event log | a spawn's `machine` stays the target, as today, so old events read the same. The shed name is found through `[hosts]` |
 | a session | at this host's shed a lane on box is `box/<name>`. `crate::shed` adds and strips the prefix; `session::Session` keeps its bare name and its host |
-| a cloud host | until D6 a `[hosts]` entry like any other. From D6 its VM is the machine, of the same name, and `register` skips it |
+| a cloud host | until #1644 a `[hosts]` entry like any other, and its link alone says whether it is up: `cloud::state` decides spend and nothing else (#1623). From #1644 the helper adds its machine and `register` skips it |
 
 ## `crate::shed`
 
@@ -63,7 +64,8 @@ pub enum Reach {
 pub fn reach(links: &BTreeMap<String, Link>, host: &str, now: u64, l: &Limits) -> Reach;   // pure
 ```
 
-A machine with no entry in `links` reads as `Down` since now, with "not registered" as its reason.
+A machine with no entry in `links` reads as `Down` since now, with "not registered" as its reason. `reach` is
+the one place that reads shed's link: D13 changes its input to `machine.ls` and its `flow`, and no caller.
 
 ## What admission reads, and from where
 
@@ -97,12 +99,43 @@ host's drover build, and the last sample for the board.
 | `[limits] link_poll_millis` | kept: the least time between two reports of one host | D11 |
 | `[limits] link_sample_secs` | kept: a report this often with no state change | D11 |
 | `[limits] link_down_minutes`, `host_offline_minutes` | kept: both now read the link's `down_since` | D1 |
-| `account` on a fleet and on a role | new: a name or `"auto"`; unset is `"auto"` (#1576) | D2 |
-| `[proxy]` | deleted | D2 |
+| `account` on a fleet, on a role and on `[fleet.<n>.role.orchestrator]` | new: a name or `"auto"`; unset is `"auto"` (#1576) | D2a |
+| `[proxy]`, `[limits] proxy_connect_secs` | deleted | D2b |
 | `[providers.deepseek]`'s key file | deleted; `warn_below` stays | D8 |
-| a cloud recipe override in drover's config folder | moves to `<config>/vms/` of shed, once | D6 |
+| the cloud and runner keys, a cloud recipe override | #1644's to decide | #1644 |
 
 Each PR that deletes or renames a key the owner may have set carries a `## Rollout` section with the exact lines.
+
+## The account key (D2a, D2b)
+
+```toml
+[fleet.web]
+account = "work"                    # every role of the fleet, unless the role says otherwise
+[fleet.web.role.rev]
+account = "auto"                    # what no key at all means
+[fleet.web.role.orchestrator]
+account = "personal"                # its threads: `orchestrator.rs` `start()` reads the same key
+```
+
+```rust
+pub enum Account { Auto, Named(String) }               // config.rs; `"auto"` is the one reserved name
+
+impl Config {
+    pub fn account(&self, fleet: &str, role: &str) -> Account;   // the role's, else the fleet's, else Auto
+}
+pub struct Acp { /* cmd, mcp, meta, awake */ pub account: Option<Account> }   // term.rs; none: no `--account` word
+```
+
+| rule | |
+|---|---|
+| who has one | an ACP start: a lane's (`spawn`) and a thread's (`orchestrator.rs` `start()`). A terminal lane (dsh) has none |
+| where, D2a | the main host only. On another host `Acp::account` is none and drover's proxy signs the lane in, as today |
+| where, D2b | every host, for an agent whose record has `[proxy]`. Another agent on another host: none when no key is set (that host's login), `ACCOUNT_LOCAL_ONLY` when one is (open question 1) |
+| `"auto"` | shed picks among the provider's signed-in named accounts and moves a lane at a limit. `default`, the CLI's own login, is used only when named |
+| a wrong name | `Config::load` checks only the form (shed's letters, digits, `-`, `_`). Whether the account exists is shed's answer at the start, `NO_ACCOUNT`: accounts change without a config edit |
+| retired keys | `accounts`, `fallback` and `[accounts]` stay retired, with the warning they have today; `account` leaves that list |
+| the floor | `shed::MIN_PROTOCOL` is 5 from D2a |
+| the event log | a spawn and a thread start record `account` as the terminal reports it, so the board can show which one a lane is on |
 
 ## The link's report (D11)
 
@@ -121,7 +154,10 @@ what the watcher did with an ack line on its stdin. `beat_secs`, `poll_millis` a
 ## The pins
 
 ```toml
-# D0. One tag for every shed crate: two tags are two sources, and `deny.toml` refuses the second shed-proto.
+# The first pin PR, before D2a: today's line with a tag in place of `rev = "9b88eb5…"` (protocol 2 to 5).
+shed-proto = { git = "https://github.com/jirathip-dev/shed", tag = "client-v5.0" }
+# D0, in place of the line above. One tag for every shed crate: two tags are two sources, and `deny.toml`
+# refuses the second shed-proto.
 shed-client = { git = "https://github.com/jirathip-dev/shed", tag = "client-v<P>.<n>" }
 # D9
 shed-catalog = { git = "https://github.com/jirathip-dev/shed", tag = "client-v<P>.<n>" }
