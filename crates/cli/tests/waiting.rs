@@ -524,18 +524,18 @@ fn a_killed_lane_waits_on_drive_to_respawn_it() {
 fn a_long_reason_stays_whole_and_only_on_its_lane() {
     let c = ctx(&tmpdir("waiting-long"), CONFIG);
     let id = "q".repeat(120 - "waiting on your answer ()".len());
-    spawn(&c, NOW - 2000, 2859, "rev", "synergy-rev-2859-r2");
-    spawn(&c, NOW - 1900, 2859, "impl", "synergy-impl-2859");
+    spawn(&c, NOW - 2000, 2859, "rev", "tangelo-rev-2859-r2");
+    spawn(&c, NOW - 1900, 2859, "impl", "tangelo-impl-2859");
     ev(
         &c,
         NOW - 600,
         Some(2859),
         "needs-decision",
-        json!({"id": id, "agent": "synergy-impl-2859", "question": "?", "options": [], "recommend": null}),
+        json!({"id": id, "agent": "tangelo-impl-2859", "question": "?", "options": [], "recommend": null}),
     );
     let sh = FakeShed::new();
     sh.attach(&c);
-    for n in ["synergy-rev-2859-r2", "synergy-impl-2859"] {
+    for n in ["tangelo-rev-2859-r2", "tangelo-impl-2859"] {
         sh.lane(n, "idle", "/x");
         sh.screen(n, "");
     }
@@ -549,11 +549,11 @@ fn a_long_reason_stays_whole_and_only_on_its_lane() {
     let reason = format!("waiting on your answer ({id})");
     assert_eq!(reason.len(), 120);
     assert!(
-        page.contains(&format!("synergy-impl-2859 | r idle 10m | r {reason}")),
+        page.contains(&format!("tangelo-impl-2859 | r idle 10m | r {reason}")),
         "{page}"
     );
     assert!(
-        page.contains("synergy-rev-2859-r2 | m idle 33m | m superseded by synergy-impl-2859"),
+        page.contains("tangelo-rev-2859-r2 | m idle 33m | m superseded by tangelo-impl-2859"),
         "{page}"
     );
     assert_eq!(
