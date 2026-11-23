@@ -29,6 +29,22 @@ re-recordable fixtures; pruning them is not this issue's.
 What #1571 adds is the API's as well and needs nothing from the edge: `rows`, `rows/stream`, `thread/<id>/rows`,
 `PUT thread/<id>`, `said`. cooee calls them on the API's address.
 
+What #1627 adds is the API's too, and needs one thing from the edge:
+
+| The edge needs | API path | Today | Gap |
+|---|---|---|---|
+| to pass an agent's MCP calls on | `/mcp` (`GET`, `POST`, `DELETE`) | none; #1627 is open, design first | **#1627 builds the route in `drover-api`** and adds the one relay line with its contract file |
+| to say which agent is calling | `Drover-Key` beside the edge's token | none | **#1627**, on the rule fixed here: the edge hashes the caller's bearer; the API looks the hash up |
+
+Gaps outside `/api/v1`, in S4:
+
+| Need | Today | Gap |
+|---|---|---|
+| exactly one writable API host for a state folder | any `drover serve` hosts; cooee's `run` line starts one when the port is quiet | **`api.lock`**; `--read-only` hosts take none |
+| exactly one webhook binder | every writable serve tries the port; the handover passes the socket on | **only the lock's holder binds it**; the launcher closes one it inherits |
+| cooee attached to the API and starting nothing | `attach` is the page's port; `run` is `drover serve` | **S4b**, after cooee's attach-only release |
+| proof that the hop costs nothing that matters | the bench and `GET /` under 150 ms, measured on one process | **two measures through the edge** ([adr.md](adr.md), "Speed and CPU") |
+
 ## Deleted in S0 (no caller in `web/src`, in cooee's manifest, or in the terminal)
 
 | Route | Why it is safe | What goes with it |
@@ -55,7 +71,7 @@ route and says so in the PR body.
 | `serve/v1.rs` (1,265), `serve/chat.rs` (1,291), `serve/hub.rs` (472), `serve/tails.rs` (345), `serve/jobs.rs` (219), `serve/fresh.rs` (185), `serve/slo.rs` (113) | `api/src/serve/` | whole |
 | `later.rs` (234), `cooee.rs` (49), `lifeboat.rs` (178) | `api/src/` | whole; `just html-lint` names the lifeboat's new path |
 | `serve.rs` (3,478) | carved, below | the one file that is not a move |
-| `hooks.rs` (220) | the webhook listener (`listen`, `reply`, `head`) to `api/src/hooks.rs`; `serve`, `held`, `take_over`, `board` to `cli/src/serve.rs` (the launcher) | the launcher keeps core's `timer`, `update` and `runner` calls |
+| `hooks.rs` (220) | the webhook listener (`listen`, `reply`, `head`) to `api/src/hooks.rs`; `serve`, `held`, `take_over`, `board` to `cli/src/serve.rs` (the launcher) | the launcher keeps core's `timer`, `update` and `runner` calls. Until S4 the launcher still binds the webhook port for the one process; in S4 the bind moves into `api::host`, under the lock |
 | `handover.rs` (168) | stays in `crates/server` | S2: the socket path and the successor come from `Edge`; the memory watch moves to `api::host` |
 | `serve/conn.rs` (118), `serve/wire.rs` (136) | stay in `crates/server`; `drover-wire` in S4 | both listeners use them from S4 |
 | `serve/device.rs` (63) | stays in `crates/server` | relays the scene; `device_hosts` from `hello` |
@@ -104,4 +120,8 @@ These are the lines S1 leaves in `core_uses.rs`. S2 deletes each and then the fi
 | `cli/tests/edge.rs` (new) | the edge on a door that replays the contract folder's answers: the shell, a relayed screen with `ETag`, a tap, pairing end to end, a stream piped and closed from both sides, read-only, a browser's `Drover-Device` header dropped, `BUSY` with the API away; and every `RELAYED` line with no `until` has a contract file | S2, extended in S4 |
 | `contract_v1.rs` (#1571's) | each new route's shape | S2 records, S4 covers the table |
 | `handover.rs`, `page.rs`, `scene_device.rs` (existing, they start the binary) | two processes: the API host and `drover serve` started by the harness, killed on drop | S4 |
-| the serve gates (150 ms p95, the request-path rule, memory) | unchanged numbers, measured through the edge | S4 |
+| the serve gates (`GET /` under 150 ms, the bench, the request-path rule, memory) | unchanged numbers, on the API | S4 |
+| `perf.rs`: `the_edge_adds_under_5ms_p95`, `an_idle_edge_stays_under_one_percent_of_a_core` (new) | the two measures of "Speed and CPU"; the baseline commit records them on the one-process build | S4 |
+| `cli/tests/api_host.rs` (new; it starts the binary, killed on drop) | a second writable host exits 1 naming the first and binds nothing; a read-only host starts beside it and binds no webhook port; a host started while the webhook port is held binds it once it is free | S4 |
+| `cooee_manifest.rs` (#1571's D2; if S4b lands first it adds the file with these two asserts on the checked-in manifest) | the manifest has no `run`, and its `attach` is `[serve] api` | S4b |
+| `cli/tests/edge.rs`, extended | no line but a `Who::Key` one passes a client's `Authorization` on in any form; a browser's `Drover-Key` header is dropped | S7 (the `Who::Key` half with #1627) |

@@ -2,19 +2,29 @@
 
 ## Summary
 
-Decision: today's server is cut in two. The part that reads state, builds screens and runs actions becomes drover's API, in its own crate and its own process (a new `api` command). What is left as `drover serve` is the page's server: it serves the page's files, checks the browser, and passes every screen, tap and stream to the API over HTTP. It holds no state and cannot call drover's code. Paired devices stay drover's; push moves nowhere (it is deleted by #1571); the chat view is just two more screens.
-Slices: eight. A check that only lets the remaining core calls shrink, and the dead routes deleted; the API crate; the page's server stops calling core (the issue's end state); the device stream; the API as its own process; the page drawn by blocks; its tests on blocks' harness; the old stream route deleted.
-Open questions: (1) one `drover` binary that runs as two jobs (recommended), or a second binary now? (2) a third kept-alive job, `dev.drover.api` (recommended), or the service hosts the API? (3) #1344 needs its own design stage: take it out of this root (recommended), or run the page slice with a design stage?
+Decision: today's server is cut in two. The part that reads state, builds screens and runs actions becomes drover's API: its own crate and its own kept-alive job (a new `api` command). What is left as `drover serve` is the page's server: it serves the page's files, checks the browser, and passes every screen, tap and stream to the API over HTTP. It holds no state and cannot call drover's code. Paired devices stay drover's; push moves nowhere (#1571 deletes it); the chat view is two more screens.
+Revised per q3302: the MCP endpoint (#1627) belongs to the API, behind one line of the page's server, and an agent's key reaches it in its own header, never through the plugin pass-through that the last slice deletes. cooee only attaches to the one API job and can no longer start a copy; that job alone takes GitHub's webhooks. The split fixes no speed problem (#1651 does); S4 measures that it adds none. #1344 is moot here: it waits for #1628's design.
+Slices: nine. A check that only lets the remaining core calls shrink, and the dead routes deleted; the API crate; the page's server stops calling core (the issue's end state); the device stream; the API as its own process, measured; cooee attached to it; the page drawn by blocks; its tests on blocks' harness; the old stream route and the pass-through deleted.
+Open questions: one left. A single `drover` binary that runs as two jobs (recommended, and what the slices assume), or a second binary now? q3302 answered the other two.
 
-Status: proposed (architect lane, 2026-11-23). Read on staging `7c0a28c1c`, with the approved #1571 ADR
+Status: proposed, revised once (q3302, 2026-11-23). Read on staging `7c0a28c1c`, with the approved #1571 ADR
 (`cooee-threads`, on `issue-1571`) and the #1567 ADR (`shed-split`, on `issue-1567`).
+
+What q3302 changed, and where it is written:
+
+| The owner's note | Where |
+|---|---|
+| `/mcp` lives in `drover-api` behind one relay line; how keys pass after S7 | "An MCP client" below; [adr.md](adr.md) Decision, MCP; [shapes.md](shapes.md), `Who::Key` and `Drover-Key` |
+| cooee attaches to `dev.drover.api` and never runs its own; one webhook binder | "cooee" below; [adr.md](adr.md) Decision (cooee, One writable host, Webhooks) and slice S4b; [boundaries.md](boundaries.md), the API host's chart |
+| speed is #1651's; the split must not regress it; measured in S4 | [adr.md](adr.md), "Speed and CPU" |
+| #1344 is moot here | [adr.md](adr.md), "The folded issues" |
 
 | File | What |
 |---|---|
 | this page | how the callers read, the design on one screen, the open questions |
 | [adr.md](adr.md) | question, where it stands, options, decision, consequences, versions, the slices, the folded issues, the rules lines, the `arch.toml` lines |
 | [shapes.md](shapes.md) | the door, the headers, the new routes and their types, the page's own paths, the jobs |
-| [boundaries.md](boundaries.md) | which module may call which; four statecharts |
+| [boundaries.md](boundaries.md) | which module may call which; five statecharts |
 | [gaps.md](gaps.md) | every path the page's server needs: there today, or a gap; what is deleted; where each file goes |
 
 Three words. The **API** is everything a client may ask drover: `/api/v1/…`, the screens (`/screens/…`), `/action`
@@ -101,11 +111,34 @@ their crate changes.
 ### cooee
 
 ```toml
-run = "exec drover api --addr 127.0.0.1:$PORT"
 attach = "http://127.0.0.1:7779"
+attach_token = "~/.config/drover/cooee-token"
+min_cooee = "<the release with attach-only plugins>"
 ```
 
-cooee and the page are two clients of the same API. cooee no longer needs the page's server to be running.
+There is no `run` line. cooee and the page are two clients of the one API job, `dev.drover.api`. cooee never
+starts a drover process: while the job is down it shows the plugin as down, and it needs no page server at all.
+
+```
+$ drover api --addr 127.0.0.1:7780          a second writable host on the same state, by hand or by any tool
+drover api: pid 4312 hosts this state on 127.0.0.1:7779          exit 1; nothing bound
+```
+
+GitHub's webhooks arrive at that one host and nowhere else.
+
+### An MCP client (#1627)
+
+```
+agent ── POST /mcp ──▶ edge                       Authorization: Bearer <the agent's key>
+edge  ── POST /mcp ──▶ API                        Authorization: Bearer <serve token>
+                                                  Drover-Key: 77c2…0e (sha256 of the key)     Drover-Ip: 100.64.0.9
+API   ── 200 (JSON or a stream), or 401 for an unknown or revoked key ──▶ edge ── the same bytes ──▶ agent
+
+agent on the host ── POST /mcp ──▶ API            Authorization: Bearer <the agent's key>, on loopback
+```
+
+The edge has one line for `/mcp` and knows nothing of tools, sessions or keys. This path never used the plugin
+pass-through, so S7 deleting it changes nothing here.
 
 ### The checks
 
@@ -114,6 +147,8 @@ drover arch-check        crates/server names drover_core or drover_api: fails
 cargo tree -p drover-server | grep -E '^drover-(core|api) '        CI layers: must print nothing
 cargo test --test contract_v1          every path in the edge's table has a frozen shape (#1571's test)
 cargo test --test edge                 the edge against recorded API answers only: no drover state at all
+cargo test --test api_host             a second writable host exits 1; one process holds the webhook port
+cargo test --release --test perf       the edge adds at most 5 ms p95 and under 1 % of a core when idle (S4)
 ```
 
 ## The design on one screen
@@ -127,7 +162,10 @@ cargo test --test edge                 the edge against recorded API answers onl
 | Every screen, the chat view included; every action; `/api/v1` | API (`drover-api`) | the edge relays, the page draws |
 | Streams | API (the hub, the device stream) | the edge pipes bytes |
 | The lifeboat page | API (it is an `/api/v1` path today) | the edge relays it |
-| GitHub webhooks | API host (drover's own way in, its own listener) | none |
+| GitHub webhooks | the one writable API host (drover's own way in, its own listener, under `api.lock`) | none: the edge and cooee never bind it |
+| MCP (#1627): tools, keys, who a caller is | API (`/mcp`) | the edge has one line: it hashes the caller's key into `Drover-Key` and pipes |
+| Whether the API is running | launchd (`dev.drover.api`), revived by `check` | the edge answers `BUSY`; cooee shows the plugin down; neither starts one |
+| Speed of a screen or an action | API (#1651 makes it fast) | the edge adds a loopback hop, budgeted and measured in S4 |
 | The scene for a companion device on the LAN | edge listener, API screen | relayed |
 | Push | drover's sender until #1571's D4 deletes it | the edge relays the subscribe call until then |
 | Config the edge needs (allowed hosts, theme, hints) | API (`hello`) | the edge re-reads it when it changes |
@@ -135,17 +173,18 @@ cargo test --test edge                 the edge against recorded API answers onl
 
 One direction: phone → edge → API. The API never calls the edge.
 
-## Open questions
+## Open question
 
-1. **One binary or two.** Recommended: one `drover` binary, run as two jobs (the new `api` command and `drover serve`). The
-   crate cut is what stops core calls; one file keeps one release, one install and one version. A second binary
-   would be built, signed and swapped by `release.rs`, which #1567's D4 is about to replace with shed's installer.
-   The edge already starts from plain values, so a second binary later is a new `main` of about 30 lines.
-2. **Where the API runs.** Recommended: its own job, `dev.drover.api`, installed and revived wherever
-   `dev.drover.serve` is. It is today's serve process without the browser part, so its load, its memory limit and
-   its request rules stay as tested, and the page keeps working with `drover service` stopped. The alternative is
-   the service hosting it: one job fewer, but screen building then shares a process with the drive loops, the
-   read-only staging check needs a service that does not drive, and the page stops with the service.
-3. **#1344 (the art onto swag's packs).** Its own text says a design stage comes first and the owner calls it. This
-   root cannot make it fixed or moot. Recommended: take it out of the fold; it then waits only on S5. The
-   alternative is to queue S5 with a design stage and do it there.
+**One binary or two.** Recommended: one `drover` binary, run as two jobs (the new `api` command and
+`drover serve`). The crate cut is what stops core calls; one file keeps one release, one install and one version.
+A second binary would be built, signed and swapped by `release.rs`, which #1567's D4 is about to replace with
+shed's installer. The edge already starts from plain values, so a second binary later is a new `main` of about 30
+lines. The slices assume one binary; an approve takes it.
+
+Answered by q3302:
+
+- **Where the API runs:** its own job, `dev.drover.api`, installed and revived beside the page's job.
+- **#1344:** moot here. Blocks art waits for #1628's design.
+
+For the orchestrator, not the owner: S4b needs one cooee issue filed, "a plugin with `attach` and no `run` is
+attach-only: cooee never starts a backend for it and shows it down until the address answers".
