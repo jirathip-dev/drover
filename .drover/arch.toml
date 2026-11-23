@@ -44,6 +44,7 @@ shared = [
     "crates/server/src/serve/chat.rs",
     "crates/server/src/serve/v1.rs",
     "crates/*/tests/**",
+    "web/src/main.ts",
 ]
 
 [[collect]]
@@ -251,6 +252,11 @@ max_fn_lines = 150
 [[size]]
 paths = ["crates/*/tests/**/*.rs"]
 max_file_lines = 1500
+
+[[size]]
+paths = ["web/src/**/*.ts"]
+max_file_lines = 800
+max_fn_lines = 80
 
 [[ban]]
 pattern = "pane_id"
