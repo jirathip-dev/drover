@@ -2,15 +2,16 @@
 
 ## Summary
 
-Decision: drover keeps the policy (which lane goes where and when, spend, approvals, the guard) and stops doing host work itself. It talks to shed through shed's own client, reaches every other host over the link shed already holds, reads health, processes, accounts and usage from shed, takes provider facts from shed's catalog, and leaves the rollout of its own binary, secrets, heavy slots and the sandbox to shed. It asks shed to install nothing else, and sets no host up itself: toolchains, the shared build caches and a host's disk floor belong to the host setup recipe of shed's VM helper (shed #337), which the owner runs on the Mini and the Air through a run card. A lane's own build folders, and the cache settings its start carries (#1641), stay drover's. Renting VMs has left this plan for its own decision (#1644). Four things stay: the copy of a closed lane's transcript, the handover of drover's own web server, the sweep of stray processes in a finished lane's folder, and the file through which a lane on another host sends its commands to the main host (#1646): shed has no connection from a host back to the main host, so the main host keeps fetching that file.
+Decision: drover keeps the policy (which lane goes where and when, spend, approvals, the guard) and stops doing host work itself. It talks to shed through shed's own client, reaches every other host over the link shed already holds, reads health, processes, accounts and usage from shed, takes provider facts from shed's catalog, and leaves the rollout of its own binary, secrets, heavy slots and the sandbox to shed. It asks shed to install nothing else, and sets no host up itself: toolchains, the shared build caches and a host's disk floor belong to the host setup recipe of shed's VM helper (shed #337), which the owner runs on the Mini and the Air through a run card. A lane's own build folders, and the cache settings its start carries (#1641), stay drover's. Renting VMs has left this plan for its own decision (#1644), and CI runners for their own repo (jirathip-dev/runners): drover's runner code is deleted once that repo covers it. Four things stay: the copy of a closed lane's transcript, the handover of drover's own web server, the sweep of stray processes in a finished lane's folder, and the file through which a lane on another host sends its commands to the main host (#1646): shed has no connection from a host back to the main host, so the main host keeps fetching that file.
 Slices: first, on its own, #1623's small fix: a rented host that shed shows as up counts as up. Then fourteen drover steps, each after the shed release it needs and each deleting the code it replaces: the account for lanes and orchestrator threads on the main host (#1576, no key set means "auto") and the client; provider facts; the token proxy's deletion (#1604); hosts as shed machines; host charts; the host link; secrets; self-update, for drover's own binary only; heavy slots; the sandbox; balances; the timer jobs through farrier; shed's new state fields. shed's two releases of 2026-11-22 and 2026-11-23 already carry what the first four need. Two installs wait for a check: #1576 until drover's doctor shows a signed-in named account for each agent, #1604 until no lane started on drover's proxy is still alive. Until #1604 a lane on another host signs in through drover's proxy, as today.
-Open questions: (1) an agent that shed's proxy does not serve (Codex today) cannot have an account on another host. With no account key set, let it run there on that host's own login, as today (recommended, and what shed's accounts decision says), or keep such lanes on the main host? (2) shed's health reading of a host has carried its free disk since shed's first release, and drover would read it there for its low-disk refusal and the Host tab's chart. Your decision names a machine as link, processes, CPU and memory: keep that one read (recommended: it is a number, and shed cleans nothing), or have drover measure free disk itself? Your three answers of 2026-11-23 are decisions here; the newest one's points are listed at the top of adr.md with where each landed.
+Open questions: (1) an agent that shed's proxy does not serve (Codex today) cannot have an account on another host. With no account key set, let it run there on that host's own login, as today (recommended, and what shed's accounts decision says), or keep such lanes on the main host? (2) shed's health reading of a host has carried its free disk since shed's first release, and drover would read it there for its low-disk refusal and the Host tab's chart. Your decision names a machine as link, processes, CPU and memory: keep that one read (recommended: it is a number, and shed cleans nothing), or have drover measure free disk itself? Your four answers of 2026-11-23 are decisions here; the newest one's points are listed at the top of adr.md with where each landed.
 
-**Status:** proposed by the architect lane, 2026-11-22; revised three times on 2026-11-23, on the owner's three
+**Status:** proposed by the architect lane, 2026-11-22; revised four times on 2026-11-23, on the owner's four
 answers. Read on drover staging `7c0a28c1c`, shed main `7540e74` (tag `client-v5.1`), shed staging `94c1ede` and
 farrier `d34a7bb`. It follows shed's accepted ADRs #191, #256 and #259, and what changed #259 on 2026-11-23: #307
 (VMs are an optional helper's), #309 (one state per flow) and the owner's decision on what a machine is (shed
-#336, #337). It reopens none.
+#336, #337). It reopens none. Beside it stand #1644 as amended (VMs, CI runners) and #1649's approved ADR
+(the flow-table folder on branch `issue-1649`, the host fact).
 The candidates one by one, how the callers read, the statecharts and the boundaries: [README.md](README.md). The
 steps, gates and issues: [order.md](order.md). Keys, types and pins: [shapes.md](shapes.md).
 
@@ -27,7 +28,7 @@ What the third changed, by the owner's answer of 2026-11-23 on what a machine is
 | the owner's point | where |
 |---|---|
 | a shed machine is a place to run agents: link, processes, CPU, memory | decision 17; open question 2 for the one disk reading |
-| toolchains, caches and host disk are shed-cloud's host setup recipe (shed #337), for runner VMs too; the Mini and the Air run it through a run card | decision 17; [shapes.md](shapes.md), "Who owns what on a host" |
+| toolchains, caches and host disk are shed-cloud's host setup recipe (shed #337); the Mini and the Air run it through a run card. Runner VMs were in this point; the fourth revision takes them out | decision 17; [shapes.md](shapes.md), "Who owns what on a host" |
 | D4 and H2 move drover's and shed's own binaries only | decision 10; [order.md](order.md), H2's row |
 | no `installs` in `crate::shed` | decision 10: its file there is `release.rs`, drover's own binary |
 | a lane's build folders stay drover's (`reclaim`, `DISK_BUDGET`); the shared caches are the recipe's | decision 17 |
@@ -35,6 +36,17 @@ What the third changed, by the owner's answer of 2026-11-23 on what a machine is
 
 Also new since the second: shed released `client-v5.1` on 2026-11-23 with its token proxy (#265), so step 3 of
 [order.md](order.md) is done and one pin serves D2a, D0, D9 and D2b.
+
+What the fourth changed, by the owner's answer of 2026-11-23 on CI runners and the host facts:
+
+| the owner's point | where |
+|---|---|
+| CI runners (the Mini's native runners, the Docker slots, the runner VMs) are `jirathip-dev/runners`', not shed-cloud's | decision 13; [README.md](README.md), row 8b |
+| README row 8, README's policy paragraph, decision 17's "on runner VMs" | row 8 is 8a (lane-host VMs, #1644) and 8b (CI runners); the paragraph says runner registration is deleted, not moved; decision 17 names no runner |
+| `runners.rs` is deleted once `runners` covers it (#1644 as amended) | decision 13; [order.md](order.md), #1644's row; [shapes.md](shapes.md), `[ci_runners]` |
+| #1649's host facts are up, loaded, draining and offline | decision 18; [shapes.md](shapes.md), "#1649's host fact" |
+| loaded comes from the host's own sample (admission over `machine.stats`'s `now`), not from `Reach` | decision 18; `Reach` keeps its four values and gains none |
+| #1649 reads both only in drive's pass | decision 18; [README.md](README.md), the rules |
 
 ## The question
 
@@ -223,9 +235,15 @@ X1 carries a second addition, a process's CPU time, for option T below.
 12. **Order and gates.** A step starts when its shed API is on shed main under a `client-v*` tag and every
     enabled host's shed answers it. Each step moves every caller and deletes the old code in one PR. Two
     installs have a gate of their own, D2a's and D2b's ([order.md](order.md)).
-13. **Cloud and runner VMs are not a step here.** shed #307 replaced #259's VM plan, and drover's side is #1644's
-    own ADR: drover publishes demand and reads which machines are pool VMs; it starts and stops none. There is
-    no D6. What this ADR owes #1644 is D1: a VM is a shed machine like any other host.
+13. **Lane-host VMs and CI runners are not steps here.** shed #307 replaced #259's VM plan, and drover's side is
+    #1644's own ADR: drover publishes demand and reads which machines are pool VMs; it starts and stops none.
+    There is no D6. What this ADR owes #1644 is D1: a VM is a shed machine like any other host.
+    CI runners are `jirathip-dev/runners`' (the owner, 2026-11-23): the Mini's native runners, the Docker slots,
+    the runner VMs and their image with its toolchains and sccache. They are not shed-cloud's, and a runner is
+    no shed machine. `runners.rs`, the `drover runners` verbs, `[ci_runners]` and the recipe's `runner_*` lines
+    are deleted once `runners` covers them (#1644 as amended); nothing of them moves to shed. No step here
+    touches them: `runners.rs` reaches no host through `On`, only `gh` and `cloud.rs`'s recipe loader
+    (`cloud::load`, `cloud::run`), so D1 leaves it as it is and it goes before `cloud.rs` or with it.
 14. **shed's state fields (D13).** When shed #309's take-overs are released, `crate::shed` reads `machine.ls`
     and each `flow` in place of `machine.links` and the old state fields. Only then may shed drop the old
     ones (shed #323). What drover does in each state is its own table's (#1649), not this step's.
@@ -239,13 +257,23 @@ X1 carries a second addition, a process's CPU time, for option T below.
     that rule and the probe.
 17. **Neither shed nor drover sets a host up or keeps its disk.** A shed machine is a place to run agents: its
     link, its processes, their CPU and memory. Toolchains, the shared build caches (sccache's folder, pnpm's
-    store) and the disk floor are shed-cloud's host setup recipe (shed #337): in the pool's image, on runner
-    VMs, and on the Mini and the Air by `shed-cloud setup --on <machine>` from a run card. So no step here
+    store) and the disk floor are shed-cloud's host setup recipe (shed #337): in the pool's image, and on the
+    Mini and the Air by `shed-cloud setup --on <machine>` from a run card. A CI runner is not among them: its
+    image and its caches are `jirathip-dev/runners`' (decision 13). So no step here
     moves bootstrap's tool steps to shed: they run as today until #1644, which drops them for the recipe.
     What stays drover's is lane state: a lane's worktree and its build folders (the tick's trim, `reclaim`,
     `clean`, `DISK_BUDGET`), the `DISK_LOW` refusal, and the cache variables `spawn` sets on a lane's start
     (#1641), which ride `RunParams.env` from D0. drover never sizes, trims or deletes a shared cache; it
     reports its size. [shapes.md](shapes.md) has the table.
+18. **#1649's host fact has two inputs, and `Reach` is one of them.** Its values are up, loaded, draining and
+    offline. `Reach` is the link: it gives up, draining and offline. `loaded` is the host's own sample: the
+    `machine.stats` `now` that the pass already reads for admission, taken on that machine by its own shed,
+    over its limits. No link state, no slow or late call and no load on the main host makes another host
+    `loaded`, and `Reach` gains no fifth value. Both are read from shed in drive's pass only, once per host,
+    and stored on the host's row; `facts::host` (#1654), a kick, `waiting` and serve read that row and call no
+    shed. A sample that does not come leaves the row's last one: late is not absent, and only `Reach` makes a
+    host offline. D1 rewrites that reader's two inputs and no row of #1649's table
+    ([shapes.md](shapes.md), "#1649's host fact").
 
 What this changes of earlier drover decisions, said plainly:
 
@@ -260,8 +288,8 @@ What this changes of earlier drover decisions, said plainly:
 
 ## Consequences
 
-- drover loses about 3,700 src lines over the fourteen steps ([order.md](order.md)), and about 850 more under
-  #1644. Every step's PR but D2a's and D13's states a negative `src/ net`, and no step needs the cap raised.
+- drover loses about 3,700 src lines over the fourteen steps ([order.md](order.md)), and about 850 more outside
+  them: `cloud.rs` under #1644, `runners.rs` once `jirathip-dev/runners` covers it. Every step's PR but D2a's and D13's states a negative `src/ net`, and no step needs the cap raised.
 - **With D2a every ACP start on the main host needs a named shed account.** `auto` draws on named accounts only, so
   the owner names the main host's logins in shed first, and D2a's build is installed only when doctor's account
   rows are all `✓`. `NO_ACCOUNT` stays one card with the `shed account add` line, for an account removed later.
@@ -278,6 +306,9 @@ What this changes of earlier drover decisions, said plainly:
 - **Between D2b and D1 a lane on another host has two routes:** its start over shed's link, the rest over ssh.
   A link that is down refuses the start (`NO_PROXY`, shown as `NO_PROXY_TOKEN`) while drover's own probe may
   still say up. D1 ends that: one route, one answer.
+- **The host fact is as fresh as the last pass.** Between passes nothing reads shed for it: a kick and the
+  page see the row the pass stored, with the sample's time on it. One `machine.stats` a host a pass serves
+  admission and the fact; X1's memory level is in both.
 - **One answer to "is the host up":** shed's link. `hosts.down`, the probe and the `host-key-changed` text match
   go; a changed host key is the link's `error` line on the offline alert.
 - **A host needs a current shed and nothing else of drover's transport.** The `drover` binary stays on each host

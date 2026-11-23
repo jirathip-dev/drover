@@ -106,8 +106,36 @@ pub fn reach(links: &BTreeMap<String, Link>, host: &str, now: u64, l: &Limits) -
 | `offline` | any | `Down`, then `Offline` by the age of its `since` |
 | `key_changed`, `removed` | any | `Offline` at once, with the reason and who did it: one alert each |
 
-#1649's host fact is this type: `Up` is its up, `Draining` its draining, `Down` and `Offline` its offline. Whether
-the wait before the alert stays `Offline` or becomes a row's timeout there is #1649's to say.
+## #1649's host fact: two inputs, read in drive's pass
+
+#1649's `host` is up, loaded, draining or offline (its ADR's facts file, in the flow-table folder on branch `issue-1649`). `Reach` is one of
+its two inputs and stays as above: the link, four values, none of them `loaded`. The other is the host's own
+sample. Drive's pass is the only code that reads either from shed, once per host:
+
+```rust
+let reach = reach(&links, name, now, l);               // the link: one `machine.links` a pass, no network
+let sample = host.sample(3, last).ok();                // the host's own: `machine.stats` `now`, taken there by its shed;
+                                                       // asked only of a host that is `Up` or `Draining`; admission reads the same one
+view.host_seen(name, &reach, sample.as_ref());         // the host's row (#1654's `HostSeen`): a missing sample keeps the last, with its `at`
+```
+
+| #1649's value | read from | never from |
+|---|---|---|
+| `offline` | `Reach::Offline`; `Reach::Down` by #1649's own rule (after `2 × fast_secs`, unless load at either end explains it) | a slow or failed `exec`, a `machine.stats` that did not come |
+| `loaded` | the row's last sample over its limits: `load_per_cpu` and `mem_level` (X1), the numbers admission reads. Which limits is #1649's rule | `Reach`, a link's `slow` flow, how long a call took, the main host's load |
+| `draining` | `Reach::Draining`; beside it the orders drover gives itself (`hosts off`, a release swap), which #1654's `hosts::drain` holds | |
+| `up` | `Reach::Up`, the last sample under its limits, no order | |
+
+- **One sample, two readers.** The pass's one `machine.stats` per host serves `host::admit` and the row. Room
+  for one more lane stays admission's answer (`HOST_BUSY`); `loaded` is #1649's reading of the same numbers.
+- **The main host's row** is `shed.here(r)`'s sample, its own. It changes no other host's value.
+- **Read in the pass only.** `facts::host` takes the row and no `Shed`, so a kick, `waiting`, serve and the API
+  process cannot call shed for the fact: they read what the last pass stored.
+- **What D1 moves.** #1654 puts a sample in each report frame (`host::sample` on the reporting host) and lets
+  link intake write the row. From D1 the pass writes the row's link, sample and drain; the frame's `sample` and
+  `host::sample` go. `sys::loadavg` stays for `runner::hung` on this host (#1652): it starts no process. The
+  row's "heard" clock reads the link's `down_since`. The four values, the bound and every row of #1649's table
+  stay.
 
 ## A rate is two reads
 
@@ -150,8 +178,9 @@ host's drover build, the last sample for the board, and with it the swap count a
 ## Who owns what on a host
 
 The owner's decision of 2026-11-23: a shed machine is a place to run agents, and a host's setup is shed-cloud's
-recipe (shed #337), on VMs and, from a run card, on the Mini and the Air. No step of this ADR moves anything
-across these rows.
+recipe (shed #337), on pool VMs and, from a run card, on the Mini and the Air. No step of this ADR moves anything
+across these rows. A CI runner is not a host of this table: the Mini's native runners, the Docker slots and the
+runner VMs, with their image, toolchains and sccache, are `jirathip-dev/runners`'.
 
 | on a host | whose | drover's part |
 |---|---|---|
@@ -178,7 +207,8 @@ across these rows.
 | `account` on a fleet, on a role and on `[fleet.<n>.role.orchestrator]` | new: a name or `"auto"`; unset is `"auto"` (#1576) | D2a |
 | `[proxy]`, `[limits] proxy_connect_secs` | deleted | D2b |
 | `[providers.deepseek]`'s key file | deleted; `warn_below` stays | D8 |
-| the cloud and runner keys, a cloud recipe override | #1644's to decide | #1644 |
+| the cloud keys, a cloud recipe override | #1644's to decide | #1644 |
+| `[ci_runners]`, the recipe's `runner_*` lines | deleted with `runners.rs`, once `jirathip-dev/runners` covers them | #1644, as amended |
 
 Each PR that deletes or renames a key the owner may have set carries a `## Rollout` section with the exact lines.
 
