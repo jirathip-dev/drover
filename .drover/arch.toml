@@ -40,6 +40,10 @@ shared = [
 dir = "ci/cap.d"
 glob = "*.toml"
 
+[[collect]]
+dir = "scripts/test-shards.d"
+glob = "*.txt"
+
 [comments]
 policy = "strict"
 except = ["assets/types/**", "web/dist/**", "web/lint-fixtures/**"]
@@ -48,7 +52,7 @@ except = ["assets/types/**", "web/dist/**", "web/lint-fixtures/**"]
 paths = ["docs/**/*.md", "README.md"]
 watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/server/src/api.rs"]
 cli = true
-skip = [".drover/**", "roles/usage-tail.md"]
+skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]
 
 [[ban]]
 pattern = "claude"
