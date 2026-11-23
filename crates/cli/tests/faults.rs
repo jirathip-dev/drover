@@ -331,7 +331,8 @@ impl Runner for Here {
             return o;
         }
         let line = format!("{prog} {}", args.join(" "));
-        let Some(sh) = line.strip_prefix(SSH).filter(|sh| !sh.starts_with("'shed'")) else {
+        let host_job = |sh: &&str| ["'shed'", "launchctl", "systemctl"].iter().any(|k| sh.contains(k));
+        let Some(sh) = line.strip_prefix(SSH).filter(|sh| !host_job(sh)) else {
             return self.0.run_in(prog, args, input);
         };
         let mut ch = std::process::Command::new("sh")
