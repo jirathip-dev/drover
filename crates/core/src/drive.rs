@@ -430,34 +430,18 @@ pub fn own_marker(ctx: &Ctx, fleet: &str, n: u64) -> Option<crate::db::Lease> {
     held(ctx, &format!("spawn-{fleet}-{n}.pending")).filter(|_| SLOT.get())
 }
 
-type Admitter = (std::path::PathBuf, u32, String);
-static ADMITTING: std::sync::Mutex<std::collections::BTreeSet<Admitter>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
-static ADMITTED: std::sync::Condvar = std::sync::Condvar::new();
-
-struct Admitting(Admitter);
-impl Drop for Admitting {
-    fn drop(&mut self) {
-        ADMITTING
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&self.0);
-        ADMITTED.notify_all();
-    }
-}
-
-fn admit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str) -> Result<(Lock, Admitting)> {
-    let me = (ctx.state.clone(), crate::sim::pid(), host.to_string());
-    let held = ADMITTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut held = (ADMITTED.wait_while(held, |h| h.contains(&me))).unwrap_or_else(std::sync::PoisonError::into_inner);
-    held.insert(me.clone());
-    drop(held);
-    let me = Admitting(me);
+fn admit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str) -> Result<Lock> {
     let key = format!("admit-{host}.lock");
     for left in (0..=cfg.limits.admit_wait_secs).rev() {
         let now = crate::now();
+        let was = crate::db::leases(&ctx.state, &key).into_iter().find(|l| l.key == key);
+        let was = was.filter(|w| w.expires_at <= now || gone(r, w, now));
         if let Some(l) = crate::db::take(&ctx.state, &key, now, 60, "", &|l| gone(r, l, now)) {
-            return Ok((Lock(ctx.state.clone(), l), me));
+            if let Some(w) = was {
+                let d = json!({"host": host, "pid": w.pid, "age": now.saturating_sub(w.at)});
+                append(&ctx.state, &Event::new(now, "drover", None, "admission-dropped", d))?;
+            }
+            return Ok(Lock(ctx.state.clone(), l));
         }
         if left > 0 {
             r.sleep(1);
@@ -653,6 +637,9 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     std::fs::create_dir_all(state_dir(ctx))?;
     let stamp = ctx.state.with_file_name("drive-fast.at");
     std::fs::write(&stamp, ctx.now.to_string()).ok();
+    for old in ["drive.at", "drive.lock.step"] {
+        std::fs::remove_file(ctx.state.with_file_name(old)).ok();
+    }
     if let Some((step, secs)) = crate::timer::stuck_step(ctx, cfg) {
         writeln!(
             out,
@@ -709,15 +696,17 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         anyhow::bail!(crate::config::NO_RUNTIME);
     }
     for f in &fleets {
-        start_pass(ctx, r, out, f)?;
+        start_pass(ctx, cfg, r, out, f)?;
     }
     let secs = (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0;
     std::fs::write(&stamp, format!("{} {secs}", ctx.now)).ok();
     Ok(())
 }
 
-fn start_pass(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    if held(ctx, &format!("drive-{fleet}.lock")).is_some() || crate::service::wake(ctx, fleet) {
+fn start_pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+    let late = 2 * cfg.limits.pass_max_secs + cfg.limits.fast_secs;
+    let fresh = last_pass(ctx, fleet).is_some_and(|t| ctx.now.saturating_sub(t) <= late);
+    if held(ctx, &format!("drive-{fleet}.lock")).is_some() || fresh && crate::service::wake(ctx, fleet) {
         return Ok(());
     }
     let args = crate::runner::argv(&["drive", fleet]);
