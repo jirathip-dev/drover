@@ -370,6 +370,8 @@ enum Cmd {
     Triage(crate::triage::Args),
     #[command(about = "#1488: file this month's deps issue, queue it and spawn its lane (orchestrators, owner)")]
     Deps(crate::deps::Args),
+    #[command(about = "#1648: the nightly soak on `[fleet.<n>.soak]` hosts; an issue per missed target")]
+    Soak(crate::soak::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
     #[command(alias = "host")]
     Hosts {
@@ -2116,6 +2118,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Lesson { fleet, .. } => return crate::lesson::cli(ctx, &cfg, r, out, fleet),
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
                 Cmd::Deps(a) => return crate::deps::cli(ctx, &cfg, r, out, &a.fleet),
+                Cmd::Soak(a) => return crate::soak::run(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
@@ -2133,11 +2136,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if json {
                         writeln!(out, "{}", serde_json::to_string_pretty(&pr)?)?;
                     } else {
-                        writeln!(
-                            out,
-                            "{}",
-                            gh::summary(&pr, &branch, &cfg.fleet(&fleet)?.required_checks)
-                        )?;
+                        let summary = gh::summary(&pr, &branch, &cfg.fleet(&fleet)?.required_checks);
+                        writeln!(out, "{summary}")?;
                     }
                     if pr.is_null() {
                         return Ok(1);

@@ -57,6 +57,7 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
+| `shed_call_secs` | `30` | a call to this host's shed server with no answer this long (past a `wait`'s own timeout) fails instead of blocking |
 | `ssh_sessions` | `8` | remote calls open at once to one host over its shared connection; more wait their turn (under sshd's `MaxSessions`) |
 | `ssh_retry_secs` | `1` | a call the shared connection refused (`Session open refused by peer`) runs again on it after this long, up to 3 times |
 | `link_beat_secs` | `5` | a host's watcher with nothing to say writes a beat this often |

@@ -61,8 +61,9 @@ flowchart TD
     t4["lesson"] --> t5
     t5["triage"] --> t6
     t6["deps"] --> t7
-    t7["hotspots"] --> t8
-    t8["compact"]
+    t7["soak"] --> t8
+    t8["hotspots"] --> t9
+    t9["compact"]
     d0["look, repair"] --> d1
     d1["closed issues"] --> d2
     d2["PR reads, gates, steps"] --> d3
@@ -84,6 +85,7 @@ flowchart TD
     d0 -.- k_pass_max_secs(["pass_max_secs = 60"])
     d0 -.- k_ssh_quick_secs(["ssh_quick_secs = 5"])
     d0 -.- k_ssh_call_secs(["ssh_call_secs = 20"])
+    d0 -.- k_shed_call_secs(["shed_call_secs = 30"])
     d0 -.- k_import_max_age_hours(["import_max_age_hours = 24"])
     d2 -.- k_webhook_poll_minutes(["webhook_poll_minutes = 10"])
     d2 -.- k_silent_minutes(["silent_minutes = 10"])

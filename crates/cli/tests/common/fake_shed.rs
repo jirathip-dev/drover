@@ -29,18 +29,14 @@ pub struct State {
     pub fault: Fault,
 }
 
-/// A fault the fake link injects into each connection.
+/// A fault the fake link injects into each connection: `Hang` reads and never answers, `Latency` answers late, `Loss(n)` closes the next n unanswered, `Gone` takes the socket away.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Fault {
     #[default]
     None,
-    /// It reads the requests and never answers (shed serve stuck behind a dead ssh link).
     Hang,
-    /// Each answer comes this late.
     Latency(std::time::Duration),
-    /// The next this many connections are closed unanswered (lost packets, a reset link).
     Loss(u32),
-    /// The host is gone: no server on the socket, any open connection cut.
     Gone,
 }
 
