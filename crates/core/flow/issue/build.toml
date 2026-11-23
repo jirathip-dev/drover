@@ -1,0 +1,161 @@
+flow = "issue"
+states = ["impl", "fix"]
+reads = ["lane", "host", "pr", "verdict", "ask", "turn"]
+ignores = []
+in_flight = true
+
+[[row]]
+id = "merged-outside"
+when = { lane = "*", host = "*", pr = ["merged"], verdict = "*", ask = "*", turn = "*" }
+do = "record-merge"
+owner = "drive"
+timeout = "act_minutes"
+to = ["merged"]
+say = "merged outside drover: record it"
+
+[[row]]
+id = "pr-closed"
+when = { lane = "*", host = "*", pr = ["closed"], verdict = "*", ask = "*", turn = "*" }
+do = "raise-card"
+owner = "drive"
+timeout = "act_minutes"
+escalate = "orchestrator"
+to = ["needs-human"]
+say = "PR closed outside drover: a card"
+
+[[row]]
+id = "ask-open"
+when = { lane = "*", host = "*", pr = "*", verdict = "*", ask = ["open"], turn = "*" }
+do = "wait"
+then = ["remind"]
+owner = "owner"
+timeout = "ask_waiting_minutes"
+escalate = "owner"
+say = "waiting on the owner's answer"
+
+[[row]]
+id = "decided"
+when = { lane = "*", host = "*", pr = "*", verdict = "*", ask = ["answered"], turn = "*" }
+do = "deliver"
+owner = "drive"
+timeout = "act_minutes"
+say = "apply the answer"
+
+[[row]]
+id = "reviewed-here"
+when = { lane = "*", host = "*", pr = "*", verdict = ["written", "PASS", "refused"], ask = ["none"], turn = "*" }
+do = "reconcile"
+owner = "drive"
+timeout = "act_minutes"
+escalate = "orchestrator"
+say = "a verdict at a build state: reconcile"
+
+[[row]]
+id = "pushed"
+when = { lane = "*", host = "*", pr = ["open", "pending", "red", "green", "conflicting"], verdict = ["none"], ask = ["none"], turn = ["done"] }
+do = "spawn-check"
+owner = "drive"
+timeout = "act_minutes"
+to = ["review"]
+say = "pushed: review starts"
+
+[[row]]
+id = "no-change"
+when = { lane = "*", host = "*", pr = "*", verdict = ["FAIL"], ask = ["none"], turn = ["done"] }
+do = "no-change"
+owner = "drive"
+timeout = "act_minutes"
+to = ["review", "ready"]
+say = "done with no change: review the same head"
+
+[[row]]
+id = "lane-blocked"
+when = { lane = "*", host = "*", pr = "*", verdict = ["none", "FAIL"], ask = ["none"], turn = ["blocked"] }
+do = "raise-card"
+owner = "drive"
+timeout = "act_minutes"
+escalate = "orchestrator"
+to = ["needs-human"]
+say = "the lane is blocked: a card"
+
+[[row]]
+id = "host-offline"
+when = { lane = "*", host = ["offline"], pr = "*", verdict = ["none", "FAIL"], ask = ["none"], turn = "*" }
+do = "wait"
+then = ["move"]
+owner = "drive"
+timeout = "host_offline_minutes"
+since = "host-heard"
+say = "the lane's host is offline"
+
+[[row]]
+id = "done-no-pr"
+when = { lane = "*", host = ["up", "loaded", "draining"], pr = ["none"], verdict = ["none"], ask = ["none"], turn = ["done"] }
+do = "nudge"
+owner = "lane"
+timeout = "stall_minutes"
+say = "turn done with no PR: open one"
+
+[[row]]
+id = "need-input"
+when = { lane = "*", host = ["up", "loaded", "draining"], pr = "*", verdict = ["none", "FAIL"], ask = ["none"], turn = ["need-input"] }
+do = "nudge"
+owner = "lane"
+timeout = "stall_minutes"
+say = "the lane needs input with no ask: file one"
+
+[[row]]
+id = "round-start"
+when = { lane = ["none"], host = ["up", "loaded", "draining"], pr = "*", verdict = ["none", "FAIL"], ask = ["none"], turn = ["none", "working"] }
+do = "spawn-build"
+owner = "drive"
+timeout = "act_minutes"
+say = "start this round's lane"
+
+[[row]]
+id = "working"
+when = { lane = ["running"], host = ["up", "draining"], pr = "*", verdict = ["none", "FAIL"], ask = ["none"], turn = ["none", "working"] }
+do = "wait"
+then = ["nudge", "respawn"]
+owner = "lane"
+timeout = "silent_minutes"
+since = "heard"
+say = "the lane is working"
+
+[[row]]
+id = "working-loaded"
+when = { lane = ["running"], host = ["loaded"], pr = "*", verdict = ["none", "FAIL"], ask = ["none"], turn = ["none", "working"] }
+do = "wait"
+then = ["move"]
+owner = "lane"
+timeout = "host_wait_minutes"
+since = "heard"
+say = "the lane is working on a loaded host"
+
+[[row]]
+id = "limited"
+when = { lane = ["limited"], host = ["up", "loaded", "draining"], pr = "*", verdict = ["none", "FAIL"], ask = ["none"], turn = ["none", "working"] }
+do = "continue-at-reset"
+then = ["respawn"]
+owner = "drive"
+timeout = "stall_minutes"
+since = "reset"
+say = "rate-limited: continue at the reset"
+
+[[row]]
+id = "lane-ended"
+when = { lane = ["done", "asleep"], host = ["up", "loaded", "draining"], pr = "*", verdict = ["none", "FAIL"], ask = ["none"], turn = ["none", "working"] }
+do = "wait"
+then = ["nudge", "respawn"]
+owner = "lane"
+timeout = "stall_minutes"
+since = "heard"
+say = "the lane ended its turn with no report"
+
+[[row]]
+id = "lane-lost"
+when = { lane = ["exited", "gone"], host = ["up", "loaded", "draining"], pr = "*", verdict = ["none", "FAIL"], ask = ["none"], turn = ["none", "working"] }
+do = "respawn"
+owner = "drive"
+timeout = "act_minutes"
+say = "the lane is gone: respawn it"

@@ -27,6 +27,7 @@ pub mod doctor;
 pub mod done;
 pub mod drive;
 pub mod events;
+pub mod flow;
 pub mod gate;
 pub mod gh;
 pub mod guard;

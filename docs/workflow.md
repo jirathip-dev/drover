@@ -20,30 +20,38 @@ stateDiagram-v2
     state "parked" as parked
     state "merged" as merged
     state "closed" as closed
-    queued --> design : queued with an architect or design mark, that lane first
-    queued --> impl : impl spawned, refused while SERIAL_BUSY, HOST_BUSY, DISK_BUDGET, LANE_LIVE or CAP
-    queued --> closed : issue closed on GitHub
-    design --> design_review : design pushed, the owner's ask
-    design_review --> queued : approve or revise
-    design_review --> needs_human : reject
-    impl --> review : turn done passes its gate at the pushed head, review spawned
-    impl --> needs_human : turn blocked, 3 done refusals at a head, or stalled past stall_minutes = 30
-    impl --> queued : lane killed, or repaired while blocked
-    review --> ready : PASS at head
-    review --> fix : FAIL at head
-    review --> needs_human : ROUND_LIMIT after review_rounds = 3
-    fix --> review : fix pushed and turn done passed, next review round
-    fix --> needs_human : turn blocked, 3 done refusals at a head, or stalled past stall_minutes = 30
-    ready --> review : verify stage at head for ui_paths, a verify or repro mark
-    ready --> fix : update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds = 3
-    ready --> merged : squash-merge into one commit, with PASS at head and CI green, no STAGING_WOULD_BREAK
-    ready --> blocked : merge refused, or PR closed outside drover
-    blocked --> fix : fix round spawned
-    blocked --> review : review spawned at a new head
-    needs_human --> queued : extend with no lane yet, start lane
-    needs_human --> fix : extend, one more round
-    needs_human --> parked : park
-    parked --> needs_human : unpark, the state before it
+    queued --> design : start
+    queued --> impl : start
+    design --> design_review : ended
+    design_review --> queued : decided
+    design_review --> design : decided
+    design_review --> needs_human : decided
+    impl --> merged : merged-outside
+    impl --> needs_human : pr-closed, lane-blocked
+    impl --> review : pushed, no-change
+    impl --> ready : no-change
+    review --> merged : merged-outside
+    review --> needs_human : pr-closed
+    review --> ready : record
+    review --> fix : record
+    fix --> merged : merged-outside
+    fix --> needs_human : pr-closed, lane-blocked
+    fix --> review : pushed, no-change
+    fix --> ready : no-change
+    ready --> merged : merged-outside, merge
+    ready --> needs_human : pr-closed
+    ready --> review : next-check
+    ready --> fix : merge, ci-red, conflict
+    blocked --> merged : merged-outside
+    blocked --> needs_human : pr-closed
+    blocked --> ready : back
+    blocked --> review : back
+    blocked --> fix : back
+    needs_human --> queued : decided
+    needs_human --> impl : decided
+    needs_human --> fix : decided
+    needs_human --> parked : decided
+    parked --> needs_human : parked
     merged --> [*]
     closed --> [*]
 ```
@@ -150,6 +158,12 @@ flowchart TD
     other -.- k_self_update_lag_minutes(["self_update_lag_minutes = 30"])
     other -.- k_self_update_stage_secs(["self_update_stage_secs = 300"])
     other -.- k_self_update_swap_secs(["self_update_swap_secs = 120"])
+    other -.- k_act_minutes(["act_minutes = 10"])
+    other -.- k_escalate_minutes(["escalate_minutes = 30"])
+    other -.- k_start_minutes(["start_minutes = 10"])
+    other -.- k_check_quiet_minutes(["check_quiet_minutes = 120"])
+    other -.- k_host_wait_minutes(["host_wait_minutes = 30"])
+    other -.- k_card_ttl_minutes(["card_ttl_minutes = 15"])
 ```
 
 ## History baseline
