@@ -1,7 +1,8 @@
 # mcp-server: how the callers read (#1627)
 
 Read this first. These are the call sites after the change; `adr.md` says why, `shapes.md` has the types and
-`boundaries.md` the rules. Everything new is in a code block, because it does not exist yet.
+`boundaries.md` the rules. Everything new is in a code block, because it does not exist yet. Paths under
+`api/src/` are #1645's API crate.
 
 ## The owner: one key per agent, made on the host
 
@@ -42,45 +43,64 @@ tools/call answer   {"fleet":"drover","id":"q2107","choice":"approve"}
                                                                outside agent answers routine asks only   (isError)
 tools/call file     {"fleet":"drover","title":"board: dark mode for the queue tab","body":"## Problem\n…"}
                                                              → filed drover#1641
-tools/call enqueue  {"fleet":"drover","issues":[1641]}       → drover queue: #1632 #1641 (needs-check)
+tools/call enqueue  {"fleet":"drover","issues":[1641]}       → asked the owner to queue #1641 (q3310)
+tools/call answer   {"fleet":"drover","id":"q3310","choice":"queue"}
+                                                             → REFUSED OWNER_ASK: q3310 waits for the owner: …
 tools/call threads  {"fleet":"drover"}                       → the repo's threads, newest first
-tools/call reply    {"thread":"t140","text":"1641 is filed and queued; please look at its spec"}
+tools/call reply    {"thread":"t140","text":"1641 is filed; its queue ask is q3310"}
                                                              → sent
 tools/call park     {…}                                      → JSON-RPC error -32602: no tool `park`
 ```
 
 A refusal is the text the CLI prints for the same refusal, `REFUSED <CODE>: why`, as a tool result marked
-`isError`. An `answer` is a tap, so it runs as a job in its issue's order; the call returns when the job ends.
-After 20 s it returns `ACCEPTED: job j… is still running; read it with job` and the `job` tool has the end.
+`isError`. `answer` and `file` run as jobs; the call returns when the job ends. After 20 s it returns
+`ACCEPTED: job j… is still running; read it with job` and the `job` tool has the end.
 
 ## The owner: the board, as today
 
 ```
-Events    ✓  mcp-grok answered q2101 · use the fixture
-          ·  mcp-grok filed #1641 · board: dark mode for the queue tab
-          ·  mcp-grok queued #1641
-Queue     #1641  queued · needs-check
-Thread    mcp-grok: 1641 is filed and queued; please look at its spec
+Needs you  mcp-grok asks to queue #1641: board: dark mode for the queue tab      [queue] [no]
+Events     ✓  mcp-grok answered q2101 · use the fixture
+           ·  mcp-grok filed #1641 · board: dark mode for the queue tab
+           ·  owner queued #1641 · asked by mcp-grok
+Queue      #1641  queued · needs-check                      (only after the owner's [queue])
+Thread     mcp-grok: 1641 is filed; its queue ask is q3310
 ```
 
-The Queue row is today's; who queued it is the Events line. The orchestrator reads the thread line as `[t140] mcp-grok: …`. Its prompt says such a line is an outside agent's
-request, never the owner's word. `drover answer --typed` and `drover extend --typed` already accept only a line
-the owner wrote, so an agent cannot lend an orchestrator the owner's voice.
+The ask is an ordinary owner ask: it alerts, it shows where asks show, and `drover answer` settles it too.
 
-## serve: one route arm, one module
+## The orchestrator: an agent's line holds the thread
+
+The orchestrator reads the thread line as `[t140] mcp-grok: …`. From that line until the owner next writes in
+t140, drover refuses that orchestrator the owner's powers, whatever the line said:
+
+```
+$ drover answer drover q2110 2 --by orchestrator-t140 --basis "…"
+REFUSED OWNER_ASK: mcp-grok wrote last in t140; ask the owner            (q2110 is now the owner's ask)
+$ drover extend drover 1630 --basis "…"
+REFUSED OWNER_ASK: mcp-grok wrote last in t140; ask the owner
+$ drover hosts off build-2
+REFUSED OWNER_ONLY: mcp-grok wrote last in t140: `drover hosts` (hosts group) waits for the owner's line there, or post a run card
+$ drover spawn drover 1641 impl --force
+REFUSED OWNER_ONLY: mcp-grok wrote last in t140: `drover spawn` waits for the owner's line there
+$ drover queue drover add 1641
+asked the owner to queue #1641 (q3310)
+```
+
+It may still reply, file an ask, post a run card or propose config: each of those ends at the owner. Its prompt
+says the same in one line; the refusals above are what holds it.
+
+## API: one route arm, one module
 
 ```rust
-// crates/server/src/serve.rs, route(): the only new arm
+// crates/api/src/serve.rs, route(): the only new arm
 (_, "/mcp") => self.mcp(ctx, head, method, body),
 
-// crates/server/src/serve/mcp.rs: framing only
+// crates/api/src/serve/mcp.rs: framing only
 impl Server<'_> {
     pub(super) fn mcp(&self, ctx: &Ctx, head: &str, method: &str, body: &str) -> Res {
         if method != "POST" {
             return plain("405 Method Not Allowed");
-        }
-        if !self.allowed(ctx, head) {
-            return plain("403 Forbidden");
         }
         let who = match self.keyed(ctx, head) {
             Ok(who) => who,
@@ -111,65 +131,96 @@ impl Server<'_> {
 ```
 
 `call` knows nothing about any one tool. `settled` turns the route's answer into the tool's text, and reads a
-202's job until it ends.
+202's job until it ends. There is no Host or Origin check here: that is the edge's.
 
-## serve: the caller reaches the three acts
+## API: a tool is a line of one table
 
 ```rust
-// crates/server/src/serve/v1.rs, api(): one guard for every route, before any work
+// crates/api/src/serve/mcp.rs
+const FLEET: Arg = Arg { name: "fleet", kind: Kind::Text, required: true, description: "the fleet's name, as status lists it" };
+
+const TOOLS: &[Tool] = &[
+    Tool { name: "status", title: "The board", description: "…", act: false, method: "GET", route: "state", args: &[] },
+    Tool {
+        name: "answer",
+        title: "Answer a routine ask",
+        description: "Answer an open ask by option number or one line of text. An ask that waits for the owner is refused OWNER_ASK: tell the owner, never retry.",
+        act: true,
+        method: "POST",
+        route: "answer",
+        args: &[FLEET, Arg { name: "id", kind: Kind::Text, required: true, description: "the ask's id, as asks lists it" }, CHOICE],
+    },
+];
+```
+
+A new tool is a new entry and, when the route is new, a route with its contract fixture and a name in
+`caller.rs`'s list.
+
+## The edge: two lines
+
+```rust
+// crates/server/src/relay.rs (#1645's table)
+Relayed { method: Post, path: "/mcp", stream: false, until: None, keyed: true },
+Relayed { method: Get,  path: "/mcp", stream: false, until: None, keyed: true },
+```
+
+On a keyed line the edge, after its Host and Origin check, sends the request on with the caller's own
+`Authorization`. It adds no token and no `Drover-Device`, and it drops the cookie.
+
+## API: the caller reaches the acts
+
+```rust
+// crates/api/src/serve/v1.rs, api(): one guard for every route, before any work
 _ if who.is_some_and(|c| c.refused(method, x).is_some()) => refusal(who, method, x),
 
-// the caller is stamped on the fields at the edge; a body's own `by`, `via` or `mtime` is dropped for an agent
+// the caller is stamped on the fields at the route; a body's own `by`, `via` or `mtime` is dropped for an agent
 let f = stamped(fields(body), op, who);
 
-// crates/server/src/serve.rs, write(): the literal ("owner", Some("web")) becomes the caller's
+// write(): the literal ("owner", Some("web")) becomes the caller's
 "answer" => crate::answer(ctx, &cfg, &self.r, &mut out, (fleet, g("id")), choice, (g("by"), Some(g("via"))))?,
 "bqueue" => crate::queue_change(ctx, &cfg, fleet, d.with("by", g("by")), Some(g("via")))?,
+"issue" => crate::issue::file(ctx, &cfg, &self.r, fleet, (g("title"), g("body")), (g("by"), g("via")))?,
 
-// crates/server/src/serve/chat.rs, post(): the literal "owner" becomes the caller's
+// chat.rs, post(): the literal "owner" becomes the caller's
 later.push(conductor::post(ctx, &cfg, (&id, &text, &files), (g("by"), false))?);
 ```
 
-## core: the one rule an agent's answer adds
+## core: the three rules
 
 ```rust
-// crates/core/src/lib.rs, answer_with(): every answer passes here, the CLI's too
+// answer_with(): every answer passes here, the CLI's too
 if callers::is_agent(by) && ask.str("kind") != Some("routine") {
     return gate::refused("OWNER_ASK", format!("{id} waits for the owner: an outside agent answers routine asks only"));
 }
+if let Some(op) = ask.data.get("queue").filter(|_| text == "queue") {
+    queue_change(ctx, cfg, fleet, op.clone().with("by", by).with("asked", ask.str("asked")), via)?;
+}
+
+// queue_change(): every queue add passes here
+if d.at("op") == "add" && d.str("by").is_some_and(callers::is_agent) {
+    return ask_to_queue(ctx, fleet, &d);
+}
+
+// orchestrator_answer(): an orchestrator's answer and extend both pass here; one more `why`
+} else if let Some(agent) = callers::asked(&events, t) {
+    &format!("{agent} wrote last in {t}")
+
+// cli.rs, the hook's policy, for an orchestrator only
+held: callers::asked(&events, &thread).map(str::to_string),
+
+// hook.rs, where a group verb and `spawn --force` are judged for an orchestrator
+if let Some(agent) = p.held.as_deref().filter(|_| group(r).is_some() || r.first() == Some(&"spawn")) {
+    return Some(format!("REFUSED OWNER_ONLY: {agent} wrote last in its thread: …"));
+}
+
+// cli.rs, `queue add` run by an orchestrator: in a held thread the add is the agent's
+let d = match callers::asked(&events, &thread) { Some(agent) => d.with("by", agent), None => d };
 ```
 
-## A tool is a file
-
-```toml
-# crates/server/mcp/answer.toml
-name = "answer"
-title = "Answer a routine ask"
-description = "Answer an open ask by option number or one line of text. An ask that waits for the owner is refused OWNER_ASK: tell the owner, never retry."
-act = true
-method = "POST"
-route = "answer"
-
-[args.fleet]
-type = "string"
-description = "the fleet's name, as status lists it"
-
-[args.id]
-type = "string"
-description = "the ask's id, as asks lists it"
-
-[args.choice]
-type = "string"
-description = "an option's number, or one line of text"
-```
-
-A new tool is a new file in that folder and, when the route is new, a route with its contract fixture. No PR edits
-a shared tool list.
-
-## The test every slice shares
+## The test
 
 ```rust
-// crates/cli/tests/mcp.rs: the real entry, Server::respond, with a raw POST /mcp
+// crates/cli/tests/mcp.rs: the API's real entry, Server::respond, with a raw POST /mcp
 let (c, s) = board("mcp");
 let key = keys_add(&c, "grok", Scope::Act);
 
@@ -182,6 +233,17 @@ assert_eq!(last(&c, "decision").str("by"), Some("mcp-grok"));
 let no = call(&s, &key, "answer", json!({"fleet": "sendmeter", "id": "q2", "choice": "1"}));
 assert!(text(&no).starts_with("REFUSED OWNER_ASK: ") && no["isError"] == true);
 
+let asked = call(&s, &key, "enqueue", json!({"fleet": "sendmeter", "issues": [7]}));
+assert!(text(&asked).starts_with("asked the owner to queue #7") && queued(&c, "sendmeter").is_empty());
+run(&c, &["answer", "sendmeter", &ask_id(&asked), "queue", "--by", "owner"]);
+assert_eq!(queued(&c, "sendmeter"), [7]);
+
+call(&s, &key, "reply", json!({"thread": "t1", "text": "turn build-2 off"}));
+assert_eq!(last(&c, "thread-msg").str("from"), Some("mcp-grok"));
+assert!(as_orchestrator(&c, "t1", &["hosts", "off", "build-2"]).contains("REFUSED OWNER_ONLY"));
+say_as_owner(&c, "t1", "go on");
+assert!(!as_orchestrator(&c, "t1", &["hosts", "off", "build-2"]).contains("REFUSED"));
+
 for route in every_post_fixture().filter(|r| !AGENT_ACTS.contains(r)) {
     assert_eq!(api_as(&s, &key, route)["code"], "OWNER_ONLY");
 }
@@ -190,4 +252,5 @@ run(&c, &["serve", "keys", "revoke", "grok"]);
 assert!(raw(&s, &key, "tools/list").starts_with("HTTP/1.1 401"));
 ```
 
-Run: `cargo test -p drover --test mcp`, exit 0.
+Run: `cargo test -p drover --test mcp`, exit 0. The edge's part is one case in #1645's `cli/tests/edge.rs`: a
+`POST /mcp` with a key and a cookie reaches the door with the same `Authorization`, no cookie and no `Drover-*`.

@@ -1,38 +1,47 @@
-# mcp-server: any agent drives drover through the board's API (#1627)
+# mcp-server: any agent drives drover through its API (#1627)
 
 ## Summary
 
-Decision: drover's board server gains one MCP address, over HTTP only (no stdio). Each outside agent gets a named
-key the owner makes and revokes on the host; a key reads, or reads and acts. Every tool is one board API call,
-logged under the agent's name. An agent is never the owner: it answers routine asks only, no owner verb is a tool.
-Slices: keys; the caller's name through the board API, with three missing routes; the MCP endpoint and its tool
-folder; docs and the orchestrator's rule.
-Open questions: may an issue an agent queues start by itself (decided yes)? May a key ever answer owner asks (no)?
+Decision: drover's API gains one MCP address over HTTP (no stdio); the page's server only passes it on. Each outside
+agent gets a named key the owner makes and revokes; every act is logged under the agent's name. An agent is never the
+owner: it answers routine asks only, an issue it queues waits for the owner's tap, and its line in a thread cannot
+make an orchestrator use an owner power.
+Slices: keys and the rules (core, now); then, after #1645's API crate: the caller through the API, the MCP address, docs.
+Open questions: an orchestrator that queues or spawns because an agent asked also waits for the owner (decided yes)?
 
 ## Read in this order
 
 | File | What |
 |---|---|
-| `usage.md` | how the owner, an agent and the code read after the change, and the test every slice shares |
-| `adr.md` | the question, the facts, the options, the decision, the consequences, the slices, the open questions, the `.drover/arch.toml` lines |
-| `shapes.md` | the key, the caller, a tool file, the JSON-RPC messages, the three new routes, the events and codes |
-| `boundaries.md` | which module may call which, who may reach which route, and two statecharts: a key, a call |
+| `usage.md` | how the owner, an agent and the code read after the change, and the test |
+| `adr.md` | the question, the facts, the options, the decision, the order with #1645, the slices, the open question, the `.drover/arch.toml` lines |
+| `shapes.md` | the key, the caller, the tool table, the JSON-RPC messages, the three new routes, the queue ask, the events and codes |
+| `boundaries.md` | which module may call which, who may reach which route, and four statecharts: a key, a call, a queue request, a thread |
+
+## What the owner's revise changed (q3299)
+
+| | Was | Is |
+|---|---|---|
+| (a) | `mcp.rs` and `caller.rs` in the page's server | in `drover-api` (#1645); the edge relays `/mcp` with the caller's own `Authorization`. #1645's S1 lands before any MCP code in the server; the core slice lands now |
+| (b) | a prompt line told the orchestrator what an agent's message is | the log holds it: from an agent's line until the owner's next, that thread's orchestrator cannot answer, extend, run a group verb or `spawn --force` |
+| (c) | a tool a TOML file, joined by a build step | one const table in `mcp.rs` |
+| (d) | an agent's queued issue started by itself | it is an owner ask; nothing is queued before the owner's tap |
 
 ## The design on one screen
 
 ```
- an outside agent                         drover serve                                   core
- ────────────────                         ────────────                                   ────
- (a Teams bot, any MCP client)
-        │  POST /mcp
-        │  Authorization: Bearer <key>
+ an outside agent            the edge (drover serve)        drover-api                              core
+ ────────────────            ───────────────────────        ──────────                              ────
+        │ POST /mcp
+        │ Authorization: Bearer <key>
         ▼
-   ┌─ serve/mcp.rs ──────────────┐   the same call a screen makes
-   │ key → Caller::Agent(name)   │ ─────────────────────────────▶  Server::api  ─▶  answer, queue_change,
-   │ tools/list: the tool folder │      (method, /api/v1 route,     (one guard:      orchestrator::post,
-   │ tools/call: one route each  │       fields, the caller)         what this        hygiene::gh
-   │ a tap's job: read to its end│ ◀─────────────────────────────    caller may       each logs `by: mcp-<name>`
-   └─────────────────────────────┘      JSON, or REFUSED <CODE>      reach)
+   Host and Origin checked ──▶ relayed whole, the ──▶ ┌─ serve/mcp.rs ─────────────┐
+   (relay.rs, a keyed line)    key untouched          │ key → Caller::Agent(name)  │
+                                                      │ tools/list: the const table│
+                                                      │ tools/call: one route each │──▶ Server::api ──▶ answer_with,
+                                                      │ a job: read to its end     │    (one guard)    queue_change,
+                                                      └────────────────────────────┘                   say, hygiene::gh
+                               JSON, or REFUSED <CODE> ◀──────────────────────────────                 by: mcp-<name>
 ```
 
 | Today | After |
@@ -44,22 +53,23 @@ Open questions: may an issue an agent queues start by itself (decided yes)? May 
 
 ## What an agent may do
 
-| | Tool | The route behind it |
-|---|---|---|
-| read | `status`, `queue`, `waiting`, `asks`, `threads`, `thread`, `job` | `state`, `queue`, `waiting` (new), `needs`, `repo/<fleet>/threads`, `thread/<t>`, `job/<id>` |
-| act | `file`, `enqueue`, `answer`, `reply` | `issue` (new), `bqueue`, `answer`, `say` (new) |
-| never | merge overrides, extend, park, unpark, drive, pause, run cards, config, secrets, hosts, lane prompts and kills, pairing | no tool; the route itself refuses an agent `OWNER_ONLY` |
+| | Tool | The route behind it | For an agent |
+|---|---|---|---|
+| read | `status`, `queue`, `waiting`, `asks`, `threads`, `thread`, `job` | `state`, `queue`, `waiting` (new), `needs`, `repo/<fleet>/threads`, `thread/<t>`, `job/<id>` | the unpaired view, plus its jobs |
+| act | `answer` | `answer` | a routine ask; any other is `OWNER_ASK` |
+| act | `file` | `issue` (new) | files the issue |
+| act | `enqueue` | `bqueue` | asks the owner; the owner's tap queues it |
+| act | `reply` | `say` (new) | a line from `mcp-<name>`; the thread is held until the owner writes there |
+| never | merge overrides, extend, park, unpark, drive, pause, run cards, config, secrets, hosts, lane prompts and kills, pairing | no tool | the route itself refuses an agent `OWNER_ONLY` |
 
 An agent that wants an owner-only thing says so in a thread. The thread's orchestrator turns it into an ask or a
-run card, and the owner approves that on the board, as today.
+run card, and the owner approves that on the board, as today. The orchestrator cannot do it instead.
 
 ## What the owner decides
 
-1. An act key can start lanes: it files an issue and queues it. Decided: allowed, since the issue asks for both
-   acts; the row shows `needs-check` and the Events tab names the agent. The other choice holds each such issue
-   behind one tap.
-2. A key never answers an ask that waits for the owner, even when you tell the bot to in Teams: drover cannot see
-   that it was you. Decided: refused `OWNER_ASK`; you answer on the board.
+1. In a thread an agent wrote in last, the orchestrator's own `queue add` becomes the same owner ask, and its
+   `spawn` is refused. Decided: yes, since otherwise an agent starts lanes by asking the orchestrator. The other
+   choice keeps to the four verbs of q3299 (b).
 
-Two things only the owner can do, outside this issue: give serve an address a cloud bot can reach, and paste the
-key into the bot.
+Two things only the owner can do, outside this issue: give the page's server an address a cloud bot can reach,
+and paste the key into the bot.

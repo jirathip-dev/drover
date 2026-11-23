@@ -1,13 +1,15 @@
-# ADR: an MCP server over the board's API (#1627)
+# ADR: an MCP server over drover's API (#1627)
 
 ## Summary
 
-Decision: drover's board server gains one MCP address, over HTTP only (no stdio). Each outside agent gets a named
-key the owner makes and revokes on the host; a key reads, or reads and acts. Every tool is one board API call,
-logged under the agent's name. An agent is never the owner: it answers routine asks only, no owner verb is a tool.
-Slices: keys; the caller's name through the board API, with three missing routes; the MCP endpoint and its tool
-folder; docs and the orchestrator's rule.
-Open questions: may an issue an agent queues start by itself (decided yes)? May a key ever answer owner asks (no)?
+Decision: drover's API gains one MCP address over HTTP (no stdio); the page's server only passes it on. Each outside
+agent gets a named key the owner makes and revokes; every act is logged under the agent's name. An agent is never the
+owner: it answers routine asks only, an issue it queues waits for the owner's tap, and its line in a thread cannot
+make an orchestrator use an owner power.
+Slices: keys and the rules (core, now); then, after #1645's API crate: the caller through the API, the MCP address, docs.
+Open questions: an orchestrator that queues or spawns because an agent asked also waits for the owner (decided yes)?
+
+Status: revised after the owner's q3299 (2026-11-23). What changed is marked "q3299 (a)" to "(d)".
 
 ## The question
 
@@ -16,31 +18,28 @@ log says who acted, the owner's decisions stay the owner's, and no second copy o
 
 ## Facts
 
-Read on staging 7c0a28c1c.
+Read on staging 7c0a28c1c, and on #1645's and #1571's ADRs as proposed (`serve-split`, `cooee-threads`).
 
 - **A caller is unpaired or a paired device, and a paired device is the owner.** `Auth` is a device or an error
   (`crates/server/src/serve.rs:129`). There is no third kind.
 - **The board's acts name the actor as a literal.** An answer is logged `by: owner, via: web`
   (`crates/server/src/serve.rs:1551`); a thread message is from `owner` (`crates/server/src/serve/chat.rs:534`);
   a queue change is `via: web` with no `by`.
-- **`/api/v1` lacks three of the asked operations.** It has no route for what waits (`drover waiting`), none to
-  say in a thread (the page posts to its own form route, cooee to the screens' action), none to file an issue
-  (drover files its own through `hygiene::gh`, in three copies: lesson, hotspots, triage).
-- **Every ask says whose it is.** A lane's ask is `kind: routine` or `kind: owner`. Every ask drover itself makes
-  (design, extend, respawn loop, lane hog, handoff) is `owner`. A routine ask takes its recommendation after 30
-  min anyway, and one naming an owner word is refused when asked (`OWNER_TOPIC`).
-- **An orchestrator cannot borrow the owner's voice.** `answer --typed` and `extend --typed` accept only a line
-  whose sender is `owner`.
-- **serve is hand-written HTTP on tokio and serde_json.** A request body is capped at 32 KB, 64 requests are
-  handled at once, and the latency alert counts `/api/v1/` routes only.
-- **The files this touches are at their size baselines.** `api` is 230 of 243 lines, `route` 173 of 184,
-  `serve.rs` 3,478 of 3,594.
-- **The CLI's reads are not agent-sized.** `drover status --json` is 2.2 MB on this host (2,250 issues, merged
-  ones included). `/api/v1/state` holds only what is live.
+- **`/api/v1` lacks three of the asked operations.** No route for what waits (`drover waiting`), none to say in a
+  thread, none to file an issue (drover files its own through `hygiene::gh`, in three copies).
+- **Every ask says whose it is.** A lane's ask is `kind: routine` or `kind: owner`; every ask drover itself makes is
+  `owner`, and `answer_with` runs what such an ask stands for (an extend, a park, a design decision).
+- **An orchestrator's owner powers pass two places.** Its `answer` and `extend` end in core's
+  `orchestrator_answer`, which knows the thread and sends a doubtful one to the owner (`OWNER_ASK`). Its group
+  verbs and `spawn --force` pass the lane hook (`hook.rs`), which knows the thread from `DROVER_THREAD`.
+- **`gh` never runs on a request.** An op that needs it is a job (`serve/jobs.rs`), answered 202 and read by id.
+- **#1645 cuts the server in two.** `drover-api` (new crate, links core) holds `Server`, `route`, `v1.rs`, `chat.rs`
+  and the jobs from its slice S1; `crates/server` becomes the edge, which checks Host and Origin and relays the
+  paths of one table (`relay.rs`) with its own token. The API checks neither Host nor Origin.
+- **#1571 keeps `say` in drover** as `core::thread::say(…, from, text)`, a row cooee types into the agent.
 - **MCP changed shape in 2026.** Revision 2026-07-28 has no handshake and no session: each POST carries its
   version and is answered alone, and `server/discover` is required. Revisions up to 2025-11-25 open with
-  `initialize`. A server may serve both on one address. A server may always answer with plain JSON, never a
-  stream. Authentication is the server's own choice.
+  `initialize`. A server may serve both on one address and may always answer with plain JSON.
 
 ## Options and choices
 
@@ -48,151 +47,178 @@ Read on staging 7c0a28c1c.
 
 | Option | Verdict |
 |---|---|
-| stdio: a drover process the client starts | No. The callers the issue names are bots in a cloud; they cannot start a process on the host. It would also be a second server beside serve, reading the state itself, outside the per-issue job order and the rate limits |
-| stdio as a thin pipe to serve | Not now. Any generic stdio-to-HTTP bridge does this for a local client; drover would add nothing |
-| **Streamable HTTP on `drover serve`, one address (chosen)** | serve already owns the listener, the Host and Origin check, the job order and the caches. One route arm |
+| stdio: a drover process the client starts | No. The callers the issue names are bots in a cloud. It would also be a second server, outside the job order and the rate limits |
+| **Streamable HTTP, one address (chosen)** | One route arm in the API; one JSON answer a request, no stream, no session |
 
-Every request gets one JSON answer. No stream, no session, no server-to-client message: drover offers tools only.
-
-### 2. Who the caller is
+### 2. Where it sits (q3299 (a))
 
 | Option | Verdict |
 |---|---|
-| Pair the agent like a phone | No. A paired device is the owner; an MCP client cannot do the cookie-and-code dance |
+| In the page's server | No. After #1645 it holds no state and may not call drover's code |
+| A third listener | No. One more port, one more Host rule, for one route |
+| **In `drover-api`, relayed by the edge (chosen)** | `mcp.rs`, `caller.rs` and the key check sit behind `Server::route`. The edge's relay table gets the `/mcp` line: Host and Origin checked, then the request passed on with its own `Authorization`, never the edge's token |
+
+### 3. Who the caller is
+
+| Option | Verdict |
+|---|---|
+| Pair the agent like a phone | No. A paired device is the owner |
 | One shared token, like cooee's | No. One name for every agent, and revoking one revokes all |
-| OAuth | No. An authorization server for one owner and a few bots; a static key is what these clients take today |
-| A row in the devices table with a flag | No. A key sent as the device cookie would read as the owner unless every reader remembers the flag |
+| OAuth | No. An authorization server for one owner and a few bots |
 | **A named key per agent, in its own table (chosen)** | The proxy's lane keys already work this way: hash kept, revoked by id, logged |
 
-The owner makes a key on the host with a name and a scope, `read` or `act`. The key's name is the identity:
-the log's `by` is `mcp-<name>`, built in one place, so it can never read `owner`, `default` or an orchestrator's.
-A scope is the one option kept: an agent picks its own tools, so a bot that only reports must not hold an act key.
+The owner makes a key on the host with a name and a scope, `read` or `act`. The log's `by` is `mcp-<name>`, built in
+one place, so it can never read `owner`, `default` or an orchestrator's.
 
-### 3. What an agent may do
-
-The issue's list, and nothing else:
+### 4. What an agent may do
 
 | Act | Rule for an agent |
 |---|---|
-| answer an ask | a `routine` ask only; any other is refused `OWNER_ASK` and stays open for the owner. The owner may change an agent's answer within the window an orchestrator's answer has |
-| reply in a thread | a message into an existing thread, from `mcp-<name>`; its orchestrator reads it as a request |
-| file an issue | through `hygiene::gh`, so `PUBLIC_LEAK` holds; the same title from the same key within 15 min returns the first |
-| queue it | `bqueue`, which marks the row `needs-check`; the queue event carries `by` |
+| answer an ask | a `routine` ask only; any other is refused `OWNER_ASK` and stays open for the owner |
+| reply in a thread | a message into an existing thread, from `mcp-<name>`; see 5 |
+| file an issue | through `hygiene::gh`, so `PUBLIC_LEAK` holds; a job, since it calls `gh` |
+| queue it | **q3299 (d): starting lanes is spend, so it is the owner's.** The agent's queue request becomes an owner ask on that issue, [queue] or [no]. Nothing is queued until the owner taps; the queue event is then `by: owner` |
 
-Considered and left out: an agent's answer with a `--basis` quote, as an orchestrator gives. That rule leans on
-the orchestrator's thread and repo; `routine` is one field on the ask and needs no judgement.
+Owner-only verbs have no tool, and the API refuses an agent on every route outside its list.
 
-Owner-only verbs have no tool, and the route guard refuses an agent on every route outside its list, so a tool
-file added by mistake cannot widen it. The path to an owner decision is the existing one: the agent says what it
-wants in a thread, the orchestrator files the ask or the run card, the owner taps.
+### 5. An agent's line in a thread (q3299 (b))
 
-### 4. What a tool maps onto
+A line from `mcp-<name>` reaches an orchestrator, which holds owner-level powers. A prompt rule alone would be a
+rule nothing checks.
 
 | Option | Verdict |
 |---|---|
-| The CLI's verbs, run in-process | No. Its reads are unbounded (2.2 MB), and several start `gh` or `git`, which a board read must never do |
+| The orchestrator's prompt says so | Not alone: a crafted line argues with a prompt |
+| Track the orchestrator's turn | No. After #1571 cooee runs the agent; drover no longer sees a turn |
+| **The thread has a state, read from the log (chosen)** | From an agent's line until the owner's next line there, the thread is *held* |
+
+In a held thread, its orchestrator's `answer` and `extend` go to the owner as the ask they are (`OWNER_ASK`,
+today's path), and a capability-group verb or a `spawn --force` is refused `OWNER_ONLY`. The ways through are the
+existing ones: the owner writes in the thread, answers the ask, or approves a run card. A handoff out of a held
+thread carries the agent's name, so the target thread is held too.
+
+Decided, and the one open question: in a held thread the orchestrator's `queue add` becomes the same owner ask as
+in 4, and any `spawn` is refused. Otherwise (d) is one message away from void.
+
+### 6. What a tool maps onto
+
+| Option | Verdict |
+|---|---|
+| The CLI's verbs, run in-process | No. Its reads are unbounded (`status --json` is 2.2 MB here), and several start `gh` or `git` |
 | Logic of its own behind each tool | No. A second copy of the rules |
-| **One `/api/v1` route per tool (chosen)** | The reads are bounded and cached; the acts already carry the refusals. Three routes are missing and are added to `/api/v1` first, with fixtures, as that API's own rule says |
+| **One `/api/v1` route per tool (chosen)** | The reads are bounded and cached; the acts carry the refusals. Three routes are added to `/api/v1` first, with fixtures |
 
-A tool is data: a name, a description, its arguments, a method and a route. The MCP module fills the route, calls
-`Server::api` as the HTTP layer does, and maps the answer. It awaits a tap's job so a refusal comes back in the
-same call; that is the board's toast, not a rule.
+**q3299 (c):** the tools are one const table in `mcp.rs`, a line a tool: name, description, arguments, method,
+route. No TOML folder, no build step. `mcp.rs` fills the route, calls `Server::api` and maps the answer.
 
-### 5. Which MCP revisions
+### 7. MCP revisions, and no dependency
 
-Both eras, on the one address: 2026-07-28 (per-request version, `server/discover`, the mirrored headers checked)
-and the handshake of 2025-11-25 and 2025-06-18. With no session and tools only, the old era costs one more method.
-Supporting only the new one would lock out every client that has not moved.
-
-### 6. A dependency
-
-None. The surface is five methods over JSON that serve already parses. An SDK crate would bring its own HTTP
-stack beside the hand-written one, and a new dependency is an owner call the design does not need.
+Both eras on the one address: 2026-07-28 and the handshake of 2025-11-25 and 2025-06-18. The surface is five
+methods over JSON the API already parses, so no SDK crate.
 
 ## Decision
 
-1. **`POST /mcp` on `drover serve`** speaks MCP over streamable HTTP, statelessly, to both protocol eras. `GET`
-   and `DELETE` answer 405. The Host and Origin check is the API's.
-2. **A key per agent.** A new `serve keys` verb adds, lists and revokes; owner only. A key has a name, a scope and a
-   hash; the secret is shown once. Every request is checked against the table, so a revoke stops the next call.
-   A key unused for a year expires, as a device does.
-3. **A caller is a device or an agent**, one type in serve. An agent's `by` is `mcp-<name>` and its `via` is
-   `mcp`. The caller is stamped on an op's fields at the HTTP edge; a request body cannot set them.
-4. **One guard in `api`** refuses an agent on any route outside its list (`OWNER_ONLY`) and a read key on an act
-   (`READ_ONLY`). An agent reads what an unpaired browser reads, plus its jobs; never a lane's transcript.
-5. **One rule in core**: an agent's answer to an ask that is not `routine` is `OWNER_ASK`. It sits where every
-   answer passes, so the CLI's `--by mcp-…` gets it too. The owner may change an agent's answer for as long as
-   an orchestrator's (`orchestrator_change_minutes`).
-6. **Three routes join `/api/v1`**: `GET waiting`, `POST say`, `POST issue`. The three copies of "file an issue
-   and read its number" become one helper, used by all four callers.
-7. **Tools are files** in one collected folder, joined by a build step. A test holds each to a route with a
-   contract fixture and to the agent's list.
-8. **A key is limited** to 60 tool calls a minute, 10 of them acts (the limit a device's sends have), and an
-   answer waits at most 20 s for its job.
-9. **The board names the agent**: the Events line and the thread message say `mcp-<name>` where they say `you`
-   or `owner` today. Words in rows that exist; no screen changes, so no design stage.
+1. **`POST /mcp` in `drover-api`** speaks MCP over HTTP, statelessly, to both eras. `GET` answers 405.
+2. **The edge relays it.** Two lines in `relay.rs` (`POST` and `GET /mcp`), marked `keyed`: the request goes on
+   whole, with its own `Authorization` and MCP headers, without the cookie and without a `Drover-*` header. Host
+   and Origin are the edge's check, as for every relayed path.
+3. **A key per agent.** `serve keys add|revoke` and the list, owner only. Name, scope, hash; the secret is shown
+   once. The API checks the table on every request, so a revoke stops the next call. A key is a credential at
+   `/mcp` only; on any other path it is an unknown token.
+4. **A caller is a device or an agent**, one type in the API (`caller.rs`). An agent's `by` is `mcp-<name>`, its
+   `via` is `mcp`, stamped on an op's fields at the route; a request body cannot set them.
+5. **One guard in `api()`** refuses an agent on any route outside its list (`OWNER_ONLY`) and a read key on an act
+   (`READ_ONLY`). An agent reads what an unpaired browser reads, plus its jobs.
+6. **Three rules in core**, where every caller passes:
+   - an agent's answer to an ask that is not `routine` is `OWNER_ASK`;
+   - an agent's queue add is an owner ask, and that ask's [queue] runs the add;
+   - a held thread's orchestrator has no owner power (choice 5): `orchestrator_answer` and the hook read one
+     function, `callers::asked`.
+7. **Three routes join `/api/v1`**: `GET waiting`, `POST say`, `POST issue` (a job). The three copies of "file an
+   issue and read its number" become one helper.
+8. **A key is limited** to 60 tool calls a minute, 10 of them acts, and a call waits at most 20 s for its job.
+9. **The board names the agent** in the Events line, the ask and the thread message. Words in rows that exist; no
+   screen changes, so no design stage.
+
+## Order with #1645 (q3299 (a): which lands first)
+
+| Order | Slice | Waits for |
+|---|---|---|
+| first | **1. Keys and the rules.** All in `crates/core` and the CLI, files #1645 never moves | nothing; it lands now, the guards before the door |
+| then | #1645's S0 and **S1** (the API crate, the edge and its relay table) | #1645's approval |
+| then | **2. The caller through the API**, **3. the MCP address**, **4. words**: written in the API crate's `serve/` folder, plus the relay lines | S1 only |
+
+So #1645's S1 lands before any MCP code in the server; nothing of this issue is moved or carved by it. Slices 2 to
+4 wait for no later #1645 slice. What those then do:
+
+- **S2** makes the API's `Viewer`. If slice 2 landed first, S2 folds `Caller::Agent` into it as one more variant
+  and `caller.rs` keeps the lists and the stamp; if S2 landed first, slice 2 adds the variant itself.
+- **S4** puts the door on a socket: the `keyed` lines pass through its HTTP client unchanged, and `/mcp` gets its
+  shape file in the contract folder with the other relayed paths.
+- **S7** deletes the plugin pass-through, never the `keyed` lines.
+
+The orchestrator files slice 1 as its own issue; #1627 keeps slices 2 to 4, blocked on S1's issue. If #1645 is
+rejected, the same files go in `crates/server/src/serve/` and nothing else here changes.
 
 ## Consequences
 
-- An agent with an act key can start work on the owner's hosts: it files an issue, queues it, and lanes build
-  it. It can also ask an orchestrator, which can queue and spawn. This is what the issue asks for; the key is
-  the trust, the scope and the revoke are the levers, and the log says who queued it.
-- A cloud bot reaches serve only at a public address. That is a host change, the owner's, and no part of this
-  issue. At such an address the key is the only gate: 256 random bits, hashed at rest, compared in constant
-  time, never logged; each refused request is one line in `serve.log`.
-- Clients that accept only OAuth cannot connect. A later issue, if one matters.
-- No stdio: a local stdio-only client needs a bridge.
-- Reads are the board's payloads, presentation fields included. One too big for an agent gets a slimmer
-  `/api/v1` route first; the MCP module never trims.
-- An agent's answer holds one of serve's 64 request slots for up to 20 s; the act limit caps that at ten a key.
-- A name is never reused, so the keys table only grows, by one small row a key.
-- The old handshake stays until clients have moved; deleting it is one arm.
-- About +450 lines of `src/`. The cap has 1,572 lines of headroom and the queue is promised about 1,700, so
-  this needs room in the next raise. The tool files and the build step are not `src/`.
-- `api`, `route` and `serve.rs` stay under their baselines: each gains single-line arms that call into new
-  files.
+- An agent with an act key can ask for work, never start it: one owner tap an issue. It can still file issues
+  and write in threads at will; the limits, the scope and the revoke are the levers.
+- An agent's line holds its thread: that thread's orchestrator sends its lane asks to the owner until the owner
+  writes there. Safe, and slower. An agent belongs in a thread of its own, not a repo's working thread.
+- A cloud bot reaches the page's server only at a public address. That is a host change, the owner's, and no part
+  of this issue. There the key is the only gate: 256 random bits, hashed at rest, compared in constant time,
+  never logged. On the host, a local client may call the API's loopback address directly with its key.
+- Clients that accept only OAuth cannot connect, and a stdio-only client needs a bridge.
+- Reads are the board's payloads. One too big for an agent gets a slimmer `/api/v1` route; `mcp.rs` never trims.
+- The tool table is a list in one file. With eleven tools and a new one rare, it is not split (q3299 (c)).
+- `reply` is one route over the existing `say`; no thread screen is added, so #1571's freeze holds. After #1571
+  the same route calls `core::thread::say` with the agent as `from`.
+- An agent's answer or filed issue holds one request slot for up to 20 s; the act limit caps that at ten a key.
+- About +520 lines of `src/`, the tool table included. Headroom today is 1,572 with 1,374 left after open PRs.
 
 ## Slices
 
-In this order. Each is green alone: one PR's commits, or four issues if the orchestrator splits them.
+1. **Keys and the rules.** `core::callers` (table, `add`, `revoke`, `check`, `asked`), `serve keys`, the two key
+   events, the three core rules, the hook's lines. Proved by: add, list, revoke, a reused name refused; a
+   `--by mcp-x` answer to an owner ask refused; an agent's add leaves the queue as it was and one ask open, whose
+   [queue] queues; in a held thread an orchestrator's answer goes to the owner and `hosts off` is refused, and
+   both work again after an owner line.
+2. **The caller through the API.** `Caller`, the stamp, the guard, the three routes with their fixtures, the one
+   issue-filing helper, the board's words. Proved by: every POST fixture called with an act key is `OWNER_ONLY`
+   but the four.
+3. **The MCP address.** `mcp.rs` with its table, both eras, the job wait; the relay lines. Proved by the test in
+   `usage.md` (the issue's AC, line by line) and one case in the edge's test.
+4. **Words.** The serve docs' new section, the refusal lines, the orchestrator prompt's line on `mcp-<name>`.
 
-1. **Keys.** `core::callers`, its table, `serve keys add|revoke` and the list, the two events, the hook's
-   `OWNER_ONLY` for a lane. Proved by: add, list, revoke, a reused name refused.
-2. **The caller through the API.** `Caller`, the stamp, the guard, the core rule, the three routes with their
-   fixtures, the one issue-filing helper, the board's words. Proved by: an agent caller in `api_v1`'s tests;
-   every POST fixture refused `OWNER_ONLY` but the four.
-3. **The endpoint.** `serve/mcp.rs`, the tool folder and its build step, both eras, the job wait. Proved by the
-   test in `usage.md`: the issue's AC, line by line.
-4. **Words.** The serve docs' new section, the refusal lines, the orchestrator prompt's rule for a message from
-   `mcp-<name>`.
+## Open question
 
-## Open questions
+1. **Does the owner's hold on queueing reach through an orchestrator?** Decided: yes. In a held thread its
+   `queue add` becomes the owner ask and its `spawn` is refused. The other choice keeps to the four of q3299 (b)
+   and trusts the orchestrator's judgement on an agent's request to queue; it removes about 15 lines.
 
-1. **May an issue an agent queues start by itself?** Decided: yes, marked `needs-check`, the agent named in
-   Events. The other choice: the agent's queue request becomes an owner ask, one tap a queued issue; about 20
-   lines more, on the extend ask's pattern.
-2. **May a key ever answer an ask that waits for the owner?** Decided: no. drover cannot tell that a line in
-   Teams was the owner's, and an owner ask is where scope, spend and secrets are decided.
+## Hot files and `.drover/arch.toml` lines
 
-## `.drover/arch.toml` lines
+| File | Class | Here |
+|---|---|---|
+| the tool table in `mcp.rs` (new) | central list | kept as one const by q3299 (c); a tool is one line |
+| the edge's `relay.rs` (#1645's) | central list of prefixes | two lines, once |
+| `crates/cli/tests/golden/contract/v1/*.keys` (#1571's) | collected folder | new files, none edited |
+| `serve.rs`, `v1.rs` (`shared`, in `drover-api` after S1) | large modules | single-line arms into `caller.rs` and `mcp.rs` |
+| `docs/serve/*.md` | docs per area | one new file, `mcp.md` |
 
-Slice 3 adds, in the PR that creates the folder:
+Slice 3 adds, in the PR that creates `mcp.rs`:
 
 ```toml
-[[collect]]
-dir = "crates/server/mcp"
-glob = "*.toml"
-
 [[ban]]
 pattern = "crate::"
-paths = ["crates/server/src/serve/mcp.rs"]
+paths = ["crates/api/src/serve/mcp.rs"]
 reason = "#1627: an MCP tool is an /api/v1 route called through Server::api; the module holds no drover logic"
 
 [[ban]]
 pattern = "drover_core::"
-paths = ["crates/server/src/serve/mcp.rs"]
+paths = ["crates/api/src/serve/mcp.rs"]
 reason = "#1627: an MCP tool is an /api/v1 route called through Server::api; the module holds no drover logic"
 ```
 
-No `frozen` line: there is no old list. No `generated` line: the joined table is written to the build's own
-output folder, never committed.
+No `[[collect]]`, `frozen` or `generated` line: there is no folder, no old list and no generated file.
