@@ -33,7 +33,9 @@ fn main() {
         .collect();
     let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default());
     std::fs::write(out.join("usage-tail.md"), tail).unwrap_or_default();
-    println!("cargo:rerun-if-changed=roles/usage");
+    if Path::new("roles/usage").exists() {
+        println!("cargo:rerun-if-changed=roles/usage");
+    }
     println!("cargo:rustc-env=DROVER_SHA={}", git(&["rev-parse", "HEAD"]));
     let dir = git(&["rev-parse", "--git-dir"]);
     if !dir.is_empty() {

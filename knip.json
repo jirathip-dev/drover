@@ -1,6 +1,12 @@
 {
   "workspaces": {
     ".": { "entry": [], "project": [] },
-    "web": { "entry": ["src/main.ts"], "project": ["src/**/*.ts"], "ignore": ["dist/**"], "ignoreBinaries": ["esbuild", "tsc"] }
+    "web": {
+      "entry": ["src/main.ts"],
+      "project": ["src/**/*.ts"],
+      "ignore": ["dist/**"],
+      "ignoreBinaries": ["esbuild", "tsc"],
+      "ignoreDependencies": ["esbuild"]
+    }
   }
 }
