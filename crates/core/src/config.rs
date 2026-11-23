@@ -956,7 +956,7 @@ impl Default for Limits {
     }
 }
 
-/// Every `[limits]` key and what it sets, in docs/config.md's order; `drover config show` prints them.
+/// Every `[limits]` key and what it sets, in docs/config/limits.md's order; `drover config show` prints them.
 pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "review_rounds",
@@ -1320,6 +1320,20 @@ pub fn show(cfg: &Config, out: &mut dyn std::io::Write) -> Result<()> {
     for (k, doc) in LIMIT_DOCS {
         let v = vals.get(*k).map_or("unset".into(), toml::Value::to_string);
         writeln!(out, "{k} = {v}  # {doc}")?;
+    }
+    Ok(())
+}
+
+/// `drover config show --md`: every `[limits]` key, its default and its doc line, as docs/config/limits.md.
+pub fn show_md(out: &mut dyn std::io::Write) -> Result<()> {
+    let vals = toml::Table::try_from(Limits::default())?;
+    write!(out, "{}", include_str!("../assets/limits_head.md"))?;
+    for (k, doc) in LIMIT_DOCS {
+        let v = match (*k, vals.get(*k)) {
+            ("deny_commands", _) => "assets/deny_commands.toml".into(),
+            (_, v) => v.map_or("unset".into(), toml::Value::to_string),
+        };
+        writeln!(out, "| `{k}` | `{v}` | {doc} |")?;
     }
     Ok(())
 }

@@ -265,11 +265,15 @@ fn owner(events: &[Event], sp: &Event) -> bool {
     asked || ended.is_some_and(|t| !answered(t))
 }
 
-/// A session's fleet, issue and role from drover's labels on it, when its fleet is configured.
+/// A session's fleet, issue and role from drover's labels on it (a `fix` round runs as `impl`), when its fleet is configured.
 pub fn whose<'a>(cfg: &Config, s: &'a Session) -> Option<(&'a str, Option<u64>, Option<&'a str>)> {
     let fleet = s.labels.get("fleet").filter(|f| cfg.fleet.contains_key(*f))?;
     let issue = s.labels.get("issue").and_then(|i| i.parse().ok());
-    Some((fleet, issue, s.labels.get("role").map(String::as_str)))
+    let role = s
+        .labels
+        .get("role")
+        .map(|r| if r == "fix" { "impl" } else { r.as_str() });
+    Some((fleet, issue, role))
 }
 
 /// The running sessions labelled for a configured fleet that no `spawn`, adoption, conductor start or young `spawn-started` names.

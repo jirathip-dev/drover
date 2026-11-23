@@ -221,3 +221,64 @@ fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
         hosts: vec![("bazzite", bazzite)],
     }
 }
+
+fn refused_then_one_card(name: &str, (queue, code): (&str, &str), exited: bool) {
+    let (c, rev) = setup(name);
+    let (q, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", queue]);
+    assert_eq!(q, 0, "{out}");
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", &rev);
+    if exited {
+        bazzite.exit(LANE);
+    }
+    let f = boat(&rev, Ok(&format!("PASS\n\nReviewed head: {}\n", head())));
+    let (status, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(status, 0, "{out}");
+    assert!(out.contains(&format!("REFUSED {code}")), "{out}");
+    let (_, waiting) = run(&c, &two(&f, &bazzite), &["waiting", "sendmeter"]);
+    assert!(waiting.contains(&format!("verdict refused {code}")), "{waiting}");
+    assert!(!waiting.contains("recording within 1 min"), "{waiting}");
+    let later = drover::Ctx {
+        now: c.now + 31 * 60,
+        ..c.clone()
+    };
+    for _ in 0..2 {
+        let (_, out) = run(&later, &two(&f, &bazzite), &["drive"]);
+        let nh = kinds(&c, "needs-human");
+        assert_eq!(nh.len(), 1, "{out}");
+        assert_eq!(nh[0].str("code"), Some(code), "{out}");
+    }
+    assert!(kinds(&c, "verdict").is_empty());
+}
+
+#[test]
+fn a_remote_no_repro_pass_from_an_exited_reviewer_is_shown_then_one_owner_card_after_the_stall_threshold() {
+    refused_then_one_card("remote-verdict-norepro", ("--repro", "NO_REPRO"), true);
+}
+
+#[test]
+fn a_remote_no_baseline_pass_is_shown_then_one_owner_card_after_the_stall_threshold() {
+    refused_then_one_card("remote-verdict-nobaseline", ("--perf", "NO_BASELINE"), false);
+}
+
+#[test]
+fn a_remote_no_baseline_pass_from_an_exited_reviewer_is_shown_then_one_owner_card() {
+    refused_then_one_card("remote-verdict-nobaseline-gone", ("--perf", "NO_BASELINE"), true);
+}
+
+#[test]
+fn a_remote_valid_pass_is_recorded_in_the_next_pass() {
+    let (c, rev) = setup("remote-verdict-pass");
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", &rev);
+    bazzite.exit(LANE);
+    let f = boat(&rev, Ok(&format!("PASS\n\nReviewed head: {}\n", head())));
+    let (code, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let v = kinds(&c, "verdict");
+    assert_eq!(v.len(), 1, "{out}");
+    assert_eq!(
+        (v[0].str("verdict"), v[0].str("sha")),
+        (Some("PASS"), Some(head().as_str()))
+    );
+}

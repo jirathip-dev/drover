@@ -1,0 +1,5 @@
+# #923: lanes run on the host's own login (`claude /login` once per host; docs/accounts.md). Remote shed-acp hosts
+# sign in through the main host's token proxy, which signs with one `claude setup-token` token (a 0600 file).
+# [proxy]
+# token-file = "~/.config/drover/tokens/proxy"
+

@@ -4,7 +4,7 @@ use serde_json::json;
 
 fn said(code: Option<&str>, step: &str, issue: u64, result: &str, serial: &str) -> (String, String, String) {
     let d = json!({"step": step, "code": code, "result": result, "cmd": "drover …"});
-    let (t, w, x) = in_words(&Event::new(1, "synergy", Some(issue), "driven", d), serial);
+    let (t, w, x) = in_words(&Event::new(1, "tangelo", Some(issue), "driven", d), serial);
     (t.into(), w.into(), x)
 }
 
@@ -61,20 +61,20 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             Some("LOGIN_NEEDED"),
             "start",
             12,
-            "REFUSED LOGIN_NEEDED: impl lane synergy-impl-3 hit the usage limit on main",
+            "REFUSED LOGIN_NEEDED: impl lane tangelo-impl-3 hit the usage limit on main",
             "serial",
-            ["a", "held", "impl lane synergy-impl-3 hit the usage limit on main"],
+            ["a", "held", "impl lane tangelo-impl-3 hit the usage limit on main"],
         ),
         (
             Some("CAP"),
             "start",
             12,
-            "REFUSED CAP: 2 impl lane(s) open in synergy, max_impl = 2",
+            "REFUSED CAP: 2 impl lane(s) open in tangelo, max_impl = 2",
             "serial",
             [
                 "a",
                 "waiting",
-                "2 impl lane(s) open in synergy, max_impl = 2 · starts when a lane finishes",
+                "2 impl lane(s) open in tangelo, max_impl = 2 · starts when a lane finishes",
             ],
         ),
         (
@@ -145,9 +145,9 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             Some("PAUSED"),
             "start",
             12,
-            "REFUSED PAUSED: synergy is paused; `drover resume synergy` first",
+            "REFUSED PAUSED: tangelo is paused; `drover resume tangelo` first",
             "serial",
-            ["m", "paused", "`drover resume synergy` first"],
+            ["m", "paused", "`drover resume tangelo` first"],
         ),
         (
             Some("EXIT"),
