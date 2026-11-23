@@ -1,0 +1,8 @@
+[serve]
+allowed_hosts = ["<mac>.<tailnet>.ts.net"]   # `tailscale serve` proxies the page over HTTPS
+# approve_hint = "or send 'pair {code}' to the owner"   # appended to the pairing panel's Mac line
+# tailscale_https_port = 8443   # `drover setup` runs `tailscale serve --bg --https=<port> http://<addr>`
+# hooks_addr = "127.0.0.1:7778"   # the Funnel listener: POST /hooks/github only ("" = off; docs/serve.md)
+# launchd_label = "dev.drover.serve"   # the board job `drover setup` writes (or adopts)
+# theme = "kitchen"   # the Herd's theme: farm (default), kitchen or <config dir>/themes/<name>/ (docs/serve.md)
+

@@ -1,0 +1,7 @@
+# #298, #455, #721: the shed runtime new lanes start in (required): shed or shed-acp (docs/runtimes.md).
+# [runtime]
+# kind = "shed"   # "berth", its old name, still works for one release (with a warning)
+# acp = "claude-acp"   # optional ACP mode (docs/runtimes.md)
+# #565: or one fleet's own, e.g. to pilot ACP lanes (cooee's Workflow list) on it:
+# [fleet.drover.runtime]
+# kind = "shed-acp"   # each lane a claude-acp session, guarded by the profile's hook; remote ones need [proxy] token-file
