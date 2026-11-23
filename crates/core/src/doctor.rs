@@ -167,7 +167,10 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let dir = fleet.local_path().display().to_string();
         let (branch, origin) = (&fleet.integration, format!("origin/{}", fleet.integration));
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
-        let fix = format!("git -C {dir} fetch origin {branch} || git clone https://github.com/{repo}.git {dir}");
+        let fix = format!(
+            "git -C {dir} fetch origin {} || git clone https://github.com/{repo}.git {dir}",
+            crate::clone::refspec(branch)
+        );
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
         rows.extend(git.then(|| crate::clone::doctor(r, name, &fleet.local_path())));
         hygiene(r, (name, fleet), &cfg.hygiene(name), view.as_ref(), rows);

@@ -104,11 +104,14 @@ fn branch_main_ignores_a_newer_staging_head_and_installs_main_heads_release() {
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ installed 1111111 at "), "{out}");
     assert!(
-        r.called("git -C /x/drover fetch -q origin main"),
+        r.called("git -C /x/drover fetch -q origin +refs/heads/main:refs/remotes/origin/main"),
         "{:?}",
         r.calls.borrow()
     );
-    assert!(!r.called("git -C /x/drover fetch -q origin staging") && !r.called("gh release download build-staging-"));
+    assert!(
+        !r.called("git -C /x/drover fetch -q origin +refs/heads/staging:")
+            && !r.called("gh release download build-staging-")
+    );
     assert!(has(&live, MAIN), "the release is live");
 
     let r = heads(&c, &live, &[("main", MAIN), ("staging", MAIN2)]);

@@ -17,6 +17,11 @@ const BROKEN: [&str; 4] = [
 
 const RACE: [&str; 2] = ["incorrect old value provided", "cannot lock ref"];
 
+/// `+refs/heads/<branch>:refs/remotes/origin/<branch>`: a fetch that writes `origin/<branch>` whatever the clone's own `remote.origin.fetch`.
+pub fn refspec(branch: &str) -> String {
+    format!("+refs/heads/{branch}:refs/remotes/origin/{branch}")
+}
+
 /// `git -C <dir> fetch <args>` in a fleet clone, one drover process at a time; a fetch losing a ref race to another (a lane's, a remote host's) is logged and run again. A fetch failing on a missing or bad object, or any fetch while an earlier heal is due, heals the clone first, logs it, and fetches again.
 pub fn fetch(ctx: &Ctx, r: &dyn Runner, dir: &Path, args: &[&str]) -> Result<String> {
     let _held = lock(r, dir)?;
