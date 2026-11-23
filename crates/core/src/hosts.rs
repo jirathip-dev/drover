@@ -599,11 +599,15 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         }
         let on = On::new(r, h.machine.as_deref());
         let s = all.entry(name.clone()).or_default();
-        let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
+        let listed = seen.0.iter().find(|l| l.0 == h.machine).and_then(|l| l.1.clone().ok());
+        let logged_stop = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
+        let stopped = logged_stop && listed.is_none();
+        if let Some(Err(e)) = (logged_stop && !stopped).then(|| crate::cloud::listed_up(ctx, cfg, name)) {
+            crate::stderr!("cloud {name}: {e:#}");
+        }
         if let Some(Err(e)) = (h.cloud.is_some() && !stopped).then(|| crate::cloud::moved(ctx, cfg, r, name, false)) {
             crate::stderr!("cloud {name}: {e:#}");
         }
-        let listed = seen.0.iter().find(|l| l.0 == h.machine).and_then(|l| l.1.clone().ok());
         let a = listed
             .filter(|_| !stopped)
             .map(|all| all.into_iter().filter(|s| s.running() && s.lane()).collect::<Vec<_>>());

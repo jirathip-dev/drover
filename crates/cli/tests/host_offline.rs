@@ -794,7 +794,7 @@ fn cloud_bazzite(c: &drover::Ctx) {
     let cfg = std::fs::read_to_string(&c.config).unwrap();
     let cfg = cfg.replace(
         "machine = \"bazzite\"\n",
-        "machine = \"bazzite\"\ncloud = \"fake\"\nsize = \"small\"\n",
+        "machine = \"bazzite\"\ncloud = \"fake\"\nsize = \"small\"\nbudget_usd_month = 10\n",
     );
     std::fs::write(&c.config, cfg).unwrap();
     let recipe = "start = \"fakecloud start {name}\"\nstop = \"fakecloud stop {name}\"\nstatus = \"fakecloud status {name}\"\naddress = \"fakecloud address {name}\"\n[rate_usd_hour]\nsmall = 1.0\n";
@@ -814,13 +814,16 @@ fn a_cloud_host_shed_lists_up_after_a_stale_cloud_stop_is_up_after_one_refresh_a
     )
     .unwrap();
     let (f, bazzite) = (down(), FakeShed::new());
-    assert_eq!(run(&c, &with_bazzite(&f, &bazzite), &["drive"]).0, 0);
-    assert!(bazzite.all("run").is_empty(), "{:?}", bazzite.methods());
+    assert_eq!(run(&c, &with_bazzite(&f, &bazzite), &["check"]).0, 0);
+    assert!(drover::hosts::down(&c).contains_key("bazzite"));
     let later = drover::Ctx {
         now: NOW + 600,
         ..c.clone()
     };
-    let f = linux_start(mini_only()).reply(&format!("{MUX} 'sh' '-lc'"), "");
+    let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
+    let f = linux_start(mini_only())
+        .reply(&format!("{MUX} 'sh' '-lc'"), "")
+        .reply(&format!("{MUX} 'gh' 'api' '-i'"), gh);
     let bazzite = FakeShed::new();
     let (code, out) = run(&later, &with_bazzite(&f, &bazzite), &["hosts", "refresh"]);
     assert_eq!(code, 0, "{out}");
