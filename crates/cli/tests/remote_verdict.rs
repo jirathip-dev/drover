@@ -16,7 +16,9 @@ fn head() -> String {
 
 fn setup(name: &str) -> (drover::Ctx, String) {
     let rev = tmpdir(&format!("{name}-rev")).display().to_string();
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG
+        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("review_rounds = 3", "review_rounds = 3\nssh_sessions = 64");
     let c = ctx(
         &tmpdir(name),
         &format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n"),
@@ -239,6 +241,85 @@ fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
         f,
         hosts: vec![("bazzite", bazzite)],
     }
+}
+
+#[test]
+fn with_an_admission_pending_a_ready_pr_merges_and_a_remote_verdict_is_recorded_in_the_same_pass() {
+    let (c, rev) = setup("remote-verdict-1625-admission");
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        cfg.replace("max_parallel_spawns = 0", "max_parallel_spawns = 6"),
+    )
+    .unwrap();
+    let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", &rev);
+    bazzite.exit(LANE);
+    let wt = c.worktrees.join("sendmeter/issue-5");
+    std::fs::create_dir_all(&wt).unwrap();
+    let wt = wt.display().to_string();
+    let ready = "b".repeat(40);
+    let at = |kind, d| append(&c.state, &Event::new(NOW - 800, "sendmeter", Some(5), kind, d)).unwrap();
+    at(
+        "spawn",
+        json!({"role": "impl", "agent": "sendmeter-impl-5", "harness": "claude", "pane": "sendmeter-impl-5",
+               "worktree": wt, "branch": "issue-5"}),
+    );
+    at("verdict", json!({"verdict": "PASS", "sha": ready, "body": "PASS"}));
+    sh.lane("sendmeter-impl-5", "idle", &wt);
+    for k in ["admit-local.lock", "admit-mini.lock", "admit-bazzite.lock"] {
+        lease_as(&c, k, 4242, drover::now(), 600);
+    }
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "7"]).0, 0);
+    let green = json!({"number": 105, "state": "OPEN", "baseRefName": "staging", "headRefOid": ready,
+                       "mergeable": "MERGEABLE",
+                       "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]});
+    let f = boat(&rev, Ok(&format!("PASS\n\nReviewed head: {}\n", head())))
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "  10:00\n")
+        .reply("gh pr view issue-5", &green.to_string())
+        .reply("gh pr view 105", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+        .reply("gh pr merge 105", "")
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-5",
+            &format!("{ready}\n"),
+        )
+        .reply("gh api -X POST repos/jirathip-dev/sendmeter/statuses/", "{}")
+        .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
+        .reply("gh issue", "")
+        .reply("sh -c nohup", "4321\n")
+        .reply("git -C", "");
+    let (code, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("REFUSED SPAWN_PENDING"),
+        "the start waits on the admission: {out}"
+    );
+    let kicks: Vec<String> = f
+        .calls
+        .borrow()
+        .iter()
+        .filter(|l| l.contains(" --why plan "))
+        .cloned()
+        .collect();
+    let mut ran = String::new();
+    for k in &kicks {
+        let a: Vec<&str> = k.split(' ').skip(4).take_while(|w| *w != ">>").collect();
+        let (code, o) = run_only(&c, &two(&f, &bazzite), &a);
+        assert_eq!(code, 0, "{o}");
+        ran += &o;
+    }
+    let v = kinds(&c, "verdict");
+    assert!(
+        v.iter()
+            .any(|e| e.issue == Some(12) && e.str("verdict") == Some("PASS")),
+        "{out}"
+    );
+    assert!(kinds(&c, "merged").iter().any(|e| e.issue == Some(5)), "{out}\n{ran}");
+    assert!(
+        lease_on(&c, "admit-bazzite.lock").is_some_and(|l| l.pid == 4242),
+        "still pending"
+    );
 }
 
 fn refused_then_one_card(name: &str, (queue, code): (&str, &str), exited: bool) {
