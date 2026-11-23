@@ -1,4 +1,12 @@
-frozen = ["ci/cap.toml", "crates/core/src/events/passive.rs", "crates/core/src/events/push.rs"]
+frozen = [
+    "ci/cap.toml",
+    "crates/core/src/events/passive.rs",
+    "crates/core/src/events/push.rs",
+    "docs/serve.md",
+    "docs/lanes.md",
+    "docs/hosts.md",
+    "docs/config.md",
+]
 generated = [
     "assets/types/api.d.ts",
     "web/dist/board.js",
@@ -45,6 +53,22 @@ glob = "*.toml"
 [[collect]]
 dir = "scripts/test-shards.d"
 glob = "*.txt"
+
+[[collect]]
+dir = "docs/serve"
+glob = "*.md"
+
+[[collect]]
+dir = "docs/lanes"
+glob = "*.md"
+
+[[collect]]
+dir = "docs/hosts"
+glob = "*.md"
+
+[[collect]]
+dir = "docs/config"
+glob = "*.md"
 
 [comments]
 policy = "strict"
