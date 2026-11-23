@@ -162,3 +162,15 @@ fn queue_set_playbook_marks_and_unmarks_an_issue() {
     let (code, out) = run(&c, &r, &["queue", "sendmeter", "set", "12", "playbook", "fast"]);
     assert_ne!(code, 0, "{out}");
 }
+
+#[test]
+fn a_perf_block_under_a_heading_or_in_bold_passes() {
+    let (c, d) = setup("perf-heading", "--perf");
+    let sha = "a".repeat(40);
+    let baseline = "baseline: cargo bench totals\nmedian 41 ms over 5 runs\n";
+    let r = Fake::default().reply(BRANCH, &sha).reply(COMMITS, baseline);
+    for (i, head) in ["## Perf:", "**Perf:**"].into_iter().enumerate() {
+        let (code, out, n) = pass(&c, &d, &r, &PERF.replacen("Perf:", head, 1));
+        assert_eq!((code, n), (0, i + 1), "{head}: {out}");
+    }
+}

@@ -109,11 +109,11 @@ fn a_configured_host_whose_muxed_call_stalls_after_its_probe_is_skipped_for_the_
     let sent = r.sent.borrow().clone();
     assert_eq!(
         sent.len(),
-        1,
-        "one stalled call, then the host is offline this pass: {sent:#?}"
+        2,
+        "one stalled call and its one retry, then the host is offline this pass: {sent:#?}"
     );
     assert!(
-        r.spent.get() <= CALL_SECS,
+        r.spent.get() <= 2 * CALL_SECS,
         "{}s on the stalled host: {sent:#?}",
         r.spent.get()
     );

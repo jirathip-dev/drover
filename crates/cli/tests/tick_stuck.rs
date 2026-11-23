@@ -388,3 +388,34 @@ fn a_tick_that_ignores_sigterm_is_killed_after_10_s() {
     let heal = ev.iter().find(|e| e.kind == "self-heal").unwrap();
     assert_eq!(heal.str("did"), Some("stopped tick pid 4244 (SIGKILL after 10 s)"));
 }
+
+#[test]
+fn a_fleet_with_due_work_and_no_finished_pass_for_three_tick_intervals_raises_one_drive_stalled() {
+    let (c, _sh) = setup("drive-stalled", "");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    let stalled = |c: &drover::Ctx| -> Vec<Event> {
+        let all = read(&c.state).unwrap().to_vec();
+        all.into_iter().filter(|e| e.kind == "drive-stalled").collect()
+    };
+    let last = c.state.with_file_name("drive-sendmeter.last");
+    std::fs::write(&last, (NOW - 3 * 300).to_string()).unwrap();
+    assert_eq!(run(&c, &local(), &["check"]).0, 0);
+    assert!(stalled(&c).is_empty(), "3 intervals is not late yet");
+    std::fs::write(&last, (NOW - 3 * 300 - 60).to_string()).unwrap();
+    let d = json!({"secs": 600, "step": "spawns", "ended": true});
+    append(&c.state, &Event::new(NOW - 120, "sendmeter", None, "pass-slow", d)).unwrap();
+    let later = drover::Ctx {
+        now: NOW + 60,
+        ..c.clone()
+    };
+    for c in [&c, &c, &later] {
+        let (code, out) = run(c, &local(), &["check"]);
+        assert_eq!(code, 0, "{out}");
+        let e = stalled(c);
+        assert_eq!(e.len(), 1, "once: {e:?}");
+        let why = e[0].str("reason").unwrap();
+        assert!(why.starts_with("sendmeter: no drive pass finished for 16m"), "{why}");
+        assert!(why.ends_with("killed after 600 s in spawns"), "{why}");
+        assert_eq!(e[0].val("last"), &json!(NOW - 3 * 300 - 60));
+    }
+}
