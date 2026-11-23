@@ -163,9 +163,122 @@ fn a_verdict_md_in_the_hosts_report_is_recorded_in_the_same_pass() {
     assert!(kinds(&c, "verdict-pickup-failed").is_empty(), "{out}");
 }
 
+fn fix_due(c: &drover::Ctx, n: u64) {
+    let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
+    std::fs::create_dir_all(&wt).unwrap();
+    let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("sendmeter-impl-{n}"),
+        "worktree": wt, "branch": format!("issue-{n}")});
+    let at = |kind, d| Event::new(NOW - 1200, "sendmeter", Some(n), kind, d);
+    append(&c.state, &at("spawn", d)).unwrap();
+    let v = json!({"verdict": "FAIL", "sha": "c".repeat(40), "body": "FAIL\nsrc/x.rs:3 off by one"});
+    append(&c.state, &at("verdict", v)).unwrap();
+}
+
+#[test]
+fn a_later_step_failing_on_a_full_disk_leaves_the_verdict_and_the_fix_round_done() {
+    let (c, rev) = setup("remote-verdict-disk-full");
+    fix_due(&c, 21);
+    for a in [
+        &["queue", "sendmeter", "add", "40"][..],
+        &["queue", "sendmeter", "block", "--on", "41", "40"],
+    ] {
+        assert_eq!(run(&c, &Fake::default(), a).0, 0);
+    }
+    let db = rusqlite::Connection::open(c.state.with_file_name("state.db")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER full BEFORE INSERT ON events WHEN NEW.type = 'blocker-closed' \
+         BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END;",
+    )
+    .unwrap();
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", &rev);
+    bazzite.exit(LANE);
+    let verdict = format!("PASS\n\nReviewed head: {}\n", head());
+    let f = boat(&rev, Ok(&verdict)).reply("gh issue view 41", r#"{"state":"CLOSED"}"#);
+    let (_, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    let v = kinds(&c, "verdict");
+    assert!(
+        v.iter()
+            .any(|e| e.issue == Some(12) && e.str("verdict") == Some("PASS")),
+        "the remote verdict is recorded: {out}"
+    );
+    let fix = kinds(&c, "driven");
+    assert!(
+        fix.iter().any(|e| e.issue == Some(21)
+            && e.str("cmd")
+                .is_some_and(|c| c.starts_with("drover spawn sendmeter 21 impl"))),
+        "the fix round is started: {out}"
+    );
+    assert!(
+        out.contains("database or disk is full"),
+        "the failed step is logged: {out}"
+    );
+}
+
 fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
     OverSsh {
         f,
         hosts: vec![("bazzite", bazzite)],
     }
+}
+
+fn refused_then_one_card(name: &str, (queue, code): (&str, &str), exited: bool) {
+    let (c, rev) = setup(name);
+    let (q, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", queue]);
+    assert_eq!(q, 0, "{out}");
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", &rev);
+    if exited {
+        bazzite.exit(LANE);
+    }
+    let f = boat(&rev, Ok(&format!("PASS\n\nReviewed head: {}\n", head())));
+    let (status, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(status, 0, "{out}");
+    assert!(out.contains(&format!("REFUSED {code}")), "{out}");
+    let (_, waiting) = run(&c, &two(&f, &bazzite), &["waiting", "sendmeter"]);
+    assert!(waiting.contains(&format!("verdict refused {code}")), "{waiting}");
+    assert!(!waiting.contains("recording within 1 min"), "{waiting}");
+    let later = drover::Ctx {
+        now: c.now + 31 * 60,
+        ..c.clone()
+    };
+    for _ in 0..2 {
+        let (_, out) = run(&later, &two(&f, &bazzite), &["drive"]);
+        let nh = kinds(&c, "needs-human");
+        assert_eq!(nh.len(), 1, "{out}");
+        assert_eq!(nh[0].str("code"), Some(code), "{out}");
+    }
+    assert!(kinds(&c, "verdict").is_empty());
+}
+
+#[test]
+fn a_remote_no_repro_pass_from_an_exited_reviewer_is_shown_then_one_owner_card_after_the_stall_threshold() {
+    refused_then_one_card("remote-verdict-norepro", ("--repro", "NO_REPRO"), true);
+}
+
+#[test]
+fn a_remote_no_baseline_pass_is_shown_then_one_owner_card_after_the_stall_threshold() {
+    refused_then_one_card("remote-verdict-nobaseline", ("--perf", "NO_BASELINE"), false);
+}
+
+#[test]
+fn a_remote_no_baseline_pass_from_an_exited_reviewer_is_shown_then_one_owner_card() {
+    refused_then_one_card("remote-verdict-nobaseline-gone", ("--perf", "NO_BASELINE"), true);
+}
+
+#[test]
+fn a_remote_valid_pass_is_recorded_in_the_next_pass() {
+    let (c, rev) = setup("remote-verdict-pass");
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "idle", &rev);
+    bazzite.exit(LANE);
+    let f = boat(&rev, Ok(&format!("PASS\n\nReviewed head: {}\n", head())));
+    let (code, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let v = kinds(&c, "verdict");
+    assert_eq!(v.len(), 1, "{out}");
+    assert_eq!(
+        (v[0].str("verdict"), v[0].str("sha")),
+        (Some("PASS"), Some(head().as_str()))
+    );
 }

@@ -169,13 +169,3 @@ pub fn stops(code: Option<&str>) -> bool {
         )
     )
 }
-
-/// `fleet` has a review FAIL with no spawn after it: a fix round waits for a slot.
-pub fn fix_due(ev: &[Event], fleet: &str) -> bool {
-    let fail = |e: &Event| e.kind == "verdict" && e.str("verdict") == Some("FAIL");
-    let mut last = std::collections::BTreeMap::new();
-    for e in ev.iter().filter(|e| e.fleet == fleet && (e.kind == "spawn" || fail(e))) {
-        last.insert(e.issue, e.kind == "verdict");
-    }
-    last.into_values().any(|due| due)
-}

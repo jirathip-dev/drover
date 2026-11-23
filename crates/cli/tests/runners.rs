@@ -102,9 +102,9 @@ fn no_token(c: &drover::Ctx, r: &Fake, out: &str) {
 
 fn asked(c: &drover::Ctx, id: &str, question: &str, choice: &str, by: &str) {
     let q = json!({"id": id, "question": question, "options": ["yes", "no"], "kind": "owner"});
-    append(&c.state, &Event::new(NOW - 60, "synergy", None, "needs-decision", q)).unwrap();
+    append(&c.state, &Event::new(NOW - 60, "tangelo", None, "needs-decision", q)).unwrap();
     let d = json!({"id": id, "choice": choice, "by": by});
-    append(&c.state, &Event::new(NOW - 30, "synergy", None, "decision", d)).unwrap();
+    append(&c.state, &Event::new(NOW - 30, "tangelo", None, "decision", d)).unwrap();
 }
 
 #[test]

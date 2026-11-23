@@ -134,6 +134,9 @@ impl Runner for Tally<'_> {
     fn detach(&self, exe: &str, args: &[String], log: &Path) -> Result<u32> {
         self.0.detach(exe, args, log)
     }
+    fn recheck(&self) -> bool {
+        self.0.recheck()
+    }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.0.shed()
     }

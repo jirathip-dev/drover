@@ -754,7 +754,13 @@ enum ThreadCmd {
 #[derive(Subcommand)]
 enum ConfigCmd {
     #[command(about = "Every [limits] key with its value and what it times or caps")]
-    Show,
+    Show {
+        #[arg(
+            long,
+            help = "The built-in defaults as docs/config/limits.md's Markdown table; reads no fleet.toml"
+        )]
+        md: bool,
+    },
     #[command(
         about = "Propose <file> as the whole new fleet.toml in a thread: validated, its diff a card with [apply] [discard]"
     )]
@@ -1274,6 +1280,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             crate::secret::retired(&state, out)?;
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
+        Cmd::Config {
+            cmd: ConfigCmd::Show { md: true },
+        } => crate::config::show_md(out)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
         Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
         Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
@@ -1640,6 +1649,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let spare = matches!(cmd, Cmd::Check | Cmd::Drive { .. } | Cmd::Kick { .. } | Cmd::Waiting(_));
             let off = crate::hosts::disabled(&cfg).into_iter().filter(|_| spare).collect();
             let pass = pass.sparing(off, Some((ctx, &cfg)));
+            let pass = if matches!(cmd, Cmd::Drive { fleet: None }) {
+                pass.own()
+            } else {
+                pass
+            };
             let paced = spare || matches!(cmd, Cmd::Clean { .. } | Cmd::Reclaim { .. });
             let r: &dyn Runner = if paced { &pass } else { r };
             let kick = |f: &str, n, why| {
@@ -1783,7 +1797,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 },
                 Cmd::Config { cmd } => {
                     let (id, apply) = match cmd {
-                        ConfigCmd::Show => return crate::config::show(&cfg, out).map(|()| 0),
+                        ConfigCmd::Show { .. } => return crate::config::show(&cfg, out).map(|()| 0),
                         ConfigCmd::Propose { thread, file, rollout } => {
                             return crate::propose::propose(ctx, &cfg, out, (&thread, &file), rollout).map(|()| 0)
                         }
