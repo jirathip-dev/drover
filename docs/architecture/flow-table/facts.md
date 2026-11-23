@@ -8,7 +8,7 @@ not in the issue's list; `adr.md` says why each is needed.
 | Fact | Who observes it | How it reaches the main host | The one place its reader reads | Reader |
 |---|---|---|---|---|
 | `lane` | shed, on the lane's host | that host's frames | the view (`state.db`) | `facts::lane` |
-| `host` | the host itself: when each frame arrives, and the load sample in it | that host's frames | the view's host row | `facts::host` |
+| `host` | the host itself: when each frame arrives, and the load sample in it | that host's frames | the view's host rows (the lane's host, and the main host's for its load) | `facts::host` |
 | `pr` | GitHub | the webhook, the catch-up poll | the PR cache | `facts::pr` |
 | `verdict` | the check lane's `verdict.md`, then `drover verdict` | intake logs `verdict-seen`; the verb logs `verdict` or `verdict-refused` | the log | `facts::verdict` |
 | `ask` | `drover ask`, `drover answer` | the verbs log it | the log | `facts::ask` |
@@ -49,24 +49,32 @@ A host with no fresh frame changes no lane value: the view keeps the last word (
 
 ### `host`: where this round's lane runs
 
-Source: the host's own frames, as the view's host row holds them. Link intake is the row's only writer. Each
+Source: the host's own frames, as the view's host rows hold them. Link intake is a row's only writer. Each
 report frame carries the host's sample (load per CPU, memory pressure), so one arrives every
 `link_sample_secs`. The row holds the last frame's arrival time, that sample, whether the link is open, and
 the drain order in force when the frame was applied. With no lane the value is `up`.
 
-One value, the first that applies:
+One value, the first that applies. "Its last sample" is the one in the host's last frame, late or not:
 
 | Value | Means |
 |---|---|
-| `offline` | the link is closed and no frame came for `2 × fast_secs`, while neither end is loaded; or the view has no row for the machine |
-| `loaded` | the host's newest sample is over its limits (`load_per_cpu`, memory pressure); or its frame is late while that sample, or the main host's own, is over its limits |
-| `draining` | a fresh frame under its limits, and an order keeps new lanes off the host: its lanes finish, none starts |
-| `up` | a fresh frame under its limits, and it takes new lanes |
+| `offline` | the view has no row for the machine; or no frame came for `host_offline_minutes`, whatever the load at either end; or the link is closed, no frame came for `2 × fast_secs`, and neither its last sample nor the main host's is over its limits |
+| `loaded` | its own last sample is over its limits (`load_per_cpu`, memory pressure) |
+| `draining` | its last sample is under its limits, and an order keeps new lanes off the host: its lanes finish, none starts |
+| `up` | its last sample is under its limits, and it takes new lanes |
 
-- **A late frame from a loaded host is `loaded`, never `offline`.** Load at either end explains lateness: the
-  host's own (its last sample), or the main host's, whose reading of every link is then slow (#1652's case).
-- A sample is evidence for `host_offline_minutes`. A host that was loaded and then stays silent with a closed
-  link past that turns `offline`.
+- **Late is not offline, for a bounded time.** Load at either end explains a late frame: the host's own (its
+  last sample), or the main host's, whose reading of every link is then slow (#1652's case). While it does, the
+  host keeps the value its last frame gave: `loaded` when that sample was over its limits, else `up` or
+  `draining`.
+- **The bound.** After `host_offline_minutes` (15) with no frame the host is `offline`, whatever the load. So a
+  host that went down while loaded reads `loaded` for at most that long. `*/host-offline` counts the same
+  minutes from the same last frame, so its lanes are then moved at once (`tables.md`).
+- **Only a host's own sample makes it `loaded`.** The main host's load changes no other host's value. While
+  only the main host is over its limits, lanes on other hosts keep their rows: none is in `working-loaded`,
+  none is moved, and none is nudged on a stale reading, because a lane's quiet clock stops at its host's last
+  frame (`shapes.md`). The main host's own lanes are in `working-loaded`, and the main host gets its one card
+  (`host/holding/refusing`).
 - `loaded` asks "can this host answer on time". Room for one more lane is a different question, and stays the
   spawn action's `Held HOST_BUSY` outcome.
 - `draining` is the one value that is an order, not an observation: the owner's `hosts off`, a release swap or
@@ -149,29 +157,33 @@ extended round starts it at `none`.
 - `Seen::load` is the only sampler. It reads `state.db`, the PR cache and the log. It never calls a host, `gh`
   or `git`: a pass that decides makes no remote read (drive-push's rule, kept).
 - One sample per pass per fleet. A kick samples its own issue again before it acts.
-- A source that is late is not guessed (rule 3): `host` turns `loaded` or `offline` by its table, and the PR
-  cache's age rides in the `Step` so `waiting` can print `checked 4m ago`.
+- A source that is late is not guessed (rule 3): `host` keeps its last value until its table says `offline`,
+  and the PR cache's age rides in the `Step` so `waiting` can print `checked 4m ago`.
 - The sampler holds no clock. "CI never started" is the `open` row's timeout, not a PR value.
 - Reads never write. The stamp (`lane-state.since`) and intake stay the only writers of what was seen.
 
 ## What changes under #1567 and #1645
 
 No row changes under either. #1567 (shed owns machines, links, stats and files) rewrites two readers. #1645
-(serve becomes its own process, an `/api/v1` client) rewrites none.
+(the API in its own process, the page's server a relay with no core link) rewrites none.
 
 | Fact | Under #1567 | Under #1645 |
 |---|---|---|
 | `lane` | shed still observes it. It arrives through shed's client over machine links, not in `drover hosts report` frames. `facts::lane` reads the new store | nothing |
-| `host` | `offline` comes from `machine.links` (link down since), `loaded` from `machine.stats`. The frame's sample and the link's host row go. `facts::host` is rewritten; its four values and rule 3 stay. The drain order needs one home: #1567's ADR names it (recommended: a flag on shed's machine record, so the fact stays one read) | nothing |
-| `pr` | nothing | the webhook's HTTP end leaves with serve. A delivery reaches core as an `/api/v1` action. The cache, its two fillers and `facts::pr` stay in core |
+| `host` | `facts::host` is rewritten over two reads of shed: its ADR's `Reach` (pure, from `machine.links`, later `machine.ls`) and the machine's last stats. `Reach::Offline` (down longer than `host_offline_minutes`) is `offline`, the same bound as here. `Reach::Down` is `offline` after `2 × fast_secs` when neither end is loaded, else the last value kept. `Reach::Draining` is `draining`: the order's one home is shed's machine record. Stats over the limits are `loaded`. The four values, rule 3 and the bound stay. #1567's line "the host fact is `Reach` and nothing else" needs `loaded` added | nothing |
+| `pr` | nothing | the webhook listener moves to the API host, which links core: a delivery fills the cache and kicks the issue as today. The cache, its two fillers and `facts::pr` stay in core |
 | `verdict` | `verdict.md` is fetched with shed's `file.read`. Whatever fetches it logs `verdict-seen`, as intake does now | nothing |
-| `ask` | nothing | an answer from the page is an `/api/v1` action that logs the same `decision` |
-| `turn` | a remote lane's `drover turn` arrives through shed, not as an outbox line in a frame. The verb still logs it | nothing |
+| `ask` | nothing | an answer from the page is relayed to the API host, which logs the same `decision` and kicks |
+| `turn` | a remote lane's `drover turn` still arrives through the outbox (#1646). The verb still logs it | nothing |
 
 Also under #1567: shed switches accounts on a usage limit, so `limited` shows only when no account has room,
-and the sign-in hold behind `draining` becomes shed's account state. Under #1645 serve reads `Waiting` (with
-`row`, `try`, `deadline`, `level` and the line already built) over `/api/v1` and never links `flow`; a card's
-[retry] and [park] are `/api/v1` actions.
+and the sign-in hold behind `draining` becomes shed's account state. A row's `host heard` clock (`shapes.md`)
+reads the link's `down_since`, not a frame's arrival.
+
+Under #1645 the readers and `decide` run wherever a `Waiting` is built: the API host builds it for the page
+(with `row`, `try`, `deadline`, `level` and the line), and the edge only relays it. Reads take no lock and write
+nothing, so a read-only API host builds every screen. Which process acts on a row is `boundaries.md`, "Which
+process runs what".
 
 ## What is not a fact
 

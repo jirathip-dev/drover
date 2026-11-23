@@ -76,7 +76,7 @@ pub struct Row {
 
 pub enum Owner    { Drive, Lane, Orchestrator, Owner }
 pub enum Timeout  { Limit(LimitKey), Subject, OwnerHeld } // a [limits] key · the subject's own (a run card's --timeout) · the owner's stop
-pub enum Since    { Entered, Heard, Reset }       // row entered · the lane last heard from · shed's limit reset
+pub enum Since    { Entered, Heard, HostHeard, Reset } // row entered · the lane last heard · its host's last frame · shed's limit reset
 pub enum Escalate { Ladder, Orchestrator, Owner } // default · skip the retries · an owner topic: straight to the owner
 
 pub enum Action {
@@ -103,6 +103,19 @@ pub struct HostSeen { /* link, since, why, boot, n, heard, build, as today */
 
 `Owner::Orchestrator` is one more than the issue's three: while a card sits in its thread, the orchestrator
 holds the row. `flow::act` matches `Action` with no wildcard arm, so a new action cannot ship without its effect.
+
+Who may act, as a type (`boundaries.md`, "Which process runs what"):
+
+```rust
+/// A held pass or kick lease. Its fields are private to `drive`, so only a drive pass or kick has one.
+pub struct Pass<'a> { /* ctx, the lease, the fleet, a kick's issue */ }      // crate::drive
+
+pub fn act(pass: &Pass, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, step: &Step) -> Result<Outcome>;
+pub(super) fn escalate(pass: &Pass, …);          // flow::escalate: only `act` calls it
+pub fn run(pass: &Pass, …);                      // flow::shadow: its events, under the same lease
+```
+
+`decide`, the readers and `Episode::of` take no `Pass`: any process may read.
 
 ## What an action returns
 
@@ -152,8 +165,14 @@ pub struct Episode {                  // read from the log, never stored apart
   into `answered`. When a row in `answered` runs out of tries again, the owner card is raised at once.
 - A row gets **three tries**: `do`, then `then[0]`, then `then[1]` (or `do` again). A try is spent by a `Failed`
   outcome or by the timeout running out.
-- The **clock** starts at `since`: when the issue entered the row, when shed last heard the lane, or shed's
-  limit reset time. `deadline = since + [limits] <timeout>`.
+- The **clock** starts at `since`: when the issue entered the row, when shed last heard the lane, when the
+  lane's host sent its last frame, or shed's limit reset time. `deadline = since + [limits] <timeout>`.
+- **A `heard` clock stops at the host's last frame.** The deadline has passed only when a frame that arrived
+  at or after it still shows the lane quiet. With no newer frame nothing expires on a guess, whichever end is
+  loaded. The `host` fact bounds that wait: with no frame for `host_offline_minutes` the host is `offline`.
+- **A `host-heard` clock** is the `*/host-offline` rows': `host_offline_minutes` from the host's last frame,
+  as `hosts::evacuate` counts today (`seen + host_offline_minutes`). A machine with no frame ever counts from
+  when the row was entered.
 - After the third try, or on `Final`, the ladder runs (`boundaries.md`).
 
 `Step` is what `decide` returns: the row, the try number, the action due now (or none before the deadline), the
@@ -166,10 +185,13 @@ deadline, the level and the line to show.
 | `row-entered` | `row`, `cond`, `deadline` | `act`, when the issue's row changes |
 | `row-tried` | `row`, `try`, `action`, `outcome`, `code`, `why` | `act`, once per try |
 | `row-escalated` | `row`, `level` (`orchestrator`, `owner`), `ask`, `thread` | `escalate` |
-| `row-retry` | `row`, `by` (`owner`, or `orchestrator-<thread>` once per row and episode) | an answer to the card: the row's tries go back to zero |
+| `row-retry` | `row`, `by` (`owner`, or `orchestrator-<thread>` once per row and episode) | `act` (`apply-decision`), for an answer to the card: the row's tries go back to zero |
 | `verdict-seen` | `lane`, `head`, `first` (`PASS`, `FAIL`), `mtime` | intake, once per new `verdict.md` |
 | `verdict-refused` | `code`, `head`, `why` | `drover verdict`, when it refuses a file |
 | `flow-disagree` | `kind`, `row`, `cond`, and the two sides below | shadow mode only |
+
+`row-*` and `flow-disagree` are written only by a drive pass or kick, under its lease. A tap or `drover answer`
+logs the `decision`; the `row-retry` is `apply-decision`'s, in the kick that follows.
 
 In shadow mode `flow::shadow` writes `row-entered`, `row-tried` and `row-escalated` itself, each marked
 `"shadow": true`, so the shadow episode has tries, deadlines and a level although nothing acts. A shadow try

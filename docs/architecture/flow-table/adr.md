@@ -2,9 +2,9 @@
 
 ## Summary
 
-Decision: one table, kept as small data files, says for every state and every observed condition what happens next, who must do it, by when, and what happens when it does not. Drive only runs what a row says; `drover waiting` and `drover diagram` print the same rows. A test fails any state and condition with no row. Each fact has one source. Host load is its own fact: a late answer from a loaded host reads loaded, never offline. The orchestrator answers a row once; the next time, the owner gets the card.
+Decision: one table, kept as small data files, says for every state and every observed condition what happens next, who must do it, by when, and what happens when it does not. Drive only runs what a row says; `drover waiting` and `drover diagram` print the same rows. A test fails any state and condition with no row. Only a drive pass acts on a row; the API process of #1645 records the owner's taps and never acts. Each fact has one source. Host load is its own fact: only a host's own load makes it loaded, a late answer from it reads loaded and not offline, and a host silent past its limit is offline whatever the load. The orchestrator answers a row once; the next time, the owner gets the card.
 Slices: 1 the table and its test; 2 one reader per fact, the hosts' load sample, #1652 fixed; 3 the engine in shadow beside today's drive (actions, tries, deadlines and escalation timing compared), with a disagreement report; 4 the escalation ladder, built but off until cut-over; 5 cut-over, the side flows and the five folded bugs; 6 delete the old paths: the stall detector becomes row timeouts and the state list is generated.
-Open questions: (1) accept one added fact (the lane's own turn report) and five added values? (2) parked and paused rows run no clock: accept? (3) two #1597 fixes the table does not cover ride in slice 5: accept? (4) six slices as six issues, filed on approve?
+Open questions: (1) accept one added fact (the lane's own turn report) and five added values? (2) parked and paused rows run no clock: accept? (3) two #1597 fixes the table does not cover ride in slice 5: accept? (4) six slices as six issues, filed on approve? (5) rows are acted on in the service's drive pass, not in the API process, whose lock guards outside writes only: accept?
 
 ## Status
 
@@ -23,6 +23,18 @@ Revised the same day after the owner's answer q3298. What changed:
 
 One correction of my own, found while adding `loaded`: in `impl` and `fix` a pushed head no longer waits for an
 offline host (`tables.md`, the `build` rows' order).
+
+Revised again after q3312:
+
+| The owner's note | Where it landed |
+|---|---|
+| which process runs `flow::act`, `flow::escalate` and shadow's event writes under #1645; fix "drive: locks" | `boundaries.md`: "Which process runs what" and the `drive` row; `drive::Pass` (`shapes.md`); decisions 3 and 6; open question 5 |
+| only the main host loaded: other hosts' lanes are not moved; `working-loaded` needs the lane's own host's sample over its limits | `loaded` is the host's own sample (`facts.md`); a quiet clock stops at the host's last frame (`shapes.md`); `*/working-loaded` (`tables.md`) |
+| a down host cannot stay `loaded`: offline after `host_offline_minutes` whatever the load | the `offline` value (`facts.md`); `*/host-offline` counts from the host's last frame (`tables.md`) |
+
+Two corrections from reading the revised #1645 and #1567 ADRs (`facts.md`, the last table): the webhook
+listener is the API host's own, not an `/api/v1` action; a remote lane's verbs keep the outbox, and #1567's
+`Reach` now names the drain order's home.
 
 ## Question
 
@@ -83,11 +95,16 @@ Smaller choices:
    (the host's own frames, as the view's host row holds them), pr (the PR cache), verdict (the log), ask (the
    log), turn (the log). One sample per pass, from `state.db`, the PR cache and the log only; no host is
    called to decide. `host` is `up`, `loaded`, `draining` or `offline`. A value that means "gone" needs
-   evidence of absence: a late frame from a host whose load, or the main host's, is over its limits reads
-   `loaded`, never `offline` (`facts.md`).
+   evidence of absence: while load at either end explains a late frame, the host keeps the value its last
+   frame gave, and never reads `offline` for lateness alone. Only its own sample makes a host `loaded`, so a
+   loaded main host moves no other host's lane. The wait is bounded: no frame for `host_offline_minutes` is
+   `offline`, whatever the load (`facts.md`).
 3. **The engine.** `flow::decide(table, state, cond, episode, now)` is pure and returns a `Step`. `flow::act`
    is the only code that turns an `Action` into an effect, in one `match` with no wildcard arm, and logs
-   `row-entered` and `row-tried`. Drive's pass is sample, decide, order, act. Records and merges run before
+   `row-entered` and `row-tried`. It takes a `drive::Pass`, the held lease of a pass or kick, which only
+   `drive` can build. So a row is acted on in the service's drive pass and kicks and nowhere else, today and
+   under #1645: the API host logs the owner's tap and kicks the issue (`boundaries.md`). Drive's pass is
+   sample, decide, order, act. Records and merges run before
    prompts, prompts before spawns, and one issue's wait never holds another's action. `waiting` prints the
    `Step`. `diagram` draws the rows' `to` edges (`usage.md`, `boundaries.md`).
 4. **Escalation.** Every row gets a first try and two retries. Then the issue's orchestrator thread gets one
@@ -104,7 +121,8 @@ Smaller choices:
    in place of a clock (`usage.md`).
 6. **Shadow mode.** From slice 3 each pass also runs `decide` for every issue, with a shadow episode of its
    own: the row, the try, the deadline and the level the ladder would be at (`shapes.md`). Nothing acts, asks
-   or cards. Two things are compared with today's drive, each difference one passive `flow-disagree` event:
+   or cards. Shadow's events are written by the same pass or kick, right after today's pass body and under the
+   same lease. Two things are compared with today's drive, each difference one passive `flow-disagree` event:
    - **the action**, each pass: the owner, the action and the role;
    - **the escalation**, per episode: whether each side reached a person, when, and at which level. Sides more
      than `act_minutes` apart disagree; so does a side that never escalated.
@@ -136,7 +154,8 @@ Disagreements the table makes on purpose, marked `today's bug` in advance:
 | an ask whose episode ended closes | it stays an owner card (#1611) |
 | every card goes to the thread first; the thread answers a row once | most go to the owner |
 | three tries, everywhere | two to five, by path |
-| a quiet lane on a loaded host is not nudged; it is moved after `host_wait_minutes` | nudged and respawned in place |
+| a quiet lane on a host whose own load is over its limits is not nudged; it is moved after `host_wait_minutes` | nudged and respawned in place |
+| a lane is quiet only as long as its host's last frame says so | a late frame's lane counts as silent |
 | a pushed head goes to review while its lane's host is offline | waits for the host |
 
 ## Consequences
@@ -161,12 +180,16 @@ Disagreements the table makes on purpose, marked `today's bug` in advance:
   ladder on.
 - **Two behaviour changes land before cut-over, both in slice 2 and both at the source of a fact**: the disk
   mark obeys the host's load (#1652), and today's evacuation and `host offline` alert ask `facts::host`, so a
-  late frame from a loaded host no longer empties a host. Everything else waits for slice 5.
+  late frame under load, the host's or the main host's, no longer empties a host. A host with no frame for
+  `host_offline_minutes` is still emptied then, loaded or not. Everything else waits for slice 5.
 - **Risk: a wrong row acts wrongly everywhere at once.** That is what the shadow week and `flow = "legacy"` are
   for. `decide` being pure also lets every reported case become a three-line test: state, condition, expected row.
-- **The shed move (#1567) rewrites two readers**, `facts::lane` and `facts::host`, and no row. Its ADR must
-  name the one home of a host's drain order. **The serve split (#1645) rewrites none**: serve reads the rows
-  through `/api/v1`'s `Waiting` and never links `flow` (`facts.md`).
+- **The shed move (#1567) rewrites two readers**, `facts::lane` and `facts::host`, and no row. Its second
+  revision names the drain order's one home (`Reach::Draining`); its line "the host fact is `Reach` and
+  nothing else" needs `loaded` added. **The serve split (#1645) rewrites none and moves no actor.** Its
+  `api.lock` admits one writable API host; it is not a lock on the log. Passes and kicks stay in the service's
+  processes under drive's leases and write through core. The API host builds `Waiting` from `decide`, logs a
+  tap's `decision` and kicks; the edge links no core. A stopped API host stops no row (`boundaries.md`).
 
 ## Slices
 
@@ -178,10 +201,13 @@ Each is one PR, green alone. A shadow week sits between 3 and 5.
 2. **Facts.** `flow::facts` with `Seen::load` and one reader per fact; `flow::episode`; the frame's `sample`
    and the host row's `drain`; `verdict-seen` and `verdict-refused`; `waiting --flow` prints state, condition
    and row beside today's line. Two behaviour changes: **#1652** (a failing test first, then `runner::hung`
-   obeys the load; #1648's overloaded-host case drives it), and today's evacuation asks `facts::host`.
-3. **Shadow.** `flow::decide`, `flow::shadow` with its episode (tries, deadlines, level), `outcomes.toml`,
-   `flow-disagree` of both kinds, `flow report`, `[fleet.<n>] flow` defaulting to `shadow`, the six `[limits]`
-   keys. The acceptance walk of `usage.md` runs against `decide`. The shadow week starts when this merges.
+   obeys the load; #1648's overloaded-host case drives it), and today's evacuation asks `facts::host`. Three
+   `facts::host` tests pin the owner's rules: a loaded main host leaves another host `up`; a late frame from a
+   loaded host is `loaded`; no frame for `host_offline_minutes` is `offline` at any load.
+3. **Shadow.** `flow::decide`, `drive::Pass`, `flow::shadow` with its episode (tries, deadlines, level),
+   `outcomes.toml`, `flow-disagree` of both kinds, `flow report`, `[fleet.<n>] flow` defaulting to `shadow`,
+   the six `[limits]` keys. The acceptance walk of `usage.md` runs against `decide`. The shadow week starts
+   when this merges.
 4. **Escalation.** `flow::escalate`: the ladder, the thread routing, the once-per-row cap, the owner card with
    [retry] and [park], `row-escalated`, `row-retry`. Built and tested during the shadow week; nothing calls it
    until slice 5, so today's cards go where they go today.
@@ -221,6 +247,11 @@ Each is one PR, green alone. A shadow week sits between 3 and 5.
    to 4 on approve, and slices 5 and 6 at the end of the shadow week, each blocked on the one before. The "names
    each symptom fixed or moot" lines move by amendment: #1652's to slice 2's issue, the other five to slice
    5's, and each symptom is re-blocked on its slice.
+5. **Which process acts, under #1645.** Its ADR's `api.lock` admits one writable API host (taps, webhook
+   deliveries); it does not guard the log, and its `service` keeps the drive loops with a core link. So
+   `flow::act`, `flow::escalate` and shadow's events run in the service's drive pass and kicks, under drive's
+   own leases. Recommend: accept. If every write should go through drover-api instead, that is a change to
+   #1645's ADR; here only the place `Pass` is built moves (`boundaries.md`).
 
 ## `.drover/arch.toml` lines
 

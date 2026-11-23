@@ -8,16 +8,20 @@ Today the pass body is 350 lines of `if w.what.starts_with(…)` over `waiting::
 (`drive.rs:1237-1496`). After:
 
 ```rust
+let Some(pass) = drive::Pass::take(ctx, r, fleet)? else { return Ok(()) };   // the lease `drive-<fleet>.lock`
 let table = flow::table();
 let seen = flow::facts::Seen::load(ctx, cfg)?;
 let steps: Vec<Step> = open_issues(&events, fleet)
     .map(|s| flow::decide(table, &s, &seen.cond(&s), &flow::Episode::of(&events, &s), ctx.now))
     .collect();
 for step in flow::order(steps) {
-    flow::act(ctx, cfg, r, out, &step)?;
+    flow::act(&pass, cfg, r, out, &step)?;
 }
 ```
 
+- `Pass` is the held lease of a fleet pass or of a kick. Only `drive` can build one, and `act` needs one, so
+  nothing outside a pass or kick acts on a row: not `drover waiting`, not the API host (#1645), not a lane's
+  verb. Those log their own event and kick the issue.
 - `Seen::load` reads `state.db`, the PR cache and the log once. It calls no host. Each fact has one reader and
   one source (`facts.md`).
 - `decide` is pure: same inputs, same `Step`.
@@ -115,6 +119,10 @@ One fake issue walked through its life against a fake shed and a fake GitHub, as
 | rev writes verdict.md on a remote host | verdict `written` | `review/record` | records it from the view; a pending spawn elsewhere does not delay it |
 | the record is refused `NO_REPRO` | verdict `refused` | `review/refused` | re-prompts once, respawns once, then the thread |
 | PASS, CI green | verdict `PASS`, pr `green` | `ready/merge` | merges |
-| the host goes offline mid-review | host `offline` | `review/host-offline` | waits `host_offline_minutes`, then reviews elsewhere |
-| a build lane's host is over its load limit and its frames turn late | host `loaded` | `build/working-loaded` | waits `host_wait_minutes` from the lane's last word, then moves it; `build/host-offline` is never the row |
+| the host goes offline mid-review | host `offline` | `review/host-offline` | waits `host_offline_minutes` from the host's last frame, then reviews elsewhere |
+| a build lane's host is over its load limit and its frames turn late | host `loaded` | `build/working-loaded` | waits `host_wait_minutes` from the lane's last word, then moves it; `build/host-offline` is not the row |
+| only the main host is over its load limit; a lane on another host has late frames and looks quiet | that host `up`, as its last frame said | `build/working` | nothing: not moved, and not nudged until a newer frame shows it quiet; the main host has its own card |
+| a loaded host sends no frame for `host_offline_minutes` | host `offline` | `build/host-offline` | moves the lane on the next pass: the clock ran from the last frame |
 | a row runs out of tries a second time after the orchestrator answered it | level `owner` | the same row | raises the owner card at once, with no second ask in the thread |
+
+The walk starts no API host and no page server: a row needs neither to be acted on (`boundaries.md`).

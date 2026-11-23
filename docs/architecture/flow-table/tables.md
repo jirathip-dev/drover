@@ -4,7 +4,9 @@ How to read a table:
 
 - Rows are tried top to bottom; the first match is the row. A blank fact cell is `*` (any value).
 - **do** runs when the issue enters the row. **timeout** is a `[limits]` key; its clock starts when the row was
-  entered unless the cell says `· heard` (shed last heard the lane) or `· reset` (shed's limit reset time).
+  entered unless the cell says `· heard` (shed last heard the lane), `· host heard` (the lane's host sent its
+  last frame) or `· reset` (shed's limit reset time). A `· heard` clock stops at the host's last frame: a lane
+  is quiet only as long as a frame says so (`shapes.md`).
 - **then** is what the first and second retry do; blank means `do` again. After three tries the ladder runs:
   the orchestrator thread (once per row and episode), then one owner card with [retry] and [park]
   (`boundaries.md`).
@@ -15,8 +17,11 @@ How to read a table:
 - Every spawn action asks placement first, and only a host that is `up` takes a start. `respawn` resumes the
   lane in its own worktree; when that host is `loaded`, `draining` or `offline` it does what `move` does: the
   unpushed work is pushed and the lane starts on another host. With no host that has room it is `Held`.
-- A host that is `loaded` is never treated as `offline`. A step that needs nothing from the lane's host (a
-  record, a merge, a hand-off of a pushed head) runs whatever the host's value.
+- A lane leaves a host only for that host's own value. `loaded` is the host's own sample (`facts.md`), so while
+  only the main host is loaded no lane on another host is moved, respawned elsewhere or nudged.
+- A host that is `loaded` is not treated as `offline` until it has sent no frame for `host_offline_minutes`.
+  A step that needs nothing from the lane's host (a record, a merge, a hand-off of a pushed head) runs whatever
+  the host's value.
 
 The rows below are the content of `crates/core/flow/*`. Slice 1 writes them as TOML; the shadow week corrects them.
 
@@ -40,7 +45,7 @@ stranded blocker.
 |---|---|---|---|---|---|---|---|---|---|
 | `ask-open` | | | open | wait | owner | `ask_waiting_minutes` | remind | owner | |
 | `decided` | | | answered | deliver | drive | `act_minutes` | | | |
-| `host-offline` | | offline | none | wait | drive | `host_offline_minutes` | move | | |
+| `host-offline` | | offline | none | wait | drive | `host_offline_minutes` · host heard | move | | |
 | `no-lane` | none | up, loaded, draining | none | reconcile | drive | `act_minutes` | | orch | |
 | `working` | running | up, draining | none | wait | lane | `silent_minutes` · heard | nudge, respawn | | |
 | `working-loaded` | running | loaded | none | wait | lane | `host_wait_minutes` · heard | move | | |
@@ -48,8 +53,12 @@ stranded blocker.
 | `ended` | done, asleep | up, loaded, draining | none | hand-off | drive | `act_minutes` | nudge, respawn | | design-review |
 | `lost` | exited, gone | up, loaded, draining | none | respawn | drive | `act_minutes` | | | |
 
-`working-loaded`: on a loaded host a quiet lane is given `host_wait_minutes` from its last word, is not nudged,
-and is then moved. A lane that is still heard is left alone.
+- `working-loaded` is the row only while the lane's own host's last sample is over its limits. A quiet lane
+  there is given `host_wait_minutes` from its last word, is not nudged, and is then moved. A lane that is still
+  heard is left alone. A loaded main host puts its own lanes here and no other host's.
+- `host-offline` counts from the host's last frame, as `hosts::evacuate` does today. A host that turned
+  `offline` only at the bound (it was loaded, or the main host was) is already past the deadline: its lane is
+  moved on the next pass.
 
 `hand-off` logs `design-review` and raises the approve, revise, reject ask when the head carries the stage's
 files; it fails when it does not.
@@ -74,7 +83,7 @@ files; it fails when it does not.
 | `pushed` | | | open, pending, red, green, conflicting | none | none | done | spawn-check | drive | `act_minutes` | | | review |
 | `no-change` | | | | FAIL | none | done | no-change | drive | `act_minutes` | | | review, ready |
 | `lane-blocked` | | | | none, FAIL | none | blocked | raise-card | drive | `act_minutes` | | orch | needs-human |
-| `host-offline` | | offline | | none, FAIL | none | | wait | drive | `host_offline_minutes` | move | | |
+| `host-offline` | | offline | | none, FAIL | none | | wait | drive | `host_offline_minutes` · host heard | move | | |
 | `done-no-pr` | | up, loaded, draining | none | none | none | done | nudge | lane | `stall_minutes` | | | |
 | `need-input` | | up, loaded, draining | | none, FAIL | none | need-input | nudge | lane | `stall_minutes` | | | |
 | `round-start` | none | up, loaded, draining | | none, FAIL | none | none, working | spawn-build | drive | `act_minutes` | | | |
@@ -105,7 +114,7 @@ files; it fails when it does not.
 | `decided` | | | | | answered | deliver | drive | `act_minutes` | | | |
 | `recorded-here` | | | | PASS, FAIL | none | reconcile | drive | `act_minutes` | | orch | |
 | `refused` | | | | refused | none | tell-check | lane | `stall_minutes` | respawn-check | | |
-| `host-offline` | | offline | | none | none | wait | drive | `host_offline_minutes` | move | | |
+| `host-offline` | | offline | | none | none | wait | drive | `host_offline_minutes` · host heard | move | | |
 | `start` | none | up, loaded, draining | | none | none | spawn-check | drive | `act_minutes` | | | |
 | `reviewing` | running | up, loaded, draining | | none | none | wait | lane | `check_quiet_minutes` · heard | respawn-check | | |
 | `limited` | limited | up, loaded, draining | | none | none | continue-at-reset | drive | `stall_minutes` · reset | respawn-check | | |
@@ -257,7 +266,8 @@ trim. `release` is `Queued` behind the raise issue and unblocks the asking issue
   `admission-dropped`; the next issue starts.
 - `host/holding/refusing` is one card per host that has refused every start for `host_wait_minutes`
   (`HOST_BUSY`, `DISK_LOW`, `LOGIN_NEEDED` and the rest of the `held` class), not one per waiting issue. A host
-  that is `loaded` is one of these, and the card carries the fact's evidence (`load 3.4 per CPU for 31 min`).
+  that is `loaded` is one of these, the main host included, and the card carries the fact's evidence
+  (`load 3.4 per CPU for 31 min`).
   #1652's two "Drive is stuck" cards become this one card.
 
 ## The timers' pass chart
@@ -282,7 +292,7 @@ and `drover diagram` already draws them from data. Only the pass's own stall mov
 | `ci_red`, `gh::unstick`, `ci-missing` | `ready/ci-red`, `ci-running`, `ci-not-started` |
 | `update_lane`, `land::auto_update` | `ready/conflict`, inside `merge` |
 | `external`: `PR_CLOSED`, merged outside | `*/pr-closed`, `*/merged-outside` |
-| `hosts::evacuate` | `*/host-offline` |
+| `hosts::evacuate` (`seen + host_offline_minutes`) | `*/host-offline`, its clock from the host's last frame |
 | `View::down` on a late frame, the ssh probe's exit code | the `host` fact: `loaded` or `offline` (`facts.md`); `*/working-loaded` |
 | `limit::due` | `*/limited` |
 | `design::handoff` | `design/ended` |

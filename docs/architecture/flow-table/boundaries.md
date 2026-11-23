@@ -22,18 +22,19 @@ New code goes in new files under `crates/core/src/flow/*`. The `shared` files (`
 | `flow::facts` (new) | `Cond`, the six enums, `Seen::load`, `Seen::cond`, one reader per fact | `link::view::View`, `gh::cached_pr`, the log, `session` types, `pipeline` (which check is due) | call a host, `gh`, `git` or the runner; write anything; read a second source for one fact |
 | `flow::episode` (new) | `Episode`: tries, the entered row, the level | the log | write |
 | `flow::decide` (new) | `decide(table, state, cond, episode, now) -> Step` | `table`, `facts`, `episode` types, `config::Limits` | any I/O, the clock (it takes `now`), the log |
-| `flow::act` (new) | the one `match Action`; `Outcome`; the `row-*` events; `order` | `spawn`, `gate`, `term`, `land`, `design`, `card`, `orchestrator`, `check::clean`, `hosts` to act, `flow::escalate` | decide: it never reads `Cond` to choose another action |
-| `flow::escalate` (new) | the ladder: the thread, the card, `[retry]`, `[park]`; the only emitter of `needs-human` | `orchestrator::route`, `events::ask`, `gate::park` | spawn, merge, or pick a thread any other way; be called by today's drive (only `flow::act` calls it) |
-| `flow::shadow` (new, gone at slice 6) | the shadow episode's `row-*` events, `flow-disagree`, `flow report` | `decide`, `episode`, `waiting::scan` (the old one), the log | act, ask, raise a card |
+| `flow::act` (new) | the one `match Action`; `Outcome`; the `row-*` events; `order` | `spawn`, `gate`, `term`, `land`, `design`, `card`, `orchestrator`, `check::clean`, `hosts` to act, `flow::escalate` | decide: it never reads `Cond` to choose another action; run without a `drive::Pass` |
+| `flow::escalate` (new) | the ladder: the thread, the card, `[retry]`, `[park]`; the only emitter of `needs-human` | `orchestrator::route`, `events::ask`, `gate::park` | spawn, merge, or pick a thread any other way; be called by today's drive (only `flow::act` calls it, with its `Pass`) |
+| `flow::shadow` (new, gone at slice 6) | the shadow episode's `row-*` events, `flow-disagree`, `flow report` | `decide`, `episode`, `waiting::scan` (the old one), the log | act, ask, raise a card; write an event without a `drive::Pass` (`flow report` only reads) |
 | `flow::chart` (new) | the statechart and `flow.md` in `docs/` from the table | `table`, `config::Limits` | read the log (but for `--live` counts) |
-| `drive` (kept, smaller) | locks, leases, kicks, job slots, the `drive-pass` event | `flow::facts`, `flow::decide`, `flow::act` | match on a `Waiting` line or a command string; emit `needs-human`; count retries |
+| `drive` (kept, smaller) | the pass and kick leases, which are rows of `state.db` (`drive-<fleet>.lock`, `drive-<fleet>-<n>.lock`, `kick-<fleet>-<n>.lock`); `Pass`, the proof one is held; kicks, job slots, the `drive-pass` event | `flow::facts`, `flow::decide`, `flow::act`, `flow::shadow` | take, wait on or check #1645's `api.lock`; hand a `Pass` to another process; match on a `Waiting` line or a command string; emit `needs-human`; count retries |
 | `waiting` (kept, smaller) | `Waiting` for API v1 and the board, built from a `Step` | `flow::decide` | compute a next step of its own |
 | `check` (kept, smaller) | host, disk, runner, keychain and config alerts; cleaning | as today, minus its issue rules | hold a stall, orphan-issue or ready-unmerged rule: an issue's alert is its row's `row-escalated` |
 | `diagram` (kept) | `drover diagram` | `flow::chart`, `drive::STEPS`, `timer::TICK_STEPS` | read `events::STATES` by hand: it is generated |
 | `events` (kept) | the fold | nothing new | know a row |
 | `link` (kept) | frames, intake, the view; the host row with its sample and drain order; `verdict-seen` | `host::sample` on the reporting host, `hosts::drain` | turn lateness into `offline` (that is `facts::host`'s rule) |
 | `runner` (kept) | the disk mark (`hung`, `sicken`) | `sys::loadavg` | mark a disk for one slow listing, or for any while the host is loaded; read the view |
-| `crates/server` | the board | `waiting` (`/api/v1`'s `Waiting`, which carries the row's text) | call any `flow::*`: after #1645 it does not link core at all |
+| `crates/server` (after #1645 `drover-api`, the API host) | the board's screens, the owner's taps, the webhook listener | `waiting` (`/api/v1`'s `Waiting`, which carries the row's text), `flow::chart`, the verbs a tap runs (`answer`, `park`, `extend`), `drive::kick` | call `flow::act`, `flow::escalate` or `flow::shadow`, or run a pass in its own process: it logs the tap and kicks |
+| `crates/server` after #1645 (the edge) | the page's files, the relay | the API host, over HTTP | link core, so no `flow::*` at all |
 
 Three rules the checks hold (`adr.md`, the `.drover/arch.toml` lines):
 
@@ -42,6 +43,40 @@ Three rules the checks hold (`adr.md`, the `.drover/arch.toml` lines):
 3. `decide` is pure: the table test and the shadow run call it with no fixture but values.
 
 Core gains no layer edge: `flow` is inside `crates/core`.
+
+## Which process runs what
+
+Today and under #1645 the answer is the same: **a row is acted on only inside a drive pass or kick, in the
+service's processes, under drive's own lease.** The API host never acts on a row.
+
+| Code | Process today | Process under #1645 | Lock it runs under |
+|---|---|---|---|
+| `flow::act`, and `flow::escalate`, which only `act` calls | a fleet pass: the `drover drive <fleet>` process the service's loop starts (the timer's tick starts it when no service runs). A kick: inside the service's process, else a detached `drover kick --now` | the same processes | the pass's lease `drive-<fleet>.lock` or the kick's `kick-<fleet>-<n>.lock`, then the issue's own `drive-<fleet>-<n>.lock` for each step; all rows of `state.db`. `Pass` is the first, held |
+| `flow::shadow`'s events (`row-*` marked `shadow`, `flow-disagree`) | the same pass or kick, right after today's pass body | the same | the same lease |
+| the owner's tap ([retry], [park], [one more round], an answer) | serve's process, or `drover answer` in a terminal | the API host (the edge relays the tap to it), or the CLI | the API host is the one writable host (`api.lock`). It logs `decision` and kicks the issue; `apply-decision` and `row-retry` are the kick's |
+| a webhook delivery | serve's process | the API host | `api.lock`; it fills the PR cache and kicks |
+| a lane's `drover turn`, `verdict`, `ask` | the lane's own CLI process; a remote lane's through its outbox and intake, in the service | the same | none of its own; its event is logged and the issue kicked |
+| `flow::facts`, `decide`, `episode`, `chart`, `flow report` | any: a pass, the CLI, serve | any: a pass, the CLI, the API host (read-only ones too); never the edge | none: they write nothing |
+
+What #1645's lock is and is not, as its ADR has it (the serve-split folder on branch `issue-1645`, `d4863aad3`):
+
+- `api.lock` is a file in the state folder that one API host holds for its life. It makes that process the only
+  one that binds the webhook listener and takes writes from outside: taps, pairing, deliveries.
+- It is not a lock on the log. Every process that links core appends to `state.db` under SQLite's own write
+  lock, as today: the pass, the kicks, intake, the CLI's verbs, the terminal's chat, the API host. #1645's
+  `service` row keeps "the drive loops, the links, the kicks", may call core and must not link `api`.
+- So no `flow` code takes or waits on `api.lock`, and a stopped API host stops no row: passes and kicks go
+  on, the catch-up poll fills the PR cache, `drover answer` still answers a card. Only taps and deliveries wait.
+- One actor per issue is the issue's lease (`drive-<fleet>-<n>.lock`), not `api.lock`: a pass and a kick both
+  take it before a step, whichever process each is in. An issue whose lease is held is left to its holder: no
+  try is spent.
+
+The check is the type, not a rule line: `act`, `escalate` and `shadow::run` take a `&drive::Pass`, and `Pass`
+has no constructor outside `drive` (`shapes.md`). The API crate links core and still cannot call them.
+
+If the owner wants every write to go through drover-api instead, that is a change to #1645's ADR (its
+`service` row and its lock), and here only this section changes: `Pass` would be built in the API host
+(`adr.md`, open question 5).
 
 ## A row's life, for one issue
 
