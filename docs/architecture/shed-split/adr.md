@@ -2,14 +2,15 @@
 
 ## Summary
 
-Decision: drover keeps the policy (which lane goes where and when, spend, approvals, the guard) and stops doing host work itself. It talks to shed through shed's own client, reaches every other host over the link shed already holds, reads health, processes, accounts and usage from shed, takes provider facts from shed's catalog, and leaves installs, secrets, heavy slots and the sandbox to shed. Renting VMs has left this plan for its own decision (#1644). Four things stay: the copy of a closed lane's transcript, the handover of drover's own web server, the sweep of stray processes in a finished lane's folder, and the file through which a lane on another host sends its commands to the main host (#1646): shed has no connection from a host back to the main host, so the main host keeps fetching that file.
-Slices: first, on its own, #1623's small fix: a rented host that shed shows as up counts as up. Then fourteen drover steps, each after the shed release it needs and each deleting the code it replaces: the account for lanes and orchestrator threads on the main host (#1576, no key set means "auto") and the client, both possible on shed's release of 2026-11-22; provider facts; hosts as shed machines; host charts; the host link; the token proxy's deletion (#1604, after shed's next release); secrets; self-update; heavy slots; the sandbox; balances; the timer jobs through farrier; shed's new state fields. Two installs wait for a check: #1576 until drover's doctor shows a signed-in named account for each agent, #1604 until no lane started on drover's proxy is still alive. Until #1604 a lane on another host signs in through drover's proxy, as today.
-Open questions: (1) an agent that shed's proxy does not serve (Codex today) cannot have an account on another host. With no account key set, let it run there on that host's own login, as today (recommended, and what shed's accounts decision says), or keep such lanes on the main host? Your two answers of 2026-11-23 are decisions here. The first: accounts are two steps, #1576 and #1604; all four crates are approved; the host link reads shed's events; shed's staging is promoted and its proxy goes in the next release. The second: its six points, listed at the top of adr.md with where each one landed.
+Decision: drover keeps the policy (which lane goes where and when, spend, approvals, the guard) and stops doing host work itself. It talks to shed through shed's own client, reaches every other host over the link shed already holds, reads health, processes, accounts and usage from shed, takes provider facts from shed's catalog, and leaves the rollout of its own binary, secrets, heavy slots and the sandbox to shed. It asks shed to install nothing else, and sets no host up itself: toolchains, the shared build caches and a host's disk floor belong to the host setup recipe of shed's VM helper (shed #337), which the owner runs on the Mini and the Air through a run card. A lane's own build folders, and the cache settings its start carries (#1641), stay drover's. Renting VMs has left this plan for its own decision (#1644). Four things stay: the copy of a closed lane's transcript, the handover of drover's own web server, the sweep of stray processes in a finished lane's folder, and the file through which a lane on another host sends its commands to the main host (#1646): shed has no connection from a host back to the main host, so the main host keeps fetching that file.
+Slices: first, on its own, #1623's small fix: a rented host that shed shows as up counts as up. Then fourteen drover steps, each after the shed release it needs and each deleting the code it replaces: the account for lanes and orchestrator threads on the main host (#1576, no key set means "auto") and the client; provider facts; the token proxy's deletion (#1604); hosts as shed machines; host charts; the host link; secrets; self-update, for drover's own binary only; heavy slots; the sandbox; balances; the timer jobs through farrier; shed's new state fields. shed's two releases of 2026-11-22 and 2026-11-23 already carry what the first four need. Two installs wait for a check: #1576 until drover's doctor shows a signed-in named account for each agent, #1604 until no lane started on drover's proxy is still alive. Until #1604 a lane on another host signs in through drover's proxy, as today.
+Open questions: (1) an agent that shed's proxy does not serve (Codex today) cannot have an account on another host. With no account key set, let it run there on that host's own login, as today (recommended, and what shed's accounts decision says), or keep such lanes on the main host? (2) shed's health reading of a host has carried its free disk since shed's first release, and drover would read it there for its low-disk refusal and the Host tab's chart. Your decision names a machine as link, processes, CPU and memory: keep that one read (recommended: it is a number, and shed cleans nothing), or have drover measure free disk itself? Your three answers of 2026-11-23 are decisions here; the newest one's points are listed at the top of adr.md with where each landed.
 
-**Status:** proposed by the architect lane, 2026-11-22; revised twice on 2026-11-23, on the owner's two answers. Read on drover
-staging `7c0a28c1c`, shed main `fbd81d9` (tag `client-v5.0`), shed staging `94c1ede` and farrier `d34a7bb`. It
-follows shed's accepted ADRs #191, #256 and #259, and the two approved on 2026-11-23 that change #259: #307 (VMs
-are an optional helper's) and #309 (one state per flow). It reopens none.
+**Status:** proposed by the architect lane, 2026-11-22; revised three times on 2026-11-23, on the owner's three
+answers. Read on drover staging `7c0a28c1c`, shed main `7540e74` (tag `client-v5.1`), shed staging `94c1ede` and
+farrier `d34a7bb`. It follows shed's accepted ADRs #191, #256 and #259, and what changed #259 on 2026-11-23: #307
+(VMs are an optional helper's), #309 (one state per flow) and the owner's decision on what a machine is (shed
+#336, #337). It reopens none.
 The candidates one by one, how the callers read, the statecharts and the boundaries: [README.md](README.md). The
 steps, gates and issues: [order.md](order.md). Keys, types and pins: [shapes.md](shapes.md).
 
@@ -17,16 +18,23 @@ What the first revision changed: accounts are D2a and D2b (decision 7); step 0 i
 for #1644 (decision 13); a last step reads shed's state fields (decision 14); #1616's machine list is taken in;
 the two folded symptoms have their step ([order.md](order.md)).
 
-What the second changed, by the owner's six points:
+What the second changed, by the owner's six points: the outbox stays for a lane's verbs on another host
+(#1646, decision 15); a rate is two reads (decision 3); `Reach::Draining` and the `reconnecting` row (decision
+3); D2a's and D2b's installs each wait for a gate (decision 7); #1623's fix is a step before D1 (decision 16).
 
-| | the owner's point | where |
-|---|---|---|
-| a | a lane's verbs on another host reach the main host through the outbox, after D1 too (#1646) | decision 15 |
-| b | lane-hog reads the CPU time between two `terminal.procs` reads; the swap rate is the difference of successive `now` reads | decision 3; [shapes.md](shapes.md) |
-| c | `Reach::Draining` for #1649 and #1644; a `reconnecting` link has its row | decision 3; [shapes.md](shapes.md) |
-| d | D2b's install waits until no lane started on drover's proxy is alive | decision 7; [order.md](order.md) |
-| e | D2a's install waits for doctor's account rows | decision 7; [order.md](order.md) |
-| f | #1623's one-line fix is a step of its own, before D1 | decision 16; [order.md](order.md) |
+What the third changed, by the owner's answer of 2026-11-23 on what a machine is:
+
+| the owner's point | where |
+|---|---|
+| a shed machine is a place to run agents: link, processes, CPU, memory | decision 17; open question 2 for the one disk reading |
+| toolchains, caches and host disk are shed-cloud's host setup recipe (shed #337), for runner VMs too; the Mini and the Air run it through a run card | decision 17; [shapes.md](shapes.md), "Who owns what on a host" |
+| D4 and H2 move drover's and shed's own binaries only | decision 10; [order.md](order.md), H2's row |
+| no `installs` in `crate::shed` | decision 10: its file there is `release.rs`, drover's own binary |
+| a lane's build folders stay drover's (`reclaim`, `DISK_BUDGET`); the shared caches are the recipe's | decision 17 |
+| #1641's cache env stays in `spawn` | decision 17; it rides the start's `env` |
+
+Also new since the second: shed released `client-v5.1` on 2026-11-23 with its token proxy (#265), so step 3 of
+[order.md](order.md) is done and one pin serves D2a, D0, D9 and D2b.
 
 ## The question
 
@@ -41,10 +49,13 @@ every step lands on a released shed and leaves drover working.
 
 Found while reading, and each one shapes the decision:
 
-- **The first release is out.** shed main is `fbd81d9`, tagged `client-v5.0`, at protocol 5: the client and the
-  catalog (#199 to #203), accounts 1 to 4 (#261 to #264), the machine, file and process APIs (#266), the tag job
-  (#267), the dsh record (#258). The main host's `shed` is that build. The token proxy (#265) is merged on shed
-  staging and not released; until it is, shed main refuses an account on a run for another machine.
+- **Two releases are out.** `client-v5.0` (`fbd81d9`, 2026-11-22), at protocol 5: the client and the catalog
+  (#199 to #203), accounts 1 to 4 (#261 to #264), the machine, file and process APIs (#266), the tag job (#267),
+  the dsh record (#258). `client-v5.1` (`7540e74`, 2026-11-23), still protocol 5: the token proxy (#265), #295
+  and #296. Half an hour after the second, the main host's `shed` was still the first build.
+- **drover sets hosts up today.** `drover hosts bootstrap` (`cloud::bootstrap`) installs git, gh, just, Rust,
+  node, each agent's CLI, shed and drover's own binary on another host. `release.rs` and `update.rs` move
+  drover's own binary and nothing else. Every lane has a build folder of its own, which the tick trims.
 - **drover still speaks to shed the old way.** It pins `shed-proto` at `9b88eb5` (protocol 2), starts ACP lanes
   and orchestrator threads through the `shed` CLI (`term::Acp`'s words), reads `shed help run` to learn whether
   a host takes `--meta`, and reaches another host's shed with `ssh … shed connect` per call.
@@ -131,7 +142,7 @@ X1 carries a second addition, a process's CPU time, for option T below.
 | | option | verdict |
 |---|---|---|
 | Q | One step after D1 and shed's proxy, as shed #256's D2 row has it | the account key, which needs neither, waits for both |
-| R | **Two: D2a (#1576) the account on the main host, D2b (#1604) the proxy's deletion** | the owner's decision: D2a needs only shed's release of 2026-11-22; D2b needs shed's proxy released |
+| R | **Two: D2a (#1576) the account on the main host, D2b (#1604) the proxy's deletion** | the owner's decision: D2a needs only shed's release of 2026-11-22; D2b needs shed's proxy, released a day later |
 
 **Who moves the pin**
 
@@ -176,12 +187,12 @@ X1 carries a second addition, a process's CPU time, for option T below.
    **D2a (#1576)**: an `account` key on a fleet, a role and `[fleet.<n>.role.orchestrator]`: a name or
    `"auto"`, and no key is `"auto"`. Two callers pass it, `spawn` and `orchestrator.rs`'s `start()`, both through
    `term::Acp`. On the main host `LOGIN_NEEDED` and the limit hold read `account.ls`, and the card's sign-in is
-   `account.login`. It needs the `shed-proto` pin at `client-v5.0` and nothing else of this ADR: not D0, not D1,
+   `account.login`. It needs the `shed-proto` pin at protocol 5 (`client-v5.1`, the newest tag) and nothing else of this ADR: not D0, not D1,
    not shed #265. A lane on another host carries no account yet: it signs in through drover's proxy and its
    limit or sign-out holds that host, as today. **Its install is gated**: doctor shows a signed-in named
    account for every agent a role or an orchestrator starts, so no thread's start meets `NO_ACCOUNT`. The rows
    ship with the pin PR, one build earlier.
-   **D2b (#1604)**: after shed #265 is released and after D2a. An ACP lane on another host starts with one `run`
+   **D2b (#1604)**: after D2a, on shed #265, which `client-v5.1` carries. An ACP lane on another host starts with one `run`
    at the main host's shed, with `machine` and `account`, so shed's proxy gives it a key and it never holds a
    token. `proxy.rs`, the tunnel, `[proxy]` and the per-lane keys are deleted. It does not wait for D1: the
    machine is in shed's list already (#1616), and until D1 that lane's reads, prompts and kills keep today's
@@ -192,15 +203,20 @@ X1 carries a second addition, a process's CPU time, for option T below.
    host's login, and its limit or sign-out holds that host, as today and as shed #256 says (open question 1).
    With a key set, the start is refused by shed's `ACCOUNT_LOCAL_ONLY`, naming the account.
 8. **Provider facts are the catalog's (D9).** Login, status, install, the token and folder variables, models,
-   efforts and limit lines are read from the record. `providers/` keeps what drover does to an
+   efforts and limit lines are read from the record. The install line is text to drover: a doctor row's fix,
+   and bootstrap's agent step for as long as #1644 leaves bootstrap one (decision 17). `providers/` keeps what drover does to an
    agent: profile sync, the hook dialect, guard meta, doctor rows. The dsh wizard watcher is deleted: the record
    has it. drover checks its config against the built-in records and starts lanes by what the host's shed serves.
    A fact drover needs and the record lacks is added to the record, never kept in drover.
 9. **Jobs are farrier's (D10).** `timer.rs` keeps which jobs exist, their arguments, intervals and PATH, the tick
    and the Services rows. The plist and unit text, load, unload, restart, the pid and the refused check become
    `farrier_service::Service`. The old `dev.herdsman.*` labels are its `supersedes`.
-10. **Installs, secrets, slots, the sandbox and balances (D3, D4, D5, D7, D8)** move as shed #259 lays out.
-    drover keeps the decision half of each, listed in [order.md](order.md).
+10. **Its own binary, secrets, slots, the sandbox and balances (D4, D3, D5, D7, D8)** move as shed #259 lays
+    out, D4 and H2 narrowed by the owner (2026-11-23): shed's `install.*` moves a release of shed's own binary
+    and of drover's, and nothing else. D4 is drover's binary at drover's path on each host: find, stage, swap
+    and back, in `crate::shed`'s `release.rs`, whose functions take a build and no tool name or path. There is
+    no `installs` area in `crate::shed`, and drover calls no `machine.setup`. drover keeps the decision half of
+    each step, listed in [order.md](order.md).
 11. **Four things stay in drover.** The transcript copy (a lane drover removed is drover's record; shed keeps
     nothing after `rm`). The serve handover (drover's listeners, drover's next build; shed's handover serves only
     shed). The stray sweep (item 4). The outbox (item 15).
@@ -221,6 +237,15 @@ X1 carries a second addition, a process's CPU time, for option T below.
 16. **#1623's fix does not wait for D1.** One line in `hosts::survey`: a cloud host that shed's machine list
     shows `up` is up, whatever its last `cloud-*` event says, and the pass logs `cloud-up`. D1 then deletes
     that rule and the probe.
+17. **Neither shed nor drover sets a host up or keeps its disk.** A shed machine is a place to run agents: its
+    link, its processes, their CPU and memory. Toolchains, the shared build caches (sccache's folder, pnpm's
+    store) and the disk floor are shed-cloud's host setup recipe (shed #337): in the pool's image, on runner
+    VMs, and on the Mini and the Air by `shed-cloud setup --on <machine>` from a run card. So no step here
+    moves bootstrap's tool steps to shed: they run as today until #1644, which drops them for the recipe.
+    What stays drover's is lane state: a lane's worktree and its build folders (the tick's trim, `reclaim`,
+    `clean`, `DISK_BUDGET`), the `DISK_LOW` refusal, and the cache variables `spawn` sets on a lane's start
+    (#1641), which ride `RunParams.env` from D0. drover never sizes, trims or deletes a shared cache; it
+    reports its size. [shapes.md](shapes.md) has the table.
 
 What this changes of earlier drover decisions, said plainly:
 
@@ -249,7 +274,7 @@ What this changes of earlier drover decisions, said plainly:
 - **Admission keeps a few numbers per host between passes:** the last `now`'s swap count and time, with the last
   five rates, in `hosts.json`. The `swapcount*` and `swapouts` files go.
 - **Between D2a and D2b accounts stop at the main host.** A lane on another host runs on `[proxy]`'s one
-  token, whatever `account` says, and two proxies exist side by side: drover's, and from its release shed's.
+  token, whatever `account` says, and two proxies exist side by side: drover's and shed's.
 - **Between D2b and D1 a lane on another host has two routes:** its start over shed's link, the rest over ssh.
   A link that is down refuses the start (`NO_PROXY`, shown as `NO_PROXY_TOKEN`) while drover's own probe may
   still say up. D1 ends that: one route, one answer.
@@ -257,6 +282,12 @@ What this changes of earlier drover decisions, said plainly:
   go; a changed host key is the link's `error` line on the offline alert.
 - **A host needs a current shed and nothing else of drover's transport.** The `drover` binary stays on each host
   for the lane hook, `drover hosts report` and profiles sync, so D4 still rolls it out.
+- **A new host is set up by three hands, none of them an installer in drover.** The recipe puts the tools and
+  the caches there (a run card, on a host that is no VM); shed puts shed there; drover then adds its own binary
+  (D4), the clones, the sign-in panes and profiles sync. After #1644 a missing tool is a doctor row naming the
+  recipe's command, never an install drover runs.
+- **`DISK_LOW` can only free lane folders.** A host under its floor because a cache grew is the recipe's to
+  bring back: drover's refusal names `drover clean` and the recipe's command.
 - **This host's shed is in the path to every host.** While it is down drover reaches none of them. shed's own
   job keeps it alive; from D1 drover no longer kicks that job (`start_job` and `connect --autostart` go) and
   doctor's row names shed's own start line.
@@ -279,20 +310,21 @@ the owner's own repos, pinned by git tag or revision; `deny.toml`'s `allow-git` 
 
 | crate | step | replaces | brings into the lock |
 |---|---|---|---|
-| `shed-client` | D0 | `shed.rs`'s client, the test fake; `shed-proto`, a direct dependency since #298 and moved to `client-v5.0` for D2a, stops being one (the client re-exports it) | nothing new (`thiserror` is there) |
+| `shed-client` | D0 | `shed.rs`'s client, the test fake; `shed-proto`, a direct dependency since #298 and moved to `client-v5.1` for D2a, stops being one (the client re-exports it) | nothing new (`thiserror` is there) |
 | `shed-catalog` | D9 | the facts in `providers/` | `toml` 1.2 in place of 0.8 |
 | `shed-secrets` | D3 | the store half of `secret.rs` | `security-framework` and its `core-foundation` crates, macOS only |
 | `farrier-service` | D10 | the job files and control words in `timer.rs` | nothing: it has no dependencies |
 
-Not taken: `farrier-update` (shed #259 made `install.*` the one install path) and `shed-accounts`, `shed-hosts`
-(server side only). `docs/serve.md`'s allowed list gains each crate in the PR that adds it.
+Not taken: `farrier-update` (shed #259 made `install.*` the one path for shed's and drover's own binaries) and
+`shed-accounts`, `shed-hosts` (server side only). `docs/serve.md`'s allowed list gains each crate in the PR that adds it.
 
 ## Hot files and `.drover/arch.toml`
 
 This work converts no central list. It is laid out so that fourteen PRs share as little as they can:
 
 - **`crate::shed` is a folder, one file per area** (`crates/core/src/shed/*.rs`: lanes, machines, files, stats,
-  accounts, installs, slots, VMs). A step adds its own file; `hosts.rs`, at its 2,000-line limit today, only shrinks.
+  accounts, slots, and `release.rs` for drover's own binary). A step adds its own file; `hosts.rs`, at its
+  2,000-line limit today, only shrinks.
 - **The pin moves in its own PR**, so no two steps edit the same `Cargo.toml` line or the lock.
 - **Docs stay one file per area:** `docs/hosts.md` (D1), `docs/accounts.md` (D2a, D2b), `docs/providers.md` (D9),
   `docs/service.md` (D10, D11), `docs/config.md` for the keys.
@@ -326,8 +358,8 @@ paths = ["crates/*/src/**"]
 reason = "#1567: a host's health is machine.stats, read in crates/core/src/shed/"
 ```
 
-D4 edits the `releases/download` ban: its `except` goes with `release.rs`, and its reason becomes
-"#1567: shed's install.find reads a release". D10:
+D4 edits the `releases/download` ban: its `except` goes with `crates/core/src/release.rs`, and its reason becomes
+"#1567: shed's install.find reads drover's release". D10:
 
 ```toml
 [[ban]]

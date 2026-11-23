@@ -56,6 +56,18 @@ impl Host<'_> {
     pub fn report(&self, w: &Watch) -> Result<Frame>;              // D11
 }
 
+// shed/release.rs (D4): drover's own binary, the one thing drover asks shed to install. The tool, its
+// releases and its path on a host are fixed inside; no function here takes a tool name or a path.
+impl Shed {
+    pub fn release(&self, build: &str) -> Result<Release>;         // install.find, once, on the main host
+}
+impl Host<'_> {
+    pub fn builds(&self) -> Result<Install>;                       // install.ls: live, staged, previous
+    pub fn stage(&self, rel: &Release) -> Result<Install>;         // install.stage, with drover's gate and identifier
+    pub fn swap(&self, build: &str) -> Result<Install>;            // install.swap, with drover's links on PATH
+    pub fn back(&self) -> Result<Install>;                         // install.back
+}
+
 pub struct Swap { pub at: u64, pub pages: u64 }                    // one `now`: `Sample::at`, `swap_out_pages`
 pub struct Tree { pub at_ms: u64, pub procs: Vec<Proc> }           // one terminal.procs answer, and when it came
 
@@ -124,7 +136,7 @@ load limit, and still wants 3 ticks running; `top` asks for every lane it lists.
 | load per CPU, without drover's own | `sysctl`, `ps`, minus drover's processes | `now.load_per_cpu`, minus the `top_cpu` rows whose command is drover |
 | free and total memory | `vm_stat`, `hw.memsize`, `/proc/meminfo` | `mem_free_mb`, `mem_total_mb` |
 | the 3 busiest processes not drover's | `ps` | `top_cpu` rows with no `terminal`: named in the refusal, their `cpu_pct` never used as a rate |
-| free and total disk | `df -k /` | `disk_free_mb`, `disk_total_mb`; a workspace root on another volume stays `df` by `exec`, in `roots.rs` |
+| free and total disk | `df -k /` | `disk_free_mb`, `disk_total_mb`: a reading only, for `DISK_LOW` and the chart (open question 2; the other answer is `roots::free` for both). A workspace root on another volume stays `df` by `exec`, in `roots.rs` |
 | a lane's CPU share | `ps`'s `pcpu`, joined to `lsof` by folder | `busy` over two `terminal.procs` reads (above); never `cpu_pct` |
 | a lane's memory | the same join | `terminal.procs`: `rss_mb` summed over its tree |
 | the top memory users and their lane | `top`, `lsof` | `top_mem` rows, each with its `terminal` |
@@ -134,6 +146,23 @@ load limit, and still wants 3 ticks running; `top` asks for every lane it lists.
 
 `hosts::Seen` (`hosts.json`) keeps drover's own facts: tags, health rows, roots, the gh token row, `busy`, the
 host's drover build, the last sample for the board, and with it the swap count and the five rates.
+
+## Who owns what on a host
+
+The owner's decision of 2026-11-23: a shed machine is a place to run agents, and a host's setup is shed-cloud's
+recipe (shed #337), on VMs and, from a run card, on the Mini and the Air. No step of this ADR moves anything
+across these rows.
+
+| on a host | whose | drover's part |
+|---|---|---|
+| the link, the processes, their CPU and memory | shed | reads them through `crate::shed` (D1) |
+| shed's own binary and state | shed | nothing |
+| drover's own binary | shed's `install.*` moves it, on drover's order (D4) | which build, when, the swap order, the check after |
+| toolchains and tools: git, gh, just, Rust, node, sccache | the recipe | installs none. The tags probe reads what is there (`xcode`, `docker`, `webkit`) for placement; bootstrap's installs go with #1644 |
+| the shared caches: sccache's folder, pnpm's store | the recipe: where they are and how big; the tools trim themselves | `spawn` sets a lane's cache variables (#1641), which ride the start's `env`; `reclaim`, `clean` and doctor report a cache's size and delete none |
+| the disk floor | the recipe: it trims caches to get back over it, never a worktree or a lane's folder | `DISK_LOW` refuses a start under `min_free_gb` and names both remedies; it frees lane folders only |
+| a lane's worktree and its build folders (`target/`, `node_modules/`, …) | drover: lane state | the tick's trim, `reclaim`, `clean`, `DISK_BUDGET`; unchanged, through a `Host` from D1 |
+| the clones, the profiles, the sign-in panes | drover | bootstrap's own steps, as today |
 
 ## fleet.toml
 
@@ -207,7 +236,7 @@ another host reaches the main host (#1646), so which verbs write it is #1646's l
 
 ```toml
 # The first pin PR, before D2a: today's line with a tag in place of `rev = "9b88eb5…"` (protocol 2 to 5).
-shed-proto = { git = "https://github.com/jirathip-dev/shed", tag = "client-v5.0" }
+shed-proto = { git = "https://github.com/jirathip-dev/shed", tag = "client-v5.1" }
 # D0, in place of the line above. One tag for every shed crate: two tags are two sources, and `deny.toml`
 # refuses the second shed-proto.
 shed-client = { git = "https://github.com/jirathip-dev/shed", tag = "client-v<P>.<n>" }
