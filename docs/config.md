@@ -231,8 +231,8 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
 | `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
 | `pass_max_secs` | `60` | a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over |
-| `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe |
-| `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout, the `ssh <host> true` probe's too |
+| `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe's retry and `hosts refresh`'s probe |
+| `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and the `ssh <host> true` probe's; the whole first probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
 | `ssh_sessions` | `8` | remote calls open at once to one host over its shared connection; more wait their turn (under sshd's `MaxSessions`) |
 | `ssh_retry_secs` | `1` | a call the shared connection refused (`Session open refused by peer`) runs again on it after this long, up to 3 times |

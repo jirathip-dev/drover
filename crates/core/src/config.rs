@@ -1121,11 +1121,11 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "ssh_connect_secs",
-        "every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe",
+        "every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe's retry and `hosts refresh`'s probe",
     ),
     (
         "ssh_quick_secs",
-        "a maintenance ssh's connect timeout, the `ssh <host> true` probe's too",
+        "a maintenance ssh's connect timeout and the `ssh <host> true` probe's; the whole first probe",
     ),
     ("ssh_call_secs", "a remote call in a pass is killed after this long"),
     (
