@@ -1384,7 +1384,7 @@ fn pass(
             if let Some((old, mins)) = stale.filter(|_| code.is_none()) {
                 stale_replaced(ctx, cfg, out, (fleet, s.issue), arg(3), old, mins)?;
             }
-            if let Some(((hash, _), c)) = repro.zip(code.filter(|c| ["NO_REPRO", "NO_BASELINE"].contains(c))) {
+            if let Some(((hash, _), c)) = repro.zip(code.filter(|c| REV_FIXES.contains(c))) {
                 repro_refused(
                     ctx,
                     cfg,
@@ -1613,14 +1613,18 @@ fn repro_stuck(
     (fleet, n, lane): crate::hosts::Lane,
 ) -> Result<()> {
     let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
-    let told =
-        |e: &&Event| e.is("repro-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts) && e.val("prompted") == true;
+    let refused = |e: &&Event| e.is("repro-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts);
     let mins = cfg.limits.stall_minutes;
-    let Some(e) = ev.iter().rfind(told).filter(|e| e.ts + mins * 60 <= ctx.now) else {
+    let Some(e) = ev.iter().rfind(refused).filter(|e| e.ts + mins * 60 <= ctx.now) else {
         return Ok(());
     };
-    let (why, code) = (e.str("why").unwrap_or_default(), e.str("code").unwrap_or("NO_REPRO"));
-    let why = format!("verdict refused {code}, not corrected {mins} min after the re-prompt: {why}");
+    let (code, why) = (e.str("code").unwrap_or("NO_REPRO"), e.str("why").unwrap_or_default());
+    let since = if e.val("prompted") == true {
+        "the re-prompt"
+    } else {
+        "it (the reviewer could not be told)"
+    };
+    let why = format!("verdict refused {code}, not corrected {mins} min after {since}: {why}");
     escalate(ctx, cfg, out, (fleet, n), (lane, None), code, &why)
 }
 
@@ -1663,6 +1667,8 @@ pub(crate) fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> 
     crate::term::awake(&on, lane).ok()?;
     Some(crate::term::reply(&on, dsh, lane, pane, text).is_ok())
 }
+
+const REV_FIXES: [&str; 2] = ["NO_REPRO", "NO_BASELINE"];
 
 pub(crate) const OLD: &str = "is in the way: replacing it";
 
@@ -2156,6 +2162,9 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
             .is_ok_and(|f| f.flow().is_check(c.get(3).copied().unwrap_or_default()))
     }) {
         crate::pending::refused(ctx, (fleet, n), k, why.unwrap_or_default())?;
+    }
+    if let Some((n, k)) = spawn.zip(code) {
+        crate::pending::stuck(ctx, cfg, out, ev, (fleet, n, step), (k, why.unwrap_or_default()))?;
     }
     ACTS.with_borrow_mut(|a| {
         a.entry(fleet.into()).or_default().push(

@@ -35,7 +35,7 @@ fn git(a: &[&str]) -> String {
 
 const OUTBOX: &str = r#"{"args":["ask","sendmeter","12","--why","bazzite is slow"],"lane":"sendmeter-impl-12","ts":1}"#;
 
-fn superseded(name: &str, src: Option<&str>) -> (i32, String, String, FakeShed) {
+fn superseded(name: &str, src: Option<(&str, &str)>) -> (i32, String, String, FakeShed) {
     let c = setup(name, "", true, 0);
     let cfg = std::fs::read_to_string(&c.config).unwrap();
     let public = cfg.replacen(
@@ -61,8 +61,8 @@ fn superseded(name: &str, src: Option<&str>) -> (i32, String, String, FakeShed) 
     git(&["-C", &wt, "commit", "-qm", "init"]);
     git(&["-C", &wt, "push", "-q", "origin", "HEAD"]);
     std::fs::write(format!("{wt}/.drover/outbox.jsonl"), format!("{OUTBOX}\n")).unwrap();
-    if let Some(s) = src {
-        std::fs::write(format!("{wt}/src/a.rs"), s).unwrap();
+    if let Some((p, s)) = src {
+        std::fs::write(format!("{wt}/{p}"), s).unwrap();
     }
     let sp = json!({"role": "impl", "agent": IMPL, "harness": "claude", "pane": IMPL, "workspace": "",
                     "worktree": wt, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
@@ -105,7 +105,7 @@ fn a_supersede_takes_no_snapshot_of_drovers_own_outbox() {
 
 #[test]
 fn a_supersede_snapshot_holds_the_source_file_and_not_the_outbox() {
-    let (code, out, files, bazzite) = superseded("hosts-wip-src", Some("fn a() { 1; }\n"));
+    let (code, out, files, bazzite) = superseded("hosts-wip-src", Some(("src/a.rs", "fn a() { 1; }\n")));
     assert_eq!(code, 0, "{out}");
     assert_eq!(files, "src/a.rs\n", "{out}");
     assert!(bazzite.called("run", IMPL), "{:?}", bazzite.methods());
@@ -113,11 +113,25 @@ fn a_supersede_snapshot_holds_the_source_file_and_not_the_outbox() {
 
 #[test]
 fn a_host_name_in_a_product_file_is_still_refused_public_leak() {
-    let (code, out, files, bazzite) =
-        superseded("hosts-wip-leak", Some("fn a() {}\nconst H: &str = \"ssh bazzite\";\n"));
+    let (code, out, files, bazzite) = superseded(
+        "hosts-wip-leak",
+        Some(("src/a.rs", "fn a() {}\nconst H: &str = \"ssh bazzite\";\n")),
+    );
     assert_eq!(code, 3, "{out}");
     assert!(
         out.contains("REFUSED PUBLIC_LEAK") && out.contains("src/a.rs:2 has a host"),
+        "{out}"
+    );
+    assert_eq!(files, "", "nothing pushed");
+    assert!(!bazzite.called("run", IMPL) && bazzite.has(IMPL));
+}
+
+#[test]
+fn an_impl_lanes_untracked_file_with_a_home_path_is_still_refused_public_leak() {
+    let (code, out, files, bazzite) = superseded("hosts-wip-home", Some(("e2e-dir.txt", "/home/me/e2e\n")));
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED PUBLIC_LEAK") && out.contains("e2e-dir.txt:1 has a home-path"),
         "{out}"
     );
     assert_eq!(files, "", "nothing pushed");
