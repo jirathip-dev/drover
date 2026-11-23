@@ -1,0 +1,5 @@
+# #303: the logins a host card's [sign in ▾] (or `drover setup <host> <name>`) runs; claude, gh and codex are built in.
+# [[setup]]
+# name = "gh"
+# cmd = "gh auth login"
+

@@ -1,0 +1,1 @@
+# required_checks = ["quality"]   # gate/check/wait look only at these (latest run each); unset = all checks

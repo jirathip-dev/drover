@@ -130,7 +130,7 @@ plus the self-update and daily clean jobs ([below](#self-update-and-the-daily-cl
 
 Run it every 5 minutes: `drover timer install`. That is the tick job alone: `drover tick` every
 5 minutes runs `drover check` (alerts once per stall, dead lane or unmerged ready issue), then
-`drover drive` (every fleet's loop, [lanes.md](lanes.md#drive)). No cron and
+`drover drive` (every fleet's loop, [lanes/drive.md](lanes/drive.md)). No cron and
 no Hermes needed.
 
 - macOS: `~/Library/LaunchAgents/dev.drover.tick.plist` (`--label` picks another label),

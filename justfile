@@ -9,6 +9,8 @@ gen: types
     npm --prefix web run build
     cargo run -q --locked -p drover -- diagram > docs/workflow.md
     BLESS=1 cargo test -q --locked -p drover --test brief_golden
+    cargo run -q --locked -p drover -- config show --md > docs/config/limits.md
+    find fleet.example.d -type f | LC_ALL=C sort | xargs cat > fleet.example.toml
 
 # #375: no board TS under assets/ (but assets/types/) declares its own copy of a generated type.
 types-lint:

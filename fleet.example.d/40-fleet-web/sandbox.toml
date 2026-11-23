@@ -1,0 +1,1 @@
+# sandbox = "srt"   # #782 spike: start each lane's agent inside sandbox-runtime (`srt` on PATH); off by default (docs/spikes/lane-sandbox.md)

@@ -1318,7 +1318,7 @@ fn start(
     let inputs = json!({"role": role, "agent": p.agent, "worktree": p.worktree});
     *intent =
         Some(crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?);
-    let mut wip = None;
+    let (mut wip, saved) = (None, (cfg, fleet, p.family));
     if o.supersede && !dup.is_empty() {
         let was = last_spawn(&events, &p.agent);
         let old = crate::hosts::On::of(base, was);
@@ -1330,7 +1330,7 @@ fn start(
         let cause = crate::session::stamp::exit(&events, &p.agent).filter(|x| x.cause.resumable());
         let here = cause.is_some() && owt == wt && old.machine == on.machine;
         if stale.is_none() && !here && !hung {
-            wip = crate::check::save_lane(ctx, (cfg, fleet), &old, &p.agent, owt)?;
+            wip = crate::check::save_lane(ctx, saved, &old, &p.agent, owt)?;
         }
         let mut killed = names.clone();
         for a in listed
@@ -1362,7 +1362,7 @@ fn start(
         .and_then(|e| Some((e, e.str("worktree")?)))
         .filter(|_| wip.is_none())
     {
-        wip = crate::check::save_lane(ctx, (cfg, fleet), &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
+        wip = crate::check::save_lane(ctx, saved, &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
     }
 
     let mut sha = None;
@@ -1405,7 +1405,7 @@ fn start(
                 }
                 let git = |a: &[&str]| ok(r, "git", &[&["-C", &local, "worktree"][..], a].concat());
                 if on.exists(Path::new(&held)) {
-                    wip = wip.or(crate::check::save_lane(ctx, (cfg, fleet), &on, &p.agent, &held)?);
+                    wip = wip.or(crate::check::save_lane(ctx, saved, &on, &p.agent, &held)?);
                     if git(&["remove", &held]).is_err() {
                         git(&["remove", "--force", &held])?;
                     }

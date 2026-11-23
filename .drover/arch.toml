@@ -1,4 +1,12 @@
-frozen = ["ci/cap.toml", "crates/core/src/events/passive.rs", "crates/core/src/events/push.rs"]
+frozen = [
+    "ci/cap.toml",
+    "crates/core/src/events/passive.rs",
+    "crates/core/src/events/push.rs",
+    "docs/serve.md",
+    "docs/lanes.md",
+    "docs/hosts.md",
+    "docs/config.md",
+]
 generated = [
     "assets/types/api.d.ts",
     "web/dist/board.js",
@@ -11,6 +19,8 @@ generated = [
     "crates/cli/tests/golden/briefs/impl-update.md",
     "crates/cli/tests/golden/briefs/rev.md",
     "crates/cli/tests/golden/briefs/rev-repro.md",
+    "docs/config/limits.md",
+    "fleet.example.toml",
 ]
 generate = "just gen"
 shared = [
@@ -34,11 +44,32 @@ shared = [
     "crates/server/src/serve/chat.rs",
     "crates/server/src/serve/v1.rs",
     "crates/*/tests/**",
+    "web/src/main.ts",
 ]
 
 [[collect]]
 dir = "ci/cap.d"
 glob = "*.toml"
+
+[[collect]]
+dir = "scripts/test-shards.d"
+glob = "*.txt"
+
+[[collect]]
+dir = "docs/serve"
+glob = "*.md"
+
+[[collect]]
+dir = "docs/lanes"
+glob = "*.md"
+
+[[collect]]
+dir = "docs/hosts"
+glob = "*.md"
+
+[[collect]]
+dir = "docs/config"
+glob = "*.md"
 
 [comments]
 policy = "strict"
@@ -48,7 +79,7 @@ except = ["assets/types/**", "web/dist/**", "web/lint-fixtures/**"]
 paths = ["docs/**/*.md", "README.md"]
 watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/server/src/api.rs"]
 cli = true
-skip = [".drover/**", "roles/usage-tail.md"]
+skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]
 
 [[ban]]
 pattern = "claude"
@@ -221,6 +252,11 @@ max_fn_lines = 150
 [[size]]
 paths = ["crates/*/tests/**/*.rs"]
 max_file_lines = 1500
+
+[[size]]
+paths = ["web/src/**/*.ts"]
+max_file_lines = 800
+max_fn_lines = 80
 
 [[ban]]
 pattern = "pane_id"
