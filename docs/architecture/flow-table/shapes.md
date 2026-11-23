@@ -55,7 +55,7 @@ Rules the loader enforces:
 pub struct Cond { pub lane: Lane, pub host: Host, pub pr: Pr, pub verdict: Verdict, pub ask: Ask, pub turn: Turn }
 
 pub enum Lane    { None, Running, Limited, Asleep, Done, Exited, Gone }
-pub enum Host    { Up, Draining, Offline }
+pub enum Host    { Up, Loaded, Draining, Offline }
 pub enum Pr      { None, Merged, Closed, Conflicting, Red, Pending, Green, Open }
 pub enum Verdict { None, Written, Pass, Fail, Refused }
 pub enum Ask     { None, Open, Answered }
@@ -90,6 +90,17 @@ pub enum Action {
 }
 ```
 
+The host fact's source, in the link's own types (`facts.md`):
+
+```rust
+pub struct Sample { pub load_per_cpu: f64, pub pressure: Pressure, pub at: u64 }   // taken on the host itself
+
+pub struct Report   { pub build: String, pub shed: Option<String>, pub lanes: Vec<Seen>,
+                      pub sample: Option<Sample> }                                 // + sample
+pub struct HostSeen { /* link, since, why, boot, n, heard, build, as today */
+                      pub sample: Option<Sample>, pub drain: Option<String> }      // + sample, + the order in force
+```
+
 `Owner::Orchestrator` is one more than the issue's three: while a card sits in its thread, the orchestrator
 holds the row. `flow::act` matches `Action` with no wildcard arm, so a new action cannot ship without its effect.
 
@@ -105,7 +116,7 @@ pub enum Outcome {
 }
 ```
 
-`outcomes.toml` classes every refusal code once. It replaces `pending::SOFT`, `SKIP`, `DISK`, `starts::stops`,
+`outcomes.toml` classes every refusal code once. Shadow needs it to count tries, so it lands in slice 3. It replaces `pending::SOFT`, `SKIP`, `DISK`, `starts::stops`,
 `drive::owner_refusal`, `waiting::HOST_WAIT` and the `waits` list in `pending::stuck`:
 
 ```toml
@@ -128,12 +139,17 @@ pub struct Episode {                  // read from the log, never stored apart
     pub tries: BTreeMap<RowId, u8>,   // `row-tried` with outcome failed, since the episode began
     pub entered: Option<(RowId, u64)>,// the row the issue is in, and since when
     pub level: Level,                 // Auto | Orchestrator { ask } | Owner { card }
+    pub answered: BTreeSet<RowId>,    // rows the orchestrator has answered in this episode
+    pub spawn: Option<Seq>,           // this round's spawn: the session and host the readers look at
 }
 ```
 
-- An **episode** begins when the fold's state changes, the PR head changes, or a decision is applied (an
-  answer, `[retry]`, an extended round). Tries are counted per row over the episode, so an issue that flips
-  between two rows (a lane that dies, is respawned, dies again) does not start from zero each time.
+- An **episode** begins when the PR head changes, when the issue moves to another working state, or when the
+  owner decides (an answer, `[retry]`, `[one more round]`, `unpark`). A stop in `needs-human` or `parked` and
+  the way back are not a move. Tries are counted per row over the episode, so an issue that flips between two
+  rows (a lane that dies, is respawned, dies again) does not start from zero each time.
+- **An orchestrator's answer begins no episode.** It gives the row three more tries, once, and the row goes
+  into `answered`. When a row in `answered` runs out of tries again, the owner card is raised at once.
 - A row gets **three tries**: `do`, then `then[0]`, then `then[1]` (or `do` again). A try is spent by a `Failed`
   outcome or by the timeout running out.
 - The **clock** starts at `since`: when the issue entered the row, when shed last heard the lane, or shed's
@@ -150,16 +166,30 @@ deadline, the level and the line to show.
 | `row-entered` | `row`, `cond`, `deadline` | `act`, when the issue's row changes |
 | `row-tried` | `row`, `try`, `action`, `outcome`, `code`, `why` | `act`, once per try |
 | `row-escalated` | `row`, `level` (`orchestrator`, `owner`), `ask`, `thread` | `escalate` |
-| `row-retry` | `row`, `by` | the card's `[retry]`: the row's tries go back to zero |
-| `flow-disagree` | `row`, `table` (action), `drive` (step, who, what), `cond` | shadow mode only |
+| `row-retry` | `row`, `by` (`owner`, or `orchestrator-<thread>` once per row and episode) | an answer to the card: the row's tries go back to zero |
+| `verdict-seen` | `lane`, `head`, `first` (`PASS`, `FAIL`), `mtime` | intake, once per new `verdict.md` |
+| `verdict-refused` | `code`, `head`, `why` | `drover verdict`, when it refuses a file |
+| `flow-disagree` | `kind`, `row`, `cond`, and the two sides below | shadow mode only |
+
+In shadow mode `flow::shadow` writes `row-entered`, `row-tried` and `row-escalated` itself, each marked
+`"shadow": true`, so the shadow episode has tries, deadlines and a level although nothing acts. A shadow try
+is spent when the row's deadline passes, or when today's drive ran the same action for the issue and it failed
+(its refusal code, classed by `outcomes.toml`). A shadow escalation raises no ask and no card.
+
+`flow-disagree` has two kinds, each logged once per issue, row and episode:
+
+| `kind` | Logged when | Data |
+|---|---|---|
+| `action` | in one pass the table's step and today's differ in owner, action or role | `table` (action, try, deadline), `drive` (step, who, what) |
+| `escalation` | one side reached a person and the other did not by the episode's end; or both did, more than `act_minutes` apart or at different levels | `table_at`, `table_level`, `drive_at`, `drive_code` (the `needs-human` code, ask or alert) |
 
 `driven`, `promise`, `promise-missed`, `promise-void`, `no-action`, `pending-action`, `turn-prompted`,
 `self-heal`, `respawn` and the `stall` key `undriven:<since>` stop being written at slice 6. Readers of old logs
 keep reading them.
 
 `needs-human` keeps its name and gains `row`; its `code` stays for old readers. A card's ask is a
-`needs-decision` with `row`, `routed` (the thread) and the options `retry`, `park` (plus `one more round` on a
-round-limit row).
+`needs-decision` with `row`, `routed` (the thread; absent when the card goes straight to the owner) and the
+options `retry`, `park` (plus `one more round` on a round-limit row).
 
 ## `[limits]` keys
 
@@ -173,7 +203,7 @@ Every timeout is a `[limits]` key. Existing keys the rows use: `stall_minutes`, 
 | `escalate_minutes` | 30 | new: how long a card stays with the orchestrator before the owner gets it |
 | `start_minutes` | 10 | the constant `stall::START_SECS` |
 | `check_quiet_minutes` | 120 | the constant `stall::STALE_CHECK_SECS` |
-| `host_wait_minutes` | 30 | the 900 s and 1800 s in `check.rs` (`spawn-held`, `host-busy`) |
+| `host_wait_minutes` | 30 | the 900 s and 1800 s in `check.rs` (`spawn-held`, `host-busy`); also how long a loaded host's lane may stay unheard |
 | `card_ttl_minutes` | 15 | the constant `card::TTL` |
 
 `promise_passes` goes at slice 6. `[fleet.<n>] flow = "shadow" | "on" | "legacy"` selects the engine per fleet

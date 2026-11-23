@@ -18,7 +18,8 @@ for step in flow::order(steps) {
 }
 ```
 
-- `Seen::load` reads `state.db` and the PR cache once. It calls no host.
+- `Seen::load` reads `state.db`, the PR cache and the log once. It calls no host. Each fact has one reader and
+  one source (`facts.md`).
 - `decide` is pure: same inputs, same `Step`.
 - `order` runs records and merges before prompts, and prompts before spawns. One issue's wait never holds
   another issue's action.
@@ -62,7 +63,7 @@ A new case is one row in one small file. No Rust list changes:
 # crates/core/flow/issue/review.toml
 [[row]]
 id      = "quiet"
-when    = { lane = ["running"], verdict = ["none"], host = ["up", "draining"] }
+when    = { lane = ["running"], verdict = ["none"], host = ["up", "loaded", "draining"] }
 do      = "wait"
 owner   = "lane"
 timeout = "check_quiet_minutes"
@@ -115,3 +116,5 @@ One fake issue walked through its life against a fake shed and a fake GitHub, as
 | the record is refused `NO_REPRO` | verdict `refused` | `review/refused` | re-prompts once, respawns once, then the thread |
 | PASS, CI green | verdict `PASS`, pr `green` | `ready/merge` | merges |
 | the host goes offline mid-review | host `offline` | `review/host-offline` | waits `host_offline_minutes`, then reviews elsewhere |
+| a build lane's host is over its load limit and its frames turn late | host `loaded` | `build/working-loaded` | waits `host_wait_minutes` from the lane's last word, then moves it; `build/host-offline` is never the row |
+| a row runs out of tries a second time after the orchestrator answered it | level `owner` | the same row | raises the owner card at once, with no second ask in the thread |

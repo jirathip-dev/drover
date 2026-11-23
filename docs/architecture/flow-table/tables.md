@@ -6,11 +6,17 @@ How to read a table:
 - **do** runs when the issue enters the row. **timeout** is a `[limits]` key; its clock starts when the row was
   entered unless the cell says `· heard` (shed last heard the lane) or `· reset` (shed's limit reset time).
 - **then** is what the first and second retry do; blank means `do` again. After three tries the ladder runs:
-  the orchestrator thread, then one owner card with [retry] and [park] (`boundaries.md`).
+  the orchestrator thread (once per row and episode), then one owner card with [retry] and [park]
+  (`boundaries.md`).
 - **esc** is blank for the ladder, `orch` to skip the retries, `owner` for an owner topic.
 - **to** is the state a success leads to; blank stays.
 - Every spawn action replaces a same-name session whose lane fact is `done`, `asleep`, `exited` or `gone`. One
   that is `running` comes back `Final LANE_LIVE`.
+- Every spawn action asks placement first, and only a host that is `up` takes a start. `respawn` resumes the
+  lane in its own worktree; when that host is `loaded`, `draining` or `offline` it does what `move` does: the
+  unpushed work is pushed and the lane starts on another host. With no host that has room it is `Held`.
+- A host that is `loaded` is never treated as `offline`. A step that needs nothing from the lane's host (a
+  record, a merge, a hand-off of a pushed head) runs whatever the host's value.
 
 The rows below are the content of `crates/core/flow/*`. Slice 1 writes them as TOML; the shadow week corrects them.
 
@@ -35,11 +41,15 @@ stranded blocker.
 | `ask-open` | | | open | wait | owner | `ask_waiting_minutes` | remind | owner | |
 | `decided` | | | answered | deliver | drive | `act_minutes` | | | |
 | `host-offline` | | offline | none | wait | drive | `host_offline_minutes` | move | | |
-| `no-lane` | none | up, draining | none | reconcile | drive | `act_minutes` | | orch | |
+| `no-lane` | none | up, loaded, draining | none | reconcile | drive | `act_minutes` | | orch | |
 | `working` | running | up, draining | none | wait | lane | `silent_minutes` · heard | nudge, respawn | | |
-| `limited` | limited | up, draining | none | continue-at-reset | drive | `stall_minutes` · reset | respawn | | |
-| `ended` | done, asleep | up, draining | none | hand-off | drive | `act_minutes` | nudge, respawn | | design-review |
-| `lost` | exited, gone | up, draining | none | respawn | drive | `act_minutes` | | | |
+| `working-loaded` | running | loaded | none | wait | lane | `host_wait_minutes` · heard | move | | |
+| `limited` | limited | up, loaded, draining | none | continue-at-reset | drive | `stall_minutes` · reset | respawn | | |
+| `ended` | done, asleep | up, loaded, draining | none | hand-off | drive | `act_minutes` | nudge, respawn | | design-review |
+| `lost` | exited, gone | up, loaded, draining | none | respawn | drive | `act_minutes` | | | |
+
+`working-loaded`: on a loaded host a quiet lane is given `host_wait_minutes` from its last word, is not nudged,
+and is then moved. A lane that is still heard is left alone.
 
 `hand-off` logs `design-review` and raises the approve, revise, reject ask when the head carries the stage's
 files; it fails when it does not.
@@ -60,19 +70,22 @@ files; it fails when it does not.
 | `pr-closed` | | | closed | | | | raise-card | drive | `act_minutes` | | orch | needs-human |
 | `ask-open` | | | | | open | | wait | owner | `ask_waiting_minutes` | remind | owner | |
 | `decided` | | | | | answered | | deliver | drive | `act_minutes` | | | |
-| `host-offline` | | offline | | | none | | wait | drive | `host_offline_minutes` | move | | |
-| `reviewed-here` | | up, draining | | written, PASS, refused | none | | reconcile | drive | `act_minutes` | | orch | |
-| `pushed` | | up, draining | open, pending, red, green, conflicting | none | none | done | spawn-check | drive | `act_minutes` | | | review |
-| `no-change` | | up, draining | | FAIL | none | done | no-change | drive | `act_minutes` | | | review, ready |
-| `done-no-pr` | | up, draining | none | none | none | done | nudge | lane | `stall_minutes` | | | |
-| `lane-blocked` | | up, draining | | none, FAIL | none | blocked | raise-card | drive | `act_minutes` | | orch | needs-human |
-| `need-input` | | up, draining | | none, FAIL | none | need-input | nudge | lane | `stall_minutes` | | | |
-| `round-start` | none | up, draining | | none, FAIL | none | none, working | spawn-build | drive | `act_minutes` | | | |
+| `reviewed-here` | | | | written, PASS, refused | none | | reconcile | drive | `act_minutes` | | orch | |
+| `pushed` | | | open, pending, red, green, conflicting | none | none | done | spawn-check | drive | `act_minutes` | | | review |
+| `no-change` | | | | FAIL | none | done | no-change | drive | `act_minutes` | | | review, ready |
+| `lane-blocked` | | | | none, FAIL | none | blocked | raise-card | drive | `act_minutes` | | orch | needs-human |
+| `host-offline` | | offline | | none, FAIL | none | | wait | drive | `host_offline_minutes` | move | | |
+| `done-no-pr` | | up, loaded, draining | none | none | none | done | nudge | lane | `stall_minutes` | | | |
+| `need-input` | | up, loaded, draining | | none, FAIL | none | need-input | nudge | lane | `stall_minutes` | | | |
+| `round-start` | none | up, loaded, draining | | none, FAIL | none | none, working | spawn-build | drive | `act_minutes` | | | |
 | `working` | running | up, draining | | none, FAIL | none | none, working | wait | lane | `silent_minutes` · heard | nudge, respawn | | |
-| `limited` | limited | up, draining | | none, FAIL | none | none, working | continue-at-reset | drive | `stall_minutes` · reset | respawn | | |
-| `lane-ended` | done, asleep | up, draining | | none, FAIL | none | none, working | wait | lane | `stall_minutes` · heard | nudge, respawn | | |
-| `lane-lost` | exited, gone | up, draining | | none, FAIL | none | none, working | respawn | drive | `act_minutes` | | | |
+| `working-loaded` | running | loaded | | none, FAIL | none | none, working | wait | lane | `host_wait_minutes` · heard | move | | |
+| `limited` | limited | up, loaded, draining | | none, FAIL | none | none, working | continue-at-reset | drive | `stall_minutes` · reset | respawn | | |
+| `lane-ended` | done, asleep | up, loaded, draining | | none, FAIL | none | none, working | wait | lane | `stall_minutes` · heard | nudge, respawn | | |
+| `lane-lost` | exited, gone | up, loaded, draining | | none, FAIL | none | none, working | respawn | drive | `act_minutes` | | | |
 
+- `reviewed-here`, `pushed`, `no-change` and `lane-blocked` sit above the host rows: they read the log and the
+  PR, so a pushed head goes to review while its lane's host is offline or loaded.
 - `round-start` is a fix round after FAIL, an update round, an extended round, or impl after a kill: the state
   is entered and no spawn of this round is logged yet.
 - `no-change` is `drover done --no-change`: a CI-only FAIL whose head is green now becomes PASS; any other head
@@ -93,16 +106,18 @@ files; it fails when it does not.
 | `recorded-here` | | | | PASS, FAIL | none | reconcile | drive | `act_minutes` | | orch | |
 | `refused` | | | | refused | none | tell-check | lane | `stall_minutes` | respawn-check | | |
 | `host-offline` | | offline | | none | none | wait | drive | `host_offline_minutes` | move | | |
-| `start` | none | up, draining | | none | none | spawn-check | drive | `act_minutes` | | | |
-| `reviewing` | running | up, draining | | none | none | wait | lane | `check_quiet_minutes` · heard | respawn-check | | |
-| `limited` | limited | up, draining | | none | none | continue-at-reset | drive | `stall_minutes` · reset | respawn-check | | |
-| `no-verdict` | done, asleep | up, draining | | none | none | wait | lane | `start_minutes` · heard | tell-check, respawn-check | | |
-| `lost` | exited, gone | up, draining | | none | none | respawn-check | drive | `act_minutes` | | | |
+| `start` | none | up, loaded, draining | | none | none | spawn-check | drive | `act_minutes` | | | |
+| `reviewing` | running | up, loaded, draining | | none | none | wait | lane | `check_quiet_minutes` · heard | respawn-check | | |
+| `limited` | limited | up, loaded, draining | | none | none | continue-at-reset | drive | `stall_minutes` · reset | respawn-check | | |
+| `no-verdict` | done, asleep | up, loaded, draining | | none | none | wait | lane | `start_minutes` · heard | tell-check, respawn-check | | |
+| `lost` | exited, gone | up, loaded, draining | | none | none | respawn-check | drive | `act_minutes` | | | |
 
 - `record` sits above the ask, host and lane rows on purpose: a written verdict is recorded from the view's
   copy whatever the lane or its host is doing (#1597, #1612, #1625).
 - `refused` re-prompts the reviewer with the refusal; a reviewer that is not there fails the try and the retry
   reviews again.
+- A loaded host changes no review row: `check_quiet_minutes` is already long, and `respawn-check` starts the
+  new review on a host that is `up`.
 
 ### `ready` · reads pr, verdict, ask · in flight
 
@@ -186,7 +201,10 @@ read `lane`, the asking lane; the others read nothing.
 - Every card starts at `routed`: needs-human, one more round, cap, respawn loop, lane asks. The thread is the
   one that filed or queued the issue, else the repo's (`orchestrator::route`). No orchestrator role, or one not
   reached, is a failed try of `in-thread` and goes on to the owner.
-- These start at `with-owner`: design and ADR approval, a handoff pick, and anything naming an owner topic.
+- These start at `with-owner`: design and ADR approval, a handoff pick, anything naming an owner topic, and
+  the card of a row the orchestrator has already answered in this episode.
+- The orchestrator answers a row once per episode. Its answer starts no new episode, so the same row running
+  out of tries again goes to the owner.
 - `deliver` types `DECISION <id>: <text>` into the asking lane; for a lane that is gone it respawns the lane
   with the decision in its brief.
 - `orphaned/close` is #1611: a design ask whose design was redone closes `closed: superseded`.
@@ -238,7 +256,9 @@ trim. `release` is `Queued` behind the raise issue and unblocks the asking issue
 - `slot/held/stale` is #1625: a start slot or an admission lease older than its limit is dropped and logged
   `admission-dropped`; the next issue starts.
 - `host/holding/refusing` is one card per host that has refused every start for `host_wait_minutes`
-  (`HOST_BUSY`, `DISK_LOW`, `LOGIN_NEEDED` and the rest of the `held` class), not one per waiting issue.
+  (`HOST_BUSY`, `DISK_LOW`, `LOGIN_NEEDED` and the rest of the `held` class), not one per waiting issue. A host
+  that is `loaded` is one of these, and the card carries the fact's evidence (`load 3.4 per CPU for 31 min`).
+  #1652's two "Drive is stuck" cards become this one card.
 
 ## The timers' pass chart
 
@@ -263,6 +283,7 @@ and `drover diagram` already draws them from data. Only the pass's own stall mov
 | `update_lane`, `land::auto_update` | `ready/conflict`, inside `merge` |
 | `external`: `PR_CLOSED`, merged outside | `*/pr-closed`, `*/merged-outside` |
 | `hosts::evacuate` | `*/host-offline` |
+| `View::down` on a late frame, the ssh probe's exit code | the `host` fact: `loaded` or `offline` (`facts.md`); `*/working-loaded` |
 | `limit::due` | `*/limited` |
 | `design::handoff` | `design/ended` |
 | `promise::pass`, `promise-missed` | every drive-owned row's `act_minutes` |
