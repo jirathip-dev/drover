@@ -1,0 +1,1 @@
+# swift_build = true   # #1478: each lane gets DROVER_DERIVED_DATA (xcodebuild -derivedDataPath) and DROVER_SWIFT_SCRATCH (swift build --scratch-path), cloned warm in <root>/.build/<agent> (docs/lanes.md)
