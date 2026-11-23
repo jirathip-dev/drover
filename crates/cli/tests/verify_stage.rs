@@ -868,3 +868,62 @@ fn an_extend_ask_a_log_left_open_closes_on_the_next_read() {
     let row = all.lines().find(|l| l.contains("q5")).unwrap_or_default();
     assert!(row.contains("closed: superseded"), "{all}");
 }
+
+#[test]
+fn a_superseded_verify_lanes_scratch_with_a_home_path_is_never_pushed() {
+    let (c, mut r, sh, _) = verify_r1_live("verify-1515-scratch", true);
+    let wt = c
+        .worktrees
+        .join("sendmeter/verify-12-r1")
+        .to_string_lossy()
+        .into_owned();
+    let diff = "diff --git a/e2e-dir.txt b/e2e-dir.txt\n+++ b/e2e-dir.txt\n@@ -0,0 +1 @@\n+/Users/me/scratch/e2e\n";
+    let mine = Fake::default()
+        .reply(&format!("git -C {wt} status --porcelain"), "?? e2e-dir.txt\n")
+        .reply(&format!("git -C {wt} diff --cached --name-only"), "")
+        .reply(&format!("git -C {wt} diff --cached"), diff);
+    r.replies.splice(0..0, mine.replies);
+    let out = drive(&c, &r);
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
+    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{out}");
+    assert_eq!(kinds(&c, "supersede")[0].val("wip"), &json!(null), "{out}");
+    for verb in ["add", "commit", "push"] {
+        assert!(
+            !r.called(&format!("git -C {wt} {verb}")),
+            "{verb}: {:?}",
+            r.calls.borrow()
+        );
+    }
+}
+
+#[test]
+fn a_verify_start_refused_the_same_way_every_pass_shows_its_code_then_one_needs_human() {
+    let cfg = config() + "mcp = [\"supabase-prod\"]\n";
+    let (c, head, sh) = passed("verify-1515-refused", &cfg, false);
+    let r = fake(&head, "web/src/queue.ts\n").reply(RECIPE, "");
+    let at = |mins: u64| drover::Ctx {
+        now: c.now + mins * 60,
+        ..c.clone()
+    };
+    for mins in [0, 5, 10] {
+        drive(&at(mins), &r);
+        let mut slot = kinds(&c, "driven").pop().unwrap();
+        slot.data.insert("code".into(), json!("SPAWN_PENDING"));
+        slot.data
+            .insert("result".into(), json!("REFUSED SPAWN_PENDING: #12 is starting"));
+        ev(&c, at(mins).now + 1, "driven", json!(slot.data));
+        let (code, out) = run(&at(mins), &r, &["waiting", "sendmeter"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("MCP_FORBIDDEN"), "pass at {mins}m: {out}");
+        assert!(!out.contains(drover::waiting::SLOT), "{out}");
+    }
+    assert!(!started(&sh, "sendmeter-verify") && kinds(&c, "needs-human").is_empty());
+    for mins in [31, 40] {
+        drive(&at(mins), &r);
+    }
+    let nh = kinds(&c, "needs-human");
+    assert_eq!(nh.len(), 1, "{nh:?}");
+    assert_eq!(nh[0].str("code"), Some("MCP_FORBIDDEN"), "{nh:?}");
+    assert!(nh[0].str("reason").unwrap().contains("supabase-prod"), "{nh:?}");
+    assert_eq!(state(&c), "needs-human");
+}

@@ -2294,9 +2294,15 @@ fn save_on(
     }
 }
 
-/// A superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any.
-pub fn save_lane(ctx: &Ctx, (cfg, fleet): (&Config, &str), on: &On, agent: &str, wt: &str) -> Result<Option<String>> {
-    if !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
+/// A superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any. A rev-family lane's scratch stays local.
+pub fn save_lane(
+    ctx: &Ctx,
+    (cfg, fleet, family): (&Config, &str, &str),
+    on: &On,
+    agent: &str,
+    wt: &str,
+) -> Result<Option<String>> {
+    if family == "rev" || !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
         return Ok(None);
     }
     let (w, chk) = (
