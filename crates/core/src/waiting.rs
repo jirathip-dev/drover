@@ -926,7 +926,10 @@ pub fn scan_where(
         }
         let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
         let spawn = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover spawn "));
-        if spawn && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
+        let refused = spawn
+            .then(|| held(mine, (&s.fleet, s.issue), w.next_cmd.as_deref()))
+            .flatten();
+        if spawn && refused.is_none() && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
             let by = crate::drive::held_by(ctx, cfg, r);
             w.say(&Say::SpawnSlot((!by.is_empty()).then_some(by)));
         }
@@ -936,10 +939,7 @@ pub fn scan_where(
         {
             w.what = why;
         }
-        if let Some(h) = spawn
-            .then(|| held(mine, (&s.fleet, s.issue), w.next_cmd.as_deref()))
-            .flatten()
-        {
+        if let Some(h) = refused {
             w.what = match crate::promise::strip_catch_up(&w.what) {
                 Some(p) => format!("{p}{h}"),
                 None => format!("{} · {h}", w.what),
@@ -1026,7 +1026,8 @@ pub fn guarded(events: &[Event], cfg: &Config) -> Vec<IssueState> {
 
 pub fn held(events: &[Event], (f, n): (&str, u64), cmd: Option<&str>) -> Option<String> {
     let mine = |e: &&Event| e.fleet == f && e.issue == Some(n) && matches!(e.kind.as_str(), "driven" | "spawn");
-    let e = events.iter().rfind(mine)?;
+    let slot = |e: &&Event| e.str("code") == Some("SPAWN_PENDING");
+    let e = events.iter().filter(mine).rfind(|e| !slot(e))?;
     let wait = ["EXIT", "ERROR", "SPAWN_PENDING", "SPAWN_BACKOFF"];
     let code = e.str("code").filter(|c| !wait.contains(c))?;
     let c = e.str("cmd").filter(|c| c.starts_with("drover spawn "))?;

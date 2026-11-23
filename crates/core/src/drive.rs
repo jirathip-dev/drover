@@ -2168,6 +2168,9 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     }) {
         crate::pending::refused(ctx, (fleet, n), k, why.unwrap_or_default())?;
     }
+    if let Some((n, k)) = spawn.zip(code) {
+        crate::pending::stuck(ctx, cfg, out, ev, (fleet, n, step), (k, why.unwrap_or_default()))?;
+    }
     ACTS.with_borrow_mut(|a| {
         a.entry(fleet.into()).or_default().push(
             json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w, "why": why, "kick": kicks}),
