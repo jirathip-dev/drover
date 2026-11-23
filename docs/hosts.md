@@ -40,6 +40,11 @@ root = "~/lanes"        # workspace root on that host (default ~/.local/share/dr
 enabled = true          # false: no new lanes go there (see below)
 ```
 
+#1616: every `drover drive` keeps the main host's shed machines in step with `[hosts]`: each enabled host with a
+`machine` shed does not list (`shed machine ls --json`) is added as `shed machine add <machine> <machine>`. drover
+never removes a machine from shed, for a host turned off or dropped from `[hosts]` either. `doctor` shows one
+`✗ shed machine <machine>` row per missing one, with that command as the fix.
+
 ## Workspace roots (#630)
 
 Everything drover makes on a host lives under its workspace root: worktrees at `<root>/<repo>/<lane>`, the
