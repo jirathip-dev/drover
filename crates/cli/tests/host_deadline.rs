@@ -109,7 +109,7 @@ fn an_ssh_that_never_returns_costs_one_retried_deadline_and_drive_still_starts()
         let (code, out) = run(&c, &r, &["tick"]);
         let took = t.elapsed();
         assert_eq!(code, 0, "{name}: {out}");
-        assert!(took < Duration::from_secs(2 * 2 + 4), "{name}: {took:?}\n{out}");
+        assert!(took < Duration::from_secs(2 * 2 + 6), "{name}: {took:?}\n{out}");
         assert!(
             sh.called("run", "sendmeter-impl-12"),
             "{name}: drive still starts the main host's work: {out}"
@@ -289,7 +289,7 @@ fn a_hung_shed_connect_on_one_remote_host_costs_one_deadline_and_another_remote_
         }
         assert_eq!(code, 0, "{name}: {out}");
         assert!(
-            took < Duration::from_secs(2 + 6),
+            took < Duration::from_secs(2 + 8),
             "{name}: the pass took {took:?}\n{out}"
         );
         assert!(

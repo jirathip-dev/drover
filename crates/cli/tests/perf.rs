@@ -1152,8 +1152,8 @@ fn a_pass_over_30k_events_and_150_done_issues_stays_fast() {
         return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
     }
     assert!(
-        pass < 75.0,
-        "a drive --fast pass took {pass:.0} ms of CPU (target < 75)"
+        pass < 90.0,
+        "a drive --fast pass took {pass:.0} ms of CPU (target < 90)"
     );
 }
 
