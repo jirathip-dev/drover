@@ -1119,10 +1119,13 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "pass_max_secs",
         "a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over",
     ),
-    ("ssh_connect_secs", "every host ssh's `-oConnectTimeout`"),
+    (
+        "ssh_connect_secs",
+        "every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe",
+    ),
     (
         "ssh_quick_secs",
-        "a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe",
+        "a maintenance ssh's connect timeout, the `ssh <host> true` probe's too",
     ),
     ("ssh_call_secs", "a remote call in a pass is killed after this long"),
     (

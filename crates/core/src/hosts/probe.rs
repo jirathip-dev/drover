@@ -1,5 +1,5 @@
 use super::{lock, Pass, CM};
-use crate::runner::{argv, Out};
+use crate::runner::{argv, Out, Runner};
 use anyhow::Result;
 use std::time::Duration;
 
@@ -20,20 +20,10 @@ impl Pass<'_> {
             return true;
         }
         let secs = crate::config::limits().ssh_quick_secs;
-        let ssh = |a: Vec<String>| self.r.run_for("ssh", &a, "", Duration::from_secs(secs));
         let late = |o: &Result<Out>| o.as_ref().is_ok_and(|o| o.code == 124);
-        let connect = format!("-oConnectTimeout={secs}");
-        let probe = || {
-            ssh(argv(&[
-                "-oBatchMode=yes",
-                &connect,
-                "-oControlPath=none",
-                m,
-                "--",
-                "true",
-            ]))
-        };
-        let mut o = ssh(argv(&[CM[1], "-O", "check", m]));
+        let probe = || reach(self.r, m).1;
+        let check = argv(&[CM[1], "-O", "check", m]);
+        let mut o = self.r.run_for("ssh", &check, "", Duration::from_secs(secs));
         if !o.as_ref().is_ok_and(|o| o.code == 0) {
             o = probe();
             if !o.as_ref().is_ok_and(|o| o.code != 124) {
@@ -50,6 +40,29 @@ impl Pass<'_> {
         self.seen(m, u);
         u
     }
+}
+
+/// The fresh handshake with machine `m` (`ssh … true`, no shared connection): `ssh_quick_secs` to connect, `ssh_connect_secs` in all; the command as run and its answer.
+pub fn reach(r: &dyn Runner, m: &str) -> (String, Result<Out>) {
+    let l = crate::config::limits();
+    let connect = format!("-oConnectTimeout={}", l.ssh_quick_secs);
+    let a = argv(&["-oBatchMode=yes", &connect, "-oControlPath=none", m, "--", "true"]);
+    let o = r.run_for("ssh", &a, "", Duration::from_secs(l.ssh_connect_secs));
+    (format!("ssh {}", a.join(" ")), o)
+}
+
+/// Why `hosts refresh` finds machine `m` offline: its probe's command, exit code and last stderr line; the shared offline mark set or cleared by it.
+pub fn why_down(ctx: &crate::Ctx, r: &dyn Runner, m: &str) -> String {
+    let (cmd, o) = reach(r, m);
+    super::went(ctx, m, o.as_ref().is_ok_and(|o| o.code == 0));
+    let said = o.map_or_else(
+        |e| format!("{e:#}"),
+        |o| {
+            let tail = o.stderr.lines().map(str::trim).rfind(|l| !l.is_empty());
+            format!("exit {}: {}", o.code, tail.unwrap_or("no stderr"))
+        },
+    );
+    format!("probe `{cmd}` {said}")
 }
 
 impl Pass<'_> {
