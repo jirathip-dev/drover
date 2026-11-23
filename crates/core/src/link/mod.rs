@@ -71,7 +71,10 @@ fn report(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, m): (&str, Option<&str
     let w = watch(ctx, cfg, ev, (name, m));
     let Some(m) = m else { return watch::frame(r, &w) };
     let args = crate::runner::argv(&["hosts", "report"]);
-    let o = crate::hosts::On::new(r, Some(m)).run_in(&exe(ctx, name), &args, &serde_json::to_string(&w)?)?;
+    let (on, w) = (crate::hosts::On::new(r, Some(m)), serde_json::to_string(&w)?);
+    let once = || on.run_in(&exe(ctx, name), &args, &w);
+    let o = once()?;
+    let o = if o.code == 124 { once()? } else { o };
     let why = || o.stderr.lines().next().map_or(format!("exit {}", o.code), String::from);
     anyhow::ensure!(o.code == 0, "{}", why());
     let line = o.stdout.lines().find(|l| l.starts_with('{')).context("no frame")?;

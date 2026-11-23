@@ -184,7 +184,7 @@ fn a_wake_starts_its_fleets_pass_within_a_second() {
     std::thread::spawn(move || drover_service::run(sc, r, || 1_000_000, api));
     let pass = |f: &str| r.count(&format!("/opt/drover/bin/drover drive {f}"));
     let t = Instant::now();
-    while pass("sendmeter") == 0 && t.elapsed() < Duration::from_secs(30) {
+    while (pass("sendmeter") == 0 || pass("slowfleet") == 0) && t.elapsed() < Duration::from_secs(30) {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(

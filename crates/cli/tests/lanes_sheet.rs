@@ -8,7 +8,7 @@ const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
 fn two() -> String {
-    format!("{CONFIG}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\n")
+    format!("{CONFIG}\n[fleet.tangelo]\nrepo = \"o/tangelo-apps\"\nlocal = \"/p/tangelo-apps\"\nintegration = \"staging\"\n")
 }
 
 fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str, now: u64) -> String {
@@ -28,19 +28,19 @@ fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     spawn("sendmeter", 12, 900_100, "impl", "sendmeter-impl-12");
     spawn("sendmeter", 9, 900_200, "rev", "sendmeter-rev-9-r1");
     spawn("sendmeter", 14, 900_300, "impl", "sendmeter-impl-14");
-    spawn("synergy", 7, 900_400, "impl", "synergy-impl-7");
-    spawn("synergy", 8, 900_500, "impl", "synergy-impl-8");
-    spawn("synergy", 5, 900_600, "design", "synergy-design-5");
-    spawn("synergy", 20, 900_700, "impl", "synergy-impl-20");
+    spawn("tangelo", 7, 900_400, "impl", "tangelo-impl-7");
+    spawn("tangelo", 8, 900_500, "impl", "tangelo-impl-8");
+    spawn("tangelo", 5, 900_600, "design", "tangelo-design-5");
+    spawn("tangelo", 20, 900_700, "impl", "tangelo-impl-20");
     let screen = "⏺ Read(src/serve.rs)\n  ⎿ Read 120 lines\n> fix the test\n⏺ Bash(cargo test)\n  ⎿ ok\n";
     let r = OnShed::new(Fake::default());
     for (n, st) in [
         ("sendmeter-impl-12", "working"),
         ("sendmeter-rev-9-r1", "blocked"),
-        ("synergy-impl-7", "working"),
-        ("synergy-impl-8", "working"),
-        ("synergy-design-5", "done"),
-        ("synergy-impl-20", "unknown"),
+        ("tangelo-impl-7", "working"),
+        ("tangelo-impl-8", "working"),
+        ("tangelo-design-5", "done"),
+        ("tangelo-impl-20", "unknown"),
     ] {
         r.1.lane(n, st, "/x");
         r.1.screen(n, screen);
@@ -90,19 +90,19 @@ fn parity_49_lanes_group_by_state_then_repo_with_counts() {
         "working (4)",
         "  sendmeter (1)",
         "    sendmeter-impl-12",
-        "  synergy (2)",
-        "    synergy-impl-8",
-        "    synergy-impl-7",
+        "  tangelo (2)",
+        "    tangelo-impl-8",
+        "    tangelo-impl-7",
         "  Others (1)",
         "    scratch",
         "idle (2)",
-        "  synergy (1)",
-        "    synergy-impl-20",
+        "  tangelo (1)",
+        "    tangelo-impl-20",
         "  Others (1)",
         "    side-project",
         "done (1)",
-        "  synergy (1)",
-        "    synergy-design-5",
+        "  tangelo (1)",
+        "    tangelo-design-5",
         "dead (1)",
         "  sendmeter (1)",
         "    sendmeter-impl-14",
@@ -526,12 +526,12 @@ fn reply_refusals_rate_limit_and_read_only() {
     assert_eq!(code(send("sendmeter-impl-12", "go")), "PAUSED");
     assert!(r.1.all("send").is_empty() && !read(&c.state).unwrap().iter().any(|e| e.kind == "prompt"));
     for _ in 0..6 {
-        send("synergy-impl-8", "go");
+        send("tangelo-impl-8", "go");
     }
-    assert!(send("synergy-impl-8", "go").starts_with("HTTP/1.1 429 "));
-    assert_eq!(r.1.sent("synergy-impl-8").len(), 6, "10 attempts incl. the 4 refused");
+    assert!(send("tangelo-impl-8", "go").starts_with("HTTP/1.1 429 "));
+    assert_eq!(r.1.sent("tangelo-impl-8").len(), 6, "10 attempts incl. the 4 refused");
     let ro = Server::new(&c, &r, None);
-    assert!(req(&ro, "POST", "/api/v1/send", "agent=synergy-impl-8&text=go", &cookie, T).starts_with("HTTP/1.1 405 "));
+    assert!(req(&ro, "POST", "/api/v1/send", "agent=tangelo-impl-8&text=go", &cookie, T).starts_with("HTTP/1.1 405 "));
 }
 
 #[test]
@@ -565,8 +565,8 @@ fn vector_horses_keep_a_coat_per_name() {
         ("sendmeter-impl-12", "impl", "working"),
         ("a", "impl", "blocked"),
         ("a", "impl", "done"),
-        ("synergy-impl-7", "impl", "idle"),
-        ("synergy-impl-7", "impl", "idle"),
+        ("tangelo-impl-7", "impl", "idle"),
+        ("tangelo-impl-7", "impl", "idle"),
     ];
     of.extend(names.iter().map(|n| (n.as_str(), "impl", "idle")));
     let all: Vec<String> = of.iter().map(|(n, _, _)| drover::serve::coat(n)).collect();

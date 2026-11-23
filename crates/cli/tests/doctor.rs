@@ -694,3 +694,24 @@ fn the_scene_device_line_says_off_by_default_and_on_with_its_address() {
         "{out}"
     );
 }
+
+#[test]
+fn a_hosts_machine_missing_from_shed_is_one_row_with_its_fix() {
+    let (c, _) = setup("doc-shed-machine", "claude");
+    let hosts = "\n[hosts.mini]\n\n[hosts.box]\nmachine = \"box\"\n\n[hosts.off]\nmachine = \"off\"\nenabled = false\n";
+    let base = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, base + hosts).unwrap();
+    let _sh = FakeShed::attached(&c);
+    let r = good().reply("shed machine ls --json", r#"[{"name":"gone","target":"gone"}]"#);
+    let (_, out) = run(&c, &r, &["doctor"]);
+    let rows: Vec<&str> = out.lines().filter(|l| l.contains("shed machine")).collect();
+    assert_eq!(rows.len(), 1, "{out}");
+    assert!(
+        rows[0].starts_with('✗') && rows[0].contains("shed machine add box box"),
+        "{out}"
+    );
+    assert!(
+        !r.called("shed machine add") && !r.called("shed machine rm"),
+        "doctor writes nothing"
+    );
+}

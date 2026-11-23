@@ -34,6 +34,9 @@ pub trait Runner: Sync {
     fn shed(&self) -> Option<crate::shed::Shed> {
         None
     }
+    fn recheck(&self) -> bool {
+        false
+    }
     fn stream(&self, prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
         Real::stream(prog, args, input)
     }

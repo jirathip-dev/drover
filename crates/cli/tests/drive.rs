@@ -1,10 +1,14 @@
 mod common;
 #[path = "drive/done_lanes.rs"]
 mod done_lanes;
+#[path = "drive/no_baseline.rs"]
+mod no_baseline;
 #[path = "drive/remote_unlisted.rs"]
 mod remote_unlisted;
 #[path = "drive/rev_unlisted.rs"]
 mod rev_unlisted;
+#[path = "drive/shed_machines.rs"]
+mod shed_machines;
 #[path = "drive/undriven.rs"]
 mod undriven;
 #[path = "drive/update_limit.rs"]
