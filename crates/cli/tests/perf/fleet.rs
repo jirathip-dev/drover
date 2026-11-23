@@ -75,10 +75,10 @@ fn live_fleet() -> (drover::Ctx, Offline, &'static FakeShed) {
             let (agent, t) = (format!("{f}-impl-{n}"), NOW - 80_000 + n * 60);
             let wt = format!("/wt/{agent}");
             let mut d = json!({"role": "impl", "agent": agent, "pane": agent, "runtime": "shed", "worktree": wt});
-            let live = n > ISSUES - 3;
-            if live && i % 3 == 0 {
+            let running = n > ISSUES - 3;
+            if running && i % 3 == 0 {
                 (d["host"], d["machine"]) = (json!("bazzite"), json!("bazzite"));
-            } else if live {
+            } else if running {
                 sh.lane(&agent, "idle", &wt);
                 sh.screen(&agent, "⏺ Working on it\n\n❯ \n");
             }
@@ -95,7 +95,7 @@ fn live_fleet() -> (drover::Ctx, Offline, &'static FakeShed) {
                 let d = json!({"step": "review", "code": "EXIT", "result": "exit 1: boom"});
                 log.push(ev(t + 3 + k, &f, Some(n), "driven", d));
             }
-            if !live && n % 5 != 0 {
+            if !running && n % 5 != 0 {
                 log.push(ev(
                     t + 10,
                     &f,

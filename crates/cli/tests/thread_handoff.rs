@@ -322,7 +322,7 @@ fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_b
     let r = b.on(&f);
     let s = Server::new(&at, &r, Some(ADDR.into()));
     let cookie = pair(&s, &at, "Mozilla/5.0 (iPhone)", at.now);
-    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, at.now, "chat")).unwrap();
+    let chat: serde_json::Value = chat_all(&s, ADDR, &cookie, at.now);
     let t1 = chat["threads"]
         .as_array()
         .unwrap()
@@ -452,7 +452,7 @@ fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not
     let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let chat = api(&s, ADDR, &cookie, c.now, "chat");
+    let chat = chat_all(&s, ADDR, &cookie, c.now).to_string();
     assert_eq!(
         chat.matches("\"text\":\"handoff to Test · t2: add facets (forwarded)\"")
             .count(),
@@ -560,7 +560,7 @@ fn the_chat_api_links_each_linked_row_and_thread_row() {
     let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, c.now, "chat")).unwrap();
+    let chat: serde_json::Value = chat_all(&s, ADDR, &cookie, c.now);
     let thread = |t: &str| {
         chat["threads"]
             .as_array()

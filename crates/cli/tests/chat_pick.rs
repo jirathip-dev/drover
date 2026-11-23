@@ -51,7 +51,7 @@ fn req(s: &Server, path: &str, body: &str, extra: &str) -> String {
 }
 
 fn chat(s: &Server, cookie: &str) -> Value {
-    serde_json::from_str(&api(s, ADDR, cookie, T, "chat")).unwrap()
+    chat_all(s, ADDR, cookie, T)
 }
 
 fn thread<'a>(chat: &'a Value, id: &str) -> &'a Value {

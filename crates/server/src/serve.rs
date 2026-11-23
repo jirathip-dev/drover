@@ -1614,7 +1614,7 @@ impl<'a> Server<'a> {
         [
             ("needs", json!(self.needs_tab(ctx, paired)).to_string()),
             ("lanes", json!(self.lanes_tab(ctx, paired)).to_string()),
-            ("chat", json!(self.chat_tab(ctx, rw)).to_string()),
+            ("chat", json!(self.chat_tab(ctx, rw, &BTreeMap::new())).to_string()),
         ]
     }
 

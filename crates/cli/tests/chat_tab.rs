@@ -20,7 +20,7 @@ fn body(res: &str) -> &str {
 }
 
 fn chat(s: &Server, cookie: &str, now: u64) -> Value {
-    serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap()
+    chat_all(s, ADDR, cookie, now)
 }
 
 fn thread<'a>(chat: &'a Value, t: &str) -> &'a Value {
@@ -1236,5 +1236,88 @@ fn a_stream_with_a_thread_open_stamps_its_watch_file() {
                 .filter(|e| e.file_name().to_string_lossy().starts_with("watch-"))
                 .count()
                 == 1
+    );
+}
+
+#[test]
+fn the_list_carries_open_rows_only_and_a_thread_comes_alone_then_only_its_newer_messages() {
+    let c = ctx(&tmpdir("chat-rows"), CONFIG);
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let mut log = vec![];
+    for (t, gone) in [("t1", false), ("t2", true)] {
+        log.push(json!({"ts": T, "fleet": "sendmeter", "type": "thread-new", "thread": t, "title": t}));
+        for m in 0..5 {
+            log.push(json!({"ts": T + m, "fleet": "sendmeter", "type": "thread-msg", "thread": t, "from": "owner", "text": format!("{t} m{m}")}));
+        }
+        if gone {
+            log.push(json!({"ts": T + 9, "fleet": "sendmeter", "type": "thread-archive", "thread": t}));
+        }
+    }
+    let jsonl: String = log.iter().map(|e| format!("{e}\n")).collect();
+    std::fs::write(&c.state, jsonl).unwrap();
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let get = |q: &str| -> Value { serde_json::from_str(&api(&s, ADDR, "", T + 60, q)).unwrap() };
+    let ids = |v: &Value, k: &str| -> Vec<String> {
+        let repo = v["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["repo"] == "sendmeter")
+            .unwrap();
+        repo[k]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let list = get("chat");
+    assert_eq!(
+        (ids(&list, "rows"), ids(&list, "archived")),
+        (vec!["t1".into()], vec![]),
+        "{list}"
+    );
+    assert_eq!(list["threads"], json!([]), "{list}");
+    assert!(
+        !list.to_string().contains("t1 m0"),
+        "no conversation in the list: {list}"
+    );
+    assert_eq!(ids(&get("chat?archived=1"), "archived"), vec!["t2".to_string()]);
+    let one = get("chat?thread=t2");
+    let views: Vec<_> = one["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].clone())
+        .collect();
+    assert_eq!(views, vec![json!("t2")], "{one}");
+    let page = get("thread/t1");
+    let seqs: Vec<u64> = page["msgs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["seq"].as_u64().unwrap())
+        .collect();
+    assert_eq!(seqs.len(), 5, "{page}");
+    let newer = get(&format!("thread/t1?after={}", seqs[2]));
+    let texts: Vec<_> = newer["msgs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["text"].clone())
+        .collect();
+    assert_eq!(texts, vec![json!("t1 m3"), json!("t1 m4")], "{newer}");
+    let screen = |p: &str| body(&req(&s, "GET", p, "", "", T + 60)).to_string();
+    let threads = screen("/screens/threads");
+    assert!(threads.contains("/screens/threads/archived"), "{threads}");
+    assert!(
+        !threads.contains("/screens/threads/t2"),
+        "an archived row in the list: {threads}"
+    );
+    let arch = screen("/screens/threads/archived");
+    assert!(
+        arch.contains("/screens/threads/t2") && !arch.contains("/screens/threads/t1\""),
+        "{arch}"
     );
 }

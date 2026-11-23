@@ -47,10 +47,11 @@ fn the_chat_tab_is_linear_in_the_log_and_cached_by_its_last_seq() {
     let scans = SCANS.load(Relaxed) - before;
     let v: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(
-        v["threads"].as_array().unwrap().len(),
+        v["repos"][1]["rows"].as_array().unwrap().len(),
         usize::try_from(THREADS).unwrap()
     );
-    assert!(first.contains("handed (forwarded)"), "the forwarded row is marked");
+    let t1 = api(&s, ADDR, "", NOW + 500, "chat?thread=t1");
+    assert!(t1.contains("handed (forwarded)"), "the forwarded row is marked");
     assert!(
         scans <= 20 * usize::try_from(THREADS).unwrap(),
         "{scans} log scans for {THREADS} threads"

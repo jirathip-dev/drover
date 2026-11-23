@@ -632,6 +632,26 @@ pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &
     r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
 }
 
+/// `GET chat?archived=1` with each listed thread's view, as opening it fetches it (`chat?thread=<id>`), in `threads`.
+pub fn chat_all(s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> serde_json::Value {
+    let get = |q: &str| -> serde_json::Value {
+        serde_json::from_str(&api(s, host, extra, now, &format!("chat?{q}"))).unwrap()
+    };
+    let mut tab = get("archived=1");
+    let repos = tab["repos"].as_array().cloned().unwrap_or_default();
+    let ids = repos.iter().flat_map(|r| {
+        let rows = r["rows"].as_array().into_iter().flatten();
+        rows.chain(r["archived"].as_array().into_iter().flatten())
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let views: Vec<_> = ids
+        .map(|r| get(&format!("thread={}", r["id"].as_str().unwrap()))["threads"][0].clone())
+        .collect();
+    tab["threads"] = serde_json::Value::Array(views);
+    tab
+}
+
 /// Replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read imports `text`. Leases, devices and snapshots go with it.
 pub fn rewrite_log(state: &Path, text: &str) {
     for f in ["state.db", "state.db-wal", "state.db-shm"] {

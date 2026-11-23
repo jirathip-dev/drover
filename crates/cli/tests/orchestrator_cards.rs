@@ -20,7 +20,7 @@ fn body(res: &str) -> &str {
 }
 
 fn chat(s: &Server, cookie: &str, now: u64) -> Value {
-    serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap()
+    chat_all(s, ADDR, cookie, now)
 }
 
 fn thread(page: &Value) -> &Value {
@@ -478,7 +478,7 @@ fn a_run_card_between_two_replies_renders_in_order_in_the_chat_tab() {
     let cli = sh.cli(&r);
     let on = sh.on(&cli);
     let s = Server::new(&c, &on, Some(ADDR.into()));
-    let j: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, T + 60, "chat")).unwrap();
+    let j: serde_json::Value = chat_all(&s, ADDR, &cookie, T + 60);
     let t = j["threads"]
         .as_array()
         .unwrap()

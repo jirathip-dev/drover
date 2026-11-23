@@ -164,7 +164,7 @@ fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
 
 fn needs_and_ask(s: &Server, cookie: &str, now: u64) -> (Value, Value) {
     let needs: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "needs")).unwrap();
-    let chat: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap();
+    let chat: Value = chat_all(s, ADDR, cookie, now);
     let msgs: Vec<Value> = chat["threads"]
         .as_array()
         .unwrap()

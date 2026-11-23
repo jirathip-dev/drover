@@ -139,7 +139,7 @@ impl Server<'_> {
             ("GET", Some("lanes")) => out("200 OK", &self.unsaved(ctx, self.lanes_tab(ctx, paired))),
             ("GET", Some("chat")) => {
                 let (mut c, ev) = (
-                    self.chat_tab(ctx, paired && self.addr.is_some()),
+                    self.chat_tab(ctx, paired && self.addr.is_some(), &f),
                     working(&ctx.state).unwrap_or_default(),
                 );
                 c.get_mut("threads")
