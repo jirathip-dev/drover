@@ -85,13 +85,7 @@ pub fn run_world(seed: u64, (mut m, cfg): (model::Model, String), steps: u64, sa
 }
 
 pub fn play(seed: u64, m: model::Model, cfg: &str, end: u64, run_steps: u64, steps: u64, keep_going: bool) -> Outcome {
-    for k in [
-        "DROVER_LANE",
-        "DROVER_OUTBOX",
-        "DROVER_SERVICE",
-        "DROVER_TOKEN",
-        "DROVER_HOST",
-    ] {
+    for k in ["DROVER_LANE", "DROVER_OUTBOX", "DROVER_HOST"] {
         std::env::remove_var(k);
     }
     let root = common::tmpdir(&format!("sim-{seed}"));

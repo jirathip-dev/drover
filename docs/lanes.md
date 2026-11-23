@@ -304,7 +304,7 @@ the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end that fleet's starts in th
 `[limits] pass_max_secs`; taken over once its pid is gone, or once it runs out: `pass-stuck`, that pid stopped), so cron,
 the service and the button never overlap on one fleet and a slow fleet never holds another. A pass ends itself at
 `pass_max_secs` (60) and logs `pass-slow` naming the step it was in; it still stamps the fleet's `last pass`, so
-only a pass that never ends leaves it stale. The fast job (`drover drive`, every `fast_secs`)
+only a pass that never ends leaves it stale. #1558: after the closed issues, a pass runs its due steps (verdicts, fix rounds, respawns) before its starts; a step that fails logs its error and the rest still run, and a host is offline to a pass only after a call in that pass failed. The fast job (`drover drive`, every `fast_secs`)
 and the tick poll every host with no fresh word, then start each fleet's pass and wait for none; the service runs a
 loop per fleet instead, started at once by a wake. The tick's slow chores (disk budget, roots, offline hosts, orphans,
 repair, the runtime canary, stale panes, each fleet's closed issues, hotspots and backlog) run beside them. A spawn's admission places it first (host probes, no lock), then recounts that host's slots and takes its marker
