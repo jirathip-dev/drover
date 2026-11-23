@@ -154,7 +154,7 @@ pub fn verdict(
                     "the PR's first commit records no baseline (`baseline:` command and numbers)",
                 );
             }
-            if !body.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("perf:")) {
+            if !body.lines().any(|l| block_key(l).starts_with("perf:")) {
                 return refused("NO_BASELINE", "no `Perf:` block: before/after by the same command, the improvement stated, the benchmark checklist");
             }
         }
@@ -545,11 +545,14 @@ fn tests_changed(diff: &str) -> Option<String> {
     (minus != plus).then(|| files.join(", "))
 }
 
+fn block_key(l: &str) -> String {
+    l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase()
+}
+
 /// A verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next heading outside a fence.
 pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
-    let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
     let ls: Vec<&str> = body.lines().collect();
-    let at = ls.iter().position(|l| key(l).starts_with("repro:"))?;
+    let at = ls.iter().position(|l| block_key(l).starts_with("repro:"))?;
     let mut fence = false;
     let block = (ls.iter().skip(at + 1).copied())
         .take_while(|l| {
@@ -559,7 +562,7 @@ pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
             !end
         })
         .collect();
-    Some((key(ls.get(at)?).split_off(6), block))
+    Some((block_key(ls.get(at)?).split_off(6), block))
 }
 
 fn repro_section(pr_body: &str) -> Option<String> {

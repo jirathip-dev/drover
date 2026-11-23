@@ -11,7 +11,7 @@ fn hook_in(lane: Option<&str>, role: &str, input: &Value) -> String {
 
 fn config() -> String {
     let fleet = |n| format!("\n[fleet.{n}]\nrepo='o/{n}'\nlocal='/tmp/{n}'\nintegration='staging'\npublic=false\n");
-    CONFIG.to_string() + &["synergy", "x", "fleet"].map(fleet).concat()
+    CONFIG.to_string() + &["tangelo", "x", "fleet"].map(fleet).concat()
 }
 
 fn hook_env(vars: &[(&str, Option<&str>)], role: &str, input: &Value) -> String {
@@ -360,20 +360,20 @@ fn a_orchestrator_may_spawn_design_lanes() {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         hook_in(Some(lane), "impl", &input)
     };
-    let spawn = "drover spawn synergy 2475 design";
-    assert_eq!(run("synergy:-:orchestrator", spawn), "", "an orchestrator may");
+    let spawn = "drover spawn tangelo 2475 design";
+    assert_eq!(run("tangelo:-:orchestrator", spawn), "", "an orchestrator may");
     for lane in [
-        "synergy:12:impl",
-        "synergy:12:rev",
-        "synergy:-:orch",
-        "synergy:-:design",
+        "tangelo:12:impl",
+        "tangelo:12:rev",
+        "tangelo:-:orch",
+        "tangelo:-:design",
     ] {
         assert!(run(lane, spawn).contains("owner-only"), "{lane}");
     }
     assert!(run("orchestrator", spawn).contains("HOOK_FAILED_CLOSED"), "no fleet");
     for cmd in ["drover setup", "drover secret ls"] {
         assert!(
-            run("synergy:-:orchestrator", cmd).contains("REFUSED OWNER_ONLY"),
+            run("tangelo:-:orchestrator", cmd).contains("REFUSED OWNER_ONLY"),
             "{cmd}"
         );
     }
@@ -386,33 +386,33 @@ fn only_a_orchestrator_runs_lesson() {
         hook_in(Some(lane), "impl", &input)
     };
     assert_eq!(
-        run("synergy:-:orchestrator", "drover lesson synergy"),
+        run("tangelo:-:orchestrator", "drover lesson tangelo"),
         "",
         "an orchestrator may"
     );
-    for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:-:orch"] {
+    for lane in ["tangelo:12:impl", "tangelo:12:rev", "tangelo:-:orch"] {
         assert!(
-            run(lane, "drover lesson synergy").contains("REFUSED ORCHESTRATOR_ONLY"),
+            run(lane, "drover lesson tangelo").contains("REFUSED ORCHESTRATOR_ONLY"),
             "{lane}"
         );
         assert_eq!(
-            run(lane, "drover lesson digest synergy --days 7"),
+            run(lane, "drover lesson digest tangelo --days 7"),
             "",
             "{lane} reads the digest"
         );
     }
-    assert_eq!(run("synergy:12:lesson", "drover lesson apply synergy"), "");
+    assert_eq!(run("tangelo:12:lesson", "drover lesson apply tangelo"), "");
 }
 
 #[test]
 fn only_a_orchestrator_runs_amend() {
     let run = |lane: &str| {
-        let cmd = "drover amend synergy 12 --basis q3 \"board-fix: x\"";
+        let cmd = "drover amend tangelo 12 --basis q3 \"board-fix: x\"";
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         hook_in(Some(lane), "impl", &input)
     };
-    assert_eq!(run("synergy:-:orchestrator"), "", "an orchestrator may");
-    for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:design"] {
+    assert_eq!(run("tangelo:-:orchestrator"), "", "an orchestrator may");
+    for lane in ["tangelo:12:impl", "tangelo:12:rev", "tangelo:12:design"] {
         assert!(run(lane).contains("REFUSED ORCHESTRATOR_ONLY"), "{lane}");
     }
 }
@@ -423,12 +423,12 @@ fn only_the_owner_or_an_orchestrator_forces_a_spawn() {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         hook_in(lane, "impl", &input)
     };
-    let force = "drover spawn synergy 12 impl --supersede --force";
-    assert_eq!(run(Some("synergy:-:orchestrator"), force), "", "an orchestrator may");
+    let force = "drover spawn tangelo 12 impl --supersede --force";
+    assert_eq!(run(Some("tangelo:-:orchestrator"), force), "", "an orchestrator may");
     assert_eq!(run(None, force), "", "the owner may");
-    for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:lesson"] {
+    for lane in ["tangelo:12:impl", "tangelo:12:rev", "tangelo:12:lesson"] {
         assert!(run(Some(lane), force).contains("REFUSED OWNER_ONLY"), "{lane}");
-        let plain = run(Some(lane), "drover spawn synergy 12 impl --supersede");
+        let plain = run(Some(lane), "drover spawn tangelo 12 impl --supersede");
         assert!(!plain.contains("--force"), "{lane}: {plain}");
     }
 }
@@ -440,9 +440,9 @@ fn only_a_orchestrator_runs_timer_install() {
         hook_in(lane, "impl", &input)
     };
     let install = "drover timer install";
-    assert_eq!(run(Some("synergy:-:orchestrator"), install), "", "an orchestrator may");
+    assert_eq!(run(Some("tangelo:-:orchestrator"), install), "", "an orchestrator may");
     assert_eq!(run(None, install), "", "the owner may");
-    for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:design"] {
+    for lane in ["tangelo:12:impl", "tangelo:12:rev", "tangelo:12:design"] {
         let out = run(Some(lane), install);
         assert!(
             out.contains("REFUSED ORCHESTRATOR_ONLY") && out.contains("timer install"),
@@ -450,13 +450,13 @@ fn only_a_orchestrator_runs_timer_install() {
         );
         assert!(!run(Some(lane), "drover timer status").contains("REFUSED"), "{lane}");
     }
-    assert!(run(Some("synergy:-:orchestrator"), "drover setup").contains("REFUSED OWNER_ONLY"));
-    for lane in ["synergy:12:impl", "synergy:-:orchestrator"] {
-        assert_eq!(run(Some(lane), "drover wip prune synergy --dry-run"), "", "{lane}");
-        let out = run(Some(lane), "drover wip prune synergy");
+    assert!(run(Some("tangelo:-:orchestrator"), "drover setup").contains("REFUSED OWNER_ONLY"));
+    for lane in ["tangelo:12:impl", "tangelo:-:orchestrator"] {
+        assert_eq!(run(Some(lane), "drover wip prune tangelo --dry-run"), "", "{lane}");
+        let out = run(Some(lane), "drover wip prune tangelo");
         assert!(out.contains("REFUSED OWNER_ONLY"), "{lane}: {out}");
     }
-    for lane in ["synergy:12:impl", "synergy:-:orchestrator"] {
+    for lane in ["tangelo:12:impl", "tangelo:-:orchestrator"] {
         for cmd in ["drover fleet rename berth shed", "drover fleet rename berth shed --yes"] {
             assert!(run(Some(lane), cmd).contains("REFUSED OWNER_ONLY"), "{lane}: {cmd}");
         }
@@ -470,9 +470,9 @@ fn quoted_text_is_not_a_command() {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         hook_in(Some(lane), "impl", &input)
     };
-    let reply = r#"drover thread reply t5 "run \`drover spawn synergy 2475 design\`""#;
-    let heredoc = "cat > f.md <<'EOF'\nrun `drover spawn synergy 2475 design`\nEOF\nwc -l f.md";
-    for lane in ["synergy:-:orchestrator", "synergy:-:orch"] {
+    let reply = r#"drover thread reply t5 "run \`drover spawn tangelo 2475 design\`""#;
+    let heredoc = "cat > f.md <<'EOF'\nrun `drover spawn tangelo 2475 design`\nEOF\nwc -l f.md";
+    for lane in ["tangelo:-:orchestrator", "tangelo:-:orch"] {
         assert_eq!(run(lane, reply), "", "{lane}");
     }
     for cmd in [
@@ -482,7 +482,7 @@ fn quoted_text_is_not_a_command() {
         "drover ask x 1 \"spawn?\" --option \"drover spawn x 1 design\" --option='docker ps'",
         "drover thread reply t1 'run docker ps'",
     ] {
-        assert_eq!(run("synergy:-:orch", cmd), "", "{cmd}");
+        assert_eq!(run("tangelo:-:orch", cmd), "", "{cmd}");
     }
     for cmd in [
         "drover thread reply t1 x; drover spawn x 1 design",
@@ -507,7 +507,7 @@ fn quoted_text_is_not_a_command() {
         "ssh h drover ask q '; drover spawn s 1 design'",
         "drover spawn x 1 \"des\"ign",
     ] {
-        assert!(run("synergy:-:orch", cmd).contains("owner-only"), "{cmd}");
+        assert!(run("tangelo:-:orch", cmd).contains("owner-only"), "{cmd}");
     }
     for cmd in [
         "bash <<'EOF'\ngh pr merge 5\nEOF",
@@ -515,14 +515,14 @@ fn quoted_text_is_not_a_command() {
         "drover ask q $'x\\'' ; gh pr merge 5",
         "eval drover ask q '; gh pr merge 5'",
     ] {
-        assert!(!run("synergy:12:impl", cmd).is_empty(), "{cmd}");
+        assert!(!run("tangelo:12:impl", cmd).is_empty(), "{cmd}");
     }
-    assert_eq!(run("synergy:-:orch", "ls # drover spawn x 1 design"), "");
+    assert_eq!(run("tangelo:-:orch", "ls # drover spawn x 1 design"), "");
     assert_eq!(
-        run("synergy:-:orch", "time FOO=1 drover ask q '; drover spawn s 1 design'"),
+        run("tangelo:-:orch", "time FOO=1 drover ask q '; drover spawn s 1 design'"),
         ""
     );
-    assert!(run("synergy:-:orch", "drover thread reply t1 x && docker ps").contains("NO_CONTAINERS"));
+    assert!(run("tangelo:-:orch", "drover thread reply t1 x && docker ps").contains("NO_CONTAINERS"));
 }
 
 #[test]
@@ -577,7 +577,7 @@ fn a_orchestrator_copies_into_its_own_thread_folder() {
         String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
     };
     let (own, other) = (c.join("t6").display().to_string(), c.join("t5").display().to_string());
-    let cond = "synergy:-:orchestrator";
+    let cond = "tangelo:-:orchestrator";
     std::fs::create_dir_all(c.join("t6")).unwrap();
     std::os::unix::fs::symlink("../..", c.join("t6/link")).unwrap();
     for cmd in [
@@ -600,17 +600,17 @@ fn a_orchestrator_copies_into_its_own_thread_folder() {
         (cond, format!("cd {own} && cp a.png ../t5/a.png")),
         (cond, format!("cd {own} && cp /tmp/a.png ./.thread.md")),
         (cond, format!("cd {st} && cp a.png ./events.jsonl")),
-        ("synergy:7:impl", format!("cd {st} && cp a.png ./events.jsonl")),
+        ("tangelo:7:impl", format!("cd {st} && cp a.png ./events.jsonl")),
         (cond, format!("cd -P {st} && cp a.png events.jsonl")),
         (cond, format!("cd -- {st} && cp a.png events.jsonl")),
         (cond, format!("pushd {st} && cp a.png events.jsonl")),
-        ("synergy:7:impl", format!("pushd {st} && cp a.png events.jsonl")),
-        ("synergy:7:impl", format!("cp a.png {own}/a.png")),
+        ("tangelo:7:impl", format!("pushd {st} && cp a.png events.jsonl")),
+        ("tangelo:7:impl", format!("cp a.png {own}/a.png")),
         (cond, format!("cp --target-directory={st}/ a.png")),
         (cond, format!("dd if=a of={st}/events.jsonl")),
         (cond, format!("cp a.png {own}/a.png && echo x>{st}/events.jsonl")),
-        ("synergy:7:impl", format!("cp --target-directory={st}/ a.png")),
-        ("synergy:7:impl", format!("dd if=a of={st}/events.jsonl")),
+        ("tangelo:7:impl", format!("cp --target-directory={st}/ a.png")),
+        ("tangelo:7:impl", format!("dd if=a of={st}/events.jsonl")),
         (cond, format!("cp -t{st}/ a.png {own}/a.png")),
         (cond, format!("sips -s format png a.jpg -o{st}/events.jsonl {own}/x")),
         (cond, format!("cd {st}/orchestrator && cp -t6/x a.png")),
@@ -701,11 +701,11 @@ fn message_text_is_not_a_write_or_a_group_verb() {
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
     let s = d.join("state").display().to_string();
     let sh = |cmd: &str| orchestrator_hook(&d, json!({"tool_name": "Bash", "tool_input": {"command": cmd}}));
-    let refusal = "REFUSED GROUP_OFF: the `set` group is off; I ran `drover set synergy impl --model x`";
+    let refusal = "REFUSED GROUP_OFF: the `set` group is off; I ran `drover set tangelo impl --model x`";
     for cmd in [
         format!("drover thread handoff t6 t7 \"copy\" 'cp mock.png {s}/orchestrator/t7/; then {refusal}'"),
-        format!("drover thread handoff t6 synergy 'why: {refusal}' \"mv a > {s}/x\""),
-        format!("drover ask synergy 1 \"cp a {s}/x?\" --why '`drover set x impl`'"),
+        format!("drover thread handoff t6 tangelo 'why: {refusal}' \"mv a > {s}/x\""),
+        format!("drover ask tangelo 1 \"cp a {s}/x?\" --why '`drover set x impl`'"),
         format!("gh issue create -t 'hook' --body 'echo x > {s}/events.jsonl; {refusal}'"),
     ] {
         assert_eq!(sh(&cmd), "", "{cmd}");
@@ -719,11 +719,11 @@ fn message_text_is_not_a_write_or_a_group_verb() {
         assert!(sh(&cmd).contains("is blocked"), "{cmd}");
     }
     for cmd in [
-        "drover set synergy impl --model x",
-        "drover thread handoff t6 t7 a b; drover set synergy impl --model x",
-        "drover \"set\" synergy impl --model x",
-        "drover thread handoff t6 t7 a \"$(drover set synergy impl --model x)\"",
-        "drover thread handoff t6 t7 a \"run `drover set synergy impl --model x`\"",
+        "drover set tangelo impl --model x",
+        "drover thread handoff t6 t7 a b; drover set tangelo impl --model x",
+        "drover \"set\" tangelo impl --model x",
+        "drover thread handoff t6 t7 a \"$(drover set tangelo impl --model x)\"",
+        "drover thread handoff t6 t7 a \"run `drover set tangelo impl --model x`\"",
     ] {
         assert!(sh(cmd).contains("REFUSED GROUP_OFF"), "{cmd}");
     }
@@ -781,7 +781,7 @@ fn orchestrator_hook(d: &std::path::Path, mut call: serde_json::Value) -> String
     let mut child = cmd
         .args(["hook", "--role", "orchestrator"])
         .env_remove("FLEET_LANE")
-        .env("DROVER_LANE", "synergy:-:orchestrator")
+        .env("DROVER_LANE", "tangelo:-:orchestrator")
         .env("DROVER_THREAD", "t6")
         .env("FLEET_CONFIG", d.join("fleet.toml"))
         .env("FLEET_STATE", d.join("state/events.jsonl"))
@@ -1343,7 +1343,7 @@ fn capability_groups_gate_a_orchestrators_owner_verbs() {
         |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let run = |cfg: &str, lane: &str, cmd: &str| hook_cfg(cfg, &[("DROVER_LANE", Some(lane))], "impl", &input(cmd)).0;
     let on = [
-        "drover clean synergy --yes",
+        "drover clean tangelo --yes",
         "drover clean --orphans --yes",
         "drover hosts off mini",
         "drover hosts refresh",
@@ -1351,32 +1351,32 @@ fn capability_groups_gate_a_orchestrators_owner_verbs() {
         "drover runners add x",
     ];
     let off = [
-        "drover pause synergy",
-        "drover resume synergy",
-        "drover set synergy impl --model opus",
+        "drover pause tangelo",
+        "drover resume tangelo",
+        "drover set tangelo impl --model opus",
     ];
     for cmd in on {
-        assert_eq!(run(&config(), "synergy:-:orchestrator", cmd), "", "default on: {cmd}");
-        for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:design"] {
+        assert_eq!(run(&config(), "tangelo:-:orchestrator", cmd), "", "default on: {cmd}");
+        for lane in ["tangelo:12:impl", "tangelo:12:rev", "tangelo:12:design"] {
             let out = run(&config(), lane, cmd);
             assert!(out.contains("REFUSED OWNER_ONLY"), "{lane} {cmd}: {out}");
         }
     }
     for cmd in off {
-        let out = run(&config(), "synergy:-:orchestrator", cmd);
+        let out = run(&config(), "tangelo:-:orchestrator", cmd);
         assert!(
             out.contains("REFUSED GROUP_OFF") && out.contains("config propose"),
             "default off: {cmd}: {out}"
         );
     }
-    for cmd in ["drover clean synergy", "drover hosts", "drover accounts"] {
-        assert_eq!(run(&config(), "synergy:12:impl", cmd), "", "{cmd}");
+    for cmd in ["drover clean tangelo", "drover hosts", "drover accounts"] {
+        assert_eq!(run(&config(), "tangelo:12:impl", cmd), "", "{cmd}");
     }
     let only = config() + "\n[orchestrator]\nallow = [\"pause\"]\n";
-    assert_eq!(run(&only, "synergy:-:orchestrator", "drover pause synergy"), "");
-    for cmd in ["drover clean --yes", "drover spawn synergy 9 design"] {
+    assert_eq!(run(&only, "tangelo:-:orchestrator", "drover pause tangelo"), "");
+    for cmd in ["drover clean --yes", "drover spawn tangelo 9 design"] {
         assert!(
-            run(&only, "synergy:-:orchestrator", cmd).contains("REFUSED GROUP_OFF"),
+            run(&only, "tangelo:-:orchestrator", cmd).contains("REFUSED GROUP_OFF"),
             "switched off: {cmd}"
         );
     }
@@ -1388,11 +1388,11 @@ fn run_cards_post_from_a_orchestrator_settle_by_the_owner_and_hard_nos_never_run
         |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let run = |lane: Option<&str>, cmd: &str| hook_in(lane, "impl", &input(cmd));
     let post = "drover card post t1 --cmd 'git log -1 main' --why w --blast none --dir .";
-    assert_eq!(run(Some("synergy:-:orchestrator"), post), "");
-    assert!(run(Some("synergy:12:impl"), post).contains("REFUSED ORCHESTRATOR_ONLY"));
+    assert_eq!(run(Some("tangelo:-:orchestrator"), post), "");
+    assert!(run(Some("tangelo:12:impl"), post).contains("REFUSED ORCHESTRATOR_ONLY"));
     for cmd in ["drover card approve r1", "drover card deny r1"] {
         assert!(
-            run(Some("synergy:-:orchestrator"), cmd).contains("REFUSED OWNER_ONLY"),
+            run(Some("tangelo:-:orchestrator"), cmd).contains("REFUSED OWNER_ONLY"),
             "{cmd}"
         );
         assert_eq!(run(None, cmd), "", "the owner may: {cmd}");
@@ -1405,12 +1405,12 @@ fn run_cards_post_from_a_orchestrator_settle_by_the_owner_and_hard_nos_never_run
         "git push --force origin main",
         "gh api -X DELETE repos/o/r/branches/main/protection",
     ] {
-        let out = run(Some("synergy:-:orchestrator"), cmd);
+        let out = run(Some("tangelo:-:orchestrator"), cmd);
         assert!(out.contains("REFUSED CARD_FORBIDDEN"), "{cmd}: {out}");
     }
     assert_eq!(
         run(
-            Some("synergy:-:orchestrator"),
+            Some("tangelo:-:orchestrator"),
             "drover thread reply t1 'never printenv'"
         ),
         ""
@@ -1430,12 +1430,12 @@ fn runners_verbs_are_a_orchestrators_and_docker_in_message_text_is_not_a_command
         "drover runners tokens",
         "drover runners retire-local",
     ] {
-        assert_eq!(run("synergy:-:orchestrator", cmd), "", "{cmd}");
-        for lane in ["synergy:12:impl", "synergy:12:rev"] {
+        assert_eq!(run("tangelo:-:orchestrator", cmd), "", "{cmd}");
+        for lane in ["tangelo:12:impl", "tangelo:12:rev"] {
             assert!(run(lane, cmd).contains("REFUSED OWNER_ONLY"), "{lane} {cmd}");
         }
     }
-    for lane in ["synergy:-:orchestrator", "synergy:12:impl"] {
+    for lane in ["tangelo:-:orchestrator", "tangelo:12:impl"] {
         for cmd in [
             "docker ps",
             "sh -c 'cd /x && docker ps'",

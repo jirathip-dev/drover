@@ -112,6 +112,11 @@ fn this_review<'a>(events: &'a [Event], (f, n): (&'a str, u64)) -> impl Iterator
         .take_while(|e| !(e.kind == "spawn" && crate::events::checks(e)))
 }
 
+fn refusal(e: &Event) -> String {
+    let (code, why) = (e.str("code").unwrap_or("NO_REPRO"), e.str("why").unwrap_or_default());
+    format!("verdict refused {code}: {why}")
+}
+
 fn pickup(events: &[Event], at: (&str, u64)) -> Option<Say> {
     let e = this_review(events, at).find(|e| e.kind == "verdict-pickup-failed")?;
     Some(Say::Drive {
@@ -554,8 +559,7 @@ fn waits(
                     .find(|e| e.kind == "repro-refused" && head.is_some_and(|h| e.str("sha") == Some(h.0)));
                 let what = match (&next, refused) {
                     (Some(_), Some(e)) => {
-                        let why = format!("verdict refused NO_REPRO: {}", e.str("why").unwrap_or_default());
-                        return w("drive", &why, s.last_ts, next);
+                        return w("drive", &refusal(e), s.last_ts, next);
                     }
                     (Some(_), None) => pickup(events, (f, n)).unwrap_or(Say::Record("review done".into())),
                     (None, _) => drive("verdict written", "record it"),
@@ -926,7 +930,10 @@ pub fn scan_where(
         }
         let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
         let spawn = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover spawn "));
-        if spawn && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
+        let refused = spawn
+            .then(|| held(mine, (&s.fleet, s.issue), w.next_cmd.as_deref()))
+            .flatten();
+        if spawn && refused.is_none() && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
             let by = crate::drive::held_by(ctx, cfg, r);
             w.say(&Say::SpawnSlot((!by.is_empty()).then_some(by)));
         }
@@ -936,10 +943,7 @@ pub fn scan_where(
         {
             w.what = why;
         }
-        if let Some(h) = spawn
-            .then(|| held(mine, (&s.fleet, s.issue), w.next_cmd.as_deref()))
-            .flatten()
-        {
+        if let Some(h) = refused {
             w.what = match crate::promise::strip_catch_up(&w.what) {
                 Some(p) => format!("{p}{h}"),
                 None => format!("{} · {h}", w.what),
@@ -1026,7 +1030,8 @@ pub fn guarded(events: &[Event], cfg: &Config) -> Vec<IssueState> {
 
 pub fn held(events: &[Event], (f, n): (&str, u64), cmd: Option<&str>) -> Option<String> {
     let mine = |e: &&Event| e.fleet == f && e.issue == Some(n) && matches!(e.kind.as_str(), "driven" | "spawn");
-    let e = events.iter().rfind(mine)?;
+    let slot = |e: &&Event| e.str("code") == Some("SPAWN_PENDING");
+    let e = events.iter().filter(mine).rfind(|e| !slot(e))?;
     let wait = ["EXIT", "ERROR", "SPAWN_PENDING", "SPAWN_BACKOFF"];
     let code = e.str("code").filter(|c| !wait.contains(c))?;
     let c = e.str("cmd").filter(|c| c.starts_with("drover spawn "))?;
