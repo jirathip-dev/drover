@@ -59,13 +59,13 @@ fn sync_writes_only_the_hooks_key_idempotently() {
 fn sync_approves_the_hook_once_per_role() {
     let d = tmpdir("hermes-allow");
     let c = ctx(&d, &(CONFIG.to_string() + DESIGN));
-    for p in ["fleet-rev", "fleet-impl", "synergy"] {
+    for p in ["fleet-rev", "fleet-impl", "tangelo"] {
         std::fs::create_dir_all(c.homes["hermes"].join(p)).unwrap();
         std::fs::write(c.homes["hermes"].join(p).join("config.yaml"), "model:\n  default: x\n").unwrap();
     }
     let other = r#"{"approvals":[{"event":"post_tool_call","command":"/x.sh"}],"note":"keep"}"#;
     std::fs::write(c.homes["hermes"].join("fleet-rev/shell-hooks-allowlist.json"), other).unwrap();
-    std::fs::write(c.homes["hermes"].join("synergy/shell-hooks-allowlist.json"), other).unwrap();
+    std::fs::write(c.homes["hermes"].join("tangelo/shell-hooks-allowlist.json"), other).unwrap();
 
     let (code, out) = run(&c, &Fake::default(), &["profiles", "sync"]);
     assert_eq!(code, 0, "{out}");
@@ -88,7 +88,7 @@ fn sync_approves_the_hook_once_per_role() {
         (rev["approvals"][0]["command"].as_str(), rev["note"].as_str()),
         (Some("/x.sh"), Some("keep"))
     );
-    assert_eq!(allow("synergy"), other, "non-fleet profile untouched");
+    assert_eq!(allow("tangelo"), other, "non-fleet profile untouched");
     assert!(!c.homes["hermes"].join("fleet-design").exists());
 
     let once = (allow("fleet-rev"), allow("fleet-impl"));

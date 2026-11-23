@@ -97,7 +97,7 @@ fn local() -> Fake {
 }
 
 #[test]
-fn an_ssh_that_never_returns_costs_one_deadline_and_drive_still_starts() {
+fn an_ssh_that_never_returns_costs_one_retried_deadline_and_drive_still_starts() {
     for (name, tail) in [("deadline-hang", "wait"), ("deadline-held-pipes", "exit 0")] {
         let (c, sh) = setup(name);
         let dir = c.state.parent().unwrap().to_path_buf();
@@ -109,7 +109,7 @@ fn an_ssh_that_never_returns_costs_one_deadline_and_drive_still_starts() {
         let (code, out) = run(&c, &r, &["tick"]);
         let took = t.elapsed();
         assert_eq!(code, 0, "{name}: {out}");
-        assert!(took < Duration::from_secs(2 + 4), "{name}: {took:?}\n{out}");
+        assert!(took < Duration::from_secs(2 * 2 + 4), "{name}: {took:?}\n{out}");
         assert!(
             sh.called("run", "sendmeter-impl-12"),
             "{name}: drive still starts the main host's work: {out}"
@@ -121,8 +121,8 @@ fn an_ssh_that_never_returns_costs_one_deadline_and_drive_still_starts() {
             .collect();
         assert_eq!(
             sent.len(),
-            1,
-            "{name}: one host report killed at its deadline, then the host is skipped: {sent:#?}"
+            2,
+            "{name}: one host report killed at its deadline and its one retry, then the host is skipped: {sent:#?}"
         );
         assert!(sent.iter().all(|l| l.contains("'hosts' 'report'")), "{name}: {sent:#?}");
         assert!(!drover::hosts::cached(&c)["boat1"].up, "{name}: boat1 shows offline");

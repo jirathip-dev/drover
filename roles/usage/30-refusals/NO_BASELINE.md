@@ -1,1 +1,1 @@
-- NO_BASELINE: verdict PASS on a `--perf` issue: the PR's first commit names no `baseline`, or verdict.md has no `Perf:` block
+- NO_BASELINE: verdict PASS on a `--perf` issue: the PR's first commit names no `baseline`, or verdict.md has no `Perf:` block (a heading, bold or list marker before it is fine); drive re-prompts the reviewer once, and a refusal still there `stall_minutes` after that, or refused again, is a needs-human card

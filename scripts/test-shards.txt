@@ -224,7 +224,7 @@
 3 state_write
 4 store
 3 stream_quiet
-3 synergy
+3 tangelo
 1 term_adapter
 2 themes
 2 thread_handoff

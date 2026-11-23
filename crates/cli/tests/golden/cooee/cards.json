@@ -24,8 +24,8 @@
         "other": { "placeholder": "other…" },
         "default": { "value": "move", "until": "2026-11-09T09:53:00Z", "label": "takes the recommendation in {rel}" } } ],
     "buttons": [ { "type": "button", "id": "ask-q947-later", "label": "later", "action": "later", "values": { "card": "ask-q947" } } ] },
-  { "type": "card", "id": "nh-2708", "kind": "ask", "tone": "bad", "title": "synergy #2708 · review 3", "meta": "needs-human · 12m",
-    "fold": { "line": "#2708 · needs-human · Round limit: review 3 FAIL · 1 finding · 12m", "main": { "block": "nh2708", "action": "needs-human", "value": "extend", "label": "one more round", "values": { "fleet": "synergy", "issue": 2708 } } },
+  { "type": "card", "id": "nh-2708", "kind": "ask", "tone": "bad", "title": "tangelo #2708 · review 3", "meta": "needs-human · 12m",
+    "fold": { "line": "#2708 · needs-human · Round limit: review 3 FAIL · 1 finding · 12m", "main": { "block": "nh2708", "action": "needs-human", "value": "extend", "label": "one more round", "values": { "fleet": "tangelo", "issue": 2708 } } },
     "blocks": [
       { "type": "text", "markdown": "**Round limit: review 3 FAIL · 1 finding**" },
       { "type": "choice", "id": "nh2708", "action": "needs-human",

@@ -13,7 +13,7 @@ fn fixture(name: &str) -> (drover::Ctx, OnShed) {
 }
 
 fn fixture_at(name: &str, pressure: &str, load: &str) -> (drover::Ctx, OnShed) {
-    let cfg = format!("[serve]\nallowed_hosts = [\"mac.example\"]\n\n{CONFIG}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\n");
+    let cfg = format!("[serve]\nallowed_hosts = [\"mac.example\"]\n\n{CONFIG}\n[fleet.tangelo]\nrepo = \"o/tangelo-apps\"\nlocal = \"/p/tangelo-apps\"\nintegration = \"staging\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     let spawn = |fleet: &str, issue: u64, ts: u64, agent: &str| {
         append(
@@ -29,8 +29,8 @@ fn fixture_at(name: &str, pressure: &str, load: &str) -> (drover::Ctx, OnShed) {
         .unwrap();
     };
     spawn("sendmeter", 12, 900_100, "sendmeter-impl-12");
-    spawn("synergy", 7, 900_400, "synergy-impl-7");
-    spawn("synergy", 8, 900_500, "synergy-impl-8");
+    spawn("tangelo", 7, 900_400, "tangelo-impl-7");
+    spawn("tangelo", 8, 900_500, "tangelo-impl-8");
     for args in [
         &["queue", "sendmeter", "add", "18", "19", "20"][..],
         &["queue", "sendmeter", "block", "--on", "18", "19"],
@@ -61,8 +61,8 @@ fn fixture_at(name: &str, pressure: &str, load: &str) -> (drover::Ctx, OnShed) {
     );
     for (n, st) in [
         ("sendmeter-impl-12", "working"),
-        ("synergy-impl-7", "blocked"),
-        ("synergy-impl-8", "done"),
+        ("tangelo-impl-7", "blocked"),
+        ("tangelo-impl-8", "done"),
     ] {
         r.1.lane(n, st, "/x");
         r.1.screen(n, SCREEN);
@@ -103,10 +103,10 @@ fn the_herd_read_shape_on_a_fixture() {
     let fleets = v["fleets"].as_array().unwrap();
     assert_eq!(
         fleets.iter().map(|f| f["name"].as_str().unwrap()).collect::<Vec<_>>(),
-        ["sendmeter", "synergy"]
+        ["sendmeter", "tangelo"]
     );
     assert_eq!(names(&fleets[0]["lanes"]), ["sendmeter-impl-12"]);
-    assert_eq!(names(&fleets[1]["lanes"]), ["synergy-impl-7", "synergy-impl-8"]);
+    assert_eq!(names(&fleets[1]["lanes"]), ["tangelo-impl-7", "tangelo-impl-8"]);
     assert_eq!(names(&v["others"]), ["side-project"]);
     let l = &fleets[0]["lanes"][0];
     assert_eq!(
@@ -211,7 +211,7 @@ fn a_shed_lane_reported_running_shows_running_with_its_note() {
         t["reported"] = json!({"state": "running", "note": note});
         t["text"] = json!("");
     });
-    r.1.set("synergy-impl-8", |t| t["reported"] = json!({"state": "idle"}));
+    r.1.set("tangelo-impl-8", |t| t["reported"] = json!({"state": "idle"}));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let herd = body(&get(&s, "/api/v1/herd", ADDR, ""));
     let l = &herd["fleets"][0]["lanes"][0];
@@ -239,7 +239,7 @@ fn a_shed_lane_reported_running_shows_running_with_its_note() {
         .find(|l| l["name"] == "sendmeter-impl-12")
         .unwrap_or_else(|| panic!("{lanes}"));
     assert_eq!((&row["act"], &row["now"]["n"]), (&json!("impl"), &json!(note)), "{row}");
-    assert!(section("idle").iter().any(|l| l["name"] == "synergy-impl-8"), "{lanes}");
+    assert!(section("idle").iter().any(|l| l["name"] == "tangelo-impl-8"), "{lanes}");
 }
 
 #[test]
@@ -298,7 +298,7 @@ fn the_scene_in_webkit_is_a_full_page_header_toggle_drawn_from_the_scene_screen(
         lb.click(); \
         const night = [n(sc.classList.contains('night')), n(localStorage['scene-light'] === 'night'), n(lb.textContent === '☾')]; \
         q('#scene .hnx').click(); \
-        const next = [n(title() === 'synergy'), figs(), n(sc.classList.contains('night')), n(localStorage['scene-repo'] === 'synergy')]; \
+        const next = [n(title() === 'tangelo'), figs(), n(sc.classList.contains('night')), n(localStorage['scene-repo'] === 'tangelo')]; \
         b.click(); \
         const back = [n(b.getAttribute('aria-pressed') === 'false'), n(sc.hidden), n(localStorage.scene == null), n(getComputedStyle(q('main')).display !== 'none'), n(lb.hidden)]; \
         const got = performance.getEntriesByType('resource').map(e => new URL(e.name).pathname); \
@@ -323,7 +323,7 @@ fn the_scene_in_webkit_is_a_full_page_header_toggle_drawn_from_the_scene_screen(
         Some(&want[..]),
         "off: unpressed, hidden, no light; [scene]: pressed, the page under the header (no sheet, the tabs gone), kept, \
          the light shown, sendmeter's 1 horse ploughing in its gait, the ranch drawn, day [☀]; [☀] → night [☾], kept; \
-         [›] synergy, its 2 horses, still night, kept; [scene] again: unpressed, hidden, forgotten, the tabs back; \
+         [›] tangelo, its 2 horses, still night, kept; [scene] again: unpressed, hidden, forgotten, the tabs back; \
          /screens/scene fetched and nothing outside the page's routes (no herd.json, no old board route): {out}"
     );
 }

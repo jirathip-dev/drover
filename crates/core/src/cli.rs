@@ -1189,7 +1189,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
         .flatten()
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
-    let res = match lane_write.then(|| forward(r, &sent)).flatten() {
+    let res = match lane_write.then(|| forward(&sent)).flatten() {
         Some(o) => o.map(|o| {
             write!(out, "{}", o.stdout).ok();
             write_stderr(format_args!("{}", o.stderr));
@@ -1211,10 +1211,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
     }
 }
 
-pub(crate) fn forward(r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
-    if let (Some(url), Some(token)) = (crate::config::env("DROVER_SERVICE"), crate::config::env("DROVER_TOKEN")) {
-        return Some(crate::service::post(r, &url, &token, args));
-    }
+pub(crate) fn forward(args: &[String]) -> Option<Result<runner::Out>> {
     let lane = crate::outbox::lane()?;
     Some(crate::outbox::queue(&lane, args).map(|p| runner::Out {
         code: 0,
@@ -1643,6 +1640,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let spare = matches!(cmd, Cmd::Check | Cmd::Drive { .. } | Cmd::Kick { .. } | Cmd::Waiting(_));
             let off = crate::hosts::disabled(&cfg).into_iter().filter(|_| spare).collect();
             let pass = pass.sparing(off, Some((ctx, &cfg)));
+            let pass = if matches!(cmd, Cmd::Drive { fleet: None }) {
+                pass.own()
+            } else {
+                pass
+            };
             let paced = spare || matches!(cmd, Cmd::Clean { .. } | Cmd::Reclaim { .. });
             let r: &dyn Runner = if paced { &pass } else { r };
             let kick = |f: &str, n, why| {
@@ -2415,12 +2417,7 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
 }
 
 fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
-    if forward(
-        &crate::runner::Real,
-        &runner::argv(&["lane-event", kind, &d.to_string()]),
-    )
-    .is_some()
-    {
+    if forward(&runner::argv(&["lane-event", kind, &d.to_string()])).is_some() {
         return;
     }
     let lane = crate::config::env("DROVER_LANE").unwrap_or_default();

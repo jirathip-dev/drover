@@ -1045,46 +1045,6 @@ fn a_lanes_outbox_env_never_reaches_the_remote_lane_test() {
 }
 
 #[test]
-fn a_remote_lane_gets_the_service_url_and_its_own_token() {
-    let c = setup(
-        "hosts-service",
-        "\n[service]\nurl = \"http://mini.tail:7778\"\n",
-        true,
-        0,
-    );
-    with_account(&c);
-    let (_sh, bazzite, r) = (FakeShed::attached(&c), FakeShed::new(), remote_fake());
-    let (code, out) = run(
-        &c,
-        &two(&r, &bazzite),
-        &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"],
-    );
-    assert_eq!(code, 0, "{out}");
-    let sent = bazzite.sent(IMPL);
-    let lane = sent.iter().find(|t| t.starts_with("export ")).unwrap();
-    assert!(
-        lane.contains(" DROVER_SERVICE='http://mini.tail:7778'") && !lane.contains("DROVER_OUTBOX"),
-        "{lane}"
-    );
-    let token = lane
-        .split(" DROVER_TOKEN='")
-        .nth(1)
-        .unwrap()
-        .split('\'')
-        .next()
-        .unwrap();
-    assert_eq!(token.len(), 64, "{lane}");
-    let log = drover::events::jsonl(&c.state).unwrap();
-    assert!(!log.contains(token) && !out.contains(token), "{log}\n{out}");
-    let cfg = Config::load(&c.config).unwrap();
-    let ask = |n: &str| drover::runner::argv(&["ask", "sendmeter", n, "Which?"]);
-    let ok = drover::service::authorize(&c, &cfg, token, &ask("12"));
-    assert_eq!(ok.unwrap(), "sendmeter:12:impl");
-    let other = drover::service::authorize(&c, &cfg, token, &ask("13"));
-    assert!(other.unwrap_err().to_string().starts_with("REFUSED TOKEN"));
-}
-
-#[test]
 fn asks_stranded_on_a_remote_host_are_imported_once() {
     let c = setup("hosts-import", "", true, 0);
     remote_spawn(&c, NOW - 900);
@@ -1282,7 +1242,7 @@ fn trim_setup(name: &str, extra: &str) -> drover::Ctx {
     c
 }
 
-const TRIMMED: &str = "trimmed /home/me/.cache/drover/target/synergy/debug/ (9 KB)";
+const TRIMMED: &str = "trimmed /home/me/.cache/drover/target/tangelo/debug/ (9 KB)";
 
 #[test]
 fn remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pass() {
