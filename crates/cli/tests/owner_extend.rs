@@ -388,3 +388,51 @@ fn an_extend_never_tried_for_the_stall_threshold_raises_one_card() {
     assert_eq!(kinds(&c, "needs-human"), 2, "one card per extension");
     assert_eq!(started(&sh), 0);
 }
+
+fn kick_on(c: &drover::Ctx) {
+    let t = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, t.replace("max_parallel_spawns = 0", "max_parallel_spawns = 6")).unwrap();
+}
+
+#[test]
+fn an_extend_with_the_last_rounds_lane_in_shed_state_done_starts_on_the_spawn_kick() {
+    let (c, sh) = setup("extend-leftover-done-kick");
+    kick_on(&c);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let calm = fake("1");
+    assert_eq!(run(&c, &calm, &["extend", "sendmeter", "12"]).0, 0);
+    sh.lane(IMPL, "done", &wt.display().to_string());
+    let (code, out) = run(&c, &calm, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out2) = run(&c, &calm, &["kick", "sendmeter", "12", "--why", "drive", "--now"]);
+    assert_eq!(code, 0, "{out2}");
+    let evs: Vec<String> = read(&c.state).unwrap().iter().map(|e| format!("{} {}", e.kind, serde_json::to_string(&e.data).unwrap())).collect();
+    assert_eq!(started(&sh), 1, "{out}\n---\n{out2}\n{evs:#?}");
+    assert_eq!(kinds(&c, "supersede"), 1, "{out}");
+    assert_eq!(status(&c, &calm, c.now), Value::Null);
+}
+
+#[test]
+fn a_second_extend_with_the_last_rounds_lane_in_shed_state_done_starts_the_new_round_in_the_next_pass() {
+    let (mut c, sh) = setup("extend-leftover-done");
+    kick_on(&c);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let calm = fake("1");
+    for round in 1..=2 {
+        sh.lane(IMPL, "done", &wt.display().to_string());
+        assert_eq!(run(&c, &calm, &["extend", "sendmeter", "12"]).0, 0);
+        let (code, out) = run(&c, &calm, &["drive"]);
+        assert_eq!(code, 0, "{out}");
+        let (code, out2) = run(&c, &calm, &["kick", "sendmeter", "12", "--why", "drive", "--now"]);
+        let evs: Vec<String> = read(&c.state).unwrap().iter().map(|e| format!("{} {} {}", e.ts, e.kind, serde_json::to_string(&e.data).unwrap())).collect();
+        assert_eq!(started(&sh), round, "{out}\n---{code}\n{out2}\n{evs:#?}");
+        assert_eq!(kinds(&c, "supersede"), round, "{out}");
+        assert_eq!(status(&c, &calm, c.now), Value::Null);
+        c.now += 600;
+        ev(&c, c.now, "turn-end", json!({"role": "impl", "agent": IMPL, "state": "done", "sha": sha("4")}));
+        ev(&c, c.now, "verdict", json!({"verdict": "FAIL", "sha": sha("4"), "body": "FAIL"}));
+        ev(&c, c.now, "needs-human", json!({"code": "ROUND_LIMIT", "reason": "out of rounds"}));
+    }
+}
