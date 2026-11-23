@@ -28,3 +28,4 @@ crates/server/src/serve.rs:queue_tab 260
 crates/server/src/serve.rs:route 184
 crates/server/src/serve.rs:validate 154
 crates/server/src/serve/v1.rs:api 243
+web/src/blocks.ts:composer 119

@@ -1,0 +1,4 @@
+# Copy to ~/.config/drover/fleet.toml (or point FLEET_CONFIG at it).
+
+models = ["opus", "sonnet", "claude-opus-5-5"]   # the model dropdown `drover serve` offers
+

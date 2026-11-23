@@ -1,0 +1,19 @@
+# This repo, dogfooding: a `*/drover` repo's merge prints the `cargo install` that picks it up.
+[fleet.drover]
+repo = "<owner>/drover"
+local = "~/Projects/drover"
+integration = "staging"
+# #438: lanes already share one cargo build folder per host and repo, `<root>/.build/drover` under
+# the host's workspace root (#630); `env` or `shared_cache` (#361) setting
+# CARGO_TARGET_DIR replaces it. Lanes building at once queue on cargo's lock (docs/lanes.md).
+# shared_cache = { CARGO_TARGET_DIR = "~/.cache/drover/drover/target" }
+
+[fleet.drover.role.impl]
+harness = "claude"
+profile = "lane-impl"
+model = "opus"
+
+[fleet.drover.role.rev]
+harness = "hermes"
+profile = "lane-rev"
+

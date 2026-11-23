@@ -422,7 +422,12 @@ pub fn view(ctx: &Ctx) -> Result<ConfigView> {
             kind: v.type_str().into(),
             secret: v.as_str().and_then(|s| s.strip_prefix("secret:")).map(String::from),
             allowed,
-            doc: docs.get(key).copied().unwrap_or_default().into(),
+            doc: docs
+                .get(key)
+                .copied()
+                .or_else(|| limit_doc(&path))
+                .unwrap_or_default()
+                .into(),
             value: serde_json::to_value(v).unwrap_or_default(),
             path,
         }
@@ -432,6 +437,14 @@ pub fn view(ctx: &Ctx) -> Result<ConfigView> {
         fields: fields.collect(),
         text,
     })
+}
+
+fn limit_doc(path: &str) -> Option<&'static str> {
+    let key = path.strip_prefix("limits.")?;
+    crate::config::LIMIT_DOCS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, doc)| *doc)
 }
 
 fn walk(path: String, v: toml::Value, out: &mut Vec<(String, toml::Value)>) {
