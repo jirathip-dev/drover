@@ -2,9 +2,9 @@
 
 ## Summary
 
-Decision: drover keeps the policy (which lane goes where and when, spend, approvals, the guard) and stops doing host work itself. It talks to shed through shed's own client, reaches every other host over the link shed already holds, reads health, processes, accounts and usage from shed, takes provider facts from shed's catalog, and leaves installs, secrets, heavy slots and the sandbox to shed. Renting VMs has left this plan for its own decision (#1644). Three things stay: the copy of a closed lane's transcript, the handover of drover's own web server, and the sweep of stray processes in a finished lane's folder.
-Slices: fourteen drover steps, each after the shed release it needs and each deleting the code it replaces. Two can start on shed's release of 2026-11-22: the account for lanes and orchestrator threads on the main host (#1576, no key set means "auto") and the client. Then provider facts; hosts as shed machines; host charts; the host link; the token proxy's deletion (#1604, after shed's next release, which carries shed's proxy); secrets; self-update; heavy slots; the sandbox; balances; the timer jobs through farrier; and reading shed's new state fields. Until #1604 a lane on another host has no account and signs in through drover's proxy, as today.
-Open questions: (1) an agent that shed's proxy does not serve (Codex today) cannot have an account on another host. With no account key set, let it run there on that host's own login, as today (recommended, and what shed's accounts decision says), or keep such lanes on the main host? Your answers of 2026-11-23 are decisions here: accounts are two steps, #1576 and #1604; all four crates are approved; the host link reads shed's events; shed's staging is promoted and its proxy goes in the next release.
+Decision: drover keeps the policy (which lane goes where and when, spend, approvals, the guard) and stops doing host work itself. It talks to shed through shed's own client, reaches every other host over the link shed already holds, reads health, processes, accounts and usage from shed, takes provider facts from shed's catalog, and leaves installs, secrets, heavy slots and the sandbox to shed. Renting VMs has left this plan for its own decision (#1644). Four things stay: the copy of a closed lane's transcript, the handover of drover's own web server, the sweep of stray processes in a finished lane's folder, and the file through which a lane on another host sends its commands to the main host (#1646): shed has no connection from a host back to the main host, so the main host keeps fetching that file.
+Slices: first, on its own, #1623's small fix: a rented host that shed shows as up counts as up. Then fourteen drover steps, each after the shed release it needs and each deleting the code it replaces: the account for lanes and orchestrator threads on the main host (#1576, no key set means "auto") and the client, both possible on shed's release of 2026-11-22; provider facts; hosts as shed machines; host charts; the host link; the token proxy's deletion (#1604, after shed's next release); secrets; self-update; heavy slots; the sandbox; balances; the timer jobs through farrier; shed's new state fields. Two installs wait for a check: #1576 until drover's doctor shows a signed-in named account for each agent, #1604 until no lane started on drover's proxy is still alive. Until #1604 a lane on another host signs in through drover's proxy, as today.
+Open questions: (1) an agent that shed's proxy does not serve (Codex today) cannot have an account on another host. With no account key set, let it run there on that host's own login, as today (recommended, and what shed's accounts decision says), or keep such lanes on the main host? Your two answers of 2026-11-23 are decisions here. The first: accounts are two steps, #1576 and #1604; all four crates are approved; the host link reads shed's events; shed's staging is promoted and its proxy goes in the next release. The second: its six points, listed at the top of adr.md with where each one landed.
 
 Read this file, then [adr.md](adr.md). [order.md](order.md) has the steps, their gates, the two folded symptoms
 and the issues to file; [shapes.md](shapes.md) has the config keys, the types and the pins. It follows shed's
@@ -21,7 +21,7 @@ Sizes are the issue's, in src lines. "Step" is the drover issue in [order.md](or
 | # | candidate | decision | why | shed API it needs | step |
 |---|---|---|---|---|---|
 | 1 | remote transport: `On`, the per-pass probe, `ssh … shed connect` (~650) | move | shed holds one link per machine; drover's second ssh path has its own failures (shared connections, session caps, a changed host key) | `exec` with `env`, `stdin` and `timeout`; `file.read`; `file.write` with `mode`; `machine.add`; `machine.links` with `down_since`, `hello`, `os`, `arch`, `home` | D1 |
-| 2 | host and process sampling: `host.rs`, the `ps` half of `top.rs`, the history writer (~550) | move, but the folder sweep | shed samples every machine each minute and knows each terminal's process tree | `machine.stats` with `top`, `since` and the memory level (X1); `terminal.procs`; `kill` | D1, D12 |
+| 2 | host and process sampling: `host.rs`, the `ps` half of `top.rs`, the history writer (~550) | move, but the folder sweep | shed samples every machine each minute and knows each terminal's process tree | `machine.stats` with `top`, `since` and the memory level (X1); `terminal.procs` with a process's CPU time (X1); `kill` | D1, D12 |
 | 3 | the hand-rolled client and the CLI word builders (~370) | delete | shed ships the client; drover's copy probes `shed help run` and starts a process per prompt | the `shed-client` crate at a tag; `run` with `model`, `effort`, `env`, `meta` | D0 |
 | 4 | launchd and systemd in `timer.rs` (~250) | move | farrier-service renders, loads and checks the same jobs; shed uses it | farrier F1: control commands through the caller's runner | D10 |
 | 5a | the dsh setup-wizard watcher (~80) | delete | shed's dsh record has the wizard, the echo check and the ready wait | the record's `[terminal]` table (on shed staging) | D9 |
@@ -43,9 +43,9 @@ What the issue asked to be settled, one line each:
 - **A private mode for `file.write`:** `mode`, in shed #266. D3 then removes the need: a lane's secrets stop being a file.
 - **A batch exists call:** `exec` is enough. `On::existing` is already one script with the paths on stdin; it becomes one `exec` with the same script and `stdin`.
 - **Link down since:** `Link::down_since`, in shed #266. drover's `hosts.down` file goes.
-- **Free memory, swap-out, totals, top-N:** in shed #266. One thing is missing: the kernel's memory pressure level, which drover's `HOST_BUSY` gate reads. That is X1.
-- **A `terminal.procs` tree:** in shed #266, with `own` marking the agent's own processes.
-- **A tagged client release:** the tag job is on shed staging (#267). No tag exists yet, because shed main has no client crate.
+- **Free memory, swap-out, totals, top-N:** in shed #266. One thing is missing: the kernel's memory pressure level, which drover's `HOST_BUSY` gate reads. That is X1. The swap-out is a count from boot: drover's rate is the difference between two passes' `now`, not the per-minute history.
+- **A `terminal.procs` tree:** in shed #266, with `own` marking the agent's own processes. Its `cpu_pct` is an average over a process's life, so a lane's CPU share is the CPU time between two reads; X1 adds that time (`cpu_ms`).
+- **A tagged client release:** `client-v5.0`, pushed by shed's tag job (#267) on 2026-11-22.
 - **How `[hosts]` become shed machines:** the `[hosts]` name is the machine's name and its `machine` value is the target ([shapes.md](shapes.md)).
 
 Policy that stays, as the issue lists it: placement, needs, slots and holds, admission and pacing, lane-hog, who
@@ -69,12 +69,17 @@ host.read(&verdict); host.write(&brief, text)?;        // file.read, file.write
 let links = shed.links()?;                             // once a pass; no network: the main shed holds the links
 match reach(&links, "box", ctx.now, &cfg.limits) {
     Reach::Up => {}
-    Reach::Down { since, why } => skip(since, why),    // the pass sends it nothing
+    Reach::Draining { .. } => no_new_lane(),           // #1644: calls go on, its lanes finish
+    Reach::Down { since, why } => skip(since, why),    // reconnecting or down: the pass sends it nothing
     Reach::Offline { since, why } => alert_once("host-offline", since, why),
 }
-let s = host.sample(3)?;                               // machine.stats {top: 3, since: now - 600}
+let s = host.sample(3, seen.swap("box"))?;             // machine.stats {top: 3}: `now`, and the swap rate against the last pass's `now`
 host::admit(&s, &cfg.limits)?;                         // the same rules: level, swap median, load without drover's own
-let tree = host.procs(&lane.name)?;                    // terminal.procs "box/lane-256-impl": top and lane-hog
+
+// D1: a lane's CPU share, for top and lane-hog: two reads, never `cpu_pct`
+let a = host.procs(&lane.name)?;                       // terminal.procs "box/lane-256-impl"
+clock::sleep(cfg.limits.cpu_sample());
+let share = shed::busy(&a, &host.procs(&lane.name)?, s.cpus);   // percent of the host's CPUs between the two
 ```
 
 The account, at D2a: before the client, so it rides the start words drover builds today. Both callers share it.
@@ -123,7 +128,17 @@ for ev in shed.events(&lanes_only)? {                  // every machine's, over 
 }
 // at most once per `link_poll_millis` per host, and every `link_sample_secs` anyway
 let frame = host.report(&Watch { worktrees, roots, acked })?;   // this host: in process; a machine: exec `drover hosts report`
-intake::apply(ctx, cfg, r, out, host.id(), frame)?;    // unchanged
+intake::apply(ctx, cfg, r, out, host.id(), frame)?;    // unchanged: the view's rows, then each outbox line, run once
+```
+
+A lane's verb on another host, before and after every step here (#1646). There is no link back to the main host,
+so the verb calls nothing:
+
+```rust
+// on box, in the lane: `drover triage close …`, `drover turn done`, `drover ask …`
+if let Some(lane) = outbox::lane() { return outbox::queue(&lane, &args) }   // one line in <worktree>/.drover/outbox.jsonl
+// on the main host: the report above carries the line; intake runs it as that lane and logs `outbox`;
+// the next report's `acked` tells box, which moves its acked mark
 ```
 
 The timer jobs, after D10:
@@ -146,26 +161,33 @@ if let Some(why) = service.status()?.refused { heal(&service, why)? }
         ▼                the name is taken by another target
      added ─────────────────────────────────────────────────▶ refused: a doctor row, no lane goes there
         │ the link is up
-        ▼         the link leaves up           down_since older than host_offline_minutes
+        ▼    the link is reconnecting or down      down_since older than host_offline_minutes
        up ──────────────────────────▶ down ──────────────────────────────────────────▶ offline
-        ▲                              │ up again                                         │ up again
-        └──────────────────────────────┴──────────────────────────────────────────────────┘
+      │ ▲ ▲                          ▲ │ up again                                         │ up again
+      │ │ └──────────────────────────┼─┴──────────────────────────────────────────────────┘
+      │ │ the drain is lifted        │ its link leaves up
+      ▼ │                            │
+    draining ────────────────────────┘        shed says the machine drains (#1644)
 ```
 
-| state | what drover does |
-|---|---|
-| up | calls, places lanes |
-| down | sends it nothing this pass; its lanes wait |
-| offline | one `host-offline` alert with the link's error; its lanes show `host offline` |
-| refused | nothing, until the owner removes shed's other machine of that name |
+| state | `Reach` | what drover does |
+|---|---|---|
+| up | `Up` | calls, places lanes |
+| draining | `Draining` | places no new lane; every call still goes, so its lanes are read, prompted and ended as on an up host and finish there. No alert. What is saved when a lane ends there is #1644's |
+| down | `Down` | sends it nothing this pass; its lanes wait |
+| offline | `Offline` | one `host-offline` alert with the link's error; its lanes show `host offline` |
+| refused | | nothing, until the owner removes shed's other machine of that name |
 
 `hosts off` is beside this: a disabled host is sent nothing, whatever its link says. A host taken out of
 fleet.toml is sent nothing either, and shed keeps the machine. drover stores none of this: each state is read
 from `machine.links` at the start of a pass. Nothing in drover's own log can hold a host offline while its link
-is up: that is #1623's cause, and D1 deletes it.
+is up: that is #1623's cause. Its own fix ends it for a host shed lists `up`; D1 deletes the rule.
 
-From D13 the same chart is read from `machine.ls`: shed's `up` (and a `slow` link) is up, `added` and `offline`
-are down and offline, `key_changed` and `removed` are one alert each. `draining` is #1644's: no new lane.
+`machine.links` has three link states and no drain: `up` is up, `reconnecting` and `down` are down, then offline
+by the age of `down_since`. So D1 builds `Reach::Draining` and every caller's arm for it, and never returns it.
+The step that moves `reach` to `machine.ls` returns it: D13, or #1644's lane-host slice if that lands first.
+From then the chart is read from the machine's `flow` and its link's ([shapes.md](shapes.md) has both tables).
+#1649's host fact (up, offline, draining) is `Reach` and nothing else.
 
 ### An account, as drover reads it (D2a on the main host, D2b on every host)
 
@@ -185,7 +207,7 @@ shed owns the state and every move; drover reads `account.ls` and the refusal of
 | the start is accepted | the spawn event records the account the terminal reports |
 | `ACCOUNT_SIGNED_OUT` | one `LOGIN_NEEDED` card for the account, not the host; its held starts go on once `account.ls` shows it ready |
 | `ACCOUNT_LIMITED` | holds the start until the first reset in `account.ls`; other hosts and other accounts are not held |
-| `NO_ACCOUNT` | one card: no named account of that provider, with the `shed account add` line |
+| `NO_ACCOUNT` | one card: no named account of that provider, with the `shed account add` line. D2a's install gate keeps a first start from meeting it ([order.md](order.md)) |
 | `ACCOUNT_SETUP` | `ACP_UNGUARDED`: the account's folder has a setup drover's hook would not guard |
 | an `account` event on a live lane or thread | one row: "X hit its limit; now on Y" |
 | no account was sent (another host before D2b; an agent with no `[proxy]` after it) | today's host hold, from the lane's banner |
@@ -227,12 +249,15 @@ A step never ships a switch between the old way and the new one: its PR moves ev
 | `update`, `heavy`, `sandbox` | the decision half of each ([order.md](order.md)) | `crate::shed` |
 | `cloud`, `runners` | as today until #1644, which deletes both | `crate::shed` for the host, from D1 |
 | `link` | the report, the intake, the view; no dial, no frames in order | `crate::shed` |
+| `outbox` | a lane's verb on another host, as one line in its worktree; the acked mark | nothing: no shed, no network |
 
 Rules, each with its enforcer ([adr.md](adr.md) has the `arch.toml` lines):
 
 - Only `crate::shed` names `shed_client`; nothing writes a handshake by hand (two bans, from D0).
 - No ssh connection is opened by drover (a ban from D1; cloud's first contact keeps one exception until #1644).
 - drover sets no proxy variable and mints no key (a ban from D2b).
+- A lane on another host calls nothing on the main host: its verbs write the outbox, and the main host pulls
+  (#1646's test: every lane verb run with no fleet.toml and no state dir).
 - A process still starts only in `runner.rs`: `exec` on a machine is shed's, and farrier's control commands go through
   drover's runner (the existing ban; F1).
 - serve's request path makes no call that crosses a link: it reads the pass's view and shed's cached answers, as the

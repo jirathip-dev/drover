@@ -20,7 +20,7 @@ machine = "user@box.example"       # unchanged key and value: now also the targe
 | removal | never by drover. A host removed from fleet.toml is sent nothing; the machine stays in shed (cooee and the owner may use it). A rented VM's machine is added and removed by shed's helper (#1644) |
 | the event log | a spawn's `machine` stays the target, as today, so old events read the same. The shed name is found through `[hosts]` |
 | a session | at this host's shed a lane on box is `box/<name>`. `crate::shed` adds and strips the prefix; `session::Session` keeps its bare name and its host |
-| a cloud host | until #1644 a `[hosts]` entry like any other, and its link alone says whether it is up: `cloud::state` decides spend and nothing else (#1623). From #1644 the helper adds its machine and `register` skips it |
+| a cloud host | until #1644 a `[hosts]` entry like any other, and its link alone says whether it is up: `cloud::state` decides spend and nothing else. #1623's own fix does the first half of that before D1: listed `up` by shed, it is up. From #1644 the helper adds its machine and `register` skips it |
 
 ## `crate::shed`
 
@@ -51,21 +51,66 @@ impl Host<'_> {
     pub fn write(&self, p: &Path, text: &str) -> Result<()>;       // file.write; folders made by one `exec mkdir -p`
     pub fn write_private(&self, p: &Path, text: &str) -> Result<()>;      // mode 0o600; deleted by D3
     pub fn remove(&self, p: &Path) -> Result<()>;
-    pub fn sample(&self, top: u32) -> Result<host::Host>;          // machine.stats {top, since: now - 600}
-    pub fn procs(&self, session: &str) -> Result<Vec<Proc>>;       // terminal.procs
+    pub fn sample(&self, top: u32, last: Option<Swap>) -> Result<host::Host>;   // machine.stats {top}: `now` only
+    pub fn procs(&self, session: &str) -> Result<Tree>;            // terminal.procs
     pub fn report(&self, w: &Watch) -> Result<Frame>;              // D11
 }
 
+pub struct Swap { pub at: u64, pub pages: u64 }                    // one `now`: `Sample::at`, `swap_out_pages`
+pub struct Tree { pub at_ms: u64, pub procs: Vec<Proc> }           // one terminal.procs answer, and when it came
+
+/// Percent of the host's CPUs the tree used between two reads of it.
+pub fn busy(a: &Tree, b: &Tree, cpus: u64) -> f64;                 // pure
+
 pub enum Reach {
     Up,
+    Draining { since: u64 },                 // up, and leaving (#1644): no new lane, every call
     Down { since: u64, why: String },        // the link is not up: the pass sends this host nothing
     Offline { since: u64, why: String },     // down longer than `host_offline_minutes`
 }
 pub fn reach(links: &BTreeMap<String, Link>, host: &str, now: u64, l: &Limits) -> Reach;   // pure
 ```
 
-A machine with no entry in `links` reads as `Down` since now, with "not registered" as its reason. `reach` is
-the one place that reads shed's link: D13 changes its input to `machine.ls` and its `flow`, and no caller.
+`reach` is the one place that reads shed's link. At D1 its input is `machine.links`:
+
+| the link's `state` | `Reach` |
+|---|---|
+| `up` | `Up` |
+| `reconnecting` | `Down` since `down_since`: shed is dialing, a call would not arrive |
+| `down` | `Down` since `down_since`, with the link's `error` |
+| either, with `down_since` older than `host_offline_minutes` | `Offline` |
+| no entry | `Down` since now, "not registered" |
+
+`machine.links` says nothing of a drain, so D1 never returns `Draining`. The step that moves the input to
+`machine.ls` does (D13, or #1644's lane-host slice if it lands first), and changes no caller:
+
+| the machine's `flow` | its link's `flow` | `Reach` |
+|---|---|---|
+| `up` | `up`, `slow` | `Up`; a `slow` host is placed on last |
+| `up` | `hung`, `reconnecting` | `Down` since the link's `since`: shed keeps the machine `up` while it dials, and answers a call `NO_LINK` |
+| `draining` | `up`, `slow` | `Draining` since the machine's `since` |
+| `draining` | `hung`, `reconnecting` | `Down` |
+| `added` | any | `Down`, "never up yet" |
+| `offline` | any | `Down`, then `Offline` by the age of its `since` |
+| `key_changed`, `removed` | any | `Offline` at once, with the reason and who did it: one alert each |
+
+#1649's host fact is this type: `Up` is its up, `Draining` its draining, `Down` and `Offline` its offline. Whether
+the wait before the alert stays `Offline` or becomes a row's timeout there is #1649's to say.
+
+## A rate is two reads
+
+shed gives counts and a life's average. drover takes every rate as a difference, in `crate::shed`:
+
+| rate | the two reads | kept between them |
+|---|---|---|
+| swap-out, pages per 2 s | this pass's `now` and the last pass's, for the same host: pages over seconds, times 2. A count that went down (a reboot) gives no rate that pass | `Swap` and the last five rates, in `hosts.json` beside the host's last sample |
+| a lane's CPU share | two `terminal.procs` of its terminal, `cpu_sample_secs` apart, in the same tick's chore or the same `top` run | nothing |
+
+`busy` sums, over the processes in the second read, the `cpu_ms` each gained since the first. A process is the
+same one when its pid matches and its start (`at` less `elapsed_s`) does within two seconds; one that started between the reads counts
+whole; one that ended counts nothing. The sum over the gap and the CPUs is the share. `cpu_ms` is X1's
+addition to `Proc`: CPU time over its life, in milliseconds. lane-hog asks only for the lanes of a host over its
+load limit, and still wants 3 ticks running; `top` asks for every lane it lists.
 
 ## What admission reads, and from where
 
@@ -74,20 +119,21 @@ the one place that reads shed's link: D13 changes its input to `machine.ls` and 
 | drover reads | today | after D1 |
 |---|---|---|
 | memory pressure level | `sysctl kern.memorystatus_vm_pressure_level` | `Sample::mem_level` (X1); none on Linux, as today |
-| swap-out, pages per 2 s | `vm_stat`, against a count kept in `swapcount*` files | the difference of `swap_out_pages` between two samples of `history` |
-| its median of 5 | the `swapouts` file | the last five differences in `history`; both files go |
+| swap-out, pages per 2 s | `vm_stat`, against a count kept in `swapcount*` files | the difference of `swap_out_pages` between this pass's `now` and the last pass's (above); never `history` |
+| its median of 5 | the `swapouts` file | the last five rates, kept in `hosts.json`; both files go |
 | load per CPU, without drover's own | `sysctl`, `ps`, minus drover's processes | `now.load_per_cpu`, minus the `top_cpu` rows whose command is drover |
 | free and total memory | `vm_stat`, `hw.memsize`, `/proc/meminfo` | `mem_free_mb`, `mem_total_mb` |
-| the 3 busiest processes not drover's | `ps` | `top_cpu` rows with no `terminal` |
+| the 3 busiest processes not drover's | `ps` | `top_cpu` rows with no `terminal`: named in the refusal, their `cpu_pct` never used as a rate |
 | free and total disk | `df -k /` | `disk_free_mb`, `disk_total_mb`; a workspace root on another volume stays `df` by `exec`, in `roots.rs` |
-| a lane's CPU share and memory | `ps` joined to `lsof` by folder | `terminal.procs`: the sum over its tree |
+| a lane's CPU share | `ps`'s `pcpu`, joined to `lsof` by folder | `busy` over two `terminal.procs` reads (above); never `cpu_pct` |
+| a lane's memory | the same join | `terminal.procs`: `rss_mb` summed over its tree |
 | the top memory users and their lane | `top`, `lsof` | `top_mem` rows, each with its `terminal` |
 | `os`, `arch`, `$HOME` | a probe script | `Link::os`, `arch`, `home` |
 | `xcode`, `docker`, `webkit` | the same script | that script without its first three lines, by `exec`, hourly as today |
 | the host's shed | `ssh … shed connect`, `hello` | `Link::hello` |
 
 `hosts::Seen` (`hosts.json`) keeps drover's own facts: tags, health rows, roots, the gh token row, `busy`, the
-host's drover build, and the last sample for the board.
+host's drover build, the last sample for the board, and with it the swap count and the five rates.
 
 ## fleet.toml
 
@@ -99,6 +145,7 @@ host's drover build, and the last sample for the board.
 | `[limits] link_poll_millis` | kept: the least time between two reports of one host | D11 |
 | `[limits] link_sample_secs` | kept: a report this often with no state change | D11 |
 | `[limits] link_down_minutes`, `host_offline_minutes` | kept: both now read the link's `down_since` | D1 |
+| `[limits] cpu_sample_secs` | new, default 5: the gap between the two process reads a CPU share is taken from | D1 |
 | `account` on a fleet, on a role and on `[fleet.<n>.role.orchestrator]` | new: a name or `"auto"`; unset is `"auto"` (#1576) | D2a |
 | `[proxy]`, `[limits] proxy_connect_secs` | deleted | D2b |
 | `[providers.deepseek]`'s key file | deleted; `warn_below` stays | D8 |
@@ -132,6 +179,7 @@ pub struct Acp { /* cmd, mcp, meta, awake */ pub account: Option<Account> }   //
 | where, D2a | the main host only. On another host `Acp::account` is none and drover's proxy signs the lane in, as today |
 | where, D2b | every host, for an agent whose record has `[proxy]`. Another agent on another host: none when no key is set (that host's login), `ACCOUNT_LOCAL_ONLY` when one is (open question 1) |
 | `"auto"` | shed picks among the provider's signed-in named accounts and moves a lane at a limit. `default`, the CLI's own login, is used only when named |
+| the gate | doctor, from the pin PR on: one row per agent that a role or an orchestrator starts over ACP. `✓ account claude: work, personal` names its signed-in named accounts (`ready` or `limited`, never `default`); `✗ account codex: no signed-in named account → shed account add codex <name>`. D2a's build is installed when every row is `✓` |
 | a wrong name | `Config::load` checks only the form (shed's letters, digits, `-`, `_`). Whether the account exists is shed's answer at the start, `NO_ACCOUNT`: accounts change without a config edit |
 | retired keys | `accounts`, `fallback` and `[accounts]` stay retired, with the warning they have today; `account` leaves that list |
 | the floor | `shed::MIN_PROTOCOL` is 5 from D2a |
@@ -150,6 +198,10 @@ pub struct Watch {
 `drover hosts report` writes each `acked` pair to the worktree's acked mark before it reads the outbox, which is
 what the watcher did with an ack line on its stdin. `beat_secs`, `poll_millis` and `sample_secs` leave `Watch`;
 `Body::Beat`, `Frame::boot` and `Frame::n` leave the frame.
+
+The outbox itself does not change at any step: `.drover/outbox.jsonl` and its acked mark in the worktree, one
+line a verb, run once on the main host as the lane its worktree's spawn names. It is the only way a lane on
+another host reaches the main host (#1646), so which verbs write it is #1646's list, and the pull is this report.
 
 ## The pins
 
