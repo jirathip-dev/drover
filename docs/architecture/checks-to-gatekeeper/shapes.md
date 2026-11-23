@@ -13,7 +13,8 @@ pub struct PrivateNames(Vec<String>);
 impl PrivateNames {
     /// One name a line, trimmed; `None` when no name is left.
     pub fn parse(text: &str) -> Option<PrivateNames>;
-    /// The 1-based number of the first name `line` holds as a whole word, any case.
+    /// The 1-based number of the first name in the list `line` holds as a whole word, any case.
+    /// The shared names set (below) fixes what that means.
     pub fn hit(&self, line: &str) -> Option<usize>;
     pub fn len(&self) -> usize;
 }
@@ -41,7 +42,7 @@ Who fills the new values:
 
 | Value | In CI and on a lane's host | In a fixture case |
 |---|---|---|
-| `names` | the CLI reads `DROVER_PRIVATE_NAMES` once | the case's `env` file, as today |
+| `names` | the CLI reads `DROVER_PRIVATE_NAMES` once | the case's `env` file, as today; or its `names` file, one name a line (new, G3: an `env` line holds one name only) |
 | `head` | the CLI reads `GATEKEEPER_HEAD` once | the case's commit |
 | `pr_body` | `--pr-body <file>`, as today | the case's `body` file, as today |
 
@@ -172,6 +173,58 @@ pub fn rules(on: &On, wt: &Path) -> Result<Option<RulesReport>>;
 /// Rewrite a gate's baseline (setup's step for `core/arch`).
 pub fn baseline(on: &On, wt: &Path, gate: &str) -> Result<Ended>;
 ```
+
+## The shared names set (G3, D1)
+
+Private names are matched by gatekeeper's `PrivateNames::hit` and by the guard's own function in drover. Both
+must give this set's `expect` lines. It is one fixture case of `core/hygiene`, three files, the same bytes in both
+repos:
+
+| File | What | Rules |
+|---|---|---|
+| `names` | the list, one name a line | made-up names only; no blank line, so a name's number is its line |
+| `lines.md` | the text, one case a line | no home path and no UUID in it: the guard names those first |
+| `expect` | `private-name #<n> at lines.md:<line>` for each line that hits, in line order | a line that is not listed must not hit |
+
+```
+# names                # lines.md                                   # expect
+quillmoor              Ship it to the Quillmoor team.               private-name #1 at lines.md:1
+north-pier             quillmoors and requillmoor2 are other words. private-name #1 at lines.md:3
+pier nine              See quillmoor_notes and v2-quillmoor/x.      private-name #2 at lines.md:4
+quill                  The north-pier build.                        private-name #3 at lines.md:5
+                       Meet at Pier Nine.                           private-name #1 at lines.md:6
+                       A quill, then quillmoor.                     private-name #4 at lines.md:7
+                       A quill alone.
+                       équillmoor is another word.
+                       Nothing here.
+```
+
+The sample is today's behaviour: `drover hygiene check` over these nine lines with these four names prints exactly
+the six `expect` lines (run 2026-11-23). What the set fixes, each with a line of its own:
+
+- any case hits; a name inside a longer word does not, and a letter or digit of any script makes a longer word;
+- every other neighbour is an edge: a space, the line's start or end, punctuation, `_`, `-`, `/`;
+- a name may hold a space, a dot or a hyphen;
+- with two names on a line, the lower number is reported, not the one further left;
+- a line gives one hit at most.
+
+Where it lives, and who checks it:
+
+| | Path | Checked by |
+|---|---|---|
+| gatekeeper (the home, from G3) | `packs/core/fixtures/hygiene/shared-names/` | selftest: the gate fails on the case and prints `expect` |
+| drover | `crates/cli/tests/golden/private-names/` | one test in `tests/hygiene.rs`: the guard over each line gives `expect` |
+
+Drover's copy is written by hand once, in D1, from today's matcher. G3 copies it. From D2 on it is a generated
+file, and `just gen` writes it from the pinned release with the new verb:
+
+```
+$ ./.gatekeeper/run fixture core/hygiene/shared-names --to crates/cli/tests/golden/private-names
+wrote names, lines.md, expect
+```
+
+`fixture <pack>/<gate>/<case> --to <dir>` writes the case's files as the pack holds them, its `expect` and other
+case files included, and leaves nothing else in `<dir>`.
 
 ## The pre-send guard's check (#1615, slice D1)
 

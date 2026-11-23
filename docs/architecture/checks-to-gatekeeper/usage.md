@@ -9,7 +9,7 @@ Nothing changes for the lane, and nothing of drover's is needed on the host: the
 
 ```
 $ ./.gatekeeper/run check
-gatekeeper 1.3.0 · legs core rust · base 7c0a28c1c1a2 · 6 files changed · host lane · cache on
+gatekeeper 1.4.0 · legs core rust · base 7c0a28c1c1a2 · 6 files changed · host lane · cache on
 ok    core/pin              0.0s /    1s
 ok    core/cap              0.1s /    5s
       src lines (formatted): 64012 / cap 65000
@@ -121,10 +121,27 @@ pub fn run(cx: &Cx) -> Result<Vec<String>> {
 `hygiene` reads `cx.names`; with `None` it returns the one `list-missing` line. `arch` reads `cx.base` and
 `cx.pr_body` as the verb read `--base` and `--pr-body`.
 
+## The shared names set, in drover (tests/hygiene.rs)
+
+The guard's side of the set (D1). Gatekeeper's side needs no code: the set is a fixture case, and selftest runs it.
+
+```rust
+#[test]
+fn the_guard_matches_private_names_as_the_shared_set_says() {
+    let set = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/private-names");
+    let read = |f: &str| fs::read_to_string(set.join(f)).unwrap();
+    let check = Check { private: read("names").lines().map(String::from).collect(), ..Check::default() };
+    let hits: Vec<String> = (read("lines.md").lines().zip(1..))
+        .filter_map(|(l, n)| Some(format!("{} at lines.md:{n}", check.find(l)?)))
+        .collect();
+    assert_eq!(hits.join("\n"), read("expect").trim());
+}
+```
+
 ## A repo's bump PR
 
 ```
-$ ./.gatekeeper/run pin 1.3.0
+$ ./.gatekeeper/run pin 1.4.0
 ```
 
 A private repo adds, in its gatekeeper config:
@@ -135,6 +152,9 @@ A private repo adds, in its gatekeeper config:
 ```
 
 Drover's own config (#1587) loses its `[tools]` table, and its `arch.toml` loses `cli = true`.
+
+In drover, a bump also runs `just gen`, which rewrites the shared names set from the new pin. If gatekeeper
+changed how a name matches, the test above fails until the guard matches the same way, in that PR.
 
 ## The proofs the issue asks for
 

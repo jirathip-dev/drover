@@ -11,8 +11,10 @@ gatekeeper
   crates/gatekeeper-engine/src/arch/           arch's parts, each under 400 lines (collected)
     config.rs  layers.rs  bans.rs  sizes.rs  frozen.rs  generated.rs  comments.rs  docs.rs  baseline.rs
   crates/gatekeeper/src/cmd/check.rs           reads the two env vars once, fills RunCtx
+  crates/gatekeeper/src/cmd/fixture.rs         new verb: writes one fixture case's files to a folder (G3)
   packs/core/gates/{cap,rules,arch,hygiene,pr-body}.toml    step: check = "<name>"
   packs/core/fixtures/<gate>/<case>/           today's cases, plus drover's tests as new cases
+  packs/core/fixtures/hygiene/shared-names/    the shared names set, its home from G3 on
   packs/core/tools/drover.toml                 deleted (G5)
 
 drover
@@ -20,7 +22,8 @@ drover
   crates/core/src/done.rs                      the done gate: head pushed, then gatekeeper::check
   crates/core/src/gate.rs                      the merge check: gatekeeper::check with gate core/cap
   crates/core/src/lesson.rs                    record, review, apply: read gatekeeper::rules
-  crates/core/src/hygiene.rs                   the pre-send guard, scan, push (no gate verb)
+  crates/core/src/hygiene.rs                   the pre-send guard with its name matcher, scan, push (no gate verb)
+  crates/cli/tests/golden/private-names/       the shared names set: written by D1, generated from the pin by D2
   crates/core/src/overlap.rs                   the cap view (no check verb)
   crates/core/src/hotspots.rs                  reads three list keys of arch.toml itself
   crates/core/src/arch.rs                      deleted (D5)
@@ -49,6 +52,10 @@ Rules that follow, each with its enforcer:
   number. G1 adds the test that a failing hygiene case's log holds no name.
 - **Same findings.** Enforcer: review of G2 to G4 against "no `expect` file edited"; selftest fails a gate whose
   case prints something else.
+- **A private name matches the same in both repos.** Enforcer: the shared names set. Gatekeeper's selftest fails
+  unless `core/hygiene` prints the set's `expect` lines (G3). Drover's test fails unless the guard gives the same
+  lines (D1). Drover's copy is a generated file from D2 on, so `core/arch` fails a copy that is not the pinned
+  release's.
 - **One module in drover names gatekeeper.** Enforcer: the ban in drover's `arch.toml` (`adr.md`, last section).
 - **A lane verb needs no fleet config for the done gate.** Enforcer: D3's test, which runs the gate against a lane
   host with no config; #1646's wider test covers the other verbs.
@@ -58,9 +65,9 @@ Rules that follow, each with its enforcer:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Tool: the gate file has a drover tool step (gatekeeper 1.2.0)
+    [*] --> Tool: the gate file has a drover tool step (gatekeeper 1.2.0 and 1.3.0)
     Tool --> BuiltIn: G2, G3 or G4 swaps the step, expect files untouched, parity shown
-    BuiltIn --> Released: G5, the tool file deleted, gatekeeper 1.3.0
+    BuiltIn --> Released: G5, the tool file deleted, gatekeeper 1.4.0
     Released --> Pinned: a repo's bump PR (one per repo)
     Pinned --> VerbGone: every repo pinned, then D5 deletes drover's verb
     VerbGone --> [*]
