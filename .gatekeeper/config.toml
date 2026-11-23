@@ -21,6 +21,9 @@ install = "npm --prefix web ci --no-audit --no-fund"
 [legs.release]
 platform = "linux"
 
+[legs.release-hub]
+platform = "linux"
+
 [legs.test]
 platform = "linux"
 
