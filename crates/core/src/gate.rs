@@ -741,7 +741,7 @@ fn premerge(
     head: &str,
 ) -> Result<Result<Option<u64>, Refusal>> {
     let f = cfg.fleet(fleet)?;
-    let checks = premerge_checks(ctx, f);
+    let checks = premerge_checks(ctx, f, &f.local_path());
     let rules = std::fs::read_to_string(crate::repo_path(&f.local_path().join(".drover/rules.md"))).unwrap_or_default();
     if checks.is_empty() && crate::lesson::checks(&rules).iter().all(|c| c.active) {
         return Ok(Ok(None));
@@ -759,6 +759,7 @@ fn premerge(
         tree(&["add", "-f", "--detach", &wts, &base])?;
         let clean = git(r, &wt, &["merge", "--no-ff", "--no-edit", head]).is_ok();
         let t = crate::clock::instant();
+        let checks = premerge_checks(ctx, f, &wt);
         let fail = clean.then(|| run_checks(r, &wt, &base, &checks)).flatten();
         if clean && fail.is_none() {
             crate::lesson::record(ctx, r, &wt, (fleet, issue))?;
@@ -782,9 +783,10 @@ fn premerge(
     )))
 }
 
-pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet) -> Vec<Check> {
+pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet, tree: &Path) -> Vec<Check> {
     let has = f.local_path().join("ci/cap.toml").exists();
-    let cap = has.then(|| Premerge::Cmd(format!("{} cap-check --config ci/cap.toml", ctx.exe)));
+    let own = || format!("{} cap-check --config ci/cap.toml", ctx.exe);
+    let cap = has.then(|| Premerge::Cmd(crate::gatekeeper::cap(tree).unwrap_or_else(own)));
     let check = |p| match p {
         Premerge::Cmd(run) => Check {
             name: run.clone(),
