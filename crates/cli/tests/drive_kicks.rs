@@ -25,7 +25,7 @@ fn fleet_with(name: &str, max: usize, extra: &str, issues: u64, flags: &[&str]) 
 }
 
 fn started(sh: &FakeShed) -> bool {
-    !sh.all("run").is_empty()
+    !sh.briefed().is_empty()
 }
 
 fn codes(d: &serde_json::Value) -> Vec<String> {
@@ -496,7 +496,7 @@ fn waiting_names_the_reviews_ahead() {
     assert!(out.contains("review waits behind 2 earlier reviews"), "{out}");
 }
 
-struct Inline(Fake, drover::Ctx, &'static str);
+struct Inline(Fake, drover::Ctx, &'static str, fake_shed::Twin);
 impl drover::runner::Runner for Inline {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.0.run(prog, args)
@@ -506,8 +506,9 @@ impl drover::runner::Runner for Inline {
         if args.first().is_none_or(|a| a != "kick") {
             return Ok(0);
         }
-        let (c, a, load) = (self.1.clone(), args.to_vec(), self.2);
+        let (c, a, load, sh) = (self.1.clone(), args.to_vec(), self.2, self.3.clone());
         std::thread::spawn(move || {
+            sh.config("");
             let a: Vec<&str> = a.iter().map(String::as_str).collect();
             run(&c, &fake(load), &a)
         })
@@ -529,8 +530,8 @@ fn act(d: &serde_json::Value, n: u64) -> serde_json::Value {
 
 #[test]
 fn a_kick_refused_host_busy_is_logged_by_its_kick_and_the_pass_never_waits_or_rewrites() {
-    let (c, _sh) = fleet("kicks-604-busy", 6, 1);
-    let r = Inline(fake("1.0"), c.clone(), "40.0");
+    let (c, sh) = fleet("kicks-604-busy", 6, 1);
+    let r = Inline(fake("1.0"), c.clone(), "40.0", sh.twin());
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("sendmeter #1 start: pending"), "{out}");
@@ -586,8 +587,8 @@ fn every_start_refused_by_one_host_gate_for_30_min_alerts_once() {
 
 #[test]
 fn a_start_returns_pending_and_its_kick_logs_the_spawn() {
-    let (c, _sh) = fleet("kicks-604-ok", 6, 1);
-    let (code, out) = run(&c, &Inline(fake("1.0"), c.clone(), "1.0"), &["drive"]);
+    let (c, sh) = fleet("kicks-604-ok", 6, 1);
+    let (code, out) = run(&c, &Inline(fake("1.0"), c.clone(), "1.0", sh.twin()), &["drive"]);
     assert_eq!(code, 0, "{out}");
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().any(|e| e.is("spawn", "sendmeter", 1)), "{out}");
@@ -913,8 +914,11 @@ fn a_fleet_whose_gh_hangs_never_holds_another_fleets_pass_or_its_spawn() {
     look(&c, &r);
     std::thread::scope(|s| {
         for f in ["alpha", "beta"] {
-            let (c, r) = (&c, &r);
-            s.spawn(move || assert_eq!(run_only(c, r, &["drive", f]).0, 0, "{f}"));
+            let (c, r, sh) = (&c, &r, &sh);
+            s.spawn(move || {
+                sh.config("");
+                assert_eq!(run_only(c, r, &["drive", f]).0, 0, "{f}");
+            });
         }
     });
     let waits = r.2.borrow().clone();
@@ -925,8 +929,8 @@ fn a_fleet_whose_gh_hangs_never_holds_another_fleets_pass_or_its_spawn() {
     let ev = read(&c.state).unwrap();
     let beta = ev.iter().find(|e| e.kind == "drive-pass" && e.fleet == "beta").unwrap();
     assert_eq!(beta.data["actions"][0]["outcome"], "started", "{:?}", beta.data);
-    let runs = sh.all("run");
-    assert!(runs.iter().any(|p| p["name"] == "beta-impl-1"), "{runs:?}");
+    let runs = sh.briefed();
+    assert!(runs.iter().any(|p| p == "beta-impl-1"), "{runs:?}");
 }
 
 struct Meet(Fake, std::sync::Barrier);
@@ -1282,21 +1286,22 @@ fn free_in_flight_slots_go_to_the_first_queued_issues_while_their_kicks_run_slow
 
 type Replies = std::sync::Arc<dyn Fn() -> Fake + Send + Sync>;
 
-struct Kicked(Fake, drover::Ctx, Replies);
+struct Kicked(Fake, drover::Ctx, Replies, fake_shed::Twin);
 impl drover::runner::Runner for Kicked {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.0.run(prog, args)
     }
     fn sleep(&self, _: u64) {}
     fn detach(&self, _: &str, args: &[String], _: &std::path::Path) -> anyhow::Result<u32> {
-        let (c, a, r) = (self.1.clone(), args.to_vec(), self.2.clone());
+        let (c, a, r, sh) = (self.1.clone(), args.to_vec(), self.2.clone(), self.3.clone());
         std::thread::spawn(move || {
+            sh.config("");
             let a: Vec<&str> = a.iter().map(String::as_str).collect();
             let pid = std::process::id().to_string();
             let alive = r()
                 .reply(&format!("kill -0 {pid}"), "")
                 .reply(&format!("ps -o etime= -p {pid}"), "  00:01\n");
-            run(&c, &Kicked(alive, c.clone(), r), &a)
+            run(&c, &Kicked(alive, c.clone(), r, sh.clone()), &a)
         })
         .join()
         .unwrap();
@@ -1361,10 +1366,10 @@ fn fix_round_starts(c: &drover::Ctx, sh: &FakeShed, r: &Replies) {
         now: c.now + 300,
         ..c.clone()
     };
-    let (code, out) = run(&later, &Kicked(r(), later.clone(), r.clone()), &["drive"]);
+    let (code, out) = run(&later, &Kicked(r(), later.clone(), r.clone(), sh.twin()), &["drive"]);
     assert_eq!(code, 0, "{out}");
-    let runs = sh.all("run");
-    assert!(runs.iter().any(|p| p["name"] == "sendmeter-impl-1"), "{out} {runs:?}");
+    let runs = sh.briefed();
+    assert!(runs.iter().any(|p| p == "sendmeter-impl-1"), "{out} {runs:?}");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-1/.brief.md")).unwrap();
     assert!(brief.contains("ui-webkit sheet close failed"), "{brief}");
     let much_later = drover::Ctx {

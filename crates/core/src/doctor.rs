@@ -113,29 +113,12 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
     rows.push(format!("✓ config — {}", ctx.config.display()));
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
     rows.extend(cfg.shed().map(|b| crate::shed::line(r, &b.wire)));
-    let missing = cfg
-        .shed()
-        .and_then(|_| crate::shed::unlisted(cfg, r).ok())
-        .unwrap_or_default();
-    rows.extend(missing.iter().map(|m| {
-        format!("✗ shed machine {m} — a [hosts] machine shed does not list → shed machine add {m} {m} (drover drive adds it)")
-    }));
     rows.extend(crate::hygiene::doctor(ctx, cfg, r));
 }
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, r, rows);
     rows.extend(crate::proxy::status(ctx, cfg, r).map(|f| f.join(" · ")));
-    if cfg
-        .runtime
-        .as_ref()
-        .is_some_and(|r| r.kind == crate::config::RuntimeKind::Berth)
-    {
-        let fix = format!("set kind = \"shed\" in {}", ctx.config.display());
-        rows.push(format!(
-            "! runtime — kind = \"berth\" is deprecated, berth is now shed → {fix}"
-        ));
-    }
     let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::working(&ctx.state).unwrap_or_default());
     row(rows, !line.contains(" · stale"), '!', &line);
     let (n401, n503) = crate::devices::denials(ctx);

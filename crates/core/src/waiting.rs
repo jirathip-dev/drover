@@ -703,7 +703,7 @@ pub fn scan_where(
     let hung = crate::roots::hung_now(events);
     let mine = |st: &crate::events::States| {
         st.values()
-            .filter(|s| cfg.fleet.contains_key(&s.fleet) && keep(s))
+            .filter(|s| cfg.fleet.contains_key(&s.fleet) && !s.settled() && keep(s))
             .cloned()
             .collect()
     };
@@ -1088,14 +1088,7 @@ pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
     })
 }
 
-const HOST_WAIT: [&str; 6] = [
-    "HOST_BUSY",
-    "HOST_UPDATING",
-    "DISK_LOW",
-    "DISK_BUDGET",
-    "MEM_LOW",
-    "LOGIN_NEEDED",
-];
+const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "LOGIN_NEEDED"];
 pub const ORPHAN_SECS: u64 = 1800;
 
 /// Since when nothing has driven guarded issue `s`, once that is 30 min: no working lane, no drive action on it (a due step, or a refused one drive retries) and no named wait (an open ask, a hold, a paused fleet, CI after PASS).

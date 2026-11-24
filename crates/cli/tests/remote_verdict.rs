@@ -17,7 +17,7 @@ fn head() -> String {
 fn setup(name: &str) -> (drover::Ctx, String) {
     let rev = tmpdir(&format!("{name}-rev")).display().to_string();
     let base = CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("review_rounds = 3", "review_rounds = 3\nssh_sessions = 64");
     let c = ctx(
         &tmpdir(name),

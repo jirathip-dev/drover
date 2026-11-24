@@ -344,15 +344,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "self_update_wait_minutes",
         "a head with no release build this long alerts `self-update-waiting`",
     ),
-    (
-        "self_update_lag_minutes",
-        "how long a rollout waits for an enabled host that is not staged before the rest swap",
-    ),
     ("self_update_stage_secs", "one host's download and gate of a release build"),
-    (
-        "self_update_swap_secs",
-        "how long a `self-update-swapping` mark holds remote placement when no `self-updated` follows",
-    ),
     ("act_minutes", "a flow row drive owns must have acted within this long (#1649)"),
     (
         "escalate_minutes",

@@ -330,7 +330,7 @@ fn tool(bin: &Path, name: &str, code: i32, say: &str) {
     let path = bin.join(name);
     let log = bin.join("ran.log");
     let script = format!(
-        "#!/bin/sh\necho \"{name} $* $PWD\" >> {}\necho '{say}'\nexit {code}\n",
+        "#!/bin/sh\necho \"{name} $* $(pwd -P)\" >> {}\necho '{say}'\nexit {code}\n",
         log.display()
     );
     std::fs::write(&path, script).unwrap();
@@ -646,7 +646,7 @@ fn just(repo: &Repo, code: i32, outcome: &Value) {
     };
     let log = repo.dir.join("just.log");
     let script = format!(
-        "#!/bin/sh\necho \"$* $INTEGRATION $PWD\" >> {}\nprintf '%s' '{out}' > \"$GUARD_OUT\"\nexit {code}\n",
+        "#!/bin/sh\necho \"$* $INTEGRATION $(pwd -P)\" >> {}\nprintf '%s' '{out}' > \"$GUARD_OUT\"\nexit {code}\n",
         log.display()
     );
     let path = repo.dir.join("bin/just");

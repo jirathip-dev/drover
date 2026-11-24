@@ -177,26 +177,27 @@ impl OrchestratorCfg {
 #[serde(try_from = "String")]
 pub enum RuntimeKind {
     #[default]
-    Shed,
     ShedAcp,
-    Berth,
 }
 
 /// The load error for the retired runtime, with its migration.
-pub const NO_RUNTIME: &str = "no shed runtime: set [runtime] kind = \"shed-acp\" or \"shed\" (docs/runtimes.md)";
+pub const NO_RUNTIME: &str = "no shed runtime: set [runtime] kind = \"shed-acp\" (docs/runtimes.md)";
 
 pub const RETIRED_RUNTIME: &str = "runtime \"herdr\" is retired (#721): set kind = \"shed-acp\" (each lane an ACP \
-     session) or \"shed\" (each lane a shed terminal); docs/runtimes.md has the migration";
+     session); docs/runtimes.md has the migration";
+
+/// The load error for `kind = "shed"` (and its old name `berth`): terminal lanes are gone, every lane is an ACP session.
+pub const TERMINAL_RUNTIME: &str = "runtime \"shed\" (terminal lanes) is retired (#1726): use kind = \"shed-acp\", \
+     each lane an ACP session (docs/runtimes.md)";
 
 impl TryFrom<String> for RuntimeKind {
     type Error = String;
     fn try_from(k: String) -> std::result::Result<Self, String> {
         match k.as_str() {
-            "shed" => Ok(Self::Shed),
             "shed-acp" => Ok(Self::ShedAcp),
-            "berth" => Ok(Self::Berth),
+            "shed" | "berth" => Err(TERMINAL_RUNTIME.into()),
             "herdr" => Err(RETIRED_RUNTIME.into()),
-            _ => Err(format!("unknown runtime \"{k}\": \"shed-acp\" or \"shed\"")),
+            _ => Err(format!("unknown runtime \"{k}\": \"shed-acp\"")),
         }
     }
 }
@@ -213,17 +214,13 @@ pub struct Runtime {
 impl Runtime {
     /// The shed runtime it names.
     pub fn shed(&self) -> crate::shed::Shed {
-        let acp = self.kind == RuntimeKind::ShedAcp;
         crate::shed::Shed {
             wire: crate::shed::Wire::Socket(self.socket.as_deref().map_or_else(crate::shed::default_socket, expand)),
             acp: self
                 .acp
                 .clone()
-                .or_else(|| acp.then(crate::providers::default_acp).flatten().map(Into::into)),
-            policy: self
-                .acp_policy
-                .clone()
-                .unwrap_or_else(|| if acp { "allow" } else { "ask" }.into()),
+                .or_else(|| crate::providers::default_acp().map(Into::into)),
+            policy: self.acp_policy.clone().unwrap_or_else(|| "allow".into()),
         }
     }
 }
@@ -492,6 +489,11 @@ pub struct Fleet {
     /// `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
     #[serde(default)]
     pub heavy: BTreeMap<String, Vec<String>>,
+    /// `[fleet.<n>.remote.<kind>]`: a heavy kind's commands run on `runners` build machines of a tag first.
+    #[serde(default)]
+    pub remote: BTreeMap<String, crate::heavy::Route>,
+    #[serde(default)]
+    pub remote_deny: Vec<String>,
     /// Globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
@@ -811,9 +813,7 @@ pub struct Limits {
     pub slo_pass_minutes: u64,
     pub stall_restart_hours: u64,
     pub self_update_wait_minutes: u64,
-    pub self_update_lag_minutes: u64,
     pub self_update_stage_secs: u64,
-    pub self_update_swap_secs: u64,
     pub act_minutes: u64,
     pub escalate_minutes: u64,
     pub start_minutes: u64,
@@ -957,9 +957,7 @@ impl Default for Limits {
             slo_pass_minutes: 5,
             stall_restart_hours: 2,
             self_update_wait_minutes: 45,
-            self_update_lag_minutes: 30,
             self_update_stage_secs: 300,
-            self_update_swap_secs: 120,
             act_minutes: 10,
             escalate_minutes: 30,
             start_minutes: 10,
@@ -1172,9 +1170,6 @@ impl Config {
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             crate::stderr!("drover: [limits].max_agents is no longer used; ignoring it");
         }
-        if c.runtime.as_ref().is_some_and(|r| r.kind == RuntimeKind::Berth) {
-            crate::stderr!("drover: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
-        }
         let levels = crate::providers::EFFORTS;
         if let Some(e) = c.limits.effort.as_deref().filter(|e| !levels.contains(e)) {
             bail!("limits.effort: \"{e}\" must be one of {levels:?}");
@@ -1314,7 +1309,25 @@ impl Config {
         for name in c.fleet.keys() {
             c.same_provider(name, text)?;
         }
-        Ok(c)
+        c.routes_ok().map(|()| c)
+    }
+
+    fn routes_ok(&self) -> Result<()> {
+        for (name, f) in &self.fleet {
+            let (never, hits) = (f.never_routed(), crate::heavy::hits);
+            for kind in f.remote.keys() {
+                let Some(ps) = f.heavy.get(kind) else {
+                    bail!("fleet.{name}.remote.{kind}: no [fleet.{name}.heavy] kind \"{kind}\" to route");
+                };
+                if let Some((p, n)) = ps
+                    .iter()
+                    .find_map(|p| Some((p, never.iter().find(|n| hits(n, p) || hits(p, n))?)))
+                {
+                    bail!("fleet.{name}.remote.{kind}: pattern \"{p}\" hits never-routed \"{n}\"");
+                }
+            }
+        }
+        Ok(())
     }
 
     fn same_provider(&self, name: &str, text: &str) -> Result<()> {
@@ -1468,6 +1481,12 @@ impl Fleet {
             .unwrap_or_else(|| limits.deny_commands.clone());
         d.extend(self.deny_commands_add.iter().cloned());
         d
+    }
+    /// Commands its lanes never send to a build machine: `heavy::NEVER_ROUTED` plus `remote_deny`.
+    pub fn never_routed(&self) -> Vec<String> {
+        let mut n: Vec<String> = crate::heavy::NEVER_ROUTED.split(',').map(String::from).collect();
+        n.extend(self.remote_deny.iter().cloned());
+        n
     }
     /// The `[land]` table when this fleet lands fast-first.
     pub fn fast_first(&self) -> Option<&Land> {

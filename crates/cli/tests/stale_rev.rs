@@ -65,7 +65,7 @@ fn fake(sh: &FakeShed, screen: &str) -> Fake {
 }
 
 fn starts(sh: &FakeShed) -> usize {
-    sh.all("run").iter().filter(|p| p["name"] == REV).count()
+    sh.sent(REV).iter().filter(|t| t.starts_with("# Brief")).count()
 }
 
 fn drive(c: &drover::Ctx, r: &Fake) -> String {

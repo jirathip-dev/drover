@@ -108,9 +108,7 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `slo_pass_minutes` | `5` | no finished pass of a fleet for this long stops that fleet's pass (never another's) and shows on the board's drive-health line |
 | `stall_restart_hours` | `2` | an issue with no push, verdict or lane event and no named wait this long restarts once (a load wait moves host); again: a stuck card (a fleet may set its own) |
 | `self_update_wait_minutes` | `45` | a head with no release build this long alerts `self-update-waiting` |
-| `self_update_lag_minutes` | `30` | how long a rollout waits for an enabled host that is not staged before the rest swap |
 | `self_update_stage_secs` | `300` | one host's download and gate of a release build |
-| `self_update_swap_secs` | `120` | how long a `self-update-swapping` mark holds remote placement when no `self-updated` follows |
 | `act_minutes` | `10` | a flow row drive owns must have acted within this long (#1649) |
 | `escalate_minutes` | `30` | a flow row's card stays with the orchestrator thread this long before the owner gets it (#1649) |
 | `start_minutes` | `10` | a flow row's check lane that ended with no verdict gets this long (#1649) |

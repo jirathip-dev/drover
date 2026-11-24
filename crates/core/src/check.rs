@@ -140,18 +140,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
-    let synced = links(ctx, cfg, &view, &events).and_then(|()| working(&ctx.state))?;
-    for name in cfg.hosts.keys() {
-        let mut tries = (synced.iter().rev()).filter(|e| e.kind == "host-sync" && e.str("host") == Some(name));
-        let Some(e) = tries.next().filter(|e| e.val("ok") == false) else {
-            continue;
-        };
-        let since = tries.find(|e| e.val("ok") == true).map_or(0, |e| e.ts);
-        let (from, to) = (e.str("from").unwrap_or("?"), e.str("to").unwrap_or("?"));
-        let why = format!("{name}: drover swap {from} → {to} failed there; the next self-update retries");
-        let d = json!({"key": format!("{name}@{since}"), "host": name, "reason": why});
-        fire(ctx, cfg, out, &synced, ("drover", None), "host-sync-failed", d)?;
-    }
+    links(ctx, cfg, &view, &events)?;
     for root in crate::roots::local(ctx, cfg) {
         let s = root.to_string_lossy();
         let was = |e: &&Event| e.str("root") == Some(&s) && matches!(e.kind.as_str(), "root-hung" | "root-answers");
@@ -355,8 +344,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 if let Some((url, line)) = wt.and_then(|wt| amendment(ctx, r, cfg, s, wt)) {
                     let key = format!("{lane}:{url}");
                     let seen = events.iter().any(|e| e.str("key") == Some(&key));
-                    let dsh = spawned.and_then(|e| e.str("harness")) == Some("dsh");
-                    if !seen && term::tell(r, dsh, lane, &a.name, &line).is_ok() {
+                    if !seen && term::tell(r, lane, &a.name, &line).is_ok() {
                         hits.push(("amended", key, line));
                     }
                 }
@@ -1084,23 +1072,18 @@ pub fn clean_all(
         if !pane.is_empty() {
             term::close(ctx, &on, pane).ok();
         }
+        let mut d = json!({"worktree": wt, "pane": pane, "why": why});
         if on.machine.is_none() {
             crate::providers::remove_tmp(&stray_roots(cfg), wt);
+            if let Some(f) = crate::heavy::forget(r, wt) {
+                writeln!(out, "runners forget {wt} failed: {f}")?;
+                d.put("forget", f.into());
+            }
         }
         drop_log(ctx, e.str("agent"));
         removed += 1;
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
-        emit(
-            &ctx.state,
-            cfg,
-            Event::new(
-                ctx.now,
-                &e.fleet,
-                Some(n),
-                "clean",
-                json!({"worktree": wt, "pane": pane, "why": why}),
-            ),
-        )?;
+        emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, Some(n), "clean", d))?;
     }
     let sheds = r.shed().filter(|_| lane.is_none()).map(term::Shed);
     for (b, t) in sheds.iter().flat_map(|b| {

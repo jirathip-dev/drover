@@ -411,7 +411,7 @@ fn a_pushed_head_on_a_held_hot_file_is_reviewed_and_its_fix_round_may_start() {
     let (out, steps) = drive(&c, &fake(&both));
     assert!(logged(&c, 12, "serial-held").is_empty(), "{out}");
     assert_eq!(steps, ["review"], "{out}");
-    assert!(sh.called("run", "sendmeter-rev-12-r1"), "{out}");
+    assert!(sh.has("sendmeter-rev-12-r1"), "{out}");
     let (_, w) = run(&c, &fake(&both), &["waiting", "sendmeter"]);
     assert!(!w.contains("serial:") && !w.contains("(0/1)"), "{w}");
     let (_, out) = run(&c, &fake(&both), &["spawn", "sendmeter", "12", "impl", "--supersede"]);

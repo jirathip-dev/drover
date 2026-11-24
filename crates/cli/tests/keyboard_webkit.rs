@@ -14,9 +14,6 @@ fn the_focused_composer_stays_the_same_node_with_its_focus_text_and_caret_while_
         &tmpdir("page-keyboard"),
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     let now = drover::now();
     let ev = |ts: u64, fleet: &str, n: Option<u64>, kind: &str, d: Value| {
         append(&c.state, &Event::new(ts, fleet, n, kind, d)).unwrap();
