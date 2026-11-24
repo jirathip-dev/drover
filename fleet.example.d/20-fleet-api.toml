@@ -9,10 +9,10 @@ integration = "staging"          # drover merge target; main is never a target
 harness = "claude"
 profile = "lane-impl"
 model = "opus"
-effort = "xhigh"                 # none|low|medium|high|xhigh: Claude --effort, Hermes --reasoning
+effort = "xhigh"                 # none|low|medium|high|xhigh: Claude effort
 mcp = ["supabase-dev"]        # only these servers from the repo's .mcp.json; default none
 
 [fleet.api.role.rev]
-harness = "hermes"
+harness = "claude"
 profile = "lane-rev"
 

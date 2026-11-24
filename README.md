@@ -48,7 +48,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 
 **Sign-in, providers and secrets**
 - Lanes run on the host's own CLI login; drover keeps no tokens, and a usage limit holds that host's new lanes (#923).
-- Providers: Claude Code, Codex, Gemini, Hermes, dsh, each one module (#836, `crates/core/src/providers/`).
+- Providers: Claude Code, Codex, Gemini, each one module (#836, `crates/core/src/providers/`).
 - Secrets are 0600 files on the main host; no secret store, no Keychain read (#767).
 
 **API and apps**

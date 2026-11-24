@@ -176,16 +176,19 @@ fn parity_80_the_config_sheet_shows_every_group_and_its_pickers_post_through_set
         String::from_utf8_lossy(&s.respond(&req, T)).into_owned()
     };
     let bad = post(&format!(
-        "op=set&fleet=alpha&role=impl&harness=dsh&model=opus&effort=high&mtime={mt}"
+        "op=set&fleet=alpha&role=impl&harness=codex&model=opus&effort=high&mtime={mt}"
     ));
-    assert!(bad.contains("does%20not%20support%20effort"), "{bad}");
+    assert!(bad.contains("is%20not%20one%20of"), "{bad}");
     let ok = post(&format!(
-        "op=set&fleet=alpha&role=impl&harness=dsh&model=opus&effort=none&mtime={mt}"
+        "op=set&fleet=alpha&role=impl&harness=claude&model=sonnet&effort=high&mtime={mt}"
     ));
-    assert!(ok.contains("Location: /?msg=alpha%20impl%3A%20harness%20dsh"), "{ok}");
+    assert!(
+        ok.contains("Location: /?msg=alpha%20impl%3A%20harness%20claude"),
+        "{ok}"
+    );
     let text = std::fs::read_to_string(&c.config).unwrap();
     assert!(
-        text.contains("[fleet.alpha.role.impl]\nharness = \"dsh\"\nmodel = \"opus\"\neffort = \"none\"\n"),
+        text.contains("[fleet.alpha.role.impl]\nharness = \"claude\"\nmodel = \"sonnet\"\neffort = \"high\"\n"),
         "{text}"
     );
     let sets: Vec<_> = read(&c.state)
@@ -194,8 +197,8 @@ fn parity_80_the_config_sheet_shows_every_group_and_its_pickers_post_through_set
         .into_iter()
         .filter(|e| e.kind == "set")
         .collect();
-    assert_eq!(sets.len(), 2, "harness and effort changed, model kept");
-    assert_eq!(sets[0].val("key"), "harness");
+    assert_eq!(sets.len(), 2, "model and effort changed, harness kept");
+    assert_eq!(sets[0].val("key"), "model");
     assert_eq!(sets[0].val("via"), "web");
     let d = tmpdir("fc-config-nomodels");
     let c = ctx(&d, &config("").replace("models = [\"opus\", \"sonnet\"]\n", ""));

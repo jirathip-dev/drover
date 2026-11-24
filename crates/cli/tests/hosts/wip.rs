@@ -1,7 +1,7 @@
 use super::*;
 use drover::runner::{Out, Runner};
 
-struct RealGit<'a>(OverSsh<'a>, String);
+struct RealGit<'a>(remote::Acp<'a, OverSsh<'a>>, String);
 
 impl Runner for RealGit<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
@@ -10,7 +10,7 @@ impl Runner for RealGit<'_> {
             .filter(|l| l.starts_with(&format!("{GIT} '-C' '{}' ", self.1)));
         match line {
             Some(l) if prog == "ssh" => {
-                self.0.f.calls.borrow_mut().push(format!("{prog} {}", args.join(" ")));
+                self.0.r.f.calls.borrow_mut().push(format!("{prog} {}", args.join(" ")));
                 drover::runner::Real.run("sh", &drover::runner::argv(&["-c", l]))
             }
             _ => self.0.run(prog, args),
@@ -94,7 +94,8 @@ fn on_bazzite(
         .reply("date -r", "20261120-120000\n");
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     bazzite.lane(agent, "idle", &wt);
-    let r = RealGit(two(&f, &bazzite), wt);
+    remote::proxied(&c);
+    let r = RealGit(acp(&f, &bazzite), wt);
     let (code, out) = run(&c, &r, args);
     let wip = git(&[
         "--git-dir",
@@ -118,7 +119,7 @@ fn a_supersede_takes_no_snapshot_of_drovers_own_outbox() {
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains("PUBLIC_LEAK"), "{out}");
     assert_eq!(files, "", "no wip snapshot of the outbox: {out}");
-    assert!(bazzite.called("run", IMPL), "{:?}", bazzite.methods());
+    assert!(bazzite.called("send", IMPL), "{:?}", bazzite.methods());
 }
 
 #[test]
@@ -126,7 +127,7 @@ fn a_supersede_snapshot_holds_the_source_file_and_not_the_outbox() {
     let (code, out, files, bazzite) = superseded("hosts-wip-src", Some(("src/a.rs", "fn a() { 1; }\n")));
     assert_eq!(code, 0, "{out}");
     assert_eq!(files, "src/a.rs\n", "{out}");
-    assert!(bazzite.called("run", IMPL), "{:?}", bazzite.methods());
+    assert!(bazzite.called("send", IMPL), "{:?}", bazzite.methods());
 }
 
 #[test]
@@ -141,7 +142,7 @@ fn a_host_name_in_a_product_file_is_still_refused_public_leak() {
         "{out}"
     );
     assert_eq!(files, "", "nothing pushed");
-    assert!(!bazzite.called("run", IMPL) && bazzite.has(IMPL));
+    assert!(!bazzite.called("send", IMPL) && bazzite.has(IMPL));
 }
 
 #[test]
@@ -153,7 +154,7 @@ fn an_impl_lanes_untracked_file_with_a_home_path_is_still_refused_public_leak() 
         "{out}"
     );
     assert_eq!(files, "", "nothing pushed");
-    assert!(!bazzite.called("run", IMPL) && bazzite.has(IMPL));
+    assert!(!bazzite.called("send", IMPL) && bazzite.has(IMPL));
 }
 
 #[test]

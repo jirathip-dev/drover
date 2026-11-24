@@ -240,7 +240,7 @@ impl Runner for Boat<'_> {
 
 fn setup(name: &str, hosts: &[&str]) -> (drover::Ctx, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
-    let base = CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"    # toggled in tests", "harness = \"claude\"");
     let home = tmpdir(&format!("{name}-remote"));
     let d = tmpdir(name);
     let tf = d.join("config/tokens/proxy");

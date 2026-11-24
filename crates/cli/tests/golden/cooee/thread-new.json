@@ -19,9 +19,7 @@
       "chips": [
         {
           "all": [
-            "claude",
-            "hermes",
-            "dsh"
+            "claude"
           ],
           "cur": "claude",
           "name": "harness"

@@ -229,8 +229,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
             None => return Health::Dead(ended(events, sessions, sp)),
         },
     };
-    let resent = |e: &&Event| e.kind == "start-resent" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-    let start = events.iter().rfind(resent).map_or(sp.ts, |e| e.ts);
+    let start = sp.ts;
     if live == Status::Unreported {
         let due = ctx.now >= start + crate::stall::START_SECS;
         return if due {

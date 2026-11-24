@@ -115,8 +115,8 @@ fn typed(sh: &FakeShed, text: &str) -> usize {
     sh.sent(LANE).iter().filter(|t| t.starts_with(text)).count()
 }
 
-fn respawned(sh: &FakeShed) -> bool {
-    sh.methods().iter().any(|m| m == "run")
+fn respawned(r: &Fake) -> bool {
+    r.called("shed run --acp")
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn a_pushed_head_with_no_done_gets_no_review_the_lane_told_once_then_one_card() 
     );
     drive(&at(&c, 7200), &r);
     assert_eq!(kinds(&c, "needs-human").len(), 1, "one card, never a loop");
-    assert!(kinds(&c, "pushed").is_empty() && !respawned(&sh));
+    assert!(kinds(&c, "pushed").is_empty() && !respawned(&r));
 }
 
 #[test]
@@ -198,7 +198,7 @@ fn three_refused_dones_at_one_head_are_one_owner_card_with_the_refusal() {
     let unanchored = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
         "statusCheckRollup": [], "body": "## For humans\n\nx"})
     .to_string();
-    let (c, r, sh) = lane_at("turn-refused", true, Some(&unanchored), Some(&sha("def")));
+    let (c, r, _sh) = lane_at("turn-refused", true, Some(&unanchored), Some(&sha("def")));
     for i in 0..3 {
         let (code, out) = run(&at(&c, i * 10), &r, &["turn", "done"]);
         assert_eq!(code, 3, "{out}");
@@ -223,7 +223,7 @@ fn three_refused_dones_at_one_head_are_one_owner_card_with_the_refusal() {
     assert_eq!(state(&c), "needs-human");
     drive(&at(&c, 7200), &r);
     assert_eq!(kinds(&c, "needs-human").len(), 1);
-    assert!(kinds(&c, "pushed").is_empty() && !respawned(&sh));
+    assert!(kinds(&c, "pushed").is_empty() && !respawned(&r));
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn done_with_nothing_pushed_is_nudged_once_then_blocked() {
         (1, 1),
         "it never loops"
     );
-    assert!(!respawned(&sh), "never respawned");
+    assert!(!respawned(&r), "never respawned");
 }
 
 #[test]
@@ -294,7 +294,7 @@ fn blocked_is_an_owner_card_with_its_reason() {
     let nh = &kinds(&c, "needs-human")[0];
     assert_eq!(nh.str("reason"), Some("lane blocked: the API key is missing"));
     assert_eq!(state(&c), "needs-human");
-    assert!(sh.sent(LANE).is_empty() && !respawned(&sh), "{:?}", sh.methods());
+    assert!(sh.sent(LANE).is_empty() && !respawned(&r), "{:?}", sh.methods());
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn working_gets_one_continue_prompt_after_the_idle_threshold_never_a_respawn() {
     assert!(w.contains("prompted to continue 99s ago"), "{w}");
     drive(&at(&c, 7200), &r);
     assert_eq!(typed(&sh, GO_ON), 1);
-    assert!(!respawned(&sh) && kinds(&c, "respawn").is_empty());
+    assert!(!respawned(&r) && kinds(&c, "respawn").is_empty());
 }
 
 #[test]
@@ -362,7 +362,7 @@ fn need_input_without_an_ask_is_nudged_once_then_a_parkable_owner_card() {
     );
     assert_eq!(code, 0, "{out}");
     assert_eq!(state(&c), "parked");
-    assert!(!respawned(&sh), "never respawned");
+    assert!(!respawned(&r), "never respawned");
 }
 
 #[test]
@@ -379,11 +379,15 @@ fn need_input_with_an_open_ask_waits_on_the_owner_unchanged() {
 
 #[test]
 fn a_reported_lane_whose_pane_is_gone_takes_the_respawn_path() {
-    let (c, r, sh) = lane("turn-gone", false, None);
+    let (c, r, _sh) = lane("turn-gone", false, None);
     turn(&c, &r, &["working"]);
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["respawn"], "{out}");
-    assert_eq!(sh.last("run")["name"], LANE, "{:?}", sh.methods());
+    assert!(
+        r.called(&format!("shed run --acp claude-acp --policy allow --name {LANE} ")),
+        "{:?}",
+        r.calls.borrow()
+    );
 }
 
 fn hook(c: &drover::Ctx, event: &str, active: bool) -> String {
@@ -498,7 +502,7 @@ fn a_respawn_refused_for_a_secret_in_a_changed_file_is_one_owner_card_naming_fil
         out.contains("REFUSED SECRET_IN_WIP") || out.contains("SECRET_IN_WIP"),
         "{out}"
     );
-    assert!(!respawned(&sh), "{:?}", sh.methods());
+    assert!(!respawned(&r), "{:?}", sh.methods());
     let nh = kinds(&c, "needs-human");
     assert_eq!(nh.len(), 1, "{out}");
     assert_eq!(nh[0].str("refused"), Some("SECRET_IN_WIP"));
@@ -535,7 +539,7 @@ fn unchecked(c: &drover::Ctx, r: &Fake, what: &str) {
 #[test]
 fn a_failed_head_read_is_could_not_check_and_raises_no_card() {
     let head = sha("abc");
-    let (c, r, sh) = lane_at("turn-head-unread", true, Some(&pr(&head, "green")), Some(&sha("def")));
+    let (c, r, _sh) = lane_at("turn-head-unread", true, Some(&pr(&head, "green")), Some(&sha("def")));
     let r = failing(&c, r, "rev-parse HEAD");
     for i in 0..3 {
         unchecked(&at(&c, i * 10), &r, "HEAD");
@@ -549,7 +553,7 @@ fn a_failed_head_read_is_could_not_check_and_raises_no_card() {
     assert!(kinds(&c, "turn-end").is_empty() && kinds(&c, "done-refused").is_empty());
     drive(&at(&c, 40), &r);
     assert!(kinds(&c, "needs-human").is_empty(), "no card from could-not-check");
-    assert!(kinds(&c, "pushed").is_empty() && !respawned(&sh));
+    assert!(kinds(&c, "pushed").is_empty() && !respawned(&r));
 }
 
 #[test]

@@ -2,7 +2,10 @@ mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
 use serde_json::{json, Value};
-use std::process::Command;
+
+fn started(sh: &FakeShed, lane: &str) -> bool {
+    !sh.sent(lane).is_empty()
+}
 
 fn merged_13(c: &drover::Ctx) {
     let e = |ts, kind: &str, d| append(&c.state, &Event::new(ts, "sendmeter", Some(13), kind, d)).unwrap();
@@ -62,42 +65,11 @@ fn spawn_and_adopt_on_merged_issue_are_refused() {
         r.calls.borrow()
     );
     assert!(
-        !sh.called("run", "sendmeter-impl-13"),
+        !started(&sh, "sendmeter-impl-13"),
         "no lane started: {:?}",
         sh.methods()
     );
     assert_eq!(read(&c.state).unwrap().len(), before, "nothing logged");
-}
-
-#[test]
-fn notifier_runs_without_lane_hermes_env() {
-    let d = tmpdir("notify-env");
-    let sink = d.join("env.txt");
-    let cfg = format!(
-        "{CONFIG}\n[[notify]]\ncmd = \"env > '{}'\"\non = [\"set\"]\n",
-        sink.display()
-    );
-    std::fs::write(d.join("fleet.toml"), cfg).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_drover"))
-        .args(["set", "sendmeter", "impl", "--harness", "claude"])
-        .env("FLEET_CONFIG", d.join("fleet.toml"))
-        .env("FLEET_STATE", d.join("state/events.jsonl"))
-        .env("HERMES_HOME", "/lane/.hermes/profiles/fleet-impl")
-        .env("HERMES_PROFILE", "fleet-impl")
-        .env("_HERMES_GATEWAY", "1")
-        .env("FLEET_TEST_MARK", "kept")
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let env = std::fs::read_to_string(&sink).expect("notifier ran");
-    assert!(
-        !env.contains("HERMES_"),
-        "lane Hermes env leaked into the notifier:\n{env}"
-    );
-    assert!(
-        env.contains("FLEET_TEST_MARK=kept") && env.contains("PATH="),
-        "the rest of the env stays:\n{env}"
-    );
 }
 
 #[test]
