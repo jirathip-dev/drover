@@ -274,3 +274,22 @@ fn a_running_hold_shows_in_top_json_while_it_lasts() {
     assert!(held.0.take().unwrap().wait().unwrap().success());
     assert_eq!(holds(), json!([]));
 }
+
+#[test]
+fn top_shows_a_routed_command_as_remote_with_its_tag() {
+    let (c, _sh, f, wt) = setup("top-remote", "");
+    let ps = format!("{}  107   101   0.5    02:00  4  0 /Users/me/.local/bin/runners run --tag linux --dir {wt} -- bash -c cargo test\n", ps());
+    let lsof = format!("p101\nccargo\nfcwd\nn{wt}\np107\ncrunners\nfcwd\nn{wt}\n");
+    let f = Fake { replies: vec![], ..f }
+        .reply(PS, &ps)
+        .reply("lsof", &lsof)
+        .reply("sysctl -n vm.loadavg", "{ 6.00 5.00 4.00 }\n")
+        .reply("sysctl -n hw.ncpu", "2\n");
+    let (code, out) = run(&c, &f, &["top"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("    107 0% 2m /Users/me/.local/bin/runners run --tag linux --dir {wt} -- bash -c cargo test [remote linux]\n")), "{out}");
+    let (_, out) = run(&c, &f, &["top", "--json"]);
+    let v: Value = serde_json::from_str(&out).unwrap();
+    let procs = v["lanes"][0]["procs"].as_array().unwrap();
+    assert_eq!(procs.iter().find(|p| p["pid"] == "107").unwrap()["remote"], "linux");
+}

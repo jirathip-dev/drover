@@ -59,6 +59,18 @@ first served (a kind at its own cap lets later kinds by); after `heavy_wait_minu
 and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its `lane`, `kind`, `cmd`,
 `since` and `running`. Other commands are unchanged.
 
+Build machines (#1708): `[fleet.<n>.remote.<kind>]` sends a heavy kind's commands to the runners repo's build machines first:
+`tag = "linux"` (required), and optional `wait` (minutes for a free machine slot), `setup`, `env = ["NAME"]` and
+`out = ["path"]`, passed as `runners run --tag … --dir <lane worktree> … -- bash -c <cmd>`. Its output and exit code
+are the command's; a remote run holds no slot here. On runners' exit 75, 76, 64 or 78, or no `runners` on `PATH`,
+`drover heavy` prints `runners: exit 75, running here` and runs the command here in a heavy slot as above. Never
+routed, whatever the patterns: `git`, `gh`, `drover`, `nx affected`, `--changed`, `merge-base`, `origin/`, code
+signing, `--release` and `cargo install`, containers, and lines reading stdin (`<`) or `.env`
+(`heavy::NEVER_ROUTED`); `remote_deny = ["…"]` in `[fleet.<n>]` adds more. Config load refuses a routed kind whose
+pattern overlaps that list, naming both. `drover clean` runs `runners forget --dir <worktree>` for each worktree it
+removes; a failure is printed and kept in the `clean` event's `forget`, and the clean goes on. `drover top` marks a
+`runners run` process `[remote <tag>]`.
+
 A CI job on a self-hosted runner that shares the main host runs its step as `drover hold --wait <minutes> -- <cmd>`
 (#1492): it waits until the host passes spawn admission (`MEM_LOW`, `HOST_BUSY`, …) and a slot is free by the main
 host's `heavy_max`, holds that slot as kind `ci` and holder `ci:<repo>` (from `GITHUB_REPOSITORY`) while the command

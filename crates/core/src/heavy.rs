@@ -1,3 +1,4 @@
+use crate::runner::Runner;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -12,30 +13,77 @@ pub struct Heavy {
     pub max: usize,
     pub kind_max: BTreeMap<String, usize>,
     pub wait_minutes: u64,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub routes: BTreeMap<String, Route>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub never: Vec<String>,
+}
+
+/// One heavy kind's build machines: `runners run --tag <tag>` with its optional flags.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, clap::Args)]
+#[serde(default, deny_unknown_fields)]
+pub struct Route {
+    #[arg(long = "remote", required = false)]
+    pub tag: String,
+    #[arg(id = "remote_wait", long = "remote-wait")]
+    pub wait: Option<u64>,
+    #[arg(long)]
+    pub setup: Option<String>,
+    #[arg(long)]
+    pub env: Vec<String>,
+    #[arg(long)]
+    pub out: Vec<String>,
+}
+
+impl Route {
+    fn flags(&self, wait: &str) -> Vec<String> {
+        let mut a: Vec<String> = (self.wait.iter()).flat_map(|w| [wait.into(), w.to_string()]).collect();
+        a.extend(self.setup.iter().flat_map(|s| ["--setup".into(), s.clone()]));
+        a.extend(self.env.iter().flat_map(|e| ["--env".into(), e.clone()]));
+        a.extend(self.out.iter().flat_map(|o| ["--out".into(), o.clone()]));
+        a
+    }
+}
+
+/// Commands never sent to a build machine, whatever a fleet's patterns: history readers, `gh`, `drover`, signing, release builds, containers, stdin and `.env` readers.
+pub const NEVER_ROUTED: &str = "git *,gh *,drover *,*nx affected*,*--changed*,*merge-base*,*origin/*,*codesign*,*notarytool*,*--release*,cargo install*,docker *,podman *,colima *,orb *,*supabase start*,*<*,*.env*";
+
+fn segments(cmd: &str) -> Vec<String> {
+    (cmd.split(['\n', ';', '|', '&', '(', ')']))
+        .map(|s| {
+            let w: Vec<&str> = s.split_whitespace().collect();
+            let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
+            at.and_then(|i| w.get(i..)).map_or(String::new(), |t| t.join(" "))
+        })
+        .collect()
+}
+
+/// Whether shell pattern `p` (`*` any text) matches `s`.
+pub fn hits(p: &str, s: &str) -> bool {
+    crate::config::glob(p.replace('*', "**").as_bytes(), s.as_bytes())
 }
 
 impl Heavy {
     /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words skipped).
     pub fn kind(&self, cmd: &str) -> Option<&str> {
-        let segs: Vec<String> = (cmd.split(['\n', ';', '|', '&', '(', ')']))
-            .map(|s| {
-                let w: Vec<&str> = s.split_whitespace().collect();
-                let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
-                at.and_then(|i| w.get(i..)).map_or(String::new(), |t| t.join(" "))
-            })
-            .collect();
-        let hit = |p: &String| {
-            segs.iter()
-                .any(|s| crate::config::glob(p.replace('*', "**").as_bytes(), s.as_bytes()))
-        };
+        let segs = segments(cmd);
+        let hit = |p: &String| segs.iter().any(|s| hits(p, s));
         self.kinds
             .iter()
             .find(|(_, ps)| ps.iter().any(hit))
             .map(|(k, _)| k.as_str())
     }
 
-    /// `cmd` as a shell line that runs it under `exe heavy`, holding a `kind` slot.
-    pub fn wrap(&self, exe: &str, kind: &str, cmd: &str) -> String {
+    /// `kind`'s route for `cmd`, unless the line or one of its commands is never routed.
+    pub fn route(&self, kind: &str, cmd: &str) -> Option<&Route> {
+        let mut segs = segments(cmd);
+        segs.push(cmd.trim().into());
+        let never = |n: &String| segs.iter().any(|s| hits(n, s));
+        self.routes.get(kind).filter(|_| !self.never.iter().any(never))
+    }
+
+    /// `cmd` as a shell line that runs it under `exe heavy`, holding a `kind` slot; with a route and the lane's worktree `dir`, on a build machine first.
+    pub fn wrap(&self, exe: &str, kind: &str, cmd: &str, dir: Option<&str>) -> String {
         let mut a = [
             exe,
             "heavy",
@@ -50,9 +98,78 @@ impl Heavy {
         if let Some(m) = self.kind_max.get(kind) {
             a.extend(["--kind-max".into(), m.to_string()]);
         }
+        if let (Some(r), Some(dir)) = (self.route(kind, cmd), dir) {
+            a.extend(["--remote".into(), r.tag.clone(), "--dir".into(), dir.into()]);
+            a.extend(r.flags("--remote-wait"));
+        }
         a.extend(["--".into(), cmd.into()]);
         let q = |w: &String| format!("'{}'", w.replace('\'', r"'\''"));
         a.iter().map(q).collect::<Vec<_>>().join(" ")
+    }
+}
+
+/// `runners run` for `cmd` in worktree `dir` on route `r`: `Some(code)` once it ran there (the command's own code), else `None` with the reason printed: run it here.
+pub fn remote(run: &dyn Runner, r: &Route, dir: &str, cmd: &str) -> Option<i32> {
+    let mut a: Vec<String> = ["run", "--tag", &r.tag, "--dir", dir].map(String::from).to_vec();
+    a.extend(r.flags("--wait"));
+    a.extend(["--", "bash", "-c", cmd].map(String::from));
+    let why = match run.attached("runners", &a) {
+        Ok(c @ (75 | 76 | 64 | 78)) => format!("exit {c}"),
+        Ok(c) => return Some(c),
+        Err(e) => match e.downcast_ref::<std::io::Error>().map(std::io::Error::kind) {
+            Some(std::io::ErrorKind::NotFound) => "not found".into(),
+            _ => format!("{e:#}"),
+        },
+    };
+    crate::stderr!("runners: {why}, running here");
+    None
+}
+
+/// `drover heavy`: a lane's heavy command, its host slot limits and its route's build machines.
+#[derive(clap::Args)]
+pub struct Args {
+    kind: String,
+    #[arg(long)]
+    max: usize,
+    #[arg(long)]
+    kind_max: Option<usize>,
+    #[arg(long)]
+    wait: u64,
+    #[arg(long)]
+    dir: Option<String>,
+    #[command(flatten)]
+    route: Option<Route>,
+    #[arg(last = true)]
+    cmd: String,
+}
+
+impl Args {
+    /// Run it on its route's build machines, else as `who` in slot folder `dir`'s line.
+    pub fn run(
+        self,
+        r: &dyn Runner,
+        dir: &Path,
+        who: String,
+        late: impl FnOnce(&Ticket, &str) -> Option<i32>,
+    ) -> Result<i32> {
+        if let (Some(route), Some(wt)) = (&self.route, &self.dir) {
+            if let Some(code) = remote(r, route, wt, &self.cmd) {
+                return Ok(code);
+            }
+        }
+        let me = Ticket::new(who, self.kind, self.cmd, self.kind_max);
+        run(r, dir, me, self.max, self.wait, &|| None, late)
+    }
+}
+
+/// `runners forget --dir <wt>` for a removed worktree: the failure, if any (no `runners` here is none).
+pub fn forget(r: &dyn Runner, wt: &str) -> Option<String> {
+    let o = r.run("runners", &crate::runner::argv(&["forget", "--dir", wt]));
+    match o {
+        _ if crate::runner::not_found(&o) => None,
+        Ok(o) if o.code == 0 => None,
+        Ok(o) => Some(format!("exit {}: {}", o.code, o.stderr.trim())),
+        Err(e) => Some(format!("{e:#}")),
     }
 }
 

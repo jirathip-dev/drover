@@ -1,5 +1,6 @@
 use crate::config::{Config, Deny};
 use crate::events::Json;
+use crate::heavy::Heavy;
 use crate::providers::dialects;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -75,6 +76,8 @@ impl Rules {
             max: h.and_then(|h| h.heavy_max).unwrap_or(3),
             kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
             wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
+            routes: f.remote.clone(),
+            never: f.never_routed(),
         });
         Rules {
             heavy,
@@ -1121,14 +1124,18 @@ pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Op
     Some(again(TURN_ASK))
 }
 
-/// A shell call matching a heavy kind, rewritten (in a dialect that can) to run in a host slot under `exe heavy`.
-pub fn heavy(input: &Value, h: &crate::heavy::Heavy, exe: &str) -> Option<Value> {
+/// A shell call matching a heavy kind, rewritten (in a dialect that can) to run under `exe heavy`: on its route's build machines from the lane's worktree (`git`'s top level of its `cwd`), else in a host slot.
+pub fn heavy(input: &Value, h: &Heavy, exe: &str, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<Value> {
     let tool = input["tool_name"].as_str()?;
     let rewrite = dialects().find(|d| (d.sent)(input) && d.shell == tool)?.rewrite?;
     let mut ti = tool_input(input).clone();
     let cmd = ti.at("command").as_str()?;
     let kind = h.kind(cmd)?;
-    ti.put("command", h.wrap(exe, kind, cmd).into());
+    let cwd = input.at("cwd").as_str().filter(|_| h.route(kind, cmd).is_some());
+    let dir = cwd
+        .and_then(|d| git(d, &["rev-parse", "--show-toplevel"]))
+        .filter(|t| !t.is_empty());
+    ti.put("command", h.wrap(exe, kind, cmd, dir.as_deref()).into());
     Some(rewrite(ti))
 }
 
