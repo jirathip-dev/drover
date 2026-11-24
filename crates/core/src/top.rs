@@ -20,6 +20,7 @@ pub struct Proc {
     pub kind: Option<String>,
     pub cpu: f64,
     pub secs: u64,
+    pub background: bool,
 }
 
 /// A heavy check in line for a slot, and how long it has waited.
@@ -37,6 +38,8 @@ pub struct Lane {
     pub lane: String,
     pub procs: Vec<Proc>,
     pub waits: Vec<Wait>,
+    /// An impl or rev lane, whose processes all belong at background priority.
+    pub build: bool,
 }
 
 /// `drover top`: the host's load against its limit, heavy slots, held respawns and every live lane.
@@ -61,10 +64,11 @@ fn ps(r: &dyn Runner, cfg: &Config) -> Vec<Proc> {
         kinds,
         ..Default::default()
     };
-    let out = ok(r, "ps", &["-axo", "pid=,ppid=,pcpu=,etime=,command="]).unwrap_or_default();
+    let out = ok(r, "ps", &["-axo", "pid=,ppid=,pcpu=,etime=,pri=,nice=,command="]).unwrap_or_default();
     let row = |l: &str| {
         let w: Vec<&str> = l.split_whitespace().collect();
-        let cmd = w.get(4..)?.join(" ");
+        let cmd = w.get(6..)?.join(" ");
+        let (pri, nice): (i32, i32) = (w.get(4)?.parse().ok()?, w.get(5)?.parse().ok()?);
         let (prog, rest) = cmd.split_once(' ').unwrap_or((&cmd, ""));
         let bare = format!("{} {rest}", prog.rsplit('/').next().unwrap_or(prog));
         Some(Proc {
@@ -74,6 +78,7 @@ fn ps(r: &dyn Runner, cfg: &Config) -> Vec<Proc> {
             kind: heavy.kind(bare.trim_end()).map(String::from),
             cpu: w.get(2)?.parse().ok()?,
             secs: host::etime_secs(w.get(3)?),
+            background: pri <= 4 || nice >= 10,
             cmd,
         })
     };
@@ -89,6 +94,7 @@ fn walk(mine: &[&Proc], at: &Proc, depth: usize, out: &mut Vec<Proc>) {
 
 fn lanes(
     ctx: &Ctx,
+    cfg: &Config,
     events: &[Event],
     agents: &[Session],
     all: &[Proc],
@@ -99,7 +105,9 @@ fn lanes(
         let agent = a.name.as_str();
         let sp = (events.iter()).rfind(|e| e.kind == "spawn" && e.str("agent") == Some(agent))?;
         let issue = sp.issue.map_or("-".into(), |n| n.to_string());
-        let key = format!("{}:{issue}:{}", sp.fleet, sp.str("role").unwrap_or_default());
+        let role = sp.str("role").unwrap_or_default();
+        let key = format!("{}:{issue}:{role}", sp.fleet);
+        let family = cfg.fleet.get(&sp.fleet).map(|f| f.family(role));
         let dir = sp.str("worktree").map_or(a.cwd.as_path(), Path::new);
         let pids: Vec<String> = host::inside(cwds, dir).into_iter().map(|p| p.0).collect();
         let mine: Vec<&Proc> = all.iter().filter(|p| pids.contains(&p.pid)).collect();
@@ -118,6 +126,7 @@ fn lanes(
             lane: key,
             procs,
             waits,
+            build: matches!(family, Some("impl" | "rev")),
         })
     };
     agents.iter().filter_map(lane).collect()
@@ -126,7 +135,7 @@ fn lanes(
 fn snapshot(ctx: &Ctx, cfg: &Config, r: &dyn Runner, agents: &[Session]) -> Result<(Vec<Proc>, Vec<Lane>)> {
     let events = crate::events::working(&ctx.state)?;
     let all = ps(r, cfg);
-    let lanes = lanes(ctx, &events, agents, &all, &host::cwds(r));
+    let lanes = lanes(ctx, cfg, &events, agents, &all, &host::cwds(r));
     Ok((all, lanes))
 }
 
@@ -143,6 +152,14 @@ pub fn busiest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, agents: &[Session], n: u
         .take(n)
         .map(|p| format!("{:.0}% {} ({})", p.cpu, p.cmd, owner(p)))
         .collect())
+}
+
+/// Each live build lane process not at background priority, as `(agent, pid)`, for doctor's `lane priority`.
+pub fn normal(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Vec<(String, String)>> {
+    let (_, lanes) = snapshot(ctx, cfg, r, &crate::session::live_on(r)?)?;
+    let procs = (lanes.iter().filter(|l| l.build)).flat_map(|l| l.procs.iter().map(move |p| (l, p)));
+    let normal = procs.filter(|(_, p)| !p.background);
+    Ok(normal.map(|(l, p)| (l.agent.clone(), p.pid.clone())).collect())
 }
 
 /// Sample the host and build `drover top`'s rows.
@@ -194,7 +211,10 @@ pub fn print(t: &Top, out: &mut dyn Write) -> Result<()> {
     for l in &t.lanes {
         writeln!(out, "{} ({})", l.agent, l.lane)?;
         for p in &l.procs {
-            let kind = p.kind.as_ref().map_or(String::new(), |k| format!(" [{k}]"));
+            let mut kind = p.kind.as_ref().map_or(String::new(), |k| format!(" [{k}]"));
+            if l.build && !p.background {
+                kind.push_str(" [normal priority]");
+            }
             let pad = "  ".repeat(p.depth + 1);
             writeln!(out, "{pad}{} {:.0}% {} {}{kind}", p.pid, p.cpu, age(p.secs), p.cmd)?;
         }
