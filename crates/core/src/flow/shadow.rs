@@ -1,9 +1,8 @@
 use super::episode::{Episode, Level};
-use super::{decide, facts::Seen, table};
+use super::{decide, facts::Seen, table, Clock, Cond, Step};
 use crate::config::{Config, Engine, Fleet};
 use crate::drive::Pass;
 use crate::events::{age, append, fold, Event, IssueState};
-use crate::runner::Runner;
 use crate::waiting::Waiting;
 use crate::Ctx;
 use anyhow::Result;
@@ -83,25 +82,42 @@ fn once(events: &[Event], (s, ep): (&IssueState, &Episode), kind: &str, row: &st
         .any(|e| mine(e) && e.str("kind") == Some(kind))
 }
 
-/// After today's pass body, under its lease: the table decides each open issue of the pass (a kick's alone) on the same sample today's `waiting` reads, and logs its `row-*` (marked `shadow`) and each `flow-disagree`; nothing acts, asks or cards. `acts`: today's pass's actions.
-pub fn run(pass: &Pass, cfg: &Config, r: &dyn Runner, acts: &[Value]) -> Result<()> {
-    let (ctx, f) = (pass.ctx(), cfg.fleet(pass.fleet())?);
-    if f.engine == Engine::Legacy {
-        return Ok(());
+/// One pass's sample as the table read it, beside today's `waiting` lines from the same moment.
+pub struct Plan {
+    waits: Vec<(IssueState, Waiting)>,
+    steps: Vec<(IssueState, Cond, Episode, Step)>,
+    clocks: Vec<Clock>,
+}
+
+/// The table's step for each open issue of fleet `fleet` (a kick's `only`), decided where today's pass reads its `waits`, before it acts; none on `flow = "legacy"`.
+pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, only: Option<u64>, waits: &[(IssueState, Waiting)]) -> Result<Plan> {
+    let mut p = Plan {
+        waits: waits.to_vec(),
+        steps: vec![],
+        clocks: vec![],
+    };
+    if cfg.fleet(fleet)?.engine == Engine::Legacy {
+        return Ok(p);
     }
     let (t, seen, events) = (table()?, Seen::load(ctx, cfg)?, crate::events::working(&ctx.state)?);
-    let agents = crate::link::view::View::load(ctx, cfg)?.sessions().checked()?.running();
-    let waits = crate::waiting::scan(ctx, cfg, r, &events, &agents, false, Some(pass.fleet()));
+    let open = fold(&events).into_values().filter(|s| s.fleet == fleet && !s.done());
+    for s in open.filter(|s| only.is_none_or(|n| n == s.issue)) {
+        let (c, clock, ep) = (seen.cond(&s).0, seen.clock(&s), Episode::of(&events, &s));
+        if let Some(step) = decide(t, &s, &c, &ep, &clock, &cfg.limits) {
+            p.steps.push((s, c, ep, step));
+            p.clocks.push(clock);
+        }
+    }
+    Ok(p)
+}
+
+/// After today's pass body, under its lease: logs each planned step's `row-*` (marked `shadow`) and each `flow-disagree` with today's drive; nothing acts, asks or cards. `acts`: today's pass's actions.
+pub fn run(pass: &Pass, cfg: &Config, plan: Plan, acts: &[Value]) -> Result<()> {
+    let (ctx, f) = (pass.ctx(), cfg.fleet(pass.fleet())?);
+    let (t, events) = (table()?, crate::events::working(&ctx.state)?);
     let act_secs = cfg.limits.act_minutes * 60;
-    let open = fold(&events)
-        .into_values()
-        .filter(|s| s.fleet == pass.fleet() && !s.done());
-    for s in open.filter(|s| pass.kick().is_none_or(|n| n == s.issue)) {
-        let (c, clock, mut ep) = (seen.cond(&s).0, seen.clock(&s), Episode::of(&events, &s));
-        let Some(step) = decide(t, &s, &c, &ep, &clock, &cfg.limits) else {
-            continue;
-        };
-        let w = (waits.iter()).find(|(x, w)| x.issue == s.issue && x.lane.as_ref() == Some(&w.lane));
+    for ((s, c, mut ep, step), clock) in plan.steps.into_iter().zip(plan.clocks) {
+        let w = (plan.waits.iter()).find(|(x, w)| x.issue == s.issue && x.lane.as_ref() == Some(&w.lane));
         let (who, did, what) = today(f, &s, w.map(|x| &x.1));
         let (due, cond) = (step.act.map_or("wait", |a| a.name()), c.to_string());
         if ep.entered.as_ref().is_none_or(|e| e.0 != step.row) {

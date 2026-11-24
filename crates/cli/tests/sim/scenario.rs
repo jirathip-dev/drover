@@ -14,6 +14,7 @@ repo = "{REPO}"
 public = false
 local = "LOCAL"
 integration = "staging"
+flow = "legacy"
 baseline = "{BASELINE}"
 
 [fleet.{FLEET}.role.impl]

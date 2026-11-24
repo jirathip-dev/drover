@@ -136,6 +136,7 @@ fn idle(c: &drover::Ctx, r: &Fake) {
             .unwrap()
             .iter()
             .filter(|e| e.kind != "drive-pass" && e.kind != "lane-state")
+            .filter(|e| e.kind != "flow-disagree" && e.data.get("shadow").is_none())
             .count()
     };
     let before = acts();

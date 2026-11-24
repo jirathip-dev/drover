@@ -811,7 +811,7 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     gh::FORCE.set(was.0);
     gh::CATCHUP.set(was.1);
     gh::PROBE.set(was.2);
-    res
+    res.and(pass::shadow(ctx, cfg, out, fleet))
 }
 
 fn lease(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &str, max: u64, data: &str) -> Result<Option<Lock>> {
@@ -869,9 +869,7 @@ fn one(
     }
     laps.lap("spawns");
     let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
-    if let Err(e) = crate::flow::shadow::run(&Pass::of(ctx, name, KICK.get()), cfg, seen, &acts) {
-        writeln!(out, "{name} shadow: {e:#}")?;
-    }
+    pass::acted(&acts);
     if KICK.get().is_none() {
         std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string()).ok();
     }
@@ -1213,7 +1211,7 @@ fn pass(
     let events = working(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
-    waits.retain(one);
+    pass::stash(ctx, cfg, fleet, &mut waits);
     let promised = crate::promise::pass(ctx, cfg, fleet, &events, &waits);
     failed(promised, out, fleet, "promises");
     failed(external(ctx, cfg, out, fleet), out, fleet, "outside changes");
