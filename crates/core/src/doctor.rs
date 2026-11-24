@@ -528,4 +528,15 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             format!("shed agent {id} — {cmd} not on the timer's PATH → install {cmd} in a folder on it ({path})");
         row(rows, found, '✗', &line);
     }
+    if let Ok(n) = crate::top::normal(ctx, cfg, r) {
+        rows.push(n.first().map_or_else(
+            || "✓ lane priority".into(),
+            |(a, p)| {
+                format!(
+                    "✗ lane priority — {} lane processes at normal priority ({a}, {p})",
+                    n.len()
+                )
+            },
+        ));
+    }
 }
