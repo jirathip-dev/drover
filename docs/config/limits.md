@@ -54,9 +54,10 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
 | `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
 | `pass_max_secs` | `60` | a fleet's pass ends itself here, `pass-slow` naming its step; a lock held past 2 × it logs `pass-stuck` and is taken over |
-| `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
-| `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
+| `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout`; the whole `ssh <host> true` probe's retry and `hosts refresh`'s probe |
+| `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and the `ssh <host> true` probe's; the whole first probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
+| `shed_call_secs` | `30` | a call to this host's shed server with no answer this long (past a `wait`'s own timeout) fails instead of blocking |
 | `ssh_sessions` | `8` | remote calls open at once to one host over its shared connection; more wait their turn (under sshd's `MaxSessions`) |
 | `ssh_retry_secs` | `1` | a call the shared connection refused (`Session open refused by peer`) runs again on it after this long, up to 3 times |
 | `link_beat_secs` | `5` | a host's watcher with nothing to say writes a beat this often |
@@ -109,3 +110,9 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `self_update_lag_minutes` | `30` | how long a rollout waits for an enabled host that is not staged before the rest swap |
 | `self_update_stage_secs` | `300` | one host's download and gate of a release build |
 | `self_update_swap_secs` | `120` | how long a `self-update-swapping` mark holds remote placement when no `self-updated` follows |
+| `act_minutes` | `10` | a flow row drive owns must have acted within this long (#1649) |
+| `escalate_minutes` | `30` | a flow row's card stays with the orchestrator thread this long before the owner gets it (#1649) |
+| `start_minutes` | `10` | a flow row's check lane that ended with no verdict gets this long (#1649) |
+| `check_quiet_minutes` | `120` | a flow row's quiet check lane gets this long (#1649) |
+| `host_wait_minutes` | `30` | a flow row's loaded host, or one refusing every start, gets this long (#1649) |
+| `card_ttl_minutes` | `15` | a flow row's run card waits this long for approval (#1649) |

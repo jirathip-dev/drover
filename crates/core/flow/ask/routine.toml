@@ -1,0 +1,14 @@
+flow = "ask"
+states = ["routine"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "default"
+when = {  }
+do = "wait"
+then = ["take-default"]
+owner = "orchestrator"
+timeout = "ask_default_minutes"
+to = ["answered"]
+say = "a routine ask: the default is taken"

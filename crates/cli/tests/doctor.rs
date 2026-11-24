@@ -226,7 +226,11 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         (|_, _, r| r.once("vm_stat", 1, ""), "host", "→ put /usr/sbin"),
         (|_, _, r| r.once("gh auth status", 1, ""), "gh", "→ gh auth login"),
         (|_, _, r| r.once("gh repo view", 1, ""), "gh demo", "→ gh auth refresh"),
-        (|_, _, r| r.once("git -C ", 1, ""), "local demo", "fetch origin staging"),
+        (
+            |_, _, r| r.once("git -C ", 1, ""),
+            "local demo",
+            "fetch origin +refs/heads/staging:refs/remotes/origin/staging",
+        ),
         (
             |_, d, r| {
                 std::fs::remove_dir_all(d.join("local")).unwrap();

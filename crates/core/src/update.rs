@@ -266,7 +266,7 @@ fn install(
     let l = f.local_path();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &*l.to_string_lossy()], a].concat());
     let what = t.what();
-    git(&["fetch", "-q", "origin", t.branch])?;
+    git(&["fetch", "-q", "origin", &crate::clone::refspec(t.branch)])?;
     let head = git(&["rev-parse", &format!("origin/{}", t.branch)])?;
     let head = head.trim();
     let found = crate::release::find(r, &f.repo, t.branch, head);

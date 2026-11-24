@@ -1,0 +1,14 @@
+flow = "card"
+states = ["posted"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "waiting"
+when = {  }
+do = "wait"
+then = ["expire"]
+owner = "owner"
+timeout = "card_ttl_minutes"
+escalate = "owner"
+say = "the run card waits on the owner"
