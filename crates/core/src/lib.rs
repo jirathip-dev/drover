@@ -29,6 +29,7 @@ pub mod drive;
 pub mod events;
 pub mod flow;
 pub mod gate;
+pub mod gatekeeper;
 pub mod gh;
 pub mod guard;
 pub mod heavy;

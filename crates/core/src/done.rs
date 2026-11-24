@@ -80,9 +80,17 @@ fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, u64), role:
         return refuse("PR_BODY", e);
     }
     let limit = Duration::from_secs(cfg.limits.gate_check_minutes * 60);
+    let pr = crate::gatekeeper::Pr {
+        head: &head,
+        body: text,
+    };
     for c in checks(f, &on, Path::new(wt)) {
-        let sh = argv(&["-c", &format!("cd \"$0\" && {c}"), wt]);
-        let o = match on.run_for("sh", &sh, "", limit) {
+        let o = if c == crate::gatekeeper::CHECK {
+            crate::gatekeeper::check(&on, Path::new(wt), &pr, &f.private_names, limit)
+        } else {
+            on.run_for("sh", &argv(&["-c", &format!("cd \"$0\" && {c}"), wt]), "", limit)
+        };
+        let o = match o {
             Ok(o) if o.code == 0 => continue,
             Ok(o) => o,
             Err(e) => return refuse(CODE, format!("`{c}` cannot start: {e:#}")),
@@ -105,14 +113,14 @@ fn checks(f: &Fleet, on: &On, wt: &Path) -> Vec<String> {
         return c.clone();
     }
     let (gk, arch, cargo) = (
-        wt.join(".gatekeeper/run"),
+        crate::gatekeeper::wrapper(wt),
         wt.join(".drover/arch.toml"),
         wt.join("Cargo.toml"),
     );
     let (gk, arch, cargo) = (gk.to_string_lossy(), arch.to_string_lossy(), cargo.to_string_lossy());
     let there = on.existing(&[&gk, &arch, &cargo]);
     if there.contains(gk.as_ref()) {
-        return vec!["./.gatekeeper/run check".into()];
+        return vec![crate::gatekeeper::CHECK.into()];
     }
     [(&arch, "drover arch-check"), (&cargo, "cargo fmt --check")]
         .into_iter()

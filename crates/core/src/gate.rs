@@ -784,7 +784,8 @@ fn premerge(
 
 pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet) -> Vec<Check> {
     let has = f.local_path().join("ci/cap.toml").exists();
-    let cap = has.then(|| Premerge::Cmd(format!("{} cap-check --config ci/cap.toml", ctx.exe)));
+    let own = || format!("{} cap-check --config ci/cap.toml", ctx.exe);
+    let cap = has.then(|| Premerge::Cmd(crate::gatekeeper::cap(&f.local_path()).unwrap_or_else(own)));
     let check = |p| match p {
         Premerge::Cmd(run) => Check {
             name: run.clone(),
