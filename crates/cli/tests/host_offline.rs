@@ -242,6 +242,14 @@ fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
         std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     };
     hosts(false);
+    let row = drover::link::view::HostSeen {
+        host: "bazzite".into(),
+        link: "down".into(),
+        since: NOW - 3600,
+        heard: Some(NOW - 901),
+        ..Default::default()
+    };
+    drover::db::view_put(&c.state, &row, None).unwrap();
     remote_spawn(&c);
     let d = json!({"role": "impl", "agent": "sendmeter-impl-13", "harness": "claude", "pane": "sendmeter-impl-13", "workspace": "",
                    "worktree": "/home/me/.herdr/worktrees/sendmeter/issue-13", "branch": "issue-13", "host": "bazzite", "machine": "bazzite"});
@@ -843,4 +851,31 @@ fn a_cloud_host_shed_lists_up_after_a_stale_cloud_stop_is_up_after_one_refresh_a
         bazzite.methods()
     );
     assert!(!drover::hosts::down(&later).contains_key("bazzite"));
+}
+
+#[test]
+fn a_loaded_host_whose_frames_turned_late_keeps_its_lanes() {
+    let (c, _sh) = setup("offline-loaded");
+    let cache = json!({
+        "mini": {"tags": ["os:macos"], "home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
+        "bazzite": {"tags": ["os:linux"], "home": "/home/me", "probed": NOW, "seen": NOW - 3600, "up": false},
+    });
+    std::fs::write(c.state.parent().unwrap().join("hosts.json"), cache.to_string()).unwrap();
+    let row = drover::link::view::HostSeen {
+        host: "bazzite".into(),
+        link: "down".into(),
+        since: NOW - 3600,
+        heard: Some(NOW - 600),
+        sample: Some(drover::link::frame::Sample {
+            load_per_cpu: 9.0,
+            pressure: None,
+            at: NOW - 600,
+        }),
+        ..Default::default()
+    };
+    drover::db::view_put(&c.state, &row, None).unwrap();
+    remote_spawn(&c);
+    let (code, out) = run(&c, &mini_only(), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(kinds(&c, "lane-moved").is_empty(), "{out}");
 }

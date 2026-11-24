@@ -301,6 +301,26 @@ const PROBES: [&[&str]; 10] = [
     &["grep", "MemTotal", "/proc/meminfo"],
 ];
 
+fn level(s: &str) -> Option<String> {
+    match s.trim() {
+        "1" | "normal" => Some("normal"),
+        "2" | "warn" => Some("warn"),
+        "4" | "critical" => Some("critical"),
+        _ => None,
+    }
+    .map(String::from)
+}
+
+/// This host's own `Sample` for its frame: `load` per CPU and its memory pressure.
+pub fn own(r: &dyn Runner) -> Option<crate::link::frame::Sample> {
+    let pressure = stdout(r, "sysctl", &["-n", "kern.memorystatus_vm_pressure_level"]);
+    Some(crate::link::frame::Sample {
+        load_per_cpu: load()?.1,
+        pressure: pressure.as_deref().and_then(level),
+        at: crate::clock::now(),
+    })
+}
+
 /// Sample the host in one `sh -c` (no sleep; `pace` turns the swap-out count into a rate).
 pub fn sample(r: &dyn Runner) -> Host {
     let lines: Vec<String> = (PROBES.iter())
@@ -319,15 +339,7 @@ pub fn sample(r: &dyn Runner) -> Host {
     let mut outs = (ran.into_iter()).map(|(o, code)| o.filter(|_| code == Some(0)));
     let mut next = || outs.next().flatten();
     let (pressure, vm, load, ncpu, ps, size) = (next(), next(), next(), next(), next(), next());
-    let pressure = pressure.and_then(|s| {
-        match s.trim() {
-            "1" | "normal" => Some("normal"),
-            "2" | "warn" => Some("warn"),
-            "4" | "critical" => Some("critical"),
-            _ => None,
-        }
-        .map(String::from)
-    });
+    let pressure = pressure.as_deref().and_then(level);
     let vm = vm.unwrap_or_default();
     let mut linux = || next().filter(|_| vm.is_empty()).unwrap_or_default();
     let (cat, nproc, avail, total) = (linux(), linux(), linux(), linux());
