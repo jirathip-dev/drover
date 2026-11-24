@@ -433,8 +433,121 @@ fn a_gatekeeper_wrapper_replaces_the_default_checks() {
     assert_eq!(code, 0, "{out}");
     let wt = repo.wt.canonicalize().unwrap();
     let ran = std::fs::read_to_string(repo.wt.join(".gatekeeper/ran.log")).unwrap();
-    assert_eq!(ran, format!("run check {}\n", wt.display()));
+    let want = format!("run check --pr-body target/gatekeeper/pr-body.md {}\n", wt.display());
+    assert_eq!(ran, want);
     assert!(!bin.join("ran.log").exists(), "arch-check and fmt do not run");
+}
+
+struct Far<'a> {
+    fake: &'a Fake,
+    home: PathBuf,
+    sent: std::sync::Mutex<Vec<String>>,
+}
+
+impl Runner for Far<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        self.run_in(prog, args, "")
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        if prog != "ssh" {
+            return self.fake.run_in(prog, args, input);
+        }
+        self.sent.lock().unwrap().push(args.join(" "));
+        let mut c = Command::new("sh")
+            .args(["-c", args.last().unwrap()])
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap())
+            .env("HOME", &self.home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        c.stdin.take().unwrap().write_all(input.as_bytes())?;
+        let o = c.wait_with_output()?;
+        Ok(Out {
+            code: o.status.code().unwrap_or(1),
+            stdout: String::from_utf8_lossy(&o.stdout).into(),
+            stderr: String::from_utf8_lossy(&o.stderr).into(),
+        })
+    }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, _: std::time::Duration) -> anyhow::Result<Out> {
+        self.run_in(prog, args, input)
+    }
+}
+
+fn files(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .flat_map(|e| {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                files(&p)
+            } else {
+                vec![p]
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn a_remote_lane_with_no_fleet_config_passes_done_with_the_names_on_stdin_only() {
+    let repo = repo("done-gk-far");
+    let (c, _sh) = lane(&repo);
+    let cfg = std::fs::read_to_string(&c.config).unwrap().replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nprivate_names = [\"quillmoor\", \"north-pier\"]",
+    );
+    std::fs::write(&c.config, cfg).unwrap();
+    let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12",
+                    "worktree": repo.wt, "branch": "issue-12", "host": "far", "machine": "far"});
+    append(&c.state, &Event::new(13, "sendmeter", Some(12), "spawn", sp)).unwrap();
+    let gk = repo.wt.join(".gatekeeper");
+    std::fs::create_dir_all(&gk).unwrap();
+    let sum = |s: &str| {
+        let o = Command::new("sh")
+            .args(["-c", "printf %s \"$0\" | cksum", s])
+            .output()
+            .unwrap();
+        String::from_utf8(o.stdout).unwrap().trim().to_string()
+    };
+    let want = sum("quillmoor\nnorth-pier");
+    let script = format!(
+        "#!/bin/sh\n[ \"$(printf %s \"$DROVER_PRIVATE_NAMES\" | cksum)\" = '{want}' ] || {{ echo 'FAIL core/hygiene: list-missing'; exit 1; }}\n\
+         grep -q '## For humans' \"$3\" || exit 1\necho \"$* $GATEKEEPER_HEAD\" > {}\n",
+        gk.join("ran.log").display()
+    );
+    std::fs::write(gk.join("run"), script).unwrap();
+    let mut p = std::fs::metadata(gk.join("run")).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut p, 0o755);
+    std::fs::set_permissions(gk.join("run"), p).unwrap();
+    let home = repo.dir.join("far-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let f = fake(&repo.head);
+    let r = Far {
+        fake: &f,
+        home,
+        sent: std::sync::Mutex::default(),
+    };
+    let (code, out) = run(&c, &r, &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    let ran = std::fs::read_to_string(gk.join("ran.log")).unwrap();
+    assert_eq!(
+        ran,
+        format!("check --pr-body target/gatekeeper/pr-body.md {}\n", repo.head)
+    );
+    let t = kinds(&c, "turn-end").pop().unwrap();
+    assert_eq!(t.str("sha"), Some(repo.head.as_str()));
+    let sent = r.sent.lock().unwrap();
+    assert!(sent.iter().any(|a| a.contains(".gatekeeper/run check")), "{sent:#?}");
+    for name in ["quillmoor", "north-pier"] {
+        assert!(!out.contains(name), "{out}");
+        assert!(sent.iter().all(|a| !a.contains(name)), "{name} in an argument");
+        assert!(f.calls.borrow().iter().all(|a| !a.contains(name)), "{name} in a call");
+        for file in files(&repo.dir).into_iter().filter(|p| *p != c.config) {
+            let text = String::from_utf8_lossy(&std::fs::read(&file).unwrap()).into_owned();
+            assert!(!text.contains(name), "{name} in {}", file.display());
+        }
+    }
 }
 
 #[test]

@@ -394,7 +394,6 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     let (dir, wt) = (f.local_path(), ctx.state.with_file_name(format!("update-{fleet}")));
     let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
     crate::clone::fetch_branches(ctx, r, &dir)?;
-    let checks = crate::gate::premerge_checks(ctx, f);
     let base = git(r, &dir, &["rev-parse", &into])?;
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     let (p, mut seen) = (gh::cache_path(ctx, "update", fleet, 0), serde_json::Map::new());
@@ -421,7 +420,12 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
             tree(&["add", "-f", "--detach", &wts, &from])?;
             git(r, &wt, &["merge", "--no-edit", &into]).is_ok()
         };
-        let fail = crate::gate::run_checks(r, &wt, &into, if clean { &checks[..] } else { &[] });
+        let checks = if clean {
+            crate::gate::premerge_checks(ctx, f, &wt)
+        } else {
+            vec![]
+        };
+        let fail = crate::gate::run_checks(r, &wt, &into, &checks);
         let res = if !clean {
             crate::drive::update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
         } else if let Some((c, o)) = fail {
