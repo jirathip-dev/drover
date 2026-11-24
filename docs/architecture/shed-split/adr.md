@@ -3,7 +3,7 @@
 ## Summary
 
 Decision: drover keeps the policy (which lane goes where and when, spend, approvals, the guard) and stops doing host work itself. It talks to shed through shed's own client, reaches every other host over the link shed already holds, reads health, processes, accounts and usage from shed, takes provider facts from shed's catalog, and leaves the rollout of its own binary, secrets, heavy slots and the sandbox to shed. It asks shed to install nothing else, and sets no host up itself: toolchains, the shared build caches and a host's disk floor belong to the host setup recipe of shed's VM helper (shed #337), which the owner runs on the Mini and the Air through a run card. A lane's own build folders, and the cache settings its start carries (#1641), stay drover's. Renting VMs has left this plan for its own decision (#1644), and CI runners for their own repo (jirathip-dev/runners): drover's runner code is deleted once that repo covers it. Four things stay: the copy of a closed lane's transcript, the handover of drover's own web server, the sweep of stray processes in a finished lane's folder, and the file through which a lane on another host sends its commands to the main host (#1646): shed has no connection from a host back to the main host, so the main host keeps fetching that file.
-Slices: first, on its own, #1623's small fix: a rented host that shed shows as up counts as up. Then fourteen drover steps, each after the shed release it needs and each deleting the code it replaces: the account for lanes and orchestrator threads on the main host (#1576, no key set means "auto") and the client; provider facts; the token proxy's deletion (#1604); hosts as shed machines; host charts; the host link; secrets; self-update, for drover's own binary only; heavy slots; the sandbox; balances; the timer jobs through farrier; shed's new state fields. shed's two releases of 2026-11-22 and 2026-11-23 already carry what the first four need. Two installs wait for a check: #1576 until drover's doctor shows a signed-in named account for each agent, #1604 until no lane started on drover's proxy is still alive. Until #1604 a lane on another host signs in through drover's proxy, as today.
+Slices: #1623's small fix (a rented host that shed shows as up counts as up) has landed, `e24a53998`. Then fourteen drover steps, each after the shed release it needs and each deleting the code it replaces: the account for lanes and orchestrator threads on the main host (#1576, no key set means "auto") and the client; provider facts; the token proxy's deletion (#1604); hosts as shed machines; host charts; the host link; secrets; self-update, for drover's own binary only; heavy slots; the sandbox; balances; the timer jobs through farrier; shed's new state fields. shed's two releases of 2026-11-22 and 2026-11-23 already carry what the first four need. Two installs wait for a check: #1576 until drover's doctor shows a signed-in named account for each agent, #1604 until no lane started on drover's proxy is still alive. Until #1604 a lane on another host signs in through drover's proxy, as today.
 Open questions: (1) an agent that shed's proxy does not serve (Codex today) cannot have an account on another host. With no account key set, let it run there on that host's own login, as today (recommended, and what shed's accounts decision says), or keep such lanes on the main host? (2) shed's health reading of a host has carried its free disk since shed's first release, and drover would read it there for its low-disk refusal and the Host tab's chart. Your decision names a machine as link, processes, CPU and memory: keep that one read (recommended: it is a number, and shed cleans nothing), or have drover measure free disk itself? Your four answers of 2026-11-23 are decisions here; the newest one's points are listed at the top of adr.md with where each landed.
 
 **Status:** proposed by the architect lane, 2026-11-22; revised four times on 2026-11-23, on the owner's four
@@ -21,7 +21,7 @@ the two folded symptoms have their step ([order.md](order.md)).
 
 What the second changed, by the owner's six points: the outbox stays for a lane's verbs on another host
 (#1646, decision 15); a rate is two reads (decision 3); `Reach::Draining` and the `reconnecting` row (decision
-3); D2a's and D2b's installs each wait for a gate (decision 7); #1623's fix is a step before D1 (decision 16).
+3); D2a's and D2b's installs each wait for a gate (decision 7); #1623's fix landed before D1 (decision 16).
 
 What the third changed, by the owner's answer of 2026-11-23 on what a machine is:
 
@@ -252,9 +252,9 @@ X1 carries a second addition, a process's CPU time, for option T below.
     `drover hosts report` from D11), runs it as that lane and acks it in the next report. #1646's "then through
     shed exec" does not hold; its rule (a lane reads no drover state where it runs), its test and its wider
     list of verbs do, and it waits for no step here. D1 and D11 keep the outbox, its acked mark and the intake.
-16. **#1623's fix does not wait for D1.** One line in `hosts::survey`: a cloud host that shed's machine list
-    shows `up` is up, whatever its last `cloud-*` event says, and the pass logs `cloud-up`. D1 then deletes
-    that rule and the probe.
+16. **#1623's fix did not wait for D1.** It landed as `e24a53998`, in `hosts::survey`: a cloud host that
+    shed's machine list shows `up` is up, whatever its last `cloud-*` event says, and the pass logs
+    `cloud-up`. D1 then deletes that rule and the probe.
 17. **Neither shed nor drover sets a host up or keeps its disk.** A shed machine is a place to run agents: its
     link, its processes, their CPU and memory. Toolchains, the shared build caches (sccache's folder, pnpm's
     store) and the disk floor are shed-cloud's host setup recipe (shed #337): in the pool's image, and on the

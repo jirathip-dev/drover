@@ -20,7 +20,7 @@ machine = "user@box.example"       # unchanged key and value: now also the targe
 | removal | never by drover. A host removed from fleet.toml is sent nothing; the machine stays in shed (cooee and the owner may use it). A rented VM's machine is added and removed by shed's helper (#1644) |
 | the event log | a spawn's `machine` stays the target, as today, so old events read the same. The shed name is found through `[hosts]` |
 | a session | at this host's shed a lane on box is `box/<name>`. `crate::shed` adds and strips the prefix; `session::Session` keeps its bare name and its host |
-| a cloud host | until #1644 a `[hosts]` entry like any other, and its link alone says whether it is up: `cloud::state` decides spend and nothing else. #1623's own fix does the first half of that before D1: listed `up` by shed, it is up. From #1644 the helper adds its machine and `register` skips it |
+| a cloud host | until #1644 a `[hosts]` entry like any other, and its link alone says whether it is up: `cloud::state` decides spend and nothing else. #1623's fix (`e24a53998`) did the first half of that before D1: listed `up` by shed, it is up. From #1644 the helper adds its machine and `register` skips it |
 
 ## `crate::shed`
 
