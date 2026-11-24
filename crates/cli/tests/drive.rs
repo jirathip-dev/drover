@@ -1626,6 +1626,7 @@ fn a_pass_recorded_with_green_ci_merges_in_the_same_pass() {
         .reply("gh issue", "");
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["verdict", "merge", "clean"], "{out}");
+    assert!(out.contains(&format!("removed {} ", rev.display())), "{out}");
     assert!(r.called(&format!(
         "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));
