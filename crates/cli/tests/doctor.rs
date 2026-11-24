@@ -715,3 +715,18 @@ fn a_hosts_machine_missing_from_shed_is_one_row_with_its_fix() {
         "doctor writes nothing"
     );
 }
+
+#[test]
+fn a_missing_shed_machine_never_fails_the_staging_gate() {
+    let (c, _) = setup("doc-shed-gate", "claude");
+    let base = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, base + "\n[hosts.box]\nmachine = \"box\"\n").unwrap();
+    let _sh = FakeShed::attached(&c);
+    let r = good().reply("shed machine ls --json", "[]");
+    let (code, out) = run(&c, &r, &["doctor", "--config-only"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("✓ config"), "{out}");
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("✗ shed machine box"), "{out}");
+}
