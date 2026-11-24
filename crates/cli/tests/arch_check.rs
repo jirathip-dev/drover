@@ -819,16 +819,16 @@ fn a_touched_baselined_fn_must_lower_its_entry_and_an_untouched_one_may_stay() {
     let (code, out) = arch(&d, &["--base", "HEAD"]);
     assert_eq!(code, 1, "{out}");
     assert!(
-        out.contains("crates/core/src/big.rs:big: this diff touches it, so its baseline entry 6 must shrink"),
+        out.contains("crates/core/src/big.rs:big: touched, so its baseline entry 6 must shrink"),
         "{out}"
     );
-    assert!(!out.contains("other.rs:huge: this diff"), "{out}");
+    assert!(!out.contains("other.rs:huge: touched"), "{out}");
     assert!(out.contains("1 violations"), "{out}");
     let five = "fn big() {\n    a();\n    c();\n    d();\n}\n";
     std::fs::write(d.join("crates/core/src/big.rs"), five).unwrap();
     let (code, out) = arch(&d, &["--base", "HEAD"]);
     assert_eq!(code, 1, "a shrunk fn whose entry stayed fails: {out}");
-    assert!(out.contains("big.rs:big: this diff touches it"), "{out}");
+    assert!(out.contains("big.rs:big: touched"), "{out}");
     let lowered = "crates/core/src/big.rs:big 5\ncrates/core/src/other.rs:huge 6\n";
     std::fs::write(d.join(".drover/arch-baseline.txt"), lowered).unwrap();
     let (code, out) = arch(&d, &["--base", "HEAD"]);

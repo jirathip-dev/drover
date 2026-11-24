@@ -2,7 +2,6 @@ crates/cli/tests/drive.rs 2982
 crates/cli/tests/hook.rs 1629
 crates/cli/tests/hosts.rs 1740
 crates/cli/tests/shed.rs 2547
-crates/core/src/arch.rs:check 157
 crates/core/src/check.rs 2530
 crates/core/src/check.rs:check 543
 crates/core/src/check.rs:clean_all 266

@@ -146,6 +146,10 @@ pub(crate) fn any(globs: &[String], p: &str) -> bool {
     globs.iter().any(|g| m(g) || m(&g.replace("/**/", "/")))
 }
 
+const SLASHES: [&str; 13] = [
+    "js", "jsx", "mjs", "cjs", "mts", "cts", "swift", "go", "kt", "java", "c", "h", "cpp",
+];
+
 /// `drover arch-check`: each violation as `file:line: why`, exit 1 on any; `write` records today's size offenders as the baseline instead. No config: nothing to check.
 pub fn check(
     config: &Path,
@@ -167,36 +171,33 @@ pub fn check(
     );
     let base_path = a.baseline.as_deref().unwrap_or(".drover/arch-baseline.txt");
     let base_text = std::fs::read_to_string(crate::repo_path(Path::new(base_path))).unwrap_or_default();
-    let crossings: BTreeSet<&str> = base_text
-        .lines()
-        .map(str::trim)
-        .filter(|l| l.contains(" -> "))
-        .collect();
+    let trimmed = base_text.lines().map(str::trim);
+    let crossings: BTreeSet<&str> = trimmed.filter(|l| l.contains(" -> ")).collect();
     let base = sizes(&base_text);
+    let (mut diff, mut frozen, mut was) = (vec![], vec![], BTreeMap::new());
+    if let Some(b) = since {
+        let o = r.run("git", &argv(&["diff", "-U0", "--no-color", "--no-ext-diff", b]))?;
+        anyhow::ensure!(o.code == 0, "git diff {b}: {}", o.stderr.trim());
+        diff = changes(&o.stdout);
+        let o = r.run("git", &argv(&["show", &format!("{b}:./{}", config.display())]))?;
+        if o.code == 0 {
+            let f: Frozen = toml::from_str(&o.stdout).with_context(|| format!("parsing {b}:{}", config.display()))?;
+            frozen = f.frozen;
+        }
+        was = sizes(&r.run("git", &argv(&["show", &format!("{b}:./{base_path}")]))?.stdout);
+    }
     let mut files = vec![];
     walk(Path::new("."), &a.named(), &mut files);
     files.sort();
     let (mut bad, mut now, mut crossed) = (vec![], BTreeMap::<String, usize>::new(), BTreeSet::new());
-    let mut spans = BTreeMap::<String, Vec<(usize, usize)>>::new();
     for p in &files {
         let ext = Path::new(p).extension().and_then(|x| x.to_str()).unwrap_or_default();
         let rust = ext == "rs";
         let code = rust || ext == "ts" || ext == "tsx";
-        let slashes = code
-            || [
-                "js", "jsx", "mjs", "cjs", "mts", "cts", "swift", "go", "kt", "java", "c", "h", "cpp",
-            ]
-            .contains(&ext);
-        let bans: Vec<&Ban> = a
-            .ban
-            .iter()
-            .filter(|b| any(&b.paths, p) && !any(&b.except, p))
-            .collect();
-        let rules: Vec<&Size> = a
-            .size
-            .iter()
-            .filter(|s| any(&s.paths, p) && !any(&s.exclude, p))
-            .collect();
+        let slashes = code || SLASHES.contains(&ext);
+        let on = |paths: &[String], not: &[String]| any(paths, p) && !any(not, p);
+        let bans: Vec<&Ban> = a.ban.iter().filter(|b| on(&b.paths, &b.except)).collect();
+        let rules: Vec<&Size> = a.size.iter().filter(|s| on(&s.paths, &s.exclude)).collect();
         let Some(src) = (code || !bans.is_empty() || !rules.is_empty())
             .then(|| std::fs::read_to_string(p).ok())
             .flatten()
@@ -204,7 +205,7 @@ pub fn check(
             continue;
         };
         let lines: Vec<&str> = src.lines().collect();
-        let own = a.layer.iter().find(|l| code && any(&l.paths, p) && !any(&l.exclude, p));
+        let own = a.layer.iter().find(|l| code && on(&l.paths, &l.exclude));
         for (i, l) in lines.iter().enumerate() {
             let at = format!("{p}:{}", i + 1);
             let comment = slashes && l.trim_start().starts_with("//");
@@ -235,7 +236,11 @@ pub fn check(
             let each = fns(&lines, ext).into_iter();
             sizes.extend(each.map(|(name, at, n)| (format!("{p}:{name}"), at, n, s.max_fn_lines)));
             for (key, at, n, max) in sizes {
-                spans.entry(key.clone()).or_default().push((at, n));
+                let hit = |c: &Change| c.file == *p && (key == *p || (at..=at + n).contains(&c.at));
+                let kept = was.get(&key).filter(|&w| base.get(&key) >= Some(w));
+                if let Some(w) = kept.filter(|_| diff.iter().any(hit)) {
+                    bad.push(format!("{key}: touched, so its baseline entry {w} must shrink"));
+                }
                 let Some(max) = max.filter(|&m| n > m) else { continue };
                 let e = now.entry(key.clone()).or_default();
                 *e = n.max(*e);
@@ -246,19 +251,6 @@ pub fn check(
             }
         }
     }
-    let (mut diff, mut frozen) = (vec![], vec![]);
-    if let Some(b) = since {
-        let o = r.run("git", &argv(&["diff", "-U0", "--no-color", "--no-ext-diff", b]))?;
-        anyhow::ensure!(o.code == 0, "git diff {b}: {}", o.stderr.trim());
-        diff = changes(&o.stdout);
-        let o = r.run("git", &argv(&["show", &format!("{b}:./{}", config.display())]))?;
-        if o.code == 0 {
-            let f: Frozen = toml::from_str(&o.stdout).with_context(|| format!("parsing {b}:{}", config.display()))?;
-            frozen = f.frozen;
-        }
-        let o = r.run("git", &argv(&["show", &format!("{b}:./{base_path}")]))?;
-        bad.extend(unshrunk(&sizes(&o.stdout), &base, &spans, &diff));
-    }
     bad.extend(expired(&files, &crate::lesson::ymd(crate::clock::now() / 86_400)));
     bad.extend(frozen_adds(&a, &frozen, &diff));
     bad.extend(unsized_shared(&a, config));
@@ -266,9 +258,8 @@ pub fn check(
     match &a.comments {
         Some(c) if c.policy == Policy::Off => bad.extend(new_comments(&diff, &c.except)),
         Some(c) if c.policy == Policy::Strict => {
-            for f in files.iter().filter(|f| commented(f, &c.except)) {
-                bad.extend(bad_comments(f, None));
-            }
+            let strict = files.iter().filter(|f| commented(f, &c.except));
+            bad.extend(strict.flat_map(|f| bad_comments(f, None)));
         }
         _ => {}
     }
@@ -280,27 +271,20 @@ pub fn check(
         }
     }
     if write {
-        let (keep, grown): (Vec<_>, Vec<_>) = crossed
-            .iter()
-            .partition(|k| crossings.is_empty() || crossings.contains(k.as_str()));
+        let known = |k: &&String| crossings.is_empty() || crossings.contains(k.as_str());
+        let (keep, grown): (Vec<_>, Vec<_>) = crossed.iter().partition(known);
         let sizes = now.iter().map(|(k, n)| format!("{k} {n}\n"));
-        std::fs::write(
-            base_path,
-            sizes.chain(keep.iter().map(|k| format!("{k}\n"))).collect::<String>(),
-        )?;
+        let text: String = sizes.chain(keep.iter().map(|k| format!("{k}\n"))).collect();
+        std::fs::write(base_path, text)?;
         let (n, c) = (now.len(), keep.len());
         writeln!(out, "wrote {n} size offenders and {c} layer crossings to {base_path}")?;
+        let why = "a new layer crossing is not baselined; the listed ones may only shrink";
         for k in &grown {
-            writeln!(
-                out,
-                "{k}: a new layer crossing is not baselined; the listed ones may only shrink"
-            )?;
+            writeln!(out, "{k}: {why}")?;
         }
         return Ok(i32::from(!grown.is_empty()));
     }
-    for b in &bad {
-        writeln!(out, "{b}")?;
-    }
+    bad.iter().try_for_each(|b| writeln!(out, "{b}"))?;
     writeln!(out, "arch-check: {} files, {} violations", files.len(), bad.len())?;
     Ok(i32::from(!bad.is_empty()))
 }
@@ -310,44 +294,17 @@ fn sizes(baseline: &str) -> BTreeMap<String, usize> {
     each.filter_map(|(k, n)| Some((k.into(), n.parse().ok()?))).collect()
 }
 
-fn unshrunk(
-    was: &BTreeMap<String, usize>,
-    now: &BTreeMap<String, usize>,
-    spans: &BTreeMap<String, Vec<(usize, usize)>>,
-    diff: &[Change],
-) -> Vec<String> {
-    let touched = |k: &str| {
-        let (file, func) = k.split_once(':').map_or((k, false), |(f, _)| (f, true));
-        let inside = |at| {
-            spans
-                .get(k)
-                .is_none_or(|s| s.iter().any(|&(a, n)| (a..=a + n).contains(&at)))
-        };
-        diff.iter().any(|c| c.file == file && (!func || inside(c.at)))
-    };
-    let kept = was.iter().filter(|(k, n)| now.get(*k).is_some_and(|m| m >= n));
-    kept.filter(|(k, _)| touched(k))
-        .map(|(k, n)| format!("{k}: this diff touches it, so its baseline entry {n} must shrink: lower it to the new size, or drop it under the cap"))
-        .collect()
-}
-
 fn expired(files: &[String], today: &str) -> Vec<String> {
-    let date = |d: &&str| {
-        d.bytes()
-            .enumerate()
-            .all(|(i, b)| [4, 7].contains(&i) == (b == b'-') && (b == b'-' || b.is_ascii_digit()))
-    };
-    let mut bad = vec![];
-    for f in files {
+    let each = |f: &String| {
         let src = std::fs::read_to_string(f).unwrap_or_default();
-        for (i, l) in src.lines().enumerate() {
-            let d = l.split_once("remove-by: ").and_then(|(_, r)| r.get(..10)).filter(date);
-            if let Some(d) = d.filter(|d| *d < today) {
-                bad.push(format!("{f}:{}: past its remove-by date {d}: delete this code", i + 1));
-            }
-        }
-    }
-    bad
+        let hits = src.lines().enumerate().filter_map(|(i, l)| {
+            let d = l.split_once("remove-by: ")?.1.get(..10)?;
+            let due = d < today && d.bytes().all(|b| b == b'-' || b.is_ascii_digit());
+            due.then(|| format!("{f}:{}: past its remove-by date {d}: delete this code", i + 1))
+        });
+        hits.collect::<Vec<_>>()
+    };
+    files.iter().flat_map(each).collect()
 }
 
 /// The globs `text`, an arch.toml, lists as frozen, generated or shared: decided, so never a hotspot.
