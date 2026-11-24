@@ -1,5 +1,5 @@
 use super::{lock, Pass, CM};
-use crate::runner::{argv, Out};
+use crate::runner::{argv, Out, Runner};
 use anyhow::Result;
 use std::time::Duration;
 
@@ -19,25 +19,13 @@ impl Pass<'_> {
         if !self.probe {
             return true;
         }
-        let secs = crate::config::limits().ssh_quick_secs;
-        let ssh = |a: Vec<String>| self.r.run_for("ssh", &a, "", Duration::from_secs(secs));
+        let l = crate::config::limits();
         let late = |o: &Result<Out>| o.as_ref().is_ok_and(|o| o.code == 124);
-        let connect = format!("-oConnectTimeout={secs}");
-        let probe = || {
-            ssh(argv(&[
-                "-oBatchMode=yes",
-                &connect,
-                "-oControlPath=none",
-                m,
-                "--",
-                "true",
-            ]))
-        };
-        let mut o = ssh(argv(&[CM[1], "-O", "check", m]));
+        let mut o = ssh(self.r, &[CM[1], "-O", "check", m], l.ssh_quick_secs);
         if !o.as_ref().is_ok_and(|o| o.code == 0) {
-            o = probe();
+            o = reach(self.r, m, l.ssh_quick_secs).1;
             if !o.as_ref().is_ok_and(|o| o.code != 124) {
-                o = probe();
+                o = reach(self.r, m, l.ssh_connect_secs).1;
             }
         }
         if let Ok(o) = &o {
@@ -50,6 +38,31 @@ impl Pass<'_> {
         self.seen(m, u);
         u
     }
+}
+
+/// The fresh handshake with machine `m` (`ssh … true`, no shared connection): `ssh_quick_secs` to connect, `secs` in all; the command as run and its answer.
+pub fn reach(r: &dyn Runner, m: &str, secs: u64) -> (String, Result<Out>) {
+    let connect = format!("-oConnectTimeout={}", crate::config::limits().ssh_quick_secs);
+    let a = ["-oBatchMode=yes", &connect, "-oControlPath=none", m, "--", "true"];
+    (format!("ssh {}", a.join(" ")), ssh(r, &a, secs))
+}
+
+fn ssh(r: &dyn Runner, a: &[&str], secs: u64) -> Result<Out> {
+    r.run_for("ssh", &argv(a), "", Duration::from_secs(secs))
+}
+
+/// Why `hosts refresh` finds machine `m` offline: its probe's command, exit code and last stderr line; the shared offline mark set or cleared by it.
+pub fn why_down(ctx: &crate::Ctx, r: &dyn Runner, m: &str) -> String {
+    let (cmd, o) = reach(r, m, crate::config::limits().ssh_connect_secs);
+    super::went(ctx, m, o.as_ref().is_ok_and(|o| o.code == 0));
+    let said = o.map_or_else(
+        |e| format!("{e:#}"),
+        |o| {
+            let tail = o.stderr.lines().map(str::trim).rfind(|l| !l.is_empty());
+            format!("exit {}: {}", o.code, tail.unwrap_or("no stderr"))
+        },
+    );
+    format!("probe `{cmd}` {said}")
 }
 
 impl Pass<'_> {

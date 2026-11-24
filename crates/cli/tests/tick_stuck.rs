@@ -188,7 +188,7 @@ fn clean_reports_a_silent_disabled_host_offline_after_one_retried_probe() {
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
     assert_eq!(to_air, [PROBE, PROBE], "one probe retried once, nothing after it");
-    assert!(r.spent.get() <= 10, "{}s on the Air", r.spent.get());
+    assert!(r.spent.get() <= 15, "{}s on the Air", r.spent.get());
 }
 
 #[test]
