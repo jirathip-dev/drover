@@ -1634,14 +1634,13 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
     })
 }
 
-/// The order that keeps new lanes off host `name` while its lanes finish: the owner's off switch, a release swap or a sign-in hold.
+/// The order that keeps new lanes off host `name` while its lanes finish: the owner's off switch or a sign-in hold.
 pub fn drain(cfg: &Config, events: &[Event], name: &str, now: u64) -> Option<String> {
     let h = cfg.hosts.get(name);
     let m = h.and_then(|h| h.machine.as_deref());
     let off = h.is_some_and(|h| !h.enabled).then(|| format!("turned off: {name}"));
-    let swap = m.and_then(|_| updating(events, (now, cfg.limits.self_update_swap_secs)));
     let hold = || login_hold(events, m, (now, cfg.limits.proxy_retry_secs)).map(String::from);
-    off.or(swap).or_else(hold)
+    off.or_else(hold)
 }
 
 /// A remote host unreachable 15 min straight: its open lanes restart on the main host from their pushed branch.
