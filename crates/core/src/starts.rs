@@ -158,7 +158,6 @@ pub fn stops(code: Option<&str>) -> bool {
         code,
         Some(
             "HOST_BUSY"
-                | "HOST_UPDATING"
                 | "DISK_LOW"
                 | "DISK_BUDGET"
                 | "MEM_LOW"

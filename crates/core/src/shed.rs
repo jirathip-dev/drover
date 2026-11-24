@@ -301,27 +301,6 @@ pub fn cli(r: &dyn Runner, a: &[&str]) -> Result<Out> {
     Ok(o)
 }
 
-/// Each enabled `[hosts]` machine missing from this host's shed (`shed machine ls --json`).
-pub fn unlisted(cfg: &Config, r: &dyn Runner) -> Result<Vec<String>> {
-    let on = cfg.hosts.values().filter(|h| h.enabled);
-    let wanted: Vec<String> = on.filter_map(|h| h.machine.clone()).collect();
-    if wanted.is_empty() {
-        return Ok(wanted);
-    }
-    let listed: Vec<Value> = serde_json::from_str(cli(r, &["machine", "ls", "--json"])?.stdout.trim())?;
-    let has = |m: &String| listed.iter().any(|l| l["name"] == m.as_str());
-    Ok(wanted.into_iter().filter(|m| !has(m)).collect())
-}
-
-/// `shed machine add <m> <m>` for each `unlisted` machine (never a `machine rm`): those it added.
-pub fn add_machines(cfg: &Config, r: &dyn Runner) -> Result<Vec<String>> {
-    let missing = unlisted(cfg, r)?;
-    for m in &missing {
-        cli(r, &["machine", "add", m, m])?;
-    }
-    Ok(missing)
-}
-
 /// An agent's installed adapter command from `shed agents --json`: under `installed` since shed#129, else top level.
 pub fn adapter(r: &dyn Runner, id: &str) -> Result<Option<Vec<String>>> {
     let agents: Value = serde_json::from_str(&cli(r, &["agents", "--json"])?.stdout)?;
