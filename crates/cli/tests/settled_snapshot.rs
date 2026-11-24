@@ -84,10 +84,13 @@ fn reads(c: &drover::Ctx, args: &[&str]) -> (usize, String) {
     (rows, out)
 }
 
+static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const COMMANDS: [&[&str]; 4] = [&["status"], &["waiting"], &["clean"], &["thread", "ls"]];
 
 #[test]
 fn settled_reads_cost() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     for args in COMMANDS {
         reads(&fixture(&format!("cost-{}", args[0])), args);
     }
@@ -95,6 +98,7 @@ fn settled_reads_cost() {
 
 #[test]
 fn settled_issues_and_archived_threads_are_read_from_the_snapshot_only() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let settled = usize::try_from(LANES).unwrap() * PER_LANE;
     let archived = usize::try_from(THREADS - OPEN_THREADS).unwrap() * (MSGS - 1);
     let later = EVENTS + 1 - settled - archived;
