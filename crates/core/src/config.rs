@@ -1312,7 +1312,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "how long a `self-update-swapping` mark holds remote placement when no `self-updated` follows",
     ),
 ];
-
 static ACTIVE: std::sync::RwLock<Option<std::sync::Arc<Limits>>> = std::sync::RwLock::new(None);
 
 /// The last loaded fleet.toml's `[limits]` (defaults before one loads), for code that holds no `Config`.
