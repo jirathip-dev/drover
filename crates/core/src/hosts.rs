@@ -556,8 +556,6 @@ pub struct Seen {
     pub github: String,
     /// Its set workspace roots.
     pub roots: Vec<crate::roots::Root>,
-    /// A remote host's `drover --version` at the last look.
-    pub drover: String,
 }
 
 fn file(ctx: &Ctx) -> PathBuf {
@@ -621,20 +619,12 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             if let Some((tags, home)) = due.then(|| probe(&on)).flatten() {
                 (s.tags, s.home, s.probed) = (tags, home, ctx.now);
             }
-            let mut landed = false;
-            if h.machine.is_some() && h.enabled && !s.home.is_empty() {
-                let live = crate::release::builds(&on, &real_exe(ctx, &s.home))
-                    .ok()
-                    .and_then(|b| b.live);
-                let live = live.unwrap_or_default();
-                (landed, s.drover) = (!s.drover.is_empty() && live != s.drover, live);
-            }
             let tunnel = h
                 .machine
                 .as_deref()
                 .filter(|_| cfg.host_acp(name).is_some())
                 .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)));
-            if (due || landed) && h.machine.is_some() && h.enabled {
+            if due && h.machine.is_some() && h.enabled {
                 s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
                 if h.watches_token() {
                     let (card, warn) = crate::cloud::github(&on, ctx.now);
@@ -1166,13 +1156,10 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     };
     let reach = format!("can't reach {}:", f.repo);
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
-    let swap = cfg.limits.self_update_swap_secs;
-    let behind = machine.and_then(|_| updating(pre.0, (ctx.now, swap)));
     let mut full = false;
     let (hs, refusal) = match cloud.map_or_else(|| crate::session::live_on(&on).map_err(|_| None), |c| Err(Some(c))) {
         Err(Some(c)) => (Host::default(), Some(c)),
         Err(None) => (Host::default(), Some(("HOST_OFFLINE", "unreachable".to_string()))),
-        Ok(_) if behind.is_some() => (Host::default(), behind.map(|w| ("HOST_UPDATING", w))),
         Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
         Ok(agents) => {
             let cap = cfg.hosts.get(name).and_then(|h| h.max_working);
@@ -1418,21 +1405,6 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
     Ok(())
 }
 
-/// Why placement passes over every remote host, from the log alone: a staged release swaps there.
-pub fn updating(events: &[Event], (now, swap_secs): (u64, u64)) -> Option<String> {
-    let rollout = |e: &&Event| {
-        e.str("target") == Some("live") && matches!(e.kind.as_str(), "self-update-swapping" | "self-updated")
-    };
-    let e = events
-        .iter()
-        .rfind(rollout)
-        .filter(|e| e.kind == "self-update-swapping" && now < e.ts.saturating_add(swap_secs))?;
-    Some(format!(
-        "drover swaps to {:.7} on every host",
-        e.str("sha").unwrap_or_default()
-    ))
-}
-
 pub(crate) fn real_exe(ctx: &Ctx, home: &str) -> String {
     let exe = std::fs::canonicalize(&ctx.exe).map_or(ctx.exe.clone(), |p| p.to_string_lossy().into());
     rehome(vec![exe], Some(home)).remove(0)
@@ -1517,7 +1489,7 @@ pub fn place(
         let code = p.refusal.as_ref().map(|x| x.0);
         let busy = matches!(
             code,
-            Some("DISK_LOW" | "HOST_BUSY" | "HOST_UPDATING" | "LOGIN_NEEDED" | "MEM_LOW" | "NO_HOST")
+            Some("DISK_LOW" | "HOST_BUSY" | "LOGIN_NEEDED" | "MEM_LOW" | "NO_HOST")
         );
         let fits = cfg.hosts.get(was.0).map_or(needs.is_empty(), |h| fit(was.0, h));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
@@ -1662,14 +1634,13 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
     })
 }
 
-/// The order that keeps new lanes off host `name` while its lanes finish: the owner's off switch, a release swap or a sign-in hold.
+/// The order that keeps new lanes off host `name` while its lanes finish: the owner's off switch or a sign-in hold.
 pub fn drain(cfg: &Config, events: &[Event], name: &str, now: u64) -> Option<String> {
     let h = cfg.hosts.get(name);
     let m = h.and_then(|h| h.machine.as_deref());
     let off = h.is_some_and(|h| !h.enabled).then(|| format!("turned off: {name}"));
-    let swap = m.and_then(|_| updating(events, (now, cfg.limits.self_update_swap_secs)));
     let hold = || login_hold(events, m, (now, cfg.limits.proxy_retry_secs)).map(String::from);
-    off.or(swap).or_else(hold)
+    off.or_else(hold)
 }
 
 /// A remote host unreachable 15 min straight: its open lanes restart on the main host from their pushed branch.
@@ -1773,7 +1744,7 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         let t = tags(h, Some(&s)).join(",");
         let built = there.and_then(|m| crate::release::sha_of(view.as_ref()?.build(Some(m))?));
         let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
-        let v = match built.as_deref().unwrap_or(&s.drover) {
+        let v = match built.as_deref().unwrap_or_default() {
             "" => String::new(),
             x if x == env!("DROVER_SHA") => format!(" · drover {x} ✓"),
             x => format!(" · drover {x} ≠ {}", env!("DROVER_SHA")),
