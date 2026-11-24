@@ -1084,19 +1084,17 @@ pub fn clean_all(
         if !pane.is_empty() {
             term::close(ctx, &on, pane).ok();
         }
-        let mut forget = None;
+        let mut d = json!({"worktree": wt, "pane": pane, "why": why});
         if on.machine.is_none() {
             crate::providers::remove_tmp(&stray_roots(cfg), wt);
-            forget = crate::heavy::forget(r, wt);
+            if let Some(f) = crate::heavy::forget(r, wt) {
+                writeln!(out, "runners forget {wt} failed: {f}")?;
+                d.put("forget", f.into());
+            }
         }
         drop_log(ctx, e.str("agent"));
         removed += 1;
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
-        let mut d = json!({"worktree": wt, "pane": pane, "why": why});
-        if let Some(f) = forget {
-            writeln!(out, "runners forget {wt} failed: {f}")?;
-            d.put("forget", f.into());
-        }
         emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, Some(n), "clean", d))?;
     }
     let sheds = r.shed().filter(|_| lane.is_none()).map(term::Shed);

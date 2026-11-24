@@ -1324,12 +1324,15 @@ impl Config {
 
     fn routes_ok(&self) -> Result<()> {
         for (name, f) in &self.fleet {
-            let never = f.never_routed();
+            let (never, hits) = (f.never_routed(), crate::heavy::hits);
             for kind in f.remote.keys() {
                 let Some(ps) = f.heavy.get(kind) else {
                     bail!("fleet.{name}.remote.{kind}: no [fleet.{name}.heavy] kind \"{kind}\" to route");
                 };
-                if let Some((p, n)) = ps.iter().find_map(|p| Some((p, crate::heavy::never_hit(p, &never)?))) {
+                if let Some((p, n)) = ps
+                    .iter()
+                    .find_map(|p| Some((p, never.iter().find(|n| hits(n, p) || hits(p, n))?)))
+                {
                     bail!("fleet.{name}.remote.{kind}: pattern \"{p}\" hits never-routed \"{n}\"");
                 }
             }

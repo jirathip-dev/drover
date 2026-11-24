@@ -1,3 +1,4 @@
+use crate::runner::Runner;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -20,7 +21,7 @@ pub struct Heavy {
 
 /// One heavy kind's build machines: `runners run --tag <tag>` with its optional flags.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, clap::Args)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Route {
     #[arg(long = "remote", required = false)]
     pub tag: String,
@@ -28,10 +29,8 @@ pub struct Route {
     pub wait: Option<u64>,
     #[arg(long)]
     pub setup: Option<String>,
-    #[serde(default)]
     #[arg(long)]
     pub env: Vec<String>,
-    #[serde(default)]
     #[arg(long)]
     pub out: Vec<String>,
 }
@@ -59,15 +58,9 @@ fn segments(cmd: &str) -> Vec<String> {
         .collect()
 }
 
-fn hits(p: &str, s: &str) -> bool {
+/// Whether shell pattern `p` (`*` any text) matches `s`.
+pub fn hits(p: &str, s: &str) -> bool {
     crate::config::glob(p.replace('*', "**").as_bytes(), s.as_bytes())
-}
-
-/// The `never` entry a routing pattern overlaps (either matches the other), for config load to refuse.
-pub fn never_hit<'a>(pattern: &str, never: &'a [String]) -> Option<&'a str> {
-    (never.iter())
-        .find(|n| hits(n, pattern) || hits(pattern, n))
-        .map(String::as_str)
 }
 
 impl Heavy {
@@ -116,7 +109,7 @@ impl Heavy {
 }
 
 /// `runners run` for `cmd` in worktree `dir` on route `r`: `Some(code)` once it ran there (the command's own code), else `None` with the reason printed: run it here.
-pub fn remote(run: &dyn crate::runner::Runner, r: &Route, dir: &str, cmd: &str) -> Option<i32> {
+pub fn remote(run: &dyn Runner, r: &Route, dir: &str, cmd: &str) -> Option<i32> {
     let mut a: Vec<String> = ["run", "--tag", &r.tag, "--dir", dir].map(String::from).to_vec();
     a.extend(r.flags("--wait"));
     a.extend(["--", "bash", "-c", cmd].map(String::from));
@@ -151,26 +144,26 @@ pub struct Args {
 }
 
 impl Args {
-    /// Run it on its route's build machines, else as `holder` in slot folder `dir`'s line (`timeout` as `run`'s `late`).
+    /// Run it on its route's build machines, else as `who` in slot folder `dir`'s line.
     pub fn run(
         self,
-        r: &dyn crate::runner::Runner,
+        r: &dyn Runner,
         dir: &Path,
-        holder: String,
-        timeout: impl FnOnce(&Ticket, &str) -> Option<i32>,
+        who: String,
+        late: impl FnOnce(&Ticket, &str) -> Option<i32>,
     ) -> Result<i32> {
         if let (Some(route), Some(wt)) = (&self.route, &self.dir) {
             if let Some(code) = remote(r, route, wt, &self.cmd) {
                 return Ok(code);
             }
         }
-        let me = Ticket::new(holder, self.kind, self.cmd, self.kind_max);
-        run(r, dir, me, self.max, self.wait, &|| None, timeout)
+        let me = Ticket::new(who, self.kind, self.cmd, self.kind_max);
+        run(r, dir, me, self.max, self.wait, &|| None, late)
     }
 }
 
 /// `runners forget --dir <wt>` for a removed worktree: the failure, if any (no `runners` here is none).
-pub fn forget(r: &dyn crate::runner::Runner, wt: &str) -> Option<String> {
+pub fn forget(r: &dyn Runner, wt: &str) -> Option<String> {
     let o = r.run("runners", &crate::runner::argv(&["forget", "--dir", wt]));
     match o {
         _ if crate::runner::not_found(&o) => None,

@@ -1,5 +1,6 @@
 use crate::config::{Config, Deny};
 use crate::events::Json;
+use crate::heavy::Heavy;
 use crate::providers::dialects;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1124,12 +1125,7 @@ pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Op
 }
 
 /// A shell call matching a heavy kind, rewritten (in a dialect that can) to run under `exe heavy`: on its route's build machines from the lane's worktree (`git`'s top level of its `cwd`), else in a host slot.
-pub fn heavy(
-    input: &Value,
-    h: &crate::heavy::Heavy,
-    exe: &str,
-    git: &dyn Fn(&str, &[&str]) -> Option<String>,
-) -> Option<Value> {
+pub fn heavy(input: &Value, h: &Heavy, exe: &str, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<Value> {
     let tool = input["tool_name"].as_str()?;
     let rewrite = dialects().find(|d| (d.sent)(input) && d.shell == tool)?.rewrite?;
     let mut ti = tool_input(input).clone();
