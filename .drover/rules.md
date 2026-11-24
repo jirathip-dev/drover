@@ -7,7 +7,7 @@
 - don't push with a failing test or a perf gate over its budget (enforced by: CI test, CI perf in release)
 - don't leave a fleet-test-* temp dir behind a test (enforced by: CI no test temp dirs)
 - don't put a ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the demo export (enforced by: CI leak gate)
-- don't add a direct dependency outside docs/serve.md's allow-list (enforced by: CI deps gate)
+- don't add a direct dependency outside docs/serve/alerts.md's allow-list (enforced by: CI deps gate)
 - don't make core depend on server or cli, server on cli, or spawn a process outside core's runner.rs (enforced by: CI layers, tests/runner_limits.rs)
 - don't let ts-rs into the release build (enforced by: CI release has no ts-rs)
 - don't let assets/types/ drift from `just types`, or hand-copy a generated type (enforced by: CI TS types, `just types-lint`)

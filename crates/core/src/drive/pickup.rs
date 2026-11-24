@@ -39,8 +39,8 @@ pub(super) fn fetch(
     let path = format!("{}/verdict.md", sp.str("worktree").unwrap_or_default());
     let view = crate::link::view::View::load(ctx, cfg)?;
     let text = match view.worktree(sp) {
-        Some(w) => match &w.verdict {
-            Some(v) => v.text.clone(),
+        Some(_) => match crate::link::read(ctx, cfg, r, Some(sp), &path) {
+            Some(t) => t,
             None => return Ok(Picked::No),
         },
         None => match view.down(sp.str("machine")) {
@@ -79,6 +79,59 @@ fn unread(ctx: &Ctx, f: &Fleet, ev: &[Event], agents: &[Session], (s, w): (&Issu
     w.next_cmd.is_none()
         && s.check_lane() == Some(&w.lane)
         && (w.what.starts_with(waiting::PICKUP) || (w.what.starts_with(waiting::IDLE) && ended()))
+}
+
+const WAKE: &str = "your review has no verdict.md yet: write it for the PR head and record it with `drover verdict`";
+
+pub(super) fn asleep(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    f: &Fleet,
+    (ev, agents): (&[Event], &[Session]),
+    (s, w): (&IssueState, &Waiting),
+) -> Result<bool> {
+    let lane = w.lane.as_str();
+    let stall = cfg.limits.stall_minutes * 60;
+    let hibernated = agents.iter().find(|a| a.name == lane).and_then(Session::status) == Some(Status::Asleep);
+    let rev = |e: &&Event| e.str("role").is_some_and(|r| r != "verify" && f.family(r) == "rev");
+    let Some(sp) = crate::events::last_spawn(ev, lane)
+        .filter(rev)
+        .filter(|e| ctx.now >= e.ts + stall)
+        .filter(|_| hibernated && w.next_cmd.is_none() && s.check_lane() == Some(&w.lane))
+        .filter(|_| w.what.starts_with(waiting::IDLE))
+    else {
+        return Ok(false);
+    };
+    let (fleet, n) = (s.fleet.as_str(), s.issue);
+    let told = ev
+        .iter()
+        .rfind(|e| e.kind == "verdict-prompted" && e.str("agent") == Some(lane) && e.ts >= sp.ts);
+    match told {
+        None => {
+            let Some(sent) = super::tell(r, ev, lane, WAKE) else {
+                writeln!(
+                    out,
+                    "{fleet} #{n} {lane} hibernated without a verdict: its prompt waits"
+                )?;
+                return Ok(true);
+            };
+            writeln!(out, "{fleet} #{n} {lane} hibernated without a verdict: prompted")?;
+            let d = json!({"agent": lane, "sent": sent});
+            append(
+                &ctx.state,
+                &Event::new(ctx.now, fleet, Some(n), "verdict-prompted", d).passive(),
+            )?;
+        }
+        Some(t) if ctx.now >= t.ts + stall => {
+            let (num, role) = (n.to_string(), s.check.as_deref().unwrap_or("rev"));
+            let args = ["spawn", fleet, &num, role, "--supersede"];
+            super::act(ctx, cfg, r, out, ev, (fleet, Some(n), "respawn"), &args)?;
+        }
+        Some(_) => {}
+    }
+    Ok(true)
 }
 
 fn no_verdict(ev: &[Event], lane: &str) -> String {

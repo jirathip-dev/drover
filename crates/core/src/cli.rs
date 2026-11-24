@@ -281,7 +281,7 @@ enum Cmd {
     #[command(
         about = "Every open issue's latest lane: what it waits on, with its next command (the owner's watchdog)"
     )]
-    Waiting(Scope),
+    Waiting(crate::waiting::Args),
     #[command(about = "Print the issue spec cached at spawn; read this instead of `gh issue view`")]
     Brief { fleet: String, issue: u64 },
     #[command(about = "Why a line is as it is: blame's commit, its issue, the issue's asks and answers")]
@@ -370,6 +370,8 @@ enum Cmd {
     Triage(crate::triage::Args),
     #[command(about = "#1488: file this month's deps issue, queue it and spawn its lane (orchestrators, owner)")]
     Deps(crate::deps::Args),
+    #[command(about = "#1648: the nightly soak on `[fleet.<n>.soak]` hosts; an issue per missed target")]
+    Soak(crate::soak::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
     #[command(alias = "host")]
     Hosts {
@@ -754,7 +756,13 @@ enum ThreadCmd {
 #[derive(Subcommand)]
 enum ConfigCmd {
     #[command(about = "Every [limits] key with its value and what it times or caps")]
-    Show,
+    Show {
+        #[arg(
+            long,
+            help = "The built-in defaults as docs/config/limits.md's Markdown table; reads no fleet.toml"
+        )]
+        md: bool,
+    },
     #[command(
         about = "Propose <file> as the whole new fleet.toml in a thread: validated, its diff a card with [apply] [discard]"
     )]
@@ -1274,6 +1282,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             crate::secret::retired(&state, out)?;
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
+        Cmd::Config {
+            cmd: ConfigCmd::Show { md: true },
+        } => crate::config::show_md(out)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
         Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
         Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
@@ -1788,7 +1799,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 },
                 Cmd::Config { cmd } => {
                     let (id, apply) = match cmd {
-                        ConfigCmd::Show => return crate::config::show(&cfg, out).map(|()| 0),
+                        ConfigCmd::Show { .. } => return crate::config::show(&cfg, out).map(|()| 0),
                         ConfigCmd::Propose { thread, file, rollout } => {
                             return crate::propose::propose(ctx, &cfg, out, (&thread, &file), rollout).map(|()| 0)
                         }
@@ -1871,7 +1882,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => {
                     crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now, id.as_deref()))?;
                 }
-                Cmd::Waiting(Scope { fleet, json }) => {
+                Cmd::Waiting(crate::waiting::Args { fleet, json, flow }) => {
                     let (events, agents) = (working(&ctx.state)?, crate::link::sessions(ctx, &cfg, r).running());
                     let (at, slots) = places(ctx, &cfg, r, &events);
                     let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true, None);
@@ -1959,14 +1970,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     } else {
                         write!(out, "{}", queue::fleets_use(ctx, &events, Some(&cfg), fleet.as_deref()))?;
                     }
+                    let seen = flow.then(|| crate::flow::facts::Seen::load(ctx, &cfg)).transpose()?;
                     for w in rows.iter().filter(|_| !json) {
                         let place = at
                             .get(&w.lane)
                             .filter(|p| !p.is_empty())
                             .map_or(String::new(), |p| format!(" · {p}"));
+                        let flow = crate::flow::line(seen.as_ref(), st.get(&(w.fleet.clone(), w.issue)))?;
                         writeln!(
                             out,
-                            "{} #{} {}: {} ({}{place}){}",
+                            "{} #{} {}: {} ({}{place}){}{flow}",
                             w.fleet,
                             w.issue,
                             w.who,
@@ -2027,8 +2040,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     sha,
                     file,
                 } => {
-                    let pass = verdict == "PASS";
-                    gate::verdict(ctx, &cfg, r, out, (&fleet, issue), pass, &sha, &file)?;
+                    gate::record(ctx, &cfg, r, out, (&fleet, issue), verdict == "PASS", &sha, &file)?;
                     let id = format!("{sha}-{verdict}");
                     let _ = crate::drive::kick_once(ctx, r, (&fleet, issue), "verdict", Some(&id));
                 }
@@ -2107,6 +2119,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Lesson { fleet, .. } => return crate::lesson::cli(ctx, &cfg, r, out, fleet),
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
                 Cmd::Deps(a) => return crate::deps::cli(ctx, &cfg, r, out, &a.fleet),
+                Cmd::Soak(a) => return crate::soak::run(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
@@ -2124,11 +2137,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if json {
                         writeln!(out, "{}", serde_json::to_string_pretty(&pr)?)?;
                     } else {
-                        writeln!(
-                            out,
-                            "{}",
-                            gh::summary(&pr, &branch, &cfg.fleet(&fleet)?.required_checks)
-                        )?;
+                        let summary = gh::summary(&pr, &branch, &cfg.fleet(&fleet)?.required_checks);
+                        writeln!(out, "{summary}")?;
                     }
                     if pr.is_null() {
                         return Ok(1);

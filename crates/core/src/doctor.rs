@@ -1,3 +1,4 @@
+use crate::clone::refspec;
 use crate::config::Config;
 use crate::runner::{argv, ok, Runner};
 use crate::{events::Json, Ctx};
@@ -165,7 +166,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             row(rows, has, '✗', &format!("label {name} — {l} in {repo} → {fix}"));
         }
         let dir = fleet.local_path().display().to_string();
-        let (branch, origin) = (&fleet.integration, format!("origin/{}", fleet.integration));
+        let (branch, origin) = (refspec(&fleet.integration), format!("origin/{}", fleet.integration));
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || git clone https://github.com/{repo}.git {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
@@ -526,5 +527,16 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line =
             format!("shed agent {id} — {cmd} not on the timer's PATH → install {cmd} in a folder on it ({path})");
         row(rows, found, '✗', &line);
+    }
+    if let Ok(n) = crate::top::normal(ctx, cfg, r) {
+        rows.push(n.first().map_or_else(
+            || "✓ lane priority".into(),
+            |(a, p)| {
+                format!(
+                    "✗ lane priority — {} lane processes at normal priority ({a}, {p})",
+                    n.len()
+                )
+            },
+        ));
     }
 }

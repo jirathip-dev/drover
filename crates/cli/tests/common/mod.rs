@@ -8,7 +8,7 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 /// The shared fake shed server lane tests run on.
 pub mod fake_shed;
 #[allow(unused_imports, reason = "not every test crate drives the fake shed")]
-pub use fake_shed::{FakeShed, OnShed, OverSsh};
+pub use fake_shed::{FakeShed, Fault, OnShed, OverSsh};
 /// The large board fixture the t141 performance tests share.
 pub mod large;
 /// The recorded sendmeter fleet the screen tests share.
@@ -826,4 +826,21 @@ impl Runner for Disk<'_> {
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
+}
+
+/// Appends one perf line to stderr and, in CI, the job summary.
+pub fn report(line: &str) {
+    eprintln!("{line}");
+    if let Ok(p) = std::env::var("GITHUB_STEP_SUMMARY") {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).create(true).open(p).unwrap();
+        writeln!(f, "{line}").unwrap();
+    }
+}
+
+/// This process's user plus system CPU time so far, in ms.
+pub fn cpu_ms() -> f64 {
+    let u = drover_sys::rusage().unwrap();
+    let tv = |s: i64, us: i64| s as f64 * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
+    tv(u[0], u[1]) + tv(u[2], u[3])
 }

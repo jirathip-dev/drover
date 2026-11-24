@@ -15,7 +15,7 @@ bad=$(find crates/core/src -name '*.rs' ! -path crates/core/src/config.rs | sort
   /^[[:space:]]*\/\// { next }
   /Duration::from_(secs|millis|mins)\([[:space:]]*[0-9]/ { print FILENAME ":" FNR ": " $0 }')
 test -z "$bad" || {
-  echo "::error::timing-check: a hard-coded Duration in core; make it a [limits] key (crates/core/src/config.rs, docs/config.md)"
+  echo "::error::timing-check: a hard-coded Duration in core; make it a [limits] key (crates/core/src/config.rs, docs/config/limits.md)"
   echo "$bad"
   exit 1
 }

@@ -1,0 +1,13 @@
+flow = "slot"
+states = ["held"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "stale"
+when = {  }
+do = "wait"
+then = ["drop-marker"]
+owner = "drive"
+timeout = "spawn_pending_max_secs"
+say = "a start slot is held"

@@ -24,17 +24,17 @@ const EXCEPTIONS: [(&str, &str, &str); 10] = [
         "#928: the shared theme repo the packs come from",
     ),
     (
-        "docs/serve.md",
+        "docs/serve/page.md",
         "jirathip-dev/corral",
         "MIT notice: the source the horses, icon and Herd mode are ported from",
     ),
     (
-        "docs/serve.md",
+        "docs/serve/page.md",
         "MIT © jirathip-dev",
         "MIT notice of the ported Corral code and icon",
     ),
     (
-        "docs/serve.md",
+        "docs/serve/export.md",
         "https://jirathip-dev.github.io/herdsman/",
         "the project's own public demo",
     ),

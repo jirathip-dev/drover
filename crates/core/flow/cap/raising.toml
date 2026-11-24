@@ -1,0 +1,12 @@
+flow = "cap"
+states = ["raising"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "release"
+when = {  }
+do = "release"
+owner = "drive"
+timeout = "act_minutes"
+say = "the raise merged: release the asking issue"

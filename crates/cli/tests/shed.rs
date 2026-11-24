@@ -185,7 +185,11 @@ fn a_lane_spawns_on_shed() {
         cmds[1].as_array().unwrap()[3..6],
         [json!("worktree"), json!("add"), json!("-b")]
     );
-    assert_eq!((cmds[2][0].as_str(), cmds[2][1].as_str()), (Some("shed"), Some("run")));
+    assert_eq!(
+        cmds[2].as_array().unwrap()[3..5],
+        [json!("config"), json!("branch.issue-12.remote")]
+    );
+    assert_eq!((cmds[4][0].as_str(), cmds[4][1].as_str()), (Some("shed"), Some("run")));
     assert!(b.methods().is_empty(), "a dry run calls nothing");
 
     let f = spawn_fake();
@@ -193,7 +197,7 @@ fn a_lane_spawns_on_shed() {
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     let wt = c.worktrees.join("sendmeter/issue-12");
     assert!(f.called(&format!(
-        "git -C /tmp/does-not-matter/sendmeter worktree add -b issue-12 {} origin/staging",
+        "git -C /tmp/does-not-matter/sendmeter worktree add -b issue-12 --no-track {} origin/staging",
         wt.display()
     )));
     assert!(
@@ -482,6 +486,31 @@ fn a_guarded_command_is_refused_inside_an_acp_lane() {
         );
     }
     assert_eq!(tool("cargo test"), "", "an ordinary command runs");
+}
+
+#[test]
+fn an_acp_lanes_adapter_and_its_grandchild_run_in_the_background_even_after_it_sets_its_title() {
+    let b = FakeShed::new();
+    let c = acp_ctx("acp-qos", &acp_config(&b.sock, "claude"));
+    let probe = "process.title = 'claude-agent-acp'; process.stdout.write(require('child_process')\
+        .execSync(\"sh -c 'ps -o pri= -o nice= -p \" + process.pid + \",$$; true'; true\").toString())";
+    let f = acp_fake(&["node", "-e", probe]);
+    let cli = b.cli(&f);
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let dump = cli.out.borrow().concat();
+    let rows: Vec<Vec<i32>> = (dump.lines())
+        .map(|l| l.split_whitespace().map(|w| w.parse().unwrap()).collect())
+        .collect();
+    assert_eq!(rows.len(), 2, "the adapter and its grandchild: {dump:?}");
+    for r in &rows {
+        let background = if cfg!(target_os = "macos") {
+            r[0] <= 4
+        } else {
+            r[1] >= 10
+        };
+        assert!(background, "pri, nice {r:?} in {dump:?}");
+    }
 }
 
 #[test]
@@ -1624,6 +1653,34 @@ fn a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves() {
     assert!(!old.exists(), "the old worktree is gone");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
     assert!(brief.contains(&format!("origin/{w}")), "{brief}");
+}
+
+#[test]
+fn an_impl_round_moves_a_verify_lanes_worktree_without_snapshotting_its_home_path_scratch() {
+    let b = FakeShed::new();
+    let (c, f, local, old, origin) = herdr_era_lane("moved-verify", &b, false, &[]);
+    let cfg = std::fs::read_to_string(&c.config).unwrap().replacen(
+        "integration = \"staging\"",
+        "integration = \"staging\"\npublic = true",
+        1,
+    );
+    let verify = "[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
+    std::fs::write(&c.config, format!("{cfg}\n{verify}")).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    std::fs::write(old.join("transcript.txt"), "/home/me/e2e\n").unwrap();
+    let sp = json!({"role": "verify", "agent": "sendmeter-verify-12-r1", "harness": "claude", "pane": "w3:p1",
+        "workspace": "w3", "worktree": old, "branch": "issue-12"});
+    let e = Event::new(c.now - 300, "sendmeter", Some(12), "spawn", sp);
+    drover::events::append(&c.state, &e).unwrap();
+    let cli = Push(b.cli(&f), local.parent().unwrap().into());
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
+    let moved = logged(&c, "worktree-moved");
+    assert_eq!(moved.len(), 1, "{out}");
+    assert_eq!(*moved[0].val("wip"), Value::Null);
+    assert_eq!(git(&origin, &["for-each-ref", "refs/heads/wip/"]), "");
+    assert!(!old.exists(), "the old worktree is gone");
 }
 
 #[test]

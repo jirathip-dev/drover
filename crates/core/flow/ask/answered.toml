@@ -1,0 +1,20 @@
+flow = "ask"
+states = ["answered"]
+reads = ["lane"]
+ignores = ["host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "deliver"
+when = { lane = ["running", "limited", "asleep", "done", "exited", "gone"] }
+do = "deliver"
+owner = "drive"
+timeout = "act_minutes"
+say = "deliver the answer to the lane"
+
+[[row]]
+id = "apply"
+when = { lane = ["none"] }
+do = "apply-decision"
+owner = "drive"
+timeout = "act_minutes"
+say = "apply the answer"

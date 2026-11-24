@@ -31,7 +31,12 @@ fn on(f: &Fleet) -> bool {
     f.deps.as_deref() == Some("monthly") && !f.paused
 }
 
-fn titled(cfg: &Config, r: &dyn Runner, fleet: &str, (state, title, exact): (&str, &str, bool)) -> Result<Option<u64>> {
+pub(crate) fn titled(
+    cfg: &Config,
+    r: &dyn Runner,
+    fleet: &str,
+    (state, title, exact): (&str, &str, bool),
+) -> Result<Option<u64>> {
     let repo = &cfg.fleet(fleet)?.repo;
     let search = format!("\"{title}\" in:title");
     let list = json(
@@ -98,7 +103,8 @@ pub fn advisories(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, 
     );
     let dir = ctx.state.with_file_name(format!("deps-{fleet}"));
     let d = dir.to_string_lossy().into_owned();
-    ok(r, "git", &["-C", &local, "fetch", "-q", "origin", &f.integration])?;
+    let spec = crate::clone::refspec(&f.integration);
+    ok(r, "git", &["-C", &local, "fetch", "-q", "origin", &spec])?;
     if dir.exists() {
         ok(r, "git", &["-C", &d, "checkout", "-q", "--force", "--detach", &head])?;
     } else {

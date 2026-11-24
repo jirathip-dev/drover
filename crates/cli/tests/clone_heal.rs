@@ -401,7 +401,7 @@ fn a_remote_fetch_racing_another_on_staging_is_retried_and_the_spawn_starts() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let _sh = FakeShed::attached(&c);
     let fetch =
-        format!("{SSH}'git' '--no-replace-objects' '-C' '/tmp/does-not-matter/sendmeter' 'fetch' 'origin' 'staging'");
+        format!("{SSH}'git' '--no-replace-objects' '-C' '/tmp/does-not-matter/sendmeter' 'fetch' 'origin' '+refs/heads/staging:refs/remotes/origin/staging'");
     let race = "error: fetching ref refs/remotes/origin/staging failed: incorrect old value provided";
     let r = Fake::default()
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")

@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
-const POLL: Duration = Duration::from_millis(25);
+const POLL: Duration = Duration::from_secs(1);
 const UNHELD: usize = 64;
 const UNHELD_SECS: u64 = 60;
 const FRAMES: usize = 64;
@@ -83,6 +83,7 @@ struct Entry {
     holders: Vec<Weak<Queue>>,
     read_at: u64,
     builds: u64,
+    built_at: u64,
 }
 
 /// One stream's outbound frames (from, rev, ops): the hub pushes, the stream's thread writes.
@@ -192,7 +193,7 @@ impl Hub {
         });
         let mut m = lock(&self.keys);
         let e = m.entry(k.clone()).or_default();
-        (e.built, e.building, e.seen, e.builds) = (true, false, now, e.builds + 1);
+        (e.built, e.building, e.seen, e.builds, e.built_at) = (true, false, now, e.builds + 1, ctx.now);
         if e.json.is_none() && text.is_some() || delta.is_some() {
             e.rev += 1;
         }
@@ -234,23 +235,23 @@ impl Hub {
             now: crate::now(),
             ..s.ctx.clone()
         };
-        let mut held: Vec<(usize, Key)> = {
+        let mut held: Vec<(usize, bool, Key)> = {
             let mut m = lock(&self.keys);
             m.values_mut().for_each(|e| e.holders.retain(|h| h.strong_count() > 0));
             Self::trim(&mut m, ctx.now);
             m.iter()
-                .map(|(k, e)| (e.holders.len(), k.clone()))
+                .map(|(k, e)| (e.holders.len(), e.built_at < ctx.now, k.clone()))
                 .filter(|h| h.0 > 0)
                 .collect()
         };
         held.sort_by_key(|h| std::cmp::Reverse(h.0));
-        for (_, k) in &held {
+        for (_, _, k) in held.iter().filter(|h| h.1) {
             drop(self.read(s, &ctx, k));
         }
         !held.is_empty()
     }
 
-    /// The publisher: asleep while no stream holds a key, else a pass each 25 ms or at once on `kick`.
+    /// The publisher: asleep while no stream holds a key, else a pass each second or at once on `kick`; a screen built this second waits for the next.
     pub fn publish(&self, s: &Server) {
         loop {
             let held = self.pass(s);

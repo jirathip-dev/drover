@@ -1,4 +1,6 @@
 mod common;
+#[path = "drive/done_lanes.rs"]
+mod done_lanes;
 #[path = "drive/no_baseline.rs"]
 mod no_baseline;
 #[path = "drive/remote_unlisted.rs"]
@@ -176,7 +178,7 @@ fn review_spawns_rev_at_the_pushed_head() {
     assert_eq!(steps, ["review"], "{out}");
     let rev = c.worktrees.join("sendmeter/rev-12-r1");
     let add = format!(
-        "git -C /tmp/does-not-matter/sendmeter worktree add -b rev-12-r1 {} origin/issue-12",
+        "git -C /tmp/does-not-matter/sendmeter worktree add -b rev-12-r1 --no-track {} origin/issue-12",
         rev.display()
     );
     assert!(r.called(&add), "{:?}", r.calls.borrow());
@@ -1623,7 +1625,8 @@ fn a_pass_recorded_with_green_ci_merges_in_the_same_pass() {
         .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
         .reply("gh issue", "");
     let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["verdict", "merge"], "{out}");
+    assert_eq!(steps, ["verdict", "merge", "clean"], "{out}");
+    assert!(out.contains(&format!("removed {} ", rev.display())), "{out}");
     assert!(r.called(&format!(
         "gh pr merge 100 -R jirathip-dev/sendmeter --squash --delete-branch --match-head-commit {head}"
     )));

@@ -927,3 +927,58 @@ fn a_verify_start_refused_the_same_way_every_pass_shows_its_code_then_one_needs_
     assert!(nh[0].str("reason").unwrap().contains("supabase-prod"), "{nh:?}");
     assert_eq!(state(&c), "needs-human");
 }
+
+#[test]
+fn a_ready_issue_whose_closed_rev_session_still_reports_working_merges_beside_other_work() {
+    let (c, head, sh) = passed("verify-1681", &config(), false);
+    let rev = "sendmeter-rev-12-r1";
+    ev(
+        &c,
+        35,
+        "lane-closed",
+        json!({"agent": rev, "reason": "verdict recorded"}),
+    );
+    ev(
+        &c,
+        50,
+        "verify-skipped",
+        json!({"sha": head, "stage": "verify", "reason": "r"}),
+    );
+    sh.lane(rev, "working", "/x");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
+    let mut r = fake(&head, "src/a.rs\n");
+    let spec = Fake::default().reply("gh issue view 13", r#"{"title":"t","body":"b"}"#);
+    r.replies.splice(0..0, spec.replies);
+    let out = drive(&c, &r);
+    let merges = kinds(&c, "driven");
+    let merge = merges.iter().find(|e| e.str("step") == Some("merge"));
+    assert_eq!(
+        merge.and_then(|e| e.str("cmd")),
+        Some("drover merge sendmeter 12"),
+        "{out}"
+    );
+    assert_eq!(state(&c), "merged", "{out}");
+}
+
+#[test]
+fn a_merge_refused_in_a_drive_pass_logs_its_code_and_waiting_shows_it() {
+    let (c, head, _sh) = passed("verify-1681-refused", &config(), false);
+    ev(
+        &c,
+        50,
+        "verify-skipped",
+        json!({"sha": head, "stage": "verify", "reason": "r"}),
+    );
+    let mut pr: serde_json::Value = serde_json::from_str(&pr(&head)).unwrap();
+    pr["baseRefName"] = json!("other");
+    let mut r = fake(&head, "src/a.rs\n");
+    let moved = Fake::default().reply("gh pr view issue-12", &pr.to_string());
+    r.replies.splice(0..0, moved.replies);
+    let out = drive(&c, &r);
+    let driven = kinds(&c, "driven");
+    let merge = driven.iter().find(|e| e.str("step") == Some("merge"));
+    assert_eq!(merge.and_then(|e| e.str("code")), Some("BASE_MISMATCH"), "{out}");
+    let (code, w) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{w}");
+    assert!(w.contains("BASE_MISMATCH") && !w.contains("merging next pass"), "{w}");
+}

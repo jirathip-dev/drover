@@ -159,7 +159,7 @@ fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
     );
     assert_eq!(code, 0, "{out}");
     let p: Value = serde_json::from_str(&out).unwrap();
-    let start = &p["commands"][4];
+    let start = &p["commands"][6];
     assert_eq!(
         (start[0].as_str(), start[1].as_str()),
         (Some("shed"), Some("send")),

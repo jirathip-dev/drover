@@ -1,4 +1,5 @@
 use crate::access;
+use crate::clone::refspec;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event, Json};
 use crate::gate::refused;
@@ -147,6 +148,10 @@ pub struct Plan {
 
 /// A build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
 pub const BACKGROUND: &str = "&& if [ -x /usr/sbin/taskpolicy ]; then /usr/sbin/taskpolicy -b -p $$; else renice -n 10 -p $$ >/dev/null; ionice -c3 -p $$ 2>/dev/null; true; fi";
+
+/// Execs the lane's adapter under background `QoS` from launch, which a program's own process title cannot clear.
+pub const BACKGROUND_EXEC: &str =
+    "if [ -x /usr/sbin/taskpolicy ]; then exec /usr/sbin/taskpolicy -b \"$@\"; else exec \"$@\"; fi";
 
 impl Plan {
     /// Build and check lanes run in the background; design, architect and orchestrator lanes do not.
@@ -602,7 +607,8 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
     let (set, role) = (q(&set.to_string_lossy()), q(&role.to_string_lossy()));
     let profile = providers::get(&p.harness).acp_profile(&set, &role);
-    let line = words.join(" ") + &profile + " && unset SHED BERTH && exec \"$@\"";
+    let run = p.qos().map_or("exec \"$@\"", |_| BACKGROUND_EXEC);
+    let line = words.join(" ") + &profile + " && unset SHED BERTH && " + run;
     let meta = providers::get(&p.harness).acp_meta();
     Ok(term::Acp {
         cmd: [argv(&["sh", "-c", &line, "sh"]), cmd].concat(),
@@ -709,8 +715,27 @@ fn worktree_add(local: &str, p: &Plan, have: bool) -> Vec<String> {
     if have {
         argv(&["-C", local, "worktree", "add", &wt, &p.branch])
     } else {
-        argv(&["-C", local, "worktree", "add", "-b", &p.branch, &wt, &p.base])
+        argv(&[
+            "-C",
+            local,
+            "worktree",
+            "add",
+            "-b",
+            &p.branch,
+            "--no-track",
+            &wt,
+            &p.base,
+        ])
     }
+}
+
+fn track(local: &str, branch: &str) -> [Vec<String>; 2] {
+    let (remote, merge) = (format!("branch.{branch}.remote"), format!("branch.{branch}.merge"));
+    let head = format!("refs/heads/{branch}");
+    [
+        argv(&["-C", local, "config", &remote, "origin"]),
+        argv(&["-C", local, "config", &merge, &head]),
+    ]
 }
 
 fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str, bool), rt: Runtime) -> Value {
@@ -722,9 +747,18 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
     let home = |a| crate::hosts::rehome(a, home);
     let mut cmds = vec![sent(
         "git",
-        argv(&["-C", local, "fetch", "origin", p.base.trim_start_matches("origin/")]),
+        argv(&[
+            "-C",
+            local,
+            "fetch",
+            "origin",
+            &refspec(p.base.trim_start_matches("origin/")),
+        ]),
     )];
-    cmds.extend((!reopen).then(|| sent("git", worktree_add(local, p, false))));
+    if !reopen {
+        cmds.push(sent("git", worktree_add(local, p, false)));
+        cmds.extend(track(local, &p.branch).map(|a| sent("git", a)));
+    }
     if bt.0.acp.is_some() {
         let run = bt.acp_argv(&p.agent, labels, &p.worktree.to_string_lossy(), acp);
         cmds.push(sent("shed", run));
@@ -1032,7 +1066,7 @@ fn integration_view(
             update.then(|| format!(include_str!("../roles/brief-update.md"), int)),
         ));
     }
-    crate::clone::fetch(ctx, r, Path::new(local), &["origin", int])?;
+    crate::clone::fetch(ctx, r, Path::new(local), &["origin", &refspec(int)])?;
     let at_int = |name: &str| {
         crate::repo_read(name, |x| {
             ok(r, "git", &["-C", local, "show", &format!("origin/{int}:{x}")]).ok()
@@ -1071,6 +1105,9 @@ fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygien
     let verify = argv(&["-C", local, "rev-parse", "--verify", "--quiet", &p.branch]);
     let have = r.run("git", &verify)?.code == 0;
     ok(r, "git", &worktree_add(local, p, have))?;
+    for a in track(local, &p.branch) {
+        ok(r, "git", &a)?;
+    }
     let deny = h.docs_trust.clone().unwrap_or_default();
     if !deny.is_empty() {
         let pats = deny.iter().map(|d| format!("!/{}", d.trim_start_matches('/')));
@@ -1293,7 +1330,7 @@ fn start(
     let inputs = json!({"role": role, "agent": p.agent, "worktree": p.worktree});
     *intent =
         Some(crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?);
-    let (mut wip, saved) = (None, (cfg, fleet, p.family));
+    let (mut wip, saved) = (None, (cfg, fleet));
     if o.supersede && !dup.is_empty() {
         let was = last_spawn(&events, &p.agent);
         let old = crate::hosts::On::of(base, was);
@@ -1348,14 +1385,15 @@ fn start(
             ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
         }
         let from = p.base.trim_start_matches("origin/");
-        crate::clone::fetch(ctx, r, Path::new(&local), &["origin", from])?;
+        crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &refspec(from)])?;
         let body = iss.at("body").as_str().unwrap_or("");
         let recipe = match p.family {
             "design" => crate::design::Recipe::at(r, &local, &p.base, body),
             _ => crate::design::Recipe::of("", body),
         };
         crate::design::tools(ctx, cfg, r, (fleet, issue, &p.agent), &recipe)?;
-        let pushed = || crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &p.branch]).is_ok();
+        let spec = refspec(&p.branch);
+        let pushed = || crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &spec]).is_ok();
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
         }
@@ -1603,8 +1641,8 @@ pub(crate) fn lane_admit(
     let f = cfg.fleet(fleet)?;
     let lanes = fold(events);
     let pending = crate::drive::pending(ctx, cfg, r);
+    let st = crate::events::fold_into(lanes.clone(), &pending);
     let events = &[events, &pending].concat();
-    let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
     let gs = crate::queue::groups(&crate::queue::replay(events, fleet), events, f, fleet, issue);
