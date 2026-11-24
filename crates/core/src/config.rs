@@ -495,7 +495,7 @@ pub struct Fleet {
     /// `[fleet.<n>.remote.<kind>]`: a heavy kind's commands run on `runners` build machines of a tag first.
     #[serde(default)]
     pub remote: BTreeMap<String, crate::heavy::Route>,
-    /// Command patterns never routed, beside `heavy::NEVER_ROUTED`.
+    /// Shell patterns never routed, beside `heavy::NEVER_ROUTED`.
     #[serde(default)]
     pub remote_deny: Vec<String>,
     /// Globs of UI files: a PR touching one goes through the verify stage.
