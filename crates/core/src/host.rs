@@ -311,12 +311,11 @@ fn level(s: &str) -> Option<String> {
     .map(String::from)
 }
 
-/// This host's own `Sample` for its frame: `load` per CPU and its memory pressure.
-pub fn own(r: &dyn Runner) -> Option<crate::link::frame::Sample> {
-    let pressure = stdout(r, "sysctl", &["-n", "kern.memorystatus_vm_pressure_level"]);
+/// This host's own `Sample` for its frame, with no process started: `load` per CPU and its memory pressure.
+pub fn own() -> Option<crate::link::frame::Sample> {
     Some(crate::link::frame::Sample {
         load_per_cpu: load()?.1,
-        pressure: pressure.as_deref().and_then(level),
+        pressure: drover_sys::pressure_level().and_then(|l| level(&l.to_string())),
         at: crate::clock::now(),
     })
 }

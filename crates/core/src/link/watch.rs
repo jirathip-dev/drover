@@ -97,7 +97,7 @@ pub fn report(r: &dyn Runner, watch: &Watch) -> Report {
         build: crate::VERSION.into(),
         shed,
         lanes,
-        sample: crate::host::own(r),
+        sample: crate::host::own(),
     }
 }
 
