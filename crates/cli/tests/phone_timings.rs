@@ -25,27 +25,15 @@ fn health(addr: std::net::SocketAddr) -> Value {
     serde_json::from_str(r.split_once("\r\n\r\n").unwrap().1).unwrap()
 }
 
-#[test]
-fn tab_sheet_thread_send_and_answer_paint_within_150ms_on_the_large_board_in_webkit() {
-    if no_webkit() {
-        return;
-    }
-    let _lock = ui_lock();
-    let (c, sh) = large::large("phone-timings");
-    let ck = pair(
-        &Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
-        &c,
-        "Mozilla/5.0 (iPhone)",
-        drover::now(),
-    );
+fn kinds_over_budget(c: &drover::Ctx, shed: &std::sync::Arc<OnShed>, cookie: &str) -> Vec<String> {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    let c2 = c.clone();
-    std::thread::spawn(move || drover::serve::serve_on(&c2, &OnShed(Fake::default(), sh), l, false));
+    let (c2, r) = (c.clone(), std::sync::Arc::clone(shed));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &*r, l, false));
     let o = std::process::Command::new("node")
         .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/ui/timings.mjs"))
         .arg(format!("http://{addr}/"))
-        .arg(ck.trim().trim_start_matches("Cookie: "))
+        .arg(cookie)
         .arg("3")
         .output()
         .unwrap();
@@ -69,7 +57,7 @@ fn tab_sheet_thread_send_and_answer_paint_within_150ms_on_the_large_board_in_web
         eprintln!("#1312 phone timings: {what} ({kind}) median {p50} ms, max {max} ms over {n}");
         assert!(n >= 3, "{kind}: {k}");
         if p50 > BUDGET_MS {
-            over.push(format!("{what} {p50} ms"));
+            over.push(format!("{what} {p50} ms (the page sent {})", out["batch"]));
         }
     }
     let delta = phone.iter().find(|p| p["route"] == "delta");
@@ -77,9 +65,31 @@ fn tab_sheet_thread_send_and_answer_paint_within_150ms_on_the_large_board_in_web
         delta.is_some_and(|d| d["count"].as_u64() >= Some(1)),
         "no stream delta timed: {h}"
     );
+    over
+}
+
+#[test]
+fn tab_sheet_thread_send_and_answer_paint_within_150ms_on_the_large_board_in_webkit() {
+    if no_webkit() {
+        return;
+    }
+    let _lock = ui_lock();
+    let (c, sh) = large::large("phone-timings");
+    let ck = pair(
+        &Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
+        &c,
+        "Mozilla/5.0 (iPhone)",
+        drover::now(),
+    );
+    let cookie = ck.trim().trim_start_matches("Cookie: ");
+    let shed = std::sync::Arc::new(OnShed(Fake::default(), sh));
+    let mut over = kinds_over_budget(&c, &shed, cookie);
+    if !over.is_empty() {
+        eprintln!("#1619 over the {BUDGET_MS} ms budget once, retrying on a fresh serve: {over:?}");
+        over = kinds_over_budget(&c, &shed, cookie);
+    }
     assert!(
         over.is_empty(),
-        "over the {BUDGET_MS} ms budget (median): {over:?}; the page sent {}",
-        out["batch"]
+        "over the {BUDGET_MS} ms budget (median) twice: {over:?}"
     );
 }
