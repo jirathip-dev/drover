@@ -524,8 +524,11 @@ fn failing(c: &drover::Ctx, mut r: Fake, read: &str) -> Fake {
 
 fn unchecked(c: &drover::Ctx, r: &Fake, what: &str) {
     let (code, out) = run(c, r, &["turn", "done"]);
-    assert_eq!(code, 1, "{out}");
-    assert!(out.contains("could not check") && out.contains(what), "{out}");
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED DONE_CHECK: could not check") && out.contains(what),
+        "{out}"
+    );
     assert!(!out.contains("push first") && !out.contains("PR_BODY"), "{out}");
 }
 
