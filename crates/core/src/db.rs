@@ -347,7 +347,7 @@ pub fn rebuild(state: &Path) -> Result<()> {
 /// The saved lane fold's events (each lane's newest lane event), kept after `compact` archives its issue; `live`: a settled issue's left out.
 pub fn lanes(state: &Path, live: bool) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| {
-        let q = "SELECT seq, json FROM lanes WHERE NOT ?1 OR json_extract(json, '$.issue') IS NULL OR (json_extract(json, '$.fleet'), json_extract(json, '$.issue')) NOT IN (SELECT fleet, issue FROM states WHERE done = 2)";
+        let q = "SELECT seq, json FROM lanes WHERE NOT ?1 OR json_extract(json, '$.issue') IS NULL OR (json_extract(json, '$.fleet'), json_extract(json, '$.issue')) NOT IN (SELECT fleet, issue FROM states WHERE done = 2 EXCEPT SELECT fleet, issue FROM events WHERE seq > (SELECT MAX(seq) FROM events) - 10000)";
         let mut q = c.prepare(q)?;
         let rows = q.query_map([live], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
         rows.map(|r| {

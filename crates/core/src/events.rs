@@ -437,7 +437,7 @@ pub struct IssueState {
     pub stage_rounds: BTreeMap<String, u32>,
     /// `FAIL (form-only)` verdicts that did not count toward the rounds.
     pub form: u32,
-    /// Worktrees its lanes were spawned in and not cleaned since.
+    /// Worktrees its lanes were spawned in (an agent: a spawn naming none) and not cleaned since.
     pub worktrees: std::collections::BTreeSet<String>,
 }
 
@@ -700,8 +700,10 @@ pub fn working(path: &Path) -> Result<Arc<Log>> {
 
 const WORKING: &str = concat!(
     "archived = 0 AND seq <= ?1 AND type NOT IN ('build-cloned', 'build-reused')",
-    " AND (issue IS NULL OR (fleet, issue) NOT IN (SELECT fleet, issue FROM states WHERE done = 2))",
-    " AND (type NOT IN ('thread-msg', 'thread-read') OR json_extract(json, '$.thread') NOT IN",
+    " AND (issue IS NULL OR (fleet, issue) NOT IN (SELECT fleet, issue FROM states WHERE done = 2",
+    " EXCEPT SELECT fleet, issue FROM events WHERE seq > ?1 - 10000))",
+    " AND (type NOT IN ('thread-msg', 'thread-read') OR seq IN (SELECT MAX(seq) FROM events WHERE type IN",
+    " ('thread-msg', 'thread-read') GROUP BY type, json_extract(json, '$.thread')) OR json_extract(json, '$.thread') NOT IN",
     " (SELECT t FROM (SELECT json_extract(json, '$.thread') AS t, type, MAX(seq) FROM events",
     " WHERE type IN ('thread-archive', 'thread-restore') GROUP BY t) WHERE type = 'thread-archive'))",
     " AND (seq > ?1 - 10000",
@@ -974,6 +976,7 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
         let s = m.entry((e.fleet.clone(), n)).or_insert_with(new);
         match (e.kind.as_str(), e.str("worktree")) {
             ("clean", Some(w)) => drop(s.worktrees.remove(w)),
+            ("spawn", w) => s.worktrees.extend(w.or(e.str("agent")).map(String::from)),
             (k, Some(w)) if k.starts_with("spawn") => drop(s.worktrees.insert(w.into())),
             _ => {}
         }

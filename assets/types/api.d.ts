@@ -581,7 +581,7 @@ stage: string, check?: string | null, build?: string | null, stage_rounds: { [ke
  */
 form: number, 
 /**
- * Worktrees its lanes were spawned in and not cleaned since.
+ * Worktrees its lanes were spawned in (an agent: a spawn naming none) and not cleaned since.
  */
 worktrees: Array<string>, };
 

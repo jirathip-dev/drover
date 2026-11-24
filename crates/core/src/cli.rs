@@ -1343,7 +1343,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let all = crate::events::states(&ctx.state)?;
             let rows: Vec<_> = all
                 .values()
-                .filter(|s| fleet.as_ref().is_none_or(|f| *f == s.fleet) && (json || !s.settled()))
+                .filter(|s| fleet.as_ref().is_none_or(|f| *f == s.fleet))
                 .collect();
             if json {
                 let rows = rows.iter().map(|s| {

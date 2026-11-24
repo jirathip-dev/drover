@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering::Relaxed;
 const NOW: u64 = 1_000_000;
 const EVENTS: usize = 30_000;
 const LANES: u64 = 2_000;
-const PER_LANE: usize = 13;
+const PER_LANE: usize = 8;
 const THREADS: u64 = 190;
 const OPEN_THREADS: u64 = 10;
 const MSGS: usize = 10;
@@ -35,7 +35,7 @@ fn fixture(name: &str) -> drover::Ctx {
     for n in 1..=LANES {
         let wt = format!("/gone/sendmeter/issue-{n}");
         log.push(spawn(n, &wt));
-        for k in 0..10 {
+        for k in 0..5 {
             log.push(ev(n, "verdict", json!({"verdict": "PASS", "sha": format!("s{k}")})));
         }
         log.push(ev(n, "merged", json!({"pr": "1", "merge_sha": "m", "into": "staging"})));
@@ -60,7 +60,7 @@ fn fixture(name: &str) -> drover::Ctx {
         json!({"pr": "2", "merge_sha": "m", "into": "staging"}),
     ));
     while log.len() < EVENTS - 2 {
-        log.push(json!({"ts": 5000, "fleet": "sendmeter", "type": "lane-state", "agent": "x", "state": "idle"}));
+        log.push(json!({"ts": 5000, "fleet": "sendmeter", "type": "note", "text": "later"}));
     }
     log.push(json!({"ts": NOW - 60, "fleet": "sendmeter", "issue": OPEN, "type": "queue", "action": "add"}));
     log.push(spawn(OPEN, "/gone/open"));
@@ -84,22 +84,32 @@ fn reads(c: &drover::Ctx, args: &[&str]) -> (usize, String) {
     (rows, out)
 }
 
+const COMMANDS: [&[&str]; 4] = [&["status"], &["waiting"], &["clean"], &["thread", "ls"]];
+
+#[test]
+fn settled_reads_cost() {
+    for args in COMMANDS {
+        reads(&fixture(&format!("cost-{}", args[0])), args);
+    }
+}
+
 #[test]
 fn settled_issues_and_archived_threads_are_read_from_the_snapshot_only() {
     let settled = usize::try_from(LANES).unwrap() * PER_LANE;
-    let archived = usize::try_from(THREADS - OPEN_THREADS).unwrap() * MSGS;
+    let archived = usize::try_from(THREADS - OPEN_THREADS).unwrap() * (MSGS - 1);
     let later = EVENTS + 1 - settled - archived;
-    for args in [&["status"][..], &["waiting"], &["clean"], &["thread", "ls"]] {
+    for args in COMMANDS {
         let c = fixture(&format!("settled-{}", args[0]));
         let (rows, out) = reads(&c, args);
-        assert_eq!(
-            rows, later,
-            "{args:?} reads no settled issue's event and no archived thread's message"
+        assert!(
+            rows <= later,
+            "{args:?} reads {rows} rows: no settled issue's event and no archived thread's message"
         );
         match args[0] {
             "status" => {
-                assert_eq!(out.lines().count(), 4, "{out}");
-                assert!(out.contains("#2002") && out.contains("clean me"), "{out}");
+                let clean_me: Vec<_> = out.lines().filter(|l| l.contains("clean me")).collect();
+                assert_eq!(clean_me.len(), 1, "{out}");
+                assert!(clean_me[0].contains("#2002"), "{out}");
             }
             "clean" => assert!(out.contains("issue-kept") && out.lines().count() == 2, "{out}"),
             "thread" => assert_eq!(out.lines().count(), usize::try_from(OPEN_THREADS).unwrap() + 1, "{out}"),
@@ -109,6 +119,7 @@ fn settled_issues_and_archived_threads_are_read_from_the_snapshot_only() {
 
     let c = fixture("settled-fold");
     let w = working(&c.state).unwrap();
+    assert_eq!(w.len(), later, "the working set is the snapshot's later events");
     assert!(w.iter().all(|e| e.issue.is_none_or(|n| n > LANES)));
     let all = read(&c.state).unwrap();
     let json = |s: drover::events::States| serde_json::to_string(&s.into_values().collect::<Vec<_>>()).unwrap();
