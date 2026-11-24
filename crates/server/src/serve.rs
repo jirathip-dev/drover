@@ -36,6 +36,7 @@ mod hub;
 mod jobs;
 #[path = "screens_kit.rs"]
 mod kit;
+mod rows;
 #[path = "screens.rs"]
 mod screens;
 pub use screens::local::{Done, Local, Place};
@@ -925,6 +926,9 @@ impl<'a> Server<'a> {
             return Ok(false);
         }
         drop(clients);
+        if req.starts_with("GET ") && path == "/api/v1/rows/stream" {
+            return self.rows_stream(s, &req).map(|()| false);
+        }
         if req.starts_with("GET ") && path.starts_with("/screens/") && path.ends_with("/stream") {
             return self.stream(s, &req, path, query).map(|()| false);
         }

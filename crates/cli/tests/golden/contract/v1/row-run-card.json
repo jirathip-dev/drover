@@ -1,0 +1,88 @@
+[
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-9-cmd",
+          "markdown": "```\njust gen\n```",
+          "type": "text"
+        },
+        {
+          "id": "m-9-s",
+          "markdown": "on local · ~/p · touches the branch  \n**running** by owner",
+          "type": "text"
+        }
+      ],
+      "buttons": [],
+      "id": "m-9",
+      "kind": "run",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:30:08Z"
+      },
+      "title": "regenerate",
+      "tone": "",
+      "type": "card"
+    },
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": null,
+    "key": "run-r1",
+    "kind": "run-card",
+    "open": true,
+    "prompt": null,
+    "push": {
+      "body": "sendmeter run-card",
+      "tag": "run-r1",
+      "title": "sendmeter"
+    },
+    "seq": 9,
+    "text": "sendmeter run-card",
+    "to": {
+      "id": "t1",
+      "k": "thread"
+    },
+    "ts": 999008
+  },
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-9-cmd",
+          "markdown": "```\njust gen\n```",
+          "type": "text"
+        },
+        {
+          "id": "m-9-s",
+          "markdown": "on local · ~/p · touches the branch  \n**running** by owner",
+          "type": "text"
+        }
+      ],
+      "buttons": [],
+      "id": "m-9",
+      "kind": "run",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:30:08Z"
+      },
+      "title": "regenerate",
+      "tone": "",
+      "type": "card"
+    },
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": null,
+    "key": "run-r1",
+    "kind": "run-card",
+    "open": false,
+    "prompt": null,
+    "push": null,
+    "seq": 10,
+    "text": "sendmeter run-settled",
+    "to": {
+      "id": "t1",
+      "k": "thread"
+    },
+    "ts": 999009
+  }
+]
