@@ -179,6 +179,9 @@ pub trait Provider: Sync {
     fn home(&self) -> Option<Home> {
         None
     }
+    fn sessions(&self) -> Option<&'static str> {
+        None
+    }
     fn profile_files(&self, _ctx: &Ctx, _profile: &str) -> Vec<PathBuf> {
         vec![]
     }
