@@ -15,7 +15,7 @@
 - don't hard-code a Duration in crates/core/src: make it a [limits] key (enforced by: CI timing check, scripts/timing-check.sh)
 - don't let docs/workflow.md, web/dist or the brief goldens drift from `just gen` (enforced by: CI arch-check, `generated`)
 - don't push src/ over ci/cap.toml's line_cap, or edit ci/cap.toml from a lane (enforced by: CI line cap, the lane hook)
-- don't break .drover/arch.toml's layers, bans, size baselines, frozen or generated files, or leave a doc stale (enforced by: CI arch-check)
+- don't break .drover/arch.toml's layers, bans, size baselines (a baselined file or fn you touch lowers its entry), frozen or generated files, leave code past its `remove-by:` date, or leave a doc stale (enforced by: CI arch-check)
 - don't write a waiting or next-step line outside crate::promise::Say (enforced by: CI arch-check, #854 bans)
 - don't fail an active lesson check (enforced by: CI lesson-check)
 - don't commit web/src that fails tsc --strict (enforced by: CI web)

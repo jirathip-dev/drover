@@ -110,7 +110,7 @@ pub struct Ctx {
     pub now: u64,
     /// Tree `drover migrate` works on: `DROVER_HOME`, else `$HOME`.
     pub home: PathBuf,
-    /// Pre-rename fallbacks in use this run; data commands print them on stderr.
+    /// Pre-rename fallbacks in use this run; data commands print them on stderr; the herdsman rename layer, #1560, remove-by: 2026-12-15.
     pub hints: Vec<String>,
 }
 

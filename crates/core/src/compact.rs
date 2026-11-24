@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// What `drover compact` is asked to do.
+/// What `drover compact` is asked to do; drover's copy moves to the standalone tool (#1574), remove-by: 2027-01-15.
 pub enum Act {
     Cut { cut: String, thread: Option<String> },
     Undo { thread: Option<String> },

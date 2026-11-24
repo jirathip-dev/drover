@@ -30,7 +30,7 @@ pub struct Config {
     /// The retired account keys still set (`Config::warnings`).
     #[serde(skip)]
     pub retired: Vec<String>,
-    /// Fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line).
+    /// Fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line); #1560, remove-by: 2026-12-15.
     #[serde(skip)]
     pub old_names: bool,
     /// The Telegram bridge is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
@@ -434,7 +434,7 @@ pub struct Fleet {
     /// Build caches shared by the fleet's lanes, exported like `env`; opt-in.
     #[serde(default)]
     pub shared_cache: BTreeMap<String, String>,
-    /// Build folders a new lane APFS-clones from `local` on a lockfile match; `clone_node_modules` is its alias for one release.
+    /// Build folders a new lane APFS-clones from `local` on a lockfile match; `clone_node_modules` is its alias for one release; remove-by: 2026-12-15.
     #[serde(default)]
     pub clone_build: Vec<String>,
     #[serde(default)]
@@ -1064,7 +1064,7 @@ impl Config {
         own.or(&self.hygiene).or(&hygiene_default())
     }
 
-    /// Each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error.
+    /// Each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error; #1560, remove-by: 2026-12-15.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
         let gone = "removed (#923): lanes run on the host's own CLI login; delete";
         let acct = (!self.retired.is_empty()).then(|| ("[accounts]", format!("{gone} {}", self.retired.join(", "))));
