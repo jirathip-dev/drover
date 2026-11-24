@@ -40,6 +40,9 @@ pub enum Fault {
     Gone,
 }
 
+/// A shared handle on a server that never removes its socket (`FakeShed::twin`).
+pub type Twin = Arc<std::mem::ManuallyDrop<FakeShed>>;
+
 pub struct FakeShed {
     pub sock: PathBuf,
     pub state: Arc<Mutex<State>>,
@@ -126,6 +129,19 @@ impl FakeShed {
         std::fs::write(bin.join("shed"), "#!/bin/sh\nexit 0\n").unwrap();
         std::fs::set_permissions(bin.join("shed"), std::fs::Permissions::from_mode(0o755)).unwrap();
         format!("{}:/usr/bin:/bin", bin.display())
+    }
+    /// The lanes sent a brief (`# Brief…`, a lane's first prompt), in order: the starts an ACP spawn made.
+    pub fn briefed(&self) -> Vec<String> {
+        let briefs = self
+            .all("send")
+            .into_iter()
+            .filter(|p| p["text"].as_str().is_some_and(|t| t.starts_with("# Brief")));
+        briefs.filter_map(|p| p["name"].as_str().map(String::from)).collect()
+    }
+    /// A second handle on this server that never removes its socket, for a thread that must `config` it again.
+    pub fn twin(&self) -> Twin {
+        let (sock, state, moved) = (self.sock.clone(), self.state.clone(), self.moved.clone());
+        Arc::new(std::mem::ManuallyDrop::new(FakeShed { sock, state, moved }))
     }
     /// Inject `f` into every connection from now on.
     pub fn fault(&self, f: Fault) {

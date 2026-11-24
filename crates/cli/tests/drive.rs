@@ -40,9 +40,7 @@ fn reconfig(c: &drover::Ctx, base: &str) {
 const NONE: &[(&str, &str, &str)] = &[];
 
 fn started(prefix: &str) -> Vec<String> {
-    let sends = sh().all("send").into_iter();
-    let briefs = sends.filter(|p| p["text"].as_str().is_some_and(|t| t.starts_with("# Brief")));
-    let names = briefs.filter_map(|p| p["name"].as_str().map(String::from));
+    let names = sh().briefed().into_iter();
     names.filter(|n| n.starts_with(prefix)).collect()
 }
 
@@ -832,7 +830,7 @@ fn the_drive_summary_groups_per_action() {
     assert_eq!(drover::drive::summary("sendmeter", ""), "sendmeter: nothing due");
 }
 
-struct Slow(Fake, std::mem::ManuallyDrop<FakeShed>);
+struct Slow(Fake, fake_shed::Twin);
 impl drover::runner::Runner for Slow {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "shed" {
@@ -863,9 +861,7 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    let (sock, state, moved) = (sh().sock.clone(), sh().state.clone(), sh().moved.clone());
-    let twin = std::mem::ManuallyDrop::new(FakeShed { sock, state, moved });
-    let r = Slow(fake(NONE).reply("git -C", ""), twin);
+    let r = Slow(fake(NONE).reply("git -C", ""), sh().twin());
     std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
     let send = |req: String| {
         let mut s = std::net::TcpStream::connect(addr).unwrap();
