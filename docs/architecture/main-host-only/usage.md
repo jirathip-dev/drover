@@ -128,7 +128,7 @@ by doctor, the board's config line and `check` (`shapes.md`, "Old keys").
 
 The later remote-build policy marks some `[fleet.<n>.heavy]` kinds as remote. For those the hook rewrites the
 lane's command to one call, as it rewrites it to `drover heavy <kind> … -- <cmd>` today. Its design is
-jirathip-dev/runners#11's; this is only what drover needs from it.
+runners#11's; this is only what drover needs from it.
 
 ```
 runners run --pool <name> --wait <secs> --timeout <secs> -- <cmd> [args…]

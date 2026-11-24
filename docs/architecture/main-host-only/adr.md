@@ -101,7 +101,7 @@ Smaller choices:
    and `eject`; `report` and `watch` stay for the service. `--host` leaves `spawn`, `kill` and `close`.
 
 7. **Runners: the cut does not wait.** `runners.rs` and the `runners` verbs follow the runners-repo
-   decision of #1567: deleted, not moved, once `jirathip-dev/runners` covers them. Slice 2 deletes `cloud.rs`
+   decision of #1567: deleted, not moved, once the `runners` repo covers them. Slice 2 deletes `cloud.rs`
    but the five functions `runners.rs` calls (about 70 lines). Slice 10 deletes those, `runners.rs`,
    `[ci_runners]`, the verbs and the recipe. It waits for one thing: the runners repo covers `status`, `revive`,
    `add`, `remove`, `tokens`, `retire-local` and the 30-minute token refresh. The `runners` name stays accepted
