@@ -25,6 +25,7 @@ pub const STEPS: [(&str, &[&str]); 4] = [
             "pass_max_secs",
             "ssh_quick_secs",
             "ssh_call_secs",
+            "shed_call_secs",
             "import_max_age_hours",
         ],
     ),

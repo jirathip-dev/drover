@@ -31,7 +31,12 @@ fn on(f: &Fleet) -> bool {
     f.deps.as_deref() == Some("monthly") && !f.paused
 }
 
-fn titled(cfg: &Config, r: &dyn Runner, fleet: &str, (state, title, exact): (&str, &str, bool)) -> Result<Option<u64>> {
+pub(crate) fn titled(
+    cfg: &Config,
+    r: &dyn Runner,
+    fleet: &str,
+    (state, title, exact): (&str, &str, bool),
+) -> Result<Option<u64>> {
     let repo = &cfg.fleet(fleet)?.repo;
     let search = format!("\"{title}\" in:title");
     let list = json(

@@ -487,6 +487,8 @@ pub struct Fleet {
     pub triage: Option<String>,
     /// `monthly` has `tick` run `drover deps` every 30 days and the advisory check daily; unset or `off`: only on demand.
     pub deps: Option<String>,
+    /// `[fleet.<n>.soak]`: `tick` runs `drover soak` nightly against these targets; unset: never.
+    pub soak: Option<crate::soak::Soak>,
     /// `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
     #[serde(default)]
     pub heavy: BTreeMap<String, Vec<String>>,
@@ -762,6 +764,7 @@ pub struct Limits {
     pub ssh_connect_secs: u64,
     pub ssh_quick_secs: u64,
     pub ssh_call_secs: u64,
+    pub shed_call_secs: u64,
     pub ssh_sessions: usize,
     pub ssh_retry_secs: u64,
     pub link_beat_secs: u64,
@@ -900,6 +903,7 @@ impl Default for Limits {
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
             ssh_call_secs: 20,
+            shed_call_secs: 30,
             ssh_sessions: 8,
             ssh_retry_secs: 1,
             link_beat_secs: 5,
@@ -1128,6 +1132,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a maintenance ssh's connect timeout and the `ssh <host> true` probe's; the whole first probe",
     ),
     ("ssh_call_secs", "a remote call in a pass is killed after this long"),
+    (
+        "shed_call_secs",
+        "a call to this host's shed server with no answer this long (past a `wait`'s own timeout) fails instead of blocking",
+    ),
     (
         "ssh_sessions",
         "remote calls open at once to one host over its shared connection; more wait their turn (under sshd's `MaxSessions`)",

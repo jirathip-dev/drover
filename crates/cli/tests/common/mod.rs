@@ -8,7 +8,7 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 /// The shared fake shed server lane tests run on.
 pub mod fake_shed;
 #[allow(unused_imports, reason = "not every test crate drives the fake shed")]
-pub use fake_shed::{FakeShed, OnShed, OverSsh};
+pub use fake_shed::{FakeShed, Fault, OnShed, OverSsh};
 /// The large board fixture the t141 performance tests share.
 pub mod large;
 /// The recorded sendmeter fleet the screen tests share.
