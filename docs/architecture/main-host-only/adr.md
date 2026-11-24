@@ -4,11 +4,11 @@
 
 Decision: delete everything drover carries for lanes on other hosts, in ten delete-only slices, leaf first, down to the ssh wrapper and the machine field themselves. First the owner empties the other hosts and takes them out of fleet.toml (step 0), so every slice removes code that can no longer run and no slice needs a gate of its own. The main host behaves as today: admission, slots, heavy slots, lane-hog, top, disk trim, its own self-update. Its own entry in fleet.toml stays as written; old keys are ignored, and an entry that names another machine is dropped with one warning.
 Slices: 1 self-update of other hosts and the shed machine list (unblocks #1685); 2 cloud VMs; 3 the token proxy; 4 lane verbs from another host (the outbox); 5 checks of other hosts and the nightly soak; 6 placement between hosts; 7 offline hosts and the ssh pass; 8 files and sweeps on other hosts; 9 the ssh wrapper and the machine field; 10 CI runners, when the runners repo covers them. About 4,800 lines of code and 13,900 of tests go.
-Open questions: (1) are the cloud VMs destroyed in step 0, or who stops them after slice 2? (2) the cut does not wait for the runners repo; slice 10 does: accept? (3) about 10 added lines keep an old fleet.toml safe: accept? (4) nine of the sixteen listed issues close, six shrink, one stays: accept the table? (5) ten issues, filed on approve, serial: accept?
+Open questions, answered by the owner on 2026-11-24: (1) one cloud VM stays as the runners repo's v0 build VM, the other three are destroyed in step 0; (2) the cut does not wait for the runners repo, only slice 10 does; (3) the ~10 added config lines are accepted; (4) the issue table is accepted; (5) the orchestrator files slices 1 to 10 on approve, queued on top.
 
 ## Status
 
-Proposed (architect lane, 2026-11-24, staging `356c5da7d`). Read `usage.md` first, then this, `inventory.md`,
+Accepted (owner, 2026-11-24; proposed by the architect lane on staging `356c5da7d`). Read `usage.md` first, then this, `inventory.md`,
 `shapes.md`, `boundaries.md`.
 
 ## Question
@@ -73,7 +73,7 @@ Smaller choices:
    |---|---|---|
    | a | no open issue, parked ones included, has its last lane on another host | `spawn <fleet> <n> <role> --supersede --host main` moves a live one (unpushed work goes to a `wip/` branch first); `kill --yes --host <name> <agent>` saves and ends one that will not run soon. drover does not contact a host that is off: `hosts on <name>` first, `off` after |
    | b | `hosts keys` lists no live key | follows from a |
-   | c | each cloud VM is destroyed, or the owner names who stops it from now on | `hosts destroy <name>`; after slice 2 drover can stop none |
+   | c | three of the four cloud VMs are destroyed; the fourth is the runners repo's v0 build VM from that day | `hosts destroy <name>`; after slice 2 drover can stop none |
    | d | the other hosts' finished worktrees and secrets files are swept | `drover clean --yes`, once, while drover still reaches them |
    | e | fleet.toml has no `[hosts.<n>]` with `machine`, no `[proxy]`, no `[fleet.<n>.soak]`, no role `host` pin naming a removed host; the removed hosts' names are in `private_names` | one `drover config propose` card |
 
@@ -156,6 +156,7 @@ review, it splits by caller, since `On::new(r, None)` stays valid until the type
 | #1496: one shed script per remote pass | close | no pass calls another host |
 | #1641: one dependency build per host | shrink | the main host's lanes only: the cache settings on a lane's start, `reclaim` and `clean` reporting the shared cache. Its "remote hosts get the same" line goes; builds that move to a build machine use the runners repo's warm worktrees |
 | #1673 D5: heavy slots are shed's | close | owner, 2026-11-24: heavy slots stay out of shed; `heavy.rs` stays drover's |
+| #1494: a guard for shed scripts | shrink | main host only: its guard line and doctor row cover the main host's shed; nothing checks a shed on another host. It waits for this ADR |
 
 Not in the issue's list: **#1685** loses its cause at step 0 e and again at slice 1, which deletes the row it
 trips on. Its second ask (one alert when a release stays unstaged) is not this cut's and stays its own.
@@ -185,20 +186,18 @@ on, shrunk, after #1575.
 - **Tests are cut, not only deleted.** About a third of the 13,900 lines sit in files that stay. Rules T1 and
   T2 keep each main-host assertion; a reviewer checks them per slice.
 
-## Open questions
+## Open questions (answered)
 
-1. **The cloud VMs (step 0 c).** After slice 2 drover can neither stop nor destroy one. Recommended: destroy
-   each with `hosts destroy` in step 0. If one is kept as a build machine, say so: it is then the runners
-   repo's from that day.
-2. **Runners.** Recommended: do not wait (decision 7). The other way holds slice 2 until the runners repo is
-   ready, so that `cloud.rs` goes in one piece; it gains nothing but one smaller file for a while.
-3. **The 10 added lines (decision 5).** Without them slice 6 is pure deletion, and a fleet.toml that still has a
-   second host would treat it as a second main host. Step 0 e clears yours; the lines protect any other copy.
-   Recommended: accept.
-4. **The issue table.** Nine close, six shrink, one stays. Recommended: accept; the orchestrator closes and
+The owner answered all five on 2026-11-24:
+
+1. **The cloud VMs (step 0 c).** One is kept as the runners repo's v0 build VM and is the runners repo's from
+   now on; the other three are destroyed with `hosts destroy` in step 0.
+2. **Runners.** The cut does not wait for the runners repo; only slice 10 does (decision 7).
+3. **The 10 added lines (decision 5).** Accepted.
+4. **The issue table.** Accepted, with #1494 added (shrink, main host only); the orchestrator closes and
    amends on approve.
-5. **Ten issues.** This issue's PR is the ADR alone. Recommended: the orchestrator files slices 1 to 10 on
-   approve, 1 to 9 each blocked on the one before and queued on top, 10 blocked on slice 2 and on its gate.
+5. **Ten issues.** This issue's PR is the ADR alone. The orchestrator files slices 1 to 10 on approve, 1 to 9
+   each blocked on the one before and queued on top, 10 blocked on slice 2 and on its gate.
 
 ## The `.drover/arch.toml` lines
 

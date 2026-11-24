@@ -4,7 +4,7 @@
 
 Decision: delete everything drover carries for lanes on other hosts, in ten delete-only slices, leaf first, down to the ssh wrapper and the machine field themselves. First the owner empties the other hosts and takes them out of fleet.toml (step 0), so every slice removes code that can no longer run and no slice needs a gate of its own. The main host behaves as today: admission, slots, heavy slots, lane-hog, top, disk trim, its own self-update. Its own entry in fleet.toml stays as written; old keys are ignored, and an entry that names another machine is dropped with one warning.
 Slices: 1 self-update of other hosts and the shed machine list (unblocks #1685); 2 cloud VMs; 3 the token proxy; 4 lane verbs from another host (the outbox); 5 checks of other hosts and the nightly soak; 6 placement between hosts; 7 offline hosts and the ssh pass; 8 files and sweeps on other hosts; 9 the ssh wrapper and the machine field; 10 CI runners, when the runners repo covers them. About 4,800 lines of code and 13,900 of tests go.
-Open questions: (1) are the cloud VMs destroyed in step 0, or who stops them after slice 2? (2) the cut does not wait for the runners repo; slice 10 does: accept? (3) about 10 added lines keep an old fleet.toml safe: accept? (4) nine of the sixteen listed issues close, six shrink, one stays: accept the table? (5) ten issues, filed on approve, serial: accept?
+Open questions, answered by the owner on 2026-11-24: (1) one cloud VM stays as the runners repo's v0 build VM, the other three are destroyed in step 0; (2) the cut does not wait for the runners repo, only slice 10 does; (3) the ~10 added config lines are accepted; (4) the issue table is accepted; (5) the orchestrator files slices 1 to 10 on approve, queued on top.
 
 ## Read in this order
 
@@ -66,13 +66,13 @@ slices can merge at any pace: nothing they delete can run.
 
 Each is one issue and one PR that only deletes; `adr.md` names its files and `inventory.md` its functions.
 
-## Open questions
+## Open questions (answered by the owner, 2026-11-24)
 
-1. **The cloud VMs.** Destroyed in step 0 (recommended), or who stops them once slice 2 has merged?
-2. **Runners.** The cut does not wait for the runners repo; only slice 10 does (recommended).
-3. **Ten added lines.** A `[hosts]` entry that names another machine is dropped at load with one warning, so it
-   can never read as a second main host (recommended). It is the only code the cut adds.
-4. **The issue table.** #1604, #1646, #1642, #1549, #1647, #1463, #1644, #1496 and #1673 close; #1575, #1672,
-   #1669, #1670, #1677 and #1641 shrink; #1576 stays (`adr.md`, "Effect on filed issues").
+1. **The cloud VMs.** One stays as the runners repo's v0 build VM; the other three are destroyed in step 0.
+2. **Runners.** The cut does not wait for the runners repo; only slice 10 does.
+3. **Ten added lines.** Accepted: a `[hosts]` entry that names another machine is dropped at load with one
+   warning. It is the only code the cut adds.
+4. **The issue table.** Accepted: #1604, #1646, #1642, #1549, #1647, #1463, #1644, #1496 and #1673 close;
+   #1575, #1672, #1669, #1670, #1677, #1641 and #1494 shrink; #1576 stays (`adr.md`, "Effect on filed issues").
 5. **Ten issues.** Filed by the orchestrator on approve; 1 to 9 serial and on top of the queue, 10 behind its
    gate. This issue's own PR is the ADR alone.
