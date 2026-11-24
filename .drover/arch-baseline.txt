@@ -6,8 +6,8 @@ crates/core/src/arch.rs:check 157
 crates/core/src/check.rs 2530
 crates/core/src/check.rs:check 543
 crates/core/src/check.rs:clean_all 266
-crates/core/src/cli.rs 2505
-crates/core/src/cli.rs:dispatch 1008
+crates/core/src/cli.rs 2506
+crates/core/src/cli.rs:dispatch 1009
 crates/core/src/config.rs:parse 166
 crates/core/src/doctor.rs:checks 264
 crates/core/src/drive.rs 2193
