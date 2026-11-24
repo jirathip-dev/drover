@@ -513,6 +513,19 @@ pub struct Fleet {
     pub sandbox: Option<Sandbox>,
     /// lanes see history since this commit only (`drover baseline`); unset = all of it.
     pub baseline: Option<Baseline>,
+    /// `flow`: `shadow` (default) runs the flow table beside today's drive and only logs; `legacy` turns it off (#1649).
+    #[serde(default, rename = "flow")]
+    pub engine: Engine,
+}
+
+/// `[fleet.<n>] flow`: until slice 5 only today's drive acts, so `on` logs as `shadow` does.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    #[default]
+    Shadow,
+    On,
+    Legacy,
 }
 
 /// One key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.

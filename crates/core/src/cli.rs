@@ -317,6 +317,8 @@ enum Cmd {
         live: bool,
         fleet: Option<String>,
     },
+    #[command(about = "#1649: the flow table's shadow run beside today's drive")]
+    Flow(crate::flow::shadow::Args),
     #[command(
         about = "Poll `drover pr` with backoff (30 s → 5 min); exit 0 reached, 1 failed check/closed PR, 124 timeout"
     )]
@@ -1286,6 +1288,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             cmd: ConfigCmd::Show { md: true },
         } => crate::config::show_md(out)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
+        Cmd::Flow(a) => crate::flow::shadow::cli(ctx, a, out)?,
         Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
         Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
         Cmd::ArchCheck {
@@ -1714,8 +1717,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     thread,
                     ..
                 } => {
-                    let at = lane(&issue)?;
-                    let how = (n, kind.as_str(), thread.as_deref());
+                    let (at, how) = (lane(&issue)?, (n, kind.as_str(), thread.as_deref()));
                     crate::ask(ctx, &cfg, r, out, (&fleet, at), (&question, &options), how)?;
                     at.inspect(|n| kick(&fleet, *n, "ask"));
                 }
@@ -1939,16 +1941,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 Some(crate::promise::Say::Pass(last).line())
                             }
                         };
-                        let (fleet, issue, since, next_cmd) = (s.fleet, s.issue, s.last_ts, why);
-                        let lane = s.lane.unwrap_or_default();
                         rows.push(crate::waiting::Waiting {
-                            fleet,
-                            issue,
-                            lane,
+                            fleet: s.fleet,
+                            issue: s.issue,
+                            lane: s.lane.unwrap_or_default(),
                             who,
                             what,
-                            since,
-                            next_cmd,
+                            since: s.last_ts,
+                            next_cmd: why,
                             promise: None,
                         });
                     }

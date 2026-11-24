@@ -59,6 +59,7 @@ integration = "staging"
 # done_checks = ["npm run format:check", "drover arch-check"]   # #1362: `turn done` runs these in the lane's worktree (gate_check_minutes each) before any review; unset = `drover arch-check` with .drover/arch.toml, `cargo fmt --check` with a Cargo.toml
 # env = { npm_config_cache = "~/.cache/drover/npm" }   # npm fleets: one shared cache (pnpm's store already is)
 # env = { PORT = "$DROVER_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
+# flow = "shadow"   # #1649: the flow table runs beside drive and only logs (`drover flow report`); "legacy" turns it off
 # hotspots = "off"   # #889: `drover tick` runs `drover hotspots` weekly per fleet (default "weekly"); "off" opts out
 # hygiene = { merge = "merge", docs_trust = [] }   # #1101: this fleet's keys over [hygiene]'s (docs/config/hygiene.md); "off" opts a key out
 # lessons = "off"   # #419: `drover tick` runs `drover lesson` weekly per fleet (default "weekly"); "off" opts out

@@ -1,8 +1,11 @@
 pub mod chart;
+pub mod decide;
 pub mod episode;
 pub mod facts;
+pub mod shadow;
 pub mod table;
 
+pub use decide::{decide, Clock, Step};
 pub use episode::Episode;
 pub use facts::Cond;
 pub use table::{table, Table};

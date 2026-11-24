@@ -144,6 +144,26 @@ impl<'a> Seen<'a> {
         };
         (cond, vec![l, h, p, v, a, t])
     }
+
+    /// Issue `s`'s clocks: when shed last spoke of its lane, its host's last frame, and the lane's limit reset.
+    pub fn clock(&self, s: &IssueState) -> super::Clock {
+        let ev = &self.events[..];
+        let sp = super::Episode::of(ev, s).spawn;
+        let agent = sp.as_ref().and_then(|e| e.str("agent"));
+        let frame = (sp.as_ref()).and_then(|e| self.view.at(e.str("machine")).map(|h| h.heard.unwrap_or(h.since)));
+        let picked = |a: &str| {
+            ev.iter()
+                .rfind(|e| e.kind == "limit-picked" && e.str("agent") == Some(a))
+        };
+        super::Clock {
+            now: self.ctx.now,
+            heard: agent
+                .and_then(|a| crate::session::stamp::since(ev, a))
+                .or(sp.as_ref().map(|e| e.ts)),
+            frame,
+            reset: agent.and_then(picked).and_then(|e| e.val("at").as_u64()),
+        }
+    }
 }
 
 /// This round's lane, as its host's last frame listed the session of `sp`.

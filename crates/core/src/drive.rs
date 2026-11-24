@@ -13,6 +13,8 @@ use std::path::Path;
 
 pub(crate) mod job;
 mod kicks;
+mod pass;
+pub use pass::Pass;
 mod pickup;
 mod remote;
 mod undriven;
@@ -867,6 +869,9 @@ fn one(
     }
     laps.lap("spawns");
     let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
+    if let Err(e) = crate::flow::shadow::run(&Pass::of(ctx, name, KICK.get()), cfg, seen, &acts) {
+        writeln!(out, "{name} shadow: {e:#}")?;
+    }
     if KICK.get().is_none() {
         std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string()).ok();
     }
