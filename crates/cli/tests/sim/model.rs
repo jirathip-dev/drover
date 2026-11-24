@@ -265,6 +265,7 @@ fn reply(w: &mut World, me: usize, prog: &str, args: &[String]) -> Out {
         "date" => err(1, "date"),
         "lsof" => ok(""),
         "hostname" => ok("sim\n"),
+        "runners" => err(127, "runners: not installed"),
         _ => err(127, "unmodelled"),
     };
     if o.code == 127 && o.stderr == "unmodelled" {

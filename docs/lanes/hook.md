@@ -59,7 +59,7 @@ first served (a kind at its own cap lets later kinds by); after `heavy_wait_minu
 and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its `lane`, `kind`, `cmd`,
 `since` and `running`. Other commands are unchanged.
 
-Build machines (#1708): `[fleet.<n>.remote.<kind>]` sends a heavy kind's commands to jirathip-dev/runners first:
+Build machines (#1708): `[fleet.<n>.remote.<kind>]` sends a heavy kind's commands to the runners repo's build machines first:
 `tag = "linux"` (required), and optional `wait` (minutes for a free machine slot), `setup`, `env = ["NAME"]` and
 `out = ["path"]`, passed as `runners run --tag … --dir <lane worktree> … -- bash -c <cmd>`. Its output and exit code
 are the command's; a remote run holds no slot here. On runners' exit 75, 76, 64 or 78, or no `runners` on `PATH`,
