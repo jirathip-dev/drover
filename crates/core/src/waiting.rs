@@ -703,7 +703,7 @@ pub fn scan_where(
     let hung = crate::roots::hung_now(events);
     let mine = |st: &crate::events::States| {
         st.values()
-            .filter(|s| cfg.fleet.contains_key(&s.fleet) && keep(s))
+            .filter(|s| cfg.fleet.contains_key(&s.fleet) && !s.settled() && keep(s))
             .cloned()
             .collect()
     };

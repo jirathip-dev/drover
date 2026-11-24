@@ -437,6 +437,8 @@ pub struct IssueState {
     pub stage_rounds: BTreeMap<String, u32>,
     /// `FAIL (form-only)` verdicts that did not count toward the rounds.
     pub form: u32,
+    /// Worktrees its lanes were spawned in and not cleaned since.
+    pub worktrees: std::collections::BTreeSet<String>,
 }
 
 /// Per-issue state, keyed by (fleet, issue).
@@ -697,7 +699,12 @@ pub fn working(path: &Path) -> Result<Arc<Log>> {
 }
 
 const WORKING: &str = concat!(
-    "archived = 0 AND seq <= ?1 AND type NOT IN ('build-cloned', 'build-reused') AND (seq > ?1 - 10000",
+    "archived = 0 AND seq <= ?1 AND type NOT IN ('build-cloned', 'build-reused')",
+    " AND (issue IS NULL OR (fleet, issue) NOT IN (SELECT fleet, issue FROM states WHERE done = 2))",
+    " AND (type NOT IN ('thread-msg', 'thread-read') OR json_extract(json, '$.thread') NOT IN",
+    " (SELECT t FROM (SELECT json_extract(json, '$.thread') AS t, type, MAX(seq) FROM events",
+    " WHERE type IN ('thread-archive', 'thread-restore') GROUP BY t) WHERE type = 'thread-archive'))",
+    " AND (seq > ?1 - 10000",
     " OR (fleet, issue) IN (SELECT fleet, issue FROM states WHERE done = 0)",
     " OR seq IN (SELECT MAX(seq) FROM events WHERE seq <= ?1 AND type IN ('driven', 'kick', 'drive-pass', 'lane-state', 'conflict-predicted', 'intent', 'push-sent', 'pass-slow')",
     " GROUP BY type, fleet, issue, json_extract(json, '$.agent'), json_extract(json, '$.step'))",
@@ -765,7 +772,7 @@ fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<
     let fresh = l.seq == 0 && l.events.is_empty();
     let (mut new, states, asks) = crate::db::since(path, l.seq, fresh, (live && fresh).then_some(WORKING))?;
     if fresh {
-        new.extend(crate::db::lanes(path)?);
+        new.extend(crate::db::lanes(path, live)?);
         new.sort_by_key(|e| e.seq);
         new.dedup_by_key(|e| e.seq);
     }
@@ -965,6 +972,11 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             ..Default::default()
         };
         let s = m.entry((e.fleet.clone(), n)).or_insert_with(new);
+        match (e.kind.as_str(), e.str("worktree")) {
+            ("clean", Some(w)) => drop(s.worktrees.remove(w)),
+            (k, Some(w)) if k.starts_with("spawn") => drop(s.worktrees.insert(w.into())),
+            _ => {}
+        }
         let back = matches!(e.kind.as_str(), "reverted" | "land-fix");
         if e.is_passive() || s.state == "merged" && !back || s.state == "closed" && e.kind != "spawn" {
             continue;
@@ -1219,6 +1231,11 @@ impl IssueState {
     /// Merged, or closed on GitHub: no lane, alert or queue slot any more.
     pub fn done(&self) -> bool {
         self.state == "merged" || self.state == "closed"
+    }
+
+    /// Done with every worktree cleaned: its saved row is final, its events are never read again.
+    pub fn settled(&self) -> bool {
+        self.done() && self.worktrees.is_empty()
     }
 
     /// The lane that should be working now: impl in impl/fix, rev in review; none once ready, blocked or merged.

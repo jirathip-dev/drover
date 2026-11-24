@@ -1334,6 +1334,11 @@ pub fn mark_read(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event) -> Result
 /// `drover thread show <id>`: the conversation; marks it read.
 pub fn show(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, id: &str, as_json: bool) -> Result<()> {
     let events = working(&ctx.state)?;
+    let events = if archived(&events, id) {
+        events::shared(&ctx.state)?
+    } else {
+        events
+    };
     let t = find(&events, id)?;
     let items = items(&events, id);
     mark_read(ctx, cfg, &events, t)?;
@@ -1354,6 +1359,9 @@ pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_
         .filter(|e| e.kind == "thread-new" && fleet.is_none_or(|f| f == e.fleet))
     {
         let id = t.str("thread").unwrap_or_default();
+        if archived(&events, id) {
+            continue;
+        }
         let items = items(&events, id);
         let who = name(cfg, id_of(t));
         let last = items.last().map(|i| render(std::slice::from_ref(i), who));
