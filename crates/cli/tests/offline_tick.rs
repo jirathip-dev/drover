@@ -64,7 +64,7 @@ fn main_host() -> Fake {
 
 fn setup(name: &str, air_cfg: &str, limits: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("[limits]\n", &format!("[limits]\n{limits}"));
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{air_cfg}");
     let c = ctx(&tmpdir(name), &toml);

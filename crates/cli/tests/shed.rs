@@ -37,11 +37,9 @@ fn every_adapter_call_is_a_shed_request() {
     assert_eq!(b.last("read"), json!({"name": lane, "history": false}));
     term::keys(&r, lane, "Escape").unwrap();
     assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["esc"]}));
-    term::reply(&r, false, lane, lane, "go on").unwrap();
+    term::reply(&r, lane, lane, "go on").unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "go on"}));
     assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["Enter"]}));
-    term::reply(&r, true, lane, lane, "typed").unwrap();
-    assert_eq!(b.last("send"), json!({"name": lane, "text": "typed"}));
     assert!(term::landed(&r, lane, lane, "x"));
     assert_eq!(
         b.last("wait"),
@@ -51,12 +49,6 @@ fn every_adapter_call_is_a_shed_request() {
     assert_eq!(
         (s.labels["harness"].as_str(), s.name.as_str(), s.running()),
         ("claude", lane, true)
-    );
-    let o = term::exec(&r, &term::wait_output_argv(lane, "❯", "60000")).unwrap();
-    assert_eq!(o.code, 0);
-    assert_eq!(
-        b.last("wait"),
-        json!({"name": lane, "until": [], "output": "❯", "timeout": 60.0})
     );
     term::ok(&r, &term::run_argv(lane, &["exec", "'dsh-tui'"])).unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "exec 'dsh-tui'\r"}));
@@ -145,7 +137,7 @@ fn shed_config(sock: &std::path::Path, extra: &str) -> String {
 }
 
 fn kind_config(kind: &str, sock: &std::path::Path, extra: &str) -> String {
-    let cfg = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let cfg = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     format!(
         "{cfg}\n[runtime]\nkind = \"{kind}\"\nsocket = \"{}\"\n{extra}",
         sock.display()
@@ -258,7 +250,7 @@ fn a_lane_spawns_on_shed() {
 
 fn acp_config(sock: &std::path::Path, harness: &str) -> String {
     let cfg = CONFIG.replace(
-        "harness  =  \"hermes\"    # toggled in tests",
+        "harness  =  \"claude\"    # toggled in tests",
         &format!("harness = \"{harness}\""),
     );
     format!(
@@ -789,6 +781,11 @@ fn no_runtime_is_no_shed_and_herdr_fails_to_load() {
     ] {
         let e = format!("{:#}", drover::config::Config::parse(&herdr).unwrap_err());
         assert!(e.contains(drover::config::RETIRED_RUNTIME), "{e}");
+    }
+    for kind in ["shed", "berth"] {
+        let terminal = format!("{CONFIG}\n[runtime]\nkind = \"{kind}\"\n");
+        let e = format!("{:#}", drover::config::Config::parse(&terminal).unwrap_err());
+        assert!(e.contains("use kind = \"shed-acp\""), "{e}");
     }
 }
 
@@ -1545,7 +1542,7 @@ fn a_lane_keeps_its_spawn_runtime_after_the_config_changes() {
     assert_eq!(wheres(&c, r)["sendmeter-impl-12"].0, "shed-acp");
     std::fs::write(
         &c.config,
-        b.config(&CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"")),
+        b.config(&CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"")),
     )
     .unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
@@ -1765,7 +1762,7 @@ fn a_hook_naming_another_binary_refuses_acp_unguarded() {
 fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
     let b = FakeShed::new();
     let cfg = acp_config(&b.sock, "claude").replace(
-        "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
+        "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
         "[fleet.sendmeter.role.rev]\nagent = \"codex-acp\"\nmodel = \"gpt-5.5\"\neffort = \"high\"",
     );
     let c = acp_ctx("acp-codex", &cfg);
@@ -1871,7 +1868,7 @@ fn a_rev_on_the_impls_provider_refuses_to_load() {
     let base = acp_config(sock, "claude");
     let rev = |agent: &str| {
         base.replace(
-            "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
+            "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
             &format!("[fleet.sendmeter.role.rev]\nagent = \"{agent}\""),
         )
     };
@@ -1886,7 +1883,7 @@ fn a_rev_on_the_impls_provider_refuses_to_load() {
         "agent = \"claude-acp\"\nprofile = \"fleet-impl\"",
     );
     let imp = imp.replace(
-        "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
+        "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
         "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
     );
     assert!(load(&imp).unwrap_err().contains("REVIEW_SAME_PROVIDER"));
@@ -1908,7 +1905,7 @@ fn a_rev_on_the_impls_provider_refuses_to_load() {
     assert!(load(&rev("gemini-acp"))
         .unwrap_err()
         .contains("no harness adapter guards it"));
-    assert!(load(&base.replace("harness = \"hermes\"", "harness = \"claude\"")).is_ok());
+    assert!(load(&base.replace("harness = \"claude\"", "harness = \"claude\"")).is_ok());
 }
 
 fn lane_json(b: &FakeShed, agent: &str, query: &str) -> Value {

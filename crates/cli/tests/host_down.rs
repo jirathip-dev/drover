@@ -70,7 +70,7 @@ fn local() -> Fake {
 }
 
 fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let other = base
         .split("[limits]")
         .next()

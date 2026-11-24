@@ -23,12 +23,12 @@ local = "/tmp/does-not-matter/sendmeter"
 integration = "staging"   # never main
 
 [fleet.sendmeter.role.impl]
-harness  =  "hermes"    # toggled in tests
+harness  =  "claude"    # toggled in tests
 profile = "fleet-impl"
 model = "opus"
 
 [fleet.sendmeter.role.rev]
-harness = "hermes"
+harness = "claude"
 profile = "fleet-rev"
 
 [limits]
@@ -144,7 +144,6 @@ pub fn boat(r: &dyn Runner, prog: &str, args: &[String], input: &str) -> Option<
         config: PathBuf::from("/nonexistent/drover/fleet.toml"),
         state: PathBuf::from("/nonexistent/drover/state/events.jsonl"),
         worktrees: PathBuf::from("/nonexistent/drover/worktrees"),
-        homes: std::collections::BTreeMap::new(),
         exe: "/opt/drover/bin/drover".into(),
         now: 1_000_000,
         home: PathBuf::from("/nonexistent/drover/home"),
@@ -261,6 +260,9 @@ impl Fake {
         }
         if line.starts_with("gh api graphql") {
             return Ok(open_prs(&mut onces, &self.replies));
+        }
+        if let Some(o) = (prog == "shed").then(|| fake_shed::acp_cli(args)).flatten() {
+            return Ok(o);
         }
         Ok(Out {
             code: 1,
@@ -394,15 +396,23 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
     let cfgdir = dir.join("config");
     std::fs::create_dir_all(&cfgdir).unwrap();
     std::fs::write(cfgdir.join("fleet.toml"), config).unwrap();
-    Ctx {
+    let c = Ctx {
         config: cfgdir.join("fleet.toml"),
         state: dir.join("state/events.jsonl"),
         worktrees: dir.join("worktrees"),
-        homes: [("hermes", dir.join("hermes"))].into(),
         exe: "/opt/drover/bin/drover".into(),
         now: 1_000_000,
         home: dir.join("home"),
         hints: vec![],
+    };
+    synced(&c);
+    c
+}
+
+/// Every role's profile written (`profiles sync`), as an ACP lane's guard check needs before spawn; a config that does not load writes none.
+pub fn synced(c: &Ctx) {
+    if let Ok(cfg) = drover::config::Config::load(&c.config) {
+        drover::spawn::profiles_sync(c, &cfg, "", &mut std::io::sink()).unwrap();
     }
 }
 

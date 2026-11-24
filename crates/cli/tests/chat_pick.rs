@@ -10,7 +10,7 @@ const T: u64 = 1_000_000;
 
 fn config(extra: &str) -> String {
     let c = CONFIG.replace(
-        "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
+        "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
         "[fleet.sendmeter.role.rev]\nharness = \"claude\"\nmodel = \"sonnet\"",
     );
     format!(
@@ -61,17 +61,6 @@ fn thread<'a>(chat: &'a Value, id: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("no {id}: {chat}"))
 }
 
-fn host() -> Fake {
-    let dsh = format!("profile: {}  /x\n", drover::providers::DSH_TUI_VERSION);
-    Fake::default().reply("dsh-tui version", &dsh)
-}
-
-fn on_shed(name: &str, extra: &str, b: &FakeShed) -> drover::Ctx {
-    let c = ctx(&tmpdir(name), &b.config(&config(extra)));
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    c
-}
-
 fn kind(c: &drover::Ctx, k: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
@@ -100,12 +89,6 @@ fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
         drover::orchestrator::harness_models(&m, "claude"),
         ["haiku", "opus", "sonnet"]
     );
-    let h = Config::parse(&config("[chat]\nharness = \"hermes\"\n")).unwrap();
-    let (_, r) = drover::orchestrator::defaults(&h, "sendmeter").unwrap();
-    assert_eq!(
-        (r.harness.as_str(), r.model.as_deref(), r.profile.as_deref()),
-        ("hermes", None, None)
-    );
     let bad = Config::parse(&config("[chat]\nharness = \"codex\"\n")).unwrap_err();
     assert!(format!("{bad:#}").contains("chat.harness"), "{bad:#}");
     let old = Config::parse(&config("[chat]\naccount = \"nobody\"\n")).unwrap();
@@ -118,7 +101,7 @@ fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
 #[test]
 fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
     let b = FakeShed::new();
-    let c = acp_ctx("pick-new", "[chat]\nharness = \"hermes\"\n", &b);
+    let c = acp_ctx("pick-new", "[chat]\nharness = \"claude\"\n", &b);
     let (code, out) = run(
         &c,
         &Fake::default(),
@@ -130,7 +113,7 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
     let news = kind(&c, "thread-new");
     assert_eq!(
         (news[0].str("harness"), news[1].str("harness")),
-        (Some("claude"), Some("hermes"))
+        (Some("claude"), Some("claude"))
     );
     let (code, out) = run(
         &c,
@@ -138,7 +121,7 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
         &["thread", "new", "sendmeter", "X", "--harness", "codex"],
     );
     assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
-    std::fs::write(&c.config, acp_config("[chat]\nharness = \"dsh\"\n", &b)).unwrap();
+    std::fs::write(&c.config, acp_config("[chat]\nharness = \"claude\"\n", &b)).unwrap();
     let f = acp();
     let cli = b.cli(&f);
     assert_eq!(run(&c, &cli, &["thread", "say", "t1", "hi"]).0, 0);
@@ -155,11 +138,11 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
     let chip = &page["repos"][0]["harness"];
     assert_eq!(
         (&chip["name"], &chip["all"]),
-        (&json!("harness"), &json!(["claude", "hermes", "dsh"])),
+        (&json!("harness"), &json!(["claude"])),
         "the empty thread's chip: {page}"
     );
     assert!(
-        chip["cur"].is_null() || chip["cur"] == "dsh",
+        chip["cur"].is_null() || chip["cur"] == "claude",
         "preset to the default: {page}"
     );
     let res = req(
@@ -184,131 +167,23 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
 }
 
 #[test]
-fn a_hermes_thread_starts_its_orchestrator_on_hermes() {
-    let b = FakeShed::new();
-    let c = on_shed("pick-new-hermes", "[chat]\nharness = \"claude\"\n", &b);
-    let (code, out) = run(
-        &c,
-        &Fake::default(),
-        &["thread", "new", "sendmeter", "Grill", "--harness", "hermes"],
-    );
-    assert_eq!((code, out.as_str()), (0, "t1\n"));
-    std::fs::write(&c.config, b.config(&config("[chat]\nharness = \"dsh\"\n"))).unwrap();
-    let r = host();
-    assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
-    let st = &kind(&c, "orchestrator-start")[0];
-    assert_eq!((st.str("harness"), st.str("model")), (Some("hermes"), None));
-}
-
-#[test]
-fn the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread() {
+fn the_conductors_instructions_reach_the_thread_brief() {
     let notes = tmpdir("pick-notes").join("AGENTS.md");
     std::fs::write(&notes, "Always grill scope first.\n").unwrap();
     let extra = format!("[conductor]\ninstructions = \"{}\"\n", notes.display());
     let b = FakeShed::new();
-    let c = on_shed("pick-reach", &extra, &b);
-    for (i, h) in ["claude", "hermes", "dsh"].iter().enumerate() {
-        let id = format!("t{}", i + 1);
-        assert_eq!(
-            run(&c, &Fake::default(), &["thread", "new", "sendmeter", h, "--harness", h]).0,
-            0
-        );
-        let r = host();
-        let (code, out) = run(&c, &r, &["thread", "say", &id, "hi"]);
-        assert_eq!(code, 0, "{out}");
-        assert_eq!(kind(&c, "orchestrator-start")[i].str("harness"), Some(*h));
-        let dir = drover::orchestrator::dir(&c, &Config::load(&c.config).unwrap(), &id);
-        let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
-        assert!(
-            brief.contains("# Orchestrator brief: thread") && brief.contains("Always grill scope first."),
-            "{brief}"
-        );
-        let sent = b.sent(&format!("orchestrator-{id}"));
-        let kick = format!("Read {} and act on it.", dir.join(".brief.md").display());
-        let channel = match *h {
-            "claude" => "exec 'claude' ",
-            "hermes" => "Read ",
-            _ => "exec dsh-tui --patch ",
-        };
-        let line = sent.iter().find(|l| l.starts_with(channel));
-        let line = line.unwrap_or_else(|| panic!("{h}: {sent:?}"));
-        assert!(*h == "dsh" || line.contains(&kick), "{h}: {sent:?}");
-        if *h == "claude" {
-            let role = c.config.with_file_name("claude").join("fleet-orchestrator/role.md");
-            assert!(
-                line.contains(&format!("'--append-system-prompt-file' '{}'", role.display())),
-                "{line}"
-            );
-            assert!(std::fs::read_to_string(role).unwrap().contains("orchestrator"));
-        }
-    }
-}
-
-#[test]
-fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
-    let b = FakeShed::new();
-    let c = on_shed("pick-model", "", &b);
-    let f = host();
-    let r = b.on(&f);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill", &cookie);
-    assert!(res.ends_with("t1 started\n"), "{res}");
-    let page = chat(&s, &cookie);
-    let chips = &thread(&page, "t1")["chips"];
-    assert_eq!(
-        (&chips[0]["name"], &chips[0]["all"], &chips[1]["name"]),
-        (&json!("model"), &json!(["opus", "sonnet"]), &json!("effort")),
-        "{page}"
-    );
-    assert!(chips[0]["cur"].is_null() || chips[0]["cur"] == "opus", "{page}");
-    let res = req(&s, "/thread", "op=model&t=t1&model=gpt-9", &cookie);
-    assert!(res.contains("REFUSED BAD_VALUE"), "{res}");
-    let res = req(&s, "/thread", "op=model&t=t1&model=sonnet&effort=low", &cookie);
-    assert!(res.ends_with("picked\n"), "{res}");
-    let pick = &kind(&c, "thread-model")[0];
-    assert_eq!((pick.str("model"), pick.str("effort")), (Some("sonnet"), Some("low")));
-    let page = chat(&s, &cookie);
-    let t1 = thread(&page, "t1");
+    let c = acp_ctx("pick-reach", &extra, &b);
+    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
+    let f = acp();
+    let (code, out) = run(&c, &b.cli(&f), &["thread", "say", "t1", "hi"]);
+    assert_eq!(code, 0, "{out}");
+    let dir = drover::orchestrator::dir(&c, &Config::load(&c.config).unwrap(), "t1");
+    let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
     assert!(
-        t1["page"]["msgs"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|m| m["text"] == "model sonnet · effort low from the next turn"),
-        "{t1}"
+        brief.contains("# Orchestrator brief: thread") && brief.contains("Always grill scope first."),
+        "{brief}"
     );
-    assert_eq!(t1["chips"][0]["cur"], "sonnet", "{t1}");
-    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
-    assert!(
-        show.ends_with("system: model sonnet · effort low from the next turn\n"),
-        "{show}"
-    );
-    let first = kind(&c, "orchestrator-start")[0].clone();
-    assert!(b.has("orchestrator-t1"));
-    let r2 = host();
-    assert_eq!(run(&c, &r2, &["thread", "say", "t1", "next"]).0, 0);
-    let m = b.methods();
-    let closed = m.iter().position(|x| x == "rm").unwrap_or_else(|| panic!("{m:?}"));
-    assert_eq!(m[closed - 1], "kill", "{m:?}");
-    let sleep = kind(&c, "orchestrator-sleep");
-    assert_eq!(sleep[0].str("why"), Some("model"));
-    let next = &kind(&c, "orchestrator-start")[1];
-    assert_eq!((next.str("model"), next.str("effort")), (Some("sonnet"), Some("low")));
-    assert_eq!(
-        (next.str("session"), next.val("resumed").as_bool()),
-        (first.str("session"), Some(true))
-    );
-    let sent = b.sent("orchestrator-t1");
-    let start = sent.iter().rfind(|l| l.starts_with("exec 'claude' ")).unwrap();
-    assert!(start.contains("'--model' 'sonnet' '--effort' 'low'"), "{start}");
-    assert!(
-        start.contains(&format!("'--resume' '{}'", first.str("session").unwrap())),
-        "{start}"
-    );
-    let r3 = host();
-    assert_eq!(run(&c, &r3, &["thread", "say", "t1", "again"]).0, 0);
-    assert_eq!(kind(&c, "orchestrator-start").len(), 2);
+    assert!(f.called("shed send orchestrator-t1 # Orchestrator brief: thread"), "{:?}", f.calls.borrow());
 }
 
 #[test]
@@ -427,7 +302,7 @@ fn the_model_chip_offers_the_models_list_and_a_pick_from_it_is_taken() {
         drover::orchestrator::harness_models(&m, "claude"),
         ["claude-opus-5-5", "fable", "opus"]
     );
-    assert_eq!(drover::orchestrator::harness_models(&m, "hermes"), [] as [&str; 0]);
+    assert_eq!(drover::orchestrator::harness_models(&m, "codex"), [] as [&str; 0]);
     let c = ctx(&tmpdir("pick-listed"), &listed("\"opus\", \"fable\""));
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
     pick_fable(&c);

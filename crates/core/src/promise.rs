@@ -266,7 +266,6 @@ mod tests {
             config: dir.join("fleet.toml"),
             state: state.clone(),
             worktrees: dir.join("w"),
-            homes: std::collections::BTreeMap::default(),
             exe: "drover".into(),
             now,
             home: dir.into(),

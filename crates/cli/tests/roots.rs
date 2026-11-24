@@ -69,7 +69,7 @@ fn repo(label: &str) -> Repo {
     git(&local, &["branch", "-q", "issue-12", "origin/issue-12"]);
     let roots = format!("roots = [\"{}\", \"{}\"]", nvme.display(), internal.display());
     let cfg = CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("/tmp/does-not-matter/sendmeter", &local.to_string_lossy())
         + &format!("\n[hosts.mini]\n{roots}\n");
     let c = ctx(&d, &cfg);

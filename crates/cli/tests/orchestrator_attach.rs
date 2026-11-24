@@ -33,7 +33,7 @@ fn ask(c: &drover::Ctx, r: &Fake, thread: Option<&str>) -> (i32, String) {
 
 #[test]
 fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
-    let cfg = CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"");
+    let cfg = CONFIG.replace("harness  =  \"claude\"    # toggled in tests", "harness = \"claude\"");
     let c = ctx(&tmpdir("orchestrator-attach"), &cfg);
     let b = FakeShed::new();
     b.attach(&c);

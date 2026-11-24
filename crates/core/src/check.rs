@@ -355,8 +355,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 if let Some((url, line)) = wt.and_then(|wt| amendment(ctx, r, cfg, s, wt)) {
                     let key = format!("{lane}:{url}");
                     let seen = events.iter().any(|e| e.str("key") == Some(&key));
-                    let dsh = spawned.and_then(|e| e.str("harness")) == Some("dsh");
-                    if !seen && term::tell(r, dsh, lane, &a.name, &line).is_ok() {
+                    if !seen && term::tell(r, lane, &a.name, &line).is_ok() {
                         hits.push(("amended", key, line));
                     }
                 }

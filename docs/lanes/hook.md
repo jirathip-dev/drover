@@ -1,10 +1,10 @@
 # The lane hook
 
 `drover profiles sync` installs `drover hook --role <role>` as a PreToolUse hook for
-Claude lanes and a `pre_tool_call` hook for Hermes profiles. Spawn exports `DROVER_LANE`
+Claude lanes. Spawn exports `DROVER_LANE`
 (`<fleet>:<issue>:<role>`) in the lane shell, which arms the hook. It blocks `gh pr merge`,
 issue and PR comments, `gh pr review`, `git push` to main, master, staging or the
-integration branch, and edits to fleet and Hermes profile config. Reviewer lanes are
+integration branch, and edits to fleet config. Reviewer lanes are
 read-only: no edits except `verdict.md`, no `git commit|push|merge|rebase|reset`.
 
 The hook fails closed (#508): in a lane, a call whose input isn't JSON or names no tool, under a fleet.toml that
@@ -14,7 +14,7 @@ hour. Its rules come from the binary and the loaded fleet.toml only, never from 
 
 ### Kicks (#304)
 
-The same hook runs on Claude `PostToolUse` (Bash) and `Stop`, and on Hermes `post_tool_call`: a
+The same hook runs on Claude `PostToolUse` (Bash) and `Stop`: a
 `git push` that went through, or a finished turn, runs `drover kick <fleet> <issue> --why push|stop`.
 So do `drover ask`, `verdict` and `answer`, and the board's answer, override, extend, park and queue
 moves. A kick returns at once: a detached `kick --now` (output in `<state>/kick.log`) drives that issue's
@@ -73,9 +73,4 @@ the respawns the last drive pass held back (`RESPAWN_PACED`). When load per CPU 
 `[limits] overload_minutes` (default 10) in the host history, `drover check` alerts `host-overloaded` once, naming
 the 5 busiest processes and their lanes; once load is back under the limit, the next overload alerts again.
 
-Enforcement by harness: **claude** (PreToolUse) and **hermes** (`pre_tool_call`, the same
-`drover hook`) refuse the command mechanically. **dsh** has no pre-tool hook: its role prompt states
-the rule, and its `pre-push` hook refuses a push whose new commits add a script line (`*.sh`, `*.bash`,
-`*.zsh`, `justfile` and `Makefile` lines that start with the command, e.g. recipe lines; not
-`package.json` scripts, nor `.github/workflows`, where CI may use Docker) running a denied command. A dsh
-lane can still run one directly.
+Enforcement: the Claude `PreToolUse` hook (`drover hook`) refuses the command mechanically.

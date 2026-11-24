@@ -29,7 +29,7 @@ fn rc(verb: &str) -> String {
 fn setup(name: &str) -> drover::Ctx {
     let dir = tmpdir(name);
     std::fs::create_dir_all(&dir).unwrap();
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let hosts = "[hosts.mini]\n\n[hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"fake\"\nsize = \"small\"\n\
 budget_usd_month = 10\nmax_hours_day = 20\ntags = [\"docker\"]\n";
     let cfg = format!("{base}\n{hosts}");

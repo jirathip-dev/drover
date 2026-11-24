@@ -18,7 +18,7 @@ fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
 }
 
 fn setup_on(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{extra}");
     let c = ctx(&tmpdir(name), &toml);
     let sh = FakeShed::new();

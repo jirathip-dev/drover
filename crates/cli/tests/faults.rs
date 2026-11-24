@@ -19,7 +19,7 @@ fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static)
 
 fn base() -> String {
     CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("[limits]\n", "[limits]\nshed_call_secs = 1\nssh_sessions = 64\n")
 }
 
@@ -71,7 +71,7 @@ fn a_prompt_to_a_lane_behind_a_hung_shed_link_fails_within_its_bound() {
     let err = within("prompt", move || {
         let f = Fake::default();
         let r = drover::shed::With(&f, b);
-        drover::term::reply(&r, false, IMPL, IMPL, "go on").map_err(|e| format!("{e:#}"))
+        drover::term::reply(&r, IMPL, IMPL, "go on").map_err(|e| format!("{e:#}"))
     });
     assert!(err.unwrap_err().contains("no answer"));
     assert_eq!(sh.sent(IMPL), Vec::<String>::new());

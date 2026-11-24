@@ -103,7 +103,7 @@ fn digest_shows_the_last_week_and_redacts_secrets() {
     assert!(out.contains("old unwrap") && out.contains("def5678"), "{out}");
 }
 
-const OFF: &str = "\n[fleet.quiet]\nrepo = \"acme/quiet\"\nlocal = \"/tmp/does-not-matter/quiet\"\nintegration = \"staging\"\nlessons = \"off\"\n[fleet.quiet.role.impl]\nharness = \"hermes\"\n";
+const OFF: &str = "\n[fleet.quiet]\nrepo = \"acme/quiet\"\nlocal = \"/tmp/does-not-matter/quiet\"\nintegration = \"staging\"\nlessons = \"off\"\n[fleet.quiet.role.impl]\nharness = \"claude\"\n";
 
 #[test]
 fn tick_runs_lesson_once_a_week_and_never_when_off() {

@@ -207,7 +207,7 @@ pub fn pre_call(input: &Value) -> bool {
     ev.is_empty() || dialects().any(|d| d.pre == ev)
 }
 
-/// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `git` runs git in a dir (its HEAD, its remote).
+/// Some(reason) denies a shell (`Bash`) or file-writing call; `git` runs git in a dir (its HEAD, its remote).
 pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<String>) -> Option<String> {
     let cur_branch = |d: &str| git(d, &["rev-parse", "--abbrev-ref", "HEAD"]);
     let origin = |d: &str| git(d, &["remote", "get-url", "origin"]);
@@ -215,7 +215,7 @@ pub fn decide(input: &Value, p: &Policy, git: &dyn Fn(&str, &[&str]) -> Option<S
     let ti = tool_input(input);
     if dialects().any(|d| d.shell == tool) {
         let cmd = ti["command"].as_str().unwrap_or_default();
-        let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
+        let cwd = input["cwd"].as_str().unwrap_or(".");
         let leak = p
             .hygiene
             .as_ref()
@@ -1003,10 +1003,10 @@ fn git_push(t: &[&str], cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Opti
     None
 }
 
-/// The repo dir of a `git push` in a Bash/terminal call (for the co-author warning).
+/// The repo dir of a `git push` in a Bash call (for the co-author warning).
 pub fn push_dir(input: &Value) -> Option<String> {
     let ti = tool_input(input);
-    let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
+    let cwd = input["cwd"].as_str().unwrap_or(".");
     ti["command"]
         .as_str()?
         .split([';', '|', '&', '\n', '(', ')', '`'])

@@ -13,7 +13,7 @@ fn config(extra: &str) -> String {
         )
         .replace(
             "[limits]",
-            "[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n\n[limits]",
+            "[fleet.sendmeter.role.design]\nharness = \"claude\"\nprofile = \"fleet-design\"\n\n[limits]",
         )
 }
 

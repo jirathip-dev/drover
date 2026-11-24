@@ -3,7 +3,7 @@ use common::*;
 use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
-const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
 const BRANCH: &str = "gh api repos/jirathip-dev/sendmeter/branches/issue-12";
 const PR_BODY: &str = "gh pr view issue-12 -R jirathip-dev/sendmeter --json body";
 const RECIPE: &str = "gh api repos/jirathip-dev/sendmeter/contents/.drover/verify.md";

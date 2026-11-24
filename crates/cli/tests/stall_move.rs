@@ -11,7 +11,7 @@ const WT: &str = "/home/me/.local/share/drover/work/sendmeter/issue-12";
 const IMPL: &str = "sendmeter-impl-12";
 
 fn config(extra: &str) -> String {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     format!("{base}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n{extra}")
 }
 

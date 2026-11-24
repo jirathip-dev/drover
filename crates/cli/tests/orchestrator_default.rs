@@ -34,7 +34,7 @@ fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
             "profile = \"fleet-rev\"\nmodel = \"sonnet\"\n",
         )
         .replace(
-            "harness  =  \"hermes\"    # toggled in tests",
+            "harness  =  \"claude\"    # toggled in tests",
             "harness = \"claude\"\naccount = \"C\"",
         );
     let text = format!(

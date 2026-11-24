@@ -57,7 +57,7 @@ fn alive(pid: &str) -> bool {
 
 fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("[limits]\n", "[limits]\nssh_call_secs = 2\nssh_quick_secs = 2\n");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.boat1]\nmachine = \"boat1\"\n");
     let c = ctx(&tmpdir(name), &toml);
@@ -245,7 +245,7 @@ fn a_hung_shed_connect_on_one_remote_host_costs_one_deadline_and_another_remote_
     let detached = "perl -e 'setpgrp(0, 0); sleep 600'";
     for (name, child) in [("connect-hang", "sleep 600"), ("connect-held-pipe", detached)] {
         let base = CONFIG
-            .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+            .replace("harness  =  \"claude\"", "harness = \"claude\"")
             .replace("[limits]\n", "[limits]\nssh_call_secs = 2\nssh_quick_secs = 2\n");
         let toml = format!(
             "{base}\n[hosts.mini]\n\n[hosts.boat1]\nmachine = \"boat1\"\n\n[hosts.boat2]\nmachine = \"boat2\"\n"

@@ -288,7 +288,7 @@ const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto 
 
 #[test]
 fn a_remote_hosts_clone_gets_the_same_heal() {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let c = ctx(
         &tmpdir("heal-remote"),
         &format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n"),
@@ -385,7 +385,7 @@ fn a_remote_hosts_clone_gets_the_same_heal() {
 
 #[test]
 fn a_remote_fetch_racing_another_on_staging_is_retried_and_the_spawn_starts() {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let c = ctx(
         &tmpdir("fetch-race-remote"),
         &format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n"),

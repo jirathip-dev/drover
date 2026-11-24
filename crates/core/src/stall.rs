@@ -61,15 +61,13 @@ fn refusals<'a>(ev: &'a [Event], sp: &Event, role: &str) -> Vec<&'a Event> {
 }
 
 /// What to do about row `w`'s live lane that nothing else waits on, when `lanes::health` says it never started or stalled.
-pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], sessions: &Sessions, w: &Waiting) -> Option<Act> {
+pub fn stalled(ctx: &Ctx, cfg: &Config, ev: &[Event], sessions: &Sessions, w: &Waiting) -> Option<Act> {
     if w.who != "none" || w.next_cmd.is_some() {
         return None;
     }
     let s = fold(ev).remove(&(w.fleet.clone(), w.issue))?;
     let (lane, sp) = (&w.lane, last_spawn(ev, &w.lane)?);
-    let (role, on) = (sp.str("role")?, On::of(r, Some(sp)));
-    let resent = |e: &&Event| e.kind == "start-resent" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-    let resent = ev.iter().rfind(resent);
+    let role = sp.str("role")?;
     let (n, _) = crate::waiting::respawns(ev, &w.fleet, w.issue);
     let ago = |t: u64| crate::events::age(ctx.now.saturating_sub(t));
     if let Some(x) = sessions.get(lane).filter(|x| x.key_refused()) {
@@ -82,22 +80,7 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], sessions: 
         return Some(Act::Escalate("LANE_KEY_REFUSED", why));
     }
     match crate::lanes::health(ctx, cfg, ev, sessions, &s) {
-        Health::NeverStarted { since } => {
-            let acp = sp.str("runtime") == Some("shed") && cfg.shed_for(&w.fleet).is_some_and(|b| b.acp.is_some());
-            let brief = sp
-                .str("worktree")
-                .and_then(|wt| on.read(&std::path::Path::new(wt).join(".brief.md")));
-            if let Some(text) = brief.filter(|_| acp && resent.is_none()) {
-                let sent = term::prompt(&on, lane, &text).is_ok();
-                let d = json!({"agent": lane, "sent": sent});
-                append(
-                    &ctx.state,
-                    &Event::new(ctx.now, &w.fleet, Some(w.issue), "start-resent", d),
-                )
-                .ok();
-                return None;
-            }
-            Some(if n == 0 {
+        Health::NeverStarted { since } => Some(if n == 0 {
                 Act::Respawn(role.into(), "failed start")
             } else {
                 Act::Escalate(
@@ -107,8 +90,7 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], sessions: 
                         ago(since)
                     ),
                 )
-            })
-        }
+            }),
         Health::Stalled { .. } if n == 0 => Some(Act::Respawn(role.into(), "lane stalled")),
         Health::Stalled { since } => {
             let note = sessions

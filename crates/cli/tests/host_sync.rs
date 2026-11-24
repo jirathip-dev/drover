@@ -10,10 +10,10 @@ const NOW: u64 = 1_000_000;
 
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
 
-const DROVER: &str = "[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/x/drover\"\nintegration = \"staging\"\n\n[fleet.drover.role.impl]\nharness = \"hermes\"\n";
+const DROVER: &str = "[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/x/drover\"\nintegration = \"staging\"\n\n[fleet.drover.role.impl]\nharness = \"claude\"\n";
 
 fn config(extra: &str) -> String {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     format!("{base}\n{DROVER}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.boat2]\nmachine = \"boat2\"\n\n[hosts.boat3]\nmachine = \"boat3\"\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n{extra}")
 }
 

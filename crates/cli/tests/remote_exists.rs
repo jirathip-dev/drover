@@ -84,7 +84,7 @@ impl Runner for Air {
 }
 
 fn setup(name: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n");
     let c = ctx(&tmpdir(name), &toml);
     let st = c.state.parent().unwrap();

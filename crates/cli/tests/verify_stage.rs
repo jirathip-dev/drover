@@ -7,7 +7,7 @@ use drover::serve::Server;
 use drover::waiting::waiting_on;
 use serde_json::json;
 
-const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
 const RECIPE: &str = "gh api repos/jirathip-dev/sendmeter/contents/.drover/verify.md";
 const ADDR: &str = "127.0.0.1:7777";
 

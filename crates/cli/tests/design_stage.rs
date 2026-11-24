@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 static ONE: Mutex<()> = Mutex::new(());
 const ADDR: &str = "127.0.0.1:7777";
-const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
+const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
 fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
@@ -463,7 +463,7 @@ fn a_paused_fleet_auto_spawns_no_design_but_the_orchestrator_still_can() {
     assert_eq!(state(&c, 12), "design");
 }
 
-const ARCHITECT: &str = "\n[fleet.sendmeter.role.architect]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
+const ARCHITECT: &str = "\n[fleet.sendmeter.role.architect]\nharness = \"claude\"\nprofile = \"fleet-design\"\n";
 
 fn adr(c: &drover::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);

@@ -8,7 +8,7 @@ fn spawned(sandbox: &str) -> (drover::Ctx, FakeShed, PathBuf, String) {
     let repo = d.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     let cfg = CONFIG
-        .replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"    # toggled in tests", "harness = \"claude\"")
         .replace("/tmp/does-not-matter/sendmeter", repo.to_str().unwrap())
         .replace(
             "integration = \"staging\"   # never main",

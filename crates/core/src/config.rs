@@ -177,26 +177,27 @@ impl OrchestratorCfg {
 #[serde(try_from = "String")]
 pub enum RuntimeKind {
     #[default]
-    Shed,
     ShedAcp,
-    Berth,
 }
 
 /// The load error for the retired runtime, with its migration.
-pub const NO_RUNTIME: &str = "no shed runtime: set [runtime] kind = \"shed-acp\" or \"shed\" (docs/runtimes.md)";
+pub const NO_RUNTIME: &str = "no shed runtime: set [runtime] kind = \"shed-acp\" (docs/runtimes.md)";
 
 pub const RETIRED_RUNTIME: &str = "runtime \"herdr\" is retired (#721): set kind = \"shed-acp\" (each lane an ACP \
-     session) or \"shed\" (each lane a shed terminal); docs/runtimes.md has the migration";
+     session); docs/runtimes.md has the migration";
+
+/// The load error for `kind = "shed"` (and its old name `berth`): terminal lanes are gone, every lane is an ACP session.
+pub const TERMINAL_RUNTIME: &str = "runtime \"shed\" (terminal lanes) is retired (#1726): use kind = \"shed-acp\", \
+     each lane an ACP session (docs/runtimes.md)";
 
 impl TryFrom<String> for RuntimeKind {
     type Error = String;
     fn try_from(k: String) -> std::result::Result<Self, String> {
         match k.as_str() {
-            "shed" => Ok(Self::Shed),
             "shed-acp" => Ok(Self::ShedAcp),
-            "berth" => Ok(Self::Berth),
+            "shed" | "berth" => Err(TERMINAL_RUNTIME.into()),
             "herdr" => Err(RETIRED_RUNTIME.into()),
-            _ => Err(format!("unknown runtime \"{k}\": \"shed-acp\" or \"shed\"")),
+            _ => Err(format!("unknown runtime \"{k}\": \"shed-acp\"")),
         }
     }
 }
@@ -213,17 +214,10 @@ pub struct Runtime {
 impl Runtime {
     /// The shed runtime it names.
     pub fn shed(&self) -> crate::shed::Shed {
-        let acp = self.kind == RuntimeKind::ShedAcp;
         crate::shed::Shed {
             wire: crate::shed::Wire::Socket(self.socket.as_deref().map_or_else(crate::shed::default_socket, expand)),
-            acp: self
-                .acp
-                .clone()
-                .or_else(|| acp.then(crate::providers::default_acp).flatten().map(Into::into)),
-            policy: self
-                .acp_policy
-                .clone()
-                .unwrap_or_else(|| if acp { "allow" } else { "ask" }.into()),
+            acp: self.acp.clone().or_else(|| crate::providers::default_acp().map(Into::into)),
+            policy: self.acp_policy.clone().unwrap_or_else(|| "allow".into()),
         }
     }
 }
@@ -1171,9 +1165,6 @@ impl Config {
         }
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             crate::stderr!("drover: [limits].max_agents is no longer used; ignoring it");
-        }
-        if c.runtime.as_ref().is_some_and(|r| r.kind == RuntimeKind::Berth) {
-            crate::stderr!("drover: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
         }
         let levels = crate::providers::EFFORTS;
         if let Some(e) = c.limits.effort.as_deref().filter(|e| !levels.contains(e)) {

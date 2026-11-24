@@ -372,44 +372,13 @@ fn tailscale_missing_is_a_warning() {
 }
 
 #[test]
-fn bad_config_and_hermes_profiles() {
+fn bad_config() {
     let (c, _) = setup("doc-badcfg", "claude");
     std::fs::write(&c.config, "[fleet.x]\nrepo = 1\n").unwrap();
     let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 1, "{out}");
     assert!(line(&out, "config").starts_with('✗'), "{out}");
     assert!(line(&out, "gh").starts_with('✓'), "{out}");
-
-    let (c, _) = setup("doc-hermes", "hermes");
-    let (code, out) = run(&c, &good(), &["doctor"]);
-    assert_eq!(code, 1, "{out}");
-    assert!(
-        line(&out, "hermes fleet-impl").contains("→ hermes profile create fleet-impl"),
-        "{out}"
-    );
-    assert!(
-        line(&out, "hermes hooks").starts_with('✓'),
-        "no profile, nothing to check: {out}"
-    );
-
-    assert!(line(&out, "hermes lane-orchestrator").starts_with('✗'), "{out}");
-    for p in ["fleet-impl", "lane-orchestrator"] {
-        write(&c.homes["hermes"].join(p).join("config.yaml"), "", 0o644);
-    }
-    let (code, out) = run(&c, &good(), &["doctor"]);
-    assert_eq!(code, 1, "{out}");
-    assert!(line(&out, "hermes fleet-impl").starts_with('✓'), "{out}");
-    assert!(line(&out, "hermes hooks").contains("→ drover profiles sync"), "{out}");
-
-    let hook = |role: &str| format!("'{}' hook --role {role} ✓ allowed", c.exe);
-    let (code, out) = run(
-        &c,
-        &good()
-            .reply("env DROVER_LANE=demo:-:impl hermes", &hook("impl"))
-            .reply("env DROVER_LANE=demo:-:orchestrator hermes", &hook("orchestrator")),
-        &["doctor"],
-    );
-    assert_eq!(code, 0, "{out}");
 }
 
 #[test]

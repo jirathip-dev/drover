@@ -11,7 +11,7 @@ fn config(d: &Path, role_extra: &str) -> String {
     std::fs::write(repo.join(".mcp.json"), mcp).unwrap();
     CONFIG
         .replace(
-            "harness  =  \"hermes\"    # toggled in tests",
+            "harness  =  \"claude\"    # toggled in tests",
             &format!("harness = \"claude\"\n{role_extra}"),
         )
         .replace("/tmp/does-not-matter/sendmeter", repo.to_str().unwrap())
@@ -199,30 +199,6 @@ fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
         let (code, out) = run(&c, &Fake::default(), &["profiles", "sync"]);
         assert_eq!((code, out.contains("MCP_FORBIDDEN")), (3, true), "{out}");
     }
-}
-
-#[test]
-fn hermes_profile_gets_only_the_listed_mcp_servers() {
-    let d = tmpdir("mcp-hermes");
-    let cfg = config(&d, "mcp = [\"supabase-dev\"]").replace("harness = \"claude\"\nmcp", "harness = \"hermes\"\nmcp");
-    let c = ctx(&d, &cfg);
-    let yaml = c.homes["hermes"].join("fleet-impl/config.yaml");
-    std::fs::create_dir_all(yaml.parent().unwrap()).unwrap();
-    std::fs::write(
-        &yaml,
-        "model:\n  default: opus\nmcp_servers:\n  supabase-prod:\n    command: npx\nagent:\n  max_turns: 90\n",
-    )
-    .unwrap();
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let text = std::fs::read_to_string(&yaml).unwrap();
-    assert!(
-        text.contains("mcp_servers:\n  \"supabase-dev\": {\"args\":[\"dev\"],\"command\":\"npx\"}\n"),
-        "{text}"
-    );
-    assert!(
-        !text.contains("prod") && text.contains("agent:\n  max_turns: 90"),
-        "{text}"
-    );
 }
 
 fn check_shows(c: &drover::Ctx, sh: &FakeShed, (status, note): (&str, &str)) -> String {

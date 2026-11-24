@@ -63,11 +63,10 @@ pub(crate) fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)>
 /// Write every harness's files for every role's profile, so `drover set` alone can switch a role's harness; a generated profile no role names any more (a retired role's) is removed.
 pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) -> Result<()> {
     let all = profiles(cfg);
-    for (_, f, role, r, profile) in &all {
+    for (_, f, role, _, profile) in &all {
         for h in providers::known() {
             providers::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
         }
-        providers::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
     }
     let root = providers::profiles_root(ctx);
     for d in std::fs::read_dir(root).into_iter().flatten().flatten() {
@@ -138,11 +137,9 @@ pub struct Plan {
     /// Display title head (`<fleet> · <role> #<issue>`) and the full lane title built from it.
     pub head: String,
     pub title: String,
-    /// An orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
-    pub session: Option<(String, bool)>,
     /// A remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
     pub lane_key: Option<String>,
-    /// The fleet's `sandbox`; `start_cmd` runs the harness inside it.
+    /// The fleet's `sandbox`.
     pub sandbox: Option<crate::config::Sandbox>,
 }
 
@@ -206,14 +203,6 @@ impl Plan {
     /// A remote lane's hook rules, beside its worktree on its host.
     pub fn rules_file(&self) -> PathBuf {
         PathBuf::from(format!("{}.rules.json", self.worktree.display()))
-    }
-
-    pub fn start_cmd(&self, ctx: &Ctx, pane: &str) -> Vec<String> {
-        crate::sandbox::wrap(self, providers::get(&self.harness).start_cmd(ctx, self, pane))
-    }
-
-    pub fn kick_cmds(&self, pane: &str) -> Vec<Vec<String>> {
-        providers::get(&self.harness).kick_cmds(self, pane)
     }
 
     fn at(&mut self, root: &Path, f: &Fleet) {
@@ -387,7 +376,6 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         mcp_file,
         head,
         title,
-        session: None,
         lane_key: None,
         sandbox: f.sandbox,
     })
@@ -526,17 +514,9 @@ fn brief(
     )
 }
 
-fn labels(p: &Plan, acp: Option<(&Fleet, u32)>) -> Vec<(&'static str, String)> {
+fn labels(p: &Plan, f: &Fleet, round: u32) -> Vec<(&'static str, String)> {
     let issue = p.lane.split(':').nth(1).unwrap_or_default().to_string();
     let fleet = p.lane.split(':').next().unwrap_or_default().to_string();
-    let Some((f, round)) = acp else {
-        return vec![
-            ("fleet", fleet),
-            ("issue", issue),
-            ("role", p.role.clone()),
-            ("harness", p.harness.clone()),
-        ];
-    };
     let role = if p.family == "impl" && round > 0 {
         "fix"
     } else {
@@ -738,13 +718,12 @@ fn track(local: &str, branch: &str) -> [Vec<String>; 2] {
     ]
 }
 
-fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str, bool), rt: Runtime) -> Value {
-    let (home, bt, labels, acp) = rt;
+fn plan_json(p: &Plan, on: &crate::hosts::On, (local, reopen): (&str, bool), rt: Runtime) -> Value {
+    let (bt, labels, acp) = rt;
     let sent = |prog: &str, a: Vec<String>| {
         let (prog, a) = on.wrap(prog, &a);
         [vec![prog], a].concat()
     };
-    let home = |a| crate::hosts::rehome(a, home);
     let mut cmds = vec![sent(
         "git",
         argv(&[
@@ -759,23 +738,9 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         cmds.push(sent("git", worktree_add(local, p, false)));
         cmds.extend(track(local, &p.branch).map(|a| sent("git", a)));
     }
-    if bt.0.acp.is_some() {
-        let run = bt.acp_argv(&p.agent, labels, &p.worktree.to_string_lossy(), acp);
-        cmds.push(sent("shed", run));
-        cmds.push(sent("shed", argv(&["send", &p.agent, "<the brief>"])));
-    } else {
-        let pane = p.agent.as_str();
-        let run = term::Shed::run_params(pane, labels, &p.worktree.to_string_lossy());
-        cmds.push(sent("shed", argv(&["run", &json!(run).to_string()])));
-        let typed = [home(p.lane_cmd(pane)), term::typed(pane, &home(p.start_cmd(ctx, pane)))];
-        let shown = |a: Vec<String>| term::shed_line(&a).get(1..).unwrap_or_default().to_vec();
-        cmds.extend(
-            typed
-                .into_iter()
-                .chain(p.kick_cmds(pane))
-                .map(|a| sent("shed", shown(a))),
-        );
-    }
+    let run = bt.acp_argv(&p.agent, labels, &p.worktree.to_string_lossy(), acp);
+    cmds.push(sent("shed", run));
+    cmds.push(sent("shed", argv(&["send", &p.agent, "<the brief>"])));
     json!({
         "agent": p.agent, "role": p.role, "harness": p.harness, "profile": p.profile, "machine": on.machine,
         "model": p.model, "effort": p.effort, "branch": p.branch, "base": p.base,
@@ -784,7 +749,6 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
 }
 
 type Runtime<'a> = (
-    Option<&'a str>,
     &'a term::Shed,
     &'a [(&'static str, String)],
     &'a term::Acp,
@@ -1189,17 +1153,14 @@ fn start(
     if on.machine.is_none() {
         crate::shed::ready(&on, &bt.0.wire, o.dry_run)?;
     }
-    let acp_id = bt.0.acp.clone();
+    let acp_id = bt.0.acp.clone().context(crate::config::NO_RUNTIME)?;
     let n = round(&working(&ctx.state)?, fleet, issue, &p);
-    let labels = labels(&p, acp_id.as_ref().map(|_| (f, n)));
-    if let (Some(id), Some(pl)) = (&acp_id, placed.as_ref().filter(|pl| pl.machine.is_some())) {
-        remote_acp(ctx, cfg, &on, &mut p, (pl, id), o.dry_run)?;
+    let labels = labels(&p, f, n);
+    if let Some(pl) = placed.as_ref().filter(|pl| pl.machine.is_some()) {
+        remote_acp(ctx, cfg, &on, &mut p, (pl, &acp_id), o.dry_run)?;
     }
-    let acp = match &acp_id {
-        Some(id) => acp_cmd(ctx, r, &p, id, hm.filter(|_| on.machine.is_some()))?,
-        None => term::Acp::default(),
-    };
-    let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
+    let acp = acp_cmd(ctx, r, &p, &acp_id, hm.filter(|_| on.machine.is_some()))?;
+    let mut pj = plan_json(&p, &on, (&local, reopen), (&bt, &labels, &acp));
     if o.dry_run {
         pj.put("dry_run", json!(true));
         print_plan(out, &pj, o.json, placed.as_ref())?;
@@ -1544,13 +1505,9 @@ fn start(
     let d = json!({"agent": p.agent, "role": role, "host": host.map(|h| h.0), "machine": host.and_then(|h| h.1.as_ref()),
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
-    pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
+    pj = plan_json(&p, &on, (&local, reopen), (&bt, &labels, &acp));
     pj.put("history", json!(history.line(&p.branch)));
     crate::slo::start_healed(ctx, (fleet, issue), || bt.start(ctx, r, &pane, &labels, &wt, &acp))?;
-    if bt.0.acp.is_none() {
-        term::ok(r, &home(p.lane_cmd(&pane)))?;
-        term::ok(r, &term::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
-    }
     crate::starts::started(ctx, fleet, issue);
     let mut dirs: Vec<String> = f.clone_build.clone();
     dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
@@ -1568,12 +1525,9 @@ fn start(
             [clone_build(r, &dirs, &f.local_path(), &p.worktree), warm]
         });
         let res = (|| -> Result<bool> {
-            let kicked = match bt.0.acp {
-                Some(_) => bt.kick_acp(r, &pane, &brief_text),
-                None => h.kick(r, &p, &pane),
-            };
+            let kicked = bt.kick_acp(r, &pane, &brief_text);
             let mut d = lane_data(&p, &pane);
-            d.put("runtime", json!(if bt.0.acp.is_some() { "shed-acp" } else { "shed" }));
+            d.put("runtime", json!("shed-acp"));
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d.put("confirmed", json!(confirmed))
                 .put("error", json!(kicked.as_ref().err().map(|e| format!("{e:#}"))))

@@ -13,7 +13,7 @@ owner only for what no file and no run can tell you (a test login, say), with `d
 
 - **Launch:** the exact command that starts the app at the checked-out head, its ready signal
   (a log line, a URL that answers), and its teardown. Use `$DROVER_PORT`, never a fixed port;
-  iOS through `sim-task` (the host's `hermes-sim-task` is the same tool). No containers:
+  iOS through `sim-task`. No containers:
   `deny_commands` refuses them.
 - **Doctor:** one read-only check that this instance is worth driving (it serves, it has data).
 - **Drive:** the real selectors, URLs and commands this repo's UI answers to.

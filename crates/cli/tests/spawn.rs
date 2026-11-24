@@ -73,7 +73,7 @@ fn launch(p: &Value) -> Vec<String> {
 #[test]
 fn claude_role_dry_run_uses_synced_profile() {
     let d = tmpdir("spawn-claude");
-    let c = ctx(&d, &CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""));
+    let c = ctx(&d, &CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\""));
     let sh = on_shed(&c);
     let r = shed_fake();
     let p = plan(&c, &r, "impl");
@@ -278,7 +278,7 @@ fn shared_cache_is_exported_into_the_lane() {
 #[test]
 fn each_lane_gets_its_own_cargo_target_under_its_root() {
     let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/x/other\"\nintegration = \"staging\"\n\n\
-                 [fleet.other.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n";
+                 [fleet.other.role.impl]\nharness = \"claude\"\nprofile = \"fleet-impl\"\n\n";
     let cfg = other.to_string() + CONFIG + "\n[hosts.mini]\nroot = \"/c\"\n";
     let c = ctx(&tmpdir("spawn-shared-target"), &cfg);
     let _sh = on_shed(&c);
@@ -614,7 +614,7 @@ fn hermes_role_dry_run_kicks_prompt_after_boot() {
 #[test]
 fn real_claude_spawn_writes_brief_and_logs_event() {
     let d = tmpdir("spawn-real");
-    let c = ctx(&d, &CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""));
+    let c = ctx(&d, &CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\""));
     let sh = on_shed(&c);
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
@@ -737,7 +737,7 @@ fn effort_maps_to_each_harness_flag() {
     let d = tmpdir("effort-claude");
     let cfg = CONFIG
         .replace(
-            "harness  =  \"hermes\"    # toggled in tests",
+            "harness  =  \"claude\"    # toggled in tests",
             "harness = \"claude\"\neffort = \"high\"",
         )
         .replace("review_rounds = 3", "review_rounds = 3\neffort = \"xhigh\"");
@@ -782,7 +782,7 @@ fn invalid_effort_is_refused_at_config_load() {
         ),
         (
             CONFIG.replace(
-                "harness = \"hermes\"\nprofile = \"fleet-rev\"",
+                "harness = \"claude\"\nprofile = \"fleet-rev\"",
                 "harness = \"dsh\"\nprofile = \"fleet-rev\"\neffort = \"high\"",
             ),
             "fleet.sendmeter.role.rev: harness dsh does not support effort \"high\"",
@@ -802,8 +802,8 @@ fn invalid_effort_is_refused_at_config_load() {
 fn claude_dry_run_names_every_role() {
     let d = tmpdir("spawn-name");
     let cfg = CONFIG
-        .replace("harness = \"hermes\"", "harness = \"claude\"")
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness = \"claude\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         + "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\nprofile = \"fleet-design\"\n";
     let c = ctx(&d, &cfg);
     let _sh = on_shed(&c);
@@ -862,7 +862,7 @@ fn lane_title_strips_prefixes_and_cuts_at_words() {
 
 #[test]
 fn a_spawned_lanes_build_command_runs_in_the_background_but_a_design_lanes_does_not() {
-    let stages = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\n\n[fleet.sendmeter.role.architect]\nharness = \"hermes\"\n";
+    let stages = "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\n\n[fleet.sendmeter.role.architect]\nharness = \"claude\"\n";
     let c = ctx(&tmpdir("spawn-nice"), &format!("{CONFIG}{stages}"));
     let _sh = on_shed(&c);
     let line = typed(&plan(&c, &shed_fake(), "impl"), "export ");
@@ -897,7 +897,7 @@ fn a_new_lane_worktree_leaves_out_docs_archive_unless_opted_out() {
         let c = ctx(
             &d,
             &CONFIG
-                .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+                .replace("harness  =  \"claude\"", "harness = \"claude\"")
                 .replace("[limits]", cfg),
         );
         let _sh = on_shed(&c);

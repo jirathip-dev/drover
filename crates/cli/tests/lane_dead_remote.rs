@@ -22,7 +22,7 @@ fn spawned_ago(name: &str, limits: &str, ago: u64) -> (drover::Ctx, FakeShed, St
     std::fs::write(&tf, TOKEN).unwrap();
     std::fs::set_permissions(&tf, std::fs::Permissions::from_mode(0o600)).unwrap();
     let base = CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("[limits]\n", &format!("[limits]\n{limits}"));
     let toml = format!(
         "{base}\n[proxy]\nport = 9\nupstream = \"http://127.0.0.1:{port}\"\ntoken-file = \"{}\"\n\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n",

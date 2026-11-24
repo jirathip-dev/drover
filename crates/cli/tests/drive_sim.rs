@@ -218,7 +218,7 @@ struct Sim {
 
 impl Sim {
     fn new(name: &str, extra: &str) -> Sim {
-        let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+        let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
         let c = ctx(&tmpdir(name), &format!("{base}{extra}"));
         std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
         assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);

@@ -18,7 +18,7 @@ fn boat1(prog: &str, args: &[String]) -> bool {
 }
 
 fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.boat1]\nmachine = \"boat1\"\n{extra}");
     let c = ctx(&tmpdir(name), &toml);
     let st = c.state.parent().unwrap();

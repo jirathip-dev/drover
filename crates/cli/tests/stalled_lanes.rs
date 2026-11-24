@@ -3,7 +3,7 @@ use common::*;
 use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
-const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
 const STALL: u64 = 30 * 60;
 
 fn config() -> String {

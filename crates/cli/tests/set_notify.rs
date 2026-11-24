@@ -7,19 +7,18 @@ fn set_round_trip_is_byte_identical() {
     let d = tmpdir("set");
     let c = ctx(&d, CONFIG);
     let r = Fake::default();
-    let (code, out) = run(&c, &r, &["set", "sendmeter", "impl", "--harness", "claude"]);
+    let (code, out) = run(&c, &r, &["set", "sendmeter", "impl", "--profile", "fleet-x"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("sendmeter.impl harness: hermes -> claude"), "{out}");
+    assert!(out.contains("sendmeter.impl profile: fleet-impl -> fleet-x"), "{out}");
     let mid = std::fs::read_to_string(&c.config).unwrap();
-    assert!(mid.contains("harness  =  \"claude\"    # toggled in tests"), "{mid}");
     assert_eq!(
-        drover::config::Config::parse(&mid).unwrap().fleet["sendmeter"].role["impl"].harness,
-        "claude"
+        drover::config::Config::parse(&mid).unwrap().fleet["sendmeter"].role["impl"].profile.as_deref(),
+        Some("fleet-x")
     );
 
-    let (code, out) = run(&c, &r, &["set", "sendmeter", "impl", "--harness", "hermes"]);
+    let (code, out) = run(&c, &r, &["set", "sendmeter", "impl", "--profile", "fleet-impl"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("claude -> hermes"), "{out}");
+    assert!(out.contains("fleet-x -> fleet-impl"), "{out}");
     assert_eq!(std::fs::read(&c.config).unwrap(), CONFIG.as_bytes());
     let ev = read(&c.state).unwrap();
     assert_eq!(ev.iter().filter(|e| e.kind == "set").count(), 2);
@@ -27,10 +26,24 @@ fn set_round_trip_is_byte_identical() {
 }
 
 #[test]
+fn set_harness_takes_claude_and_refuses_the_retired_ones() {
+    let d = tmpdir("set-harness");
+    let c = ctx(&d, CONFIG);
+    let (code, out) = run(&c, &Fake::default(), &["set", "sendmeter", "impl", "--harness", "claude"]);
+    assert_eq!(code, 0, "{out}");
+    for h in ["dsh", "hermes"] {
+        let (code, out) = run(&c, &Fake::default(), &["set", "sendmeter", "impl", "--harness", h]);
+        assert_eq!(code, 3, "{out}");
+        assert!(out.starts_with("REFUSED BAD_VALUE"), "{out}");
+    }
+    assert_eq!(std::fs::read(&c.config).unwrap(), CONFIG.as_bytes());
+}
+
+#[test]
 fn set_unknown_role_table_fails_without_writing() {
     let d = tmpdir("set-missing");
     let text = CONFIG.replace(
-        "[fleet.sendmeter.role.rev]\nharness = \"hermes\"\nprofile = \"fleet-rev\"\n",
+        "[fleet.sendmeter.role.rev]\nharness = \"claude\"\nprofile = \"fleet-rev\"\n",
         "",
     );
     let c = ctx(&d, &text);
