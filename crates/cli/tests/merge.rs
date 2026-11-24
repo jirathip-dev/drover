@@ -728,8 +728,8 @@ fn premerge_passing_merges_and_logs_its_time() {
 #[test]
 fn premerge_runs_the_cap_through_the_gatekeeper_wrapper() {
     let (_d, c, local, wt) = premerge_setup("pre-gk-cap", true, "");
-    std::fs::create_dir_all(format!("{local}/.gatekeeper")).unwrap();
-    std::fs::write(format!("{local}/.gatekeeper/run"), "").unwrap();
+    std::fs::create_dir_all(format!("{wt}/.gatekeeper")).unwrap();
+    std::fs::write(format!("{wt}/.gatekeeper/run"), "").unwrap();
     let r = premerge_fake(&local).once("sh -c", 1, "FAIL core/cap: 14885 / cap 14700\n");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
