@@ -180,7 +180,7 @@ host's drover build, the last sample for the board, and with it the swap count a
 The owner's decision of 2026-11-23: a shed machine is a place to run agents, and a host's setup is shed-cloud's
 recipe (shed #337), on pool VMs and, from a run card, on the Mini and the Air. No step of this ADR moves anything
 across these rows. A CI runner is not a host of this table: the Mini's native runners, the Docker slots and the
-runner VMs, with their image, toolchains and sccache, are `jirathip-dev/runners`'.
+runner VMs, with their image, toolchains and sccache, are `<owner>/runners`'.
 
 | on a host | whose | drover's part |
 |---|---|---|
@@ -208,7 +208,7 @@ runner VMs, with their image, toolchains and sccache, are `jirathip-dev/runners`
 | `[proxy]`, `[limits] proxy_connect_secs` | deleted | D2b |
 | `[providers.deepseek]`'s key file | deleted; `warn_below` stays | D8 |
 | the cloud keys, a cloud recipe override | #1644's to decide | #1644 |
-| `[ci_runners]`, the recipe's `runner_*` lines | deleted with `runners.rs`, once `jirathip-dev/runners` covers them | #1644, as amended |
+| `[ci_runners]`, the recipe's `runner_*` lines | deleted with `runners.rs`, once `<owner>/runners` covers them | #1644, as amended |
 
 Each PR that deletes or renames a key the owner may have set carries a `## Rollout` section with the exact lines.
 
@@ -266,25 +266,25 @@ another host reaches the main host (#1646), so which verbs write it is #1646's l
 
 ```toml
 # The first pin PR, before D2a: today's line with a tag in place of `rev = "9b88eb5…"` (protocol 2 to 5).
-shed-proto = { git = "https://github.com/jirathip-dev/shed", tag = "client-v5.1" }
+shed-proto = { git = "https://github.com/<owner>/shed", tag = "client-v5.1" }
 # D0, in place of the line above. One tag for every shed crate: two tags are two sources, and `deny.toml`
 # refuses the second shed-proto.
-shed-client = { git = "https://github.com/jirathip-dev/shed", tag = "client-v<P>.<n>" }
+shed-client = { git = "https://github.com/<owner>/shed", tag = "client-v<P>.<n>" }
 # D9
-shed-catalog = { git = "https://github.com/jirathip-dev/shed", tag = "client-v<P>.<n>" }
+shed-catalog = { git = "https://github.com/<owner>/shed", tag = "client-v<P>.<n>" }
 # D3, at the first tag that carries the crate (shed's H1 adds it to the tag job)
-shed-secrets = { git = "https://github.com/jirathip-dev/shed", tag = "client-v<P>.<n>" }
+shed-secrets = { git = "https://github.com/<owner>/shed", tag = "client-v<P>.<n>" }
 # D10, at the commit that has F1
-farrier-service = { git = "https://github.com/jirathip-dev/farrier", rev = "<40 hex>" }
+farrier-service = { git = "https://github.com/<owner>/farrier", rev = "<40 hex>" }
 ```
 
 `shed-proto` leaves `[workspace.dependencies]`: drover names the wire types as `shed_client::proto`. `deny.toml`:
 
 ```toml
 allow-git = [
-    "https://github.com/jirathip-dev/shed",
-    "https://github.com/jirathip-dev/blocks",
-    "https://github.com/jirathip-dev/swag",
-    "https://github.com/jirathip-dev/farrier",
+    "https://github.com/<owner>/shed",
+    "https://github.com/<owner>/blocks",
+    "https://github.com/<owner>/swag",
+    "https://github.com/<owner>/farrier",
 ]
 ```
