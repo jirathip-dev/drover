@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 const HERMES_HOOKS: &str = include_str!("../../hooks/hermes-hooks.yaml");
 
-/// The retired hermes harness (#1570), remove-by: 2027-01-15.
+/// The retired hermes harness (#1570), remove-by: 2026-12-15.
 pub struct Hermes;
 pub static PROVIDER: Hermes = Hermes;
 
