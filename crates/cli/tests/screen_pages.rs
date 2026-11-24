@@ -254,7 +254,7 @@ fn a_stream_delta_puts_a_new_event_on_top_and_drops_no_loaded_row() {
     assert_eq!(insert["block"]["title"], "review PASS · round 2");
 }
 
-const PAINTS: usize = 13;
+const PAINTS: usize = 40;
 
 fn p95(ms: &mut [u64]) -> u64 {
     ms.sort_unstable();
@@ -306,6 +306,7 @@ fn scrolling_the_events_tab_to_its_end_appends_the_next_page_in_place_and_it_pai
         .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/ui/pages.mjs"))
         .arg(format!("http://{addr}/"))
         .arg(ck.trim().trim_start_matches("Cookie: "))
+        .arg(PAINTS.to_string())
         .output()
         .unwrap();
     let out: Value =
