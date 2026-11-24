@@ -734,7 +734,7 @@ pub fn scan_where(
             out.push((s, w));
             continue;
         }
-        if busy(&lane) {
+        if busy(&lane) && !sp.is_some_and(|sp| crate::lanes::closed(mine, sp)) {
             let who = if s.check_lane() == Some(&lane) {
                 "reviewer"
             } else {
