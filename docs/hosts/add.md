@@ -37,4 +37,5 @@ enabled = true          # false: no new lanes go there (see below)
 #1616: every `drover drive` keeps the main host's shed machines in step with `[hosts]`: each enabled host with a
 `machine` shed does not list (`shed machine ls --json`) is added as `shed machine add <machine> <machine>`. drover
 never removes a machine from shed, for a host turned off or dropped from `[hosts]` either. `doctor` shows one
-`✗ shed machine <machine>` row per missing one, with that command as the fix.
+`✗ shed machine <machine>` row per missing one, with that command as the fix; #1685: `doctor --config-only`,
+the self-update gate, leaves it out, so a host finding never blocks staging a release.
