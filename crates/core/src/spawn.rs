@@ -1330,7 +1330,7 @@ fn start(
     let inputs = json!({"role": role, "agent": p.agent, "worktree": p.worktree});
     *intent =
         Some(crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?);
-    let (mut wip, saved) = (None, (cfg, fleet, p.family));
+    let (mut wip, saved) = (None, (cfg, fleet));
     if o.supersede && !dup.is_empty() {
         let was = last_spawn(&events, &p.agent);
         let old = crate::hosts::On::of(base, was);

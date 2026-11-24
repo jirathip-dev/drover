@@ -1656,6 +1656,34 @@ fn a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves() {
 }
 
 #[test]
+fn an_impl_round_moves_a_verify_lanes_worktree_without_snapshotting_its_home_path_scratch() {
+    let b = FakeShed::new();
+    let (c, f, local, old, origin) = herdr_era_lane("moved-verify", &b, false, &[]);
+    let cfg = std::fs::read_to_string(&c.config).unwrap().replacen(
+        "integration = \"staging\"",
+        "integration = \"staging\"\npublic = true",
+        1,
+    );
+    let verify = "[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
+    std::fs::write(&c.config, format!("{cfg}\n{verify}")).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    std::fs::write(old.join("transcript.txt"), "/home/me/e2e\n").unwrap();
+    let sp = json!({"role": "verify", "agent": "sendmeter-verify-12-r1", "harness": "claude", "pane": "w3:p1",
+        "workspace": "w3", "worktree": old, "branch": "issue-12"});
+    let e = Event::new(c.now - 300, "sendmeter", Some(12), "spawn", sp);
+    drover::events::append(&c.state, &e).unwrap();
+    let cli = Push(b.cli(&f), local.parent().unwrap().into());
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
+    let moved = logged(&c, "worktree-moved");
+    assert_eq!(moved.len(), 1, "{out}");
+    assert_eq!(*moved[0].val("wip"), Value::Null);
+    assert_eq!(git(&origin, &["for-each-ref", "refs/heads/wip/"]), "");
+    assert!(!old.exists(), "the old worktree is gone");
+}
+
+#[test]
 fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
     let b = FakeShed::new();
     let (c, f, local, old, _) = herdr_era_lane("moved-live", &b, false, &["shell"]);
