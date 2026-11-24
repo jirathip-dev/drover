@@ -370,7 +370,8 @@ fn stale_generated(a: &Arch, r: &dyn Runner) -> Result<Vec<String>> {
         before.insert(p.clone(), std::fs::read(&p).ok());
         std::fs::remove_file(&p)?;
     }
-    let o = r.run("sh", &argv(&["-c", cmd]));
+    let limit = std::time::Duration::from_secs(crate::config::limits().gate_check_minutes * 60);
+    let o = r.run_for("sh", &argv(&["-c", cmd]), "", limit);
     let mut paths: BTreeSet<String> = before.keys().cloned().collect();
     paths.extend(matched());
     let mut bad = vec![];
