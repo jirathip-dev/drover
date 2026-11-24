@@ -1,4 +1,5 @@
 use crate::access;
+use crate::clone::refspec;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event, Json};
 use crate::gate::refused;
@@ -709,8 +710,27 @@ fn worktree_add(local: &str, p: &Plan, have: bool) -> Vec<String> {
     if have {
         argv(&["-C", local, "worktree", "add", &wt, &p.branch])
     } else {
-        argv(&["-C", local, "worktree", "add", "-b", &p.branch, &wt, &p.base])
+        argv(&[
+            "-C",
+            local,
+            "worktree",
+            "add",
+            "-b",
+            &p.branch,
+            "--no-track",
+            &wt,
+            &p.base,
+        ])
     }
+}
+
+fn track(local: &str, branch: &str) -> [Vec<String>; 2] {
+    let (remote, merge) = (format!("branch.{branch}.remote"), format!("branch.{branch}.merge"));
+    let head = format!("refs/heads/{branch}");
+    [
+        argv(&["-C", local, "config", &remote, "origin"]),
+        argv(&["-C", local, "config", &merge, &head]),
+    ]
 }
 
 fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str, bool), rt: Runtime) -> Value {
@@ -722,9 +742,18 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
     let home = |a| crate::hosts::rehome(a, home);
     let mut cmds = vec![sent(
         "git",
-        argv(&["-C", local, "fetch", "origin", p.base.trim_start_matches("origin/")]),
+        argv(&[
+            "-C",
+            local,
+            "fetch",
+            "origin",
+            &refspec(p.base.trim_start_matches("origin/")),
+        ]),
     )];
-    cmds.extend((!reopen).then(|| sent("git", worktree_add(local, p, false))));
+    if !reopen {
+        cmds.push(sent("git", worktree_add(local, p, false)));
+        cmds.extend(track(local, &p.branch).map(|a| sent("git", a)));
+    }
     if bt.0.acp.is_some() {
         let run = bt.acp_argv(&p.agent, labels, &p.worktree.to_string_lossy(), acp);
         cmds.push(sent("shed", run));
@@ -741,11 +770,6 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
                 .chain(p.kick_cmds(pane))
                 .map(|a| sent("shed", shown(a))),
         );
-    }
-    if let Some(t) = p.env.get("DROVER_TOKEN") {
-        cmds.iter_mut()
-            .flatten()
-            .for_each(|w| *w = w.replace(t.as_str(), "•••"));
     }
     json!({
         "agent": p.agent, "role": p.role, "harness": p.harness, "profile": p.profile, "machine": on.machine,
@@ -1037,7 +1061,7 @@ fn integration_view(
             update.then(|| format!(include_str!("../roles/brief-update.md"), int)),
         ));
     }
-    crate::clone::fetch(ctx, r, Path::new(local), &["origin", int])?;
+    crate::clone::fetch(ctx, r, Path::new(local), &["origin", &refspec(int)])?;
     let at_int = |name: &str| {
         crate::repo_read(name, |x| {
             ok(r, "git", &["-C", local, "show", &format!("origin/{int}:{x}")]).ok()
@@ -1076,6 +1100,9 @@ fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygien
     let verify = argv(&["-C", local, "rev-parse", "--verify", "--quiet", &p.branch]);
     let have = r.run("git", &verify)?.code == 0;
     ok(r, "git", &worktree_add(local, p, have))?;
+    for a in track(local, &p.branch) {
+        ok(r, "git", &a)?;
+    }
     let deny = h.docs_trust.clone().unwrap_or_default();
     if !deny.is_empty() {
         let pats = deny.iter().map(|d| format!("!/{}", d.trim_start_matches('/')));
@@ -1091,8 +1118,25 @@ pub fn spawn(
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
+    who: (&str, u64, &str),
+    o: &Opts,
+) -> Result<bool> {
+    let mut intent = None;
+    let res = start(ctx, cfg, r, out, who, o, &mut intent);
+    if let (Err(e), Some(i)) = (&res, intent.take()) {
+        i.fail(e)?;
+    }
+    res
+}
+
+fn start(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
     (fleet, issue, role): (&str, u64, &str),
     o: &Opts,
+    intent: &mut Option<crate::action::Intent>,
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
     if f.paused && !crate::events::STAGES.contains(&role) {
@@ -1116,10 +1160,7 @@ pub fn spawn(
         p.at(&pl.root, f);
         p.env.insert("DROVER_HOST".into(), pl.name.clone());
         if pl.machine.is_some() {
-            match &cfg.service.url {
-                Some(url) => p.env.insert("DROVER_SERVICE".into(), url.clone()),
-                None => p.env.insert("DROVER_OUTBOX".into(), "1".into()),
-            };
+            p.env.insert("DROVER_OUTBOX".into(), "1".into());
             p.env
                 .insert("DROVER_RULES".into(), p.rules_file().display().to_string());
         }
@@ -1161,17 +1202,6 @@ pub fn spawn(
     }
     if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
         return refused("HOST_OFFLINE", why);
-    }
-    if p.env.contains_key("DROVER_SERVICE") {
-        let g = crate::service::Grant {
-            fleet: fleet.into(),
-            issue,
-            role: role.into(),
-            agent: p.agent.clone(),
-            lane: p.lane.clone(),
-            at: ctx.now,
-        };
-        p.env.insert("DROVER_TOKEN".into(), crate::service::grant(ctx, &g)?);
     }
     let h = providers::get(&p.harness);
     h.ready(ctx, r, &p)?;
@@ -1251,7 +1281,7 @@ pub fn spawn(
     }
 
     lane_admit(ctx, (cfg, r), &events, (fleet, issue, role), o.force)?;
-    respawn_guard(ctx, cfg, &events, (fleet, issue, role))?;
+    crate::respawn::guard(ctx, cfg, &events, (fleet, issue, role))?;
     if o.update {
         update_guard(ctx, cfg, &events, (fleet, issue), f.flow().update_limit())?;
     }
@@ -1293,9 +1323,9 @@ pub fn spawn(
     };
     let (key, secs) = (format!("{role}@{round}"), SPAWN_SECS + 300);
     let inputs = json!({"role": role, "agent": p.agent, "worktree": p.worktree});
-    let intent =
-        crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?;
-    let mut wip = None;
+    *intent =
+        Some(crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?);
+    let (mut wip, saved) = (None, (cfg, fleet, p.family));
     if o.supersede && !dup.is_empty() {
         let was = last_spawn(&events, &p.agent);
         let old = crate::hosts::On::of(base, was);
@@ -1307,7 +1337,7 @@ pub fn spawn(
         let cause = crate::session::stamp::exit(&events, &p.agent).filter(|x| x.cause.resumable());
         let here = cause.is_some() && owt == wt && old.machine == on.machine;
         if stale.is_none() && !here && !hung {
-            wip = crate::check::save_lane(ctx, (cfg, fleet), &old, &p.agent, owt)?;
+            wip = crate::check::save_lane(ctx, saved, &old, &p.agent, owt)?;
         }
         let mut killed = names.clone();
         for a in listed
@@ -1339,7 +1369,7 @@ pub fn spawn(
         .and_then(|e| Some((e, e.str("worktree")?)))
         .filter(|_| wip.is_none())
     {
-        wip = crate::check::save_lane(ctx, (cfg, fleet), &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
+        wip = crate::check::save_lane(ctx, saved, &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
     }
 
     let mut sha = None;
@@ -1350,14 +1380,15 @@ pub fn spawn(
             ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
         }
         let from = p.base.trim_start_matches("origin/");
-        crate::clone::fetch(ctx, r, Path::new(&local), &["origin", from])?;
+        crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &refspec(from)])?;
         let body = iss.at("body").as_str().unwrap_or("");
         let recipe = match p.family {
             "design" => crate::design::Recipe::at(r, &local, &p.base, body),
             _ => crate::design::Recipe::of("", body),
         };
         crate::design::tools(ctx, cfg, r, (fleet, issue, &p.agent), &recipe)?;
-        let pushed = || crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &p.branch]).is_ok();
+        let spec = refspec(&p.branch);
+        let pushed = || crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &spec]).is_ok();
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
         }
@@ -1382,7 +1413,7 @@ pub fn spawn(
                 }
                 let git = |a: &[&str]| ok(r, "git", &[&["-C", &local, "worktree"][..], a].concat());
                 if on.exists(Path::new(&held)) {
-                    wip = wip.or(crate::check::save_lane(ctx, (cfg, fleet), &on, &p.agent, &held)?);
+                    wip = wip.or(crate::check::save_lane(ctx, saved, &on, &p.agent, &held)?);
                     if git(&["remove", &held]).is_err() {
                         git(&["remove", "--force", &held])?;
                     }
@@ -1564,7 +1595,9 @@ pub fn spawn(
                     event("lane-closed", c)?;
                 }
             }
-            intent.done(json!({"agent": p.agent, "pane": pane}))?;
+            if let Some(i) = intent.take() {
+                i.done(json!({"agent": p.agent, "pane": pane}))?;
+            }
             event("spawn", d)?;
             crate::link::look_at(ctx, cfg, r, placed.as_ref().and_then(|pl| pl.machine.as_deref())).ok();
             kicked?;
@@ -1649,52 +1682,6 @@ pub(crate) fn lane_admit(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "override", d))
 }
 
-fn starts<'a>(
-    events: &'a [Event],
-    fleet: &str,
-    issue: u64,
-    role: &str,
-) -> (Vec<(u64, Option<&'a str>)>, Option<&'a str>) {
-    let (mut v, mut asked, mut agent) = (vec![], None, None);
-    let mut asks = vec![];
-    let fail = |v: &mut Vec<(u64, Option<&str>)>, why| {
-        if let Some(s) = v.last_mut().filter(|s| s.1.is_none()) {
-            s.1 = Some(why);
-        }
-    };
-    for e in events.iter().filter(|e| e.fleet == fleet && e.issue == Some(issue)) {
-        let mine = e.str("role") == Some(role);
-        match e.kind.as_str() {
-            "spawn" if mine => {
-                agent = e.str("agent");
-                v.push((
-                    e.ts,
-                    (e.data.get("confirmed") == Some(&json!(false))).then_some("prompt never landed"),
-                ));
-            }
-            "pushed" => (v, asked) = (vec![], None),
-            "runtime-cleared" => v.clear(),
-            "turn-end" if mine => (v, asked) = (vec![], None),
-            "lane-dead" if agent.is_some_and(|a| e.str("key").is_some_and(|k| k.ends_with(&format!(":{a}")))) => {
-                fail(&mut v, "lane died");
-            }
-            "supersede"
-                if mine && agent.is_some_and(|a| e.val("killed").as_array().is_some_and(|k| k.contains(&json!(a)))) => {
-            }
-            "supersede" | "lane-killed" if mine => fail(&mut v, "killed"),
-            "needs-decision" if e.str("respawn_loop") == Some(role) => {
-                asks.extend(e.str("id"));
-                asked = e.str("id");
-            }
-            "decision" if e.str("choice") == Some("try again") && asks.contains(&e.str("id").unwrap_or_default()) => {
-                (v, asked) = (vec![], None);
-            }
-            _ => {}
-        }
-    }
-    (v, asked)
-}
-
 fn update_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue): (&str, u64), limit: u32) -> Result<()> {
     let (updates, extra) = fold(events)
         .remove(&(fleet.into(), issue))
@@ -1717,33 +1704,6 @@ fn update_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue): (&str
         )?;
     }
     refused("UPDATE_LIMIT", why)
-}
-
-fn respawn_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue, role): (&str, u64, &str)) -> Result<()> {
-    let l = &cfg.limits;
-    let (v, asked) = starts(events, fleet, issue, role);
-    let since = ctx.now.saturating_sub(l.respawn_window_minutes * 60);
-    let failed: Vec<String> = (v.iter())
-        .filter(|s| s.0 >= since)
-        .filter_map(|s| Some(format!("{} ago: {}", crate::events::age(ctx.now - s.0), s.1?)))
-        .collect();
-    if failed.len() < usize::try_from(l.respawn_max).unwrap_or(usize::MAX) {
-        return Ok(());
-    }
-    let why = format!(
-        "{} failed {role} starts within {} min ({}); answer the owner ask to try again or park",
-        failed.len(),
-        l.respawn_window_minutes,
-        failed.join("; ")
-    );
-    if asked.is_none() {
-        let q = format!("#{issue}'s {role} lane keeps failing at start: {}", failed.join("; "));
-        let d = json!({"question": q, "options": ["try again", "park"], "recommend": null, "agent": null,
-            "kind": "owner", "respawn_loop": role});
-        let ev = Event::new(ctx.now, fleet, Some(issue), "needs-decision", d);
-        crate::events::ask(&ctx.state, cfg, vec![ev], None)?;
-    }
-    refused("RESPAWN_LOOP", why)
 }
 
 fn handover(

@@ -25,6 +25,19 @@ pub struct State {
     pub hello: Option<Hello>,
     /// A `send`, `keys` or `kill` naming this terminal waits until the test clears it and notifies `FakeShed::moved`.
     pub held: Option<String>,
+    /// What the link does to each connection (`Fault::None`: answers at once).
+    pub fault: Fault,
+}
+
+/// A fault the fake link injects into each connection: `Hang` reads and never answers, `Latency` answers late, `Loss(n)` closes the next n unanswered, `Gone` takes the socket away.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Fault {
+    #[default]
+    None,
+    Hang,
+    Latency(std::time::Duration),
+    Loss(u32),
+    Gone,
 }
 
 pub struct FakeShed {
@@ -109,6 +122,13 @@ impl FakeShed {
         std::fs::write(bin.join("shed"), "#!/bin/sh\nexit 0\n").unwrap();
         std::fs::set_permissions(bin.join("shed"), std::fs::Permissions::from_mode(0o755)).unwrap();
         format!("{}:/usr/bin:/bin", bin.display())
+    }
+    /// Inject `f` into every connection from now on.
+    pub fn fault(&self, f: Fault) {
+        if f == Fault::Gone {
+            let _ = std::fs::remove_file(&self.sock);
+        }
+        self.lock().fault = f;
     }
     pub fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap()
@@ -207,7 +227,24 @@ fn answer(st: &Mutex<State>, q: &Request) -> String {
 
 fn conn(c: UnixStream, st: &Mutex<State>, moved: &Condvar) {
     let mut w = c.try_clone().unwrap();
+    let fault = {
+        let mut s = st.lock().unwrap();
+        let f = s.fault;
+        if let Fault::Loss(n) = f {
+            s.fault = if n > 1 { Fault::Loss(n - 1) } else { Fault::None };
+        }
+        f
+    };
+    if matches!(fault, Fault::Loss(_) | Fault::Gone) {
+        return;
+    }
     for line in BufReader::new(c).lines().map_while(Result::ok) {
+        match st.lock().unwrap().fault {
+            Fault::Hang => continue,
+            Fault::Gone => return,
+            Fault::Latency(d) => std::thread::sleep(d),
+            _ => {}
+        }
         let q: Request = serde_json::from_str(&line).unwrap();
         let writes = matches!(q.method.as_str(), "send" | "keys" | "kill");
         let held = |s: &mut State| writes && s.held.is_some() && s.held.as_deref() == q.params["name"].as_str();

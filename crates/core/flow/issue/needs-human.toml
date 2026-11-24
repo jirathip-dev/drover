@@ -1,0 +1,32 @@
+flow = "issue"
+states = ["needs-human"]
+reads = ["ask"]
+ignores = ["lane", "host", "pr", "verdict", "turn"]
+
+[[row]]
+id = "card-open"
+when = { ask = ["open"] }
+do = "wait"
+then = ["remind"]
+owner = "owner"
+timeout = "ask_waiting_minutes"
+escalate = "owner"
+say = "the card waits on the owner"
+
+[[row]]
+id = "decided"
+when = { ask = ["answered"] }
+do = "apply-decision"
+owner = "drive"
+timeout = "act_minutes"
+to = ["queued", "impl", "fix", "parked"]
+say = "apply the owner's decision"
+
+[[row]]
+id = "no-card"
+when = { ask = ["none"] }
+do = "raise-card"
+owner = "drive"
+timeout = "act_minutes"
+escalate = "orchestrator"
+say = "no card: raise one"

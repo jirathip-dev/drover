@@ -242,7 +242,7 @@ fn the_funnel_listener_answers_no_path_but_hooks_github() {
     let res = http(addr, &request("ping", Some(&sign(SECRET, &body)), &body));
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
 
-    let docs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/serve.md")).unwrap();
+    let docs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/serve/webhooks.md")).unwrap();
     let funnel: Vec<&str> = docs.lines().filter(|l| l.starts_with("tailscale funnel")).collect();
     assert_eq!(
         funnel,

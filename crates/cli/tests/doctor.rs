@@ -226,7 +226,11 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         (|_, _, r| r.once("vm_stat", 1, ""), "host", "→ put /usr/sbin"),
         (|_, _, r| r.once("gh auth status", 1, ""), "gh", "→ gh auth login"),
         (|_, _, r| r.once("gh repo view", 1, ""), "gh demo", "→ gh auth refresh"),
-        (|_, _, r| r.once("git -C ", 1, ""), "local demo", "fetch origin staging"),
+        (
+            |_, _, r| r.once("git -C ", 1, ""),
+            "local demo",
+            "fetch origin +refs/heads/staging:refs/remotes/origin/staging",
+        ),
         (
             |_, d, r| {
                 std::fs::remove_dir_all(d.join("local")).unwrap();
@@ -692,5 +696,26 @@ fn the_scene_device_line_says_off_by_default_and_on_with_its_address() {
         line(&out, "scene device"),
         "✓ scene device — on 0.0.0.0:7779, the scene to the LAN",
         "{out}"
+    );
+}
+
+#[test]
+fn a_hosts_machine_missing_from_shed_is_one_row_with_its_fix() {
+    let (c, _) = setup("doc-shed-machine", "claude");
+    let hosts = "\n[hosts.mini]\n\n[hosts.box]\nmachine = \"box\"\n\n[hosts.off]\nmachine = \"off\"\nenabled = false\n";
+    let base = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, base + hosts).unwrap();
+    let _sh = FakeShed::attached(&c);
+    let r = good().reply("shed machine ls --json", r#"[{"name":"gone","target":"gone"}]"#);
+    let (_, out) = run(&c, &r, &["doctor"]);
+    let rows: Vec<&str> = out.lines().filter(|l| l.contains("shed machine")).collect();
+    assert_eq!(rows.len(), 1, "{out}");
+    assert!(
+        rows[0].starts_with('✗') && rows[0].contains("shed machine add box box"),
+        "{out}"
+    );
+    assert!(
+        !r.called("shed machine add") && !r.called("shed machine rm"),
+        "doctor writes nothing"
     );
 }

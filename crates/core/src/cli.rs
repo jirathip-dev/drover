@@ -370,6 +370,8 @@ enum Cmd {
     Triage(crate::triage::Args),
     #[command(about = "#1488: file this month's deps issue, queue it and spawn its lane (orchestrators, owner)")]
     Deps(crate::deps::Args),
+    #[command(about = "#1648: the nightly soak on `[fleet.<n>.soak]` hosts; an issue per missed target")]
+    Soak(crate::soak::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
     #[command(alias = "host")]
     Hosts {
@@ -754,7 +756,13 @@ enum ThreadCmd {
 #[derive(Subcommand)]
 enum ConfigCmd {
     #[command(about = "Every [limits] key with its value and what it times or caps")]
-    Show,
+    Show {
+        #[arg(
+            long,
+            help = "The built-in defaults as docs/config/limits.md's Markdown table; reads no fleet.toml"
+        )]
+        md: bool,
+    },
     #[command(
         about = "Propose <file> as the whole new fleet.toml in a thread: validated, its diff a card with [apply] [discard]"
     )]
@@ -1189,7 +1197,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
         .flatten()
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
-    let res = match lane_write.then(|| forward(r, &sent)).flatten() {
+    let res = match lane_write.then(|| forward(&sent)).flatten() {
         Some(o) => o.map(|o| {
             write!(out, "{}", o.stdout).ok();
             write_stderr(format_args!("{}", o.stderr));
@@ -1211,10 +1219,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
     }
 }
 
-pub(crate) fn forward(r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
-    if let (Some(url), Some(token)) = (crate::config::env("DROVER_SERVICE"), crate::config::env("DROVER_TOKEN")) {
-        return Some(crate::service::post(r, &url, &token, args));
-    }
+pub(crate) fn forward(args: &[String]) -> Option<Result<runner::Out>> {
     let lane = crate::outbox::lane()?;
     Some(crate::outbox::queue(&lane, args).map(|p| runner::Out {
         code: 0,
@@ -1277,6 +1282,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             crate::secret::retired(&state, out)?;
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
+        Cmd::Config {
+            cmd: ConfigCmd::Show { md: true },
+        } => crate::config::show_md(out)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
         Cmd::CapCheck { config, base } => return crate::overlap::cap_check(r, &config, base.as_deref(), out),
         Cmd::Cap { fleet } if fleet == "log" => return crate::overlap::cap_log(r, std::path::Path::new("."), out),
@@ -1643,6 +1651,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let spare = matches!(cmd, Cmd::Check | Cmd::Drive { .. } | Cmd::Kick { .. } | Cmd::Waiting(_));
             let off = crate::hosts::disabled(&cfg).into_iter().filter(|_| spare).collect();
             let pass = pass.sparing(off, Some((ctx, &cfg)));
+            let pass = if matches!(cmd, Cmd::Drive { fleet: None }) {
+                pass.own()
+            } else {
+                pass
+            };
             let paced = spare || matches!(cmd, Cmd::Clean { .. } | Cmd::Reclaim { .. });
             let r: &dyn Runner = if paced { &pass } else { r };
             let kick = |f: &str, n, why| {
@@ -1786,7 +1799,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 },
                 Cmd::Config { cmd } => {
                     let (id, apply) = match cmd {
-                        ConfigCmd::Show => return crate::config::show(&cfg, out).map(|()| 0),
+                        ConfigCmd::Show { .. } => return crate::config::show(&cfg, out).map(|()| 0),
                         ConfigCmd::Propose { thread, file, rollout } => {
                             return crate::propose::propose(ctx, &cfg, out, (&thread, &file), rollout).map(|()| 0)
                         }
@@ -2105,6 +2118,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Lesson { fleet, .. } => return crate::lesson::cli(ctx, &cfg, r, out, fleet),
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
                 Cmd::Deps(a) => return crate::deps::cli(ctx, &cfg, r, out, &a.fleet),
+                Cmd::Soak(a) => return crate::soak::run(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
@@ -2122,11 +2136,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if json {
                         writeln!(out, "{}", serde_json::to_string_pretty(&pr)?)?;
                     } else {
-                        writeln!(
-                            out,
-                            "{}",
-                            gh::summary(&pr, &branch, &cfg.fleet(&fleet)?.required_checks)
-                        )?;
+                        let summary = gh::summary(&pr, &branch, &cfg.fleet(&fleet)?.required_checks);
+                        writeln!(out, "{summary}")?;
                     }
                     if pr.is_null() {
                         return Ok(1);
@@ -2415,12 +2426,7 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
 }
 
 fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
-    if forward(
-        &crate::runner::Real,
-        &runner::argv(&["lane-event", kind, &d.to_string()]),
-    )
-    .is_some()
-    {
+    if forward(&runner::argv(&["lane-event", kind, &d.to_string()])).is_some() {
         return;
     }
     let lane = crate::config::env("DROVER_LANE").unwrap_or_default();

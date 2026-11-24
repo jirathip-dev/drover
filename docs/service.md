@@ -24,7 +24,6 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
   - `GET /api/v1/health`: pid, version, busy jobs, heartbeat age.
   - `GET /api/v1/events?after=<seq>`: Server-Sent Events, the log after `seq` (the last 500), then each new event as
     it is logged; this host or a paired device's cookie only.
-  - `POST /api/v1/cmd` `{"token", "args", "files"}`: a remote lane's command (below).
 - **The board** runs in the same process with `--board` (the `serve` job's address); it is not grown here.
 - **Links** (#1319, #1309 step 2): one thread per host, this one included, holds `drover hosts watch` open there
   (over ssh to a boat; a child process here). The watcher sends a whole report first, a new one within
@@ -38,44 +37,31 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
   it is live again; the `links` services row says how many are live. With the service stopped every host is
   polled, as before.
 
-## Remote lanes over HTTP
+## Remote lanes
 
-With `[service] url = "http://<main host on the tailnet>:7778"` in fleet.toml, a lane spawned on another host gets
-`DROVER_SERVICE` (that url) and `DROVER_TOKEN` instead of #389's outbox (`DROVER_OUTBOX`), so its commands
-arrive at once. Its `ask`, `answer`, `verdict`, `done`, `kick` and its own events go to `/api/v1/cmd` with curl; a
-`--file` travels as its text.
-The main host keeps controlling other hosts over ssh (spawn, read, kill).
-
-**The token** is 32 random bytes, issued by spawn, stored only as its sha256 in `state.db`, and never printed or
-logged. It runs a command only when:
-
-- the command is one the outbox would run as that lane (#389's check): its own fleet and issue, an answer's issue
-  being its ask's;
-- a verdict comes from a check role;
-- the token's spawn is still the issue's latest for its role, its lane is not closed or dead, and the issue is open.
-
-Anything else is `REFUSED TOKEN` (HTTP 403) and runs nothing.
+A lane on another host appends its commands to its worktree's outbox (#389, `DROVER_OUTBOX`); the host's link
+delivers each line within `link_poll_millis` and acks it (Links, above). It holds no key, token or route to the main
+host (#1322 removed the HTTP path, owner decision q2026). The main host keeps controlling other hosts over ssh
+(spawn, read, kill).
 
 ## Robustness
 
-Every job runs on a blocking thread in one of 16 slots with a timeout (a kick or poll 900 s, a lane command 150 s);
+Every job runs on a blocking thread in one of 16 slots with a timeout (a kick or poll 900 s);
 a timeout logs `service-timeout` and frees its slot, so a stuck job never blocks the others. At most 64 API
-connections, 4 MiB a request, 64 KiB a socket line. A watchdog thread exits the process when the event loop's
+connections, 64 KiB a request head or socket line. A watchdog thread exits the process when the event loop's
 heartbeat is 30 s late.
 
-A timed-out kick frees its issue's spawn slot (the marker's pid is the service's own, which outlives the kick). A
-`--file` must come with its text: a lane never makes the service read a path on the main host.
+A timed-out kick frees its issue's spawn slot (the marker's pid is the service's own, which outlives the kick).
 
 Killed mid-spawn (`kill -9`), the service leaves nothing that blocks: its spawn marker and kick lock name its pid, so
-they are stale at once; the CLI goes on in direct mode, and a remote lane's command fails fast instead of hanging. The
+they are stale at once; the CLI goes on in direct mode. The
 next service starts over the dead one's socket, the next pass sweeps the marker and spawns again
 (`crates/cli/tests/service.rs`).
 
 ## Install
 
 `drover service --install [--api <addr>] [--board <addr>]` writes the unit (`dev.drover.service`) and prints the
-commands that swap it in; it loads nothing itself. The API listens on `127.0.0.1:7778` by default; for remote lanes give
-`--api` the main host's tailnet address (the one `[service] url` names). On macOS, for example:
+commands that swap it in; it loads nothing itself. The API listens on `127.0.0.1:7778` by default. On macOS, for example:
 
 ```
 launchctl bootout gui/$(id -u)/dev.drover.fast

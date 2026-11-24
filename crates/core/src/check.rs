@@ -8,7 +8,7 @@ use crate::hosts::On;
 use crate::hygiene::Check;
 use crate::lanes::Health;
 use crate::runner::{ok, Runner};
-use crate::session::{Session, Status};
+use crate::session::{stamp::since as stamped, Session, Status};
 use crate::spawn::{changes, dirty, dirty_past, own_files, SHOT_DIRS};
 use crate::Ctx;
 use crate::{gh, term};
@@ -1472,7 +1472,10 @@ pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     let events = working(&ctx.state)?;
     let spawned = (events.iter().filter(|e| e.kind == "spawn" && e.ts >= since)).filter_map(|e| e.str("agent"));
     let agents = crate::session::live_on(r)?;
-    let names = agents.iter().filter(|a| !a.hollow()).map(|a| a.name.as_str());
+    let live = |a: &&Session| {
+        !a.hollow() && (a.status() != Some(Status::Done) || stamped(&events, &a.name).is_none_or(|t| t > since))
+    };
+    let names = agents.iter().filter(live).map(|a| a.name.as_str());
     Ok(names.chain(spawned).map(String::from).collect())
 }
 
@@ -2294,9 +2297,15 @@ fn save_on(
     }
 }
 
-/// A superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any.
-pub fn save_lane(ctx: &Ctx, (cfg, fleet): (&Config, &str), on: &On, agent: &str, wt: &str) -> Result<Option<String>> {
-    if !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
+/// A superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any. A rev-family lane's scratch stays local.
+pub fn save_lane(
+    ctx: &Ctx,
+    (cfg, fleet, family): (&Config, &str, &str),
+    on: &On,
+    agent: &str,
+    wt: &str,
+) -> Result<Option<String>> {
+    if family == "rev" || !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
         return Ok(None);
     }
     let (w, chk) = (
@@ -2367,7 +2376,7 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
-    crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "--prune", "origin"])?;
+    crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "--prune", "origin", crate::clone::ALL])?;
     let integ = format!("origin/{}", f.integration);
     let refs = git(&[
         "for-each-ref",

@@ -1,3 +1,4 @@
+use crate::clone::refspec;
 use crate::config::Config;
 use crate::runner::{argv, ok, Runner};
 use crate::{events::Json, Ctx};
@@ -112,6 +113,13 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
     rows.push(format!("✓ config — {}", ctx.config.display()));
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
     rows.extend(cfg.shed().map(|b| crate::shed::line(r, &b.wire)));
+    let missing = cfg
+        .shed()
+        .and_then(|_| crate::shed::unlisted(cfg, r).ok())
+        .unwrap_or_default();
+    rows.extend(missing.iter().map(|m| {
+        format!("✗ shed machine {m} — a [hosts] machine shed does not list → shed machine add {m} {m} (drover drive adds it)")
+    }));
     rows.extend(crate::hygiene::doctor(ctx, cfg, r));
 }
 
@@ -158,7 +166,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             row(rows, has, '✗', &format!("label {name} — {l} in {repo} → {fix}"));
         }
         let dir = fleet.local_path().display().to_string();
-        let (branch, origin) = (&fleet.integration, format!("origin/{}", fleet.integration));
+        let (branch, origin) = (refspec(&fleet.integration), format!("origin/{}", fleet.integration));
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || git clone https://github.com/{repo}.git {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));

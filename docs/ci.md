@@ -90,7 +90,7 @@ full run to start before it merges.
 
 ### With `[fleet.<n>.land] mode = "fast-first"`
 
-Fast-first lands a PASS without the label's full run ([config.md](config.md#fast-first-landing-350)). Set
+Fast-first lands a PASS without the label's full run ([config/fast-first.md](config/fast-first.md)). Set
 `fast = ["ci"]`: the narrowed PR run is the fast check. The push to the integration branch then has no green full PR
 run to reuse, so it runs in full. That run is the "full suite on integration's tip" fast-first reads to resume, or to
 find and revert the culprit. Keep `.github/**` and lockfiles in `full_first_paths`. Those PRs land on the full suite.

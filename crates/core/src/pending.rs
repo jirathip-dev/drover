@@ -180,3 +180,45 @@ pub fn refused(ctx: &Ctx, (fleet, n): (&str, u64), code: &str, why: &str) -> Res
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "pending-action", d))?;
     Ok(soft)
 }
+
+pub(crate) fn stuck(
+    ctx: &Ctx,
+    cfg: &crate::config::Config,
+    out: &mut dyn std::io::Write,
+    ev: &[Event],
+    (fleet, n, step): (&str, u64, &str),
+    (code, why): (&str, &str),
+) -> Result<()> {
+    let waits = [
+        "SPAWN_PENDING",
+        "SPAWN_BACKOFF",
+        "RESPAWN_PACED",
+        "HOST_FULL",
+        "IN_FLIGHT",
+        "ALREADY_DONE",
+        "LANE_LIVE",
+        "EXIT",
+        "ERROR",
+        "ROUND_LIMIT",
+        "UPDATE_LIMIT",
+    ];
+    let carded = step == "start" || step == "respawn" && crate::drive::owner_refusal(code);
+    if carded || waits.contains(&code) || SOFT.contains(&code) || crate::starts::stops(Some(code)) {
+        return Ok(());
+    }
+    let mine = crate::events::of_issue(ev, fleet, n);
+    let turn = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "needs-human" | "round-extended");
+    let from = mine.iter().rposition(turn).map_or(0, |i| i + 1);
+    let same = |e: &&&Event| e.kind == "driven" && e.str("step") == Some(step) && e.str("code") == Some(code);
+    let Some(first) = (mine.get(from..).unwrap_or_default().iter())
+        .find(same)
+        .filter(|e| ctx.now >= e.ts + cfg.limits.stall_minutes * 60)
+    else {
+        return Ok(());
+    };
+    let since = age(ctx.now.saturating_sub(first.ts));
+    let reason = format!("{step} refused {code} on every pass for {since}: {why}");
+    writeln!(out, "{fleet} #{n} needs-human: {reason}")?;
+    let d = json!({"code": code, "reason": reason});
+    crate::events::emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))
+}

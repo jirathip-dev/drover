@@ -8,7 +8,7 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 /// The shared fake shed server lane tests run on.
 pub mod fake_shed;
 #[allow(unused_imports, reason = "not every test crate drives the fake shed")]
-pub use fake_shed::{FakeShed, OnShed, OverSsh};
+pub use fake_shed::{FakeShed, Fault, OnShed, OverSsh};
 /// The large board fixture the t141 performance tests share.
 pub mod large;
 /// The recorded sendmeter fleet the screen tests share.
@@ -341,12 +341,10 @@ fn reap_at_exit(d: &Path) {
     writeln!(reaper.stdin.as_mut().unwrap(), "{}", d.display()).unwrap();
 }
 
-const LANE_ENV: [&str; 10] = [
+const LANE_ENV: [&str; 8] = [
     "DROVER_LANE",
     "DROVER_HOST",
     "DROVER_OUTBOX",
-    "DROVER_SERVICE",
-    "DROVER_TOKEN",
     "DROVER_RULES",
     "DROVER_THREAD",
     "DROVER_ORCHESTRATOR",

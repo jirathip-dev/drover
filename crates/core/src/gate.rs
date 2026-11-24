@@ -71,7 +71,7 @@ fn pr_diff(ctx: &Ctx, r: &dyn Runner, f: &Fleet, branch: &str, head: &str) -> Re
     match ok(r, "gh", &["pr", "diff", branch, "-R", &f.repo]) {
         Err(e) if format!("{e:#}").contains("too_large") => {
             let (dir, range) = (f.local_path(), format!("origin/{}...{head}", f.integration));
-            crate::clone::fetch(ctx, r, &dir, &["-q", "origin"])?;
+            crate::clone::fetch_branches(ctx, r, &dir)?;
             git(r, &dir, &["diff", &range])
         }
         d => d,
@@ -154,7 +154,7 @@ pub fn verdict(
                     "the PR's first commit records no baseline (`baseline:` command and numbers)",
                 );
             }
-            if !body.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("perf:")) {
+            if !body.lines().any(|l| block_key(l).starts_with("perf:")) {
                 return refused("NO_BASELINE", "no `Perf:` block: before/after by the same command, the improvement stated, the benchmark checklist");
             }
         }
@@ -545,11 +545,14 @@ fn tests_changed(diff: &str) -> Option<String> {
     (minus != plus).then(|| files.join(", "))
 }
 
+fn block_key(l: &str) -> String {
+    l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase()
+}
+
 /// A verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next heading outside a fence.
 pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
-    let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
     let ls: Vec<&str> = body.lines().collect();
-    let at = ls.iter().position(|l| key(l).starts_with("repro:"))?;
+    let at = ls.iter().position(|l| block_key(l).starts_with("repro:"))?;
     let mut fence = false;
     let block = (ls.iter().skip(at + 1).copied())
         .take_while(|l| {
@@ -559,7 +562,7 @@ pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
             !end
         })
         .collect();
-    Some((key(ls.get(at)?).split_off(6), block))
+    Some((block_key(ls.get(at)?).split_off(6), block))
 }
 
 fn repro_section(pr_body: &str) -> Option<String> {
@@ -724,7 +727,7 @@ fn premerge(
         format!("origin/{}", f.integration),
     );
     let (dir, wts) = (f.local_path(), wt.to_string_lossy());
-    let tip = || crate::clone::fetch(ctx, r, &dir, &["-q", "origin"]).and_then(|_| git(r, &dir, &["rev-parse", &into]));
+    let tip = || crate::clone::fetch_branches(ctx, r, &dir).and_then(|_| git(r, &dir, &["rev-parse", &into]));
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     for _ in 0..2 {
         let base = tip()?;

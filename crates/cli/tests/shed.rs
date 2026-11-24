@@ -185,7 +185,11 @@ fn a_lane_spawns_on_shed() {
         cmds[1].as_array().unwrap()[3..6],
         [json!("worktree"), json!("add"), json!("-b")]
     );
-    assert_eq!((cmds[2][0].as_str(), cmds[2][1].as_str()), (Some("shed"), Some("run")));
+    assert_eq!(
+        cmds[2].as_array().unwrap()[3..5],
+        [json!("config"), json!("branch.issue-12.remote")]
+    );
+    assert_eq!((cmds[4][0].as_str(), cmds[4][1].as_str()), (Some("shed"), Some("run")));
     assert!(b.methods().is_empty(), "a dry run calls nothing");
 
     let f = spawn_fake();
@@ -193,7 +197,7 @@ fn a_lane_spawns_on_shed() {
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     let wt = c.worktrees.join("sendmeter/issue-12");
     assert!(f.called(&format!(
-        "git -C /tmp/does-not-matter/sendmeter worktree add -b issue-12 {} origin/staging",
+        "git -C /tmp/does-not-matter/sendmeter worktree add -b issue-12 --no-track {} origin/staging",
         wt.display()
     )));
     assert!(

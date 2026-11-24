@@ -1,0 +1,1 @@
+# notify_global = true   # also send this fleet's events to the global [[notify]]

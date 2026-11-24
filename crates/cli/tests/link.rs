@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 const NOW: u64 = 1_000_000;
 const COST_MS: u64 = 700;
-const BOATS: [&str; 3] = ["boat-1", "boat-2", "boat-3"];
+const BOATS: [&str; 4] = ["boat-1", "boat-2", "boat-3", "boat-4"];
 const EXE: &str = "/opt/drover/bin/drover";
 
 static CLOCK: AtomicU64 = AtomicU64::new(NOW);
@@ -174,8 +174,8 @@ fn fleet(name: &str, limits: &str) -> Fleet {
     let c = ctx(&d, &cfg);
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let mut lanes = vec![];
-    for n in 1..=30u64 {
-        let b = BOATS[usize::try_from(n % 3).unwrap()];
+    for n in 1..=40u64 {
+        let b = BOATS[usize::try_from(if n > 30 { 3 } else { n % 3 }).unwrap()];
         let wt = d.join(format!("{b}/sendmeter/issue-{n}"));
         std::fs::create_dir_all(wt.join(".drover")).unwrap();
         let agent = format!("sendmeter-impl-{n}");
@@ -322,7 +322,7 @@ fn the_service_links_every_host_and_a_pass_on_live_links_calls_none() {
     let cfg = drover::config::Config::load(&f.c.config).unwrap();
     let rows = drover::timer::services(&f.now(), &cfg, f.r, None);
     let links = rows.iter().find(|r| r.0 == "links").unwrap();
-    assert_eq!((links.1, links.2.as_str()), ("g", "4 of 4 live"));
+    assert_eq!((links.1, links.2.as_str()), ("g", "5 of 5 live"));
 }
 
 #[test]
@@ -430,4 +430,51 @@ fn a_poll_of_a_linked_host_leaves_its_link_live() {
     drover::link::look_at(&f.now(), &cfg, f.r, Some("boat-1")).unwrap();
     assert!(f.live("boat-1"), "{:?}", f.view().link("boat-1"));
     f.r.mute("boat-1", false);
+}
+
+#[test]
+fn an_hour_of_4_boats_and_40_lanes_at_700ms_a_call_acts_within_5s_p95_and_no_pass_reads_a_boat() {
+    let f = fleet("link-soak", "link_beat_secs = 1");
+    f.links();
+    let live = || BOATS.iter().all(|h| f.live(h));
+    until("every boat's link is live", 10, live);
+    let (mut lags, mut passes, mut reads) = (vec![], vec![], 0);
+    for minute in 0..60u64 {
+        CLOCK.fetch_add(60, Relaxed);
+        until("every boat has word since the clock moved", 10, live);
+        let wrote: Vec<_> = (0..3)
+            .map(|i| (minute * 3 + i) % 40 + 1)
+            .map(|n| (n, f.write(n, &["turn", "working"]).1))
+            .collect();
+        until("every turn kicked its issue", 30, || {
+            wrote.iter().all(|(n, t)| f.r.kicked_at(*n, *t).is_some())
+        });
+        lags.extend(
+            wrote
+                .iter()
+                .map(|(n, t)| f.r.kicked_at(*n, *t).unwrap().duration_since(*t).as_millis()),
+        );
+        let (before, spent, t) = (f.r.calls(), f.r.spent_ms.load(Relaxed), Instant::now());
+        let (code, out) = run(&f.now(), f.r, &["drive", "sendmeter"]);
+        assert_eq!(code, 0, "{out}");
+        let after = f.r.calls();
+        reads += after
+            .iter()
+            .map(|(h, n)| n - before.get(h).unwrap_or(&0))
+            .sum::<usize>();
+        passes.push(t.elapsed().as_millis() + u128::from(f.r.spent_ms.load(Relaxed) - spent));
+    }
+    lags.sort_unstable();
+    let p95 = lags[lags.len() * 95 / 100 - 1];
+    let longest = passes.iter().max().copied().unwrap();
+    eprintln!(
+        "#1322 soak: 60 min on the test clock, 4 boats, 40 lanes, 700 ms a call: {} lines, event-to-action p50 {} ms, p95 {p95} ms; {} passes, longest {longest} ms; {reads} remote calls in passes",
+        lags.len(),
+        lags[lags.len() / 2],
+        passes.len()
+    );
+    assert!(p95 <= 5_000, "event-to-action p95 {p95} ms (target 5 s)");
+    assert!(longest <= 60_000, "longest pass {longest} ms (target 60 s)");
+    assert_eq!(reads, 0, "a pass reads no boat");
+    once_each(&f, 180);
 }

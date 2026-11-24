@@ -1,0 +1,12 @@
+flow = "handoff"
+states = ["picked"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "deliver"
+when = {  }
+do = "deliver-handoff"
+owner = "drive"
+timeout = "act_minutes"
+say = "deliver the hand-off"

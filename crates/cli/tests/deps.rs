@@ -118,7 +118,9 @@ fn tick_runs_deps_monthly_and_files_each_new_advisory_once_only_where_monthly() 
     let r = ticker(90, "[]");
     let first = tick(NOW, &r);
     assert!(
-        r.called("git -C /tmp/does-not-matter/sendmeter fetch -q origin staging"),
+        r.called(
+            "git -C /tmp/does-not-matter/sendmeter fetch -q origin +refs/heads/staging:refs/remotes/origin/staging"
+        ),
         "{:?}",
         r.calls.borrow()
     );
