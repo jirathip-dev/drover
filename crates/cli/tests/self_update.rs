@@ -373,7 +373,6 @@ fn a_release_is_staged_gated_swapped_synced_and_restarted() {
         "{calls}"
     );
     assert_eq!(kinds(&c, "self-updated")[0].str("sha"), Some(SHA));
-    assert!(kinds(&c, "self-update-swapping").is_empty(), "no remote host to hold");
 
     let r2 = release(base(&c, &live), "main", SHA, &live);
     assert_eq!(run(&c, &Disk(&r2), &["self-update"]).1, "= up to date @ abcdef1\n");

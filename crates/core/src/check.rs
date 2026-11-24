@@ -140,18 +140,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
-    let synced = links(ctx, cfg, &view, &events).and_then(|()| working(&ctx.state))?;
-    for name in cfg.hosts.keys() {
-        let mut tries = (synced.iter().rev()).filter(|e| e.kind == "host-sync" && e.str("host") == Some(name));
-        let Some(e) = tries.next().filter(|e| e.val("ok") == false) else {
-            continue;
-        };
-        let since = tries.find(|e| e.val("ok") == true).map_or(0, |e| e.ts);
-        let (from, to) = (e.str("from").unwrap_or("?"), e.str("to").unwrap_or("?"));
-        let why = format!("{name}: drover swap {from} → {to} failed there; the next self-update retries");
-        let d = json!({"key": format!("{name}@{since}"), "host": name, "reason": why});
-        fire(ctx, cfg, out, &synced, ("drover", None), "host-sync-failed", d)?;
-    }
+    links(ctx, cfg, &view, &events)?;
     for root in crate::roots::local(ctx, cfg) {
         let s = root.to_string_lossy();
         let was = |e: &&Event| e.str("root") == Some(&s) && matches!(e.kind.as_str(), "root-hung" | "root-answers");

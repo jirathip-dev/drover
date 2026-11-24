@@ -819,15 +819,6 @@ fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
     );
 }
 
-const STATUS: &str = "'sh' '-c' 'for x in";
-
-fn synced(status: &str) -> Fake {
-    healthy(fake(0.1, 0.1))
-        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
-        .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
-        .reply(&format!("{SSH}{STATUS}"), status)
-}
-
 #[test]
 fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     let c = setup("hosts-dry", "", true, 0);
@@ -1699,22 +1690,6 @@ fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_wor
         p.why.as_deref(),
         Some("stays on bazzite: its worktree there has unpushed work")
     );
-}
-
-#[test]
-fn a_tick_reads_the_version_of_a_reachable_host_though_its_health_check_times_out() {
-    let c = setup("hosts-tick-sync", "", true, 0);
-    let hosts = c.state.with_file_name("hosts.json");
-    let mut cache: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&hosts).unwrap()).unwrap();
-    cache["bazzite"]["probed"] = json!(0);
-    std::fs::write(&hosts, cache.to_string()).unwrap();
-    let _sh = FakeShed::attached(&c);
-    let bazzite = FakeShed::new();
-    let r = synced("drover 0.1.0 (0ld)\n-\n").once(&format!("{SSH}{GIT} 'ls-remote'"), 124, "");
-    let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(r.count(&format!("{SSH}{STATUS}")), 1, "{:#?}", r.calls.borrow());
-    assert!(!r.called(&format!("{SSH}'sh' '-c' 'V=")), "a tick never installs");
 }
 
 #[test]

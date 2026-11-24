@@ -656,12 +656,6 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         writeln!(out, "host history: {e:#}")?;
     }
     if let Some(b) = r.shed() {
-        match crate::shed::add_machines(cfg, r) {
-            Ok(added) => added
-                .iter()
-                .try_for_each(|m| writeln!(out, "shed: machine {m} added"))?,
-            Err(e) => writeln!(out, "shed machines: {e:#}")?,
-        }
         let res = crate::session::stamp::intake(ctx, cfg, &b.wire);
         if let (false, Err(e)) = (crate::shed::version_alert(ctx, cfg, &res)?, &res) {
             writeln!(out, "shed events: {e:#}")?;
