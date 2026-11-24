@@ -1,0 +1,13 @@
+flow = "pass"
+states = ["running"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "slow"
+when = {  }
+do = "wait"
+then = ["end-pass"]
+owner = "drive"
+timeout = "pass_max_secs"
+say = "a pass is running"

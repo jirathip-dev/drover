@@ -110,3 +110,9 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `self_update_lag_minutes` | `30` | how long a rollout waits for an enabled host that is not staged before the rest swap |
 | `self_update_stage_secs` | `300` | one host's download and gate of a release build |
 | `self_update_swap_secs` | `120` | how long a `self-update-swapping` mark holds remote placement when no `self-updated` follows |
+| `act_minutes` | `10` | a flow row drive owns must have acted within this long (#1649) |
+| `escalate_minutes` | `30` | a flow row's card stays with the orchestrator thread this long before the owner gets it (#1649) |
+| `start_minutes` | `10` | a flow row's check lane that ended with no verdict gets this long (#1649) |
+| `check_quiet_minutes` | `120` | a flow row's quiet check lane gets this long (#1649) |
+| `host_wait_minutes` | `30` | a flow row's loaded host, or one refusing every start, gets this long (#1649) |
+| `card_ttl_minutes` | `15` | a flow row's run card waits this long for approval (#1649) |

@@ -21,6 +21,7 @@ generated = [
     "crates/cli/tests/golden/briefs/rev-repro.md",
     "docs/config/limits.md",
     "fleet.example.toml",
+    "docs/flow.md",
 ]
 generate = "just gen"
 shared = [
@@ -28,6 +29,7 @@ shared = [
     "crates/core/src/cli.rs",
     "crates/core/src/cloud.rs",
     "crates/core/src/config.rs",
+    "crates/core/src/config/limit_docs.rs",
     "crates/core/src/doctor.rs",
     "crates/core/src/drive.rs",
     "crates/core/src/events.rs",
@@ -46,6 +48,10 @@ shared = [
     "crates/*/tests/**",
     "web/src/main.ts",
 ]
+
+[[collect]]
+dir = "crates/core/flow"
+glob = "**/*.toml"
 
 [[collect]]
 dir = "ci/cap.d"
@@ -77,7 +83,7 @@ except = ["assets/types/**", "web/dist/**", "web/lint-fixtures/**"]
 
 [docs]
 paths = ["docs/**/*.md", "README.md"]
-watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/server/src/api.rs"]
+watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/core/src/config/limit_docs.rs", "crates/server/src/api.rs"]
 cli = true
 skip = [".drover/**", "roles/usage-tail.md", "scripts/test-shards.txt"]
 

@@ -26,6 +26,16 @@ fn joined(p: &Path) -> String {
     }
 }
 
+fn tomls(dir: &Path, out: &mut Vec<PathBuf>) {
+    for p in files(dir) {
+        if p.is_dir() {
+            tomls(&p, out);
+        } else if p.extension().is_some_and(|e| e == "toml") {
+            out.push(p);
+        }
+    }
+}
+
 fn main() {
     let tail: String = files(Path::new("roles/usage"))
         .iter()
@@ -34,6 +44,22 @@ fn main() {
     let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default());
     std::fs::write(out.join("usage-tail.md"), tail).unwrap_or_default();
     println!("cargo:rerun-if-changed=roles/usage");
+    let root = std::env::current_dir().unwrap_or_default().join("flow");
+    let mut flow = vec![];
+    tomls(&root, &mut flow);
+    let list: String = flow
+        .iter()
+        .map(|p| {
+            let rel = p.strip_prefix(&root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+            format!("    ({rel:?}, include_str!({:?})),\n", p.to_string_lossy())
+        })
+        .collect();
+    std::fs::write(
+        out.join("flow_files.rs"),
+        format!("const FILES: &[(&str, &str)] = &[\n{list}];\n"),
+    )
+    .unwrap_or_default();
+    println!("cargo:rerun-if-changed=flow");
     println!("cargo:rustc-env=DROVER_SHA={}", git(&["rev-parse", "HEAD"]));
     let dir = git(&["rev-parse", "--git-dir"]);
     if !dir.is_empty() {

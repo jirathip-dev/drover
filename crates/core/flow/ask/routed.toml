@@ -1,0 +1,14 @@
+flow = "ask"
+states = ["routed"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "in-thread"
+when = {  }
+do = "wait"
+then = ["to-owner"]
+owner = "orchestrator"
+timeout = "escalate_minutes"
+to = ["with-owner", "answered"]
+say = "with the orchestrator thread"

@@ -1,0 +1,13 @@
+flow = "card"
+states = ["approved"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "run"
+when = {  }
+do = "run-card"
+then = ["kill-run"]
+owner = "drive"
+timeout = "subject"
+say = "run the approved card"

@@ -1,0 +1,32 @@
+flow = "issue"
+states = ["blocked"]
+reads = ["pr", "verdict"]
+ignores = ["lane", "host", "ask", "turn"]
+
+[[row]]
+id = "merged-outside"
+when = { pr = ["merged"], verdict = "*" }
+do = "record-merge"
+owner = "drive"
+timeout = "act_minutes"
+to = ["merged"]
+say = "merged outside drover: record it"
+
+[[row]]
+id = "pr-closed"
+when = { pr = ["closed"], verdict = "*" }
+do = "raise-card"
+owner = "drive"
+timeout = "act_minutes"
+escalate = "orchestrator"
+to = ["needs-human"]
+say = "PR closed outside drover: a card"
+
+[[row]]
+id = "back"
+when = { pr = ["none", "open", "pending", "red", "green", "conflicting"], verdict = ["none", "written", "PASS", "FAIL", "refused"] }
+do = "reconcile"
+owner = "drive"
+timeout = "act_minutes"
+to = ["ready", "review", "fix"]
+say = "an old blocked state: reconcile"
