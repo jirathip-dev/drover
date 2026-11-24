@@ -511,6 +511,15 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             format!("shed agent {id} — {cmd} not on the timer's PATH → install {cmd} in a folder on it ({path})");
         row(rows, found, '✗', &line);
     }
+    let acp = cfg.fleet.iter().filter(|(n, _)| cfg.shed_for(n).is_some());
+    let roles = acp.flat_map(|(_, f)| f.role.values().map(|role| role.harness.as_str()));
+    let agents: BTreeSet<String> = (roles.chain(cfg.chat.harness.as_deref()))
+        .filter(|h| crate::providers::get(h).acp().is_some())
+        .map(str::to_string)
+        .collect();
+    if let Some(s) = cfg.shed().filter(|_| !agents.is_empty()) {
+        rows.extend(crate::shed::account_rows(r, &s.wire, &agents));
+    }
     if let Ok(n) = crate::top::normal(ctx, cfg, r) {
         rows.push(n.first().map_or_else(
             || "✓ lane priority".into(),

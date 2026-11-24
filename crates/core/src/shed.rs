@@ -121,6 +121,44 @@ pub fn line(r: &dyn Runner, w: &Wire) -> String {
     }
 }
 
+const ACCOUNTS: u32 = 5;
+
+/// Doctor's account rows from `account.ls` on `w`: per agent, its signed-in named accounts or `✗` with the `shed account add` line; one `✗` row for a shed under protocol 5.
+pub fn account_rows(r: &dyn Runner, w: &Wire, agents: &std::collections::BTreeSet<String>) -> Vec<String> {
+    let ls = (Method::AccountLs, json!(proto::AccountsParams::default()));
+    let got = exchange(r, w, &[ls]).and_then(|t| answer(&t, 1));
+    let list = match got {
+        Ok((h, _)) if h.protocol < ACCOUNTS => {
+            return vec![format!(
+                "✗ account — shed serve is {}, accounts need protocol {ACCOUNTS} → {UPDATE}",
+                side(&h)
+            )]
+        }
+        Ok((_, mut v)) => v.pop().context("shed: connection closed").and_then(|x| x),
+        Err(e) => Err(e),
+    };
+    let all: Vec<proto::Account> = match list.and_then(|v| Ok(serde_json::from_value(v)?)) {
+        Ok(all) => all,
+        Err(e) => return vec![format!("! account — account.ls: {e:#}")],
+    };
+    let signed = |a: &&proto::Account| {
+        a.name != "default" && matches!(a.state, proto::AccountState::Ready | proto::AccountState::Limited)
+    };
+    agents
+        .iter()
+        .map(|id| {
+            let names: Vec<&str> = (all.iter().filter(|a| a.provider == *id).filter(signed))
+                .map(|a| a.name.as_str())
+                .collect();
+            if names.is_empty() {
+                format!("✗ account {id}: no signed-in named account → shed account add {id} <name>")
+            } else {
+                format!("✓ account {id}: {}", names.join(", "))
+            }
+        })
+        .collect()
+}
+
 fn on_path(r: &dyn Runner) -> Option<Hello> {
     let o = r.run("shed", &argv(&["--version"])).ok().filter(|o| o.code == 0)?;
     let (version, build) = o.stdout.trim().strip_prefix("shed ")?.split_once(" (")?;

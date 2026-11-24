@@ -27,6 +27,8 @@ pub struct State {
     pub held: Option<String>,
     /// What the link does to each connection (`Fault::None`: answers at once).
     pub fault: Fault,
+    /// The accounts `account.ls` answers with.
+    pub accounts: Vec<Value>,
 }
 
 /// A fault the fake link injects into each connection: `Hang` reads and never answers, `Latency` answers late, `Loss(n)` closes the next n unanswered, `Gone` takes the socket away.
@@ -294,6 +296,7 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
         }
         "ls" => Ok(json!(terms.values().collect::<Vec<_>>())),
         "events" => Ok(json!({})),
+        "account.ls" => Ok(json!(st.accounts)),
         _ if !terms.contains_key(&name) => Err(gone()),
         "get" => Ok(terms[&name].clone()),
         "read" if p["events"] == true && terms[&name]["acp"].is_string() => {
