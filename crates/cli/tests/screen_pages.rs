@@ -254,6 +254,25 @@ fn a_stream_delta_puts_a_new_event_on_top_and_drops_no_loaded_row() {
     assert_eq!(insert["block"]["title"], "review PASS · round 2");
 }
 
+const PAINTS: usize = 40;
+
+fn p95(ms: &mut [u64]) -> u64 {
+    ms.sort_unstable();
+    ms[(ms.len() * 95).div_ceil(100) - 1]
+}
+
+#[test]
+fn one_slow_events_paint_of_the_samples_does_not_set_their_p95() {
+    let fast: Vec<u64> = (0..12).map(|i| 115 + i * 21 / 11).collect();
+    let mut thirteen: Vec<u64> = fast.iter().copied().chain([170]).collect();
+    assert_eq!(p95(&mut thirteen), 170);
+    let mut runs: Vec<u64> = fast.iter().cycle().take(PAINTS - 1).copied().chain([170]).collect();
+    assert!(
+        p95(&mut runs) <= 150,
+        "p95 of {PAINTS} paints with one at 170 ms: {runs:?}"
+    );
+}
+
 #[test]
 fn scrolling_the_events_tab_to_its_end_appends_the_next_page_in_place_and_it_paints_within_150ms_in_webkit() {
     if no_webkit() {
@@ -287,6 +306,7 @@ fn scrolling_the_events_tab_to_its_end_appends_the_next_page_in_place_and_it_pai
         .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/ui/pages.mjs"))
         .arg(format!("http://{addr}/"))
         .arg(ck.trim().trim_start_matches("Cookie: "))
+        .arg(PAINTS.to_string())
         .output()
         .unwrap();
     let out: Value =
@@ -306,8 +326,10 @@ fn scrolling_the_events_tab_to_its_end_appends_the_next_page_in_place_and_it_pai
         .iter()
         .map(|v| v.as_u64().unwrap())
         .collect();
-    ms.sort_unstable();
-    let p95 = ms[(ms.len() * 95).div_ceil(100) - 1];
+    let p95 = p95(&mut ms);
     eprintln!("#1316 events first paint: p95 {p95} ms over {} ({ms:?})", ms.len());
-    assert!(ms.len() >= 10 && p95 <= 150, "events first paint p95 {p95} ms: {ms:?}");
+    assert!(
+        ms.len() >= PAINTS && p95 <= 150,
+        "events first paint p95 {p95} ms: {ms:?}"
+    );
 }

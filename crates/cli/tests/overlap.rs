@@ -948,6 +948,38 @@ fn cap_prints_the_queue_wide_view() {
     }
 }
 
+#[test]
+fn cap_counts_by_the_rules_in_cap_toml_like_cap_check() {
+    let (_d, seed, c, _) = repos("cap-rules");
+    for dir in ["crates/a/src", "ci", "src"] {
+        std::fs::create_dir_all(seed.join(dir)).unwrap();
+    }
+    let toml = "[fleet.sendmeter]\nline_cap = 1000\ncount = [\"crates/*/src/**/*.rs\"]\nskip_blank = true\nstop_at_cfg_test = true\n";
+    std::fs::write(seed.join("ci/cap.toml"), toml).unwrap();
+    std::fs::write(seed.join("src/main.rs"), "fn main() {}\n").unwrap();
+    let lib = "fn a() {}\n\n   \nfn b() {}\n  #[cfg(test)]\nmod tests {\n    fn t() {}\n}\n";
+    commit(&seed, "crates/a/src/lib.rs", lib, "staging");
+    let (code, out) = drover_in(&seed, &["cap-check", "--config", "ci/cap.toml"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("src lines (formatted): 2 / cap 1000\n"), "{out}");
+    git(&seed, &["checkout", "-q", "-B", "issue-4", "staging"]);
+    let more = "fn c() {}\n\nfn d() {}\n#[cfg(test)]\nmod t {}\n";
+    commit(&seed, "crates/a/src/m.rs", more, "issue-4");
+    git(&seed, &["checkout", "-q", "staging"]);
+    let pr = json!({"number": 14, "state": "OPEN", "baseRefName": "staging", "body": "no figure"});
+    let r = Mixed(Fake::default().reply("gh pr view issue-4", &pr.to_string()));
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "4"]).0, 0);
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: 2 / cap 1000 at staging",
+        "counted by ci/cap.toml: count crates/*/src/**/*.rs, skip_blank, stop_at_cfg_test\n",
+        "  #4 (PR #14): +2 (measured)",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}
+
 struct Shell(Mixed);
 
 impl Runner for Shell {

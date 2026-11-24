@@ -1,1 +1,0 @@
-- HOST_UPDATING: spawn: a staged release swaps on every host (`[limits] self_update_swap_secs`); its running lanes finish, placement passes over remote hosts until the swap ends. A host on another build otherwise takes lanes
