@@ -24,8 +24,7 @@ closed lanes (shown as `<host>:<path>`) and lists the orphan folders under each 
 drover's own processes and the `cp` clones they run (#825), and a refusal on load names the 3 busiest other processes
 (`top: rustc 900%, …`). A tapped start held by load alone waits and starts on the first pass the host admits it; its
 card never comes back for the load. When no host fits at
-all (or only a cloud host over its budget fits), it is refused with `REFUSED NO_HOST: no host with docker`, plus
-` (cloud host stopped or over budget)` when fleet.toml has a cloud host. drive
+all, it is refused with `REFUSED NO_HOST: no host with docker`. drive
 retries on its next pass.
 
 ### Start slots (#1186)

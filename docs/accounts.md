@@ -48,8 +48,7 @@ with the same facts:
 
 `drover check` alerts `proxy-token-expiring` (pushed) once at 30 d and once at 7 d left, naming the steps. An
 upstream 401 on the token alerts `proxy-token-rejected` (pushed) once per saved token, not once per lane. A remote
-spawn without the file is refused `NO_PROXY_TOKEN` with the setup command, and so is starting a `shed-acp` cloud
-host (`hosts bootstrap`, drive's start), before any VM is made or resumed.
+spawn without the file is refused `NO_PROXY_TOKEN` with the setup command.
 
 ## Retired keys
 

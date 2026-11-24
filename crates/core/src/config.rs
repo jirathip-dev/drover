@@ -246,13 +246,7 @@ pub struct HostCfg {
     pub roots: Vec<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
-    /// A cloud host's recipe (`boat`, or `<config>/recipes/<name>.toml`), size, limits and idle stop (20 min).
-    pub cloud: Option<String>,
-    pub size: Option<String>,
-    pub budget_usd_month: Option<f64>,
-    pub max_hours_day: Option<f64>,
-    pub idle_stop_minutes: Option<u64>,
-    /// Its lanes' command rules: `deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops entries (unset: a cloud host allows `CLOUD_ALLOW`, a Mac nothing).
+    /// Its lanes' command rules: `deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops entries.
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
@@ -274,18 +268,6 @@ pub struct HostCfg {
     pub heavy_kind_max: BTreeMap<String, usize>,
     /// Minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
     pub heavy_wait_minutes: Option<u64>,
-    /// Who issues gh's token here: `managed` (default) warns before it expires, `external` never does.
-    #[serde(default)]
-    pub github_token: GithubToken,
-}
-
-/// Who issues a host's GitHub token.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum GithubToken {
-    #[default]
-    Managed,
-    External,
 }
 
 /// The point a starting lane frees its start slot.
@@ -296,9 +278,6 @@ pub enum StartRelease {
     Confirmed,
 }
 
-/// A cloud host is a disposable machine: its lanes may start containers.
-pub const CLOUD_ALLOW: [&str; 3] = ["docker", "docker compose", "supabase start"];
-
 impl HostCfg {
     /// Its workspace roots in order, as written (none set: empty).
     pub fn roots(&self) -> Vec<String> {
@@ -306,19 +285,8 @@ impl HostCfg {
         v.extend(self.root.clone().filter(|_| v.is_empty()));
         v
     }
-    /// Whether health looks at gh's token here: a cloud host whose token drover manages.
-    pub fn watches_token(&self) -> bool {
-        self.cloud.is_some() && self.github_token == GithubToken::Managed
-    }
     pub fn allow(&self) -> Vec<String> {
-        let def = || {
-            CLOUD_ALLOW
-                .iter()
-                .filter(|_| self.cloud.is_some())
-                .map(ToString::to_string)
-                .collect()
-        };
-        self.allow_commands.clone().unwrap_or_else(def)
+        self.allow_commands.clone().unwrap_or_default()
     }
     /// The lane hook's deny list on this host, from the fleet's (`fleet`).
     pub fn deny(&self, fleet: Vec<Deny>) -> Vec<Deny> {
@@ -738,7 +706,6 @@ pub struct Limits {
     pub slow_secs: u64,
     pub form_categories: Vec<String>,
     pub form_rounds: u32,
-    pub overflow_after_minutes: u64,
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
     pub max_parallel_spawns: usize,
@@ -771,7 +738,6 @@ pub struct Limits {
     pub link_down_minutes: u64,
     pub db_busy_secs: u64,
     pub db_retry_millis: u64,
-    pub cloud_idle_stop_minutes: u64,
     pub notify_secs: u64,
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
@@ -878,7 +844,6 @@ impl Default for Limits {
                 .unwrap_or_default(),
             fast_secs: 60,
             slow_secs: 300,
-            overflow_after_minutes: 10,
             form_categories: ["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]
                 .map(String::from)
                 .into(),
@@ -915,7 +880,6 @@ impl Default for Limits {
             link_down_minutes: 5,
             db_busy_secs: 60,
             db_retry_millis: 10,
-            cloud_idle_stop_minutes: 20,
             notify_secs: 15,
             gate_check_minutes: 30,
             shed_read_millis: 300,

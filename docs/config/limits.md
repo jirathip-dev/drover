@@ -35,7 +35,6 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `slow_secs` | `300` | the slow tick runs every this many seconds |
 | `form_categories` | `["trailer", "stale-baseline", "docs-fresh", "migration-redate", "infra"]` | the finding tags a `FAIL (form-only)` may carry |
 | `form_rounds` | `3` | form-only FAILs per issue that don't count as a review round |
-| `overflow_after_minutes` | `10` | every local host refused this long lets placement start a stopped cloud host |
 | `import_max_age_hours` | `24` | a remote host's asks older than this are never imported |
 | `max_pushes_per_pass` | `3` | push alerts `check` sends a pass before a summary |
 | `max_parallel_spawns` | `6` | concurrent detached spawn kicks on the main host (0: in the pass) |
@@ -68,7 +67,6 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `link_down_minutes` | `5` | a host with lanes whose link is not live this long alerts `link-down` |
 | `db_busy_secs` | `60` | the SQLite busy timeout |
 | `db_retry_millis` | `10` | the pause between a new database's WAL switch retries |
-| `cloud_idle_stop_minutes` | `20` | a cloud host's `idle_stop_minutes` when it sets none |
 | `notify_secs` | `15` | a notifier command or web push send is killed after this long |
 | `gate_check_minutes` | `30` | a premerge or gate check (a build or test run) is killed after this long |
 | `shed_read_millis` | `300` | how long drive's intake waits for shed's state changes |

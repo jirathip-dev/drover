@@ -608,14 +608,6 @@ pressure?: number | null, swap?: number | null, top: Array<string>,
  */
 mem_total?: number | null, disk_total?: number | null, 
 /**
- * When it last had a live agent (a cloud host's idle stop).
- */
-busy: number, 
-/**
- * A cloud host's gh token, as its card says it.
- */
-github: string, 
-/**
  * Its set workspace roots.
  */
 roots: Array<HostRoot>, };

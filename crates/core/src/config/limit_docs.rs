@@ -89,10 +89,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "form-only FAILs per issue that don't count as a review round",
     ),
     (
-        "overflow_after_minutes",
-        "every local host refused this long lets placement start a stopped cloud host",
-    ),
-    (
         "import_max_age_hours",
         "a remote host's asks older than this are never imported",
     ),
@@ -192,10 +188,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "db_retry_millis",
         "the pause between a new database's WAL switch retries",
-    ),
-    (
-        "cloud_idle_stop_minutes",
-        "a cloud host's `idle_stop_minutes` when it sets none",
     ),
     (
         "notify_secs",
