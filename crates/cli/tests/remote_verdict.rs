@@ -165,6 +165,25 @@ fn a_verdict_md_in_the_hosts_report_is_recorded_in_the_same_pass() {
     assert!(kinds(&c, "verdict-pickup-failed").is_empty(), "{out}");
 }
 
+#[test]
+fn a_remote_verdict_md_the_hosts_report_never_carries_is_read_there_and_recorded_in_one_pass() {
+    let (c, rev) = setup("remote-verdict-unreported");
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    bazzite.lane(LANE, "done", &rev);
+    let verdict = format!("PASS\n\nReviewed head: {}\n", head());
+    let f = boat(&rev, Ok(&verdict));
+    std::fs::remove_file(format!("{rev}/verdict.md")).unwrap();
+    let f = f.reply(&format!("{SSH}'cat' '{rev}/verdict.md'"), &verdict);
+    let (code, out) = run(&c, &two(&f, &bazzite), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let v = kinds(&c, "verdict");
+    assert_eq!(v.len(), 1, "{out}");
+    assert_eq!(
+        (v[0].str("verdict"), v[0].str("sha")),
+        (Some("PASS"), Some(head().as_str()))
+    );
+}
+
 fn fix_due(c: &drover::Ctx, n: u64) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();

@@ -8,7 +8,7 @@ use crate::hosts::On;
 use crate::hygiene::Check;
 use crate::lanes::Health;
 use crate::runner::{ok, Runner};
-use crate::session::{Session, Status};
+use crate::session::{stamp::since as stamped, Session, Status};
 use crate::spawn::{changes, dirty, dirty_past, own_files, SHOT_DIRS};
 use crate::Ctx;
 use crate::{gh, term};
@@ -1472,7 +1472,10 @@ pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     let events = working(&ctx.state)?;
     let spawned = (events.iter().filter(|e| e.kind == "spawn" && e.ts >= since)).filter_map(|e| e.str("agent"));
     let agents = crate::session::live_on(r)?;
-    let names = agents.iter().filter(|a| !a.hollow()).map(|a| a.name.as_str());
+    let live = |a: &&Session| {
+        !a.hollow() && (a.status() != Some(Status::Done) || stamped(&events, &a.name).is_none_or(|t| t > since))
+    };
+    let names = agents.iter().filter(live).map(|a| a.name.as_str());
     Ok(names.chain(spawned).map(String::from).collect())
 }
 

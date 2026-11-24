@@ -39,8 +39,8 @@ pub(super) fn fetch(
     let path = format!("{}/verdict.md", sp.str("worktree").unwrap_or_default());
     let view = crate::link::view::View::load(ctx, cfg)?;
     let text = match view.worktree(sp) {
-        Some(w) => match &w.verdict {
-            Some(v) => v.text.clone(),
+        Some(_) => match crate::link::read(ctx, cfg, r, Some(sp), &path) {
+            Some(t) => t,
             None => return Ok(Picked::No),
         },
         None => match view.down(sp.str("machine")) {

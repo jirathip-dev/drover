@@ -337,7 +337,7 @@ fn design_lane_spawns_but_never_moves_the_issue() {
     let wt = c.worktrees.join("sendmeter/design-12");
     assert!(
         r.called(&format!(
-            "git -C /tmp/does-not-matter/sendmeter worktree add -b design-12 {} origin/staging",
+            "git -C /tmp/does-not-matter/sendmeter worktree add -b design-12 --no-track {} origin/staging",
             wt.display()
         )),
         "{:?}",
