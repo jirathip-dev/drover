@@ -192,10 +192,10 @@ fn reply(w: &mut World, me: usize, prog: &str, args: &[String]) -> Out {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     let o = match prog {
         "shed" => {
+            let brief = matches!(a[..], ["send", n, _] if w.model.panes.iter().any(|p| p.id == n && !p.closed && p.agent.is_none()));
             let o = shed(w, &a);
-            let exec = a.get(1).is_some_and(|p| p.contains("\"text\":\"exec "));
-            if let (["send", _], true, 0) = (&a[..], exec, o.code) {
-                let pane = serde_json::from_str::<Value>(a[1]).unwrap_or_default()["name"].as_str().unwrap_or_default().to_string();
+            if let (true, 0) = (brief, o.code) {
+                let pane = a[1].to_string();
                 w.procs[me].starting = Some(pane.clone());
                 let agent = Some(pane.clone());
                 let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
@@ -285,6 +285,25 @@ fn shed(w: &mut World, a: &[&str]) -> Out {
         let (v, b) = (drover::shed::proto::VERSION, drover::shed::proto::BUILD);
         return ok(format!("shed {v} ({b})\n"));
     }
+    match a {
+        ["help", "run"] => return ok("--meta <JSON>"),
+        ["agents", "--json"] => {
+            return ok(json!([{"id": "claude-acp", "version": "0.101.0", "cmd": ["claude-acp"]}]).to_string())
+        }
+        ["run", "--acp", ..] => {
+            let at = |k: &str| a.iter().position(|x| *x == k).map_or("", |i| a[i + 1]);
+            let p = json!({"name": at("--name"), "cwd": at("--cwd")});
+            let o = shed(w, &["run", &p.to_string()]);
+            if let Some(t) = w.model.pane(at("--name")).filter(|_| o.code == 0) {
+                t.screen = "ACP session ready\n".into();
+            }
+            return o;
+        }
+        ["send", name, text] => return shed(w, &["send", &json!({"name": name, "text": text}).to_string()]),
+        ["cancel", name] if !name.starts_with('{') => return ok(""),
+        ["kill", name] if !name.starts_with('{') => return shed(w, &["kill", &json!({"name": name}).to_string()]),
+        _ => {}
+    }
     let [m, p] = a else { return unmodelled() };
     let p: Value = serde_json::from_str(p).unwrap_or_default();
     let name = p["name"].as_str().unwrap_or_default().to_string();
@@ -355,7 +374,7 @@ fn shed(w: &mut World, a: &[&str]) -> Out {
             if w.model.pane(&name).is_none() {
                 return gone();
             }
-            if text.starts_with("exec ") {
+            if w.model.pane(&name).is_some_and(|p| p.agent.is_none()) {
                 let role = name.split('-').nth(1).unwrap_or("impl").to_string();
                 let own = format!("{role}#{}", name.split('-').nth(2).unwrap_or_default());
                 let queued = match w.model.scripts.get_mut(&own) {

@@ -29,7 +29,7 @@ enum Cmd {
         fleet: String,
         #[arg(help = "impl | rev | design")]
         role: String,
-        #[arg(long, help = providers::lane_names().join(" | "), value_parser = clap::builder::PossibleValuesParser::new(providers::lane_names()))]
+        #[arg(long, help = providers::lane_names().join(" | "))]
         harness: Option<String>,
         #[arg(long, help = "Model name (ignored where the provider's profile owns the model)")]
         model: Option<String>,
@@ -642,9 +642,6 @@ enum Cmd {
         #[arg(help = "The lane's role; `rev` is read-only")]
         #[arg(long)]
         role: Option<String>,
-        #[arg(help = "Act as git's pre-push hook (reads `<local ref> <sha> <remote ref> <sha>` lines on stdin)")]
-        #[arg(long)]
-        git_pre_push: bool,
     },
     #[command(hide = true, about = "A provider's status line: the lane's fleet and issue")]
     Statusline,
@@ -1301,14 +1298,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Hosts {
             cmd: Some(c @ (HostsCmd::Report | HostsCmd::Watch)),
         } => crate::link::watch::answer(r, matches!(c, HostsCmd::Watch), stdin, out)?,
-        Cmd::Hook {
-            role,
-            git_pre_push: true,
-        } => return pre_push(ctx, r, out, stdin, role.as_deref() == Some("rev")),
-        Cmd::Hook {
-            role,
-            git_pre_push: false,
-        } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
+        Cmd::Hook { role } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
         Cmd::Statusline => crate::usage::statusline(&crate::config::env("DROVER_LANE").unwrap_or_default(), out),
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
         Cmd::Heavy(a) => {
@@ -2333,11 +2323,6 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         dir(&ctx.state),
         h.join(".config/fleet-operations").to_string_lossy().into(),
     ];
-    paths.extend(
-        providers::all()
-            .filter_map(|p| Some(p.home()?.default))
-            .map(|d| h.join(d).to_string_lossy().into()),
-    );
     paths.extend(crate::config::env("DROVER_RULES"));
     let orchestrator = crate::config::env("DROVER_LANE")
         .is_some_and(|l| l.split(':').nth(2).is_some_and(crate::orchestrator::is_role));
@@ -2424,55 +2409,6 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
         Ok(cfg) if !quiet => emit(&ctx.state, &cfg, ev).ok(),
         _ => crate::events::append(&ctx.state, &ev).ok(),
     };
-}
-
-fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<i32> {
-    let mut buf = String::new();
-    stdin.read_to_string(&mut buf)?;
-    let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
-    let rules = hook::lane_rules(ctx, &lane).unwrap_or_else(|_| {
-        let (mut it, host) = (lane.split(':'), crate::config::env("DROVER_HOST").unwrap_or_default());
-        let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
-        hook::Rules::resolve(&Config::load(&ctx.config).unwrap_or_default(), fleet, role, &host)
-    });
-    let reviewer = reviewer || rules.reviewer;
-    for dst in buf.lines().filter_map(|l| l.split_whitespace().nth(2)) {
-        let b = dst.trim_start_matches("refs/heads/");
-        if reviewer {
-            writeln!(
-                out,
-                "drover: reviewers are read-only: no `git push` (to `{b}`); write verdict.md and report in your pane"
-            )?;
-            return Ok(1);
-        }
-        if rules.branches.iter().any(|x| x == b) {
-            writeln!(
-                out,
-                "drover: pushing to `{b}` is blocked; integration branches change only via `drover merge`"
-            )?;
-            return Ok(1);
-        }
-    }
-    let deny = rules.deny;
-    for sha in buf.lines().filter_map(|l| l.split_whitespace().nth(1)) {
-        let specs = ["*.sh", "*.bash", "*.zsh", "*justfile", "*Justfile", "*Makefile"];
-        let mut args = vec!["log", "-p", "--format=", sha, "--not", "--remotes", "--"];
-        args.extend(specs.iter().chain(&[":!.github/workflows"]));
-        let diff = runner::ok(r, "git", &args).unwrap_or_default();
-        let mut hit = diff.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++"));
-        if let Some(d) = hit.find_map(|l| hook::denied(&l[1..], &deny)) {
-            lane_event(ctx, "hook-denied", json!({"rule": d.reason()}));
-            writeln!(out, "drover: a pushed script runs `{}`: {}", d.cmd(), d.reason())?;
-            return Ok(1);
-        }
-        if let Some(why) = rules.hygiene.as_ref().and_then(|c| crate::hygiene::pushed(r, c, sha)) {
-            lane_event(ctx, "hook-denied", json!({"rule": why}));
-            writeln!(out, "drover: {why}")?;
-            return Ok(1);
-        }
-        coauthor_warn(ctx, r, ".", sha);
-    }
-    Ok(0)
 }
 
 fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> queue::Places {

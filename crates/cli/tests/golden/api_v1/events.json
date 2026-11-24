@@ -71,7 +71,7 @@
         "act": "idle",
         "coat": "",
         "data": {
-          "device": "iPhone b57f"
+          "device": "iPhone e142"
         },
         "fleet": "drover",
         "glyph": "·",
@@ -91,7 +91,7 @@
         "act": "idle",
         "coat": "",
         "data": {
-          "harness": "hermes",
+          "harness": "claude",
           "thread": "t1",
           "title": "Let's talk about #30"
         },
@@ -138,12 +138,11 @@
           "agent": "orchestrator-t1",
           "confirmed": true,
           "effort": null,
-          "harness": "hermes",
+          "harness": "claude",
           "model": "opus",
           "pane": "orchestrator-t1",
           "resumed": false,
-          "runtime": "shed",
-          "session": "b6261e9b-bc8a-4dff-9a66-a0d8ec31d576",
+          "runtime": "shed-acp",
           "thread": "t1"
         },
         "fleet": "sendmeter",
@@ -168,7 +167,7 @@
           "machine": "bazzite",
           "name": "claude B",
           "pane": "drover-setup-claude-B",
-          "via": "web iPhone b57f"
+          "via": "web iPhone e142"
         },
         "fleet": "",
         "glyph": "·",

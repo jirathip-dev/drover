@@ -25,7 +25,7 @@ Copy the secret files with their mode (`scp -p` or `rsync -a`), never through ch
 
 ## Regenerate, don't copy
 
-- `~/.config/drover/claude/` (the per-role Claude profiles) and the Hermes profiles' hooks:
+- `~/.config/drover/claude/` (the per-role Claude profiles):
   `drover profiles sync`.
 - `gh auth login`, shed (and its job), and each fleet's `local` checkout (`git clone https://github.com/<repo>.git <local>`).
 - Then `drover setup` ([setup.md](setup.md#4-watchdog)): the tick and serve jobs, `tailscale serve`

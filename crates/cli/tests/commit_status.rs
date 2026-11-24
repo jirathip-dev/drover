@@ -6,7 +6,7 @@ use serde_json::json;
 const H1: &str = "1111111111111111111111111111111111111111";
 const H2: &str = "2222222222222222222222222222222222222222";
 const POST: &str = "gh api -X POST repos/jirathip-dev/sendmeter/statuses/";
-const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
 
 fn setup(name: &str, cfg: &str) -> (std::path::PathBuf, drover::Ctx) {
     let d = tmpdir(name);

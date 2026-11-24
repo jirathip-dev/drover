@@ -18,7 +18,7 @@ fn boat1(prog: &str, args: &[String]) -> bool {
 }
 
 fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.boat1]\nmachine = \"boat1\"\n{extra}");
     let c = ctx(&tmpdir(name), &toml);
     let st = c.state.parent().unwrap();
@@ -73,7 +73,7 @@ fn a_disabled_host_with_no_lane_there_gets_no_ssh_from_a_tick_or_status() {
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(to_boat1(&r), Vec::<String>::new(), "{out}");
-    assert!(sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "drive still starts: {out}");
     let (_, status) = run(&c, &r, &["status"]);
     assert_eq!(to_boat1(&r), Vec::<String>::new(), "{status}");
     let ev = read(&c.state).unwrap().to_vec();

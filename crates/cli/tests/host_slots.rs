@@ -26,8 +26,26 @@ fn fake() -> Fake {
         .reply("git -C", "")
 }
 
-fn drive(c: &drover::Ctx) -> String {
-    let (code, out) = run(c, &fake(), &["drive"]);
+struct Prompted<'a>(Fake, &'a FakeShed);
+
+impl drover::runner::Runner for Prompted<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        let o = self.0.run(prog, args);
+        let sent = args
+            .get(1)
+            .filter(|n| prog == "shed" && args[0] == "send" && self.1.has(n));
+        if let Some(name) = sent {
+            self.1.set(name, |t| t["reported"] = json!({"state": "working"}));
+        }
+        o
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+}
+
+fn drive(c: &drover::Ctx, sh: &FakeShed) -> String {
+    let (code, out) = run(c, &Prompted(fake(), sh), &["drive"]);
     assert_eq!(code, 0, "{out}");
     out
 }
@@ -39,14 +57,20 @@ fn state(c: &drover::Ctx, n: u64) -> String {
 }
 
 fn spawned(sh: &FakeShed) -> Vec<String> {
-    let runs = sh.all("run").into_iter();
-    runs.filter_map(|p| p["name"].as_str().map(String::from)).collect()
+    let mut started: Vec<String> = vec![];
+    for p in sh.all("send") {
+        let name = p["name"].as_str().unwrap_or_default().to_string();
+        if sh.has(&name) && !started.contains(&name) {
+            started.push(name);
+        }
+    }
+    started
 }
 
 #[test]
 fn over_max_working_a_start_waits_then_starts_when_a_lane_finishes() {
     let (c, sh) = fleet("slots-cap", "max_working = 2", "0", &["1", "2", "3"], &[]);
-    let out = drive(&c);
+    let out = drive(&c, &sh);
     assert_eq!(spawned(&sh), ["sendmeter-impl-1", "sendmeter-impl-2"], "{out}");
     assert!(out.contains("waiting for a slot: 2/2 working on mini"), "{out}");
     assert_eq!((state(&c, 2), state(&c, 3)), ("impl".into(), "queued".into()));
@@ -57,7 +81,7 @@ fn over_max_working_a_start_waits_then_starts_when_a_lane_finishes() {
     assert!(st.contains("waiting for a slot: 2/2 working on mini"), "{st}");
 
     sh.set("sendmeter-impl-1", |t| t["reported"] = json!({"state": "idle"}));
-    let out = drive(&c);
+    let out = drive(&c, &sh);
     assert_eq!(state(&c, 3), "impl", "{out}");
     assert!(spawned(&sh).contains(&"sendmeter-impl-3".to_string()), "{out}");
 }
@@ -65,14 +89,14 @@ fn over_max_working_a_start_waits_then_starts_when_a_lane_finishes() {
 #[test]
 fn a_ready_or_needs_human_lane_holds_no_slot_even_if_its_agent_works() {
     let (c, sh) = fleet("slots-idle", "max_working = 1", "0", &["1", "2"], &[]);
-    drive(&c);
+    drive(&c, &sh);
     assert_eq!(spawned(&sh), ["sendmeter-impl-1"]);
     sh.set("sendmeter-impl-1", |t| t["reported"] = json!({"state": "working"}));
     for kind in ["ready", "needs-human"] {
         let e = Event::new(c.now, "sendmeter", Some(1), kind, json!({"reason": "x"}));
         append(&c.state, &e).unwrap();
     }
-    let out = drive(&c);
+    let out = drive(&c, &sh);
     assert_eq!(state(&c, 2), "impl", "{out}");
 }
 
@@ -85,11 +109,11 @@ fn with_max_simulators_one_a_second_sim_lane_waits() {
         &["1", "2"],
         &["--needs", "sim"],
     );
-    let out = drive(&c);
+    let out = drive(&c, &sh);
     assert_eq!(spawned(&sh), ["sendmeter-impl-1"], "{out}");
     assert!(out.contains("waiting for a slot: 1/1 simulators on mini"), "{out}");
     sh.set("sendmeter-impl-1", |t| t["reported"] = json!({"state": "idle"}));
-    drive(&c);
+    drive(&c, &sh);
     assert_eq!(state(&c, 2), "queued");
 }
 
@@ -245,7 +269,7 @@ fn acp_panes_between_turns_hold_no_slot_and_a_new_start_is_placed() {
     let (code, st) = run(&c, &fake(), &["status"]);
     assert_eq!(code, 0, "{st}");
     assert!(st.contains("mini: working 1/4"), "{st}");
-    let out = drive(&c);
+    let out = drive(&c, &sh);
     assert!(!out.contains("waiting for a slot"), "{out}");
     assert!(spawned(&sh).contains(&"sendmeter-impl-20".to_string()), "{out}");
     assert_eq!(state(&c, 20), "impl", "{out}");
@@ -265,7 +289,7 @@ fn four_mid_turn_acp_panes_fill_the_host_whatever_idle_ones_sit_there() {
         "idle",
     ];
     acp_lanes(&c, &sh, &states);
-    let out = drive(&c);
+    let out = drive(&c, &sh);
     assert!(out.contains("waiting for a slot: 4/4 working on mini"), "{out}");
     assert!(!spawned(&sh).contains(&"sendmeter-impl-20".to_string()), "{out}");
 }

@@ -173,7 +173,7 @@ fn explain_prints_the_owner_action_table() {
 fn the_owners_verdict_and_spawn_count_and_a_lanes_do_not() {
     let c = ctx(
         &tmpdir("autonomy-owner"),
-        &CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""),
+        &CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\""),
     );
     let _sh = FakeShed::attached(&c);
     let w = c.worktrees.join("sendmeter").join("rev-12-r1");

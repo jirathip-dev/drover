@@ -7,7 +7,7 @@ use std::path::Path;
 const MAC: bool = cfg!(target_os = "macos");
 
 fn host(r: Fake) -> Fake {
-    r.reply("which hermes", "/opt/hermes/bin/hermes\n")
+    r.reply("which claude", "/opt/claude/bin/claude\n")
         .reply("which gh", "/opt/homebrew/bin/gh\n")
         .reply("which shed", "/opt/homebrew/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
@@ -20,7 +20,7 @@ fn host(r: Fake) -> Fake {
 fn job_files_match_their_goldens() {
     let d = tmpdir("timer-golden");
     let c = ctx(&d, CONFIG);
-    let path = "/opt/hermes/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+    let path = "/opt/claude/bin:/usr/bin:/bin:/usr/sbin:/sbin";
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/timer");
     for mac in [true, false] {
         for (label, args, every) in [
@@ -61,7 +61,7 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ wrote dev.drover.tick; load it: "), "{out}");
     let text = std::fs::read_to_string(job(&c, "dev.drover.tick")).unwrap();
-    let path = "/opt/hermes/bin:/opt/homebrew/bin:/opt/drover/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+    let path = "/opt/claude/bin:/opt/homebrew/bin:/opt/drover/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
     assert!(text.contains(path) && text.contains("tick"), "{text}");
     assert!(!r.called("launchctl bootstrap") && !r.called("systemctl --user enable"));
     assert_eq!(

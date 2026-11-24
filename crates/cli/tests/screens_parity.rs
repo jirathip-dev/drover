@@ -193,7 +193,7 @@ fn parity_84_the_drover_menu_opens_hosts_and_the_notifications_sheet() {
 fn parity_81_every_configured_role_gets_a_model_and_an_effort_picker_and_saving_sets_it() {
     let cfg = CONFIG.replacen(
         "[limits]",
-        "[fleet.sendmeter.role.verify]\nharness = \"hermes\"\neffort = \"low\"\n\n[limits]",
+        "[fleet.sendmeter.role.verify]\nharness = \"claude\"\neffort = \"low\"\n\n[limits]",
         1,
     );
     let c = ctx(&tmpdir("parity-81"), &format!("models = [\"opus\", \"sonnet\"]\n{cfg}"));
@@ -215,7 +215,7 @@ fn parity_81_every_configured_role_gets_a_model_and_an_effort_picker_and_saving_
             "sendmeter.verify.effort"
         ]
     );
-    let efforts: Vec<&str> = drover::providers::get("hermes").efforts().to_vec();
+    let efforts: Vec<&str> = drover::providers::get("claude").efforts().to_vec();
     let pick = |n: &str| fields.iter().find(|x| x["name"] == n).unwrap().clone();
     assert_eq!(pick("sendmeter.rev.effort")["options"], json!(efforts));
     assert_eq!(pick("sendmeter.rev.effort")["label"], "Review effort");

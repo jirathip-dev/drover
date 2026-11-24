@@ -5,7 +5,7 @@ use drover::runner::{Out, Runner};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-const SLOW: &str = "\n[fleet.slowfleet]\nrepo = \"jirathip-dev/slowfleet\"\nlocal = \"/tmp/does-not-matter/slowfleet\"\nintegration = \"staging\"\n\n[fleet.slowfleet.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n[fleet.slowfleet.role.rev]\nharness = \"hermes\"\nprofile = \"fleet-rev\"\n";
+const SLOW: &str = "\n[fleet.slowfleet]\nrepo = \"jirathip-dev/slowfleet\"\nlocal = \"/tmp/does-not-matter/slowfleet\"\nintegration = \"staging\"\n\n[fleet.slowfleet.role.impl]\nharness = \"claude\"\nprofile = \"fleet-impl\"\n\n[fleet.slowfleet.role.rev]\nharness = \"claude\"\nprofile = \"fleet-rev\"\n";
 
 struct Gate {
     f: Fake,
@@ -155,7 +155,6 @@ fn a_hung_pass_ends_itself_at_pass_max_secs_and_names_its_step() {
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
         .env("FLEET_WORKTREES", &c.worktrees)
-        .env("FLEET_HERMES_PROFILES", &c.homes["hermes"])
         .output()
         .unwrap();
     let secs = t.elapsed().as_secs_f64();

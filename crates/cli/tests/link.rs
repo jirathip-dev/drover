@@ -165,7 +165,7 @@ fn fleet(name: &str, limits: &str) -> Fleet {
     for h in std::iter::once("mini").chain(BOATS) {
         sheds.insert(h, Box::leak(Box::new(FakeShed::new())));
     }
-    let mut cfg = sheds["mini"].config(&CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""));
+    let mut cfg = sheds["mini"].config(&CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\""));
     cfg = cfg.replace("[limits]\n", &format!("[limits]\n{limits}\n"));
     cfg += "\n[hosts.mini]\n";
     for b in BOATS {

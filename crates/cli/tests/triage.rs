@@ -57,7 +57,7 @@ fn a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo() 
         out.contains("filed sendmeter#90: triage: sendmeter week of 1970-01-12"),
         "{out}"
     );
-    assert_eq!(sh.last("run")["name"], "sendmeter-triage-90", "{:?}", sh.methods());
+    assert!(sh.has("sendmeter-triage-90"), "{:?}", sh.methods());
     let events = read(&c.state).unwrap();
     let spawn = events.iter().find(|e| e.is("spawn", "sendmeter", 90)).expect("a lane");
     assert_eq!(

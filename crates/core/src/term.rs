@@ -213,20 +213,6 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
                 }),
             )
         }
-        ["pane", "wait-output", t, ..] => {
-            let output = flag("--match").map(String::from);
-            (
-                Method::Wait,
-                json!(WaitParams {
-                    children: None,
-                    kind: None,
-                    name: t.into(),
-                    until: vec![],
-                    output,
-                    timeout: secs
-                }),
-            )
-        }
         ["pane", "close", t] => (Method::Kill, json!(Target { name: t.into() })),
         _ => return None,
     })
@@ -294,16 +280,6 @@ impl Shed {
     }
 }
 
-/// A harness launch (`start_cmd`, a `pane run` line) as the line a lane's shell runs: `exec <line>`.
-pub fn typed(pane: &str, start: &[String]) -> Vec<String> {
-    run_argv(pane, &["exec", &start.get(3..).unwrap_or_default().join(" ")])
-}
-
-/// Pane word `a` as the shed request a plan shows (`shed <method> <params>`).
-pub fn shed_line(a: &[String]) -> Vec<String> {
-    request(a).map_or_else(|| a.to_vec(), |(m, v)| argv(&["shed", m.name(), &v.to_string()]))
-}
-
 fn shed(r: &dyn Runner) -> Result<Shed> {
     r.shed()
         .map(Shed)
@@ -350,14 +326,9 @@ pub fn send_text_argv(pane: &str, text: &str) -> Vec<String> {
     argv(&["pane", "send-text", pane, text])
 }
 
-/// The page's reply: the text (dsh: `pane send-text`, else `agent prompt`), then Enter.
-pub fn reply(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> Result<()> {
-    let first = if dsh {
-        send_text_argv(pane, text)
-    } else {
-        prompt_argv(agent, text)
-    };
-    for a in [first, keys_argv(pane, "Enter")] {
+/// The page's reply: the text (`agent prompt`), then Enter.
+pub fn reply(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> Result<()> {
+    for a in [prompt_argv(agent, text), keys_argv(pane, "Enter")] {
         let o = exec(r, &a)?;
         if o.code != 0 {
             bail!("{}: {}", a.get(..2).unwrap_or_default().join(" "), o.stderr.trim());
@@ -381,15 +352,15 @@ pub fn awake(r: &dyn Runner, agent: &str) -> Result<()> {
 }
 
 /// `reply` once `awake` lets drover's prompt through.
-pub fn tell(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> Result<()> {
+pub fn tell(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> Result<()> {
     awake(r, agent)?;
-    reply(r, dsh, agent, pane, text)
+    reply(r, agent, pane, text)
 }
 
 /// Whether a prompt the caller just entered moved the agent off idle within 20 s, typing it once more if not.
 pub fn landed(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> bool {
     let up = || exec(r, &wait_working_argv(agent, "20000")).is_ok_and(|o| o.code == 0);
-    up() || (reply(r, false, agent, pane, text).is_ok() && up())
+    up() || (reply(r, agent, pane, text).is_ok() && up())
 }
 
 /// Close the session, its log archived first (`session::transcript::archive`); one already gone is closed.
@@ -426,27 +397,8 @@ pub fn run_argv(pane: &str, words: &[&str]) -> Vec<String> {
     argv(&[&["pane", "run", pane][..], words].concat())
 }
 
-/// The harness `kind` launched in `pane` with `args`, as its shell line.
-pub fn start_argv(kind: &str, pane: &str, args: &[String]) -> Vec<String> {
-    run_argv(pane, &[&crate::hosts::quote(kind, args)])
-}
-
 /// `agent wait` until the kick shows as working or blocked.
 pub fn wait_working_argv(agent: &str, ms: &str) -> Vec<String> {
     let a = format!("agent wait {agent} --until working --until blocked --timeout {ms}");
     argv(&a.split(' ').collect::<Vec<_>>())
-}
-
-pub fn wait_output_argv(pane: &str, pattern: &str, ms: &str) -> Vec<String> {
-    argv(&[
-        "pane",
-        "wait-output",
-        pane,
-        "--match",
-        pattern,
-        "--source",
-        "visible",
-        "--timeout",
-        ms,
-    ])
 }

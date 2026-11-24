@@ -11,7 +11,7 @@ const WT: &str = "/home/me/.local/share/drover/work/sendmeter/issue-12";
 const IMPL: &str = "sendmeter-impl-12";
 
 fn config(extra: &str) -> String {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     format!("{base}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n{extra}")
 }
 
@@ -173,7 +173,7 @@ fn a_fix_spawn_held_on_its_busy_pinned_host_past_the_stall_window_moves_with_its
     );
     let calls = r.calls.borrow().clone();
     assert_eq!(code, 0, "{out} {calls:?}");
-    assert!(sh.called("run", IMPL), "{:?}", sh.methods());
+    assert!(sh.has(IMPL), "{:?}", sh.methods());
     let push = calls
         .iter()
         .position(|l| l.starts_with(&format!("{SSH}'git' '--no-replace-objects' '-C' '{WT}' 'push'")));

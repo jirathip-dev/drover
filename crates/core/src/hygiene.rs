@@ -258,13 +258,6 @@ pub fn hits(log: &str, find: impl Fn(&str) -> Option<String>) -> Vec<(String, St
     out
 }
 
-/// The pre-push check: the first hit in the commits `sha` pushes (`git log -p`, messages included), as its refusal.
-pub fn pushed(r: &dyn Runner, c: &Check, sha: &str) -> Option<String> {
-    let log = ok(r, "git", &["log", "-p", sha, "--not", "--remotes"]).ok()?;
-    let (s, at, p) = hits(&log, |l| c.find(l)).into_iter().next()?;
-    Some(why(&c.repo, &format!("commit {s:.7} {at}"), &p))
-}
-
 /// `drover hygiene`'s verbs.
 #[derive(clap::Subcommand)]
 pub enum Cmd {
