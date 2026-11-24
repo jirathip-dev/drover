@@ -1306,7 +1306,9 @@ fn pass(
             )?;
         } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE {
             crate::lesson::idle_done(ctx, cfg, r, out, (fleet, s.issue), s.build.as_deref())?;
-        } else if pickup::stuck(ctx, cfg, out, f, (&events, &agents), (s, w))? {
+        } else if pickup::asleep(ctx, cfg, r, out, f, (&events, &agents), (s, w))?
+            || pickup::stuck(ctx, cfg, out, f, (&events, &agents), (s, w))?
+        {
         } else if w.who == "drive" {
             let gone = w.what.split_once(waiting::NO_PUSH);
             let ends =
