@@ -495,7 +495,6 @@ pub struct Fleet {
     /// `[fleet.<n>.remote.<kind>]`: a heavy kind's commands run on `runners` build machines of a tag first.
     #[serde(default)]
     pub remote: BTreeMap<String, crate::heavy::Route>,
-    /// Shell patterns never routed, beside `heavy::NEVER_ROUTED`.
     #[serde(default)]
     pub remote_deny: Vec<String>,
     /// Globs of UI files: a PR touching one goes through the verify stage.
@@ -1490,7 +1489,7 @@ impl Fleet {
     }
     /// Commands its lanes never send to a build machine: `heavy::NEVER_ROUTED` plus `remote_deny`.
     pub fn never_routed(&self) -> Vec<String> {
-        let mut n: Vec<String> = crate::heavy::NEVER_ROUTED.iter().map(|s| (*s).to_string()).collect();
+        let mut n: Vec<String> = crate::heavy::NEVER_ROUTED.split(',').map(String::from).collect();
         n.extend(self.remote_deny.iter().cloned());
         n
     }

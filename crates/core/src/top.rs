@@ -18,7 +18,6 @@ pub struct Proc {
     pub depth: usize,
     pub cmd: String,
     pub kind: Option<String>,
-    /// A `runners run` command: the build machine tag it went to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote: Option<String>,
     pub cpu: f64,

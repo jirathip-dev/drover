@@ -12,24 +12,27 @@ pub struct Heavy {
     pub max: usize,
     pub kind_max: BTreeMap<String, usize>,
     pub wait_minutes: u64,
-    /// `[fleet.<n>.remote]`: heavy kind → the build machines `runners run` sends its commands to.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub routes: BTreeMap<String, Route>,
-    /// `NEVER_ROUTED` plus the fleet's `remote_deny`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub never: Vec<String>,
 }
 
 /// One heavy kind's build machines: `runners run --tag <tag>` with its optional flags.
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, clap::Args)]
 #[serde(deny_unknown_fields)]
 pub struct Route {
+    #[arg(long = "remote", required = false)]
     pub tag: String,
+    #[arg(id = "remote_wait", long = "remote-wait")]
     pub wait: Option<u64>,
+    #[arg(long)]
     pub setup: Option<String>,
     #[serde(default)]
+    #[arg(long)]
     pub env: Vec<String>,
     #[serde(default)]
+    #[arg(long)]
     pub out: Vec<String>,
 }
 
@@ -44,26 +47,7 @@ impl Route {
 }
 
 /// Commands never sent to a build machine, whatever a fleet's patterns: history readers, `gh`, `drover`, signing, release builds, containers, stdin and `.env` readers.
-pub const NEVER_ROUTED: &[&str] = &[
-    "git *",
-    "gh *",
-    "drover *",
-    "*nx affected*",
-    "*--changed*",
-    "*merge-base*",
-    "*origin/*",
-    "*codesign*",
-    "*notarytool*",
-    "*--release*",
-    "cargo install*",
-    "docker *",
-    "podman *",
-    "colima *",
-    "orb *",
-    "*supabase start*",
-    "*<*",
-    "*.env*",
-];
+pub const NEVER_ROUTED: &str = "git *,gh *,drover *,*nx affected*,*--changed*,*merge-base*,*origin/*,*codesign*,*notarytool*,*--release*,cargo install*,docker *,podman *,colima *,orb *,*supabase start*,*<*,*.env*";
 
 fn segments(cmd: &str) -> Vec<String> {
     (cmd.split(['\n', ';', '|', '&', '(', ')']))
@@ -159,17 +143,9 @@ pub struct Args {
     #[arg(long)]
     wait: u64,
     #[arg(long)]
-    remote: Option<String>,
-    #[arg(long)]
     dir: Option<String>,
-    #[arg(long)]
-    remote_wait: Option<u64>,
-    #[arg(long)]
-    setup: Option<String>,
-    #[arg(long)]
-    env: Vec<String>,
-    #[arg(long)]
-    out: Vec<String>,
+    #[command(flatten)]
+    route: Option<Route>,
     #[arg(last = true)]
     cmd: String,
 }
@@ -183,16 +159,8 @@ impl Args {
         holder: String,
         timeout: impl FnOnce(&Ticket, &str) -> Option<i32>,
     ) -> Result<i32> {
-        if let (Some(tag), Some(wt)) = (self.remote, &self.dir) {
-            let (wait, setup, env, out) = (self.remote_wait, self.setup, self.env, self.out);
-            let route = Route {
-                tag,
-                wait,
-                setup,
-                env,
-                out,
-            };
-            if let Some(code) = remote(r, &route, wt, &self.cmd) {
+        if let (Some(route), Some(wt)) = (&self.route, &self.dir) {
+            if let Some(code) = remote(r, route, wt, &self.cmd) {
                 return Ok(code);
             }
         }
