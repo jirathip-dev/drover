@@ -203,58 +203,6 @@ fn a_session_id_already_on_the_integration_branch_passes() {
     assert!(out.contains("session-id"), "{out}");
 }
 
-fn repo(d: &Path, text: &str) -> String {
-    let wt = d.join("wt");
-    std::fs::create_dir_all(&wt).unwrap();
-    let git = |a: &[&str]| {
-        let o = Command::new("git").args(a).current_dir(&wt).output().unwrap();
-        assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr));
-        String::from_utf8(o.stdout).unwrap()
-    };
-    git(&["init", "-q"]);
-    std::fs::write(wt.join("hosts.md"), text).unwrap();
-    git(&["add", "."]);
-    git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "docs"]);
-    git(&["rev-parse", "HEAD"]).trim().to_string()
-}
-
-fn push(d: &Path, fleet: &str, sha: &str) -> (i32, String) {
-    let line = format!("refs/heads/issue-24 {sha} refs/heads/issue-24 {}\n", "0".repeat(40));
-    hook(
-        d,
-        &d.join("wt"),
-        &format!("{fleet}:24:impl"),
-        &["--git-pre-push"],
-        &line,
-    )
-}
-
-#[test]
-fn a_pushed_commit_naming_a_fleet_host_is_refused_only_in_a_public_fleet() {
-    let d = dir("hygiene-push");
-    let sha = repo(&d, "# Hosts\n\nThe lanes run on me@bazzite.\n");
-    let (code, out) = push(&d, "open", &sha);
-    assert_eq!(code, 1, "{out}");
-    assert!(
-        out.contains("PUBLIC_LEAK") && out.contains("hosts.md:3 has a host"),
-        "{out}"
-    );
-    assert!(!out.contains("bazzite"), "{out}");
-    assert_eq!(push(&d, "closed", &sha).0, 0, "the fleet.toml flag: private");
-    let cache = d.join("state/cache/visibility-cached-0.json");
-    std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let cached = json!({"ts": now, "repo": "o/cached", "public": false});
-    std::fs::write(&cache, cached.to_string()).unwrap();
-    assert_eq!(push(&d, "cached", &sha).0, 0, "the cached visibility: private");
-    let d = dir("hygiene-push-clean");
-    let clean = repo(&d, "# Hosts\n\nThe lanes run on the main host.\n");
-    assert_eq!(push(&d, "open", &clean).0, 0);
-}
-
 #[test]
 fn visibility_is_read_once_a_day_and_the_flag_wins() {
     let d = tmpdir("hygiene-visibility");

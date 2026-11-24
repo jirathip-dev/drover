@@ -285,12 +285,7 @@ fn run_as_herdsman_it_works_and_prints_the_rename_notice() {
     assert_eq!(err, "herdsman is now drover: the old name works for one more release\n");
 }
 
-const EMPTY: [(&str, &str); 4] = [
-    ("FLEET_CONFIG", ""),
-    ("FLEET_STATE", ""),
-    ("FLEET_WORKTREES", ""),
-    ("FLEET_HERMES_PROFILES", ""),
-];
+const EMPTY: [(&str, &str); 3] = [("FLEET_CONFIG", ""), ("FLEET_STATE", ""), ("FLEET_WORKTREES", "")];
 
 #[test]
 fn empty_path_vars_resolve_to_the_defaults() {

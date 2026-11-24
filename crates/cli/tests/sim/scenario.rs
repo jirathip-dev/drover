@@ -26,7 +26,7 @@ harness = "claude"
 profile = "fleet-rev"
 
 [runtime]
-kind = "shed"
+kind = "shed-acp"
 
 [limits]
 review_rounds = {rounds}
@@ -50,7 +50,6 @@ pub fn ctx(root: &Path, now: u64) -> Ctx {
         config: root.join("config/fleet.toml"),
         state: root.join("state/events.jsonl"),
         worktrees: root.join("wt"),
-        homes: [("hermes", root.join("hermes"))].into(),
         exe: "/opt/drover/bin/drover".into(),
         now,
         home: root.join("home"),
@@ -65,12 +64,9 @@ pub fn setup(root: &Path, cfg: &str) {
     std::fs::create_dir_all(root.join("config")).unwrap();
     let cfg = cfg.replace("LOCAL", &local.display().to_string());
     std::fs::write(root.join("config/fleet.toml"), cfg).unwrap();
-    for p in ["fleet-impl", "fleet-rev", "fleet-verify"] {
-        let d = root.join("config/claude").join(p);
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("settings.json"), "{}").unwrap();
-        std::fs::write(d.join("role.md"), "role").unwrap();
-    }
+    let c = ctx(root, T0);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    drover::spawn::profiles_sync(&c, &cfg, "", &mut std::io::sink()).unwrap();
 }
 
 /// The three timers launchd runs, each first at a seeded offset.

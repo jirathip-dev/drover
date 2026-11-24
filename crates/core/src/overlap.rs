@@ -105,7 +105,7 @@ pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[E
         let sp = crate::events::last_spawn(events, lane);
         let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
         let on = crate::hosts::On::of(r, sp);
-        if crate::term::tell(&on, sp.and_then(|e| e.str("harness")) == Some("dsh"), lane, pane, &text).is_ok() {
+        if crate::term::tell(&on, lane, pane, &text).is_ok() {
             ev(s.issue, "heads-up", json!({"key": key, "reason": text}))?;
         }
     }
@@ -347,26 +347,69 @@ fn rust_globs() -> Vec<String> {
 }
 
 impl Counted {
-    fn lines(&self) -> usize {
-        let hit = |gs: &[String], p: &str| gs.iter().any(|g| crate::config::glob(g.as_bytes(), p.as_bytes()));
-        let mut files = std::collections::BTreeSet::new();
-        for g in &self.count {
-            let root: Vec<&str> = g.split('/').take_while(|c| !c.contains(['*', '?'])).collect();
-            walk(&root.join("/"), &mut files);
-        }
-        let files = files
-            .into_iter()
-            .filter(|p| hit(&self.count, p) && !hit(&self.exclude, p));
-        files.map(|p| self.file_lines(&p)).sum()
+    fn at(r: &dyn Runner, dir: &Path, sha: &str) -> Option<Self> {
+        let text = git(r, dir, &["show", &format!("{sha}:ci/cap.toml")]).ok()?;
+        toml::Value::Table(cap_table(&text)?).try_into().ok()
     }
 
-    fn file_lines(&self, p: &str) -> usize {
+    fn counts(&self, p: &str) -> bool {
+        let hit = |gs: &[String]| gs.iter().any(|g| crate::config::glob(g.as_bytes(), p.as_bytes()));
+        hit(&self.count) && !hit(&self.exclude)
+    }
+
+    fn roots(&self) -> Vec<String> {
+        let root = |g: &String| {
+            g.split('/')
+                .take_while(|c| !c.contains(['*', '?']))
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+        self.count.iter().map(root).collect()
+    }
+
+    fn lines(&self) -> usize {
+        let mut files = std::collections::BTreeSet::new();
+        for root in self.roots() {
+            walk(&root, &mut files);
+        }
+        let files = files.into_iter().filter(|p| self.counts(p));
+        files
+            .map(|p| self.body(&p, std::fs::read_to_string(&p).unwrap_or_default().lines()))
+            .sum()
+    }
+
+    fn lines_at(&self, r: &dyn Runner, dir: &Path, rev: &str) -> Option<i64> {
+        let roots: Vec<String> = self
+            .roots()
+            .into_iter()
+            .map(|p| if p.is_empty() { ".".into() } else { p })
+            .collect();
+        let roots: Vec<&str> = roots.iter().map(String::as_str).collect();
+        let o = git(r, dir, &[&["grep", "-z", "-I", "", rev, "--"][..], &roots].concat()).unwrap_or_default();
+        let at = format!("{rev}:");
+        let mut files: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
+        for (p, l) in o.lines().filter_map(|l| l.split_once('\0')) {
+            files.entry(p.strip_prefix(&at).unwrap_or(p)).or_default().push(l);
+        }
+        let files = files.into_iter().filter(|(p, _)| self.counts(p));
+        i64::try_from(files.map(|(p, ls)| self.body(p, ls.into_iter())).sum::<usize>()).ok()
+    }
+
+    fn body<'a>(&self, p: &str, lines: impl Iterator<Item = &'a str>) -> usize {
         let cut = self.stop_at_cfg_test && Path::new(p).extension().is_some_and(|x| x == "rs");
-        let text = std::fs::read_to_string(p).unwrap_or_default();
-        let body = text
-            .lines()
-            .take_while(|l| !(cut && l.trim_start().starts_with("#[cfg(test)]")));
+        let body = lines.take_while(|l| !(cut && l.trim_start().starts_with("#[cfg(test)]")));
         body.filter(|l| !(self.skip_blank && l.trim().is_empty())).count()
+    }
+
+    fn rules(&self) -> String {
+        let mut each = vec![format!("count {}", self.count.join(" "))];
+        each.extend((!self.exclude.is_empty()).then(|| format!("exclude {}", self.exclude.join(" "))));
+        each.extend(self.skip_blank.then(|| "skip_blank".to_string()));
+        each.extend(self.stop_at_cfg_test.then(|| "stop_at_cfg_test".to_string()));
+        if each.len() == 1 && self.count == rust_globs() {
+            return "the built-in count of src/**/*.rs and crates/*/src/**/*.rs".into();
+        }
+        format!("ci/cap.toml: {}", each.join(", "))
     }
 }
 
@@ -396,12 +439,7 @@ pub fn cap_at(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Option<(S
         warn_within: warn,
         ..
     } = cap_at_sha(r, &dir, &sha)?;
-    let globs = [":(glob)src/**/*.rs", ":(glob)crates/*/src/**/*.rs"];
-    let counts = git(r, &dir, &[&["grep", "-c", "", &sha, "--"][..], &globs].concat()).unwrap_or_default();
-    let lines = counts
-        .lines()
-        .filter_map(|l| l.rsplit(':').next()?.parse::<i64>().ok())
-        .sum();
+    let lines = Counted::at(r, &dir, &sha)?.lines_at(r, &dir, &sha)?;
     gh::store(&p, &json!({"sha": sha, "lines": lines, "cap": cap, "warn": warn})).ok();
     Some((sha, lines, cap, warn))
 }
@@ -534,27 +572,22 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
             c.limit - c.lines
         )?;
     }
-    let by = script.as_deref().map_or_else(
-        || "the built-in count of src/**/*.rs and crates/*/src/**/*.rs".to_string(),
-        |s| format!("`{s}`"),
-    );
+    let rule = script.is_none().then(|| Counted::at(r, &dir, &sha)).flatten();
+    let by = match (&script, &rule) {
+        (Some(s), _) => format!("`{s}`"),
+        (None, Some(c)) => c.rules(),
+        (None, None) => "ci/cap.toml".to_string(),
+    };
     writeln!(out, "counted by {by}")?;
     let prs = gh::snapshot(ctx, r, f, fleet, ctx.now)?;
     let mut prs: Vec<&Value> = (prs.as_object().into_iter().flat_map(|m| m.values()))
         .filter(|p| p["baseRefName"] == f.integration.as_str())
         .collect();
     prs.sort_by_key(|p| p["number"].as_u64());
-    let globs = [":(glob)src/**/*.rs", ":(glob)crates/*/src/**/*.rs"];
     let measured = |b: &str| -> Option<i64> {
-        let range = format!("{sha}...origin/{b}");
-        let o = git(r, &dir, &[&["diff", "--numstat", &range, "--"][..], &globs].concat()).ok()?;
-        let n = |w: Option<&str>| w.and_then(|w| w.parse::<i64>().ok()).unwrap_or(0);
-        Some(
-            o.lines()
-                .map(|l| l.split('\t'))
-                .map(|mut w| n(w.next()) - n(w.next()))
-                .sum(),
-        )
+        let (c, head) = (rule.as_ref()?, format!("origin/{b}"));
+        let base = git(r, &dir, &["merge-base", &sha, &head]).ok()?;
+        Some(c.lines_at(r, &dir, &head)? - c.lines_at(r, &dir, &base)?)
     };
     let scripted = |s: &str, b: &str| -> Option<Vec<i64>> {
         let m = script_caps(ctx, r, f, s, &sha, Some(&format!("origin/{b}"))).ok()?;

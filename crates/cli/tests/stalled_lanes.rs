@@ -3,7 +3,7 @@ use common::*;
 use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
-const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
 const STALL: u64 = 30 * 60;
 
 fn config() -> String {
@@ -119,7 +119,10 @@ fn a_verify_lane_that_ends_without_a_verdict_is_respawned_once_then_needs_a_huma
     let r = fake().reply("gh pr view issue-12", &pr(&head));
     drive(&c, &r);
     assert!(kinds(&c, "respawn").is_empty());
-    assert!(!sh.called("run", "sendmeter-verify-12-r1"));
+    assert!(!sh
+        .sent("sendmeter-verify-12-r1")
+        .iter()
+        .any(|t| t.starts_with("# Brief")));
     let c1 = at(&c, c.now + STALL + 1);
     let out = drive(&c1, &r);
     let rs = kinds(&c, "respawn");
@@ -128,7 +131,12 @@ fn a_verify_lane_that_ends_without_a_verdict_is_respawned_once_then_needs_a_huma
         (rs[0].str("role"), rs[0].str("why")),
         (Some("verify"), Some("lane stalled"))
     );
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{out}");
+    assert!(
+        sh.sent("sendmeter-verify-12-r1")
+            .iter()
+            .any(|t| t.starts_with("# Brief")),
+        "{out}"
+    );
     assert!(state(&c).starts_with("review"), "{}", state(&c));
     sh.lane("sendmeter-verify-12-r1", "done", "/w/verify-12-r1");
     note(&sh);
@@ -171,7 +179,10 @@ fn parity_r15_a_lane_shed_never_heard_from_after_the_start_window_is_retried_onc
         (rs[0].str("role"), rs[0].str("why")),
         (Some("impl"), Some("failed start"))
     );
-    assert!(sh.called("run", "sendmeter-impl-12"), "{out}");
+    assert!(
+        sh.sent("sendmeter-impl-12").iter().any(|t| t.starts_with("# Brief")),
+        "{out}"
+    );
     sh.lane("sendmeter-impl-12", "idle", &wt.to_string_lossy());
     sh.set("sendmeter-impl-12", |t| t["reported"] = serde_json::Value::Null);
     let out = drive(&at(&c, t0 + 2 * start + 2), &r);

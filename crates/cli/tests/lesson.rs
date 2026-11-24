@@ -103,7 +103,7 @@ fn digest_shows_the_last_week_and_redacts_secrets() {
     assert!(out.contains("old unwrap") && out.contains("def5678"), "{out}");
 }
 
-const OFF: &str = "\n[fleet.quiet]\nrepo = \"acme/quiet\"\nlocal = \"/tmp/does-not-matter/quiet\"\nintegration = \"staging\"\nlessons = \"off\"\n[fleet.quiet.role.impl]\nharness = \"hermes\"\n";
+const OFF: &str = "\n[fleet.quiet]\nrepo = \"acme/quiet\"\nlocal = \"/tmp/does-not-matter/quiet\"\nintegration = \"staging\"\nlessons = \"off\"\n[fleet.quiet.role.impl]\nharness = \"claude\"\n";
 
 #[test]
 fn tick_runs_lesson_once_a_week_and_never_when_off() {
@@ -218,7 +218,7 @@ fn lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change() 
         drover::queue::replay(&events, "sendmeter").first().map(|i| i.issue),
         Some(80)
     );
-    assert_eq!(sh.last("run")["name"], "sendmeter-lesson-80", "{:?}", sh.methods());
+    assert_eq!(sh.last("send")["name"], "sendmeter-lesson-80", "{:?}", sh.methods());
     let spawn = events.iter().find(|e| e.is("spawn", "sendmeter", 80)).expect("a lane");
     assert_eq!(
         (spawn.str("role"), spawn.str("profile"), spawn.str("stage")),

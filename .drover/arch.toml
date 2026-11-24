@@ -352,3 +352,9 @@ pattern = ".build_screen("
 paths = ["crates/server/src/**"]
 except = ["crates/server/src/serve/hub.rs", "crates/server/src/screens.rs", "crates/server/src/screens_local.rs"]
 reason = "#1318: a screen is built once per change by the hub (serve/hub.rs); a request and a stream read its cache"
+
+[[ban]]
+pattern = ".gatekeeper/run"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/gatekeeper.rs"]
+reason = "#1643: one module builds the gatekeeper command and reads its report"

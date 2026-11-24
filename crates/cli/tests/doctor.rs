@@ -259,7 +259,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "→ tailscale serve --bg",
         ),
         (
-            |_, _, r| r.once("launchctl print", 113, ""),
+            |_, _, r| r.once("launchctl print", 0, "").once("launchctl print", 113, ""),
             "launchd",
             "→ launchctl bootstrap gui/$(id -u)",
         ),
@@ -316,7 +316,9 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         (
             |_, _, r| {
                 if cfg!(target_os = "macos") {
-                    r.once("launchctl print", 0, "").once("launchctl print", 1, "")
+                    r.once("launchctl print", 0, "")
+                        .once("launchctl print", 0, "")
+                        .once("launchctl print", 1, "")
                 } else {
                     r.once("systemctl --user is-active", 3, "")
                 }
@@ -372,44 +374,13 @@ fn tailscale_missing_is_a_warning() {
 }
 
 #[test]
-fn bad_config_and_hermes_profiles() {
+fn bad_config() {
     let (c, _) = setup("doc-badcfg", "claude");
     std::fs::write(&c.config, "[fleet.x]\nrepo = 1\n").unwrap();
     let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 1, "{out}");
     assert!(line(&out, "config").starts_with('✗'), "{out}");
     assert!(line(&out, "gh").starts_with('✓'), "{out}");
-
-    let (c, _) = setup("doc-hermes", "hermes");
-    let (code, out) = run(&c, &good(), &["doctor"]);
-    assert_eq!(code, 1, "{out}");
-    assert!(
-        line(&out, "hermes fleet-impl").contains("→ hermes profile create fleet-impl"),
-        "{out}"
-    );
-    assert!(
-        line(&out, "hermes hooks").starts_with('✓'),
-        "no profile, nothing to check: {out}"
-    );
-
-    assert!(line(&out, "hermes lane-orchestrator").starts_with('✗'), "{out}");
-    for p in ["fleet-impl", "lane-orchestrator"] {
-        write(&c.homes["hermes"].join(p).join("config.yaml"), "", 0o644);
-    }
-    let (code, out) = run(&c, &good(), &["doctor"]);
-    assert_eq!(code, 1, "{out}");
-    assert!(line(&out, "hermes fleet-impl").starts_with('✓'), "{out}");
-    assert!(line(&out, "hermes hooks").contains("→ drover profiles sync"), "{out}");
-
-    let hook = |role: &str| format!("'{}' hook --role {role} ✓ allowed", c.exe);
-    let (code, out) = run(
-        &c,
-        &good()
-            .reply("env DROVER_LANE=demo:-:impl hermes", &hook("impl"))
-            .reply("env DROVER_LANE=demo:-:orchestrator hermes", &hook("orchestrator")),
-        &["doctor"],
-    );
-    assert_eq!(code, 0, "{out}");
 }
 
 #[test]
@@ -696,26 +667,5 @@ fn the_scene_device_line_says_off_by_default_and_on_with_its_address() {
         line(&out, "scene device"),
         "✓ scene device — on 0.0.0.0:7779, the scene to the LAN",
         "{out}"
-    );
-}
-
-#[test]
-fn a_hosts_machine_missing_from_shed_is_one_row_with_its_fix() {
-    let (c, _) = setup("doc-shed-machine", "claude");
-    let hosts = "\n[hosts.mini]\n\n[hosts.box]\nmachine = \"box\"\n\n[hosts.off]\nmachine = \"off\"\nenabled = false\n";
-    let base = std::fs::read_to_string(&c.config).unwrap();
-    std::fs::write(&c.config, base + hosts).unwrap();
-    let _sh = FakeShed::attached(&c);
-    let r = good().reply("shed machine ls --json", r#"[{"name":"gone","target":"gone"}]"#);
-    let (_, out) = run(&c, &r, &["doctor"]);
-    let rows: Vec<&str> = out.lines().filter(|l| l.contains("shed machine")).collect();
-    assert_eq!(rows.len(), 1, "{out}");
-    assert!(
-        rows[0].starts_with('✗') && rows[0].contains("shed machine add box box"),
-        "{out}"
-    );
-    assert!(
-        !r.called("shed machine add") && !r.called("shed machine rm"),
-        "doctor writes nothing"
     );
 }

@@ -243,6 +243,7 @@ fn with_a_long_premerge_and_spawn_in_flight_every_pass_ends_under_5s_and_a_verdi
                     .name(format!("job-{}", issue_of(&a)))
                     .spawn_scoped(s, move || {
                         clock(at);
+                        r.local.config("");
                         let a: Vec<&str> = a.iter().map(String::as_str).collect();
                         run_only(c, r, &a);
                         r.settled();
@@ -365,6 +366,7 @@ fn a_finished_review_is_recorded_at_once_while_a_spawn_holds_its_start_and_the_f
                     .name(format!("job-{}", issue_of(&a)))
                     .spawn_scoped(s, move || {
                         clock(at);
+                        r.local.config("");
                         let a: Vec<&str> = a.iter().map(String::as_str).collect();
                         run_only(c, r, &a);
                         r.settled();

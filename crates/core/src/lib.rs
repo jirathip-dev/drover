@@ -29,6 +29,7 @@ pub mod drive;
 pub mod events;
 pub mod flow;
 pub mod gate;
+pub mod gatekeeper;
 pub mod gh;
 pub mod guard;
 pub mod heavy;
@@ -105,7 +106,6 @@ pub struct Ctx {
     pub config: PathBuf,
     pub state: PathBuf,
     pub worktrees: PathBuf,
-    pub homes: std::collections::BTreeMap<&'static str, PathBuf>,
     pub exe: String,
     pub now: u64,
     /// Tree `drover migrate` works on: `DROVER_HOME`, else `$HOME`.
@@ -149,9 +149,6 @@ impl Ctx {
             config,
             state,
             worktrees: env("FLEET_WORKTREES", home().join(roots::DEFAULT.trim_start_matches("~/"))),
-            homes: providers::all()
-                .filter_map(|p| Some((p.name, p.home()?.resolve(&home()))))
-                .collect(),
             exe: std::env::current_exe().map_or("drover".into(), |p| p.to_string_lossy().into()),
             now: now(),
             home: root,
@@ -313,6 +310,13 @@ pub fn set(
             "BAD_VALUE",
             format!("{k} {v:?}: empty, or has a quote, backslash or control char"),
         );
+    }
+    let lanes = providers::lane_names();
+    if let Some((_, h)) = wanted
+        .iter()
+        .find(|(k, h)| *k == "harness" && !lanes.contains(&h.as_str()))
+    {
+        return gate::refused("BAD_VALUE", format!("harness {h:?} is not one of {lanes:?}"));
     }
     if let Some((_, m)) = wanted.iter().find(|(k, m)| *k == "model" && !cfg.models.contains(m)) {
         return gate::refused("BAD_VALUE", format!("model {m:?} is not in `models` {:?}", cfg.models));

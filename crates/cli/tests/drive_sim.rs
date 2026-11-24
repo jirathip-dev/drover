@@ -218,7 +218,7 @@ struct Sim {
 
 impl Sim {
     fn new(name: &str, extra: &str) -> Sim {
-        let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+        let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
         let c = ctx(&tmpdir(name), &format!("{base}{extra}"));
         std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
         assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
@@ -291,7 +291,11 @@ impl Sim {
     }
 
     fn started(&self) {
-        let (runs, seen) = (self.sh.all("run"), self.born.borrow().len());
+        let sends = self.sh.all("send").into_iter();
+        let runs: Vec<_> = sends
+            .filter(|p| p["text"].as_str().is_some_and(|t| t.starts_with("# Brief")))
+            .collect();
+        let seen = self.born.borrow().len();
         for p in runs.iter().skip(seen) {
             let n = p["name"].as_str().unwrap().to_string();
             self.born.borrow_mut().push((n.clone(), self.w.now()));

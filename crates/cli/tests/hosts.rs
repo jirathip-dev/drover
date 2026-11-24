@@ -24,7 +24,7 @@ const ADDR: &str = "127.0.0.1:7777";
 const TOKEN: &str = concat!("sk", "-ant-oat01-AAAA-secret");
 
 fn config(extra: &str) -> String {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     format!("{base}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n{extra}")
 }
 
@@ -62,6 +62,10 @@ fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
         f,
         hosts: vec![("bazzite", bazzite)],
     }
+}
+
+fn acp<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> remote::Acp<'a, OverSsh<'a>> {
+    remote::Acp::over(two(f, bazzite))
 }
 
 fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
@@ -207,9 +211,10 @@ fn admission_runs_per_host() {
     assert_eq!(e, format!("DISK_LOW: bazzite: 1.0 GB free < 10; {nothing}"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (_sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), low());
+    remote::proxied(&c);
     let (code, out) = run(
         &c,
-        &two(&f, &bazzite),
+        &acp(&f, &bazzite),
         &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"],
     );
     assert_eq!(code, 3, "{out}");
@@ -274,10 +279,13 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         &["queue", "sendmeter", "add", "12", "--needs", "docker"],
     );
     let (sh, bazzite, r) = (FakeShed::attached(&c), FakeShed::new(), remote_fake());
-    let (code, out) = run(&c, &two(&r, &bazzite), &["spawn", "sendmeter", "12", "impl"]);
+    remote::proxied(&c);
+    let o = acp(&r, &bazzite);
+    let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let calls = r.calls.borrow();
-    for m in ["run", "send", "wait"] {
+    assert!(bazzite.has(IMPL) && !sh.has(IMPL), "{:?}", sh.methods());
+    for m in ["send", "wait"] {
         assert!(bazzite.called(m, IMPL), "{m}: {:?}", bazzite.methods());
         assert!(!sh.called(m, IMPL), "{m} here: {:?}", sh.methods());
     }
@@ -292,7 +300,11 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         ))) && !calls.iter().any(|c| c.contains("'gh' 'repo' 'clone'")),
         "#307: first use clones with plain git (the host's insteadOf/SSH applies), never gh: {calls:?}"
     );
-    assert_eq!(bazzite.last("run")["cwd"], json!(WT), "worktree under bazzite's home");
+    assert_eq!(
+        bazzite.lock().terms[IMPL]["cwd"],
+        json!(WT),
+        "worktree under bazzite's home"
+    );
     assert!(calls
         .iter()
         .any(|c| c.starts_with(&format!("{SSH}'sh' '-c' 'mkdir")) && c.ends_with(&format!("'{WT}/.brief.md'"))));
@@ -313,13 +325,15 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         !sent.iter().any(|t| t.contains("OAUTH_TOKEN=") || t.contains(token)),
         "token typed: {sent:?}"
     );
-    let export = sent.iter().find(|t| t.starts_with("export ")).unwrap();
+    let start = calls
+        .iter()
+        .find(|c| c.starts_with(&format!("{SSH}'shed' 'run' '--acp'")))
+        .unwrap();
     assert!(
-        !export.contains("DROVER_ACCOUNT") && !export.contains("CLAUDE_CONFIG_DIR") && !export.contains("&& . '"),
-        "{export}"
+        !start.contains("DROVER_ACCOUNT") && !start.contains("CLAUDE_CONFIG_DIR"),
+        "{start}"
     );
-    let start = sent.iter().find(|t| t.starts_with("exec ")).unwrap();
-    assert!(start.contains(&format!("Read {WT}/.brief.md")), "{start}");
+    assert!(sent.iter().any(|t| t.contains("AC: it works")), "{sent:?}");
     drop(calls);
     let e = read(&c.state)
         .unwrap()
@@ -805,15 +819,6 @@ fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
     );
 }
 
-const STATUS: &str = "'sh' '-c' 'for x in";
-
-fn synced(status: &str) -> Fake {
-    healthy(fake(0.1, 0.1))
-        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
-        .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
-        .reply(&format!("{SSH}{STATUS}"), status)
-}
-
 #[test]
 fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     let c = setup("hosts-dry", "", true, 0);
@@ -824,7 +829,8 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     );
     std::fs::write(&c.config, text).unwrap();
     let (_sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), remote_fake());
-    let r = two(&f, &bazzite);
+    remote::proxied(&c);
+    let r = acp(&f, &bazzite);
     let cfg = Config::load(&c.config).unwrap();
     drover::gh::spec(&c, &f, cfg.fleet("sendmeter").unwrap(), "sendmeter", 12, true).unwrap();
     let args = ["spawn", "sendmeter", "12", "impl", "--host", "bazzite", "--json"];
@@ -850,19 +856,19 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
         "{all}"
     );
     let typed = all.replace("'\\''", "'");
-    assert!(
-        typed.contains("TOOLS='/home/me/bin'") && typed.contains(&format!("Read {WT}/.brief.md")),
-        "{all}"
-    );
+    assert!(typed.contains("TOOLS='/home/me/bin'"), "{all}");
     assert!(
         cmds[0].starts_with(&format!("{SSH}{GIT} '-C' '/home/me/src/sendmeter' 'fetch'")),
         "{all}"
     );
     assert!(cmds[1..].iter().all(|c| c.starts_with(SSH)), "{all}");
     assert!(
-        cmds.iter().any(|c| c.starts_with(&format!("{SSH}'shed' 'run' "))),
+        cmds.iter()
+            .any(|c| c.starts_with(&format!("{SSH}'shed' 'run' '--acp' "))),
         "{all}"
     );
+    let brief = format!("{SSH}'shed' 'send' '{IMPL}' ");
+    assert_eq!(cmds.last(), Some(&format!("{brief}'<the brief>'")), "{all}");
     let verify = format!("{SSH}{GIT} '-C' '/home/me/src/sendmeter' 'rev-parse' '--verify'");
     let new = drover::runner::Out {
         code: 1,
@@ -873,17 +879,11 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     let (code, out) = run(&c, &r, &args);
     assert_eq!(code, 0, "{out}");
     let sent = f.calls.borrow()[n..].to_vec();
-    for c in &cmds {
-        let Some(req) = c.strip_prefix(&format!("{SSH}'shed' '")) else {
-            assert!(sent.contains(c), "planned but not sent: {c}\nsent: {sent:#?}");
-            continue;
-        };
-        let (method, params) = req.split_once("' '").unwrap();
-        let params: serde_json::Value =
-            serde_json::from_str(&params.trim_end_matches('\'').replace("'\\''", "'")).unwrap();
-        let got = bazzite.all(method);
-        assert!(got.contains(&params), "planned but not sent: {c}\nsent: {got:#?}");
+    for c in &cmds[..cmds.len() - 1] {
+        assert!(sent.contains(c), "planned but not sent: {c}\nsent: {sent:#?}");
     }
+    assert!(sent.iter().any(|c| c.starts_with(&brief)), "{sent:#?}");
+    assert!(bazzite.sent(IMPL).iter().any(|t| t.contains("AC: it works")));
 }
 
 #[test]
@@ -980,14 +980,14 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     let c = setup("hosts-answer", "", true, 0);
     with_account(&c);
     let (sh, bazzite, r) = (FakeShed::attached(&c), FakeShed::new(), remote_fake());
+    remote::proxied(&c);
     let (code, out) = run(
         &c,
-        &two(&r, &bazzite),
+        &acp(&r, &bazzite),
         &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"],
     );
     assert_eq!(code, 0, "{out}");
-    let sent = bazzite.sent(IMPL);
-    let lane = sent.iter().find(|t| t.starts_with("export ")).unwrap();
+    let lane = remote::start_line(&r, "bazzite").unwrap();
     assert!(
         lane.contains(" DROVER_OUTBOX='1'") && !lane.contains("DROVER_MAIN"),
         "{lane}"
@@ -995,7 +995,7 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     let d = json!({"id": "q1", "question": "Which?", "options": ["a", "b"], "agent": "sendmeter-impl-12"});
     ev(&c, NOW, 12, "needs-decision", d);
     let (seen, f) = (bazzite.lock().seen.len(), Fake::default());
-    let (code, out) = run(&c, &two(&f, &bazzite), &["answer", "sendmeter", "q1", "1"]);
+    let (code, out) = run(&c, &acp(&f, &bazzite), &["answer", "sendmeter", "q1", "1"]);
     assert_eq!(
         (code, out.as_str()),
         (0, "sendmeter q1: a -> sendmeter-impl-12\n"),
@@ -1011,7 +1011,6 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
         after,
         [
             ("send".to_string(), json!({"name": IMPL, "text": "DECISION q1: a"})),
-            ("keys".to_string(), json!({"name": IMPL, "keys": ["Enter"]})),
             (
                 "wait".to_string(),
                 json!({"name": IMPL, "until": ["working", "blocked"], "timeout": 20.0})
@@ -1022,7 +1021,8 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     assert!(!sh.called("send", IMPL) && !sh.called("keys", IMPL));
     let calls = f.calls.borrow();
     let other: Vec<_> = calls.iter().filter(|c| !c.contains("'shed' 'connect'")).collect();
-    assert_eq!(other.len(), 1, "{calls:?}");
+    assert_eq!(other.len(), 2, "{calls:?}");
+    assert!(f.called(&format!("{SSH}'shed' 'send' '{IMPL}' 'DECISION q1: a'")));
     assert!(f.called("sh -c nohup '/opt/drover/bin/drover' kick sendmeter 12 --why answer --now"));
 }
 
@@ -1122,16 +1122,19 @@ fn a_remote_supersede_stays_on_its_host() {
     let f = live_fake()
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{SSH}{GIT} '-C'"), "")
-        .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "");
+        .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
+        .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
+        .reply(&format!("{SSH}'rm' '-f'"), "");
+    remote::proxied(&c);
     let (code, out) = run(
         &c,
-        &two(&f, &bazzite),
+        &acp(&f, &bazzite),
         &["spawn", "sendmeter", "12", "impl", "--supersede"],
     );
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     assert!(bazzite.called("kill", IMPL), "{:?}", bazzite.methods());
     assert!(
-        bazzite.called("run", IMPL),
+        bazzite.called("send", IMPL),
         "the new lane runs there: {:?}",
         bazzite.methods()
     );
@@ -1156,9 +1159,9 @@ fn a_supersede_onto_another_host_closes_the_old_lane_on_its_own() {
     remote_spawn(&c, NOW - 900);
     let (sh, bazzite, f) = (FakeShed::attached(&c), live_on(), live_fake().reply("git ", ""));
     let args = ["spawn", "sendmeter", "12", "impl", "--supersede", "--host", "mini"];
-    let (code, out) = run(&c, &two(&f, &bazzite), &args);
+    let (code, out) = run(&c, &acp(&f, &bazzite), &args);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
-    assert!(sh.called("run", IMPL), "the new lane runs here: {:?}", sh.methods());
+    assert!(sh.has(IMPL), "the new lane runs here: {:?}", sh.methods());
     assert!(bazzite.called("kill", IMPL), "{:?}", bazzite.methods());
     assert!(!bazzite.has(IMPL), "the old lane is gone from bazzite");
     assert!(!sh.called("kill", IMPL), "never on the main host's shed");
@@ -1184,7 +1187,7 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
         .reply(&format!("{SSH}'git'"), "")
         .reply("git ", "");
     let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
-    let (code, out) = run(&c, &two(&r, &bazzite), &["spawn", "sendmeter", "12", "impl"]);
+    let (code, out) = run(&c, &acp(&r, &bazzite), &["spawn", "sendmeter", "12", "impl"]);
     let calls = r.calls.borrow().clone();
     assert_eq!(code, 0, "{out} {calls:?}");
     let create = calls
@@ -1192,7 +1195,7 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
         .find(|l| l.starts_with("git -C") && l.contains(" worktree add "))
         .unwrap();
     assert!(create.ends_with(" origin/issue-12"), "{create}");
-    assert!(sh.called("run", IMPL), "{:?}", sh.methods());
+    assert!(sh.has(IMPL), "{:?}", sh.methods());
     assert!(
         calls
             .iter()
@@ -1437,9 +1440,10 @@ fn a_supersede_saves_a_remote_lanes_dirty_work_first() {
             .reply(&format!("{SSH}'rm' '-f'"), "");
         let (r, g) = dirty_remote(live, fail.then_some(1));
         let (sh, bazzite) = (FakeShed::attached(&c), live_on());
+        remote::proxied(&c);
         let (code, out) = run(
             &c,
-            &two(&r, &bazzite),
+            &acp(&r, &bazzite),
             &["spawn", "sendmeter", "12", "impl", "--supersede"],
         );
         let calls = r.calls.borrow().clone();
@@ -1457,10 +1461,7 @@ fn a_supersede_saves_a_remote_lanes_dirty_work_first() {
         }
         assert_eq!(code, 0, "{out} {calls:?}");
         assert!(r.index(&push).unwrap() < shed_call_at(&r, "kill").unwrap(), "{calls:?}");
-        assert!(
-            bazzite.called("run", IMPL) && !sh.called("run", IMPL),
-            "restarted on bazzite"
-        );
+        assert!(bazzite.called("send", IMPL) && !sh.has(IMPL), "restarted on bazzite");
         let brief = r
             .inputs
             .borrow()
@@ -1689,22 +1690,6 @@ fn a_last_host_without_the_needs_tag_yields_unless_its_worktree_has_unpushed_wor
         p.why.as_deref(),
         Some("stays on bazzite: its worktree there has unpushed work")
     );
-}
-
-#[test]
-fn a_tick_reads_the_version_of_a_reachable_host_though_its_health_check_times_out() {
-    let c = setup("hosts-tick-sync", "", true, 0);
-    let hosts = c.state.with_file_name("hosts.json");
-    let mut cache: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&hosts).unwrap()).unwrap();
-    cache["bazzite"]["probed"] = json!(0);
-    std::fs::write(&hosts, cache.to_string()).unwrap();
-    let _sh = FakeShed::attached(&c);
-    let bazzite = FakeShed::new();
-    let r = synced("drover 0.1.0 (0ld)\n-\n").once(&format!("{SSH}{GIT} 'ls-remote'"), 124, "");
-    let (code, out) = run(&c, &two(&r, &bazzite), &["tick"]);
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(r.count(&format!("{SSH}{STATUS}")), 1, "{:#?}", r.calls.borrow());
-    assert!(!r.called(&format!("{SSH}'sh' '-c' 'V=")), "a tick never installs");
 }
 
 #[test]

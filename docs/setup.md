@@ -24,7 +24,7 @@ harness = "claude"
 profile = "lane-rev"
 
 [runtime]
-kind = "shed"
+kind = "shed-acp"
 EOF
 drover profiles sync                # per-role profiles and the lane hook
 drover spawn app 12 impl --dry-run  # print the plan; drop --dry-run to launch it
@@ -50,7 +50,7 @@ Self-update installs CI's signed release build of the `[self_update] branch` hea
 ## 1. Install
 
 You need `git`, `gh` (logged in), shed (its server job running, [runtimes](runtimes.md)), a Rust toolchain, and
-at least one harness: Claude Code and/or Hermes. Every lane terminal call goes through `crates/core/src/term.rs`, the
+Claude Code. Every lane call goes through `crates/core/src/term.rs`, the
 one adapter.
 
 ```sh
@@ -130,8 +130,7 @@ plus the self-update and daily clean jobs ([below](#self-update-and-the-daily-cl
 
 Run it every 5 minutes: `drover timer install`. That is the tick job alone: `drover tick` every
 5 minutes runs `drover check` (alerts once per stall, dead lane or unmerged ready issue), then
-`drover drive` (every fleet's loop, [lanes/drive.md](lanes/drive.md)). No cron and
-no Hermes needed.
+`drover drive` (every fleet's loop, [lanes/drive.md](lanes/drive.md)). No cron needed.
 
 - macOS: `~/Library/LaunchAgents/dev.drover.tick.plist` (`--label` picks another label),
   `StartInterval 300`, `RunAtLoad`, loaded with `launchctl bootstrap gui/$(id -u) <plist>`.
@@ -150,23 +149,13 @@ no Hermes needed.
 
 ### Self-update and the daily clean (#557)
 
-drover needs no Hermes: `drover setup` (or `timer install`) also writes two jobs of its own.
+`drover setup` (or `timer install`) also writes two jobs of its own.
 
 - `dev.drover.update` runs `drover self-update` every 5 minutes: it installs CI's signed release build of the
   `[self_update] branch` head on every host, staged first and swapped together. See [releases](releases.md).
 - `dev.drover.clean` runs `drover clean --scheduled` daily at 03:30: worktrees of merged or closed issues idle
   3 days or more, at most 10 a run, never a live one; unsaved work goes to `wip/` first, as `clean --yes`. A refusal or failure alerts `clean-failed` once; a clean
   no-op is silent.
-
-Moving off Hermes: once both jobs have run (`self-updated` in the log after a staging merge),
-remove the old Hermes fleet jobs, once:
-
-```sh
-hermes -p orchestrator cron remove d8bbecd490d7   # fleet-check (auto-install)
-hermes -p orchestrator cron remove 064cdd00dc56   # the old worktree-prune job
-```
-
-Other Hermes cron jobs (a one-off reminder) stay.
 
 ## 5. Alerts
 

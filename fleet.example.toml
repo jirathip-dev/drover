@@ -21,11 +21,11 @@ integration = "staging"          # drover merge target; main is never a target
 harness = "claude"
 profile = "lane-impl"
 model = "opus"
-effort = "xhigh"                 # none|low|medium|high|xhigh: Claude --effort, Hermes --reasoning
+effort = "xhigh"                 # none|low|medium|high|xhigh: Claude effort
 mcp = ["supabase-dev"]        # only these servers from the repo's .mcp.json; default none
 
 [fleet.api.role.rev]
-harness = "hermes"
+harness = "claude"
 profile = "lane-rev"
 
 # This repo, dogfooding: a `*/drover` repo's merge prints the `cargo install` that picks it up.
@@ -44,7 +44,7 @@ profile = "lane-impl"
 model = "opus"
 
 [fleet.drover.role.rev]
-harness = "hermes"
+harness = "claude"
 profile = "lane-rev"
 
 [fleet.web]
@@ -102,20 +102,19 @@ paths = ["supabase/migrations/**"]
 # Per-fleet notifiers replace the global [[notify]] for this fleet's events (same fields).
 [[fleet.web.notify]]
 cmd = "notify <chat>:<thread>"   # e.g. one thread per repo
-# cmd = "hermes send -q -t telegram:<chat_id>:<thread_id>"   # or Hermes, to Telegram
 on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human", "evidence-missing"]
 
 [fleet.web.role.impl]
-harness = "hermes"
+harness = "claude"
 profile = "lane-impl"
 
 [fleet.web.role.rev]
-harness = "hermes"
+harness = "claude"
 profile = "lane-rev"
 
 # Owner-only: `drover spawn web <issue> design`; the hook denies it from any lane.
 [fleet.web.role.design]
-harness = "hermes"
+harness = "claude"
 profile = "lane-design"
 
 # #417: the optional verify stage (docs/pipeline.md): after rev's PASS, a read-only lane drives the real app at the
@@ -140,7 +139,6 @@ profile = "lane-design"
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin
-# cmd = "hermes send -q -t telegram:<chat_id>"   # or Hermes, to Telegram
 on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human", "evidence-missing", "usage-limit", "signed-out"]
 # format = "json"   # send the raw event JSON instead
 
@@ -149,10 +147,10 @@ on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human"
 # name = "gh"
 # cmd = "gh auth login"
 
-# #298, #455, #721: the shed runtime new lanes start in (required): shed or shed-acp (docs/runtimes.md).
+# #298, #455, #721, #1726: the shed runtime new lanes start in (required): shed-acp, each lane an ACP session (docs/runtimes.md).
 # [runtime]
-# kind = "shed"   # "berth", its old name, still works for one release (with a warning)
-# acp = "claude-acp"   # optional ACP mode (docs/runtimes.md)
+# kind = "shed-acp"
+# acp = "claude-acp"   # the ACP agent lanes run (default: the role's harness's)
 # #565: or one fleet's own, e.g. to pilot ACP lanes (cooee's Workflow list) on it:
 # [fleet.drover.runtime]
 # kind = "shed-acp"   # each lane a claude-acp session, guarded by the profile's hook; remote ones need [proxy] token-file

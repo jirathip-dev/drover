@@ -13,9 +13,6 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-
-type Terms = Arc<Mutex<common::fake_shed::State>>;
 
 fn lane_labels() -> Value {
     json!({"fleet": "sendmeter", "issue": "12", "role": "impl", "harness": "claude"})
@@ -37,11 +34,9 @@ fn every_adapter_call_is_a_shed_request() {
     assert_eq!(b.last("read"), json!({"name": lane, "history": false}));
     term::keys(&r, lane, "Escape").unwrap();
     assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["esc"]}));
-    term::reply(&r, false, lane, lane, "go on").unwrap();
+    term::reply(&r, lane, lane, "go on").unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "go on"}));
     assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["Enter"]}));
-    term::reply(&r, true, lane, lane, "typed").unwrap();
-    assert_eq!(b.last("send"), json!({"name": lane, "text": "typed"}));
     assert!(term::landed(&r, lane, lane, "x"));
     assert_eq!(
         b.last("wait"),
@@ -52,14 +47,8 @@ fn every_adapter_call_is_a_shed_request() {
         (s.labels["harness"].as_str(), s.name.as_str(), s.running()),
         ("claude", lane, true)
     );
-    let o = term::exec(&r, &term::wait_output_argv(lane, "❯", "60000")).unwrap();
-    assert_eq!(o.code, 0);
-    assert_eq!(
-        b.last("wait"),
-        json!({"name": lane, "until": [], "output": "❯", "timeout": 60.0})
-    );
-    term::ok(&r, &term::run_argv(lane, &["exec", "'dsh-tui'"])).unwrap();
-    assert_eq!(b.last("send"), json!({"name": lane, "text": "exec 'dsh-tui'\r"}));
+    term::ok(&r, &term::run_argv(lane, &["exec", "'top'"])).unwrap();
+    assert_eq!(b.last("send"), json!({"name": lane, "text": "exec 'top'\r"}));
     let a = drover::session::live_on(&r).unwrap();
     assert_eq!(a.len(), 1, "{a:?}");
     assert_eq!(
@@ -140,12 +129,12 @@ fn another_host_is_reached_through_shed_connect_over_ssh() {
     assert!(b.methods().is_empty(), "nothing went to this host's server");
 }
 
-fn shed_config(sock: &std::path::Path, extra: &str) -> String {
-    kind_config("shed", sock, extra)
+fn shed_config(b: &FakeShed, extra: &str) -> String {
+    b.config(&CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"")) + extra
 }
 
 fn kind_config(kind: &str, sock: &std::path::Path, extra: &str) -> String {
-    let cfg = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let cfg = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     format!(
         "{cfg}\n[runtime]\nkind = \"{kind}\"\nsocket = \"{}\"\n{extra}",
         sock.display()
@@ -164,7 +153,7 @@ fn spawn_fake() -> Fake {
 fn a_lane_spawns_on_shed() {
     let b = FakeShed::new();
     let d = tmpdir("shed-spawn");
-    let c = ctx(&d, &shed_config(&b.sock, ""));
+    let c = ctx(&d, &shed_config(&b, ""));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let settings = std::fs::read_to_string(c.config.parent().unwrap().join("claude/fleet-impl/settings.json")).unwrap();
     let s: Value = serde_json::from_str(&settings).unwrap();
@@ -189,7 +178,11 @@ fn a_lane_spawns_on_shed() {
         cmds[2].as_array().unwrap()[3..5],
         [json!("config"), json!("branch.issue-12.remote")]
     );
-    assert_eq!((cmds[4][0].as_str(), cmds[4][1].as_str()), (Some("shed"), Some("run")));
+    assert_eq!(
+        (cmds[4][0].as_str(), cmds[4][1].as_str(), cmds[4][2].as_str()),
+        (Some("shed"), Some("run"), Some("--acp"))
+    );
+    assert_eq!(cmds[5], json!(["shed", "send", "sendmeter-impl-12", "<the brief>"]));
     assert!(b.methods().is_empty(), "a dry run calls nothing");
 
     let f = spawn_fake();
@@ -205,34 +198,31 @@ fn a_lane_spawns_on_shed() {
         "{:?}",
         f.calls.borrow()
     );
-    let run_p = b.last("run");
-    assert_eq!(run_p["name"], "sendmeter-impl-12");
-    assert_eq!(run_p["labels"], lane_labels());
-    assert_eq!(
-        (run_p["cwd"].as_str(), run_p["keep"].as_bool()),
-        (wt.to_str(), Some(true))
-    );
-    assert_eq!(
-        run_p["cmd"],
-        json!(["sh", "-c", "exec \"${SHELL:-sh}\" -l"]),
-        "no secret in the terminal's argv"
-    );
-    let sends: Vec<String> = b
-        .lock()
-        .seen
+    let start = f
+        .calls
+        .borrow()
         .iter()
-        .filter(|s| s.0 == "send")
-        .map(|s| s.1["text"].as_str().unwrap().into())
-        .collect();
+        .find(|l| l.starts_with("shed run --acp"))
+        .cloned();
+    let start = start.expect("an ACP session started");
+    let labels = [
+        "--label fleet=sendmeter",
+        "--label issue=12",
+        "--label role=impl",
+        "--label harness=claude",
+    ];
     assert!(
-        sends[0].starts_with("export DROVER_LANE='sendmeter:12:impl'") && sends[0].ends_with('\r'),
-        "{sends:?}"
+        start.contains(&format!("--name sendmeter-impl-12 --cwd {} ", wt.display()))
+            && labels.iter().all(|l| start.contains(l)),
+        "{start}"
     );
     assert!(
-        sends[1].starts_with("exec 'claude' '--dangerously-skip-permissions'"),
-        "{sends:?}"
+        start.contains(" -- sh -c export DROVER_LANE='sendmeter:12:impl'") && start.ends_with(" sh claude-acp"),
+        "{start}"
     );
-    assert_eq!(b.last("wait")["until"], json!(["working", "blocked"]));
+    assert_eq!(b.last("wait")["until"], json!(["working", "blocked", "done"]));
+    let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    assert_eq!(b.sent("sendmeter-impl-12"), [brief], "the brief is the one prompt");
     let ev = drover::events::read(&c.state)
         .unwrap()
         .to_vec()
@@ -241,7 +231,7 @@ fn a_lane_spawns_on_shed() {
         .unwrap();
     assert_eq!(
         (ev.str("runtime"), ev.str("pane"), ev.str("workspace")),
-        (Some("shed"), Some("sendmeter-impl-12"), None)
+        (Some("shed-acp"), Some("sendmeter-impl-12"), None)
     );
     assert_eq!(ev.val("confirmed"), true);
     assert!(std::fs::read_to_string(wt.join(".brief.md"))
@@ -258,7 +248,7 @@ fn a_lane_spawns_on_shed() {
 
 fn acp_config(sock: &std::path::Path, harness: &str) -> String {
     let cfg = CONFIG.replace(
-        "harness  =  \"hermes\"    # toggled in tests",
+        "harness  =  \"claude\"    # toggled in tests",
         &format!("harness = \"{harness}\""),
     );
     format!(
@@ -517,14 +507,9 @@ fn an_acp_lanes_adapter_and_its_grandchild_run_in_the_background_even_after_it_s
 fn an_unguardable_acp_lane_refuses_to_start() {
     let b = FakeShed::new();
     let unsynced = ctx(&tmpdir("acp-nohook"), &acp_config(&b.sock, "claude"));
-    let cases = [
-        (
-            acp_ctx("acp-hermes", &acp_config(&b.sock, "hermes")),
-            "runs no hermes hook",
-        ),
-        (unsynced, "no drover PreToolUse hook"),
-    ];
-    for (c, why) in cases {
+    std::fs::remove_dir_all(unsynced.config.with_file_name("claude")).unwrap();
+    {
+        let (c, why) = (unsynced, "no drover PreToolUse hook");
         let f = acp_fake(&["env"]);
         let cli = b.cli(&f);
         let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
@@ -665,12 +650,12 @@ fn an_acp_lanes_state_follows_its_turn_events() {
 }
 
 fn hook(sock: &std::path::Path, event: &str) -> String {
-    hook_in("shed", "SHED", sock, event)
+    hook_in("SHED", sock, event)
 }
 
-fn hook_in(kind: &str, var: &str, sock: &std::path::Path, event: &str) -> String {
+fn hook_in(var: &str, sock: &std::path::Path, event: &str) -> String {
     let d = tmpdir("shed-hook");
-    std::fs::write(d.join("fleet.toml"), kind_config(kind, sock, "")).unwrap();
+    std::fs::write(d.join("fleet.toml"), kind_config("shed-acp", sock, "")).unwrap();
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
         .args(["hook", "--role", "impl"])
         .env("DROVER_LANE", "sendmeter:-:impl")
@@ -739,7 +724,7 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
     ];
     let b = FakeShed::start(shed::proto::VERSION, events);
     let d = tmpdir("shed-drive");
-    let c = ctx(&d, &shed_config(&b.sock, ""));
+    let c = ctx(&d, &shed_config(&b, ""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
     assert_eq!(drover::session::stamp::intake(&c, &cfg, &b.shed().wire).unwrap(), 2);
@@ -790,6 +775,11 @@ fn no_runtime_is_no_shed_and_herdr_fails_to_load() {
         let e = format!("{:#}", drover::config::Config::parse(&herdr).unwrap_err());
         assert!(e.contains(drover::config::RETIRED_RUNTIME), "{e}");
     }
+    for kind in ["shed", "berth"] {
+        let terminal = format!("{CONFIG}\n[runtime]\nkind = \"{kind}\"\n");
+        let e = format!("{:#}", drover::config::Config::parse(&terminal).unwrap_err());
+        assert!(e.contains("use kind = \"shed-acp\""), "{e}");
+    }
 }
 
 #[test]
@@ -805,25 +795,12 @@ fn another_product_at_the_same_version_is_refused() {
 }
 
 #[test]
-fn the_old_kind_and_env_still_work_with_a_warning() {
+fn the_old_env_still_reports_the_lanes_state() {
     let b = FakeShed::new();
     b.add("sendmeter-impl-12", lane_labels());
-    let err = hook_in("berth", "BERTH", &b.sock, "Stop");
+    let err = hook_in("BERTH", &b.sock, "Stop");
     assert_eq!(b.last("state"), json!({"name": "sendmeter-impl-12", "state": "done"}));
-    assert!(
-        err.contains("kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\""),
-        "{err}"
-    );
-    assert!(!hook(&b.sock, "Stop").contains("deprecated"));
-    let d = tmpdir("shed-doctor");
-    let c = ctx(&d, &kind_config("berth", &b.sock, ""));
-    let (_, out) = run(&c, &Fake::default(), &["doctor"]);
-    assert!(
-        out.contains("! runtime — kind = \"berth\" is deprecated, berth is now shed → set kind = \"shed\" in "),
-        "{out}"
-    );
-    let c = ctx(&tmpdir("shed-doctor-new"), &shed_config(&b.sock, ""));
-    assert!(!run(&c, &Fake::default(), &["doctor"]).1.contains("! runtime"));
+    assert!(!err.contains("deprecated"), "{err}");
 }
 
 #[test]
@@ -831,7 +808,7 @@ fn drive_reads_berths_seq_file_once_when_sheds_is_missing() {
     let ev = json!({"seq": 9, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "killed"});
     let b = FakeShed::start(shed::proto::VERSION, vec![ev]);
     let d = tmpdir("shed-old-seq");
-    let c = ctx(&d, &shed_config(&b.sock, ""));
+    let c = ctx(&d, &shed_config(&b, ""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(c.state.with_file_name("berth.seq"), "8").unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
@@ -850,7 +827,7 @@ fn the_lanes_tab_lists_a_running_shed_acp_lane_live() {
     let b = FakeShed::new();
     b.add("sendmeter-impl-12", lane_labels());
     let c = ctx(&tmpdir("acp-lanes-tab"), &acp_config(&b.sock, "claude"));
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed",
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed-acp",
         "pane": "sendmeter-impl-12", "worktree": "/w/issue-12"});
     drover::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
     let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr agent list", NO_AGENTS)));
@@ -887,91 +864,6 @@ fn the_lanes_tab_lists_a_running_shed_acp_lane_live() {
         (row.0.as_str(), row.1["state"].as_str(), row.1["gone"].as_bool()),
         (Some("working"), Some("working"), Some(false)),
         "{v}"
-    );
-}
-
-struct Lands<'a>(&'a Fake, Terms);
-
-impl Runner for Lands<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
-        if prog == "shed" && args[0] == "send" {
-            let mut st = self.1.lock().unwrap();
-            st.terms.get_mut(&args[1]).unwrap()["text"] = json!(format!("> {}", args[2]));
-        }
-        self.0.run(prog, args)
-    }
-    fn sleep(&self, _: u64) {}
-}
-
-#[test]
-fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
-    let b = FakeShed::new();
-    let lane = "sendmeter-rev-12-r1";
-    b.add(
-        lane,
-        json!({"fleet": "sendmeter", "issue": "12", "role": "rev", "harness": "claude"}),
-    );
-    {
-        let mut st = b.lock();
-        let terms = &mut st.terms;
-        let t = terms.get_mut(lane).unwrap();
-        (t["acp"], t["reported"], t["text"]) = (json!("claude-acp"), Value::Null, json!(""));
-    }
-    let c = ctx(&tmpdir("acp-dropped"), &acp_config(&b.sock, "claude"));
-    let head = "a".repeat(40);
-    let wt = c.worktrees.join("sendmeter/rev-12-r1");
-    std::fs::create_dir_all(&wt).unwrap();
-    std::fs::write(wt.join(".brief.md"), "# Brief — review #12\n").unwrap();
-    let ev = |ts: u64, kind: &str, d: Value| {
-        drover::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
-    };
-    ev(
-        10,
-        "spawn",
-        json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"}),
-    );
-    ev(20, "pushed", json!({"sha": head}));
-    let t0 = c.now - 60;
-    ev(
-        t0,
-        "spawn",
-        json!({"role": "rev", "check": true, "agent": lane, "pane": lane, "worktree": wt, "branch": "rev-12-r1",
-            "sha": head, "runtime": "shed", "confirmed": true}),
-    );
-    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
-        "mergeable": "MERGEABLE", "statusCheckRollup": []});
-    let f = Fake::default()
-        .reply("gh pr view issue-12", &pr.to_string())
-        .reply("git -C", "")
-        .reply("shed send", "");
-    let r = Lands(&f, b.state.clone());
-    let at = |s: u64| drover::Ctx { now: s, ..c.clone() };
-    let sends = || f.count(&format!("shed send {lane}"));
-    let drive = |c: &drover::Ctx| {
-        let (code, out) = run(c, &r, &["drive"]);
-        assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
-        out
-    };
-    drive(&c);
-    assert_eq!(sends(), 0, "inside the start window");
-    let out = drive(&at(t0 + 601));
-    assert_eq!(sends(), 1, "{out} {:?}", f.calls.borrow());
-    assert!(
-        f.called(&format!("shed send {lane} # Brief — review #12")),
-        "the brief itself"
-    );
-    let ev = drover::events::read(&c.state).unwrap();
-    assert!(
-        ev.iter()
-            .any(|e| e.kind == "start-resent" && e.str("agent") == Some(lane)),
-        "{out}"
-    );
-    drive(&at(t0 + 1202));
-    assert_eq!(sends(), 1);
-    let ev = drover::events::read(&c.state).unwrap().to_vec();
-    assert!(
-        !ev.iter().any(|e| matches!(e.kind.as_str(), "respawn" | "needs-human")),
-        "{ev:?}"
     );
 }
 
@@ -1363,6 +1255,7 @@ fn an_acp_orchestrator_runs_under_the_orchestrator_guard() {
 fn an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_back_to_herdr() {
     let b = FakeShed::new();
     let c = ctx(&tmpdir("acp-orchestrator-nohook"), &acp_config(&b.sock, "claude"));
+    std::fs::remove_dir_all(c.config.with_file_name("claude")).unwrap();
     run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
     let f = acp_fake(&["env"]);
     let cli = b.cli(&f);
@@ -1533,30 +1426,6 @@ fn every_lane_says_where_it_runs() {
     );
 }
 
-#[test]
-fn a_lane_keeps_its_spawn_runtime_after_the_config_changes() {
-    let b = FakeShed::new();
-    b.add("sendmeter-impl-12", lane_labels());
-    let c = ctx(&tmpdir("acp-keeps-runtime"), &acp_config(&b.sock, "claude"));
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed-acp",
-        "pane": "sendmeter-impl-12", "worktree": "/w/issue-12"});
-    drover::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
-    let r = Fake::default;
-    assert_eq!(wheres(&c, r)["sendmeter-impl-12"].0, "shed-acp");
-    std::fs::write(
-        &c.config,
-        b.config(&CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"")),
-    )
-    .unwrap();
-    let cfg = drover::config::Config::load(&c.config).unwrap();
-    assert!(
-        cfg.shed_for("sendmeter").unwrap().acp.is_none(),
-        "the fleet's new lanes start in a shed terminal"
-    );
-    let got = wheres(&c, r);
-    assert_eq!(got["sendmeter-impl-12"].0, "shed-acp", "{got:?}");
-}
-
 fn herdr_era_lane(
     name: &str,
     b: &FakeShed,
@@ -1583,7 +1452,7 @@ fn herdr_era_lane(
     );
     git(&old, &["commit", "-q", "--allow-empty", "-m", "impl"]);
     git(&old, &["push", "-q", "origin", "issue-12"]);
-    let cfg = shed_config(&b.sock, "").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
+    let cfg = shed_config(b, "").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
     let c = ctx(&d, &cfg);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w1:p1",
@@ -1653,6 +1522,34 @@ fn a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves() {
     assert!(!old.exists(), "the old worktree is gone");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
     assert!(brief.contains(&format!("origin/{w}")), "{brief}");
+}
+
+#[test]
+fn an_impl_round_moves_a_verify_lanes_worktree_without_snapshotting_its_home_path_scratch() {
+    let b = FakeShed::new();
+    let (c, f, local, old, origin) = herdr_era_lane("moved-verify", &b, false, &[]);
+    let cfg = std::fs::read_to_string(&c.config).unwrap().replacen(
+        "integration = \"staging\"",
+        "integration = \"staging\"\npublic = true",
+        1,
+    );
+    let verify = "[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
+    std::fs::write(&c.config, format!("{cfg}\n{verify}")).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    std::fs::write(old.join("transcript.txt"), "/home/me/e2e\n").unwrap();
+    let sp = json!({"role": "verify", "agent": "sendmeter-verify-12-r1", "harness": "claude", "pane": "w3:p1",
+        "workspace": "w3", "worktree": old, "branch": "issue-12"});
+    let e = Event::new(c.now - 300, "sendmeter", Some(12), "spawn", sp);
+    drover::events::append(&c.state, &e).unwrap();
+    let cli = Push(b.cli(&f), local.parent().unwrap().into());
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
+    let moved = logged(&c, "worktree-moved");
+    assert_eq!(moved.len(), 1, "{out}");
+    assert_eq!(*moved[0].val("wip"), Value::Null);
+    assert_eq!(git(&origin, &["for-each-ref", "refs/heads/wip/"]), "");
+    assert!(!old.exists(), "the old worktree is gone");
 }
 
 #[test]
@@ -1737,7 +1634,7 @@ fn a_hook_naming_another_binary_refuses_acp_unguarded() {
 fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
     let b = FakeShed::new();
     let cfg = acp_config(&b.sock, "claude").replace(
-        "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
+        "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
         "[fleet.sendmeter.role.rev]\nagent = \"codex-acp\"\nmodel = \"gpt-5.5\"\neffort = \"high\"",
     );
     let c = acp_ctx("acp-codex", &cfg);
@@ -1843,7 +1740,7 @@ fn a_rev_on_the_impls_provider_refuses_to_load() {
     let base = acp_config(sock, "claude");
     let rev = |agent: &str| {
         base.replace(
-            "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
+            "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
             &format!("[fleet.sendmeter.role.rev]\nagent = \"{agent}\""),
         )
     };
@@ -1856,10 +1753,6 @@ fn a_rev_on_the_impls_provider_refuses_to_load() {
     let imp = base.replace(
         "harness = \"claude\"\nprofile = \"fleet-impl\"",
         "agent = \"claude-acp\"\nprofile = \"fleet-impl\"",
-    );
-    let imp = imp.replace(
-        "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
-        "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
     );
     assert!(load(&imp).unwrap_err().contains("REVIEW_SAME_PROVIDER"));
     let opt = |line: &str| {
@@ -1880,12 +1773,12 @@ fn a_rev_on_the_impls_provider_refuses_to_load() {
     assert!(load(&rev("gemini-acp"))
         .unwrap_err()
         .contains("no harness adapter guards it"));
-    assert!(load(&base.replace("harness = \"hermes\"", "harness = \"claude\"")).is_ok());
+    assert!(load(&base).is_ok());
 }
 
 fn lane_json(b: &FakeShed, agent: &str, query: &str) -> Value {
     let c = ctx(&tmpdir(&format!("acp-blocks-{agent}")), &acp_config(&b.sock, "claude"));
-    let d = json!({"role": "impl", "agent": agent, "harness": "claude", "runtime": "shed", "pane": agent});
+    let d = json!({"role": "impl", "agent": agent, "harness": "claude", "runtime": "shed-acp", "pane": agent});
     drover::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
     let fake = Fake::default();
     let r = shed::With(&fake, b.shed());
@@ -2228,7 +2121,7 @@ fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start() {
 fn verify_round_one(name: &str) -> (drover::Ctx, FakeShed) {
     let b = FakeShed::new();
     let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
-    let c = ctx(&tmpdir(name), &format!("{}{verify}", shed_config(&b.sock, "")));
+    let c = ctx(&tmpdir(name), &format!("{}{verify}", shed_config(&b, "")));
     let ev = |kind: &str, d: Value| {
         drover::events::append(&c.state, &Event::new(c.now - 100, "sendmeter", Some(12), kind, d)).unwrap();
     };
@@ -2239,7 +2132,7 @@ fn verify_round_one(name: &str) -> (drover::Ctx, FakeShed) {
     let wt = c.worktrees.join("sendmeter/verify-12-r1");
     ev(
         "spawn",
-        json!({"role": "verify", "stage": "verify", "check": true, "agent": r1, "pane": r1, "runtime": "shed",
+        json!({"role": "verify", "stage": "verify", "check": true, "agent": r1, "pane": r1, "runtime": "shed-acp",
         "worktree": wt, "branch": "verify-12-r1"}),
     );
     let fail = json!({"verdict": "FAIL", "sha": "a".repeat(40), "stage": "verify", "body": "FAIL"});
@@ -2258,8 +2151,20 @@ fn carrying(b: &FakeShed, role: &str) -> Vec<String> {
     let live = st
         .terms
         .values()
-        .filter(|t| t["state"] == "running" && t["labels"]["role"] == role);
+        .filter(|t| t["state"] == "running" && t["name"].as_str().unwrap().contains(&format!("-{role}-")));
     live.map(|t| t["name"].as_str().unwrap().to_string()).collect()
+}
+
+struct Starts<'a>(&'a Fake, &'a FakeShed);
+
+impl Runner for Starts<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        if prog == "shed" && args[0] == "run" {
+            let name = &args[args.iter().position(|a| a == "--name").unwrap() + 1];
+            self.1.lock().seen.push(("run".into(), json!({"name": name})));
+        }
+        self.0.run(prog, args)
+    }
 }
 
 #[test]
@@ -2267,7 +2172,7 @@ fn spawning_verify_round_two_stops_round_ones_live_terminal_first() {
     let (c, b) = verify_round_one("dup-spawn");
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let f = spawn_fake().reply("gh pr view", "{}");
-    let (code, out) = run(&c, &f, &["spawn", "sendmeter", "12", "verify"]);
+    let (code, out) = run(&c, &Starts(&f, &b), &["spawn", "sendmeter", "12", "verify"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     let order: Vec<(String, String)> = (b.lock().seen.iter())
         .filter(|s| matches!(s.0.as_str(), "kill" | "run"))
@@ -2292,7 +2197,7 @@ fn spawning_verify_round_two_stops_round_ones_live_terminal_first() {
 fn two_live_processes_of_one_lane_alert_once_and_the_next_drive_pass_keeps_the_newest() {
     let (c, b) = verify_round_one("dup-check");
     let r2 = "sendmeter-verify-12-r2";
-    let d = json!({"role": "verify", "stage": "verify", "check": true, "agent": r2, "pane": r2, "runtime": "shed"});
+    let d = json!({"role": "verify", "stage": "verify", "check": true, "agent": r2, "pane": r2, "runtime": "shed-acp"});
     drover::events::append(&c.state, &Event::new(c.now - 50, "sendmeter", Some(12), "spawn", d)).unwrap();
     b.add(
         r2,
