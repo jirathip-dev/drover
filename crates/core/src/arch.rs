@@ -88,6 +88,7 @@ struct Change {
     file: String,
     hunk: usize,
     line: usize,
+    at: usize,
     added: bool,
     created: bool,
     text: String,
@@ -171,18 +172,12 @@ pub fn check(
         .map(str::trim)
         .filter(|l| l.contains(" -> "))
         .collect();
-    let base: BTreeMap<String, usize> = base_text
-        .lines()
-        .filter_map(|l| {
-            l.trim()
-                .rsplit_once(' ')
-                .and_then(|(k, n)| Some((k.into(), n.parse().ok()?)))
-        })
-        .collect();
+    let base = sizes(&base_text);
     let mut files = vec![];
     walk(Path::new("."), &a.named(), &mut files);
     files.sort();
     let (mut bad, mut now, mut crossed) = (vec![], BTreeMap::<String, usize>::new(), BTreeSet::new());
+    let mut spans = BTreeMap::<String, Vec<(usize, usize)>>::new();
     for p in &files {
         let ext = Path::new(p).extension().and_then(|x| x.to_str()).unwrap_or_default();
         let rust = ext == "rs";
@@ -240,6 +235,7 @@ pub fn check(
             let each = fns(&lines, ext).into_iter();
             sizes.extend(each.map(|(name, at, n)| (format!("{p}:{name}"), at, n, s.max_fn_lines)));
             for (key, at, n, max) in sizes {
+                spans.entry(key.clone()).or_default().push((at, n));
                 let Some(max) = max.filter(|&m| n > m) else { continue };
                 let e = now.entry(key.clone()).or_default();
                 *e = n.max(*e);
@@ -260,7 +256,10 @@ pub fn check(
             let f: Frozen = toml::from_str(&o.stdout).with_context(|| format!("parsing {b}:{}", config.display()))?;
             frozen = f.frozen;
         }
+        let o = r.run("git", &argv(&["show", &format!("{b}:./{base_path}")]))?;
+        bad.extend(unshrunk(&sizes(&o.stdout), &base, &spans, &diff));
     }
+    bad.extend(expired(&files, &crate::lesson::ymd(crate::clock::now() / 86_400)));
     bad.extend(frozen_adds(&a, &frozen, &diff));
     bad.extend(unsized_shared(&a, config));
     bad.extend(stale_generated(&a, r)?);
@@ -304,6 +303,51 @@ pub fn check(
     }
     writeln!(out, "arch-check: {} files, {} violations", files.len(), bad.len())?;
     Ok(i32::from(!bad.is_empty()))
+}
+
+fn sizes(baseline: &str) -> BTreeMap<String, usize> {
+    let each = baseline.lines().filter_map(|l| l.trim().rsplit_once(' '));
+    each.filter_map(|(k, n)| Some((k.into(), n.parse().ok()?))).collect()
+}
+
+fn unshrunk(
+    was: &BTreeMap<String, usize>,
+    now: &BTreeMap<String, usize>,
+    spans: &BTreeMap<String, Vec<(usize, usize)>>,
+    diff: &[Change],
+) -> Vec<String> {
+    let touched = |k: &str| {
+        let (file, func) = k.split_once(':').map_or((k, false), |(f, _)| (f, true));
+        let inside = |at| {
+            spans
+                .get(k)
+                .is_none_or(|s| s.iter().any(|&(a, n)| (a..=a + n).contains(&at)))
+        };
+        diff.iter().any(|c| c.file == file && (!func || inside(c.at)))
+    };
+    let kept = was.iter().filter(|(k, n)| now.get(*k).is_some_and(|m| m >= n));
+    kept.filter(|(k, _)| touched(k))
+        .map(|(k, n)| format!("{k}: this diff touches it, so its baseline entry {n} must shrink: lower it to the new size, or drop it under the cap"))
+        .collect()
+}
+
+fn expired(files: &[String], today: &str) -> Vec<String> {
+    let date = |d: &&str| {
+        d.bytes()
+            .enumerate()
+            .all(|(i, b)| [4, 7].contains(&i) == (b == b'-') && (b == b'-' || b.is_ascii_digit()))
+    };
+    let mut bad = vec![];
+    for f in files {
+        let src = std::fs::read_to_string(f).unwrap_or_default();
+        for (i, l) in src.lines().enumerate() {
+            let d = l.split_once("remove-by: ").and_then(|(_, r)| r.get(..10)).filter(date);
+            if let Some(d) = d.filter(|d| *d < today) {
+                bad.push(format!("{f}:{}: past its remove-by date {d}: delete this code", i + 1));
+            }
+        }
+    }
+    bad
 }
 
 /// The globs `text`, an arch.toml, lists as frozen, generated or shared: decided, so never a hotspot.
@@ -508,12 +552,13 @@ fn changes(diff: &str) -> Vec<Change> {
             from = l.strip_prefix("--- a/").unwrap_or(from);
             to = l.strip_prefix("+++ b/").unwrap_or(to);
         } else if let Some((sign @ ("+" | "-"), text)) = l.split_at_checked(1) {
-            let added = sign == "+";
+            let (added, at) = (sign == "+", new);
             let (file, line) = if added { (to, &mut new) } else { (from, &mut old) };
             v.push(Change {
                 file: file.into(),
                 hunk,
                 line: *line,
+                at,
                 added,
                 created,
                 text: text.into(),
