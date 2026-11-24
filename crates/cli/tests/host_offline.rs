@@ -257,7 +257,12 @@ fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
         )
     };
     let mut r = mini_only();
-    r.replies.insert(0, fail(format!("{local} fetch origin issue-13")));
+    r.replies.insert(
+        0,
+        fail(format!(
+            "{local} fetch origin +refs/heads/issue-13:refs/remotes/origin/issue-13"
+        )),
+    );
     for n in [12, 13] {
         r.replies
             .insert(0, fail(format!("{local} rev-parse --verify --quiet issue-{n}")));

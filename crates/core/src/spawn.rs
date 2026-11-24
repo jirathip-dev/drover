@@ -1,4 +1,5 @@
 use crate::access;
+use crate::clone::refspec;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event, Json};
 use crate::gate::refused;
@@ -741,7 +742,13 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
     let home = |a| crate::hosts::rehome(a, home);
     let mut cmds = vec![sent(
         "git",
-        argv(&["-C", local, "fetch", "origin", p.base.trim_start_matches("origin/")]),
+        argv(&[
+            "-C",
+            local,
+            "fetch",
+            "origin",
+            &refspec(p.base.trim_start_matches("origin/")),
+        ]),
     )];
     if !reopen {
         cmds.push(sent("git", worktree_add(local, p, false)));
@@ -1054,7 +1061,7 @@ fn integration_view(
             update.then(|| format!(include_str!("../roles/brief-update.md"), int)),
         ));
     }
-    crate::clone::fetch(ctx, r, Path::new(local), &["origin", int])?;
+    crate::clone::fetch(ctx, r, Path::new(local), &["origin", &refspec(int)])?;
     let at_int = |name: &str| {
         crate::repo_read(name, |x| {
             ok(r, "git", &["-C", local, "show", &format!("origin/{int}:{x}")]).ok()
@@ -1373,14 +1380,15 @@ fn start(
             ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
         }
         let from = p.base.trim_start_matches("origin/");
-        crate::clone::fetch(ctx, r, Path::new(&local), &["origin", from])?;
+        crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &refspec(from)])?;
         let body = iss.at("body").as_str().unwrap_or("");
         let recipe = match p.family {
             "design" => crate::design::Recipe::at(r, &local, &p.base, body),
             _ => crate::design::Recipe::of("", body),
         };
         crate::design::tools(ctx, cfg, r, (fleet, issue, &p.agent), &recipe)?;
-        let pushed = || crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &p.branch]).is_ok();
+        let spec = refspec(&p.branch);
+        let pushed = || crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &spec]).is_ok();
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
         }

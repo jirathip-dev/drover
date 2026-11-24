@@ -71,7 +71,7 @@ fn pr_diff(ctx: &Ctx, r: &dyn Runner, f: &Fleet, branch: &str, head: &str) -> Re
     match ok(r, "gh", &["pr", "diff", branch, "-R", &f.repo]) {
         Err(e) if format!("{e:#}").contains("too_large") => {
             let (dir, range) = (f.local_path(), format!("origin/{}...{head}", f.integration));
-            crate::clone::fetch(ctx, r, &dir, &["-q", "origin"])?;
+            crate::clone::fetch_branches(ctx, r, &dir)?;
             git(r, &dir, &["diff", &range])
         }
         d => d,
@@ -727,7 +727,7 @@ fn premerge(
         format!("origin/{}", f.integration),
     );
     let (dir, wts) = (f.local_path(), wt.to_string_lossy());
-    let tip = || crate::clone::fetch(ctx, r, &dir, &["-q", "origin"]).and_then(|_| git(r, &dir, &["rev-parse", &into]));
+    let tip = || crate::clone::fetch_branches(ctx, r, &dir).and_then(|_| git(r, &dir, &["rev-parse", &into]));
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     for _ in 0..2 {
         let base = tip()?;

@@ -2376,7 +2376,7 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
-    crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "--prune", "origin"])?;
+    crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "--prune", "origin", crate::clone::ALL])?;
     let integ = format!("origin/{}", f.integration);
     let refs = git(&[
         "for-each-ref",
