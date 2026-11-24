@@ -1054,7 +1054,7 @@ pub fn clean_all(
                     freed += purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
                 }
             }
-            dirty_past(&on, Path::new(wt), kept)
+            dirty_past(&on, Path::new(wt), kept).filter(|_| !scratch_only(cfg, e))
         };
         let saved = keep.is_some() && yes && !live && lane.is_none();
         let keep = match keep {
@@ -2008,7 +2008,7 @@ fn kill_as(
     let on = On::of(r, Some(e));
     let wt = e.str("worktree").filter(|w| on.exists(Path::new(w)));
     let (dirty, ahead) = wt.map_or(Ok((0, 0)), |w| pending(&on, w))?;
-    let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, &on, agent));
+    let wip = (dirty + ahead > 0 && !scratch_only(cfg, e)).then(|| wip_branch(ctx, &on, agent));
     let pr = e.issue.zip(cfg.fleet.get(&e.fleet)).and_then(|(n, f)| {
         let b = crate::gate::branch_of(st.as_ref(), n);
         gh::pr(ctx, r, f, (&e.fleet, n), &b, ctx.now).ok()
@@ -2018,6 +2018,7 @@ fn kill_as(
         .map_or(String::new(), |p| format!(" · PR #{} open", p.at("number")));
     let lost = match &wip {
         Some(w) => format!("{ahead} unpushed commit(s), {dirty} dirty file(s) → {w}"),
+        None if dirty + ahead > 0 => format!("{dirty} scratch file(s) stay local"),
         None => "nothing unpushed".into(),
     };
     writeln!(
@@ -2030,14 +2031,7 @@ fn kill_as(
     }
     let wip = match wip {
         Some(w) => {
-            let chk = crate::hygiene::of(ctx, Some(r), cfg, &e.fleet);
-            let (w, skip) = save_on(
-                &on,
-                agent,
-                wt.unwrap_or_default(),
-                (&w, "wip: kill snapshot"),
-                chk.as_ref(),
-            )?;
+            let (w, skip) = save_on(ctx, (cfg, &e.fleet), &on, (agent, wt.unwrap_or_default()), &w, "kill")?;
             let _ = skip.is_empty()
                 || writeln!(out, "skipped (build output or over the size caps): {}", skip.join(", ")).is_ok();
             Some(w)
@@ -2266,14 +2260,20 @@ fn close_gone(ctx: &Ctx, on: &On, agent: &str, pane: &str) -> Result<()> {
     Ok(())
 }
 
+fn scratch_only(cfg: &Config, e: &Event) -> bool {
+    (cfg.fleet.get(&e.fleet)).is_some_and(|f| f.family(e.str("role").unwrap_or_default()) == "rev")
+}
+
 fn save_on(
+    ctx: &Ctx,
+    (cfg, fleet): (&Config, &str),
     on: &On,
-    agent: &str,
-    wt: &str,
-    (w, msg): (&str, &str),
-    chk: Option<&Check>,
+    (agent, wt): (&str, &str),
+    w: &str,
+    why: &str,
 ) -> Result<(String, Vec<String>)> {
-    match snapshot(on, wt, (w, msg), (chk, None)) {
+    let chk = crate::hygiene::of(ctx, Some(on.r), cfg, fleet);
+    match snapshot(on, wt, (w, &format!("wip: {why} snapshot")), (chk.as_ref(), None)) {
         Err(Snap::Failed(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
             format!("{agent}: wip snapshot failed ({e:#}); index restored, nothing pushed, pane kept"),
@@ -2308,11 +2308,8 @@ pub fn save_lane(
     if family == "rev" || !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
         return Ok(None);
     }
-    let (w, chk) = (
-        wip_branch(ctx, on, agent),
-        crate::hygiene::of(ctx, Some(on.r), cfg, fleet),
-    );
-    save_on(on, agent, wt, (&w, "wip: supersede snapshot"), chk.as_ref()).map(|(w, _)| Some(w))
+    let w = wip_branch(ctx, on, agent);
+    save_on(ctx, (cfg, fleet), on, (agent, wt), &w, "supersede").map(|(w, _)| Some(w))
 }
 
 pub(crate) fn wip_branch(ctx: &Ctx, on: &On, agent: &str) -> String {
