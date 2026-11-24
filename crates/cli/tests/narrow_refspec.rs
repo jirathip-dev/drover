@@ -78,7 +78,7 @@ fn repo(name: &str, hosts: &str) -> Repo {
     git(&seed, &["push", "-q", "origin", "issue-12"]);
     let head = git(&seed, &["rev-parse", "HEAD"]);
     let base = CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("/tmp/does-not-matter/sendmeter", &local.to_string_lossy());
     let c = ctx(&d, &format!("{base}{hosts}"));
     Repo { c, local, head }

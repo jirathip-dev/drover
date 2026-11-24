@@ -8,6 +8,10 @@ use std::sync::Mutex;
 const NOW: u64 = 1_000_000;
 static ENV: Mutex<()> = Mutex::new(());
 
+fn started(sh: &FakeShed, lane: &str) -> bool {
+    !sh.sent(lane).is_empty()
+}
+
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
@@ -170,7 +174,7 @@ fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_s
     let f = spawnable();
     let (code, out) = as_orch(&c, &f, "ada", &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
-    assert!(sh.called("run", "sendmeter-impl-12"), "{:?}", sh.methods());
+    assert!(started(&sh, "sendmeter-impl-12"), "{:?}", sh.methods());
     let (code, out) = as_orch(&c, &spawnable(), "bob", &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED LANE_LIVE"), "{out}");

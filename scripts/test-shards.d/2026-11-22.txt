@@ -54,8 +54,6 @@
 3 drive_kicks
 1 drive_loops
 3 drive_sim
-2 dsh
-3 dsh_unit
 4 empty_env
 3 events_log
 2 events_tab
@@ -71,7 +69,6 @@
 2 handover
 3 heavy
 1 herd
-3 hermes_hooks
 1 history
 4 hook
 4 hook_own_folder

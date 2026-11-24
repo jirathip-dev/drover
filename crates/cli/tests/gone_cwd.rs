@@ -30,7 +30,7 @@ impl Runner for RealShed<'_> {
 }
 
 fn acp_ctx(name: &str, sock: &Path) -> drover::Ctx {
-    let cfg = CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"");
+    let cfg = CONFIG.replace("harness  =  \"claude\"    # toggled in tests", "harness = \"claude\"");
     let cfg = format!(
         "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         sock.display()

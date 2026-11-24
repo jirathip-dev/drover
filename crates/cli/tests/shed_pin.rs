@@ -33,7 +33,7 @@ fn refused(c: &drover::Ctx, sh: &FakeShed, f: &Fake) -> String {
     let (code, out) = run(c, f, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED SHED_VERSION: "), "{out}");
-    assert!(sh.all("run").is_empty(), "{out}");
+    assert!(!f.called("shed run") && !sh.has("sendmeter-impl-12"), "{out}");
     assert!(kinds(c, "spawn").is_empty(), "{out}");
     assert!(!c.worktrees.join("sendmeter/issue-12").exists(), "{out}");
     out
@@ -49,7 +49,8 @@ fn shed_builds_9b88eb5_and_f026a4d_both_pass_spawn_and_doctor_whichever_runs_ser
         let (code, out) = run(&c, &f, &["spawn", "sendmeter", "12", "impl"]);
         assert!(!out.contains("SHED_VERSION"), "{serve}: {out}");
         assert_eq!(code, 0, "{serve}: {out}");
-        assert_eq!(sh.all("run").len(), 1, "{serve}: {out}");
+        assert_eq!(f.count("shed run --acp claude-acp"), 1, "{serve}: {out}");
+        assert!(sh.has("sendmeter-impl-12"), "{serve}: {out}");
         let (_, doctor) = run(&c, &f, &["doctor", "--config-only"]);
         let want = format!(
             "✓ shed — server {VERSION} ({serve}) protocol {PROTOCOL}, drover needs protocol {} or newer; \
@@ -89,7 +90,7 @@ fn five_lanes_whose_prompt_never_landed_stop_every_respawn_with_one_needs_human_
         let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
         std::fs::create_dir_all(&wt).unwrap();
         let agent = format!("sendmeter-impl-{n}");
-        let d = json!({"role": "impl", "agent": agent, "pane": agent, "workspace": "", "runtime": "shed",
+        let d = json!({"role": "impl", "agent": agent, "pane": agent, "workspace": "", "runtime": "shed-acp",
             "worktree": wt, "branch": format!("issue-{n}"), "confirmed": false});
         append(&c.state, &Event::new(t0 + n * 120, "sendmeter", Some(n), "spawn", d)).unwrap();
         sh.lane(&agent, "idle", &wt.to_string_lossy());
@@ -107,7 +108,7 @@ fn five_lanes_whose_prompt_never_landed_stop_every_respawn_with_one_needs_human_
         );
         assert_eq!(code, 0, "{out}");
         assert!(kinds(&c, "respawn").is_empty(), "{out}");
-        assert!(sh.all("run").is_empty(), "{out}");
+        assert!(!r.called("shed run"), "{out}");
     }
     let nh = kinds(&c, "needs-human");
     assert_eq!(nh.len(), 1, "{nh:?}");

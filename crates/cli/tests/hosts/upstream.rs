@@ -29,7 +29,8 @@ fn a_remote_worktree_tracks_its_own_issue_branch_so_a_plain_push_works() {
     let verify = format!("{SSH}{GIT} '-C' '/tmp/does-not-matter/sendmeter' 'rev-parse' '--verify'");
     r.replies.insert(0, (verify, none));
     let args = ["spawn", "sendmeter", "12", "impl", "--host", "bazzite"];
-    let (code, out) = run(&c, &two(&r, &bazzite), &args);
+    remote::proxied(&c);
+    let (code, out) = run(&c, &acp(&r, &bazzite), &args);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let sent = format!("{SSH}{GIT} '-C' '/tmp/does-not-matter/sendmeter' ");
     let calls = r.calls.borrow();

@@ -61,7 +61,10 @@ fn two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips() {
     let second = Shared::<Vec<String>>::default();
     let race = || {
         std::thread::scope(|s| {
-            let b = s.spawn(|| run(&c, &r, &["kick", "sendmeter", "12", "--now"]));
+            let b = s.spawn(|| {
+                sh.config("");
+                run(&c, &r, &["kick", "sendmeter", "12", "--now"])
+            });
             second.borrow_mut().push(b.join().unwrap().1);
         });
     };
@@ -80,9 +83,8 @@ fn two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips() {
         b.contains("REFUSED IN_FLIGHT: skipped: sendmeter#12:spawn@impl@0 in flight"),
         "{b}"
     );
-    let runs = sh.all("run");
-    assert_eq!(runs.len(), 1, "{:?}", r.calls.borrow());
-    assert_eq!(runs[0]["name"], "sendmeter-impl-12");
+    assert_eq!(r.count("shed run --acp"), 1, "{:?}", r.calls.borrow());
+    assert!(sh.has("sendmeter-impl-12"), "{:?}", r.calls.borrow());
     assert_eq!(r.count("git -C /tmp/does-not-matter/sendmeter worktree add"), 1);
     assert_eq!(kinds(&c, "spawn").len(), 1);
     let id = |e: &Event| e.str("action_id").map(String::from);

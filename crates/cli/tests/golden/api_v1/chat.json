@@ -7,11 +7,9 @@
         "archived": [],
         "harness": {
           "all": [
-            "claude",
-            "hermes",
-            "dsh"
+            "claude"
           ],
-          "cur": "hermes",
+          "cur": "claude",
           "name": "harness"
         },
         "k": "x",
@@ -22,11 +20,9 @@
         "archived": [],
         "harness": {
           "all": [
-            "claude",
-            "hermes",
-            "dsh"
+            "claude"
           ],
-          "cur": "hermes",
+          "cur": "claude",
           "name": "harness"
         },
         "k": "g",
@@ -51,6 +47,14 @@
         "chips": [
           {
             "all": [
+              "opus",
+              "sonnet"
+            ],
+            "cur": "opus",
+            "name": "model"
+          },
+          {
+            "all": [
               "none",
               "low",
               "medium",
@@ -61,7 +65,7 @@
             "name": "effort"
           }
         ],
-        "ds": "sendmeter · hermes · opus · awake",
+        "ds": "sendmeter · claude · opus · awake",
         "id": "t1",
         "page": {
           "archived": false,

@@ -338,8 +338,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 if let Some((url, line)) = wt.and_then(|wt| amendment(ctx, r, cfg, s, wt)) {
                     let key = format!("{lane}:{url}");
                     let seen = events.iter().any(|e| e.str("key") == Some(&key));
-                    let dsh = spawned.and_then(|e| e.str("harness")) == Some("dsh");
-                    if !seen && term::tell(r, dsh, lane, &a.name, &line).is_ok() {
+                    if !seen && term::tell(r, lane, &a.name, &line).is_ok() {
                         hits.push(("amended", key, line));
                     }
                 }
@@ -1067,23 +1066,18 @@ pub fn clean_all(
         if !pane.is_empty() {
             term::close(ctx, &on, pane).ok();
         }
+        let mut d = json!({"worktree": wt, "pane": pane, "why": why});
         if on.machine.is_none() {
             crate::providers::remove_tmp(&stray_roots(cfg), wt);
+            if let Some(f) = crate::heavy::forget(r, wt) {
+                writeln!(out, "runners forget {wt} failed: {f}")?;
+                d.put("forget", f.into());
+            }
         }
         drop_log(ctx, e.str("agent"));
         removed += 1;
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
-        emit(
-            &ctx.state,
-            cfg,
-            Event::new(
-                ctx.now,
-                &e.fleet,
-                Some(n),
-                "clean",
-                json!({"worktree": wt, "pane": pane, "why": why}),
-            ),
-        )?;
+        emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, Some(n), "clean", d))?;
     }
     let sheds = r.shed().filter(|_| lane.is_none()).map(term::Shed);
     for (b, t) in sheds.iter().flat_map(|b| {

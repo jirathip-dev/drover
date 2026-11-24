@@ -807,25 +807,10 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
         }
         return start(ctx, cfg, r, t, &working(&ctx.state)?, line);
     };
-    let (agent, pane) = (s.str("agent").unwrap_or_default(), s.str("pane").unwrap_or_default());
-    if acp(s) {
-        crate::shed::cli(r, &["send", agent, line])?;
-        held(ctx, cfg, r, t, &events, agents.iter().find(|a| a.name == agent))?;
-        return Ok(agent.into());
-    }
-    term::reply(
-        r,
-        s.str("harness") == Some("dsh"),
-        agent,
-        pane,
-        &line.replace('\n', " "),
-    )?;
+    let agent = s.str("agent").unwrap_or_default();
+    crate::shed::cli(r, &["send", agent, line])?;
     held(ctx, cfg, r, t, &events, agents.iter().find(|a| a.name == agent))?;
     Ok(agent.into())
-}
-
-fn acp(s: &Event) -> bool {
-    s.str("runtime") == Some("shed-acp")
 }
 
 /// Thread `id`'s awake ACP conductor reporting `working` with no CPU and no output for `stall_minutes`: its start and quiet seconds.
@@ -837,7 +822,7 @@ pub fn hung<'a>(
     id: &str,
 ) -> Option<(&'a Event, u64)> {
     let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let s = last.filter(|e| e.kind == "orchestrator-start" && acp(e))?;
+    let s = last.filter(|e| e.kind == "orchestrator-start")?;
     let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"))?;
     let out = crate::session::pulse::of(ctx, &a.name).map_or(0, |p| p.heard);
     let quiet = ctx.now.saturating_sub(out.max(s.ts));
@@ -857,7 +842,7 @@ fn end(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (t, s): (&Event, &Event), mut d:
     )
 }
 
-/// `drover stop <thread>`: end its conductor (an ACP session cancelled and killed, a pane sent Esc); logs `stop`.
+/// `drover stop <thread>`: end its conductor (its ACP session cancelled and killed); logs `stop`.
 pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> {
     let events = working(&ctx.state)?;
     let t = find(&events, id)?;
@@ -866,11 +851,7 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String>
         return refused("NO_SUCH_AGENT", format!("thread {id}'s orchestrator is asleep"));
     };
     let agent = s.str("agent").unwrap_or_default();
-    if acp(s) {
-        end(ctx, cfg, r, (t, s), json!({"why": "stopped"}))?;
-    } else {
-        term::keys(r, s.str("pane").unwrap_or_default(), "Escape")?;
-    }
+    end(ctx, cfg, r, (t, s), json!({"why": "stopped"}))?;
     let d = json!({"agent": agent, "thread": id});
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "stop", d))?;
     Ok(agent.into())
@@ -1076,48 +1057,22 @@ fn save(ctx: &Ctx, r: &dyn Runner, new: &str) -> Result<Config> {
     Ok(new_cfg)
 }
 
-fn uuid() -> Result<String> {
-    let mut b = crate::devices::random(16)?;
-    if let [_, _, _, _, _, _, x6, _, x8, ..] = b.as_mut_slice() {
-        (*x6, *x8) = (*x6 & 0x0f | 0x40, *x8 & 0x3f | 0x80);
-    }
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    Ok(format!(
-        "{}-{}-{}-{}-{}",
-        &h[..8],
-        &h[8..12],
-        &h[12..16],
-        &h[16..20],
-        &h[20..]
-    ))
-}
-
 fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
     let (fleet, base) = thread_role(cfg, events, t)?;
     let f = cfg.fleet(fleet)?;
     let role = base;
     let h = providers::get(&role.harness);
-    let first =
-        of(events, id).find(|e| e.kind == "orchestrator-start" && e.str("harness") == Some(&role.harness) && !acp(e));
-    let session = first
-        .and_then(|e| e.str("session"))
-        .map_or_else(uuid, |s| Ok(s.into()))?;
-    let resume = first.is_some() && h.resumes();
     let dir = dir(ctx, cfg, id);
     let brief = dir.join(".brief.md");
     let on = crate::hosts::On::new(r, None);
     let thread = dir.join(".thread.md");
     on.write(&thread, &render(&items(events, id), name(cfg, id_of(t))))?;
-    let kick = if resume && line.len() <= 400 {
-        line.replace(char::is_control, " ")
-    } else {
-        format!(
-            "Read {} and act on it. The thread so far is in {}, the last message new.",
-            brief.display(),
-            thread.display()
-        )
-    };
+    let kick = format!(
+        "Read {} and act on it. The thread so far is in {}, the last message new.",
+        brief.display(),
+        thread.display()
+    );
     let agent = format!("orchestrator-{id}");
     let head = format!("{} · orchestrator {id}", t.fleet);
     let mut p = Plan {
@@ -1141,7 +1096,6 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         mcp_file: dir.join(".mcp.lane.json"),
         title: crate::spawn::lane_title(&head, t.str("title").unwrap_or_default()),
         head,
-        session: Some((session.clone(), resume)),
         lane_key: None,
         sandbox: None,
     };
@@ -1149,31 +1103,27 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());
     let shed = cfg.shed_for(fleet).context(crate::config::NO_RUNTIME)?;
     let wire = r.shed().map_or(shed.wire.clone(), |w| w.wire);
-    let acp = match shed.acp.clone() {
-        Some(aid) => match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
-            Ok(cmd) => Some(cmd),
-            Err(e) => {
-                if e.downcast_ref::<crate::gate::Refusal>().is_some() {
-                    log(
-                        ctx,
-                        cfg,
-                        t,
-                        "system",
-                        (&format!("the orchestrator does not start: {e:#}"), &[]),
-                    )?;
-                }
-                return Err(e);
+    let aid = shed.acp.clone().context(crate::config::NO_RUNTIME)?;
+    let acp = match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            if e.downcast_ref::<crate::gate::Refusal>().is_some() {
+                log(
+                    ctx,
+                    cfg,
+                    t,
+                    "system",
+                    (&format!("the orchestrator does not start: {e:#}"), &[]),
+                )?;
             }
-        },
-        None => None,
+            return Err(e);
+        }
     };
     h.ready(ctx, r, &p)?;
     let text = brief::thread(cfg, t, fleet);
     on.write(&brief, &text)?;
     h.prepare(ctx, &on, &p)?;
-    if let Some(acp) = &acp {
-        crate::spawn::write_acp_mcp(&on, &p, acp)?;
-    }
+    crate::spawn::write_acp_mcp(&on, &p, &acp)?;
     let _secrets = crate::spawn::deliver(ctx, &on, &p)?;
     let labels = [
         ("fleet", fleet),
@@ -1186,28 +1136,12 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     ]
     .map(|(k, v)| (k, v.to_string()));
     let b = term::Shed(crate::shed::Shed { wire, ..shed });
-    b.start(
-        ctx,
-        r,
-        &agent,
-        &labels,
-        &dir.to_string_lossy(),
-        &acp.clone().unwrap_or_default(),
-    )?;
-    if acp.is_some() {
-        let kick = format!("The thread so far is in {}, the last message new.", thread.display());
-        let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
-        let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
-            "model": p.model, "effort": p.effort, "resumed": false,
-            "confirmed": kicked});
-        return started(ctx, cfg, t, d);
-    }
-    term::ok(r, &p.lane_cmd(&agent))?;
-    term::ok(r, &term::typed(&agent, &p.start_cmd(ctx, &agent)))?;
-    let kicked = h.kick(r, &p, &agent).unwrap_or(false);
-    let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed", "harness": p.harness,
-        "model": p.model, "effort": p.effort, "session": session,
-        "resumed": resume, "confirmed": kicked});
+    b.start(ctx, r, &agent, &labels, &dir.to_string_lossy(), &acp)?;
+    let kick = format!("The thread so far is in {}, the last message new.", thread.display());
+    let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
+    let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
+        "model": p.model, "effort": p.effort, "resumed": false,
+        "confirmed": kicked});
     started(ctx, cfg, t, d)
 }
 
@@ -1424,7 +1358,7 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         if a.is_some() && pending(events, id).is_some() {
             continue;
         }
-        let gone = a.is_none() && acp(s);
+        let gone = a.is_none();
         if !gone && (!quiet || a.is_some_and(Session::busy)) {
             continue;
         }

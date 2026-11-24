@@ -142,7 +142,7 @@ impl Runner for Lag<'_> {
 
 #[test]
 fn a_drive_pass_reads_every_crashed_lanes_last_words_on_a_host_over_one_shed_connect() {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let cfg = format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
     let c = ctx(&tmpdir("shed-batch"), &cfg);
     let st = c.state.parent().unwrap();

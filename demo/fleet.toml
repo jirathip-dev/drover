@@ -15,7 +15,7 @@ model = "opus"
 effort = "xhigh"
 
 [fleet.acme-web.role.rev]
-harness = "hermes"
+harness = "claude"
 profile = "fleet-rev"
 
 [fleet.acme-api]
@@ -24,7 +24,7 @@ local = "/srv/acme/acme-api"
 integration = "staging"
 
 [fleet.acme-api.role.impl]
-harness = "dsh"
+harness = "claude"
 
 [fleet.acme-api.role.rev]
 harness = "claude"

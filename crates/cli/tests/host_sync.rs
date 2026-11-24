@@ -6,10 +6,10 @@ use std::path::Path;
 
 const NOW: u64 = 1_000_000;
 
-const DROVER: &str = "[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/x/drover\"\nintegration = \"staging\"\n\n[fleet.drover.role.impl]\nharness = \"hermes\"\n";
+const DROVER: &str = "[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/x/drover\"\nintegration = \"staging\"\n\n[fleet.drover.role.impl]\nharness = \"claude\"\n";
 
 fn config(extra: &str) -> String {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     format!("{base}\n{DROVER}\n[hosts.mini]\ntags = [\"fast\"]\n{extra}")
 }
 

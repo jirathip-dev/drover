@@ -18,7 +18,8 @@ fn forced(name: &str) -> drover::events::Event {
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#);
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--force"]);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(sh.all("run").len(), 1);
+    assert_eq!(r.count("shed run --acp claude-acp"), 1);
+    assert!(sh.has("sendmeter-impl-12"));
     let all = read(&c.state).unwrap();
     all.iter().find(|e| e.kind == "override").expect("override").clone()
 }

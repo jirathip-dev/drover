@@ -2,7 +2,7 @@
 Description=drover dev.drover.tick
 
 [Service]
-Environment=PATH=/opt/hermes/bin:/usr/bin:/bin:/usr/sbin:/sbin
+Environment=PATH=/opt/claude/bin:/usr/bin:/bin:/usr/sbin:/sbin
 ExecStart=/x/drover tick
 StandardOutput=append:<dir>/state/tick.log
 StandardError=append:<dir>/state/tick.log

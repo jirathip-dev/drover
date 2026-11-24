@@ -180,7 +180,6 @@ fn demo() -> (Ctx, Vec<Event>) {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
-        homes: [("hermes", d.join("hermes"))].into(),
         exe: "drover".into(),
         now: events.iter().map(|e| e.ts).max().unwrap_or(0) + 60,
         home: d.join("home"),

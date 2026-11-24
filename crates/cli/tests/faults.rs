@@ -17,9 +17,23 @@ fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static)
     }
 }
 
+fn bounded<T>(what: &str, f: impl FnOnce() -> T) -> T {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let what = what.to_string();
+    std::thread::spawn(move || {
+        if rx.recv_timeout(BOUND) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+            eprintln!("{what} still blocked after {} s", BOUND.as_secs());
+            std::process::exit(1);
+        }
+    });
+    let v = f();
+    drop(tx);
+    v
+}
+
 fn base() -> String {
     CONFIG
-        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("harness  =  \"claude\"", "harness = \"claude\"")
         .replace("[limits]\n", "[limits]\nshed_call_secs = 1\nssh_sessions = 64\n")
 }
 
@@ -36,10 +50,7 @@ fn spawn_fake() -> Fake {
 }
 
 fn spawn(c: &drover::Ctx) -> (i32, String) {
-    let c = c.clone();
-    within("spawn", move || {
-        run(&c, &spawn_fake(), &["spawn", "sendmeter", "12", "impl"])
-    })
+    bounded("spawn", || run(c, &spawn_fake(), &["spawn", "sendmeter", "12", "impl"]))
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<drover::events::Event> {
@@ -71,7 +82,7 @@ fn a_prompt_to_a_lane_behind_a_hung_shed_link_fails_within_its_bound() {
     let err = within("prompt", move || {
         let f = Fake::default();
         let r = drover::shed::With(&f, b);
-        drover::term::reply(&r, false, IMPL, IMPL, "go on").map_err(|e| format!("{e:#}"))
+        drover::term::reply(&r, IMPL, IMPL, "go on").map_err(|e| format!("{e:#}"))
     });
     assert!(err.unwrap_err().contains("no answer"));
     assert_eq!(sh.sent(IMPL), Vec::<String>::new());
@@ -101,7 +112,7 @@ fn a_spawn_whose_link_drops_a_connection_fails_cleanly_and_the_next_one_starts()
     let (code, out) = spawn(&c);
     assert_ne!(code, 0, "{out}");
     assert!(kinds(&c, "spawn").is_empty(), "{out}");
-    assert!(!sh.called("run", IMPL), "{:?}", sh.methods());
+    assert!(!sh.has(IMPL), "{:?}", sh.methods());
     let (code, out) = spawn(&c);
     assert_eq!(code, 0, "{out}");
     assert_eq!(kinds(&c, "spawn").len(), 1, "{out}");
