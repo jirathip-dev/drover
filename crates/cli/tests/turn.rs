@@ -510,3 +510,89 @@ fn a_respawn_refused_for_a_secret_in_a_changed_file_is_one_owner_card_naming_fil
     drive(&at(&c, 3600), &r);
     assert_eq!(kinds(&c, "needs-human").len(), 1, "one card");
 }
+
+fn failing(c: &drover::Ctx, mut r: Fake, read: &str) -> Fake {
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let line = format!("git -C {} {read}", wt.display());
+    let out = drover::runner::Out {
+        code: 124,
+        ..Default::default()
+    };
+    r.replies.insert(0, (line, out));
+    r
+}
+
+fn unchecked(c: &drover::Ctx, r: &Fake, what: &str) {
+    let (code, out) = run(c, r, &["turn", "done"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("could not check") && out.contains(what), "{out}");
+    assert!(!out.contains("push first") && !out.contains("PR_BODY"), "{out}");
+}
+
+#[test]
+fn a_failed_head_read_is_could_not_check_and_raises_no_card() {
+    let head = sha("abc");
+    let (c, r, sh) = lane_at("turn-head-unread", true, Some(&pr(&head, "green")), Some(&sha("def")));
+    let r = failing(&c, r, "rev-parse HEAD");
+    for i in 0..3 {
+        unchecked(&at(&c, i * 10), &r, "HEAD");
+    }
+    assert!(
+        r.count(&format!(
+            "git -C {} rev-parse HEAD",
+            c.worktrees.join("sendmeter/issue-12").display()
+        )) > 3
+    );
+    assert!(kinds(&c, "turn-end").is_empty() && kinds(&c, "done-refused").is_empty());
+    drive(&at(&c, 40), &r);
+    assert!(kinds(&c, "needs-human").is_empty(), "no card from could-not-check");
+    assert!(kinds(&c, "pushed").is_empty() && !respawned(&sh));
+}
+
+#[test]
+fn a_read_head_off_the_pr_head_is_still_push_first() {
+    let head = sha("abc");
+    let (c, r, _sh) = lane_at("turn-head-off", true, Some(&pr(&head, "green")), Some(&sha("def")));
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let mut r = r;
+    r.replies.insert(
+        0,
+        (
+            format!("git -C {} rev-parse HEAD", wt.display()),
+            drover::runner::Out {
+                stdout: sha("fed"),
+                ..Default::default()
+            },
+        ),
+    );
+    let (code, out) = run(&c, &r, &["turn", "done"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED DONE_CHECK: push first: the worktree is at fed0000"),
+        "{out}"
+    );
+    assert_eq!(kinds(&c, "done-refused").len(), 1);
+}
+
+#[test]
+fn a_failed_git_read_in_the_pr_body_walk_is_could_not_check() {
+    let head = sha("abc");
+    let unnamed = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "statusCheckRollup": [], "body": "## For humans\n\nx"})
+    .to_string();
+    let (c, r, _sh) = lane_at("turn-body-unread", true, Some(&unnamed), Some(&sha("def")));
+    let r = failing(&c, r, "log -1 --format=%s");
+    unchecked(&c, &r, "git log");
+    let (c, r, _sh) = lane_at("turn-parent-unread", true, Some(&unnamed), Some(&sha("def")));
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let mut r = failing(&c, r, &format!("rev-parse {head}^1"));
+    let merge = "Merge remote-tracking branch 'origin/staging' into issue-12";
+    let subject = drover::runner::Out {
+        stdout: merge.into(),
+        ..Default::default()
+    };
+    r.replies
+        .insert(0, (format!("git -C {} log -1 --format=%s", wt.display()), subject));
+    unchecked(&c, &r, "rev-parse");
+    assert!(kinds(&c, "done-refused").is_empty());
+}
