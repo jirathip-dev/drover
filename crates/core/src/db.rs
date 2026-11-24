@@ -645,10 +645,11 @@ pub fn processed(state: &Path, id: &str, now: u64) -> Result<bool> {
 pub fn view_put(state: &Path, h: &crate::link::view::HostSeen, lanes: Option<&[(String, String)]>) -> Result<()> {
     with(state, true, (), |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let q = "INSERT OR REPLACE INTO host_view (host, link, since, why, boot, n, heard, build) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+        let q = "INSERT OR REPLACE INTO host_view (host, link, since, why, boot, n, heard, build, load) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
+        let load = serde_json::to_string(&(&h.sample, &h.drain))?;
         tx.execute(
             q,
-            params![h.host, h.link, h.since, h.why, h.boot, h.n, h.heard, h.build],
+            params![h.host, h.link, h.since, h.why, h.boot, h.n, h.heard, h.build, load],
         )?;
         if let Some(all) = lanes {
             tx.execute("DELETE FROM lane_view WHERE host = ?1", [&h.host])?;
@@ -667,8 +668,10 @@ pub type Rows = Vec<(String, String)>;
 /// Every `host_view` row, and every `lane_view` row as (host, json).
 pub fn view(state: &Path) -> Result<(Vec<crate::link::view::HostSeen>, Rows)> {
     with(state, false, (vec![], vec![]), |c| {
-        let mut q = c.prepare_cached("SELECT host, link, since, why, boot, n, heard, build FROM host_view")?;
+        let mut q = c.prepare_cached("SELECT host, link, since, why, boot, n, heard, build, load FROM host_view")?;
         let row = |r: &rusqlite::Row| {
+            let load = r.get::<_, Option<String>>(8)?.unwrap_or_default();
+            let (sample, drain) = serde_json::from_str(&load).unwrap_or_default();
             Ok(crate::link::view::HostSeen {
                 host: r.get(0)?,
                 link: r.get(1)?,
@@ -678,6 +681,8 @@ pub fn view(state: &Path) -> Result<(Vec<crate::link::view::HostSeen>, Rows)> {
                 n: r.get(5)?,
                 heard: r.get(6)?,
                 build: r.get(7)?,
+                sample,
+                drain,
             })
         };
         let hosts = q.query_map([], row)?.collect::<rusqlite::Result<Vec<_>>>()?;

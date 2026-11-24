@@ -16,6 +16,8 @@ pub struct HostSeen {
     pub n: Option<u64>,
     pub heard: Option<u64>,
     pub build: Option<String>,
+    pub sample: Option<super::frame::Sample>,
+    pub drain: Option<String>,
 }
 
 /// The view: every host's last word as `state.db` holds it; never a call to a host.
@@ -89,8 +91,26 @@ impl View {
     }
     /// Each host's sessions, this one first; a host with no fresh word answers `Err`, as an unreachable one.
     pub fn sessions(&self) -> Sessions {
+        self.listed(true)
+    }
+    /// Each host's sessions as its last frame listed them, however late; a host with no frame yet answers `Err`.
+    pub fn last_word(&self) -> Sessions {
+        self.listed(false)
+    }
+    /// The row of the host at `m` (None: this one), as its last frame left it.
+    pub fn at(&self, m: Option<&str>) -> Option<&HostSeen> {
+        self.hosts.iter().find(|h| h.1.as_deref() == m)?.2.as_ref()
+    }
+    fn listed(&self, fresh: bool) -> Sessions {
         let one = |(name, m, row): &(String, Option<String>, Option<HostSeen>)| {
-            let got = self.word(row.as_ref()).map(|()| {
+            let framed = || {
+                row.as_ref()
+                    .and_then(|h| h.heard)
+                    .map(drop)
+                    .ok_or_else(|| "no frame yet".into())
+            };
+            let got = if fresh { self.word(row.as_ref()) } else { framed() };
+            let got = got.map(|()| {
                 let all = (self.lanes.iter())
                     .filter(|l| &l.0 == m)
                     .filter_map(|l| l.1.session.clone().map(Session::from));

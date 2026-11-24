@@ -281,7 +281,7 @@ enum Cmd {
     #[command(
         about = "Every open issue's latest lane: what it waits on, with its next command (the owner's watchdog)"
     )]
-    Waiting(Scope),
+    Waiting(crate::waiting::Args),
     #[command(about = "Print the issue spec cached at spawn; read this instead of `gh issue view`")]
     Brief { fleet: String, issue: u64 },
     #[command(about = "Why a line is as it is: blame's commit, its issue, the issue's asks and answers")]
@@ -1865,7 +1865,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => {
                     crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now, id.as_deref()))?;
                 }
-                Cmd::Waiting(Scope { fleet, json }) => {
+                Cmd::Waiting(crate::waiting::Args { fleet, json, flow }) => {
                     let (events, agents) = (working(&ctx.state)?, crate::link::sessions(ctx, &cfg, r).running());
                     let (at, slots) = places(ctx, &cfg, r, &events);
                     let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true, None);
@@ -1953,14 +1953,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     } else {
                         write!(out, "{}", queue::fleets_use(ctx, &events, Some(&cfg), fleet.as_deref()))?;
                     }
+                    let seen = flow.then(|| crate::flow::facts::Seen::load(ctx, &cfg)).transpose()?;
                     for w in rows.iter().filter(|_| !json) {
                         let place = at
                             .get(&w.lane)
                             .filter(|p| !p.is_empty())
                             .map_or(String::new(), |p| format!(" · {p}"));
+                        let flow = crate::flow::line(seen.as_ref(), st.get(&(w.fleet.clone(), w.issue)))?;
                         writeln!(
                             out,
-                            "{} #{} {}: {} ({}{place}){}",
+                            "{} #{} {}: {} ({}{place}){}{flow}",
                             w.fleet,
                             w.issue,
                             w.who,
@@ -2021,8 +2023,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     sha,
                     file,
                 } => {
-                    let pass = verdict == "PASS";
-                    gate::verdict(ctx, &cfg, r, out, (&fleet, issue), pass, &sha, &file)?;
+                    gate::record(ctx, &cfg, r, out, (&fleet, issue), verdict == "PASS", &sha, &file)?;
                     let id = format!("{sha}-{verdict}");
                     let _ = crate::drive::kick_once(ctx, r, (&fleet, issue), "verdict", Some(&id));
                 }

@@ -1,5 +1,6 @@
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
 use crate::events::{age, append, emit, fold, last_spawn, open_asks, working, Event, IssueState, Json};
+use crate::flow::facts;
 use crate::gate::refused;
 use crate::host::{self, Host};
 use crate::providers;
@@ -1661,17 +1662,27 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
     })
 }
 
+/// The order that keeps new lanes off host `name` while its lanes finish: the owner's off switch, a release swap or a sign-in hold.
+pub fn drain(cfg: &Config, events: &[Event], name: &str, now: u64) -> Option<String> {
+    let h = cfg.hosts.get(name);
+    let m = h.and_then(|h| h.machine.as_deref());
+    let off = h.is_some_and(|h| !h.enabled).then(|| format!("turned off: {name}"));
+    let swap = m.and_then(|_| updating(events, (now, cfg.limits.self_update_swap_secs)));
+    let hold = || login_hold(events, m, (now, cfg.limits.proxy_retry_secs)).map(String::from);
+    off.or(swap).or_else(hold)
+}
+
 /// A remote host unreachable 15 min straight: its open lanes restart on the main host from their pushed branch.
 pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let seen = cached(ctx);
+    if cfg.hosts.values().all(|h| h.machine.is_none()) {
+        return Ok(());
+    }
+    let view = crate::link::view::View::load(ctx, cfg)?;
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.machine.is_some()) {
         let events = working(&ctx.state)?;
         let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
-        if stopped
-            || !seen
-                .get(name)
-                .is_some_and(|s| !s.up && s.seen + cfg.limits.host_offline_minutes * 60 <= ctx.now)
-        {
+        let offline = facts::host(view.link(name), view.at(None), &cfg.limits, ctx.now).0 == facts::Host::Offline;
+        if stopped || !offline || !facts::silent(view.link(name), &cfg.limits, ctx.now) {
             continue;
         }
         let mut moved = vec![];

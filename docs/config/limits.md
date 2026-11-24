@@ -75,7 +75,8 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `proxy_connect_secs` | `1` | the token proxy's liveness connect timeout |
 | `proxy_retry_secs` | `300` | a proxy lane's sign-out holds its host only if no call gets through the token proxy this long after it |
 | `service_call_secs` | `2` | a call to the running service's socket times out after this long |
-| `disk_probe_secs` | `2` | a folder listing slower than this marks its disk as not answering |
+| `disk_probe_secs` | `2` | a folder listing slower than this on a host under `load_per_cpu` marks its disk as not answering |
+| `disk_hung_secs` | `6` | over `load_per_cpu` a call waits this long for a slow folder listing, then the disk is not answering |
 | `disk_sick_secs` | `300` | a disk that let a call run out of time stays hung this long |
 | `disk_trust_secs` | `60` | a folder that answered is trusted this long before it is probed again |
 | `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |

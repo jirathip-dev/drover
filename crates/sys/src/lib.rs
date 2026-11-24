@@ -13,6 +13,40 @@ extern "C" {
     fn setsid() -> i32;
     fn kill(pid: i32, sig: i32) -> i32;
     fn getrusage(who: i32, usage: *mut [i64; 18]) -> i32;
+    fn getloadavg(loadavg: *mut [f64; 1], nelem: i32) -> i32;
+}
+
+/// macOS's memory pressure level (`kern.memorystatus_vm_pressure_level`: 1 normal, 2 warn, 4 critical), read with no process.
+#[cfg(target_os = "macos")]
+pub fn pressure_level() -> Option<i32> {
+    extern "C" {
+        fn sysctlbyname(name: *const u8, old: *mut i32, len: *mut usize, new: *const u8, newlen: usize) -> i32;
+    }
+    let (mut v, mut len) = (0i32, std::mem::size_of::<i32>());
+    // SAFETY: a NUL-terminated name and a one-int out buffer whose size `len` gives; nothing is written to the kernel.
+    let rc = unsafe {
+        sysctlbyname(
+            c"kern.memorystatus_vm_pressure_level".as_ptr().cast(),
+            &raw mut v,
+            &raw mut len,
+            std::ptr::null(),
+            0,
+        )
+    };
+    (rc == 0).then_some(v)
+}
+
+/// No memory pressure level off macOS.
+#[cfg(not(target_os = "macos"))]
+pub fn pressure_level() -> Option<i32> {
+    None
+}
+
+/// The host's one-minute load average, read with `getloadavg(3)`: no process is started.
+pub fn loadavg() -> Option<f64> {
+    let mut l = [0f64; 1];
+    // SAFETY: getloadavg writes at most `nelem` (1) doubles into the one-double buffer.
+    (unsafe { getloadavg(&raw mut l, 1) } == 1).then_some(l).map(|[x]| x)
 }
 
 /// `c` keeps the listeners `fds` open across its exec.
