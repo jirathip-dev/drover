@@ -386,6 +386,17 @@ pub fn window(state: &Path, h: &mut Host) {
     h.swap_median = m.get(m.len() / 2).copied();
 }
 
+/// This host's load now, with no process started: the one-minute average, and that per CPU.
+pub fn load() -> Option<(f64, f64)> {
+    let cpus = u32::try_from(std::thread::available_parallelism().ok()?.get()).ok()?;
+    drover_sys::loadavg().map(|l| (l, l / f64::from(cpus)))
+}
+
+/// This host is over `load_per_cpu` now.
+pub fn loaded() -> bool {
+    load().is_some_and(|l| l.1 > crate::config::limits().load_per_cpu)
+}
+
 /// Why a host with `disk` GB free on `/` takes no new lane: under `min_free_gb`.
 pub fn disk_low(disk: Option<f64>) -> Option<String> {
     let min = crate::config::limits().min_free_gb;

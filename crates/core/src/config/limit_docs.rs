@@ -220,7 +220,11 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "disk_probe_secs",
-        "a folder listing slower than this marks its disk as not answering",
+        "a folder listing slower than this on a host under `load_per_cpu` marks its disk as not answering",
+    ),
+    (
+        "disk_hung_secs",
+        "over `load_per_cpu` a call waits this long for a slow folder listing, then the disk is not answering",
     ),
     (
         "disk_sick_secs",
