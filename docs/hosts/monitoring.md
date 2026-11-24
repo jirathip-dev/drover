@@ -13,6 +13,12 @@
   close the old pane there logs it (`stale_host`, `stale_pane`); drive kills it once the host answers (wip first, as
   `kill` does) and logs `stale-pane-killed`. `drover kill|close --host <name> <agent>` picks that host's agent when
   another host has a lane of the same name.
+- #1654: each host's frame carries its own load sample (load per CPU, memory pressure). A host is `loaded` only by its
+  own sample; a late frame keeps the host's last word while it or the main host is loaded; no frame for
+  `host_offline_minutes` (15) is `offline` at any load, and only then are its lanes restarted on the main host
+  (`lane-moved`). `drover waiting --flow` prints, under each issue's line, its flow state, each fact's value with its
+  evidence, and the table row (`docs/flow.md`) that condition matches. Intake logs `verdict-seen` once per new
+  `verdict.md` a frame brings; `drover verdict` logs `verdict-refused` (code, head, why) for a file it refuses.
 - #938: a runtime breaker per host. `[limits] runtime_down_failures` (5) lanes there failing to start or ending
   without a push within `runtime_down_minutes` (30) make drive log one `runtime-down` (host, count, a sample reason;
   one alert). While it is open a spawn there is refused `RUNTIME_DOWN`, those lanes show `runtime down on <host> since

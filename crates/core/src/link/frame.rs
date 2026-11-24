@@ -29,6 +29,16 @@ pub struct Report {
     pub build: String,
     pub shed: Option<String>,
     pub lanes: Vec<Seen>,
+    pub sample: Option<Sample>,
+}
+
+/// The reporting host's own load as it built the frame: load per CPU, memory pressure and when.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Sample {
+    pub load_per_cpu: f64,
+    pub pressure: Option<String>,
+    pub at: u64,
 }
 
 /// One session, its worktree, or both.

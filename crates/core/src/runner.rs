@@ -241,7 +241,11 @@ impl Real {
             })
         };
         if let Some(dir) = dir.filter(|d| hung(d, probe_wait(), list)) {
-            return fail(format!("{dir} is on a disk that is not answering"));
+            return Ok(Out {
+                code: 124,
+                stderr: format!("{dir} is on a disk that is not answering: {}", listed(dir)),
+                ..Out::default()
+            });
         }
         let mut pipes = None;
         let end = crate::clock::instant() + limit;
@@ -327,6 +331,19 @@ pub fn answers(dir: &std::path::Path) -> bool {
     !hung(&dir.to_string_lossy(), probe_wait(), list)
 }
 
+fn listed(dir: &str) -> String {
+    let load = crate::host::load().map_or("?".into(), |l| format!("{:.1}", l.0));
+    match probes().get(dir) {
+        Some(p) if !p.done.load(std::sync::atomic::Ordering::Relaxed) => {
+            format!(
+                "folder listing still running after {:.1} s at load {load}",
+                p.at.elapsed().as_secs_f64()
+            )
+        }
+        _ => format!("a call on its disk ran out of time; load {load}"),
+    }
+}
+
 fn sick_for() -> Duration {
     Duration::from_secs(crate::config::limits().disk_sick_secs)
 }
@@ -394,19 +411,19 @@ pub fn sicken(dir: &str) {
     }
 }
 
-/// Whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and must finish within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread, until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
+/// Whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and must finish within `wait`, or within `disk_hung_secs` of its start while the host is over its load limit. A probe still running is never repeated: the folder stays hung, with no new thread, until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
 pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> + Send + 'static) -> bool {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
     use std::sync::Arc;
-    let (done, dev, end) = {
+    let (done, dev, at, end) = {
         let mut m = probes();
         if let Some(p) = m.get(dir) {
-            if !p.done.load(Relaxed) && crate::clock::instant() < p.end {
-                let (done, dev, end) = (p.done.clone(), p.dev.clone(), p.end);
+            if !p.done.load(Relaxed) {
+                let (done, dev, at, end) = (p.done.clone(), p.dev.clone(), p.at, p.end);
                 drop(m);
-                return hangs_past(&done, &dev, end);
+                return hangs_past(&done, &dev, at, end);
             }
-            if !p.done.load(Relaxed) || is_sick(p.dev.load(Relaxed)) {
+            if is_sick(p.dev.load(Relaxed)) {
                 return true;
             }
             if p.at.elapsed() < Duration::from_secs(crate::config::limits().disk_trust_secs) {
@@ -414,28 +431,36 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
             }
         }
         let (done, dev) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicU64::new(0)));
-        let end = crate::clock::instant() + wait;
+        let at = crate::clock::instant();
+        let end = at + wait;
         m.insert(
             dir.into(),
             Probe {
                 done: done.clone(),
                 dev: dev.clone(),
-                at: crate::clock::instant(),
+                at,
                 end,
             },
         );
-        (done, dev, end)
+        (done, dev, at, end)
     };
     let (d, v, owned) = (done.clone(), dev.clone(), dir.to_string());
     std::thread::spawn(move || {
         v.store(probe(&owned).unwrap_or(0), Relaxed);
         d.store(true, Relaxed);
     });
-    hangs_past(&done, &dev, end)
+    hangs_past(&done, &dev, at, end)
 }
 
-fn hangs_past(done: &std::sync::atomic::AtomicBool, dev: &std::sync::atomic::AtomicU64, end: Instant) -> bool {
+fn hangs_past(
+    done: &std::sync::atomic::AtomicBool,
+    dev: &std::sync::atomic::AtomicU64,
+    at: Instant,
+    end: Instant,
+) -> bool {
     use std::sync::atomic::Ordering::Relaxed;
+    let never = at + Duration::from_secs(crate::config::limits().disk_hung_secs);
+    let end = if crate::host::loaded() { end.max(never) } else { end };
     while crate::clock::instant() < end {
         if done.load(Relaxed) {
             return is_sick(dev.load(Relaxed));

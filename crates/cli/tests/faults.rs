@@ -301,6 +301,9 @@ fn pickup_through(fault: Ssh) {
         (v[0].str("verdict"), v[0].str("sha")),
         (Some("PASS"), Some(head().as_str()))
     );
+    let seen = kinds(&c, "verdict-seen");
+    assert_eq!(seen.len(), 1, "logged once for the one verdict.md: {seen:?}");
+    assert_eq!(seen[0].str("first"), Some("PASS"));
 }
 
 #[test]

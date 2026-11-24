@@ -827,3 +827,20 @@ impl Runner for Disk<'_> {
         self.0.sleep(secs);
     }
 }
+
+/// Appends one perf line to stderr and, in CI, the job summary.
+pub fn report(line: &str) {
+    eprintln!("{line}");
+    if let Ok(p) = std::env::var("GITHUB_STEP_SUMMARY") {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).create(true).open(p).unwrap();
+        writeln!(f, "{line}").unwrap();
+    }
+}
+
+/// This process's user plus system CPU time so far, in ms.
+pub fn cpu_ms() -> f64 {
+    let u = drover_sys::rusage().unwrap();
+    let tv = |s: i64, us: i64| s as f64 * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
+    tv(u[0], u[1]) + tv(u[2], u[3])
+}

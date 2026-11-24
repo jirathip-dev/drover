@@ -1641,8 +1641,8 @@ pub(crate) fn lane_admit(
     let f = cfg.fleet(fleet)?;
     let lanes = fold(events);
     let pending = crate::drive::pending(ctx, cfg, r);
+    let st = crate::events::fold_into(lanes.clone(), &pending);
     let events = &[events, &pending].concat();
-    let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
     let gs = crate::queue::groups(&crate::queue::replay(events, fleet), events, f, fleet, issue);
