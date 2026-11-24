@@ -811,7 +811,7 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     gh::FORCE.set(was.0);
     gh::CATCHUP.set(was.1);
     gh::PROBE.set(was.2);
-    res.and(pass::shadow(ctx, cfg, out, fleet))
+    res
 }
 
 fn lease(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &str, max: u64, data: &str) -> Result<Option<Lock>> {
@@ -869,7 +869,7 @@ fn one(
     }
     laps.lap("spawns");
     let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
-    pass::acted(&acts);
+    pass::shadow(ctx, cfg, out, name, &acts)?;
     if KICK.get().is_none() {
         std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string()).ok();
     }
