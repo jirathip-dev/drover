@@ -489,6 +489,31 @@ fn a_guarded_command_is_refused_inside_an_acp_lane() {
 }
 
 #[test]
+fn an_acp_lanes_adapter_and_its_grandchild_run_in_the_background_even_after_it_sets_its_title() {
+    let b = FakeShed::new();
+    let c = acp_ctx("acp-qos", &acp_config(&b.sock, "claude"));
+    let probe = "process.title = 'claude-agent-acp'; process.stdout.write(require('child_process')\
+        .execSync(\"sh -c 'ps -o pri= -o nice= -p \" + process.pid + \",$$; true'; true\").toString())";
+    let f = acp_fake(&["node", "-e", probe]);
+    let cli = b.cli(&f);
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let dump = cli.out.borrow().concat();
+    let rows: Vec<Vec<i32>> = (dump.lines())
+        .map(|l| l.split_whitespace().map(|w| w.parse().unwrap()).collect())
+        .collect();
+    assert_eq!(rows.len(), 2, "the adapter and its grandchild: {dump:?}");
+    for r in &rows {
+        let background = if cfg!(target_os = "macos") {
+            r[0] <= 4
+        } else {
+            r[1] >= 10
+        };
+        assert!(background, "pri, nice {r:?} in {dump:?}");
+    }
+}
+
+#[test]
 fn an_unguardable_acp_lane_refuses_to_start() {
     let b = FakeShed::new();
     let unsynced = ctx(&tmpdir("acp-nohook"), &acp_config(&b.sock, "claude"));

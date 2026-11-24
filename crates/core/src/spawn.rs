@@ -149,6 +149,10 @@ pub struct Plan {
 /// A build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
 pub const BACKGROUND: &str = "&& if [ -x /usr/sbin/taskpolicy ]; then /usr/sbin/taskpolicy -b -p $$; else renice -n 10 -p $$ >/dev/null; ionice -c3 -p $$ 2>/dev/null; true; fi";
 
+/// Execs the lane's adapter under background `QoS` from launch, which a program's own process title cannot clear.
+pub const BACKGROUND_EXEC: &str =
+    "if [ -x /usr/sbin/taskpolicy ]; then exec /usr/sbin/taskpolicy -b \"$@\"; else exec \"$@\"; fi";
+
 impl Plan {
     /// Build and check lanes run in the background; design, architect and orchestrator lanes do not.
     pub fn qos(&self) -> Option<&'static str> {
@@ -603,7 +607,8 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
     let (set, role) = (q(&set.to_string_lossy()), q(&role.to_string_lossy()));
     let profile = providers::get(&p.harness).acp_profile(&set, &role);
-    let line = words.join(" ") + &profile + " && unset SHED BERTH && exec \"$@\"";
+    let run = p.qos().map_or("exec \"$@\"", |_| BACKGROUND_EXEC);
+    let line = words.join(" ") + &profile + " && unset SHED BERTH && " + run;
     let meta = providers::get(&p.harness).acp_meta();
     Ok(term::Acp {
         cmd: [argv(&["sh", "-c", &line, "sh"]), cmd].concat(),
