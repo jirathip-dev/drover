@@ -849,3 +849,49 @@ fn code_past_its_remove_by_date_fails_and_a_future_date_passes() {
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
 }
+
+struct Slow;
+
+impl drover_core::runner::Runner for Slow {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover_core::runner::Out> {
+        self.run_for(prog, args, "", drover_core::runner::limit(prog, args))
+    }
+    fn run_for(
+        &self,
+        _: &str,
+        args: &[String],
+        _: &str,
+        limit: std::time::Duration,
+    ) -> anyhow::Result<drover_core::runner::Out> {
+        let secs: u64 = args[1].strip_prefix("takes ").unwrap().parse().unwrap();
+        let late = secs > limit.as_secs();
+        Ok(drover_core::runner::Out {
+            code: if late { 124 } else { 0 },
+            stdout: String::new(),
+            stderr: if late {
+                format!("no answer in {limit:?}")
+            } else {
+                String::new()
+            },
+        })
+    }
+}
+
+#[test]
+fn generate_gets_the_gate_check_limit_not_the_60s_default() {
+    let gate = drover_core::config::limits().gate_check_minutes * 60;
+    let check = |secs: u64| {
+        let d = tmpdir("arch-generate-limit");
+        let conf = format!("generated = [\"gen/never-written.ts\"]\ngenerate = \"takes {secs}\"\n");
+        std::fs::write(d.join("arch.toml"), conf).unwrap();
+        let mut out = vec![];
+        let code = drover_core::arch::check(&d.join("arch.toml"), false, None, None, &Slow, &mut out).unwrap();
+        std::fs::remove_dir_all(&d).unwrap();
+        (code, String::from_utf8(out).unwrap())
+    };
+    let (code, out) = check(90);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    let (code, out) = check(gate + 1);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains(&format!("`takes {}` exited 124", gate + 1)), "{out}");
+}
