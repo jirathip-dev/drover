@@ -24,6 +24,7 @@ fn hook(d: &Path, cwd: &Path, lane: &str, args: &[&str], stdin: &str) -> (i32, S
     let mut child = Command::new(env!("CARGO_BIN_EXE_drover"))
         .env_remove("DROVER_RULES")
         .env_remove("DROVER_SCRATCH_TARGET")
+        .env("HOME", d)
         .env("DROVER_LANE", lane)
         .env("FLEET_CONFIG", d.join("fleet.toml"))
         .env("FLEET_STATE", d.join("state/events.jsonl"))
@@ -131,6 +132,17 @@ fn a_host_name_is_a_leak_only_where_it_is_used_as_a_hostname() {
         let out = bash(&d, "open", &format!("gh pr create --title t --body '{text}'"));
         assert!(out.contains("--body has a host"), "{text}: {out}");
     }
+}
+
+#[test]
+fn a_public_gatt_service_uuid_is_no_session_id() {
+    let d = dir("hygiene-gatt");
+    let out = bash(
+        &d,
+        "open",
+        "gh pr create --title t --body 'the service is 7e4e1701-1ea6-40c9-9dcc-13d34ffead57'",
+    );
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
 }
 
 fn repo(d: &Path, text: &str) -> String {
