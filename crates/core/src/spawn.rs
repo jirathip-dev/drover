@@ -63,7 +63,8 @@ pub(crate) fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)>
 /// Write every harness's files for every role's profile, so `drover set` alone can switch a role's harness; a generated profile no role names any more (a retired role's) is removed.
 pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) -> Result<()> {
     let all = profiles(cfg);
-    for (_, f, role, _, profile) in &all {
+    for (_, f, role, r, profile) in &all {
+        access::mcp_servers(cfg, f, r)?;
         for h in providers::known() {
             providers::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
         }
@@ -590,6 +591,7 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     let run = p.qos().map_or("exec \"$@\"", |_| BACKGROUND_EXEC);
     let line = words.join(" ") + &profile + " && unset SHED BERTH && " + run;
     let meta = providers::get(&p.harness).acp_meta();
+    let meta = meta.map(|m| serde_json::from_str(&home(vec![m.to_string()]).remove(0)).unwrap_or(m));
     Ok(term::Acp {
         cmd: [argv(&["sh", "-c", &line, "sh"]), cmd].concat(),
         mcp: (meta.is_some() || !p.mcp.is_empty()).then(|| p.mcp_file.clone()),
@@ -748,11 +750,7 @@ fn plan_json(p: &Plan, on: &crate::hosts::On, (local, reopen): (&str, bool), rt:
     })
 }
 
-type Runtime<'a> = (
-    &'a term::Shed,
-    &'a [(&'static str, String)],
-    &'a term::Acp,
-);
+type Runtime<'a> = (&'a term::Shed, &'a [(&'static str, String)], &'a term::Acp);
 
 /// Lane scratch: untracked files fleet itself writes into a worktree (some gitignored). Never dirty work.
 pub const OWN_FILES: &[&str] = &[
@@ -1156,7 +1154,14 @@ fn start(
     let acp_id = bt.0.acp.clone().context(crate::config::NO_RUNTIME)?;
     let n = round(&working(&ctx.state)?, fleet, issue, &p);
     let labels = labels(&p, f, n);
-    if let Some(pl) = placed.as_ref().filter(|pl| pl.machine.is_some()) {
+    let offline = placed
+        .as_ref()
+        .and_then(|pl| pl.refusal.clone())
+        .filter(|x| x.0 == "HOST_OFFLINE");
+    if let Some((code, why)) = offline.clone().filter(|_| !o.dry_run) {
+        return refused(code, why);
+    }
+    if let Some(pl) = placed.as_ref().filter(|pl| pl.machine.is_some() && offline.is_none()) {
         remote_acp(ctx, cfg, &on, &mut p, (pl, &acp_id), o.dry_run)?;
     }
     let acp = acp_cmd(ctx, r, &p, &acp_id, hm.filter(|_| on.machine.is_some()))?;
@@ -1165,9 +1170,6 @@ fn start(
         pj.put("dry_run", json!(true));
         print_plan(out, &pj, o.json, placed.as_ref())?;
         return Ok(true);
-    }
-    if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
-        return refused("HOST_OFFLINE", why);
     }
     let h = providers::get(&p.harness);
     h.ready(ctx, r, &p)?;

@@ -340,19 +340,16 @@ fn stop_sends_escape() {
 fn close_shuts_an_others_pane_and_refuses_lanes() {
     let (c, _, sh) = lane("close");
     sh.lane(LANE, "idle", "/x");
-    sh.lane("dsh-tui-test", "idle", "/tmp");
+    sh.lane("tui-test", "idle", "/tmp");
     let r = Fake::default();
-    let (code, out) = run(&c, &r, &["close", "dsh-tui-test"]);
+    let (code, out) = run(&c, &r, &["close", "tui-test"]);
     assert_eq!(
         (code, out.as_str()),
-        (0, "closed dsh-tui-test's pane; its worktree and files stay\n")
+        (0, "closed tui-test's pane; its worktree and files stay\n")
     );
-    assert!(sh.called("kill", "dsh-tui-test") && !sh.has("dsh-tui-test") && !r.called("git"));
+    assert!(sh.called("kill", "tui-test") && !sh.has("tui-test") && !r.called("git"));
     let e = read(&c.state).unwrap().to_vec().pop().unwrap();
-    assert_eq!(
-        (e.kind.as_str(), e.str("agent")),
-        ("closed-other", Some("dsh-tui-test"))
-    );
+    assert_eq!((e.kind.as_str(), e.str("agent")), ("closed-other", Some("tui-test")));
     let (code, out) = run(&c, &r, &["close", LANE]);
     assert!(code == 3 && out.starts_with("REFUSED IS_LANE"), "{out}");
     assert!(!sh.called("kill", LANE) && sh.has(LANE));

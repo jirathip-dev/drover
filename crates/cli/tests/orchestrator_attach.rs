@@ -35,6 +35,11 @@ fn ask(c: &drover::Ctx, r: &Fake, thread: Option<&str>) -> (i32, String) {
 fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     let cfg = CONFIG.replace("harness  =  \"claude\"    # toggled in tests", "harness = \"claude\"");
     let c = ctx(&tmpdir("orchestrator-attach"), &cfg);
+    let settings = c
+        .config
+        .with_file_name("claude")
+        .join("lane-orchestrator/settings.json");
+    std::fs::remove_file(&settings).unwrap();
     let b = FakeShed::new();
     b.attach(&c);
     let r = Fake::default().reply("gh", "");
@@ -56,10 +61,6 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
         "{a}"
     );
     assert!(a["why"].as_str().unwrap().contains("no drover PreToolUse hook"), "{a}");
-    let settings = c
-        .config
-        .with_file_name("claude")
-        .join("lane-orchestrator/settings.json");
     assert_eq!(a["settings"], settings.to_string_lossy().as_ref());
     assert_eq!(a["env"]["DROVER_LANE"], "sendmeter:-:orchestrator");
     assert_eq!(a["env"]["DROVER_THREAD"], COOEE);

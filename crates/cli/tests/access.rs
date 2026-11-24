@@ -17,37 +17,24 @@ fn config(d: &Path, role_extra: &str) -> String {
         .replace("/tmp/does-not-matter/sendmeter", repo.to_str().unwrap())
 }
 
-fn shell(sh: &FakeShed, lane: &str, var: &str) -> String {
-    let typed = sh.sent(lane);
-    let export = typed.iter().find(|t| t.starts_with("export ")).expect("no export line");
-    let export = format!("{}; printf %s \"${var}\"", export.trim_end_matches('\r'));
-    let mut c = std::process::Command::new("sh");
-    c.env_remove("CLAUDE_CODE_OAUTH_TOKEN")
-        .env_remove("CLAUDE_CONFIG_DIR")
-        .env_remove("DROVER_ACCOUNT");
-    String::from_utf8_lossy(&c.arg("-c").arg(export).output().unwrap().stdout).into()
-}
-
-fn spawn_run(c: &drover::Ctx, n: u64) -> (i32, String) {
+fn spawner(c: &drover::Ctx, n: u64) -> Fake {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
-    let r = Fake::default()
+    Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply(&format!("gh issue view {n}"), r#"{"title":"t","body":"b"}"#)
-        .reply("git -C", "");
-    run(c, &r, &["spawn", "sendmeter", &n.to_string(), "impl"])
+        .reply("git -C", "")
+}
+
+fn spawn_run(c: &drover::Ctx, n: u64) -> (i32, String) {
+    run(c, &spawner(c, n), &["spawn", "sendmeter", &n.to_string(), "impl"])
 }
 
 fn spawn(c: &drover::Ctx, sh: &FakeShed, n: u64) {
     let (code, out) = spawn_run(c, n);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(
-        sh.last("run")["name"],
-        format!("sendmeter-impl-{n}"),
-        "{:?}",
-        sh.methods()
-    );
+    assert!(sh.has(&format!("sendmeter-impl-{n}")), "{out}");
 }
 
 #[test]
@@ -72,10 +59,18 @@ fn retired_account_keys_load_warn_once_and_the_lane_runs_on_the_hosts_login() {
         "once"
     );
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, &sh, 12);
-    let lane = "sendmeter-impl-12";
-    assert_eq!(shell(&sh, lane, "CLAUDE_CONFIG_DIR"), "", "the CLI's default folder");
-    assert_eq!(shell(&sh, lane, "DROVER_ACCOUNT"), "");
+    let env =
+        r#"[{"id": "claude-acp", "cmd": ["sh", "-c", "printf '%s|%s' \"$CLAUDE_CONFIG_DIR\" \"$DROVER_ACCOUNT\""]}]"#;
+    let f = spawner(&c, 12).reply("shed agents --json", env);
+    let cli = sh.cli(&f);
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(sh.has("sendmeter-impl-12"), "{out}");
+    assert_eq!(
+        cli.out.borrow().as_slice(),
+        ["|"],
+        "the CLI's default folder, no account"
+    );
     let sp = kinds(&c, "spawn");
     assert!(sp[0].val("account").is_null(), "{sp:?}");
 }
@@ -159,27 +154,25 @@ fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
     );
     assert_eq!(code, 0, "{out}");
     let p: Value = serde_json::from_str(&out).unwrap();
-    let start = &p["commands"][6];
+    let start = &p["commands"][4];
     assert_eq!(
-        (start[0].as_str(), start[1].as_str()),
-        (Some("shed"), Some("send")),
+        (start[0].as_str(), start[1].as_str(), start[2].as_str()),
+        (Some("shed"), Some("run"), Some("--acp")),
         "{start}"
     );
-    let typed: Value = serde_json::from_str(start[2].as_str().unwrap()).unwrap();
-    let typed = typed["text"].as_str().unwrap();
+    let words: Vec<&str> = start.as_array().unwrap().iter().filter_map(Value::as_str).collect();
     let file = c.worktrees.join("sendmeter/issue-12/.mcp.lane.json");
-    assert!(typed.starts_with("exec 'claude'"), "{typed}");
-    assert!(
-        typed.contains(&format!("'--mcp-config' '{}' '--strict-mcp-config'", file.display())),
-        "{typed}"
-    );
+    let at = words.iter().position(|w| *w == "--mcp").expect("no --mcp");
+    assert_eq!(words[at + 1], file.to_str().unwrap(), "{start}");
+    let meta = words[words.iter().position(|w| *w == "--meta").unwrap() + 1];
+    assert!(meta.contains("\"strictMcpConfig\":true"), "{meta}");
 
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     let lane: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-    let names: Vec<&String> = lane["mcpServers"].as_object().unwrap().keys().collect();
-    assert_eq!(names, ["supabase-dev"]);
-    assert_eq!(lane["mcpServers"]["supabase-dev"]["args"][0], "dev");
+    let names: Vec<&Value> = lane.as_array().unwrap().iter().map(|s| &s["name"]).collect();
+    assert_eq!(names, ["supabase-dev"], "{lane}");
+    assert_eq!(lane[0]["args"][0], "dev");
 
     let d2 = tmpdir("mcp-none");
     let c2 = ctx(&d2, &config(&d2, ""));
@@ -189,7 +182,7 @@ fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
     let lane: Value =
         serde_json::from_str(&std::fs::read_to_string(c2.worktrees.join("sendmeter/issue-12/.mcp.lane.json")).unwrap())
             .unwrap();
-    assert_eq!(lane["mcpServers"], serde_json::json!({}));
+    assert_eq!(lane, serde_json::json!([]));
 
     for bad in ["supabase-prod", "Supabase-PROD-ro"] {
         let c = ctx(&d, &config(&d, &format!("mcp = [\"supabase-dev\", \"{bad}\"]")));

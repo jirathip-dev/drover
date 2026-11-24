@@ -107,7 +107,10 @@ impl FakeShed {
     }
     pub fn attach(&self, c: &drover::Ctx) {
         let base = std::fs::read_to_string(&c.config).unwrap();
-        let base = base.split("\n[runtime]\nkind = \"shed-acp\"\n").next().unwrap_or_default();
+        let base = base
+            .split("\n[runtime]\nkind = \"shed-acp\"\n")
+            .next()
+            .unwrap_or_default();
         std::fs::write(&c.config, self.config(base)).unwrap();
     }
     /// A new server, ctx `c`'s lanes on it (`attach`).
@@ -484,7 +487,10 @@ pub fn acp_cli(args: &[String]) -> Option<Out> {
             String::new()
         }
         ["send", name, text] => {
-            st.lock().unwrap().seen.push(("send".into(), json!({"name": name, "text": text})));
+            st.lock()
+                .unwrap()
+                .seen
+                .push(("send".into(), json!({"name": name, "text": text})));
             String::new()
         }
         ["cancel", _] => String::new(),

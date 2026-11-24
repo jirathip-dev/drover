@@ -215,7 +215,7 @@ fn parity_81_every_configured_role_gets_a_model_and_an_effort_picker_and_saving_
             "sendmeter.verify.effort"
         ]
     );
-    let efforts: Vec<&str> = drover::providers::get("hermes").efforts().to_vec();
+    let efforts: Vec<&str> = drover::providers::get("claude").efforts().to_vec();
     let pick = |n: &str| fields.iter().find(|x| x["name"] == n).unwrap().clone();
     assert_eq!(pick("sendmeter.rev.effort")["options"], json!(efforts));
     assert_eq!(pick("sendmeter.rev.effort")["label"], "Review effort");

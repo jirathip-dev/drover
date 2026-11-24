@@ -13,22 +13,6 @@
             "xhigh"
           ],
           "name": "claude"
-        },
-        {
-          "efforts": [
-            "none",
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ],
-          "name": "hermes"
-        },
-        {
-          "efforts": [
-            "none"
-          ],
-          "name": "dsh"
         }
       ],
       "model": null
@@ -67,22 +51,6 @@
             "xhigh"
           ],
           "name": "claude"
-        },
-        {
-          "efforts": [
-            "none",
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ],
-          "name": "hermes"
-        },
-        {
-          "efforts": [
-            "none"
-          ],
-          "name": "dsh"
         }
       ],
       "integration": "staging",
@@ -121,7 +89,7 @@
             },
             "role": "impl",
             "rounds": null,
-            "run": "hermes · opus · effort none"
+            "run": "claude · opus · effort none"
           },
           {
             "here": 1,
@@ -135,7 +103,7 @@
             },
             "role": "rev",
             "rounds": 3,
-            "run": "hermes · default · effort none"
+            "run": "claude · default · effort none"
           },
           {
             "here": 0,
@@ -169,10 +137,10 @@
             "high",
             "xhigh"
           ],
-          "harness": "hermes",
+          "harness": "claude",
           "mcp": [],
           "model": "opus",
-          "model_default": "profile",
+          "model_default": "claude",
           "name": "impl",
           "profile": "fleet-impl"
         },
@@ -187,10 +155,10 @@
             "high",
             "xhigh"
           ],
-          "harness": "hermes",
+          "harness": "claude",
           "mcp": [],
           "model": "opus",
-          "model_default": "profile",
+          "model_default": "claude",
           "name": "orchestrator",
           "profile": "lane-orchestrator"
         },
@@ -205,10 +173,10 @@
             "high",
             "xhigh"
           ],
-          "harness": "hermes",
+          "harness": "claude",
           "mcp": [],
           "model": null,
-          "model_default": "profile",
+          "model_default": "claude",
           "name": "rev",
           "profile": "fleet-rev"
         }

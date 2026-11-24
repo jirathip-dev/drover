@@ -234,11 +234,8 @@ fn reviewers_are_read_only() {
         None
     );
     assert_eq!(call("rev", "Write", &json!({"file_path": "verdict.md"})), None);
-    let v4a = json!({"tool_name": "patch", "args": {"mode": "patch", "patch": "*** Update File: src/a.rs\n"}});
-    assert_eq!(
-        serde_json::from_str::<Value>(&hook_as("rev", &v4a)).unwrap()["action"],
-        "block"
-    );
+    let patch = json!({"command": "*** Begin Patch\n*** Update File: src/a.rs\n"});
+    assert!(call("rev", "apply_patch", &patch).unwrap().contains("read-only"));
 }
 
 #[test]
@@ -1134,8 +1131,7 @@ fn parity_r13_a_lane_hook_fails_closed() {
     };
     let unnamed = [
         json!({"hook_event_name": "PreToolUse", "tool_input": {"command": "docker ps"}}),
-        json!({"hook_event_name": "pre_tool_call", "tool_name": "", "tool_input": {"command": "docker ps"}}),
-        json!({"args": {"command": "docker ps"}}),
+        json!({"hook_event_name": "PreToolUse", "tool_name": "", "tool_input": {"command": "docker ps"}}),
     ];
     for (raw, what) in [("docker ps", "its input is not JSON"), ("", "its input is not JSON")]
         .map(|(r, w)| (r.to_string(), w))
@@ -1499,9 +1495,10 @@ fn a_design_lane_writes_only_its_issues_design_paths() {
     };
     let patch = |lane: &str, f: &str| {
         let p = format!("*** Begin Patch\n*** Update File: {f}\n@@\n-a\n+b\n*** End Patch\n");
+        let ti = json!({"command": p});
         hook(
             lane,
-            json!({"tool_name": "patch", "args": {"mode": "patch", "patch": p}}),
+            json!({"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": "/w", "tool_input": ti}),
         )
     };
     let design = "sendmeter:30:design";

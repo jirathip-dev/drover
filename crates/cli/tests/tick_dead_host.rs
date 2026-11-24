@@ -104,10 +104,7 @@ fn a_host_whose_ssh_never_connects_with_50_worktrees_costs_the_tick_under_a_minu
         };
         let (code, out) = run(&c, &r, &["tick"]);
         assert_eq!(code, 0, "{name}: {out}");
-        assert!(
-            sh.called("run", "sendmeter-impl-12"),
-            "{name}: drive's step runs: {out}"
-        );
+        assert!(sh.has("sendmeter-impl-12"), "{name}: drive's step runs: {out}");
         let sent = r.sent.borrow();
         assert!(r.spent.get() < 60, "{name}: {}s on the Air: {sent:#?}", r.spent.get());
         assert!(

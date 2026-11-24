@@ -81,16 +81,16 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, ev: &[Event], sessions: &Sessions, w: &W
     }
     match crate::lanes::health(ctx, cfg, ev, sessions, &s) {
         Health::NeverStarted { since } => Some(if n == 0 {
-                Act::Respawn(role.into(), "failed start")
-            } else {
-                Act::Escalate(
-                    "START_FAILED",
-                    format!(
-                        "lane {lane} never started: no report {} after its spawn, retried once",
-                        ago(since)
-                    ),
-                )
-            }),
+            Act::Respawn(role.into(), "failed start")
+        } else {
+            Act::Escalate(
+                "START_FAILED",
+                format!(
+                    "lane {lane} never started: no report {} after its spawn, retried once",
+                    ago(since)
+                ),
+            )
+        }),
         Health::Stalled { .. } if n == 0 => Some(Act::Respawn(role.into(), "lane stalled")),
         Health::Stalled { since } => {
             let note = sessions

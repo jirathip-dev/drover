@@ -216,7 +216,10 @@ impl Runtime {
     pub fn shed(&self) -> crate::shed::Shed {
         crate::shed::Shed {
             wire: crate::shed::Wire::Socket(self.socket.as_deref().map_or_else(crate::shed::default_socket, expand)),
-            acp: self.acp.clone().or_else(|| crate::providers::default_acp().map(Into::into)),
+            acp: self
+                .acp
+                .clone()
+                .or_else(|| crate::providers::default_acp().map(Into::into)),
             policy: self.acp_policy.clone().unwrap_or_else(|| "allow".into()),
         }
     }

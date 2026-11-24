@@ -36,7 +36,7 @@ fn deps_files_queues_and_spawns_a_deps_lane_and_never_a_second_while_one_is_open
         drover::queue::replay(&events, "sendmeter").first().map(|i| i.issue),
         Some(80)
     );
-    assert_eq!(sh.last("run")["name"], "sendmeter-deps-80", "{:?}", sh.methods());
+    assert_eq!(sh.last("send")["name"], "sendmeter-deps-80", "{:?}", sh.methods());
     let spawn = events.iter().find(|e| e.is("spawn", "sendmeter", 80)).expect("a lane");
     assert_eq!(
         (spawn.str("role"), spawn.str("profile"), spawn.str("stage")),

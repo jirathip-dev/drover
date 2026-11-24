@@ -303,6 +303,7 @@ fn a_remote_hosts_clone_gets_the_same_heal() {
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let _sh = FakeShed::attached(&c);
+    remote::proxied(&c);
     let git = format!("{SSH}'git' '--no-replace-objects' '-C' ");
     let gone = "4f50d959cad0891493b08636928fbfd2db083ea0";
     let bad = "fatal: bad object refs/remotes/origin/issue-9\nerror: did not send all necessary objects";
@@ -347,10 +348,10 @@ fn a_remote_hosts_clone_gets_the_same_heal() {
         ..r
     };
     let bazzite = FakeShed::new();
-    let o = OverSsh {
+    let o = remote::Acp::over(OverSsh {
         f: &r,
         hosts: vec![("bazzite", &bazzite)],
-    };
+    });
     let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out} {:#?}", r.calls.borrow());
     let heal = [
@@ -400,6 +401,7 @@ fn a_remote_fetch_racing_another_on_staging_is_retried_and_the_spawn_starts() {
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let _sh = FakeShed::attached(&c);
+    remote::proxied(&c);
     let fetch =
         format!("{SSH}'git' '--no-replace-objects' '-C' '/tmp/does-not-matter/sendmeter' 'fetch' 'origin' '+refs/heads/staging:refs/remotes/origin/staging'");
     let race = "error: fetching ref refs/remotes/origin/staging failed: incorrect old value provided";
@@ -421,10 +423,10 @@ fn a_remote_fetch_racing_another_on_staging_is_retried_and_the_spawn_starts() {
         .reply(&format!("{SSH}'rm' '-f'"), "")
         .reply("which shed", "/opt/shed/bin/shed\n");
     let bazzite = FakeShed::new();
-    let o = OverSsh {
+    let o = remote::Acp::over(OverSsh {
         f: &r,
         hosts: vec![("bazzite", &bazzite)],
-    };
+    });
     let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out} {:#?}", r.calls.borrow());
     assert!(r.count(&fetch) >= 2, "{:#?}", r.calls.borrow());

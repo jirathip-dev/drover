@@ -105,10 +105,7 @@ fn a_kick_pays_one_connect_timeout_to_a_dead_host_with_twenty_old_lanes() {
     let r = Dead::new();
     let (code, out) = run(&c, &r, &["kick", "sendmeter", "12", "--why", "push", "--now"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        sh.called("run", "sendmeter-impl-12"),
-        "the kick still starts #12: {out}"
-    );
+    assert!(sh.has("sendmeter-impl-12"), "the kick still starts #12: {out}");
     assert!(r.calls.get() <= 1, "{} calls to air: {out}", r.calls.get());
     assert!(r.waited() <= CONNECT, "{} s simulated", r.waited());
 }
@@ -179,7 +176,7 @@ fn a_second_kick_for_a_running_issue_exits_at_once_and_is_logged() {
         .reply("ps -o etime= -p 4242", "00:01\n");
     let (code, out) = run(&c, &r, &["kick", "sendmeter", "12", "--why", "push", "--now"]);
     assert_eq!(code, 0, "{out}");
-    assert!(!sh.called("run", "sendmeter-impl-12"), "the running kick does the work");
+    assert!(!sh.has("sendmeter-impl-12"), "the running kick does the work");
     let ev = read(&c.state).unwrap().to_vec();
     let busy: Vec<_> = ev.iter().filter(|e| e.kind == "kick-in-flight").collect();
     assert_eq!(busy.len(), 1, "{ev:?}");

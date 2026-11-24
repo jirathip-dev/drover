@@ -464,7 +464,7 @@ fn lanes_group_by_fleet_with_others() {
     ev(
         "sendmeter",
         Some(9),
-        json!({"role": "rev", "agent": "sendmeter-rev-9-r1", "harness": "hermes"}),
+        json!({"role": "rev", "agent": "sendmeter-rev-9-r1", "harness": "codex"}),
     );
     ev(
         "tangelo",
@@ -485,7 +485,7 @@ fn lanes_group_by_fleet_with_others() {
         {"name": "tangelo-design-5", "status": "done", "cwd": "/x", "labels": lab("tangelo", "claude")},
         {"name": "w3", "status": "working", "cwd": wt, "labels": lab("tangelo", "claude")},
         {"name": "side-project", "status": "idle", "cwd": "/Users/me/Projects/side", "labels": lab("", "codex")},
-        {"name": "tangelo-impl-7", "status": "waiting-approval", "cwd": "/p/tangelo-apps", "labels": lab("tangelo", "dsh")},
+        {"name": "tangelo-impl-7", "status": "waiting-approval", "cwd": "/p/tangelo-apps", "labels": lab("tangelo", "claude")},
     ]));
     let lanes = drover::lanes::join(&cfg, None, &events, &st, &agents);
     let got: Vec<(Option<&str>, &str, &str, String, bool)> = lanes

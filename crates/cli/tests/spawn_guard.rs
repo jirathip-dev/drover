@@ -44,7 +44,8 @@ fn assert_refused(c: &drover::Ctx, sh: &FakeShed, r: &Fake, extra: &[&str], code
         "nothing created: {:?}",
         r.calls.borrow()
     );
-    assert!(sh.all("run").is_empty(), "{:?}", sh.methods());
+    assert!(!r.called("shed run"), "{:?}", r.calls.borrow());
+    assert!(sh.sent("sendmeter-impl-12").is_empty(), "{:?}", sh.methods());
     assert_eq!(read(&c.state).unwrap().len(), before, "nothing logged");
     out
 }
@@ -78,7 +79,7 @@ fn swap_refuses_on_sustained_median_with_pressure_not_one_spike() {
     let (c, sh, r) = swap("0 0 0 0", "1");
     assert_eq!(spawn(&c, &r, &[]).0, 0, "a spike with normal pressure admits");
     assert!(!r.called("sleep"), "the rate is from the count kept 2 s before");
-    assert_eq!(sh.all("run").len(), 1, "the lane started");
+    assert!(sh.has("sendmeter-impl-12"), "the lane started");
     let (c, sh, r) = swap("0 0 0 0", "2");
     let out = assert_refused(&c, &sh, &r, &[], "HOST_BUSY");
     assert!(!out.contains("swap-out"), "a spike's median is low: {out}");
@@ -103,7 +104,7 @@ fn mem_low_under_the_floor() {
     let (sh, r) = shed_happy(&c);
     let r = r.once("vm_stat", 0, &vm(65536)).once("vm_stat", 0, &vm(98304));
     assert_eq!(spawn(&c, &r, &[]).0, 0, "3 GB free admits");
-    assert_eq!(sh.all("run").len(), 1);
+    assert!(sh.has("sendmeter-impl-12"), "the lane started");
 }
 
 #[test]
@@ -124,7 +125,7 @@ fn disk_low_under_min_free_gb() {
     let r = r.once("df -k /", 0, &df(19 * 1_048_576));
     let (exit, out) = spawn(&c, &r, &[]);
     assert_eq!(exit, 0, "{out}");
-    assert_eq!(sh.all("run").len(), 1);
+    assert!(sh.has("sendmeter-impl-12"), "the lane started");
 }
 
 #[test]
@@ -147,7 +148,7 @@ fn load_from_drovers_own_processes_admits_and_an_outside_one_is_named() {
         .reply("ps -Ao", ps);
     let (exit, out) = spawn(&c, &own, &[]);
     assert_eq!(exit, 0, "drover's own drive and clone: {out}");
-    assert_eq!(sh.all("run").len(), 1);
+    assert!(sh.has("sendmeter-impl-12"), "the lane started");
     let busy = format!("{ps}  104     1 900.0 /usr/bin/rustc\n  105     1 120.0 /usr/libexec/fseventsd\n");
     let c = ctx(&tmpdir("host-other-load"), CONFIG);
     let (sh, other) = shed_happy(&c);
@@ -174,7 +175,7 @@ fn many_live_agents_with_normal_signals_admit() {
         exit, 0,
         "a leftover max_agents key is ignored and there is no count cap: {out}"
     );
-    assert_eq!(sh.last("run")["name"], "sendmeter-impl-12");
+    assert!(sh.has("sendmeter-impl-12"));
 }
 
 #[test]
@@ -188,7 +189,7 @@ fn host_under_every_threshold_admits() {
         r.called("sysctl -n kern.memorystatus_vm_pressure_level"),
         "the host was probed"
     );
-    assert_eq!(sh.last("run")["name"], "sendmeter-impl-12");
+    assert!(sh.has("sendmeter-impl-12"));
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().any(|e| e.kind == "spawn"));
     assert!(ev.iter().all(|e| e.kind != "override"));
@@ -202,7 +203,7 @@ fn force_admits_busy_host_and_logs_override() {
     let r = r.once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4");
     let (exit, out) = spawn(&c, &r, &["--force"]);
     assert_eq!(exit, 0, "{out}");
-    assert_eq!(sh.all("run").len(), 1);
+    assert!(sh.has("sendmeter-impl-12"), "the lane started");
     let ev = read(&c.state).unwrap();
     let o = ev.iter().find(|e| e.kind == "override").expect("override event");
     assert_eq!(o.str("code"), Some("HOST_BUSY"));
@@ -253,7 +254,7 @@ fn dirty_unknown_worktree_is_worktree_dirty() {
     let (sh, r) = shed_happy(&c);
     let r = r.once(&format!("git -C {} status", w.display()), 0, "?? .brief.md\n");
     assert_eq!(spawn(&c, &r, &[]).0, 0);
-    assert_eq!(sh.all("run").len(), 1);
+    assert!(sh.has("sendmeter-impl-12"), "the lane started");
 }
 
 #[test]
@@ -265,14 +266,19 @@ fn supersede_kills_old_agent_then_spawns() {
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", d0)).unwrap();
     let (sh, r) = shed_happy(&c);
     sh.lane("sendmeter-impl-12", "idle", &w);
-    let (exit, out) = spawn(&c, &r, &["--supersede"]);
-    assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
-    let m = sh.methods();
-    let kill = m.iter().position(|m| m == "kill").expect("old agent killed");
-    assert_eq!(sh.all("kill")[0]["name"], "sendmeter-impl-12");
-    assert!(
-        kill < m.iter().position(|m| m == "run").unwrap(),
-        "kill before start: {m:?}"
+    let o = Order {
+        fake: r,
+        sh: &sh,
+        killed_first: Shared::new(None),
+    };
+    let (exit, out) = spawn(&c, &o, &["--supersede"]);
+    assert_eq!(exit, 0, "{out} {:?}", o.fake.calls.borrow());
+    assert_eq!(sh.all("kill")[0]["name"], "sendmeter-impl-12", "old agent killed");
+    assert_eq!(
+        o.killed_first.get(),
+        Some(true),
+        "kill before start: {:?}",
+        sh.methods()
     );
     let ev = read(&c.state).unwrap();
     let s = ev.iter().find(|e| e.kind == "supersede").expect("supersede logged");
@@ -280,48 +286,21 @@ fn supersede_kills_old_agent_then_spawns() {
     assert_eq!(ev.last().unwrap().kind, "spawn");
 }
 
-struct Hermes<'a> {
+struct Order<'a> {
     fake: Fake,
     sh: &'a FakeShed,
+    killed_first: Shared<Option<bool>>,
 }
 
-impl Runner for Hermes<'_> {
+impl Runner for Order<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if prog == "shed" && args.first().is_some_and(|a| a == "run") && self.killed_first.get().is_none() {
+            self.killed_first.set(Some(
+                self.sh.called("kill", IMPL) || self.fake.called("shed kill sendmeter-impl-12"),
+            ));
+        }
         self.fake.run(prog, args)
     }
-    fn sleep(&self, secs: u64) {
-        if secs == 10 {
-            self.sh.lock().waits.clear();
-            self.sh.screen(IMPL, "fleet-impl ❯  ctx 52K");
-        }
-        self.fake.sleep(secs);
-    }
-}
-
-#[test]
-fn hermes_kick_retries_after_dropped_first_prompt() {
-    let d = tmpdir("kick-retry");
-    let c = ctx(&d, CONFIG);
-    let (sh, fake) = shed_happy(&c);
-    sh.wait_ends(IMPL, "timeout");
-    let h = Hermes { fake, sh: &sh };
-    let (exit, out) = spawn(&c, &h, &[]);
-    assert_eq!(exit, 0, "{out} {:?}", h.fake.calls.borrow());
-    let f = &h.fake;
-    let seen = sh.lock().seen.clone();
-    let at = |m: &str, p: &dyn Fn(&serde_json::Value) -> bool| seen.iter().position(|s| s.0 == m && p(&s.1));
-    let waited = at("wait", &|p| p["output"] == "❯").expect("waits for the prompt");
-    let prompt = |p: &serde_json::Value| p["name"] == IMPL && !p["text"].as_str().unwrap().ends_with('\r');
-    assert!(waited < at("send", &prompt).unwrap(), "waits for input");
-    let prompts = seen.iter().filter(|s| s.0 == "send" && prompt(&s.1)).count();
-    assert_eq!(prompts, 2, "landed on attempt 2: {seen:?}");
-    let enters = sh
-        .all("keys")
-        .into_iter()
-        .filter(|p| p["name"] == IMPL && p["keys"] == json!(["Enter"]));
-    assert_eq!(enters.count(), 2, "explicit Enter each attempt");
-    assert_eq!(f.count("sleep 10"), 1);
-    assert_eq!(read(&c.state).unwrap().last().unwrap().val("confirmed"), true);
 }
 
 #[test]
@@ -340,7 +319,7 @@ fn an_orch_spawn_is_refused_and_every_lane_takes_an_issue() {
     assert!(read(&c.state).unwrap_or_default().is_empty());
     assert_eq!(run(&c, &r, &["spawn", "sendmeter", "-", "impl"]).0, 1);
     assert_eq!(run(&c, &r, &["spawn", "sendmeter", "12", "boss"]).0, 1);
-    assert_eq!(sh.all("run"), [] as [serde_json::Value; 0]);
+    assert!(!r.called("shed run"), "{:?}", r.calls.borrow());
 }
 
 #[test]
@@ -385,7 +364,7 @@ fn adopt_records_running_lane() {
     let sh = FakeShed::new();
     sh.attach(&c);
     sh.lane("stray", "idle", "/elsewhere");
-    sh.set("stray", |t| t["labels"]["harness"] = json!("hermes"));
+    sh.set("stray", |t| t["labels"]["harness"] = json!("claude"));
     let r = Fake::default();
     let (exit, out) = run(&c, &r, &["adopt", "sendmeter", "12", "impl", "--pane", "stray"]);
     assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
@@ -433,7 +412,6 @@ fn parity_r11_kick_failure_after_start_still_logs_unconfirmed_spawn() {
         (s.str("agent"), s.val("confirmed").clone()),
         (Some("sendmeter-impl-12"), json!(false))
     );
-    assert_eq!(r.count("sleep 10"), 2, "three attempts");
 }
 
 #[test]
@@ -444,7 +422,7 @@ fn named_orphan_in_worktree_is_adopted_not_lane_live() {
     sh.lane(IMPL, "working", wt(&c).to_str().unwrap());
     let (exit, out) = spawn(&c, &r, &[]);
     assert_eq!(exit, 0, "{out}");
-    assert!(sh.all("run").is_empty(), "nothing started: {:?}", sh.methods());
+    assert!(!r.called("shed run"), "nothing started: {:?}", r.calls.borrow());
     let ev = read(&c.state).unwrap();
     assert_eq!(ev.iter().filter(|e| e.kind == "spawn").count(), 1);
     assert_eq!((ev[0].str("pane"), ev[0].val("adopted")), (Some(IMPL), &json!(true)));

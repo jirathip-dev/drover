@@ -49,8 +49,9 @@ fn fake(head: &str, files: &str) -> Fake {
 }
 
 fn started(sh: &FakeShed, prefix: &str) -> bool {
-    let runs = sh.all("run");
-    runs.iter()
+    let sends = sh.all("send");
+    sends
+        .iter()
         .any(|p| p["name"].as_str().is_some_and(|n| n.starts_with(prefix)))
 }
 
@@ -128,7 +129,7 @@ fn a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane() {
     let (c, head, sh) = passed("verify-ui", &config(), false);
     let r = fake(&head, "src/a.rs\nweb/src/queue.ts\n").reply(RECIPE, "");
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
     assert!(!r.called("gh pr merge"));
     assert_eq!(state(&c), "verify(1)");
     assert!(kinds(&c, "verify-skipped").is_empty());
@@ -173,7 +174,7 @@ fn a_design_stage_issue_always_verifies() {
     let (c, head, sh) = passed("verify-design", &config(), true);
     let r = fake(&head, "src/a.rs\n").reply(RECIPE, "");
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-verify-12-r1"));
+    assert!(started(&sh, "sendmeter-verify-12-r1"));
     assert!(kinds(&c, "verify-skipped").is_empty());
 }
 
@@ -221,7 +222,7 @@ fn verify_off_skips_the_stage_and_verify_on_forces_it() {
     assert!(ls.contains("verify on"), "{ls}");
     let r = fake(&head, "src/a.rs\n").reply(RECIPE, "");
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-verify-12-r1"));
+    assert!(started(&sh, "sendmeter-verify-12-r1"));
     assert!(kinds(&c, "verify-skipped").is_empty());
 }
 
@@ -509,7 +510,7 @@ fn a_pass_drive_records_on_a_ui_pr_without_a_recipe_logs_verify_no_recipe_and_me
 fn a_pass_drive_records_on_a_ui_pr_with_a_recipe_spawns_verify_not_rev() {
     let (c, r, _, sh) = rev_wrote_pass("verify-599-recipe", "src/a.rs\nweb/src/queue.ts\n", true);
     after_pass(&c, &r, &sh, 3);
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
     assert!(!r.called("gh pr merge"));
     assert_eq!(state(&c), "verify(1)");
 }
@@ -699,7 +700,7 @@ fn a_pr_that_rewrites_the_recipe_is_verified_by_the_integration_recipe() {
             recipe,
         );
     drive(&c, &r);
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
     assert_eq!(std::fs::read_to_string(wt.join(".verify.md")).unwrap(), recipe);
     let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
     assert!(
@@ -754,7 +755,7 @@ fn a_verify_lane_that_recorded_its_verdict_is_superseded_by_the_next_verify() {
         (Some("verify"), Some("sendmeter-verify-12-r1"), Some(b.as_str())),
         "{out}"
     );
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", sh.methods());
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{:?}", sh.methods());
 }
 
 #[test]
@@ -763,7 +764,7 @@ fn a_same_name_verify_lane_without_a_verdict_is_still_lane_live() {
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "verify"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED LANE_LIVE: live agent(s)"), "{out}");
-    assert!(kinds(&c, "supersede").is_empty() && !sh.called("run", "sendmeter-verify-12-r1"));
+    assert!(kinds(&c, "supersede").is_empty() && !started(&sh, "sendmeter-verify-12-r1"));
 }
 
 fn extend_ask(c: &drover::Ctx, ts: u64) {
@@ -885,7 +886,7 @@ fn a_superseded_verify_lanes_scratch_with_a_home_path_is_never_pushed() {
     r.replies.splice(0..0, mine.replies);
     let out = drive(&c, &r);
     assert!(!out.contains("PUBLIC_LEAK"), "{out}");
-    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{out}");
+    assert!(started(&sh, "sendmeter-verify-12-r1"), "{out}");
     assert_eq!(kinds(&c, "supersede")[0].val("wip"), &json!(null), "{out}");
     for verb in ["add", "commit", "push"] {
         assert!(

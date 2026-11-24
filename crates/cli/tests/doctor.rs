@@ -259,7 +259,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "→ tailscale serve --bg",
         ),
         (
-            |_, _, r| r.once("launchctl print", 113, ""),
+            |_, _, r| r.once("launchctl print", 0, "").once("launchctl print", 113, ""),
             "launchd",
             "→ launchctl bootstrap gui/$(id -u)",
         ),
@@ -316,7 +316,9 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         (
             |_, _, r| {
                 if cfg!(target_os = "macos") {
-                    r.once("launchctl print", 0, "").once("launchctl print", 1, "")
+                    r.once("launchctl print", 0, "")
+                        .once("launchctl print", 0, "")
+                        .once("launchctl print", 1, "")
                 } else {
                     r.once("systemctl --user is-active", 3, "")
                 }

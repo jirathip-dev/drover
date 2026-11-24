@@ -1563,8 +1563,7 @@ fn no_proof(
             "Drop those findings"
         };
         let text = format!("drover verdict refused your verdict.md: REFUSED {code}: {why}. {fix}.");
-        let tell =
-            |p| crate::term::reply(&on, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
+        let tell = |p| crate::term::reply(&on, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
         let prompted = open.filter(|_| !told).is_some_and(tell);
         let d = json!({"sha": args.get(5), "hash": hash, "agent": lane, "prompted": prompted});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "proof-refused", d))?;

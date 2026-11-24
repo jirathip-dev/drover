@@ -111,7 +111,7 @@ fn an_ssh_that_never_returns_costs_one_retried_deadline_and_drive_still_starts()
         assert_eq!(code, 0, "{name}: {out}");
         assert!(took < Duration::from_secs(2 * 2 + 4), "{name}: {took:?}\n{out}");
         assert!(
-            sh.called("run", "sendmeter-impl-12"),
+            sh.has("sendmeter-impl-12"),
             "{name}: drive still starts the main host's work: {out}"
         );
         let calls = r.f.calls.borrow();
@@ -165,10 +165,10 @@ impl Runner for Two {
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> anyhow::Result<Out> {
         if !boat1(prog, args) {
-            let on = OverSsh {
+            let on = remote::Acp::over(OverSsh {
                 f: &self.f,
                 hosts: vec![("boat2", &self.boat2)],
-            };
+            });
             return on.run_in(prog, args, input);
         }
         self.f.calls.borrow_mut().push(format!("{prog} {}", args.join(" ")));
@@ -179,7 +179,11 @@ impl Runner for Two {
         std::thread::sleep(Duration::from_secs(secs));
     }
     fn detach(&self, exe: &str, args: &[String], log: &Path) -> anyhow::Result<u32> {
-        self.f.detach(exe, args, log)
+        let on = remote::Acp::over(OverSsh {
+            f: &self.f,
+            hosts: vec![("boat2", &self.boat2)],
+        });
+        on.detach(exe, args, log)
     }
 }
 
@@ -268,6 +272,7 @@ fn a_hung_shed_connect_on_one_remote_host_costs_one_deadline_and_another_remote_
         let add = ["queue", "sendmeter", "add", "12", "--needs", "docker"];
         assert_eq!(run(&c, &Fake::default(), &add).0, 0);
         let _main = FakeShed::attached(&c);
+        remote::proxied(&c);
         let r = Two {
             f: boat2_side(),
             ssh: hung_connect(&dir, child),
@@ -298,7 +303,7 @@ fn a_hung_shed_connect_on_one_remote_host_costs_one_deadline_and_another_remote_
         );
         assert!(!pids.is_empty(), "{name}: boat1's shed connect was reached");
         assert!(
-            r.boat2.called("run", "sendmeter-impl-12"),
+            r.boat2.has("sendmeter-impl-12"),
             "{name}: the lane starts on boat2: {:?}\n{out}",
             r.boat2.methods()
         );

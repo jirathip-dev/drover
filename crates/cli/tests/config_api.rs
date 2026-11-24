@@ -73,7 +73,7 @@ fn read_gives_every_setting_with_secrets_as_names_and_needs_a_paired_device() {
     );
     assert_eq!(
         field(&v, "fleet.sendmeter.role.impl.harness")["allowed"],
-        json!(["claude", "hermes", "dsh"])
+        json!(["claude"])
     );
     assert_eq!(
         field(&v, "fleet.sendmeter.integration")["doc"],
@@ -180,7 +180,7 @@ fn a_fleet_is_added_removed_paused_and_resumed_with_each_logged() {
     let web = cfg.fleet("web").unwrap();
     assert_eq!((web.repo.as_str(), web.integration.as_str()), ("acme/web", "staging"));
     assert_eq!(web.role("impl").unwrap().profile.as_deref(), Some("fleet-impl"));
-    assert_eq!(web.role("rev").unwrap().harness, "hermes");
+    assert_eq!(web.role("rev").unwrap().harness, "claude");
     assert!(std::fs::read_to_string(&c.config).unwrap().starts_with(&before));
     assert_eq!(edits(&c).pop().unwrap().str("added"), Some("web"));
     let (status, v) = post("config-edit", json!({"hash": get(&s, &ck)["hash"], "remove": "web"}));

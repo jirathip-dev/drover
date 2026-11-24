@@ -13,6 +13,8 @@ pub use fake_shed::{FakeShed, Fault, OnShed, OverSsh};
 pub mod large;
 /// The recorded sendmeter fleet the screen tests share.
 pub mod recorded;
+/// A remote host that passes a remote ACP lane's guard.
+pub mod remote;
 #[allow(unused_imports, reason = "not every test crate reads the recorded fleet")]
 pub use recorded::recorded;
 
@@ -409,10 +411,10 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
     c
 }
 
-/// Every role's profile written (`profiles sync`), as an ACP lane's guard check needs before spawn; a config that does not load writes none.
+/// Every role's profile written (`profiles sync`), as an ACP lane's guard check needs before spawn; a config that does not load, or that sync refuses, writes none.
 pub fn synced(c: &Ctx) {
     if let Ok(cfg) = drover::config::Config::load(&c.config) {
-        drover::spawn::profiles_sync(c, &cfg, "", &mut std::io::sink()).unwrap();
+        drover::spawn::profiles_sync(c, &cfg, "", &mut std::io::sink()).ok();
     }
 }
 

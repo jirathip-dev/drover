@@ -40,8 +40,9 @@ fn reconfig(c: &drover::Ctx, base: &str) {
 const NONE: &[(&str, &str, &str)] = &[];
 
 fn started(prefix: &str) -> Vec<String> {
-    let runs = sh().all("run").into_iter();
-    let names = runs.filter_map(|p| p["name"].as_str().map(String::from));
+    let sends = sh().all("send").into_iter();
+    let briefs = sends.filter(|p| p["text"].as_str().is_some_and(|t| t.starts_with("# Brief")));
+    let names = briefs.filter_map(|p| p["name"].as_str().map(String::from));
     names.filter(|n| n.starts_with(prefix)).collect()
 }
 
@@ -731,7 +732,7 @@ fn the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over() {
     let r = fake(NONE).reply("git -C", "").reply("kill -0 4242", "");
     let (out, steps) = drive(&c, &r);
     assert!(out.contains("another pass holds") && steps.is_empty(), "{out}");
-    assert!(!sh().methods().iter().any(|m| m == "run"), "{:?}", sh().methods());
+    assert!(started("").is_empty(), "{:?}", sh().methods());
     lease_as(&c, "drive-sendmeter.lock", 4242, c.now - 7200, 3600);
     assert_eq!(drive(&c, &r).1, ["start"]);
     assert!(
@@ -831,9 +832,12 @@ fn the_drive_summary_groups_per_action() {
     assert_eq!(drover::drive::summary("sendmeter", ""), "sendmeter: nothing due");
 }
 
-struct Slow(Fake);
+struct Slow(Fake, std::mem::ManuallyDrop<FakeShed>);
 impl drover::runner::Runner for Slow {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        if prog == "shed" {
+            self.1.config("");
+        }
         if prog == "git" && args.join(" ").contains(" worktree add ") {
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
@@ -859,7 +863,10 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || drover::serve::serve_on(&c2, &Slow(fake(NONE).reply("git -C", "")), l, false));
+    let (sock, state, moved) = (sh().sock.clone(), sh().state.clone(), sh().moved.clone());
+    let twin = std::mem::ManuallyDrop::new(FakeShed { sock, state, moved });
+    let r = Slow(fake(NONE).reply("git -C", ""), twin);
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
     let send = |req: String| {
         let mut s = std::net::TcpStream::connect(addr).unwrap();
         s.write_all(req.replacen("\r\n", "\r\nConnection: close\r\n", 1).as_bytes())
@@ -1527,11 +1534,7 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
         "sendmeter #12 start: started\nsendmeter #13 start: REFUSED CAP: lane limit or usage cap reached\n"
     );
     assert_eq!(r.2.into_inner(), 3, "waited 3 s, then ran no pass of its own");
-    assert!(
-        !shed.methods().iter().any(|m| m == "run"),
-        "never two passes: {:?}",
-        shed.methods()
-    );
+    assert!(started("").is_empty(), "never two passes: {:?}", shed.methods());
     assert_eq!(
         drover::drive::summary("sendmeter", &out),
         "sendmeter: started #12 · 1 skipped (CAP)"

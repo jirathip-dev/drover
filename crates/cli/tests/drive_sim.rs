@@ -291,7 +291,11 @@ impl Sim {
     }
 
     fn started(&self) {
-        let (runs, seen) = (self.sh.all("run"), self.born.borrow().len());
+        let sends = self.sh.all("send").into_iter();
+        let runs: Vec<_> = sends
+            .filter(|p| p["text"].as_str().is_some_and(|t| t.starts_with("# Brief")))
+            .collect();
+        let seen = self.born.borrow().len();
         for p in runs.iter().skip(seen) {
             let n = p["name"].as_str().unwrap().to_string();
             self.born.borrow_mut().push((n.clone(), self.w.now()));

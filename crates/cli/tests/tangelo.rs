@@ -5,6 +5,10 @@ use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
+fn started(sh: &FakeShed, lane: &str) -> bool {
+    !sh.sent(lane).is_empty()
+}
+
 fn config(extra: &str) -> String {
     CONFIG
         .replace(
@@ -333,7 +337,7 @@ fn design_lane_spawns_but_never_moves_the_issue() {
     let r = happy().once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "");
     let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design"]);
     assert_eq!(exit, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-design-12"), "{:?}", sh.methods());
+    assert!(started(&sh, "sendmeter-design-12"), "{:?}", sh.methods());
     let wt = c.worktrees.join("sendmeter/design-12");
     assert!(
         r.called(&format!(

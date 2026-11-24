@@ -312,7 +312,10 @@ pub fn set(
         );
     }
     let lanes = providers::lane_names();
-    if let Some((_, h)) = wanted.iter().find(|(k, h)| *k == "harness" && !lanes.contains(&h.as_str())) {
+    if let Some((_, h)) = wanted
+        .iter()
+        .find(|(k, h)| *k == "harness" && !lanes.contains(&h.as_str()))
+    {
         return gate::refused("BAD_VALUE", format!("harness {h:?} is not one of {lanes:?}"));
     }
     if let Some((_, m)) = wanted.iter().find(|(k, m)| *k == "model" && !cfg.models.contains(m)) {

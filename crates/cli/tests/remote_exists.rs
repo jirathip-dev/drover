@@ -182,7 +182,7 @@ fn a_hung_host_is_logged_over_budget_and_the_other_hosts_spawn_goes_ahead() {
     let r = air(&[], true);
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-impl-12"), "the spawn goes ahead: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "the spawn goes ahead: {out}");
     assert!(
         out.contains("tick: air: over budget; skipped for the rest of this pass"),
         "{out}"

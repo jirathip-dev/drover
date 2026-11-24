@@ -128,13 +128,8 @@ fn on_cloud<'a>(f: &'a Fake, sh: &'a FakeShed) -> OverSsh<'a> {
     }
 }
 
-fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
-    let calls = r.calls.borrow();
-    let at = calls.iter().enumerate().filter(|(_, c)| c.contains("'shed' 'connect'"));
-    let inputs = r.inputs.borrow();
-    let sent = inputs.iter().filter(|(c, _)| c.contains("'shed' 'connect'"));
-    let want = format!("\"method\":\"{method}\"");
-    at.zip(sent).find(|(_, (_, i))| i.contains(&want)).map(|((n, _), _)| n)
+fn acp_cloud<'a>(f: &'a Fake, sh: &'a FakeShed) -> remote::Acp<'a, OverSsh<'a>> {
+    remote::Acp::over(on_cloud(f, sh))
 }
 
 #[test]
@@ -143,6 +138,7 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (sh, cloud) = (FakeShed::new(), FakeShed::new());
     sh.attach(&c);
+    remote::proxied(&c);
     run(
         &c,
         &Fake::default(),
@@ -151,19 +147,18 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     let r = spawn_fake();
     let (code, out) = run(
         &c,
-        &on_cloud(&r, &cloud),
+        &acp_cloud(&r, &cloud),
         &["spawn", "sendmeter", "12", "impl", "--dry-run"],
     );
     assert!(!r.called(&rc("start")), "{code} {out}");
     assert!(cloud.methods().is_empty(), "{:?}", cloud.methods());
     let r = spawn_fake();
-    let (code, out) = run(&c, &on_cloud(&r, &cloud), &["spawn", "sendmeter", "12", "impl"]);
+    let (code, out) = run(&c, &acp_cloud(&r, &cloud), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let i = |p: &str| r.index(p).unwrap_or_else(|| panic!("no {p}: {:?}", r.calls.borrow()));
     assert!(i(&rc("status")) < i(&rc("start")) && i(&rc("start")) < i(&rc("address")));
-    let started = shed_call_at(&r, "run").unwrap_or_else(|| panic!("no run: {:?}", r.calls.borrow()));
-    assert!(i(&rc("address")) < started);
-    assert!(cloud.called("run", "sendmeter-impl-12") && sh.all("run").is_empty());
+    assert!(i(&rc("address")) < i(&format!("{SSH}'shed' 'run' '--acp'")));
+    assert!(cloud.has("sendmeter-impl-12") && !sh.has("sendmeter-impl-12"));
     let inc = std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
     assert!(
         inc.contains("Host cloud1\n  HostName 10.0.0.7\n  User ubuntu\n  Port 2222\n"),
@@ -181,8 +176,8 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     let s = events.iter().rfind(|e| e.kind == "spawn").unwrap();
     assert_eq!(s.str("host"), Some("cloud1"));
     assert_eq!(s.str("why"), Some("needs docker: no local host has it"));
-    let sent = cloud.sent("sendmeter-impl-12");
-    assert!(sent.iter().any(|c| c.contains("DROVER_HOST='cloud1'")), "{sent:?}");
+    let start = remote::start_line(&r, "cloud1").unwrap();
+    assert!(start.contains("DROVER_HOST='cloud1'"), "{start}");
     let clone: Vec<_> = (r.calls.borrow().iter())
         .filter(|c| c.contains("git clone"))
         .cloned()
@@ -304,12 +299,13 @@ fn the_dry_run_names_the_host_it_picked_and_why() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let sh = FakeShed::new();
     sh.attach(&c);
+    remote::proxied(&c);
     run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]);
     let r = spawn_fake_at(3.0);
     let cloud = FakeShed::new();
     let (code, out) = run(
         &c,
-        &on_cloud(&r, &cloud),
+        &acp_cloud(&r, &cloud),
         &["spawn", "sendmeter", "12", "impl", "--dry-run"],
     );
     assert_eq!(code, 0, "{out}");
@@ -779,7 +775,6 @@ impl Runner for Remote<'_> {
             .env("DROVER_HOME", &self.2)
             .env("FLEET_CONFIG", &there)
             .env("FLEET_STATE", self.2.join("state/events.jsonl"))
-            .env("FLEET_HERMES_PROFILES", self.2.join("hermes"))
             .output()?;
         Ok(Out {
             code: o.status.code().unwrap_or(1),

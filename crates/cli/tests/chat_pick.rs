@@ -183,7 +183,11 @@ fn the_conductors_instructions_reach_the_thread_brief() {
         brief.contains("# Orchestrator brief: thread") && brief.contains("Always grill scope first."),
         "{brief}"
     );
-    assert!(f.called("shed send orchestrator-t1 # Orchestrator brief: thread"), "{:?}", f.calls.borrow());
+    assert!(
+        f.called("shed send orchestrator-t1 # Orchestrator brief: thread"),
+        "{:?}",
+        f.calls.borrow()
+    );
 }
 
 #[test]

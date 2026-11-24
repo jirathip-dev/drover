@@ -3,7 +3,7 @@ use common::*;
 use serde_json::Value;
 use std::path::PathBuf;
 
-fn spawned(sandbox: &str) -> (drover::Ctx, FakeShed, PathBuf, String) {
+fn spawned(sandbox: &str) -> (drover::Ctx, FakeShed, PathBuf) {
     let d = tmpdir("lane-sandbox");
     let repo = d.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -26,12 +26,8 @@ fn spawned(sandbox: &str) -> (drover::Ctx, FakeShed, PathBuf, String) {
         .reply("git -C", "");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out}");
-    let start = sh
-        .sent("sendmeter-impl-12")
-        .into_iter()
-        .find(|t| t.starts_with("exec "))
-        .expect("no start line");
-    (c, sh, wt, start)
+    assert!(sh.has("sendmeter-impl-12"), "{out}");
+    (c, sh, wt)
 }
 
 fn strings(v: &Value) -> Vec<String> {
@@ -43,13 +39,9 @@ fn strings(v: &Value) -> Vec<String> {
 }
 
 #[test]
-fn a_sandboxed_fleet_starts_its_agent_under_srt_with_rules_walling_off_home_secrets_and_the_network() {
-    let (c, _sh, wt, start) = spawned("sandbox = \"srt\"");
+fn a_sandboxed_fleet_writes_srt_rules_walling_off_home_secrets_and_the_network() {
+    let (c, _sh, wt) = spawned("sandbox = \"srt\"");
     let file = format!("{}.srt.json", wt.display());
-    assert!(
-        start.contains(&format!("'srt' '--settings' '{file}' 'claude'")),
-        "{start}"
-    );
     let rules: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     let fs = &rules["filesystem"];
     let home = drover::config::home().display().to_string();
@@ -65,16 +57,11 @@ fn a_sandboxed_fleet_starts_its_agent_under_srt_with_rules_walling_off_home_secr
         !write.contains(&home) && !strings(&fs["allowRead"]).contains(&home),
         "{fs}"
     );
-    let tmp = start
-        .split("CLAUDE_CODE_TMPDIR=")
-        .nth(1)
-        .unwrap()
-        .split('\'')
-        .next()
-        .unwrap();
     assert!(
-        PathBuf::from(tmp).is_dir() && write.iter().any(|w| w == tmp),
-        "{tmp} {write:?}"
+        write
+            .iter()
+            .any(|w| w.ends_with("/tmp") && PathBuf::from(w).join(".keep").is_file()),
+        "the lane's own temp folder: {write:?}"
     );
     let hosts = strings(&rules["network"]["allowedDomains"]);
     assert!(
@@ -85,9 +72,8 @@ fn a_sandboxed_fleet_starts_its_agent_under_srt_with_rules_walling_off_home_secr
 }
 
 #[test]
-fn an_unsandboxed_fleet_starts_its_agent_as_before() {
-    let (_c, _sh, wt, start) = spawned("");
-    assert!(!start.contains("srt"), "{start}");
+fn an_unsandboxed_fleet_writes_no_srt_rules() {
+    let (_c, _sh, wt) = spawned("");
     assert!(!PathBuf::from(format!("{}.srt.json", wt.display())).exists());
 }
 

@@ -5,12 +5,7 @@ use std::path::Path;
 fn empty_values_are_unset() {
     let h = std::env::temp_dir().join(format!("fleet-test-empty-env-{}", std::process::id()));
     std::env::set_var("HOME", &h);
-    for k in [
-        "FLEET_CONFIG",
-        "FLEET_STATE",
-        "FLEET_WORKTREES",
-        "DROVER_HOME",
-    ] {
+    for k in ["FLEET_CONFIG", "FLEET_STATE", "FLEET_WORKTREES", "DROVER_HOME"] {
         std::env::set_var(k, "");
     }
     let c = Ctx::from_env();

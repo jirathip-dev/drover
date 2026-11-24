@@ -12,7 +12,9 @@ fn set_round_trip_is_byte_identical() {
     assert!(out.contains("sendmeter.impl profile: fleet-impl -> fleet-x"), "{out}");
     let mid = std::fs::read_to_string(&c.config).unwrap();
     assert_eq!(
-        drover::config::Config::parse(&mid).unwrap().fleet["sendmeter"].role["impl"].profile.as_deref(),
+        drover::config::Config::parse(&mid).unwrap().fleet["sendmeter"].role["impl"]
+            .profile
+            .as_deref(),
         Some("fleet-x")
     );
 
@@ -29,7 +31,11 @@ fn set_round_trip_is_byte_identical() {
 fn set_harness_takes_claude_and_refuses_the_retired_ones() {
     let d = tmpdir("set-harness");
     let c = ctx(&d, CONFIG);
-    let (code, out) = run(&c, &Fake::default(), &["set", "sendmeter", "impl", "--harness", "claude"]);
+    let (code, out) = run(
+        &c,
+        &Fake::default(),
+        &["set", "sendmeter", "impl", "--harness", "claude"],
+    );
     assert_eq!(code, 0, "{out}");
     for h in ["dsh", "hermes"] {
         let (code, out) = run(&c, &Fake::default(), &["set", "sendmeter", "impl", "--harness", h]);
@@ -92,16 +98,12 @@ fn notifier_gets_event_json_on_stdin() {
     let sink = d.join("sink.json");
     let cfg = notify_cfg(&format!("cat > '{}'", sink.display()), "set") + "format = \"json\"\n";
     let c = ctx(&d, &cfg);
-    let (code, _) = run(
-        &c,
-        &Fake::default(),
-        &["set", "sendmeter", "impl", "--harness", "claude"],
-    );
+    let (code, _) = run(&c, &Fake::default(), &["set", "sendmeter", "impl", "--effort", "high"]);
     assert_eq!(code, 0);
     let got: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&sink).unwrap()).unwrap();
     assert_eq!(got["type"], "set");
     assert_eq!(got["fleet"], "sendmeter");
-    assert_eq!(got["new"], "claude");
+    assert_eq!(got["new"], "high");
 }
 
 #[test]
@@ -109,11 +111,7 @@ fn notifier_skips_unlisted_types() {
     let d = tmpdir("notify-skip");
     let sink = d.join("sink.json");
     let c = ctx(&d, &notify_cfg(&format!("cat > '{}'", sink.display()), "merged"));
-    let (code, _) = run(
-        &c,
-        &Fake::default(),
-        &["set", "sendmeter", "impl", "--harness", "claude"],
-    );
+    let (code, _) = run(&c, &Fake::default(), &["set", "sendmeter", "impl", "--effort", "high"]);
     assert_eq!(code, 0);
     assert!(!sink.exists());
 }
@@ -122,11 +120,7 @@ fn notifier_skips_unlisted_types() {
 fn failing_notifier_does_not_change_exit_code() {
     let d = tmpdir("notify-fail");
     let c = ctx(&d, &notify_cfg("exit 7", "set"));
-    let (code, _) = run(
-        &c,
-        &Fake::default(),
-        &["set", "sendmeter", "impl", "--harness", "claude"],
-    );
+    let (code, _) = run(&c, &Fake::default(), &["set", "sendmeter", "impl", "--effort", "high"]);
     assert_eq!(code, 0);
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().any(|e| e.kind == "notify-failed"), "failure is logged");

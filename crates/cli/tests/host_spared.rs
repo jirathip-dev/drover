@@ -73,7 +73,7 @@ fn a_disabled_host_with_no_lane_there_gets_no_ssh_from_a_tick_or_status() {
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(to_boat1(&r), Vec::<String>::new(), "{out}");
-    assert!(sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "drive still starts: {out}");
     let (_, status) = run(&c, &r, &["status"]);
     assert_eq!(to_boat1(&r), Vec::<String>::new(), "{status}");
     let ev = read(&c.state).unwrap().to_vec();

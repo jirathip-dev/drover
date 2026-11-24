@@ -11,7 +11,7 @@ const IPHONE: &str = "Mozilla/5.0 (iPhone) Safari/604.1";
 fn board(name: &str, mini: &FakeShed) -> drover::Ctx {
     let hosts = "[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n";
     let c = ctx(&tmpdir(name), &mini.config(&format!("{CONFIG}\n{hosts}")));
-    let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "dsh"});
+    let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude"});
     append(&c.state, &Event::new(T - 500, "sendmeter", Some(12), "spawn", spawn)).unwrap();
     let conductor = json!({"agent": "conductor-t1", "thread": "t1"});
     append(

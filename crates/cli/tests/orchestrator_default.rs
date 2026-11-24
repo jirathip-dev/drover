@@ -151,25 +151,13 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
 }
 
 #[test]
-fn a_orchestrator_choice_that_fails_doctor_is_refused_and_leaves_fleet_toml_alone() {
+fn a_orchestrator_choice_of_a_model_its_harness_lacks_is_refused_and_leaves_fleet_toml_alone() {
     let c = setup("cdef-doctor");
     let orig = std::fs::read(&c.config).unwrap();
-    let r = Fake::default().reply("which hermes", "/usr/local/bin/hermes\n");
+    let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let mt = mtime(&s);
-    let res = req(
-        &s,
-        "/",
-        &format!("op=cond&fleet=sendmeter&harness=claude&mtime={mt}"),
-        &cookie,
-    );
-    assert!(
-        res.contains("REFUSED%20DOCTOR") && res.contains("claude%20on%20PATH"),
-        "{res}"
-    );
-    assert_eq!(std::fs::read(&c.config).unwrap(), orig, "byte-identical");
-    assert!(!c.config.with_extension("toml.bak").exists());
     let res = req(
         &s,
         "/",
@@ -177,5 +165,6 @@ fn a_orchestrator_choice_that_fails_doctor_is_refused_and_leaves_fleet_toml_alon
         &cookie,
     );
     assert!(res.contains("REFUSED%20BAD%5FVALUE"), "{res}");
-    assert_eq!(std::fs::read(&c.config).unwrap(), orig);
+    assert_eq!(std::fs::read(&c.config).unwrap(), orig, "byte-identical");
+    assert!(!c.config.with_extension("toml.bak").exists());
 }

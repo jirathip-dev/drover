@@ -112,7 +112,7 @@ fn a_host_that_never_answers_costs_one_retried_probe_and_drive_still_starts() {
     };
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "drive still starts: {out}");
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
     assert_eq!(to_air, [PROBE, PROBE], "one probe retried once, nothing after it");

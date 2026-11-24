@@ -17,6 +17,20 @@ fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static)
     }
 }
 
+fn bounded<T>(what: &str, f: impl FnOnce() -> T) -> T {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let what = what.to_string();
+    std::thread::spawn(move || {
+        if rx.recv_timeout(BOUND) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+            eprintln!("{what} still blocked after {} s", BOUND.as_secs());
+            std::process::exit(1);
+        }
+    });
+    let v = f();
+    drop(tx);
+    v
+}
+
 fn base() -> String {
     CONFIG
         .replace("harness  =  \"claude\"", "harness = \"claude\"")
@@ -36,10 +50,7 @@ fn spawn_fake() -> Fake {
 }
 
 fn spawn(c: &drover::Ctx) -> (i32, String) {
-    let c = c.clone();
-    within("spawn", move || {
-        run(&c, &spawn_fake(), &["spawn", "sendmeter", "12", "impl"])
-    })
+    bounded("spawn", || run(c, &spawn_fake(), &["spawn", "sendmeter", "12", "impl"]))
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<drover::events::Event> {
@@ -101,7 +112,7 @@ fn a_spawn_whose_link_drops_a_connection_fails_cleanly_and_the_next_one_starts()
     let (code, out) = spawn(&c);
     assert_ne!(code, 0, "{out}");
     assert!(kinds(&c, "spawn").is_empty(), "{out}");
-    assert!(!sh.called("run", IMPL), "{:?}", sh.methods());
+    assert!(!sh.has(IMPL), "{:?}", sh.methods());
     let (code, out) = spawn(&c);
     assert_eq!(code, 0, "{out}");
     assert_eq!(kinds(&c, "spawn").len(), 1, "{out}");

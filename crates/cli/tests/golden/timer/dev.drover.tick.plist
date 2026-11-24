@@ -3,7 +3,7 @@
 <plist version="1.0"><dict>
 <key>Label</key><string>dev.drover.tick</string>
 <key>ProgramArguments</key><array><string>/x/drover</string><string>tick</string></array>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/hermes/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/claude/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
 <key>StartInterval</key><integer>300</integer>
 <key>RunAtLoad</key><true/>
 <key>AbandonProcessGroup</key><true/>

@@ -21,6 +21,7 @@ fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let sh = FakeShed::new();
     sh.attach(&c);
+    remote::proxied(&c);
     (c, sh)
 }
 
@@ -43,11 +44,11 @@ fn mini_only() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-fn with_bazzite<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
-    OverSsh {
+fn with_bazzite<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> remote::Acp<'a, OverSsh<'a>> {
+    remote::Acp::over(OverSsh {
         f,
         hosts: vec![("bazzite", bazzite)],
-    }
+    })
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
@@ -68,12 +69,12 @@ fn an_unreachable_host_refuses_only_its_own_spawns() {
     assert!(out.contains("REFUSED HOST_OFFLINE: bazzite: unreachable"), "{out}");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "14", "impl", "--host", "mini"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    assert!(sh.called("run", "sendmeter-impl-14"), "{:?}", sh.methods());
+    assert!(sh.has("sendmeter-impl-14"), "{:?}", sh.methods());
     remote_spawn(&c);
     ev(&c, NOW - 100, "verdict", json!({"verdict": "FAIL", "sha": "abc"}));
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
     assert_eq!(code, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-rev-12-r2"), "{:?}", sh.methods());
+    assert!(sh.has("sendmeter-rev-12-r2"), "{:?}", sh.methods());
 }
 
 #[test]
@@ -84,7 +85,7 @@ fn a_logged_lane_on_the_down_host_still_blocks_a_duplicate() {
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "mini"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED LANE_LIVE: unfinished impl lane"), "{out}");
-    assert!(sh.all("run").is_empty(), "{:?}", sh.methods());
+    assert!(sh.lock().terms.is_empty(), "{:?}", sh.methods());
 }
 
 #[test]
@@ -303,7 +304,7 @@ fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
             (Some("mini"), Some("impl")),
             "#{n}: {out}"
         );
-        assert!(sh.called("run", &format!("sendmeter-impl-{n}")), "{:?}", sh.methods());
+        assert!(sh.has(&format!("sendmeter-impl-{n}")), "{:?}", sh.methods());
     }
     let creates: Vec<String> = r
         .calls
@@ -355,7 +356,7 @@ fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
     assert_eq!(kinds(&c, "spawn").len(), 4, "{out}");
     assert_eq!(kinds(&c, "lane-moved").len(), 2);
     assert_eq!(std::fs::read_to_string(&note).unwrap().lines().count(), 1);
-    assert!(bazzite.all("run").is_empty(), "{:?}", bazzite.methods());
+    assert!(bazzite.lock().terms.is_empty(), "{:?}", bazzite.methods());
 }
 
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite --";
@@ -371,6 +372,8 @@ fn remote(mut f: Fake) -> Fake {
         .reply(&format!("{SSH} 'git'"), "")
         .reply(&format!("{SSH} '/opt/drover/bin/drover' 'profiles' 'sync'"), "")
         .reply(&format!("{SSH} 'sh' '-c' 'mkdir"), "")
+        .reply(&format!("{SSH} 'sh' '-c' 'umask 077"), "")
+        .reply(&format!("{SSH} 'rm' '-f'"), "")
 }
 
 #[test]
@@ -385,11 +388,7 @@ fn a_host_an_earlier_pass_found_down_takes_its_start_when_it_answers_this_pass()
     assert_eq!(code, 0, "{out}");
     let pass = kinds(&c, "drive-pass").into_iter().last().unwrap();
     assert!(!pass.val("actions").to_string().contains("HOST_OFFLINE"), "{out}");
-    assert!(
-        bazzite.called("run", "sendmeter-impl-13"),
-        "{out} {:?}",
-        bazzite.methods()
-    );
+    assert!(bazzite.has("sendmeter-impl-13"), "{out} {:?}", bazzite.methods());
 }
 
 #[test]
@@ -418,7 +417,7 @@ fn a_start_on_a_host_offline_this_pass_waits_for_it_with_no_card_or_backoff() {
             "{}",
             why(&c)
         );
-        assert!(bazzite.all("run").is_empty(), "{:?}", bazzite.methods());
+        assert!(bazzite.lock().terms.is_empty(), "{:?}", bazzite.methods());
         assert_eq!(run(&at(k + 60), &mini_only(), &["check"]).0, 0);
     }
     let mine: Vec<String> = read(&c.state)
@@ -445,11 +444,7 @@ fn a_start_on_a_host_offline_this_pass_waits_for_it_with_no_card_or_backoff() {
     let (f, bazzite) = (remote(mini_only()), FakeShed::new());
     let (code, out) = run(&at(500), &with_bazzite(&f, &bazzite), &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        bazzite.called("run", "sendmeter-impl-13"),
-        "{out} {:?}",
-        bazzite.methods()
-    );
+    assert!(bazzite.has("sendmeter-impl-13"), "{out} {:?}", bazzite.methods());
 }
 
 const PROBE: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none bazzite -- true";
@@ -543,6 +538,8 @@ fn linux_start(f: Fake) -> Fake {
         .reply(&format!("{MUX} 'git'"), "")
         .reply(&format!("{MUX} '/opt/drover/bin/drover' 'profiles' 'sync'"), "")
         .reply(&format!("{MUX} 'sh' '-c' 'mkdir"), "")
+        .reply(&format!("{MUX} 'sh' '-c' 'umask 077"), "")
+        .reply(&format!("{MUX} 'rm' '-f'"), "")
 }
 
 fn down() -> Fake {
@@ -572,11 +569,7 @@ fn a_probe_that_times_out_once_then_answers_leaves_the_host_up_for_the_pass() {
     let bazzite = FakeShed::new();
     let (code, out) = run(&c, &with_bazzite(&f, &bazzite), &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        bazzite.called("run", "sendmeter-impl-13"),
-        "{out} {:?}",
-        bazzite.methods()
-    );
+    assert!(bazzite.has("sendmeter-impl-13"), "{out} {:?}", bazzite.methods());
 }
 
 #[test]
@@ -587,7 +580,7 @@ fn a_host_that_fails_every_probe_is_offline_for_the_pass() {
     let (code, out) = run(&c, &with_bazzite(&f, &bazzite), &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(last_code(&c), "HOST_OFFLINE");
-    assert!(bazzite.all("run").is_empty(), "{:?}", bazzite.methods());
+    assert!(bazzite.lock().terms.is_empty(), "{:?}", bazzite.methods());
 }
 
 #[test]
@@ -610,7 +603,7 @@ fn an_extended_round_held_only_by_its_offline_host_raises_no_card_and_starts_onc
     let (code, out) = run(&c, &with_bazzite(&f, &bazzite), &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(last_code(&c), "HOST_OFFLINE");
-    assert!(bazzite.all("run").is_empty(), "{:?}", bazzite.methods());
+    assert!(bazzite.lock().terms.is_empty(), "{:?}", bazzite.methods());
     let cards: Vec<Event> = kinds(&c, "needs-human")
         .into_iter()
         .filter(|e| e.issue == Some(13))
@@ -625,11 +618,7 @@ fn an_extended_round_held_only_by_its_offline_host_raises_no_card_and_starts_onc
     let (f, bazzite) = (linux_start(mini_only()), FakeShed::new());
     let (code, out) = run(&at, &with_bazzite(&f, &bazzite), &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        bazzite.called("run", "sendmeter-impl-13"),
-        "{out} {:?}",
-        bazzite.methods()
-    );
+    assert!(bazzite.has("sendmeter-impl-13"), "{out} {:?}", bazzite.methods());
     assert!(kinds(&c, "needs-human").iter().all(|e| e.issue != Some(13)));
 }
 
@@ -708,11 +697,7 @@ fn a_start_held_by_a_slow_probes_offline_mark_goes_ahead_in_the_same_pass() {
     let (code, out) = run(&c, &with_bazzite(&f, &bazzite), &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_ne!(last_code(&c), "HOST_OFFLINE", "{out}");
-    assert!(
-        bazzite.called("run", "sendmeter-impl-13"),
-        "{out} {:?}",
-        bazzite.methods()
-    );
+    assert!(bazzite.has("sendmeter-impl-13"), "{out} {:?}", bazzite.methods());
     assert!(!drover::hosts::down(&c).contains_key("bazzite"));
     let p = drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 13);
     assert!(p.is_none(), "{p:?}");
@@ -775,11 +760,7 @@ fn a_host_down_for_hours_whose_handshake_takes_6_s_is_up_after_one_refresh_and_i
     let (code, out) = run(&at(9 * 3600 + 30), &up, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_ne!(last_code(&c), "HOST_OFFLINE", "{out} {:?}", f.calls.borrow());
-    assert!(
-        bazzite.called("run", "sendmeter-impl-13"),
-        "{out} {:?}",
-        bazzite.methods()
-    );
+    assert!(bazzite.has("sendmeter-impl-13"), "{out} {:?}", bazzite.methods());
     assert!(!drover::hosts::down(&c).contains_key("bazzite"));
 }
 
@@ -845,11 +826,7 @@ fn a_cloud_host_shed_lists_up_after_a_stale_cloud_stop_is_up_after_one_refresh_a
     assert_eq!(drover::cloud::state(&read(&c.state).unwrap(), "bazzite"), "running");
     let (code, out) = run(&later, &with_bazzite(&f, &bazzite), &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        bazzite.called("run", "sendmeter-impl-13"),
-        "{out} {:?}",
-        bazzite.methods()
-    );
+    assert!(bazzite.has("sendmeter-impl-13"), "{out} {:?}", bazzite.methods());
     assert!(!drover::hosts::down(&later).contains_key("bazzite"));
 }
 
