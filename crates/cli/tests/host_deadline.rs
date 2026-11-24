@@ -39,7 +39,7 @@ fn fake_ssh(dir: &Path, tail: &str) -> PathBuf {
     let p = dir.join("ssh");
     let pids = dir.join("pids");
     let body = format!(
-        "#!/bin/sh\ncase \"$*\" in *'-- true') exit 0;; esac\nsleep 600 &\necho $! >> '{}'\n{tail}\n",
+        "#!/bin/sh\ncase \"$*\" in *'-- true') exit 0;; *'-O check'*) exit 255;; esac\nsleep 600 &\necho $! >> '{}'\n{tail}\n",
         pids.display()
     );
     std::fs::write(&p, body).unwrap();
