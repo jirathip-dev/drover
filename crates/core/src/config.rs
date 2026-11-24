@@ -557,12 +557,8 @@ impl Hygiene {
 
     /// Doctor's line: `merge squash · comments strict · …`, `docs_trust` as its deny list.
     pub fn line(&self) -> String {
-        let deny = self.docs_trust.clone().unwrap_or_default();
-        let deny = if deny.is_empty() {
-            "off".into()
-        } else {
-            format!("deny {}", deny.join(","))
-        };
+        let deny = self.docs_trust.as_ref().filter(|d| !d.is_empty());
+        let deny = deny.map_or_else(|| "off".into(), |d| format!("deny {}", d.join(",")));
         let o = |v: &Option<String>| v.clone().unwrap_or_default();
         format!(
             "merge {} · comments {} · baseline {} · triage {} · docs_trust {deny} · issue_spec {} · docs {}",

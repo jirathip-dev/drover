@@ -61,7 +61,7 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
   carries `ETag: "<epoch>.<rev>"` and answers a matching `If-None-Match` with 304;
 - `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
   `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
-  one publisher thread rebuilds the screens open streams hold (every 25 ms, at once after a write, asleep while none
+  one publisher thread rebuilds the screens open streams hold (each second, at once after a write but at most once a second a screen, asleep while none
   is held) and hands each stream the diff; no server-wide stream cap, 16 a device;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
   each other runs the board's own op (a refusal is 409 with its line).
