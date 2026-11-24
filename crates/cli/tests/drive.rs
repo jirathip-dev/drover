@@ -1621,7 +1621,8 @@ fn a_pass_recorded_with_green_ci_merges_in_the_same_pass() {
         .reply("git -C", "")
         .reply("gh pr merge 100", "")
         .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
-        .reply("gh issue", "");
+        .reply("gh issue", "")
+        .reply("runners forget", "");
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["verdict", "merge", "clean"], "{out}");
     assert!(out.contains(&format!("removed {} ", rev.display())), "{out}");
