@@ -514,6 +514,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             Some(h) => ok(format!("{h} {}\n", w.now)),
             None => err(128, "fatal"),
         },
+        ["log", "-1", "--format=%s", _] => ok("work\n"),
         ["rev-list", "--objects", "--disk-usage", ..] | ["rev-list", "--count", ..] => ok("0\n"),
         ["reset", "--hard", b] => {
             if let Some(h) = m.origin.get(b.trim_start_matches("origin/")).cloned() {

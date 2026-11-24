@@ -35,8 +35,21 @@ fn git(a: &[&str]) -> String {
 
 const OUTBOX: &str = r#"{"args":["ask","sendmeter","12","--why","bazzite is slow"],"lane":"sendmeter-impl-12","ts":1}"#;
 
+const VERIFY: &str = "[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
+const VERIFY_R1: &str = "sendmeter-verify-12-r1";
+
 fn superseded(name: &str, src: Option<(&str, &str)>) -> (i32, String, String, FakeShed) {
-    let c = setup(name, "", true, 0);
+    let args = ["spawn", "sendmeter", "12", "impl", "--supersede"];
+    on_bazzite(name, ("impl", IMPL), src, &args)
+}
+
+fn on_bazzite(
+    name: &str,
+    (role, agent): (&str, &str),
+    src: Option<(&str, &str)>,
+    args: &[&str],
+) -> (i32, String, String, FakeShed) {
+    let c = setup(name, VERIFY, true, 0);
     let cfg = std::fs::read_to_string(&c.config).unwrap();
     let public = cfg.replacen(
         "integration = \"staging\"",
@@ -64,9 +77,14 @@ fn superseded(name: &str, src: Option<(&str, &str)>) -> (i32, String, String, Fa
     if let Some((p, s)) = src {
         std::fs::write(format!("{wt}/{p}"), s).unwrap();
     }
-    let sp = json!({"role": "impl", "agent": IMPL, "harness": "claude", "pane": IMPL, "workspace": "",
-                    "worktree": wt, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
+    let sp = json!({"role": role, "stage": role, "check": role != "impl", "agent": agent, "harness": "claude",
+                    "pane": agent, "workspace": "", "worktree": wt, "branch": "issue-12", "host": "bazzite",
+                    "machine": "bazzite"});
     ev(&c, NOW - 900, 12, "spawn", sp);
+    if role != "impl" {
+        let v = json!({"verdict": "FAIL", "sha": "a".repeat(40), "stage": role, "loop": role, "round": 1});
+        ev(&c, NOW - 800, 12, "verdict", v);
+    }
     let f = live_fake()
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
@@ -75,9 +93,9 @@ fn superseded(name: &str, src: Option<(&str, &str)>) -> (i32, String, String, Fa
         .reply(&format!("{SSH}{GIT} '-C'"), "")
         .reply("date -r", "20261120-120000\n");
     let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
-    bazzite.lane(IMPL, "idle", &wt);
+    bazzite.lane(agent, "idle", &wt);
     let r = RealGit(two(&f, &bazzite), wt);
-    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    let (code, out) = run(&c, &r, args);
     let wip = git(&[
         "--git-dir",
         &origin,
@@ -136,4 +154,40 @@ fn an_impl_lanes_untracked_file_with_a_home_path_is_still_refused_public_leak() 
     );
     assert_eq!(files, "", "nothing pushed");
     assert!(!bazzite.called("run", IMPL) && bazzite.has(IMPL));
+}
+
+#[test]
+fn a_new_verify_round_starts_though_the_last_verify_lanes_scratch_has_a_home_path() {
+    let args = ["spawn", "sendmeter", "12", "verify", "--supersede"];
+    let scratch = Some(("transcript.txt", "/home/me/e2e\n"));
+    let (code, out, files, bazzite) = on_bazzite("hosts-wip-verify", ("verify", VERIFY_R1), scratch, &args);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("PUBLIC_LEAK"), "{out}");
+    assert_eq!(files, "", "nothing pushed for the verify lane: {out}");
+    assert!(!bazzite.has(VERIFY_R1), "{:?}", bazzite.methods());
+}
+
+#[test]
+fn killing_a_verify_lane_with_home_path_scratch_pushes_nothing() {
+    let args = ["kill", VERIFY_R1, "--yes"];
+    let scratch = Some(("transcript.txt", "/home/me/e2e\n"));
+    let (code, out, files, bazzite) = on_bazzite("hosts-wip-kill-verify", ("verify", VERIFY_R1), scratch, &args);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("killed {VERIFY_R1}\n")), "{out}");
+    assert_eq!(files, "", "nothing pushed: {out}");
+    assert!(!bazzite.has(VERIFY_R1), "{:?}", bazzite.methods());
+}
+
+#[test]
+fn killing_an_impl_lane_with_a_home_path_is_still_refused_public_leak() {
+    let args = ["kill", IMPL, "--yes"];
+    let scratch = Some(("e2e-dir.txt", "/home/me/e2e\n"));
+    let (code, out, files, bazzite) = on_bazzite("hosts-wip-kill-impl", ("impl", IMPL), scratch, &args);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED PUBLIC_LEAK") && out.contains("e2e-dir.txt:1 has a home-path"),
+        "{out}"
+    );
+    assert_eq!(files, "", "nothing pushed");
+    assert!(bazzite.has(IMPL));
 }

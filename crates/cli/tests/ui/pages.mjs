@@ -1,10 +1,10 @@
-// #1316 in Playwright's WebKit at 390 px on a real serve: node pages.mjs <url> <cookie name=value>.
-// Times 12 switches to the Events tab (tap to fresh rows painted, the page's own tab spans), then scrolls it to its end:
+// #1316 in Playwright's WebKit at 390 px on a real serve: node pages.mjs <url> <cookie name=value> <paints>.
+// Times <paints> switches to the Events tab (tap to fresh rows painted, the page's own tab spans), then scrolls it to its end:
 // the next page appends with the scroll position unchanged, until every row is there once. Prints one JSON object.
 import { createRequire } from 'node:module';
 
 const pw = createRequire(import.meta.url)('playwright');
-const [url, cookie] = process.argv.slice(2);
+const [url, cookie, paints] = process.argv.slice(2);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const out = { errors: [], paints: [] };
 const browser = await pw[process.env.DROVER_ENGINE ?? 'webkit'].launch();
@@ -23,7 +23,7 @@ try {
   const rows = 'main section.tab:not([hidden]) .row[data-id^="e-"]';
   await page.goto(url + '#queue');
   await until(() => document.querySelector('main section.tab:not([hidden]) .row'), 'first paint');
-  for (let i = 0; i < 12; i++) {
+  for (let i = 1; i < Number(paints); i++) {
     await page.click('nav a[href="#events"]');
     await until(s => document.querySelectorAll(s).length >= 100, 'events rows', rows);
     await wait(300);
