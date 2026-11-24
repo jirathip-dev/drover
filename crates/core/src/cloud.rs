@@ -217,6 +217,11 @@ fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) {
     crate::events::append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d)).ok();
 }
 
+/// Shed lists host `name` up over a logged stop: `cloud-up`, so it is running again.
+pub fn listed_up(ctx: &Ctx, cfg: &Config, name: &str) -> Result<()> {
+    log(ctx, cfg, "cloud-up", name, json!({"via": "shed"}))
+}
+
 /// `status` printed nothing (`gone`) or not `running` (`stopped outside drover`): logs that `cloud-stop` and returns its why. A failing `status` is neither.
 pub fn outside(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<Option<&'static str>> {
     let why = match cmd(ctx, cfg, r, name, "status").as_deref().map(str::trim) {

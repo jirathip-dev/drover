@@ -3,6 +3,8 @@ mod common;
 mod doctor;
 #[path = "hosts/report.rs"]
 mod report;
+#[path = "hosts/upstream.rs"]
+mod upstream;
 #[path = "hosts/warm.rs"]
 mod warm;
 #[path = "hosts/wip.rs"]

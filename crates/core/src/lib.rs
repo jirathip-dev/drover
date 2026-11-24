@@ -68,6 +68,7 @@ pub mod shed;
 pub mod sim;
 pub mod slo;
 pub mod snapshot;
+pub mod soak;
 pub mod spawn;
 pub mod stall;
 pub mod starts;

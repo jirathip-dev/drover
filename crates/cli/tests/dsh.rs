@@ -151,7 +151,7 @@ fn dry_run_launches_pinned_dsh_tui_with_role_patch() {
     assert_eq!(code, 0, "{out}");
     let p: Value = serde_json::from_str(&out).unwrap();
     let cmd = |i: usize| -> (String, Value) {
-        let w = p["commands"][i].as_array().unwrap();
+        let w = p["commands"][i + 2].as_array().unwrap();
         assert_eq!(w[0], "shed", "{w:?}");
         let params = serde_json::from_str(w[2].as_str().unwrap()).unwrap();
         (w[1].as_str().unwrap().to_string(), params)
