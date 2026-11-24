@@ -497,5 +497,5 @@ fn a_merged_issue_whose_last_lane_was_never_cleaned_holds_no_slot() {
     let (c, _sh) = merged_lane_left("sg-merged-left-drive");
     let (out, _) = drive(&c, &fake(&[]));
     assert!(!out.contains("SERIAL_BUSY"), "{out}");
-    assert!(out.contains("sendmeter #2 start: spawned"), "{out}");
+    assert!(out.contains("sendmeter #2 start: \"sendmeter-impl-2\""), "{out}");
 }
