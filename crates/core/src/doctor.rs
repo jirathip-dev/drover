@@ -34,6 +34,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
         Ok(cfg) if config_only => config_rows(ctx, &cfg, r, &mut rows),
         Ok(cfg) => {
             checks(ctx, &cfg, r, &mut rows);
+            rows.extend(machine_rows(&cfg, r));
             rows.extend(just_rows(ctx, &cfg, r));
             rows.extend(crate::status::doctor(ctx, &cfg));
         }
@@ -113,14 +114,14 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
     rows.push(format!("✓ config — {}", ctx.config.display()));
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
     rows.extend(cfg.shed().map(|b| crate::shed::line(r, &b.wire)));
-    let missing = cfg
-        .shed()
-        .and_then(|_| crate::shed::unlisted(cfg, r).ok())
-        .unwrap_or_default();
-    rows.extend(missing.iter().map(|m| {
-        format!("✗ shed machine {m} — a [hosts] machine shed does not list → shed machine add {m} {m} (drover drive adds it)")
-    }));
     rows.extend(crate::hygiene::doctor(ctx, cfg, r));
+}
+
+fn machine_rows(cfg: &Config, r: &dyn Runner) -> Vec<String> {
+    let missing = cfg.shed().and_then(|_| crate::shed::unlisted(cfg, r).ok());
+    let row =
+        |m: String| format!("✗ shed machine {m} — a [hosts] machine shed does not list → shed machine add {m} {m}");
+    missing.unwrap_or_default().into_iter().map(row).collect()
 }
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
