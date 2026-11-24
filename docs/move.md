@@ -34,7 +34,7 @@ Copy the secret files with their mode (`scp -p` or `rsync -a`), never through ch
 ## Don't copy
 
 - Worktrees (each workspace root): their branches are on GitHub; new lanes make fresh ones.
-- Lock files, `check.at` / `drive.at` and `tick.log`: the new host writes its own.
+- Lock files, `check.at` / `drive-fast.at` and `tick.log`: the new host writes its own.
 
 ## New hostname
 

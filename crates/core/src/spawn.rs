@@ -1,4 +1,5 @@
 use crate::access;
+use crate::clone::refspec;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event, Json};
 use crate::gate::refused;
@@ -709,8 +710,27 @@ fn worktree_add(local: &str, p: &Plan, have: bool) -> Vec<String> {
     if have {
         argv(&["-C", local, "worktree", "add", &wt, &p.branch])
     } else {
-        argv(&["-C", local, "worktree", "add", "-b", &p.branch, &wt, &p.base])
+        argv(&[
+            "-C",
+            local,
+            "worktree",
+            "add",
+            "-b",
+            &p.branch,
+            "--no-track",
+            &wt,
+            &p.base,
+        ])
     }
+}
+
+fn track(local: &str, branch: &str) -> [Vec<String>; 2] {
+    let (remote, merge) = (format!("branch.{branch}.remote"), format!("branch.{branch}.merge"));
+    let head = format!("refs/heads/{branch}");
+    [
+        argv(&["-C", local, "config", &remote, "origin"]),
+        argv(&["-C", local, "config", &merge, &head]),
+    ]
 }
 
 fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str, bool), rt: Runtime) -> Value {
@@ -722,9 +742,18 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
     let home = |a| crate::hosts::rehome(a, home);
     let mut cmds = vec![sent(
         "git",
-        argv(&["-C", local, "fetch", "origin", p.base.trim_start_matches("origin/")]),
+        argv(&[
+            "-C",
+            local,
+            "fetch",
+            "origin",
+            &refspec(p.base.trim_start_matches("origin/")),
+        ]),
     )];
-    cmds.extend((!reopen).then(|| sent("git", worktree_add(local, p, false))));
+    if !reopen {
+        cmds.push(sent("git", worktree_add(local, p, false)));
+        cmds.extend(track(local, &p.branch).map(|a| sent("git", a)));
+    }
     if bt.0.acp.is_some() {
         let run = bt.acp_argv(&p.agent, labels, &p.worktree.to_string_lossy(), acp);
         cmds.push(sent("shed", run));
@@ -1032,7 +1061,7 @@ fn integration_view(
             update.then(|| format!(include_str!("../roles/brief-update.md"), int)),
         ));
     }
-    crate::clone::fetch(ctx, r, Path::new(local), &["origin", int])?;
+    crate::clone::fetch(ctx, r, Path::new(local), &["origin", &refspec(int)])?;
     let at_int = |name: &str| {
         crate::repo_read(name, |x| {
             ok(r, "git", &["-C", local, "show", &format!("origin/{int}:{x}")]).ok()
@@ -1071,6 +1100,9 @@ fn add_worktree(r: &dyn Runner, local: &str, p: &Plan, h: &crate::config::Hygien
     let verify = argv(&["-C", local, "rev-parse", "--verify", "--quiet", &p.branch]);
     let have = r.run("git", &verify)?.code == 0;
     ok(r, "git", &worktree_add(local, p, have))?;
+    for a in track(local, &p.branch) {
+        ok(r, "git", &a)?;
+    }
     let deny = h.docs_trust.clone().unwrap_or_default();
     if !deny.is_empty() {
         let pats = deny.iter().map(|d| format!("!/{}", d.trim_start_matches('/')));
@@ -1348,14 +1380,15 @@ fn start(
             ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
         }
         let from = p.base.trim_start_matches("origin/");
-        crate::clone::fetch(ctx, r, Path::new(&local), &["origin", from])?;
+        crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &refspec(from)])?;
         let body = iss.at("body").as_str().unwrap_or("");
         let recipe = match p.family {
             "design" => crate::design::Recipe::at(r, &local, &p.base, body),
             _ => crate::design::Recipe::of("", body),
         };
         crate::design::tools(ctx, cfg, r, (fleet, issue, &p.agent), &recipe)?;
-        let pushed = || crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &p.branch]).is_ok();
+        let spec = refspec(&p.branch);
+        let pushed = || crate::clone::fetch(ctx, r, Path::new(&local), &["origin", &spec]).is_ok();
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
         }

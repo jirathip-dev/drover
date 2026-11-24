@@ -386,6 +386,13 @@ pub fn window(state: &Path, h: &mut Host) {
     h.swap_median = m.get(m.len() / 2).copied();
 }
 
+/// Why a host with `disk` GB free on `/` takes no new lane: under `min_free_gb`.
+pub fn disk_low(disk: Option<f64>) -> Option<String> {
+    let min = crate::config::limits().min_free_gb;
+    disk.filter(|gb| *gb < min)
+        .map(|gb| format!("DISK_LOW {gb:.1} GB free < {min}: no new lanes"))
+}
+
 /// Free GB on `/` (`df -k`, when readable); a disk row is amber within 25 % of `min_free_gb`, red under it.
 pub fn free_gb(r: &dyn Runner) -> Option<f64> {
     df(r).map(|d| d.0)

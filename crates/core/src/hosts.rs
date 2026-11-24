@@ -273,7 +273,7 @@ impl Runner for On<'_> {
     }
 }
 
-/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed at the limit its `run_for` names, else after `ssh_call_secs`; a second one killed takes its host offline for the rest of the pass, and `recheck` reaches an offline host once more; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step, the child it waits on and `n`, the nanosecond of its last step or call (local calls too): the progress `slo-tick` watches.
+/// A check, clean or drive pass's runner. Each remote host is probed once (`probe::reach`); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed at the limit its `run_for` names, else after `ssh_call_secs`; a second one killed takes its host offline for the rest of the pass, and `recheck` reaches an offline host once more; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step, the child it waits on and `n`, the nanosecond of its last step or call (local calls too): the progress `slo-tick` watches.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
     probe: bool,
@@ -599,11 +599,15 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         }
         let on = On::new(r, h.machine.as_deref());
         let s = all.entry(name.clone()).or_default();
-        let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
+        let listed = seen.0.iter().find(|l| l.0 == h.machine).and_then(|l| l.1.clone().ok());
+        let logged_stop = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
+        let stopped = logged_stop && listed.is_none();
+        if let Some(Err(e)) = (logged_stop && !stopped).then(|| crate::cloud::listed_up(ctx, cfg, name)) {
+            crate::stderr!("cloud {name}: {e:#}");
+        }
         if let Some(Err(e)) = (h.cloud.is_some() && !stopped).then(|| crate::cloud::moved(ctx, cfg, r, name, false)) {
             crate::stderr!("cloud {name}: {e:#}");
         }
-        let listed = seen.0.iter().find(|l| l.0 == h.machine).and_then(|l| l.1.clone().ok());
         let a = listed
             .filter(|_| !stopped)
             .map(|all| all.into_iter().filter(|s| s.running() && s.lane()).collect::<Vec<_>>());
@@ -1727,7 +1731,7 @@ pub fn shown(enabled: bool, s: &Seen, lanes: usize, now: u64) -> (&'static str, 
     match (enabled, lanes) {
         (false, 0) => ("m", "off · not used for lanes".into()),
         (false, n) => ("m", format!("off · draining {n} lane{}", if n == 1 { "" } else { "s" })),
-        _ => match (sick('✗'), sick('!')) {
+        _ => match (sick('✗'), host::disk_low(s.disk).as_deref().or(sick('!'))) {
             (Some(w), _) => ("r", format!("unhealthy · {w}")),
             (_, Some(w)) => ("a", format!("up · {w}")),
             _ => ("g", "up".into()),
@@ -1752,7 +1756,9 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         let there = h.machine.as_deref().filter(|_| view.is_some());
         let failing = there.and_then(|m| view.as_ref()?.failing(Some(m)));
         let mut words = shown(h.enabled, &s, lanes.len(), ctx.now).1;
-        words.extend(failing.map(|w| format!(" · report: {w}")));
+        words.extend(failing.map(|w| format!(" · report: {}", w.lines().next().unwrap_or_default())));
+        let probed = h.machine.as_deref().filter(|_| refresh && !s.up);
+        words.extend(probed.map(|m| format!(" · {}", probe::why_down(ctx, r, m))));
         let t = tags(h, Some(&s)).join(",");
         let built = there.and_then(|m| crate::release::sha_of(view.as_ref()?.build(Some(m))?));
         let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));

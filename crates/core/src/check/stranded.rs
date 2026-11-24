@@ -34,7 +34,8 @@ pub(super) fn alert(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Even
             Event::new(ctx.now, &fleet, Some(n), "blocker-stranded", d).push(),
         )?;
     }
-    drive_stalled(ctx, cfg, out, events)
+    drive_stalled(ctx, cfg, out, events)?;
+    spawn_stuck(ctx, cfg, out, events)
 }
 
 fn drive_stalled(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Result<()> {
@@ -76,4 +77,43 @@ fn drive_stalled(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event])
 
 fn step(e: &Event) -> &str {
     e.str("step").unwrap_or("?")
+}
+
+fn spawn_stuck(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Result<()> {
+    let passes = crate::events::since(&ctx.state, &["drive-pass"], ctx.now.saturating_sub(2 * 86_400))?;
+    let tried = |e: &Event| {
+        let acts = e.data.get("actions").and_then(serde_json::Value::as_array);
+        let start =
+            |a: &serde_json::Value| a["step"] == "start" && (a["outcome"] == "pending" || a["code"] == "SPAWN_PENDING");
+        acts.is_some_and(|a| a.iter().any(start))
+    };
+    for name in cfg.fleet.iter().filter(|f| !f.1.paused).map(|f| f.0) {
+        let ns = crate::queue::startable(events, name);
+        let last = events
+            .iter()
+            .rfind(|e| e.kind == "spawn" && e.fleet == *name)
+            .map_or(0, |e| e.ts);
+        let since = passes
+            .iter()
+            .find(|e| e.fleet == *name && e.ts > last && tried(e))
+            .map(|e| e.ts);
+        let Some(since) = since.filter(|s| !ns.is_empty() && ctx.now >= s + 3600) else {
+            continue;
+        };
+        let ns: Vec<String> = ns.iter().map(|n| format!("#{n}")).collect();
+        let why = format!(
+            "{name}: no drive spawn succeeded for {} with {} startable",
+            age(ctx.now - since),
+            ns.join(", ")
+        );
+        let d = json!({"key": since, "reason": why});
+        fire_event(
+            ctx,
+            cfg,
+            out,
+            events,
+            Event::new(ctx.now, name, None, "spawn-stuck", d).push(),
+        )?;
+    }
+    Ok(())
 }
