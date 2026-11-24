@@ -301,6 +301,25 @@ const PROBES: [&[&str]; 10] = [
     &["grep", "MemTotal", "/proc/meminfo"],
 ];
 
+fn level(s: &str) -> Option<String> {
+    match s.trim() {
+        "1" | "normal" => Some("normal"),
+        "2" | "warn" => Some("warn"),
+        "4" | "critical" => Some("critical"),
+        _ => None,
+    }
+    .map(String::from)
+}
+
+/// This host's own `Sample` for its frame, with no process started: `load` per CPU and its memory pressure.
+pub fn own() -> Option<crate::link::frame::Sample> {
+    Some(crate::link::frame::Sample {
+        load_per_cpu: load()?.1,
+        pressure: drover_sys::pressure_level().and_then(|l| level(&l.to_string())),
+        at: crate::clock::now(),
+    })
+}
+
 /// Sample the host in one `sh -c` (no sleep; `pace` turns the swap-out count into a rate).
 pub fn sample(r: &dyn Runner) -> Host {
     let lines: Vec<String> = (PROBES.iter())
@@ -319,15 +338,7 @@ pub fn sample(r: &dyn Runner) -> Host {
     let mut outs = (ran.into_iter()).map(|(o, code)| o.filter(|_| code == Some(0)));
     let mut next = || outs.next().flatten();
     let (pressure, vm, load, ncpu, ps, size) = (next(), next(), next(), next(), next(), next());
-    let pressure = pressure.and_then(|s| {
-        match s.trim() {
-            "1" | "normal" => Some("normal"),
-            "2" | "warn" => Some("warn"),
-            "4" | "critical" => Some("critical"),
-            _ => None,
-        }
-        .map(String::from)
-    });
+    let pressure = pressure.as_deref().and_then(level);
     let vm = vm.unwrap_or_default();
     let mut linux = || next().filter(|_| vm.is_empty()).unwrap_or_default();
     let (cat, nproc, avail, total) = (linux(), linux(), linux(), linux());
@@ -384,6 +395,17 @@ pub fn window(state: &Path, h: &mut Host) {
     let mut m = w.to_vec();
     m.sort_by(f64::total_cmp);
     h.swap_median = m.get(m.len() / 2).copied();
+}
+
+/// This host's load now, with no process started: the one-minute average, and that per CPU.
+pub fn load() -> Option<(f64, f64)> {
+    let cpus = u32::try_from(std::thread::available_parallelism().ok()?.get()).ok()?;
+    drover_sys::loadavg().map(|l| (l, l / f64::from(cpus)))
+}
+
+/// This host is over `load_per_cpu` now.
+pub fn loaded() -> bool {
+    load().is_some_and(|l| l.1 > crate::config::limits().load_per_cpu)
 }
 
 /// Why a host with `disk` GB free on `/` takes no new lane: under `min_free_gb`.

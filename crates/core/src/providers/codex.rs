@@ -29,6 +29,9 @@ pub fn config(hook: &str) -> serde_json::Value {
 }
 
 impl Provider for Codex {
+    fn sessions(&self) -> Option<&'static str> {
+        Some(".codex/sessions")
+    }
     fn surface(&self) -> Surface {
         Surface::Acp
     }

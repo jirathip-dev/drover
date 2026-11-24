@@ -8,6 +8,18 @@ use crate::{gh, Ctx};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+/// `drover waiting`'s arguments.
+#[derive(clap::Args)]
+pub struct Args {
+    pub fleet: Option<String>,
+    #[arg(help = "Machine-readable output")]
+    #[arg(long)]
+    pub json: bool,
+    #[arg(help = "Each issue's flow state, condition and table row under its line")]
+    #[arg(long)]
+    pub flow: bool,
+}
+
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Waiting {
@@ -734,7 +746,7 @@ pub fn scan_where(
             out.push((s, w));
             continue;
         }
-        if busy(&lane) {
+        if busy(&lane) && !sp.is_some_and(|sp| crate::lanes::closed(mine, sp)) {
             let who = if s.check_lane() == Some(&lane) {
                 "reviewer"
             } else {

@@ -78,7 +78,31 @@ fn pr_diff(ctx: &Ctx, r: &dyn Runner, f: &Fleet, branch: &str, head: &str) -> Re
     }
 }
 
-pub fn verdict(
+/// The refusals of a verdict file itself: `drover verdict` logs each as a passive `verdict-refused`.
+pub const VERDICT_REFUSALS: [&str; 5] = ["NO_PROOF", "NO_REPRO", "NO_BASELINE", "PAPERWORK", "TESTS_CHANGED"];
+
+/// `drover verdict`: the verdict recorded, or its refusal; a refusal of the file itself also logs `verdict-refused`.
+pub fn record(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, issue): (&str, u64),
+    pass: bool,
+    sha: &str,
+    file: &str,
+) -> Result<()> {
+    let res = verdict(ctx, cfg, r, out, (fleet, issue), pass, sha, file);
+    let refused = res.as_ref().err().and_then(|e| e.downcast_ref::<Refusal>());
+    if let Some(x) = refused.filter(|x| VERDICT_REFUSALS.contains(&x.code)) {
+        let d = json!({"code": x.code, "head": sha.to_ascii_lowercase(), "why": x.msg});
+        let e = Event::new(ctx.now, fleet, Some(issue), "verdict-refused", d).passive();
+        crate::events::append(&ctx.state, &e)?;
+    }
+    res
+}
+
+fn verdict(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,

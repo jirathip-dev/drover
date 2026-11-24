@@ -133,6 +133,7 @@ flowchart TD
     other -.- k_proxy_retry_secs(["proxy_retry_secs = 300"])
     other -.- k_service_call_secs(["service_call_secs = 2"])
     other -.- k_disk_probe_secs(["disk_probe_secs = 2"])
+    other -.- k_disk_hung_secs(["disk_hung_secs = 6"])
     other -.- k_disk_sick_secs(["disk_sick_secs = 300"])
     other -.- k_disk_trust_secs(["disk_trust_secs = 60"])
     other -.- k_lane_read_secs(["lane_read_secs = 5"])

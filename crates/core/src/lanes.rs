@@ -196,6 +196,13 @@ fn ended(events: &[Event], sessions: &Sessions, sp: &Event) -> Option<Exit> {
     }
 }
 
+/// Drover closed or killed the lane spawn `sp` started.
+pub fn closed(events: &[Event], sp: &Event) -> bool {
+    let shut = |e: &Event| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
+    let killed = |e: &Event| e.kind == "lane-killed" && e.str("agent") == sp.str("agent") && e.ts >= sp.ts;
+    (crate::events::of_kind(events, &["lane-closed", "lane-killed"]).into_iter()).any(|e| shut(e) || killed(e))
+}
+
 /// The issue's active lane's health: one rule set for stall, never-started, dead and closed.
 pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s: &IssueState) -> Health {
     let Some((_, lane)) = s.active_lane() else {
@@ -204,9 +211,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
     let Some(sp) = last_spawn(events, lane) else {
         return Health::Unknown;
     };
-    let shut = |e: &Event| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
-    let killed = |e: &Event| e.kind == "lane-killed" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-    if (crate::events::of_kind(events, &["lane-closed", "lane-killed"]).into_iter()).any(|e| shut(e) || killed(e)) {
+    if closed(events, sp) {
         return Health::Closed;
     }
     let live = match sessions.seen(lane, sp.str("machine")) {
