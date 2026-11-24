@@ -1,5 +1,6 @@
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
 use crate::events::{age, append, emit, fold, last_spawn, open_asks, working, Event, IssueState, Json};
+use crate::flow::facts;
 use crate::gate::refused;
 use crate::host::{self, Host};
 use crate::providers;
@@ -1673,16 +1674,15 @@ pub fn drain(cfg: &Config, events: &[Event], name: &str, now: u64) -> Option<Str
 
 /// A remote host unreachable 15 min straight: its open lanes restart on the main host from their pushed branch.
 pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    if cfg.hosts.values().all(|h| h.machine.is_none()) {
+        return Ok(());
+    }
     let view = crate::link::view::View::load(ctx, cfg)?;
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.machine.is_some()) {
         let events = working(&ctx.state)?;
         let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
-        let (row, main) = (view.link(name), view.at(None));
-        let fact = crate::flow::facts::host(row, main, &cfg.limits, ctx.now).0;
-        if stopped
-            || fact != crate::flow::facts::Host::Offline
-            || !crate::flow::facts::silent(row, &cfg.limits, ctx.now)
-        {
+        let offline = facts::host(view.link(name), view.at(None), &cfg.limits, ctx.now).0 == facts::Host::Offline;
+        if stopped || !offline || !facts::silent(view.link(name), &cfg.limits, ctx.now) {
             continue;
         }
         let mut moved = vec![];
