@@ -15,6 +15,19 @@ pub(super) fn in_flight(ctx: &Ctx, out: &mut dyn Write, (fleet, n): (&str, u64),
     )?)
 }
 
+pub(super) fn coalesced(ctx: &Ctx, r: &dyn Runner, (fleet, n): (&str, u64), why: &str) -> bool {
+    let Some(l) = super::held(ctx, &format!("kick-{fleet}-{n}.lock")) else {
+        return false;
+    };
+    if super::gone(r, &l, ctx.now) {
+        return false;
+    }
+    let ttl = crate::config::limits().spawn_pending_max_secs;
+    let again = format!("kick-{fleet}-{n}.again");
+    drop(crate::db::take(&ctx.state, &again, ctx.now, ttl, why, &|_| true));
+    true
+}
+
 pub(super) fn overdue(ctx: &Ctx, cfg: &Config, r: &dyn Runner, l: &crate::db::Lease, remove: bool) -> bool {
     let (age, max) = (ctx.now.saturating_sub(l.at), super::job::limit(ctx, cfg, l));
     let id = l.key.strip_prefix("kick-").and_then(|k| k.strip_suffix(".lock"));

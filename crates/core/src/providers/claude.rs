@@ -62,6 +62,9 @@ pub fn root(ctx: &Ctx) -> PathBuf {
 }
 
 impl Provider for Claude {
+    fn sessions(&self) -> Option<&'static str> {
+        Some(".claude/projects")
+    }
     fn vendor(&self) -> Option<&'static str> {
         Some("anthropic")
     }
