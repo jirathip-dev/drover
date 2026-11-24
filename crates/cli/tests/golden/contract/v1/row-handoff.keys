@@ -1,0 +1,26 @@
+[].block: object
+[].fleet: string
+[].handoff.choices: array
+[].handoff.error: null
+[].handoff.folded: boolean
+[].handoff.from.agent: string
+[].handoff.from.repo: string
+[].handoff.from.thread: string
+[].handoff.id: number
+[].handoff.kind = "handoff"
+[].handoff.state: string
+[].handoff.summary: string
+[].handoff.text: string
+[].handoff.title: string
+[].handoff.to: string
+[].issue: null
+[].key: string
+[].kind = "handoff"
+[].open: boolean
+[].prompt: string
+[].push: null
+[].seq: number
+[].text: string
+[].to.id: string
+[].to.k = "thread"
+[].ts: number

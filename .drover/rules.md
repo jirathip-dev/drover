@@ -10,7 +10,7 @@
 - don't add a direct dependency outside docs/serve/alerts.md's allow-list (enforced by: CI deps gate)
 - don't make core depend on server or cli, server on cli, or spawn a process outside core's runner.rs (enforced by: CI layers, tests/runner_limits.rs)
 - don't let ts-rs into the release build (enforced by: CI release has no ts-rs)
-- don't let assets/types/ drift from `just types`, or hand-copy a generated type (enforced by: CI TS types, `just types-lint`)
+- don't let assets/types/ drift from `just types`, hand-copy a generated type, or remove or retype a key of crates/cli/tests/golden/contract/v1/: a breaking change is /api/v2 (enforced by: CI TS types, `just types-lint`, CI arch-check `append_only`, crates/cli/tests/contract_v1.rs)
 - don't build HTML in crates/server outside the page shell and the lifeboat (enforced by: CI `just html-lint`)
 - don't hard-code a Duration in crates/core/src: make it a [limits] key (enforced by: CI timing check, scripts/timing-check.sh)
 - don't let docs/workflow.md, web/dist or the brief goldens drift from `just gen` (enforced by: CI arch-check, `generated`)
