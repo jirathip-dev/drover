@@ -1157,7 +1157,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
     };
     for e in events {
         match &e.kind {
-            E::Turn { prompt } => out.push(Block::Prompt { text: prompt.clone() }),
+            E::Turn { prompt, .. } => out.push(Block::Prompt { text: prompt.clone() }),
             E::Text { text } => match out.last_mut() {
                 Some(Block::Reply { markdown }) => markdown.push_str(text),
                 _ => out.push(Block::Reply { markdown: text.clone() }),
@@ -1170,6 +1170,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
                 title,
                 status,
                 kind,
+                ..
             } => {
                 let was = out
                     .iter_mut()
@@ -1201,7 +1202,7 @@ pub(super) fn acp_numbered(events: &[crate::shed::proto::Logged]) -> Vec<(u64, B
                     None => out.push(p),
                 }
             }
-            E::ApprovalRequest { tool, options } => out.push(Block::Approval {
+            E::ApprovalRequest { tool, options, .. } => out.push(Block::Approval {
                 tool: tool.clone(),
                 options: options
                     .iter()
