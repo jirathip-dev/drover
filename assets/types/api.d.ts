@@ -609,7 +609,11 @@ stage: string, check?: string | null, build?: string | null, stage_rounds: { [ke
 /**
  * `FAIL (form-only)` verdicts that did not count toward the rounds.
  */
-form: number, };
+form: number, 
+/**
+ * Worktrees its lanes were spawned in (an agent: a spawn naming none) and not cleaned since.
+ */
+worktrees: Array<string>, };
 
 export type Waiting = { fleet: string, issue: number, 
 /**
