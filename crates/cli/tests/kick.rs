@@ -15,9 +15,7 @@ fn fan(name: &str) -> (drover::Ctx, FakeShed) {
 }
 
 fn started(sh: &FakeShed) -> Vec<String> {
-    let runs = sh.all("run").into_iter();
-    runs.map(|p| p["name"].as_str().unwrap_or_default().to_string())
-        .collect()
+    sh.lock().terms.keys().cloned().collect()
 }
 
 fn fake(live: usize) -> Fake {

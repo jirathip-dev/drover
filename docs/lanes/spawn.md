@@ -105,6 +105,5 @@ issue's lane, an orchestrator or any other agent in the folder stays `keep …: 
 
 `--supersede` kills the old agent and logs it. `drover adopt` records a lane by hand.
 
-Harnesses: `claude` runs Claude Code with the synced profile folder, `hermes` runs a Hermes
-profile with its hook accepted, and `dsh` is a reviewer-only beta ([dsh.md](../dsh.md)).
+Harness: `claude` runs Claude Code as an ACP session with the synced profile folder (#1726: the only one).
 `drover set <fleet> <role> --harness <name>` switches one role.

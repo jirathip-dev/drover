@@ -4,7 +4,7 @@ use drover::events::{append, Event};
 use serde_json::json;
 use std::path::Path;
 
-const DESIGN: &str = "\n[fleet.api.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
+const DESIGN: &str = "\n[fleet.api.role.design]\nharness = \"claude\"\nprofile = \"fleet-design\"\n";
 
 fn fake() -> Fake {
     Fake::default()

@@ -4,7 +4,7 @@ use drover::events::read;
 
 const NOW: u64 = 1_000_000;
 const LIST: &str = "gh issue list -R jirathip-dev/sendmeter --state";
-const MONTHLY: &str = "\n[fleet.quiet]\nrepo = \"acme/quiet\"\nlocal = \"/tmp/does-not-matter/quiet\"\nintegration = \"staging\"\n[fleet.quiet.role.impl]\nharness = \"hermes\"\n";
+const MONTHLY: &str = "\n[fleet.quiet]\nrepo = \"acme/quiet\"\nlocal = \"/tmp/does-not-matter/quiet\"\nintegration = \"staging\"\n[fleet.quiet.role.impl]\nharness = \"claude\"\n";
 const RUSTSEC: &str = r#"{"type":"diagnostic","fields":{"severity":"error","code":"vulnerability","advisory":{"id":"RUSTSEC-2024-0001","package":"smallvec"},"notes":["ID: RUSTSEC-2024-0001","Solution: Upgrade to >=1.13.2"]}}"#;
 const PNPM: &str = r#"{"advisories":{"1096366":{"module_name":"semver","patched_versions":">=7.5.2","github_advisory_id":"GHSA-c2qf-rxjj-qqgw"}}}"#;
 
@@ -36,7 +36,7 @@ fn deps_files_queues_and_spawns_a_deps_lane_and_never_a_second_while_one_is_open
         drover::queue::replay(&events, "sendmeter").first().map(|i| i.issue),
         Some(80)
     );
-    assert_eq!(sh.last("run")["name"], "sendmeter-deps-80", "{:?}", sh.methods());
+    assert_eq!(sh.last("send")["name"], "sendmeter-deps-80", "{:?}", sh.methods());
     let spawn = events.iter().find(|e| e.is("spawn", "sendmeter", 80)).expect("a lane");
     assert_eq!(
         (spawn.str("role"), spawn.str("profile"), spawn.str("stage")),

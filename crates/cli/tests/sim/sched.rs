@@ -95,7 +95,7 @@ pub struct Sim {
 
 fn cost(prog: &str, args: &[String]) -> u64 {
     match (prog, args.first().map(String::as_str), args.get(1).map(String::as_str)) {
-        ("shed", Some("send"), Some(p)) if p.contains("\"text\":\"exec ") => 3,
+        ("shed", Some("send"), Some(_)) if args.len() == 3 => 3,
         ("gh" | "ssh", ..) => 1,
         _ => 0,
     }
@@ -460,8 +460,8 @@ impl Runner for SimRunner {
         let wire = drover::shed::Wire::Connect;
         Some(drover::shed::Shed {
             wire,
-            acp: None,
-            policy: "ask".into(),
+            acp: Some("claude-acp".into()),
+            policy: "allow".into(),
         })
     }
     fn sleep(&self, secs: u64) {

@@ -69,7 +69,7 @@ fn shed() -> &'static FakeShed {
 }
 
 fn fixture() -> (drover::Ctx, Slow) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let cfg = format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
     let c = ctx(&tmpdir("perf"), &cfg);
     let st = c.state.parent().unwrap();
@@ -1242,7 +1242,7 @@ fn fleets5() -> (drover::Ctx, Boats) {
 }
 
 fn boats_in(queued: bool, fleets: &str, lanes: &[(String, u64)]) -> (drover::Ctx, Boats) {
-    let base = (CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""))
+    let base = (CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\""))
         .replace("max_parallel_spawns = 0", "max_parallel_spawns = 6")
         .replace(
             "integration = \"staging\"",

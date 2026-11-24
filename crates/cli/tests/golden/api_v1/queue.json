@@ -38,22 +38,6 @@
                 "xhigh"
               ],
               "name": "claude"
-            },
-            {
-              "efforts": [
-                "none",
-                "low",
-                "medium",
-                "high",
-                "xhigh"
-              ],
-              "name": "hermes"
-            },
-            {
-              "efforts": [
-                "none"
-              ],
-              "name": "dsh"
             }
           ],
           "integration": "staging",
@@ -92,7 +76,7 @@
                 },
                 "role": "impl",
                 "rounds": null,
-                "run": "hermes · opus · effort none"
+                "run": "claude · opus · effort none"
               },
               {
                 "here": 1,
@@ -106,7 +90,7 @@
                 },
                 "role": "rev",
                 "rounds": 3,
-                "run": "hermes · default · effort none"
+                "run": "claude · default · effort none"
               },
               {
                 "here": 0,
@@ -140,10 +124,10 @@
                 "high",
                 "xhigh"
               ],
-              "harness": "hermes",
+              "harness": "claude",
               "mcp": [],
               "model": "opus",
-              "model_default": "profile",
+              "model_default": "claude",
               "name": "impl",
               "profile": "fleet-impl"
             },
@@ -158,10 +142,10 @@
                 "high",
                 "xhigh"
               ],
-              "harness": "hermes",
+              "harness": "claude",
               "mcp": [],
               "model": "opus",
-              "model_default": "profile",
+              "model_default": "claude",
               "name": "orchestrator",
               "profile": "lane-orchestrator"
             },
@@ -176,10 +160,10 @@
                 "high",
                 "xhigh"
               ],
-              "harness": "hermes",
+              "harness": "claude",
               "mcp": [],
               "model": null,
-              "model_default": "profile",
+              "model_default": "claude",
               "name": "rev",
               "profile": "fleet-rev"
             }
@@ -195,7 +179,8 @@
           "line": "drive · no pass yet",
           "meta": [
             "stall check: #9 in 28m",
-            "2 lanes"
+            "2 lanes",
+            "in flight 2/8"
           ],
           "pass": false,
           "tone": "a"
@@ -351,7 +336,7 @@
       }
     ],
     "live": true,
-    "mtime": "1794801054570310696",
+    "mtime": "1795519971678530620",
     "now": 1000000,
     "rw": true
   },

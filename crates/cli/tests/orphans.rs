@@ -69,7 +69,7 @@ fn review(c: &drover::Ctx, verdict: &str) -> PathBuf {
 fn spawn_logs_spawn_started_before_the_harness_starts() {
     let sh = FakeShed::new();
     let cfg = CONFIG.replace(
-        "harness  =  \"hermes\"    # toggled in tests",
+        "harness  =  \"claude\"    # toggled in tests",
         "harness = \"claude\"\naccount = \"C\"",
     );
     let cfg = format!(

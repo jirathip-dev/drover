@@ -5,7 +5,7 @@ use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 const ALPHA: &str = "[fleet.alpha]\nrepo = \"jirathip-dev/alpha\"\nlocal = \"/tmp/does-not-matter/alpha\"\n\
-    integration = \"staging\"\n\n[fleet.alpha.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n[limits]";
+    integration = \"staging\"\n\n[fleet.alpha.role.impl]\nharness = \"claude\"\nprofile = \"fleet-impl\"\n\n[limits]";
 
 fn lane(c: &drover::Ctx, fleet: &str, n: u64) {
     let d = json!({"role": "impl", "agent": format!("{fleet}-impl-{n}"), "branch": format!("issue-{n}")});

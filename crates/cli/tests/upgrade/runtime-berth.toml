@@ -1,8 +1,0 @@
-# Before berth became shed: `kind = "berth"` is deprecated, still read.
-[runtime]
-kind = "berth"
-
-[fleet.app]
-repo = "o/app"
-local = "/tmp/app"
-integration = "staging"

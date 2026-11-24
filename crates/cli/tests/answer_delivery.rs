@@ -215,15 +215,14 @@ fn a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane() {
         (Some("old-36"), Some(LANE))
     );
     assert!(sh.called("kill", "old-36"), "{:?}", sh.methods());
-    assert_eq!(sh.last("run")["name"], LANE);
+    assert!(sh.has(LANE), "{:?}", sh.methods());
     let ran = sh.lock().seen.len();
     lane_ask(&c);
     let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: yes -> sendmeter-impl-36\n"));
     let after: Vec<_> = sh.lock().seen[ran..].to_vec();
     let sent = (after.iter()).any(|(m, p)| m == "send" && p["name"] == LANE && p["text"] == "DECISION q1: yes");
-    let enter = (after.iter()).any(|(m, p)| m == "keys" && p["name"] == LANE && p["keys"] == json!(["Enter"]));
-    assert!(sent && enter, "{after:?}");
+    assert!(sent, "{after:?}");
     assert_eq!(kinds(&c, "answer-delivered").len(), 1);
 }
 

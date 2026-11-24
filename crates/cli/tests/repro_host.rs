@@ -17,7 +17,7 @@ fn setup() -> drover::Ctx {
 }
 
 fn hosts_with(name: &str, needs: &str, mini: [&str; 2], bazzite: [&str; 2]) -> drover::Ctx {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let base = base.replace(
         "integration = \"staging\"",
         &format!("integration = \"staging\"\n{needs}"),

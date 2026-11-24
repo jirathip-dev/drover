@@ -226,7 +226,7 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
             .any(|l| l.contains(" worktree add -b rev-3-r2 ") && l.ends_with(" origin/issue-3")),
         "{calls:?}"
     );
-    assert_eq!(sh.last("run")["name"], "sendmeter-rev-3-r2", "{:?}", sh.methods());
+    assert!(sh.has("sendmeter-rev-3-r2"), "{:?}", sh.methods());
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
     assert_eq!(st.state, "review(2)");
     assert!(!st.reviewed(&h), "B has no verdict yet");

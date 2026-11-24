@@ -25,7 +25,7 @@ fn setup(name: &str) -> (drover::Ctx, std::path::PathBuf) {
     let d = tmpdir(name);
     let own = d.join("conductor.md");
     std::fs::write(&own, OWN).unwrap();
-    let cfg = CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"")
+    let cfg = CONFIG.replace("harness  =  \"claude\"    # toggled in tests", "harness = \"claude\"")
         + &format!(
             "\n[orchestrator]\nname = \"Conductor\"\ninstructions = \"{}\"\n\n[orchestrator.ops]\nname = \"Ops\"\nfleets = [\"sendmeter\"]\n",
             own.display()
