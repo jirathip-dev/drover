@@ -492,6 +492,12 @@ pub struct Fleet {
     /// `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
     #[serde(default)]
     pub heavy: BTreeMap<String, Vec<String>>,
+    /// `[fleet.<n>.remote.<kind>]`: a heavy kind's commands run on `runners` build machines of a tag first.
+    #[serde(default)]
+    pub remote: BTreeMap<String, crate::heavy::Route>,
+    /// Command patterns never routed, beside `heavy::NEVER_ROUTED`.
+    #[serde(default)]
+    pub remote_deny: Vec<String>,
     /// Globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
@@ -1312,7 +1318,22 @@ impl Config {
         for name in c.fleet.keys() {
             c.same_provider(name, text)?;
         }
-        Ok(c)
+        c.routes_ok().map(|()| c)
+    }
+
+    fn routes_ok(&self) -> Result<()> {
+        for (name, f) in &self.fleet {
+            let never = f.never_routed();
+            for kind in f.remote.keys() {
+                let Some(ps) = f.heavy.get(kind) else {
+                    bail!("fleet.{name}.remote.{kind}: no [fleet.{name}.heavy] kind \"{kind}\" to route");
+                };
+                if let Some((p, n)) = ps.iter().find_map(|p| Some((p, crate::heavy::never_hit(p, &never)?))) {
+                    bail!("fleet.{name}.remote.{kind}: pattern \"{p}\" hits never-routed \"{n}\"");
+                }
+            }
+        }
+        Ok(())
     }
 
     fn same_provider(&self, name: &str, text: &str) -> Result<()> {
@@ -1466,6 +1487,12 @@ impl Fleet {
             .unwrap_or_else(|| limits.deny_commands.clone());
         d.extend(self.deny_commands_add.iter().cloned());
         d
+    }
+    /// Commands its lanes never send to a build machine: `heavy::NEVER_ROUTED` plus `remote_deny`.
+    pub fn never_routed(&self) -> Vec<String> {
+        let mut n: Vec<String> = crate::heavy::NEVER_ROUTED.iter().map(|s| (*s).to_string()).collect();
+        n.extend(self.remote_deny.iter().cloned());
+        n
     }
     /// The `[land]` table when this fleet lands fast-first.
     pub fn fast_first(&self) -> Option<&Land> {

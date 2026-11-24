@@ -18,6 +18,9 @@ pub struct Proc {
     pub depth: usize,
     pub cmd: String,
     pub kind: Option<String>,
+    /// A `runners run` command: the build machine tag it went to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
     pub cpu: f64,
     pub secs: u64,
     pub background: bool,
@@ -71,11 +74,15 @@ fn ps(r: &dyn Runner, cfg: &Config) -> Vec<Proc> {
         let (pri, nice): (i32, i32) = (w.get(4)?.parse().ok()?, w.get(5)?.parse().ok()?);
         let (prog, rest) = cmd.split_once(' ').unwrap_or((&cmd, ""));
         let bare = format!("{} {rest}", prog.rsplit('/').next().unwrap_or(prog));
+        let tag = (bare.starts_with("runners run "))
+            .then(|| rest.split_once("--tag "))
+            .flatten();
         Some(Proc {
             pid: w.first()?.to_string(),
             ppid: w.get(1)?.to_string(),
             depth: 0,
             kind: heavy.kind(bare.trim_end()).map(String::from),
+            remote: tag.and_then(|(_, t)| t.split_whitespace().next()).map(String::from),
             cpu: w.get(2)?.parse().ok()?,
             secs: host::etime_secs(w.get(3)?),
             background: pri <= 4 || nice >= 10,
@@ -212,6 +219,7 @@ pub fn print(t: &Top, out: &mut dyn Write) -> Result<()> {
         writeln!(out, "{} ({})", l.agent, l.lane)?;
         for p in &l.procs {
             let mut kind = p.kind.as_ref().map_or(String::new(), |k| format!(" [{k}]"));
+            kind.extend(p.remote.as_ref().map(|t| format!(" [remote {t}]")));
             if l.build && !p.background {
                 kind.push_str(" [normal priority]");
             }

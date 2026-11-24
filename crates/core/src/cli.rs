@@ -655,17 +655,7 @@ enum Cmd {
     LaneEvent { kind: String, data: String },
     #[command(hide = true)]
     #[command(about = "Run a lane's heavy check in a host slot, waiting in line for one (#909)")]
-    Heavy {
-        kind: String,
-        #[arg(long)]
-        max: usize,
-        #[arg(long)]
-        kind_max: Option<usize>,
-        #[arg(long)]
-        wait: u64,
-        #[arg(last = true)]
-        cmd: String,
-    },
+    Heavy(crate::heavy::Args),
 }
 
 #[derive(clap::Args)]
@@ -1162,7 +1152,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
         cli.cmd,
         Cmd::Hook { .. }
             | Cmd::LaneEvent { .. }
-            | Cmd::Heavy { .. }
+            | Cmd::Heavy(_)
             | Cmd::Statusline
             | Cmd::Migrate { .. }
             | Cmd::Help { .. }
@@ -1321,21 +1311,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
         Cmd::Statusline => crate::usage::statusline(&crate::config::env("DROVER_LANE").unwrap_or_default(), out),
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
-        Cmd::Heavy {
-            kind,
-            max,
-            kind_max,
-            wait,
-            cmd,
-        } => {
+        Cmd::Heavy(a) => {
             let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
-            let me = crate::heavy::Ticket::new(lane, kind, cmd, kind_max);
             let timeout = |t: &crate::heavy::Ticket, _: &str| {
                 let d = json!({"kind": t.kind, "cmd": t.cmd, "since": t.since});
                 lane_event(ctx, "heavy-timeout", d);
                 None
             };
-            return crate::heavy::run(r, &ctx.state.with_file_name("heavy"), me, max, wait, &|| None, timeout);
+            return a.run(r, &ctx.state.with_file_name("heavy"), lane, timeout);
         }
         Cmd::Hold { wait, cmd } => return crate::heavy::hold(ctx, r, wait, &cmd),
         Cmd::Status(Scope { fleet, json }) => {
@@ -2392,7 +2375,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
         return Ok(());
     }
-    if let Some(v) = heavy.and_then(|h| hook::heavy(&input, &h, &ctx.exe)) {
+    if let Some(v) = heavy.and_then(|h| hook::heavy(&input, &h, &ctx.exe, &git)) {
         writeln!(out, "{v}")?;
         return Ok(());
     }
