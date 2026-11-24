@@ -1,0 +1,13 @@
+flow = "issue"
+states = ["parked"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "parked"
+when = {  }
+do = "wait"
+owner = "owner"
+timeout = "owner-held"
+to = ["needs-human"]
+say = "parked: unpark returns it to the state it had"

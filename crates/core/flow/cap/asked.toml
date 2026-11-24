@@ -1,0 +1,13 @@
+flow = "cap"
+states = ["asked"]
+reads = []
+ignores = ["lane", "host", "pr", "verdict", "ask", "turn"]
+
+[[row]]
+id = "settle"
+when = {  }
+do = "tell-orchestrator"
+then = ["to-owner"]
+owner = "orchestrator"
+timeout = "escalate_minutes"
+say = "a cap ask: raise or trim"
