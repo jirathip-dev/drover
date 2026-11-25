@@ -15,9 +15,7 @@ fn fan(name: &str) -> (drover::Ctx, FakeShed) {
 }
 
 fn started(sh: &FakeShed) -> Vec<String> {
-    let runs = sh.all("run").into_iter();
-    runs.map(|p| p["name"].as_str().unwrap_or_default().to_string())
-        .collect()
+    sh.lock().terms.keys().cloned().collect()
 }
 
 fn fake(live: usize) -> Fake {
@@ -80,6 +78,22 @@ fn three_kicks_coalesce_into_one_run_and_one_follow_up() {
     assert_eq!(r.count("sleep 10"), 2);
     assert_eq!(started(&sh), ["sendmeter-impl-2"], "the follow-up finds it started");
     assert!(lease_on(&c, "kick-sendmeter-2.again").is_none() && lease_on(&c, "kick-sendmeter-2.lock").is_none());
+}
+
+#[test]
+fn five_webhook_kicks_while_one_runs_start_no_process_and_give_one_follow_up() {
+    let (c, sh) = fan("kick-1588");
+    lease_as(&c, "kick-sendmeter-2.lock", 4242, c.now, 300);
+    let r = fake(5);
+    for _ in 0..5 {
+        assert_eq!(drover::drive::kick(&c, &r, "sendmeter", 2, "webhook"), None);
+    }
+    assert_eq!(r.count("nohup"), 0, "{:?}", r.calls.borrow());
+    assert!(lease_on(&c, "kick-sendmeter-2.again").is_some());
+    let r = fake(0);
+    kick(&c, &r, "2");
+    assert_eq!(kicks(&c).len(), 2, "the running kick's pass and one follow-up");
+    assert_eq!(started(&sh), ["sendmeter-impl-2"]);
 }
 
 #[test]

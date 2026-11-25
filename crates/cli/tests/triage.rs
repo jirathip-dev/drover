@@ -57,7 +57,7 @@ fn a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo() 
         out.contains("filed sendmeter#90: triage: sendmeter week of 1970-01-12"),
         "{out}"
     );
-    assert_eq!(sh.last("run")["name"], "sendmeter-triage-90", "{:?}", sh.methods());
+    assert!(sh.has("sendmeter-triage-90"), "{:?}", sh.methods());
     let events = read(&c.state).unwrap();
     let spawn = events.iter().find(|e| e.is("spawn", "sendmeter", 90)).expect("a lane");
     assert_eq!(
@@ -239,7 +239,7 @@ fn the_docs_pass_files_one_docs_issue_with_each_finding_and_none_when_clean() {
 
 fn hook(lane: &str, cmd: &str) -> String {
     let d = tmpdir("hook");
-    let fleet = "\n[fleet.synergy]\nrepo = \"o/synergy\"\nlocal = \"/tmp/synergy\"\nintegration = \"staging\"\n";
+    let fleet = "\n[fleet.tangelo]\nrepo = \"o/tangelo\"\nlocal = \"/tmp/tangelo\"\nintegration = \"staging\"\n";
     std::fs::write(d.join("fleet.toml"), CONFIG.to_string() + fleet).unwrap();
     let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
@@ -263,28 +263,28 @@ fn hook(lane: &str, cmd: &str) -> String {
 #[test]
 fn a_triage_lane_changes_issues_only_through_its_verbs_and_never_code() {
     let acts = [
-        "drover triage close synergy 5 --why done --evidence abc1234",
-        "drover triage fold synergy 7 --spec spec.md",
-        "drover triage label synergy 9 stale?",
-        "drover triage docs synergy --findings f.md",
+        "drover triage close tangelo 5 --why done --evidence abc1234",
+        "drover triage fold tangelo 7 --spec spec.md",
+        "drover triage label tangelo 9 stale?",
+        "drover triage docs tangelo --findings f.md",
     ];
     for cmd in acts {
-        assert_eq!(hook("synergy:90:triage", cmd), "", "{cmd}");
-        for lane in ["synergy:12:impl", "synergy:12:rev"] {
+        assert_eq!(hook("tangelo:90:triage", cmd), "", "{cmd}");
+        for lane in ["tangelo:12:impl", "tangelo:12:rev"] {
             assert!(hook(lane, cmd).contains("REFUSED ORCHESTRATOR_ONLY"), "{lane}: {cmd}");
         }
     }
-    assert_eq!(hook("synergy:-:orchestrator", "drover triage synergy"), "");
+    assert_eq!(hook("tangelo:-:orchestrator", "drover triage tangelo"), "");
     for (cmd, why) in [
-        ("drover triage synergy", "REFUSED ORCHESTRATOR_ONLY"),
-        ("gh issue close 5 -R o/synergy", "REFUSED TRIAGE_VERBS"),
-        ("gh issue edit 7 -R o/synergy --body x", "REFUSED TRIAGE_VERBS"),
+        ("drover triage tangelo", "REFUSED ORCHESTRATOR_ONLY"),
+        ("gh issue close 5 -R o/tangelo", "REFUSED TRIAGE_VERBS"),
+        ("gh issue edit 7 -R o/tangelo --body x", "REFUSED TRIAGE_VERBS"),
         ("gh issue comment 5 -b x", "never comment"),
         ("git commit -am x", "read-only"),
         ("git push origin issue-90", "read-only"),
         ("gh pr merge 3", "merging is gated"),
     ] {
-        assert!(hook("synergy:90:triage", cmd).contains(why), "{cmd}");
+        assert!(hook("tangelo:90:triage", cmd).contains(why), "{cmd}");
     }
-    assert_eq!(hook("synergy:12:impl", "gh issue edit 7 -R o/synergy --body x"), "");
+    assert_eq!(hook("tangelo:12:impl", "gh issue edit 7 -R o/tangelo --body x"), "");
 }

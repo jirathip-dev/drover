@@ -450,7 +450,7 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
 #[test]
 fn lanes_group_by_fleet_with_others() {
     let d = tmpdir("lanes");
-    let two = format!("{CONFIG}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\n");
+    let two = format!("{CONFIG}\n[fleet.tangelo]\nrepo = \"o/tangelo-apps\"\nlocal = \"/p/tangelo-apps\"\nintegration = \"staging\"\n");
     let c = ctx(&d, &two);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let ev = |fleet: &str, issue: Option<u64>, d: serde_json::Value| {
@@ -464,28 +464,28 @@ fn lanes_group_by_fleet_with_others() {
     ev(
         "sendmeter",
         Some(9),
-        json!({"role": "rev", "agent": "sendmeter-rev-9-r1", "harness": "hermes"}),
+        json!({"role": "rev", "agent": "sendmeter-rev-9-r1", "harness": "codex"}),
     );
     ev(
-        "synergy",
+        "tangelo",
         Some(5),
-        json!({"role": "design", "agent": "synergy-design-5", "harness": "claude"}),
+        json!({"role": "design", "agent": "tangelo-design-5", "harness": "claude"}),
     );
     ev(
-        "synergy",
+        "tangelo",
         Some(7),
-        json!({"role": "impl", "agent": "synergy-impl-7", "harness": "claude", "pane": "w5:p1"}),
+        json!({"role": "impl", "agent": "tangelo-impl-7", "harness": "claude", "pane": "w5:p1"}),
     );
     let events = read(&c.state).unwrap();
     let st = drover::events::fold(&events);
-    let wt = c.worktrees.join("synergy-apps/designer").to_string_lossy().into_owned();
+    let wt = c.worktrees.join("tangelo-apps/designer").to_string_lossy().into_owned();
     let lab = |f: &str, h: &str| json!({"fleet": f, "harness": h});
     let agents = sessions(&json!([
         {"name": "sendmeter-impl-12", "status": "working", "cwd": "/x", "labels": lab("sendmeter", "claude")},
-        {"name": "synergy-design-5", "status": "done", "cwd": "/x", "labels": lab("synergy", "claude")},
-        {"name": "w3", "status": "working", "cwd": wt, "labels": lab("synergy", "claude")},
+        {"name": "tangelo-design-5", "status": "done", "cwd": "/x", "labels": lab("tangelo", "claude")},
+        {"name": "w3", "status": "working", "cwd": wt, "labels": lab("tangelo", "claude")},
         {"name": "side-project", "status": "idle", "cwd": "/Users/me/Projects/side", "labels": lab("", "codex")},
-        {"name": "synergy-impl-7", "status": "waiting-approval", "cwd": "/p/synergy-apps", "labels": lab("synergy", "dsh")},
+        {"name": "tangelo-impl-7", "status": "waiting-approval", "cwd": "/p/tangelo-apps", "labels": lab("tangelo", "claude")},
     ]));
     let lanes = drover::lanes::join(&cfg, None, &events, &st, &agents);
     let got: Vec<(Option<&str>, &str, &str, String, bool)> = lanes
@@ -504,12 +504,12 @@ fn lanes_group_by_fleet_with_others() {
         got,
         [
             (Some("sendmeter"), "sendmeter-impl-12", "impl", "working".into(), false),
-            (Some("synergy"), "synergy-design-5", "design", "done".into(), false),
-            (Some("synergy"), "w3", "other", "working".into(), false),
+            (Some("tangelo"), "tangelo-design-5", "design", "done".into(), false),
+            (Some("tangelo"), "w3", "other", "working".into(), false),
             (None, "side-project", "other", "idle".into(), false),
             (
-                Some("synergy"),
-                "synergy-impl-7",
+                Some("tangelo"),
+                "tangelo-impl-7",
                 "impl",
                 "waiting-approval".into(),
                 false
@@ -526,7 +526,7 @@ fn lanes_group_by_fleet_with_others() {
     sh.set("sendmeter-impl-12", |t| {
         t["reported"]["note"] = json!("running: cargo test (4m)");
     });
-    sh.lane("synergy-design-5", "done", "/x");
+    sh.lane("tangelo-design-5", "done", "/x");
     for (name, harness, cwd, state) in [
         ("w3", "claude", wt.as_str(), "working"),
         ("side-project", "codex", "/Users/me/Projects/side", "idle"),
@@ -536,7 +536,7 @@ fn lanes_group_by_fleet_with_others() {
             (t["cwd"], t["reported"]) = (json!(cwd), json!({"state": state}));
         });
     }
-    sh.lane("synergy-impl-7", "blocked", "/p/synergy-apps");
+    sh.lane("tangelo-impl-7", "blocked", "/p/tangelo-apps");
     let f = Fake::default();
     let r = sh.on(&f);
     let lanes = screen(&Server::new(&c, &r, Some(ADDR.into())), "/screens/lanes");
@@ -625,7 +625,7 @@ fn secrets_in_shown_text_are_masked() {
 #[test]
 fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     let d = tmpdir("short");
-    let two = format!("{}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\npaused = true\n", config());
+    let two = format!("{}\n[fleet.tangelo]\nrepo = \"o/tangelo-apps\"\nlocal = \"/p/tangelo-apps\"\nintegration = \"staging\"\npaused = true\n", config());
     let c = ctx(&d, &two);
     let ev = |fleet: &str, issue: u64, ts: u64, kind: &str, d: serde_json::Value| {
         append(&c.state, &Event::new(ts, fleet, Some(issue), kind, d)).unwrap();
@@ -654,13 +654,13 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
         "spawn",
         json!({"role": "impl", "agent": "sendmeter-impl-17"}),
     );
-    run(&c, &Fake::default(), &["queue", "synergy", "add", "1039", "1040"]);
+    run(&c, &Fake::default(), &["queue", "tangelo", "add", "1039", "1040"]);
     ev(
-        "synergy",
+        "tangelo",
         1039,
         999_000,
         "spawn",
-        json!({"role": "impl", "agent": "synergy-impl-1039"}),
+        json!({"role": "impl", "agent": "tangelo-impl-1039"}),
     );
     for k in 0..4 {
         ev(
@@ -686,13 +686,13 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     assert_eq!(
         text.matches("\"id\":\"q-").count(),
         2 + 2,
-        "open items only: sendmeter #17 #18, synergy #1039 #1040"
+        "open items only: sendmeter #17 #18, tangelo #1039 #1040"
     );
     assert_eq!(find(&q, "done-today-sendmeter").unwrap()["value"], "30");
-    let syn = find(&q, "fleet-synergy").unwrap();
+    let syn = find(&q, "fleet-tangelo").unwrap();
     assert_eq!(syn["subtitle"], "paused · 1 lane (dead)", "{syn}");
-    assert_eq!(find(syn, "pause-synergy").unwrap()["label"], "Resume");
-    let dead = find(&q, "q-synergy-1039").unwrap();
+    assert_eq!(find(syn, "pause-tangelo").unwrap()["label"], "Resume");
+    let dead = find(&q, "q-tangelo-1039").unwrap();
     assert_eq!(dead["badge"]["text"], "dead", "{dead}");
     assert!(dead.get("swipe").is_none(), "no action on a dead lane: {dead}");
     assert_eq!(

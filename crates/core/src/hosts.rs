@@ -1,5 +1,6 @@
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
 use crate::events::{age, append, emit, fold, last_spawn, open_asks, working, Event, IssueState, Json};
+use crate::flow::facts;
 use crate::gate::refused;
 use crate::host::{self, Host};
 use crate::providers;
@@ -273,7 +274,7 @@ impl Runner for On<'_> {
     }
 }
 
-/// A check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed at the limit its `run_for` names, else after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step, the child it waits on and `n`, the nanosecond of its last step or call (local calls too): the progress `slo-tick` watches.
+/// A check, clean or drive pass's runner. Each remote host is probed once (`probe::reach`); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed at the limit its `run_for` names, else after `ssh_call_secs`; a second one killed takes its host offline for the rest of the pass, and `recheck` reaches an offline host once more; one refused through a dead shared connection drops its socket and runs once more without it. a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step, the child it waits on and `n`, the nanosecond of its last step or call (local calls too): the progress `slo-tick` watches.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
     probe: bool,
@@ -283,6 +284,8 @@ pub struct Pass<'a> {
     t0: std::time::Instant,
     pub until: Option<std::time::Instant>,
     late: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    slow: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    rechecked: std::sync::Mutex<std::collections::BTreeSet<String>>,
     unsent: std::sync::atomic::AtomicU64,
     slowest: std::sync::Mutex<(String, u64)>,
     off: std::collections::BTreeSet<String>,
@@ -301,13 +304,15 @@ impl<'a> Pass<'a> {
             t0: crate::clock::instant(),
             until: None,
             late: std::sync::Mutex::default(),
+            slow: std::sync::Mutex::default(),
+            rechecked: std::sync::Mutex::default(),
             unsent: std::sync::atomic::AtomicU64::new(0),
             slowest: std::sync::Mutex::default(),
             off: std::collections::BTreeSet::new(),
             log: None,
         }
     }
-    /// Never contact the machines `off`; with `log`, a host's changed key logs `host-key-changed` once and a fresh shared offline mark holds but in the tick, which probes afresh.
+    /// Never contact the machines `off`; with `log`, a host's changed key logs `host-key-changed` once and a fresh shared offline mark holds but in the tick and the fast step's `own` poll.
     #[must_use]
     pub fn sparing(mut self, off: std::collections::BTreeSet<String>, log: Option<(&'a Ctx, &'a Config)>) -> Self {
         if let (Some((ctx, cfg)), Ok(up), None) = (log, self.up.get_mut(), &self.mark) {
@@ -346,7 +351,7 @@ impl<'a> Pass<'a> {
             done
         }
     }
-    /// The fast step's one remote call per host, no probe; a call killed at 15 s marks its host down.
+    /// The fast step's one remote call per host, no probe; a second call killed at its limit marks its host down.
     pub fn fast(r: &'a dyn Runner) -> Self {
         Pass {
             probe: false,
@@ -435,7 +440,8 @@ impl<'a> Pass<'a> {
             o = self.r.run_for(prog, &bare, input, limit)?;
         }
         self.key_changed(m, &o);
-        if matches!(o.code, 124 | 255) {
+        let first_slow = o.code == 124 && lock(&self.slow).insert(m.into());
+        if matches!(o.code, 124 | 255) && !first_slow {
             self.seen(m, false);
         } else if lock(&self.up).get(m).is_none() {
             self.seen(m, true);
@@ -445,31 +451,6 @@ impl<'a> Pass<'a> {
         }
         self.note("");
         Ok(o)
-    }
-    fn key_changed(&self, m: &str, o: &Out) {
-        if !o.stderr.contains(KEY_CHANGED) {
-            return;
-        }
-        let Some((ctx, cfg)) = self.log else {
-            return;
-        };
-        let host = cfg
-            .hosts
-            .iter()
-            .find(|h| h.1.machine.as_deref() == Some(m))
-            .map_or(m, |h| h.0.as_str());
-        let events = working(&ctx.state).unwrap_or_default();
-        let kinds = ["host-key-changed", "host-online"];
-        let last = events
-            .iter()
-            .rev()
-            .find(|e| e.str("host") == Some(host) && kinds.contains(&e.kind.as_str()));
-        if last.is_some_and(|e| e.kind == kinds[0]) {
-            return;
-        }
-        let why = format!("host-key-changed {host}: ssh refuses its new host key; check it, then `ssh-keygen -R {m}`");
-        let d = json!({"host": host, "reason": why});
-        emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kinds[0], d)).ok();
     }
 }
 
@@ -539,6 +520,9 @@ impl Runner for Pass<'_> {
     fn detach(&self, exe: &str, args: &[String], log: &Path) -> Result<u32> {
         self.r.detach(exe, args, log)
     }
+    fn recheck(&self) -> bool {
+        self.reach_held()
+    }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()
     }
@@ -572,8 +556,6 @@ pub struct Seen {
     pub github: String,
     /// Its set workspace roots.
     pub roots: Vec<crate::roots::Root>,
-    /// A remote host's `drover --version` at the last look.
-    pub drover: String,
 }
 
 fn file(ctx: &Ctx) -> PathBuf {
@@ -616,11 +598,15 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         }
         let on = On::new(r, h.machine.as_deref());
         let s = all.entry(name.clone()).or_default();
-        let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
+        let listed = seen.0.iter().find(|l| l.0 == h.machine).and_then(|l| l.1.clone().ok());
+        let logged_stop = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
+        let stopped = logged_stop && listed.is_none();
+        if let Some(Err(e)) = (logged_stop && !stopped).then(|| crate::cloud::listed_up(ctx, cfg, name)) {
+            crate::stderr!("cloud {name}: {e:#}");
+        }
         if let Some(Err(e)) = (h.cloud.is_some() && !stopped).then(|| crate::cloud::moved(ctx, cfg, r, name, false)) {
             crate::stderr!("cloud {name}: {e:#}");
         }
-        let listed = seen.0.iter().find(|l| l.0 == h.machine).and_then(|l| l.1.clone().ok());
         let a = listed
             .filter(|_| !stopped)
             .map(|all| all.into_iter().filter(|s| s.running() && s.lane()).collect::<Vec<_>>());
@@ -633,20 +619,12 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             if let Some((tags, home)) = due.then(|| probe(&on)).flatten() {
                 (s.tags, s.home, s.probed) = (tags, home, ctx.now);
             }
-            let mut landed = false;
-            if h.machine.is_some() && h.enabled && !s.home.is_empty() {
-                let live = crate::release::builds(&on, &real_exe(ctx, &s.home))
-                    .ok()
-                    .and_then(|b| b.live);
-                let live = live.unwrap_or_default();
-                (landed, s.drover) = (!s.drover.is_empty() && live != s.drover, live);
-            }
             let tunnel = h
                 .machine
                 .as_deref()
                 .filter(|_| cfg.host_acp(name).is_some())
                 .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)));
-            if (due || landed) && h.machine.is_some() && h.enabled {
+            if due && h.machine.is_some() && h.enabled {
                 s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
                 if h.watches_token() {
                     let (card, warn) = crate::cloud::github(&on, ctx.now);
@@ -1178,13 +1156,10 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     };
     let reach = format!("can't reach {}:", f.repo);
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
-    let swap = cfg.limits.self_update_swap_secs;
-    let behind = machine.and_then(|_| updating(pre.0, (ctx.now, swap)));
     let mut full = false;
     let (hs, refusal) = match cloud.map_or_else(|| crate::session::live_on(&on).map_err(|_| None), |c| Err(Some(c))) {
         Err(Some(c)) => (Host::default(), Some(c)),
         Err(None) => (Host::default(), Some(("HOST_OFFLINE", "unreachable".to_string()))),
-        Ok(_) if behind.is_some() => (Host::default(), behind.map(|w| ("HOST_UPDATING", w))),
         Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
         Ok(agents) => {
             let cap = cfg.hosts.get(name).and_then(|h| h.max_working);
@@ -1430,21 +1405,6 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
     Ok(())
 }
 
-/// Why placement passes over every remote host, from the log alone: a staged release swaps there.
-pub fn updating(events: &[Event], (now, swap_secs): (u64, u64)) -> Option<String> {
-    let rollout = |e: &&Event| {
-        e.str("target") == Some("live") && matches!(e.kind.as_str(), "self-update-swapping" | "self-updated")
-    };
-    let e = events
-        .iter()
-        .rfind(rollout)
-        .filter(|e| e.kind == "self-update-swapping" && now < e.ts.saturating_add(swap_secs))?;
-    Some(format!(
-        "drover swaps to {:.7} on every host",
-        e.str("sha").unwrap_or_default()
-    ))
-}
-
 pub(crate) fn real_exe(ctx: &Ctx, home: &str) -> String {
     let exe = std::fs::canonicalize(&ctx.exe).map_or(ctx.exe.clone(), |p| p.to_string_lossy().into());
     rehome(vec![exe], Some(home)).remove(0)
@@ -1529,7 +1489,7 @@ pub fn place(
         let code = p.refusal.as_ref().map(|x| x.0);
         let busy = matches!(
             code,
-            Some("DISK_LOW" | "HOST_BUSY" | "HOST_UPDATING" | "LOGIN_NEEDED" | "MEM_LOW" | "NO_HOST")
+            Some("DISK_LOW" | "HOST_BUSY" | "LOGIN_NEEDED" | "MEM_LOW" | "NO_HOST")
         );
         let fits = cfg.hosts.get(was.0).map_or(needs.is_empty(), |h| fit(was.0, h));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
@@ -1674,17 +1634,26 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
     })
 }
 
+/// The order that keeps new lanes off host `name` while its lanes finish: the owner's off switch or a sign-in hold.
+pub fn drain(cfg: &Config, events: &[Event], name: &str, now: u64) -> Option<String> {
+    let h = cfg.hosts.get(name);
+    let m = h.and_then(|h| h.machine.as_deref());
+    let off = h.is_some_and(|h| !h.enabled).then(|| format!("turned off: {name}"));
+    let hold = || login_hold(events, m, (now, cfg.limits.proxy_retry_secs)).map(String::from);
+    off.or_else(hold)
+}
+
 /// A remote host unreachable 15 min straight: its open lanes restart on the main host from their pushed branch.
 pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let seen = cached(ctx);
+    if cfg.hosts.values().all(|h| h.machine.is_none()) {
+        return Ok(());
+    }
+    let view = crate::link::view::View::load(ctx, cfg)?;
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.machine.is_some()) {
         let events = working(&ctx.state)?;
         let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
-        if stopped
-            || !seen
-                .get(name)
-                .is_some_and(|s| !s.up && s.seen + cfg.limits.host_offline_minutes * 60 <= ctx.now)
-        {
+        let offline = facts::host(view.link(name), view.at(None), &cfg.limits, ctx.now).0 == facts::Host::Offline;
+        if stopped || !offline || !facts::silent(view.link(name), &cfg.limits, ctx.now) {
             continue;
         }
         let mut moved = vec![];
@@ -1744,7 +1713,7 @@ pub fn shown(enabled: bool, s: &Seen, lanes: usize, now: u64) -> (&'static str, 
     match (enabled, lanes) {
         (false, 0) => ("m", "off · not used for lanes".into()),
         (false, n) => ("m", format!("off · draining {n} lane{}", if n == 1 { "" } else { "s" })),
-        _ => match (sick('✗'), sick('!')) {
+        _ => match (sick('✗'), host::disk_low(s.disk).as_deref().or(sick('!'))) {
             (Some(w), _) => ("r", format!("unhealthy · {w}")),
             (_, Some(w)) => ("a", format!("up · {w}")),
             _ => ("g", "up".into()),
@@ -1769,11 +1738,13 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         let there = h.machine.as_deref().filter(|_| view.is_some());
         let failing = there.and_then(|m| view.as_ref()?.failing(Some(m)));
         let mut words = shown(h.enabled, &s, lanes.len(), ctx.now).1;
-        words.extend(failing.map(|w| format!(" · report: {w}")));
+        words.extend(failing.map(|w| format!(" · report: {}", w.lines().next().unwrap_or_default())));
+        let probed = h.machine.as_deref().filter(|_| refresh && !s.up);
+        words.extend(probed.map(|m| format!(" · {}", probe::why_down(ctx, r, m))));
         let t = tags(h, Some(&s)).join(",");
         let built = there.and_then(|m| crate::release::sha_of(view.as_ref()?.build(Some(m))?));
         let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
-        let v = match built.as_deref().unwrap_or(&s.drover) {
+        let v = match built.as_deref().unwrap_or_default() {
             "" => String::new(),
             x if x == env!("DROVER_SHA") => format!(" · drover {x} ✓"),
             x => format!(" · drover {x} ≠ {}", env!("DROVER_SHA")),

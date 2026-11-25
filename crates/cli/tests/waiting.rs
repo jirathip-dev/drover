@@ -524,18 +524,18 @@ fn a_killed_lane_waits_on_drive_to_respawn_it() {
 fn a_long_reason_stays_whole_and_only_on_its_lane() {
     let c = ctx(&tmpdir("waiting-long"), CONFIG);
     let id = "q".repeat(120 - "waiting on your answer ()".len());
-    spawn(&c, NOW - 2000, 2859, "rev", "synergy-rev-2859-r2");
-    spawn(&c, NOW - 1900, 2859, "impl", "synergy-impl-2859");
+    spawn(&c, NOW - 2000, 2859, "rev", "tangelo-rev-2859-r2");
+    spawn(&c, NOW - 1900, 2859, "impl", "tangelo-impl-2859");
     ev(
         &c,
         NOW - 600,
         Some(2859),
         "needs-decision",
-        json!({"id": id, "agent": "synergy-impl-2859", "question": "?", "options": [], "recommend": null}),
+        json!({"id": id, "agent": "tangelo-impl-2859", "question": "?", "options": [], "recommend": null}),
     );
     let sh = FakeShed::new();
     sh.attach(&c);
-    for n in ["synergy-rev-2859-r2", "synergy-impl-2859"] {
+    for n in ["tangelo-rev-2859-r2", "tangelo-impl-2859"] {
         sh.lane(n, "idle", "/x");
         sh.screen(n, "");
     }
@@ -549,11 +549,11 @@ fn a_long_reason_stays_whole_and_only_on_its_lane() {
     let reason = format!("waiting on your answer ({id})");
     assert_eq!(reason.len(), 120);
     assert!(
-        page.contains(&format!("synergy-impl-2859 | r idle 10m | r {reason}")),
+        page.contains(&format!("tangelo-impl-2859 | r idle 10m | r {reason}")),
         "{page}"
     );
     assert!(
-        page.contains("synergy-rev-2859-r2 | m idle 33m | m superseded by synergy-impl-2859"),
+        page.contains("tangelo-rev-2859-r2 | m idle 33m | m superseded by tangelo-impl-2859"),
         "{page}"
     );
     assert_eq!(
@@ -721,4 +721,42 @@ fn a_promise_missed_after_the_disk_recovers_names_the_current_hold_not_disk_low_
     let why = missed.and_then(|e| e.str("why")).unwrap_or_default();
     assert!(why.contains("SERIAL_BUSY") && why.contains("#983"), "{why:?} {ev:?}");
     assert!(!why.contains("DISK_LOW") && !why.contains("disk nearly full"), "{why}");
+}
+
+#[test]
+fn waiting_flow_prints_each_issues_state_condition_and_row_under_its_line() {
+    let (c, r) = fixture("waiting-flow");
+    let (code, out) = run(&c, &r, &["waiting", "sendmeter", "--flow"]);
+    assert_eq!(code, 0, "{out}");
+    let flow = |n: u64| {
+        let at = out
+            .find(&format!("sendmeter #{n} "))
+            .unwrap_or_else(|| panic!("#{n}: {out}"));
+        let line = out[at..].lines().nth(1).unwrap_or_default().to_string();
+        assert!(line.starts_with("  flow: "), "#{n}: {out}");
+        line
+    };
+    let l = flow(42);
+    assert!(l.contains("  flow: fix · lane gone · "), "{l}");
+    assert!(
+        l.contains(" · pr pending · verdict none · ask none · turn done · issue/build/pushed ("),
+        "{l}"
+    );
+    assert!(l.contains("PR 100 at 605297c"), "{l}");
+    let l = flow(1);
+    assert!(
+        l.contains("  flow: impl · ")
+            && l.contains(" · pr none · verdict none · ask open · turn none · issue/build/ask-open ("),
+        "{l}"
+    );
+    assert!(l.contains("ask q3 open") && l.contains("no PR;"), "{l}");
+    let l = flow(4);
+    assert!(l.contains("  flow: ready · lane none · host up · pr green · verdict PASS · ask none · turn none · issue/ready/merge ("), "{l}");
+    let l = flow(6);
+    assert!(
+        l.contains(" · verdict written · ") && l.contains("issue/review/record ("),
+        "{l}"
+    );
+    let (_, plain) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(!plain.contains("flow: "), "{plain}");
 }

@@ -82,9 +82,6 @@ fn thread_t2(name: &str, script: &str, args: &[&str], more: &[(&str, Value)]) ->
         &tmpdir(name),
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     let now = drover::now();
     let ev = |ts: u64, kind: &str, d: Value| append(&c.state, &Event::new(ts, "sendmeter", None, kind, d)).unwrap();
     ev(
@@ -402,9 +399,6 @@ fn a_settled_config_run_or_secret_card_leaves_the_cards_and_the_thread_at_once()
         &tmpdir("page-settled"),
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
     let cli = |args: &[&str]| {
         let (code, out) = run(
             &drover::Ctx {

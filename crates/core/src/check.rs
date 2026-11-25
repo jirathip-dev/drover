@@ -8,7 +8,7 @@ use crate::hosts::On;
 use crate::hygiene::Check;
 use crate::lanes::Health;
 use crate::runner::{ok, Runner};
-use crate::session::{Session, Status};
+use crate::session::{stamp::since as stamped, Session, Status};
 use crate::spawn::{changes, dirty, dirty_past, own_files, SHOT_DIRS};
 use crate::Ctx;
 use crate::{gh, term};
@@ -140,18 +140,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
-    let synced = links(ctx, cfg, &view, &events).and_then(|()| working(&ctx.state))?;
-    for name in cfg.hosts.keys() {
-        let mut tries = (synced.iter().rev()).filter(|e| e.kind == "host-sync" && e.str("host") == Some(name));
-        let Some(e) = tries.next().filter(|e| e.val("ok") == false) else {
-            continue;
-        };
-        let since = tries.find(|e| e.val("ok") == true).map_or(0, |e| e.ts);
-        let (from, to) = (e.str("from").unwrap_or("?"), e.str("to").unwrap_or("?"));
-        let why = format!("{name}: drover swap {from} → {to} failed there; the next self-update retries");
-        let d = json!({"key": format!("{name}@{since}"), "host": name, "reason": why});
-        fire(ctx, cfg, out, &synced, ("drover", None), "host-sync-failed", d)?;
-    }
+    links(ctx, cfg, &view, &events)?;
     for root in crate::roots::local(ctx, cfg) {
         let s = root.to_string_lossy();
         let was = |e: &&Event| e.str("root") == Some(&s) && matches!(e.kind.as_str(), "root-hung" | "root-answers");
@@ -355,8 +344,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 if let Some((url, line)) = wt.and_then(|wt| amendment(ctx, r, cfg, s, wt)) {
                     let key = format!("{lane}:{url}");
                     let seen = events.iter().any(|e| e.str("key") == Some(&key));
-                    let dsh = spawned.and_then(|e| e.str("harness")) == Some("dsh");
-                    if !seen && term::tell(r, dsh, lane, &a.name, &line).is_ok() {
+                    if !seen && term::tell(r, lane, &a.name, &line).is_ok() {
                         hits.push(("amended", key, line));
                     }
                 }
@@ -1054,7 +1042,7 @@ pub fn clean_all(
                     freed += purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
                 }
             }
-            dirty_past(&on, Path::new(wt), kept)
+            dirty_past(&on, Path::new(wt), kept).filter(|_| !scratch_only(cfg, e))
         };
         let saved = keep.is_some() && yes && !live && lane.is_none();
         let keep = match keep {
@@ -1084,23 +1072,18 @@ pub fn clean_all(
         if !pane.is_empty() {
             term::close(ctx, &on, pane).ok();
         }
+        let mut d = json!({"worktree": wt, "pane": pane, "why": why});
         if on.machine.is_none() {
             crate::providers::remove_tmp(&stray_roots(cfg), wt);
+            if let Some(f) = crate::heavy::forget(r, wt) {
+                writeln!(out, "runners forget {wt} failed: {f}")?;
+                d.put("forget", f.into());
+            }
         }
         drop_log(ctx, e.str("agent"));
         removed += 1;
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
-        emit(
-            &ctx.state,
-            cfg,
-            Event::new(
-                ctx.now,
-                &e.fleet,
-                Some(n),
-                "clean",
-                json!({"worktree": wt, "pane": pane, "why": why}),
-            ),
-        )?;
+        emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, Some(n), "clean", d))?;
     }
     let sheds = r.shed().filter(|_| lane.is_none()).map(term::Shed);
     for (b, t) in sheds.iter().flat_map(|b| {
@@ -1472,7 +1455,10 @@ pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     let events = working(&ctx.state)?;
     let spawned = (events.iter().filter(|e| e.kind == "spawn" && e.ts >= since)).filter_map(|e| e.str("agent"));
     let agents = crate::session::live_on(r)?;
-    let names = agents.iter().filter(|a| !a.hollow()).map(|a| a.name.as_str());
+    let live = |a: &&Session| {
+        !a.hollow() && (a.status() != Some(Status::Done) || stamped(&events, &a.name).is_none_or(|t| t > since))
+    };
+    let names = agents.iter().filter(live).map(|a| a.name.as_str());
     Ok(names.chain(spawned).map(String::from).collect())
 }
 
@@ -2005,7 +1991,7 @@ fn kill_as(
     let on = On::of(r, Some(e));
     let wt = e.str("worktree").filter(|w| on.exists(Path::new(w)));
     let (dirty, ahead) = wt.map_or(Ok((0, 0)), |w| pending(&on, w))?;
-    let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, &on, agent));
+    let wip = (dirty + ahead > 0 && !scratch_only(cfg, e)).then(|| wip_branch(ctx, &on, agent));
     let pr = e.issue.zip(cfg.fleet.get(&e.fleet)).and_then(|(n, f)| {
         let b = crate::gate::branch_of(st.as_ref(), n);
         gh::pr(ctx, r, f, (&e.fleet, n), &b, ctx.now).ok()
@@ -2015,6 +2001,7 @@ fn kill_as(
         .map_or(String::new(), |p| format!(" · PR #{} open", p.at("number")));
     let lost = match &wip {
         Some(w) => format!("{ahead} unpushed commit(s), {dirty} dirty file(s) → {w}"),
+        None if dirty + ahead > 0 => format!("{dirty} scratch file(s) stay local"),
         None => "nothing unpushed".into(),
     };
     writeln!(
@@ -2027,14 +2014,7 @@ fn kill_as(
     }
     let wip = match wip {
         Some(w) => {
-            let chk = crate::hygiene::of(ctx, Some(r), cfg, &e.fleet);
-            let (w, skip) = save_on(
-                &on,
-                agent,
-                wt.unwrap_or_default(),
-                (&w, "wip: kill snapshot"),
-                chk.as_ref(),
-            )?;
+            let (w, skip) = save_on(ctx, (cfg, &e.fleet), &on, (agent, wt.unwrap_or_default()), &w, "kill")?;
             let _ = skip.is_empty()
                 || writeln!(out, "skipped (build output or over the size caps): {}", skip.join(", ")).is_ok();
             Some(w)
@@ -2263,14 +2243,20 @@ fn close_gone(ctx: &Ctx, on: &On, agent: &str, pane: &str) -> Result<()> {
     Ok(())
 }
 
+fn scratch_only(cfg: &Config, e: &Event) -> bool {
+    (cfg.fleet.get(&e.fleet)).is_some_and(|f| f.family(e.str("role").unwrap_or_default()) == "rev")
+}
+
 fn save_on(
+    ctx: &Ctx,
+    (cfg, fleet): (&Config, &str),
     on: &On,
-    agent: &str,
-    wt: &str,
-    (w, msg): (&str, &str),
-    chk: Option<&Check>,
+    (agent, wt): (&str, &str),
+    w: &str,
+    why: &str,
 ) -> Result<(String, Vec<String>)> {
-    match snapshot(on, wt, (w, msg), (chk, None)) {
+    let chk = crate::hygiene::of(ctx, Some(on.r), cfg, fleet);
+    match snapshot(on, wt, (w, &format!("wip: {why} snapshot")), (chk.as_ref(), None)) {
         Err(Snap::Failed(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
             format!("{agent}: wip snapshot failed ({e:#}); index restored, nothing pushed, pane kept"),
@@ -2294,16 +2280,17 @@ fn save_on(
     }
 }
 
-/// A superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any.
+/// A superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any. A rev-family lane's scratch stays local.
 pub fn save_lane(ctx: &Ctx, (cfg, fleet): (&Config, &str), on: &On, agent: &str, wt: &str) -> Result<Option<String>> {
-    if !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
+    let events = working(&ctx.state)?;
+    let owner = events
+        .iter()
+        .rfind(|e| e.kind == "spawn" && e.str("worktree") == Some(wt));
+    if owner.is_some_and(|e| scratch_only(cfg, e)) || !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
         return Ok(None);
     }
-    let (w, chk) = (
-        wip_branch(ctx, on, agent),
-        crate::hygiene::of(ctx, Some(on.r), cfg, fleet),
-    );
-    save_on(on, agent, wt, (&w, "wip: supersede snapshot"), chk.as_ref()).map(|(w, _)| Some(w))
+    let w = wip_branch(ctx, on, agent);
+    save_on(ctx, (cfg, fleet), on, (agent, wt), &w, "supersede").map(|(w, _)| Some(w))
 }
 
 pub(crate) fn wip_branch(ctx: &Ctx, on: &On, agent: &str) -> String {
@@ -2367,7 +2354,7 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
-    crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "--prune", "origin"])?;
+    crate::clone::fetch(ctx, r, &f.local_path(), &["-q", "--prune", "origin", crate::clone::ALL])?;
     let integ = format!("origin/{}", f.integration);
     let refs = git(&[
         "for-each-ref",

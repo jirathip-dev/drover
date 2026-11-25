@@ -42,7 +42,7 @@ fn lane(name: &str, title: &str) -> (drover::Ctx, Fake, FakeShed) {
 }
 
 fn started(sh: &FakeShed) -> bool {
-    !sh.all("run").is_empty()
+    !sh.lock().terms.is_empty()
 }
 
 fn ok(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
@@ -115,7 +115,7 @@ fn a_blocked_issue_given_an_extra_round_is_never_respawned_and_waits_for_its_blo
     }
     let (out, steps) = drive(&at(&c, 7300), &r);
     assert_eq!(steps, ["start"], "{out}");
-    assert_eq!(sh.last("run")["name"], LANE);
+    assert!(sh.has(LANE));
 }
 
 #[test]
@@ -230,9 +230,13 @@ fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
         Some(wt.to_str().unwrap()),
         "its own worktree"
     );
-    let runs = sh.all("run");
+    let runs: Vec<_> = sh.lock().terms.values().cloned().collect();
     assert_eq!(
-        (runs.len(), runs[0]["name"].as_str(), runs[0]["cwd"].as_str()),
+        (
+            r.count("shed run --acp"),
+            runs[0]["name"].as_str(),
+            runs[0]["cwd"].as_str()
+        ),
         (1, Some(LANE), wt.to_str()),
         "its lane restarted on shed in that worktree"
     );

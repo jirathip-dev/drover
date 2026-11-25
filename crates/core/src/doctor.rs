@@ -1,3 +1,4 @@
+use crate::clone::refspec;
 use crate::config::Config;
 use crate::runner::{argv, ok, Runner};
 use crate::{events::Json, Ctx};
@@ -118,16 +119,6 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, r, rows);
     rows.extend(crate::proxy::status(ctx, cfg, r).map(|f| f.join(" · ")));
-    if cfg
-        .runtime
-        .as_ref()
-        .is_some_and(|r| r.kind == crate::config::RuntimeKind::Berth)
-    {
-        let fix = format!("set kind = \"shed\" in {}", ctx.config.display());
-        rows.push(format!(
-            "! runtime — kind = \"berth\" is deprecated, berth is now shed → {fix}"
-        ));
-    }
     let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::working(&ctx.state).unwrap_or_default());
     row(rows, !line.contains(" · stale"), '!', &line);
     let (n401, n503) = crate::devices::denials(ctx);
@@ -158,7 +149,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             row(rows, has, '✗', &format!("label {name} — {l} in {repo} → {fix}"));
         }
         let dir = fleet.local_path().display().to_string();
-        let (branch, origin) = (&fleet.integration, format!("origin/{}", fleet.integration));
+        let (branch, origin) = (refspec(&fleet.integration), format!("origin/{}", fleet.integration));
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || git clone https://github.com/{repo}.git {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
@@ -519,5 +510,25 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line =
             format!("shed agent {id} — {cmd} not on the timer's PATH → install {cmd} in a folder on it ({path})");
         row(rows, found, '✗', &line);
+    }
+    let acp = cfg.fleet.iter().filter(|(n, _)| cfg.shed_for(n).is_some());
+    let roles = acp.flat_map(|(_, f)| f.role.values().map(|role| role.harness.as_str()));
+    let agents: BTreeSet<String> = (roles.chain(cfg.chat.harness.as_deref()))
+        .filter(|h| crate::providers::get(h).acp().is_some())
+        .map(str::to_string)
+        .collect();
+    if let Some(s) = cfg.shed().filter(|_| !agents.is_empty()) {
+        rows.extend(crate::shed::account_rows(r, &s.wire, &agents));
+    }
+    if let Ok(n) = crate::top::normal(ctx, cfg, r) {
+        rows.push(n.first().map_or_else(
+            || "✓ lane priority".into(),
+            |(a, p)| {
+                format!(
+                    "✗ lane priority — {} lane processes at normal priority ({a}, {p})",
+                    n.len()
+                )
+            },
+        ));
     }
 }

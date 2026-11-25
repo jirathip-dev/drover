@@ -1,0 +1,1 @@
+merge_label = "merge-ready"   # the full CI runs only with this label; drover adds it on a PASS at the head (docs/ci.md)

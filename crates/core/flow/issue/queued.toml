@@ -1,0 +1,31 @@
+flow = "issue"
+states = ["queued"]
+reads = ["ask"]
+ignores = ["lane", "host", "pr", "verdict", "turn"]
+
+[[row]]
+id = "ask-open"
+when = { ask = ["open"] }
+do = "wait"
+then = ["remind"]
+owner = "owner"
+timeout = "ask_waiting_minutes"
+escalate = "owner"
+say = "waiting on the owner's answer"
+
+[[row]]
+id = "decided"
+when = { ask = ["answered"] }
+do = "apply-decision"
+owner = "drive"
+timeout = "act_minutes"
+say = "apply the answer"
+
+[[row]]
+id = "start"
+when = { ask = ["none"] }
+do = "start"
+owner = "drive"
+timeout = "act_minutes"
+to = ["design", "impl"]
+say = "start the first lane"

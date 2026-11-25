@@ -3,15 +3,15 @@ use common::*;
 use drover::events::{append, Event};
 use serde_json::{json, Value};
 
-const PS: &str = "ps -axo pid=,ppid=,pcpu=,etime=,command=";
+const PS: &str = "ps -axo pid=,ppid=,pcpu=,etime=,pri=,nice=,command=";
 
 fn ps() -> String {
-    "  101    50  12.5    05:00 /Users/me/.cargo/bin/cargo test --all
-  102   101  85.0 01:02:03 /Users/me/.rustup/bin/rustc --crate-name meter
-  103     1  40.0    10:00 /opt/homebrew/bin/node server.js
-  104     1  30.0    10:00 /usr/bin/python3 job.py
-  105     1  20.0    10:00 /usr/bin/ruby gem.rb
-  106     1   1.0    10:00 /bin/zsh -l
+    "  101    50  12.5    05:00  4  0 /Users/me/.cargo/bin/cargo test --all
+  102   101  85.0 01:02:03 31  0 /Users/me/.rustup/bin/rustc --crate-name meter
+  103     1  40.0    10:00 31  0 /opt/homebrew/bin/node server.js
+  104     1  30.0    10:00 31  0 /usr/bin/python3 job.py
+  105     1  20.0    10:00 31  0 /usr/bin/ruby gem.rb
+  106     1   1.0    10:00 31  0 /bin/zsh -l
 "
     .into()
 }
@@ -63,7 +63,7 @@ fn top_lists_each_live_lane_with_its_process_tree_and_heavy_waits_in_text_and_js
         "load/cpu 3.00 (limit 2.5) · heavy slots 1/2 · respawns held 1\n",
         "sendmeter-impl-12 (sendmeter:12:impl)\n",
         "  101 12% 5m /Users/me/.cargo/bin/cargo test --all [cargo]\n",
-        "    102 85% 62m /Users/me/.rustup/bin/rustc --crate-name meter\n",
+        "    102 85% 62m /Users/me/.rustup/bin/rustc --crate-name meter [normal priority]\n",
         "  waiting for heavy slot lint 4m: sh lint.sh\n",
     ];
     let mut at = 0;
@@ -92,7 +92,7 @@ fn top_lists_each_live_lane_with_its_process_tree_and_heavy_waits_in_text_and_js
         (l["agent"].as_str(), l["lane"].as_str()),
         (Some("sendmeter-impl-12"), Some("sendmeter:12:impl"))
     );
-    let p: Vec<(&str, u64, f64, u64, Value)> = (l["procs"].as_array().unwrap().iter())
+    let p: Vec<(&str, u64, f64, u64, Value, bool)> = (l["procs"].as_array().unwrap().iter())
         .map(|p| {
             let k = p["kind"].clone();
             (
@@ -101,17 +101,36 @@ fn top_lists_each_live_lane_with_its_process_tree_and_heavy_waits_in_text_and_js
                 p["cpu"].as_f64().unwrap(),
                 p["secs"].as_u64().unwrap(),
                 k,
+                p["background"].as_bool().unwrap(),
             )
         })
         .collect();
     assert_eq!(
         p,
         [
-            ("101", 0, 12.5, 300, json!("cargo")),
-            ("102", 1, 85.0, 3723, Value::Null)
+            ("101", 0, 12.5, 300, json!("cargo"), true),
+            ("102", 1, 85.0, 3723, Value::Null, false)
         ]
     );
     assert_eq!(l["waits"], json!([{"kind": "lint", "cmd": "sh lint.sh", "secs": 240}]));
+}
+
+#[test]
+fn doctor_crosses_lane_priority_for_a_build_lane_process_at_normal_priority_and_ticks_it_once_all_are_background() {
+    let (c, _sh, f, _) = setup("top-priority", "");
+    let (_, out) = run(&c, &f, &["doctor"]);
+    assert!(
+        out.contains("✗ lane priority — 1 lane processes at normal priority (sendmeter-impl-12, 102)\n"),
+        "{out}"
+    );
+    let low = ps().replace("01:02:03 31  0", "01:02:03 20 10");
+    let mut f = f;
+    f.replies.retain(|r| r.0 != PS);
+    let f = f.reply(PS, &low);
+    let (_, out) = run(&c, &f, &["doctor"]);
+    assert!(out.contains("✓ lane priority\n"), "{out}");
+    let (_, out) = run(&c, &f, &["top"]);
+    assert!(!out.contains("[normal priority]"), "{out}");
 }
 
 fn history(c: &drover::Ctx, rows: &[(u64, f64)]) {
@@ -254,4 +273,23 @@ fn a_running_hold_shows_in_top_json_while_it_lasts() {
     std::fs::write(dir.join("go"), "").unwrap();
     assert!(held.0.take().unwrap().wait().unwrap().success());
     assert_eq!(holds(), json!([]));
+}
+
+#[test]
+fn top_shows_a_routed_command_as_remote_with_its_tag() {
+    let (c, _sh, f, wt) = setup("top-remote", "");
+    let ps = format!("{}  107   101   0.5    02:00  4  0 /Users/me/.local/bin/runners run --tag linux --dir {wt} -- bash -c cargo test\n", ps());
+    let lsof = format!("p101\nccargo\nfcwd\nn{wt}\np107\ncrunners\nfcwd\nn{wt}\n");
+    let f = Fake { replies: vec![], ..f }
+        .reply(PS, &ps)
+        .reply("lsof", &lsof)
+        .reply("sysctl -n vm.loadavg", "{ 6.00 5.00 4.00 }\n")
+        .reply("sysctl -n hw.ncpu", "2\n");
+    let (code, out) = run(&c, &f, &["top"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("    107 0% 2m /Users/me/.local/bin/runners run --tag linux --dir {wt} -- bash -c cargo test [remote linux]\n")), "{out}");
+    let (_, out) = run(&c, &f, &["top", "--json"]);
+    let v: Value = serde_json::from_str(&out).unwrap();
+    let procs = v["lanes"][0]["procs"].as_array().unwrap();
+    assert_eq!(procs.iter().find(|p| p["pid"] == "107").unwrap()["remote"], "linux");
 }

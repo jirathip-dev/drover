@@ -84,7 +84,7 @@ impl Runner for Air {
 }
 
 fn setup(name: &str) -> (drover::Ctx, FakeShed) {
-    let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    let base = CONFIG.replace("harness  =  \"claude\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n");
     let c = ctx(&tmpdir(name), &toml);
     let st = c.state.parent().unwrap();
@@ -182,14 +182,14 @@ fn a_hung_host_is_logged_over_budget_and_the_other_hosts_spawn_goes_ahead() {
     let r = air(&[], true);
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert!(sh.called("run", "sendmeter-impl-12"), "the spawn goes ahead: {out}");
+    assert!(sh.has("sendmeter-impl-12"), "the spawn goes ahead: {out}");
     assert!(
         out.contains("tick: air: over budget; skipped for the rest of this pass"),
         "{out}"
     );
     let sent = r.sent.borrow();
     assert!(
-        sent.len() <= 2,
-        "one call and its retry without the shared connection: {sent:#?}"
+        sent.len() <= 3,
+        "one call, its retry without the shared connection and the one retry of a killed call: {sent:#?}"
     );
 }

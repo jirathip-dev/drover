@@ -104,28 +104,20 @@ struct Member<'a> {
     exe: String,
     conf: String,
     tags: Vec<String>,
-    main: bool,
-    waited: bool,
-    builds: Option<Builds>,
-    unread: Option<String>,
+    builds: Builds,
     failed: Option<Unstaged>,
 }
 
 impl Member<'_> {
     fn needs(&self, head: &str) -> bool {
-        self.builds
-            .as_ref()
-            .is_none_or(|b| b.live.as_deref() != Some(head) || b.unsigned)
+        self.builds.live.as_deref() != Some(head) || self.builds.unsigned
     }
     fn staged(&self, head: &str) -> bool {
-        self.builds.as_ref().is_some_and(|b| b.staged.as_deref() == Some(head))
+        self.builds.staged.as_deref() == Some(head)
     }
     fn has(&self) -> String {
-        let b = self.builds.as_ref();
-        let sha = b
-            .and_then(|b| b.live.as_deref())
-            .map_or("?".into(), |s| s.chars().take(7).collect());
-        if b.is_some_and(|b| b.unsigned) {
+        let sha = (self.builds.live.as_deref()).map_or("?".into(), |s| s.chars().take(7).collect());
+        if self.builds.unsigned {
             format!("{sha} unsigned")
         } else {
             sha
@@ -141,11 +133,9 @@ struct Marks {
 
 #[derive(Debug, PartialEq, Eq)]
 enum Step {
-    Current,
     Wait { alert: bool },
-    Hold { missing: Vec<String>, until: u64 },
     Stuck,
-    Swap { ready: Vec<String>, behind: Vec<String> },
+    Swap,
 }
 
 fn builds(on: &On, exe: &str, tags: &[String]) -> Result<Builds> {
@@ -154,7 +144,7 @@ fn builds(on: &On, exe: &str, tags: &[String]) -> Result<Builds> {
     Ok(b)
 }
 
-fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], t: &Target) -> Vec<Member<'a>> {
+fn member<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, t: &Target) -> Member<'a> {
     let here = On::new(r, None);
     let exe = t.live.to_string_lossy().to_string();
     let arch = std::env::consts::ARCH.replace("aarch64", "arm64");
@@ -169,57 +159,18 @@ fn members<'a>(ctx: &Ctx, cfg: &'a Config, r: &'a dyn Runner, events: &[Event], 
         || vec![format!("os:{}", std::env::consts::OS), format!("arch:{arch}")],
         |(h, s)| crate::hosts::tags(h, Some(s)),
     );
-    let mut v = vec![Member {
+    Member {
         name: main.into(),
-        builds: Some(builds(&here, &exe, &tags).unwrap_or_default()),
+        builds: builds(&here, &exe, &tags).unwrap_or_default(),
         on: here,
         exe,
         conf: ctx.config.display().to_string(),
         tags,
-        main: true,
-        waited: true,
-        unread: None,
         failed: None,
-    }];
-    if t.kind == Kind::StagingServe {
-        return v;
     }
-    for (name, h) in &cfg.hosts {
-        let Some(m) = h.machine.as_deref() else { continue };
-        let mut s = seen.get(name).cloned().unwrap_or_default();
-        let up = h.cloud.is_none() || crate::cloud::state(events, name) == "running";
-        let (on, read) = (On::new(r, Some(m)), up && h.enabled);
-        if let Some((tags, home)) = (read && s.home.is_empty()).then(|| crate::hosts::probe(&on)).flatten() {
-            (s.tags, s.home) = (tags, home);
-        }
-        let exe = crate::hosts::real_exe(ctx, &s.home);
-        let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&s.home)).remove(0);
-        let tags = crate::hosts::tags(h, Some(&s));
-        let got = match (read, s.home.is_empty()) {
-            (false, _) => Ok(None),
-            (true, true) => Err("its $HOME probe over ssh failed".to_string()),
-            (true, false) => builds(&on, &exe, &tags).map(Some).map_err(|e| format!("{e:#}")),
-        };
-        v.push(Member {
-            name: name.clone(),
-            builds: got.as_ref().ok().cloned().flatten(),
-            unread: got.err(),
-            on,
-            exe,
-            conf,
-            tags,
-            main: false,
-            waited: h.enabled && up,
-            failed: None,
-        });
-    }
-    v
 }
 
-fn step(now: u64, head: &str, found: &Found, ms: &[Member], marks: &Marks, l: &Limits) -> Step {
-    if ms.iter().filter(|m| m.builds.is_some()).all(|m| !m.needs(head)) {
-        return Step::Current;
-    }
+fn step(now: u64, head: &str, found: &Found, m: &Member, marks: &Marks, l: &Limits) -> Step {
     if let Found::Missing(_) = found {
         let due = marks
             .seen
@@ -228,30 +179,11 @@ fn step(now: u64, head: &str, found: &Found, ms: &[Member], marks: &Marks, l: &L
             alert: due && !marks.waiting,
         };
     }
-    let names = |f: &dyn Fn(&Member) -> bool| ms.iter().filter(|m| f(m)).map(|m| m.name.clone()).collect::<Vec<_>>();
-    let mut ready = names(&|m| !m.main && m.needs(head) && m.staged(head));
-    let Some(mini) = ms.iter().find(|m| m.main) else {
-        return Step::Stuck;
-    };
-    let bare = matches!(mini.failed, Some(Unstaged::NoAsset(_)));
-    if mini.needs(head) && !mini.staged(head) && (!bare || ready.is_empty()) {
-        return Step::Stuck;
+    if m.staged(head) {
+        Step::Swap
+    } else {
+        Step::Stuck
     }
-    if !mini.needs(head) || bare {
-        let behind = names(&|m| m.main && bare);
-        return Step::Swap { ready, behind };
-    }
-    ready.push(mini.name.clone());
-    let behind = names(&|m| m.needs(head) && !m.staged(head));
-    let missing = names(&|m| m.waited && m.needs(head) && !m.staged(head));
-    let until = marks
-        .staging
-        .unwrap_or(now)
-        .saturating_add(l.self_update_lag_minutes * 60);
-    if missing.is_empty() || now >= until {
-        return Step::Swap { ready, behind };
-    }
-    Step::Hold { missing, until }
 }
 
 fn install(
@@ -266,17 +198,17 @@ fn install(
     let l = f.local_path();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &*l.to_string_lossy()], a].concat());
     let what = t.what();
-    git(&["fetch", "-q", "origin", t.branch])?;
+    git(&["fetch", "-q", "origin", &crate::clone::refspec(t.branch)])?;
     let head = git(&["rev-parse", &format!("origin/{}", t.branch)])?;
     let head = head.trim();
     let found = crate::release::find(r, &f.repo, t.branch, head);
-    let mut ms = members(ctx, cfg, r, events, t);
-    if ms.iter().filter(|m| m.builds.is_some()).all(|m| !m.needs(head)) {
+    let mut m = member(ctx, cfg, r, t);
+    if !m.needs(head) {
         writeln!(out, "= {what}up to date @ {head:.7}")?;
         return Ok(0);
     }
     if dry {
-        return plan(out, t, head, &found, &ms);
+        return plan(out, t, head, &found, &m);
     }
     let (word, d) = (t.word(), json!({"sha": head, "branch": t.branch, "target": t.word()}));
     let mark = |kind: &str| {
@@ -299,21 +231,18 @@ fn install(
             log("self-update-staging", d.clone())?;
         }
         let limit = std::time::Duration::from_secs(cfg.limits.self_update_stage_secs);
-        for m in ms
-            .iter_mut()
-            .filter(|m| m.builds.is_some() && m.needs(head) && !m.staged(head))
-        {
+        if !m.staged(head) {
             let staged = rel
                 .asset(&f.repo, &m.tags)
                 .ok_or_else(|| Unstaged::NoAsset(m.tags.join(",")));
             let gate = m.on.exists(Path::new(&m.conf));
             match staged.and_then(|a| crate::release::stage(&m.on, &m.exe, rel, &a, gate, limit)) {
-                Ok(()) => m.builds.get_or_insert_default().staged = Some(head.into()),
+                Ok(()) => m.builds.staged = Some(head.into()),
                 Err(u) => m.failed = Some(u),
             }
         }
     }
-    for (m, u) in ms.iter().filter_map(|m| Some((m, m.failed.as_ref()?))) {
+    if let Some(u) = &m.failed {
         writeln!(out, "✗ {what}{}: {head:.7} not staged: {u}; kept {}", m.name, m.exe)?;
         let why = u.to_string();
         let shed = why
@@ -324,8 +253,7 @@ fn install(
         let d = json!({"host": m.name, "sha": head, "reason": format!("self-update {head:.7}: {why}")});
         failed(ctx, cfg, events, &key, d)?;
     }
-    match step(ctx.now, head, &found, &ms, &marks, &cfg.limits) {
-        Step::Current => writeln!(out, "= {what}up to date @ {head:.7}")?,
+    match step(ctx.now, head, &found, &m, &marks, &cfg.limits) {
         Step::Wait { alert } => {
             let why = match &found {
                 Found::Missing(w) => w.as_str(),
@@ -349,16 +277,8 @@ fn install(
                 )?;
             }
         }
-        Step::Hold { missing, until } => {
-            let left = until.saturating_sub(ctx.now).div_ceil(60);
-            let m = missing.join(", ");
-            writeln!(
-                out,
-                "= {what}{head:.7} staged; waiting up to {left} min for {m}, then the rest swap"
-            )?;
-        }
         Step::Stuck => return Ok(1),
-        Step::Swap { ready, behind } => return swap(ctx, cfg, r, out, (t, events, head), &ms, (ready, behind)),
+        Step::Swap => return swap(ctx, cfg, r, out, (t, events, head), &m),
     }
     Ok(0)
 }
@@ -380,26 +300,18 @@ fn failed(ctx: &Ctx, cfg: &Config, events: &[Event], key: &str, mut d: serde_jso
     )
 }
 
-fn plan(out: &mut dyn Write, t: &Target, head: &str, found: &Found, ms: &[Member]) -> Result<i32> {
+fn plan(out: &mut dyn Write, t: &Target, head: &str, found: &Found, m: &Member) -> Result<i32> {
     let have = match found {
         Found::Release(rel) => format!("{} found", rel.tag),
         Found::Missing(w) => format!("waiting: {w}"),
     };
     writeln!(out, "{}{} @ {head:.7}: {have}", t.what(), t.branch)?;
-    for m in ms {
-        let (has, will) = match &m.builds {
-            None if m.waited => (
-                "unreachable".to_string(),
-                "waited for up to the lag limit, then left behind",
-            ),
-            None => ("stopped or off".into(), "not waited for; caught up when it starts"),
-            Some(_) if !m.needs(head) => (m.has(), "current"),
-            Some(_) if m.staged(head) => (format!("{}, staged {head:.7}", m.has()), "would swap"),
-            Some(_) => (m.has(), "would stage, then swap"),
-        };
-        let last = if m.main && m.needs(head) { ", last" } else { "" };
-        writeln!(out, "  {:<12} {has:<24} {will}{last}", m.name)?;
-    }
+    let (has, will) = if m.staged(head) {
+        (format!("{}, staged {head:.7}", m.has()), "would swap")
+    } else {
+        (m.has(), "would stage, then swap")
+    };
+    writeln!(out, "  {:<12} {has:<24} {will}, last", m.name)?;
     let then = match t.kind {
         Kind::Live => "then: profiles sync, serve handed over",
         Kind::StagingServe => "then: the read-only staging serve restarts",
@@ -414,70 +326,12 @@ fn swap(
     r: &dyn Runner,
     out: &mut dyn Write,
     (t, events, head): (&Target, &[Event], &str),
-    ms: &[Member],
-    (ready, mut behind): (Vec<String>, Vec<String>),
+    m: &Member,
 ) -> Result<i32> {
     let what = t.what();
-    let by = |n: &String| ms.iter().find(|m| m.name == *n);
-    let main = ready.iter().filter_map(by).any(|m| m.main);
-    let remote: Vec<&Member> = ready.iter().filter_map(by).filter(|m| !m.main).collect();
-    if main && !remote.is_empty() {
-        let d = json!({"sha": head, "target": t.word(), "hosts": ready});
-        emit(
-            &ctx.state,
-            cfg,
-            Event::new(ctx.now, "drover", None, "self-update-swapping", d).passive(),
-        )?;
-    }
-    let (mut hosts, mut unswapped) = (vec![], vec![]);
-    for m in remote {
-        let res = remote_swap(cfg, m);
-        let d = json!({"host": m.name, "from": m.has(), "to": head, "ok": res.is_ok()});
-        crate::events::append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d))?;
-        match res {
-            Ok(_) => hosts.push(m.name.clone()),
-            Err(e) => {
-                writeln!(out, "✗ {}: swap to {head:.7} failed: {e:#}", m.name)?;
-                unswapped.push((m.name.clone(), format!("swap: {e:#}")));
-                behind.push(m.name.clone());
-            }
-        }
-    }
-    for m in behind.iter().filter_map(by) {
-        let logged =
-            |e: &Event| e.kind == "host-behind" && e.str("host") == Some(&m.name) && e.str("wants") == Some(head);
-        if !events.iter().any(logged) {
-            let swap = unswapped.iter().find(|u| u.0 == m.name).map(|u| u.1.clone());
-            let why = (m.failed.as_ref().map(ToString::to_string))
-                .or(swap)
-                .or_else(|| m.unread.clone())
-                .unwrap_or_else(|| "unreachable or stopped".into());
-            let d = json!({"host": m.name, "has": m.has(), "wants": head, "reason": why});
-            emit(
-                &ctx.state,
-                cfg,
-                Event::new(ctx.now, "drover", None, "host-behind", d).passive(),
-            )?;
-        }
-    }
-    let left = if behind.is_empty() {
-        String::new()
-    } else {
-        format!("; left behind: {}", behind.join(", "))
-    };
-    if !main {
-        let late = ms.iter().any(|m| m.failed.is_some()) || !behind.is_empty();
-        if hosts.is_empty() {
-            writeln!(out, "= {what}live @ {head:.7} here; another host is not caught up yet")?;
-        } else {
-            writeln!(out, "✓ {what}caught up {} to {head:.7}{left}", hosts.join(", "))?;
-        }
-        return Ok(i32::from(late));
-    }
     let new = PathBuf::from(format!("{}.new", t.live.display()));
     std::fs::rename(&new, &t.live).with_context(|| format!("swap into {}", t.live.display()))?;
-    hosts.extend(ms.iter().find(|m| m.main).map(|m| m.name.clone()));
-    let d = json!({"sha": head, "branch": t.branch, "target": t.word(), "hosts": hosts, "behind": behind});
+    let d = json!({"sha": head, "branch": t.branch, "target": t.word(), "hosts": [m.name]});
     emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "self-updated", d))?;
     let then = match t.kind {
         Kind::StagingServe => staging_serve(ctx, cfg, r, &t.live).context("installed, then the staging serve"),
@@ -495,7 +349,7 @@ fn swap(
     };
     match then {
         Ok(done) => {
-            writeln!(out, "✓ {what}installed {head:.7} at {}; {done}{left}", t.live.display())?;
+            writeln!(out, "✓ {what}installed {head:.7} at {}; {done}", t.live.display())?;
             Ok(0)
         }
         Err(e) => {
@@ -515,23 +369,6 @@ fn swap(
             Ok(1)
         }
     }
-}
-
-fn remote_swap(cfg: &Config, m: &Member) -> Result<String> {
-    let (exe, conf) = (&m.exe, &m.conf);
-    let acp = cfg
-        .host_acp(&m.name)
-        .map(|_| crate::hosts::acp_profiles(cfg, &m.name, &m.tags));
-    let acp: String = (acp.unwrap_or_default().iter())
-        .map(|(p, family, _)| format!(" && '{exe}' profiles sync --profile '{p}' --role {family}"))
-        .collect();
-    let line = format!(
-        "{}{} && {} && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}{acp}",
-        crate::cloud::SH,
-        crate::release::swap_line(exe),
-        crate::hosts::link_line(exe)
-    );
-    ok(&m.on, "sh", &["-c", &line])
 }
 
 #[derive(Debug)]

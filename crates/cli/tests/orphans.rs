@@ -69,7 +69,7 @@ fn review(c: &drover::Ctx, verdict: &str) -> PathBuf {
 fn spawn_logs_spawn_started_before_the_harness_starts() {
     let sh = FakeShed::new();
     let cfg = CONFIG.replace(
-        "harness  =  \"hermes\"    # toggled in tests",
+        "harness  =  \"claude\"    # toggled in tests",
         "harness = \"claude\"\naccount = \"C\"",
     );
     let cfg = format!(
@@ -358,4 +358,51 @@ fn an_orphan_rev_lane_of_the_wrong_round_is_closed() {
     assert_eq!(kinds(&c, "lane-closed")[0].str("why"), Some("stale-orphan"));
     assert_eq!(kinds(&c, "spawn").len(), 1, "never adopted");
     assert!(sh.called("kill", name) && !sh.has(name), "{:?}", sh.methods());
+}
+
+fn fix_lane(sh: &FakeShed, wt: &str) {
+    let labels = json!({"fleet": "sendmeter", "issue": "12", "role": "fix", "harness": "claude",
+        "drover.fleet": "sendmeter", "drover.issue": "12", "drover.role": "fix", "drover.round": "1"});
+    sh.add("sendmeter-impl-12", labels);
+    sh.set("sendmeter-impl-12", |t| t["cwd"] = json!(wt));
+}
+
+#[test]
+fn a_remote_fix_round_orphan_is_adopted_as_impl() {
+    let (c, _sh) = shed_ctx("orphan-1626-fix", HOSTS);
+    ev(&c, 10, "queued", json!({}));
+    let wt = "/home/me/.herdr/worktrees/sendmeter/issue-12";
+    let baz = FakeShed::new();
+    fix_lane(&baz, wt);
+    let f = fake();
+    let r = OverSsh {
+        f: &f,
+        hosts: vec![("bazzite", &baz)],
+    };
+    let out = fast(&c, &r);
+    assert!(!out.contains("not configured"), "{out}");
+    assert!(out.contains("adopted sendmeter-impl-12 as sendmeter-impl-12"), "{out}");
+    let sp = &kinds(&c, "spawn")[0];
+    assert_eq!(
+        (sp.str("role"), sp.str("host"), sp.str("worktree")),
+        (Some("impl"), Some("bazzite"), Some(wt))
+    );
+    assert_eq!(kinds(&c, "spawn-adopted").len(), 1);
+}
+
+#[test]
+fn a_merged_issues_fix_round_orphan_is_closed() {
+    let (c, sh) = shed_ctx("orphan-1626-merged", "");
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    ev(&c, 10, "merged", json!({}));
+    fix_lane(&sh, &wt.to_string_lossy());
+    let r = fake().reply("git -C", "");
+    let out = fast(&c, &r);
+    assert!(!out.contains("not configured"), "{out}");
+    assert!(
+        out.contains("closed stale orphan sendmeter-impl-12 (sendmeter#12 is merged)"),
+        "{out}"
+    );
+    assert!(sh.called("kill", "sendmeter-impl-12"), "{:?}", sh.methods());
 }

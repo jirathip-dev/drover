@@ -12,7 +12,7 @@ podman, `supabase start`, …); the lane hook refuses them, and so must the reci
    and the issue's acceptance criteria below. If the issue had a design stage, open the approved
    PNGs under `docs/design/<slug>/` on the branch.
 2. Launch the app at the head exactly as the recipe's Launch says, on `$DROVER_PORT` (iOS:
-   through `sim-task`; the host's `hermes-sim-task` is the same tool). Wait for its ready signal.
+   through `sim-task`). Wait for its ready signal.
    Run Doctor; if the instance is not worth driving, that is a FAIL with Doctor's output.
 3. Drive each acceptance criterion a user can observe, with the recipe's selectors and commands
    and its Feature map to reach each screen. Skip criteria no user can see (say which).

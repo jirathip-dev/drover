@@ -254,7 +254,7 @@ fn an_issue_carries_its_latest_why_owner_line() {
 #[test]
 fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     let d = tmpdir("api-issue");
-    let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+    let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
     let c = ctx(&d, &(CONFIG.to_string() + verify));
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--repro"]).0,

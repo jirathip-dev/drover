@@ -318,7 +318,7 @@ pub fn done(
         s += &format!("- #{} {what} · undo: `{undo}`\n", e.val("target"));
     }
     s += &format!("note: {note}");
-    match crate::orchestrator::route(cfg, &events, fleet) {
+    match crate::thread::route::route(cfg, &events, fleet) {
         Some(id) => crate::orchestrator::reply(ctx, cfg, id, &s, &[])?,
         None => writeln!(out, "{fleet}: no orchestrator thread; the summary is on #{n}")?,
     }

@@ -1,0 +1,5 @@
+[[notify]]
+cmd = "notify <chat>"   # any command; one plain line on stdin
+on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human", "evidence-missing", "usage-limit", "signed-out"]
+# format = "json"   # send the raw event JSON instead
+

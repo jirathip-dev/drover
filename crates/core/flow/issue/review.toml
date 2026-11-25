@@ -1,0 +1,125 @@
+flow = "issue"
+states = ["review"]
+reads = ["lane", "host", "pr", "verdict", "ask"]
+ignores = ["turn"]
+in_flight = true
+
+[[row]]
+id = "merged-outside"
+when = { lane = "*", host = "*", pr = ["merged"], verdict = "*", ask = "*" }
+do = "record-merge"
+owner = "drive"
+timeout = "act_minutes"
+to = ["merged"]
+say = "merged outside drover: record it"
+
+[[row]]
+id = "pr-closed"
+when = { lane = "*", host = "*", pr = ["closed"], verdict = "*", ask = "*" }
+do = "raise-card"
+owner = "drive"
+timeout = "act_minutes"
+escalate = "orchestrator"
+to = ["needs-human"]
+say = "PR closed outside drover: a card"
+
+[[row]]
+id = "record"
+when = { lane = "*", host = "*", pr = ["none", "open", "pending", "red", "green", "conflicting"], verdict = ["written"], ask = "*" }
+do = "record"
+owner = "drive"
+timeout = "act_minutes"
+to = ["ready", "fix"]
+say = "record the written verdict"
+
+[[row]]
+id = "ask-open"
+when = { lane = "*", host = "*", pr = "*", verdict = "*", ask = ["open"] }
+do = "wait"
+then = ["remind"]
+owner = "owner"
+timeout = "ask_waiting_minutes"
+escalate = "owner"
+say = "waiting on the owner's answer"
+
+[[row]]
+id = "decided"
+when = { lane = "*", host = "*", pr = "*", verdict = "*", ask = ["answered"] }
+do = "deliver"
+owner = "drive"
+timeout = "act_minutes"
+say = "apply the answer"
+
+[[row]]
+id = "recorded-here"
+when = { lane = "*", host = "*", pr = "*", verdict = ["PASS", "FAIL"], ask = ["none"] }
+do = "reconcile"
+owner = "drive"
+timeout = "act_minutes"
+escalate = "orchestrator"
+say = "a recorded verdict at review: reconcile"
+
+[[row]]
+id = "refused"
+when = { lane = "*", host = "*", pr = "*", verdict = ["refused"], ask = ["none"] }
+do = "tell-check"
+then = ["respawn-check"]
+owner = "lane"
+timeout = "stall_minutes"
+say = "the verdict was refused: the check fixes it"
+
+[[row]]
+id = "host-offline"
+when = { lane = "*", host = ["offline"], pr = "*", verdict = ["none"], ask = ["none"] }
+do = "wait"
+then = ["move"]
+owner = "drive"
+timeout = "host_offline_minutes"
+since = "host-heard"
+say = "the check's host is offline"
+
+[[row]]
+id = "start"
+when = { lane = ["none"], host = ["up", "loaded", "draining"], pr = "*", verdict = ["none"], ask = ["none"] }
+do = "spawn-check"
+owner = "drive"
+timeout = "act_minutes"
+say = "start the check lane"
+
+[[row]]
+id = "reviewing"
+when = { lane = ["running"], host = ["up", "loaded", "draining"], pr = "*", verdict = ["none"], ask = ["none"] }
+do = "wait"
+then = ["respawn-check"]
+owner = "lane"
+timeout = "check_quiet_minutes"
+since = "heard"
+say = "the check is working"
+
+[[row]]
+id = "limited"
+when = { lane = ["limited"], host = ["up", "loaded", "draining"], pr = "*", verdict = ["none"], ask = ["none"] }
+do = "continue-at-reset"
+then = ["respawn-check"]
+owner = "drive"
+timeout = "stall_minutes"
+since = "reset"
+say = "rate-limited: continue at the reset"
+
+[[row]]
+id = "no-verdict"
+when = { lane = ["done", "asleep"], host = ["up", "loaded", "draining"], pr = "*", verdict = ["none"], ask = ["none"] }
+do = "wait"
+then = ["tell-check", "respawn-check"]
+owner = "lane"
+timeout = "start_minutes"
+since = "heard"
+say = "the check ended with no verdict"
+
+[[row]]
+id = "lost"
+when = { lane = ["exited", "gone"], host = ["up", "loaded", "draining"], pr = "*", verdict = ["none"], ask = ["none"] }
+do = "respawn-check"
+owner = "drive"
+timeout = "act_minutes"
+say = "the check is gone: respawn it"

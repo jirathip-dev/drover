@@ -1,0 +1,4 @@
+[fleet.web]
+repo = "acme/web"
+local = "~/Projects/web"
+integration = "staging"

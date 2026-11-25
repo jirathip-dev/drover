@@ -31,7 +31,6 @@ fn in_lane(prog: &str, d: &Path) -> Command {
     for k in [
         "DROVER_SCRATCH_TARGET",
         "DROVER_RULES",
-        "DROVER_SERVICE",
         "DROVER_OUTBOX",
         "DROVER_THREAD",
     ] {
@@ -307,4 +306,160 @@ fn a_lanes_heavy_command_waits_behind_a_running_hold() {
         go(&d, j);
     }
     finish(vec![h, a, b]);
+}
+
+const ROUTE: &str = "\n[fleet.sendmeter.remote.test]\ntag = \"linux\"\nwait = 5\nsetup = \"make deps\"\nenv = [\"CARGO_BUILD_JOBS\"]\nout = [\"target/shots\"]\n";
+
+fn routed() -> (PathBuf, String) {
+    let d = lane("");
+    let cfg = std::fs::read_to_string(d.join("fleet.toml")).unwrap();
+    std::fs::write(
+        d.join("fleet.toml"),
+        cfg.replace("\n[hosts.mini]", &format!("{ROUTE}\n[hosts.mini]")),
+    )
+    .unwrap();
+    assert!(Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&d)
+        .status()
+        .unwrap()
+        .success());
+    let top = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&d)
+        .output()
+        .unwrap();
+    (d, String::from_utf8(top.stdout).unwrap().trim().to_string())
+}
+
+fn wrapped(d: &Path, cmd: &str) -> String {
+    let out: Value = serde_json::from_str(&hook(d, cmd)).unwrap();
+    out["hookSpecificOutput"]["updatedInput"]["command"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+fn fake_runners(d: &Path, code: Option<i32>) -> String {
+    let bin = d.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    if let Some(c) = code {
+        let f = bin.join("runners");
+        std::fs::write(&f, format!("#!/bin/sh\necho \"$@\" >> runners.log\nexit {c}\n")).unwrap();
+        Command::new("chmod").args(["755"]).arg(&f).status().unwrap();
+    }
+    format!("{}:/usr/bin:/bin", bin.display())
+}
+
+#[test]
+fn a_routed_kind_becomes_the_remote_wrapper_with_its_config() {
+    let (d, top) = routed();
+    let w = wrapped(&d, "sh test.sh a");
+    let flags = format!(
+        "'--remote' 'linux' '--dir' '{top}' '--remote-wait' '5' '--setup' 'make deps' '--env' 'CARGO_BUILD_JOBS' '--out' 'target/shots' '--' 'sh test.sh a'"
+    );
+    assert!(
+        w.contains("'heavy' 'test' '--max' '2' '--wait' '30' ") && w.ends_with(&flags),
+        "{w}"
+    );
+    let lint = wrapped(&d, "sh lint.sh a");
+    assert!(
+        lint.ends_with("'heavy' 'lint' '--max' '2' '--wait' '30' '--' 'sh lint.sh a'"),
+        "an unrouted kind: {lint}"
+    );
+    for never in [
+        "git log -1 && sh test.sh a",
+        "npx nx affected -t sh test.sh",
+        "sh test.sh a < input",
+    ] {
+        let w = wrapped(&d, never);
+        assert!(w.contains("'heavy' 'test'") && !w.contains("--remote"), "{never}: {w}");
+    }
+}
+
+#[test]
+fn an_unrouted_fleets_rewrite_is_unchanged() {
+    let d = lane("");
+    let w = wrapped(&d, "sh test.sh a");
+    assert!(
+        w.ends_with("'heavy' 'test' '--max' '2' '--wait' '30' '--' 'sh test.sh a'"),
+        "{w}"
+    );
+}
+
+#[test]
+fn the_remote_code_passes_through_without_a_local_run() {
+    for code in [0, 3] {
+        let (d, top) = routed();
+        let path = fake_runners(&d, Some(code));
+        let st = in_lane("bash", &d)
+            .env("PATH", path)
+            .args(["-c", &wrapped(&d, "sh test.sh a")])
+            .status()
+            .unwrap();
+        assert_eq!(st.code(), Some(code));
+        assert_eq!(log(&d), "", "never run here");
+        assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0], "no slot held");
+        let args = std::fs::read_to_string(d.join("runners.log")).unwrap();
+        let want = format!("run --tag linux --dir {top} --wait 5 --setup make deps --env CARGO_BUILD_JOBS --out target/shots -- bash -c sh test.sh a\n");
+        assert_eq!(args, want);
+    }
+}
+
+#[test]
+fn a_reserved_code_or_no_runners_runs_here_in_a_slot_and_says_why() {
+    for (code, why) in [
+        (Some(75), "runners: exit 75, running here"),
+        (Some(76), "runners: exit 76, running here"),
+        (Some(64), "runners: exit 64, running here"),
+        (Some(78), "runners: exit 78, running here"),
+        (None, "runners: not found, running here"),
+    ] {
+        let (d, _) = routed();
+        let path = fake_runners(&d, code);
+        let mut child = in_lane("bash", &d)
+            .env("PATH", path)
+            .args(["-c", &wrapped(&d, "sh test.sh a")])
+            .stderr(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut err = child.stderr.take().unwrap();
+        let job = Job(Some(child));
+        until("its slot ticket", || !tickets(&d).is_empty());
+        go(&d, "a");
+        finish(vec![job]);
+        let mut said = String::new();
+        std::io::Read::read_to_string(&mut err, &mut said).unwrap();
+        assert_eq!(said.trim(), why, "{code:?}");
+        assert!(log(&d).contains("end a"), "{code:?}: {}", log(&d));
+        assert_eq!(code.is_some(), d.join("runners.log").exists());
+    }
+}
+
+#[test]
+fn config_load_refuses_a_routed_pattern_that_hits_the_never_routed_list() {
+    let base = "[fleet.acme]\nrepo = \"acme/app\"\nlocal = \"/x/app\"\nintegration = \"staging\"\n";
+    let with = |heavy: &str, extra: &str| {
+        format!("{base}{extra}[fleet.acme.heavy]\nbuild = [{heavy}]\n[fleet.acme.remote.build]\ntag = \"linux\"\n")
+    };
+    assert!(drover::config::Config::parse(&with("\"cargo test*\"", "")).is_ok());
+    for (heavy, extra, hit) in [
+        ("\"cargo test*\", \"npx nx affected*\"", "", "*nx affected*"),
+        ("\"git log*\"", "", "git *"),
+        ("\"*\"", "", "git *"),
+        (
+            "\"cargo test*\"",
+            "remote_deny = [\"cargo test --doc*\"]\n",
+            "cargo test --doc*",
+        ),
+    ] {
+        let e = drover::config::Config::parse(&with(heavy, extra))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("fleet.acme.remote.build") && e.contains(&format!("hits never-routed \"{hit}\"")),
+            "{e}"
+        );
+    }
 }

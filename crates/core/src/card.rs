@@ -200,7 +200,7 @@ pub fn settle_via(
     } else {
         format!("run {id} denied by owner; nothing ran")
     };
-    orchestrator::tell(ctx, cfg, r, thread, &line);
+    crate::thread::route::tell(ctx, cfg, r, thread, &line);
     Ok(line)
 }
 
@@ -239,7 +239,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
     let d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "code": code, "tail": tail});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-done", d))?;
     let line = format!("run {id} approved by owner, ran in {dir}: exit {code}\n```\n{tail}\n```");
-    orchestrator::tell(ctx, cfg, r, thread, &line);
+    crate::thread::route::tell(ctx, cfg, r, thread, &line);
     if code == 124 {
         r.run("kill", &argv(&["-KILL", "--", &format!("-{pid}")])).ok();
     }

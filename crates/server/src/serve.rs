@@ -36,6 +36,7 @@ mod hub;
 mod jobs;
 #[path = "screens_kit.rs"]
 mod kit;
+mod rows;
 #[path = "screens.rs"]
 mod screens;
 pub use screens::local::{Done, Local, Place};
@@ -925,6 +926,9 @@ impl<'a> Server<'a> {
             return Ok(false);
         }
         drop(clients);
+        if req.starts_with("GET ") && path == "/api/v1/rows/stream" {
+            return self.rows_stream(s, &req).map(|()| false);
+        }
         if req.starts_with("GET ") && path.starts_with("/screens/") && path.ends_with("/stream") {
             return self.stream(s, &req, path, query).map(|()| false);
         }
@@ -961,7 +965,7 @@ impl<'a> Server<'a> {
 
     fn tell(&self, ctx: &Ctx, l: &lanes::Lane, fleet: &str, text: &str) {
         let pane = l.pane().unwrap_or_default();
-        match term::reply(&l.on(&self.r), l.harness == "dsh", &l.name, pane, text) {
+        match term::reply(&l.on(&self.r), &l.name, pane, text) {
             Ok(()) => {
                 if let Some(n) = l.issue {
                     crate::drive::kick(ctx, &self.r, fleet, n, "board");

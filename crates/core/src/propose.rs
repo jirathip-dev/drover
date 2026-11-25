@@ -202,7 +202,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         }
         None => line,
     };
-    orchestrator::tell(ctx, cfg, r, thread, &line);
+    crate::thread::route::tell(ctx, cfg, r, thread, &line);
     Ok(line)
 }
 
@@ -242,7 +242,7 @@ pub fn open_rollout(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, 
     let filed = filed
         .and_then(|e| e.str("filed_in"))
         .filter(|t| orchestrator::find(&events, t).is_ok());
-    let to = filed.or_else(|| orchestrator::route(cfg, &events, fleet));
+    let to = filed.or_else(|| crate::thread::route::route(cfg, &events, fleet));
     let d = json!({"to": to, "snippet": snippet});
     emit(
         &ctx.state,
@@ -254,7 +254,7 @@ pub fn open_rollout(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, n): (&str, 
             "#{n} merged with a rollout, not applied yet:\n{snippet}\nDraft its card now: \
              `drover config propose {t} <file> --rollout {n}`"
         );
-        orchestrator::tell(ctx, cfg, r, t, &line);
+        crate::thread::route::tell(ctx, cfg, r, t, &line);
     }
     Ok(())
 }
@@ -298,7 +298,7 @@ impl Rollout {
 
 /// A `gh issue create` an orchestrator thread ran (hook `input`): its flow-back `text` to the threads that handed off to it, and `issue-filed` for the fleet whose repo its URL names.
 pub fn filed(ctx: &Ctx, cfg: &Config, thread: &str, text: &str, input: &Value) -> Result<()> {
-    orchestrator::flow(ctx, cfg, thread, text)?;
+    crate::thread::route::flow(ctx, cfg, thread, text)?;
     let Some((repo, n)) = crate::hook::filed_issue(input) else {
         return Ok(());
     };
@@ -422,7 +422,12 @@ pub fn view(ctx: &Ctx) -> Result<ConfigView> {
             kind: v.type_str().into(),
             secret: v.as_str().and_then(|s| s.strip_prefix("secret:")).map(String::from),
             allowed,
-            doc: docs.get(key).copied().unwrap_or_default().into(),
+            doc: docs
+                .get(key)
+                .copied()
+                .or_else(|| limit_doc(&path))
+                .unwrap_or_default()
+                .into(),
             value: serde_json::to_value(v).unwrap_or_default(),
             path,
         }
@@ -432,6 +437,14 @@ pub fn view(ctx: &Ctx) -> Result<ConfigView> {
         fields: fields.collect(),
         text,
     })
+}
+
+fn limit_doc(path: &str) -> Option<&'static str> {
+    let key = path.strip_prefix("limits.")?;
+    crate::config::LIMIT_DOCS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, doc)| *doc)
 }
 
 fn walk(path: String, v: toml::Value, out: &mut Vec<(String, toml::Value)>) {

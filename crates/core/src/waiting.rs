@@ -8,6 +8,18 @@ use crate::{gh, Ctx};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+/// `drover waiting`'s arguments.
+#[derive(clap::Args)]
+pub struct Args {
+    pub fleet: Option<String>,
+    #[arg(help = "Machine-readable output")]
+    #[arg(long)]
+    pub json: bool,
+    #[arg(help = "Each issue's flow state, condition and table row under its line")]
+    #[arg(long)]
+    pub flow: bool,
+}
+
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Waiting {
@@ -112,6 +124,11 @@ fn this_review<'a>(events: &'a [Event], (f, n): (&'a str, u64)) -> impl Iterator
         .take_while(|e| !(e.kind == "spawn" && crate::events::checks(e)))
 }
 
+fn refusal(e: &Event) -> String {
+    let (code, why) = (e.str("code").unwrap_or("NO_REPRO"), e.str("why").unwrap_or_default());
+    format!("verdict refused {code}: {why}")
+}
+
 fn pickup(events: &[Event], at: (&str, u64)) -> Option<Say> {
     let e = this_review(events, at).find(|e| e.kind == "verdict-pickup-failed")?;
     Some(Say::Drive {
@@ -183,6 +200,14 @@ pub fn turn<'a>(events: &'a [Event], s: &IssueState) -> Option<&'a Event> {
         .rev()
         .filter(|e| e.is("turn-end", &s.fleet, s.issue))
         .find(role)
+}
+
+fn done_working(ctx: &Ctx, cfg: &Config, events: &[Event], session: Option<&Session>, t: &Event) -> bool {
+    let Some(a) = session.filter(|a| a.status() == Some(crate::session::Status::Done)) else {
+        return false;
+    };
+    let since = crate::session::stamp::since(events, &a.name).unwrap_or(t.ts).max(t.ts);
+    t.str("state") == Some("working") && ctx.now >= since + cfg.limits.stall_minutes * 60
 }
 
 fn turned(events: &[Event], t: &Event, lane: &str, now: u64, stall: u64) -> (Who, String) {
@@ -554,8 +579,7 @@ fn waits(
                     .find(|e| e.kind == "repro-refused" && head.is_some_and(|h| e.str("sha") == Some(h.0)));
                 let what = match (&next, refused) {
                     (Some(_), Some(e)) => {
-                        let why = format!("verdict refused NO_REPRO: {}", e.str("why").unwrap_or_default());
-                        return w("drive", &why, s.last_ts, next);
+                        return w("drive", &refusal(e), s.last_ts, next);
                     }
                     (Some(_), None) => pickup(events, (f, n)).unwrap_or(Say::Record("review done".into())),
                     (None, _) => drive("verdict written", "record it"),
@@ -679,7 +703,7 @@ pub fn scan_where(
     let hung = crate::roots::hung_now(events);
     let mine = |st: &crate::events::States| {
         st.values()
-            .filter(|s| cfg.fleet.contains_key(&s.fleet) && keep(s))
+            .filter(|s| cfg.fleet.contains_key(&s.fleet) && !s.settled() && keep(s))
             .cloned()
             .collect()
     };
@@ -722,7 +746,7 @@ pub fn scan_where(
             out.push((s, w));
             continue;
         }
-        if busy(&lane) {
+        if busy(&lane) && !sp.is_some_and(|sp| crate::lanes::closed(mine, sp)) {
             let who = if s.check_lane() == Some(&lane) {
                 "reviewer"
             } else {
@@ -841,6 +865,8 @@ pub fn scan_where(
                 _ => None,
             });
         let waiting_turn = turn(mine, &s);
+        let quiet = |t: &Event| done_working(ctx, cfg, mine, session, t);
+        let ended = ended.or(waiting_turn.filter(|t| idle && quiet(t)).map(|_| "done"));
         if idle && crate::lesson::no_pr(s.build.as_deref()) && settled() {
             let asked = mine
                 .iter()
@@ -857,7 +883,7 @@ pub fn scan_where(
                 _ => LESSON_CLOSE.into(),
             };
         } else if let Some(t) =
-            waiting_turn.filter(|t| idle && (!gone && !unconfirmed || t.str("state") == Some("blocked")))
+            waiting_turn.filter(|t| idle && !quiet(t) && (!gone && !unconfirmed || t.str("state") == Some("blocked")))
         {
             (w.who, w.what) = turned(mine, t, &built, ctx.now, cfg.limits.stall_minutes * 60);
             (w.lane, w.since) = (built, t.ts);
@@ -926,7 +952,10 @@ pub fn scan_where(
         }
         let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
         let spawn = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover spawn "));
-        if spawn && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
+        let refused = spawn
+            .then(|| held(mine, (&s.fleet, s.issue), w.next_cmd.as_deref()))
+            .flatten();
+        if spawn && refused.is_none() && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
             let by = crate::drive::held_by(ctx, cfg, r);
             w.say(&Say::SpawnSlot((!by.is_empty()).then_some(by)));
         }
@@ -936,10 +965,7 @@ pub fn scan_where(
         {
             w.what = why;
         }
-        if let Some(h) = spawn
-            .then(|| held(mine, (&s.fleet, s.issue), w.next_cmd.as_deref()))
-            .flatten()
-        {
+        if let Some(h) = refused {
             w.what = match crate::promise::strip_catch_up(&w.what) {
                 Some(p) => format!("{p}{h}"),
                 None => format!("{} · {h}", w.what),
@@ -1026,7 +1052,8 @@ pub fn guarded(events: &[Event], cfg: &Config) -> Vec<IssueState> {
 
 pub fn held(events: &[Event], (f, n): (&str, u64), cmd: Option<&str>) -> Option<String> {
     let mine = |e: &&Event| e.fleet == f && e.issue == Some(n) && matches!(e.kind.as_str(), "driven" | "spawn");
-    let e = events.iter().rfind(mine)?;
+    let slot = |e: &&Event| e.str("code") == Some("SPAWN_PENDING");
+    let e = events.iter().filter(mine).rfind(|e| !slot(e))?;
     let wait = ["EXIT", "ERROR", "SPAWN_PENDING", "SPAWN_BACKOFF"];
     let code = e.str("code").filter(|c| !wait.contains(c))?;
     let c = e.str("cmd").filter(|c| c.starts_with("drover spawn "))?;
@@ -1061,14 +1088,7 @@ pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
     })
 }
 
-const HOST_WAIT: [&str; 6] = [
-    "HOST_BUSY",
-    "HOST_UPDATING",
-    "DISK_LOW",
-    "DISK_BUDGET",
-    "MEM_LOW",
-    "LOGIN_NEEDED",
-];
+const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "LOGIN_NEEDED"];
 pub const ORPHAN_SECS: u64 = 1800;
 
 /// Since when nothing has driven guarded issue `s`, once that is 30 min: no working lane, no drive action on it (a due step, or a refused one drive retries) and no named wait (an open ask, a hold, a paused fleet, CI after PASS).

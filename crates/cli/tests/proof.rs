@@ -58,6 +58,18 @@ fn a_blocker_without_proof_is_refused_by_name() {
         "{out}"
     );
     assert!(!out.contains("src/x.rs:9"), "the proven finding is not named: {out}");
+    let refused: Vec<Event> = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "verdict-refused")
+        .cloned()
+        .collect();
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    assert_eq!(
+        (refused[0].str("code"), refused[0].str("head")),
+        (Some("NO_PROOF"), Some(&*"a".repeat(40)))
+    );
+    assert!(refused[0].passive, "the fold ignores it");
 }
 
 #[test]

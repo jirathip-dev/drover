@@ -71,14 +71,38 @@ fn pr_diff(ctx: &Ctx, r: &dyn Runner, f: &Fleet, branch: &str, head: &str) -> Re
     match ok(r, "gh", &["pr", "diff", branch, "-R", &f.repo]) {
         Err(e) if format!("{e:#}").contains("too_large") => {
             let (dir, range) = (f.local_path(), format!("origin/{}...{head}", f.integration));
-            crate::clone::fetch(ctx, r, &dir, &["-q", "origin"])?;
+            crate::clone::fetch_branches(ctx, r, &dir)?;
             git(r, &dir, &["diff", &range])
         }
         d => d,
     }
 }
 
-pub fn verdict(
+/// The refusals of a verdict file itself: `drover verdict` logs each as a passive `verdict-refused`.
+pub const VERDICT_REFUSALS: [&str; 5] = ["NO_PROOF", "NO_REPRO", "NO_BASELINE", "PAPERWORK", "TESTS_CHANGED"];
+
+/// `drover verdict`: the verdict recorded, or its refusal; a refusal of the file itself also logs `verdict-refused`.
+pub fn record(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, issue): (&str, u64),
+    pass: bool,
+    sha: &str,
+    file: &str,
+) -> Result<()> {
+    let res = verdict(ctx, cfg, r, out, (fleet, issue), pass, sha, file);
+    let refused = res.as_ref().err().and_then(|e| e.downcast_ref::<Refusal>());
+    if let Some(x) = refused.filter(|x| VERDICT_REFUSALS.contains(&x.code)) {
+        let d = json!({"code": x.code, "head": sha.to_ascii_lowercase(), "why": x.msg});
+        let e = Event::new(ctx.now, fleet, Some(issue), "verdict-refused", d).passive();
+        crate::events::append(&ctx.state, &e)?;
+    }
+    res
+}
+
+fn verdict(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
@@ -154,7 +178,7 @@ pub fn verdict(
                     "the PR's first commit records no baseline (`baseline:` command and numbers)",
                 );
             }
-            if !body.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("perf:")) {
+            if !body.lines().any(|l| block_key(l).starts_with("perf:")) {
                 return refused("NO_BASELINE", "no `Perf:` block: before/after by the same command, the improvement stated, the benchmark checklist");
             }
         }
@@ -545,11 +569,14 @@ fn tests_changed(diff: &str) -> Option<String> {
     (minus != plus).then(|| files.join(", "))
 }
 
+fn block_key(l: &str) -> String {
+    l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase()
+}
+
 /// A verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next heading outside a fence.
 pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
-    let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
     let ls: Vec<&str> = body.lines().collect();
-    let at = ls.iter().position(|l| key(l).starts_with("repro:"))?;
+    let at = ls.iter().position(|l| block_key(l).starts_with("repro:"))?;
     let mut fence = false;
     let block = (ls.iter().skip(at + 1).copied())
         .take_while(|l| {
@@ -559,7 +586,7 @@ pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
             !end
         })
         .collect();
-    Some((key(ls.get(at)?).split_off(6), block))
+    Some((block_key(ls.get(at)?).split_off(6), block))
 }
 
 fn repro_section(pr_body: &str) -> Option<String> {
@@ -714,7 +741,7 @@ fn premerge(
     head: &str,
 ) -> Result<Result<Option<u64>, Refusal>> {
     let f = cfg.fleet(fleet)?;
-    let checks = premerge_checks(ctx, f);
+    let checks = premerge_checks(ctx, f, &f.local_path());
     let rules = std::fs::read_to_string(crate::repo_path(&f.local_path().join(".drover/rules.md"))).unwrap_or_default();
     if checks.is_empty() && crate::lesson::checks(&rules).iter().all(|c| c.active) {
         return Ok(Ok(None));
@@ -724,7 +751,7 @@ fn premerge(
         format!("origin/{}", f.integration),
     );
     let (dir, wts) = (f.local_path(), wt.to_string_lossy());
-    let tip = || crate::clone::fetch(ctx, r, &dir, &["-q", "origin"]).and_then(|_| git(r, &dir, &["rev-parse", &into]));
+    let tip = || crate::clone::fetch_branches(ctx, r, &dir).and_then(|_| git(r, &dir, &["rev-parse", &into]));
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     for _ in 0..2 {
         let base = tip()?;
@@ -732,6 +759,7 @@ fn premerge(
         tree(&["add", "-f", "--detach", &wts, &base])?;
         let clean = git(r, &wt, &["merge", "--no-ff", "--no-edit", head]).is_ok();
         let t = crate::clock::instant();
+        let checks = premerge_checks(ctx, f, &wt);
         let fail = clean.then(|| run_checks(r, &wt, &base, &checks)).flatten();
         if clean && fail.is_none() {
             crate::lesson::record(ctx, r, &wt, (fleet, issue))?;
@@ -755,9 +783,10 @@ fn premerge(
     )))
 }
 
-pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet) -> Vec<Check> {
+pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet, tree: &Path) -> Vec<Check> {
     let has = f.local_path().join("ci/cap.toml").exists();
-    let cap = has.then(|| Premerge::Cmd(format!("{} cap-check --config ci/cap.toml", ctx.exe)));
+    let own = || format!("{} cap-check --config ci/cap.toml", ctx.exe);
+    let cap = has.then(|| Premerge::Cmd(crate::gatekeeper::cap(tree).unwrap_or_else(own)));
     let check = |p| match p {
         Premerge::Cmd(run) => Check {
             name: run.clone(),
