@@ -294,7 +294,38 @@ pub fn parse(files: &[(&str, &str)]) -> Result<Table> {
 /// The embedded table, loaded once.
 pub fn table() -> Result<&'static Table> {
     static T: OnceLock<Result<Table, String>> = OnceLock::new();
-    T.get_or_init(|| parse(FILES).map_err(|e| format!("{e:#}")))
+    let rows: Vec<(&str, &str)> = FILES.iter().copied().filter(|f| f.0.contains('/')).collect();
+    T.get_or_init(|| parse(&rows).map_err(|e| format!("{e:#}")))
+        .as_ref()
+        .map_err(|e| anyhow!("{e}"))
+}
+
+/// `crates/core/flow/outcomes.toml`: the refusal codes that queue, hold or end a row; any other code fails a try.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Outcomes {
+    pub queued: Vec<String>,
+    pub held: Vec<String>,
+    #[serde(rename = "final")]
+    pub ends: Vec<String>,
+}
+
+impl Outcomes {
+    /// `code`'s class: `queued`, `held`, `final` or `failed`.
+    pub fn class(&self, code: &str) -> &'static str {
+        let has = |v: &[String]| v.iter().any(|c| c == code);
+        [("queued", &self.queued), ("held", &self.held), ("final", &self.ends)]
+            .into_iter()
+            .find(|x| has(x.1))
+            .map_or("failed", |x| x.0)
+    }
+}
+
+/// The embedded `outcomes.toml`, loaded once.
+pub fn outcomes() -> Result<&'static Outcomes> {
+    static O: OnceLock<Result<Outcomes, String>> = OnceLock::new();
+    let text = FILES.iter().find(|f| f.0 == "outcomes.toml").map_or("", |f| f.1);
+    O.get_or_init(|| toml::from_str(text).map_err(|e| format!("crates/core/flow/outcomes.toml: {e}")))
         .as_ref()
         .map_err(|e| anyhow!("{e}"))
 }

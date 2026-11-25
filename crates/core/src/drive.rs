@@ -13,6 +13,8 @@ use std::path::Path;
 
 pub(crate) mod job;
 mod kicks;
+mod pass;
+pub use pass::Pass;
 mod pickup;
 mod remote;
 mod undriven;
@@ -860,7 +862,7 @@ fn one(
         res = res.or(failed(undriven::cards(ctx, cfg, out, name), out, name, "spawns"));
     }
     laps.lap("spawns");
-    let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
+    let acts = pass::shadow(ctx, cfg, out, name)?;
     if KICK.get().is_none() {
         std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string()).ok();
     }
@@ -1130,6 +1132,37 @@ fn turn_prompt(what: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
+fn design_handoffs<'a>(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    agents: &[Session],
+    states: impl Iterator<Item = &'a IssueState>,
+) -> Result<BTreeMap<u64, String>> {
+    let mut unread = BTreeMap::new();
+    for s in states.filter(|s| s.state == "design") {
+        if let Some(why) = crate::design::handoff(ctx, cfg, r, out, agents, s)? {
+            writeln!(
+                out,
+                "{} #{} design-review: worktree unread, held: {why}",
+                s.fleet, s.issue
+            )?;
+            unread.insert(s.issue, why);
+        }
+    }
+    Ok(unread)
+}
+
+fn hold_unread(waits: &mut [(IssueState, Waiting)], unread: &BTreeMap<u64, String>) {
+    for (_, w) in waits.iter_mut().filter(|(s, _)| s.state == "design") {
+        if let Some(why) = unread.get(&w.issue) {
+            (w.who, w.next_cmd, w.promise) = ("none", None, None);
+            w.what = format!("design round unread, no respawn this pass: {why}");
+        }
+    }
+}
+
 fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -1191,25 +1224,23 @@ fn pass(
             emit(&ctx.state, cfg, e)?;
         }
     }
-    for s in st.values().filter(|s| s.fleet == fleet && s.state == "design") {
-        crate::design::handoff(ctx, cfg, r, out, &agents, s)?;
-    }
+    let unread = design_handoffs(ctx, cfg, r, out, &agents, st.values().filter(|s| s.fleet == fleet))?;
     crate::stall::refused(ctx, cfg, r, out, &working(&ctx.state)?, fleet)?;
     silent(ctx, cfg, r, out, &agents, fleet)?;
     if let Err(e) = crate::hotspots::sync(ctx, cfg, r, fleet) {
         writeln!(out, "{fleet} hotspots: {e:#}")?;
     }
     let events = working(&ctx.state)?;
-    let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
-    waits.retain(one);
+    pass::stash(ctx, cfg, fleet, &mut waits);
     let promised = crate::promise::pass(ctx, cfg, fleet, &events, &waits);
     failed(promised, out, fleet, "promises");
     failed(external(ctx, cfg, out, fleet), out, fleet, "outside changes");
     if handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, seen, &working(&ctx.state)?, &agents, false, Some(fleet));
-        waits.retain(one);
+        waits.retain(|(s, _)| KICK.get().is_none_or(|k| k == s.issue));
     }
+    hold_unread(&mut waits, &unread);
     let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();
     let rev = |w: &Waiting| {
         w.next_cmd

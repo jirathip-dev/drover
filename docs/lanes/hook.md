@@ -66,7 +66,12 @@ are the command's; a remote run holds no slot here. On runners' exit 75, 76, 64 
 `drover heavy` prints `runners: exit 75, running here` and runs the command here in a heavy slot as above. Never
 routed, whatever the patterns: `git`, `gh`, `drover`, `nx affected`, `--changed`, `merge-base`, `origin/`, code
 signing, `--release` and `cargo install`, containers, and lines reading stdin (`<`) or `.env`
-(`heavy::NEVER_ROUTED`); `remote_deny = ["…"]` in `[fleet.<n>]` adds more. Config load refuses a routed kind whose
+(`heavy::NEVER_ROUTED`); `remote_deny = ["…"]` in `[fleet.<n>]` adds more. A line mixing a routed kind's commands with
+never-routed ones (#1748) sends only those commands, each with its own redirects kept here, and runs the rest here
+in order, so its output and exit code are the line's. A line with a pipe into or out of such a command, a subshell,
+a here-doc, `<`, `&` or `.env` stays here in a slot and prints `heavy: <why> in the line, running here`. Text in
+quotes, comments and here-doc bodies never makes a command a heavy kind. A fleet with any heavy kind or route
+gets the `cargo` kind (`heavy::CARGO`: build, check, clippy, test, nextest, run, xtask) unless it sets its own. Config load refuses a routed kind whose
 pattern overlaps that list, naming both. `drover clean` runs `runners forget --dir <worktree>` for each worktree it
 removes; a failure is printed and kept in the `clean` event's `forget`, and the clean goes on. `drover top` marks a
 `runners run` process `[remote <tag>]`.

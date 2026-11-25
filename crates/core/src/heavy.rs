@@ -48,33 +48,232 @@ impl Route {
 /// Commands never sent to a build machine, whatever a fleet's patterns: history readers, `gh`, `drover`, signing, release builds, containers, stdin and `.env` readers.
 pub const NEVER_ROUTED: &str = "git *,gh *,drover *,*nx affected*,*--changed*,*merge-base*,*origin/*,*codesign*,*notarytool*,*--release*,cargo install*,docker *,podman *,colima *,orb *,*supabase start*,*<*,*.env*";
 
-fn segments(cmd: &str) -> Vec<String> {
-    (cmd.split(['\n', ';', '|', '&', '(', ')']))
-        .map(|s| {
-            let w: Vec<&str> = s.split_whitespace().collect();
-            let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
-            at.and_then(|i| w.get(i..)).map_or(String::new(), |t| t.join(" "))
-        })
-        .collect()
+/// The `cargo` kind of a fleet with heavy kinds or routes that sets no `cargo` kind of its own.
+pub const CARGO: &str = "cargo build*,cargo check*,cargo clippy*,cargo test*,cargo nextest*,cargo run*,cargo xtask*";
+
+#[derive(Default)]
+struct Part {
+    words: Vec<String>,
+    plain: Vec<String>,
+    redirs: Vec<String>,
+    op: String,
 }
 
-/// The kind whose `[remote.<kind>]` route a fleet's gate checks, done checks and `drover hold` take.
-pub const GATE_KIND: &str = "cargo";
+impl Part {
+    fn plain(&self) -> String {
+        let w: Vec<&String> = self.plain.iter().filter(|w| !w.is_empty()).collect();
+        let at = w.iter().position(|w| !w.contains('=') || w.starts_with('-'));
+        at.and_then(|i| w.get(i..)).map_or(String::new(), |t| {
+            t.iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" ")
+        })
+    }
 
-const GATES: [&str; 2] = ["./.gatekeeper/run check*", "just check*"];
+    fn text(&self) -> String {
+        self.words
+            .iter()
+            .chain(&self.redirs)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+#[derive(Default)]
+struct Line {
+    parts: Vec<Part>,
+    unsplit: Option<&'static str>,
+    part: Part,
+    w: String,
+    m: String,
+    word: bool,
+    to: Option<String>,
+}
+
+impl Line {
+    fn end_word(&mut self) {
+        if !self.word {
+            return;
+        }
+        self.word = false;
+        let (w, m) = (std::mem::take(&mut self.w), std::mem::take(&mut self.m));
+        if let Some(op) = self.to.take() {
+            self.part.redirs.push(op + &w);
+        } else {
+            self.part.words.push(w);
+            self.part.plain.push(m);
+        }
+    }
+
+    fn end_part(&mut self, op: &str) {
+        self.end_word();
+        self.part.redirs.extend(self.to.take());
+        let mut p = std::mem::take(&mut self.part);
+        p.op = op.into();
+        self.parts.push(p);
+    }
+
+    fn why(&mut self, why: &'static str) {
+        self.unsplit.get_or_insert(why);
+    }
+
+    fn push(&mut self, c: char, plain: bool) {
+        self.word = true;
+        self.w.push(c);
+        if plain {
+            self.m.push(c);
+        }
+    }
+
+    fn parse(cmd: &str) -> Line {
+        let c: Vec<char> = cmd.chars().collect();
+        let at = |i: usize| c.get(i).copied();
+        let mut l = Line::default();
+        let mut docs: Vec<String> = Vec::new();
+        let mut i = 0;
+        if cmd.contains(".env") {
+            l.why(".env");
+        }
+        while let Some(ch) = at(i) {
+            let n = at(i + 1);
+            i += 1;
+            match ch {
+                '\\' => {
+                    l.push(ch, false);
+                    if let Some(e) = n {
+                        l.push(e, true);
+                        i += 1;
+                    }
+                }
+                '\'' | '"' => {
+                    l.push(ch, false);
+                    while let Some(q) = at(i) {
+                        i += 1;
+                        l.push(q, false);
+                        if q == ch {
+                            break;
+                        }
+                        if ch == '"' && q == '\\' {
+                            l.push(at(i).unwrap_or_default(), false);
+                            i += 1;
+                        } else if ch == '"' && (q == '`' || (q == '$' && at(i) == Some('('))) {
+                            l.why("a subshell");
+                        }
+                    }
+                }
+                '`' => {
+                    l.why("a subshell");
+                    l.push(ch, true);
+                }
+                '$' if n == Some('(') => {
+                    l.why("a subshell");
+                    l.push(ch, true);
+                }
+                '#' if !l.word => {
+                    while at(i).is_some_and(|c| c != '\n') {
+                        i += 1;
+                    }
+                }
+                '(' | ')' => {
+                    l.why("a subshell");
+                    l.end_part(";");
+                }
+                '<' if n == Some('<') && at(i + 1) != Some('<') => {
+                    l.why("a here-doc");
+                    i += 1;
+                    i += usize::from(at(i) == Some('-'));
+                    while at(i).is_some_and(|c| c == ' ' || c == '\t') {
+                        i += 1;
+                    }
+                    let mut d = String::new();
+                    while let Some(q) = at(i).filter(|q| !q.is_whitespace() && !";|&<>()".contains(*q)) {
+                        if !"'\"\\".contains(q) {
+                            d.push(q);
+                        }
+                        i += 1;
+                    }
+                    docs.push(d);
+                }
+                '<' => l.why("stdin (<)"),
+                '>' => {
+                    let fd = if l.word && l.to.is_none() && l.w.chars().all(|c| c.is_ascii_digit()) {
+                        l.word = false;
+                        l.m.clear();
+                        std::mem::take(&mut l.w)
+                    } else {
+                        l.end_word();
+                        String::new()
+                    };
+                    let mut op = fd + ">";
+                    if let Some(e) = n.filter(|e| matches!(e, '>' | '&' | '|')) {
+                        op.push(e);
+                        i += 1;
+                    }
+                    l.to = Some(op);
+                }
+                '&' if n == Some('>') => {
+                    l.end_word();
+                    i += 1;
+                    let mut op = String::from("&>");
+                    if at(i) == Some('>') {
+                        op.push('>');
+                        i += 1;
+                    }
+                    l.to = Some(op);
+                }
+                '&' | '|' if n == Some(ch) => {
+                    i += 1;
+                    l.end_part(&format!("{ch}{ch}"));
+                }
+                '&' => {
+                    l.why("a background job (&)");
+                    l.end_part("&");
+                }
+                '|' => {
+                    i += usize::from(n == Some('&'));
+                    l.end_part("|");
+                }
+                ';' => l.end_part(";"),
+                '\n' => {
+                    l.end_part("\n");
+                    for d in docs.drain(..) {
+                        while i < c.len() {
+                            let row: String = c.iter().skip(i).take_while(|&&c| c != '\n').collect();
+                            i += row.chars().count() + 1;
+                            if row.trim() == d {
+                                break;
+                            }
+                        }
+                    }
+                }
+                c if c.is_whitespace() => l.end_word(),
+                c => l.push(c, true),
+            }
+        }
+        l.end_part("");
+        l
+    }
+}
 
 /// Whether shell pattern `p` (`*` any text) matches `s`.
 pub fn hits(p: &str, s: &str) -> bool {
     crate::config::glob(p.replace('*', "**").as_bytes(), s.as_bytes())
 }
 
+fn matches(ps: &[String], p: &Part) -> bool {
+    let s = p.plain();
+    ps.iter().any(|q| hits(q, &s))
+}
+
+/// The kind whose `[remote.<kind>]` route a fleet's gate checks, done checks and `drover hold` take.
+pub const GATE_KIND: &str = "cargo";
+
 impl Heavy {
     /// Fleet `f`'s kinds, routes and never-routed list under host `h`'s slot limits; with a `cargo` route its gate checks join that kind.
     pub fn of(f: &crate::config::Fleet, h: Option<&crate::config::HostCfg>) -> Heavy {
-        let mut kinds = f.heavy.clone();
+        let mut kinds = f.heavy_kinds();
         if f.remote.contains_key(GATE_KIND) {
             let gates = kinds.entry(GATE_KIND.into()).or_default();
-            gates.extend(GATES.map(String::from));
+            gates.extend([format!("{}*", crate::gatekeeper::CHECK), "just check*".into()]);
         }
         Heavy {
             kinds,
@@ -86,34 +285,35 @@ impl Heavy {
         }
     }
 
-    /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words skipped).
-    pub fn kind(&self, cmd: &str) -> Option<&str> {
-        let segs = segments(cmd);
-        let hit = |p: &String| segs.iter().any(|s| hits(p, s));
-        self.kinds
-            .iter()
-            .find(|(_, ps)| ps.iter().any(hit))
-            .map(|(k, _)| k.as_str())
+    /// Whether `cmd` goes whole to the `cargo` route's build machines: it has a `cargo` command and no never-routed one.
+    pub fn gated(&self, cmd: &str) -> bool {
+        let line = Line::parse(cmd);
+        let ps = self.kinds.get(GATE_KIND).map_or(&[][..], Vec::as_slice);
+        let never = |p: &Part| (self.never.iter()).any(|n| hits(n, &p.plain()) || hits(n, &p.text()));
+        self.routes.contains_key(GATE_KIND)
+            && line.unsplit.is_none()
+            && line.parts.iter().any(|p| matches(ps, p))
+            && !line.parts.iter().any(never)
     }
 
-    /// `kind`'s route for `cmd`, unless the line or one of its commands is never routed.
-    pub fn route(&self, kind: &str, cmd: &str) -> Option<&Route> {
-        let mut segs = segments(cmd);
-        segs.push(cmd.trim().into());
-        let never = |n: &String| segs.iter().any(|s| hits(n, s));
-        self.routes.get(kind).filter(|_| !self.never.iter().any(never))
-    }
-
-    /// Gate check `cmd` as a shell line: under `exe heavy` on the `cargo` route's build machines from worktree `dir` when it is routed, else unchanged.
+    /// Gate check `cmd` as a shell line: under `exe heavy` on the `cargo` route's build machines from worktree `dir` when `gated`, else unchanged.
     pub fn gate(&self, exe: &str, cmd: &str, dir: &str) -> String {
-        match self.route(GATE_KIND, cmd) {
-            Some(_) => self.wrap(exe, GATE_KIND, cmd, Some(dir)),
-            None => cmd.into(),
+        match self.gated(cmd) {
+            true => self.wrap(exe, GATE_KIND, cmd, Some(dir)),
+            false => cmd.into(),
         }
     }
 
-    /// `cmd` as a shell line that runs it under `exe heavy`, holding a `kind` slot; with a route and the lane's worktree `dir`, on a build machine first.
-    pub fn wrap(&self, exe: &str, kind: &str, cmd: &str, dir: Option<&str>) -> String {
+    /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words, quoted text, comments and here-doc bodies skipped).
+    pub fn kind(&self, cmd: &str) -> Option<&str> {
+        let line = Line::parse(cmd);
+        self.kinds
+            .iter()
+            .find(|(_, ps)| line.parts.iter().any(|p| matches(ps, p)))
+            .map(|(k, _)| k.as_str())
+    }
+
+    fn slot(&self, exe: &str, kind: &str, on: Option<(&Route, &str)>, cmd: &str) -> String {
         let mut a = [
             exe,
             "heavy",
@@ -128,13 +328,60 @@ impl Heavy {
         if let Some(m) = self.kind_max.get(kind) {
             a.extend(["--kind-max".into(), m.to_string()]);
         }
-        if let (Some(r), Some(dir)) = (self.route(kind, cmd), dir) {
+        if let Some((r, dir)) = on {
             a.extend(["--remote".into(), r.tag.clone(), "--dir".into(), dir.into()]);
             a.extend(r.flags("--remote-wait"));
         }
         a.extend(["--".into(), cmd.into()]);
         let q = |w: &String| format!("'{}'", w.replace('\'', r"'\''"));
         a.iter().map(q).collect::<Vec<_>>().join(" ")
+    }
+
+    /// `cmd` as a shell line under `exe heavy` in a `kind` slot; with a route and the lane's worktree `dir`, its `kind` commands on a build machine first and, in a line mixing them with never-routed ones, only those.
+    pub fn wrap(&self, exe: &str, kind: &str, cmd: &str, dir: Option<&str>) -> String {
+        let here = self.slot(exe, kind, None, cmd);
+        let (Some(r), Some(dir)) = (self.routes.get(kind), dir) else {
+            return here;
+        };
+        let line = Line::parse(cmd);
+        let ps = self.kinds.get(kind).map_or(&[][..], Vec::as_slice);
+        let never = |p: &Part| (self.never.iter()).any(|n| hits(n, &p.plain()) || hits(n, &p.text()));
+        let routed: Vec<bool> = line.parts.iter().map(|p| matches(ps, p) && !never(p)).collect();
+        let (mut prev, mut piped) = ("", false);
+        for (p, r) in line.parts.iter().zip(&routed) {
+            piped |= *r && (p.op == "|" || prev == "|");
+            prev = &p.op;
+        }
+        if !routed.contains(&true) {
+            return here;
+        }
+        if let Some(why) = line.unsplit.or(piped.then_some("a pipe")) {
+            return format!("echo 'heavy: {why} in the line, running here' >&2; {here}");
+        }
+        if !line.parts.iter().any(never) {
+            return self.slot(exe, kind, Some((r, dir)), cmd);
+        }
+        let part = |(p, on): (&Part, &bool)| {
+            let t = match on {
+                true => [self.slot(exe, kind, Some((r, dir)), &p.words.join(" "))]
+                    .into_iter()
+                    .chain(p.redirs.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                false => p.text(),
+            };
+            match p.op.as_str() {
+                "" | "\n" => format!("{t}{}", p.op),
+                op => format!("{t} {op} "),
+            }
+        };
+        line.parts
+            .iter()
+            .zip(&routed)
+            .map(part)
+            .collect::<String>()
+            .trim_end()
+            .into()
     }
 }
 
@@ -333,7 +580,7 @@ pub fn run(
     code
 }
 
-/// `drover hold`: run `cmd` on its fleet's (the lane's, else the repo's) `cargo` route's build machines when it has one, else as holder `ci:<repo>` once the main host passes spawn admission and a heavy slot is free; 75 past `wait` minutes.
+/// `drover hold`: run `cmd` on its fleet's (the lane's, else the repo's) `cargo` route's build machines when `gated`, else as holder `ci:<repo>` once the main host passes spawn admission and a heavy slot is free; 75 past `wait` minutes.
 pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[String]) -> Result<i32> {
     let (prog, args) = cmd.split_first().context("hold: no command")?;
     let cfg = crate::config::Config::load(&ctx.config)?;
@@ -354,10 +601,10 @@ pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[S
     let lane = crate::config::env("DROVER_LANE").and_then(|l| Some(l.split(':').next()?.to_string()));
     let fleet = (lane.and_then(|l| cfg.fleet.get(&l)))
         .or_else(|| (cfg.fleet.values()).find(|f| f.repo.rsplit('/').next() == Some(repo.as_str())));
-    let plain = cmd.join(" ");
-    let route = fleet.and_then(|f| Heavy::of(f, host).route(GATE_KIND, &plain).cloned());
+    let heavy = fleet.map(|f| Heavy::of(f, host)).filter(|h| h.gated(&cmd.join(" ")));
+    let route = heavy.as_ref().and_then(|h| h.routes.get(GATE_KIND));
     let here = std::env::current_dir()?;
-    if let Some(code) = route.and_then(|rt| remote(r, &rt, &here.to_string_lossy(), &line)) {
+    if let Some(code) = route.and_then(|rt| remote(r, rt, &here.to_string_lossy(), &line)) {
         return Ok(code);
     }
     let kind_max = host.and_then(|h| h.heavy_kind_max.get("ci").copied());

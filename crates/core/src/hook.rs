@@ -70,7 +70,7 @@ impl Rules {
         let mut branches: Vec<String> = ["main", "master", "staging"].map(String::from).to_vec();
         branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
         let family = f.map(|f| f.family(role));
-        let heavy = (f.filter(|f| !f.heavy.is_empty())).map(|f| Heavy::of(f, cfg.hosts.get(host)));
+        let heavy = f.map(|f| Heavy::of(f, cfg.hosts.get(host))).filter(|h| !h.kinds.is_empty());
         Rules {
             heavy,
             branches,
@@ -1123,7 +1123,7 @@ pub fn heavy(input: &Value, h: &Heavy, exe: &str, git: &dyn Fn(&str, &[&str]) ->
     let mut ti = tool_input(input).clone();
     let cmd = ti.at("command").as_str()?;
     let kind = h.kind(cmd)?;
-    let cwd = input.at("cwd").as_str().filter(|_| h.route(kind, cmd).is_some());
+    let cwd = input.at("cwd").as_str().filter(|_| h.routes.contains_key(kind));
     let dir = cwd
         .and_then(|d| git(d, &["rev-parse", "--show-toplevel"]))
         .filter(|t| !t.is_empty());
