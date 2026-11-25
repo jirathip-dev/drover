@@ -77,7 +77,9 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - Design reviews and one more round from the owner's typed words (#828); a typed `#N approve` approves (#1080).
 - SLO promises a known hold supersedes are void, not missed (#1093); one log read per pass (#832).
 - Banned APIs (unwrap, panics, indexing, `as` casts) fail CI (#809).
-- `drover compact`: a one-time fresh start of the history, with an owner card and undo (#1121).
+- Compact: a one-time fresh start of the history, with an owner card and undo (#1121), now the standalone
+  [`compact`](https://github.com/jirathip-dev/compact) binary; `drover compact <fleet> <act>` runs it on the fleet
+  and logs its records (#1574).
 
 ## Next
 
@@ -95,7 +97,6 @@ The open queue, by area.
   sleep ([#951](https://github.com/jirathip-dev/herdsman/issues/951)).
 - A stalled lane restarts, a long load wait moves host ([#1216](https://github.com/jirathip-dev/herdsman/issues/1216)); remote scratch is swept ([#1215](https://github.com/jirathip-dev/herdsman/issues/1215)).
 - Proxy lanes' sign-out advice ([#1212](https://github.com/jirathip-dev/herdsman/issues/1212)); a `Repro: verify` PASS on a fleet with no verify role ([#1224](https://github.com/jirathip-dev/herdsman/issues/1224)).
-- `drover compact` as a kept feature ([#1202](https://github.com/jirathip-dev/herdsman/issues/1202)).
 
 **Hosts**
 - Remote drover from a prebuilt Linux binary ([#1165](https://github.com/jirathip-dev/herdsman/issues/1165)).
