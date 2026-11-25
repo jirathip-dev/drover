@@ -298,9 +298,10 @@ impl Heavy {
 
     /// Gate check `cmd` as a shell line: under `exe heavy` on the `cargo` route's build machines from worktree `dir` when `gated`, else unchanged.
     pub fn gate(&self, exe: &str, cmd: &str, dir: &str) -> String {
-        match self.gated(cmd) {
-            true => self.wrap(exe, GATE_KIND, cmd, Some(dir)),
-            false => cmd.into(),
+        if self.gated(cmd) {
+            self.wrap(exe, GATE_KIND, cmd, Some(dir))
+        } else {
+            cmd.into()
         }
     }
 
@@ -598,8 +599,8 @@ pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[S
         })
         .unwrap_or_default();
     let line = crate::hosts::quote(prog, args);
-    let lane = crate::config::env("DROVER_LANE").and_then(|l| Some(l.split(':').next()?.to_string()));
-    let fleet = (lane.and_then(|l| cfg.fleet.get(&l)))
+    let of_lane = crate::config::env("DROVER_LANE").and_then(|l| Some(l.split(':').next()?.to_string()));
+    let fleet = (of_lane.and_then(|l| cfg.fleet.get(&l)))
         .or_else(|| (cfg.fleet.values()).find(|f| f.repo.rsplit('/').next() == Some(repo.as_str())));
     let heavy = fleet.map(|f| Heavy::of(f, host)).filter(|h| h.gated(&cmd.join(" ")));
     let route = heavy.as_ref().and_then(|h| h.routes.get(GATE_KIND));
