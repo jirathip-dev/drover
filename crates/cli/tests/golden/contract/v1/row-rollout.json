@@ -1,0 +1,31 @@
+[
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-15-t",
+          "markdown": "sendmeter #12 rollout-open",
+          "type": "text"
+        }
+      ],
+      "id": "m-15",
+      "kind": "sys",
+      "type": "card"
+    },
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": 12,
+    "key": "rollout-sendmeter-12",
+    "kind": "rollout",
+    "open": true,
+    "prompt": null,
+    "push": null,
+    "seq": 15,
+    "text": "sendmeter #12 rollout-open",
+    "to": {
+      "id": "t1",
+      "k": "thread"
+    },
+    "ts": 999014
+  }
+]

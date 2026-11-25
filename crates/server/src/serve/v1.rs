@@ -68,6 +68,12 @@ impl Server<'_> {
         let paired_op = |op: &str| PAIRED_OPS.contains(&op) || LANE_OPS.contains(&op) || V1_PAIRED.contains(&op);
         match (method, p.strip_prefix("/api/v1/")) {
             ("POST", _) if self.addr.is_none() => reply("405 Method Not Allowed", "READ_ONLY", "GET only"),
+            ("GET", Some(x))
+                if super::rows::is(x) && (Self::plugin(ctx, head) || paired && self.allowed(ctx, head)) =>
+            {
+                out("200 OK", &super::rows::get(ctx, x, &f))
+            }
+            ("GET", Some(x)) if super::rows::is(x) => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
             _ if !self.allowed(ctx, head) => reply("403 Forbidden", "FORBIDDEN", "foreign Host or Origin"),
             (_, Some(x))
                 if busy(auth)

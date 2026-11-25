@@ -1,0 +1,16 @@
+[].block: object
+[].fleet: string
+[].handoff: null
+[].issue: null
+[].key: string
+[].kind = "said"
+[].open: boolean
+[].prompt: string
+[].push.body: string
+[].push.tag: string
+[].push.title: string
+[].seq: number
+[].text: string
+[].to.id: string
+[].to.k = "thread"
+[].ts: number
