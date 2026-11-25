@@ -933,8 +933,10 @@ fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         let Some((at, &(ix, nh))) = mine.iter().enumerate().rfind(|(_, (_, e))| e.kind == "needs-human") else {
             continue;
         };
-        if crate::lesson::no_pr(s.build.as_deref()) && nh.str("code") == Some("LANE_ENDS") {
-            crate::lesson::idle_done(ctx, cfg, r, out, (&s.fleet, s.issue), s.build.as_deref())?;
+        if let Some(line) =
+            crate::jobs::empty(cfg, &events, &s.fleet, s.issue).filter(|_| nh.str("code") == Some("LANE_ENDS"))
+        {
+            crate::jobs::close(ctx, cfg, r, out, (&s.fleet, s.issue), line)?;
             continue;
         }
         let from = (mine.iter().take(at)).rposition(|(_, e)| reset.contains(&e.kind.as_str()));
@@ -1292,13 +1294,13 @@ fn pass(
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if job::planned(ctx, cfg, r, out, (s, w))? {
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT {
-            let p = crate::lesson::prompt(fleet, s.issue, s.build.as_deref());
+            let p = crate::jobs::prompt(cfg, &events, (fleet, s.issue));
             let Some(sent) = tell(r, &events, &w.lane, &p) else {
                 continue;
             };
             writeln!(
                 out,
-                "{fleet} #{n} lesson lane prompted: {}",
+                "{fleet} #{n} job lane prompted: {}",
                 if sent { "sent" } else { "not sent" }
             )?;
             let d = json!({"agent": w.lane, "sent": sent});
@@ -1329,8 +1331,10 @@ fn pass(
                 cfg,
                 Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
             )?;
-        } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE {
-            crate::lesson::idle_done(ctx, cfg, r, out, (fleet, s.issue), s.build.as_deref())?;
+        } else if let Some(line) = crate::jobs::empty(cfg, &events, fleet, s.issue)
+            .filter(|_| w.who == "drive" && w.what == waiting::LESSON_CLOSE)
+        {
+            crate::jobs::close(ctx, cfg, r, out, (fleet, s.issue), line)?;
         } else if pickup::asleep(ctx, cfg, r, out, f, (&events, &agents), (s, w))?
             || pickup::stuck(ctx, cfg, out, f, (&events, &agents), (s, w))?
         {
@@ -1968,12 +1972,7 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         let design = n.parse().ok().and_then(|n| queue::wants_design(&events, fleet, n));
         let again = n.parse().is_ok_and(|n| crate::pending::requeued(&events, fleet, n));
         let f = cfg.fleet(fleet)?;
-        let own = n.parse().ok().and_then(|n| {
-            let sp = crate::events::of_issue(&events, fleet, n)
-                .into_iter()
-                .rfind(|e| e.kind == "spawn")?;
-            sp.str("role").filter(|r| matches!(*r, "lesson" | "triage" | "deps"))
-        });
+        let own = n.parse().ok().and_then(|n| crate::jobs::role(&events, fleet, n));
         let c = [
             "spawn",
             fleet,

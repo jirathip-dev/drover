@@ -135,7 +135,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
     let date = format!("{}-{m:02}-{dd:02}", crate::access::civil_year(day));
     for (target, why) in &misses {
         let title = format!("soak: {fleet} {target} target missed {date}");
-        if crate::deps::titled(cfg, r, fleet, ("all", &title, true))?.is_some() {
+        if crate::gh::titled(cfg, r, fleet, &title)?.is_some() {
             continue;
         }
         let body = format!("The nightly soak missed its `{target}` target: {why}.\n\n```json\n{d:#}\n```\n");

@@ -363,19 +363,17 @@ enum Cmd {
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
     },
-    #[command(
-        about = "File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)"
-    )]
-    #[command(args_conflicts_with_subcommands = true)]
+    #[command(about = "#419: a lesson lane's verbs: the digest and the lesson checks' promotion")]
     Lesson {
         #[command(subcommand)]
-        cmd: Option<LessonCmd>,
-        fleet: Option<String>,
+        cmd: LessonCmd,
     },
-    #[command(about = "#1100: file this week's triage issue and spawn its lane, or a triage lane's verb")]
+    #[command(about = "#1100: a triage lane's verbs")]
     Triage(crate::triage::Args),
-    #[command(about = "#1488: file this month's deps issue, queue it and spawn its lane (orchestrators, owner)")]
-    Deps(crate::deps::Args),
+    #[command(
+        about = "#1756: the fleet's scheduled jobs (every, last, next, open issue); with a name, run it now (orchestrators and the owner)"
+    )]
+    Job(crate::jobs::Args),
     #[command(about = "#1648: the nightly soak on `[fleet.<n>.soak]` hosts; an issue per missed target")]
     Soak(crate::soak::Args),
     #[command(about = "Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)")]
@@ -1058,6 +1056,11 @@ enum LessonCmd {
         #[arg(help = "The window in days")]
         #[arg(long, default_value_t = 7)]
         days: u64,
+        #[arg(
+            long,
+            help = "Exit 1 when the window holds this many review FAILs or more (the lesson job's check)"
+        )]
+        min_fails: Option<usize>,
     },
     #[command(
         about = "Promote or retire the lesson checks in a rules file by their history (the lesson lane, in its worktree)"
@@ -2079,7 +2082,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let e = Event::new(ctx.now, &fleet, Some(issue), "fix-done", json!({"why": no_change}));
                     emit(&ctx.state, &cfg, e)?;
                     writeln!(out, "recorded {fleet}#{issue} fix-done: {no_change}")?;
-                    crate::lesson::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
+                    crate::jobs::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
                 }
                 Cmd::Turn { state, why } => {
                     let lane = crate::config::env("DROVER_LANE").unwrap_or_default();
@@ -2111,16 +2114,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
                 Cmd::Lesson {
-                    cmd: Some(LessonCmd::Digest { fleet, days }),
-                    ..
-                } => write!(out, "{}", crate::lesson::digest(ctx, &cfg, r, &fleet, days)?)?,
+                    cmd: LessonCmd::Digest { fleet, days, min_fails },
+                } => {
+                    let (text, fails) = crate::lesson::digest(ctx, &cfg, r, &fleet, days)?;
+                    write!(out, "{text}")?;
+                    return Ok(i32::from(min_fails.is_some_and(|m| fails >= m)));
+                }
                 Cmd::Lesson {
-                    cmd: Some(LessonCmd::Apply { fleet, rules }),
-                    ..
+                    cmd: LessonCmd::Apply { fleet, rules },
                 } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?,
-                Cmd::Lesson { fleet, .. } => return crate::lesson::cli(ctx, &cfg, r, out, fleet),
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
-                Cmd::Deps(a) => return crate::deps::cli(ctx, &cfg, r, out, &a.fleet),
+                Cmd::Job(a) => return crate::jobs::cli(ctx, &cfg, r, out, &a),
                 Cmd::Soak(a) => return crate::soak::run(ctx, &cfg, r, out, &a.fleet),
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;

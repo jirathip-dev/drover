@@ -81,7 +81,7 @@ Any other brace text stays as written.
 ## The five built-in entries
 
 One file each in a `jobs` folder under `roles/`, collected by `crates/core/build.rs` as the flow tables are. The
-bodies are today's issue templates (`roles/lesson-issue.md` and its like), moved into the entry.
+bodies are today's issue templates (the lesson issue template and its like), moved into the entry.
 
 ```toml
 # roles/jobs/lesson.toml

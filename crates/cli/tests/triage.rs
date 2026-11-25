@@ -1,16 +1,12 @@
 mod common;
 use common::*;
-use drover::events::{append, fold, read, Event};
+use drover::events::{fold, read};
 use serde_json::{json, Value};
 
 const REPO: &str = "-R jirathip-dev/sendmeter";
 const LANE: &str = "sendmeter:90:triage";
 const AMENDED: &str =
     "Do X.\n\n## Amendments\n- **Amendment (q1)**: a\n- **Amendment (q2)**: not a\n- **Amendment (q3)**: b\n";
-
-fn ev(c: &drover::Ctx, issue: Option<u64>, kind: &str, d: Value) {
-    append(&c.state, &Event::new(c.now, "sendmeter", issue, kind, d)).unwrap();
-}
 
 fn issue(body: &str, labels: &[&str]) -> String {
     let labels: Vec<Value> = labels.iter().map(|l| json!({"name": l})).collect();
@@ -30,6 +26,7 @@ fn fake() -> Fake {
         .reply("gh issue view 9 ", &issue("Maybe?", &[]))
         .reply("gh issue view 12 ", &issue(AMENDED, &[]))
         .reply("gh issue close", "")
+        .reply("gh issue list", "[]")
         .reply("gh issue edit", "")
         .reply(
             "git -C /tmp/does-not-matter/sendmeter merge-base --is-ancestor abc1234 origin/staging",
@@ -49,12 +46,11 @@ fn a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo() 
     set_env("DROVER_LANE", LANE);
     let c = ctx(&tmpdir("triage-run"), CONFIG);
     let sh = FakeShed::attached(&c);
-    ev(&c, None, "thread-new", json!({"thread": "t1", "title": "chat"}));
     let r = fake();
-    let (code, out) = run(&c, &r, &["triage", "sendmeter"]);
+    let (code, out) = run(&c, &r, &["job", "sendmeter", "triage"]);
     assert!(code == 0 || code == 4, "{code} {out}");
     assert!(
-        out.contains("filed sendmeter#90: triage: sendmeter week of 1970-01-12"),
+        out.contains("filed sendmeter#90: triage: sendmeter 1970-01-12"),
         "{out}"
     );
     assert!(sh.has("sendmeter-triage-90"), "{:?}", sh.methods());
@@ -133,47 +129,21 @@ fn a_triage_lane_closes_done_folds_amended_skips_queued_and_reports_each_undo() 
     let (code, out) = run(&c, &r, &["done", "sendmeter", "90", "--no-change", "read 6 issues"]);
     assert_eq!(code, 0, "{out}");
     let events = read(&c.state).unwrap();
-    let msg = events
+    let closed = events
         .iter()
-        .rfind(|e| e.kind == "thread-msg")
-        .expect("a summary in the thread");
-    let text = msg.str("text").unwrap();
-    for line in [
-        "triage sendmeter#90: 1 closed, 1 folded, 1 flagged",
-        &format!("- #5 closed (done: {commit}) · undo: `gh issue reopen 5 {REPO}`"),
-        "- #7 folded (3 amendments) · undo: `its earlier text is in the folded block`",
-        &format!("- #9 labeled [\"stale?\"] · undo: `gh issue edit 9 {REPO} --remove-label stale?`"),
-        "note: read 6 issues",
+        .rfind(|e| e.is("closed", "sendmeter", 90))
+        .expect("closed");
+    let text = closed.str("why").unwrap();
+    assert!(text.starts_with("read 6 issues\n- "), "{text}");
+    for undo in [
+        format!("undo: `gh issue reopen 5 {REPO}`"),
+        "undo: `its earlier text is in the folded block`".into(),
+        format!("undo: `gh issue edit 9 {REPO} --remove-label stale?`"),
     ] {
-        assert!(text.contains(line), "missing {line:?}:\n{text}");
+        assert!(text.contains(&undo), "missing {undo:?}:\n{text}");
     }
-    assert_eq!(msg.str("thread"), Some("t1"));
     assert!(r.called(&format!("gh issue close 90 {REPO} --comment {text}")));
     assert_eq!(fold(&events)[&("sendmeter".into(), 90)].state, "closed");
-}
-
-#[test]
-fn tick_runs_triage_weekly_only_where_the_fleet_turns_it_on() {
-    set_env("DROVER_LANE", LANE);
-    let on = CONFIG.replace(
-        "integration = \"staging\"   # never main",
-        "integration = \"staging\"\ntriage = \"weekly\"",
-    );
-    let filed = |cfg: &str, name: &str, days: &[u64]| -> Vec<usize> {
-        let c = ctx(&tmpdir(name), cfg);
-        let _sh = FakeShed::attached(&c);
-        let tick = |now: u64| {
-            let r = fake()
-                .reply("herdr status", "server:\n  status: running\n")
-                .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n");
-            let (code, out) = run(&drover::Ctx { now, ..c.clone() }, &r, &["tick"]);
-            assert_eq!(code, 0, "{out}");
-            r.count("gh issue create -R jirathip-dev/sendmeter --title triage: ")
-        };
-        days.iter().map(|d| tick(c.now + d * 86400)).collect()
-    };
-    assert_eq!(filed(&on, "triage-tick", &[0, 6, 7]), [1, 0, 1]);
-    assert_eq!(filed(CONFIG, "triage-off", &[0, 7]), [0, 0]);
 }
 
 #[test]
@@ -274,9 +244,7 @@ fn a_triage_lane_changes_issues_only_through_its_verbs_and_never_code() {
             assert!(hook(lane, cmd).contains("REFUSED ORCHESTRATOR_ONLY"), "{lane}: {cmd}");
         }
     }
-    assert_eq!(hook("tangelo:-:orchestrator", "drover triage tangelo"), "");
     for (cmd, why) in [
-        ("drover triage tangelo", "REFUSED ORCHESTRATOR_ONLY"),
         ("gh issue close 5 -R o/tangelo", "REFUSED TRIAGE_VERBS"),
         ("gh issue edit 7 -R o/tangelo --body x", "REFUSED TRIAGE_VERBS"),
         ("gh issue comment 5 -b x", "never comment"),
