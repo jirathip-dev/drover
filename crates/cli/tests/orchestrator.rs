@@ -334,3 +334,63 @@ fn a_rate_limited_orchestrator_tells_the_owner_and_gets_one_continue_at_its_rese
         .filter(|e| e.str("text") == Some("scope?"));
     assert_eq!(owner.count(), 1);
 }
+
+fn asleep(c: &drover::Ctx) {
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let d = json!({"thread": "t1", "agent": "orchestrator-t1", "why": "gone"});
+    let e = Event::new(NOW + 60, "sendmeter", None, "orchestrator-sleep", d);
+    drover::events::emit(&c.state, &cfg, e).unwrap();
+}
+
+#[test]
+fn a_conductor_missing_from_the_list_is_gone_only_once_shed_has_no_session() {
+    let b = FakeShed::new();
+    let c = acp_setup("orchestrator-unlisted", &b);
+    assert_eq!(run(&c, &b.cli(&acp(&["env"])), &["thread", "say", "t1", "hello"]).0, 0);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let f = acp(&["echo"]);
+    let cli = b.cli(&f);
+    let (r, later) = (b.on(&cli), at(&c, NOW + 60));
+    for state in ["running", "hibernated"] {
+        b.set("orchestrator-t1", |t| t["reported"] = json!({"state": state}));
+        let events = read(&c.state).unwrap().to_vec();
+        drover::orchestrator::sleep_idle(&later, &cfg, &r, &events, &[]).unwrap();
+        assert!(kinds(&c, "orchestrator-sleep").is_empty(), "{state}");
+    }
+    b.remove("orchestrator-t1");
+    let events = read(&c.state).unwrap().to_vec();
+    drover::orchestrator::sleep_idle(&later, &cfg, &r, &events, &[]).unwrap();
+    assert_eq!(kinds(&c, "orchestrator-sleep")[0].str("why"), Some("gone"));
+}
+
+#[test]
+fn a_message_to_an_asleep_thread_whose_session_is_hibernated_resumes_it_with_no_new_run() {
+    let b = FakeShed::new();
+    let c = acp_setup("orchestrator-hibernated", &b);
+    assert_eq!(run(&c, &b.cli(&acp(&["env"])), &["thread", "say", "t1", "hello"]).0, 0);
+    b.set("orchestrator-t1", |t| t["reported"] = json!({"state": "hibernated"}));
+    asleep(&c);
+    let f = acp(&["echo"]);
+    let (code, out) = run(&at(&c, NOW + 120), &b.cli(&f), &["thread", "say", "t1", "still there?"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(shed_calls(&f), ["shed send orchestrator-t1 [t1] owner: still there?"]);
+    let starts = kinds(&c, "orchestrator-start");
+    assert_eq!(starts.len(), 2);
+    assert_eq!(*starts[1].val("resumed"), json!(true));
+}
+
+#[test]
+fn an_exited_same_name_session_is_replaced_and_the_replacement_is_logged() {
+    let b = FakeShed::new();
+    let c = acp_setup("orchestrator-exited", &b);
+    assert_eq!(run(&c, &b.cli(&acp(&["env"])), &["thread", "say", "t1", "hello"]).0, 0);
+    b.exit("orchestrator-t1");
+    let f = acp(&["echo"]);
+    let (code, out) = run(&at(&c, NOW + 120), &b.cli(&f), &["thread", "say", "t1", "again"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(b.called("rm", "orchestrator-t1"), "{:?}", b.methods());
+    let calls = shed_calls(&f);
+    assert!(calls[0].starts_with("shed run --acp claude-acp"), "{calls:?}");
+    let starts = kinds(&c, "orchestrator-start");
+    assert_eq!(starts[1].str("replaced"), Some("exited"));
+}
