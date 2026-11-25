@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 const JOB: &str = "echo $$ > \"pid-$1\"; echo \"start $1\" >> log; for i in $(seq 200); do [ -f \"go-$1\" ] || [ ! -f \"$0\" ] && break; sleep 0.05; done; [ -f \"go-$1\" ] || exit 1; echo \"end $1\" >> log\n";
 
-const IDLE: &str = "load_per_cpu = 1000.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n";
+const IDLE: &str = "min_cpu_idle = -1.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n";
 
 fn lane(host: &str) -> PathBuf {
     host_with(IDLE, host)
@@ -278,9 +278,9 @@ fn hold_with_every_slot_taken_gives_up_with_75_and_the_reason() {
 
 #[test]
 fn hold_on_a_host_over_its_admission_limits_gives_up_with_75_and_the_reason() {
-    let d = host_with("load_per_cpu = -1.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n", "");
+    let d = host_with("min_cpu_idle = 101.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n", "");
     let why = refused(&d);
-    assert!(why.contains("HOST_BUSY") && why.contains("load/cpu"), "{why}");
+    assert!(why.contains("HOST_BUSY") && why.contains("cpu idle"), "{why}");
     assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
 }
 

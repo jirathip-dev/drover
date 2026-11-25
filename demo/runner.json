@@ -2,7 +2,7 @@
   "hostname -s": "mini\n",
   "sysctl -n hw.memsize": "17179869184\n",
   "sysctl -n kern.memorystatus_vm_pressure_level": "1\n",
-  "sysctl -n vm.loadavg": "{ 9.60 8.10 7.40 }\n",
+  "iostat -n 0 -c 2 -w 1": "      cpu    load average\n us sy id   1m   5m   15m\n 30 10 60  9.60 8.10 7.40\n 31  9 60  9.60 8.10 7.40\n",
   "sysctl -n hw.ncpu": "8\n",
   "vm_stat": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 200000.\nPages inactive: 400000.\nSwapouts: 4096.\n",
   "shed read w1:p1": "{\"cursor\": {\"seq\": 0, \"screen\": 0}, \"text\": \"\\u276f Watch acme-web: start the next queued issue when a lane frees up\\n\\u23fa Checking the queue and the live lanes.\\n\\u23fa Bash(drover status acme-web)\\n  \\u23bf #41 impl \\u00b7 acme-web-impl-41 \\u00b7 50m\\n    #44 impl \\u00b7 acme-web-impl-44 \\u00b7 30m\\n    #38 review(2) \\u00b7 acme-web-rev-38 \\u00b7 40m\\n\\u23fa Bash(drover next acme-web)\\n  \\u23bf 45\\n\\u23fa Three lanes are busy; #45 starts when one finishes.\\n\"}",

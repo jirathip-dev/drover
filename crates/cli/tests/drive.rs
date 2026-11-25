@@ -2255,10 +2255,10 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
 fn busy(mut f: Fake) -> Fake {
     let o = drover::runner::Out {
         code: 0,
-        stdout: "{ 50.00 40.00 30.00 }\n".into(),
+        stdout: iostat(5),
         stderr: String::new(),
     };
-    f.replies.insert(0, ("sysctl -n vm.loadavg".into(), o));
+    f.replies.insert(0, ("iostat".into(), o));
     f
 }
 

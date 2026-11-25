@@ -92,9 +92,9 @@ samples admission every `[limits] hold_sample_secs` (default 10). Past the wait 
 
 `drover top` (#910; `--json` for the same data) shows what each live lane is really doing: every process under its
 worktree as a tree with its CPU %, run time and heavy kind, and `waiting for heavy slot <kind> <age>` for each of its
-commands in line; the header gives the host's load per CPU against `load_per_cpu`, heavy slots used of `heavy_max` and
-the respawns the last drive pass held back (`RESPAWN_PACED`). When load per CPU stays over `load_per_cpu` for
+commands in line; the header gives the host's CPU idle against `min_cpu_idle`, heavy slots used of `heavy_max` and
+the respawns the last drive pass held back (`RESPAWN_PACED`). When CPU idle stays under `min_cpu_idle` for
 `[limits] overload_minutes` (default 10) in the host history, `drover check` alerts `host-overloaded` once, naming
-the 5 busiest processes and their lanes; once load is back under the limit, the next overload alerts again.
+the 5 busiest processes and their lanes; once idle is back over the floor, the next overload alerts again.
 
 Enforcement: the Claude `PreToolUse` hook (`drover hook`) refuses the command mechanically.

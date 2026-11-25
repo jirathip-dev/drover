@@ -332,15 +332,15 @@ pub fn answers(dir: &std::path::Path) -> bool {
 }
 
 fn listed(dir: &str) -> String {
-    let load = crate::host::load().map_or("?".into(), |l| format!("{:.1}", l.0));
+    let idle = crate::host::idle().map_or("?".into(), |i| format!("{i:.0}%"));
     match probes().get(dir) {
         Some(p) if !p.done.load(std::sync::atomic::Ordering::Relaxed) => {
             format!(
-                "folder listing still running after {:.1} s at load {load}",
+                "folder listing still running after {:.1} s at cpu idle {idle}",
                 p.at.elapsed().as_secs_f64()
             )
         }
-        _ => format!("a call on its disk ran out of time; load {load}"),
+        _ => format!("a call on its disk ran out of time; cpu idle {idle}"),
     }
 }
 

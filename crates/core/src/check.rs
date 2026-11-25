@@ -731,10 +731,10 @@ fn overload(
 ) -> Result<()> {
     let rows = crate::hosts::history(ctx);
     let remote = |h: &str| cfg.hosts.get(h).is_some_and(|c| c.machine.is_some());
-    let over = (rows.iter().rev().filter(|w| !remote(&w.host)))
-        .take_while(|w| w.load_cpu.is_some_and(|l| l > cfg.limits.load_per_cpu));
-    let (Some(since), Some((load, main))) = over.fold((None, None), |(_, l), w| {
-        (Some(w.ts), l.or(w.load_cpu.map(|x| (x, w.host.clone()))))
+    let floor = cfg.limits_on(None).min_cpu_idle;
+    let over = (rows.iter().rev().filter(|w| !remote(&w.host))).take_while(|w| w.cpu_idle.is_some_and(|i| i < floor));
+    let (Some(since), Some((idle, main))) = over.fold((None, None), |(_, l), w| {
+        (Some(w.ts), l.or(w.cpu_idle.map(|x| (x, w.host.clone()))))
     }) else {
         return Ok(());
     };
@@ -743,8 +743,7 @@ fn overload(
     }
     let top = crate::top::busiest(ctx, cfg, r, agents, 5)?;
     let why = format!(
-        "{main} load/cpu {load:.2} > {} for {}; top: {}",
-        cfg.limits.load_per_cpu,
+        "{main} cpu idle {idle:.0}% < {floor}% for {}; top: {}",
         age(ctx.now - since),
         top.join(", ")
     );
@@ -2143,8 +2142,8 @@ pub fn hogs(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
         .find(|w| !remote(&w.host))
         .filter(|w| w.ts + 600 >= ctx.now);
     let busy = last
-        .and_then(|w| w.load_cpu)
-        .is_some_and(|l| l > cfg.limits.load_per_cpu);
+        .and_then(|w| w.cpu_idle)
+        .is_some_and(|i| i < cfg.limits_on(None).min_cpu_idle);
     let lanes = if busy {
         host::lane_cpu(r, &crate::hosts::lane_dirs(&events, None))
     } else {

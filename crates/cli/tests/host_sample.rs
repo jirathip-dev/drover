@@ -22,7 +22,10 @@ impl Runner for Count {
 fn probes() -> Fake {
     Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-        .reply("sysctl -n vm.loadavg", "{ 5.00 1.20 1.00 }\n")
+        .reply(
+            "iostat -n 0 -c 2 -w 1",
+            " us sy id   1m   5m   15m\n 5 5 90  5 1 1\n 30 20 50  5 1 1\n",
+        )
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts: 100.\n")
 }
@@ -38,7 +41,11 @@ fn a_sample_never_sleeps_and_starts_one_process_per_host() {
     assert_eq!(started.len(), 1, "{started:?}");
     assert!(started[0].starts_with("sh -c "), "{started:?}");
     assert_eq!(h.pressure.as_deref(), Some("normal"));
-    assert_eq!(h.load_per_cpu, Some(0.5));
+    assert_eq!(
+        h.cpu_idle,
+        Some(50.0),
+        "the second line: the last second, not since boot"
+    );
     assert_eq!(h.swap_count, Some(100.0));
     r.started.borrow_mut().clear();
     host::sample(&On::new(&r, Some("mini")));

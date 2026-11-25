@@ -368,6 +368,20 @@ pub fn set_env(k: &str, v: &str) {
     std::env::set_var(k, v);
 }
 
+/// Linux `vmstat 1 2`'s output whose last second had `idle` percent of the CPUs idle.
+pub fn vmstat(idle: u32) -> String {
+    let head = "procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----\n r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st\n";
+    format!("{head} 1  0      0 900000  1000 50000    0    0     1     1   10   10  5  5 90  0  0\n 1  0      0 900000  1000 50000    0    0     0     0   10   10 50 {} {idle}  0  0\n", 50 - idle.min(50))
+}
+
+/// `iostat -n 0 -c 2 -w 1`'s output whose last second had `idle` percent of the CPUs idle.
+pub fn iostat(idle: u32) -> String {
+    format!(
+        "      cpu    load average\n us sy id   1m   5m   15m\n 40 20 40  1 1 1\n 50 {} {idle}  1 1 1\n",
+        50 - idle.min(50)
+    )
+}
+
 pub fn tmpdir(name: &str) -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
     without_lane_env();
