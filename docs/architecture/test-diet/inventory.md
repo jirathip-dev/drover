@@ -16,7 +16,7 @@ How to read a row:
 - **leaves #N**: another decided cut deletes or rewrites it. The diet does not touch those lines.
 - **soak**: its full size moves to a soak target, off the PR path, and a small check stays (slice 2). This
   changes time, not lines.
-- **retired**: the owner dropped the feature in q3678; its tests and its src go in slice 5.
+- **retired**: the owner dropped the feature in 2026-11-25; its tests and its src go in slice 5.
 
 A test that `.drover/rules.md` names as an enforcer stays whatever else is true: `runner_limits.rs`, the
 request-path guard in `serve_health.rs`, `contract_v1.rs`, `heavy.rs`'s dropped-job test, and the tests CI's `ui`
@@ -41,7 +41,7 @@ and `ui-webkit` jobs run.
 | **All** | **288** | **94,506** | **72,242** | **57,710** |
 
 The decided cuts are the rest of #1691, #1571, #1643 with #1587, #1574 and the shed split's test deletes. "After
-the diet" counts the owner's retirements of q3678 as deleted: the pre-rename move (287), the form route (500, in
+the diet" counts the owner's retirements of 2026-11-25 as deleted: the pre-rename move (287), the form route (500, in
 the serve total, not split by row) and the sim owner tools (1,296). `adr.md`'s figures add the server crate's 431
 lines and take out about 600 lines of #1571 and #1756 that the rows do not split out: 72,100 after the decided
 cuts, 59,700 after the audit's verdicts, 57,600 with the retirements.
@@ -281,7 +281,7 @@ rebuilt in three of them and in four files of other areas.
 | `cooee_token.rs` | 94 | table; delete 1 `impl` | 72 | 25 s on a missing `Connection: close`. |
 | `remote_sheet.rs` | 85 | merge → `lanes_sheet.rs` | 55 | |
 
-The form route is retired (q3678), once slice 5 has found no client that calls it: `serve_web.rs`'s form tests
+The form route is retired (owner, 2026-11-25), once slice 5 has found no client that calls it: `serve_web.rs`'s form tests
 and the tests that write through it elsewhere go, about 500 lines. The handler behind the route stays, because
 the screens' actions call it: a form test with an action twin is a `dup`, one without moves onto the action
 route. The write half of `/api/v1` stays (#1627 builds on it).
@@ -290,7 +290,7 @@ route. The write half of `/api/v1` stays (#1627 builds on it).
 
 | file | today | verdict | after | note |
 |---|---|---|---|---|
-| `cooee_screens.rs` | 1,422 | table (a golden loop); delete 2; leaves #1571 (55) | 1,135 | `cooees_queue_stream_fixture_applies_in_place` runs no drover code. `parity_63` (dropped q3678, slice 5) is held by `an_action_outside_the_manifest_…`. |
+| `cooee_screens.rs` | 1,422 | table (a golden loop); delete 2; leaves #1571 (55) | 1,135 | `cooees_queue_stream_fixture_applies_in_place` runs no drover code. `parity_63` (dropped by the owner 2026-11-25, slice 5) is held by `an_action_outside_the_manifest_…`. |
 | `lanes_sheet.rs` | 860 | merge (the pairing half → `pair_status.rs`); delete 1 `impl` | 730 | The lane-prompt refusals are asserted three times. |
 | `events_tab.rs` | 273 | table | 160 | `parity_83` is 20 rows in 155 lines. |
 | `fleet_cards.rs` | 208 | keep | 175 | |
@@ -304,7 +304,7 @@ route. The write half of `/api/v1` stays (#1627 builds on it).
 | `local_screens.rs` | 96 | merge → `board_tui.rs` | 65 | |
 | `page.rs` | 112 | keep (CI `ui`) | 112 | |
 | `page_drafts.rs` | 512 | leaves #1571 (300, six thread tests); builders | 150 | |
-| `parity_webkit.rs` | 488 | leaves #1571 (270, ten thread tests); delete 2 `dup` (`parity_2`, `parity_20`: dropped q3678, slice 5) | 160 | `parity_r25` is the sheet-close enforcer. |
+| `parity_webkit.rs` | 488 | leaves #1571 (270, ten thread tests); delete 2 `dup` (`parity_2`, `parity_20`: dropped by the owner 2026-11-25, slice 5) | 160 | `parity_r25` is the sheet-close enforcer. |
 | `issue_sheet_webkit.rs` | 128 | builders | 95 | |
 | `keyboard_webkit.rs` | 76 | leaves #1571 | 0 | |
 | `url_links.rs` | 42 | merge → `parity_webkit.rs` | 25 | |
@@ -324,7 +324,7 @@ The page-client tests (`page.rs`, `page_drafts.rs`, `parity_webkit.rs`, `issue_s
 thread cut) test how a client draws, not what drover builds. #1665 moves that onto blocks' snapshot tool
 (decision 9).
 
-38 `parity_*` tests are in this area. Three are held whole by another test and their rows are dropped (q3678);
+38 `parity_*` tests are in this area. Three are held whole by another test and their rows are dropped (owner, 2026-11-25);
 none of the others can go without its row being dropped.
 
 ## Threads, chat, orchestrators

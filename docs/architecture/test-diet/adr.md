@@ -8,13 +8,13 @@ Open questions: none.
 
 ## Status
 
-Revised by the architect lane on 2026-11-25 after the owner's q3678 (the first version is `f3ea16fda`). Read on
+Revised by the architect lane on 2026-11-25 after the owner's revision (the first version is `f3ea16fda`). Read on
 staging `4cf52e4bf` and on gatekeeper's approved ADR for #99 (`docs/architecture/test-health/` on its branch
 `issue-99`). Read `README.md` first, then this. `inventory.md` is the verdict per test file, `usage.md` how the
 callers read, `shapes.md` the data shapes, `boundaries.md` who may call what and the statecharts, `issues.md`
 the twelve issues as they are to be filed.
 
-What q3678 changed: the test-cap slice is gone and nothing in drover counts test lines; the three retirements
+What the owner's revision changed: the test-cap slice is gone and nothing in drover counts test lines; the three retirements
 and the three parity rows are decided and have a slice of their own (5); cargo-llvm-cov is approved; slow tests
 move into whole files, as gatekeeper's check wants them, not into a module convention of drover's own.
 
@@ -121,7 +121,7 @@ Where slow tests go:
 
 ## The ratchet is gatekeeper's
 
-Decided by the owner (q3668, q3678). What drover gets, from gatekeeper#99's ADR, and what it means here:
+Decided by the owner (2026-11-25). What drover gets, from gatekeeper#99's ADR, and what it means here:
 
 | gatekeeper's rule | For the diet |
 |---|---|
@@ -131,7 +131,7 @@ Decided by the owner (q3668, q3678). What drover gets, from gatekeeper#99's ADR,
 | A new or changed test over 2 s fails its PR. A change to a helper of a test file changes every test of that file. Tests over 2 s at adoption are listed and only warn until changed. | A slice that rewrites a file owns every slow test in it. Slice 2 takes the worst first; slices 6 to 10 leave no test of their files over 2 s. |
 | Changed tests run three times. | After adoption an area slice runs its area three times in CI. One more reason slice 2 goes first. |
 | Perf and timing tests are whole files, run nightly. | Decision 11. |
-| Line coverage of a PR may not be more than 0.1 point under the integration branch's. A deliberate drop is a file with the owner's decision. | Deleting covered src lowers the percent with no cover lost. Slice 5, if it lands after adoption, carries the drop file and names q3678. No other slice should need one. |
+| Line coverage of a PR may not be more than 0.1 point under the integration branch's. A deliberate drop is a file with the owner's decision. | Deleting covered src lowers the percent with no cover lost. Slice 5, if it lands after adoption, carries the drop file and names the owner's decision of 2026-11-25. No other slice should need one. |
 
 ## Decisions
 
@@ -151,9 +151,9 @@ Decided by the owner (q3668, q3678). What drover gets, from gatekeeper#99's ADR,
 7. **One test binary per area**, for the files that set no process environment. Lanes run every test binary on
    their host, so the 29 files that set `DROVER_LANE` and the like keep a binary of their own until their lane
    comes from the test's context. 259 binaries become about 45.
-8. **The owner's retirements are one slice (5), with their src** (q3678): the pre-rename move of the `herdsman`
+8. **The owner's retirements are one slice (5), with their src** (owner, 2026-11-25): the pre-rename move of the `herdsman`
    trees and its aliases; the form route, once the slice has found no client that calls it; the sim owner tools
-   `--replay`, `--what-if` and `--metrics`; parity rows 2, 20 and 63, marked `dropped q3678`.
+   `--replay`, `--what-if` and `--metrics`; parity rows 2, 20 and 63, marked `dropped by the owner 2026-11-25`.
 9. **The gap to 1.00 is closed by named cuts, not by pressure.** The page-client tests go to blocks' snapshot
    tool with #1665 (about 1,700); the builders inside test bodies (about 900, measured by slice 6);
    `host_words.rs` as a data file (196). Slice 12 reports what is left.
@@ -172,7 +172,7 @@ Three checks, each with its enforcer. A slice that removes a test passes all thr
 | Check | What it proves | Enforcer |
 |---|---|---|
 | **The ledger.** The PR body's `## Tests removed` has one line per removed test: the test that keeps its behaviour, the table row that is it, or `none` with `impl` or `dead` and the reason. | every removed test was a decision | the keep job: test names at the base that are gone at the head must each have a line, and a named keeper or row label must exist at the head |
-| **No lost cover.** Line coverage of src with the whole suite, at the base and at the head. A src line covered before and not after fails, unless the ledger lists it under `Uncovered on purpose`. | no src line lost its last test | the keep job (cargo-llvm-cov, approved in q3678; only src files the PR leaves unchanged are compared; a loss must repeat in a second head run) |
+| **No lost cover.** Line coverage of src with the whole suite, at the base and at the head. A src line covered before and not after fails, unless the ledger lists it under `Uncovered on purpose`. | no src line lost its last test | the keep job (cargo-llvm-cov, approved by the owner 2026-11-25; only src files the PR leaves unchanged are compared; a loss must repeat in a second head run) |
 | **The keeper bites.** For each duplicate, the lane breaks the behaviour once (a one-line change of src, not committed) and shows the keeper fail: a `Kept-by: run` block with the change, the command and the failing output. | the keeper asserts the behaviour, not just runs the line | rev: FAIL without the blocks; rev re-runs three of them |
 
 A slice that only moves tests onto builders or into an area binary removes no test name: its ledger is empty and
@@ -238,7 +238,7 @@ Per-slice figures are the audit's estimates; each PR states its measured `tests 
 
 ## Open questions
 
-None. q3678 answered the four of the first version: no cap in drover; cargo-llvm-cov yes; the three retirements
+None. The owner's revision of 2026-11-25 answered the four of the first version: no cap in drover; cargo-llvm-cov yes; the three retirements
 yes, the form route once the slice has confirmed no client calls it; parity rows 2, 20 and 63 dropped.
 
 ## The `.drover/arch.toml` lines

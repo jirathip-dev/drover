@@ -18,7 +18,7 @@ Shared lines for the body of every one of them:
 
 ## 1. The keep check: no test is deleted without its cover shown
 
-Queue: plain. Starts on approval. cargo-llvm-cov is approved (q3678).
+Queue: plain. Starts on approval. cargo-llvm-cov is approved (owner, 2026-11-25).
 
 **Wanted.**
 - A job of its own that runs only when a PR's diff removes a `#[test]`: a workflow, `keep.yml`, while drover's CI
@@ -84,12 +84,12 @@ retirements and not the three parity tests: slice 5.
 
 **AC.** As slice 3.
 
-## 5. The retirements: what the owner dropped in q3678
+## 5. The retirements: what the owner dropped on 2026-11-25
 
 Queue: plain; blocked on 4. About −2,200 test lines, about −115 s, src net negative.
 
 **Wanted.** Each with its tests and its src in this PR; each removed test's ledger line reads `none (dead:
-retired, q3678)`.
+retired by the owner 2026-11-25)`.
 - **The pre-rename move.** The `migrate` verb, the `herdsman` aliases of the binary name and of the config,
   state and share trees, and the `.herdsman` twin of a repo's `.drover` folder. `migrate.rs` keeps its four
   tests that are not about the rename. `drover help --agent` and the usage doc's parts lose the verb (`just
@@ -106,13 +106,13 @@ retired, q3678)`.
   step of the nightly sim workflow with its `sim-metrics` artifact. The fixed seeds, the gate scenarios, the
   invariants and the hunt stay.
 - **Parity rows 2, 20 and 63.** `parity_2` and `parity_20` (`parity_webkit.rs`) and `parity_63`
-  (`cooee_screens.rs`) are deleted; their rows in `docs/parity.md` read `dropped q3678`. The ledger names the
+  (`cooee_screens.rs`) are deleted; their rows in `docs/parity.md` read `dropped by the owner 2026-11-25`. The ledger names the
   test that holds each behaviour.
 
 **AC.** The keep job is green. The PR body carries the form-route check with what was searched. `just sim` and
 the nightly sim workflow run green without the three tools. If A1 has merged and the repo's line coverage
 falls by more than gatekeeper's tolerance because covered src was deleted, the PR carries gatekeeper's
-coverage drop file, its commit naming q3678.
+coverage drop file, its commit naming the owner's decision of 2026-11-25.
 
 ## 6. The builders, and the gates area on them
 

@@ -6,7 +6,7 @@ Decision: drover builds no test cap. The ratchet is gatekeeper's test-health che
 Slices: 1 the keep check, with cargo-llvm-cov; 2 slow tests off the PR path (2,011 s of test time per run to about 1,320 s, about 900 s once the cuts land); 3 and 4 the deletes; 5 what you retired: the pre-rename move, the form route once no client is found calling it, the sim owner tools, parity rows 2, 20 and 63; 6 shared builders, proven on one area; 7 to 10 the other areas; 11 one test binary per area (16 GB of test executables per lane to about 3); 12 the close, once gatekeeper's check is on.
 Open questions: none.
 
-## What the revision changed (q3678)
+## What the owner's revision of 2026-11-25 changed
 
 | The owner said | Where it landed |
 |---|---|
@@ -43,7 +43,7 @@ each "after" figure is an estimate from counted lines.
  ├─  9,400  threads, repo checks, compact, shed parts      leave with #1571, #1643, #1574
  │                                                         src after those cuts: 55,000  1.31
  ├─  4,300  duplicate, implementation-detail, dead tests   deleted, each with a ledger line
- ├─  2,100  the owner's retirements (q3678)                deleted with their src
+ ├─  2,100  the owner's retirements                        deleted with their src
  ├─  4,000  tests that are rows of a table                 one table test each
  ├─  4,700  fixtures copied from file to file              shared builders (+600 new lines)
  └─ 57,600  left                                           src 54,800                    1.05
