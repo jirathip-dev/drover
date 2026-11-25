@@ -77,7 +77,7 @@ spec settles them?
   uploads or `drover chat`. `GET /api/v1/thread/<id>/rows` stays: rows are a function of the log, so old history
   stays readable by id.
 - **Client chats.** A chat is opened by a client with `orchestrator-attach {fleet, thread}`: cooee's Orchestrator, or
-  a terminal through `drover orchestrator attach <repo> [--thread <id>]` (D2), which logs the same attach and prints
+  a terminal through D2's CLI attach verb (a repo, optionally an old thread id), which logs the same attach and prints
   the brief path, the settings path and the env lines. `fleet` is a repo, `all` or `none`. The client runs the agent
   on the returned profile (#1057). The agent runs drover's CLI, so its asks, cards and queued issues carry its thread.
 - **Rows.** D1's `Row` is the contract ([shapes.md](shapes.md)). A row whose `to` is an attached chat carries
@@ -130,7 +130,7 @@ spec settles them?
 |---|---|
 | Trigger | a drive pass: an open `needs-decision` with `lane_ask`, or a `needs-human` issue, with no `judge` spawn for that id or episode |
 | Key | `<fleet>-<issue>-judge` agent, `action_id` `judge:<fleet>:<ask id>` or `judge:<fleet>:nh<seq>` |
-| Brief | `roles/orchestrator/judge.md` (the rulebook's judging part, out of `role.md`), the ask or card, `drover brief`'s spec, the issue's decisions |
+| Brief | judge.md in `roles/orchestrator/` (the rulebook's judging part, out of `role.md`), the ask or card, `drover brief`'s spec, the issue's decisions |
 | May run | `drover brief`, `drover asks`, `drover why`, `drover answer --basis`, `drover answer` (to the owner), `drover extend --basis`, `drover turn done` |
 | Must not | edit files, spawn, merge, queue, amend, ask a new question (the lane hook's `judge` role list) |
 | Ends | after its one answer; drive closes its pane at `turn done` or at `judge_minutes` |
@@ -150,8 +150,8 @@ Drover (D1, merged):
 - `to.k = "desk"` and `to.k = "thread"` stay: D4 changes what `desk` means to a drover surface, not its shape.
 - D2 adds the `.keys` of `said` and `orchestrator-attach`'s answer, #1610 `handoff-move`, D5 `manifest`.
 
-Cooee (C1): `crates/cooee/tests/fixtures/drover-contract/` is a `generated` copy of that folder at the pinned drover
-commit, and `crates/cooee/tests/drover_contract.rs` parses every sample with cooee's own types and fails on a key it
+Cooee (C1): `<cooee>/crates/cooee/tests/fixtures/drover-contract/` is a `generated` copy of that folder at the pinned drover
+commit, and `<cooee>/crates/cooee/tests/drover_contract.rs` parses every sample with cooee's own types and fails on a key it
 reads that is missing. A drover bump that would break cooee fails in cooee's CI at the bump.
 
 ## Real coupling, and where each piece goes
@@ -171,8 +171,8 @@ Nothing in drover imports, calls or holds an address of cooee; the `/plugin/` ba
 | # | Repo | Issue | Needs | Closes |
 |---|---|---|---|---|
 | D1 | drover | #1617, merged: rows from the log, `thread::route`, the rows routes, contract v1 and its test | this ADR | |
-| #1609 | drover | the judge lane, `[limits] judge_minutes`, `judge_max`, `roles/orchestrator/judge.md`, the `judge` hook role; quiet decisions; the digest; routing by thread id, else `desk` | D1 | #1638 |
-| D2 | drover | clients: `deliver` skips an attached chat; attach takes `all`, `none`; `drover orchestrator attach`; `said` and `--typed` reading it; `push` always set; the `.keys` of `said` and attach | D1 | #1598 |
+| #1609 | drover | the judge lane, `[limits] judge_minutes`, `judge_max`, judge.md in `roles/orchestrator/`, the `judge` hook role; quiet decisions; the digest; routing by thread id, else `desk` | D1 | #1638 |
+| D2 | drover | clients: `deliver` skips an attached chat; attach takes `all`, `none`; the CLI attach verb; `said` and `--typed` reading it; `push` always set; the `.keys` of `said` and attach | D1 | #1598 |
 | #1610 | drover | handoffs to a repo are an open `desk` row at once, `land` deleted; [move] as `handoff-move` | D2 | #1610 |
 | D3 | drover | the freeze: `thread new` and [New] refused `THREADS_CUT`; lane asks routed to the judge, not to threads; attach adopts an archived thread id; each open thread's closing row | #1609, #1610, C1 released | |
 | D4 | drover | the cut: stop and archive every open thread, delete the store, engine, screens, uploads code, `drover chat` and the `thread` verbs but `handoff`; the note field on taps; the `thread-new` ban | D3 | |

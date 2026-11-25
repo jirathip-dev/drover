@@ -13,7 +13,7 @@ no server. "A client" is any program attached through the manifest: cooee, or a 
 | `GET /api/v1/rows?open=1` | a client, first connect and recovery; drover's board | `Rows`: every open row, `prompt` and `push` null | D1, merged |
 | `GET /api/v1/rows/stream` | a client | server-sent events, `id:` the seq, `data:` one `Row`; resumes from `Last-Event-ID` | D1, merged |
 | `GET /api/v1/thread/<id>/rows?before=<seq>&n=<k>` | a client | `Rows` of one chat or old drover thread, `more` for older ones | D1, merged |
-| `POST /api/v1/orchestrator-attach` | a client, `drover orchestrator attach` | `{fleet, thread}`: a repo, `all` or `none` (D2); answers the brief, settings and env | today, D2, D3 |
+| `POST /api/v1/orchestrator-attach` | a client, the CLI attach verb | `{fleet, thread}`: a repo, `all` or `none` (D2); answers the brief, settings and env | today, D2, D3 |
 | `POST /api/v1/orchestrator-detach` | a client | `{fleet, thread}`: the chat takes no more routed rows | today |
 | `POST /api/v1/thread/<id>/said` | a client | `Said`; a repeated `id` is ignored | D2 |
 | `POST /action` | a client, drover's page | `{screen, block, action, values, by}` with an `Action`'s values | today, plus #1610 |

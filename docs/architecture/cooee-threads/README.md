@@ -37,7 +37,7 @@ POST /api/v1/orchestrator-attach           {"fleet": "api", "thread": "t19a3f0c2
 The client starts its own agent with the brief, hook settings and env the attach returns. `fleet` is the repo picked
 on [New]: a fleet, `all` or `none` (D2). Every event that agent's drover commands log carries the thread, so an ask it
 files or an issue it queues comes back to that chat. A terminal session does the same through
-`drover orchestrator attach <repo>` (D2), which prints the brief path, the settings path and the env lines.
+D2's CLI attach verb, which prints the brief path, the settings path and the env lines.
 
 ### the client reads the rows
 

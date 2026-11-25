@@ -7,7 +7,7 @@ a client ──HTTP, plugin token──▶ server::serve::v1     (manifest, orch
 a client ──HTTP, plugin token──▶ server::serve::rows   (rows, rows/stream, thread/<id>/rows; POST said)
 a client, drover's page ─POST /action─▶ server::screens ──▶ serve::rows::action ──▶ the core verb (answer, card, …)
 drover's page, drover board ───▶ server::serve::cards, chat::board  (the owner cards, drawn from rows)
-drover orchestrator attach ────▶ core::orchestrator::attach   (a terminal session's chat)
+the CLI attach verb ────▶ core::orchestrator::attach   (a terminal session's chat)
                                  ▼
                  core::thread          registry (attached chats, old threads as history), rows(), home()
                  core::thread::route   emit(): log the row; never deliver into a chat
@@ -65,7 +65,7 @@ stateDiagram-v2
     [*] --> Live: thread-new before D3
     Live --> Frozen: D3 merged
     Frozen --> Closing: D3's first drive pass logs its closing row (once)
-    Closing --> Adopted: a client attaches its id (cooee [New] adopt, or drover orchestrator attach --thread)
+    Closing --> Adopted: a client attaches its id (cooee [New] adopt, or the CLI attach verb with an old id)
     Closing --> Stopped: D4's first drive pass (its session ended, thread-archive by migration)
     Adopted --> [*]: an attached chat; its issues route to it
     Stopped --> Adopted: a client attaches its id later
