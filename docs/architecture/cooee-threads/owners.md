@@ -61,8 +61,12 @@ About 350 lines move and 950 go.
 | `drover chat` | delete, D4: `drover board` is the TUI |
 | `POST /api/v1/orchestrator-attach`, `-detach` | keep |
 | `GET` and `POST /api/v1/chat`, the `chat-about` op | delete, D4 |
-| `crates/core/src/webpush.rs`, `/push/*`, the VAPID key, the devices list, `drover push test`, `[[notify]] type = "webpush"` | keep: drover's push for its page; its thread-title lookup (`find`, `title`) reads the row's text instead (D4) |
-| `crates/server/src/serve/device.rs` | keep: it serves the scene to a companion device (#1497) |
+| `crates/core/src/webpush.rs`, `/push/*`, the VAPID key, the subscriptions, `drover push test`, `[[notify]] type = "webpush"` | move to drover-server, D6: the page's own push, sent by serve from the events it follows; its thread-title lookup (`find`, `title`) reads the row's text instead (D4) |
+| `crates/core/src/devices.rs`: pairing, the devices list, cookie `check` and `find`, `denied`, `cooee_token` | move to drover-server, D6; `drover pair` dispatches there from the cli crate |
+| `crates/core/src/devices.rs`: `sha256`, `random`, `write0600`, `tmp_name`, `save` | keep in core, D6 moves them to a core file helper module: core's callers (events, config, card, propose, proxy, drive, usage, transcript) are not push |
+| `crates/core/src/events.rs` `[[notify]]` | keep: core sends the generic command hook only; from D6 it skips a `webpush` notifier, which serve sends |
+| `crates/core/src/check.rs` `alerts-off`, `doctor.rs` and `timer.rs` subscription lines | move to drover-server, D6, with the subscriptions they read |
+| `crates/server/src/serve/device.rs` | keep in drover-server: it serves the scene to a companion device (#1497), and D6 puts it beside the pairing it checks |
 | `crates/server/src/cooee.rs` | keep: `GET /cooee/profiles`, `POST /cooee/thread-started`, listed in the manifest (D5) |
 | `cooee-plugin.toml` | keep, generated from the manifest (D5) |
 | `roles/orchestrator/role.md`, `chat.md` | keep: the rulebook; #1609 adds `judge.md` |

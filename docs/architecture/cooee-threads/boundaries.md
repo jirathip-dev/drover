@@ -27,7 +27,8 @@ core::drive ──▶ core::judge::due ──▶ core::spawn (role judge, no wor
 | `core::thread::route` | the emitters every workflow verb uses | `core::thread`, `events`, `config` | deliver into any session: a row's `prompt` is the only way a line reaches a chat |
 | `core::orchestrator` | the acting orchestrator, the role and its sheet, `brief`, the profiles, attach and detach | `config`, `providers` | start, stop or type into a session (D4 deletes the engine) |
 | `core::judge` (#1609) | `due`: open asks and needs-human cards with no judge; the judge brief; `judge-failed` | `events`, `config`, `thread::route::to_owner` | answer for itself: the lane answers through the CLI |
-| `core::events::notify`, `core::webpush` | `[[notify]]` and web push to devices subscribed on drover's page | the runner | read a client's subscriptions |
+| `core::events::notify` | events and the `[[notify]]` command hook | the runner | send web push or read devices (D6) |
+| `server::push` (from `core::webpush` and `core::devices`, D6) | the page's web push, its subscriptions, pairing and paired devices | `core::events`, `core::config` | read a client's subscriptions |
 | `chat` (the terminal) | the Board tab only, run by `drover board` | `core::thread`, `core::card`, core's answer | keep a Threads tab |
 | a client | its chats, their messages, uploads and picks, its Orchestrator agent, its devices and push | the manifest's paths, `/action` | read a row's `kind` to decide workflow; hold a path the manifest does not give |
 
@@ -47,13 +48,14 @@ stateDiagram-v2
     CooeeOrchestrator --> Frozen
     Frozen --> Cut: D4 merged (threads stopped and archived; store, engine, screens, drover chat deleted)
     Cut --> Manifest: D5 merged (manifest served; cooee-plugin.toml generated)
-    Manifest --> CapRaises: #1608 merged
+    Manifest --> PushInServe: D6 merged (web push and devices in drover-server; core keeps events and [[notify]])
+    PushInServe --> CapRaises: #1608 merged
     CapRaises --> [*]
 ```
 
 Each arrow is a merge or a release, and each state runs. Until D3 drover's threads work as today, and from #1609
 the judge answers a lane ask even when no thread is open. D3 waits for C1, so the owner has a chat in a client before
-drover stops taking new threads. D5 and #1608 need only D2 and #1609; they are drawn last for one line.
+drover stops taking new threads. D5 and #1608 need only D2 and #1609, and D6 only D4; they are drawn last for one line.
 
 Going back: before D4, reverting D3 reopens `thread new`. After D4 the way back is a revert of D4's merge; the log
 still holds every thread event, so a restored engine reads them as before.

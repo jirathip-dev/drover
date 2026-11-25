@@ -9,8 +9,8 @@ its web push, and its board, TUI and page, which answer asks and cards with taps
 open lane ask or needs-human card, does the autonomous answering that a thread's orchestrator did. Drover never
 calls a client, and neither side has a code dependency on the other: only the plugin manifest, rows and actions.
 Slices: D1 (#1617) is merged. Next come #1609 (the judge lane), D2 (clients), #1610 (handoffs), D3 (the freeze and
-the migration of open threads), D4 (the deletion), D5 (the manifest) and #1608, then C1 and cooee #802 on cooee's
-side. #1598 closes with D2, #1610 with its own slice.
+the migration of open threads), D4 (the deletion), D5 (the manifest), D6 (push into drover-server) and #1608, then C1
+and cooee #802 on cooee's side. #1598 closes with D2, #1610 with its own slice.
 Open questions: none.
 
 Status: revised after the owner's 2026-11-25 decisions. Read on drover staging `fd81ef5c3` (D1 included).
@@ -112,9 +112,11 @@ A device subscribes to one sender or the other, so nothing arrives twice. Every 
 6. Cooee has one Orchestrator agent. Each of its chats names a repo, `all` or `none`, picked on [New], and the thread
    list filters by repo. A `none` chat is a free chat: no cards are routed there, and it can still act on any repo.
 7. Asks and cards route to the chat that filed the work, by thread id. Drover never calls a client.
-8. Drover keeps its web push and devices code for its own page. Cooee sends its own alerts from drover's rows. A
-   device subscribes to one or the other.
-9. `crates/server/src/serve/device.rs` stays: it serves the scene to a companion device (#1497), not alerts.
+8. Drover core keeps events and the generic `[[notify]]` command hook only. Web push and paired devices
+   (`webpush.rs`, `devices.rs`) move into drover-server as the page's own push, not deleted (D6). Cooee sends its
+   own push from `/api/v1` events. A device subscribes to one or the other.
+9. `crates/server/src/serve/device.rs` stays in drover-server, beside the pairing D6 moves there: it serves the
+   scene to a companion device (#1497), not alerts.
 10. #1609 (judgment, quiet decisions, routing by thread id, the digest) follows D1. #1610 (handoffs) and #1608 (cap
     raises) are drover's, as rows and actions. #1638 closes with #1609; #1598 and #1610 close with this ADR's slices.
 11. The API contract, the row and action shapes and the contract test stay. #1617, #1645 and #1663 stand.

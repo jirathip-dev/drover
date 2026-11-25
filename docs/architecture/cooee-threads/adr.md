@@ -7,7 +7,7 @@ a client (cooee's Orchestrator agent or a terminal session) that loads drover's 
 and calls drover's CLI and `/api/v1`. Drover keeps asks, cards, the rulebook, the rows and actions, its push, and its
 board, TUI and page, which answer with taps. A short-lived judge lane per open lane ask or needs-human card does the
 autonomous answering. Drover never calls a client.
-Slices: D1 (#1617) is merged; then #1609, D2, #1610, D3, D4, D5 and #1608 in drover, and C1 and cooee #802 in cooee.
+Slices: D1 (#1617) is merged; then #1609, D2, #1610, D3, D4, D5, D6 and #1608 in drover, and C1 and cooee #802 in cooee.
 Open questions: none.
 
 Status: revised after the owner's 2026-11-25 decisions, replacing the 2026-11-24 "drover keeps its threads" revision.
@@ -100,8 +100,9 @@ spec settles them?
   a surface lacks one).
 - **Handoffs (#1610).** A handoff to a repo is an open `desk` row at once, with no pick: `land` goes. [move]
   (`handoff-move`) re-targets it to an attached chat, the first copy marked forwarded.
-- **Push.** From D2 a row's `push` is always set. Drover's web push still sends from events to devices subscribed on
-  its page; a client sends `push` to its own devices.
+- **Push.** From D2 a row's `push` is always set. Core keeps events and the `[[notify]]` command hook only. D6
+  moves web push and paired devices into drover-server as the page's own push: serve sends it from the events it
+  follows to devices subscribed on its page. A client sends `push` to its own devices.
 - **Open threads.** D3 freezes them and D4 stops and archives them ([boundaries.md](boundaries.md)). A client may
   attach an old thread's id to carry on: from D3 attach takes an archived drover thread's id, so the issues that
   thread filed route to the chat that adopted it. History stays in the log; nothing is copied out.
@@ -177,6 +178,7 @@ Nothing in drover imports, calls or holds an address of cooee; the `/plugin/` ba
 | D3 | drover | the freeze: `thread new` and [New] refused `THREADS_CUT`; lane asks routed to the judge, not to threads; attach adopts an archived thread id; each open thread's closing row | #1609, #1610, C1 released | |
 | D4 | drover | the cut: stop and archive every open thread, delete the store, engine, screens, uploads code, `drover chat` and the `thread` verbs but `handoff`; the note field on taps; the `thread-new` ban | D3 | |
 | D5 | drover | `GET /api/v1/manifest` and its `.keys`; `cooee-plugin.toml` generated from it | D2 | |
+| D6 | drover | push leaves core: `webpush.rs` and the pairing and devices parts of `devices.rs` move to drover-server (the page's push, sent by serve from events), with `/push/*`, `drover pair`, `drover push test` and the `alerts-off`, doctor and timer subscription lines; core keeps events, `[[notify]]`'s command hook and the file helpers; the `webpush` ban | D4 | |
 | #1608 | drover | cap raises within 5% are the judge's, a quiet row | #1609 | |
 | C1 | cooee | read a plugin's rows: the follower and its cursor, draw by key in an attached chat or the cards place, type `prompt`, send `push`, post actions and `said`; the contract copy and its test | D2 | |
 | cooee #802 | cooee | Chief's hand-off to the Orchestrator agent; [New] picks a repo, `all` or `none`, attaches, and may adopt an old thread id; the repo filter | C1 | |
@@ -228,6 +230,15 @@ pattern = "thread-new"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/thread.rs"]
 reason = "#1571: drover makes no thread; chat lives in a client, and thread.rs only reads old events"
+```
+
+D6 lands one more, once push has left core:
+
+```toml
+[[ban]]
+pattern = "webpush::"
+paths = ["crates/core/src/**"]
+reason = "#1571: core keeps events and the [[notify]] command hook; web push and devices are drover-server's"
 ```
 
 D1's `append_only` and `/plugin/` ban stay.
