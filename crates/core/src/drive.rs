@@ -862,8 +862,7 @@ fn one(
         res = res.or(failed(undriven::cards(ctx, cfg, out, name), out, name, "spawns"));
     }
     laps.lap("spawns");
-    let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
-    pass::shadow(ctx, cfg, out, name, &acts)?;
+    let acts = pass::shadow(ctx, cfg, out, name)?;
     if KICK.get().is_none() {
         std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string()).ok();
     }
@@ -1232,7 +1231,6 @@ fn pass(
         writeln!(out, "{fleet} hotspots: {e:#}")?;
     }
     let events = working(&ctx.state)?;
-    let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
     pass::stash(ctx, cfg, fleet, &mut waits);
     let promised = crate::promise::pass(ctx, cfg, fleet, &events, &waits);
@@ -1240,7 +1238,7 @@ fn pass(
     failed(external(ctx, cfg, out, fleet), out, fleet, "outside changes");
     if handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, seen, &working(&ctx.state)?, &agents, false, Some(fleet));
-        waits.retain(one);
+        waits.retain(|(s, _)| KICK.get().is_none_or(|k| k == s.issue));
     }
     hold_unread(&mut waits, &unread);
     let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();

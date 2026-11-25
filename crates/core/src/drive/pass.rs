@@ -17,21 +17,16 @@ pub(super) fn stash(ctx: &Ctx, cfg: &Config, fleet: &str, waits: &mut Vec<(Issue
     PLAN.set(Some(shadow::plan(ctx, cfg, fleet, kick, waits)));
 }
 
-pub(super) fn shadow(
-    ctx: &Ctx,
-    cfg: &Config,
-    out: &mut dyn Write,
-    fleet: &str,
-    acts: &[serde_json::Value],
-) -> Result<()> {
+pub(super) fn shadow(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Result<Vec<serde_json::Value>> {
+    let acts = super::ACTS.with_borrow_mut(|m| m.remove(fleet)).unwrap_or_default();
     let Some(plan) = PLAN.take() else {
-        return Ok(());
+        return Ok(acts);
     };
     let pass = Pass::of(ctx, fleet, super::KICK.get());
-    if let Err(e) = plan.and_then(|p| shadow::run(&pass, cfg, p, acts)) {
+    if let Err(e) = plan.and_then(|p| shadow::run(&pass, cfg, p, &acts)) {
         writeln!(out, "{fleet} shadow: {e:#}")?;
     }
-    Ok(())
+    Ok(acts)
 }
 
 /// A held pass or kick lease; only `drive` builds one, so only a pass or kick writes the flow table's events.
