@@ -2045,7 +2045,8 @@ fn a_silent_lanes_respawn_waits_under_host_busy_and_mem_low() {
         (
             "acp-memlow",
             "vm_stat",
-            "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 100.\nPages inactive: 100.\n".to_string(),
+            "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 100.\nPages inactive: 100.\n"
+                .to_string(),
             1,
         ),
     ] {
