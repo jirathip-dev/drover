@@ -15,7 +15,7 @@ pub fn line(seen: Option<&facts::Seen>, s: Option<&crate::events::IssueState>) -
     let (Some(seen), Some(s)) = (seen, s) else {
         return Ok(String::new());
     };
-    let (cond, why) = seen.cond(s);
+    let (cond, why) = seen.cond(s, &seen.episode(s));
     let name = s.state.split(['(', '+']).next().unwrap_or_default();
     let file = table()?
         .flow("issue")

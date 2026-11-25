@@ -109,30 +109,42 @@ pub struct Seen<'a> {
     cfg: &'a Config,
     view: View,
     events: std::sync::Arc<crate::events::Log>,
+    asks: Vec<Event>,
 }
 
 impl<'a> Seen<'a> {
     /// The sample as `state.db`, the log and the PR cache hold it now.
     pub fn load(ctx: &'a Ctx, cfg: &'a Config) -> anyhow::Result<Seen<'a>> {
         let (view, events) = (View::load(ctx, cfg)?, crate::events::working(&ctx.state)?);
-        Ok(Seen { ctx, cfg, view, events })
+        let asks = crate::events::open_asks(&events).into_iter().cloned().collect();
+        Ok(Seen {
+            ctx,
+            cfg,
+            view,
+            events,
+            asks,
+        })
     }
 
-    /// Issue `s`'s condition, and each value's evidence.
-    pub fn cond(&self, s: &IssueState) -> (Cond, Vec<String>) {
-        let (ev, now) = (&self.events[..], self.ctx.now);
-        let sp = super::Episode::of(ev, s).spawn;
-        let m = sp.as_ref().and_then(|e| e.str("machine"));
+    /// Issue `s`'s episode, read from this sample's log.
+    pub fn episode(&self, s: &IssueState) -> super::Episode {
+        super::Episode::of(&self.events, s)
+    }
+
+    /// Issue `s`'s condition in its episode `ep`, and each value's evidence.
+    pub fn cond(&self, s: &IssueState, ep: &super::Episode) -> (Cond, Vec<String>) {
+        let (ev, now, sp) = (&self.events[..], self.ctx.now, ep.spawn.as_ref());
+        let m = sp.and_then(|e| e.str("machine"));
         let json = crate::gh::cached_pr(self.ctx, &s.fleet, s.issue);
         let req = self.cfg.fleet.get(&s.fleet).map_or(&[][..], |f| f.checks(&json));
-        let (lane, l) = lane(&self.view, sp.as_ref());
+        let (lane, l) = lane(&self.view, sp);
         let (host, h) = match sp {
             Some(_) => host(self.view.at(m), self.view.at(None), &self.cfg.limits, now),
             None => (Host::Up, "no lane".into()),
         };
         let (pr, p) = pr(&json, req);
         let (verdict, v) = verdict(ev, s, json.at("headRefOid").as_str());
-        let (ask, a) = ask(ev, s);
+        let (ask, a) = ask(ev, &self.asks, s);
         let (turn, t) = turn(ev, s);
         let cond = Cond {
             lane,
@@ -145,21 +157,18 @@ impl<'a> Seen<'a> {
         (cond, vec![l, h, p, v, a, t])
     }
 
-    /// Issue `s`'s clocks: when shed last spoke of its lane, its host's last frame, and the lane's limit reset.
-    pub fn clock(&self, s: &IssueState) -> super::Clock {
-        let ev = &self.events[..];
-        let sp = super::Episode::of(ev, s).spawn;
-        let agent = sp.as_ref().and_then(|e| e.str("agent"));
-        let frame = (sp.as_ref()).and_then(|e| self.view.at(e.str("machine")).map(|h| h.heard.unwrap_or(h.since)));
-        let picked = |a: &str| {
-            ev.iter()
-                .rfind(|e| e.kind == "limit-picked" && e.str("agent") == Some(a))
-        };
+    /// Issue episode `ep`'s clocks: when shed last spoke of its lane, its host's last frame, and the lane's limit reset.
+    pub fn clock(&self, ep: &super::Episode) -> super::Clock {
+        let (ev, sp) = (&self.events[..], ep.spawn.as_ref());
+        let agent = sp.and_then(|e| e.str("agent"));
+        let frame = sp.and_then(|e| self.view.at(e.str("machine")).map(|h| h.heard.unwrap_or(h.since)));
+        let picked =
+            |a: &str| (crate::events::of_kind(ev, &["limit-picked"]).into_iter()).rfind(|e| e.str("agent") == Some(a));
         super::Clock {
             now: self.ctx.now,
             heard: agent
                 .and_then(|a| crate::session::stamp::since(ev, a))
-                .or(sp.as_ref().map(|e| e.ts)),
+                .or(sp.map(|e| e.ts)),
             frame,
             reset: agent.and_then(picked).and_then(|e| e.val("at").as_u64()),
         }
@@ -260,14 +269,18 @@ pub fn verdict(events: &[Event], s: &IssueState, head: Option<&str>) -> (Verdict
             .is_some_and(|h| h.eq_ignore_ascii_case(head))
     };
     let stage = |e: &Event| e.str("stage").is_none_or(|x| x == s.stage);
-    let mine = |e: &&Event| e.fleet == s.fleet && e.issue == Some(s.issue) && at(e);
-    let last = events.iter().rev().filter(mine).find_map(|e| match e.kind.as_str() {
-        "verdict" if stage(e) && e.str("verdict") == Some("PASS") => Some((Verdict::Pass, e)),
-        "verdict" if stage(e) => Some((Verdict::Fail, e)),
-        "verdict-refused" => Some((Verdict::Refused, e)),
-        "verdict-seen" if matches!(e.str("first"), Some("PASS" | "FAIL")) => Some((Verdict::Written, e)),
-        _ => None,
-    });
+    let mine = crate::events::of_issue(events, &s.fleet, s.issue);
+    let last = mine
+        .into_iter()
+        .rev()
+        .filter(|e| at(e))
+        .find_map(|e| match e.kind.as_str() {
+            "verdict" if stage(e) && e.str("verdict") == Some("PASS") => Some((Verdict::Pass, e)),
+            "verdict" if stage(e) => Some((Verdict::Fail, e)),
+            "verdict-refused" => Some((Verdict::Refused, e)),
+            "verdict-seen" if matches!(e.str("first"), Some("PASS" | "FAIL")) => Some((Verdict::Written, e)),
+            _ => None,
+        });
     let short: String = head.chars().take(7).collect();
     last.map_or((Verdict::None, format!("nothing at {short}")), |(v, e)| {
         (
@@ -279,11 +292,11 @@ pub fn verdict(events: &[Event], s: &IssueState, head: Option<&str>) -> (Verdict
     })
 }
 
-/// The issue's ask: one open on it or by one of its lanes, else an answer not yet delivered.
-pub fn ask(events: &[Event], s: &IssueState) -> (Ask, String) {
+/// The issue's ask: one of the `open` asks on it or by one of its lanes, else an answer not yet delivered.
+pub fn ask(events: &[Event], open: &[Event], s: &IssueState) -> (Ask, String) {
     let by_lane = |e: &Event| e.str("agent").is_some_and(|a| s.lanes.values().any(|l| l == a));
-    let mine = |e: &&&Event| e.fleet == s.fleet && (e.issue == Some(s.issue) || by_lane(e));
-    if let Some(e) = crate::events::open_asks(events).iter().find(mine) {
+    let mine = |e: &&Event| e.fleet == s.fleet && (e.issue == Some(s.issue) || by_lane(e));
+    if let Some(e) = open.iter().find(mine) {
         return (Ask::Open, format!("ask {} open", e.str("id").unwrap_or("?")));
     }
     match crate::undelivered(events, &s.fleet)

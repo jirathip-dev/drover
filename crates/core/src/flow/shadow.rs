@@ -102,7 +102,8 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, only: Option<u64>, waits: &[(I
     let (t, seen, events) = (table()?, Seen::load(ctx, cfg)?, crate::events::working(&ctx.state)?);
     let open = fold(&events).into_values().filter(|s| s.fleet == fleet && !s.done());
     for s in open.filter(|s| only.is_none_or(|n| n == s.issue)) {
-        let (c, clock, ep) = (seen.cond(&s).0, seen.clock(&s), Episode::of(&events, &s));
+        let ep = seen.episode(&s);
+        let (c, clock) = (seen.cond(&s, &ep).0, seen.clock(&ep));
         if let Some(step) = decide(t, &s, &c, &ep, &clock, &cfg.limits) {
             p.steps.push((s, c, ep, step));
             p.clocks.push(clock);

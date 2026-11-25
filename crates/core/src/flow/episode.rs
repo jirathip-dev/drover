@@ -50,9 +50,7 @@ pub struct Episode {
 impl Episode {
     /// Issue `s`'s episode: it begins at a new PR head, a move to another working state (a spawn) or the owner's decision.
     pub fn of(events: &[Event], s: &IssueState) -> Episode {
-        let mine: Vec<&Event> = (events.iter())
-            .filter(|e| e.fleet == s.fleet && e.issue == Some(s.issue))
-            .collect();
+        let mine = crate::events::of_issue(events, &s.fleet, s.issue);
         let head = mine.iter().rev().find_map(|e| head_of(e)).map(String::from);
         let orchestrator = |e: &Event| e.str("by").is_some_and(|b| b.starts_with("orchestrator-"));
         let begins = |(i, e): (usize, &&Event)| match e.kind.as_str() {
