@@ -2,46 +2,48 @@
 
 Sketched before anything is built. Each block is what someone sees or writes once the slices have landed.
 
-## A lane whose PR brings too many tests
+## A slice under gatekeeper's ratchet
 
-CI's line-cap step, and the same check at merge on the PR merged with the integration branch:
-
-```
-src lines (formatted): 55310 / cap 56000
-test lines: 71903 / cap 71349 (129% of 55310 src)
-test cap from ci/test-cap.d/2026-12-04-129.toml
-exit 1
-```
-
-The lane reads one line and has two moves: add the case as a row of the table that already tests the verb, or
-delete a test its change made redundant (with its ledger line). It never asks for a raise: there is none.
-`roles/impl.md` says so in one sentence beside the line-cap rule.
-
-## A diet slice lowers the ratchet
-
-The last commit of the slice measures and adds one file:
-
-```toml
-# ci/test-cap.d/2026-12-04-129.toml
-test_pct = 129
-why = "#N slice 5: tests 70,410 / src 55,310 = 127.3%, rounded up, plus one"
-```
-
-Nothing else is edited. Two slices that land the same day add two files; the lower one wins.
-
-## Someone tries to raise it
-
-Editing a step, or deleting one, fails arch-check on that PR and at `drover turn done`:
+Nothing here is built by the diet: this is gatekeeper's `core/test-health`, as its ADR (gatekeeper#99) prints
+it, once drover has adopted it. A lane's run and CI print the same:
 
 ```
-ci/test-cap.d/2026-12-04-129.toml:1: `test_pct = 129` removed or changed in an append-only file
+ok    core/test-health     0.2s /    5s
+      tests 68,410 / src 52,300 lines: ratio 1.31, ceiling 1.35
 ```
 
-Adding a file with a higher number changes nothing: the lowest wins.
+A delete slice takes the ratio a whole step under the ceiling, and the check asks for the ratchet's turn:
+
+```
+FAIL  core/test-health     0.2s /    5s
+      ratio 1.28 is a step under the ceiling 1.35: lower it (./.gatekeeper/run baseline core/test-health)
+$ ./.gatekeeper/run baseline core/test-health
+ci/tests/ratio.d/2026-12-09-130.toml: ceiling 1.30 (was 1.35)
+```
+
+The slice commits that one file. That is all a diet slice ever does about the cap. A slice that lands before
+adoption does nothing: the first ceiling is written at adoption, from the ratio the slices left.
+
+A lane whose feature PR goes over the ceiling reads one line and has two moves: add the case as a row of the
+table that already tests the verb, or delete a test its change made redundant, with its ledger line.
+
+## A slice that rewrites a slow test's file
+
+Also gatekeeper's, once adopted. A change to a helper of a test file changes every test in it, and a changed
+test over 2 s fails:
+
+```
+FAIL  local/test          48.1s /  600s
+      over 2 s: drover::design_stage revise_redoes_the_design_with_the_note_in_its_brief_five_times_in_a_row took 5.1 s at its fastest of 3 (changed in this change)
+```
+
+The slice makes the test faster (the causes the audit found: a process-wide lock, a socket waiting out a
+timeout, a real sleep), or moves its full size into the `soak` target and leaves a small check of the same rule
+where it was.
 
 ## A PR that deletes tests
 
-Its body carries the ledger (`shapes.md`, section 4):
+Its body carries the ledger (`shapes.md`, section 2):
 
 ```
 ## Tests removed
@@ -162,16 +164,19 @@ cargo test                                   everything on the PR path: about 45
 
 A file that still has its own binary is run by its own name, as today.
 
-## The nightly run
+## The soak run
 
-One step, no list of names:
+Three test targets hold the slow tests, each test ignored by default, so neither a lane's run nor the PR shards
+start them. One nightly step runs them in release, with no list of test names:
 
 ```
-cargo nextest run --release --run-ignored ignored-only -E 'test(/nightly::/)'
+cargo nextest run --release --run-ignored all -E 'binary(perf) | binary(soak) | binary(sim_soak)'
 ```
 
-A red nightly files its issue the way the sim workflow does today. The PR path keeps a small check of each
-moved thing: six sim tests (about 128 s), the pipeline replay over 150 events, `ask_scale` at 2,000 events, two
+Until adoption that step is drover's own nightly workflow; adoption makes it gatekeeper's nightly gate, with the
+same three targets named under `soak` in its config. A red run is a red scheduled workflow, as a red sim run is
+today; after adoption drover files an issue for it (gatekeeper#99's slice D1). The PR path keeps a small check
+of each moved thing: six sim tests, the pipeline replay over 150 events, `ask_scale` at 2,000 events, two
 compaction seeds.
 
 ## The close
@@ -179,8 +184,8 @@ compaction seeds.
 Slice 12's PR body ends the diet with the measured figures and what is left:
 
 ```
-tests 55,940 / src 54,870 = 102%; the ratchet rests at 103.
-Left for 100%: the page-client tests (#1665, about 1,700 lines).
+tests 55,940 / src 54,870 = 1.02; gatekeeper's ceiling rests at 1.05. On its slow list: 0.
+Left for 1.00: the page-client tests (#1665, about 1,700 lines).
 ```
 
-From then on the ratchet falls only when someone adds a lower step.
+From then on the ceiling falls whenever a PR takes the ratio a step under it.

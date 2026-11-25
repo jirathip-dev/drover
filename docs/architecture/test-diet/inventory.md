@@ -14,7 +14,9 @@ How to read a row:
   (asserts source text, a private function or a call order nobody sees), `dead` (code retired, or a one-off
   migration whose window has passed).
 - **leaves #N**: another decided cut deletes or rewrites it. The diet does not touch those lines.
-- **nightly**: moves off the PR path (slice 3). This changes time, not lines.
+- **soak**: its full size moves to a soak target, off the PR path, and a small check stays (slice 2). This
+  changes time, not lines.
+- **retired**: the owner dropped the feature in q3678; its tests and its src go in slice 5.
 
 A test that `.drover/rules.md` names as an enforcer stays whatever else is true: `runner_limits.rs`, the
 request-path guard in `serve_health.rs`, `contract_v1.rs`, `heavy.rs`'s dropped-job test, and the tests CI's `ui`
@@ -31,17 +33,18 @@ and `ui-webkit` jobs run.
 | Check, clean, disk, host | 30 | 11,227 | 6,880 | 5,666 |
 | Setup, state, config, the repo itself | 39 | 8,356 | 7,279 | 6,048 |
 | Asks, cards, queue | 21 | 5,509 | 5,106 | 4,410 |
-| Serve, API, streams | 26 | 6,293 | 6,210 | 5,226 |
+| Serve, API, streams | 26 | 6,293 | 6,210 | 4,726 |
 | Screens, page, terminal board, themes | 28 | 8,113 | 7,367 | 6,071 |
 | Threads, chat, orchestrators | 18 | 7,055 | 1,964 | 1,451 |
-| Simulation, perf, the shared harness | 23 | 8,659 | 7,530 | 6,853 |
+| Simulation, perf, the shared harness | 23 | 8,659 | 7,530 | 5,557 |
 | Other hosts (whole files of the remote cut) | 22 | 6,014 | 55 | 55 |
-| **All** | **288** | **94,506** | **72,242** | **59,506** |
+| **All** | **288** | **94,506** | **72,242** | **57,710** |
 
-The decided cuts are the rest of #1691, #1571, #1643 with #1587, #1574 and the shed split's test deletes. The rows
-count the pre-rename move as deleted (287 lines; it is question 3). `adr.md`'s figures leave it in, add the server
-crate's 431 lines and take out about 600 lines of #1571 and #1756 that the rows do not split out: 72,100 and
-59,700.
+The decided cuts are the rest of #1691, #1571, #1643 with #1587, #1574 and the shed split's test deletes. "After
+the diet" counts the owner's retirements of q3678 as deleted: the pre-rename move (287), the form route (500, in
+the serve total, not split by row) and the sim owner tools (1,296). `adr.md`'s figures add the server crate's 431
+lines and take out about 600 lines of #1571 and #1756 that the rows do not split out: 72,100 after the decided
+cuts, 59,700 after the audit's verdicts, 57,600 with the retirements.
 
 ## Drive loop
 
@@ -73,7 +76,7 @@ crate's 431 lines and take out about 600 lines of #1571 and #1756 that the rows 
 |---|---|---|---|---|
 | `merge.rs` | 964 | keep; table (6 rows); delete 1 `dead`; leaves #1643 (32) | 870 | `merge_into_fleet_repo_prints_no_source_build_line` asserts a line no code prints. |
 | `gate_unit.rs` | 123 | table, in `merge.rs` | 55 | Three of nine restate `required_checks_gate_only_the_latest_named_run`. |
-| `overlap.rs` | 1,330 | leaves #1643 (250, the `cap_check_*` tests); table; delete 1.5 `dup` | 950 | The test cap's own tests join the `cap_check_*` ones and leave with them. |
+| `overlap.rs` | 1,330 | leaves #1643 (250, the `cap_check_*` tests); table; delete 1.5 `dup` | 950 | |
 | `land.rs` | 519 | keep | 490 | |
 | `verify_stage.rs` | 985 | table; delete `dup`, `impl` | 760 | `a_verify_pass_at_an_older_sha_…` is `pipeline.rs`'s `two_checks_…` under another stage name. |
 | `design_stage.rs` | 1,268 | keep; table (4 ask texts); builders | 1,040 | 24 queue-add blocks; one process-wide lock makes its 27 tests run in a row (43 s). |
@@ -86,7 +89,7 @@ crate's 431 lines and take out about 600 lines of #1571 and #1756 that the rows 
 | `rev_no_verdict.rs` | 206 | merge → one stalls file | 140 | Not duplicates of `drive.rs`; 96 lines are a copied fixture. |
 | `stale_rev.rs` | 130 | merge → the same file | 80 | |
 | `stalled_lanes.rs` | 232 | merge → the same file | 150 | |
-| `pipeline.rs` | 391 | keep; nightly for the replay | 395 | The replay folds every prefix of 1,295 events (76 s). PR path: 150 events that hold every label. |
+| `pipeline.rs` | 391 | keep; soak for the replay | 395 | The replay folds every prefix of 1,295 events (76 s). PR path: 150 events that hold every label. |
 | `commit_status.rs` | 232 | keep; 1 test → the hook table | 198 | |
 | `done_gate.rs` | 767 | leaves #1643 (80) and #1691 (108); builders | 510 | The third copy of a real git repo builder. |
 | `typed_choice.rs` | 153 | keep | 150 | Its thread setup is rewritten by #1571. |
@@ -159,8 +162,8 @@ issue, never a second": about 160 lines become one table when #1756 lands. Not c
 | `roots.rs` | 512 | keep | 425 | |
 | `hung_root.rs` | 246 | keep | 229 | |
 | `hung_read.rs` | 24 | keep | 24 | Its own binary on purpose (it sets HOME). |
-| `overloaded.rs` | 85 | table; nightly | 65 | 11 s of real waits. |
-| `runner_limits.rs` | 378 | keep (enforcer); delete 2 `dup`; 1 test nightly | 316 | Its `Command::new` pair is a strict subset of the arch ban; it stays while the rules line names the file. |
+| `overloaded.rs` | 85 | table; soak | 65 | 11 s of real waits. |
+| `runner_limits.rs` | 378 | keep (enforcer); delete 2 `dup`; 1 test soak | 316 | Its `Command::new` pair is a strict subset of the arch ban; it stays while the rules line names the file. |
 | `abandoned_child.rs` | 35 | merge → `runner_limits.rs` | 18 | |
 | `heavy.rs` | 465 | keep (enforcer) | 445 | |
 | `top.rs` | 295 | keep | 285 | |
@@ -189,13 +192,13 @@ issue, never a second": about 160 lines become one table when #1756 lands. Not c
 | `timer.rs` | 694 | keep | 678 | Takes `timer_install.rs`'s test. |
 | `timer_install.rs` | 49 | merge → `timer.rs` | 0 | |
 | `self_update.rs` | 748 | table; 2 tests → the clean tests | 532 | No test here is about another host. |
-| `migrate.rs` | 360 | delete `dead` (240): **the owner's yes** | 120 | The one-off `herdsman` move (question 3). Four tests are not about the rename and stay. |
+| `migrate.rs` | 360 | retired (240) | 120 | The one-off `herdsman` move. Four tests are not about the rename and stay. |
 | `fleet_rename.rs` | 273 | keep | 264 | |
 | `state_db.rs` | 213 | keep; delete 2 `impl` | 174 | One is ignored and asserts nothing; one pins an index name. |
 | `state_write.rs` | 121 | keep | 119 | |
-| `store.rs` | 63 | keep; 1 `dead` with the rename | 43 | |
+| `store.rs` | 63 | keep; 1 retired with the rename | 43 | |
 | `events_log.rs` | 150 | table | 142 | The kill-9 loop runs one round on a PR. |
-| `compaction.rs` | 317 | keep | 317 | 2 seeds on a PR, 20 nightly. |
+| `compaction.rs` | 317 | keep | 317 | 2 seeds on a PR, 20 in soak. |
 | `compact.rs` | 397 | leaves #1574 | 0 | |
 | `working_set.rs` | 61 | keep | 61 | |
 | `tmpdir.rs` | 47 | keep | 47 | |
@@ -233,7 +236,7 @@ issue, never a second": about 160 lines become one table when #1756 lands. Not c
 | `answer_delivery.rs` | 290 | merge → `asks.rs` | 200 | The three undelivered-answer tests are three cases, not duplicates. |
 | `ask_endings.rs` | 300 | keep; delete 1 `dead`; leaves #1571 (49) | 200 | The one-time sweep of #584. |
 | `ask_ids.rs` | 289 | keep; delete 1 `impl`, 1 `dup` | 243 | `no_ask_id_is_counted_from_the_log_in_core` greps src. |
-| `ask_scale.rs` | 91 | keep at 2,000 events; 60,000 nightly | 86 | The bound is a ratio, so the small log proves the same. |
+| `ask_scale.rs` | 91 | keep at 2,000 events; 60,000 in soak | 86 | The bound is a ratio, so the small log proves the same. |
 | `lane_asks.rs` | 402 | leaves #1571 (129, thread routing); table | 236 | |
 | `extend_ask.rs` | 220 | merge → `owner_extend.rs`; table | 170 | |
 | `owner_extend.rs` | 390 | keep; delete 1 `dead`; table (3) | 325 | The one-off requeue of #1058. Extend is 35 tests across nine files today, 24 after. |
@@ -267,9 +270,9 @@ rebuilt in three of them and in four files of other areas.
 | `contract_v1.rs` | 223 | keep (enforcer) | 223 | |
 | `history.rs` | 38 | delete `dup` | 0 | The last block of `serve_working_set.rs`. |
 | `log_share.rs` | 74 | delete 1 `impl`; merge 1 → `ask_scale.rs` | 28 | |
-| `settled_snapshot.rs` | 156 | nightly; delete `settled_reads_cost` | 147 | That test asserts an exit code only: 41 s. |
+| `settled_snapshot.rs` | 156 | soak; delete `settled_reads_cost` | 147 | That test asserts an exit code only: 41 s. |
 | `stream_quiet.rs` | 240 | delete 1 `dup` | 200 | Most of the rest leaves with #1571. |
-| `screen_hub.rs` | 290 | release job only | 290 | The only file run in both the debug shards and the release job. |
+| `screen_hub.rs` | 290 | release job only (joins `perf`) | 290 | The only file run in both the debug shards and the release job. |
 | `screen_pages.rs` | 335 | keep; delete 1 `impl` | 318 | |
 | `lifeboat.rs` | 183 | keep | 183 | |
 | `pair_status.rs` | 128 | keep | 128 | No twin. |
@@ -278,15 +281,16 @@ rebuilt in three of them and in four files of other areas.
 | `cooee_token.rs` | 94 | table; delete 1 `impl` | 72 | 25 s on a missing `Connection: close`. |
 | `remote_sheet.rs` | 85 | merge → `lanes_sheet.rs` | 55 | |
 
-If the form route goes (question 3), `serve_web.rs`'s form tests and the tests that write through it elsewhere
-become `dead`: 500 lines for the form alone, about 1,100 if the write half of `/api/v1` went too (it does not:
-#1627 builds on it).
+The form route is retired (q3678), once slice 5 has found no client that calls it: `serve_web.rs`'s form tests
+and the tests that write through it elsewhere go, about 500 lines. The handler behind the route stays, because
+the screens' actions call it: a form test with an action twin is a `dup`, one without moves onto the action
+route. The write half of `/api/v1` stays (#1627 builds on it).
 
 ## Screens, page, terminal board, themes
 
 | file | today | verdict | after | note |
 |---|---|---|---|---|
-| `cooee_screens.rs` | 1,422 | table (a golden loop); delete 2; leaves #1571 (55) | 1,135 | `cooees_queue_stream_fixture_applies_in_place` runs no drover code. `parity_63` is held by `an_action_outside_the_manifest_…`. |
+| `cooee_screens.rs` | 1,422 | table (a golden loop); delete 2; leaves #1571 (55) | 1,135 | `cooees_queue_stream_fixture_applies_in_place` runs no drover code. `parity_63` (dropped q3678, slice 5) is held by `an_action_outside_the_manifest_…`. |
 | `lanes_sheet.rs` | 860 | merge (the pairing half → `pair_status.rs`); delete 1 `impl` | 730 | The lane-prompt refusals are asserted three times. |
 | `events_tab.rs` | 273 | table | 160 | `parity_83` is 20 rows in 155 lines. |
 | `fleet_cards.rs` | 208 | keep | 175 | |
@@ -300,7 +304,7 @@ become `dead`: 500 lines for the form alone, about 1,100 if the write half of `/
 | `local_screens.rs` | 96 | merge → `board_tui.rs` | 65 | |
 | `page.rs` | 112 | keep (CI `ui`) | 112 | |
 | `page_drafts.rs` | 512 | leaves #1571 (300, six thread tests); builders | 150 | |
-| `parity_webkit.rs` | 488 | leaves #1571 (270, ten thread tests); delete 2 `dup` (`parity_2`, `parity_20`) | 160 | `parity_r25` is the sheet-close enforcer. |
+| `parity_webkit.rs` | 488 | leaves #1571 (270, ten thread tests); delete 2 `dup` (`parity_2`, `parity_20`: dropped q3678, slice 5) | 160 | `parity_r25` is the sheet-close enforcer. |
 | `issue_sheet_webkit.rs` | 128 | builders | 95 | |
 | `keyboard_webkit.rs` | 76 | leaves #1571 | 0 | |
 | `url_links.rs` | 42 | merge → `parity_webkit.rs` | 25 | |
@@ -310,7 +314,7 @@ become `dead`: 500 lines for the form alone, about 1,100 if the write half of `/
 | `themes.rs` | 740 | table; delete the pack's own content | 500 | Four tests re-test the pinned pack's files; one loop over the packs replaces them. |
 | `herd.rs` | 496 | delete 1 `dup`; table (2) | 450 | |
 | `demo_export.rs` | 227 | keep; delete 1 | 230 | |
-| `ui_audit_hang.rs` | 75 | nightly | 75 | Tooling; 20 s of every run. |
+| `ui_audit_hang.rs` | 75 | soak | 75 | Tooling; 20 s of every run. |
 | `ui_lock.rs` | 106 | keep | 104 | |
 | `ui_tokens.rs` | 190 | keep | 162 | |
 | `verify_browser.rs` | 120 | keep | 120 | |
@@ -320,8 +324,8 @@ The page-client tests (`page.rs`, `page_drafts.rs`, `parity_webkit.rs`, `issue_s
 thread cut) test how a client draws, not what drover builds. #1665 moves that onto blocks' snapshot tool
 (decision 9).
 
-38 `parity_*` tests are in this area. Three are held whole by another test (question 4); none of the others can
-go without its row being dropped.
+38 `parity_*` tests are in this area. Three are held whole by another test and their rows are dropped (q3678);
+none of the others can go without its row being dropped.
 
 ## Threads, chat, orchestrators
 
@@ -348,16 +352,16 @@ go without its row being dropped.
 
 | file | today | verdict | after | note |
 |---|---|---|---|---|
-| `sim/main.rs` | 732 | keep 6 tests on the PR path; 5 nightly | 700 | 496 s per run today, about 128 s after. The hunt self-test alone is 215 s. |
+| `sim/main.rs` | 732 | keep 6 tests on the PR path; the hunt self-test to `sim_soak`; the tools' entry points and self-tests retired (575) | 125 | 496 s per run today, about 128 s after. The hunt self-test alone is 215 s; the tools' self-tests 115 s. |
 | `sim/model.rs`, `sim/sched.rs`, `sim/scenario.rs`, `sim/invariants.rs`, `sim/gates.rs`, `sim/seeds.rs` | 2,045 | keep | 2,045 | The real drive code under a simulated world; no rule is written twice. |
 | `sim/hunt.rs` | 350 | keep | 350 | Half of it is the hunt tool. |
-| `sim/replay.rs`, `sim/whatif.rs`, `sim/metrics.rs` | 745 | keep (question 3) | 721 | Owner tools, not tests: with their entry points and self-tests, 1,320 lines. |
+| `sim/replay.rs`, `sim/whatif.rs`, `sim/metrics.rs` | 745 | retired | 0 | Owner tools, not tests: with their entry points and self-tests, 1,320 lines. The nightly metrics table goes with them. |
 | `drive_sim.rs` | 500 | leaves #1691 (115); delete `dup` | 0 | A second simulator. Draft PR: `drive.rs`. Quiet reviewer: `stale_rev.rs` and `rev_no_verdict.rs`. Shared files: `disk.rs`, which gains one assertion. |
-| `perf.rs` | 1,492 | leaves #1691 (389); merge; 6 tests release only | 850 | Three tests are not perf. `parity_r7` joins the request-path guard. |
+| `perf.rs` | 1,492 | leaves #1691 (389); merge; 6 tests release only | 850 | A soak target. Three tests are not perf and move to their areas. `parity_r7` joins the request-path guard. |
 | `perf/screens.rs` | 201 | keep; release only | 165 | |
 | `pass_budget.rs` | 113 | keep | 95 | |
 | `pass_profile.rs` | 58 | merge → `pass_budget.rs` | 0 | A manual profiling loop. |
-| `soak.rs` | 273 | keep | 235 | Already off the PR path. |
+| `soak.rs` | 273 | keep | 235 | Already ignored by default; becomes the `soak` target that takes the full-size runs. |
 | `link.rs` | 480 | leaves #1691 (430) | 50 | |
 | `common/mod.rs` | 858 | leaves #1691 (98); delete `dead` (90) | 670 | No caller: `chat_fixture`, `chat_scene`, `agents`, `herdr_setup`, `Shell`. |
 | `common/fake_shed.rs` | 531 | leaves #1691 (73); keep | 458 | The shed split replaces it later. |

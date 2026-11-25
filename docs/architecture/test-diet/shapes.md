@@ -3,74 +3,53 @@
 Sketches for the impl lanes and the reviewer. Names may change in review; the shapes may not without a note in
 the PR body. `usage.md` shows each one in use.
 
-## 1. One step of the ratchet
+## 1. What gatekeeper counts here, and the soak files
 
-A file in the folder `test-cap.d`, beside `cap.d` under `ci`. One file per step, named by date and value.
+The diet defines no cap shape. The ceiling files, the count and the check's output are gatekeeper's
+(gatekeeper#99, `docs/architecture/test-health/shapes.md`). What they come to on drover's tree, `4cf52e4bf`:
+
+| | Lines | Rule |
+|---|---|---|
+| test | 90,260 | every non-blank line of a Rust file under a `tests` folder, and the tail of a src file from its first `#[cfg(test)]` line (241 of them) |
+| src | 61,322 | every other non-blank Rust line |
+| ratio | 1.47 | so the first ceiling, on the 0.05 grid, would be 1.50 |
+| neither | | goldens, scripts and other non-Rust files under a `tests` folder; web's TypeScript unless the config names its pack (then 1,942 more src lines) |
+
+The one key of gatekeeper's config the diet prepares for. Slice 2 makes these the only places a slow test
+lives; the adoption PR writes the line:
 
 ```toml
-# ci/test-cap.d/2026-11-26-148.toml
-test_pct = 148
-why = "#N: the cap starts at today's ratio: tests 94,937 / src 64,744 = 146.6%, rounded up, plus one"
+# .gatekeeper/config.toml, written by gatekeeper#99's adoption issue for drover
+[tests]
+soak = [
+  "crates/cli/tests/perf.rs", "crates/cli/tests/perf/**",       # the release budgets
+  "crates/cli/tests/soak/**",                                    # the full-size runs
+  "crates/cli/tests/sim_soak/**",                                # the simulator's hunt
+]
 ```
+
+A soak file in drover, after slice 2:
 
 ```rust
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Step {
-    test_pct: i64, // 1..=1000; a percent of src lines
-    why: String,   // the issue and the measured figures
-}
+// crates/cli/tests/soak/main.rs: one test target, `--test soak`
+mod pipeline_replay;   // the whole 1,295-event log; `pipeline.rs` keeps 150 events
+mod ask_scale;         // 60,000 events; `ask_scale.rs` keeps 2,000
+mod compaction;        // 20 seeds; `compaction.rs` keeps 2
 
-/// The test cap in force: the lowest step. No folder or no file: no test cap, and the check prints nothing.
-pub struct TestCap {
-    pub pct: i64,
-    pub from: String, // the file that set it
-}
+// crates/cli/tests/soak/pipeline_replay.rs
+#[test]
+#[ignore = "soak"]
+fn default_pipeline_replays_recorded_histories() { /* today's test, whole; the 150-event one beside it in `pipeline.rs` is new */ }
 ```
 
-Rules of the folder:
+- Every test of a soak target carries `#[ignore = "soak"]`, as `soak.rs`'s do today: a plain test run on a lane
+  skips it, and the nightly run passes `--run-ignored all`.
+- `sim_soak` is a second target over the simulator: its `main.rs` names the sim's modules by `#[path]`, so the
+  harness that both use moves out of `sim/main.rs` into a module.
+- A budget that needs a release build: `#[cfg_attr(debug_assertions, ignore = "release only")]`, in place of an
+  early return in debug.
 
-- the lowest `test_pct` wins, whatever the file names say;
-- a file that does not parse fails the check (exit 1): a broken step is never read as "no cap";
-- the folder is `append_only` in `.drover/arch.toml`: a PR may add a file, never change or remove one. So
-  nothing a PR can add raises the cap.
-
-## 2. What is counted
-
-```rust
-fn src_globs() -> Vec<String>  { vec!["src/**/*.rs".into(), "crates/*/src/**/*.rs".into()] }
-fn test_globs() -> Vec<String> { vec!["tests/**/*.rs".into(), "crates/*/tests/**/*.rs".into()] }
-```
-
-Every line of every matching file, blank lines and all, as the line cap counts by default. The src figure of the
-test cap is always the built-in globs: it does not follow `count` and `exclude` in `ci/cap.toml`, so a crate that
-leaves the line cap stays in the ratio with its tests. Goldens, scripts and other non-Rust files under a `tests`
-folder are not counted.
-
-The rule: `tests * 100 <= src * pct`.
-
-## 3. What the cap check prints
-
-After its two lines of today, one more, and a second when a step set the cap:
-
-```
-src lines (formatted): 64744 / cap 65963
-cap raised by ci/cap.d/2026-11-24-65963.toml
-test lines: 94937 / cap 95821 (148% of 64744 src)
-test cap from ci/test-cap.d/2026-11-26-148.toml
-web lines (TypeScript, soft budget, not capped): 1990
-```
-
-Exit 1 when tests are over the cap; the same line is the finding. No `warn_within` for tests: the next step of
-the ratchet is the warning.
-
-The finding for a changed or removed step comes from arch-check, not from the cap check:
-
-```
-ci/test-cap.d/2026-11-26-148.toml:1: `test_pct = 148` removed or changed in an append-only file
-```
-
-## 4. The ledger in a PR body
+## 2. The ledger in a PR body
 
 A section of the PR body of any PR that removes a test. One line per removed test function.
 
@@ -104,7 +83,7 @@ Change: crates/core/src/drive.rs: the `gh pr ready` call skipped
 
 followed by the fenced command and its fenced failing output, as a `Repro: run` block is written.
 
-## 5. What the keep job prints
+## 3. What the keep job prints
 
 ```
 tests removed: 14, in the ledger: 14
@@ -123,7 +102,7 @@ lost cover: crates/core/src/term.rs 88-93 (covered at the base by: shed::a_wait_
 A removed test is a `#[test]` function name present at the base and absent at the head, by bare name with its
 count: a test that moves to another file or module is not removed.
 
-## 6. The builders
+## 4. The builders
 
 In the cli crate's `tests/common`. Signatures only; slice 6 writes them and may adjust.
 
@@ -182,7 +161,7 @@ pub struct Hook;    // Hook::lane("tangelo:12:impl").bash(cmd) -> Allow | Deny(r
 
 What a builder must not do: assert. It builds a world and reads it back; the test owns every `assert`.
 
-## 7. A table test
+## 5. A table test
 
 ```rust
 #[test]
@@ -203,26 +182,17 @@ fn refusals() {
 A row's first field is the old test's name. It names the temp dir, it is what a failure prints, and it is the
 text the keep job looks for.
 
-## 8. Where test files live
+## 6. Where test files live
 
 ```
 crates/cli/tests/
   common/            the builders and the fakes; compiled once per binary
   drive/main.rs      mod pass; mod kicks; mod turn; mod waiting; ...      one binary: `--test drive`
   drive/pass.rs      today's drive.rs
-  gates/  lanes/  guard/  host/  ops/  asks/  serve/  screens/  sim/  perf/
+  gates/  lanes/  guard/  host/  ops/  asks/  serve/  screens/  sim/
+  perf.rs  perf/  soak/  sim_soak/     the three soak targets (section 1)
   turn.rs            a file that sets process environment keeps its own binary
 ```
 
-A module inside any binary may hold a `nightly` module:
-
-```rust
-mod nightly {
-    #[test]
-    #[ignore = "nightly"]
-    fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() { /* ... */ }
-}
-```
-
-A budget that needs a release build: `#[cfg_attr(debug_assertions, ignore = "release only")]`, in place of an
-early return in debug.
+A test's name in gatekeeper's lists is its binary and its function, `drover::drive a_draft_pr_…`, so moving a
+file into an area binary renames its tests there. Slice 11 lands with no moved test on the slow list.
