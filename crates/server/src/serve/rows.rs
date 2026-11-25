@@ -1,4 +1,4 @@
-use super::{header, hung_up, sent, wire, working, Config, Ctx, Event, Server};
+use super::{header, hung_up, sent, wire, working, Ctx, Event, Server};
 use crate::api::{RowView, Rows};
 use crate::thread::{self, Row, Target};
 use std::collections::BTreeMap;
@@ -10,10 +10,6 @@ const MOST: usize = 500;
 
 pub(super) fn is(p: &str) -> bool {
     p == "rows" || p.strip_prefix("thread/").is_some_and(|t| t.ends_with("/rows"))
-}
-
-fn pushes(ctx: &Ctx) -> bool {
-    Config::kept(ctx).is_ok_and(|c| c.webpush_sub().is_none())
 }
 
 fn view(ctx: &Ctx, events: &[Event], (subject, row): (&Event, Row)) -> RowView {
@@ -38,7 +34,7 @@ pub(super) fn get(ctx: &Ctx, p: &str, f: &BTreeMap<String, String>) -> Rows {
         Some(id) => {
             let to = Target::Thread { id: id.into() };
             let before = n("before").unwrap_or(u64::MAX);
-            let mut all: Vec<_> = thread::rows(&events, false);
+            let mut all: Vec<_> = thread::rows(&events);
             all.retain(|r| r.1.to == to && r.1.seq < before);
             let skip = all.len().saturating_sub(cap);
             (skip > 0, all.into_iter().skip(skip).collect::<Vec<_>>())
@@ -46,7 +42,7 @@ pub(super) fn get(ctx: &Ctx, p: &str, f: &BTreeMap<String, String>) -> Rows {
         None if f.get("open").is_some_and(|o| o == "1") => (false, thread::open(&events)),
         None => {
             let since = n("since").unwrap_or(0);
-            let mut all = thread::rows(&events, pushes(ctx));
+            let mut all = thread::rows(&events);
             all.retain(|r| r.1.seq > since);
             (all.len() > cap, all.into_iter().take(cap).collect())
         }
@@ -90,7 +86,7 @@ impl Server<'_> {
             }
             if last() > at {
                 let (c, events) = (ctx(), working(&self.ctx.state).unwrap_or_default());
-                let mut fresh = thread::rows(&events, pushes(&c));
+                let mut fresh = thread::rows(&events);
                 fresh.retain(|r| r.1.seq > at);
                 if fresh.len() <= MOST {
                     at = at.max(events.last().map_or(at, |e| e.seq));

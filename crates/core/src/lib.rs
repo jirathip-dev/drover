@@ -450,7 +450,7 @@ pub fn ask(
         .pop()
         .context("ask not logged")?;
     let id = ev.str("id").unwrap_or_default();
-    if let Some(t) = routed.filter(|t| orchestrator::attached(&events, t).is_none()) {
+    if let Some(t) = routed {
         if let Err(e) = crate::thread::route::lane_ask(ctx, cfg, r, t, &ev) {
             crate::thread::route::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
         }

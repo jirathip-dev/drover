@@ -74,6 +74,20 @@ impl Server<'_> {
                 out("200 OK", &super::rows::get(ctx, x, &f))
             }
             ("GET", Some(x)) if super::rows::is(x) => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
+            ("POST", Some(x)) if x.starts_with("thread/") && x.ends_with("/said") => {
+                if !Self::plugin(ctx, head) {
+                    return reply("401 Unauthorized", "UNPAIRED", "the plugin token");
+                }
+                let id = x
+                    .strip_prefix("thread/")
+                    .and_then(|t| t.strip_suffix("/said"))
+                    .unwrap_or_default();
+                let s = serde_json::from_str::<crate::api::Said>(body).context("the body is no `Said`");
+                done(s.and_then(|s| {
+                    let cfg = Config::kept(ctx)?;
+                    crate::orchestrator::said(ctx, &cfg, id, (&s.id, &s.from, &s.text))
+                }))
+            }
             _ if !self.allowed(ctx, head) => reply("403 Forbidden", "FORBIDDEN", "foreign Host or Origin"),
             (_, Some(x))
                 if busy(auth)

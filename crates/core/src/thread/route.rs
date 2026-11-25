@@ -30,9 +30,10 @@ pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a s
     ids.iter().find(|id| Some(**id) == pin).copied().or_else(newest)
 }
 
-/// Lane ask `a` typed into thread `id`'s orchestrator (started or resumed) as a system line the board hides.
+/// Lane ask `a` as a system row in thread `id`, typed into a drover thread's orchestrator (started or resumed); an attached chat's client types the row's prompt.
 pub fn lane_ask(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, a: &Event) -> Result<String> {
-    let t = find(&working(&ctx.state)?, id)?.clone();
+    let events = working(&ctx.state)?;
+    let t = attached(&events, id).map_or_else(|| find(&events, id), Ok)?.clone();
     let text = route_row(ctx, cfg, id, a)?;
     deliver(ctx, cfg, r, &t, &format!("[{id}] system: {text}"))
 }

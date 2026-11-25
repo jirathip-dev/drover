@@ -1194,6 +1194,9 @@ impl Config {
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
         }
+        if let Some(n) = c.fleet.keys().find(|n| matches!(n.as_str(), "all" | "none")) {
+            bail!("fleet.{n}: `all` and `none` are reserved: a chat attaches to a repo, `all` or `none`");
+        }
         orchestrator_ids(&c)?;
         if let Some(g) = c
             .orchestrator

@@ -7,7 +7,7 @@
 - don't put a ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the demo export (enforced by: CI leak gate)
 - don't add a direct dependency outside docs/serve/alerts.md's allow-list (enforced by: CI deps gate)
 - don't make core depend on server or cli, server on cli, or spawn a process outside core's runner.rs (enforced by: CI layers, tests/runner_limits.rs)
-- don't let ts-rs into the release build, let assets/types/ drift from `just types`, hand-copy a generated type, or remove or retype a key of crates/cli/tests/golden/contract/v1/: a breaking change is /api/v2 (enforced by: CI release has no ts-rs, CI TS types, `just types-lint`, CI arch-check `append_only`, crates/cli/tests/contract_v1.rs)
+- don't let ts-rs into the release build, let assets/types/ drift from `just types`, hand-copy a generated type, remove or retype a key of crates/cli/tests/golden/contract/v1/, call a client, or type into a chat a client runs: a breaking change is /api/v2, and a line for a client's chat is a row's prompt (enforced by: CI release has no ts-rs, CI TS types, `just types-lint`, CI arch-check `append_only` and the `/plugin/` ban, crates/cli/tests/contract_v1.rs, D2's test that a lane ask to an attached chat starts no shed session)
 - don't build HTML in crates/server outside the page shell and the lifeboat (enforced by: CI `just html-lint`)
 - don't hard-code a Duration in crates/core/src: make it a [limits] key (enforced by: CI timing check, scripts/timing-check.sh)
 - don't push src/ over ci/cap.toml's line_cap, or edit ci/cap.toml from a lane (enforced by: CI line cap, the lane hook)
