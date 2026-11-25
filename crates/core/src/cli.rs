@@ -364,10 +364,8 @@ enum Cmd {
         cmd: Vec<String>,
     },
     #[command(about = "#419: a lesson lane's verbs: the digest and the lesson checks' promotion")]
-    Lesson {
-        #[command(subcommand)]
-        cmd: LessonCmd,
-    },
+    #[command(subcommand)]
+    Lesson(LessonCmd),
     #[command(about = "#1100: a triage lane's verbs")]
     Triage(crate::triage::Args),
     #[command(
@@ -2082,9 +2080,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let e = Event::new(ctx.now, &fleet, Some(issue), "fix-done", json!({"why": no_change}));
                     emit(&ctx.state, &cfg, e)?;
                     writeln!(out, "recorded {fleet}#{issue} fix-done: {no_change}")?;
-                    if crate::jobs::of(&working(&ctx.state)?, &fleet, issue) == Some("triage") {
-                        crate::triage::flag_orphans(ctx, &cfg, r, out, &fleet)?;
-                    }
+                    crate::triage::flag_orphans(ctx, &cfg, r, out, (&fleet, issue))?;
                     crate::jobs::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
                 }
                 Cmd::Turn { state, why } => {
@@ -2116,16 +2112,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     kick(f, n, "turn");
                 }
                 Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
-                Cmd::Lesson {
-                    cmd: LessonCmd::Digest { fleet, days, min_fails },
-                } => {
+                Cmd::Lesson(LessonCmd::Digest { fleet, days, min_fails }) => {
                     let (text, fails) = crate::lesson::digest(ctx, &cfg, r, &fleet, days)?;
                     write!(out, "{text}")?;
                     return Ok(i32::from(min_fails.is_some_and(|m| fails >= m)));
                 }
-                Cmd::Lesson {
-                    cmd: LessonCmd::Apply { fleet, rules },
-                } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?,
+                Cmd::Lesson(LessonCmd::Apply { fleet, rules }) => {
+                    crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?
+                }
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
                 Cmd::Job(a) => return crate::jobs::cli(ctx, &cfg, r, out, &a),
                 Cmd::Soak(a) => return crate::soak::run(ctx, &cfg, r, out, &a.fleet),

@@ -37,8 +37,8 @@ brief names where you sit, the fleet your asks go on and your own instructions.
   which cap-check requires; only that issue's lane may write there), sized by
   `drover cap <fleet>` (projected total plus margin) for the whole queue, and queue it on top. Answer every lane
   that asked with a `DECISION` to wait for it (`queue block --on <raise>`); drive rechecks them once it merges.
-- When the owner says "correct", run `drover lesson <fleet>`: it files this week's lessons issue and spawns its
-  `lesson` lane, which turns the fleet's repeated mistakes into checks (only orchestrators and the owner may).
+- When the owner says "correct", run `drover job <fleet> lesson`: it files this week's lessons issue and spawns
+  its `lesson` lane, which turns the fleet's repeated mistakes into checks (only orchestrators and the owner may).
 - When `drover doctor` reports `✗ timer — … outdated` (or missing), run `drover timer install` yourself (logged
   `timer-install`); it is the one host verb you may run.
 - Never edit fleet.toml or harness config (roles, models, gates, land mode, serial groups, hosts, accounts)

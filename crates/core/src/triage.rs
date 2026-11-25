@@ -309,8 +309,17 @@ fn orphans(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<(
     Ok(rooted.into_iter().filter(|(_, root)| shut(root)).collect())
 }
 
-/// A triage lane's `done`: `stale?` on each open issue whose `Root cause` is closed.
-pub fn flag_orphans(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+/// A triage job's lane's `done`: `stale?` on each open issue whose `Root cause` is closed.
+pub fn flag_orphans(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+) -> Result<()> {
+    if crate::jobs::of(&working(&ctx.state)?, fleet, n) != Some("triage") {
+        return Ok(());
+    }
     for (o, root) in orphans(ctx, cfg, r, fleet)? {
         let flag = labeled(ctx, cfg, r, out, (fleet, o), &["stale?".into()], json!({"root": root}));
         if let Err(e) = flag {
