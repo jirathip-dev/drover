@@ -139,6 +139,36 @@ export type Chip = { name: string, cur?: string | null, all: Array<string>, };
 export type ThreadRow = { id: string, title: string, age: string, unread: boolean, state: string, waiting: Array<string>, links: Array<Link>, line: string, };
 
 /**
+ * API v1's `rows` and `thread/<id>/rows` (docs/rows.md): `seq` the newest row's; `more`: ask again from the last row's seq.
+ */
+export type Rows = { seq: number, more: boolean, rows: Array<RowView>, };
+
+/**
+ * A row as cooee reads it: the row, what every surface draws (`block`), and a handoff row's item.
+ */
+export type RowView = { block: JsonValue, handoff?: Handoff | null, seq: number, ts: number, key: string, to: Target, kind: RowKind, fleet: string, issue?: number | null, text: string, open: boolean, prompt?: string | null, push?: Push | null, };
+
+/**
+ * One thing a thread shows, made from one logged event (`seq`, `ts`), without its block.
+ */
+export type RowData = { seq: number, ts: number, key: string, to: Target, kind: RowKind, fleet: string, issue?: number | null, text: string, open: boolean, prompt?: string | null, push?: Push | null, };
+
+/**
+ * Where a row goes: a thread by id, a repo's desk thread, or the owner alone.
+ */
+export type Target = { "k": "thread", id: string, } | { "k": "desk", repo: string, } | { "k": "owner" };
+
+/**
+ * What a row is; for filters and buttons, never for workflow.
+ */
+export type RowKind = "ask" | "decision" | "handoff" | "run-card" | "config-card" | "secret-card" | "system" | "merged" | "rollout" | "digest" | "alert" | "said";
+
+/**
+ * A notification's words; a newer one with the same `tag` replaces the older.
+ */
+export type Push = { title: string, body: string, tag: string, };
+
+/**
  * A linked thread's chip: `from t5`, `continued in t6`.
  */
 export type Link = { w: string, t: string, };

@@ -93,7 +93,7 @@ pub fn settle(
         format!("secret {name} set ✓ (by owner)"),
     ];
     let line = if value.is_some() { &line[1] } else { &line[0] };
-    orchestrator::tell(ctx, cfg, r, id, line);
+    crate::thread::route::tell(ctx, cfg, r, id, line);
     Ok(line.clone())
 }
 

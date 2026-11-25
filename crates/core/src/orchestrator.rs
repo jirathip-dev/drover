@@ -2,7 +2,7 @@ use crate::config::{expand, Config, Role};
 use crate::events::{self, emit, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::Runner;
-use crate::session::Session;
+use crate::session::{Session, Status};
 use crate::spawn::Plan;
 use crate::{providers, term, Ctx};
 use anyhow::{bail, Context, Result};
@@ -54,7 +54,7 @@ pub fn find<'a>(events: &'a [Event], id: &str) -> Result<&'a Event> {
     }
 }
 
-fn link_of<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
+pub(crate) fn link_of<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     let link = |e: &&Event| matches!(e.kind.as_str(), "orchestrator-attached" | "orchestrator-detached");
     events.iter().rfind(|e| link(e) && e.str("thread") == Some(id))
 }
@@ -238,11 +238,11 @@ fn make(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch): Opt2,
             a.kind == "needs-decision"
                 && a.fleet == repo
                 && a.data.get("lane_ask").is_some()
-                && routed_to(&events, a).is_none()
+                && crate::thread::route::routed_to(&events, a).is_none()
                 && events::closed(&events, a).is_none()
         };
         for a in events.iter().filter(waiting) {
-            route_row(ctx, cfg, &id, a)?;
+            crate::thread::route::route_row(ctx, cfg, &id, a)?;
         }
     }
     Ok(id)
@@ -520,96 +520,13 @@ pub fn handoff_text(e: &Event) -> String {
     e.str("target").map_or(title.into(), |t| format!("{title} → {t}"))
 }
 
-/// The thread a lane's ask on `fleet` goes to: `[fleet.<n>] ask_thread`, else the repo's most recently active one (neither archived); none without a conductor role. an attached cooee thread is one of them.
-pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a str> {
-    let own = role(cfg, fleet).is_ok();
-    let chat = |e: &Event| e.str("via") == Some("profile");
-    let repo = |e: &&'a Event| {
-        e.fleet == fleet && (own && e.kind == "thread-new" || e.kind == "orchestrator-attached" && !chat(e))
-    };
-    let ids = events.iter().filter(repo).filter_map(|e| e.str("thread"));
-    let live = |id: &&str| match link_of(events, id) {
-        Some(_) => attached(events, id).is_some_and(|e| e.fleet == fleet),
-        None => !archived(events, id),
-    };
-    let ids: Vec<&str> = ids.filter(live).collect();
-    let pin = cfg.fleet.get(fleet).and_then(|f| f.ask_thread.as_deref());
-    let newest = || ids.iter().max_by_key(|id| of(events, id).map(|e| e.seq).max()).copied();
-    ids.iter().find(|id| Some(**id) == pin).copied().or_else(newest)
-}
-
-/// Lane ask `a` typed into thread `id`'s orchestrator (started or resumed) as a system line the board hides.
-pub fn lane_ask(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, a: &Event) -> Result<String> {
-    let t = find(&working(&ctx.state)?, id)?.clone();
-    let text = route_row(ctx, cfg, id, a)?;
-    deliver(ctx, cfg, r, &t, &format!("[{id}] system: {text}"))
-}
-
-fn route_row(ctx: &Ctx, cfg: &Config, id: &str, a: &Event) -> Result<String> {
-    let s = |k| a.str(k).unwrap_or_default();
-    let rec = a.val("recommend").as_u64();
-    let opts = a.val("options").as_array().into_iter().flatten().zip(1..);
-    let opts: String = opts
-        .map(|(o, n)| {
-            let r = if rec == Some(n) { " (recommended)" } else { "" };
-            format!(" [{n}] {}{r}", o.as_str().unwrap_or_default())
-        })
-        .collect();
-    let at = a.issue.map_or("the fleet".into(), |n| format!("#{n}"));
-    let text = format!(
-        "lane ask {} on {at} from {} ({}): {}{opts}. Answer it only if the issue spec or a past decision settles it: \
-         `drover answer {} {} <n> --basis \"<verbatim spec quote | q<id>>\"`; else run it without --basis and it \
-         goes to the owner.",
-        s("id"),
-        a.str("agent").unwrap_or("a lane"),
-        s("kind"),
-        s("question"),
-        a.fleet,
-        s("id")
-    );
-    let d = json!({"thread": id, "from": "system", "text": text, "lane_ask": a.str("id")});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &a.fleet, None, "thread-msg", d))?;
-    Ok(text)
-}
-
-/// The thread lane ask `a` was routed to: when asked, else its routing row in a thread opened after.
-pub fn routed_to<'a>(events: &'a [Event], a: &'a Event) -> Option<&'a str> {
-    let row = |e: &&Event| e.kind == "thread-msg" && e.fleet == a.fleet && e.str("lane_ask") == a.str("id");
-    a.str("routed")
-        .or_else(|| events.iter().find(row).and_then(|e| e.str("thread")))
-}
-
-/// Lane ask `a` put to the owner as a choice row in thread `id` (once), `rec` (else its own) recommended; it pushes as an ask.
-pub fn to_owner(ctx: &Ctx, cfg: &Config, id: &str, a: &Event, rec: Option<u64>, why: &str) -> Result<()> {
-    let events = working(&ctx.state)?;
-    if of(&events, id).any(|e| e.kind == "ask-owner" && e.str("id") == a.str("id")) {
-        return Ok(());
-    }
-    let rec = rec.or_else(|| a.val("recommend").as_u64());
-    let d = json!({"thread": id, "id": a.str("id"), "question": a.str("question"), "options": a.val("options"),
-        "recommend": rec, "agent": a.str("agent"), "why": why});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &a.fleet, a.issue, "ask-owner", d))
-}
-
 /// An `ask-owner` row's lane ask.
 pub fn lane_of<'a>(events: &'a [Event], e: &Event) -> Option<&'a Event> {
     events::ask_event(events, "needs-decision", &e.fleet, e.str("id").unwrap_or_default())
 }
 
-/// A one-line row from thread `id` into each thread that handed off to it (an issue filed, an ask answered).
-pub fn flow(ctx: &Ctx, cfg: &Config, id: &str, text: &str) -> Result<()> {
-    let events = working(&ctx.state)?;
-    let to_id = |e: &&Event| e.kind == "thread-handoff" && e.str("to") == Some(id);
-    let srcs: std::collections::BTreeSet<_> = events.iter().filter(to_id).filter_map(|e| e.str("from")).collect();
-    for s in srcs {
-        let d = json!({"thread": s, "from": "system", "via": id, "text": text});
-        let e = Event::new(ctx.now, &find(&events, s)?.fleet, None, "thread-msg", d);
-        emit(&ctx.state, cfg, e)?;
-    }
-    Ok(())
-}
-
-fn is_id(s: &str) -> bool {
+/// `s` is a drover thread id (`t<n>`).
+pub fn is_id(s: &str) -> bool {
     s.len() > 1 && s.starts_with('t') && s[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
@@ -630,7 +547,7 @@ pub fn text_ok(text: &str) -> Result<()> {
     Ok(())
 }
 
-fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, (text, files): (&str, &[Value])) -> Result<()> {
+pub(crate) fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, (text, files): (&str, &[Value])) -> Result<()> {
     let mut d = json!({"thread": t.str("thread"), "from": from, "text": text});
     if !files.is_empty() {
         d.put("files", json!(files));
@@ -710,16 +627,6 @@ pub fn say(
     deliver(ctx, cfg, r, &t, &line)
 }
 
-/// A card's settle line into thread `id` as `system`: typed into a drover thread's orchestrator, logged for a cooee chat.
-pub fn tell(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, line: &str) {
-    let chat = working(&ctx.state).ok().and_then(|e| attached(&e, id).cloned());
-    match chat {
-        Some(t) => log(ctx, cfg, &t, "system", (line, &[])),
-        None => say(ctx, cfg, r, (id, line, &[]), ("system", false)).map(drop),
-    }
-    .ok();
-}
-
 thread_local! {
     static LATER: std::cell::RefCell<Option<Vec<(Event, String)>>> = const { std::cell::RefCell::new(None) };
 }
@@ -786,10 +693,32 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let id = t.str("thread").unwrap_or_default();
     let events = working(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let agents = crate::session::live_on(r)?;
-    let awake = last
-        .filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| Some(a.name.as_str()) == s.str("agent")));
-    let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
+    let own = format!("orchestrator-{id}");
+    let agent = last.and_then(|s| s.str("agent")).unwrap_or(&own);
+    let found = crate::session::get(r, agent)?;
+    if let Some(ended) = found.as_ref().filter(|a| a.status().is_none_or(|s| s == Status::Done)) {
+        let was = ended.status().map_or("exited", Status::word);
+        crate::session::transcript::archive(r, ctx, agent).ok();
+        let w = r.shed().context(crate::config::NO_RUNTIME)?.wire;
+        let target = json!(shed_proto::Target { name: agent.into() });
+        crate::shed::call(r, &w, shed_proto::Method::Kill, target.clone()).ok();
+        crate::shed::call(r, &w, shed_proto::Method::Rm, target)?;
+        return start(ctx, cfg, r, (t, Some(was)), &events, line);
+    }
+    let agents: Vec<Session> = found.into_iter().collect();
+    let begun = of(&events, id).rfind(|e| e.kind == "orchestrator-start");
+    let picked = begun.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
+    if last.is_some_and(|l| l.kind != "orchestrator-start") && !agents.is_empty() && !picked {
+        let mut was = begun.map(|s| s.data.clone()).unwrap_or_default();
+        was.remove("replaced");
+        let mut d = Value::Object(was);
+        d.put("thread", json!(id))
+            .put("agent", json!(agent))
+            .put("resumed", json!(true));
+        started(ctx, cfg, t, d)?;
+        return once(ctx, cfg, r, t, line);
+    }
+    let awake = last.filter(|s| s.kind == "orchestrator-start" && !agents.is_empty());
     let stuck = awake.and(hung(ctx, cfg, &events, &agents, id));
     let Some(s) = awake.filter(|_| !picked && stuck.is_none()) else {
         match (awake, stuck) {
@@ -803,13 +732,14 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
                     Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
                 )?;
             }
+            (None, _) if !agents.is_empty() => term::close(ctx, r, agent).map(drop)?,
             _ => {}
         }
-        return start(ctx, cfg, r, t, &working(&ctx.state)?, line);
+        return start(ctx, cfg, r, (t, None), &working(&ctx.state)?, line);
     };
     let agent = s.str("agent").unwrap_or_default();
     crate::shed::cli(r, &["send", agent, line])?;
-    held(ctx, cfg, r, t, &events, agents.iter().find(|a| a.name == agent))?;
+    held(ctx, cfg, r, t, &events, agents.first())?;
     Ok(agent.into())
 }
 
@@ -1057,7 +987,14 @@ fn save(ctx: &Ctx, r: &dyn Runner, new: &str) -> Result<Config> {
     Ok(new_cfg)
 }
 
-fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], line: &str) -> Result<String> {
+fn start(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (t, replaced): (&Event, Option<&str>),
+    events: &[Event],
+    line: &str,
+) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
     let (fleet, base) = thread_role(cfg, events, t)?;
     let f = cfg.fleet(fleet)?;
@@ -1139,9 +1076,12 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     b.start(ctx, r, &agent, &labels, &dir.to_string_lossy(), &acp)?;
     let kick = format!("The thread so far is in {}, the last message new.", thread.display());
     let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
-    let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
+    let mut d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
         "model": p.model, "effort": p.effort, "resumed": false,
         "confirmed": kicked});
+    if let Some(was) = replaced {
+        d.put("replaced", json!(was));
+    }
     started(ctx, cfg, t, d)
 }
 
@@ -1350,7 +1290,12 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         };
         let heard = of(events, id).filter(|e| e.data.get("noreply").is_none());
         let quiet = heard.map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
-        let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"));
+        let name = s.str("agent").unwrap_or_default();
+        let listed = agents.iter().find(|a| a.name == name).cloned();
+        let Ok(a) = listed.map_or_else(|| crate::session::get(r, name), |a| Ok(Some(a))) else {
+            continue;
+        };
+        let a = a.as_ref();
         if a.is_some_and(Session::signed_out) {
             signed_out(ctx, cfg, r, t, s)?;
             continue;

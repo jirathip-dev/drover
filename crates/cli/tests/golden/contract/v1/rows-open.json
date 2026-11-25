@@ -1,0 +1,212 @@
+{
+  "more": false,
+  "rows": [
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-6-t",
+            "markdown": "split the PR?",
+            "type": "text"
+          },
+          {
+            "action": "answer",
+            "id": "q2",
+            "options": [
+              {
+                "label": "split",
+                "value": "split"
+              },
+              {
+                "label": "keep",
+                "value": "keep"
+              }
+            ],
+            "other": {
+              "placeholder": "other: type an answer"
+            },
+            "type": "choice",
+            "values": {
+              "thread": ""
+            }
+          }
+        ],
+        "id": "m-6",
+        "kind": "ask",
+        "meta": {
+          "label": "{}",
+          "since": "1970-01-12T13:30:05Z"
+        },
+        "title": "q2",
+        "tone": "warn",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": 30,
+      "key": "ask-sendmeter-q2",
+      "kind": "ask",
+      "open": true,
+      "prompt": null,
+      "push": null,
+      "seq": 6,
+      "text": "q2 · split the PR?",
+      "to": {
+        "k": "desk",
+        "repo": "sendmeter"
+      },
+      "ts": 999005
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-11-d",
+            "markdown": "```diff\n+x = 1\n```",
+            "type": "text"
+          }
+        ],
+        "buttons": [
+          {
+            "action": "config-card",
+            "id": "m-11-discard",
+            "label": "discard",
+            "style": "",
+            "type": "button",
+            "values": {
+              "act": "discard",
+              "id": "c1",
+              "thread": "t1"
+            }
+          }
+        ],
+        "id": "m-11",
+        "kind": "config",
+        "meta": {
+          "label": "{}",
+          "since": "1970-01-12T13:30:10Z"
+        },
+        "subtitle": "stale: fleet.toml changed since, it can no longer apply",
+        "title": "config proposal c1",
+        "tone": "bad",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": null,
+      "key": "config-c1",
+      "kind": "config-card",
+      "open": true,
+      "prompt": null,
+      "push": null,
+      "seq": 11,
+      "text": "sendmeter config-propose",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999010
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-12-t",
+            "markdown": "the deploy",
+            "type": "text"
+          },
+          {
+            "fields": [
+              {
+                "label": "",
+                "name": "text",
+                "placeholder": "value of API_KEY",
+                "type": "secret",
+                "value": ""
+              }
+            ],
+            "id": "m-12-f",
+            "submit": {
+              "action": "secret-card",
+              "label": "save",
+              "values": {
+                "act": "save",
+                "name": "API_KEY",
+                "thread": "t1"
+              }
+            },
+            "type": "form"
+          }
+        ],
+        "buttons": [
+          {
+            "action": "secret-card",
+            "id": "m-12-dismiss",
+            "label": "dismiss",
+            "style": "",
+            "type": "button",
+            "values": {
+              "act": "dismiss",
+              "name": "API_KEY",
+              "thread": "t1"
+            }
+          }
+        ],
+        "id": "m-12",
+        "kind": "secret",
+        "meta": {
+          "label": "{}",
+          "since": "1970-01-12T13:30:11Z"
+        },
+        "title": "secret API_KEY",
+        "tone": "warn",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": null,
+      "key": "secret-t1-API_KEY",
+      "kind": "secret-card",
+      "open": true,
+      "prompt": null,
+      "push": null,
+      "seq": 12,
+      "text": "sendmeter secret-request",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999011
+    },
+    {
+      "block": {
+        "blocks": [
+          {
+            "id": "m-15-t",
+            "markdown": "sendmeter #12 rollout-open",
+            "type": "text"
+          }
+        ],
+        "id": "m-15",
+        "kind": "sys",
+        "type": "card"
+      },
+      "fleet": "sendmeter",
+      "handoff": null,
+      "issue": 12,
+      "key": "rollout-sendmeter-12",
+      "kind": "rollout",
+      "open": true,
+      "prompt": null,
+      "push": null,
+      "seq": 15,
+      "text": "sendmeter #12 rollout-open",
+      "to": {
+        "id": "t1",
+        "k": "thread"
+      },
+      "ts": 999014
+    }
+  ],
+  "seq": 17
+}

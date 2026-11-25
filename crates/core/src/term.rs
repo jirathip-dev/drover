@@ -43,6 +43,7 @@ impl Shed {
             parent: None,
             rows: None,
             cols: None,
+            ..RunParams::default()
         }
     }
     /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
@@ -164,6 +165,7 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
                     events: false,
                     before: None,
                     n: None,
+                    since: None,
                 }),
             )
         }

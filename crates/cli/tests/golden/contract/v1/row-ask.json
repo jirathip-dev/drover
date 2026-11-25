@@ -1,0 +1,106 @@
+[
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-4-t",
+          "markdown": "retry the flaky gate?",
+          "type": "text"
+        },
+        {
+          "id": "m-4-a",
+          "markdown": "✓ **retry** · owner · 16m",
+          "type": "text"
+        }
+      ],
+      "id": "m-4",
+      "kind": "ask",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:30:03Z"
+      },
+      "title": "q1",
+      "tone": "",
+      "type": "card"
+    },
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": 12,
+    "key": "ask-sendmeter-q1",
+    "kind": "ask",
+    "open": false,
+    "prompt": null,
+    "push": {
+      "body": "q1 · retry the flaky gate?",
+      "tag": "ask-sendmeter-q1",
+      "title": "sendmeter #12"
+    },
+    "seq": 4,
+    "text": "q1 · retry the flaky gate?",
+    "to": {
+      "id": "t1",
+      "k": "thread"
+    },
+    "ts": 999003
+  },
+  {
+    "block": {
+      "blocks": [
+        {
+          "id": "m-6-t",
+          "markdown": "split the PR?",
+          "type": "text"
+        },
+        {
+          "action": "answer",
+          "id": "q2",
+          "options": [
+            {
+              "label": "split",
+              "value": "split"
+            },
+            {
+              "label": "keep",
+              "value": "keep"
+            }
+          ],
+          "other": {
+            "placeholder": "other: type an answer"
+          },
+          "type": "choice",
+          "values": {
+            "thread": ""
+          }
+        }
+      ],
+      "id": "m-6",
+      "kind": "ask",
+      "meta": {
+        "label": "{}",
+        "since": "1970-01-12T13:30:05Z"
+      },
+      "title": "q2",
+      "tone": "warn",
+      "type": "card"
+    },
+    "fleet": "sendmeter",
+    "handoff": null,
+    "issue": 30,
+    "key": "ask-sendmeter-q2",
+    "kind": "ask",
+    "open": true,
+    "prompt": null,
+    "push": {
+      "body": "q2 · split the PR?",
+      "tag": "ask-sendmeter-q2",
+      "title": "sendmeter #30"
+    },
+    "seq": 6,
+    "text": "q2 · split the PR?",
+    "to": {
+      "k": "desk",
+      "repo": "sendmeter"
+    },
+    "ts": 999005
+  }
+]
