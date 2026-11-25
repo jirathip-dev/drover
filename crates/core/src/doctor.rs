@@ -115,7 +115,6 @@ fn hygiene(
     }
 }
 
-/// Per host, its CPU idle, free memory and swap-out against its own limits: the main host's from `main`, each reachable other's from its last look.
 fn limit_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, main: &crate::host::Host) -> Vec<String> {
     let seen = crate::hosts::cached(ctx);
     let n = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
