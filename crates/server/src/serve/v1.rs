@@ -78,15 +78,7 @@ impl Server<'_> {
                 if !Self::plugin(ctx, head) {
                     return reply("401 Unauthorized", "UNPAIRED", "the plugin token");
                 }
-                let id = x
-                    .strip_prefix("thread/")
-                    .and_then(|t| t.strip_suffix("/said"))
-                    .unwrap_or_default();
-                let s = serde_json::from_str::<crate::api::Said>(body).context("the body is no `Said`");
-                done(s.and_then(|s| {
-                    let cfg = Config::kept(ctx)?;
-                    crate::orchestrator::said(ctx, &cfg, id, (&s.id, &s.from, &s.text))
-                }))
+                said(ctx, x, body)
             }
             _ if !self.allowed(ctx, head) => reply("403 Forbidden", "FORBIDDEN", "foreign Host or Origin"),
             (_, Some(x))
@@ -829,6 +821,18 @@ fn fields(body: &str) -> BTreeMap<String, String> {
         |_| form(body.trim()),
         |m| m.into_iter().map(|(k, v)| (k, flat(v))).collect(),
     )
+}
+
+fn said(ctx: &Ctx, x: &str, body: &str) -> Res {
+    let id = x
+        .strip_prefix("thread/")
+        .and_then(|t| t.strip_suffix("/said"))
+        .unwrap_or_default();
+    let s = serde_json::from_str::<crate::api::Said>(body).context("the body is no `Said`");
+    done(s.and_then(|s| {
+        let cfg = Config::kept(ctx)?;
+        crate::orchestrator::said(ctx, &cfg, id, (&s.id, &s.from, &s.text))
+    }))
 }
 
 fn done(r: Result<String>) -> Res {
