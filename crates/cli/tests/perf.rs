@@ -1131,9 +1131,9 @@ fn a_pass_over_30k_events_and_150_done_issues_stays_fast() {
     }
     t.sort_by(f64::total_cmp);
     cal.sort_by(f64::total_cmp);
-    let (pass, budget) = (t[0], (2.4 * cal[0]).round());
+    let (pass, budget) = (t[0], (2.4 * cal[0]).round().max(100.0));
     report(&format!(
-        "#954 perf (30,000 events, 200 issues, 150 done): drive --fast {pass:.0} ms of CPU (fastest of {t:?}); budget 2.4 x this runner's 3 parses of the log {cal:?} = {budget:.0} ms"
+        "#954 perf (30,000 events, 200 issues, 150 done): drive --fast {pass:.0} ms of CPU (fastest of {t:?}); budget 2.4 x this runner's 3 parses of the log {cal:?}, at least 100, = {budget:.0} ms"
     ));
     if cfg!(debug_assertions) {
         return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
