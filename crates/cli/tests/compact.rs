@@ -3,6 +3,7 @@ use common::*;
 use drover::events::{append, history, Event};
 use drover::reroot::Shas;
 use serde_json::json;
+use std::path::Path;
 
 #[test]
 fn drover_compact_runs_the_compact_binary_for_the_fleet_and_logs_its_records_once() {
