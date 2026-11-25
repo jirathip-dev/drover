@@ -620,7 +620,7 @@ enum Cmd {
         rebuild: bool,
     },
     #[command(
-        about = "Moved to the standalone `compact` binary (jirathip-dev/compact): this runs it on the fleet's repo, clone, lanes and saved ids, and logs its records"
+        about = "Moved to the standalone `compact` binary: this runs it on the fleet's repo, clone, lanes and saved ids, and logs its records"
     )]
     Compact(crate::reroot::Opts),
     #[command(about = "The event log in its JSONL format (one event a line, with its seq), for external readers")]

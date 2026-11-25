@@ -78,7 +78,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - SLO promises a known hold supersedes are void, not missed (#1093); one log read per pass (#832).
 - Banned APIs (unwrap, panics, indexing, `as` casts) fail CI (#809).
 - Compact: a one-time fresh start of the history, with an owner card and undo (#1121), now the standalone
-  [`compact`](https://github.com/jirathip-dev/compact) binary; `drover compact <fleet> <act>` runs it on the fleet
+  `compact` binary; `drover compact <fleet> <act>` runs it on the fleet
   and logs its records (#1574).
 
 ## Next

@@ -190,8 +190,7 @@ Undo, at four sizes:
 
 ## Compact: a repo's fresh start
 
-Compact is the standalone `compact` binary (jirathip-dev/compact; `cargo install --locked --git
-https://github.com/jirathip-dev/compact`): one root commit before a cut, one commit per landed PR after it, an archive
+Compact is the standalone `compact` binary (its own repo; install it on the PATH): one root commit before a cut, one commit per landed PR after it, an archive
 in `<repo>-history`, and undo. Its README is the reference. Drover keeps only the glue:
 
 - **Run.** `drover compact <fleet> <act>` runs `compact --repo <repo> --line <integration> --clone <clone> --lane

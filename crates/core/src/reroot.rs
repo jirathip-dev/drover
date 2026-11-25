@@ -96,8 +96,8 @@ pub fn cli(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, o: Opts) -> Result<()
     args.extend(["--saved".into(), list.to_string_lossy().into()]);
     args.extend(["--dir".into(), d.to_string_lossy().into()]);
     args.extend(o.act);
-    let res = (r.run("compact", &args))
-        .context("no `compact` binary: cargo install --locked --git https://github.com/jirathip-dev/compact")?;
+    let res =
+        (r.run("compact", &args)).context("no `compact` binary on the PATH: install the standalone compact tool")?;
     write!(out, "{}", res.stdout)?;
     record(ctx, &cfg, &f.repo)?;
     let err = res.stderr.trim();
