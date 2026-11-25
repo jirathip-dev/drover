@@ -191,7 +191,9 @@ fn keys_answer_the_open_ask_and_settle_a_card_and_an_expired_card_is_refused_as_
         assert!(!screen(&mut t, &mut app).contains("answer q1"), "⌫ backs out");
         key(&mut app, KeyCode::Char('2'));
         key(&mut app, KeyCode::Enter);
-        until(&mut app, |_| !kinds(&c, "decision").is_empty());
+        until(&mut app, |a| {
+            !kinds(&c, "decision").is_empty() && !shot(&mut term(40, 18), a).contains("answer q1")
+        });
         let d = &kinds(&c, "decision")[0];
         assert_eq!(
             (d.str("id"), d.str("choice"), d.str("by")),
