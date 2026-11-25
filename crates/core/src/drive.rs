@@ -1130,6 +1130,37 @@ fn turn_prompt(what: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
+fn design_handoffs<'a>(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    agents: &[Session],
+    states: impl Iterator<Item = &'a IssueState>,
+) -> Result<BTreeMap<u64, String>> {
+    let mut unread = BTreeMap::new();
+    for s in states.filter(|s| s.state == "design") {
+        if let Some(why) = crate::design::handoff(ctx, cfg, r, out, agents, s)? {
+            writeln!(
+                out,
+                "{} #{} design-review: worktree unread, held: {why}",
+                s.fleet, s.issue
+            )?;
+            unread.insert(s.issue, why);
+        }
+    }
+    Ok(unread)
+}
+
+fn hold_unread(waits: &mut [(IssueState, Waiting)], unread: &BTreeMap<u64, String>) {
+    for (_, w) in waits.iter_mut().filter(|(s, _)| s.state == "design") {
+        if let Some(why) = unread.get(&w.issue) {
+            (w.who, w.next_cmd, w.promise) = ("none", None, None);
+            w.what = format!("design round unread, no respawn this pass: {why}");
+        }
+    }
+}
+
 fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -1191,13 +1222,7 @@ fn pass(
             emit(&ctx.state, cfg, e)?;
         }
     }
-    let mut unread = std::collections::BTreeMap::new();
-    for s in st.values().filter(|s| s.fleet == fleet && s.state == "design") {
-        if let Some(why) = crate::design::handoff(ctx, cfg, r, out, &agents, s)? {
-            writeln!(out, "{fleet} #{} design-review: worktree unread, held: {why}", s.issue)?;
-            unread.insert(s.issue, why);
-        }
-    }
+    let unread = design_handoffs(ctx, cfg, r, out, &agents, st.values().filter(|s| s.fleet == fleet))?;
     crate::stall::refused(ctx, cfg, r, out, &working(&ctx.state)?, fleet)?;
     silent(ctx, cfg, r, out, &agents, fleet)?;
     if let Err(e) = crate::hotspots::sync(ctx, cfg, r, fleet) {
@@ -1214,12 +1239,7 @@ fn pass(
         waits = waiting::scan(ctx, cfg, seen, &working(&ctx.state)?, &agents, false, Some(fleet));
         waits.retain(one);
     }
-    for (_, w) in waits.iter_mut().filter(|(s, _)| s.state == "design") {
-        if let Some(why) = unread.get(&w.issue) {
-            (w.who, w.next_cmd, w.promise) = ("none", None, None);
-            w.what = format!("design round unread, no respawn this pass: {why}");
-        }
-    }
+    hold_unread(&mut waits, &unread);
     let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();
     let rev = |w: &Waiting| {
         w.next_cmd
