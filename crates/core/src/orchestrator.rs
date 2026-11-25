@@ -2,7 +2,7 @@ use crate::config::{expand, Config, Role};
 use crate::events::{self, emit, working, Event, Json};
 use crate::gate::refused;
 use crate::runner::Runner;
-use crate::session::Session;
+use crate::session::{Session, Status};
 use crate::spawn::Plan;
 use crate::{providers, term, Ctx};
 use anyhow::{bail, Context, Result};
@@ -693,10 +693,32 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let id = t.str("thread").unwrap_or_default();
     let events = working(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let agents = crate::session::live_on(r)?;
-    let awake = last
-        .filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| Some(a.name.as_str()) == s.str("agent")));
-    let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
+    let own = format!("orchestrator-{id}");
+    let agent = last.and_then(|s| s.str("agent")).unwrap_or(&own);
+    let found = crate::session::get(r, agent)?;
+    if let Some(ended) = found.as_ref().filter(|a| a.status().is_none_or(|s| s == Status::Done)) {
+        let was = ended.status().map_or("exited", Status::word);
+        crate::session::transcript::archive(r, ctx, agent).ok();
+        let w = r.shed().context(crate::config::NO_RUNTIME)?.wire;
+        let target = json!(shed_proto::Target { name: agent.into() });
+        crate::shed::call(r, &w, shed_proto::Method::Kill, target.clone()).ok();
+        crate::shed::call(r, &w, shed_proto::Method::Rm, target)?;
+        return start(ctx, cfg, r, (t, Some(was)), &events, line);
+    }
+    let agents: Vec<Session> = found.into_iter().collect();
+    let begun = of(&events, id).rfind(|e| e.kind == "orchestrator-start");
+    let picked = begun.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
+    if last.is_some_and(|l| l.kind != "orchestrator-start") && !agents.is_empty() && !picked {
+        let mut was = begun.map(|s| s.data.clone()).unwrap_or_default();
+        was.remove("replaced");
+        let mut d = Value::Object(was);
+        d.put("thread", json!(id))
+            .put("agent", json!(agent))
+            .put("resumed", json!(true));
+        started(ctx, cfg, t, d)?;
+        return once(ctx, cfg, r, t, line);
+    }
+    let awake = last.filter(|s| s.kind == "orchestrator-start" && !agents.is_empty());
     let stuck = awake.and(hung(ctx, cfg, &events, &agents, id));
     let Some(s) = awake.filter(|_| !picked && stuck.is_none()) else {
         match (awake, stuck) {
@@ -710,13 +732,14 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
                     Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
                 )?;
             }
+            (None, _) if !agents.is_empty() => term::close(ctx, r, agent).map(drop)?,
             _ => {}
         }
-        return start(ctx, cfg, r, t, &working(&ctx.state)?, line);
+        return start(ctx, cfg, r, (t, None), &working(&ctx.state)?, line);
     };
     let agent = s.str("agent").unwrap_or_default();
     crate::shed::cli(r, &["send", agent, line])?;
-    held(ctx, cfg, r, t, &events, agents.iter().find(|a| a.name == agent))?;
+    held(ctx, cfg, r, t, &events, agents.first())?;
     Ok(agent.into())
 }
 
@@ -964,7 +987,14 @@ fn save(ctx: &Ctx, r: &dyn Runner, new: &str) -> Result<Config> {
     Ok(new_cfg)
 }
 
-fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], line: &str) -> Result<String> {
+fn start(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (t, replaced): (&Event, Option<&str>),
+    events: &[Event],
+    line: &str,
+) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
     let (fleet, base) = thread_role(cfg, events, t)?;
     let f = cfg.fleet(fleet)?;
@@ -1046,9 +1076,12 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     b.start(ctx, r, &agent, &labels, &dir.to_string_lossy(), &acp)?;
     let kick = format!("The thread so far is in {}, the last message new.", thread.display());
     let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
-    let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
+    let mut d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
         "model": p.model, "effort": p.effort, "resumed": false,
         "confirmed": kicked});
+    if let Some(was) = replaced {
+        d.put("replaced", json!(was));
+    }
     started(ctx, cfg, t, d)
 }
 
@@ -1257,7 +1290,12 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         };
         let heard = of(events, id).filter(|e| e.data.get("noreply").is_none());
         let quiet = heard.map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
-        let a = agents.iter().find(|a| Some(a.name.as_str()) == s.str("agent"));
+        let name = s.str("agent").unwrap_or_default();
+        let listed = agents.iter().find(|a| a.name == name).cloned();
+        let Ok(a) = listed.map_or_else(|| crate::session::get(r, name), |a| Ok(Some(a))) else {
+            continue;
+        };
+        let a = a.as_ref();
         if a.is_some_and(Session::signed_out) {
             signed_out(ctx, cfg, r, t, s)?;
             continue;
