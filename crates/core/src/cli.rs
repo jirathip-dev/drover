@@ -623,8 +623,10 @@ enum Cmd {
         #[arg(long, help = "Rebuild the issue, lane and ask tables from every event instead")]
         rebuild: bool,
     },
-    #[command(about = "A repo's fresh start: one root before a cut, one commit per landed PR after it; archive, undo")]
-    Compact(crate::compact::Opts),
+    #[command(
+        about = "Moved to the standalone `compact` binary: this runs it on the fleet's repo, clone, lanes and saved ids, and logs its records"
+    )]
+    Compact(crate::reroot::Opts),
     #[command(about = "The event log in its JSONL format (one event a line, with its seq), for external readers")]
     #[command(hide = true)]
     Events {
@@ -1480,7 +1482,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             write!(out, "{}", boards.join("\n"))?;
         }
         Cmd::ArchiveEvents { rebuild } => crate::db::archive_events(&ctx.state, ctx.now, rebuild, out)?,
-        Cmd::Compact(o) => crate::compact::cli(ctx, r, out, o)?,
+        Cmd::Compact(o) => crate::reroot::cli(ctx, r, out, o)?,
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
             scope: Scope { fleet, json },
