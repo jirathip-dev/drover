@@ -668,7 +668,7 @@ fn what_if() {
 
 fn fleet_toml(serial_max: u64) -> String {
     format!(
-        "[fleet.fx]\nrepo = \"o/fx\"\nlocal = \"/x\"\nintegration = \"staging\"\nserial_paths = [\"db/**\"]\nserial_max = {serial_max}\n"
+        "[fleet.fx]\nrepo = \"o/fx\"\nlocal = \"/x\"\nintegration = \"staging\"\nflow = \"legacy\"\nserial_paths = [\"db/**\"]\nserial_max = {serial_max}\n"
     )
 }
 
