@@ -20,12 +20,17 @@ fn mode(path: &Path) -> String {
 
 pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config_only: bool) -> Result<i32> {
     let mut rows = vec![];
-    if !config_only {
-        let sample = crate::host::sample(r);
-        let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.load_per_cpu.is_some();
-        match sample.not_found(&["sysctl", "vm_stat"]).filter(|_| !host) {
+    let sample = (!config_only).then(|| crate::host::sample(r));
+    if let Some(sample) = &sample {
+        let host = sample.pressure.is_some() && sample.swap_count.is_some() && sample.cpu_idle.is_some();
+        match sample.not_found(&["sysctl", "vm_stat", "iostat"]).filter(|_| !host) {
             Some(why) => rows.push(format!("? host — {why}")),
-            None => row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH"),
+            None => row(
+                &mut rows,
+                host,
+                '✗',
+                "host — sysctl + vm_stat + iostat → put /usr/sbin on PATH",
+            ),
         }
         let gh = ok(r, "gh", &["auth", "status"]).is_ok();
         row(&mut rows, gh, '✗', "gh — auth status → gh auth login");
@@ -34,6 +39,7 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
         Ok(cfg) if config_only => config_rows(ctx, &cfg, r, &mut rows),
         Ok(cfg) => {
             checks(ctx, &cfg, r, &mut rows);
+            rows.extend(sample.iter().flat_map(|s| limit_rows(ctx, &cfg, r, s)));
             rows.extend(just_rows(ctx, &cfg, r));
             rows.extend(crate::status::doctor(ctx, &cfg));
         }
@@ -107,6 +113,47 @@ fn hygiene(
             "! hygiene {name} — docs: .drover/arch.toml has no [docs], hygiene says on → drover setup writes it"
         ));
     }
+}
+
+/// Per host, its CPU idle, free memory and swap-out against its own limits: the main host's from `main`, each reachable other's from its last look.
+fn limit_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, main: &crate::host::Host) -> Vec<String> {
+    let seen = crate::hosts::cached(ctx);
+    let n = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
+    let mut rows = vec![];
+    for (name, h) in crate::hosts::cards(cfg, r) {
+        let machine = h.and_then(|h| h.machine.as_deref());
+        let (l, s) = (cfg.limits_on(machine), seen.get(&name).cloned().unwrap_or_default());
+        if machine.is_some() && !s.up {
+            continue;
+        }
+        let at = |p: u8| {
+            ["normal", "warn", "critical"]
+                .get(usize::from(p))
+                .map(|w| (*w).to_string())
+        };
+        let h = match machine {
+            None => main.clone(),
+            Some(_) => crate::host::Host {
+                cpu_idle: s.idle,
+                free_mem_gb: s.mem,
+                swapout: s.swap,
+                pressure: s.pressure.and_then(at),
+                ..crate::host::Host::default()
+            },
+        };
+        let low = h.free_mem_gb.is_some_and(|g| g < l.min_free_mem_gb);
+        let text = format!(
+            "limits {name} — cpu idle {}% (min {}%) · mem {} GB free (min {}) · swap-out {} pages/2s (max {}) → raise [hosts.{name}] or [limits] only if it has room",
+            n(h.cpu_idle, 0),
+            l.min_cpu_idle,
+            n(h.free_mem_gb, 1),
+            l.min_free_mem_gb,
+            n(h.swapout, 0),
+            l.swapout_rate
+        );
+        row(&mut rows, !low && crate::host::admit(&h, &l).is_ok(), '!', &text);
+    }
+    rows
 }
 
 fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
