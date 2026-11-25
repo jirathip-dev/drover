@@ -58,12 +58,34 @@ fn segments(cmd: &str) -> Vec<String> {
         .collect()
 }
 
+/// The kind whose `[remote.<kind>]` route a fleet's gate checks, done checks and `drover hold` take.
+pub const GATE_KIND: &str = "cargo";
+
+const GATES: [&str; 2] = ["./.gatekeeper/run check*", "just check*"];
+
 /// Whether shell pattern `p` (`*` any text) matches `s`.
 pub fn hits(p: &str, s: &str) -> bool {
     crate::config::glob(p.replace('*', "**").as_bytes(), s.as_bytes())
 }
 
 impl Heavy {
+    /// Fleet `f`'s kinds, routes and never-routed list under host `h`'s slot limits; with a `cargo` route its gate checks join that kind.
+    pub fn of(f: &crate::config::Fleet, h: Option<&crate::config::HostCfg>) -> Heavy {
+        let mut kinds = f.heavy.clone();
+        if f.remote.contains_key(GATE_KIND) {
+            let gates = kinds.entry(GATE_KIND.into()).or_default();
+            gates.extend(GATES.map(String::from));
+        }
+        Heavy {
+            kinds,
+            max: h.and_then(|h| h.heavy_max).unwrap_or(3),
+            kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
+            wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
+            routes: f.remote.clone(),
+            never: f.never_routed(),
+        }
+    }
+
     /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words skipped).
     pub fn kind(&self, cmd: &str) -> Option<&str> {
         let segs = segments(cmd);
@@ -80,6 +102,14 @@ impl Heavy {
         segs.push(cmd.trim().into());
         let never = |n: &String| segs.iter().any(|s| hits(n, s));
         self.routes.get(kind).filter(|_| !self.never.iter().any(never))
+    }
+
+    /// Gate check `cmd` as a shell line: under `exe heavy` on the `cargo` route's build machines from worktree `dir` when it is routed, else unchanged.
+    pub fn gate(&self, exe: &str, cmd: &str, dir: &str) -> String {
+        match self.route(GATE_KIND, cmd) {
+            Some(_) => self.wrap(exe, GATE_KIND, cmd, Some(dir)),
+            None => cmd.into(),
+        }
     }
 
     /// `cmd` as a shell line that runs it under `exe heavy`, holding a `kind` slot; with a route and the lane's worktree `dir`, on a build machine first.
@@ -303,7 +333,7 @@ pub fn run(
     code
 }
 
-/// `drover hold`: run `cmd` as holder `ci:<repo>` once the main host passes spawn admission and a heavy slot is free; 75 past `wait` minutes.
+/// `drover hold`: run `cmd` on its fleet's (the lane's, else the repo's) `cargo` route's build machines when it has one, else as holder `ci:<repo>` once the main host passes spawn admission and a heavy slot is free; 75 past `wait` minutes.
 pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[String]) -> Result<i32> {
     let (prog, args) = cmd.split_first().context("hold: no command")?;
     let cfg = crate::config::Config::load(&ctx.config)?;
@@ -320,13 +350,18 @@ pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[S
             )
         })
         .unwrap_or_default();
+    let line = crate::hosts::quote(prog, args);
+    let lane = crate::config::env("DROVER_LANE").and_then(|l| Some(l.split(':').next()?.to_string()));
+    let fleet = (lane.and_then(|l| cfg.fleet.get(&l)))
+        .or_else(|| (cfg.fleet.values()).find(|f| f.repo.rsplit('/').next() == Some(repo.as_str())));
+    let plain = cmd.join(" ");
+    let route = fleet.and_then(|f| Heavy::of(f, host).route(GATE_KIND, &plain).cloned());
+    let here = std::env::current_dir()?;
+    if let Some(code) = route.and_then(|rt| remote(r, &rt, &here.to_string_lossy(), &line)) {
+        return Ok(code);
+    }
     let kind_max = host.and_then(|h| h.heavy_kind_max.get("ci").copied());
-    let me = Ticket::new(
-        format!("ci:{repo}"),
-        "ci".into(),
-        crate::hosts::quote(prog, args),
-        kind_max,
-    );
+    let me = Ticket::new(format!("ci:{repo}"), "ci".into(), line, kind_max);
     let max = host.and_then(|h| h.heavy_max).unwrap_or(3);
     let on = crate::hosts::On::new(r, None);
     let busy = || {

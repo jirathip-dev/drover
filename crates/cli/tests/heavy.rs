@@ -463,3 +463,115 @@ fn config_load_refuses_a_routed_pattern_that_hits_the_never_routed_list() {
         );
     }
 }
+
+fn gated() -> PathBuf {
+    let d = lane("");
+    let cfg = std::fs::read_to_string(d.join("fleet.toml")).unwrap();
+    let cfg = cfg
+        .replace(
+            "test = [\"*test.sh*\"]\n",
+            "test = [\"*test.sh*\"]\ncargo = [\"cargo test*\"]\n",
+        )
+        .replace(
+            "\n[hosts.mini]",
+            "\n[fleet.sendmeter.remote.cargo]\ntag = \"linux\"\n\n[hosts.mini]",
+        );
+    std::fs::write(d.join("fleet.toml"), cfg).unwrap();
+    d
+}
+
+fn routed_hold(d: &Path, path: &str, cmd: &[&str]) -> Command {
+    let mut c = hold(d, "1", cmd);
+    c.env("GITHUB_REPOSITORY", "jirathip-dev/sendmeter").env("PATH", path);
+    c
+}
+
+#[test]
+fn a_routed_fleets_hold_runs_on_the_build_machine_and_holds_no_slot() {
+    for code in [0, 3] {
+        let d = gated();
+        let path = fake_runners(&d, Some(code));
+        let st = routed_hold(&d, &path, &["sh", "test.sh", "h"]).status().unwrap();
+        assert_eq!(st.code(), Some(code));
+        assert_eq!(log(&d), "", "never run here");
+        assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0], "no slot held");
+        let here = d.canonicalize().unwrap();
+        let args = std::fs::read_to_string(d.join("runners.log")).unwrap();
+        assert_eq!(
+            args,
+            format!(
+                "run --tag linux --dir {} -- bash -c 'sh' 'test.sh' 'h'\n",
+                here.display()
+            )
+        );
+    }
+    let d = gated();
+    let path = fake_runners(&d, Some(5));
+    let mut c = routed_hold(&d, &path, &["sh", "test.sh", "h"]);
+    c.env_remove("GITHUB_REPOSITORY")
+        .env("DROVER_LANE", "sendmeter:24:impl");
+    assert_eq!(c.status().unwrap().code(), Some(5), "a lane's hold routes by its fleet");
+    assert_eq!(log(&d), "");
+}
+
+#[test]
+fn a_routed_hold_on_a_reserved_code_runs_here_in_a_slot_and_says_why() {
+    let d = gated();
+    let path = fake_runners(&d, Some(75));
+    let mut child = routed_hold(&d, &path, &["sh", "test.sh", "h"])
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let mut err = child.stderr.take().unwrap();
+    let job = Job(Some(child));
+    until("h's start", || log(&d).contains("start h"));
+    let t = tickets(&d);
+    assert_eq!(
+        (t[0].lane.as_str(), t[0].kind.as_str(), t[0].running),
+        ("ci:sendmeter", "ci", true)
+    );
+    go(&d, "h");
+    finish(vec![job]);
+    let mut said = String::new();
+    std::io::Read::read_to_string(&mut err, &mut said).unwrap();
+    assert_eq!(said.trim(), "runners: exit 75, running here");
+    assert!(d.join("runners.log").exists());
+}
+
+#[test]
+fn a_hold_never_routes_a_never_routed_command_or_an_unrouted_fleets() {
+    let d = gated();
+    let path = fake_runners(&d, Some(0));
+    let st = routed_hold(&d, &path, &["git", "--version"]).status().unwrap();
+    assert_eq!(st.code(), Some(0));
+    assert!(!d.join("runners.log").exists(), "git never leaves this host");
+    let d = lane("");
+    let path = fake_runners(&d, Some(0));
+    let st = routed_hold(&d, &path, &["sh", "-c", "exit 7"]).status().unwrap();
+    assert_eq!(st.code(), Some(7));
+    assert!(!d.join("runners.log").exists());
+}
+
+#[test]
+fn a_routed_fleets_gate_checks_go_to_the_build_machine_under_the_cargo_kind() {
+    let d = gated();
+    Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&d)
+        .status()
+        .unwrap();
+    for gate in ["just check", "./.gatekeeper/run check --gate core/fmt"] {
+        let w = wrapped(&d, gate);
+        assert!(
+            w.contains("'heavy' 'cargo'") && w.contains("'--remote' 'linux'") && w.ends_with(&format!("'--' '{gate}'")),
+            "{gate}: {w}"
+        );
+    }
+    let d = lane("");
+    assert_eq!(
+        hook(&d, "just check"),
+        "",
+        "an unrouted fleet's gate check is unchanged"
+    );
+}
