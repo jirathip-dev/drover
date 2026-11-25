@@ -155,19 +155,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     crate::setup::reap(ctx, r, &events).and_then(|()| stranded::alert(ctx, cfg, out, &events))?;
-    match crate::runners::tick(ctx, cfg, r, &events) {
-        Some(Ok((on, want))) => {
-            let was = |e: &&Event| matches!(e.kind.as_str(), "runners-low" | "runners-ok");
-            let last = events.iter().rev().find(was);
-            if (on < want) != last.is_some_and(|e| e.kind == "runners-low") {
-                let kind = if on < want { "runners-low" } else { "runners-ok" };
-                let d = json!({"key": last.map_or(0, |e| e.ts), "reason": format!("CI runners {on}/{want} online")});
-                fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
-            }
-        }
-        Some(Err(e)) => crate::stderr!("drover check: CI runners: {e:#}"),
-        None => {}
-    }
     for (k, w) in cfg.warnings() {
         let d = json!({"key": k, "reason": format!("{k} is {w}")});
         fire(ctx, cfg, out, &events, ("drover", None), "config-warning", d)?;

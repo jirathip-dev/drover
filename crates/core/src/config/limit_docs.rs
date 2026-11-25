@@ -263,10 +263,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "an orchestrator's answer may not change one this long after it",
     ),
     (
-        "token_refresh_minutes",
-        "`check` pushes a fresh runner registration token to every VM this often",
-    ),
-    (
         "ask_waiting_minutes",
         "an owner ask open this long alerts `ask-waiting`",
     ),
