@@ -1744,10 +1744,21 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let a = crate::orchestrator::attach(ctx, &cfg, &repo, &id)?;
                     let brief = crate::orchestrator::dir(ctx, &cfg, &id).join("brief.md");
                     std::fs::create_dir_all(brief.parent().context("no chat folder")?)?;
-                    std::fs::write(&brief, a["brief"].as_str().unwrap_or_default())?;
+                    let s = |k: &str| {
+                        a.get(k)
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    std::fs::write(&brief, s("brief"))?;
                     writeln!(out, "brief: {}", brief.display())?;
-                    writeln!(out, "settings: {}", a["settings"].as_str().unwrap_or_default())?;
-                    for (k, v) in a["env"].as_object().into_iter().flatten() {
+                    writeln!(out, "settings: {}", s("settings"))?;
+                    for (k, v) in a
+                        .get("env")
+                        .and_then(serde_json::Value::as_object)
+                        .into_iter()
+                        .flatten()
+                    {
                         writeln!(out, "{k}={}", v.as_str().unwrap_or_default())?;
                     }
                 }
