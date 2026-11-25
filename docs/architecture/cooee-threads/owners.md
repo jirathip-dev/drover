@@ -1,60 +1,70 @@
 # cooee-threads: who owns each current function (#1571)
 
-Read on staging `fd81ef5c3`, D1 included. **keep**: stays in drover, in the module named. **delete**: nobody needs it
-once its slice lands. Nothing moves to cooee: drover keeps its threads, and cooee's Orchestrator chats are a second run
-path that calls drover's API.
+Read on staging `fd81ef5c3`, D1 included. **keep**: stays where it is. **move**: stays in drover, in the module named.
+**delete**: goes in the slice named. Nothing moves into cooee: a client brings its own chat; it takes no drover code.
 
 ## `crates/core/src/orchestrator.rs` (1,369 lines) and its two files
 
 | Functions | Verdict | Where, or why |
 |---|---|---|
-| `is_role`, `by`, `acting`, `actor` | keep | `core::orchestrator`: who runs a command |
-| `DEFAULT`, `name`, `label`, `id_of`, `name_of` | keep | `core::orchestrator`: the seat's name on labels |
-| `role`, `models`, `set`, `save` | keep | `core::orchestrator`: the role and its `[config]` sheet |
-| `brief::chat`, `brief::standing`, `brief::thread` | keep | `orchestrator/brief.rs`: the briefs, for both run paths |
-| `chat::Seat`, `ids`, `seat`, `ChatProfile`, `hidden`, `profiles`, `profile`, `chat::started` | keep | `orchestrator/chat.rs`: the profiles cooee's Orchestrator loads (#1057) |
-| `SCANS`, `WALKS`, `of`, `threads`, `find`, `fleet_of`, `title`, `archived` | keep | the drover thread registry; `core::thread::Registry` (D1) reads the same events for routing |
-| `items`, `render`, `link`, `handoff_text`, `forwarded`, `text_ok`, `log` | keep | a thread's conversation and `thread show`'s text |
-| `unread`, `mark_read`, `show`, `ls` | keep | drover's read mark and the CLI's reads |
-| `say`, `post` | keep | the owner's message; D2 adds `said`, cooee's copy of a chat's owner line |
-| `route`, `lane_ask`, `route_row`, `routed_to`, `to_owner`, `flow`, `tell` (in `thread/route.rs` since D1), `lane_of` | keep | the emitters; each logs a row, and delivers its line only to a drover thread (D2) |
-| `handoff`, `send`, `forwards` | keep | a handoff row to a thread id, or to the desk from #1610 |
-| `land` | delete | #1610: the handoff pick goes; the desk takes a handoff and [move] re-targets it |
-| `new`, `new_with`, `resent`, `make`, `assign`, `title_ok`, `retitle`, `archive` | keep | opening, titling and archiving drover threads; D3's desk uses `make` |
-| `files_ok`, `upload`, `dir`, `inside`, `file`, `copy_in` | keep | uploads to drover threads |
-| `reply` | keep | an agent's reply in a drover thread |
-| `deliver`, `once`, `START_SECS`, `acp`, `start`, `started`, `uuid`, `close`, `end`, `stop`, `hung` | keep | the engine for drover threads; D2's guard in `deliver` skips a cooee chat (#1598) |
-| `sleep_idle`, `signed_out`, `silence`, `held`, `pending`, `human`, `since` | keep | idle sleep, the sign-in line, the rate-limit hold, the no-reply line, for drover threads |
-| `defaults`, `on`, `thread_role`, `harness_models`, `pick`, `picked`, `chat` | keep | model, effort and harness pick and the `[chat]` defaults, for drover threads |
-| `LATER`, `deferred` | keep | a delivery after the request, for drover threads |
-| `link_of`, `attached`, `hold`, `attach`, `detach` | keep | cooee's attach: how a cooee chat gets its thread id; D2 lets it take `all` and `none` |
-| `is_id` | keep | a drover thread id |
+| `is_role`, `by`, `acting`, `actor` | keep | who runs a command; a judge lane is `is_role` too (#1609) |
+| `DEFAULT`, `name`, `label`, `id_of`, `name_of` | keep | the seat's name on labels and `drover why` |
+| `role`, `models`, `set`, `save` | keep | the orchestrator role and its `[config]` sheet; the judge reads it (#1609) |
+| `brief::chat`, `brief::standing` | keep | the profile's brief, for a client chat and the judge |
+| `brief::thread` | delete, D4 | the brief of a drover thread |
+| `chat::Seat`, `ids`, `seat`, `ChatProfile`, `hidden`, `profiles`, `profile`, `chat::started` | keep | the profiles a client loads (#1057) |
+| `link_of`, `attached`, `hold`, `attach`, `detach` | keep | a client chat's attach; D2 takes `all`, `none` and adds the CLI; D3 adopts an archived id |
+| `SCANS`, `WALKS`, `of`, `find`, `fleet_of` | move, D4 | `core::thread`: the registry over attached chats and old threads, for `secret`, `propose`, `lib`'s ask |
+| `threads`, `title`, `archived`, `is_id` | move, D4 | `core::thread`: history reads (old ids, titles) |
+| `route`, `lane_ask`, `route_row` (in `thread/route.rs`) | delete, D3 | a lane ask goes to the judge, not to a thread |
+| `routed_to`, `to_owner`, `flow`, `tell` (in `thread/route.rs`) | keep | rows; `to_owner` takes no thread (#1609), `tell` only logs (D2) |
+| `lane_of` | keep | a row's lane |
+| `handoff`, `send`, `forwards`, `forwarded`, `handoff_text` | keep | a handoff row to a chat or to `desk` (#1610) |
+| `land` | delete, #1610 | the handoff pick goes; [move] re-targets |
+| `new`, `new_with`, `resent`, `make`, `assign`, `title_ok`, `retitle`, `archive` | delete, D4 | opening, titling and archiving drover threads; D3 refuses `new` first |
+| `files_ok`, `upload`, `dir`, `inside`, `file`, `copy_in` | delete, D4 | thread uploads; a client keeps its own (`hygiene`'s scan of `dir` goes too) |
+| `reply` | delete, D4 | an agent's reply in a drover thread; `triage`'s summary becomes a `system` row to `desk` |
+| `say`, `post` | delete, D4 | the owner's message into a drover thread; `answer`'s `DECISION` line becomes the decision row's `prompt` |
+| `items`, `render`, `link`, `text_ok`, `log` | delete, D4 | a drover thread's conversation; `lesson`'s use of `link` reads the row instead; `tell`'s `log` becomes `emit` |
+| `unread`, `mark_read`, `show`, `ls` | delete, D4 | `thread show|ls` and the read mark |
+| `deliver`, `once`, `START_SECS`, `acp`, `start`, `started`, `uuid`, `close`, `end`, `stop`, `hung` | delete, D4 | the engine; D2 guards `deliver` first (#1598) |
+| `sleep_idle`, `signed_out`, `silence`, `held`, `pending`, `human`, `since` | delete, D4 | idle sleep, sign-in line, rate-limit hold, no-reply line; `check` drops its calls |
+| `defaults`, `on`, `thread_role`, `harness_models`, `pick`, `picked`, `chat` | delete, D4 | a thread's model, effort and harness pick and `[chat]`; a client picks its own |
+| `LATER`, `deferred` | delete, D4 | deliveries after a request; `v1` and `jobs` drop the wrapper |
+
+About 900 of the file's lines go in D4.
 
 ## `crates/server/src/serve/chat.rs` (1,326 lines)
 
 | Functions | Verdict | Where, or why |
 |---|---|---|
-| `owner_card`, `owner_cards`, `msg_card`, `msg_body`, `ask_body`, `config_body`, `secret_body`, `run_body`, `run_card`, `options`, `note`, `card`, `act_button`, `ask`, `change`, `link` | keep | the builders of a row's block, drawn by cooee and by drover's page; D3 and #1610 add the [chat] and [move] buttons here |
-| `open_ask`, `choosing`, `waiting`, `or`, `files_of`, `ext`, `state` | keep | drover's thread screens |
-| `page`, `older`, `thread`, `row`, `tab`, `chat_tab`, `figure`, `row_block`, `list_screen`, `thread_screen`, `composer`, `threads_screen`, `mark_read` | keep | drover's own screens and `chat` tab |
-| `post`, `qid`, `qfiles`, `queued`, `unqueue`, `flush`, `chip`, `chips`, `composer_chips`, `first`, `new_screen`, `file`, `stop`, `deliver` | keep | drover's composer, chips, new thread, files and stop, for drover threads |
+| `owner_card`, the two `pub` card fns, `msg_card`, `ask_body`, `config_body`, `secret_body`, `run_body`, `run_card`, `options`, `note`, `card`, `act_button`, `ask`, `change`, `link`, `open_ask`, `choosing` | move, D4 | `serve/cards.rs`: a row's block, drawn by the board, the page and a client; `options` puts the recommended one first and `note` is the note field |
+| `msg_body`, `or`, `files_of`, `ext`, `state`, `waiting` | delete, D4 | a thread message's body and its files |
+| `page`, `older`, `thread`, `row`, `tab`, `figure`, `row_block`, `list_screen`, `thread_screen`, `composer`, `composer_chips` | delete, D4 | the page's thread list, thread screen and `chat` tab |
+| `post`, `qid`, `qfiles`, `queued`, `unqueue`, `flush`, `chip`, `chips`, `first`, `new_screen`, `file`, `stop`, `deliver` | delete, D4 | the composer, its queue, chips, [New], files and stop |
 
-## `crates/chat/src/threads.rs` (363 lines) and `threads/view.rs`
+About 350 lines move and 950 go.
+
+## `crates/chat/src/threads.rs` (363 lines) and `threads/view.rs` (500)
 
 | Items | Verdict | Where, or why |
 |---|---|---|
-| everything | keep | `drover chat`'s Threads tab stays as today, for drover threads |
+| everything | delete, D4 | the Threads tab; the Board tab already answers asks and cards (`board/cards.rs`, `board/forms.rs`) |
+| `lib.rs`'s `Open::Threads`, `Tab`, the tab switch | delete, D4 | one tab is left; `drover board` runs it, and `drover chat` goes |
 
 ## Outside the three files
 
 | Code | Verdict |
 |---|---|
-| `crates/core/src/webpush.rs`, `/push/*`, the VAPID key, the alert devices list, `drover push test`, `[[notify]] type = "webpush"` | keep: drover's push for its own page |
+| `drover thread new|title|reply|archive|restore|say|show|ls` | delete, D4 (refused `THREADS_CUT` from D3) |
+| `drover thread handoff` | keep: a handoff row (#1610) |
+| `drover chat` | delete, D4: `drover board` is the TUI |
+| `POST /api/v1/orchestrator-attach`, `-detach` | keep |
+| `GET` and `POST /api/v1/chat`, the `chat-about` op | delete, D4 |
+| `crates/core/src/webpush.rs`, `/push/*`, the VAPID key, the devices list, `drover push test`, `[[notify]] type = "webpush"` | keep: drover's push for its page; its thread-title lookup (`find`, `title`) reads the row's text instead (D4) |
 | `crates/server/src/serve/device.rs` | keep: it serves the scene to a companion device (#1497) |
-| `crates/server/src/cooee.rs` | keep: `GET /cooee/profiles`, `POST /cooee/thread-started` |
-| `POST /api/v1/orchestrator-attach`, `-detach`, `chat`, `chat-about` | keep; `chat-about` becomes the [chat] action in D3 |
-| `drover thread new|title|reply|archive|restore|say|show|ls|handoff` | keep |
-| `cooee-plugin.toml`'s `chat-cards` place | keep: cooee draws rows that name no attached chat there |
-
-Drover loses only `land` (#1610). D2 adds a guard in `deliver`, `said` and its route. D3 adds the desk maker and the
-[chat] action, and #1610 the `handoff-move` action. No line of the issue's 2.3k moves out of drover.
+| `crates/server/src/cooee.rs` | keep: `GET /cooee/profiles`, `POST /cooee/thread-started`, listed in the manifest (D5) |
+| `cooee-plugin.toml` | keep, generated from the manifest (D5) |
+| `roles/orchestrator/role.md`, `chat.md` | keep: the rulebook; #1609 adds `judge.md` |
+| `roles/orchestrator/thread.md` | delete, D4 |
+| `[limits]` keys of the engine (idle sleep, hold, silence) | delete, D4; #1609 adds `judge_minutes`, `judge_max` |
