@@ -46,7 +46,7 @@ pub struct Config {
     /// `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
     pub hygiene: Hygiene,
     /// `[job.<name>]`, a scheduled job for every fleet over the built-in entry (`crate::jobs`).
-    pub job: BTreeMap<String, crate::jobs::JobToml>,
+    pub job: BTreeMap<String, toml::Table>,
 }
 
 /// `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
@@ -488,7 +488,7 @@ pub struct Fleet {
     pub deps: Option<String>,
     /// `[fleet.<n>.job.<name>]`, this fleet's keys over `[job.<name>]` and the built-in entry.
     #[serde(default)]
-    pub job: BTreeMap<String, crate::jobs::JobToml>,
+    pub job: BTreeMap<String, toml::Table>,
     /// The jobs after their layers are merged and checked (`Config::parse`).
     #[serde(skip)]
     pub jobs: BTreeMap<String, crate::jobs::Job>,
@@ -538,20 +538,17 @@ pub enum Engine {
     Legacy,
 }
 
-fn jobs(
-    name: &str,
-    all: &BTreeMap<String, crate::jobs::JobToml>,
-    f: &Fleet,
-) -> Result<BTreeMap<String, crate::jobs::Job>> {
-    let mut was = BTreeMap::new();
-    for j in ["lesson", "triage", "deps", "advisory"] {
-        let every = old_every(f, j).and_then(|e| crate::jobs::Every::try_from(toml::Value::String(e.into())).ok());
-        let layer = crate::jobs::JobToml {
-            every,
-            ..Default::default()
-        };
-        was.insert(j.to_string(), layer);
-    }
+fn jobs(name: &str, all: &BTreeMap<String, toml::Table>, f: &Fleet) -> Result<BTreeMap<String, crate::jobs::Job>> {
+    let every = |j: &str| {
+        Some((
+            j.into(),
+            toml::Table::from_iter([("every".into(), old_every(f, j)?.into())]),
+        ))
+    };
+    let was = ["lesson", "triage", "deps", "advisory"]
+        .into_iter()
+        .filter_map(every)
+        .collect();
     crate::jobs::entries(name, &[all, &was, &f.job])
 }
 
@@ -1124,27 +1121,15 @@ impl Config {
             "renamed (#780): call it [orchestrator] and role.orchestrator; the old names are read for one release";
         let old = self.old_names.then(|| ("[conductor]", old.to_string()));
         let jobs = self.fleet.iter().flat_map(|(n, f)| {
-            let lines = |jobs: &[&str]| {
-                let line = |j: &&str| Some(format!("[fleet.{n}.job.{j}] every = \"{}\"", old_every(f, j)?));
-                jobs.iter().filter_map(line).collect::<Vec<_>>().join(", ")
-            };
-            [
-                ("lessons", &f.lessons, lines(&["lesson"])),
-                ("triage", &f.triage, lines(&["triage"])),
-                ("deps", &f.deps, lines(&["deps", "advisory"])),
-            ]
-            .into_iter()
-            .filter(|k| k.1.is_some())
-            .map(move |(k, _, to)| {
-                let to = if to.is_empty() {
-                    "nothing: the built-in job".into()
-                } else {
-                    to
-                };
-                (
-                    k,
-                    format!("fleet.{n}.{k} is read for now (#1790): replace it with {to}"),
-                )
+            let old = [
+                ("lessons", &f.lessons, &["lesson"][..]),
+                ("triage", &f.triage, &["triage"]),
+                ("deps", &f.deps, &["deps", "advisory"]),
+            ];
+            old.into_iter().filter(|k| k.1.is_some()).map(move |(k, _, jobs)| {
+                let add = |j: &&str| Some(format!(", add [fleet.{n}.job.{j}] every = \"{}\"", old_every(f, j)?));
+                let add: String = jobs.iter().filter_map(add).collect();
+                (k, format!("fleet.{n}.{k} is read for now (#1790): delete it{add}"))
             })
         });
         acct.into_iter().chain(tg).chain(old).chain(jobs).collect()

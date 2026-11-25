@@ -275,15 +275,15 @@ fn each_load_error_names_the_job() {
     for (extra, want) in [
         (
             "\n[job.x]\ntitle = \"x\"\nbody = \"b\"\n",
-            "fleet.sendmeter.job.x: no `role`",
+            "fleet.sendmeter.job.x: missing field `role`",
         ),
         (
             "\n[job.x]\nbody = \"b\"\nrole = \"impl\"\n",
-            "fleet.sendmeter.job.x: no `title`",
+            "fleet.sendmeter.job.x: missing field `title`",
         ),
         (
             "\n[job.x]\ntitle = \"x\"\nrole = \"impl\"\n",
-            "fleet.sendmeter.job.x: no `body`",
+            "fleet.sendmeter.job.x: missing field `body`",
         ),
         (
             &new.replace("title = \"x\"", "title = \"x {week}\""),

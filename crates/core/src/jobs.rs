@@ -14,27 +14,24 @@ include!(concat!(env!("OUT_DIR"), "/jobs_files.rs"));
 const HOUR: u64 = 3600;
 const DAY: u64 = 86_400;
 
-/// How often `tick` runs a job, in seconds: `"12h"`, `"1d"`, `"7d"`; `0` or `"off"`: only by hand.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "toml::Value")]
-pub struct Every(pub u64);
-
-impl TryFrom<toml::Value> for Every {
-    type Error = String;
-    fn try_from(v: toml::Value) -> std::result::Result<Self, String> {
-        let bad = || format!("every = {v}: a duration like \"12h\" or \"7d\", or 0 or \"off\"");
-        let s = match &v {
-            toml::Value::Integer(0) => return Ok(Every(0)),
-            toml::Value::String(s) if s == "off" || s == "0" => return Ok(Every(0)),
-            toml::Value::String(s) => s,
-            _ => return Err(bad()),
-        };
-        let (n, unit) = (s.strip_suffix('h').map(|n| (n, HOUR)))
-            .or_else(|| s.strip_suffix('d').map(|n| (n, DAY)))
-            .ok_or_else(bad)?;
-        let n = n.parse::<u64>().ok().filter(|n| *n > 0).ok_or_else(bad)?;
-        n.checked_mul(unit).map(Every).ok_or_else(bad)
-    }
+fn every<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<u64, D::Error> {
+    let v = toml::Value::deserialize(d)?;
+    let bad = || {
+        serde::de::Error::custom(format!(
+            "every = {v}: a duration like \"12h\" or \"7d\", or 0 or \"off\""
+        ))
+    };
+    let s = match &v {
+        toml::Value::Integer(0) => return Ok(0),
+        toml::Value::String(s) if s == "off" || s == "0" => return Ok(0),
+        toml::Value::String(s) => s,
+        _ => return Err(bad()),
+    };
+    let (n, unit) = (s.strip_suffix('h').map(|n| (n, HOUR)))
+        .or_else(|| s.strip_suffix('d').map(|n| (n, DAY)))
+        .ok_or_else(bad)?;
+    let n = n.parse::<u64>().ok().filter(|n| *n > 0).ok_or_else(bad)?;
+    n.checked_mul(unit).ok_or_else(bad)
 }
 
 /// Where a job's issue goes in the queue.
@@ -46,86 +43,44 @@ pub enum Place {
     End,
 }
 
-/// One layer of a job as written: the built-in file, `[job.<name>]` or `[fleet.<n>.job.<name>]`.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct JobToml {
-    pub every: Option<Every>,
-    pub check: Option<String>,
-    pub title: Option<String>,
-    pub body: Option<String>,
-    pub role: Option<String>,
-    pub queue: Option<Place>,
-    pub empty: Option<String>,
-}
-
-impl JobToml {
-    fn over(self, o: &JobToml) -> JobToml {
-        let o = o.clone();
-        JobToml {
-            every: o.every.or(self.every),
-            check: o.check.or(self.check),
-            title: o.title.or(self.title),
-            body: o.body.or(self.body),
-            role: o.role.or(self.role),
-            queue: o.queue.or(self.queue),
-            empty: o.empty.or(self.empty),
-        }
-    }
-}
-
 /// A job after its layers are merged and checked at load: what `run` trusts.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Job {
+    #[serde(default, deserialize_with = "every")]
     pub every: u64,
     pub check: Option<String>,
     pub title: String,
     pub body: String,
     pub role: String,
+    #[serde(default)]
     pub queue: Place,
     pub empty: Option<String>,
 }
 
-/// Fleet `fleet`'s jobs: each built-in entry, then each `layers` map over it key by key; a missing key or a title with an unknown placeholder is a load error.
-pub fn entries(fleet: &str, layers: &[&BTreeMap<String, JobToml>]) -> Result<BTreeMap<String, Job>> {
-    let mut all: BTreeMap<String, JobToml> = BTreeMap::new();
+/// Fleet `fleet`'s jobs: each built-in entry, then each of `layers` over it key by key; a bad key or a title with an unknown placeholder is a load error.
+pub fn entries(fleet: &str, layers: &[&BTreeMap<String, toml::Table>]) -> Result<BTreeMap<String, Job>> {
+    let mut all: BTreeMap<String, toml::Table> = BTreeMap::new();
     for (file, text) in BUILTIN {
-        let name = file.trim_end_matches(".toml");
-        let t: JobToml = toml::from_str(text).with_context(|| format!("roles/jobs/{file}"))?;
-        all.insert(name.into(), t);
+        let t = toml::from_str(text).with_context(|| format!("roles/jobs/{file}"))?;
+        all.insert(file.trim_end_matches(".toml").into(), t);
     }
-    for layer in layers {
-        for (name, t) in *layer {
-            let merged = all.remove(name).unwrap_or_default().over(t);
-            all.insert(name.clone(), merged);
-        }
+    for (name, t) in layers.iter().flat_map(|l| l.iter()) {
+        all.entry(name.clone()).or_default().extend(t.clone());
     }
-    let mut jobs = BTreeMap::new();
-    for (name, t) in all {
+    let job = |(name, t): (String, toml::Table)| {
         let at = format!("fleet.{fleet}.job.{name}");
-        let need =
-            |v: Option<String>, k: &str| v.with_context(|| format!("{at}: no `{k}`; a job needs title, body and role"));
-        let (title, body, role) = (need(t.title, "title")?, need(t.body, "body")?, need(t.role, "role")?);
+        let job: Job = toml::Value::Table(t).try_into().with_context(|| at.clone())?;
+        let role = &job.role;
         if role.is_empty() || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             bail!("{at}: role \"{role}\" is letters, digits and `-`");
         }
-        if fill(&title, &[("{fleet}", fleet), ("{integration}", "x")], 0).contains('{') {
-            bail!("{at}: title \"{title}\" has a placeholder other than {{fleet}} {{integration}} {{date}} {{monday}} {{month}}");
+        if fill(&job.title, &[("{fleet}", fleet), ("{integration}", "x")], 0).contains('{') {
+            bail!("{at}: title \"{}\" has a placeholder other than {{fleet}} {{integration}} {{date}} {{monday}} {{month}}", job.title);
         }
-        let every = t.every.unwrap_or_default().0;
-        let (check, queue, empty) = (t.check, t.queue.unwrap_or_default(), t.empty);
-        let job = Job {
-            every,
-            check,
-            title,
-            body,
-            role,
-            queue,
-            empty,
-        };
-        jobs.insert(name, job);
-    }
-    Ok(jobs)
+        Ok((name, job))
+    };
+    all.into_iter().map(job).collect()
 }
 
 fn ymd(day: u64) -> String {
@@ -196,13 +151,10 @@ pub fn close(
     ok(
         r,
         "gh",
-        &["issue", "close", &n.to_string(), "-R", repo, "--comment", &why],
+        &["issue", "close", &format!("{n}"), "-R", repo, "--comment", &why],
     )?;
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, fleet, Some(n), "closed", json!({"why": why})),
-    )?;
+    let e = Event::new(ctx.now, fleet, Some(n), "closed", json!({"why": why}));
+    emit(&ctx.state, cfg, e)?;
     Ok(writeln!(out, "closed {fleet}#{n}: {line}")?)
 }
 
@@ -245,34 +197,19 @@ fn checkout(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<String>
     let local = f.local_path().to_string_lossy().into_owned();
     let old = ctx.state.with_file_name(format!("deps-{fleet}"));
     if old.exists() {
-        r.run(
-            "git",
-            &argv(&["-C", &local, "worktree", "remove", "--force", &old.to_string_lossy()]),
-        )
-        .ok();
+        let old = old.to_string_lossy();
+        let rm = argv(&["-C", &local, "worktree", "remove", "--force", &old]);
+        r.run("git", &rm).ok();
     }
     let dir = ctx.state.with_file_name(format!("job-{fleet}"));
     let (d, head) = (dir.to_string_lossy().into_owned(), format!("origin/{}", f.integration));
-    ok(
-        r,
-        "git",
-        &[
-            "-C",
-            &local,
-            "fetch",
-            "-q",
-            "origin",
-            &crate::clone::refspec(&f.integration),
-        ],
-    )?;
+    let spec = crate::clone::refspec(&f.integration);
+    ok(r, "git", &["-C", &local, "fetch", "-q", "origin", &spec])?;
     if dir.exists() {
         ok(r, "git", &["-C", &d, "checkout", "-q", "--force", "--detach", &head])?;
     } else {
-        ok(
-            r,
-            "git",
-            &["-C", &local, "worktree", "add", "-q", "--detach", &d, &head],
-        )?;
+        let add = ["-C", &local, "worktree", "add", "-q", "--detach", &d, &head];
+        ok(r, "git", &add)?;
     }
     Ok(d)
 }
@@ -300,13 +237,8 @@ pub fn run(
         let sh = format!("cd \"$0\" && {}", fill(cmd, &vars, ctx.now));
         let o = r.run("sh", &argv(&["-c", &sh, &d]))?;
         let text = format!("{}{}", o.stdout, o.stderr).replace(&d, ".");
-        let lines: Vec<&str> = text.lines().collect();
-        report = lines
-            .iter()
-            .skip(lines.len().saturating_sub(200))
-            .copied()
-            .collect::<Vec<_>>()
-            .join("\n");
+        let skip = text.lines().count().saturating_sub(200);
+        report = text.lines().skip(skip).collect::<Vec<_>>().join("\n");
         if o.code == 0 && matches!(how, Trigger::Tick) {
             return Ok(Ran::Nothing("its check passed".into()));
         }
@@ -392,18 +324,12 @@ pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, a: &Arg
     let Some(name) = &a.name else {
         let events = working(&ctx.state)?;
         for (name, job) in &f.jobs {
-            let mut s = if job.every == 0 {
-                "off".into()
-            } else {
-                let last = last(ctx, name, fleet);
-                let at = |t: Option<u64>| t.map_or_else(|| "never".into(), |t| ymd(t / DAY));
-                let next = last.map_or(ctx.now, |t| t + job.every);
-                format!(
-                    "every {}   last {}   next {}",
-                    span(job.every),
-                    at(last),
-                    at(Some(next))
-                )
+            let at = |t: Option<u64>| t.map_or_else(|| "never".into(), |t| ymd(t / DAY));
+            let last = last(ctx, name, fleet);
+            let next = at(Some(last.map_or(ctx.now, |t| t + job.every)));
+            let mut s = match job.every {
+                0 => "off".into(),
+                e => format!("every {}   last {}   next {next}", span(e), at(last)),
             };
             if let Some(n) = open(&events, fleet, name) {
                 s += &format!("   open #{n}");
@@ -412,19 +338,10 @@ pub fn cli(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, a: &Arg
         }
         return Ok(0);
     };
-    Ok(
-        match run(ctx, cfg, r, out, (fleet, name), Trigger::Hand { by: None })? {
-            Ran::Nothing(why) => {
-                writeln!(out, "{fleet} {name}: {why}")?;
-                0
-            }
-            Ran::Filed { confirmed, .. } => {
-                if confirmed {
-                    0
-                } else {
-                    4
-                }
-            }
-        },
-    )
+    match run(ctx, cfg, r, out, (fleet, name), Trigger::Hand { by: None })? {
+        Ran::Nothing(why) => writeln!(out, "{fleet} {name}: {why}")?,
+        Ran::Filed { confirmed: false, .. } => return Ok(4),
+        Ran::Filed { .. } => {}
+    }
+    Ok(0)
 }

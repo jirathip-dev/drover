@@ -2082,6 +2082,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let e = Event::new(ctx.now, &fleet, Some(issue), "fix-done", json!({"why": no_change}));
                     emit(&ctx.state, &cfg, e)?;
                     writeln!(out, "recorded {fleet}#{issue} fix-done: {no_change}")?;
+                    if crate::jobs::of(&working(&ctx.state)?, &fleet, issue) == Some("triage") {
+                        crate::triage::flag_orphans(ctx, &cfg, r, out, &fleet)?;
+                    }
                     crate::jobs::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
                 }
                 Cmd::Turn { state, why } => {
