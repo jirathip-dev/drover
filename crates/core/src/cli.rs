@@ -2118,7 +2118,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     return Ok(i32::from(min_fails.is_some_and(|m| fails >= m)));
                 }
                 Cmd::Lesson(LessonCmd::Apply { fleet, rules }) => {
-                    crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?
+                    crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?;
                 }
                 Cmd::Triage(a) => return crate::triage::cli(ctx, &cfg, r, out, a),
                 Cmd::Job(a) => return crate::jobs::cli(ctx, &cfg, r, out, &a),
