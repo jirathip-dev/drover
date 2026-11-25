@@ -837,3 +837,52 @@ fn a_routed_fleets_done_checks_route_the_same_way_but_never_routed_ones() {
     );
     assert_eq!(ran, want);
 }
+
+#[test]
+fn a_routed_done_check_runs_here_when_runners_exits_75_and_fmt_never_leaves() {
+    let (repo, c, f, bin) = routed_done(
+        "done-75-here",
+        75,
+        "done_checks = [\"cargo test\", \"cargo fmt --check\"]",
+    );
+    let (code, out) = run(&c, &ui(Git::new(&f), &bin, false), &["turn", "done"]);
+    assert_eq!(code, 0, "{out}");
+    let wt = repo.wt.canonicalize().unwrap();
+    let ran = std::fs::read_to_string(bin.join("ran.log")).unwrap();
+    let want = format!(
+        "runners run --tag linux --dir {} -- bash -c cargo test | \ncargo test {}\ncargo fmt --check {}\n",
+        repo.wt.display(),
+        wt.display(),
+        wt.display()
+    );
+    assert_eq!(ran, want);
+    assert_eq!(
+        kinds(&c, "turn-end").pop().unwrap().str("sha"),
+        Some(repo.head.as_str())
+    );
+}
+
+#[test]
+fn a_done_check_of_any_routed_kind_goes_to_its_build_machines() {
+    let (repo, c, f, bin) = routed_done("done-web-routed", 5, "done_checks = [\"pnpm test\"]");
+    let cfg = std::fs::read_to_string(&c.config).unwrap().replace(
+        "cargo = [\"cargo test*\"]\n",
+        "cargo = [\"cargo test*\"]\nweb = [\"pnpm test*\"]\n",
+    );
+    std::fs::write(
+        &c.config,
+        format!("{cfg}\n[fleet.sendmeter.remote.web]\ntag = \"mac\"\n"),
+    )
+    .unwrap();
+    let (out, _) = refused(&c, &ui(Git::new(&f), &bin, false), "DONE_CHECK");
+    assert!(
+        out.contains("`pnpm test` failed (exit 5):\nremote: FAIL gate-9"),
+        "{out}"
+    );
+    let ran = std::fs::read_to_string(bin.join("ran.log")).unwrap();
+    let want = format!(
+        "runners run --tag mac --dir {} -- bash -c pnpm test | \n",
+        repo.wt.display()
+    );
+    assert_eq!(ran, want);
+}
