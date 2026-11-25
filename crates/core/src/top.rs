@@ -61,7 +61,7 @@ pub struct Top {
 }
 
 fn ps(r: &dyn Runner, cfg: &Config) -> Vec<Proc> {
-    let kinds = cfg.fleet.values().flat_map(|f| f.heavy.clone()).collect();
+    let kinds = cfg.fleet.values().flat_map(crate::config::Fleet::heavy_kinds).collect();
     let heavy = crate::heavy::Heavy {
         kinds,
         ..Default::default()

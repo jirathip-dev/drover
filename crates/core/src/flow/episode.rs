@@ -10,7 +10,7 @@ fn head_of(e: &Event) -> Option<&str> {
 }
 
 /// Who holds the issue's row now.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
     #[default]
     Auto,
@@ -22,6 +22,16 @@ pub enum Level {
     },
 }
 
+impl Level {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Level::Auto => "auto",
+            Level::Orchestrator { .. } => "orchestrator",
+            Level::Owner { .. } => "owner",
+        }
+    }
+}
+
 /// The issue's episode as the log has it: what began it, this round's spawn, each row's failed tries, the row it is in and who holds it.
 #[derive(Debug, Clone, Default)]
 pub struct Episode {
@@ -30,17 +40,17 @@ pub struct Episode {
     pub began: u64,
     pub spawn: Option<Event>,
     pub tries: BTreeMap<String, u8>,
+    pub last: BTreeMap<String, u64>,
     pub entered: Option<(String, u64)>,
     pub level: Level,
+    pub escalated: Option<(String, u64)>,
     pub answered: BTreeSet<String>,
 }
 
 impl Episode {
     /// Issue `s`'s episode: it begins at a new PR head, a move to another working state (a spawn) or the owner's decision.
     pub fn of(events: &[Event], s: &IssueState) -> Episode {
-        let mine: Vec<&Event> = (events.iter())
-            .filter(|e| e.fleet == s.fleet && e.issue == Some(s.issue))
-            .collect();
+        let mine = crate::events::of_issue(events, &s.fleet, s.issue);
         let head = mine.iter().rev().find_map(|e| head_of(e)).map(String::from);
         let orchestrator = |e: &Event| e.str("by").is_some_and(|b| b.starts_with("orchestrator-"));
         let begins = |(i, e): (usize, &&Event)| match e.kind.as_str() {
@@ -60,7 +70,15 @@ impl Episode {
         for e in mine.iter().skip(at) {
             let row = e.str("row").unwrap_or_default().to_string();
             match e.kind.as_str() {
-                "row-tried" if e.str("outcome") == Some("failed") => *ep.tries.entry(row).or_default() += 1,
+                "row-tried" => {
+                    let n = ep.tries.entry(row.clone()).or_default();
+                    match e.str("outcome") {
+                        Some("failed") => *n += 1,
+                        Some("final") => *n = 3,
+                        _ => {}
+                    }
+                    ep.last.insert(row, e.ts);
+                }
                 "row-entered" => ep.entered = Some((row, e.ts)),
                 "row-escalated" => {
                     let ask = e.str("ask").unwrap_or_default().to_string();
@@ -68,10 +86,12 @@ impl Episode {
                         Some("owner") => Level::Owner { card: ask },
                         _ => Level::Orchestrator { ask },
                     };
+                    ep.escalated = Some((row, e.ts));
                 }
                 "row-retry" if orchestrator(e) => {
                     ep.tries.remove(&row);
                     ep.level = Level::Auto;
+                    ep.escalated = None;
                     ep.answered.insert(row);
                 }
                 _ => {}

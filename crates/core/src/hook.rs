@@ -71,8 +71,9 @@ impl Rules {
         branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
         let family = f.map(|f| f.family(role));
         let h = cfg.hosts.get(host);
-        let heavy = f.filter(|f| !f.heavy.is_empty()).map(|f| crate::heavy::Heavy {
-            kinds: f.heavy.clone(),
+        let heavy = f.map(|f| (f, f.heavy_kinds())).filter(|(_, k)| !k.is_empty());
+        let heavy = heavy.map(|(f, kinds)| crate::heavy::Heavy {
+            kinds,
             max: h.and_then(|h| h.heavy_max).unwrap_or(3),
             kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
             wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
@@ -1131,7 +1132,7 @@ pub fn heavy(input: &Value, h: &Heavy, exe: &str, git: &dyn Fn(&str, &[&str]) ->
     let mut ti = tool_input(input).clone();
     let cmd = ti.at("command").as_str()?;
     let kind = h.kind(cmd)?;
-    let cwd = input.at("cwd").as_str().filter(|_| h.route(kind, cmd).is_some());
+    let cwd = input.at("cwd").as_str().filter(|_| h.routes.contains_key(kind));
     let dir = cwd
         .and_then(|d| git(d, &["rev-parse", "--show-toplevel"]))
         .filter(|t| !t.is_empty());

@@ -515,6 +515,19 @@ pub struct Fleet {
     pub sandbox: Option<Sandbox>,
     /// lanes see history since this commit only (`drover baseline`); unset = all of it.
     pub baseline: Option<Baseline>,
+    /// `flow`: `shadow` (default) runs the flow table beside today's drive and only logs; `legacy` turns it off (#1649).
+    #[serde(default, rename = "flow")]
+    pub engine: Engine,
+}
+
+/// `[fleet.<n>] flow`: until slice 5 only today's drive acts, so `on` logs as `shadow` does.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    #[default]
+    Shadow,
+    On,
+    Legacy,
 }
 
 /// One key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
@@ -1316,7 +1329,7 @@ impl Config {
         for (name, f) in &self.fleet {
             let (never, hits) = (f.never_routed(), crate::heavy::hits);
             for kind in f.remote.keys() {
-                let Some(ps) = f.heavy.get(kind) else {
+                let Some(ps) = f.heavy_kinds().remove(kind) else {
                     bail!("fleet.{name}.remote.{kind}: no [fleet.{name}.heavy] kind \"{kind}\" to route");
                 };
                 if let Some((p, n)) = ps
@@ -1481,6 +1494,15 @@ impl Fleet {
             .unwrap_or_else(|| limits.deny_commands.clone());
         d.extend(self.deny_commands_add.iter().cloned());
         d
+    }
+    /// Its heavy kinds: `[fleet.<n>.heavy]` plus, with any kind or route, `heavy::CARGO` as `cargo` unless it sets its own.
+    pub fn heavy_kinds(&self) -> BTreeMap<String, Vec<String>> {
+        let mut k = self.heavy.clone();
+        if !k.is_empty() || !self.remote.is_empty() {
+            let cargo = || crate::heavy::CARGO.split(',').map(String::from).collect();
+            k.entry("cargo".into()).or_insert_with(cargo);
+        }
+        k
     }
     /// Commands its lanes never send to a build machine: `heavy::NEVER_ROUTED` plus `remote_deny`.
     pub fn never_routed(&self) -> Vec<String> {
