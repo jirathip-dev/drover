@@ -697,3 +697,107 @@ pub fn unstick(
     }
     Ok(())
 }
+
+/// A failed check: its name, its Actions run (none for a commit status) and when it completed.
+pub struct Red {
+    pub name: String,
+    pub run: Option<String>,
+    pub done: Option<u64>,
+}
+
+/// The failed checks of a rollup.
+pub fn reds(checks: &Value) -> Vec<Red> {
+    let run = |c: &Value| {
+        let u = c["detailsUrl"].as_str()?;
+        Some(u.split("/runs/").nth(1)?.split('/').next()?.to_string()).filter(|r| !r.is_empty())
+    };
+    (checks.as_array().into_iter().flatten())
+        .filter(|c| check_state(c) == "failed")
+        .map(|c| Red {
+            name: check_name(c).into(),
+            run: run(c),
+            done: c["completedAt"].as_str().and_then(crate::usage::epoch),
+        })
+        .collect()
+}
+
+fn reruns<'a>(ev: &'a [Event], (fleet, n): (&'a str, Option<u64>), head: &'a str) -> impl Iterator<Item = &'a Event> {
+    ev.iter().filter(move |e| {
+        e.kind == "ci-rerun"
+            && e.fleet == fleet
+            && e.issue == n
+            && e.str("why") == Some("failed")
+            && e.str("sha") == Some(head)
+    })
+}
+
+/// Re-runs the failed jobs of `reds` at `head`, at most `max` times a check (`ci-rerun`, why failed). None: wait for a re-run's result; else the red is final, with the checks that failed again after their re-run.
+pub fn retry(
+    x: &Ctx,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    k: (&str, Option<u64>),
+    ev: &[Event],
+    (repo, head, max): (&str, &str, u32),
+    reds: &[Red],
+) -> Result<Option<Vec<String>>> {
+    let (mut due, mut waiting, mut twice) = (Vec::new(), false, Vec::new());
+    for red in reds {
+        let at: Vec<u64> = reruns(ev, k, head)
+            .filter(|e| {
+                e.val("checks")
+                    .as_array()
+                    .is_some_and(|a| a.iter().any(|c| c == red.name.as_str()))
+            })
+            .map(|e| e.ts)
+            .collect();
+        let left = u32::try_from(at.len()).unwrap_or(u32::MAX) < max;
+        match (&red.run, at.last()) {
+            (Some(run), _) if left => due.push((run.as_str(), red.name.as_str())),
+            (_, Some(t)) if red.done.is_some_and(|d| d <= *t) => waiting = true,
+            (_, Some(_)) => twice.push(red.name.clone()),
+            (_, None) => {}
+        }
+    }
+    if due.is_empty() {
+        return Ok((!waiting).then_some(twice));
+    }
+    let mut runs: Vec<&str> = due.iter().map(|d| d.0).collect();
+    runs.sort_unstable();
+    runs.dedup();
+    for run in &runs {
+        ok(r, "gh", &["run", "rerun", run, "--failed", "-R", repo])?;
+    }
+    let checks: Vec<&str> = due.iter().map(|d| d.1).collect();
+    let (fleet, n) = k;
+    let at = n.map_or(String::new(), |n| format!(" #{n}"));
+    writeln!(
+        out,
+        "{fleet}{at} ci-rerun: {} failed at {head:.7}; re-run once",
+        checks.join(", ")
+    )?;
+    let d = json!({"sha": head, "why": "failed", "checks": checks, "runs": runs});
+    crate::events::append(&x.state, &Event::new(x.now, fleet, n, "ci-rerun", d).passive()).map(|()| None)
+}
+
+/// CI green at `head` after a `ci-rerun` of failed checks there: `ci-flaky?` names them, once a head.
+pub fn flaky(x: &Ctx, out: &mut dyn Write, k: (&str, Option<u64>), ev: &[Event], head: &str) -> Result<()> {
+    let (fleet, n) = k;
+    let logged = |e: &Event| e.kind == "ci-flaky?" && e.fleet == fleet && e.issue == n && e.str("sha") == Some(head);
+    let mut checks: Vec<Value> = reruns(ev, k, head)
+        .flat_map(|e| e.val("checks").as_array().cloned().unwrap_or_default())
+        .collect();
+    checks.dedup();
+    if checks.is_empty() || ev.iter().any(logged) {
+        return Ok(());
+    }
+    let names: Vec<&str> = checks.iter().filter_map(Value::as_str).collect();
+    let at = n.map_or(String::new(), |n| format!(" #{n}"));
+    writeln!(
+        out,
+        "{fleet}{at} ci-flaky?: {} green at {head:.7} after a re-run",
+        names.join(", ")
+    )?;
+    let d = json!({"sha": head, "checks": checks});
+    crate::events::append(&x.state, &Event::new(x.now, fleet, n, "ci-flaky?", d).passive())
+}

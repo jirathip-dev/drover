@@ -603,3 +603,30 @@ fn a_failed_git_read_in_the_pr_body_walk_is_could_not_check() {
     unchecked(&c, &r, "rev-parse");
     assert!(kinds(&c, "done-refused").is_empty());
 }
+
+#[test]
+fn a_red_pr_body_leg_is_rerun_once_after_pr_body_passes_at_its_head() {
+    let head = sha("abc");
+    let leg = |conclusion: &str, body: &str| {
+        let check = json!({"__typename": "CheckRun", "name": "evidence", "status": "COMPLETED",
+            "conclusion": conclusion, "completedAt": "1970-01-12T13:40:00Z",
+            "detailsUrl": "https://github.com/jirathip-dev/sendmeter/actions/runs/555/job/5"});
+        json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+            "statusCheckRollup": [check], "body": body})
+        .to_string()
+    };
+    let good = format!("## For humans\n\nx\n\n## Evidence (head {head})");
+    let (c, r, _sh) = lane_at("turn-body-leg", true, Some(&leg("FAILURE", &good)), Some(&sha("def")));
+    let r = r
+        .once("gh pr view issue-12", 0, &leg("FAILURE", "## For humans\n\nx"))
+        .reply("gh run rerun", "");
+    let (code, out) = run(&c, &r, &["turn", "done"]);
+    assert!(code == 3 && out.contains("REFUSED PR_BODY"), "{out}");
+    assert!(!r.called("gh run rerun"), "no re-run while PR_BODY refuses");
+    turn(&at(&c, 10), &r, &["done"]);
+    assert_eq!(r.count("gh run rerun 555 --failed -R jirathip-dev/sendmeter"), 1);
+    let rerun = kinds(&c, "ci-rerun");
+    assert_eq!((rerun.len(), rerun[0].val("checks")), (1, &json!(["evidence"])));
+    turn(&at(&c, 20), &r, &["done"]);
+    assert_eq!(r.count("gh run rerun"), 1, "once a head");
+}
