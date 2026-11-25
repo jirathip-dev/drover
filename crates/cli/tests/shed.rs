@@ -411,6 +411,37 @@ fn a_shed_without_run_meta_is_a_doctor_cross_and_refuses_acp_lanes() {
     assert!(out.contains("✓ shed run --meta — "), "{out}");
 }
 
+#[test]
+fn doctor_prints_an_account_row_per_acp_agent_and_crosses_a_shed_under_protocol_5() {
+    let b = FakeShed::new();
+    let c = acp_ctx("acp-accounts", &acp_config(&b.sock, "claude"));
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let (_, out) = run(&c, &f, &["doctor"]);
+    assert!(
+        out.contains("✗ account claude: no signed-in named account → shed account add claude <name>"),
+        "{out}"
+    );
+    let acct = |name: &str, state: &str| json!({"provider": "claude", "name": name, "state": state});
+    b.lock().accounts = vec![
+        acct("default", "ready"),
+        acct("work", "ready"),
+        acct("spare", "signed-out"),
+        acct("personal", "limited"),
+        json!({"provider": "codex", "name": "x", "state": "ready"}),
+    ];
+    let (_, out) = run(&c, &f, &["doctor"]);
+    let rows: Vec<&str> = out.lines().filter(|l| l.contains(" account")).collect();
+    assert_eq!(rows, ["✓ account claude: work, personal"], "{out}");
+    b.lock().hello.as_mut().unwrap().protocol = 4;
+    let (code, out) = run(&c, &f, &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("✗ account — shed serve is "), "{out}");
+    assert!(
+        out.contains(&format!("protocol 4, accounts need protocol 5 → {}", shed::UPDATE)),
+        "{out}"
+    );
+}
+
 fn bash_call(cmd: &str, cwd: &std::path::Path) -> String {
     json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": cwd})
         .to_string()
