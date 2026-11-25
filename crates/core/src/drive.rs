@@ -1191,8 +1191,12 @@ fn pass(
             emit(&ctx.state, cfg, e)?;
         }
     }
+    let mut unread = std::collections::BTreeMap::new();
     for s in st.values().filter(|s| s.fleet == fleet && s.state == "design") {
-        crate::design::handoff(ctx, cfg, r, out, &agents, s)?;
+        if let Some(why) = crate::design::handoff(ctx, cfg, r, out, &agents, s)? {
+            writeln!(out, "{fleet} #{} design-review: worktree unread, held: {why}", s.issue)?;
+            unread.insert(s.issue, why);
+        }
     }
     crate::stall::refused(ctx, cfg, r, out, &working(&ctx.state)?, fleet)?;
     silent(ctx, cfg, r, out, &agents, fleet)?;
@@ -1209,6 +1213,12 @@ fn pass(
     if handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, seen, &working(&ctx.state)?, &agents, false, Some(fleet));
         waits.retain(one);
+    }
+    for (_, w) in waits.iter_mut().filter(|(s, _)| s.state == "design") {
+        if let Some(why) = unread.get(&w.issue) {
+            (w.who, w.next_cmd, w.promise) = ("none", None, None);
+            w.what = format!("design round unread, no respawn this pass: {why}");
+        }
     }
     let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();
     let rev = |w: &Waiting| {
