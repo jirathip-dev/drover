@@ -3,28 +3,29 @@
 ## Who may call whom
 
 ```
-cooee ──HTTP, plugin token──▶ server::serve::rows   (GET rows, rows/stream, thread/<id>/rows; PUT thread; POST said)
+cooee ──HTTP, plugin token──▶ server::serve::rows   (GET rows, rows/stream, thread/<id>/rows; POST said)
+cooee ──HTTP, plugin token──▶ server::serve::v1     (orchestrator-attach, -detach: as today, via #1663 later)
 cooee ──POST /action────────▶ server::screens ─────▶ server::serve::rows::action ──▶ the core verb (answer, card, …)
-drover's page ──────────────▶ server::serve::chat   (its own thread screens, drawn from rows)
-drover chat, thread show|ls ─┐
-                             ▼
-                 core::thread          registry (facts), rows(), list(), say(), said(), unread
-                 core::thread::route   home(), emit(); lane_ask, to_owner, flow, handoff, tell
-                 core::orchestrator    who acts (acting, actor, by), the role, the brief, the profiles
-                             ▲
+drover's page ──────────────▶ server::serve::chat   (its own thread screens, as today)
+drover chat, thread show|ls|say ─┐
+                                 ▼
+                 core::thread          registry (both hosts), rows(), home()
+                 core::thread::route   emit(): log the row; deliver its prompt only to a drover thread
+                 core::orchestrator    who acts, the role, the brief, the profiles, the engine for drover threads
+                                 ▲
 core::{lib (ask, answer), card, propose, secret, triage, check, gate} ── emit a row through thread::route
 ```
 
 | Module | Owns | May call | Must not |
 |---|---|---|---|
-| `server::serve::rows` (new) | the routes above; a core row plus its block; the stream; the thread actions' table | `core::thread`, `serve::chat`'s block builders, the hub | decide where a row goes; start, stop or type into an agent |
-| `server::serve::chat` | drover's own thread screens and the `chat` tab, from rows | `core::thread`, `screens_kit` | read `orchestrator-start` to decide a state; upload, queue or pick a model |
-| `core::thread` (new) | the thread registry from `thread-facts`; `Row` without its block; `say`, `said`; unread and read marks | `events`, `config` | import blocks; call `term`, `shed`, `spawn`, `session` or `providers` |
-| `core::thread::route` (new) | `home`: a thread id or a repo's desk; the emitters every workflow verb uses | `core::thread`, `events`, `config`; until D4, the engine's `deliver` for a thread drover hosts | deliver to a cooee thread: there a row's `prompt` is the only way a line reaches an agent |
-| `core::orchestrator` (kept, about 300 lines) | the acting orchestrator, the role and its `[config]` sheet, `brief`, `chat::profiles` | `config`, `providers` (the ACP agent name, the settings path), `spawn::unguarded` | hold a thread, a message or a session |
-| `core::events::notify` | `[[notify]]` command notifiers | the runner | send a web push; decide a row's `push` (that is `thread::route`) |
-| `chat` (the terminal) | the Threads tab from `thread::list` and `thread::rows`; answers and card taps through the core verbs | `core::thread`, `core::card`, core's answer | deliver, check shed, or wait on an agent |
-| cooee | the thread, messages, uploads, picks, the agent, the desk thread, push | drover's routes in `[threads]`, `/action`, `/cooee/profiles` | read a row's `kind` to decide workflow; name a drover path or event outside the manifest |
+| `server::serve::rows` | the rows routes, `said` (D2), a core row plus its block, the stream, the thread actions' table | `core::thread`, `serve::chat`'s block builders, the hub | decide where a row goes; start, stop or type into an agent |
+| `server::serve::chat` | drover's own thread screens and the `chat` tab, as today | `core::thread`, `core::orchestrator`, `screens_kit` | list a cooee chat's conversation (drover does not hold it) |
+| `core::thread` | the registry (drover threads, cooee chats, desks); `Row` without its block; `home` | `events`, `config` | import blocks; call `term`, `shed`, `spawn`, `session` or `providers` |
+| `core::thread::route` | the emitters every workflow verb uses | `core::thread`, `events`, `config`, the engine's `deliver` for a drover thread | deliver to a cooee chat: there a row's `prompt` is the only way a line reaches the agent |
+| `core::orchestrator` | the acting orchestrator, the role and its sheet, `brief`, the profiles, attach and detach, and the engine (start, deliver, sleep, hold) for drover threads | `config`, `providers`, `spawn::unguarded`, shed | start or type into a session for a thread whose open event is `orchestrator-attached` (D2) |
+| `core::events::notify`, `core::webpush` | `[[notify]]` notifiers and web push to devices subscribed on drover's page, as today | the runner | read cooee's subscriptions |
+| `chat` (the terminal) | the Threads tab, as today | `core::thread`, `core::orchestrator`, `core::card`, core's answer | |
+| cooee | its chats, their messages, uploads and picks, its Orchestrator agent, Chief's hand-off, its devices and push | the routes in `[threads]`, `/action`, `/cooee/profiles` | read a row's `kind` to decide workflow; name a drover path or event outside the manifest |
 
 Nothing in drover calls cooee. The bans in [adr.md](adr.md) hold the last column where a pattern can.
 
@@ -32,82 +33,74 @@ Nothing in drover calls cooee. The bans in [adr.md](adr.md) hold the last column
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Frozen: today, drover's thread chat takes fixes only
-    Frozen --> Contract: D1 merged (rows served, keys frozen)
+    [*] --> Contract: D1 merged (#1617: rows served, keys frozen)
     Contract --> OrchestratorFirst: #1609 merged (cards by thread id, judgment, quiet decisions, digest)
-    OrchestratorFirst --> BothHosts: C1 and D2 live (cooee draws rows, types prompts, pushes; drover copies said)
-    BothHosts --> Routed: C2 and C3 live (repo per thread, each desk PUT turns the desk fallback on)
-    Routed --> PushMoved: the owner's config card drops the webpush notifier
-    PushMoved --> Moving: C6 live (import)
-    Moving --> Moved: no drover-hosted thread is open, D3 merged (new ones refused)
-    Moved --> Cut: D4 merged
-    Cut --> [*]
+    OrchestratorFirst --> Clients: D2 merged (no delivery into a cooee chat, said, push on rows, [threads])
+    Clients --> Desks: D3 merged (a drover desk thread per repo, [chat])
+    Desks --> Handoffs: #1610 merged (handoffs to the desk, [move])
+    Handoffs --> CapRaises: #1608 merged
+    Clients --> Reading: C1 live (cooee draws rows, types prompts, sends push)
+    Reading --> CooeeOrchestrator: cooee #802 live (Chief hands off; [New] picks a repo and attaches)
+    CapRaises --> [*]
+    CooeeOrchestrator --> [*]
 ```
 
-Each arrow is a merge or an owner card, and each state runs. Up to `Moved` nothing is deleted and drover's surfaces
-are as today. In `OrchestratorFirst` and `BothHosts` a card goes orchestrator first only in a thread drover hosts; one
-filed from a cooee chat, or from no thread, is an owner card until `Routed`. Before `Cut`, going back is turning
-cooee's row reader off: drover's own threads carry on.
+Each arrow is a merge or a release, and each state runs. Nothing in drover is deleted on the way, and drover's page,
+terminal and `drover chat` stay as today throughout. The drover line and the cooee line run side by side after D2.
+Going back on the cooee side is cooee no longer attaching or reading rows: drover's threads carry on, and a chat's
+open cards are still on drover's board.
 
-One sender at a time: while fleet.toml has a `type = "webpush"` notifier, drover sends as today and every row's `push`
-is null. The config card that removes the notifier is the switch to cooee; D4 then deletes the notifier type.
+Push has no switch. Drover's web push keeps sending to devices subscribed on its page. From D2 every row carries
+`push`, and cooee sends it to devices subscribed in cooee. A device is subscribed to one of them.
 
 ## A thread's host
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DroverHosted: thread-new (before D3)
-    [*] --> CooeeHosted: PUT thread (thread-facts)
-    DroverHosted --> Importing: cooee reads the thread's rows page by page
-    Importing --> DroverHosted: the import stops (nothing was logged)
-    Importing --> Moved: PUT the new thread with from = the old id
-    Moved --> [*]: the old id is read-only, its rows and new rows go to the new id
-    CooeeHosted --> Archived: PUT archived = true
-    Archived --> CooeeHosted: PUT archived = false
-    CooeeHosted --> Desk: PUT desk = true (one per repo, the newest PUT wins)
+    [*] --> DroverThread: thread-new (thread new, the page, a desk from D3)
+    [*] --> CooeeChat: orchestrator-attached (cooee's [New] or Chief's hand-off)
+    DroverThread --> Archived: thread-archive
+    Archived --> DroverThread: thread-restore
+    CooeeChat --> Detached: orchestrator-detached
+    Detached --> CooeeChat: attached again
+    DroverThread --> [*]
+    CooeeChat --> [*]
 ```
 
-How history moves: it is never copied out of drover's log and never deleted. Cooee's import reads a thread's rows
-oldest first, adds each as a history item with its time (messages as messages, a settled card as its block, no
-prompt, no push), then `PUT`s the new thread with `from`. From that seq on, `home` and every open row of the old
-thread name the new id, so open asks and cards appear there through the normal row stream. A drover-hosted thread
-whose agent is awake is put to sleep by drover first (its last engine act); the cooee thread starts a fresh agent
-session with the imported text as context, since the two engines keep sessions differently. Running the import
-twice finds the `from` link and does nothing.
+A thread never changes host. In `DroverThread` drover runs the agent and delivers every row's `prompt`. In
+`CooeeChat` cooee runs the agent and types the `prompt` in; drover delivers nothing (D2). `Archived` and `Detached`
+take no routed rows, and `home` falls through to the repo's desk.
 
-`Archived` and `none` threads take no routed rows: `home` falls through to the repo's desk. So does a thread
-drover neither hosts nor has had `PUT`: a cooee chat opened before C2.
+History does not move. A drover thread's history stays in drover's log and on drover's surfaces. A cooee chat starts
+at its attach, and cooee may read its earlier rows through `thread/<id>/rows`. Nothing is copied out of the log, and
+nothing is deleted.
 
-## A repo's desk, on drover's side
+## A repo's desk
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NoDesk: the repo has no thread-facts with desk = true
-    NoDesk --> Desk: PUT thread, desk = true (C3)
-    Desk --> Desk: a newer desk PUT replaces it
+    [*] --> NoDesk: no thread-facts with desk = true for the repo
+    NoDesk --> Desk: D3: a to-desk row makes the repo's desk thread (a drover thread)
     Desk --> NoDesk: the desk is archived
 ```
 
-`NoDesk`: a `to: desk` row is an owner card as today (open, pushed, on the board, no `prompt`), and the board does
-not say `with orchestrator`. `Desk`: the row carries its `prompt`, and the orchestrator there judges it first
-(#1609). The state is read from the log at the row's seq, so a replay gives the same row. A card left open from
-`NoDesk` shows in the desk once it exists and stays the owner's to answer.
+`NoDesk`: a `to: desk` row is an owner card as today (open, pushed, on the board, no `prompt`). `Desk`: the row
+carries its `prompt`, drover delivers it, and the orchestrator there judges it first (#1609). The state is read from
+the log at the row's seq, so a replay gives the same row. Cooee draws desk rows in its drover cards place, where
+[chat] and [move] post the same actions as on drover's page.
 
 ## A row, on cooee's side
 
 ```mermaid
 stateDiagram-v2
     [*] --> Read: seq above the cursor
-    Read --> Drawn: block placed in its thread, a known key replaced
-    Drawn --> Told: prompt typed into the agent, or none
-    Told --> Notified: push sent, or none
+    Read --> InChat: to names a chat cooee attached
+    Read --> InCards: to is a drover thread, a desk or the owner
+    InChat --> Told: block drawn (a known key replaced), prompt typed into the agent, or none
+    InCards --> Told: block drawn in the drover cards place
+    Told --> Notified: push sent to cooee's devices, or none
     Notified --> Kept: cursor = seq, stored
     Kept --> [*]
-    Read --> Held: the thread is unknown
-    Held --> Drawn: drawn in the repo's desk, with a line saying why
 ```
 
-A row is never dropped: a thread cooee does not have falls to the desk. Drover sees the reader's cursor on each
-`GET rows` and on the stream's reconnect; past `rows_stale_minutes` behind a row with `push`, `check` says so on the
-board and through the `[[notify]]` commands, which is how an owner card is not lost while cooee is down. The lifeboat
-page answers asks and run cards without cooee, as today.
+A row is never dropped. With cooee down, rows wait in the log and the stream resumes from `Last-Event-ID`.

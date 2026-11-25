@@ -1,31 +1,34 @@
 # cooee-threads: the row and action contract (#1571)
 
 The payload types live in `crates/server/src/api.rs` and reach `assets/types/api.d.ts` through `just types`. The row's
-data without its block lives in `core::thread` (a new `thread/` folder in `crates/core/src/`) so the terminal reads it
+data without its block lives in `core::thread` (`crates/core/src/thread.rs`, D1) so the terminal reads it
 with no server.
 
 ## Routes
 
-| Route | Who calls | Body or answer |
-|---|---|---|
-| `GET /api/v1/rows?since=<seq>&n=<1..500>` | cooee | `Rows`: the rows after `since`, oldest first |
-| `GET /api/v1/rows?open=1` | cooee, first connect and recovery | `Rows`: every open row, `prompt` and `push` null |
-| `GET /api/v1/rows/stream` | cooee | server-sent events, `id:` the seq, `data:` one `Row`; resumes from `Last-Event-ID` |
-| `GET /api/v1/thread/<id>/rows?before=<seq>&n=<k>` | cooee's import, drover's surfaces | `Rows` of one thread, `more` for older ones |
-| `PUT /api/v1/thread/<id>` | cooee | `ThreadFacts`; an upsert, so open, retitle, archive, restore and move are one call |
-| `POST /api/v1/thread/<id>/said` | cooee | `Said`; a repeated `id` is ignored |
-| `POST /action` | cooee, drover's page | `{screen, block, action, values, by}` with an `Action`'s values; the same op as `POST /api/v1/<op>` |
-| `GET /cooee/profiles` | cooee | one `ChatProfile` per repo: `all`, `none`, each fleet (unchanged shape) |
+| Route | Who calls | Body or answer | Slice |
+|---|---|---|---|
+| `GET /api/v1/rows?since=<seq>&n=<1..500>` | cooee | `Rows`: the rows after `since`, oldest first | D1, merged |
+| `GET /api/v1/rows?open=1` | cooee, first connect and recovery | `Rows`: every open row, `prompt` and `push` null | D1, merged |
+| `GET /api/v1/rows/stream` | cooee | server-sent events, `id:` the seq, `data:` one `Row`; resumes from `Last-Event-ID` | D1, merged |
+| `GET /api/v1/thread/<id>/rows?before=<seq>&n=<k>` | cooee, drover's surfaces | `Rows` of one thread, `more` for older ones | D1, merged |
+| `POST /api/v1/orchestrator-attach` | cooee | `{fleet, thread}`: `fleet` is the repo picked on [New] (`all`, `none` from D2); answers the brief, settings and env | today |
+| `POST /api/v1/orchestrator-detach` | cooee | `{fleet, thread}`: the chat takes no more routed rows | today |
+| `POST /api/v1/thread/<id>/said` | cooee | `Said`; a repeated `id` is ignored | D2 |
+| `POST /action` | cooee, drover's page | `{screen, block, action, values, by}` with an `Action`'s values; the same op as `POST /api/v1/<op>` | today, plus D3, #1610 |
+| `GET /cooee/profiles` | cooee | one `ChatProfile` per orchestrator seat (#1057, unchanged) | today |
 
-The plugin token or a paired device reads; only the plugin token may `PUT` a thread or post `said`. Every refusal is
-the existing `Reply` (`ok`, `code`, `message`). `cooee-plugin.toml` names the paths in a `[threads]` table, so cooee
-core holds no drover path:
+The plugin token or a paired device reads; only the plugin token may attach or post `said`. Every refusal is the
+existing `Reply` (`ok`, `code`, `message`). `cooee-plugin.toml` names the row paths in a `[threads]` table (D2), so
+cooee core holds no drover path:
 
 ```toml
 [threads]
 rows = "/api/v1/rows"
-thread = "/api/v1/thread/{thread}"
+thread = "/api/v1/thread/{thread}/rows"
 said = "/api/v1/thread/{thread}/said"
+attach = "/api/v1/orchestrator-attach"
+detach = "/api/v1/orchestrator-detach"
 ```
 
 ## Rows
@@ -56,7 +59,7 @@ pub struct Row {
     pub open: bool,
     /// The line the thread's agent is told; cooee types it in, waking the agent. None: shown only.
     pub prompt: Option<String>,
-    /// Set: cooee sends this notification. None: quiet.
+    /// Set: cooee sends this notification to its devices (from D2, also while drover's web push sends to its own). None: quiet.
     pub push: Option<Push>,
     /// A handoff row's item (the existing `Handoff`).
     pub handoff: Option<Handoff>,
@@ -108,16 +111,19 @@ What each kind is, and what it replaces today:
 | `merged`, `rollout` | `merged`, an open rollout | the issue's home | none | `merged` as today |
 | `digest` | the daily list of orchestrator decisions (#1609) | `desk` | none | set |
 | `alert` | an event with `is_push()` and no thread (`blocked`, `stall`, `lane-dead`, `needs-human`, `host-busy`, …) | the issue's home, else `owner` | none | set |
-| `said` | an owner message typed on a drover surface | its thread | the message | none |
+| `said` | an owner message typed on a drover surface, or copied from a cooee chat (D2) | its thread | the message, for a drover one | none |
 
-The issue's home is `thread::route::home`: the thread whose orchestrator filed or queued the issue, when that thread is
-open, drover hosts it or cooee has `PUT` it, and its profile is not `none`; else `desk` of the fleet. While the repo
-has no desk thread (no `thread-facts` with `desk`), a `desk` row is an owner card as today: `open`, pushed, no
-`prompt`. A `none` thread gets only rows about itself (its own
-asks, cards and their settle lines). `to` is fixed by the log up to the row's seq, so a replay gives the same target.
+The issue's home is `thread::route::home` (D1): the open thread that filed or queued the issue, unless its repo is
+`none`; else `desk` of the fleet. "Open" covers both hosts: a drover thread (`thread-new`, not archived) and a cooee
+chat (`orchestrator-attached`, not detached). While the repo has no desk thread (D3 makes it), a `desk` row is an owner
+card as today: `open`, pushed, no `prompt`. A `none` thread gets only rows about itself. `to` is fixed by the log up
+to the row's seq, so a replay gives the same target.
 
-Delivery is at least once. Cooee keeps the last seq it applied; a replayed row is harmless for drawing (`key`), and
-cooee skips `prompt` and `push` for a seq at or under its cursor.
+Who acts on `prompt` depends on the host of `to`. For a drover thread, drover delivers it, as today. For a cooee chat,
+drover delivers nothing (D2) and cooee types it in. For a desk, drover delivers it, since a desk is a drover thread.
+
+Delivery to cooee is at least once. Cooee keeps the last seq it applied; a replayed row is harmless for drawing
+(`key`), and cooee skips `prompt` and `push` for a seq at or under its cursor.
 
 ## Actions
 
@@ -131,7 +137,9 @@ pub enum Action {
     ConfigCard { id: String, act: ConfigAct },
     /// `value` only with `save`; drover stores it and never logs it.
     SecretCard { thread: String, name: String, act: SecretAct, value: Option<String> },
-    /// #1610: deliver a handoff to another thread; the first copy becomes forwarded.
+    /// D3, [chat] on an owner card: the card's `text` quoted as an owner line in its thread (its home, else the desk).
+    ChatAbout { key: String },
+    /// #1610, [move] on a handoff: deliver it to another thread; the first copy becomes forwarded.
     HandoffMove { id: u64, to: Target },
 }
 
@@ -140,58 +148,39 @@ pub enum ConfigAct { Apply, Discard }
 pub enum SecretAct { Save, Dismiss }
 ```
 
-The first four exist today as manifest actions with these values; only `handoff-move` is new. The answer is `{line}`
-on 2xx and the refusal's line on 409, as cooee's action route already expects.
+The first four exist today as manifest actions with these values. `chat-about` exists as a v1 op and D3 makes it a
+row action. `handoff-move` is new in #1610. The answer is `{line}` on 2xx and the refusal's line on 409, as cooee's
+action route already expects. [chat] quoting into a cooee chat is a `said` row with a `prompt`, which cooee types in;
+quoting into a drover thread is `thread::say`, delivered by drover.
 
 ## What cooee writes
 
 ```rust
-/// `PUT /api/v1/thread/<id>`: the facts drover needs to route to a thread and list it.
-pub struct ThreadFacts {
-    /// The thread's repo: a fleet, `all` or `none` (the drover profile it started with).
-    pub profile: String,
-    pub title: String,
-    /// `working`, `idle` or `asleep`: the figure on drover's own list.
-    pub state: String,
-    pub archived: bool,
-    /// The repo's desk thread.
-    pub desk: bool,
-    /// The drover thread this one continues (a move); set once.
-    pub from: Option<String>,
-}
-
-/// `POST /api/v1/thread/<id>/said`: one chat message, copied for drover's surfaces and for `--typed`.
+/// `POST /api/v1/thread/<id>/said` (D2): one owner line of an attached chat, copied for `answer --typed`.
 pub struct Said {
     /// Cooee's item id: posting it twice logs it once.
     pub id: String,
     pub ts: u64,
-    /// `owner` or `orchestrator`.
+    /// `owner`; the agent's own lines stay in cooee.
     pub from: String,
     pub text: String,
-    /// Names and sizes only; the bytes stay in cooee.
-    pub files: Vec<FileRef>,
 }
 ```
 
-Cooee does not post back a message that reached it as a `said` row. A thread id is opaque to drover (cooee's
-`1..64` of `A-Za-z0-9-_`); drover never parses one.
+Cooee does not post back a line that reached it as a `said` row. A thread id is opaque to drover (cooee's `1..64` of
+`A-Za-z0-9-_`); drover never parses one. A `said` for a thread that is not an attached chat is refused
+`NO_SUCH_THREAD`.
 
 ## The log
 
-No new store: a row is a pure function of the event log, as the Events feed is today.
+No new store: a row is a pure function of the event log, as the Events feed is.
 
-| Event | Logged by | Replaces |
+| Event | Logged by | Slice |
 |---|---|---|
-| `thread-facts` (`thread`, the `ThreadFacts` fields) | `PUT thread/<id>` | `thread-new`, `thread-title`, `thread-archive`, `thread-restore`, `orchestrator-attached`, `orchestrator-detached` |
-| `thread-msg` with `item` (cooee's id) | `POST …/said` | the same event written by `say` and `thread reply` |
-| `thread-msg` with `via: "drover"` | `thread::say` | the same, delivered by drover |
+| `orchestrator-attached`, `orchestrator-detached` | cooee's attach and detach; open and close a cooee chat in the registry | today |
+| `thread-msg` with `item` (cooee's id) and `via: "cooee"` | `POST …/said` | D2 |
+| `thread-facts` with `desk: true` | drover, making a repo's desk thread | D3 |
+| `thread-handoff` with `moved` | the `handoff-move` action | #1610 |
 
-From D1, every event an orchestrator's command logs carries `thread` (from `DROVER_THREAD`) beside today's
-`orchestrator` stamp; `home` reads it. An issue filed before D1 has no stamp and goes to the desk. Old events stay readable: a `thread-new` thread is a drover-hosted one, an
-`orchestrator-attached` one is a cooee thread opened before this contract.
-
-## `[limits]`
-
-| Key | Default | What it times |
-|---|---|---|
-| `rows_stale_minutes` | 10 | a row with `push` older than this past the reader's cursor: `check` logs `rows-stale` once, the board shows `cooee is not reading rows`, and `[[notify]]` commands get it |
+Every event an orchestrator's command logs carries `thread` (from `DROVER_THREAD`, D1), whichever host runs the agent;
+`home` reads it. An issue filed before D1 has no stamp and goes to the desk.
