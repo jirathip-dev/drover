@@ -62,7 +62,7 @@ About 350 lines move and 950 go.
 | `POST /api/v1/orchestrator-attach`, `-detach` | keep |
 | `GET` and `POST /api/v1/chat`, the `chat-about` op | delete, D4 |
 | `crates/core/src/webpush.rs`, `/push/*`, the VAPID key, the subscriptions, `drover push test`, `[[notify]] type = "webpush"` | move to drover-server, D6: the page's own push, sent by serve from the events it follows; its thread-title lookup (`find`, `title`) reads the row's text instead (D4) |
-| `crates/core/src/devices.rs`: pairing, the devices list, cookie `check` and `find`, `denied`, `cooee_token` | move to drover-server, D6; `drover pair` dispatches there from the cli crate |
+| `crates/core/src/devices.rs`: pairing, the devices list, cookie `check` and `find`, `denied`, `cooee_token` | move to drover-server, D6; `drover serve pair|approve|devices` dispatch there from the cli crate |
 | `crates/core/src/devices.rs`: `sha256`, `random`, `write0600`, `tmp_name`, `save` | keep in core, D6 moves them to a core file helper module: core's callers (events, config, card, propose, proxy, drive, usage, transcript) are not push |
 | `crates/core/src/events.rs` `[[notify]]` | keep: core sends the generic command hook only; from D6 it skips a `webpush` notifier, which serve sends |
 | `crates/core/src/check.rs` `alerts-off`, `doctor.rs` and `timer.rs` subscription lines | move to drover-server, D6, with the subscriptions they read |
