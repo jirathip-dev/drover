@@ -170,3 +170,172 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     post("orchestrator-attach", attach);
     assert_eq!(ask(&c, &r, Some(COOEE)).0, 0);
 }
+
+const TOKEN: &str = "tok-attach";
+
+fn chat(name: &str) -> (drover::Ctx, FakeShed, Fake) {
+    let c = ctx(&tmpdir(name), CONFIG);
+    std::fs::write(c.config.with_file_name("cooee-token"), TOKEN).unwrap();
+    let b = FakeShed::new();
+    b.attach(&c);
+    (c, b, Fake::default().reply("gh", ""))
+}
+
+fn bearer() -> String {
+    format!("Authorization: Bearer {TOKEN}\r\n")
+}
+
+#[test]
+fn a_lane_ask_to_an_attached_chat_starts_no_session_and_its_row_carries_the_routing_line() {
+    let (c, b, r) = chat("attach-lane-ask");
+    let on = b.on(&r);
+    let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let attach = json!({"fleet": "sendmeter", "thread": COOEE}).to_string();
+    assert_eq!(
+        call(&s, &ck, ("POST", "/api/v1/orchestrator-attach"), &attach)["ok"],
+        true
+    );
+
+    set_env("DROVER_LANE", "sendmeter:12:impl");
+    let (code, out) = ask(&c, &r, None);
+    std::env::remove_var("DROVER_LANE");
+    assert_eq!((code, out.as_str()), (0, "q1\n"));
+    let shed = |c: &String| c.starts_with("shed run") || c.starts_with("shed send");
+    assert!(
+        !r.calls.borrow().iter().any(shed) && !b.methods().iter().any(|m| m == "run" || m == "send"),
+        "{:?} {:?}",
+        r.calls.borrow(),
+        b.methods()
+    );
+    let rows = call(&s, &bearer(), ("GET", &format!("/api/v1/thread/{COOEE}/rows")), "");
+    let rows = rows["rows"].as_array().unwrap();
+    let row = rows
+        .iter()
+        .find(|r| r["kind"] == "system")
+        .unwrap_or_else(|| panic!("{rows:?}"));
+    let prompt = row["prompt"].as_str().unwrap();
+    assert!(
+        prompt.starts_with("lane ask q1 on #12") && prompt.contains("drover answer sendmeter q1"),
+        "{row}"
+    );
+}
+
+#[test]
+fn a_chat_attaches_to_all_or_none_and_no_fleet_may_take_those_names() {
+    let (c, b, r) = chat("attach-all-none");
+    let on = b.on(&r);
+    let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    for (fleet, id) in [("all", "chat-all"), ("none", "chat-none")] {
+        let body = json!({"fleet": fleet, "thread": id}).to_string();
+        let a = call(&s, &ck, ("POST", "/api/v1/orchestrator-attach"), &body);
+        assert_eq!(
+            (a["ok"].clone(), a["env"]["DROVER_THREAD"].clone()),
+            (json!(true), json!(id)),
+            "{a}"
+        );
+    }
+    let fleets: Vec<String> = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "orchestrator-attached")
+        .map(|e| e.fleet.clone())
+        .collect();
+    assert_eq!(fleets, ["all", "none"]);
+    for name in ["all", "none"] {
+        let cfg = CONFIG.replace("fleet.sendmeter", &format!("fleet.{name}"));
+        let e = drover::config::Config::parse(&cfg).err().unwrap();
+        assert!(
+            format!("{e:#}").contains(&format!("fleet.{name}: `all` and `none` are reserved")),
+            "{e:#}"
+        );
+    }
+}
+
+#[test]
+fn the_cli_attach_logs_the_attach_and_prints_the_brief_the_settings_and_the_env() {
+    let (c, b, r) = chat("attach-cli");
+    let on = b.on(&r);
+    let (code, out) = run(&c, &on, &["attach", "sendmeter", "term-1"]);
+    assert_eq!(code, 0, "{out}");
+    let events = read(&c.state).unwrap();
+    let e = events.iter().rfind(|e| e.kind == "orchestrator-attached").unwrap();
+    assert_eq!((e.fleet.as_str(), e.str("thread")), ("sendmeter", Some("term-1")));
+    let line = |k: &str| {
+        out.lines()
+            .find_map(|l| l.strip_prefix(k))
+            .unwrap_or_else(|| panic!("{k} {out}"))
+    };
+    let brief = std::fs::read_to_string(line("brief: ")).unwrap();
+    assert!(
+        brief.contains("# ROLE: ORCHESTRATOR") && brief.contains("Thread: term-1"),
+        "{brief}"
+    );
+    assert!(line("settings: ").ends_with("lane-orchestrator/settings.json"), "{out}");
+    assert_eq!(line("DROVER_LANE="), "sendmeter:-:orchestrator");
+    assert_eq!(line("DROVER_THREAD="), "term-1");
+    assert!(line("DROVER_PORT=").parse::<u16>().is_ok(), "{out}");
+}
+
+#[test]
+fn said_logs_an_owner_line_once_and_answer_typed_takes_it() {
+    let (c, b, r) = chat("attach-said");
+    let on = b.on(&r);
+    let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let attach = json!({"fleet": "sendmeter", "thread": COOEE}).to_string();
+    assert_eq!(
+        call(&s, &ck, ("POST", "/api/v1/orchestrator-attach"), &attach)["ok"],
+        true
+    );
+    assert_eq!(ask(&c, &r, Some(COOEE)), (0, "q1\n".into()));
+    let said = |auth: &str, thread: &str, item: &str| {
+        let body = json!({"id": item, "ts": T, "from": "owner", "text": "take full"}).to_string();
+        call(&s, auth, ("POST", &format!("/api/v1/thread/{thread}/said")), &body)
+    };
+    assert_eq!(said("", COOEE, "m1")["code"], "UNPAIRED");
+    assert_eq!(said(&bearer(), COOEE, "m1")["ok"], true);
+    assert_eq!(said(&bearer(), COOEE, "m1")["ok"], true);
+    let lines: Vec<_> = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "thread-msg" && e.str("item") == Some("m1"))
+        .map(|e| {
+            (
+                e.str("thread").map(String::from),
+                e.str("from").map(String::from),
+                e.str("via").map(String::from),
+            )
+        })
+        .collect();
+    assert_eq!(
+        lines,
+        [(Some(COOEE.into()), Some("owner".into()), Some("client".into()))]
+    );
+    let rows = call(&s, &bearer(), ("GET", &format!("/api/v1/thread/{COOEE}/rows")), "");
+    let row = rows["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rfind(|r| r["kind"] == "said")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        (row["text"].clone(), row["prompt"].clone(), row["push"].clone()),
+        (json!("take full"), Value::Null, Value::Null),
+        "{row}"
+    );
+    let other = said(&bearer(), "not-attached", "m2");
+    assert_eq!(
+        (other["ok"].clone(), other["code"].clone()),
+        (json!(false), json!("NO_SUCH_THREAD")),
+        "{other}"
+    );
+
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--typed", "take full"]);
+    assert_eq!(code, 0, "{out}");
+    let events = read(&c.state).unwrap();
+    let d = events.iter().rfind(|e| e.kind == "decision").unwrap();
+    assert_eq!((d.str("choice"), d.str("by")), (Some("full"), Some("owner (typed)")));
+}

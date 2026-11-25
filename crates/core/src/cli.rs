@@ -228,6 +228,10 @@ enum Cmd {
     #[command(about = "Owner only: the orchestrator threads full screen in a terminal; needs no serve")]
     Chat { thread: Option<String> },
     #[command(
+        about = "Attach a terminal chat to a repo, `all` or `none` (optionally an old chat's id): logs the attach, prints the brief path, the settings path and the env lines"
+    )]
+    Attach { repo: String, thread: Option<String> },
+    #[command(
         about = "Orchestrator chat threads per repo (or `all`), each talked through by one orchestrator lane (docs/orchestrator.md)"
     )]
     Thread {
@@ -1735,6 +1739,29 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     basis,
                 } => crate::amend::amend(ctx, &cfg, r, out, (&fleet, issue), &basis, &text)?,
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
+                Cmd::Attach { repo, thread } => {
+                    let id = thread.unwrap_or_else(|| format!("term-{}", ctx.now));
+                    let a = crate::orchestrator::attach(ctx, &cfg, &repo, &id)?;
+                    let brief = crate::orchestrator::dir(ctx, &cfg, &id).join("brief.md");
+                    std::fs::create_dir_all(brief.parent().context("no chat folder")?)?;
+                    let s = |k: &str| {
+                        a.get(k)
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    std::fs::write(&brief, s("brief"))?;
+                    writeln!(out, "brief: {}", brief.display())?;
+                    writeln!(out, "settings: {}", s("settings"))?;
+                    for (k, v) in a
+                        .get("env")
+                        .and_then(serde_json::Value::as_object)
+                        .into_iter()
+                        .flatten()
+                    {
+                        writeln!(out, "{k}={}", v.as_str().unwrap_or_default())?;
+                    }
+                }
                 Cmd::Thread { cmd } => match cmd {
                     ThreadCmd::New { .. } if crate::config::env("DROVER_THREAD").is_some_and(|t| !t.is_empty()) => {
                         gate::refused("USE_HANDOFF", "an orchestrator starts threads with `thread handoff`")?;

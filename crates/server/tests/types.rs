@@ -116,6 +116,7 @@ macro_rules! each {
             Job,
             ConductorAttach,
             AttachEnv,
+            Said,
             propose::ConfigView,
             propose::ConfigField,
             propose::ConfigChange,

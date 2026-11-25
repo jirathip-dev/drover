@@ -14,6 +14,7 @@ The cooee plugin token (`Authorization: Bearer …`) or a paired device reads th
 | `GET /api/v1/rows?open=1` | `Rows`: each key's newest row while it is still open, `prompt` and `push` null |
 | `GET /api/v1/rows/stream` | server-sent events: `id:` the row's seq, `data:` one row; from `Last-Event-ID`, else from now |
 | `GET /api/v1/thread/<id>/rows?before=<seq>&n=<k>` | `Rows` of one thread, the newest `n` before `before`; `more` for older ones |
+| `POST /api/v1/thread/<id>/said` | the plugin token only: `Said` (`id`, `ts`, `from: owner`, `text`), an attached chat's owner line logged as `thread-msg` with `item` and `via: client` for `answer --typed`; a repeated `id` logs nothing; `Reply`, `NO_SUCH_THREAD` unless `<id>` is an attached chat |
 
 ## A row
 
@@ -21,8 +22,8 @@ The cooee plugin token (`Authorization: Bearer …`) or a paired device reads th
 (`{"k": "thread", "id"}`, `{"k": "desk", "repo"}` or `{"k": "owner"}`), `kind` (`ask`, `decision`, `handoff`,
 `run-card`, `config-card`, `secret-card`, `system`, `merged`, `rollout`, `digest`, `alert`, `said`), `fleet`, `issue`,
 `text` (one plain line), `block` (what every surface draws, in the shared blocks schema), `open`, `prompt` (the line
-the thread's agent is told), `push` (`title`, `body`, `tag`; null while fleet.toml has a web push notifier, which still
-sends) and `handoff` (a handoff row's item).
+the thread's agent is told), `push` (`title`, `body`, `tag`; set on every row that notifies, whatever notifiers fleet.toml has) and `handoff` (a
+handoff row's item). A `said` line a client copied has neither `prompt` nor `push`.
 
 ## Where a row goes
 
@@ -30,7 +31,8 @@ An event about a thread (its asks, cards, messages) goes to that thread. Any oth
 home (`thread::route::home`): the open thread that filed (`issue-filed`) or queued it (the `thread` every event an
 orchestrator logs carries), unless that thread's repo is `none`; else `{"k": "desk", "repo": <fleet>}`. An event of no
 issue and no thread goes to the owner. The home is read from the log up to the row's seq, so a replay gives the same
-target. Drover still delivers to its own threads as before; the rows add a reader, not a second writer.
+target. Drover still delivers to its own threads; it types nothing into an attached chat (`orchestrator-attached`
+not followed by `orchestrator-detached`): a lane ask routed there is a `system` row whose `prompt` the client types in.
 
 ## The contract
 

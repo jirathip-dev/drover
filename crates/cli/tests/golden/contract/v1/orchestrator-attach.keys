@@ -1,0 +1,10 @@
+brief: string
+code: string
+env.DROVER_LANE: string
+env.DROVER_PORT: string
+env.DROVER_THREAD: string
+guarded: boolean
+message: string
+ok: boolean
+settings: string
+why: string
