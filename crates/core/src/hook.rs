@@ -70,7 +70,9 @@ impl Rules {
         let mut branches: Vec<String> = ["main", "master", "staging"].map(String::from).to_vec();
         branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
         let family = f.map(|f| f.family(role));
-        let heavy = f.map(|f| Heavy::of(f, cfg.hosts.get(host))).filter(|h| !h.kinds.is_empty());
+        let heavy = f
+            .map(|f| Heavy::of(f, cfg.hosts.get(host)))
+            .filter(|h| !h.kinds.is_empty());
         Rules {
             heavy,
             branches,
