@@ -6,7 +6,7 @@ the PR body. `usage.md` shows each one in use.
 ## 1. What gatekeeper counts here, and the soak files
 
 The diet defines no cap shape. The ceiling files, the count and the check's output are gatekeeper's
-(gatekeeper#99, `docs/architecture/test-health/shapes.md`). What they come to on drover's tree, `4cf52e4bf`:
+(gatekeeper#99, its docs/architecture/test-health/shapes.md). What they come to on drover's tree, `4cf52e4bf`:
 
 | | Lines | Rule |
 |---|---|---|

@@ -9,7 +9,7 @@ Open questions: none.
 ## Status
 
 Revised by the architect lane on 2026-11-25 after the owner's revision (the first version is `f3ea16fda`). Read on
-staging `4cf52e4bf` and on gatekeeper's approved ADR for #99 (`docs/architecture/test-health/` on its branch
+staging `4cf52e4bf` and on gatekeeper's approved ADR for #99 (gatekeeper repo, docs/architecture/test-health on its branch
 `issue-99`). Read `README.md` first, then this. `inventory.md` is the verdict per test file, `usage.md` how the
 callers read, `shapes.md` the data shapes, `boundaries.md` who may call what and the statecharts, `issues.md`
 the twelve issues as they are to be filed.
