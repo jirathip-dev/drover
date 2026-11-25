@@ -958,7 +958,7 @@ pub fn merge(
         },
         res => res,
     };
-    let res = match res.and_then(|h| crate::compact::head(r, &events, (fleet, f), h)) {
+    let res = match res.and_then(|h| crate::reroot::head(r, &events, (fleet, f), h)) {
         Ok(h) if fast && !crate::land::based(ctx, r, f, &h) => Err(refuse(
             "BEHIND",
             format!(
