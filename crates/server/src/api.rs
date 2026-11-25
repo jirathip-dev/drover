@@ -1124,6 +1124,16 @@ pub struct AttachEnv {
     pub port: String,
 }
 
+/// `POST /api/v1/thread/<id>/said`: one owner line of an attached chat, copied for `answer --typed`.
+pub struct Said {
+    /// The client's item id: posting it twice logs it once.
+    pub id: String,
+    pub ts: u64,
+    /// `owner`; the agent's own lines stay in the client.
+    pub from: String,
+    pub text: String,
+}
+
 }
 
 /// One block of a lane's transcript, tagged `k`, built from ACP's own fields only (never an agent's wording): a prompt, a reply's markdown (its text chunks joined), a tool call (its updates folded into one; `title_line`, the title's first line, cut), the plan, an approval (`answered`: the option taken); a PTY lane's screen is one `screen`, its `lines`.

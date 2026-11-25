@@ -529,6 +529,19 @@ guarded: boolean, why: string, };
 export type AttachEnv = { DROVER_LANE: string, DROVER_THREAD: string, DROVER_PORT: string, };
 
 /**
+ * `POST /api/v1/thread/<id>/said`: one owner line of an attached chat, copied for `answer --typed`.
+ */
+export type Said = { 
+/**
+ * The client's item id: posting it twice logs it once.
+ */
+id: string, ts: number, 
+/**
+ * `owner`; the agent's own lines stay in the client.
+ */
+from: string, text: string, };
+
+/**
  * `GET /api/v1/config`: fleet.toml as cooee's config screens read it.
  */
 export type ConfigView = { 

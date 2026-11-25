@@ -1113,7 +1113,7 @@ fn start(
         return refused("BAD_VALUE", "--update is an impl fix round");
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
-    let ev = crate::compact::on_root(r, working(&ctx.state)?, (fleet, f))?;
+    let ev = crate::reroot::on_root(r, working(&ctx.state)?, (fleet, f))?;
     let host = o.host.clone().or_else(|| crate::starts::admitted(ctx, fleet, issue));
     let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), (host.as_deref(), &|_| None))
         .inspect_err(|e| no_webkit(ctx, cfg, &ev, (fleet, issue), e))?;

@@ -681,7 +681,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         writeln!(out, "offline hosts: {e:#}")?;
     }
     crate::link::look(ctx, cfg, r, out, true).map_or_else(|e| drop(writeln!(out, "look: {e:#}")), drop);
-    let on = |n: &&str| crate::compact::drives(ctx, cfg, r, n, out);
+    let on = |n: &&str| crate::reroot::drives(ctx, cfg, r, n, out);
     let fleets: Vec<&str> = cfg.fleet.keys().map(String::as_str).filter(on).collect();
     if !fleets.is_empty() {
         if let Some(_one) = take(ctx, r, "orphans.lock", cfg.limits.pass_max_secs, "") {
@@ -722,7 +722,7 @@ pub fn chores(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         writeln!(out, "budget: {e:#}")?;
     }
     crate::check::hogs(ctx, cfg, r, out).unwrap_or_else(|e| crate::stderr!("drover: lane-hog: {e:#}"));
-    for name in cfg.fleet.keys().filter(|n| crate::compact::drives(ctx, cfg, r, n, out)) {
+    for name in cfg.fleet.keys().filter(|n| crate::reroot::drives(ctx, cfg, r, n, out)) {
         crate::gh::backlog(ctx, r, cfg.fleet(name)?, name)
             .unwrap_or_else(|e| crate::stderr!("drover: {name} backlog: {e:#}"));
     }
@@ -771,7 +771,7 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
             None => return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?),
         },
     };
-    if !crate::compact::drives(ctx, cfg, r, fleet, out) {
+    if !crate::reroot::drives(ctx, cfg, r, fleet, out) {
         return Ok(());
     }
     let catchup = if KICK.get().is_some() {
