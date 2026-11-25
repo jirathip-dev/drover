@@ -264,7 +264,47 @@ fn matches(ps: &[String], p: &Part) -> bool {
     ps.iter().any(|q| hits(q, &s))
 }
 
+/// The kind whose `[remote.<kind>]` route a fleet's gate checks, done checks and `drover hold` take.
+pub const GATE_KIND: &str = "cargo";
+
 impl Heavy {
+    /// Fleet `f`'s kinds, routes and never-routed list under host `h`'s slot limits; with a `cargo` route its gate checks join that kind.
+    pub fn of(f: &crate::config::Fleet, h: Option<&crate::config::HostCfg>) -> Heavy {
+        let mut kinds = f.heavy_kinds();
+        if f.remote.contains_key(GATE_KIND) {
+            let gates = kinds.entry(GATE_KIND.into()).or_default();
+            gates.extend([format!("{}*", crate::gatekeeper::CHECK), "just check*".into()]);
+        }
+        Heavy {
+            kinds,
+            max: h.and_then(|h| h.heavy_max).unwrap_or(3),
+            kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
+            wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
+            routes: f.remote.clone(),
+            never: f.never_routed(),
+        }
+    }
+
+    /// Whether `cmd` goes whole to the `cargo` route's build machines: it has a `cargo` command and no never-routed one.
+    pub fn gated(&self, cmd: &str) -> bool {
+        let line = Line::parse(cmd);
+        let ps = self.kinds.get(GATE_KIND).map_or(&[][..], Vec::as_slice);
+        let never = |p: &Part| (self.never.iter()).any(|n| hits(n, &p.plain()) || hits(n, &p.text()));
+        self.routes.contains_key(GATE_KIND)
+            && line.unsplit.is_none()
+            && line.parts.iter().any(|p| matches(ps, p))
+            && !line.parts.iter().any(never)
+    }
+
+    /// Gate check `cmd` as a shell line: under `exe heavy` on the `cargo` route's build machines from worktree `dir` when `gated`, else unchanged.
+    pub fn gate(&self, exe: &str, cmd: &str, dir: &str) -> String {
+        if self.gated(cmd) {
+            self.wrap(exe, GATE_KIND, cmd, Some(dir))
+        } else {
+            cmd.into()
+        }
+    }
+
     /// The first kind with a pattern matching one of `cmd`'s commands (leading `VAR=value` words, quoted text, comments and here-doc bodies skipped).
     pub fn kind(&self, cmd: &str) -> Option<&str> {
         let line = Line::parse(cmd);
@@ -541,7 +581,7 @@ pub fn run(
     code
 }
 
-/// `drover hold`: run `cmd` as holder `ci:<repo>` once the main host passes spawn admission and a heavy slot is free; 75 past `wait` minutes.
+/// `drover hold`: run `cmd` on its fleet's (the lane's, else the repo's) `cargo` route's build machines when `gated`, else as holder `ci:<repo>` once the main host passes spawn admission and a heavy slot is free; 75 past `wait` minutes.
 pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[String]) -> Result<i32> {
     let (prog, args) = cmd.split_first().context("hold: no command")?;
     let cfg = crate::config::Config::load(&ctx.config)?;
@@ -558,13 +598,18 @@ pub fn hold(ctx: &crate::Ctx, r: &dyn crate::runner::Runner, wait: u64, cmd: &[S
             )
         })
         .unwrap_or_default();
+    let line = crate::hosts::quote(prog, args);
+    let of_lane = crate::config::env("DROVER_LANE").and_then(|l| Some(l.split(':').next()?.to_string()));
+    let fleet = (of_lane.and_then(|l| cfg.fleet.get(&l)))
+        .or_else(|| (cfg.fleet.values()).find(|f| f.repo.rsplit('/').next() == Some(repo.as_str())));
+    let heavy = fleet.map(|f| Heavy::of(f, host)).filter(|h| h.gated(&cmd.join(" ")));
+    let route = heavy.as_ref().and_then(|h| h.routes.get(GATE_KIND));
+    let here = std::env::current_dir()?;
+    if let Some(code) = route.and_then(|rt| remote(r, rt, &here.to_string_lossy(), &line)) {
+        return Ok(code);
+    }
     let kind_max = host.and_then(|h| h.heavy_kind_max.get("ci").copied());
-    let me = Ticket::new(
-        format!("ci:{repo}"),
-        "ci".into(),
-        crate::hosts::quote(prog, args),
-        kind_max,
-    );
+    let me = Ticket::new(format!("ci:{repo}"), "ci".into(), line, kind_max);
     let max = host.and_then(|h| h.heavy_max).unwrap_or(3);
     let on = crate::hosts::On::new(r, None);
     let busy = || {

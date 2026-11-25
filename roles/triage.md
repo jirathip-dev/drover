@@ -29,6 +29,8 @@ issues only, never code: no commits, no pushes, no merges, no PRs.
    `drover triage docs <fleet> --findings <file>`: it files the run's **one** `docs:` issue (no finding, no issue).
    The README's top section (what it is, principles, non-goals) is the owner's intent: flag any doc that contradicts
    it, never propose a change to it; drover puts a missing intent section first. Never edit docs yourself.
+   Check the code against the README's `## Scope` and `## Non-goals` too: code doing another repo's job (shed's,
+   cooee's, …) is one line, `file:line: move to <repo>: the Non-goals line it breaks`.
 8. End with `drover done --no-change "<one line: what you looked at>" <fleet> <your issue>`. drover posts the summary
    (closed, folded and flagged, each with its one-line undo) to the fleet's orchestrator thread and closes your
    issue. Nothing to do: the same line, `nothing to triage`.
