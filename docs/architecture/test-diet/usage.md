@@ -90,8 +90,8 @@ again in other files:
 #[test]
 fn a_draft_pr_with_a_pass_is_marked_ready_once_then_merged() {
     let c = setup("drive-839-draft");
-    lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
-    std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
+    lane(&c, 10, "impl", "app-impl-12", "gone-12");
+    std::fs::remove_dir_all(c.worktrees.join("app/gone-12")).unwrap();
     let head = sha("abc");
     ev(
         &c,
@@ -99,7 +99,7 @@ fn a_draft_pr_with_a_pass_is_marked_ready_once_then_merged() {
         "verdict",
         json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
     );
-    let ready = "gh pr ready 100 -R jirathip-dev/sendmeter";
+    let ready = "gh pr ready 100 -R acme/app";
     let kinds = |k: &str| read(&c.state).unwrap().iter().filter(|e| e.kind == k).count();
     let r = fake(NONE)
         .reply("gh pr view issue-12", &draft_pr(&head, "green"))
