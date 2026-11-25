@@ -274,6 +274,10 @@ pub struct HostCfg {
     /// Who issues gh's token here: `managed` (default) warns before it expires, `external` never does.
     #[serde(default)]
     pub github_token: GithubToken,
+    /// Admission limits on this host over `[limits]`' (unset: those).
+    pub min_cpu_idle: Option<f64>,
+    pub min_free_mem_gb: Option<f64>,
+    pub swapout_rate: Option<f64>,
 }
 
 /// Who issues a host's GitHub token.
@@ -731,7 +735,10 @@ pub struct Limits {
     pub silent_minutes: u64,
     pub ci_start_minutes: u64,
     pub ci_stuck_minutes: u64,
-    pub load_per_cpu: f64,
+    pub min_cpu_idle: f64,
+    /// Retired (#1780): read only so doctor can name `min_cpu_idle` instead.
+    #[serde(skip_serializing)]
+    pub load_per_cpu: Option<f64>,
     pub overload_minutes: u64,
     pub swapout_rate: f64,
     pub min_free_gb: f64,
@@ -870,7 +877,8 @@ impl Default for Limits {
             silent_minutes: 10,
             ci_start_minutes: 10,
             ci_stuck_minutes: 30,
-            load_per_cpu: 2.5,
+            min_cpu_idle: 15.0,
+            load_per_cpu: None,
             overload_minutes: 10,
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
@@ -1086,7 +1094,23 @@ impl Config {
         let old =
             "renamed (#780): call it [orchestrator] and role.orchestrator; the old names are read for one release";
         let old = self.old_names.then(|| ("[conductor]", old.to_string()));
-        acct.into_iter().chain(tg).chain(old).collect()
+        let load = "replaced (#1780): load average is no gate now; set `min_cpu_idle` (percent of the CPUs idle, default 15) and delete it";
+        let load = self
+            .limits
+            .load_per_cpu
+            .map(|_| ("[limits] load_per_cpu", load.to_string()));
+        acct.into_iter().chain(tg).chain(old).chain(load).collect()
+    }
+
+    /// `[limits]` with host `machine`'s (`None`: the main host) `min_cpu_idle`, `min_free_mem_gb` and `swapout_rate` over them.
+    pub fn limits_on(&self, machine: Option<&str>) -> Limits {
+        let mut l = self.limits.clone();
+        if let Some(h) = self.hosts.values().find(|h| h.machine.as_deref() == machine) {
+            l.min_cpu_idle = h.min_cpu_idle.unwrap_or(l.min_cpu_idle);
+            l.min_free_mem_gb = h.min_free_mem_gb.unwrap_or(l.min_free_mem_gb);
+            l.swapout_rate = h.swapout_rate.unwrap_or(l.swapout_rate);
+        }
+        l
     }
 
     pub fn load(path: &Path) -> Result<Config> {

@@ -5,7 +5,7 @@ fn a_remote_host_with_no_fleet_toml_reports_its_running_lane_and_is_up() {
     let c = setup("hosts-bare-report", "", true, 0);
     remote_spawn(&c, NOW - 900);
     let (sh, bazzite) = (FakeShed::attached(&c), live_on());
-    let f = fake(1.0, 1.0);
+    let f = fake(70, 70);
     let r = two(&f, &bazzite);
     let on = drover::hosts::On::new(&r, Some("bazzite"));
     let watch = r#"{"roots":[],"worktrees":[]}"#;
@@ -33,7 +33,7 @@ fn a_remote_host_with_no_fleet_toml_reports_its_running_lane_and_is_up() {
 fn a_failing_report_names_its_reason_and_keeps_the_hosts_folders() {
     let c = trim_setup("hosts-report-fails", "");
     let cfg = Config::load(&c.config).unwrap();
-    let r = healthy(fake(0.1, 0.1))
+    let r = healthy(fake(97, 97))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
         .reply(&format!("{SSH}'/opt/drover/bin/drover' 'hosts' 'report'"), "")
         .reply(SWEEP, "sendmeter-impl-12\n")
@@ -64,7 +64,7 @@ fn a_hosts_line_shows_the_build_it_reports() {
     seen["bazzite"]["drover"] = json!("d91e726".repeat(6)[..40]);
     std::fs::write(&cache, seen.to_string()).unwrap();
     let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
-    let f = fake(0.1, 0.1);
+    let f = fake(97, 97);
     let r = two(&f, &bazzite);
     look(&c, &sh.on(&r));
     let (_, hosts) = run(&c, &r, &["hosts"]);

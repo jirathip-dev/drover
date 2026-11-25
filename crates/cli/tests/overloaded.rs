@@ -7,7 +7,7 @@ fn overloaded() {
     let d = tmpdir("overloaded");
     let c = ctx(
         &d,
-        &CONFIG.replace("[limits]\n", "[limits]\nload_per_cpu = -1.0\ndisk_hung_secs = 4\n"),
+        &CONFIG.replace("[limits]\n", "[limits]\nmin_cpu_idle = 101.0\ndisk_hung_secs = 4\n"),
     );
     drover::config::Config::load(&c.config).unwrap();
 }
@@ -64,7 +64,7 @@ fn on_an_overloaded_host_a_listing_that_never_returns_still_marks_the_disk_not_a
 }
 
 #[test]
-fn the_refusal_names_the_listings_time_and_the_load_and_no_command() {
+fn the_refusal_names_the_listings_time_and_the_cpu_idle_and_no_command() {
     overloaded();
     let dir = tmpdir("overloaded-text").to_string_lossy().into_owned();
     let (tx, rx) = std::sync::mpsc::channel::<()>();
@@ -75,7 +75,7 @@ fn the_refusal_names_the_listings_time_and_the_load_and_no_command() {
     let o = Real.run("git", &argv(&["-C", &dir, "status"])).unwrap();
     assert_eq!(o.code, 124, "{o:?}");
     assert!(o.stderr.contains("folder listing still running after "), "{}", o.stderr);
-    assert!(o.stderr.contains(" s at load "), "{}", o.stderr);
+    assert!(o.stderr.contains(" s at cpu idle "), "{}", o.stderr);
     assert!(
         !o.stderr.contains("git") && !o.stderr.contains("status"),
         "{}",

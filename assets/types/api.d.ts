@@ -639,9 +639,9 @@ lane: string,
 who: string, what: string, since: number, next_cmd?: string | null, };
 
 /**
- * What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, load/cpu, free memory and disk in GB.
+ * What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, CPU idle %, free memory and disk in GB.
  */
-export type HostSeen = { tags: Array<string>, home: string, probed: number, seen: number, up: boolean, load?: number | null, mem?: number | null, disk?: number | null, 
+export type HostSeen = { tags: Array<string>, home: string, probed: number, seen: number, up: boolean, idle?: number | null, mem?: number | null, disk?: number | null, 
 /**
  * A remote host's failed checks from `health` (`✗` keeps lanes off it, `!` warns), with the probe.
  */
@@ -675,7 +675,7 @@ export type HostRoot = { path: string, state: string, free_gb?: number | null, }
 /**
  * One row a minute per host in `<state dir>/host-history.jsonl`, written by the fast step; 24 h kept.
  */
-export type HostRow = { ts: number, host: string, load_cpu?: number | null, pressure?: number | null, swap_out?: number | null, mem_free_gb?: number | null, disk_free_gb?: number | null, lanes: number, 
+export type HostRow = { ts: number, host: string, cpu_idle?: number | null, pressure?: number | null, swap_out?: number | null, mem_free_gb?: number | null, disk_free_gb?: number | null, lanes: number, 
 /**
  * MB per `host::groups` group, only while `/live?tab=host` was seen in the last 2 min (else no `ps` walk).
  */

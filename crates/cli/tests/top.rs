@@ -30,7 +30,10 @@ fn setup(name: &str, limits: &str) -> (drover::Ctx, FakeShed, Fake, String) {
     let f = Fake::default()
         .reply(PS, &ps())
         .reply("lsof", &lsof)
-        .reply("sysctl -n vm.loadavg", "{ 6.00 5.00 4.00 }\n")
+        .reply(
+            "iostat",
+            " us sy id   1m   5m   15m\n 50 30 20  6 5 4\n 60 30 10  6 5 4\n",
+        )
         .reply("sysctl -n hw.ncpu", "2\n");
     (c, sh, f, wt)
 }
@@ -60,7 +63,7 @@ fn top_lists_each_live_lane_with_its_process_tree_and_heavy_waits_in_text_and_js
     let (code, out) = run(&c, &f, &["top"]);
     assert_eq!(code, 0, "{out}");
     let want = [
-        "load/cpu 3.00 (limit 2.5) · heavy slots 1/2 · respawns held 1\n",
+        "cpu idle 10% (floor 15%) · heavy slots 1/2 · respawns held 1\n",
         "sendmeter-impl-12 (sendmeter:12:impl)\n",
         "  101 12% 5m /Users/me/.cargo/bin/cargo test --all [cargo]\n",
         "    102 85% 62m /Users/me/.rustup/bin/rustc --crate-name meter [normal priority]\n",
@@ -80,10 +83,10 @@ fn top_lists_each_live_lane_with_its_process_tree_and_heavy_waits_in_text_and_js
     let (code, out) = run(&c, &f, &["top", "--json"]);
     assert_eq!(code, 0, "{out}");
     let v: Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(v["load_per_cpu"], 3.0);
+    assert_eq!(v["cpu_idle"], 10.0);
     assert_eq!(
         (v["limit"].clone(), v["heavy_used"].clone(), v["heavy_max"].clone()),
-        (json!(2.5), json!(1), json!(2))
+        (json!(15.0), json!(1), json!(2))
     );
     assert_eq!(v["respawns_held"], 1);
     assert_eq!(v["lanes"].as_array().unwrap().len(), 1, "{v}");
@@ -136,14 +139,14 @@ fn doctor_crosses_lane_priority_for_a_build_lane_process_at_normal_priority_and_
 fn history(c: &drover::Ctx, rows: &[(u64, f64)]) {
     let p = c.state.with_file_name("host-history.jsonl");
     let mut text = std::fs::read_to_string(&p).unwrap_or_default();
-    for (ts, load) in rows {
-        text += &format!("{}\n", json!({"ts": ts, "host": "mini", "load_cpu": load, "lanes": 1}));
+    for (ts, idle) in rows {
+        text += &format!("{}\n", json!({"ts": ts, "host": "mini", "cpu_idle": idle, "lanes": 1}));
     }
     std::fs::write(p, text).unwrap();
 }
 
-fn minutes(from: u64, to: u64, load: f64) -> Vec<(u64, f64)> {
-    (from..=to).map(|m| (m * 60, load)).collect()
+fn minutes(from: u64, to: u64, idle: f64) -> Vec<(u64, f64)> {
+    (from..=to).map(|m| (m * 60, idle)).collect()
 }
 
 fn overloads(c: &drover::Ctx) -> Vec<Value> {
@@ -156,11 +159,11 @@ fn overloads(c: &drover::Ctx) -> Vec<Value> {
 fn ten_minutes_over_the_limit_alerts_once_with_the_top_five_and_again_after_load_drops() {
     let (mut c, _sh, f, _) = setup("top-overload", "");
     let at = |m: u64| m * 60;
-    history(&c, &minutes(1000, 1009, 3.0));
+    history(&c, &minutes(1000, 1009, 10.0));
     c.now = at(1009);
     run(&c, &f, &["check"]);
     assert_eq!(overloads(&c).len(), 0, "9 minutes over is not yet an overload");
-    history(&c, &minutes(1010, 1010, 3.0));
+    history(&c, &minutes(1010, 1010, 10.0));
     c.now = at(1010);
     run(&c, &f, &["check"]);
     let all = overloads(&c);
@@ -182,19 +185,19 @@ fn ten_minutes_over_the_limit_alerts_once_with_the_top_five_and_again_after_load
         ]
     );
     let why = all[0]["reason"].as_str().unwrap();
-    assert!(why.starts_with("mini load/cpu 3.00 > 2.5 for 10m; top: 85% "), "{why}");
+    assert!(why.starts_with("mini cpu idle 10% < 15% for 10m; top: 85% "), "{why}");
     for m in [1011, 1015] {
-        history(&c, &minutes(m, m, 4.0));
+        history(&c, &minutes(m, m, 8.0));
         c.now = at(m);
         run(&c, &f, &["check"]);
     }
     assert_eq!(overloads(&c).len(), 1, "quiet while the overload lasts");
-    history(&c, &minutes(1016, 1016, 2.0));
-    history(&c, &minutes(1017, 1026, 3.0));
+    history(&c, &minutes(1016, 1016, 50.0));
+    history(&c, &minutes(1017, 1026, 10.0));
     c.now = at(1026);
     run(&c, &f, &["check"]);
     assert_eq!(overloads(&c).len(), 1, "a new overload waits its own 10 minutes");
-    history(&c, &minutes(1027, 1027, 3.0));
+    history(&c, &minutes(1027, 1027, 10.0));
     c.now = at(1027);
     run(&c, &f, &["check"]);
     let all = overloads(&c);
@@ -209,21 +212,21 @@ fn ten_minutes_over_the_limit_alerts_once_with_the_top_five_and_again_after_load
 #[test]
 fn overload_minutes_comes_from_the_config() {
     let (mut c, _sh, f, _) = setup("top-overload-cfg", "overload_minutes = 3\n");
-    history(&c, &minutes(1000, 1003, 3.0));
+    history(&c, &minutes(1000, 1003, 10.0));
     c.now = 1003 * 60;
     run(&c, &f, &["check"]);
     assert_eq!(overloads(&c).len(), 1);
 }
 
 #[test]
-fn a_missing_tool_names_itself_on_the_load_line() {
+fn a_missing_tool_names_itself_on_the_cpu_line() {
     let (c, _sh, f, _) = setup("top-missing-tool", "");
-    let f = f.once("sysctl -n vm.loadavg", 127, "");
+    let f = f.once("iostat", 127, "");
     let (code, out) = run(&c, &f, &["top"]);
     assert_eq!(code, 0, "{out}");
     let first = out.lines().next().unwrap();
     assert!(
-        first.starts_with("? load/cpu — sysctl not found (limit 2.5) · "),
+        first.starts_with("? cpu idle — iostat not found (floor 15%) · "),
         "{out}"
     );
 }
@@ -244,7 +247,7 @@ fn a_running_hold_shows_in_top_json_while_it_lasts() {
     use std::os::unix::process::CommandExt;
     let (c, _sh, f, _) = setup(
         "top-hold",
-        "load_per_cpu = 1000.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n",
+        "min_cpu_idle = -1.0\nmin_free_gb = 0.0\nmin_free_mem_gb = 0.0\n",
     );
     let dir = c.state.parent().unwrap().to_path_buf();
     let job = "for i in $(seq 200); do [ -f go ] && break; sleep 0.05; done; [ -f go ]";
@@ -284,7 +287,10 @@ fn top_shows_a_routed_command_as_remote_with_its_tag() {
     let f = Fake { replies: vec![], ..f }
         .reply(PS, &ps)
         .reply("lsof", &lsof)
-        .reply("sysctl -n vm.loadavg", "{ 6.00 5.00 4.00 }\n")
+        .reply(
+            "iostat",
+            " us sy id   1m   5m   15m\n 50 30 20  6 5 4\n 60 30 10  6 5 4\n",
+        )
         .reply("sysctl -n hw.ncpu", "2\n");
     let (code, out) = run(&c, &f, &["top"]);
     assert_eq!(code, 0, "{out}");
