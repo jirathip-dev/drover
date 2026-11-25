@@ -7,6 +7,28 @@ it through orchestrator threads, in cooee or on the phone page. Setup and detail
 [config](docs/config.md), [pipeline](docs/pipeline.md), [lanes](docs/lanes.md), [serve](docs/serve.md),
 [architecture](docs/architecture.md); agents read `drover help --agent`.
 
+## Scope
+
+drover is the autonomous agent workflow plus its `/api/v1`: queue, spawn, hook, drive, check, flow, gate, land,
+events, asks, cards, config propose, the design, architect and judge lanes, host-load admission, the generic
+`[[notify]]` command hook and the screens JSON. It owns policy and each lane's env, its cache env included. Its own
+threads and thread blocks (desk thread, `[chat]`, `[move]`) stay. Two binaries sit outside core and the line cap:
+drover-serve (the page relay, webpush, paired devices) and drover-tui (a terminal client of `/api/v1`).
+
+## Non-goals
+
+- **shed** owns the runtime: terminals, ACP sessions, the link to machines it can reach (ssh, exec, files), their
+  processes, CPU and memory, accounts and credentials, secrets, the token proxy, usage, self-update and provider
+  facts as catalog records. drover uses shed-client; it has no ssh plumbing, protocol client or provider facts of
+  its own.
+- **shed-cloud** owns what a machine has on it (toolchains, sccache, disk) and pool VM lifecycle: drover runs no
+  lanes on other hosts and starts no cloud VMs.
+- **cooee** owns chat and its push: personas, chat threads, cooee-only chat features and the sign-in screens that
+  call shed. drover keeps no chat or thread store; drover never calls cooee and cooee never needs drover.
+- **gatekeeper** owns repo gate checks and what passing means; **runners** owns CI runners; **compact** owns history
+  rewrite; **farrier** owns timer jobs.
+- Tests stay at most 1x src.
+
 ## Today
 
 Shipped on `staging`. Each line names the PR (or file) that proves it.
