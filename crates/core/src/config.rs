@@ -1316,7 +1316,7 @@ impl Config {
         for (name, f) in &self.fleet {
             let (never, hits) = (f.never_routed(), crate::heavy::hits);
             for kind in f.remote.keys() {
-                let Some(ps) = f.heavy.get(kind) else {
+                let Some(ps) = f.heavy_kinds().remove(kind) else {
                     bail!("fleet.{name}.remote.{kind}: no [fleet.{name}.heavy] kind \"{kind}\" to route");
                 };
                 if let Some((p, n)) = ps
@@ -1481,6 +1481,15 @@ impl Fleet {
             .unwrap_or_else(|| limits.deny_commands.clone());
         d.extend(self.deny_commands_add.iter().cloned());
         d
+    }
+    /// Its heavy kinds: `[fleet.<n>.heavy]` plus, with any kind or route, `heavy::CARGO` as `cargo` unless it sets its own.
+    pub fn heavy_kinds(&self) -> BTreeMap<String, Vec<String>> {
+        let mut k = self.heavy.clone();
+        if !k.is_empty() || !self.remote.is_empty() {
+            let cargo = || crate::heavy::CARGO.split(',').map(String::from).collect();
+            k.entry("cargo".into()).or_insert_with(cargo);
+        }
+        k
     }
     /// Commands its lanes never send to a build machine: `heavy::NEVER_ROUTED` plus `remote_deny`.
     pub fn never_routed(&self) -> Vec<String> {
