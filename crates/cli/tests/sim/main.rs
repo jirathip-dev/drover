@@ -277,7 +277,7 @@ fn a_sometimes_state_never_reached_fails_the_run() {
     assert!(outs[0].failure.is_none(), "{}", outs[0].report());
     assert_eq!(
         gates::unreached(&outs, &["merge-after-retried-verdict"]),
-        [] as [String; 0]
+        <[String; 0]>::default()
     );
     assert_eq!(
         gates::unreached(&outs, &["round-limit"]),
@@ -343,7 +343,7 @@ fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
         .iter()
         .find(|x| tripped(&x.failure))
         .expect("the hunt finds it within 40 rounds");
-    let random: Vec<u64> = (2015..2015 + f.round as u64).collect();
+    let random: Vec<u64> = (2015..2015 + u64::try_from(f.round).unwrap()).collect();
     let hs: Vec<_> = random.iter().map(|&n| std::thread::spawn(move || run(n, s))).collect();
     for o in hs.into_iter().map(|h| h.join().expect("a run")) {
         let why = o.failure.unwrap_or_default();
@@ -467,7 +467,7 @@ fn a_metric_over_20_percent_worse_is_a_warning() {
         "{t}"
     );
     let back: serde_json::Value = serde_json::from_str(&metrics::to_json(1, &s).to_string()).unwrap();
-    assert_eq!(metrics::regressions(&s, &back), [] as [std::string::String; 0]);
+    assert_eq!(metrics::regressions(&s, &back), <[std::string::String; 0]>::default());
 }
 
 #[test]
@@ -728,5 +728,5 @@ fn a_busy_window_blocks_spawns_only_while_it_takes_every_host() {
     assert_eq!(loads(&ws, 1).0, [(100, 40), (300, 1)]);
     assert_eq!(loads(&ws, 2).0, [(100, 40), (200, 1)]);
     assert_eq!(loads(&ws, 3), (vec![(150, 40), (200, 1)], vec![(150, 200, 1)]));
-    assert_eq!(loads(&[(100, 200, 1)], 2).0, [] as [(u64, u64); 0]);
+    assert_eq!(loads(&[(100, 200, 1)], 2).0, <[(u64, u64); 0]>::default());
 }

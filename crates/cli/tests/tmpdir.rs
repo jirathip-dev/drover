@@ -25,8 +25,8 @@ fn writer_outliving_its_test_child() {
     let d = tmpdir("tmpdir-late-writer");
     println!("dir={}", d.display());
     std::thread::spawn(move || loop {
-        let _ = std::fs::create_dir_all(d.join("state"));
-        let _ = std::fs::write(d.join("state/state.db"), "x");
+        std::fs::create_dir_all(d.join("state")).ok();
+        std::fs::write(d.join("state/state.db"), "x").ok();
         std::thread::sleep(std::time::Duration::from_micros(50));
     });
 }

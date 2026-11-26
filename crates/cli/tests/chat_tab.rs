@@ -192,7 +192,7 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let png: Vec<u8> = (0..40_000u32).map(|i| (i % 251) as u8).collect();
+    let png: Vec<u8> = (0..40_000u32).map(|i| u8::try_from(i % 251).unwrap()).collect();
     let data: String = url_enc(&B64.encode(&png));
     let res = req(
         &s,
@@ -379,7 +379,7 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
         let f = acp();
         drover::serve::serve_on(&c2, &Held(b.cli(&f), held.into(), typed.into()), l, false)
     });
-    let png: Vec<u8> = (0..600_000u32).map(|i| (i % 253) as u8).collect();
+    let png: Vec<u8> = (0..600_000u32).map(|i| u8::try_from(i % 253).unwrap()).collect();
     let body = format!("op=say&t=t1&text=big&name=big.png&data={}", url_enc(&B64.encode(&png)));
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     write!(

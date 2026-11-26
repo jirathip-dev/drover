@@ -169,7 +169,7 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
 
 fn landed(c: &drover::Ctx, rows: &[(u64, &str, &str)]) {
     for (i, (n, mode, sha)) in rows.iter().enumerate() {
-        let ts = 100 + i as u64;
+        let ts = 100 + u64::try_from(i).unwrap();
         let d = json!({"pr": format!("{}", 30 + n), "merge_sha": sha});
         append(&c.state, &Event::new(ts, "sendmeter", Some(*n), "merged", d)).unwrap();
         let d = json!({"mode": mode, "sha": sha, "pr": format!("{}", 30 + n)});

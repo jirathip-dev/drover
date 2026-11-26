@@ -150,7 +150,7 @@ fn checks(f: &Fleet, on: &On, wt: &Path) -> Vec<String> {
         .collect()
 }
 
-/// `body` has `## For humans`, no "Generated with" line, and names `head` as `scripts/evidence-check.sh` does.
+/// `body` has `## For humans`, no "Generated with" line, and names `head`.
 pub fn body(
     body: &str,
     head: &str,

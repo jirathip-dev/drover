@@ -202,7 +202,7 @@ fn every_route_on_the_live_fleets_size_with_a_remote_host_offline() {
         timed(addr, p, &cookie);
     }
     let mut worst = vec![];
-    let mut line = format!("#1622 perf ({FLEET13} fleets, {} issues, {THREADS} threads, {OPEN} open, bazzite offline, 6 streams held): median of 3, an event appended before each", FLEET13 as u64 * ISSUES);
+    let mut line = format!("#1622 perf ({FLEET13} fleets, {} issues, {THREADS} threads, {OPEN} open, bazzite offline, 6 streams held): median of 3, an event appended before each", u64::try_from(FLEET13).unwrap() * ISSUES);
     let before = ssh();
     for p in ROUTES {
         let mut t = vec![];

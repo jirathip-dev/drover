@@ -139,7 +139,7 @@ fn the_host_api_counts_leftovers_and_reap_kills_them() {
     );
     let res = String::from_utf8_lossy(&s.respond(&unpaired, 1_000_000)).into_owned();
     assert!(res.starts_with("HTTP/1.1 401"), "only a paired device reaps: {res}");
-    assert_eq!(kills(&r), [] as [std::string::String; 0]);
+    assert_eq!(kills(&r), <[std::string::String; 0]>::default());
     let cookie = pair(&s, &c, "", 1_000_000);
     let req = format!(
         "POST / HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
@@ -467,7 +467,10 @@ fn clean_stops_a_serve_run_from_the_lanes_build_folder_and_spares_another_lanes(
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     let (gone, kept) = (ours.try_wait().unwrap(), other.try_wait().unwrap());
-    let _ = (ours.kill(), other.kill(), ours.wait(), other.wait());
+    ours.kill().ok();
+    other.kill().ok();
+    ours.wait().ok();
+    other.wait().ok();
     assert_eq!(code, 0, "{out}");
     assert!(gone.is_some(), "the lane's stray serve ends with its lane: {out}");
     assert!(kept.is_none(), "another lane's build keeps running");

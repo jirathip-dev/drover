@@ -22,7 +22,13 @@ fn lanes_newest_first_and_a_gone_lane_has_no_link() {
         let d = json!({"role": if a.starts_with("rev") { "rev" } else { "impl" }, "agent": a, "harness": "claude"});
         append(
             &c.state,
-            &Event::new(T - 3600 + i as u64 * 60, "sendmeter", Some(3), "spawn", d),
+            &Event::new(
+                T - 3600 + u64::try_from(i).unwrap() * 60,
+                "sendmeter",
+                Some(3),
+                "spawn",
+                d,
+            ),
         )
         .unwrap();
     }
