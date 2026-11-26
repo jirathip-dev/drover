@@ -2451,6 +2451,7 @@ fn snapshot(
             git(&["reset", "-q", "--", &format!(":(literal){p}")])?;
             skip.push(format!("{p} ({} MB)", n >> 20));
         }
+        git(&["fetch", "-q", "origin", crate::clone::ALL, "^refs/heads/wip/*"]).ok();
         Ok((
             git(&["diff", "--cached"])?,
             git(&[&UNPUSHED[..], kept.as_slice()].concat())?,
