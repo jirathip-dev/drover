@@ -52,7 +52,9 @@ fn collect(out: &Path, dir: &str, file: &str, name: &str) {
         format!("const {name}: &[(&str, &str)] = &[\n{list}];\n"),
     )
     .unwrap_or_default();
-    println!("cargo:rerun-if-changed={dir}");
+    if root.exists() {
+        println!("cargo:rerun-if-changed={dir}");
+    }
 }
 
 fn main() {
