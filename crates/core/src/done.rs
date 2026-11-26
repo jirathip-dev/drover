@@ -12,7 +12,6 @@ use std::time::Duration;
 /// The refusal code of a `turn done` whose head is unpushed or fails a done check.
 pub const CODE: &str = "DONE_CHECK";
 
-/// The CI legs that check the PR body: re-run once when `turn done`'s `PR_BODY` passes at their red head.
 const BODY_LEGS: [&str; 2] = ["pr-body", "evidence"];
 
 type Checked = Option<(String, Option<(&'static str, String)>)>;

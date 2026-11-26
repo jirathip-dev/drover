@@ -801,3 +801,40 @@ pub fn flaky(x: &Ctx, out: &mut dyn Write, k: (&str, Option<u64>), ev: &[Event],
     let d = json!({"sha": head, "checks": checks});
     crate::events::append(&x.state, &Event::new(x.now, fleet, n, "ci-flaky?", d).passive())
 }
+
+/// A ready PR's red CI: None while a re-run of its failed checks is due or running, else the checks red again after theirs.
+pub fn final_red(
+    x: &Ctx,
+    c: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    ev: &[Event],
+    pr: &Value,
+) -> Result<Option<Vec<String>>> {
+    let f = c.fleet(fleet)?;
+    let head = pr["headRefOid"].as_str().unwrap_or_default();
+    let reds = reds(&required(&pr["statusCheckRollup"], f.checks(pr)));
+    let max = f.ci_flaky_retries.unwrap_or(c.limits.ci_flaky_retries);
+    retry(x, r, out, (fleet, Some(n)), ev, (&f.repo, head, max), &reds)
+}
+
+/// The CI FAIL verdict's body: the failed check, the checks red again after their re-run, the failed log's tail.
+pub fn findings(r: &dyn Runner, f: &Fleet, pr: &Value, head: &str, twice: &[String]) -> String {
+    let checks = required(&pr["statusCheckRollup"], &f.required_checks);
+    let failed = (checks.as_array().into_iter().flatten()).find(|c| check_state(c) == "failed");
+    let url = failed.and_then(|c| c["detailsUrl"].as_str()).unwrap_or_default();
+    let run = (url.split("/runs/").nth(1).and_then(|t| t.split('/').next())).unwrap_or_default();
+    let log = (!run.is_empty()).then(|| ok(r, "gh", &["run", "view", run, "-R", &f.repo, "--log-failed"]).ok());
+    let log = log.flatten().unwrap_or_default();
+    let lines: Vec<&str> = log.lines().collect();
+    let tail = lines.get(lines.len().saturating_sub(40)..).unwrap_or_default();
+    let mut what = not_green(&checks).unwrap_or_else(|| "a check failed".into());
+    if !twice.is_empty() {
+        what += &format!("; failed again after its re-run: `{}`", twice.join("`, `"));
+    }
+    format!(
+        "FAIL\n\nCI is red at {head}: {what}.\n\n```\n{}\n```\n",
+        crate::lanes::mask(&tail.join("\n"))
+    )
+}

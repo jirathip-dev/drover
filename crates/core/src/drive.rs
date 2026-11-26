@@ -1269,10 +1269,6 @@ fn pass(
         crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
         let ci = gh::ci(&gh::required(pr.at("statusCheckRollup"), f.checks(&pr)));
         let gone = gh::missing(ctx, None, cfg, (fleet, s.issue), &events, &pr).filter(|m| w.what.contains(m));
-        if ci == "green" {
-            let head = pr.at("headRefOid").as_str().unwrap_or_default();
-            gh::flaky(ctx, out, (fleet, Some(s.issue)), &events, head)?;
-        }
         let n = s.issue.to_string();
         if pr.at("state") == "OPEN" && !queue::serials(&events, f, fleet).is_empty() {
             serial(ctx, cfg, r, out, (fleet, s), &pr)?;
@@ -1514,18 +1510,7 @@ fn pass(
             let d = json!({"why": w.what});
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "no-action", d))?;
         } else if s.state == "ready" && (ci == "failed" || gone.is_some()) {
-            let head = pr.at("headRefOid").as_str().unwrap_or_default();
-            let reds = gh::reds(&gh::required(pr.at("statusCheckRollup"), f.checks(&pr)));
-            let max = f.ci_flaky_retries.unwrap_or(cfg.limits.ci_flaky_retries);
-            let at = (f.repo.as_str(), head, max);
-            let twice = match gone {
-                Some(_) => Some(Vec::new()),
-                None => gh::retry(ctx, r, out, (fleet, Some(s.issue)), &events, at, &reds)?,
-            };
-            if let Some(twice) = twice {
-                let red = (&pr, gone.as_deref(), twice.as_slice());
-                ci_red(ctx, cfg, (r, seen), out, (&events, &agents), s, red)?;
-            }
+            ci_red(ctx, cfg, (r, seen), out, (&events, &agents), s, (&pr, gone.as_deref()))?;
         } else if s.state == "ready" && ci == "pending" {
             gh::unstick(ctx, cfg, r, out, (fleet, s.issue), &events, &pr)?;
         }
@@ -1549,13 +1534,19 @@ fn ci_red(
     out: &mut dyn Write,
     (events, agents): (&[Event], &[Session]),
     s: &IssueState,
-    (pr, gone, twice): (&Value, Option<&str>, &[String]),
+    (pr, gone): (&Value, Option<&str>),
 ) -> Result<()> {
     let (fleet, n, f) = (s.fleet.as_str(), s.issue.to_string(), cfg.fleet(&s.fleet)?);
     let head = pr.at("headRefOid").as_str().unwrap_or_default();
     let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
-    let gone = gone.map(|m| format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"));
-    std::fs::write(&file, gone.unwrap_or_else(|| ci_findings(r, f, pr, head, twice)))?;
+    let body = match gone {
+        Some(m) => format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"),
+        None => match gh::final_red(ctx, cfg, r, out, (fleet, s.issue), events, pr)? {
+            Some(twice) => gh::findings(r, f, pr, head, &twice),
+            None => return Ok(()),
+        },
+    };
+    std::fs::write(&file, body)?;
     let file = file.to_string_lossy();
     let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
     if act(ctx, cfg, r, out, events, (fleet, Some(s.issue), "ci-red"), &args)?.is_some() {
@@ -2063,45 +2054,6 @@ fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         &ctx.state,
         cfg,
         Event::new(ctx.now, fleet, None, kinds[0], json!({"reason": reason})),
-    )
-}
-
-fn ci_findings(
-    r: &dyn Runner,
-    f: &crate::config::Fleet,
-    pr: &serde_json::Value,
-    head: &str,
-    twice: &[String],
-) -> String {
-    let checks = gh::required(&pr["statusCheckRollup"], &f.required_checks);
-    let failed = checks
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|c| gh::check_state(c) == "failed");
-    let url = failed.and_then(|c| c["detailsUrl"].as_str()).unwrap_or_default();
-    let run = url
-        .split("/runs/")
-        .nth(1)
-        .and_then(|t| t.split('/').next())
-        .unwrap_or_default();
-    let log = (!run.is_empty()).then(|| ok(r, "gh", &["run", "view", run, "-R", &f.repo, "--log-failed"]).ok());
-    let log = log.flatten().unwrap_or_default();
-    let tail: Vec<&str> = log
-        .lines()
-        .rev()
-        .take(40)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    let mut what = gh::not_green(&checks).unwrap_or_else(|| "a check failed".into());
-    if !twice.is_empty() {
-        what += &format!("; failed again after its re-run: `{}`", twice.join("`, `"));
-    }
-    format!(
-        "FAIL\n\nCI is red at {head}: {what}.\n\n```\n{}\n```\n",
-        crate::lanes::mask(&tail.join("\n"))
     )
 }
 
