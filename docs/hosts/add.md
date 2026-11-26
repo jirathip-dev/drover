@@ -19,8 +19,7 @@
    - drover itself. The lane's tool-guard hook calls `drover hook`, and the Claude profile lives under that host's
      own home: each spawn there syncs its lane's profile (`profiles sync --profile <p> --role <r>`, #592).
 
-   drover never copies credentials to another host: a lane on another host runs on that host's own Claude login
-   (a `shed-acp` host's, through the main host's token proxy).
+   drover never copies credentials to another host: a lane on another host runs on that host's own Claude login.
 3. Add the host to fleet.toml:
 
 ```toml

@@ -13,14 +13,13 @@ paths and model ids pass.
 
 **No store (#707).** drover keeps no secret store and makes no Keychain read. Each secret is a file on the main host
 only its owner reads (mode 0600; a looser one is refused `SECRET_FILE_OPEN`): a `secret:<NAME>` env is
-`<config dir>/secrets/<NAME>`; the webhook secret, a provider key's `env_file` and the proxy's `token-file` are the
+`<config dir>/secrets/<NAME>`; the webhook secret and a provider key's `env_file` are the
 files fleet.toml names by path. Place one by hand (`umask 077`), or answer `drover secret request`'s masked card from a
 paired device, which writes `<config dir>/secrets/<NAME>`; `drover secret rm` deletes it. Remote hosts keep no
 secrets.
 
 **Lane sign-in (#923).** drover keeps no Claude token and has no accounts: lanes run on the host's own login
-(`claude /login` once per host, [accounts](accounts.md)). Remote `shed-acp` lanes sign in through the main host's
-token proxy, which signs with the one `[proxy] token-file` ([hosts](hosts.md)).
+(`claude /login` once per host, [accounts](accounts.md)).
 
 **Delivery.** At spawn drover reads the lane's `secret:<NAME>` env from its file and writes it to a 0600 file beside
 the worktree on the lane's host: directly on the main host, over the ssh channel's stdin on a remote one. The pane's
