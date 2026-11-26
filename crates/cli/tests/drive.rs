@@ -9,6 +9,8 @@ mod no_baseline;
 mod remote_unlisted;
 #[path = "drive/rev_unlisted.rs"]
 mod rev_unlisted;
+#[path = "drive/stale_view.rs"]
+mod stale_view;
 #[path = "drive/undriven.rs"]
 mod undriven;
 #[path = "drive/update_limit.rs"]
