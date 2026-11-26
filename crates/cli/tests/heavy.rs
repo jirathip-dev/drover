@@ -631,11 +631,11 @@ fn a_mixed_line_routes_its_build_and_runs_the_rest_here() {
 }
 
 #[test]
-fn a_build_piped_or_reading_stdin_stays_here_and_says_why() {
+fn a_build_fed_by_a_pipe_or_reading_stdin_stays_here_and_says_why() {
     let (d, _, path) = cargo_routed();
     std::fs::write(d.join("in"), "").unwrap();
     for (cmd, why) in [
-        ("cargo test | cat", "heavy: a pipe in the line, running here"),
+        ("echo x | cargo test", "heavy: a pipe in the line, running here"),
         ("cargo test < in", "heavy: stdin (<) in the line, running here"),
     ] {
         let h = hook(&d, cmd);
@@ -670,4 +670,48 @@ fn the_default_cargo_kind_routes_xtask_and_run() {
         let tail = format!("'--remote' 'linux' '--dir' '{top}' '--' '{cmd}'");
         assert!(w.contains("'heavy' 'cargo'") && w.ends_with(&tail), "{cmd}: {w}");
     }
+}
+
+#[test]
+fn a_build_heading_a_pipe_or_writing_a_file_runs_on_the_build_machine() {
+    let (d, top, path) = cargo_routed();
+    let o = tmpdir("heavy-out");
+    let got = o.join("got");
+    for cmd in [
+        "cargo test 2>&1 | tail -15".to_string(),
+        format!("cargo test > {} 2>&1; echo done", got.display()),
+    ] {
+        std::fs::remove_file(d.join("runners.log")).ok();
+        let w = wrapped(&d, &cmd);
+        assert!(w.contains("'--remote' 'linux'"), "{cmd}: {w}");
+        let (code, out, err) = run_line(&d, &path, &cmd);
+        assert_eq!(code, Some(0), "{cmd}: {err}");
+        assert!(
+            !out.contains("cargo-here") && !err.contains("running here"),
+            "{cmd}: {out}{err}"
+        );
+        let runners = std::fs::read_to_string(d.join("runners.log")).unwrap();
+        assert_eq!(
+            runners,
+            format!("run --tag linux --dir {top} -- bash -c cargo test\n"),
+            "{cmd}"
+        );
+    }
+    assert!(got.exists(), "the build's redirect is written here");
+}
+
+#[test]
+fn a_routed_build_that_falls_back_says_why_and_logs_it() {
+    let (d, _, _) = cargo_routed();
+    let path = fake_runners(&d, Some(75));
+    let (code, out, err) = run_line(&d, &path, "cargo test -p x");
+    assert_eq!(code, Some(0), "{err}");
+    assert!(out.contains("cargo-here test -p x"), "{out}");
+    assert_eq!(err.trim(), "runners: exit 75, running here");
+    let ev = drover::events::read(&d.join("state/events.jsonl")).unwrap();
+    let here: Vec<_> = ev.iter().filter(|e| e.kind == "heavy-here").collect();
+    assert_eq!(here.len(), 1, "{here:?}");
+    assert_eq!(here[0].str("why"), Some("exit 75"));
+    assert_eq!(here[0].str("cmd"), Some("cargo test -p x"));
+    assert_eq!(here[0].str("kind"), Some("cargo"));
 }
