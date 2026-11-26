@@ -285,6 +285,61 @@ fn kill_snapshots_only_the_real_dirty_file() {
 }
 
 #[test]
+fn kill_snapshots_a_merge_of_integration_without_scanning_its_lines() {
+    let (c, wt, sh) = lane("kill-merge");
+    sh.lane(LANE, "idle", &wt);
+    let r = repo(&wt, "");
+    let g = |a: &[&str]| {
+        let o = std::process::Command::new("git").args(a).output().unwrap();
+        assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr));
+    };
+    let up = format!("{wt}-up");
+    g(&["clone", "-q", &format!("{wt}.git"), &up]);
+    let row = format!(
+        "{{\n  \"key\": \"rollout-sendmeter-12\",\n  \"note\": \"{}\"\n}}\n",
+        concat!("gh", "p_abcdefghijklmnopqrstu1234")
+    );
+    std::fs::write(format!("{up}/row.json"), row).unwrap();
+    g(&["-C", &up, "add", "-A"]);
+    g(&[
+        "-C",
+        &up,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-qm",
+        "integ",
+    ]);
+    g(&["-C", &up, "push", "-q", "origin", "HEAD:refs/heads/integ"]);
+    std::fs::remove_dir_all(&up).unwrap();
+    g(&[
+        "-C",
+        &wt,
+        "config",
+        "remote.origin.fetch",
+        "+refs/heads/lane:refs/remotes/origin/lane",
+    ]);
+    g(&["-C", &wt, "fetch", "-q", "origin", "integ"]);
+    g(&[
+        "-C",
+        &wt,
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "Merge origin/integ into lane",
+        "FETCH_HEAD",
+    ]);
+    let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("SECRET_IN_WIP"), "{out}");
+    assert!(r.0.called(&format!("git -C {wt} push origin HEAD:refs/heads/wip/")));
+    assert!(closed(&sh), "{:?}", sh.methods());
+}
+
+#[test]
 fn kill_leaves_an_untracked_log_out_of_the_snapshot_and_in_the_worktree() {
     let (c, wt, sh) = lane("kill-log");
     sh.lane(LANE, "idle", &wt);
@@ -530,6 +585,7 @@ fn secret_flags_real_shapes_only() {
         "a3f9c2e1b7d4058a6e3f9c2e1b7d4058a6e3f9c2 src/x.rs",
         "    \"integrity\": \"sha512-z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==\",",
         "    \"apiKey\": \"config_api_key_from_env\",",
+        "\"key\": \"rollout-sendmeter-12\",",
     ] {
         assert_eq!(secret(ok), None, "{ok}");
     }
