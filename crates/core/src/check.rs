@@ -2443,7 +2443,20 @@ fn snapshot(
     let (staged, log) = snap().map_err(undo)?;
     let diff = format!("{staged}\n{log}");
     let secret = |a: &str| Some(crate::lanes::redact(a.trim())).filter(|m| m != a.trim());
-    let leak = chk.and_then(|c| Some((c, crate::hygiene::hits(&diff, |l| c.find(l)).into_iter().next()?)));
+    let differs = (chk.and_then(|c| c.tree.as_ref())).and_then(|(_, b)| {
+        let at = format!("origin/{b}");
+        git(&["diff", "--cached", "--name-only", "--no-renames", "-z", &at, "--"]).ok()
+    });
+    let public = |at: &str| {
+        let file = at.rsplit_once(':').map_or(at, |a| a.0);
+        differs.as_ref().is_some_and(|d| !d.split('\0').any(|p| p == file))
+    };
+    let leak = chk.and_then(|c| {
+        let staged = crate::hygiene::hits(&staged, |l| c.find(l))
+            .into_iter()
+            .filter(|h| !public(&h.1));
+        Some((c, staged.chain(crate::hygiene::hits(&log, |l| c.find(l))).next()?))
+    });
     let hit = match crate::hygiene::hits(&diff, secret)
         .into_iter()
         .find(|h| !unscanned(&h.1))
