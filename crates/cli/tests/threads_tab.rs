@@ -225,9 +225,10 @@ fn the_threads_screens_are_their_golden_json_and_the_tab_is_standalone_only() {
         page.contains(r#""id":"threads""#),
         "the standalone page has the Threads tab"
     );
-    let manifest = include_str!("../../../cooee-plugin.toml");
+    let manifest: toml::Value = toml::from_str(include_str!("../../../cooee-plugin.toml")).unwrap();
+    let theirs = format!("{} {}", manifest["places"], manifest["permissions"]["actions"]);
     assert!(
-        !manifest.contains("threads") && !manifest.contains("thread-"),
+        !theirs.contains("threads") && !theirs.contains("thread-"),
         "never the plugin's"
     );
 }

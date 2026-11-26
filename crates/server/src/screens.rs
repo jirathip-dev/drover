@@ -25,7 +25,6 @@ pub(super) mod pages;
 pub(super) use lanes::said;
 use lanes::{lanes_screen, scene_screen};
 
-const MANIFEST: &str = include_str!("../../../cooee-plugin.toml");
 pub(super) type Res = (&'static str, &'static str, Vec<u8>);
 type Q = BTreeMap<String, String>;
 
@@ -66,17 +65,11 @@ pub(super) fn line(status: &'static str, l: &str) -> Res {
     out(status, &Value::Object(fields([("line", l.into())])))
 }
 
-/// Whether `cooee-plugin.toml`'s `[permissions]` lists `action`.
-pub fn permitted(action: &str) -> bool {
-    let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
-    let list = m.get("permissions").and_then(|p| p.get("actions")?.as_array().cloned());
-    list.unwrap_or_default().iter().any(|a| a.as_str() == Some(action))
-}
+pub use crate::manifest::permitted;
 
-/// `cooee-plugin.toml`'s `[[places]]` as JSON: the tabs, menu rows and cards the phone page draws.
+/// The manifest's places as JSON: the tabs, menu rows and cards the phone page draws.
 pub fn places() -> Value {
-    let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
-    serde_json::to_value(m.get("places")).unwrap_or_default()
+    serde_json::to_value(crate::manifest::manifest("").screens).unwrap_or_default()
 }
 
 /// The standalone page's places: the manifest's, then the Threads tab and the Hosts row (never the plugin's).
