@@ -56,7 +56,6 @@ pub const STEPS: [(&str, &[&str]); 4] = [
             "admit_wait_secs",
             "respawn_max",
             "respawn_window_minutes",
-            "overflow_after_minutes",
         ],
     ),
 ];

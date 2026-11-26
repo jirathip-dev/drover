@@ -982,19 +982,6 @@ enum HostsCmd {
     )]
     Eject { name: String, root: Option<String> },
     #[command(
-        about = "Owner only: a cloud host's lanes' work to `wip/` first, then its recipe's `destroy`; logs `cloud-stop`"
-    )]
-    #[command(hide = true)]
-    Destroy { name: String },
-    #[command(
-        hide = true,
-        about = "Owner only: install shed, drover, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
-    )]
-    Bootstrap { name: String },
-    #[command(about = "Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`")]
-    #[command(hide = true)]
-    Snapshot { name: String },
-    #[command(
         about = "The token proxy's per-lane keys (#637): id, state, lane, host; `revoke <id>` (owner only) ends one at once"
     )]
     Keys {
@@ -1851,12 +1838,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Eject { name, root }) => {
                         return crate::roots::eject(ctx, &cfg, r, out, &name, root.as_deref());
                     }
-                    Some(HostsCmd::Destroy { name }) => {
-                        let wip = crate::cloud::stop(ctx, &cfg, r, &name, "destroy", "owner")?;
-                        writeln!(out, "{name}: destroyed; wip {}", wip.join(" "))?;
-                    }
-                    Some(HostsCmd::Bootstrap { name }) => crate::cloud::bootstrap(ctx, &cfg, r, &name, out)?,
-                    Some(HostsCmd::Snapshot { name }) => crate::cloud::snapshot(ctx, &cfg, r, &name)?,
                     Some(HostsCmd::Keys { cmd: None }) => crate::proxy::list(ctx, out)?,
                     Some(HostsCmd::Keys {
                         cmd: Some(KeysCmd::Revoke { id }),

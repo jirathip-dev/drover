@@ -124,14 +124,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let (stall, remote) = (cfg.limits.stall_minutes * 60, crate::hosts::survey(ctx, cfg, r, false));
     crate::session::stamp::observe(ctx, cfg, r, &sessions)?;
     let events = working(&ctx.state)?;
-    crate::cloud::tick(ctx, cfg, r, &remote, out)?;
     for (name, a) in &remote {
-        let stopped = || crate::cloud::state(&events, name) == "stopped";
-        if cfg
-            .hosts
-            .get(name)
-            .is_none_or(|h| h.machine.is_none() || h.cloud.is_some() && stopped())
-        {
+        if cfg.hosts.get(name).is_none_or(|h| h.machine.is_none()) {
             continue;
         }
         let was = |e: &&Event| e.str("host") == Some(name) && matches!(e.kind.as_str(), "host-offline" | "host-online");

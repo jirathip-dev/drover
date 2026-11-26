@@ -784,52 +784,6 @@ fn hosts_refresh_prints_an_offline_hosts_probe_exit_code_and_stderr() {
     assert!(drover::hosts::down(&c).contains_key("bazzite"));
 }
 
-fn cloud_bazzite(c: &drover::Ctx) {
-    let cfg = std::fs::read_to_string(&c.config).unwrap();
-    let cfg = cfg.replace(
-        "machine = \"bazzite\"\n",
-        "machine = \"bazzite\"\ncloud = \"fake\"\nsize = \"small\"\nbudget_usd_month = 10\n",
-    );
-    std::fs::write(&c.config, cfg).unwrap();
-    let recipe = "start = \"fakecloud start {name}\"\nstop = \"fakecloud stop {name}\"\nstatus = \"fakecloud status {name}\"\naddress = \"fakecloud address {name}\"\n[rate_usd_hour]\nsmall = 1.0\n";
-    std::fs::create_dir_all(c.config.with_file_name("recipes")).unwrap();
-    std::fs::write(c.config.with_file_name("recipes/fake.toml"), recipe).unwrap();
-}
-
-#[test]
-fn a_cloud_host_shed_lists_up_after_a_stale_cloud_stop_is_up_after_one_refresh_and_its_held_start_goes_on() {
-    let (c, _sh) = setup("offline-stale-stop");
-    cloud_bazzite(&c);
-    queue_linux(&c);
-    let stop = json!({"host": "bazzite", "why": "start failed"});
-    append(
-        &c.state,
-        &Event::new(NOW - 9 * 3600, "drover", None, "cloud-stop", stop),
-    )
-    .unwrap();
-    let (f, bazzite) = (down(), FakeShed::new());
-    assert_eq!(run(&c, &with_bazzite(&f, &bazzite), &["check"]).0, 0);
-    assert!(drover::hosts::down(&c).contains_key("bazzite"));
-    let later = drover::Ctx {
-        now: NOW + 600,
-        ..c.clone()
-    };
-    let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
-    let f = linux_start(mini_only())
-        .reply(&format!("{MUX} 'sh' '-lc'"), "")
-        .reply(&format!("{MUX} 'gh' 'api' '-i'"), gh);
-    let bazzite = FakeShed::new();
-    let (code, out) = run(&later, &with_bazzite(&f, &bazzite), &["hosts", "refresh"]);
-    assert_eq!(code, 0, "{out}");
-    let row = out.lines().find(|l| l.starts_with("bazzite")).unwrap_or_default();
-    assert!(!row.is_empty() && !row.contains("offline"), "{out}");
-    assert_eq!(drover::cloud::state(&read(&c.state).unwrap(), "bazzite"), "running");
-    let (code, out) = run(&later, &with_bazzite(&f, &bazzite), &["drive"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(bazzite.has("sendmeter-impl-13"), "{out} {:?}", bazzite.methods());
-    assert!(!drover::hosts::down(&later).contains_key("bazzite"));
-}
-
 #[test]
 fn a_loaded_host_whose_frames_turned_late_keeps_its_lanes() {
     let (c, _sh) = setup("offline-loaded");
