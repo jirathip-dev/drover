@@ -39,6 +39,8 @@ This file is `drover config show --md`'s output: `just gen` writes it.
 | `import_max_age_hours` | `24` | a remote host's asks older than this are never imported |
 | `max_pushes_per_pass` | `3` | push alerts `check` sends a pass before a summary |
 | `max_parallel_spawns` | `6` | concurrent detached spawn kicks on the main host (0: in the pass) |
+| `max_in_flight_total` | `6` | PRs in flight across every fleet before a first start is refused `IN_FLIGHT_CAP` (0: off) |
+| `fleet_priority` | `[]` | fleets in the order a freed `max_in_flight_total` slot goes to, oldest queue entry first; unlisted fleets after |
 | `start_max` | `2` | lanes starting at once on a remote host that sets no `start_max` |
 | `start_release` | `"started"` | a start frees its slot once its harness is up (`started`) or its prompt is confirmed (`confirmed`) |
 | `spawn_pending_max_secs` | `300` | a spawn marker older than this is stale |
