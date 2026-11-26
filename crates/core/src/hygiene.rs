@@ -43,10 +43,7 @@ impl Check {
         let under_but = |d: &str, but: Option<&str>| {
             (low.match_indices(&d.to_lowercase())).any(|(i, m)| {
                 low.get(i + m.len()..).is_some_and(|r| {
-                    r.starts_with(name)
-                        && !but
-                            .and_then(|b| r.strip_prefix(b))
-                            .is_some_and(|t| !t.starts_with(name))
+                    r.starts_with(name) && but.and_then(|b| r.strip_prefix(b)).is_none_or(|t| t.starts_with(name))
                 })
             })
         };

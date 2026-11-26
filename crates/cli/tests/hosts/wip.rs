@@ -53,10 +53,12 @@ fn on_bazzite(
     on_integration(name, lane, (None, src), args)
 }
 
+type File<'a> = Option<(&'a str, &'a str)>;
+
 fn on_integration(
     name: &str,
     (role, agent): (&str, &str),
-    (integration, src): (Option<(&str, &str)>, Option<(&str, &str)>),
+    (integration, src): (File, File),
     args: &[&str],
 ) -> (i32, String, String, FakeShed) {
     let c = setup(name, VERIFY, true, 0);
