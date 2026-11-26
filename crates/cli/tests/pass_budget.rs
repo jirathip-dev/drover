@@ -107,7 +107,7 @@ fn pass_profile_on_the_fixture_log() {
         let len = EVENTS + ISSUES + 1;
         println!(
             "run {i}: exit {code} wall {wall:.2}s cpu {cpu:.2}s rows {rows} ({:.1} full-log reads)",
-            rows as f64 / len as f64
+            f64::from(u32::try_from(rows).unwrap()) / f64::from(u32::try_from(len).unwrap())
         );
     }
 }

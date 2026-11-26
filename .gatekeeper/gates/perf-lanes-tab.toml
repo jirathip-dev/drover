@@ -1,0 +1,10 @@
+about = "perf in release (#447: waits and the Lanes tab on a 30,000-event log); the numbers go to the job summary"
+fix = "make the case fit its budget; a budget is raised only in its own issue"
+budget_secs = 900
+leg = "release"
+setup = ["rust", "node"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "assets/**", "demo/**", "web/dist/**"]
+run = '''
+if [ -z "${CI:-}" ]; then echo "CI's release leg runs it"; exit 0; fi
+cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log --nocapture --test-threads=1
+'''

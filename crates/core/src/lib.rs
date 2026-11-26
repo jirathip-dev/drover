@@ -737,8 +737,7 @@ pub(crate) fn answer_with(
             && !orchestrator(by)
             && ctx.now < d.ts + cfg.limits.orchestrator_change_minutes * 60
     };
-    let handoff = ask.data.get("handoff").is_some();
-    if let Some(d) = last.filter(|d| !handoff && d.str("by") != Some("default") && !change(d)) {
+    if let Some(d) = last.filter(|d| d.str("by") != Some("default") && !change(d)) {
         return gate::refused(
             "ALREADY_ANSWERED",
             format!(
@@ -752,21 +751,6 @@ pub(crate) fn answer_with(
     if text.trim().is_empty() || text.chars().any(char::is_control) || text.chars().count() > 2000 {
         let why = "an answer is an option number or one line of text, at most 2,000 chars";
         return gate::refused("BAD_VALUE", why);
-    }
-    if handoff {
-        let (to, fresh) = orchestrator::land(ctx, cfg, r, ask, choice)?;
-        let text = match last.and_then(|d| d.str("choice")) {
-            Some(first) if !fresh => first,
-            _ => text,
-        };
-        if fresh {
-            let d = with_via(
-                json!({"id": id, "ask_seq": ask.seq, "choice": text, "by": by, "to": to}),
-                via,
-            );
-            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "decision", d))?;
-        }
-        return Ok(writeln!(out, "{fleet} {id}: {text} -> {to}")?);
     }
     let design = crate::design::is_ask(ask);
     if design {

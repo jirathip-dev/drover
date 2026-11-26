@@ -21,7 +21,7 @@ fn log_10k(name: &str) -> drover::Ctx {
     }
     for m in 0..10_000 - log.len() {
         let d = json!({"thread": format!("t{}", m % 20), "from": "owner", "text": "hi"});
-        log.push(ev(NOW - 7_000 + m as u64 / 20, "thread-msg", d));
+        log.push(ev(NOW - 7_000 + u64::try_from(m).unwrap() / 20, "thread-msg", d));
     }
     rewrite_log(&c.state, &(log.join("\n") + "\n"));
     c

@@ -40,6 +40,10 @@ impl<'a> Pass<'a> {
     fn of(ctx: &'a Ctx, fleet: &'a str, kick: Option<u64>) -> Pass<'a> {
         Pass { ctx, fleet, kick }
     }
+    #[cfg(test)]
+    pub(crate) fn test(ctx: &'a Ctx, fleet: &'a str) -> Pass<'a> {
+        Pass::of(ctx, fleet, None)
+    }
     pub fn ctx(&self) -> &Ctx {
         self.ctx
     }

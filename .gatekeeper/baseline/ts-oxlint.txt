@@ -1,0 +1,8 @@
+web/src/blocks.ts: eslint(no-nested-ternary): Do not nest ternary expressions.
+web/src/blocks.ts: unicorn(no-useless-spread): Using a spread operator here creates a new array unnecessarily.
+web/src/main.ts: eslint(no-nested-ternary): Do not nest ternary expressions.
+web/src/main.ts: eslint(no-unused-expressions): Expected expression to be used
+web/src/scene.ts: eslint(no-nested-ternary): Do not nest ternary expressions.
+web/src/scene.ts: eslint(no-useless-return): Unnecessary return statement.
+web/src/theme.ts: eslint(no-empty): Unexpected empty block statements
+web/src/theme.ts: eslint(no-nested-ternary): Do not nest ternary expressions.

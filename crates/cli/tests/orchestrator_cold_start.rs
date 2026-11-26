@@ -83,7 +83,7 @@ fn call(addr: SocketAddr, method: &str, path: &str, cookie: &str, body: &str) ->
     );
     s.write_all(req.as_bytes()).unwrap();
     let mut res = vec![];
-    let _ = s.read_to_end(&mut res);
+    s.read_to_end(&mut res).ok();
     (t.elapsed().as_millis(), String::from_utf8_lossy(&res).into_owned())
 }
 

@@ -28,6 +28,7 @@ const V1_PAIRED: &[&str] = &[
     "config-check",
     "config-edit",
     "timings",
+    "handoff-move",
 ];
 
 const PHONE: &[&str] = &["tap", "sheet", "tab", "send", "answer", "delta"];
@@ -1090,6 +1091,11 @@ pub(super) fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
         (_, Some(_)) => "failed",
         (Some(_), None) => "delivered",
         (None, None) => "pending",
+    };
+    let state = if !card && crate::orchestrator::moved(events, o.seq).is_some() {
+        "forwarded"
+    } else {
+        state
     };
     let opts = o.data.get("options").and_then(Value::as_array).into_iter().flatten();
     let rows = opts.zip(h["targets"].as_array().into_iter().flatten()).zip(1..);

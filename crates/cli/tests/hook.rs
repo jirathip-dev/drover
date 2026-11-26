@@ -1016,7 +1016,7 @@ fn a_orchestrator_command_is_logged_for_its_thread() {
         cmds(&lane, "drover thread reply t1 \"done\"").1.is_empty(),
         "the reply is the message"
     );
-    assert_eq!(cmds(&lane, "ls -la").1, [] as [serde_json::Value; 0]);
+    assert_eq!(cmds(&lane, "ls -la").1, <[serde_json::Value; 0]>::default());
     assert!(
         cmds(&lane, "gh pr merge 5").1.is_empty(),
         "a denied call is not a tool row"

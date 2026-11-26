@@ -12,7 +12,7 @@ fn enc(s: &str) -> String {
     s.bytes()
         .map(|b| {
             if b.is_ascii_alphanumeric() {
-                (b as char).to_string()
+                char::from(b).to_string()
             } else {
                 format!("%{b:02X}")
             }

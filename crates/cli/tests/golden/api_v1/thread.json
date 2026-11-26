@@ -25,31 +25,12 @@
       },
       {
         "answer": null,
-        "ask": {
-          "fleet": "sendmeter",
-          "id": "q1",
-          "issue": null,
-          "options": [
-            "new thread: Facets"
-          ],
-          "question": "Hand off \"Facets\" to which sendmeter thread? Nothing is delivered until you tap one.",
-          "recommend": null,
-          "ts": 1000000
-        },
+        "ask": null,
         "cmds": [],
         "files": [],
         "from": "",
         "handoff": {
-          "choices": [
-            {
-              "fleet": "sendmeter",
-              "id": "q1",
-              "n": 1,
-              "op": "answer",
-              "text": "new thread: Facets",
-              "thread": "new"
-            }
-          ],
+          "choices": [],
           "error": null,
           "folded": true,
           "from": {
@@ -57,27 +38,27 @@
             "repo": "sendmeter",
             "thread": "t1"
           },
-          "id": 9,
+          "id": 11,
           "kind": "handoff",
-          "state": "pending",
+          "state": "delivered",
           "summary": "add facets",
           "text": "add facets\nthen reindex",
           "title": "Facets",
-          "to": {
-            "pending": true,
-            "repo": "sendmeter"
-          }
+          "to": "t2"
         },
         "host": "",
-        "kind": "ask",
-        "link": null,
-        "open": true,
+        "kind": "handoff",
+        "link": {
+          "t": "t2",
+          "w": "continued in"
+        },
+        "open": false,
         "retry": false,
         "routine": false,
         "run": null,
-        "seq": 9,
+        "seq": 11,
         "signin": null,
-        "text": "Hand off \"Facets\" to which sendmeter thread? Nothing is delivered until you tap one.",
+        "text": "Facets → Desk · t2",
         "ts": 1000000
       }
     ],

@@ -64,7 +64,7 @@ fn live_shaped() -> (drover::Ctx, Fake, &'static FakeShed) {
             sh.screen(&agent, "⏺ Working on it\n\n❯ \n");
         }
     }
-    for i in 0..3_000 - log.len() as u64 {
+    for i in 0..3_000 - u64::try_from(log.len()).unwrap() {
         let d = json!({"step": "review", "code": "EXIT", "result": "exit 1: boom"});
         log.push(ev(NOW - 5_000 + i, Some(1 + i % 150), "driven", d));
     }

@@ -52,7 +52,7 @@ fn pass_profile() {
         println!(
             "run {i} {:?}: exit {code} wall {wall:.2}s cpu {cpu:.2}s rows {rows} ({:.1} full-log reads of {len})",
             args,
-            rows as f64 / len as f64
+            f64::from(u32::try_from(rows).unwrap()) / f64::from(u32::try_from(len).unwrap())
         );
     }
 }

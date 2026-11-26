@@ -56,7 +56,7 @@ fn parity_r3_a_database_error_is_503_never_401_and_each_refusal_logs_one_line() 
     assert!(req(&s, "GET", "/lane?agent=x", &cookie, late).starts_with("HTTP/1.1 401 "));
     let db = drover::db::file(&c.state);
     for x in ["", "-wal", "-shm"] {
-        let _ = std::fs::remove_file(format!("{}{x}", db.display()));
+        std::fs::remove_file(format!("{}{x}", db.display())).ok();
     }
     std::fs::create_dir(&db).unwrap();
     let why = devices::check(&c, cookie.trim().strip_prefix("Cookie: ").unwrap()).unwrap_err();
