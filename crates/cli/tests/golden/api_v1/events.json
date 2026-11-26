@@ -135,6 +135,7 @@
         "act": "idle",
         "coat": "--c:#8a5a33;--d:#6f4527;--m:#2e2019;--b:transparent",
         "data": {
+          "account": "auto",
           "agent": "orchestrator-t1",
           "confirmed": true,
           "effort": null,

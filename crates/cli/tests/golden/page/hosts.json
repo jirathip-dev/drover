@@ -41,7 +41,7 @@
               },
               "id": "h-cloud1",
               "subtitle": {
-                "text": "cloud host"
+                "text": "remote host"
               },
               "swipe": [
                 {

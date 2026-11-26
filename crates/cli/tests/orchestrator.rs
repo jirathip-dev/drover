@@ -29,12 +29,9 @@ fn setup(name: &str) -> drover::Ctx {
 
 fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let d = tmpdir(name);
-    let cfg = config(&d).replace(
-        "[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"",
-        "[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\naccount = \"C\"",
-    );
     let cfg = format!(
-        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
+        config(&d),
         b.sock.display()
     );
     let mut c = ctx(&d, &cfg);

@@ -19,9 +19,9 @@ fn config(extra: &str) -> String {
 }
 
 fn acp_config(extra: &str, b: &FakeShed) -> String {
-    let c = config(extra).replace("effort = \"high\"\n", "effort = \"high\"\naccount = \"C\"\n");
+    let c = config(extra);
     format!(
-        "{c}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{c}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         b.sock.display()
     )
 }

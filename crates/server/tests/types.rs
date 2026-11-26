@@ -117,6 +117,9 @@ macro_rules! each {
             ConductorAttach,
             AttachEnv,
             Said,
+            Manifest,
+            Place,
+            Threads,
             propose::ConfigView,
             propose::ConfigField,
             propose::ConfigChange,
@@ -151,6 +154,12 @@ fn bindings() -> String {
 fn export_bindings() {
     std::fs::create_dir_all(Path::new(OUT).parent().unwrap()).unwrap();
     std::fs::write(OUT, bindings()).unwrap();
+}
+
+#[test]
+fn export_plugin_manifest() {
+    let out = concat!(env!("CARGO_MANIFEST_DIR"), "/../../cooee-plugin.toml");
+    std::fs::write(out, drover_server::manifest::plugin_toml().unwrap()).unwrap();
 }
 
 struct Canned(std::collections::BTreeMap<String, String>);

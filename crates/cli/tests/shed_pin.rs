@@ -68,7 +68,8 @@ fn a_serve_under_drovers_minimum_protocol_refuses_the_spawn_naming_both_protocol
     sh.lock().hello.as_mut().unwrap().protocol = drover::shed::MIN_PROTOCOL - 1;
     let out = refused(&c, &sh, &fake(&ours()));
     let want = format!(
-        "shed serve is {VERSION} ({BUILD}) protocol 0, drover needs shed protocol {} or newer → {}",
+        "shed serve is {VERSION} ({BUILD}) protocol {}, drover needs shed protocol {} or newer → {}",
+        drover::shed::MIN_PROTOCOL - 1,
         drover::shed::MIN_PROTOCOL,
         drover::shed::UPDATE
     );

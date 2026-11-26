@@ -38,7 +38,7 @@ Three rules the reviewer can check in the diff:
 |---|---|
 | `crates/core/src/update.rs` | `stage` (worktree and cargo build), `gate`'s signing step, the `sha` marker file, the `land::suite` read |
 | `crates/core/src/hosts.rs` | `sync`, `install_line`, `SYNC_STATUS`, `SYNC_START`, the `host-sync-skipped` event |
-| `crates/core/src/cloud.rs` | bootstrap's `cargo install` of drover (shed's stays) |
+| `cloud.rs` (deleted, #1704) | bootstrap's `cargo install` of drover (shed's stays) |
 | `crates/core/src/gate.rs` | the build-and-install line `drover merge` prints for this repo |
 | scripts/install-gate.sh | the file |
 | `docs/setup.md`, `docs/hosts.md` | the "Self-update" and "Auto-update" sections, each replaced by a link to the new page; the manual install becomes a download of the release asset |

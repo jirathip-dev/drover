@@ -1,6 +1,7 @@
 pub mod chart;
 pub mod decide;
 pub mod episode;
+pub mod escalate;
 pub mod facts;
 pub mod shadow;
 pub mod table;
