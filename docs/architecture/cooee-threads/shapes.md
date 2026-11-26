@@ -43,6 +43,8 @@ pub struct Manifest {
 
 pub struct Threads {
     pub profiles: String,
+    /// `POST /cooee/thread-started`.
+    pub started: String,
     pub attach: String,
     pub detach: String,
     pub rows: String,

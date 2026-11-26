@@ -251,3 +251,32 @@ fn attach_and_said_keep_contract_v1() {
     check("said", &said, &mut fails);
     assert!(fails.is_empty(), "{}", fails.join("\n"));
 }
+
+#[test]
+fn the_manifest_keeps_contract_v1_and_names_every_chat_path() {
+    let c = board("contract-manifest");
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    assert_eq!(get(&s, "/api/v1/manifest", "").0, "401");
+    let (code, m) = get(&s, "/api/v1/manifest", &bearer());
+    assert_eq!(code, "200", "{m}");
+    assert_eq!(m["api"], "http://127.0.0.1:4810");
+    assert_eq!(m["threads"]["profiles"], "/cooee/profiles");
+    assert_eq!(m["threads"]["started"], "/cooee/thread-started");
+    assert_eq!(m["threads"]["said"], "/api/v1/thread/<id>/said");
+    let screens: Vec<&str> = m["screens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["screen"].as_str())
+        .collect();
+    assert_eq!(
+        screens,
+        ["/screens/queue", "/screens/events", "/screens/lanes", "/screens/fleets"]
+    );
+    let actions = m["actions"].as_array().unwrap();
+    assert!(m["destructive"].as_array().unwrap().iter().all(|d| actions.contains(d)));
+    let mut fails = vec![];
+    check("manifest", &m, &mut fails);
+    assert!(fails.is_empty(), "{}", fails.join("\n"));
+}

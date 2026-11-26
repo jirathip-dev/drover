@@ -75,6 +75,11 @@ impl Server<'_> {
                 out("200 OK", &super::rows::get(ctx, x, &f))
             }
             ("GET", Some(x)) if super::rows::is(x) => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
+            ("GET", Some("manifest")) if Self::plugin(ctx, head) || paired && self.allowed(ctx, head) => {
+                let host = super::header(head, "host").unwrap_or("127.0.0.1:7777");
+                out("200 OK", &crate::manifest::manifest(&format!("http://{host}")))
+            }
+            ("GET", Some("manifest")) => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
             ("POST", Some(x)) if x.starts_with("thread/") && x.ends_with("/said") => {
                 if !Self::plugin(ctx, head) {
                     return reply("401 Unauthorized", "UNPAIRED", "the plugin token");

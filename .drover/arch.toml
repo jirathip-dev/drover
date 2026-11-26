@@ -26,6 +26,7 @@ generated = [
     "crates/cli/tests/golden/private-names/names",
     "crates/cli/tests/golden/private-names/lines.md",
     "crates/cli/tests/golden/private-names/expect",
+    "cooee-plugin.toml",
 ]
 generate = "sh scripts/arch-gen.sh"
 shared = [
