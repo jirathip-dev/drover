@@ -22,6 +22,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a ready PR's check still pending this long after its run completed is re-run once, then alerts `ci-stuck`",
     ),
     (
+        "ci_flaky_retries",
+        "re-runs of a failed check's jobs a head gets before its red counts, `ci-rerun` why failed (0 = off; a fleet may set its own)",
+    ),
+    (
         "min_cpu_idle",
         "spawn refuses HOST_BUSY under this percent of the CPUs idle over a 1 s sample; `[hosts.<n>]` may set its own",
     ),

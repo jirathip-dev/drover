@@ -253,6 +253,10 @@ fn install(
         let d = json!({"host": m.name, "sha": head, "reason": format!("self-update {head:.7}: {why}")});
         failed(ctx, cfg, events, &key, d)?;
     }
+    match &found {
+        Found::Missing(_) => retry_red(ctx, cfg, r, out, (f, events), head)?,
+        Found::Release(_) => crate::gh::flaky(ctx, out, ("drover", None), events, head)?,
+    }
     match step(ctx.now, head, &found, &m, &marks, &cfg.limits) {
         Step::Wait { alert } => {
             let why = match &found {
@@ -281,6 +285,28 @@ fn install(
         Step::Swap => return swap(ctx, cfg, r, out, (t, events, head), &m),
     }
     Ok(0)
+}
+
+fn retry_red(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (f, events): (&crate::config::Fleet, &[Event]),
+    head: &str,
+) -> Result<()> {
+    let fields = "databaseId,conclusion,workflowName,updatedAt";
+    let runs = crate::runner::json(r, "gh", &["run", "list", "-R", &f.repo, "-c", head, "--json", fields]);
+    let reds: Vec<crate::gh::Red> = (runs.unwrap_or_default().as_array().into_iter().flatten())
+        .filter(|x| x["conclusion"] == "failure")
+        .map(|x| crate::gh::Red {
+            name: x["workflowName"].as_str().unwrap_or("?").into(),
+            run: x["databaseId"].as_u64().map(|i| i.to_string()),
+            done: x["updatedAt"].as_str().and_then(crate::usage::epoch),
+        })
+        .collect();
+    let max = f.ci_flaky_retries.unwrap_or(cfg.limits.ci_flaky_retries);
+    crate::gh::retry(ctx, r, out, ("drover", None), events, (&f.repo, head, max), &reds).map(drop)
 }
 
 fn failed(ctx: &Ctx, cfg: &Config, events: &[Event], key: &str, mut d: serde_json::Value) -> Result<()> {

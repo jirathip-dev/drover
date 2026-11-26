@@ -39,6 +39,7 @@ pub const STEPS: [(&str, &[&str]); 4] = [
             "silent_minutes",
             "ci_start_minutes",
             "ci_stuck_minutes",
+            "ci_flaky_retries",
             "gate_check_minutes",
             "review_rounds",
             "update_rounds",
@@ -1542,8 +1543,14 @@ fn ci_red(
     let (fleet, n, f) = (s.fleet.as_str(), s.issue.to_string(), cfg.fleet(&s.fleet)?);
     let head = pr.at("headRefOid").as_str().unwrap_or_default();
     let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
-    let gone = gone.map(|m| format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"));
-    std::fs::write(&file, gone.unwrap_or_else(|| ci_findings(r, f, pr, head)))?;
+    let body = match gone {
+        Some(m) => format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"),
+        None => match gh::final_red(ctx, cfg, r, out, (fleet, s.issue), events, pr)? {
+            Some(twice) => gh::findings(r, f, pr, head, &twice),
+            None => return Ok(()),
+        },
+    };
+    std::fs::write(&file, body)?;
     let file = file.to_string_lossy();
     let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
     if act(ctx, cfg, r, out, events, (fleet, Some(s.issue), "ci-red"), &args)?.is_some() {
@@ -2046,36 +2053,6 @@ fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         &ctx.state,
         cfg,
         Event::new(ctx.now, fleet, None, kinds[0], json!({"reason": reason})),
-    )
-}
-
-fn ci_findings(r: &dyn Runner, f: &crate::config::Fleet, pr: &serde_json::Value, head: &str) -> String {
-    let checks = gh::required(&pr["statusCheckRollup"], &f.required_checks);
-    let failed = checks
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|c| gh::check_state(c) == "failed");
-    let url = failed.and_then(|c| c["detailsUrl"].as_str()).unwrap_or_default();
-    let run = url
-        .split("/runs/")
-        .nth(1)
-        .and_then(|t| t.split('/').next())
-        .unwrap_or_default();
-    let log = (!run.is_empty()).then(|| ok(r, "gh", &["run", "view", run, "-R", &f.repo, "--log-failed"]).ok());
-    let log = log.flatten().unwrap_or_default();
-    let tail: Vec<&str> = log
-        .lines()
-        .rev()
-        .take(40)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    let what = gh::not_green(&checks).unwrap_or_else(|| "a check failed".into());
-    format!(
-        "FAIL\n\nCI is red at {head}: {what}.\n\n```\n{}\n```\n",
-        crate::lanes::mask(&tail.join("\n"))
     )
 }
 

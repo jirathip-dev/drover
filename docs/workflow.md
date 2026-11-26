@@ -97,6 +97,7 @@ flowchart TD
     d2 -.- k_silent_minutes(["silent_minutes = 10"])
     d2 -.- k_ci_start_minutes(["ci_start_minutes = 10"])
     d2 -.- k_ci_stuck_minutes(["ci_stuck_minutes = 30"])
+    d2 -.- k_ci_flaky_retries(["ci_flaky_retries = 1"])
     d2 -.- k_gate_check_minutes(["gate_check_minutes = 30"])
     d2 -.- k_review_rounds(["review_rounds = 3"])
     d2 -.- k_update_rounds(["update_rounds = 3"])

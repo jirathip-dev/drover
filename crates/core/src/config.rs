@@ -465,6 +465,8 @@ pub struct Fleet {
     pub form_rounds: Option<u32>,
     /// This fleet's `respawn_per_pass`; `Config::parse` fills in `[limits]`'s when absent.
     pub respawn_per_pass: Option<usize>,
+    /// This fleet's `ci_flaky_retries`; `Config::parse` fills in `[limits]`'s when absent.
+    pub ci_flaky_retries: Option<u32>,
     /// This fleet's `stall_restart_hours`; unset = `[limits]`'s.
     pub stall_restart_hours: Option<u64>,
     /// Replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
@@ -769,6 +771,7 @@ pub struct Limits {
     pub silent_minutes: u64,
     pub ci_start_minutes: u64,
     pub ci_stuck_minutes: u64,
+    pub ci_flaky_retries: u32,
     pub min_cpu_idle: f64,
     /// Retired (#1780): read only so doctor can name `min_cpu_idle` instead.
     #[serde(skip_serializing)]
@@ -911,6 +914,7 @@ impl Default for Limits {
             silent_minutes: 10,
             ci_start_minutes: 10,
             ci_stuck_minutes: 30,
+            ci_flaky_retries: 1,
             min_cpu_idle: 15.0,
             load_per_cpu: None,
             overload_minutes: 10,
@@ -1322,6 +1326,7 @@ impl Config {
                 .get_or_insert_with(|| c.limits.form_categories.clone());
             f.form_rounds.get_or_insert(c.limits.form_rounds);
             f.respawn_per_pass.get_or_insert(c.limits.respawn_per_pass);
+            f.ci_flaky_retries.get_or_insert(c.limits.ci_flaky_retries);
             (f.bad, f.pipeline, f.jobs) = (p.validate(name, &f.role), Some(p), jobs(name, &c.job, f)?);
         }
         for (name, f) in &mut c.fleet {

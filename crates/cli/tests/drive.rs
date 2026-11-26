@@ -1,3 +1,5 @@
+#[path = "drive/ci_flaky.rs"]
+mod ci_flaky;
 mod common;
 #[path = "drive/done_lanes.rs"]
 mod done_lanes;
@@ -382,47 +384,6 @@ fn the_third_fail_stops_at_needs_human_with_the_findings() {
     assert!(nh.str("findings").unwrap().contains("src/y.rs:9 still wrong"));
     idle(&c, &r);
     assert!(started("").is_empty(), "no fix lane after the limit");
-}
-
-#[test]
-fn red_ci_after_pass_is_a_fail_with_the_log_tail() {
-    let c = setup("drive-red");
-    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
-    let head = sha("abc");
-    ev(
-        &c,
-        30,
-        "verdict",
-        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
-    );
-    let r = fake(NONE)
-        .reply("gh pr view issue-12", &pr(&head, "red"))
-        .reply(
-            "gh run view 777 -R jirathip-dev/sendmeter --log-failed",
-            "test x ... FAILED\nGH_TOKEN=ghp_abcdef123456\nerror: 1 test failed\n",
-        )
-        .reply(
-            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
-            &format!("{head}\n"),
-        )
-        .reply("git -C", "");
-    let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["ci-red", "fix"], "{out}");
-    let all = read(&c.state).unwrap();
-    let v = all.iter().rev().find(|e| e.kind == "verdict").unwrap();
-    assert_eq!(v.str("verdict"), Some("FAIL"));
-    assert!(
-        v.str("body").unwrap().contains("error: 1 test failed"),
-        "{:?}",
-        v.str("body")
-    );
-    assert!(
-        !v.str("body").unwrap().contains("ghp_abcdef"),
-        "the log tail is masked: {:?}",
-        v.str("body")
-    );
-    let st = &fold(&all)[&("sendmeter".to_string(), 12)];
-    assert_eq!((st.state.as_str(), st.rounds), ("fix(1)", 1), "same head: no new round");
 }
 
 #[test]

@@ -59,6 +59,18 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
     for e in recent.iter().filter(owner) {
         s += &format!("- {}: {}\n", e.kind, plain(e));
     }
+    s += "\n## Flaky checks (green after a re-run)\n\n";
+    for e in recent.iter().filter(|e| e.kind == "ci-flaky?") {
+        let n = e.issue.map_or(String::new(), |n| format!("#{n} "));
+        let checks = e
+            .val("checks")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_str());
+        let checks: Vec<&str> = checks.collect();
+        s += &format!("- {n}{} at {:.7}\n", checks.join(", "), e.str("sha").unwrap_or("?"));
+    }
     s += "\n## Reverts on integration\n\n";
     let local = f.local_path().to_string_lossy().into_owned();
     let integration = format!("origin/{}", f.integration);

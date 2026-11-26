@@ -35,7 +35,11 @@ fn a_fail_gets_its_fix_round_on_the_next_pass_while_the_in_flight_cap_holds_a_qu
 
 #[test]
 fn a_pass_at_a_red_ci_head_gets_its_fix_round_in_the_same_pass() {
-    let c = setup("drive-red-fix");
+    let off = CONFIG.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nci_flaky_retries = 0",
+    );
+    let c = ctx(&tmpdir("drive-red-fix"), &off);
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
     ev(
