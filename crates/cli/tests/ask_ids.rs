@@ -169,10 +169,11 @@ impl Runner for Meet {
             let mut n = self.met.lock().unwrap();
             *n += 1;
             self.cv.notify_all();
-            let _ = self
-                .cv
-                .wait_timeout_while(n, Duration::from_secs(5), |n| *n < 2)
-                .unwrap();
+            drop(
+                self.cv
+                    .wait_timeout_while(n, Duration::from_secs(5), |n| *n < 2)
+                    .unwrap(),
+            );
         }
         self.fake.run(prog, args)
     }

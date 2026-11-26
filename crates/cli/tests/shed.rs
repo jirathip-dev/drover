@@ -60,7 +60,7 @@ fn every_adapter_call_is_a_shed_request() {
     assert_eq!(b.methods().iter().rev().take(2).collect::<Vec<_>>(), ["rm", "kill"]);
     assert_eq!(
         drover::session::live_on(&r).unwrap(),
-        [] as [drover::session::Session; 0]
+        <[drover::session::Session; 0]>::default()
     );
     term::close(&c, &r, lane).unwrap();
     let o = term::exec(&r, &term::read_argv(lane)).unwrap();
@@ -1021,10 +1021,11 @@ fn exits(b: &FakeShed, kinds: &[Value]) {
     b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
     let mut st = b.lock();
     let ev = &mut st.events;
-    let start = ev.len() as u64 * 10;
+    let start = u64::try_from(ev.len()).unwrap() * 10;
     let all = [&[json!({"event": "turn", "prompt": "# Brief"})][..], kinds].concat();
     for (i, k) in all.iter().enumerate() {
-        let mut e = json!({"seq": start + i as u64 + 1, "name": "sendmeter-impl-12", "labels": lane_labels()});
+        let mut e =
+            json!({"seq": start + u64::try_from(i).unwrap() + 1, "name": "sendmeter-impl-12", "labels": lane_labels()});
         e.as_object_mut().unwrap().extend(k.as_object().unwrap().clone());
         ev.push(e);
     }
@@ -1499,7 +1500,13 @@ fn herdr_era_lane(
     .enumerate()
     .filter(|_| fix)
     {
-        let e = Event::new(c.now - 900 + i as u64 * 60, "sendmeter", Some(12), kind, data);
+        let e = Event::new(
+            c.now - 900 + u64::try_from(i).unwrap() * 60,
+            "sendmeter",
+            Some(12),
+            kind,
+            data,
+        );
         drover::events::append(&c.state, &e).unwrap();
     }
     for n in live {
@@ -2126,7 +2133,7 @@ fn a_skipped_fix_round_spawn_shows_its_refusal_in_waiting() {
 #[test]
 fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start() {
     let (c, b, f, wt, _) = acp_lane("acp-silent");
-    let seq = b.lock().events.len() as u64 * 10 + 1;
+    let seq = u64::try_from(b.lock().events.len()).unwrap() * 10 + 1;
     let turn =
         json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "turn", "prompt": "# Brief"});
     b.lock().events.push(turn);

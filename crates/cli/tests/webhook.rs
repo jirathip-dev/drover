@@ -109,7 +109,7 @@ fn a_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing() {
     assert!(r.calls.borrow().is_empty(), "{:?}", r.calls.borrow());
     assert!(drover::gh::cached_pr(&c, "sendmeter", 7).is_null());
     assert!(!c.state.with_file_name("tick.log").exists());
-    assert_eq!(drover::webhook::rejected(&c), sigs.len() as u64);
+    assert_eq!(drover::webhook::rejected(&c), u64::try_from(sigs.len()).unwrap());
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(
         out.contains("✓ webhook — secret set · 0 accepted · 6 refused (bad signature)"),

@@ -311,13 +311,13 @@ fn the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state() {
         let req = format!("POST {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}", body.len());
         std::io::Write::write_all(&mut s, req.as_bytes()).unwrap();
         let mut res = String::new();
-        let _ = std::io::Read::read_to_string(&mut s, &mut res);
+        std::io::Read::read_to_string(&mut s, &mut res).ok();
         res
     };
     let paused = post("/pause");
     let queued = post("/queue");
-    let _ = p.kill();
-    let _ = p.wait();
+    p.kill().ok();
+    p.wait().ok();
     assert!(paused.starts_with("HTTP/1.1 405"), "{paused}");
     assert!(queued.starts_with("HTTP/1.1 405"), "{queued}");
     assert_eq!(

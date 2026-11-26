@@ -367,7 +367,7 @@ fn red_ci_in_the_last_round_goes_to_park() {
     let file = file.to_string_lossy().to_string();
     let log = |ts, kind, d| drover::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
     for (i, sha) in ["a", "b", "c"].iter().enumerate() {
-        let t = 10 * i as u64;
+        let t = 10 * u64::try_from(i).unwrap();
         log(t, "spawn", json!({"role": "impl", "agent": "sendmeter-impl-12"}));
         log(
             t + 1,

@@ -61,7 +61,7 @@ fn fleet(bb_on: usize, aa_busy: bool) -> String {
         (32, "self-2", "self", true, false),
     ];
     for (i, n) in ["boat-bb-1", "boat-bb-2", "boat-bb-3"].iter().enumerate() {
-        v.push((21 + i as u64, n, "boat", i < bb_on, false));
+        v.push((21 + u64::try_from(i).unwrap(), n, "boat", i < bb_on, false));
     }
     gh(&v)
 }

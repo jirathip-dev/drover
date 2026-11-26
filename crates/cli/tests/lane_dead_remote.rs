@@ -69,7 +69,7 @@ fn upstream() -> u16 {
             }
             rd.read_exact(&mut vec![0; len]).unwrap();
             let b = "event: message_stop\ndata: {}\n\n";
-            let _ = write!(c, "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{b}", b.len());
+            write!(c, "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{b}", b.len()).ok();
         }
     });
     port

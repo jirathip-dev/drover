@@ -168,7 +168,10 @@ impl Plan {
             let faults: Vec<usize> = (0..p.items.len())
                 .filter(|&i| !matches!(p.items[i].1, Ev::Timer { .. }))
                 .collect();
-            let pick = |rng: &mut Rng, v: &[usize]| v.get(usize::try_from(rng.below(v.len() as u64)).unwrap()).copied();
+            let pick = |rng: &mut Rng, v: &[usize]| {
+                v.get(usize::try_from(rng.below(u64::try_from(v.len()).unwrap())).unwrap())
+                    .copied()
+            };
             match rng.below(6) {
                 0 => {
                     if let Some(i) = pick(rng, &faults) {
@@ -194,7 +197,7 @@ impl Plan {
                 3 | 4 => {
                     let role = ["impl", "rev"][usize::try_from(rng.below(2)).unwrap()];
                     let s = (role.to_string(), default_script(rng, role));
-                    let at = usize::try_from(rng.below(p.scripts.len() as u64 + 1)).unwrap();
+                    let at = usize::try_from(rng.below(u64::try_from(p.scripts.len()).unwrap() + 1)).unwrap();
                     if rng.chance(50) && at < p.scripts.len() {
                         p.scripts[at] = s;
                     } else {
@@ -341,7 +344,7 @@ pub fn hunt(start: &[u64], rng: u64, sabotage: Option<Sabotage>, more: impl Fn(u
         }
         next = (0..8)
             .map(|_| {
-                let i = usize::try_from(rng.below(h.corpus.len() as u64)).unwrap();
+                let i = usize::try_from(rng.below(u64::try_from(h.corpus.len()).unwrap())).unwrap();
                 h.corpus[i].mutate(&mut rng)
             })
             .collect();
