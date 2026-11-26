@@ -421,6 +421,8 @@ pub struct Fleet {
     pub max_in_flight: Option<usize>,
     #[serde(default)]
     pub role: BTreeMap<String, Role>,
+    /// The shed account its roles' ACP runs use unless a role names one: a name or `auto`; unset is `auto`.
+    pub account: Option<String>,
     /// Replace the global `[[notify]]` for this fleet's events; `notify_global` sends to both.
     #[serde(default)]
     pub notify: Vec<Notify>,
@@ -747,6 +749,8 @@ pub struct Role {
     pub needs: Vec<String>,
     /// The host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
     pub host: Option<String>,
+    /// The shed account its ACP runs use: a name or `auto`; unset is the fleet's.
+    pub account: Option<String>,
     /// The default orchestrator `Config::parse` adds for a fleet without one: its impl role on `lane-orchestrator`.
     #[serde(skip)]
     pub default: bool,
@@ -1125,7 +1129,7 @@ impl Config {
 
     /// Each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
-        let gone = "removed (#923): lanes run on the host's own CLI login; delete";
+        let gone = "removed (#1576): accounts are shed's, a role or fleet names one with `account`; delete";
         let acct = (!self.retired.is_empty()).then(|| ("[accounts]", format!("{gone} {}", self.retired.join(", "))));
         let tg = "removed (#557): drover has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
@@ -1299,6 +1303,7 @@ impl Config {
                 bail!("chat.effort: harness {h} does not support effort \"{e}\"");
             }
         }
+        accounts_ok(&c)?;
         let mut c = c;
         c.retired = retired(&raw);
         c.old_names = raw.contains_key("conductor");
@@ -1333,6 +1338,7 @@ impl Config {
             if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("orchestrator")) {
                 let r = Role {
                     profile: Some("lane-orchestrator".into()),
+                    account: None,
                     default: true,
                     ..r.clone()
                 };
@@ -1472,6 +1478,18 @@ impl Config {
     pub fn shed_for(&self, name: &str) -> Option<crate::shed::Shed> {
         let own = self.fleet.get(name).and_then(|f| f.runtime.as_ref());
         own.or(self.runtime.as_ref()).map(Runtime::shed)
+    }
+
+    /// The account role `role` of fleet `fleet` runs on: the role's, else the fleet's, else `auto`.
+    pub fn account(&self, fleet: &str, role: &str) -> Account {
+        let f = self.fleet.get(fleet);
+        let own = f
+            .and_then(|f| f.role.get(f.role_key(role)))
+            .and_then(|r| r.account.as_deref());
+        match own.or_else(|| f?.account.as_deref()) {
+            None | Some("auto") => Account::Auto,
+            Some(n) => Account::Named(n.into()),
+        }
     }
 
     pub fn shed(&self) -> Option<crate::shed::Shed> {
@@ -1622,6 +1640,45 @@ impl Fleet {
     }
 }
 
+fn accounts_ok(c: &Config) -> Result<()> {
+    let ok = |a: &str| {
+        !a.is_empty()
+            && a.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-_".contains(c))
+    };
+    let named = c.fleet.iter().flat_map(|(n, f)| {
+        let roles = f
+            .role
+            .iter()
+            .map(move |(r, x)| (format!("fleet.{n}.role.{r}"), &x.account));
+        std::iter::once((format!("fleet.{n}"), &f.account)).chain(roles)
+    });
+    if let Some((at, a)) = named
+        .filter_map(|(at, a)| Some((at, a.as_deref()?)))
+        .find(|(_, a)| !ok(a))
+    {
+        bail!("{at}.account: \"{a}\" is no shed account name (a-z, 0-9, -, _)");
+    }
+    Ok(())
+}
+
+/// The shed account an ACP run asks for: `auto` (shed picks a signed-in named one, moving at a limit) or one by name.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Account {
+    Auto,
+    Named(String),
+}
+
+impl Account {
+    /// The word `run`'s `account` carries.
+    pub fn word(&self) -> &str {
+        match self {
+            Account::Auto => "auto",
+            Account::Named(n) => n,
+        }
+    }
+}
+
 fn retired(raw: &toml::Table) -> Vec<String> {
     let mut out: Vec<String> = raw
         .contains_key("accounts")
@@ -1634,6 +1691,7 @@ fn retired(raw: &toml::Table) -> Vec<String> {
         out.extend(
             keys.iter()
                 .filter(|k| t.is_some_and(|t| t.contains_key(**k)))
+                .filter(|k| at == "chat" || **k != "account")
                 .map(|k| format!("{at}.{k}")),
         );
     };

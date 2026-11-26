@@ -118,6 +118,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             }
         }
     }
+    for (kind, d) in crate::accounts::alerts(cfg, r, &events) {
+        fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
+    }
     let (stall, remote) = (cfg.limits.stall_minutes * 60, crate::hosts::survey(ctx, cfg, r, false));
     crate::session::stamp::observe(ctx, cfg, r, &sessions)?;
     let events = working(&ctx.state)?;
@@ -317,7 +320,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 ));
             }
             if let Some(a) = agent {
-                if let Some(sp) = spawned {
+                if let Some(sp) = spawned.filter(|sp| !crate::hosts::on_account(sp)) {
                     let seen = match a.status() {
                         Some(Status::Limited) => Some(("usage-limit", "hit the usage limit")),
                         _ if a.signed_out() => Some(("signed-out", "is signed out")),

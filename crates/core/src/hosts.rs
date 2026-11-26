@@ -948,8 +948,15 @@ pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>, (now, retry): 
     let retried = |e: &Event| {
         e.val("proxy").as_bool() == Some(true) && (now < e.ts + retry || proxy_ok(events, e.str("agent")) >= Some(e.ts))
     };
-    let hold = |e: &&Event| ["usage-limit", "signed-out"].contains(&e.kind.as_str()) && mine(e) && !retried(e);
+    let lane = |e: &Event| e.data.get("account").is_none();
+    let hold =
+        |e: &&Event| ["usage-limit", "signed-out"].contains(&e.kind.as_str()) && mine(e) && lane(e) && !retried(e);
     events.iter().skip(from).rfind(hold)?.str("reason")
+}
+
+/// Spawn `sp`'s lane runs on a shed account (an ACP lane on the main host): `account.ls` holds it, never its banner.
+pub fn on_account(sp: &Event) -> bool {
+    sp.str("account").is_some()
 }
 
 /// When the token proxy last relayed a good answer to lane `agent` after it signed out.

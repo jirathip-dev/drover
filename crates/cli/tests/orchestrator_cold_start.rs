@@ -12,8 +12,8 @@ const ADDR: &str = "127.0.0.1:7777";
 const TIMEOUT: &str = "timed out waiting for agent startup";
 fn setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
-         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n",
         b.sock.display()
     );
     let mut c = ctx(&tmpdir(name), &cfg);
