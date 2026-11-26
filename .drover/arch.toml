@@ -31,7 +31,6 @@ generate = "sh scripts/arch-gen.sh"
 shared = [
     "crates/core/src/check.rs",
     "crates/core/src/cli.rs",
-    "crates/core/src/cloud.rs",
     "crates/core/src/config.rs",
     "crates/core/src/config/limit_docs.rs",
     "crates/core/src/doctor.rs",
