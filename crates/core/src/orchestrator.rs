@@ -365,154 +365,97 @@ pub fn upload(ctx: &Ctx, cfg: &Config, id: &str, files: &[(String, Vec<u8>)]) ->
     Ok(out)
 }
 
-/// `thread handoff`: to thread `to` at once, linked; wakes its conductor as `from`. to a repo (or `all`), a choice card in `from` (an owner ask with `handoff`): the repo's threads or a new one; `pick` delivers on the tap.
+/// `thread handoff`: to thread `to`, or to repo `to`'s (or `all`'s) desk thread, at once, linked; wakes its orchestrator as `from`.
 pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]: [&str; 4]) -> Result<String> {
     text_ok(text)?;
     let events = working(&ctx.state)?;
-    let t = find(&events, from)?;
+    find(&events, from)?;
+    let fwd = forwards(&events, from);
+    let to = if is_id(to) {
+        role(cfg, &find(&events, to)?.fleet)?;
+        to.to_string()
+    } else {
+        role(cfg, to)?;
+        title_ok(title)?;
+        desk(ctx, cfg, &events, to)?
+    };
     if to == from {
         return refused("BAD_VALUE", "a thread hands off to another thread");
     }
-    let fwd = forwards(&events, from);
-    if is_id(to) {
-        role(cfg, &find(&events, to)?.fleet)?;
-        return send(ctx, cfg, r, (from, to, to), (title, text), (fwd, None));
-    }
-    role(cfg, to)?;
-    title_ok(title)?;
-    let open = |e: &&Event| e.kind == "thread-new" && e.fleet == to;
-    let mut rows: Vec<(u64, &str)> = (events.iter().filter(open))
-        .filter_map(|e| e.str("thread"))
-        .filter(|id| *id != from && !archived(&events, id))
-        .map(|id| (of(&events, id).map(|e| e.ts).max().unwrap_or(0), id))
-        .collect();
-    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
-    let row = |(ts, id): &(u64, &str)| {
-        let last = items(&events, id).pop().unwrap_or_default();
-        let last = last
-            .at("text")
-            .as_str()
-            .or(last.at("question").as_str())
-            .unwrap_or_default();
-        let topic: String = last
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .take(60)
-            .collect();
-        let age = events::age(ctx.now.saturating_sub(*ts));
-        let topic = if topic.is_empty() {
-            String::new()
-        } else {
-            format!(" — {topic}")
-        };
-        format!("{} · {id}{topic} ({age} ago)", self::title(&events, id))
-    };
-    let mut opts: Vec<String> = rows.iter().map(row).collect();
-    let mut targets: Vec<&str> = rows.iter().map(|r| r.1).collect();
-    opts.insert(opts.len().min(4), format!("new thread: {title}"));
-    targets.insert(targets.len().min(4), "new");
-    let question = format!("Hand off \"{title}\" to which {to} thread? Nothing is delivered until you tap one.");
-    let d = json!({"question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
-        "handoff": {"repo": to, "title": title, "text": text, "targets": targets}, "forwards": fwd});
-    let ev = Event::new(ctx.now, &t.fleet, None, "needs-decision", d);
-    let ev = events::ask(&ctx.state, cfg, vec![ev], None)?.pop();
-    let q = ev.as_ref().and_then(|e| e.str("id")).unwrap_or_default();
-    Ok(format!(
-        "{q}: the owner picks the thread; nothing is delivered until then"
-    ))
+    send(ctx, cfg, r, (from, &to), (title, text), (fwd, None))
 }
 
-/// The owner's tap on a handoff card (`choice`: an option number or its text, or a thread id): delivered there (`new`: a new thread in the card's repo); the target, and whether this tap delivered it. once per card: a tap waits for one in flight and gets the delivered one's target; after a failed delivery it retries that one.
-pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) -> Result<(String, bool)> {
-    let (h, from) = (&ask.val("handoff"), ask.str("thread").unwrap_or_default());
-    let id = ask.str("id").unwrap_or_default();
-    let dir = dir(ctx, cfg, from);
-    std::fs::create_dir_all(&dir)?;
-    let lock = std::fs::File::create(dir.join(format!(".handoff-{id}.lock")))?;
-    lock.lock()?;
-    let events = working(&ctx.state)?;
-    let mine = |e: &&Event| e.kind == "thread-handoff" && e.str("thread") == Some(from) && e.str("ask") == Some(id);
-    let failed = |e: &Event| {
-        events
-            .iter()
-            .any(|f| f.kind == "ask-failed" && f.str("id") == Some(id) && f.seq > e.seq)
-    };
-    let (to, sent) = match events.iter().rfind(mine) {
-        Some(e) if !failed(e) => return Ok((e.str("to").unwrap_or_default().into(), false)),
-        Some(e) => {
-            let to = e.str("to").unwrap_or_default();
-            let msg = |m: &&Event| m.kind == "thread-msg" && m.seq > e.seq && m.str("from") == Some(from);
-            let text = (of(&events, to).find(msg))
-                .and_then(|m| m.str("text"))
-                .unwrap_or_default();
-            let line = format!("[{to}] {from}: {text}");
-            (
-                to.to_string(),
-                deliver(ctx, cfg, r, find(&events, to)?, &line).map(|_| to.into()),
-            )
-        }
-        None => {
-            let opts = ask.val("options").as_array().cloned().unwrap_or_default();
-            let n = choice
-                .parse::<usize>()
-                .ok()
-                .or_else(|| opts.iter().position(|o| o == choice).map(|i| i + 1));
-            let to = match n.and_then(|n| h["targets"].get(n.checked_sub(1)?)?.as_str()) {
-                Some(to) => to,
-                None if is_id(choice) && choice != from => find(&events, choice).map(|_| choice)?,
-                None => return refused("BAD_VALUE", "tap a row, or name a thread id"),
-            };
-            let s = |k: &str| h[k].as_str().unwrap_or_default();
-            let send = || {
-                send(
-                    ctx,
-                    cfg,
-                    r,
-                    (from, to, s("repo")),
-                    (s("title"), s("text")),
-                    (None, Some(id)),
-                )
-            };
-            (to.to_string(), role(cfg, s("repo")).and_then(|_| send()))
-        }
-    };
-    if let Err(e) = &sent {
-        let d = json!({"id": id, "ask_seq": ask.seq, "to": to, "reason": format!("{e:#}")});
-        emit(&ctx.state, cfg, Event::new(ctx.now, &ask.fleet, None, "ask-failed", d))?;
-        let text = format!("✗ {id} not delivered to {to}: {e:#}");
-        log(ctx, cfg, find(&events, from)?, "system", (&text, &[]))?;
+fn desk(ctx: &Ctx, cfg: &Config, events: &[Event], repo: &str) -> Result<String> {
+    if let Some(d) = crate::thread::Registry::read(events).desk(repo) {
+        return Ok(d.into());
     }
-    sent.map(|to| (to, true))
+    let id = new(ctx, cfg, repo, "Desk", (None, None))?;
+    let d = json!({"thread": id, "profile": repo, "desk": true});
+    emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-facts", d))?;
+    Ok(id)
+}
+
+/// The handoff that moved handoff `seq` on, if one did.
+pub fn moved(events: &[Event], seq: u64) -> Option<&Event> {
+    events
+        .iter()
+        .find(|e| e.kind == "thread-handoff" && e.val("moves").as_u64() == Some(seq))
+}
+
+/// [move] on handoff `seq`: delivered again to thread `to` from its sender; its first copy is marked forwarded and that thread's orchestrator told to drop it.
+pub fn move_handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, seq: u64, to: &str) -> Result<String> {
+    let events = working(&ctx.state)?;
+    let Some(h) = events.iter().find(|e| e.seq == seq && e.kind == "thread-handoff") else {
+        return refused("NO_SUCH_HANDOFF", format!("no handoff {seq}"));
+    };
+    let s = |k: &str| h.str(k).unwrap_or_default();
+    if let Some(m) = moved(&events, seq) {
+        let at = m.str("to").unwrap_or_default();
+        if at == to {
+            return Ok(at.into());
+        }
+        return refused(
+            "BAD_VALUE",
+            format!("handoff {seq} moved to {at} already; move that one"),
+        );
+    }
+    if to == s("to") || to == s("from") {
+        return refused(
+            "BAD_VALUE",
+            format!("handoff {seq} is from {} and in {}", s("from"), s("to")),
+        );
+    }
+    role(cfg, &find(&events, to)?.fleet)?;
+    let first = |m: &&Event| m.kind == "thread-msg" && m.seq > seq && m.str("from") == h.str("from");
+    let copy = of(&events, s("to")).find(first).map(|m| m.seq);
+    let sent = send(ctx, cfg, r, (s("from"), to), (s("title"), s("text")), (copy, Some(seq)))?;
+    let line = format!("handoff \"{}\" moved to {to}: don't act on it here", s("title"));
+    crate::thread::route::tell(ctx, cfg, r, s("to"), &line);
+    Ok(sent)
 }
 
 fn send(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
-    (from, to, repo): (&str, &str, &str),
+    (from, to): (&str, &str),
     (title, text): (&str, &str),
-    (fwd, ask): (Option<u64>, Option<&str>),
+    (fwd, moves): (Option<u64>, Option<u64>),
 ) -> Result<String> {
-    let to = if to == "new" {
-        new(ctx, cfg, repo, title, (None, None))?
-    } else {
-        to.into()
-    };
-    let target = format!("{} · {to}", self::title(&working(&ctx.state)?, &to));
+    let events = working(&ctx.state)?;
+    let target = format!("{} · {to}", self::title(&events, to));
     let d = json!({"thread": from, "from": from, "to": to, "title": title, "text": text, "target": target,
-        "forwards": fwd, "ask": ask});
-    let t = find(&working(&ctx.state)?, from)?.fleet.clone();
+        "forwards": fwd, "moves": moves});
+    let t = find(&events, from)?.fleet.clone();
     emit(&ctx.state, cfg, Event::new(ctx.now, &t, None, "thread-handoff", d))?;
     say(
         ctx,
         cfg,
         r,
-        (&to, &format!("handoff to {target}: {text}"), &[]),
+        (to, &format!("handoff to {target}: {text}"), &[]),
         (from, false),
     )?;
-    Ok(to)
+    Ok(to.into())
 }
 
 fn forwards(events: &[Event], from: &str) -> Option<u64> {
