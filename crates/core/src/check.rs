@@ -192,18 +192,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 json!({"key": sha, "reason": why}),
             )?;
         }
-        let ran = |e: &&Event| {
-            e.fleet == *name && (e.kind == "lesson-skipped" || e.kind == "spawn" && e.str("role") == Some("lesson"))
-        };
-        let last = (events.iter().rfind(ran))
-            .or_else(|| events.iter().find(|e| e.fleet == *name))
-            .map(|e| e.ts)
-            .filter(|t| !f.paused && f.lessons.as_deref() != Some("off") && ctx.now > t + 8 * 86400);
-        if let Some(t) = last {
-            let why = format!("no lessons issue for {} days", (ctx.now - t) / 86400);
-            let d = json!({"key": t, "reason": why});
-            fire(ctx, cfg, out, &events, (name, None), "lessons-missed", d)?;
-        }
         for i in crate::queue::replay(&events, name) {
             gh::spec(ctx, r, f, name, i.issue, false).ok();
         }

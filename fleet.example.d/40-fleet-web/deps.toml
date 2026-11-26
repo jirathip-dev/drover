@@ -1,1 +1,0 @@
-# deps = "monthly"   # #1488: `drover tick` runs `drover deps` every 30 days and the advisory check daily (default off: on demand only)

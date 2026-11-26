@@ -45,6 +45,8 @@ pub struct Config {
     pub self_update: SelfUpdate,
     /// `[hygiene]`, the history and issue convention every fleet follows unless its own `[fleet.<n>.hygiene]` key says otherwise.
     pub hygiene: Hygiene,
+    /// `[job.<name>]`, a scheduled job for every fleet over the built-in entry (`crate::jobs`).
+    pub job: BTreeMap<String, toml::Table>,
 }
 
 /// `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
@@ -480,14 +482,20 @@ pub struct Fleet {
     /// How `merge` lands a PR: `squash` (default) or `merge`.
     #[serde(default)]
     pub merge: MergeMode,
-    /// `weekly` (unset) has `tick` run `drover lesson` every 7 days; `off` opts out.
+    /// Old: `off` is `[fleet.<n>.job.lesson] every = "off"` (`Config::warnings`).
     pub lessons: Option<String>,
     /// `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
     pub hotspots: Option<String>,
-    /// `weekly` has `tick` run `drover triage` every 7 days; unset or `off`: only on demand.
+    /// Old: `weekly` or `off` is `[fleet.<n>.job.triage] every` (`Config::warnings`).
     pub triage: Option<String>,
-    /// `monthly` has `tick` run `drover deps` every 30 days and the advisory check daily; unset or `off`: only on demand.
+    /// Old: `monthly` or `off` is `[fleet.<n>.job.deps]` and `.advisory` `every` (`Config::warnings`).
     pub deps: Option<String>,
+    /// `[fleet.<n>.job.<name>]`, this fleet's keys over `[job.<name>]` and the built-in entry.
+    #[serde(default)]
+    pub job: BTreeMap<String, toml::Table>,
+    /// The jobs after their layers are merged and checked (`Config::parse`).
+    #[serde(skip)]
+    pub jobs: BTreeMap<String, crate::jobs::Job>,
     /// `[fleet.<n>.soak]`: `tick` runs `drover soak` nightly against these targets; unset: never.
     pub soak: Option<crate::soak::Soak>,
     /// `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
@@ -532,6 +540,32 @@ pub enum Engine {
     Shadow,
     On,
     Legacy,
+}
+
+fn jobs(name: &str, all: &BTreeMap<String, toml::Table>, f: &Fleet) -> Result<BTreeMap<String, crate::jobs::Job>> {
+    let every = |j: &str| {
+        Some((
+            j.into(),
+            toml::Table::from_iter([("every".into(), old_every(f, j)?.into())]),
+        ))
+    };
+    let was = ["lesson", "triage", "deps", "advisory"]
+        .into_iter()
+        .filter_map(every)
+        .collect();
+    crate::jobs::entries(name, &[all, &was, &f.job])
+}
+
+fn old_every(f: &Fleet, job: &str) -> Option<&'static str> {
+    match (job, f.lessons.as_deref(), f.triage.as_deref(), f.deps.as_deref()) {
+        ("lesson", Some("off"), ..) | ("triage", _, Some("off"), _) | ("deps" | "advisory", .., Some("off")) => {
+            Some("off")
+        }
+        ("triage", _, Some("weekly"), _) => Some("7d"),
+        ("deps", .., Some("monthly")) => Some("30d"),
+        ("advisory", .., Some("monthly")) => Some("1d"),
+        _ => None,
+    }
 }
 
 /// One key unset falls back to `[hygiene]`, then to `HYGIENE`; `"off"` (`docs_trust = []`) opts out.
@@ -1094,12 +1128,24 @@ impl Config {
         let old =
             "renamed (#780): call it [orchestrator] and role.orchestrator; the old names are read for one release";
         let old = self.old_names.then(|| ("[conductor]", old.to_string()));
+        let jobs = self.fleet.iter().flat_map(|(n, f)| {
+            let old = [
+                ("lessons", &f.lessons, &["lesson"][..]),
+                ("triage", &f.triage, &["triage"]),
+                ("deps", &f.deps, &["deps", "advisory"]),
+            ];
+            old.into_iter().filter(|k| k.1.is_some()).map(move |(k, _, jobs)| {
+                let add = |j: &&str| Some(format!(", add [fleet.{n}.job.{j}] every = \"{}\"", old_every(f, j)?));
+                let add: String = jobs.iter().filter_map(add).collect();
+                (k, format!("fleet.{n}.{k} is read for now (#1790): delete it{add}"))
+            })
+        });
         let load = "replaced (#1780): load average is no gate now; set `min_cpu_idle` (percent of the CPUs idle, default 15) and delete it";
         let load = self
             .limits
             .load_per_cpu
             .map(|_| ("[limits] load_per_cpu", load.to_string()));
-        acct.into_iter().chain(tg).chain(old).chain(load).collect()
+        acct.into_iter().chain(tg).chain(old).chain(load).chain(jobs).collect()
     }
 
     /// `[limits]` with host `machine`'s (`None`: the main host) `min_cpu_idle`, `min_free_mem_gb` and `swapout_rate` over them.
@@ -1276,8 +1322,7 @@ impl Config {
                 .get_or_insert_with(|| c.limits.form_categories.clone());
             f.form_rounds.get_or_insert(c.limits.form_rounds);
             f.respawn_per_pass.get_or_insert(c.limits.respawn_per_pass);
-            f.bad = p.validate(name, &f.role);
-            f.pipeline = Some(p);
+            (f.bad, f.pipeline, f.jobs) = (p.validate(name, &f.role), Some(p), jobs(name, &c.job, f)?);
         }
         for (name, f) in &mut c.fleet {
             if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("orchestrator")) {
@@ -1556,9 +1601,9 @@ impl Fleet {
             .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
     }
-    /// The configured role a lane runs as: a lesson, triage or deps lane is impl's unless its own role is set.
+    /// The configured role a lane runs as: a role only a job names is impl's unless its own role is set.
     pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
-        if matches!(role, "lesson" | "triage" | "deps") && !self.role.contains_key(role) {
+        if !self.role.contains_key(role) && self.jobs.values().any(|j| j.role == role) {
             "impl"
         } else {
             role

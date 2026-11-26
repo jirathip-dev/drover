@@ -71,7 +71,7 @@ queued herdsman #1771 on top
 spawned herdsman-lesson-1771
 ```
 
-`job <fleet> <name>` replaces `drover lesson <fleet>`, `drover triage <fleet>`, `drover deps <fleet>` and the
+`job <fleet> <name>` replaces `drover lesson <fleet>`, `drover triage <fleet>`, the `deps` verb and the
 filing half of `drover hotspots`. It is an orchestrator's and the owner's, exit 4 when the lane's prompt is not
 confirmed, as `spawn`. The list is any lane's.
 

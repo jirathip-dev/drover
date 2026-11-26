@@ -834,18 +834,15 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if block && r.iter().enumerate().skip(3).any(other) {
         return Some("REFUSED OWN_ISSUE: a lane may `queue block`/`unblock` only its own issue (#425)".into());
     }
-    if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
-        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover lesson` (#419)".into());
-    }
-    if !orchestrator && r.first() == Some(&"deps") {
-        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover deps` (#1488)".into());
+    if !orchestrator && r.first() == Some(&"job") && r.len() > 2 {
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs a job by hand (#1756)".into());
     }
     let triage = lane.split(':').nth(2) == Some("triage");
     let acts = matches!(r.get(1), Some(&("close" | "fold" | "label" | "docs")));
     if !orchestrator && r.first() == Some(&"triage") && !(acts && triage) {
         return Some(
-            "REFUSED ORCHESTRATOR_ONLY: an orchestrator or the owner runs `drover triage <fleet>`; only a triage lane \
-             closes, folds, labels or files docs (#1100)"
+            "REFUSED ORCHESTRATOR_ONLY: only a triage lane, an orchestrator or the owner closes, folds, labels or files \
+             docs (#1100)"
                 .into(),
         );
     }

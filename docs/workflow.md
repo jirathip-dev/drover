@@ -66,12 +66,10 @@ flowchart TD
     t1["drive"] --> t2
     t2["clean"] --> t3
     t3["trim"] --> t4
-    t4["lesson"] --> t5
-    t5["triage"] --> t6
-    t6["deps"] --> t7
-    t7["soak"] --> t8
-    t8["hotspots"] --> t9
-    t9["compact"]
+    t4["jobs"] --> t5
+    t5["soak"] --> t6
+    t6["hotspots"] --> t7
+    t7["compact"]
     d0["look, repair"] --> d1
     d1["closed issues"] --> d2
     d2["PR reads, gates, steps"] --> d3

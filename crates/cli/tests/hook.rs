@@ -323,31 +323,6 @@ fn a_orchestrator_may_spawn_design_lanes() {
 }
 
 #[test]
-fn only_a_orchestrator_runs_lesson() {
-    let run = |lane: &str, cmd: &str| {
-        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        hook_in(Some(lane), "impl", &input)
-    };
-    assert_eq!(
-        run("tangelo:-:orchestrator", "drover lesson tangelo"),
-        "",
-        "an orchestrator may"
-    );
-    for lane in ["tangelo:12:impl", "tangelo:12:rev", "tangelo:-:orch"] {
-        assert!(
-            run(lane, "drover lesson tangelo").contains("REFUSED ORCHESTRATOR_ONLY"),
-            "{lane}"
-        );
-        assert_eq!(
-            run(lane, "drover lesson digest tangelo --days 7"),
-            "",
-            "{lane} reads the digest"
-        );
-    }
-    assert_eq!(run("tangelo:12:lesson", "drover lesson apply tangelo"), "");
-}
-
-#[test]
 fn only_a_orchestrator_runs_amend() {
     let run = |lane: &str| {
         let cmd = "drover amend tangelo 12 --basis q3 \"board-fix: x\"";
