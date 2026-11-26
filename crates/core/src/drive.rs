@@ -252,24 +252,28 @@ pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Op
     kick_once(ctx, r, (fleet, issue), why, None)
 }
 
-/// `kick`, carrying its trigger's `id` (a verdict's sha, a decision): the same trigger is driven once.
+/// `kick`, carrying its trigger's `id` (a verdict's sha, a decision): the same trigger is driven once. A trigger's kick joins its fleet's queue, and only a fleet with no runner starts one (`kick --now`), which drains it.
 pub fn kick_once(ctx: &Ctx, r: &dyn Runner, (fleet, issue): (&str, u64), why: &str, id: Option<&str>) -> Option<u32> {
-    let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
-    a.extend(id.into_iter().flat_map(|i| ["--id".to_string(), i.into()]));
     if IN_ACT.get() || crate::outbox::lane().is_some() {
         return None;
     }
-    if why != "drive" && kicks::coalesced(ctx, r, (fleet, issue), why) {
-        return None;
+    let lease = if kicks::launched(why) {
+        None
+    } else {
+        kicks::queue(ctx, (fleet, issue), why, id);
+        Some(kicks::starting(ctx, r, fleet)?)
+    };
+    let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why, "--now"]);
+    a.extend(id.into_iter().flat_map(|i| ["--id".to_string(), i.into()]));
+    let pid = crate::service::kick(ctx, fleet, issue, why, id)
+        .or_else(|| r.detach(&ctx.exe, &a, &state_dir(ctx).join("kick.log")).ok());
+    if let Some(l) = lease {
+        kicks::started(ctx, &l, pid);
     }
-    if let Some(pid) = crate::service::kick(ctx, fleet, issue, why, id) {
-        return Some(pid);
-    }
-    a.insert(5, "--now".into());
-    r.detach(&ctx.exe, &a, &state_dir(ctx).join("kick.log")).ok()
+    pid
 }
 
-/// `kick --now`: one pass of `issue` alone under the drive lock. A kick while one runs, or within the 10 s after it, is coalesced into one follow-up; a busy lock is retried as one too.
+/// `kick --now`: a pass's launch drives its issue alone; a trigger's kick runs as its fleet's one runner, draining every kick queued meanwhile, unless a runner drains them already.
 pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: Kicked) -> Result<()> {
     let (fleet, n, why, now, id) = k;
     if !now {
@@ -277,65 +281,19 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
         kick_once(ctx, r, (fleet, n), why, id);
         return Ok(());
     }
-    if let Some(id) = id {
-        if !crate::db::processed(&ctx.state, &format!("{fleet}#{n}:{why}:{id}"), ctx.now)? {
-            return Ok(writeln!(out, "kick {why} {id}: already processed")?);
+    if kicks::launched(why) {
+        if kicks::one(ctx, cfg, r, out, (fleet, n), (why, id))? {
+            kicks::in_flight(ctx, out, (fleet, n), why)?;
+            kicks::queue(ctx, (fleet, n), why, None);
+            kick_once(ctx, r, (fleet, n), "busy", None);
         }
+        return Ok(());
     }
-    let (again, ttl) = (format!("kick-{fleet}-{n}.again"), cfg.limits.spawn_pending_max_secs);
-    let pending = (why == "drive").then(|| held(ctx, &format!("spawn-{fleet}-{n}.pending")));
-    let mut pending = pending.flatten().map(|l| Lock(ctx.state.clone(), l));
-    let flag = || crate::db::take(&ctx.state, &again, ctx.now, ttl, why, &|_| true).map(drop);
-    let Some(k) = take(ctx, r, &format!("kick-{fleet}-{n}.lock"), ttl, fleet) else {
-        flag();
+    kicks::queue(ctx, (fleet, n), why, id);
+    let Some(run) = kicks::claim(ctx, r, fleet) else {
         return kicks::in_flight(ctx, out, (fleet, n), why);
     };
-    let _slot = match pending.is_none().then(|| job::slot(ctx, cfg, r, fleet)) {
-        Some(None) => {
-            return Ok(writeln!(
-                out,
-                "kick {fleet} #{n}: every job_max slot of {fleet} is busy; not driven"
-            )?)
-        }
-        slot => slot.flatten(),
-    };
-    let start = crate::now();
-    for _ in 0..30 {
-        let ctx = &Ctx {
-            now: ctx.now + crate::now().saturating_sub(start),
-            ..ctx.clone()
-        };
-        let expires_at = ctx.now + ttl;
-        crate::db::renew(
-            &ctx.state,
-            &k.1,
-            &crate::db::Lease {
-                expires_at,
-                ..k.1.clone()
-            },
-        );
-        let mut buf = vec![];
-        KICK.set(Some(n));
-        SLOT.set(pending.is_some());
-        let res = drive(ctx, cfg, r, &mut buf, fleet, false);
-        KICK.set(None);
-        SLOT.set(false);
-        drop(pending.take());
-        let text = String::from_utf8_lossy(&buf).into_owned();
-        out.write_all(&buf)?;
-        if text.starts_with("drive: ") {
-            flag();
-        } else {
-            let d = json!({"why": why, "result": summary(fleet, &text)});
-            append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "kick", d))?;
-        }
-        res?;
-        r.sleep(10);
-        if !crate::db::release(&ctx.state, &again, None) {
-            break;
-        }
-    }
-    Ok(())
+    kicks::drain(ctx, cfg, r, out, fleet, run)
 }
 
 /// `kick --now`'s fleet, issue, why, `--now` and trigger id.
@@ -709,11 +667,25 @@ fn start_pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, flee
     if held(ctx, &format!("drive-{fleet}.lock")).is_some() || crate::service::wake(ctx, fleet) && fresh {
         return Ok(());
     }
+    if quiet(ctx, fleet) {
+        std::fs::write(state_dir(ctx).join(format!("drive-{fleet}.last")), ctx.now.to_string()).ok();
+        return Ok(());
+    }
     let args = crate::runner::argv(&["drive", fleet]);
     if let Err(e) = r.detach(&ctx.exe, &args, &state_dir(ctx).join("drive.log")) {
         writeln!(out, "{fleet}: pass not started: {e:#}")?;
     }
     Ok(())
+}
+
+fn quiet(ctx: &Ctx, fleet: &str) -> bool {
+    let Some(issues) = crate::db::quiet(&ctx.state, fleet) else {
+        return false;
+    };
+    let Ok(queued) = crate::db::events(&ctx.state, "type = 'queue' AND fleet = ?1", fleet) else {
+        return false;
+    };
+    queue::replay(&queued, fleet).iter().all(|i| issues.contains(&i.issue))
 }
 
 /// The tick's slow chores beside the passes: the disk budget, lanes hogging the CPU, then each fleet's backlog.

@@ -11,7 +11,9 @@ fn ps() -> String {
   103     1  40.0    10:00 31  0 /opt/homebrew/bin/node server.js
   104     1  30.0    10:00 31  0 /usr/bin/python3 job.py
   105     1  20.0    10:00 31  0 /usr/bin/ruby gem.rb
-  106     1   1.0    10:00 31  0 /bin/zsh -l
+  106     1   1.5    10:00 31  0 /bin/zsh -l
+  107     1  10.0    10:00 31  0 /opt/drover/bin/drover drive sendmeter
+  108     1   5.0    10:00 31  0 /opt/drover/bin/drover serve
 "
     .into()
 }
@@ -63,7 +65,7 @@ fn top_lists_each_live_lane_with_its_process_tree_and_heavy_waits_in_text_and_js
     let (code, out) = run(&c, &f, &["top"]);
     assert_eq!(code, 0, "{out}");
     let want = [
-        "cpu idle 10% (floor 15%) · heavy slots 1/2 · respawns held 1\n",
+        "cpu idle 10% (floor 15%) · heavy slots 1/2 · respawns held 1 · drover 7% of busy CPU (15% of 204%)\n",
         "sendmeter-impl-12 (sendmeter:12:impl)\n",
         "  101 12% 5m /Users/me/.cargo/bin/cargo test --all [cargo]\n",
         "    102 85% 62m /Users/me/.rustup/bin/rustc --crate-name meter [normal priority]\n",
@@ -89,6 +91,10 @@ fn top_lists_each_live_lane_with_its_process_tree_and_heavy_waits_in_text_and_js
         (json!(15.0), json!(1), json!(2))
     );
     assert_eq!(v["respawns_held"], 1);
+    assert_eq!(
+        (v["drover_cpu"].clone(), v["busy_cpu"].clone()),
+        (json!(15.0), json!(204.0))
+    );
     assert_eq!(v["lanes"].as_array().unwrap().len(), 1, "{v}");
     let l = &v["lanes"][0];
     assert_eq!(
