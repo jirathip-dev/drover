@@ -698,7 +698,7 @@ enum ThreadCmd {
         orchestrator: Option<String>,
     },
     #[command(
-        about = "An orchestrator hands off to thread <to> at once, or to a repo (or `all`): the owner taps one of its threads or a new one; linked both ways, <text> wakes its orchestrator as from <from>"
+        about = "An orchestrator hands off to thread <to>, or to a repo's (or `all`'s) desk thread, at once with no tap; linked both ways, <text> wakes its orchestrator as from <from>"
     )]
     Handoff {
         from: String,
